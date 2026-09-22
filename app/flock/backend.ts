@@ -125,23 +125,6 @@ function errorResponse(error: unknown): Response {
       { status: 404 },
     );
   if (
-    typeof error === "object" &&
-    error !== null &&
-    "name" in error &&
-    error.name === "AppletImpactConflictError"
-  )
-    return Response.json(
-      {
-        error:
-          error instanceof Error
-            ? error.message
-            : "this Bot's Applets changed since the deletion was confirmed",
-        code: "applet-impact-changed",
-        definitive: true,
-      },
-      { status: 409 },
-    );
-  if (
     error instanceof FlockConflictError ||
     (typeof error === "object" &&
       error !== null &&
@@ -292,12 +275,6 @@ export function createFlockBackendContribution(
           if (command.botId !== botId)
             throw new FlockDecodeError(
               "lifecycle command does not match request path",
-            );
-          // A deletion from a person destroys the Applets its confirmation
-          // listed, so it must say which list that was (ADR 0027).
-          if (command.type === "bot/delete" && !command.appletImpact)
-            throw new FlockDecodeError(
-              "a Bot deletion must carry the appletImpact its confirmation showed",
             );
           const receipt = await host.executeBotLifecycle(
             context.userId,

@@ -859,9 +859,6 @@ export async function startHarness(
         // better-auth needs a secret to construct; no spec signs in with it.
         "--var",
         "BETTER_AUTH_SECRET:e2e",
-        // Applet viewer tokens are HMACs over this; any value works locally.
-        "--var",
-        "APPLET_VIEWER_SECRET:e2e-applet-viewer-secret",
         // The operator surface, so a spec can read a Turn's tool results — the
         // transcript deliberately hides them — when it has to explain a state.
         "--var",

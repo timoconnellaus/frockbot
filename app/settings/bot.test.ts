@@ -911,7 +911,6 @@ describe("Bot Package setting commands", () => {
 describe("the account features read of one mount", () => {
   const features = {
     schemaVersion: 1,
-    applets: true,
     pluginAuthoring: false,
     plugins: [] as string[],
     updatedAt: "2026-09-16T00:00:00.000Z",

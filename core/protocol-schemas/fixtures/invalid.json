@@ -788,11 +788,6 @@
     "value": null
   },
   {
-    "name": "AppletViewerToken wrong shape",
-    "schema": "AppletViewerToken",
-    "value": null
-  },
-  {
     "name": "ImmutableArtifact wrong shape",
     "schema": "ImmutableArtifact",
     "value": null
@@ -1081,15 +1076,6 @@
     }
   },
   {
-    "name": "viewer wrong scheme",
-    "schema": "AppletViewerToken",
-    "value": {
-      "token": "1.1.0",
-      "expiresAt": "2026-09-05T00:00:00.000Z",
-      "socketUrl": "javascript:alert(1)"
-    }
-  },
-  {
     "name": "settings credential bytes",
     "schema": "SettingsFrame",
     "value": {
@@ -1290,6 +1276,15 @@
     }
   },
   {
+    "name": "turn admission invalid",
+    "schema": "TurnAdmission",
+    "value": {
+      "schemaVersion": 1,
+      "runId": "turn-1",
+      "text": "still running"
+    }
+  },
+  {
     "name": "turn response invalid",
     "schema": "TurnResponse",
     "value": {
@@ -1298,78 +1293,6 @@
       "text": "Done",
       "events": [],
       "sessionToken": "forbidden"
-    }
-  },
-  {
-    "name": "AppletSummary invalid",
-    "schema": "AppletSummary",
-    "value": {
-      "appletId": "tim.counter",
-      "displayName": "Counter",
-      "status": "unknown",
-      "currentGenerationId": "generation-1",
-      "tools": ["increment"],
-      "createdAt": "2026-09-05T00:00:00.000Z"
-    }
-  },
-  {
-    "name": "AppletSummary without its owner",
-    "schema": "AppletSummary",
-    "value": {
-      "appletId": "tim.counter",
-      "displayName": "Counter",
-      "status": "published",
-      "tools": ["increment"],
-      "createdAt": "2026-09-05T00:00:00.000Z",
-      "access": "owner",
-      "sharedWithBotIds": []
-    }
-  },
-  {
-    "name": "AppletImpactFingerprint wrong shape",
-    "schema": "AppletImpactFingerprint",
-    "value": "not-a-fingerprint"
-  },
-  {
-    "name": "BotAppletImpact wrong fingerprint",
-    "schema": "BotAppletImpact",
-    "value": {
-      "schemaVersion": 1,
-      "botId": "default",
-      "fingerprint": "not-a-fingerprint",
-      "applets": []
-    }
-  },
-  {
-    "name": "AppletDirectory invalid",
-    "schema": "AppletDirectory",
-    "value": {
-      "schemaVersion": 2,
-      "applets": []
-    }
-  },
-  {
-    "name": "AppletOpenView invalid",
-    "schema": "AppletOpenView",
-    "value": {
-      "schemaVersion": 1,
-      "applets": [],
-      "focused": {
-        "appletId": "tim.counter"
-      },
-      "extra": true
-    }
-  },
-  {
-    "name": "AppletOpenFocus wrong socket scheme",
-    "schema": "AppletOpenFocus",
-    "value": {
-      "appletId": "tim.counter",
-      "generationId": "generation-1",
-      "uiUrl": "https://ui.bot.frockbot.com/packages/aaaa.html",
-      "token": "signed.token",
-      "socketUrl": "javascript:alert(1)",
-      "expiresAt": "2026-09-05T00:15:00.000Z"
     }
   },
   {
@@ -2133,6 +2056,42 @@
       "type": "card",
       "surfaceId": "draft-email",
       "messages": []
+    }
+  },
+  {
+    "name": "PanelBagEntry missing label invalid",
+    "schema": "PanelBagEntry",
+    "value": {
+      "pluginId": "notes",
+      "displayName": "Notes",
+      "surfaceId": "board"
+    }
+  },
+  {
+    "name": "PanelFocus extra field invalid",
+    "schema": "PanelFocus",
+    "value": {
+      "pluginId": null,
+      "surfaceId": "board"
+    }
+  },
+  {
+    "name": "PanelDoor empty label invalid",
+    "schema": "PanelDoor",
+    "value": {
+      "pluginId": "notes",
+      "label": ""
+    }
+  },
+  {
+    "name": "PanelOpenView missing bag invalid",
+    "schema": "PanelOpenView",
+    "value": {
+      "schemaVersion": 1,
+      "focus": {
+        "pluginId": null
+      },
+      "doors": []
     }
   }
 ]

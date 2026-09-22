@@ -18,16 +18,37 @@ describe("What’s New feed", () => {
       kind: "improvement",
     });
     expect(feed.entries[2]).toMatchObject({
+      id: "voice-call-card",
+      title: "A live call is a card",
+      kind: "improvement",
+      image: {
+        src: "/whats-new/voice-call-card.webp",
+        alt: "A phone chat with the live call in a card under the header: the Bot, the wave, and you, with mute and hang-up on the row below.",
+      },
+    });
+    expect(feed.entries[3]).toMatchObject({
+      id: "header-align",
+      title: "Chat header lines up",
+      kind: "fix",
+    });
+    expect(feed.entries[4]).toMatchObject({
+      id: "quiet-delivery",
+      title: "Sends acknowledge immediately",
+      kind: "fix",
+      summary:
+        "A message is accepted as soon as it is saved. A long reply no longer looks like the send failed.",
+    });
+    expect(feed.entries[5]).toMatchObject({
       id: "chat-scroll",
       title: "Earlier messages stay in reach",
       kind: "fix",
     });
-    expect(feed.entries[3]).toMatchObject({
+    expect(feed.entries[6]).toMatchObject({
       id: "marketplace-installed",
       title: "Installed in the Marketplace",
       kind: "improvement",
     });
-    expect(feed.entries[4]).toMatchObject({
+    expect(feed.entries[7]).toMatchObject({
       id: "chat-type",
       title: "Easier reading in chat",
       kind: "improvement",

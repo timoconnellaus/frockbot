@@ -3,7 +3,8 @@
 // The Plugin SDK's scaffold, as strings. `plugin_create` writes these
 // through the Workspace. Editing `applets/sdk/plugin/template/` and
 // rerunning the build is the only way to change what a new Plugin
-// starts as. Base64 for the same reason the Applet scaffold is.
+// starts as. The bodies are base64 so import specifiers in the scaffold
+// are not read as this module's own.
 export const PLUGIN_TEMPLATE_FILES_V1: ReadonlyArray<{
   path: string;
   base64: string;

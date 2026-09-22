@@ -638,6 +638,39 @@ export async function createRoutineThroughApi(
 }
 
 /**
+ * Fire a Routine now, through the same `routine/run` command the panel's
+ * Run now sends.
+ *
+ * The alarm drains the queue after this returns. Call it only once a different
+ * chat is the one on screen: a failure that arrives in the open chat is marked
+ * read on arrival and never badges the row.
+ */
+export async function runRoutineThroughApi(
+  page: Page,
+  options: { botId: string; routineId: string },
+): Promise<void> {
+  const response = await page.request.post(
+    `/api/bots/${encodeURIComponent(options.botId)}/routines`,
+    {
+      data: {
+        schemaVersion: 1,
+        type: "routine/run",
+        commandId: crypto.randomUUID(),
+        botId: options.botId,
+        routineId: options.routineId,
+      },
+    },
+  );
+  const text = await response.text();
+  expect(
+    response.ok(),
+    `routine/run answered ${response.status()}: ${text.slice(0, 500)}`,
+  ).toBe(true);
+  const receipt = JSON.parse(text) as { status: string };
+  expect(receipt.status).toBe("fired");
+}
+
+/**
  * Turn an account's features on, as an administrator does.
  *
  * There is no product route for this any more: administration left the app
@@ -650,7 +683,7 @@ export async function createRoutineThroughApi(
 async function setAccountFeatures(
   page: Page,
   userId: string,
-  features: { applets: boolean; pluginAuthoring?: boolean },
+  features: { pluginAuthoring?: boolean; plugins?: string[] },
 ): Promise<void> {
   const response = await page.request.post(
     `/api/debug/users/${encodeURIComponent(userId)}/features`,
@@ -662,20 +695,12 @@ async function setAccountFeatures(
   expect(response.status(), await response.text()).toBe(200);
 }
 
-/** Applets are off for every account until an administrator turns them on. */
-export function enableApplets(page: Page, userId: string): Promise<void> {
-  return setAccountFeatures(page, userId, { applets: true });
-}
-
-/** Plugin authoring, ADR 0026's master toggle. Applets stay off. */
+/** Plugin authoring, ADR 0026's master toggle. */
 export function enablePluginAuthoring(
   page: Page,
   userId: string,
 ): Promise<void> {
-  return setAccountFeatures(page, userId, {
-    applets: false,
-    pluginAuthoring: true,
-  });
+  return setAccountFeatures(page, userId, { pluginAuthoring: true });
 }
 
 /**
@@ -1072,6 +1097,24 @@ export async function enableCustomModels(page: Page): Promise<void> {
 }
 
 /**
+ * Type into the Marketplace search and wait until the field holds it.
+ *
+ * `fill()` sets the DOM input's value. A Flutter field only reads that while
+ * an editing session is open, so a fill against a closed session reports
+ * success and leaves the catalog unfiltered. [answerInputs] opens the session
+ * and types.
+ */
+export async function searchMarketplace(
+  page: Page,
+  query: string,
+): Promise<void> {
+  const search = sem(page, "marketplace-search").locator("input, textarea");
+  await expect(search.first()).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+  await answerInputs([[search.first(), query]]);
+  await settle(page);
+}
+
+/**
  * Install the Ollama Cloud provider from the Marketplace catalog. Models
  * only lists providers already added; Connectors offers the key form once
  * the Package is installed. `connectOllama` picks up from Models.
@@ -1085,10 +1128,7 @@ export async function chooseOllamaProvider(page: Page): Promise<void> {
   }
   await closeOverlay(page);
   await openConnectors(page);
-  const search = sem(page, "marketplace-search").locator("input, textarea");
-  await expect(search.first()).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
-  await search.first().fill("Ollama Cloud");
-  await settle(page);
+  await searchMarketplace(page, "Ollama Cloud");
   const offer = group(page, "Ollama Cloud");
   await expect(offer).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
   const add = sem(offer, "view-action-add-provider-ollama-cloud");

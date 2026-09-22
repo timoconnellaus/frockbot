@@ -23,10 +23,6 @@ The native speaker uses `com.frockbot/pcm`: Android receipts follow the AudioTra
 
 This speaker changes Android native code and removes a native plugin dependency. Its first Android delivery therefore requires a **full enabling APK**, through the release procedure below; it cannot ship as a Dart-only patch. Building or reviewing a PR does not publish or install that APK.
 
-Silero v6 (`vad_plus`) labels assistant-capture frames as speech on Android, iOS and macOS. It is a native plugin plus a bundled ONNX model, so the first delivery that includes it is also a **full enabling APK**. The plugin is asked only to score PCM the existing recorder already captured; it must not open a second microphone. Flutter web keeps the energy gate: `vad_plus` does not support web, and the app origin's `script-src 'self'` would refuse a CDN ONNX runtime. macOS's deployment target is 13.4, which is the plugin's floor.
-
-The connect chime is `assets/voice/connect.wav` played by `audioplayers`. That is an asset and a native plugin, so the first Android delivery that includes it is also a **full enabling APK**. It mixes with the call and does not take audio focus.
-
 ## Android upgrade
 
 Use `scripts/native-acceptance.sh inventory` to record the installed version and certificate, then follow the Shorebird release procedure below. Phone upgrades use `adb install -r` with the exact published APK; never uninstall or clear app data. The acceptance runner’s stock-Flutter build is for qualification, not routine phone delivery.
@@ -60,6 +56,8 @@ State lives under ignored `.native-build/updates/` (`NATIVE_UPDATE_STATE` overri
 
 Release:
 
+A version tag runs this same release from `release.yml` when a patch cannot carry the diff. The commands below are that release off the pipeline.
+
 ```sh
 bun run native:release                              # or: python3 scripts/native-update.py release
 bun run native:release --version-floor <installed versionCode>
@@ -89,9 +87,9 @@ bun run native:promote --release-version 1.2.0+<code> --patch-number <n>        
 
 The emulator has shown a signed staging patch download and restart, an offline boot and a remote rollback; a patch signed with the wrong private key is rejected by the CLI before upload. The evidence and what stays unqualified are in the [qualification ledger](../../docs/research/shorebird-qualification-2026-09-09.md). After promotion, launch the installed app on the phone twice and confirm the change is live. The APK download route stays the fallback for a phone that cannot pick up a patch.
 
-The release pipeline cuts this patch itself for every version tag whose `apps/native` differs from the previous tag. `release.yml`'s `Cut Android patch` runs `native-update.py patch --baseline shorebird`, which takes the baseline from Shorebird's release list instead of `baseline.json`: the newest active Android release is, by the rule above, the one installed on the phone. `Promote Android patch` runs `native-update.py promote` after the production deploy. The job installs the CLI version `qualification.json` records, takes the private key and the signer from repository secrets (see the root `README.md`, Releases → Android patches), and its patches show in `shorebird patches list`, not in the local `baseline.json`. Shorebird's native or asset diff verdict leaves the script with exit status 3, which the job reports as needing a full release. Full releases are never cut by the pipeline.
+The release pipeline ships the phone app for every version tag whose `apps/native` differs from the previous tag. `release.yml`'s `Ship Android` job runs `native-update.py patch --baseline shorebird`, which takes the baseline from Shorebird's release list instead of `baseline.json`: the newest active Android release is the one the pipeline last cut. `Promote Android patch` runs `native-update.py promote` after the production deploy. The job installs the CLI version `qualification.json` records, takes the private key and the signer from repository secrets (see the root `README.md`, Releases → Android patches), and its patches show in `shorebird patches list`, not in the local `baseline.json`. Shorebird's native or asset diff verdict leaves the script with exit status 3, and the same job then runs `native-update.py release` and uploads that APK. Installing it once is what puts the phone on the baseline later patches target.
 
-Each version tag still attaches `frockbot.apk` to the GitHub release. `Fetch Android APK` runs `native-update.py export-apk`, which downloads that enabling release from Shorebird and re-signs it with the phone's key. The latest release's asset is the public sideload: `https://github.com/timoconnellaus/frockbot/releases/latest/download/frockbot.apk`. It does not cut a Shorebird release, so patches keep targeting the APK already on the phone.
+Each version tag attaches `frockbot.apk` to the GitHub release. When the tag cut a full release, those bytes are the APK just built. Otherwise `Fetch Android APK` runs `native-update.py export-apk`, which downloads the newest active Shorebird release and re-signs it with the phone's key. The latest release's asset is the public sideload: `https://github.com/timoconnellaus/frockbot/releases/latest/download/frockbot.apk`.
 
 The application retains `com.frockbot.mobile`. Compile SDK 37 is required by secure storage 11; minSdk 24 and targetSdk 36 remain unchanged. Its API-28+ WebView directory is separate from Capacitor's retained directory, and cookies are disabled before the first WebView. API 24–27 isolation remains unqualified. The acceptance build checks only a random continuity sentinel; same-User/Bot re-auth is a separate device check.
 

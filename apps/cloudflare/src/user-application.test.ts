@@ -9,43 +9,12 @@ import {
   createUserApplication,
   HOSTED_EMBEDDED_BODY_ATTRIBUTES_V1,
 } from "./user-application.js";
-import {
-  APPLETS_UNAVAILABLE_MESSAGE_V1,
-  BotTurnRefusedError,
-} from "@frockbot/core/durable";
+import { BotTurnRefusedError } from "@frockbot/core/durable";
 import { COMPUTER_HOST_CAPABILITIES_V1 } from "./computer-host.js";
-import { AppletUnavailableError } from "./applet-directory.js";
 
 function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
   return {
     assertRegistered: () => Promise.resolve(),
-    deleteApplet: () => Promise.resolve({ status: "deleted" }),
-    listApplets: () =>
-      Promise.resolve({ schemaVersion: 1, revision: 0, applets: [] }),
-    readBotAppletImpact: ({ botId }) =>
-      Promise.resolve({
-        schemaVersion: 1,
-        botId,
-        fingerprint: "0123456789abcdef",
-        applets: [],
-      }),
-    mintAppletViewerToken: () =>
-      Promise.reject(new Error("Applet is unavailable")),
-    readAppletUi: () => Promise.reject(new Error("Applet is unavailable")),
-    openFocusedApplet: () =>
-      Promise.resolve({ schemaVersion: 1 as const, applets: [] }),
-    readFocusedApplet: () =>
-      Promise.resolve({
-        schemaVersion: 1,
-        appletId: null,
-        changedAt: new Date(0).toISOString(),
-      }),
-    setFocusedApplet: ({ appletId }) =>
-      Promise.resolve({
-        schemaVersion: 1,
-        appletId,
-        changedAt: new Date(0).toISOString(),
-      }),
     listSkills: () =>
       Promise.resolve({ schemaVersion: 1 as const, skills: [] }),
     listPackageUi: ({ botId }) =>
@@ -68,10 +37,11 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
         status: "not-found" as const,
         reason: "no workspace in this test",
       }),
-    readAppletSourceV1: ({ appletId }) =>
-      Promise.resolve({ appletId, files: [], truncated: false }),
-    readAppletBuildV1: () => Promise.resolve({ status: "unknown" as const }),
     run: ({ botId, command }) => state.run(botId, command),
+    admitRun: async ({ botId, command }) => {
+      const turn = await state.run(botId, command);
+      return { schemaVersion: 1 as const, runId: turn.runId };
+    },
     listRuns: ({ botId, query }) => state.listRuns(botId, query),
     lookupRun: ({ botId, query }) => state.lookupRun(botId, query),
     fenceRunAdmission: ({ botId, query }) =>
@@ -386,8 +356,11 @@ describe("user application Bot seam", () => {
       env,
     );
 
-    expect(response.status).toBe(200);
-    expect((await response.json()) as BotTurnResult).toEqual(result);
+    expect(response.status).toBe(202);
+    expect((await response.json()) as unknown).toEqual({
+      schemaVersion: 1,
+      runId: "run-1",
+    });
     expect(calls).toEqual([{ botId: "primary", text: "hello" }]);
   });
 
@@ -676,7 +649,7 @@ describe("user application Bot seam", () => {
       env,
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     // Absent means chat: the HTTP path never carries the field at all.
     expect(forwarded).toHaveLength(1);
     expect(Object.hasOwn(forwarded[0]!, "turnType")).toBe(false);
@@ -1237,483 +1210,12 @@ describe("run list failures", () => {
   });
 });
 
-const TODO_SUMMARY = {
-  appletId: "alice.todo",
-  displayName: "Todo",
-  status: "published",
-  currentGenerationId: "g1",
-  tools: ["add_todo"],
-  createdAt: "2026-09-03T00:00:00.000Z",
-  ownerBotId: "bot-1",
-  access: "owner",
-  sharedWithBotIds: ["bot-2"],
-};
-
-describe("the Applet open route", () => {
-  const applet = TODO_SUMMARY;
-
-  test("answers the directory and the focused viewer with the URLs of this origin", async () => {
-    const env: UserApplicationEnv = {
-      BOT_STATE: {
-        ...rpcBindingFor({} as BotStateBinding),
-        openFocusedApplet: ({ botId }) => {
-          expect(botId).toBe("bot-1");
-          return Promise.resolve({
-            schemaVersion: 1 as const,
-            applets: [applet],
-            focused: {
-              appletId: "alice.todo",
-              generationId: "g1",
-              uiHash: "a".repeat(64),
-              token: "viewer-token",
-              expiresAt: "2026-09-03T00:15:00.000Z",
-            },
-          });
-        },
-      },
-      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
-    };
-    const response = await createUserApplication()(
-      new Request("https://frockbot.test/api/bots/bot-1/applets/open"),
-      env,
-    );
-    expect(response.status).toBe(200);
-    expect<unknown>(await response.json()).toEqual({
-      schemaVersion: 1,
-      applets: [applet],
-      focused: {
-        appletId: "alice.todo",
-        generationId: "g1",
-        // The anonymous artifact origin, as the `/ui` route names it.
-        uiUrl: `https://ui.frockbot.test/packages/${"a".repeat(64)}.html`,
-        token: "viewer-token",
-        // The address only; the token never rides in it.
-        socketUrl: "wss://frockbot.test/api/applets/alice.todo/socket",
-        expiresAt: "2026-09-03T00:15:00.000Z",
-      },
-    });
-  });
-
-  test("an unpublished focus is the building state, and no focus is the directory alone", async () => {
-    const answers = [
-      {
-        schemaVersion: 1 as const,
-        applets: [applet],
-        focused: { appletId: "alice.todo" },
-      },
-      { schemaVersion: 1 as const, applets: [applet] },
-    ];
-    const env: UserApplicationEnv = {
-      BOT_STATE: {
-        ...rpcBindingFor({} as BotStateBinding),
-        openFocusedApplet: () => Promise.resolve(answers.shift()!),
-      },
-      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
-    };
-    const fetchUserApplication = createUserApplication();
-    const building = await fetchUserApplication(
-      new Request("https://frockbot.test/api/bots/bot-1/applets/open"),
-      env,
-    );
-    expect<unknown>(await building.json()).toEqual({
-      schemaVersion: 1,
-      applets: [applet],
-      focused: { appletId: "alice.todo" },
-    });
-    const closed = await fetchUserApplication(
-      new Request("https://frockbot.test/api/bots/bot-1/applets/open"),
-      env,
-    );
-    expect<unknown>(await closed.json()).toEqual({
-      schemaVersion: 1,
-      applets: [applet],
-    });
-  });
-
-  test("a deployment that cannot sign tokens says so, once and finally", async () => {
-    const env: UserApplicationEnv = {
-      BOT_STATE: {
-        ...rpcBindingFor({} as BotStateBinding),
-        openFocusedApplet: () =>
-          Promise.reject(new Error(APPLETS_UNAVAILABLE_MESSAGE_V1)),
-      },
-      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
-    };
-    const response = await createUserApplication()(
-      new Request("https://frockbot.test/api/bots/bot-1/applets/open"),
-      env,
-    );
-    expect(response.status).toBe(503);
-    expect<unknown>(await response.json()).toEqual({
-      error: "Applets are unavailable right now.",
-      definitive: true,
-    });
-  });
-});
-
-describe("the Applet viewer token route", () => {
-  test("a deployment that cannot sign tokens says so, once and finally", async () => {
-    // Production ran for weeks with no `APPLET_VIEWER_SECRET`: the route threw
-    // "Applet viewer sessions are not configured", the body carried that
-    // sentence to the browser, and the panel — which never shows a 5xx body —
-    // drew "Couldn't reach FrockBot." and retried forever (2026-09-05).
-    const env: UserApplicationEnv = {
-      BOT_STATE: {
-        ...rpcBindingFor({} as BotStateBinding),
-        mintAppletViewerToken: () =>
-          Promise.reject(new Error(APPLETS_UNAVAILABLE_MESSAGE_V1)),
-      },
-      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
-    };
-    const response = await createUserApplication()(
-      new Request(
-        "https://frockbot.test/api/bots/bot-1/applets/alice.todo/token",
-      ),
-      env,
-    );
-    expect(response.status).toBe(503);
-    // The sentence is the User's; `definitive` is the panel's instruction to
-    // stop retrying. Neither carries the secret's name — that is in the log.
-    const body = (await response.json()) as Record<string, unknown>;
-    expect(body).toEqual({
-      error: "Applets are unavailable right now.",
-      definitive: true,
-    });
-  });
-
-  test("the socket address carries no token of its own", async () => {
-    // It used to. The page then offered the same token as a subprotocol — the
-    // browser carrier — and the gateway, which refuses a token presented
-    // twice, answered every Applet's socket 401 (2026-09-08).
-    const env: UserApplicationEnv = {
-      BOT_STATE: {
-        ...rpcBindingFor({} as BotStateBinding),
-        mintAppletViewerToken: (input) => {
-          // The token is minted for the Bot the route names.
-          expect(input).toEqual({
-            schemaVersion: 1,
-            botId: "bot-1",
-            appletId: "alice.todo",
-          });
-          return Promise.resolve({
-            token: "viewer-token",
-            expiresAt: new Date(Date.now() + 900_000).toISOString(),
-            appletId: "alice.todo",
-            generationId: "g1",
-          });
-        },
-      },
-      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
-    };
-    const response = await createUserApplication()(
-      new Request(
-        "https://frockbot.test/api/bots/bot-1/applets/alice.todo/token",
-      ),
-      env,
-    );
-    expect(response.status).toBe(200);
-    const body = (await response.json()) as {
-      token: string;
-      socketUrl: string;
-    };
-    expect(body.token).toBe("viewer-token");
-    expect(body.socketUrl).toBe(
-      "wss://frockbot.test/api/applets/alice.todo/socket",
-    );
-  });
-
-  test("an Applet the Bot cannot reach is a settled 404", async () => {
-    const env: UserApplicationEnv = {
-      BOT_STATE: {
-        ...rpcBindingFor({} as BotStateBinding),
-        mintAppletViewerToken: () =>
-          Promise.reject(new AppletUnavailableError("alice.todo")),
-        readAppletUi: () =>
-          Promise.reject(new AppletUnavailableError("alice.todo")),
-      },
-      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
-    };
-    const app = createUserApplication();
-    for (const read of ["token", "ui"]) {
-      const response = await app(
-        new Request(
-          `https://frockbot.test/api/bots/bot-2/applets/alice.todo/${read}`,
-        ),
-        env,
-      );
-      expect(response.status).toBe(404);
-    }
-    // The account-wide routes are gone: nothing answers for "the User".
-    expect(
-      (
-        await app(
-          new Request("https://frockbot.test/api/applets/alice.todo/token"),
-          env,
-        )
-      ).status,
-    ).toBe(404);
-  });
-});
-
-describe("a Bot's Applets", () => {
-  test("the list and the impact are the Bot's the route names", async () => {
-    const asked: unknown[] = [];
-    const env: UserApplicationEnv = {
-      BOT_STATE: {
-        ...rpcBindingFor({} as BotStateBinding),
-        listApplets: (input) => {
-          asked.push(input);
-          return Promise.resolve({
-            schemaVersion: 1,
-            revision: 4,
-            applets: [TODO_SUMMARY],
-          });
-        },
-        readBotAppletImpact: (input) => {
-          asked.push(input);
-          return Promise.resolve({
-            schemaVersion: 1,
-            botId: "bot-1",
-            fingerprint: "0123456789abcdef",
-            applets: [
-              {
-                appletId: "alice.todo",
-                displayName: "Todo",
-                status: "published",
-                sharedWithBotIds: ["bot-2"],
-              },
-            ],
-          });
-        },
-      },
-      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
-    };
-    const app = createUserApplication();
-    const listed = await app(
-      new Request("https://frockbot.test/api/bots/bot-1/applets"),
-      env,
-    );
-    expect(listed.status).toBe(200);
-    // The durable revision is not part of the client's view.
-    expect<unknown>(await listed.json()).toEqual({
-      schemaVersion: 1,
-      applets: [TODO_SUMMARY],
-    });
-    const impact = await app(
-      new Request("https://frockbot.test/api/bots/bot-1/applets/impact"),
-      env,
-    );
-    expect(impact.status).toBe(200);
-    expect<unknown>(await impact.json()).toMatchObject({
-      botId: "bot-1",
-      fingerprint: "0123456789abcdef",
-      applets: [{ appletId: "alice.todo", sharedWithBotIds: ["bot-2"] }],
-    });
-    expect(asked).toEqual([
-      { schemaVersion: 1, botId: "bot-1" },
-      { schemaVersion: 1, botId: "bot-1" },
-    ]);
-  });
-
-  test("a shared Bot asking for the owner's code or deletion is told so, not a 500", async () => {
-    const refusal = Object.assign(
-      new Error(
-        'Applet "alice.todo" is shared with this Bot; only the Bot that owns it can change it',
-      ),
-      { name: "AppletNotOwnerError" },
-    );
-    const env: UserApplicationEnv = {
-      BOT_STATE: {
-        ...rpcBindingFor({} as BotStateBinding),
-        readAppletSourceV1: () => Promise.reject(refusal),
-        readAppletBuildV1: () => Promise.reject(refusal),
-        deleteApplet: () => Promise.reject(refusal),
-      },
-      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
-    };
-    const app = createUserApplication();
-    for (const request of [
-      new Request(
-        "https://frockbot.test/api/bots/bot-2/applets/alice.todo/source",
-      ),
-      new Request(
-        "https://frockbot.test/api/bots/bot-2/applets/alice.todo/build",
-      ),
-      new Request(
-        "https://frockbot.test/api/bots/bot-2/applets/alice.todo/delete",
-        {
-          method: "POST",
-        },
-      ),
-    ]) {
-      const response = await app(request, env);
-      expect(response.status).toBe(403);
-      expect<unknown>(await response.json()).toMatchObject({
-        code: "applet-not-owner",
-        definitive: true,
-      });
-    }
-  });
-
-  test("focusing an Applet the Bot cannot open is a 404", async () => {
-    const env: UserApplicationEnv = {
-      BOT_STATE: {
-        ...rpcBindingFor({} as BotStateBinding),
-        setFocusedApplet: () =>
-          Promise.reject(new AppletUnavailableError("alice.todo")),
-      },
-      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
-    };
-    const response = await createUserApplication()(
-      new Request("https://frockbot.test/api/bots/bot-2/applets/focus", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ appletId: "alice.todo" }),
-      }),
-      env,
-    );
-    expect(response.status).toBe(404);
-  });
-});
-
-describe("Applet deletion", () => {
-  test("POST uses the scoped authority; GET and malformed ids cannot delete", async () => {
-    const calls: unknown[] = [];
-    const env: UserApplicationEnv = {
-      BOT_STATE: {
-        ...rpcBindingFor({} as BotStateBinding),
-        deleteApplet: async (input) => {
-          calls.push(input);
-          return { status: "deleted" };
-        },
-      },
-      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
-    };
-    const app = createUserApplication();
-    expect(
-      (
-        await app(
-          new Request(
-            "https://frockbot.test/api/bots/bot-1/applets/alice.todo/delete",
-          ),
-          env,
-        )
-      ).status,
-    ).toBe(405);
-    expect(
-      (
-        await app(
-          new Request(
-            "https://frockbot.test/api/bots/bot-1/applets/invalid/delete",
-            {
-              method: "POST",
-            },
-          ),
-          env,
-        )
-      ).status,
-    ).toBe(400);
-    expect(calls).toEqual([]);
-    const response = await app(
-      new Request(
-        "https://frockbot.test/api/bots/bot-1/applets/alice.todo/delete",
-        {
-          method: "POST",
-        },
-      ),
-      env,
-    );
-    expect(response.status).toBe(200);
-    expect(calls).toEqual([
-      { schemaVersion: 1, botId: "bot-1", appletId: "alice.todo" },
-    ]);
-    expect((await response.json()) as unknown).toEqual({
-      schemaVersion: 1,
-      status: "deleted",
-    });
-  });
-
-  test("an Applet the directory no longer holds answers 404, not a retryable 503", async () => {
-    const env: UserApplicationEnv = {
-      BOT_STATE: {
-        ...rpcBindingFor({} as BotStateBinding),
-        deleteApplet: async () => {
-          throw new AppletUnavailableError("alice.todo");
-        },
-      },
-      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
-    };
-    const app = createUserApplication();
-    const response = await app(
-      new Request(
-        "https://frockbot.test/api/bots/bot-1/applets/alice.todo/delete",
-        {
-          method: "POST",
-        },
-      ),
-      env,
-    );
-    expect(response.status).toBe(404);
-  });
-
-  test("a failure that merely reads as unavailable stays a retryable 503", async () => {
-    const env: UserApplicationEnv = {
-      BOT_STATE: {
-        ...rpcBindingFor({} as BotStateBinding),
-        deleteApplet: async () => {
-          throw new Error("the Applet Durable Object is unavailable");
-        },
-      },
-      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
-    };
-    const app = createUserApplication();
-    const response = await app(
-      new Request(
-        "https://frockbot.test/api/bots/bot-1/applets/alice.todo/delete",
-        {
-          method: "POST",
-        },
-      ),
-      env,
-    );
-    expect(response.status).toBe(503);
-  });
-
-  test("a delete that might still work stays a 503", async () => {
-    const env: UserApplicationEnv = {
-      BOT_STATE: {
-        ...rpcBindingFor({} as BotStateBinding),
-        deleteApplet: async () => {
-          throw new Error("Network connection lost");
-        },
-      },
-      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
-    };
-    const app = createUserApplication();
-    const response = await app(
-      new Request(
-        "https://frockbot.test/api/bots/bot-1/applets/alice.todo/delete",
-        {
-          method: "POST",
-        },
-      ),
-      env,
-    );
-    expect(response.status).toBe(503);
-  });
-});
-
 test("the public turn route forwards a retry target under its fresh command id", async () => {
   const calls: unknown[] = [];
   const binding = rpcBindingFor({} as BotStateBinding);
-  binding.run = async (request) => {
+  binding.admitRun = async (request) => {
     calls.push(request);
-    return {
-      schemaVersion: 1,
-      runId: request.command.runId,
-      text: "",
-      events: [],
-    };
+    return { schemaVersion: 1, runId: request.command.runId };
   };
   const response = await createUserApplication()(
     new Request("https://app.example/api/bots/primary/turns", {
@@ -1731,7 +1233,7 @@ test("the public turn route forwards a retry target under its fresh command id",
       DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
     },
   );
-  expect(response.status).toBe(200);
+  expect(response.status).toBe(202);
   expect(calls).toEqual([
     expect.objectContaining({
       botId: "primary",

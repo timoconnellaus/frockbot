@@ -1,6 +1,4 @@
 import type { ConfigurationCommandV1 } from "@frockbot/core/configuration";
-import type { AppletToolDeclarationV1 } from "@frockbot/core/contracts";
-import type { AppletProvenanceV1 } from "@frockbot/core/contracts";
 import type { MachineCommandV1 } from "@frockbot/core/machine-protocol";
 import type { TemplateCommandV1 } from "@frockbot/app/bot-template/shared";
 import type {
@@ -146,37 +144,6 @@ export interface BotUserConfigurationRpcTargetV1
   releaseAgentTurnSlot(
     input: UserRpcEnvelopeV1<{ requesterId: string; runId: string }>,
   ): Promise<{ schemaVersion: 1; status: "released"; held: number }>;
-  listApplets(input: BotRpcEnvelopeV1): Promise<object>;
-  readApplet(
-    input: BotRpcEnvelopeV1<{ appletId: string; owner?: boolean }>,
-  ): Promise<object>;
-  readAppletCompositionInput(input: UserRpcEnvelopeV1): Promise<object>;
-  readAppletToolNameClashes(
-    input: UserRpcEnvelopeV1<{ appletId: string; names: string[] }>,
-  ): Promise<string[]>;
-  createApplet(
-    input: BotRpcEnvelopeV1<{
-      displayName: string;
-      provenance: AppletProvenanceV1;
-    }>,
-  ): Promise<object>;
-  recordAppletGeneration(
-    input: BotRpcEnvelopeV1<{
-      appletId: string;
-      generationId: string;
-      tools: AppletToolDeclarationV1[];
-    }>,
-  ): Promise<object>;
-  deleteApplet(input: BotRpcEnvelopeV1<{ appletId: string }>): Promise<object>;
-  shareApplet(
-    input: BotRpcEnvelopeV1<{ appletId: string; targetBotId: string }>,
-  ): Promise<object>;
-  unshareApplet(
-    input: BotRpcEnvelopeV1<{ appletId: string; targetBotId: string }>,
-  ): Promise<object>;
-  transferApplet(
-    input: BotRpcEnvelopeV1<{ appletId: string; targetBotId: string }>,
-  ): Promise<object>;
   listConnectTriggers(input: UserRpcEnvelopeV1): Promise<object>;
   upsertConnectTrigger(
     input: UserRpcEnvelopeV1<{

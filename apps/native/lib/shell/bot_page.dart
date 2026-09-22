@@ -3,7 +3,7 @@
 /// One page drawn twice — the right panel's root at the wide tiers, a pushed
 /// page on a phone — because the two used to be different maps of the same
 /// Bot. It is activity and only activity: the Computer as it is now, the
-/// Routines that have fired, the Applets that are running, the doors this
+/// Routines that have fired, the Plugin panels that are open, the doors this
 /// Bot's Packages open. What the Bot *is* — its character, its name, its
 /// switches, its model, the way to archive it — is Settings, one level down
 /// behind the gear, and nothing of it is here.
@@ -11,9 +11,9 @@ library;
 
 import 'package:flutter/material.dart';
 
-import '../applets/canvas.dart';
 import '../computer/card.dart';
 import '../computer/client.dart';
+import '../panels/canvas.dart';
 import '../routines/page.dart';
 import '../theme/rows.dart';
 import 'semantics.dart';
@@ -35,9 +35,6 @@ class BotPageDoor {
 /// How many firings the page shows before it sends the reader to the list.
 const botPageRunsShownV1 = 3;
 
-/// How many Applets the page names before the same.
-const botPageAppletsShownV1 = 2;
-
 class BotPageView extends StatelessWidget {
   final String botName;
 
@@ -53,10 +50,9 @@ class BotPageView extends StatelessWidget {
   final void Function(RoutineRunSummary run)? onOpenRun;
   final VoidCallback? onOpenRoutines;
 
-  /// The Applets this Bot holds. Absent where the Composition has no Applets.
-  final AppletCanvasController? applets;
-  final void Function(String appletId)? onOpenApplet;
-  final VoidCallback? onOpenApplets;
+  /// Plugin conversation panels for this Bot.
+  final PanelCanvasController? panels;
+  final List<BotPageDoor> panelDoors;
   final List<BotPageDoor> doors;
   const BotPageView({
     super.key,
@@ -67,9 +63,8 @@ class BotPageView extends StatelessWidget {
     this.inbox,
     this.onOpenRun,
     this.onOpenRoutines,
-    this.applets,
-    this.onOpenApplet,
-    this.onOpenApplets,
+    this.panels,
+    this.panelDoors = const [],
     this.doors = const [],
   });
 
@@ -93,9 +88,9 @@ class BotPageView extends StatelessWidget {
         const FrockSectionLabel('Routines'),
         _routines(context),
       ],
-      if (applets != null) ...[
-        const FrockSectionLabel('Applets'),
-        _applets(context),
+      if (panels != null && panelDoors.isNotEmpty) ...[
+        const FrockSectionLabel('Panels'),
+        _panels(context),
       ],
       if (doors.isNotEmpty) ...[
         const FrockSectionLabel('More'),
@@ -188,42 +183,24 @@ class BotPageView extends StatelessWidget {
     );
   }
 
-  /// What this Bot has built and is running, then the way to the rest.
-  Widget _applets(BuildContext context) {
-    final canvas = applets!;
+  /// Doors into Plugin panel surfaces declared for this Bot.
+  Widget _panels(BuildContext context) {
+    final controller = panels!;
     return AnimatedBuilder(
-      animation: canvas,
-      builder: (context, _) {
-        final shown = canvas.directory.take(botPageAppletsShownV1).toList();
-        return FrockRowGroup(
-          rows: [
-            for (final applet in shown)
-              identified(
-                SettingsIds.botPageApplet(applet.appletId),
-                FrockRow(
-                  icon: Icons.web_asset_rounded,
-                  title: applet.displayName,
-                  subtitle: applet.appletId == canvas.focusedId
-                      ? 'Open now'
-                      : applet.access == 'shared'
-                      ? 'Shared with this Bot'
-                      : 'Built by this Bot',
-                  onTap: onOpenApplet == null
-                      ? null
-                      : () => onOpenApplet!(applet.appletId),
-                ),
-              ),
+      animation: controller,
+      builder: (context, _) => FrockRowGroup(
+        rows: [
+          for (final door in panelDoors)
             identified(
-              SettingsIds.botPageAppletsAll,
+              door.identifier,
               FrockRow(
-                icon: Icons.widgets_outlined,
-                title: 'All Applets',
-                onTap: onOpenApplets,
+                icon: door.icon,
+                title: door.label,
+                onTap: door.onTap,
               ),
             ),
-          ],
-        );
-      },
+        ],
+      ),
     );
   }
 }

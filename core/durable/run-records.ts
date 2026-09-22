@@ -1200,6 +1200,15 @@ export interface BotTurnCompletion {
 }
 
 /**
+ * The server has durably accepted a command. Execution may still be queued
+ * or running; the receipt is not a completion.
+ */
+export interface BotTurnAdmission {
+  runId: string;
+  state: "queued" | "running" | "terminal";
+}
+
+/**
  * The little that can be trusted about a run record nobody can decode.
  *
  * A transcript read is display-only: it never resumes, settles or recovers a

@@ -406,9 +406,6 @@ function featuresPanel(
       <input type="hidden" name="userId" value="${id}">
       <fieldset>
         <legend>What this account holds</legend>
-        <label class="check"><input type="checkbox" name="applets"${
-          features.applets ? " checked" : ""
-        }> Applets</label>
         <label class="check"><input type="checkbox" name="pluginAuthoring"${
           features.pluginAuthoring ? " checked" : ""
         }> Bots may write Plugins</label>

@@ -59,6 +59,8 @@ export interface BotPluginRowV1 {
   quarantined?: string;
   /** The sections the Plugin drew on its card, when it is on and declares any. */
   sections?: BotPluginSectionV1[];
+  /** Extra conversation.panel views the eight-tab cap dropped. */
+  omitted?: string;
 }
 
 export interface BotPluginsFrameV1 {
@@ -343,6 +345,9 @@ function pluginNode(row: BotPluginRowV1, revision: number): ViewNode {
   if (row.quarantined) {
     lines.push({ type: "text", text: row.quarantined, style: "status" });
   }
+  if (row.omitted) {
+    lines.push({ type: "text", text: row.omitted, style: "status" });
+  }
   for (const section of row.sections ?? []) {
     if (section.root) {
       lines.push({
@@ -402,6 +407,7 @@ export function botPluginsDocumentV1(frame: BotPluginsFrameV1): ViewDocument {
       (row.network ? 1 : 0) +
       (row.unavailable ? 1 : 0) +
       (row.quarantined ? 1 : 0) +
+      (row.omitted ? 1 : 0) +
       (row.sections ?? []).reduce(
         (sum, section) => sum + (section.root ? 1 + section.nodes : 1),
         0,

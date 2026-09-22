@@ -16,8 +16,7 @@ import 'package:flutter/services.dart';
 import '../activity/badge.dart';
 import '../activity/controller.dart';
 import '../activity/push.dart';
-import '../applets/canvas.dart';
-import '../applets/list.dart';
+import '../panels/canvas.dart';
 import '../audit/page.dart';
 import '../client/auth.dart' show developmentAuth;
 import '../client/document_cache.dart';
@@ -180,21 +179,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   RoutineInboxController? routineInbox;
   RoutinesPanelHandle? routinesPanel;
 
-  /// The selected Bot's Applet canvas, its Computer, and the Package pages its
-  /// Composition declares. All three belong to one Bot and are replaced whole
-  /// when the selection moves.
-  AppletCanvasController? appletCanvas;
-
-  /// The live Applet frame's one key. On a phone the frame is built off stage
-  /// the moment the Bot is adopted and moved into the canvas page when that
-  /// is pushed, so opening the Applet presents a document that is already
-  /// loaded and connected — the way the desk tiers have always kept it in
-  /// the panel column. The key is what makes the push a move.
-  final GlobalKey _appletFrameKey = GlobalKey(debugLabel: 'applet-frame');
-
-  /// Whether the canvas page holds the frame now. While it does the off-stage
-  /// holder builds nothing, so the one key is in one place.
-  bool _appletPagePresented = false;
+  /// The selected Bot's conversation panel, its Computer, and the Package
+  /// pages its Composition declares. All belong to one Bot and are replaced
+  /// whole when the selection moves.
+  PanelCanvasController? panelCanvas;
   ComputerController? computer;
   BotSession? _selectedSession;
 
@@ -235,10 +223,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// conversation is a column and this is not consulted.
   bool conversationOpen = false;
 
-  /// Whether the sidebar shows the selected Bot's Applets in place of the
-  /// Bots. Only where the sidebar is a column: a phone's list is the first
-  /// screen, so its Applets are a page over it instead.
-  bool appletsMode = false;
   bool panelOpen = false;
 
   /// Whether the person has hidden the right panel where it is a column. The
@@ -299,7 +283,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool showHidden = false;
   TranscriptLine? openRun;
 
-  /// The person's name and Google photo, for the call and the You surfaces.
+  /// The person's name and photo, for the call, the You page, and the sidebar.
   String? profileName;
   String? profileImageUrl;
 
@@ -397,13 +381,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _observedConnection = connection;
     _observedBotComputerRunning = computerRunning;
     if (!repaint) return;
+    panelCanvas?.followTurn(workingRunId != null);
     // Restoring a cached conversation can notify while its pane is building.
     scheduleMicrotask(() {
       if (!mounted || !identical(_selectedSession, session)) return;
       setState(() {});
-      // A Turn is how an Applet comes into existence. Refresh the directory
-      // when that Turn ends, without mirroring the Turn itself into the shell.
-      final canvas = appletCanvas;
+      final canvas = panelCanvas;
       if (settled && canvas != null) unawaited(canvas.load());
     });
   }
@@ -1009,7 +992,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     push.reading(null);
     final bot = bots.where((bot) => bot.botId.value == botId).firstOrNull;
     if (bot == null) return;
-    final switching = selected?.botId.value != botId;
     // A capture belongs to the Bot it started on. Switching away commits it
     // there rather than carrying the words into the new Bot's composer.
     if (dictation?.active == true && dictation?.context != botId) {
@@ -1019,11 +1001,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // delays the pane behind a store write.
     setState(() {
       selected = bot;
-      // A switch arrives from search, a link or a new Bot, never from the
-      // Applet list, which offers no Bots. It is a way to a conversation, so
-      // the sidebar goes back to the Bots rather than showing Applets of a Bot
-      // nobody asked the Applets of.
-      if (switching) appletsMode = false;
+      // A switch arrives from search, a link or a new Bot.
       conversationOpen = true;
       _leaveRun();
       exchangeController?.dispose();
@@ -1118,6 +1096,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       ),
       label: 'Plugins',
     );
+    panelCanvas?.disposeController();
     slots.register(
       ShellSlot.rightPanel,
       'voice',
@@ -1147,12 +1126,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       ),
       label: 'Look',
     );
-    appletCanvas?.dispose();
     computer?.dispose();
-    appletCanvas = null;
+    panelCanvas = null;
     computer = null;
     _setCatalog(null);
-    slots.remove(ShellSlot.rightPanel, 'applet');
+    slots.remove(ShellSlot.rightPanel, 'canvas');
+    slots.remove(ShellSlot.rightPanel, 'computer');
     unawaited(controller.load());
     unawaited(inbox.load());
     unawaited(
@@ -1178,23 +1157,25 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     unawaited(_adoptComposition(botId));
   }
 
-  /// What this Bot's Composition declares it may show: the Applet canvas, the
-  /// Computer, and the Package pages and entries. An absent capability is
-  /// silence — no catalog means none of these are registered, and the shell
-  /// asks for no route that does not exist here.
+  /// What this Bot's Composition declares it may show: the conversation panel,
+  /// the Computer, and the Package pages and entries.
   Future<void> _adoptComposition(String botId) async {
+    panelCanvas?.removeListener(_repaint);
+    panelCanvas?.removeListener(_syncPanelCanvasSlot);
+    panelCanvas?.disposeController();
+    panelCanvas = null;
+    slots.remove(ShellSlot.rightPanel, 'canvas');
+
     final read = await readPackageCatalogV1(widget.api, botId);
     if (!mounted || selected?.botId.value != botId) return;
     setState(() => _setCatalog(read));
-    if (read != null && read.appletsAvailable) {
-      final canvas = AppletCanvasController(widget.api, botId);
-      appletCanvas = canvas;
-      canvas.addListener(_repaint);
-      // The Applet is a window of its own at every width, so it is not a
-      // right-panel entry: a page with its own back and its own name, and the
-      // Applet filling everything under that one row.
-      unawaited(canvas.load());
-    }
+
+    final canvas = PanelCanvasController(widget.api, botId);
+    panelCanvas = canvas;
+    canvas.addListener(_repaint);
+    canvas.addListener(_syncPanelCanvasSlot);
+    unawaited(canvas.load());
+
     final machine = ComputerController(widget.api, botId);
     computer = machine;
     // The Computer is not a panel entry: it is one destination, the desktop
@@ -1206,15 +1187,64 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   /// The Package doors worth drawing beside the native ones.
   ///
-  /// The Applets Package declares an entry of its own called Applets. Where
-  /// this client has the built-in Applets entry — the outlined window in the
-  /// bar, the row on the Bot's page — that is the same door, so the Package's
-  /// copy of it is left out and every other destination is kept.
   List<PackageEntryPage> _packageEntries() => [
     for (final entry in packageIframeEntriesV1(catalog))
-      if (appletCanvas == null || entry.entry.label.toLowerCase() != 'applets')
-        entry,
+      if (entry.entry.label.toLowerCase() != 'applets') entry,
   ];
+
+  List<BotPageDoor> _panelDoors() {
+    final canvas = panelCanvas;
+    if (canvas == null) return [];
+    return [
+      for (final door in canvas.doors)
+        BotPageDoor(
+          identifier: 'bot-page-panel-${door.pluginId.value}',
+          icon: Icons.view_sidebar_outlined,
+          label: door.label,
+          onTap: () => unawaited(_openPanelDoor(door)),
+        ),
+    ];
+  }
+
+  Future<void> _openPanelDoor(wire.PanelDoor door) async {
+    final canvas = panelCanvas;
+    if (canvas == null) return;
+    final opens = door.opens;
+    final pluginId = (opens?['pluginId'] as String?) ?? door.pluginId.value;
+    final surfaceId = opens?['surfaceId'] as String?;
+    _syncPanelCanvasSlot();
+    _openPanel('canvas', push: true);
+    await canvas.setFocus(pluginId: pluginId, surfaceId: surfaceId);
+  }
+
+  void _syncPanelCanvasSlot() {
+    if (!mounted) return;
+    final canvas = panelCanvas;
+    if (canvas == null || !canvas.regionOpen) {
+      slots.remove(ShellSlot.rightPanel, 'canvas');
+      return;
+    }
+    if (slots.keys(ShellSlot.rightPanel).contains('canvas')) return;
+    final botId = selected?.botId.value;
+    if (botId == null) return;
+    slots.register(
+      ShellSlot.rightPanel,
+      'canvas',
+      (context) => PanelCanvas(
+        controller: canvas,
+        store: widget.store,
+        userId: widget.userId,
+        onClose: () => setState(() {
+          if (panelStack.isNotEmpty && panelStack.last == 'canvas') {
+            panelStack.removeLast();
+          }
+          if (panelStack.isEmpty) panelOpen = false;
+        }),
+      ),
+      label: 'Panel',
+    );
+    setState(() {});
+  }
 
   /// The Composition this Bot is showing, and the one signal a pushed page
   /// watches for it.
@@ -1278,96 +1308,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       slot: entry.slot,
       layout: PackageFrameLayout.fill,
       surfaceTitle: entry.entry.label,
-      states: {packageIframeAppletsStateV2: appletsBridgeStateV2(appletCanvas)},
-      onFocus: (appletId) async {
-        await appletCanvas?.setFocus(appletId);
-        if (mounted) _openPanel('applet');
-      },
     ),
   );
-
-  /// The page takes over the frame pre-mounted behind the conversation.
-  Widget _appletCanvas(
-    String botId,
-    AppletCanvasController canvas, {
-    VoidCallback? onClose,
-    bool holdsFrame = false,
-  }) {
-    final session = widget.sessions.open(widget.userId, botId);
-    return AnimatedBuilder(
-      animation: session.controller,
-      builder: (context, _) => AppletCanvas(
-        controller: canvas,
-        lines: projectRuns(session.controller.runs),
-        running: session.controller.activeRunId != null,
-        onClose: onClose ?? () => setState(() => panelOpen = false),
-        frameKey: holdsFrame ? _appletFrameKey : null,
-      ),
-    );
-  }
-
-  /// The Applet, full window, at every width.
-  ///
-  /// One row of chrome — back, the Applet's name, the switch to its code —
-  /// and the Applet under it for the rest of the page. The page takes the
-  /// pre-mounted frame over: the holder lets go in the same frame the page is
-  /// built, so the key moves rather than doubles. It takes the frame back
-  /// only once the page has finished leaving — a route on its way out is
-  /// still in the tree and is not rebuilt, so a holder that reclaimed the key
-  /// on the pop itself would double it.
-  void _pushApplet() {
-    final bot = selected;
-    final canvas = appletCanvas;
-    if (bot == null || canvas == null || _appletPagePresented) return;
-    final route = MaterialPageRoute<void>(
-      builder: (_) => Scaffold(
-        body: SafeArea(
-          child: _appletCanvas(
-            bot.botId.value,
-            canvas,
-            onClose: () => Navigator.of(context).maybePop(),
-            holdsFrame: true,
-          ),
-        ),
-      ),
-    );
-    setState(() => _appletPagePresented = true);
-    push.reading(null);
-    unawaited(Navigator.of(context).push(route));
-    unawaited(
-      route.completed.then((_) {
-        if (mounted) setState(() => _appletPagePresented = false);
-      }),
-    );
-  }
-
-  /// The live frame, pre-mounted off stage behind the conversation.
-  ///
-  /// Built as soon as the adopted Bot's canvas has a viewer and until the
-  /// canvas page takes the frame over. Off stage it is laid out and never
-  /// painted; the WebView behind it loads its page and opens its socket all
-  /// the same, so the tap that opens the Applet finds it ready. Closing the
-  /// page is the one direction that is not a move: a route sliding out keeps
-  /// its subtree without rebuilding it, so the frame stays with the page
-  /// until it is gone and a fresh one is held here afterwards, loading
-  /// behind the conversation for the next open.
-  Widget? _appletFrameHolder(BuildContext context) {
-    final canvas = appletCanvas;
-    final viewer = canvas?.viewer;
-    if (canvas == null || viewer == null || _appletPagePresented) return null;
-    final size = MediaQuery.sizeOf(context);
-    return Positioned(
-      left: 0,
-      top: 0,
-      width: size.width,
-      height: size.height,
-      child: Offstage(
-        child: ExcludeSemantics(
-          child: AppletViewerFrame(key: _appletFrameKey, viewer: viewer),
-        ),
-      ),
-    );
-  }
 
   ThemeData _accountThemeOf(BuildContext context) => FrockTheme.fromDocument(
     namedLookDocument(
@@ -1840,12 +1782,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   ///
   /// Everything it reads lives on the shell, and a pushed page is outside the
   /// shell's own `setState` — so the listenables it watches are what make the
-  /// Computer arriving, an Applet being built or a Composition mounting show
-  /// up on a page that is already open.
+  /// Computer arriving, a panel opening or a Composition mounting show up on a
+  /// page that is already open.
   Widget _botPageView(wire.BotRegistration bot) {
     final botId = bot.botId.value;
     return ListenableBuilder(
-      listenable: Listenable.merge([slots, catalogRevision, avatarRevision]),
+      listenable: Listenable.merge([
+        slots,
+        catalogRevision,
+        avatarRevision,
+        ?panelCanvas,
+      ]),
       builder: (context, _) => BotPageView(
         botName: _name(bot),
         computer: computer,
@@ -1856,9 +1803,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         inbox: routineInbox,
         onOpenRun: (run) => _openRoutineRun(botId, run),
         onOpenRoutines: () => _openPanel('routines', push: true),
-        applets: appletCanvas,
-        onOpenApplet: (appletId) => unawaited(_openApplet(appletId)),
-        onOpenApplets: _openApplets,
+        panels: panelCanvas,
+        panelDoors: _panelDoors(),
         doors: [
           for (final entry in _packageEntries())
             BotPageDoor(
@@ -1932,11 +1878,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// over a full-width conversation is the same thing with less room and a
   /// scrim in the way.
   void _openPanel(String key, {bool push = false}) {
-    // The Applet is never a panel: it is a full window at every width.
-    if (key == 'applet') {
-      _pushApplet();
-      return;
-    }
+    if (key == 'canvas') _syncPanelCanvasSlot();
     if (shellTierForWidth(MediaQuery.sizeOf(context).width) ==
         ShellTier.single) {
       _pushPanel(key);
@@ -2114,7 +2056,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           botId: botId,
           botName: name,
           type: action == BotAction.archive ? 'bot/archive' : 'bot/restore',
-          nameOf: _botNameOf,
         );
         if (!mounted) return;
         if (lifecycle.error ?? lifecycle.message case final String notice) {
@@ -2190,54 +2131,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   String? _botNameOf(String botId) =>
       bots.where((bot) => bot.botId.value == botId).map(_name).firstOrNull;
 
-  /// The selected Bot's Applets, from the All Applets row on the Bot page:
-  /// the sidebar's Applets mode beside the conversation, and a page on a
-  /// phone. A row opens its Applet over whichever it is.
-  void _openApplets() {
-    final bot = selected;
-    final canvas = appletCanvas;
-    if (bot == null || canvas == null) return;
-    if (shellTierForWidth(MediaQuery.sizeOf(context).width) ==
-        ShellTier.single) {
-      _push(
-        Scaffold(
-          appBar: DesktopHeader(child: AppBar()),
-          body: SafeArea(
-            top: false,
-            child: AppletList(
-              controller: canvas,
-              botName: _name(bot),
-              nameOf: _botNameOf,
-              onOpen: (appletId) => unawaited(_openApplet(appletId)),
-            ),
-          ),
-        ),
-      );
-      return;
-    }
-    // The Bot page may be over the shell when the window is wide enough for a
-    // sidebar; the mode is drawn in the shell, so that is where this returns.
-    Navigator.of(context).popUntil((route) => route.isFirst);
-    setState(() => appletsMode = true);
-  }
-
-  Future<void> _openApplet(String appletId) async {
-    final canvas = appletCanvas;
-    if (canvas == null) return;
-    // The panel opens onto the chosen Applet now, rather than after the write
-    // that records the focus and the read that follows it.
-    canvas.predictFocus(appletId);
-    _openPanel('applet');
-    await canvas.setFocus(appletId);
-    // A focus read may finish after the person switches Bots.
-    if (!mounted || canvas != appletCanvas) return;
-    if (canvas.focusedId != appletId) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Couldn’t open this Applet. Try again.')),
-      );
-    }
-  }
-
   /// The same doors, as a phone's pages.
   ///
   /// The panel's stack and a phone's route stack are the same idea drawn twice:
@@ -2277,8 +2170,20 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       );
       return;
     }
-    if (key == 'applet') {
-      _pushApplet();
+    if (key == 'canvas' && panelCanvas != null) {
+      _push(
+        Scaffold(
+          appBar: AppBar(title: const Text('Panel')),
+          body: SafeArea(
+            top: false,
+            child: PanelCanvas(
+              controller: panelCanvas!,
+              store: widget.store,
+              userId: widget.userId,
+            ),
+          ),
+        ),
+      );
       return;
     }
     if (controller == null) return;
@@ -2439,7 +2344,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     botId: botId,
     botName: botName,
     archived: archived.contains(botId),
-    nameOf: _botNameOf,
     onChanged: load,
     onDeleted: () => unawaited(_closeDeletedBot(botId)),
   );
@@ -2474,21 +2378,22 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     slots.remove(ShellSlot.rightPanel, 'bot-settings');
     slots.remove(ShellSlot.rightPanel, 'routines');
     slots.remove(ShellSlot.rightPanel, 'plugins');
+    slots.remove(ShellSlot.rightPanel, 'canvas');
+    slots.remove(ShellSlot.rightPanel, 'computer');
     slots.remove(ShellSlot.rightPanel, 'voice');
     slots.remove(ShellSlot.rightPanel, 'look');
-    slots.remove(ShellSlot.rightPanel, 'applet');
     botSettings?.removeListener(_paintFromSettings);
     botSettings?.dispose();
     routineInbox?.dispose();
     routinesPanel?.removeListener(_repaint);
     routinesPanel?.dispose();
-    appletCanvas?.dispose();
+    panelCanvas?.disposeController();
     computer?.dispose();
     _selectedChat?.removeListener(_selectedChatChanged);
     botSettings = null;
     routineInbox = null;
+    panelCanvas = null;
     routinesPanel = null;
-    appletCanvas = null;
     computer = null;
     _selectedSession = null;
     _observedWorkingRunId = null;
@@ -2539,10 +2444,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final ownLook = _botHasOwnLook(bot);
     final botTheme = ownLook ? _botThemeOf(context, bot!) : accountTheme;
     final session = voiceSession;
-    // This Bot is the one on the call: the header wears the pair, the
-    // composer control goes primary, and the dock stays off. A call with
-    // another Bot keeps the small dock, so looking at one Bot while talking
-    // to another still works.
+    // This Bot is the one on the call: the card sits at the top of the
+    // thread, the composer control goes primary, and the dock stays off. A
+    // call with another Bot keeps the small dock, so looking at one Bot
+    // while talking to another still works.
     final liveSession =
         footerOpen && bot != null && voiceBotId == bot.botId.value
         ? session
@@ -2551,24 +2456,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final rightPanel = _rightPanel();
     ChatHeader conversationHeader({Widget? companion}) => ChatHeader(
       name: _name(bot!),
-      companion: voiceHere ? null : companion,
-      voiceChrome: liveSession == null
-          ? null
-          : VoiceCallChrome(
-              session: liveSession,
-              userInitials: profileName ?? '',
-              userImageUrl: profileImageUrl,
-              botName: _name(bot),
-              characterId: bot.avatar.characterId,
-              primary: bot.avatar.primary,
-              onEnd: () => unawaited(_endVoice(reason: 'end-button')),
-            ),
+      companion: companion,
       connection: _selectedConnection,
       textScale: MediaQuery.textScalerOf(context).scale(14) / 14,
       // A phone's bar is Back and the panel switch. A desk opens the Bot
       // page and the Computer from the column beside the thread, so the
       // overlay keeps only the switch that shows or hides that column.
-      // Back still leaves the page: the call stays up in the header, or
+      // Back still leaves the page: the call stays on this Bot's card, or
       // the dock on another Bot.
       onBack: single ? _openBack : null,
       phone: single,
@@ -2624,63 +2518,49 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     onDismiss: () => setState(() => panelOpen = false),
                     rightPanel: rightPanel,
                     panelTheme: ownLook ? botTheme : null,
-                    sidebar:
-                        appletsMode &&
-                            !single &&
-                            bot != null &&
-                            appletCanvas != null
-                        ? AppletList(
-                            controller: appletCanvas!,
-                            botName: _name(bot),
-                            nameOf: _botNameOf,
-                            onOpen: (appletId) =>
-                                unawaited(_openApplet(appletId)),
-                            onBack: () => setState(() => appletsMode = false),
-                          )
-                        : ShellSidebar(
-                            bots: bots,
-                            profiles: profiles,
-                            unread: activity.unread,
-                            archived: archived,
-                            // The count for the Bot being read is suppressed
-                            // here rather than waited out: the receipt that
-                            // clears it is a round trip behind the message.
-                            focusedBotId: _focusedBotId,
-                            // A phone's list is a list of doors, not a selection: no row
-                            // is the current one once the conversation is a page.
-                            activeBotId: single ? null : bot?.botId.value,
-                            workingBotId: _workingRunId == null
-                                ? null
-                                : bot?.botId.value,
-                            loaded: loaded,
-                            error: error,
-                            showHidden: showHidden,
-                            onSelect: _select,
-                            onCreateBot: () => unawaited(_createBot()),
-                            onSearch: _openSearch,
-                            onProfile: _openProfile,
-                            profileName: profileName,
-                            profileImageUrl: profileImageUrl,
-                            onMarketplace: _openMarketplace,
-                            phone: single,
-                            onToggleHidden: () =>
-                                setState(() => showHidden = !showHidden),
-                            onRetry: load,
-                            onMove: (drop) => unawaited(_moveBot(drop)),
-                            onActions: (botId, {position}) => unawaited(
-                              _botActions(botId, position: position),
-                            ),
-                            onSwipeRead: (botId) => unawaited(
-                              _runBotAction(
-                                botId,
-                                _botActionState(botId).unread
-                                    ? BotAction.markRead
-                                    : BotAction.markUnread,
-                              ),
-                            ),
-                            onSwipeHide: (botId) =>
-                                unawaited(_runBotAction(botId, BotAction.hide)),
-                          ),
+                    sidebar: ShellSidebar(
+                      bots: bots,
+                      profiles: profiles,
+                      unread: activity.unread,
+                      archived: archived,
+                      // The count for the Bot being read is suppressed
+                      // here rather than waited out: the receipt that
+                      // clears it is a round trip behind the message.
+                      focusedBotId: _focusedBotId,
+                      // A phone's list is a list of doors, not a selection: no row
+                      // is the current one once the conversation is a page.
+                      activeBotId: single ? null : bot?.botId.value,
+                      workingBotId: _workingRunId == null
+                          ? null
+                          : bot?.botId.value,
+                      loaded: loaded,
+                      error: error,
+                      showHidden: showHidden,
+                      onSelect: _select,
+                      onCreateBot: () => unawaited(_createBot()),
+                      onSearch: _openSearch,
+                      onProfile: _openProfile,
+                      profileName: profileName,
+                      profileImageUrl: profileImageUrl,
+                      onMarketplace: _openMarketplace,
+                      phone: single,
+                      onToggleHidden: () =>
+                          setState(() => showHidden = !showHidden),
+                      onRetry: load,
+                      onMove: (drop) => unawaited(_moveBot(drop)),
+                      onActions: (botId, {position}) =>
+                          unawaited(_botActions(botId, position: position)),
+                      onSwipeRead: (botId) => unawaited(
+                        _runBotAction(
+                          botId,
+                          _botActionState(botId).unread
+                              ? BotAction.markRead
+                              : BotAction.markUnread,
+                        ),
+                      ),
+                      onSwipeHide: (botId) =>
+                          unawaited(_runBotAction(botId, BotAction.hide)),
+                    ),
                     conversation: _maybeBotLookScope(
                       wrap: ownLook,
                       key: 'thread-theme-${bot?.botId.value ?? 'none'}',
@@ -2717,8 +2597,34 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                   ?.unreadFromMessageId,
                               background: _background(bot.botId.value),
                               primary: _primary(bot.botId.value),
-                              overlay: (companion) =>
+                              overlay: (companion) => Stack(
+                                fit: StackFit.expand,
+                                children: [
                                   conversationHeader(companion: companion),
+                                  if (liveSession != null)
+                                    Positioned(
+                                      top:
+                                          chatHeaderChromeTop +
+                                          chatCompanionSize +
+                                          12,
+                                      left: 0,
+                                      right: 0,
+                                      child: Center(
+                                        child: VoiceCallChrome(
+                                          session: liveSession,
+                                          userInitials: profileName ?? '',
+                                          userImageUrl: profileImageUrl,
+                                          botName: _name(bot),
+                                          characterId: bot.avatar.characterId,
+                                          primary: bot.avatar.primary,
+                                          onEnd: () => unawaited(
+                                            _endVoice(reason: 'end-button'),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
                               onDictate: () => unawaited(_dictate()),
                               onStopDictation: () =>
                                   unawaited(_stopDictation()),
@@ -2748,7 +2654,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             ),
                     ),
                   ),
-                  ?_appletFrameHolder(context),
                 ],
               ),
             ),
@@ -3013,6 +2918,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                           padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
                           child: Row(
                             children: [
+                              // Unlabeled on purpose. An image label on this face merges
+                              // into the profile-name node, and the person's name
+                              // stops being text.
                               PersonAvatar(
                                 name: profileName ?? '',
                                 imageUrl: profileImageUrl,
@@ -3317,6 +3225,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       // Initials can wait; the page stays usable.
     }
     if (!mounted) return;
+    // The You page reads this again whenever it opens, and that read is still
+    // in flight while a later page — Marketplace — is on screen. A setState
+    // for a name the shell already shows rebuilds that page and tears down
+    // the text field's editing session, so a search typed into it never lands.
+    if (profileName == name && profileImageUrl == photo) return;
     setState(() {
       profileName = name;
       profileImageUrl = photo;
@@ -3324,7 +3237,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   /// The saved profile name, read again so a save on Settings shows up here.
-  /// A name is a courtesy: a read that fails leaves the page usable.
+  ///
+  /// The shell already holds a name from startup. Returning that cache left
+  /// the You page on the name from before the save. A read that fails leaves
+  /// the page usable.
   Future<String> _displayName() async {
     await _loadProfile();
     return profileName ?? widget.userId;
@@ -3348,7 +3264,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     routineInbox?.dispose();
     routinesPanel?.removeListener(_repaint);
     routinesPanel?.dispose();
-    appletCanvas?.dispose();
+    panelCanvas?.disposeController();
     computer?.dispose();
     _selectedChat?.removeListener(_selectedChatChanged);
     slots.dispose();

@@ -207,7 +207,6 @@ async function apply(
       const command: SetUserFeaturesCommandV1 = {
         schemaVersion: 1,
         type: "user/set-features",
-        applets: form.get("applets") !== null,
         pluginAuthoring: form.get("pluginAuthoring") !== null,
         plugins: form
           .getAll("plugin")

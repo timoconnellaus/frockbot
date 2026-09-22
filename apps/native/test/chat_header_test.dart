@@ -426,19 +426,64 @@ void main() {
       tester.getTopLeft(name).dx,
       closeTo(tester.getTopRight(companion).dx + 10, 0.5),
     );
-    expect(
-      tester.getTopLeft(companion).dy,
-      chatHeaderChromeTop - chatHeaderCompanionLift,
-    );
-    expect(
-      tester.getTopLeft(find.byTooltip('Show the panel')).dy,
-      chatHeaderChromeTop,
-    );
-    expect(
-      tester.getTopLeft(find.byTooltip('Your Bots')).dy,
-      chatHeaderChromeTop,
-    );
+    final back = tester.getRect(find.byTooltip('Your Bots'));
+    final panel = tester.getRect(find.byTooltip('Show the panel'));
+    final avatar = tester.getRect(companion);
+    final title = tester.getRect(name);
+    expect(avatar.center.dy, closeTo(back.center.dy, 0.5));
+    expect(panel.center.dy, closeTo(back.center.dy, 0.5));
+    expect(title.center.dy, closeTo(back.center.dy, 0.5));
   });
+
+  testWidgets(
+    'on a phone every character shares the chrome\'s vertical center',
+    (tester) async {
+      tester.view.physicalSize = const Size(390, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      for (final characterId in ['pixel', 'dog', 'cow']) {
+        await tester.pumpWidget(
+          host(
+            ChatHeader(
+              name: 'Rosemary',
+              phone: true,
+              onBack: () {},
+              onTogglePanel: () {},
+              companion: CharacterAvatar(
+                size: chatCompanionSize,
+                cropToInk: true,
+                characterId: characterId,
+                motion: CharacterMotion.still,
+                semanticsLabel: 'Bot is ready',
+              ),
+            ),
+            size: const Size(390, 900),
+          ),
+        );
+        await tester.pump();
+        final back = tester.getRect(find.byTooltip('Your Bots'));
+        final panel = tester.getRect(find.byTooltip('Show the panel'));
+        final avatar = tester.getRect(find.bySemanticsLabel('Bot is ready'));
+        final title = tester.getRect(find.text('Rosemary'));
+        expect(avatar.height, chatCompanionSize, reason: characterId);
+        expect(
+          avatar.center.dy,
+          closeTo(back.center.dy, 0.5),
+          reason: characterId,
+        );
+        expect(
+          panel.center.dy,
+          closeTo(back.center.dy, 0.5),
+          reason: characterId,
+        );
+        expect(
+          title.center.dy,
+          closeTo(back.center.dy, 0.5),
+          reason: characterId,
+        );
+      }
+    },
+  );
 
   testWidgets(
     'on a Mac a full-window call header sits past the traffic lights',
@@ -537,21 +582,24 @@ void main() {
     },
   );
 
-  testWidgets('the panel switch is a frosted pill on a phone', (tester) async {
+  testWidgets('a phone header has no stadium around its buttons', (
+    tester,
+  ) async {
     await tester.pumpWidget(
-      host(ChatHeader(name: 'Rosemary', phone: true, onTogglePanel: () {})),
+      host(
+        ChatHeader(
+          name: 'Rosemary',
+          phone: true,
+          onBack: () {},
+          onTogglePanel: () {},
+        ),
+      ),
     );
     await tester.pump();
-    final material = tester.widget<Material>(
-      find
-          .descendant(
-            of: find.byTooltip('Show the panel'),
-            matching: find.byType(Material),
-          )
-          .first,
-    );
-    expect(material.color, isNot(Colors.transparent));
-    expect(material.color!.a, lessThan(1));
+    expect(find.byType(BackdropFilter), findsNothing);
+    expect(find.byTooltip('Your Bots'), findsOneWidget);
+    expect(find.byTooltip('Show the panel'), findsOneWidget);
+    expect(find.byType(IconButton), findsNWidgets(2));
     expect(find.byTooltip('Open Rosemary'), findsNothing);
   });
 

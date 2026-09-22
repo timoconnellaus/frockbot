@@ -6,12 +6,7 @@
   "description": "Authoring SDK for FrockBot Applets: schema-first Durable Object server, TanStack DB client, component kit, linter, and the build pipeline.",
   "license": "UNLICENSED",
   "exports": {
-    "./server": "./src/server/index.ts",
-    "./client": "./src/client/index.ts",
-    "./kit": "./src/kit/index.tsx",
     "./lint": "./src/lint/index.ts",
-    "./protocol": "./src/protocol/index.ts",
-    "./build": "./src/build/pipeline.ts",
     "./build/plugin": "./src/build/plugin.ts",
     "./plugin": "./plugin/index.d.ts",
     "./package.json": "./package.json"

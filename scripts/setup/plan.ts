@@ -288,7 +288,6 @@ export const MINTED_SECRETS_V1 = [
     shape: "hex",
   },
   { name: "APPLET_BUILD_TOKEN", workers: ["app", "appletBuild"], shape: "hex" },
-  { name: "APPLET_VIEWER_SECRET", workers: ["app"], shape: "hex" },
   { name: "ROUTINE_HOOK_SECRET", workers: ["app"], shape: "hex" },
   { name: "MACHINE_TOKEN_SECRET", workers: ["app"], shape: "hex" },
   { name: "NATIVE_TOKEN_SECRET", workers: ["app"], shape: "hex" },

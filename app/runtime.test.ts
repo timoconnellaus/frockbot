@@ -45,7 +45,6 @@ describe("foundation application", () => {
       "user-machine",
       "machine-messages",
       "subagents",
-      "applets",
     ]);
   });
 
@@ -178,7 +177,6 @@ describe("foundation application", () => {
       .map((pkg) => pkg.id);
 
     expect(platformOwned.toSorted()).toEqual([
-      "applets",
       "auth",
       "credentials",
       "provider-flock-ai",

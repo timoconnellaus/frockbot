@@ -42,5 +42,8 @@ the Plugin is on for that Bot. Outside a Turn — a section, a control, a
 trigger — `ctx.schedule` answers unavailable; everything else works.
 
 The slots a Plugin may declare are `composer.toolbar`, `message.actions`,
-`sidebar.entries`, `settings.sections`, and `bot.profile`. Only
-`settings.sections` is open today. Trust chrome is never a slot.
+`settings.sections`, `bot.profile`, `conversation.panel`, and `bot.nav`.
+Open today: `settings.sections`, `conversation.panel` (the page beside the
+chat), and `bot.nav` (a door on this Bot). How to declare those two is
+`panels.md`. `composer.toolbar`, `message.actions`, and `bot.profile` are
+closed. Trust chrome is never a slot.

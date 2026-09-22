@@ -9,21 +9,21 @@
 // was drawn twice: the message bubble and, underneath it, the generic
 // "something went wrong" row for the same firing.
 //
-// The Routine is fired from the panel's own "Run now", and the provider is put
-// into `unauthorized` first, so the firing's Turn fails the way an upstream
-// revocation makes it fail.
+// The firing is the same `routine/run` the panel's Run now sends, started only
+// after this spec has left Sol. The provider is already `unauthorized`, so the
+// Turn fails the way an upstream revocation makes it fail. A failure that lands
+// in the open chat is marked read on arrival and never badges the row — which
+// is what happened when Run now was pressed while Sol was still on screen, and
+// the revocation answered before the switch.
 import {
   test,
   expect,
-  action,
   createBot,
   createRoutineThroughApi,
-  documentField,
   expectReadyToSend,
-  group,
-  press,
   provisionThroughApi,
   revealSidebar,
+  runRoutineThroughApi,
   sem,
   setFakeOllamaChatMode,
   spokenText,
@@ -76,57 +76,28 @@ test("a Routine that breaks says so once, by name, and badges the Bot", async ({
   // badge Sol's row rather than being read on arrival.
   await createBot(page, "Beta");
   await expectReadyToSend(page);
-  await revealSidebar(page);
-  await botRow(page, "Sol").click();
-  await expectReadyToSend(page);
 
-  // The Routine, through the command route — conversation is the author,
-  // and the panel is a list and a read-only detail.
-  await createRoutineThroughApi(page, {
+  const routine = await createRoutineThroughApi(page, {
     botName: "Sol",
     name: "Morning brief",
     prompt: "Summarise overnight email.",
     schedule: "0 9 * * *",
   });
-  await press(sem(page, "bot-page-routines-all"));
-  const document = sem(page, "routines-document");
-  await expect(document).toBeVisible({ timeout: 60_000 });
-  const card = group(page, "Morning brief");
-  await expect(card).toBeVisible({ timeout: 60_000 });
+
+  // Beta is the chat on screen before the firing is even queued. At this
+  // width a panel sits beside the conversation, so Sol would stay focused for
+  // the whole of a Run now click, and the failure would be read before the
+  // switch.
+  await revealSidebar(page);
+  await botRow(page, "Beta").click();
+  await expectReadyToSend(page);
 
   const said = `"Morning brief" did not run: ${RUN_FAILURE_COPY_V1["model-error"]}`;
   try {
     // The Connection validated; the endpoint then refuses inference, which is
     // what a revoked key looks like to a firing.
     await setFakeOllamaChatMode(page, ollamaBaseUrl, "unauthorized");
-    // Run now is on the detail the row opens: a row is what is armed and
-    // the switch that pauses it.
-    await card.click({ position: { x: 24, y: 20 } });
-    await expect(documentField(page, "routine.name")).toBeVisible();
-    // The click is not the command. Opening the detail reloads the
-    // document, so wait until the run is admitted.
-    const ran = page.waitForResponse(
-      (response) =>
-        response.request().method() === "POST" &&
-        /\/api\/bots\/[^/]+\/routines$/u.test(new URL(response.url()).pathname),
-    );
-    await press(action(page, "run-routine"));
-    await ran;
-    // Run now lives on the detail. Leave it so the shell's sidebar is
-    // reachable again. In the panel that is the header back, named as
-    // the detail's own way out; on the phone it is the same id.
-    const detailBack = sem(page, "routine-detail-back");
-    await expect(detailBack).toBeVisible();
-    await press(detailBack);
-    await expect(documentField(page, "routine.name")).toHaveCount(0);
-
-    // Away from Sol before the firing settles, so the message lands somewhere
-    // nobody is looking. Straight to another Bot from the sidebar, which is beside the
-    // conversation at this width: the panel is a column of the same window and
-    // the thread is on screen throughout.
-    await revealSidebar(page);
-    await botRow(page, "Beta").click();
-    await expectReadyToSend(page);
+    await runRoutineThroughApi(page, routine);
 
     // The broken firing is a message like any other: it counts unread on the
     // Bot nobody is reading.

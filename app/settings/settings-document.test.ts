@@ -79,6 +79,33 @@ test("a frame becomes one titled group per section, with a save action naming it
   ]);
 });
 
+test("identity photo is omitted from the settings document", () => {
+  const document = settingsDocumentV1(
+    frame([
+      {
+        ...profile,
+        fields: [
+          ...profile.fields,
+          {
+            id: "photo",
+            label: "Photo",
+            kind: "text",
+            value: "https://lh3.googleusercontent.com/a/photo",
+            editable: false,
+            maxLength: 2048,
+          },
+        ],
+      },
+    ]),
+  );
+  const section = group(document, 0);
+  expect(
+    section.children.flatMap((node) =>
+      node.type === "field" ? [node.field.id] : [],
+    ),
+  ).toEqual(["f0.name", "f0.email"]);
+});
+
 test("a field id names its section, and a select says its value is JSON", () => {
   const document = settingsDocumentV1(
     frame([

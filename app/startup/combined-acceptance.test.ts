@@ -16,12 +16,12 @@ import {
   type BotDurableAuthorityHooks,
   type ConversationUpdateV1,
   type OwnedBotTurnCommand,
-  type SessionEvent,
   type StoredRunV1,
   createStoredRunCodecV1,
 } from "@frockbot/core/durable";
 import {
   decodeSessionEvent,
+  type SessionEvent,
   type SessionEventInput,
 } from "@frockbot/core/contracts";
 import { MemoryStorage } from "@frockbot/core/durable/testing";
@@ -92,8 +92,8 @@ const SESSION = `${USER}:alpha`;
 const NOW = Date.parse("2026-09-22T12:00:00.000Z");
 
 class CountingStorage extends MemoryStorage {
-  readonly lists: Array<{ prefix?: string; limit?: number }> = [];
-  readonly gets: string[] = [];
+  lists: Array<{ prefix?: string; limit?: number }> = [];
+  gets: string[] = [];
 
   override get<T>(key: string): Promise<T | undefined> {
     this.gets.push(key);
@@ -640,7 +640,9 @@ describe("startup combined acceptance", () => {
     const replay = firstContext.find(
       (message) => message.role === "assistant" && message.providerState,
     );
-    expect(replay?.providerState).toMatchObject({
+    expect(
+      replay?.role === "assistant" ? replay.providerState : undefined,
+    ).toMatchObject({
       provider: "openai-compatible",
       model: "m",
       connectionId: "conn",
@@ -984,16 +986,16 @@ describe("startup combined acceptance", () => {
     const scheduler = new VoiceMaintenanceSchedulerV1(async (_delay, token) => {
       wakes.push(token);
     });
-    await scheduler.commit(() =>
-      sealVoiceCallV1(voice, {
+    await scheduler.commit(async () => {
+      await sealVoiceCallV1(voice, {
         callId: "call-done",
         botId: "alpha",
         startedAt: openedAt.toISOString(),
         endedAt: later.toISOString(),
         turnSequence: 1,
         now: NOW,
-      }),
-    );
+      });
+    });
     expect(wakes).toHaveLength(1);
     const delivered: string[] = [];
     const seen = new Set<string>();

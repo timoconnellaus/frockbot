@@ -17,7 +17,6 @@ import type {
 } from "@frockbot/core/contracts";
 import {
   bootstrapGeneration,
-  compositionAppletMemberReachesV1,
   CompositionMountFailureError,
   type CompositionFailurePhaseV1,
   type CompositionGenerationV1,
@@ -136,29 +135,6 @@ export interface ShellIsolateMountOptions {
   }): Promise<{ fatal: boolean }>;
 }
 
-/**
- * How an Applet member's tools reach their instance.
- *
- * The Applet Durable Object forwards to the facet; a facet stub is not
- * serializable and never leaves that object, so this is a call, never a stub.
- * Absent when the Bot Durable Object has no Applet binding: an Applet member's
- * tools are then simply not registered, exactly as an isolate member fails
- * without a loader.
- *
- * `generationId` is the Applet generation this Turn's Composition pinned, and
- * it is not decoration: the Applet Durable Object runs that generation or
- * refuses the call. Without it a publish landing mid-Turn would
- * execute new code behind the schema and provenance the model was shown.
- */
-export interface ShellAppletMountOptions {
-  invokeTool(request: {
-    appletId: string;
-    generationId: string;
-    tool: string;
-    input: unknown;
-  }): Promise<{ status: "ok" | "error"; content: string }>;
-}
-
 export interface ShellCompositionMountOptions {
   billing?: ModelBilling;
   botId: string;
@@ -202,8 +178,6 @@ export interface ShellCompositionMountOptions {
   cardApprovals?: CardApprovalStoreV1;
   /** Absent when the host cannot load isolates; isolate members then fail verify. */
   isolate?: ShellIsolateMountOptions;
-  /** Absent when the host cannot reach Applet instances. */
-  applets?: ShellAppletMountOptions;
   /**
    * The model provider Plugin host for this mount (ADR 0032). Present exactly
    * when this Bot's model selection names a provider this deployment opens to
@@ -730,52 +704,7 @@ export function createShellCompositionHost(
       // Applet Durable Object. An Applet contributes no module and no manifest,
       // so there is nothing here to mount, load, or health-check: the
       // instance's own health check ran when its generation was published, and
-      // its failure is recorded there. The generation is the User's, so it
-      // names every available Applet; this Bot registers only the ones it owns
-      // or is shared, as they stood when the generation was resolved (ADR
-      // 0027).
-      const unregisterApplets: (() => void)[] = [];
-      for (const applet of (generation.applets ?? []).filter((member) =>
-        compositionAppletMemberReachesV1(member, options.botId),
-      )) {
-        if (!options.applets) {
-          failures.push({
-            phase: "resolve",
-            message: `Applet "${applet.appletId}" needs an Applet binding and this host has none`,
-          });
-          continue;
-        }
-        const routing = options.applets;
-        for (const tool of applet.tools) {
-          unregisterApplets.push(
-            runtime.services.tools.register({
-              name: tool.name,
-              // Provenance travels into the catalog the model reads, so a Bot
-              // can tell an Applet's tool from a Package's.
-              description: `${tool.description} (Applet "${applet.appletId}", generation ${applet.generationId})`,
-              inputSchema: tool.inputSchema,
-              idempotent: false,
-              execute: async (input) => {
-                const outcome = await routing.invokeTool({
-                  appletId: applet.appletId,
-                  // The pin the description above advertises, carried into the
-                  // call so the instance executes it or refuses.
-                  generationId: applet.generationId,
-                  tool: tool.name,
-                  input: input ?? null,
-                });
-                return {
-                  content: outcome.content,
-                  isError: outcome.status === "error",
-                };
-              },
-            }),
-          );
-        }
-      }
-
       const dispose = async () => {
-        for (const unregister of unregisterApplets.toReversed()) unregister();
         for (const unregister of registeredModelProviders.toReversed()) {
           unregister();
         }

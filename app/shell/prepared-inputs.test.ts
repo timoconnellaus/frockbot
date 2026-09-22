@@ -78,7 +78,7 @@ function stamp(generationId: string, revision = 1): AccountPreparationStampV1 {
   return {
     schemaVersion: 1,
     revision,
-    features: { applets: false, pluginAuthoring: false, plugins: [] },
+    features: { pluginAuthoring: false, plugins: [] },
     compositionGenerationId: generationId,
     skillIndexRevision: "",
   };

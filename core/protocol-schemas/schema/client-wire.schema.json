@@ -665,71 +665,9 @@
         },
         "botId": {
           "$ref": "#/$defs/BotId"
-        },
-        "appletImpact": {
-          "$ref": "#/$defs/AppletImpactFingerprint"
         }
       },
       "required": ["schemaVersion", "type", "commandId", "botId"],
-      "additionalProperties": false
-    },
-    "AppletImpactFingerprint": {
-      "type": "string",
-      "minLength": 16,
-      "maxLength": 16,
-      "pattern": "^[0-9a-f]{16}$"
-    },
-    "BotAppletImpact": {
-      "type": "object",
-      "properties": {
-        "schemaVersion": {
-          "const": 1
-        },
-        "botId": {
-          "$ref": "#/$defs/BotId"
-        },
-        "fingerprint": {
-          "$ref": "#/$defs/AppletImpactFingerprint"
-        },
-        "applets": {
-          "type": "array",
-          "maxItems": 100,
-          "items": {
-            "type": "object",
-            "properties": {
-              "appletId": {
-                "type": "string",
-                "minLength": 3,
-                "maxLength": 129,
-                "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}\\.[a-z0-9-]{1,64}$"
-              },
-              "displayName": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 160
-              },
-              "status": {
-                "enum": ["draft", "published"]
-              },
-              "sharedWithBotIds": {
-                "type": "array",
-                "maxItems": 100,
-                "items": {
-                  "$ref": "#/$defs/BotId"
-                }
-              }
-            },
-            "required": [
-              "appletId",
-              "displayName",
-              "status",
-              "sharedWithBotIds"
-            ],
-            "additionalProperties": false
-          }
-        }
-      },
-      "required": ["schemaVersion", "botId", "fingerprint", "applets"],
       "additionalProperties": false
     },
     "BotCreateCommand": {
@@ -1136,7 +1074,7 @@
           "type": "object",
           "properties": {
             "kind": {
-              "enum": ["user", "bot", "applet"]
+              "enum": ["user", "bot"]
             },
             "id": {
               "$ref": "#/$defs/Identifier"
@@ -1592,22 +1530,6 @@
             }
           },
           "required": ["type", "approvalId", "action", "risk"],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
-              "const": "applet"
-            },
-            "appletId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 129,
-              "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}\\.[a-z0-9-]{1,64}$"
-            }
-          },
-          "required": ["type", "appletId"],
           "additionalProperties": false
         },
         {
@@ -3872,27 +3794,6 @@
       "required": ["schemaVersion", "home", "revision", "ownerId", "sections"],
       "additionalProperties": false
     },
-    "AppletViewerToken": {
-      "type": "object",
-      "properties": {
-        "token": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 4096
-        },
-        "expiresAt": {
-          "$ref": "#/$defs/Instant"
-        },
-        "socketUrl": {
-          "type": "string",
-          "minLength": 8,
-          "maxLength": 2048,
-          "pattern": "^(?:wss://[^\\s/@?#]+|ws://(?:127\\.0\\.0\\.1|10\\.0\\.2\\.2|localhost)(?::[0-9]+)?)/[^\\s#]*$"
-        }
-      },
-      "required": ["token", "expiresAt", "socketUrl"],
-      "additionalProperties": false
-    },
     "ImmutableArtifact": {
       "type": "object",
       "properties": {
@@ -4303,6 +4204,127 @@
       "required": ["schemaVersion", "surfaceId", "reason", "message"],
       "additionalProperties": false
     },
+    "PanelBagEntry": {
+      "type": "object",
+      "properties": {
+        "pluginId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "displayName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 160
+        },
+        "surfaceId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        }
+      },
+      "required": ["pluginId", "displayName", "surfaceId", "label"],
+      "additionalProperties": false
+    },
+    "PanelFocus": {
+      "oneOf": [
+        {
+          "type": "object",
+          "properties": {
+            "pluginId": {
+              "const": null
+            }
+          },
+          "required": ["pluginId"],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "pluginId": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "surfaceId": {
+              "$ref": "#/$defs/Identifier"
+            }
+          },
+          "required": ["pluginId", "surfaceId"],
+          "additionalProperties": false
+        }
+      ]
+    },
+    "PanelDoor": {
+      "type": "object",
+      "properties": {
+        "pluginId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "label": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "opens": {
+          "type": "object",
+          "properties": {
+            "pluginId": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "surfaceId": {
+              "$ref": "#/$defs/Identifier"
+            }
+          },
+          "required": ["pluginId", "surfaceId"],
+          "additionalProperties": false
+        },
+        "document": {
+          "$ref": "#/$defs/ViewDocument"
+        },
+        "failure": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        }
+      },
+      "required": ["pluginId", "label"],
+      "additionalProperties": false
+    },
+    "PanelOpenView": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "bag": {
+          "type": "array",
+          "maxItems": 8,
+          "items": {
+            "$ref": "#/$defs/PanelBagEntry"
+          }
+        },
+        "focus": {
+          "$ref": "#/$defs/PanelFocus"
+        },
+        "document": {
+          "$ref": "#/$defs/ViewDocument"
+        },
+        "failure": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 500
+        },
+        "doors": {
+          "type": "array",
+          "maxItems": 16,
+          "items": {
+            "$ref": "#/$defs/PanelDoor"
+          }
+        }
+      },
+      "required": ["schemaVersion", "bag", "focus", "doors"],
+      "additionalProperties": false
+    },
     "UnreadDirectory": {
       "type": "object",
       "properties": {
@@ -4420,6 +4442,19 @@
       "required": ["kind", "botId", "sessionId", "turnId"],
       "additionalProperties": false
     },
+    "TurnAdmission": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "runId": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": ["schemaVersion", "runId"],
+      "additionalProperties": false
+    },
     "TurnResponse": {
       "type": "object",
       "properties": {
@@ -4445,137 +4480,6 @@
         }
       },
       "required": ["schemaVersion", "runId", "text", "events"],
-      "additionalProperties": false
-    },
-    "AppletSummary": {
-      "type": "object",
-      "properties": {
-        "appletId": {
-          "type": "string",
-          "minLength": 3,
-          "maxLength": 129,
-          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}\\.[a-z0-9-]{1,64}$"
-        },
-        "displayName": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 160
-        },
-        "status": {
-          "enum": ["draft", "published", "deleted"]
-        },
-        "currentGenerationId": {
-          "$ref": "#/$defs/GenerationId"
-        },
-        "tools": {
-          "type": "array",
-          "maxItems": 100,
-          "items": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 128
-          }
-        },
-        "createdAt": {
-          "$ref": "#/$defs/Instant"
-        },
-        "ownerBotId": {
-          "$ref": "#/$defs/BotId"
-        },
-        "access": {
-          "enum": ["owner", "shared"]
-        },
-        "sharedWithBotIds": {
-          "type": "array",
-          "maxItems": 100,
-          "items": {
-            "$ref": "#/$defs/BotId"
-          }
-        }
-      },
-      "required": [
-        "appletId",
-        "displayName",
-        "status",
-        "tools",
-        "createdAt",
-        "ownerBotId",
-        "access",
-        "sharedWithBotIds"
-      ],
-      "additionalProperties": false
-    },
-    "AppletOpenFocus": {
-      "type": "object",
-      "properties": {
-        "appletId": {
-          "type": "string",
-          "minLength": 3,
-          "maxLength": 129,
-          "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}\\.[a-z0-9-]{1,64}$"
-        },
-        "generationId": {
-          "$ref": "#/$defs/GenerationId"
-        },
-        "uiUrl": {
-          "type": "string",
-          "minLength": 8,
-          "maxLength": 2048,
-          "pattern": "^https?://[^\\s/@?#]+/[^\\s#]*$"
-        },
-        "token": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 4096
-        },
-        "expiresAt": {
-          "$ref": "#/$defs/Instant"
-        },
-        "socketUrl": {
-          "type": "string",
-          "minLength": 8,
-          "maxLength": 2048,
-          "pattern": "^(?:wss://[^\\s/@?#]+|ws://(?:127\\.0\\.0\\.1|10\\.0\\.2\\.2|localhost)(?::[0-9]+)?)/[^\\s#]*$"
-        }
-      },
-      "required": ["appletId"],
-      "additionalProperties": false
-    },
-    "AppletOpenView": {
-      "type": "object",
-      "properties": {
-        "schemaVersion": {
-          "const": 1
-        },
-        "applets": {
-          "type": "array",
-          "maxItems": 100,
-          "items": {
-            "$ref": "#/$defs/AppletSummary"
-          }
-        },
-        "focused": {
-          "$ref": "#/$defs/AppletOpenFocus"
-        }
-      },
-      "required": ["schemaVersion", "applets"],
-      "additionalProperties": false
-    },
-    "AppletDirectory": {
-      "type": "object",
-      "properties": {
-        "schemaVersion": {
-          "const": 1
-        },
-        "applets": {
-          "type": "array",
-          "maxItems": 100,
-          "items": {
-            "$ref": "#/$defs/AppletSummary"
-          }
-        }
-      },
-      "required": ["schemaVersion", "applets"],
       "additionalProperties": false
     },
     "SettingsChangeCommand": {

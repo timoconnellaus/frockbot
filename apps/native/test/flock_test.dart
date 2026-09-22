@@ -18,26 +18,6 @@ Map<String, Object?> directory(int revision) => {
   'bots': <Object?>[],
 };
 
-/// What deleting or archiving `alpha` does to Applets: [applets] as
-/// `(appletId, displayName, sharedWithBotIds)`.
-Map<String, Object?> impact({
-  String fingerprint = '0123456789abcdef',
-  List<(String, String, List<String>)> applets = const [],
-}) => {
-  'schemaVersion': 1,
-  'botId': 'alpha',
-  'fingerprint': fingerprint,
-  'applets': [
-    for (final (id, name, shared) in applets)
-      {
-        'appletId': id,
-        'displayName': name,
-        'status': 'published',
-        'sharedWithBotIds': shared,
-      },
-  ],
-};
-
 Map<String, Object?> lifecycleReceipt(Object? commandId, String status) => {
   'schemaVersion': 1,
   'commandId': commandId,
@@ -270,7 +250,6 @@ void main() {
     final store = MemoryStore();
     final sent = <Map<String, Object?>>[];
     final api = SettingsApi(store, (path, body) async {
-      if (path == '/api/bots/alpha/applets/impact') return impact();
       sent.add((body! as Map).cast<String, Object?>());
       return {
         'schemaVersion': 1,
@@ -311,7 +290,7 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Delete Alpha?'), findsOneWidget);
     expect(
-      find.textContaining('removes its conversation and Applets'),
+      find.textContaining('removes its conversation and cannot be undone'),
       findsOneWidget,
     );
     await tester.tap(find.text('Cancel'));
@@ -362,247 +341,6 @@ void main() {
     api.close();
   });
 
-  group('the Applets a Bot takes with it', () {
-    Future<void> zone(
-      WidgetTester tester,
-      BotLifecycleCommands lifecycle, {
-      Future<void> Function()? onChanged,
-    }) async {
-      await tester.pumpWidget(
-        MaterialApp(
-          theme: FrockTheme.theme(Brightness.dark),
-          home: Scaffold(
-            body: BotDangerZone(
-              lifecycle: lifecycle,
-              botId: 'alpha',
-              botName: 'Alpha',
-              archived: false,
-              nameOf: (id) => id == 'scout' ? 'Scout' : null,
-              onChanged: onChanged,
-            ),
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-    }
-
-    Finder confirm(String verb) => find.descendant(
-      of: find.byType(AlertDialog),
-      matching: find.widgetWithText(FilledButton, verb),
-    );
-
-    testWidgets('a delete names each owned Applet and who else uses it, and '
-        'carries the fingerprint it showed', (tester) async {
-      final store = MemoryStore();
-      final sent = <Map<String, Object?>>[];
-      final api = SettingsApi(store, (path, body) async {
-        if (path == '/api/bots/alpha/applets/impact') {
-          return impact(
-            applets: [
-              ('todo.applet', 'Weekly Todos', ['scout']),
-              ('notes.applet', 'Field Notes', ['scout', 'stranger']),
-              ('solo.applet', 'Solo', []),
-            ],
-          );
-        }
-        final command = (body! as Map).cast<String, Object?>();
-        sent.add(command);
-        return lifecycleReceipt(command['commandId'], 'deleted');
-      });
-      final lifecycle = BotLifecycleCommands(api, store, 'tim');
-      await zone(tester, lifecycle);
-
-      await tester.tap(find.text('Delete Bot'));
-      await tester.pumpAndSettle();
-      expect(
-        find.textContaining('permanently deleted, including for the Bots'),
-        findsOneWidget,
-      );
-      expect(
-        find.textContaining('• Weekly Todos — also used by Scout'),
-        findsOneWidget,
-      );
-      // A Bot this surface cannot name is counted, not guessed at.
-      expect(
-        find.textContaining('• Field Notes — shared with 2 other Bots'),
-        findsOneWidget,
-      );
-      // Nobody else uses it, so nobody else is named.
-      expect(find.textContaining(RegExp(r'• Solo$')), findsOneWidget);
-      await tester.tap(confirm('Delete'));
-      await tester.pumpAndSettle();
-      expect(sent.single['type'], 'bot/delete');
-      expect(sent.single['appletImpact'], '0123456789abcdef');
-      await tester.pumpWidget(const SizedBox());
-      lifecycle.dispose();
-      api.close();
-    });
-
-    testWidgets('an archive says the Applets wait for a restore, and carries '
-        'no fingerprint', (tester) async {
-      final store = MemoryStore();
-      final sent = <Map<String, Object?>>[];
-      final api = SettingsApi(store, (path, body) async {
-        if (path == '/api/bots/alpha/applets/impact') {
-          return impact(applets: [('todo.applet', 'Weekly Todos', [])]);
-        }
-        final command = (body! as Map).cast<String, Object?>();
-        sent.add(command);
-        return lifecycleReceipt(command['commandId'], 'archived');
-      });
-      final lifecycle = BotLifecycleCommands(api, store, 'tim');
-      await zone(tester, lifecycle);
-      await tester.tap(find.text('Archive Bot'));
-      await tester.pumpAndSettle();
-      expect(
-        find.textContaining(
-          'unavailable to every Bot until this Bot is restored',
-        ),
-        findsOneWidget,
-      );
-      expect(find.textContaining('• Weekly Todos'), findsOneWidget);
-      await tester.tap(confirm('Archive Bot'));
-      await tester.pumpAndSettle();
-      expect(sent.single['type'], 'bot/archive');
-      expect(sent.single.containsKey('appletImpact'), isFalse);
-      await tester.pumpWidget(const SizedBox());
-      lifecycle.dispose();
-      api.close();
-    });
-
-    testWidgets('a delete whose Applets cannot be read is not asked', (
-      tester,
-    ) async {
-      final store = MemoryStore();
-      final sent = <Object?>[];
-      final api = SettingsApi(store, (path, body) async {
-        if (path.endsWith('/applets/impact')) {
-          throw const RequestFailure('offline');
-        }
-        sent.add(body);
-        return null;
-      });
-      final lifecycle = BotLifecycleCommands(api, store, 'tim');
-      await zone(tester, lifecycle);
-      await tester.tap(find.text('Delete Bot'));
-      await tester.pumpAndSettle();
-      expect(find.byType(AlertDialog), findsNothing);
-      expect(sent, isEmpty);
-      expect(
-        find.textContaining('Couldn’t check which Applets this Bot owns'),
-        findsOneWidget,
-      );
-      await tester.pumpWidget(const SizedBox());
-      lifecycle.dispose();
-      api.close();
-    });
-
-    testWidgets('Applets that changed since the confirmation are read again '
-        'and asked about again', (tester) async {
-      final store = MemoryStore();
-      final sent = <Map<String, Object?>>[];
-      var reads = 0;
-      final api = SettingsApi(store, (path, body) async {
-        if (path == '/api/bots/alpha/applets/impact') {
-          reads++;
-          return reads == 1
-              ? impact(applets: [('todo.applet', 'Weekly Todos', [])])
-              : impact(
-                  fingerprint: 'fedcba9876543210',
-                  applets: [
-                    ('todo.applet', 'Weekly Todos', []),
-                    ('late.applet', 'Late Arrival', ['scout']),
-                  ],
-                );
-        }
-        final command = (body! as Map).cast<String, Object?>();
-        sent.add(command);
-        if (sent.length == 1) {
-          // The command is refused before it is admitted, so nothing of it
-          // is kept to retry.
-          expect(store.values.containsKey('bot-lifecycle.tim'), isTrue);
-          throw const RequestFailure(
-            'applet impact changed',
-            409,
-            'applet-impact-changed',
-          );
-        }
-        return lifecycleReceipt(command['commandId'], 'deleted');
-      });
-      final lifecycle = BotLifecycleCommands(api, store, 'tim');
-      var changed = 0;
-      await zone(tester, lifecycle, onChanged: () async => changed++);
-
-      await tester.tap(find.text('Delete Bot'));
-      await tester.pumpAndSettle();
-      expect(find.textContaining('Late Arrival'), findsNothing);
-      await tester.tap(confirm('Delete'));
-      await tester.pumpAndSettle();
-
-      // Asked again, with the list as it is now and why.
-      expect(reads, 2);
-      expect(find.byType(AlertDialog), findsOneWidget);
-      expect(
-        find.textContaining(
-          'This Bot’s Applets changed. Review them and try again.',
-        ),
-        findsWidgets,
-      );
-      expect(
-        find.textContaining('• Late Arrival — also used by Scout'),
-        findsOneWidget,
-      );
-      expect(lifecycle.pending, isFalse);
-      expect(store.values.containsKey('bot-lifecycle.tim'), isFalse);
-
-      await tester.tap(confirm('Delete'));
-      await tester.pumpAndSettle();
-      expect(sent, hasLength(2));
-      expect(sent[0]['appletImpact'], '0123456789abcdef');
-      expect(sent[1]['appletImpact'], 'fedcba9876543210');
-      expect(sent[1]['commandId'], isNot(sent[0]['commandId']));
-      expect(changed, 1);
-      await tester.pumpWidget(const SizedBox());
-      lifecycle.dispose();
-      api.close();
-    });
-
-    test(
-      'a retry re-sends the fingerprint the command was issued with',
-      () async {
-        final store = MemoryStore();
-        final sent = <Map<String, Object?>>[];
-        var lost = true;
-        final api = SettingsApi(store, (path, body) async {
-          final command = (body! as Map).cast<String, Object?>();
-          sent.add(command);
-          if (lost) {
-            lost = false;
-            throw const RequestFailure('lost');
-          }
-          return lifecycleReceipt(command['commandId'], 'deleted');
-        });
-        final first = BotLifecycleCommands(api, store, 'tim');
-        expect(
-          await first.change(
-            'alpha',
-            'bot/delete',
-            appletImpact: '0123456789abcdef',
-          ),
-          isFalse,
-        );
-        first.dispose();
-        final next = BotLifecycleCommands(api, store, 'tim');
-        await next.restore();
-        expect(await next.retry(), isTrue);
-        expect(sent[1], sent[0]);
-        expect(sent[1]['appletImpact'], '0123456789abcdef');
-        next.dispose();
-        api.close();
-      },
-    );
-  });
-
   group('the one width a Bot asks its questions at', () {
     // The Name field takes 100 characters, and a title is one unwrapped line:
     // a dialog that sizes itself to its longest sentence came out ~700 wide on
@@ -616,7 +354,6 @@ void main() {
     ) async {
       final store = MemoryStore();
       final api = SettingsApi(store, (path, body) async {
-        if (path.endsWith('/applets/impact')) return impact();
         final command = (body! as Map).cast<String, Object?>();
         return lifecycleReceipt(command['commandId'], 'deleted');
       });

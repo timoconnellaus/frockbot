@@ -14,9 +14,7 @@ function pkg(
 
 const packages = [
   pkg("image", [{ id: "generated", scope: "user" }]),
-  // Applets declares no root: its source is authored and built in the cloud,
-  // and nothing on a Computer reads it.
-  pkg("applets"),
+  pkg("notes"),
   pkg("clock"),
 ];
 
@@ -25,7 +23,7 @@ describe("the durable roots a User's Packages declare", () => {
     expect(
       declaredPackageRootsV1({
         installations: [
-          { packageId: "applets", state: "installed" },
+          { packageId: "notes", state: "installed" },
           { packageId: "image", state: "installed" },
           { packageId: "clock", state: "installed" },
         ],

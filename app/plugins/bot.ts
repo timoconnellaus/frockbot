@@ -34,6 +34,7 @@ import {
   type SetBotPluginEnabledCommandV1,
 } from "./page.js";
 import { renderBotPluginSectionsV1 } from "./views-bot.js";
+import { omittedPanelNoticesV1 } from "./panels-bot.js";
 import { readBotPluginRosterV1 } from "./worker-bot.js";
 
 export type SetBotPluginEnabledReceiptV1 =
@@ -135,9 +136,12 @@ export async function readBotPluginsFrameV1(
   if (options.sections) {
     const roster = await readBotPluginRosterV1(state, identity);
     const sections = await renderBotPluginSectionsV1(state, identity, roster);
+    const omitted = omittedPanelNoticesV1(roster);
     for (const row of rows) {
       const drawn = sections.get(row.pluginId);
       if (drawn && drawn.length > 0) row.sections = drawn;
+      const notice = omitted.get(row.pluginId);
+      if (notice) row.omitted = notice;
     }
   }
   return {

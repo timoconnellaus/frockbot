@@ -47,9 +47,10 @@ export type PluginGrantV1 = (typeof PLUGIN_GRANTS_V1)[number];
 export const PLUGIN_SLOTS_V1 = [
   "composer.toolbar",
   "message.actions",
-  "sidebar.entries",
   "settings.sections",
   "bot.profile",
+  "conversation.panel",
+  "bot.nav",
 ] as const;
 
 export type PluginSlotV1 = (typeof PLUGIN_SLOTS_V1)[number];
@@ -69,11 +70,14 @@ export interface PluginToolV1 {
 /**
  * One view a plugin offers in a slot. The plugin returns a `ViewDocument` for
  * `surfaceId` and the host renders it with the host's own widgets; the plugin
- * ships no markup.
+ * ships no markup. `label` is the tab or door the host draws. `opens` is only
+ * on `bot.nav`: a press focuses that `conversation.panel` surface (ADR 0034).
  */
 export interface PluginViewV1 {
   slot: PluginSlotV1;
   surfaceId: string;
+  label?: string;
+  opens?: string;
 }
 
 /**
@@ -192,6 +196,8 @@ const PLUGIN_HOST =
 const PLUGIN_SURFACE_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const MAX_PLUGIN_TOOLS_V1 = 64;
 const MAX_PLUGIN_VIEWS_V1 = 16;
+/** Tab and door copy; matches a settings-section title. */
+const MAX_PLUGIN_VIEW_LABEL_V1 = 80;
 const MAX_PLUGIN_HOSTS_V1 = 32;
 const MAX_PLUGIN_SERVICES_V1 = 32;
 const MAX_PLUGIN_TRIGGERS_V1 = 16;
@@ -295,15 +301,31 @@ function decodePluginToolV1(input: unknown, label: string): PluginToolV1 {
 
 function decodePluginViewV1(input: unknown, label: string): PluginViewV1 {
   const value = record(input, label);
-  exactKeys(value, ["slot", "surfaceId"], [], label);
+  exactKeys(value, ["slot", "surfaceId"], ["label", "opens"], label);
   const surfaceId = boundedString(value.surfaceId, `${label}.surfaceId`, 128);
   if (!PLUGIN_SURFACE_ID.test(surfaceId)) {
     throw new Error(`${label}.surfaceId is invalid`);
   }
-  return {
-    slot: vocabulary([value.slot], PLUGIN_SLOTS_V1, `${label}.slot`)[0]!,
-    surfaceId,
-  };
+  const slot = vocabulary([value.slot], PLUGIN_SLOTS_V1, `${label}.slot`)[0]!;
+  const decoded: PluginViewV1 = { slot, surfaceId };
+  if (value.label !== undefined) {
+    decoded.label = boundedString(
+      value.label,
+      `${label}.label`,
+      MAX_PLUGIN_VIEW_LABEL_V1,
+    );
+  }
+  if (value.opens !== undefined) {
+    const opens = boundedString(value.opens, `${label}.opens`, 128);
+    if (!PLUGIN_SURFACE_ID.test(opens)) {
+      throw new Error(`${label}.opens is invalid`);
+    }
+    if (slot !== "bot.nav") {
+      throw new Error(`${label}.opens is only valid on bot.nav`);
+    }
+    decoded.opens = opens;
+  }
+  return decoded;
 }
 
 export function decodePluginNetworkV1(
@@ -759,6 +781,22 @@ export function decodePluginDescriptorV1(
     new Set(views.map((view) => view.surfaceId)).size !== views.length
   ) {
     throw new Error(`${label}.views contains duplicate surface ids`);
+  }
+  if (views) {
+    const panels = views.filter((view) => view.slot === "conversation.panel");
+    if (panels.length > 1 && panels.some((view) => view.label === undefined)) {
+      throw new Error(
+        `${label}.views: each conversation.panel view needs a label when a plugin declares more than one`,
+      );
+    }
+    const panelIds = new Set(panels.map((view) => view.surfaceId));
+    for (const [index, view] of views.entries()) {
+      if (view.opens !== undefined && !panelIds.has(view.opens)) {
+        throw new Error(
+          `${label}.views[${index}].opens must name a conversation.panel surface of this plugin`,
+        );
+      }
+    }
   }
   return {
     id,

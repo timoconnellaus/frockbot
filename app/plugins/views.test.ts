@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   MAX_PLUGIN_TOOL_ARGUMENTS_BYTES_V1,
   PLUGIN_SECTION_NODE_LIMIT_V1,
+  pluginPageV1,
   pluginSectionV1,
 } from "./views.js";
 
@@ -182,5 +183,100 @@ describe("a Plugin's section", () => {
       rendered({ type: "text", text: "a".repeat(5_000) }),
     );
     expect((section.root as { text: string }).text).toHaveLength(4_000);
+  });
+});
+
+describe("a Plugin's conversation panel", () => {
+  test("keeps a host image and a field; still rewrites controls to plugin-tool", () => {
+    const page = pluginPageV1(
+      source,
+      rendered({
+        type: "group",
+        orientation: "column",
+        children: [
+          {
+            type: "embed",
+            kind: "image",
+            source: "https://cdn.example/chart.png",
+            label: "Chart",
+          },
+          {
+            type: "field",
+            field: {
+              id: "city",
+              label: "City",
+              kind: "text",
+              value: "Wollongong",
+              editable: false,
+            },
+          },
+          {
+            type: "action",
+            actionId: "refresh",
+            label: "Refresh",
+          },
+        ],
+      }),
+    );
+    expect(page.failure).toBeUndefined();
+    expect(page.root).toMatchObject({
+      type: "group",
+      children: [
+        {
+          type: "embed",
+          kind: "image",
+          source: "https://cdn.example/chart.png",
+          label: "Chart",
+        },
+        {
+          type: "field",
+          field: {
+            id: "city",
+            label: "City",
+            kind: "text",
+            value: "Wollongong",
+            editable: false,
+          },
+        },
+        {
+          type: "action",
+          actionId: "plugin-tool",
+          label: "Refresh",
+        },
+      ],
+    });
+  });
+
+  test("refuses a frame embed, a secret field and an http image", () => {
+    const failure = (root: unknown) =>
+      pluginPageV1(source, rendered(root)).failure;
+    expect(
+      failure({
+        type: "embed",
+        kind: "frame",
+        source: "some-frame",
+        label: "x",
+      }),
+    ).toMatch(/must be a host image/);
+    expect(
+      failure({
+        type: "embed",
+        kind: "image",
+        source: "http://cdn.example/x.png",
+        label: "x",
+      }),
+    ).toMatch(/https URL/);
+    expect(
+      failure({
+        type: "field",
+        field: {
+          id: "token",
+          label: "Token",
+          kind: "secret",
+          value: "",
+          editable: true,
+        },
+      }),
+    ).toMatch(/unknown kind/);
   });
 });

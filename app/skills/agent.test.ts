@@ -117,7 +117,6 @@ describe("the Skill catalog", () => {
         { path: "skills/kept/SKILL.md", name: "kept" },
         { path: "managed/a2ui/SKILL.md" },
         { path: "managed/add-connector/SKILL.md" },
-        { path: "managed/applets/SKILL.md" },
         { path: "managed/export-bot-template/SKILL.md" },
         { path: "managed/import-bot-template/SKILL.md" },
         { path: "managed/plugins/SKILL.md" },
@@ -209,12 +208,12 @@ describe("the Skill catalog", () => {
 
   test("a managed Skill the host withholds is neither listed nor refused", async () => {
     const { session, dispose } = await openSession();
-    const catalog = new SkillCatalog(OWNER, new FakeWorkspace(), ["applets"]);
+    const catalog = new SkillCatalog(OWNER, new FakeWorkspace(), ["plugins"]);
 
     await catalog.refresh(4, session);
 
     const paths = catalog.current().skills.map((skill) => skill.path);
-    expect(paths).not.toContain("managed/applets/SKILL.md");
+    expect(paths).not.toContain("managed/plugins/SKILL.md");
     expect(paths).toContain("managed/add-connector/SKILL.md");
     const injected = session.activeRunJournal.find(
       (event) => event.type === "skill/injected",
@@ -228,7 +227,7 @@ describe("the Skill catalog", () => {
       injected?.type === "skill/injected"
         ? injected.skills.map((skill) => skill.path)
         : undefined,
-    ).not.toContain("managed/applets/SKILL.md");
+    ).not.toContain("managed/plugins/SKILL.md");
     await dispose();
   });
 });
@@ -313,8 +312,8 @@ describe("the skill_load tool", () => {
 
     // A shape the model can produce reaches `execute` and is explained there;
     // `validate` no longer swallows it into a nameless refusal.
-    expect(tool.validate?.({ ref: "managed/applets" })).toBe(true);
-    const refused = await tool.execute({ skill: "managed/applets" }, CONTEXT);
+    expect(tool.validate?.({ ref: "managed/plugins" })).toBe(true);
+    const refused = await tool.execute({ skill: "managed/plugins" }, CONTEXT);
     expect(refused.isError).toBe(true);
     expect(refused.content).toContain('"path"');
     expect(refused.content).toContain('{"path":"managed/add-connector"}');

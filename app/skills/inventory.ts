@@ -25,10 +25,6 @@ export const MANAGED_SKILL_AUTHORSHIPS_V1 = [
     directory: "app/skills/managed-skills/write-skill",
   },
   {
-    slug: "applets",
-    directory: "applets/skills/applets",
-  },
-  {
     slug: "plugins",
     directory: "app/plugins/skills/plugins",
   },

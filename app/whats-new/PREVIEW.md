@@ -14,6 +14,28 @@ improvement
 
 A Bot’s message appears in the thread as soon as it is committed, without waiting for a refresh.
 
+## A live call is a card
+
+improvement
+
+It sits at the top of the chat, with mute and hang-up under the wave.
+
+![A phone chat with the live call in a card under the header: the Bot, the wave, and you, with mute and hang-up on the row below.](media/voice-call-card.webp)
+
+## Chat header lines up
+
+fix
+
+The back arrow, avatar, name, and panel icon share one center.
+
+![The phone chat header with Pixel, Dog, and Cow, each centered with the back arrow, name, and panel icon.](media/header-align.webp)
+
+## Sends acknowledge immediately
+
+fix
+
+A message is accepted as soon as it is saved. A long reply no longer looks like the send failed.
+
 ## Earlier messages stay in reach
 
 fix

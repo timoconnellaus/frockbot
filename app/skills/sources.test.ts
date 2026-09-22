@@ -72,7 +72,6 @@ describe("the managed Skill source", () => {
       "export-bot-template",
       "import-bot-template",
       "write-skill",
-      "applets",
       "plugins",
       "a2ui",
     ]);
@@ -392,7 +391,6 @@ describe("a Turn's whole catalog", () => {
 
     expect(catalog.current().skills.map((skill) => skill.ref?.source)).toEqual([
       "bot",
-      "managed",
       "managed",
       "managed",
       "managed",

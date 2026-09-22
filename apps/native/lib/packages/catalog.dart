@@ -9,13 +9,6 @@ library;
 
 import '../client/transport.dart';
 
-/// The tool name that carries the Applet focus capability. Focus belongs to
-/// the Package that owns the Applet tools and to no other.
-const packageIframeFocusToolV2 = 'applet_focus';
-
-/// The host state name that carries the Applets feed to a v2 page.
-const packageIframeAppletsStateV2 = 'applets';
-
 /// Slots the shell draws. A page mounts into one; an entry sits in the third.
 const packageRightPanelSlotV1 = 'frockbot.right-panel';
 const packageBotSettingsSlotV1 = 'frockbot.bot-settings-sections';
@@ -84,7 +77,6 @@ class PackageContribution {
   };
 
   bool allowsTool(String name) => declaredTools.contains(name);
-  bool get allowsFocus => allowsTool(packageIframeFocusToolV2);
 }
 
 class PackageCatalog {
@@ -158,15 +150,6 @@ class PackageCatalog {
   /// The URL the anonymous page origin serves one page at.
   String pageUrl(PackagePage page) =>
       '$artifactOrigin/packages/${page.contentHash}.html';
-
-  /// Whether this Bot's Composition has Applets in it at all.
-  ///
-  /// Derived from manifest facts — a Package declaring the Applet focus tool —
-  /// never from a Package id. A deployment or a User without Applets has no
-  /// Applet routes, and the shell must not ask for them: an absent capability
-  /// is silence, not a failed request.
-  bool get appletsAvailable =>
-      contributions.any((contribution) => contribution.allowsFocus);
 
   /// The one origin a page may hand the host to open. A page is served from
   /// the anonymous artifact origin and has no business steering the reader

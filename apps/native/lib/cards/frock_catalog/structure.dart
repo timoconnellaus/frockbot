@@ -13,6 +13,7 @@ import 'package:flutter/material.dart';
 import 'package:genui/genui.dart';
 
 import '../../theme/frock_theme.dart';
+import '../../theme/initials.dart';
 import 'common.dart';
 import 'core.dart';
 import 'tone.dart';
@@ -253,16 +254,7 @@ class FrockAvatarView extends StatelessWidget {
   final String? imageUrl;
   const FrockAvatarView({super.key, required this.initials, this.imageUrl});
 
-  /// At most two letters, from the first two words of what it was given.
-  String get _letters {
-    final words = initials
-        .trim()
-        .split(RegExp(r'[\s@._-]+'))
-        .where((word) => word.isNotEmpty)
-        .take(2);
-    final letters = words.map((word) => word[0].toUpperCase()).join();
-    return letters.isEmpty ? '?' : letters;
-  }
+  String get _letters => personInitialsV1(initials);
 
   @override
   Widget build(BuildContext context) {

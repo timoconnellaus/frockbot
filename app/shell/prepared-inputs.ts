@@ -121,7 +121,6 @@ export interface AccountPreparationStampV1 {
   schemaVersion: 1;
   revision: number;
   features: {
-    applets: boolean;
     pluginAuthoring: boolean;
     plugins: string[];
   };
@@ -189,11 +188,10 @@ function nonNegative(value: unknown, label: string): number {
 }
 
 function featureKey(features: {
-  applets: boolean;
   pluginAuthoring: boolean;
   plugins: readonly string[];
 }): string {
-  return `${features.applets ? 1 : 0}:${features.pluginAuthoring ? 1 : 0}:${[...features.plugins].sort().join(",")}`;
+  return `${features.pluginAuthoring ? 1 : 0}:${[...features.plugins].sort().join(",")}`;
 }
 
 export function preparedConnectionRefsV1(
@@ -392,7 +390,6 @@ export function decodeAccountPreparationStampV1(
     schemaVersion: 1,
     revision: nonNegative(record.revision, "account revision"),
     features: {
-      applets: features.applets === true,
       pluginAuthoring: features.pluginAuthoring === true,
       plugins: features.plugins.map((plugin, index) =>
         boundedId(plugin, `plugins[${index}]`),

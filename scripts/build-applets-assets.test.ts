@@ -17,13 +17,8 @@ import { pathToFileURL } from "node:url";
 import {
   managedSkillModule,
   PLUGIN_SKILL_SOURCE,
-  SKILL_SOURCE,
   skillDirectory,
 } from "./build-applets-assets";
-import {
-  APPLETS_SKILL_DOCUMENT_V1,
-  APPLETS_SKILL_REFERENCES_V1,
-} from "../app/skills/managed-applets.generated";
 import {
   PLUGINS_SKILL_DOCUMENT_V1,
   PLUGINS_SKILL_REFERENCES_V1,
@@ -132,11 +127,7 @@ describe("the managed Skill generator", () => {
     ]);
   });
 
-  test("the committed modules carry what the authored directories hold", async () => {
-    const applets = await skillDirectory(SKILL_SOURCE);
-    expect(APPLETS_SKILL_DOCUMENT_V1).toBe(applets.text);
-    expect(APPLETS_SKILL_REFERENCES_V1).toEqual(applets.references);
-
+  test("the committed Plugins Skill carries what its directory holds", async () => {
     const plugins = await skillDirectory(PLUGIN_SKILL_SOURCE);
     expect(PLUGINS_SKILL_DOCUMENT_V1).toBe(plugins.text);
     expect(PLUGINS_SKILL_REFERENCES_V1).toEqual(plugins.references);

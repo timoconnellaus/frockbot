@@ -1320,7 +1320,6 @@ describe("Bot recovery", () => {
                 settings: user,
                 features: {
                   schemaVersion: 1,
-                  applets: false,
                   pluginAuthoring: false,
                   plugins: [],
                   updatedAt: "2026-09-22T00:00:00.000Z",
@@ -1333,7 +1332,6 @@ describe("Bot recovery", () => {
               schemaVersion: 1,
               revision: user.revision,
               features: {
-                applets: false,
                 pluginAuthoring: false,
                 plugins: [],
               },

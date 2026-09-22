@@ -206,7 +206,7 @@ has computed the digest of the artifact it downloaded; `deploy-backend` rewrites
 the written file in place instead, in its `Configure application artifact` step. A
 Worker whose var still says `foundation-v1` looks for an object that is not there.
 
-`frockbot.apk` is also attached, by `android-apk`. It is the hosted phone app,
+`frockbot.apk` is also attached, by `patch-android` when the tag cut a full release and by `android-apk` otherwise. It is the hosted phone app,
 not an installer asset: `bun run setup` does not download it, and a deployer
 who wants the phone app builds it against their own origin (`docs/app-updates.md`).
 

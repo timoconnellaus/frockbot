@@ -57,9 +57,6 @@ test("legacy empty account is backfilled once without reviving an old general to
     await expectOkJson(await asUser(userId, "/api/bots/bootstrap")),
   ).toEqual(bootstrap);
 
-  const impact = (await expectOkJson(
-    await asUser(userId, `/api/bots/${generalId}/applets/impact`),
-  )) as { fingerprint: string };
   expect(
     await expectOkJson(
       await postAsUser(userId, `/api/bots/${generalId}/lifecycle`, {
@@ -67,7 +64,6 @@ test("legacy empty account is backfilled once without reviving an old general to
         type: "bot/delete",
         botId: generalId,
         commandId: crypto.randomUUID(),
-        appletImpact: impact.fingerprint,
       }),
     ),
   ).toMatchObject({ status: "applied" });

@@ -8,6 +8,7 @@ import {
   openModels,
   press,
   revealSidebar,
+  searchMarketplace,
   sem,
   sendMessage,
   settle,
@@ -31,13 +32,6 @@ async function openBotList(page: Page): Promise<void> {
       timeout: 1_000,
     });
   }).toPass({ timeout: 120_000 });
-  await settle(page);
-}
-
-async function searchMarketplace(page: Page, query: string): Promise<void> {
-  const search = sem(page, "marketplace-search").locator("input, textarea");
-  await expect(search.first()).toBeVisible();
-  await search.first().fill(query);
   await settle(page);
 }
 

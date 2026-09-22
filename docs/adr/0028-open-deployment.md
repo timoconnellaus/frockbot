@@ -98,7 +98,7 @@ D1: the Access Package stores nothing.
 
 Secrets the installer mints itself, as `setup-production.sh` does today:
 `CREDENTIAL_KEYRING`, `COMPUTER_HOST_TOKEN`, `APPLET_BUILD_TOKEN`,
-`APPLET_VIEWER_SECRET`, `ROUTINE_HOOK_SECRET`, `MACHINE_TOKEN_SECRET`.
+`ROUTINE_HOOK_SECRET`, `MACHINE_TOKEN_SECRET`.
 
 ## Plan
 

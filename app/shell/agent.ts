@@ -153,8 +153,6 @@ function sendAcknowledgement(payload: SendToUserPayloadV1): string {
       return "Question sent to the user. This Turn is over; their answer arrives as a new Turn.";
     case "secret-request":
       return "Secret request sent to the user.";
-    case "applet":
-      return "Interactive Applet sent to the user.";
     case "agent-card":
       return "Agent card sent to the user.";
     case "card":
@@ -323,7 +321,6 @@ const SEND_TO_USER_DESCRIPTION = [
   '{"type":"attachment","url":"https://…","name":"…","mediaType":"…"}',
   '{"type":"widget","widget":{"prompt":"…","helpText":"…","options":["…"],"allowCustom":false,"dismissOnMoveOn":false}}',
   '{"type":"secret-request","prompt":"…","secretName":"…"}',
-  '{"type":"applet","appletId":"the id returned by applet_list or applet_create"} — embed the live Applet as an interactive chat card. Only an Applet you own or that is shared with you opens; the card opens it as you.',
   '{"type":"agent-card","agentId":"…","title":"…","body":"…"}',
   '{"type":"card","surfaceId":"…","messages":[{"version":"v1.0","createSurface":{"surfaceId":"…","components":[{"id":"root","component":"Column","children":["title"]},{"id":"title","component":"Text","text":"…"}],"dataModel":{}}}]} — one A2UI surface in the conversation. A later send with the same surfaceId updates it in place and does not end your Turn. Name the surface anything but an underscore followed later by a dot: "trip_summary.v1" is refused, because "<plugin>_<card>." is reserved for the cards a plugin draws. "trip-summary.v1" or "tripSummary.v1" are fine.',
   '{"type":"approval","approvalId":"…","action":"…","rationale":"…","risk":"low|medium|high","expiresInSeconds":86400}',
@@ -413,15 +410,6 @@ const SEND_TO_USER_INPUT_SCHEMA = {
             secretName: { type: "string" },
           },
           required: ["type", "prompt", "secretName"],
-          additionalProperties: false,
-        },
-        {
-          type: "object",
-          properties: {
-            type: { const: "applet" },
-            appletId: { type: "string" },
-          },
-          required: ["type", "appletId"],
           additionalProperties: false,
         },
         {

@@ -79,8 +79,6 @@ export interface ComputerMountResult {
 
 export { BotCapabilities } from "../src/bot-capabilities.ts";
 export { PluginEgress } from "../src/plugin-egress.ts";
-// The Applet authority under test in `applets.workerd.ts`.
-export { AppletCapabilities, AppletState } from "../src/applet-state.ts";
 export { BotIsolateProbe } from "./bot-isolate-probe.ts";
 export { SearchSpikeProbe } from "./search-probe.ts";
 export { AuditProbe } from "./audit-probe.ts";

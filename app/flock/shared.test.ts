@@ -73,16 +73,6 @@ describe("Flock v1 contracts", () => {
     expect(() =>
       decodeBotLifecycleCommandV1({ ...command, type: "bot/delete-all" }),
     ).toThrow("unsupported Bot lifecycle command");
-    // A delete carries the Applet impact its confirmation showed; nothing
-    // else may carry one, because nothing else destroys an Applet.
-    const fenced = { ...command, appletImpact: "0123456789abcdef" };
-    expect(decodeBotLifecycleCommandV1(fenced)).toEqual(fenced);
-    expect(() =>
-      decodeBotLifecycleCommandV1({ ...fenced, appletImpact: "stale" }),
-    ).toThrow("appletImpact is invalid");
-    expect(() =>
-      decodeBotLifecycleCommandV1({ ...fenced, type: "bot/archive" }),
-    ).toThrow("appletImpact is invalid");
     expect(() =>
       decodeBotLifecycleViewV1({
         schemaVersion: 1,

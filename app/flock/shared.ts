@@ -7,7 +7,6 @@ import {
   type BotSelfWriterV1,
 } from "@frockbot/core/configuration";
 export type { BotSelfWriterV1 } from "@frockbot/core/configuration";
-import { APPLET_IMPACT_FINGERPRINT_V1 } from "@frockbot/core/contracts";
 import {
   decodeBotVoiceAppearanceV1,
   type BotVoiceAppearanceV1,
@@ -144,12 +143,6 @@ export interface BotLifecycleCommandV1 {
   type: "bot/archive" | "bot/restore" | "bot/delete";
   commandId: string;
   botId: string;
-  /**
-   * `bot/delete` only: the fingerprint of the Applets its confirmation named
-   * (ADR 0027). The client's route requires it; admission refuses a command
-   * whose fingerprint no longer matches the directory.
-   */
-  appletImpact?: string;
 }
 export interface BotLifecycleReceiptV1 {
   schemaVersion: 1;
@@ -709,11 +702,7 @@ export function decodeBotLifecycleCommandV1(
   input: unknown,
 ): BotLifecycleCommandV1 {
   const value = record(input, "Bot lifecycle command");
-  exact(
-    value,
-    ["schemaVersion", "type", "commandId", "botId"],
-    ["appletImpact"],
-  );
+  exact(value, ["schemaVersion", "type", "commandId", "botId"], []);
   if (
     value.schemaVersion !== 1 ||
     (value.type !== "bot/archive" &&
@@ -721,21 +710,11 @@ export function decodeBotLifecycleCommandV1(
       value.type !== "bot/delete")
   )
     throw new FlockDecodeError("unsupported Bot lifecycle command");
-  if (
-    value.appletImpact !== undefined &&
-    (value.type !== "bot/delete" ||
-      typeof value.appletImpact !== "string" ||
-      !APPLET_IMPACT_FINGERPRINT_V1.test(value.appletImpact))
-  )
-    throw new FlockDecodeError("appletImpact is invalid");
   return {
     schemaVersion: 1,
     type: value.type,
     commandId: identifier(value.commandId, "commandId"),
     botId: botIdentifier(value.botId),
-    ...(value.appletImpact === undefined
-      ? {}
-      : { appletImpact: value.appletImpact as string }),
   };
 }
 

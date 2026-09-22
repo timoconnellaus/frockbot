@@ -6,7 +6,6 @@
 // fences it, and the one alarm that recovers it.
 
 import type { AgentEffectAdmission } from "@frockbot/core/agent-loop/agent";
-import { firstPartyPackageToolAllowedV1 } from "@frockbot/applets/pages";
 import {
   validateToolOccurrenceJournal,
   type TurnTypeV1,
@@ -34,10 +33,10 @@ import {
 } from "@frockbot/core/durable";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import { selectStoredWorkingContextV1 } from "./working-context-store.js";
-import { resolveAppletComposition } from "@frockbot/app/applets-host/bot";
 import {
   admitTurnCommandV1,
   admitTurnV1,
+  syncCompositionFromUser,
   compositionActivationStoreV1,
   compositionFailureLogV1,
 } from "@frockbot/app/composition/bot";
@@ -45,7 +44,6 @@ import {
   DEPLOYMENT_PLUGIN_CATALOG_V1,
   enabledSeededPluginIdsV1,
 } from "@frockbot/app/plugins/catalog";
-import { createAppletInstanceBindingV1 } from "@frockbot/app/applets-host/records";
 import { isolateMountOptions } from "@frockbot/app/isolates/bot";
 import { settlePluginHealthV1 } from "@frockbot/app/plugins/health";
 import { pendingBotInputPreambleV1 } from "@frockbot/app/routines/inbox";
@@ -59,7 +57,6 @@ import {
 import { readPluginEnablementV1 } from "@frockbot/app/plugins/enablement";
 import {
   createShellCompositionHost,
-  type ShellAppletMountOptions,
   type ShellMountedComposition,
 } from "./backend-composition.js";
 import { compositionFailureTurnTextV1 } from "./backend-composition-input.js";
@@ -72,7 +69,7 @@ import {
   type StoredRunStatus,
 } from "./backend-contracts.js";
 import { latestModelRequestJournalState } from "./backend-recovery.js";
-import { executeBotTurn, executeDirectToolTurn } from "./backend-runner.js";
+import { executeBotTurn } from "./backend-runner.js";
 import type { ShellBotStateV1 } from "./backend-state.js";
 import { yieldCompactionWorkV1 } from "./compaction-scheduler.js";
 import { notificationIdV1 } from "./notification-id.js";
@@ -135,19 +132,15 @@ async function prepareTurnAdmission(
   // Before the authority reads the session log, so a compaction detached
   // from the previous Turn has already handed the log back.
   await yieldCompactionWorkV1(command.sessionId);
-  // Before admission, so the pin this Turn takes already carries whatever
-  // the User's Applet directory says now; `admitTurnV1` then mirrors the
-  // User's Composition as it stands after that, and the pin is taken from it.
-  await resolveAppletComposition(
-    state,
-    { userId: command.userId, botId: command.botId },
-    command,
-  );
+  await syncCompositionFromUser(state, {
+    userId: command.userId,
+    botId: command.botId,
+  });
 }
 
 /**
  * Completion-waiting entry. A Routine or another Bot needs the settled Turn.
- * A person's send uses {@link admitRun}, which returns as soon as the command
+ * A person's send uses {@link admit}, which returns as soon as the command
  * is durable.
  */
 export async function run(
@@ -158,22 +151,20 @@ export async function run(
   return projectClientTurnV1(await admitTurnV1(state, command));
 }
 
-export async function admitRun(
+/**
+ * Durably accepts a composer command and returns before the Turn finishes.
+ *
+ * The same preparation `run` does — compaction yield, then the User's
+ * Composition — and then only the admission. Execution is the authority's
+ * drive and its recovery alarm.
+ */
+export async function admit(
   state: ShellBotStateV1,
   command: OwnedBotTurnCommand,
-): Promise<ClientTurnV1> {
+): Promise<{ schemaVersion: 1; runId: string }> {
   await prepareTurnAdmission(state, command);
   const receipt = await admitTurnCommandV1(state, command);
-  if (receipt.completion) return projectClientTurnV1(receipt.completion);
-  // An accepted command is not a completed result. The body stays a
-  // TurnResponse so an installed client can confirm the run id; the answer
-  // is read from the run lookup once the driver settles it.
-  return {
-    schemaVersion: 1,
-    runId: receipt.runId,
-    text: "",
-    events: [],
-  };
+  return { schemaVersion: 1, runId: receipt.runId };
 }
 
 /**
@@ -338,21 +329,6 @@ export async function executeTurn(
   // The isolate bindings follow the generation actually being mounted, so a
   // fail-closed fallback loads the last known good's members, not the
   // pinned generation's.
-  // Applet tools route to the Applet Durable Object, which forwards to the
-  // facet. The instance binding is minted once per Turn; the facet stub
-  // itself never leaves that object.
-  const appletInstances = state.env.APPLET_STATES
-    ? createAppletInstanceBindingV1(
-        state.env.APPLET_STATES,
-        input.identity.userId,
-      )
-    : undefined;
-  const appletRouting: ShellAppletMountOptions | undefined = appletInstances
-    ? {
-        invokeTool: (request) =>
-          appletInstances(request.appletId).invokeTool(request),
-      }
-    : undefined;
   const host: CompositionMountHost<ShellMountedComposition> = {
     mount: async (mounting, signal) => {
       // Skills follow this mount, including a fail-closed fallback. The array
@@ -445,7 +421,6 @@ export async function executeTurn(
         // takes is settled where the loop settles the outcome.
         ...(runtime.pluginModel ? { pluginModel: runtime.pluginModel } : {}),
         ...(isolate ? { isolate } : {}),
-        ...(appletRouting ? { applets: appletRouting } : {}),
       }).mount(mounting, signal);
       return mounted;
     },
@@ -504,30 +479,11 @@ export async function executeTurn(
   try {
     const directTool = input.command.directTool;
     if (directTool) {
-      // The page registry is the declaration, and it is checked again here
-      // rather than trusted from the admitted command: a durable run replayed
-      // after a deploy that withdrew a page must not still run its tool.
-      if (
-        !firstPartyPackageToolAllowedV1(directTool.packageId, directTool.name)
-      ) {
-        throw new Error(
-          `Package "${directTool.packageId}" did not declare tool "${directTool.name}" for its pages`,
-        );
-      }
-      return await executeDirectToolTurn({
-        command: { ...input.command, directTool },
-        composition: activation.mounted,
-        admitEffect: (effect) =>
-          admitRunEffect(
-            state,
-            input.identity,
-            input.command.runId,
-            input.command.sessionId,
-            effect,
-          ),
-        signal: controller.signal,
-        suffixStartSeq: input.cursor.nextSeq,
-      });
+      // No first-party package pages remain after the Applets deletion
+      // (ADR 0034). Any surviving direct-tool replay is refused.
+      throw new Error(
+        `Package "${directTool.packageId}" did not declare tool "${directTool.name}" for its pages`,
+      );
     }
     const ordinaryInput = await turnInputTextV1(state, input.command);
     if (ordinaryInput === undefined) {

@@ -108,6 +108,33 @@ class UpdatesTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "No Android build-tools aapt"):
                 updates.build_tool("aapt")
 
+    def test_build_tools_follow_the_sdk_the_build_wrote(self):
+        root = updates.STATE / "native"
+        sdk = updates.STATE / "flutter-sdk"
+        tool = sdk / "build-tools" / "36.0.0" / "aapt"
+        tool.parent.mkdir(parents=True)
+        tool.write_text("")
+        properties = root / "android" / "local.properties"
+        properties.parent.mkdir(parents=True)
+        properties.write_text(f"sdk.dir={sdk}\n")
+        env = {key: value for key, value in os.environ.items() if key not in ("ANDROID_HOME", "ANDROID_SDK_ROOT")}
+        with patch.object(updates, "NATIVE", root), patch.dict(os.environ, env, clear=True):
+            self.assertEqual(updates.build_tool("aapt"), tool)
+
+    def test_explicit_android_home_wins_over_the_build_sdk(self):
+        root = updates.STATE / "native"
+        chosen = updates.STATE / "chosen-sdk"
+        other = updates.STATE / "other-sdk"
+        for sdk in (chosen, other):
+            tool = sdk / "build-tools" / "36.0.0" / "aapt"
+            tool.parent.mkdir(parents=True)
+            tool.write_text("")
+        properties = root / "android" / "local.properties"
+        properties.parent.mkdir(parents=True)
+        properties.write_text(f"sdk.dir={other}\n")
+        with patch.object(updates, "NATIVE", root), patch.dict(os.environ, {"ANDROID_HOME": str(chosen)}):
+            self.assertEqual(updates.build_tool("aapt"), chosen / "build-tools/36.0.0/aapt")
+
     def test_download_and_no_directory_access(self):
         (updates.STATE / "release.apk").write_bytes(b"complete apk")
         (updates.STATE / "latest.json").write_text(json.dumps({"versionCode": 50, "file": "release.apk"}))
@@ -187,11 +214,14 @@ class ShorebirdHarness(unittest.TestCase):
         self.yaml = root / "shorebird.yaml"
         self.yaml.write_text(f"# comment\napp_id: {APP_ID}\n")
         self.apk = root / "app-release.apk"
+        self.keystore = root / "debug.keystore"
+        self.keystore.write_bytes(b"keystore")
         for tool in ("aapt", "apksigner", "zipalign"):
             path = root / "sdk/build-tools/36.0.0" / tool
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("")
-        self.environ = {**os.environ, "NATIVE_SHOREBIRD": str(self.cli), "ANDROID_HOME": str(root / "sdk")}
+        self.environ = {**os.environ, "NATIVE_SHOREBIRD": str(self.cli), "ANDROID_HOME": str(root / "sdk"),
+                        "FROCKBOT_ANDROID_KEYSTORE": str(self.keystore)}
         self.environ.pop("NATIVE_SHOREBIRD_PRIVATE_KEY", None)
         self.calls = []
         self.commands = []
@@ -330,6 +360,12 @@ class ReleaseTest(ShorebirdHarness):
         self.assertEqual(record["file"], published["file"])
         self.assertTrue((self.state / published["file"]).exists())
         self.assertFalse((self.state / "pending-release.json").exists())
+        # Shorebird's build is re-signed with the phone key before publish.
+        signed = [call for call in self.calls
+                  if Path(call[0]).name == "apksigner" and call[1:2] == ["sign"]]
+        self.assertEqual(len(signed), 1)
+        self.assertIn(str(self.keystore), signed[0])
+        self.assertIn(str(self.apk), signed[0])
 
     def test_wrong_built_version_does_not_replace_download(self):
         original = self.fake_command

@@ -27,23 +27,42 @@ describe("a plugin's declared views", () => {
         ...base,
         views: [
           { slot: "settings.sections", surfaceId: "weather.defaults" },
-          { slot: "sidebar.entries", surfaceId: "weather-forecast" },
+          { slot: "conversation.panel", surfaceId: "weather.board" },
+          {
+            slot: "bot.nav",
+            surfaceId: "weather.door",
+            label: "Forecast",
+            opens: "weather.board",
+          },
         ],
       }).views,
     ).toEqual([
       { slot: "settings.sections", surfaceId: "weather.defaults" },
-      { slot: "sidebar.entries", surfaceId: "weather-forecast" },
+      { slot: "conversation.panel", surfaceId: "weather.board" },
+      {
+        slot: "bot.nav",
+        surfaceId: "weather.door",
+        label: "Forecast",
+        opens: "weather.board",
+      },
     ]);
     // Absent stays absent: a plugin that renders nothing declares nothing.
     expect(decodePluginDescriptorV1(base).views).toBeUndefined();
   });
 
-  test("refuses a slot the deployment has not opened", () => {
+  test("refuses a slot the vocabulary does not name", () => {
     expect(PLUGIN_SLOTS_V1).not.toContain("trust.chrome");
+    expect(PLUGIN_SLOTS_V1).not.toContain("sidebar.entries");
     expect(() =>
       decodePluginDescriptorV1({
         ...base,
         views: [{ slot: "trust.chrome", surfaceId: "weather" }],
+      }),
+    ).toThrow();
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        views: [{ slot: "sidebar.entries", surfaceId: "weather" }],
       }),
     ).toThrow();
   });
@@ -58,7 +77,7 @@ describe("a plugin's declared views", () => {
       expect(() =>
         decodePluginDescriptorV1({
           ...base,
-          views: [{ slot: "sidebar.entries", surfaceId }],
+          views: [{ slot: "conversation.panel", surfaceId }],
         }),
       ).toThrow();
   });
@@ -68,7 +87,7 @@ describe("a plugin's declared views", () => {
       decodePluginDescriptorV1({
         ...base,
         views: [
-          { slot: "sidebar.entries", surfaceId: "weather" },
+          { slot: "conversation.panel", surfaceId: "weather" },
           { slot: "bot.profile", surfaceId: "weather" },
         ],
       }),
@@ -77,7 +96,7 @@ describe("a plugin's declared views", () => {
       decodePluginDescriptorV1({
         ...base,
         views: Array.from({ length: 17 }, (_, index) => ({
-          slot: "sidebar.entries",
+          slot: "conversation.panel",
           surfaceId: `weather-${index}`,
         })),
       }),
@@ -86,10 +105,59 @@ describe("a plugin's declared views", () => {
       decodePluginDescriptorV1({
         ...base,
         views: [
-          { slot: "sidebar.entries", surfaceId: "weather", botId: "default" },
+          {
+            slot: "conversation.panel",
+            surfaceId: "weather",
+            botId: "default",
+          },
         ],
       }),
     ).toThrow();
+  });
+
+  test("a second panel view needs a label; opens only names this plugin's panel", () => {
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        views: [
+          { slot: "conversation.panel", surfaceId: "inbox" },
+          { slot: "conversation.panel", surfaceId: "board" },
+        ],
+      }),
+    ).toThrow(/label/);
+    expect(
+      decodePluginDescriptorV1({
+        ...base,
+        views: [
+          { slot: "conversation.panel", surfaceId: "inbox", label: "Inbox" },
+          { slot: "conversation.panel", surfaceId: "board", label: "Board" },
+        ],
+      }).views,
+    ).toHaveLength(2);
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        views: [
+          {
+            slot: "conversation.panel",
+            surfaceId: "inbox",
+            opens: "inbox",
+          },
+        ],
+      }),
+    ).toThrow(/only valid on bot.nav/);
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        views: [
+          {
+            slot: "bot.nav",
+            surfaceId: "door",
+            opens: "missing",
+          },
+        ],
+      }),
+    ).toThrow(/conversation.panel/);
   });
 });
 

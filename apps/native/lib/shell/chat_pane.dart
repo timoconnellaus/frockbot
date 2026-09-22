@@ -18,7 +18,6 @@ import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter/services.dart';
 
 import '../acceptance_metrics.dart';
-import '../applets/chat_card.dart';
 import '../cards/approvals.dart';
 import '../cards/chat_card.dart';
 import '../client/bot_sessions.dart';
@@ -72,7 +71,7 @@ class ChatPane extends StatefulWidget {
   final VoidCallback? onDiscardDictation;
 
   /// Starts a voice call with this Bot, or moves the open one to it
-  /// (ADR 0029). It never ends one: hang-up lives in the header chrome.
+  /// (ADR 0029). It never ends one: hang-up lives on the call card.
   final VoidCallback? onVoice;
 
   /// Whether a call is still closing, which holds [onVoice]'s control.
@@ -554,7 +553,7 @@ class ConversationView extends StatefulWidget {
   final VoidCallback? onDiscardDictation;
 
   /// Starts a voice call with this Bot, or moves the open one to it
-  /// (ADR 0029). It never ends one: hang-up lives in the header chrome.
+  /// (ADR 0029). It never ends one: hang-up lives on the call card.
   final VoidCallback? onVoice;
 
   /// Whether a call is still closing, which holds [onVoice]'s control.
@@ -673,48 +672,44 @@ class _ConversationViewState extends State<ConversationView> {
   }
 
   @override
-  Widget build(BuildContext context) => AppletChatScope(
+  Widget build(BuildContext context) => CardChatScope(
     api: session.api,
     botId: session.botId,
-    child: CardChatScope(
-      api: session.api,
-      botId: session.botId,
-      invalidations: session.controller.invalidations,
-      // What `ApprovalActions` reads to say what was decided. The decision is
-      // the kernel's record, not the Card's, so the component that draws it
-      // reads the Bot's own approvals projection (ADR 0030 step 7).
-      child: CardApprovalsScope(
-        approvals: approvals,
-        child: ChatPane(
-          background: widget.background,
-          primary: widget.primary,
-          overlay: widget.overlay,
-          starters: starters,
-          controller: session.controller,
-          onReconnect: session.channel.connect,
-          skills: skills,
-          onOpenRun: widget.onOpenRun,
-          onOpenExchange: widget.onOpenExchange,
-          backgroundOf: widget.backgroundOf,
-          primaryOf: widget.primaryOf,
-          nameOf: widget.nameOf,
-          onMessageActions: widget.onMessageActions,
-          unreadFromMessageId: widget.unreadFromMessageId,
-          onReadLatest: widget.onReadLatest,
-          outOfCredit: widget.outOfCredit,
-          onOpenBilling: widget.onOpenBilling,
-          onDictate: widget.onDictate,
-          onVoice: widget.onVoice,
-          voiceClosing: widget.voiceClosing,
-          voiceActive: widget.voiceActive,
-          onStopDictation: widget.onStopDictation,
-          onDiscardDictation: widget.onDiscardDictation,
-          dictationState: widget.dictationState,
-          canRevertDictation: widget.canRevertDictation,
-          onRevertDictation: widget.onRevertDictation,
-          dictationLevel: widget.dictationLevel,
-          dictationElapsed: widget.dictationElapsed,
-        ),
+    invalidations: session.controller.invalidations,
+    // What `ApprovalActions` reads to say what was decided. The decision is
+    // the kernel's record, not the Card's, so the component that draws it
+    // reads the Bot's own approvals projection (ADR 0030 step 7).
+    child: CardApprovalsScope(
+      approvals: approvals,
+      child: ChatPane(
+        background: widget.background,
+        primary: widget.primary,
+        overlay: widget.overlay,
+        starters: starters,
+        controller: session.controller,
+        onReconnect: session.channel.connect,
+        skills: skills,
+        onOpenRun: widget.onOpenRun,
+        onOpenExchange: widget.onOpenExchange,
+        backgroundOf: widget.backgroundOf,
+        primaryOf: widget.primaryOf,
+        nameOf: widget.nameOf,
+        onMessageActions: widget.onMessageActions,
+        unreadFromMessageId: widget.unreadFromMessageId,
+        onReadLatest: widget.onReadLatest,
+        outOfCredit: widget.outOfCredit,
+        onOpenBilling: widget.onOpenBilling,
+        onDictate: widget.onDictate,
+        onVoice: widget.onVoice,
+        voiceClosing: widget.voiceClosing,
+        voiceActive: widget.voiceActive,
+        onStopDictation: widget.onStopDictation,
+        onDiscardDictation: widget.onDiscardDictation,
+        dictationState: widget.dictationState,
+        canRevertDictation: widget.canRevertDictation,
+        onRevertDictation: widget.onRevertDictation,
+        dictationLevel: widget.dictationLevel,
+        dictationElapsed: widget.dictationElapsed,
       ),
     ),
   );

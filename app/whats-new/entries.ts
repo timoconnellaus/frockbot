@@ -37,6 +37,34 @@ export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
     kind: "improvement",
   },
   {
+    id: "voice-call-card",
+    title: "A live call is a card",
+    summary:
+      "It sits at the top of the chat, with mute and hang-up under the wave.",
+    kind: "improvement",
+    image: {
+      file: "voice-call-card.webp",
+      alt: "A phone chat with the live call in a card under the header: the Bot, the wave, and you, with mute and hang-up on the row below.",
+    },
+  },
+  {
+    id: "header-align",
+    title: "Chat header lines up",
+    summary: "The back arrow, avatar, name, and panel icon share one center.",
+    kind: "fix",
+    image: {
+      file: "header-align.webp",
+      alt: "The phone chat header with Pixel, Dog, and Cow, each centered with the back arrow, name, and panel icon.",
+    },
+  },
+  {
+    id: "quiet-delivery",
+    title: "Sends acknowledge immediately",
+    summary:
+      "A message is accepted as soon as it is saved. A long reply no longer looks like the send failed.",
+    kind: "fix",
+  },
+  {
     id: "chat-scroll",
     title: "Earlier messages stay in reach",
     summary:

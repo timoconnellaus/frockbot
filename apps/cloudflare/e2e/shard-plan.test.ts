@@ -17,9 +17,6 @@ import {
 
 const corpus: SpecWeight[] = [
   { file: "admin.e2e.ts", tests: 1 },
-  { file: "applets-publish.e2e.ts", tests: 1 },
-  { file: "applets-shell.e2e.ts", tests: 2 },
-  { file: "applets.e2e.ts", tests: 2 },
   { file: "bot-info.e2e.ts", tests: 3 },
   { file: "bot-settings.e2e.ts", tests: 1 },
   { file: "chat.e2e.ts", tests: 12 },
@@ -49,9 +46,6 @@ const totalTests = corpus.reduce((sum, spec) => sum + spec.tests, 0);
 
 const timed: SpecWeight[] = [
   { file: "admin.e2e.ts", tests: 1, seconds: 8.9 },
-  { file: "applets-publish.e2e.ts", tests: 1, seconds: 73.1 },
-  { file: "applets-shell.e2e.ts", tests: 3, seconds: 174.7 },
-  { file: "applets.e2e.ts", tests: 2, seconds: 107.6 },
   { file: "bot-info.e2e.ts", tests: 2, seconds: 12.8 },
   { file: "bot-settings.e2e.ts", tests: 1, seconds: 7.5 },
   { file: "chat.e2e.ts", tests: 12, seconds: 128.9 },
@@ -82,15 +76,15 @@ describe("contiguousShards", () => {
     // fixture is taken from spent thirteen minutes on shard 1 and eighty
     // seconds on shard 2.
     expect(shardSizes(corpus, contiguousShards(corpus, 4))).toEqual([
-      22, 7, 13, 14,
+      17, 9, 15, 10,
     ]);
   });
 });
 
 describe("planShards", () => {
-  test("gives every shard the same share of the fifty-six tests", () => {
+  test("gives every shard the same share of the fifty tests", () => {
     const sizes = shardSizes(corpus, planShards(corpus, 4));
-    expect(sizes).toEqual([14, 14, 14, 14]);
+    expect(sizes).toEqual([13, 13, 13, 12]);
     expect(sizes.reduce((a, b) => a + b, 0)).toBe(totalTests);
   });
 
@@ -150,7 +144,7 @@ describe("planShards by measured seconds", () => {
     const minutes = shardSeconds(timed, planShards(counted, 4)).map(
       (seconds) => seconds / 60,
     );
-    expect(Math.max(...minutes) / Math.min(...minutes)).toBeGreaterThan(2);
+    expect(Math.max(...minutes) / Math.min(...minutes)).toBeGreaterThan(1.5);
   });
 
   test("weighing by seconds keeps every shard within one file of even", () => {
@@ -167,44 +161,41 @@ describe("planShards by measured seconds", () => {
 
   test("the plan for the 2026-09-11 suite", () => {
     // Pinned so a change to the packer shows up as a diff here rather than as
-    // a slower run. The two Applet files that shared a runner are apart now.
+    // a slower run.
     const plan = planShards(timed, 4);
     expect(plan).toEqual([
       [
-        "applets-shell.e2e.ts",
-        "bot-settings.e2e.ts",
+        "errors.e2e.ts",
+        "first-run.e2e.ts",
         "profile.e2e.ts",
-        "routine-failure-message.e2e.ts",
         "theme.e2e.ts",
-      ],
-      [
-        "admin.e2e.ts",
-        "bot-info.e2e.ts",
-        "mobile.e2e.ts",
-        "settings-models.e2e.ts",
-        "sidebar-groups.e2e.ts",
         "unread-focus.e2e.ts",
       ],
       [
-        "applets-publish.e2e.ts",
+        "admin.e2e.ts",
         "chat.e2e.ts",
         "delete-bot.e2e.ts",
-        "first-run.e2e.ts",
-        "package-iframe-ui.e2e.ts",
-        "pinned-bots.e2e.ts",
-        "routines.e2e.ts",
+        "sidebar-groups.e2e.ts",
       ],
       [
-        "applets.e2e.ts",
         "computer-presence.e2e.ts",
         "continuous-chat.e2e.ts",
         "defaults.e2e.ts",
-        "errors.e2e.ts",
+        "pinned-bots.e2e.ts",
+        "routines.e2e.ts",
+        "settings-models.e2e.ts",
+      ],
+      [
+        "bot-info.e2e.ts",
+        "bot-settings.e2e.ts",
+        "mobile.e2e.ts",
+        "package-iframe-ui.e2e.ts",
+        "routine-failure-message.e2e.ts",
         "skill-menu.e2e.ts",
       ],
     ]);
     expect(shardSeconds(timed, plan).map(Math.round)).toEqual([
-      266, 263, 265, 263,
+      177, 175, 174, 174,
     ]);
   });
 

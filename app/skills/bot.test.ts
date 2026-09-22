@@ -12,7 +12,7 @@ const TURN = { runId: "run-9", turnId: "turn-4", sessionId: "user-1:bot-1" };
  * the harness says, with or without a Workspace file surface bound.
  */
 function botState(options: {
-  applets: boolean | "unreachable";
+  featuresReachable?: boolean;
   pluginAuthoring?: boolean;
   /** The artifact bucket a Plugin's module is stored in; bound by default. */
   artifacts?: boolean;
@@ -20,13 +20,13 @@ function botState(options: {
 }): ShellBotStateV1 {
   const rpc = {
     readFeatures: () => {
-      if (options.applets === "unreachable") {
+      if (options.featuresReachable === false) {
         throw new Error("the User object is unavailable");
       }
       return Promise.resolve({
         schemaVersion: 1,
-        applets: options.applets,
         pluginAuthoring: options.pluginAuthoring ?? true,
+        plugins: [],
         updatedAt: "2026-09-11T00:00:00.000Z",
         updatedBy: "owner",
       });
@@ -74,7 +74,7 @@ function mount(options: Parameters<typeof botState>[0]): {
 
 describe("the Bot Skills seam", () => {
   test("mounts nothing when the Workspace file surface is unbound", async () => {
-    const { state, features } = mount({ applets: true });
+    const { state, features } = mount({});
     expect(
       await createBotSkillsHost(state, IDENTITY, TURN, features),
     ).toBeUndefined();
@@ -82,7 +82,7 @@ describe("the Bot Skills seam", () => {
 
   test("binds the Bot's own root and its Turn provenance when it is bound", async () => {
     const workspace = new FakeWorkspace();
-    const { state, features } = mount({ applets: true, workspace });
+    const { state, features } = mount({ workspace });
     const host = await createBotSkillsHost(state, IDENTITY, TURN, features);
     expect(host).toBeDefined();
     expect(host?.owner).toEqual(IDENTITY);
@@ -98,41 +98,21 @@ describe("the Bot Skills seam", () => {
     expect(workspace.calls).toEqual([]);
   });
 
-  test("withholds the managed Applets Skill exactly when the switch is off", async () => {
+  test("withholds the managed Plugins Skill when authoring cannot be read", async () => {
     const workspace = new FakeWorkspace();
-    const enabled = mount({ applets: true, workspace });
-    const on = await createBotSkillsHost(
-      enabled.state,
-      IDENTITY,
-      TURN,
-      enabled.features,
-    );
-    expect(on?.withheldManagedSlugs).toEqual([]);
-
-    const disabled = mount({ applets: false, workspace });
-    const off = await createBotSkillsHost(
-      disabled.state,
-      IDENTITY,
-      TURN,
-      disabled.features,
-    );
-    expect(off?.withheldManagedSlugs).toEqual(["applets"]);
-
-    // Unreadable is off, as it is for the tools the Skill teaches.
-    const broken = mount({ applets: "unreachable", workspace });
+    const broken = mount({ featuresReachable: false, workspace });
     const unreachable = await createBotSkillsHost(
       broken.state,
       IDENTITY,
       TURN,
       broken.features,
     );
-    expect(unreachable?.withheldManagedSlugs).toEqual(["applets", "plugins"]);
+    expect(unreachable?.withheldManagedSlugs).toEqual(["plugins"]);
   });
 
   test("withholds the managed Plugins Skill exactly when authoring is off", async () => {
     const workspace = new FakeWorkspace();
     const authoringOff = mount({
-      applets: true,
       pluginAuthoring: false,
       workspace,
     });
@@ -144,7 +124,6 @@ describe("the Bot Skills seam", () => {
     );
     expect(off?.withheldManagedSlugs).toEqual(["plugins"]);
     const authoringOn = mount({
-      applets: true,
       pluginAuthoring: true,
       workspace,
     });
@@ -158,7 +137,6 @@ describe("the Bot Skills seam", () => {
     // The Skill goes exactly where the tools go, and the tools need the
     // bucket a published module is stored in.
     const noBucket = mount({
-      applets: true,
       pluginAuthoring: true,
       artifacts: false,
       workspace,
@@ -177,29 +155,19 @@ describe("the composer's Skill list", () => {
   const refs = (catalog: { skills: Array<{ ref: string }> }) =>
     catalog.skills.map((entry) => entry.ref);
 
-  test("offers the managed Applets Skill when the switch is on", async () => {
-    const state = botState({ applets: true, workspace: new FakeWorkspace() });
+  test("offers the managed connector Skill", async () => {
+    const state = botState({ workspace: new FakeWorkspace() });
     const listed = refs(await listSkills(state, IDENTITY));
-    expect(listed).toContain("managed/applets");
     expect(listed).toContain("managed/add-connector");
   });
 
-  test("leaves the managed Applets Skill out when the switch is off", async () => {
-    const state = botState({ applets: false, workspace: new FakeWorkspace() });
-    const listed = refs(await listSkills(state, IDENTITY));
-    expect(listed).not.toContain("managed/applets");
-    // Only that Skill follows the switch; the rest of the managed set stays.
-    expect(listed).toContain("managed/add-connector");
-    expect(listed).toContain("managed/export-bot-template");
-  });
-
-  test("a switch that cannot be read lists no Applets Skill", async () => {
+  test("a features read that cannot be reached still lists the connector Skill", async () => {
     const state = botState({
-      applets: "unreachable",
+      featuresReachable: false,
       workspace: new FakeWorkspace(),
     });
-    expect(refs(await listSkills(state, IDENTITY))).not.toContain(
-      "managed/applets",
+    expect(refs(await listSkills(state, IDENTITY))).toContain(
+      "managed/add-connector",
     );
   });
 });

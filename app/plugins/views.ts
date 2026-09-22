@@ -28,6 +28,11 @@ export const PLUGIN_TOOL_ACTION_ID_V1 = "plugin-tool";
 /** Nodes one section may hold; a bigger tree is a failure, not a truncation. */
 export const PLUGIN_SECTION_NODE_LIMIT_V1 = 64;
 const PLUGIN_SECTION_DEPTH_LIMIT_V1 = 8;
+/** Nodes one conversation panel may hold; matches the host ViewDocument budget. */
+export const PLUGIN_PAGE_NODE_LIMIT_V1 = 512;
+const PLUGIN_PAGE_DEPTH_LIMIT_V1 = 16;
+const HTTPS_URL = /^https:\/\/[^\s/@?#:]+(?::[0-9]+)?(?:\/[^\s#]*)?$/;
+const FIELD_KINDS = new Set(["text", "boolean", "number", "select"]);
 /** The JSON a control hands its tool, as one string in the action's input. */
 export const MAX_PLUGIN_TOOL_ARGUMENTS_BYTES_V1 = 8_000;
 const MAX_TEXT = 4_000;
@@ -86,16 +91,25 @@ function pluginToolActionInputV1(
   return { kind: "plugin-tool", pluginId, tool, arguments: serialized };
 }
 
+type WalkKind = "section" | "page";
+
 function walk(
   value: unknown,
   source: PluginSectionSourceV1,
   budget: { nodes: number },
   depth: number,
+  kind: WalkKind,
 ): ViewNode {
-  if (depth > PLUGIN_SECTION_DEPTH_LIMIT_V1)
-    refuse("the section nests too deep");
-  if (++budget.nodes > PLUGIN_SECTION_NODE_LIMIT_V1) {
-    refuse(`the section holds more than ${PLUGIN_SECTION_NODE_LIMIT_V1} nodes`);
+  const depthLimit =
+    kind === "page"
+      ? PLUGIN_PAGE_DEPTH_LIMIT_V1
+      : PLUGIN_SECTION_DEPTH_LIMIT_V1;
+  const nodeLimit =
+    kind === "page" ? PLUGIN_PAGE_NODE_LIMIT_V1 : PLUGIN_SECTION_NODE_LIMIT_V1;
+  const noun = kind === "page" ? "page" : "section";
+  if (depth > depthLimit) refuse(`the ${noun} nests too deep`);
+  if (++budget.nodes > nodeLimit) {
+    refuse(`the ${noun} holds more than ${nodeLimit} nodes`);
   }
   const node = record(value, "a node");
   switch (node.type) {
@@ -126,7 +140,7 @@ function walk(
           : {}),
         ...(node.collapsed !== undefined ? { collapsed: node.collapsed } : {}),
         children: node.children.map((child) =>
-          walk(child, source, budget, depth + 1),
+          walk(child, source, budget, depth + 1, kind),
         ),
       };
     }
@@ -176,19 +190,151 @@ function walk(
           // a section's controls are action nodes and rows are plain.
           return {
             id: row.id,
-            node: walk(row.node, source, budget, depth + 1),
+            node: walk(row.node, source, budget, depth + 1, kind),
             ...(row.selected !== undefined ? { selected: row.selected } : {}),
           };
         }),
       };
     }
-    case "field":
-    case "embed":
-      refuse(`a plugin section cannot hold a ${node.type} node`);
-    // eslint-disable-next-line no-fallthrough -- `refuse` never returns.
+    case "field": {
+      if (kind !== "page") {
+        refuse(`a plugin ${noun} cannot hold a field node`);
+      }
+      return { type: "field", field: pluginPageFieldV1(node.field) };
+    }
+    case "embed": {
+      if (kind !== "page") {
+        refuse(`a plugin ${noun} cannot hold a embed node`);
+      }
+      if (node.kind !== "image") {
+        refuse("a page embed must be a host image");
+      }
+      const sourceUrl = text(node.source, "an embed's source", 2048);
+      if (!HTTPS_URL.test(sourceUrl) || sourceUrl.length < 9) {
+        refuse("an embed's source must be an https URL");
+      }
+      return {
+        type: "embed",
+        kind: "image",
+        source: sourceUrl,
+        label: text(node.label, "an embed's label", MAX_TITLE),
+        ...(node.aspectRatio !== undefined
+          ? { aspectRatio: pluginPageAspectV1(node.aspectRatio) }
+          : {}),
+      };
+    }
     default:
       refuse("a node has an unknown type");
   }
+}
+
+function pluginPageAspectV1(value: unknown): number {
+  if (typeof value !== "number" || !(value >= 0.1 && value <= 10)) {
+    refuse("an embed's aspect ratio is out of range");
+  }
+  return value;
+}
+
+function pluginPageFieldV1(
+  input: unknown,
+): Extract<ViewNode, { type: "field" }>["field"] {
+  const field = record(input, "a field");
+  const allowed = new Set([
+    "id",
+    "label",
+    "kind",
+    "value",
+    "editable",
+    "hint",
+    "minimum",
+    "maximum",
+    "maxLength",
+    "required",
+    "choices",
+    "isSet",
+    "canReset",
+  ]);
+  if (
+    !["id", "label", "kind", "value", "editable"].every((key) =>
+      Object.hasOwn(field, key),
+    ) ||
+    !Object.keys(field).every((key) => allowed.has(key))
+  ) {
+    refuse("a field has invalid fields");
+  }
+  if (typeof field.id !== "string" || !IDENTIFIER.test(field.id)) {
+    refuse("a field has an invalid id");
+  }
+  if (typeof field.kind !== "string" || !FIELD_KINDS.has(field.kind)) {
+    refuse("a field names an unknown kind");
+  }
+  if (typeof field.editable !== "boolean") {
+    refuse("a field's editable flag is not a boolean");
+  }
+  const decoded: Record<string, unknown> = {
+    id: field.id,
+    label: text(field.label, "a field's label", MAX_TITLE),
+    kind: field.kind,
+    value: field.value ?? null,
+    editable: field.editable,
+  };
+  if (field.hint !== undefined) {
+    decoded.hint = text(field.hint, "a field's hint", 2_000);
+  }
+  if (field.minimum !== undefined) {
+    if (typeof field.minimum !== "number")
+      refuse("a field's minimum is not a number");
+    decoded.minimum = field.minimum;
+  }
+  if (field.maximum !== undefined) {
+    if (typeof field.maximum !== "number")
+      refuse("a field's maximum is not a number");
+    decoded.maximum = field.maximum;
+  }
+  if (field.maxLength !== undefined) {
+    if (
+      !Number.isSafeInteger(field.maxLength) ||
+      (field.maxLength as number) < 1 ||
+      (field.maxLength as number) > 32_000
+    ) {
+      refuse("a field's maxLength is invalid");
+    }
+    decoded.maxLength = field.maxLength;
+  }
+  if (field.required !== undefined) {
+    if (typeof field.required !== "boolean") {
+      refuse("a field's required flag is not a boolean");
+    }
+    decoded.required = field.required;
+  }
+  if (field.isSet !== undefined) {
+    if (typeof field.isSet !== "boolean") {
+      refuse("a field's isSet flag is not a boolean");
+    }
+    decoded.isSet = field.isSet;
+  }
+  if (field.canReset !== undefined) {
+    if (typeof field.canReset !== "boolean") {
+      refuse("a field's canReset flag is not a boolean");
+    }
+    decoded.canReset = field.canReset;
+  }
+  if (field.choices !== undefined) {
+    if (!Array.isArray(field.choices) || field.choices.length > 600) {
+      refuse("a field's choices are invalid");
+    }
+    decoded.choices = field.choices.map((raw, index) => {
+      const choice = record(raw, `a field choice ${index}`);
+      if (typeof choice.id !== "string" || !IDENTIFIER.test(choice.id)) {
+        refuse("a field choice has an invalid id");
+      }
+      return {
+        id: choice.id,
+        label: text(choice.label, "a field choice's label", MAX_TITLE),
+      };
+    });
+  }
+  return decoded as Extract<ViewNode, { type: "field" }>["field"];
 }
 
 /**
@@ -213,6 +359,7 @@ export function pluginSectionV1(
       source,
       budget,
       0,
+      "section",
     );
     return { surfaceId: source.surfaceId, root, nodes: budget.nodes };
   } catch (error) {
@@ -223,6 +370,43 @@ export function pluginSectionV1(
         error instanceof SectionRefusal
           ? `This plugin's section could not be shown: ${error.message}.`
           : "This plugin's section could not be shown.",
+    };
+  }
+}
+
+/**
+ * One Plugin's answer for a conversation.panel surface. Same refusal shape as
+ * a section; the walk admits the full page vocabulary (field and host image).
+ */
+export function pluginPageV1(
+  source: PluginSectionSourceV1,
+  result: PluginWorkerViewResultV1,
+): BotPluginSectionV1 {
+  if (result.status === "drop") {
+    return {
+      surfaceId: source.surfaceId,
+      nodes: 0,
+      failure: `This plugin could not show its page${result.reason ? `: ${result.reason.slice(0, 500)}` : "."}`,
+    };
+  }
+  const budget = { nodes: 0 };
+  try {
+    const root = walk(
+      record(result.document, "the document").root,
+      source,
+      budget,
+      0,
+      "page",
+    );
+    return { surfaceId: source.surfaceId, root, nodes: budget.nodes };
+  } catch (error) {
+    return {
+      surfaceId: source.surfaceId,
+      nodes: 0,
+      failure:
+        error instanceof SectionRefusal
+          ? `This plugin's page could not be shown: ${error.message}.`
+          : "This plugin's page could not be shown.",
     };
   }
 }

@@ -59,7 +59,9 @@ void main() {
       expect(companion, findsOneWidget);
       expect(
         tester.getTopLeft(companion).dy,
-        chatHeaderChromeTop - chatHeaderCompanionLift,
+        width == 390
+            ? chatHeaderChromeTop
+            : chatHeaderChromeTop - chatHeaderCompanionLift,
       );
       expect(tester.getSize(companion).height, chatCompanionSize);
       final field = find.byKey(const ValueKey('composer'));

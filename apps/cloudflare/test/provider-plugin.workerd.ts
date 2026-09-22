@@ -341,10 +341,7 @@ async function pinPluginWithMembers(
       descriptor: plugin.descriptor,
     },
   ];
-  const artifactSetHash = await compositionArtifactSetHashV1(
-    members as never,
-    [],
-  );
+  const artifactSetHash = await compositionArtifactSetHashV1(members as never);
   await user(identity.userId).proposeComposition({
     schemaVersion: 1,
     userId: identity.userId,

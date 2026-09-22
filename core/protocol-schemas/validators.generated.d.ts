@@ -48,10 +48,6 @@ declare const validators: {
   isBotLifecycleCommand(
     value: unknown,
   ): value is ProtocolTypes["BotLifecycleCommand"];
-  isAppletImpactFingerprint(
-    value: unknown,
-  ): value is ProtocolTypes["AppletImpactFingerprint"];
-  isBotAppletImpact(value: unknown): value is ProtocolTypes["BotAppletImpact"];
   isBotCreateCommand(
     value: unknown,
   ): value is ProtocolTypes["BotCreateCommand"];
@@ -118,9 +114,6 @@ declare const validators: {
   isMarkReadCommand(value: unknown): value is ProtocolTypes["MarkReadCommand"];
   isSettingField(value: unknown): value is ProtocolTypes["SettingField"];
   isSettingsFrame(value: unknown): value is ProtocolTypes["SettingsFrame"];
-  isAppletViewerToken(
-    value: unknown,
-  ): value is ProtocolTypes["AppletViewerToken"];
   isImmutableArtifact(
     value: unknown,
   ): value is ProtocolTypes["ImmutableArtifact"];
@@ -134,15 +127,16 @@ declare const validators: {
   isSurfaceUnavailable(
     value: unknown,
   ): value is ProtocolTypes["SurfaceUnavailable"];
+  isPanelBagEntry(value: unknown): value is ProtocolTypes["PanelBagEntry"];
+  isPanelFocus(value: unknown): value is ProtocolTypes["PanelFocus"];
+  isPanelDoor(value: unknown): value is ProtocolTypes["PanelDoor"];
+  isPanelOpenView(value: unknown): value is ProtocolTypes["PanelOpenView"];
   isUnreadDirectory(value: unknown): value is ProtocolTypes["UnreadDirectory"];
   isRunLookup(value: unknown): value is ProtocolTypes["RunLookup"];
   isBotIdentity(value: unknown): value is ProtocolTypes["BotIdentity"];
   isBotWriter(value: unknown): value is ProtocolTypes["BotWriter"];
+  isTurnAdmission(value: unknown): value is ProtocolTypes["TurnAdmission"];
   isTurnResponse(value: unknown): value is ProtocolTypes["TurnResponse"];
-  isAppletSummary(value: unknown): value is ProtocolTypes["AppletSummary"];
-  isAppletOpenFocus(value: unknown): value is ProtocolTypes["AppletOpenFocus"];
-  isAppletOpenView(value: unknown): value is ProtocolTypes["AppletOpenView"];
-  isAppletDirectory(value: unknown): value is ProtocolTypes["AppletDirectory"];
   isSettingsChangeCommand(
     value: unknown,
   ): value is ProtocolTypes["SettingsChangeCommand"];

@@ -47,9 +47,14 @@ import type {
   FoundationAgentPackage,
   RuntimeModelSelection,
 } from "@frockbot/app/agent-runtime";
-import { appletsRuntimeHost } from "@frockbot/app/applets-host/bot";
 import { admitTurnV1 } from "@frockbot/app/composition/bot";
 import { pluginAuthoringRuntimeHost } from "@frockbot/app/plugins/authoring-bot";
+import {
+  applyPanelFocusV1,
+  panelBagFromRosterV1,
+} from "@frockbot/app/plugins/panels-bot";
+import { readBotPluginRosterV1 } from "@frockbot/app/plugins/worker-bot";
+import type { PanelFocusRuntimeHostV1 } from "@frockbot/app/plugins/panel-focus";
 import { decodeAgentTurnSlotReceiptV1 } from "@frockbot/app/flock/quota";
 import {
   createBotMachineHost,
@@ -347,14 +352,6 @@ export async function agentRuntime(
           () => machines.list(),
         )
       : Promise.resolve({ status: "off" } as const);
-  // A Bot builds an Applet only inside an admitted Turn: the publish is a
-  // durable effect whose intent record has to name the Session and Turn that
-  // asked for it, and the scaffold write names the same writer. Resolved
-  // before the Composition is built for the same reason the machine gate is:
-  // the answer decides whether the Package is mounted at all.
-  const appletsPromise = turn
-    ? appletsRuntimeHost(state, identity, turn, accountFeatures)
-    : Promise.resolve(undefined);
   // A Bot writes a Plugin only inside an admitted Turn, for the same reason,
   // and only behind the account's Plugin-authoring switch (ADR 0026).
   const pluginsPromise = turn
@@ -379,13 +376,37 @@ export async function agentRuntime(
           : undefined,
       )
     : Promise.resolve(undefined);
+  const panelsPromise = (async (): Promise<
+    PanelFocusRuntimeHostV1 | undefined
+  > => {
+    if (!turn) return undefined;
+    const roster = await readBotPluginRosterV1(state, identity);
+    const bag = panelBagFromRosterV1(roster);
+    if (bag.tabs.length === 0) return undefined;
+    return {
+      panels: {
+        bag: bag.tabs,
+        async focus(request) {
+          const result = await applyPanelFocusV1(state, identity, request);
+          if (result.status === "error") return result;
+          return {
+            status: "applied",
+            pluginId: result.focus.pluginId,
+            ...(result.focus.surfaceId
+              ? { surfaceId: result.focus.surfaceId }
+              : {}),
+          };
+        },
+      },
+    };
+  })();
   // These gates share the account-feature read above but otherwise touch
   // independent authorities. Resolve them as one preparation stage.
-  const [messagesGate, applets, plugins, skills] = await Promise.all([
+  const [messagesGate, plugins, skills, panels] = await Promise.all([
     messagesGatePromise,
-    appletsPromise,
     pluginsPromise,
     skillsPromise,
+    panelsPromise,
   ]);
   // Filled in once this Turn's model binding is resolved, below. The tool
   // and the prompt section both read it lazily, from inside the Turn.
@@ -412,8 +433,8 @@ export async function agentRuntime(
             ),
           }
         : {}),
-      ...(applets ? { applets } : {}),
       ...(plugins ? { plugins } : {}),
+      ...(panels ? { panels } : {}),
       // A Bot changes its own identity, or adds a Bot to its User's flock,
       // only inside an admitted Turn whose Session and Turn the write names.
       ...(turn

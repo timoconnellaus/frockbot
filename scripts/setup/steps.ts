@@ -592,7 +592,6 @@ const MINTED_WORKER_MAP_V1: readonly {
   { name: "CREDENTIAL_KEYRING", workers: ["app"] },
   { name: "COMPUTER_HOST_TOKEN", workers: ["app", "computerHost"] },
   { name: "APPLET_BUILD_TOKEN", workers: ["app", "appletBuild"] },
-  { name: "APPLET_VIEWER_SECRET", workers: ["app"] },
   { name: "ROUTINE_HOOK_SECRET", workers: ["app"] },
   { name: "MACHINE_TOKEN_SECRET", workers: ["app"] },
   { name: "NATIVE_TOKEN_SECRET", workers: ["app"] },

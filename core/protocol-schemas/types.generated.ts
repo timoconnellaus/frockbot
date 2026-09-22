@@ -149,19 +149,6 @@ export type BotLifecycleCommand = {
   type: "bot/archive" | "bot/restore" | "bot/delete";
   commandId: Identifier;
   botId: BotId;
-  appletImpact?: AppletImpactFingerprint;
-};
-export type AppletImpactFingerprint = string;
-export type BotAppletImpact = {
-  schemaVersion: 1;
-  botId: BotId;
-  fingerprint: AppletImpactFingerprint;
-  applets: Array<{
-    appletId: string;
-    displayName: string;
-    status: "draft" | "published";
-    sharedWithBotIds: Array<BotId>;
-  }>;
 };
 export type BotCreateCommand = {
   schemaVersion: 1;
@@ -255,7 +242,7 @@ export type ReconcileCommand = { schemaVersion: 1; action: "resume" };
 export type DurableReceipt = {
   schemaVersion: 1;
   commandId: Identifier;
-  owner: { kind: "user" | "bot" | "applet"; id: Identifier };
+  owner: { kind: "user" | "bot"; id: Identifier };
   status: "accepted" | "applied" | "refused";
   recordedAt: Instant;
   runId?: Identifier;
@@ -339,7 +326,6 @@ export type SendPayload =
       risk: "low" | "medium" | "high";
       expiresInSeconds?: number;
     }
-  | { type: "applet"; appletId: string }
   | { type: "card"; surfaceId: Identifier; messages: Array<A2uiAgentMessage> };
 export type RunEvent =
   | { type: "send/to-user"; payload: SendPayload; ordinal: number }
@@ -661,11 +647,6 @@ export type SettingsFrame = {
     }>;
   }>;
 };
-export type AppletViewerToken = {
-  token: string;
-  expiresAt: Instant;
-  socketUrl: string;
-};
 export type ImmutableArtifact = {
   contentHash: Digest;
   size: number;
@@ -750,6 +731,29 @@ export type SurfaceUnavailable = {
     | "limit-exceeded";
   message: string;
 };
+export type PanelBagEntry = {
+  pluginId: Identifier;
+  displayName: string;
+  surfaceId: Identifier;
+  label: string;
+};
+export type PanelFocus =
+  { pluginId: null } | { pluginId: Identifier; surfaceId: Identifier };
+export type PanelDoor = {
+  pluginId: Identifier;
+  label: string;
+  opens?: { pluginId: Identifier; surfaceId: Identifier };
+  document?: ViewDocument;
+  failure?: string;
+};
+export type PanelOpenView = {
+  schemaVersion: 1;
+  bag: Array<PanelBagEntry>;
+  focus: PanelFocus;
+  document?: ViewDocument;
+  failure?: string;
+  doors: Array<PanelDoor>;
+};
 export type UnreadDirectory = { schemaVersion: 1; unread: Array<UnreadView> };
 export type RunLookup =
   | { schemaVersion: 1; state: "not-admitted" }
@@ -771,40 +775,13 @@ export type BotWriter = {
   sessionId: string;
   turnId: Identifier;
 };
+export type TurnAdmission = { schemaVersion: 1; runId: Identifier };
 export type TurnResponse = {
   schemaVersion: 1;
   runId: Identifier;
   text: string;
   events: Array<RunEvent>;
   notification?: Notification;
-};
-export type AppletSummary = {
-  appletId: string;
-  displayName: string;
-  status: "draft" | "published" | "deleted";
-  currentGenerationId?: GenerationId;
-  tools: Array<string>;
-  createdAt: Instant;
-  ownerBotId: BotId;
-  access: "owner" | "shared";
-  sharedWithBotIds: Array<BotId>;
-};
-export type AppletOpenFocus = {
-  appletId: string;
-  generationId?: GenerationId;
-  uiUrl?: string;
-  token?: string;
-  expiresAt?: Instant;
-  socketUrl?: string;
-};
-export type AppletOpenView = {
-  schemaVersion: 1;
-  applets: Array<AppletSummary>;
-  focused?: AppletOpenFocus;
-};
-export type AppletDirectory = {
-  schemaVersion: 1;
-  applets: Array<AppletSummary>;
 };
 export type SettingsChangeCommand = {
   schemaVersion: 1;
@@ -1035,8 +1012,6 @@ export interface ProtocolTypes {
   BotDirectory: BotDirectory;
   BotLifecycle: BotLifecycle;
   BotLifecycleCommand: BotLifecycleCommand;
-  AppletImpactFingerprint: AppletImpactFingerprint;
-  BotAppletImpact: BotAppletImpact;
   BotCreateCommand: BotCreateCommand;
   BotLifecycleReceipt: BotLifecycleReceipt;
   AvatarIdentity: AvatarIdentity;
@@ -1079,7 +1054,6 @@ export interface ProtocolTypes {
   MarkReadCommand: MarkReadCommand;
   SettingField: SettingField;
   SettingsFrame: SettingsFrame;
-  AppletViewerToken: AppletViewerToken;
   ImmutableArtifact: ImmutableArtifact;
   WebArtifact: WebArtifact;
   ActionValueSchema: ActionValueSchema;
@@ -1087,15 +1061,16 @@ export interface ProtocolTypes {
   ViewNode: ViewNode;
   ViewDocument: ViewDocument;
   SurfaceUnavailable: SurfaceUnavailable;
+  PanelBagEntry: PanelBagEntry;
+  PanelFocus: PanelFocus;
+  PanelDoor: PanelDoor;
+  PanelOpenView: PanelOpenView;
   UnreadDirectory: UnreadDirectory;
   RunLookup: RunLookup;
   BotIdentity: BotIdentity;
   BotWriter: BotWriter;
+  TurnAdmission: TurnAdmission;
   TurnResponse: TurnResponse;
-  AppletSummary: AppletSummary;
-  AppletOpenFocus: AppletOpenFocus;
-  AppletOpenView: AppletOpenView;
-  AppletDirectory: AppletDirectory;
   SettingsChangeCommand: SettingsChangeCommand;
   SettingsReceipt: SettingsReceipt;
   SettingsHandoffCommand: SettingsHandoffCommand;

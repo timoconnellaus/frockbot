@@ -88,7 +88,6 @@ export function accountPreparationRpcV1(
 ) {
   const features = {
     schemaVersion: 1 as const,
-    applets: false,
     pluginAuthoring: false,
     plugins: [] as string[],
     updatedAt: "1970-01-01T00:00:00.000Z",
@@ -111,7 +110,6 @@ export function accountPreparationRpcV1(
         schemaVersion: 1 as const,
         revision: readSettings().revision,
         features: {
-          applets: false,
           pluginAuthoring: false,
           plugins: [] as string[],
         },
