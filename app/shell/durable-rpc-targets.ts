@@ -195,6 +195,9 @@ export interface BotUserConfigurationRpcTargetV1
       routineId: string;
     }>,
   ): Promise<void>;
+  operateMemory(
+    input: BotRpcEnvelopeV1<{ action: string; request: object }>,
+  ): Promise<object>;
 }
 
 export interface BotStateRpcTargetV1 extends SubagentDurableObjectRpcTargetV1 {

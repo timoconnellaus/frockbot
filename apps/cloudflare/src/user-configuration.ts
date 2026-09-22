@@ -163,6 +163,13 @@ import {
 } from "@frockbot/core/contracts";
 import type { MemoryProjectV1 } from "@frockbot/app/memory/agent";
 import {
+  createUserMemoryEngineV1,
+  dispatchMemoryOperateV1,
+  durableObjectHasSqlV1,
+  type MemoryOperateActionV1,
+} from "./memory-records.js";
+import type { MemoryEngineV1 } from "@frockbot/app/memory/engine";
+import {
   SEARCH_MAX_ROW_PAGE_V1,
   decodeSearchQueryV1,
   type ClientSearchRebuildReceiptV1,
@@ -300,6 +307,17 @@ export class UserConfiguration
         (await this.ctx.storage.getAlarm()) === null
       ) {
         await this.ctx.storage.setAlarm(Date.now());
+      }
+      if (durableObjectHasSqlV1(this.ctx.storage)) {
+        const memoryDue = createUserMemoryEngineV1(
+          this.ctx.storage,
+        ).nextWakeupAt();
+        if (
+          memoryDue !== undefined &&
+          (await this.ctx.storage.getAlarm()) === null
+        ) {
+          await this.ctx.storage.setAlarm(memoryDue);
+        }
       }
     });
   }
@@ -1951,6 +1969,67 @@ export class UserConfiguration
     return this.membership(request.botId as string);
   }
 
+  #memoryEngine: MemoryEngineV1 | undefined;
+
+  private memoryEngine(): MemoryEngineV1 {
+    this.#memoryEngine ??= createUserMemoryEngineV1(this.ctx.storage);
+    return this.#memoryEngine;
+  }
+
+  /**
+   * User and shared Group Chat Memory. Membership is loaded here and overwrites
+   * anything the Bot RPC claimed, so a caller-supplied scope id is never enough.
+   */
+  async operateMemory(input: unknown): Promise<object> {
+    const envelope = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      action: rpcEnum([
+        "write",
+        "forget",
+        "recall",
+        "expand",
+        "browse",
+        "preparedCore",
+      ]),
+      request: rpcDecodedValue,
+    });
+    const userId = envelope.userId as string;
+    const botId = envelope.botId as string;
+    await this.assertFlockIdentity(userId);
+    const joined = await this.membership(botId);
+    const revision =
+      (await this.ctx.storage.get<number>(
+        `${MEMORY_PROJECTS_KEY}:${botId}:rev`,
+      )) ?? 0;
+    const inner = (envelope.request ?? {}) as Record<string, unknown>;
+    const claimed = inner.authority;
+    if (claimed && typeof claimed === "object" && !Array.isArray(claimed)) {
+      inner.authority = {
+        ...(claimed as Record<string, unknown>),
+        userId,
+        botId,
+        actor:
+          (claimed as { actor?: unknown }).actor === "user" ? "user" : "bot",
+        joinedGroupChatIds: joined.map((project) => project.projectId),
+        membershipRevision: String(revision),
+      };
+    }
+    const result = dispatchMemoryOperateV1(
+      this.memoryEngine(),
+      envelope.action as MemoryOperateActionV1,
+      inner,
+    );
+    const due = this.memoryEngine().nextWakeupAt();
+    if (due !== undefined) {
+      const current = await this.ctx.storage.getAlarm();
+      if (current === null || current > due) {
+        await this.ctx.storage.setAlarm(due);
+      }
+    }
+    return result as object;
+  }
+
   /**
    * Create, join, or leave. Create is join when the slug already exists, which
    * is GrokBot's own `update_state project create` behaviour, and the refusal
@@ -2025,6 +2104,10 @@ export class UserConfiguration
       `${MEMORY_PROJECTS_KEY}:${botId}`,
       [...joined].sort(),
     );
+    const revisionKey = `${MEMORY_PROJECTS_KEY}:${botId}:rev`;
+    const revision =
+      ((await this.ctx.storage.get<number>(revisionKey)) ?? 0) + 1;
+    await this.ctx.storage.put(revisionKey, revision);
     return { status: "ok", joined: await this.membership(botId) };
   }
 
@@ -2075,6 +2158,15 @@ export class UserConfiguration
     // state or source a crash or an unreachable object left behind.
     const userId = await this.provenIdentity();
     if (userId) await this.sweepAppletCleanups(userId);
+    if (durableObjectHasSqlV1(this.ctx.storage)) {
+      const memoryDue = this.memoryEngine().nextWakeupAt();
+      if (memoryDue !== undefined) {
+        const current = await this.ctx.storage.getAlarm();
+        if (current === null || current > memoryDue) {
+          await this.ctx.storage.setAlarm(memoryDue);
+        }
+      }
+    }
   }
 
   /**
@@ -2089,6 +2181,7 @@ export class UserConfiguration
     contributions.search.purge(botId);
     contributions.audit.purgeAuditForBot(botId);
     await this.ctx.storage.delete(`${MEMORY_PROJECTS_KEY}:${botId}`);
+    await this.ctx.storage.delete(`${MEMORY_PROJECTS_KEY}:${botId}:rev`);
     await contributions.flock.forgetDeletedBot(botId);
   }
 
