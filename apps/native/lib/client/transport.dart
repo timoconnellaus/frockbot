@@ -353,7 +353,7 @@ class BackendChatTransport implements ChatTransport {
           ? <String, Object?>{}
           : {'runId': supersedes},
     });
-    final response = wire.TurnResponse.fromJson(
+    final response = wire.TurnAdmission.fromJson(
       await api.request(path(botId), body: command.toJson(), limit: 256000),
     );
     if (response.runId.value != id) {

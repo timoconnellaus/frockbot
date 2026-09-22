@@ -699,6 +699,7 @@ export class BotState
             env: this.backendEnv,
             outboundFetch: this.outboundFetch,
             messagesCommitted: () => this.ctx.waitUntil(this.drainPush()),
+            runSettled: (runId) => this.projectSettled(requireShell(), runId),
             // The Durable Object owns the kernel authority; the Shell
             // Package supplies only its configuration and Composition
             // hooks.
@@ -1708,10 +1709,38 @@ export class BotState
     const request = decodeBotRunRpcV1(input);
     const identity = { userId: request.userId, botId: request.botId };
     const { shell } = await this.materialized(identity);
-    const turn = await shell.run({ ...identity, ...request.command });
-    await this.projectSettledRun(shell, identity, request.command.runId);
-    await this.projectSettledAudit(shell, identity, request.command.runId);
-    return turn;
+    return shell.run({ ...identity, ...request.command });
+  }
+
+  /**
+   * Durably accepts a composer command and returns its receipt.
+   *
+   * Execution continues on this object's drive. `waitUntil` keeps the
+   * isolate awake for that drive; the recovery alarm is what resumes it
+   * after eviction.
+   */
+  async admitRun(input: unknown) {
+    const request = decodeBotRunRpcV1(input);
+    const identity = { userId: request.userId, botId: request.botId };
+    const { shell } = await this.materialized(identity);
+    const receipt = await shell.admit({ ...identity, ...request.command });
+    const work = shell.pendingWork();
+    if (work) this.ctx.waitUntil(work);
+    return receipt;
+  }
+
+  /**
+   * Finishes the resident drive, including the settled-run projections.
+   *
+   * The composer returns at admission. A caller that needs search and audit
+   * rows waits here. Eviction drops this promise; the recovery alarm resumes
+   * the run.
+   */
+  async joinAdmittedDrive(): Promise<void> {
+    const mounted = this.mounted;
+    if (!mounted) return;
+    const { shell } = await mounted;
+    await shell.pendingWork();
   }
 
   async runAgent(input: unknown) {
@@ -1728,8 +1757,6 @@ export class BotState
       lane: "agent",
       origin: request.command.source,
     });
-    await this.projectSettledRun(shell, identity, request.command.runId);
-    await this.projectSettledAudit(shell, identity, request.command.runId);
     return turn;
   }
 
@@ -1756,8 +1783,6 @@ export class BotState
       lane: "agent",
       origin: request.command.source,
     });
-    await this.projectSettledRun(shell, identity, request.command.runId);
-    await this.projectSettledAudit(shell, identity, request.command.runId);
     await this.drainVoiceReplyOutbox(identity.userId);
     return turn;
   }
@@ -1869,7 +1894,7 @@ export class BotState
     const outbox = this.auditOutbox();
     try {
       const lookup = await shell.lookupRun({ schemaVersion: 1, runId });
-      if (lookup.state !== "not-admitted") {
+      if (lookup.state === "terminal") {
         const stored = await shell.listRunEventPage();
         const run = stored.runs.find((candidate) => candidate.runId === runId);
         if (run) {
@@ -1931,6 +1956,20 @@ export class BotState
   }
 
   /**
+   * Search and audit for one settled run. Called from the authority once the
+   * run is terminal, including when the composer did not wait for it.
+   */
+  private async projectSettled(
+    shell: ShellBotBackendContribution,
+    runId: string,
+  ): Promise<void> {
+    const identity = await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
+    if (!identity) return;
+    await this.projectSettledRun(shell, identity, runId);
+    await this.projectSettledAudit(shell, identity, runId);
+  }
+
+  /**
    * Projects one settled run into the User's transcript index.
    *
    * After settlement, and never before it: the run is already durable in this
@@ -1947,7 +1986,7 @@ export class BotState
     if (!sink) return;
     try {
       const lookup = await shell.lookupRun({ schemaVersion: 1, runId });
-      if (lookup.state === "not-admitted") return;
+      if (lookup.state !== "terminal") return;
       await sink.indexRows(
         searchRowsFromClientRunV1(identity.botId, lookup.run),
       );
@@ -2061,10 +2100,7 @@ export class BotState
     const { shell } = await this.materialized(identity);
     const command =
       request.command as import("@frockbot/core/contracts").PackageIframeToolCommandV1;
-    const turn = await runPackageUiTool(shell.state, identity, command);
-    await this.projectSettledRun(shell, identity, command.commandId);
-    await this.projectSettledAudit(shell, identity, command.commandId);
-    return turn;
+    return runPackageUiTool(shell.state, identity, command);
   }
 
   /**

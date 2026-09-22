@@ -4229,6 +4229,19 @@
       "required": ["kind", "botId", "sessionId", "turnId"],
       "additionalProperties": false
     },
+    "TurnAdmission": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "runId": {
+          "$ref": "#/$defs/Identifier"
+        }
+      },
+      "required": ["schemaVersion", "runId"],
+      "additionalProperties": false
+    },
     "TurnResponse": {
       "type": "object",
       "properties": {

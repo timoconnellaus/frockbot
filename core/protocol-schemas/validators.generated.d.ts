@@ -123,6 +123,7 @@ declare const validators: {
   isRunLookup(value: unknown): value is ProtocolTypes["RunLookup"];
   isBotIdentity(value: unknown): value is ProtocolTypes["BotIdentity"];
   isBotWriter(value: unknown): value is ProtocolTypes["BotWriter"];
+  isTurnAdmission(value: unknown): value is ProtocolTypes["TurnAdmission"];
   isTurnResponse(value: unknown): value is ProtocolTypes["TurnResponse"];
   isSettingsChangeCommand(
     value: unknown,

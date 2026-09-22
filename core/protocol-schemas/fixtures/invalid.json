@@ -1239,6 +1239,15 @@
     }
   },
   {
+    "name": "turn admission invalid",
+    "schema": "TurnAdmission",
+    "value": {
+      "schemaVersion": 1,
+      "runId": "turn-1",
+      "text": "still running"
+    }
+  },
+  {
     "name": "turn response invalid",
     "schema": "TurnResponse",
     "value": {

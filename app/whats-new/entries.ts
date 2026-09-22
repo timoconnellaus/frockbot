@@ -24,9 +24,9 @@ export type WhatsNewEntrySourceV1 = {
 export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
     id: "quiet-delivery",
-    title: "Confirming a message stays quiet",
+    title: "Sends acknowledge immediately",
     summary:
-      "A sent message stays in the conversation while FrockBot confirms it.",
+      "A message is accepted as soon as it is saved. A long reply no longer looks like the send failed.",
     kind: "fix",
   },
   {

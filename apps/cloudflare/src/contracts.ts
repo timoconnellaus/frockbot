@@ -246,6 +246,15 @@ export interface UserBotStateBinding {
     botId: string;
     command: BotTurnCommand;
   }): Promise<BotTurnResult>;
+  /**
+   * Durable acceptance of a composer command. The receipt is not the Turn's
+   * outcome; execution continues after this method returns.
+   */
+  admitRun(input: {
+    schemaVersion: 1;
+    botId: string;
+    command: BotTurnCommand;
+  }): Promise<{ schemaVersion: 1; runId: string }>;
   listRuns(input: {
     schemaVersion: 1;
     botId: string;

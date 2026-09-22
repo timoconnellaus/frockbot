@@ -21,12 +21,7 @@ class WireApi extends NativeApi {
   }) async {
     if (body is Map<String, Object?>) {
       sentCommand = body;
-      return {
-        'schemaVersion': 1,
-        'runId': body['commandId'],
-        'text': '',
-        'events': [],
-      };
+      return {'schemaVersion': 1, 'runId': body['commandId']};
     }
     final run = {
       'schemaVersion': 4,

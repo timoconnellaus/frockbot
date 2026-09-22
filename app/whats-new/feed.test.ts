@@ -9,10 +9,10 @@ describe("What’s New feed", () => {
     expect(feed.schemaVersion).toBe(1);
     expect(feed.entries[0]).toMatchObject({
       id: "quiet-delivery",
-      title: "Confirming a message stays quiet",
+      title: "Sends acknowledge immediately",
       kind: "fix",
       summary:
-        "A sent message stays in the conversation while FrockBot confirms it.",
+        "A message is accepted as soon as it is saved. A long reply no longer looks like the send failed.",
     });
     expect(feed.entries[1]).toMatchObject({
       id: "chat-scroll",

@@ -2,11 +2,11 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
-## Confirming a message stays quiet
+## Sends acknowledge immediately
 
 fix
 
-A sent message stays in the conversation while FrockBot confirms it.
+A message is accepted as soon as it is saved. A long reply no longer looks like the send failed.
 
 ## Earlier messages stay in reach
 

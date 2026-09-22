@@ -45,6 +45,7 @@ import type {
   ClientTurnV1,
 } from "./run-protocol.js";
 import {
+  admit as admitTurn,
   alarm,
   executeTurn,
   fenceRunAdmission,
@@ -78,6 +79,7 @@ export class ShellBotBackendContribution {
       terminalRecords: (input) => terminalPackageRecords(input),
       supersededRecords: (input) => supersededPackageRecords(input),
       interruptTurn: (runId, reason) => state.turn.interrupt(runId, reason),
+      runSettled: (runId) => host.runSettled?.(runId) ?? Promise.resolve(),
       scheduledDeadlines: (transaction) =>
         scheduledDeadlines(state, transaction),
       scheduledWorkInFlight: () => state.hostScheduled.inFlight?.() ?? false,
@@ -109,6 +111,17 @@ export class ShellBotBackendContribution {
 
   async run(command: OwnedBotTurnCommand): Promise<ClientTurnV1> {
     return run(this.state, command);
+  }
+
+  async admit(
+    command: OwnedBotTurnCommand,
+  ): Promise<{ schemaVersion: 1; runId: string }> {
+    return admitTurn(this.state, command);
+  }
+
+  /** The drive settling admitted work, when this object is still resident. */
+  pendingWork(): Promise<void> | undefined {
+    return this.state.authority.pendingWork();
   }
 
   async alarm(): Promise<void> {

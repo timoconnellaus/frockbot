@@ -81,7 +81,7 @@ void main() {
       transport.observed = running();
       transport.completion.complete();
       await send;
-      expect(transport.calls, ['send:send-1', 'lookup:send-1']);
+      expect(transport.calls, ['send:send-1']);
       controller.dispose();
     },
   );
@@ -143,7 +143,7 @@ void main() {
       store.fail = false;
       await controller.checkDelivery();
       expect(controller.pending, isEmpty);
-      expect(transport.calls, ['lookup:send-1', 'lookup:send-1']);
+      expect(transport.calls, ['lookup:send-1']);
       controller.dispose();
     },
   );
@@ -162,7 +162,7 @@ void main() {
     await Future<void>.delayed(Duration.zero);
     expect(transport.gates, hasLength(1));
     expect(controller.error, isNull);
-    expect(controller.stoppable, isTrue);
+    expect(controller.stoppable, isFalse);
     transport.gates.single.complete({
       ...running(),
       'runId': 'send-1',
@@ -253,7 +253,7 @@ void main() {
       find.text('Checking whether your message went through…'),
       findsNothing,
     );
-    expect(find.byKey(const ValueKey('stop')), findsOneWidget);
+    expect(find.byKey(const ValueKey('stop')), findsNothing);
 
     transport.gates.single.complete(null);
     await tester.pump();
@@ -272,4 +272,239 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     controller.dispose();
   });
+
+  test(
+    'a transcript row confirms a command whose POST later times out',
+    () async {
+      final transport = _TimeoutAfterPage();
+      final controller = ChatController(
+        transport: transport,
+        store: MemoryStore(),
+        userId: 'user-1',
+        botId: 'bot-1',
+        nextId: () => 'send-1',
+      );
+      await controller.initialize();
+      final sending = controller.send('Hello');
+      await Future<void>.delayed(Duration.zero);
+      transport.pageRun = {...running(), 'runId': 'send-1', 'input': 'Hello'};
+      await controller.invalidate();
+      transport.release();
+      await sending;
+      expect(controller.error, isNull);
+      expect(controller.pending, isEmpty);
+      expect(controller.draft, isEmpty);
+      expect(transport.fenced, isFalse);
+      expect(controller.runs.single['runId'], 'send-1');
+      controller.dispose();
+    },
+  );
+
+  test(
+    'overlapping failed sends keep independent outcomes and both get checked',
+    () async {
+      final transport = _SplitDelivery();
+      var next = 0;
+      final controller = ChatController(
+        transport: transport,
+        store: MemoryStore(),
+        userId: 'user-1',
+        botId: 'bot-1',
+        nextId: () => 'send-${next += 1}',
+      );
+      await controller.initialize();
+      final first = controller.send('one');
+      await Future<void>.delayed(Duration.zero);
+      final second = controller.send('two');
+      await Future<void>.delayed(Duration.zero);
+      transport.release();
+      await first;
+      await second;
+      expect(controller.pending.single.text, 'two');
+      expect(controller.draft, 'one');
+      expect(controller.error, contains('didn’t go through'));
+      expect(controller.error, contains('Couldn’t confirm your message'));
+      expect(transport.lookups, containsAll(['send-1', 'send-2']));
+
+      transport.found = true;
+      await controller.checkDelivery();
+      expect(controller.pending, isEmpty);
+      expect(controller.draft, 'one');
+      expect(controller.error, contains('didn’t go through'));
+      expect(
+        controller.error,
+        isNot(contains('Couldn’t confirm your message')),
+      );
+      controller.dispose();
+    },
+  );
+
+  test(
+    'a refused send restores the draft and a failed Turn does not',
+    () async {
+      final transport = _ReceiptThenFailedRun();
+      final controller = ChatController(
+        transport: transport,
+        store: MemoryStore(),
+        userId: 'user-1',
+        botId: 'bot-1',
+        nextId: () {
+          var n = 0;
+          return () => 'send-${++n}';
+        }(),
+      );
+      await controller.initialize();
+      await controller.send('Hello');
+      expect(controller.draft, isEmpty);
+      expect(controller.error, isNull);
+      expect(controller.runs.single['status'], 'failed');
+
+      transport.refuseNext = true;
+      await controller.send('Again');
+      expect(controller.draft, 'Again');
+      expect(controller.error, 'no');
+      expect(controller.pending, isEmpty);
+      controller.dispose();
+    },
+  );
+}
+
+class _TimeoutAfterPage implements ChatTransport {
+  Map<String, dynamic>? pageRun;
+  bool fenced = false;
+  final _send = Completer<void>();
+
+  void release() {
+    if (!_send.isCompleted) {
+      _send.completeError(const RequestFailure('timed out'));
+    }
+  }
+
+  @override
+  Future<Map<String, dynamic>> page(String botId, {String? before}) async => {
+    'runs': [?pageRun],
+    'page': {'truncated': false},
+  };
+
+  @override
+  Future<void> send(
+    String botId,
+    String id,
+    String text, {
+    String? supersedes,
+    String? retryOf,
+  }) => _send.future;
+
+  @override
+  Future<Map<String, dynamic>?> lookup(
+    String botId,
+    String id, {
+    bool fence = false,
+  }) async {
+    if (fence) fenced = true;
+    return null;
+  }
+
+  @override
+  Future<Map<String, dynamic>> stop(
+    String botId,
+    String id,
+    String commandId,
+  ) async => {'runId': id};
+}
+
+class _SplitDelivery implements ChatTransport {
+  final lookups = <String>[];
+  bool found = false;
+  final _gate = Completer<void>();
+
+  void release() {
+    if (!_gate.isCompleted) _gate.complete();
+  }
+
+  @override
+  Future<Map<String, dynamic>> page(String botId, {String? before}) async => {
+    'runs': <Object?>[],
+    'page': {'truncated': false},
+  };
+
+  @override
+  Future<void> send(
+    String botId,
+    String id,
+    String text, {
+    String? supersedes,
+    String? retryOf,
+  }) async {
+    throw const RequestFailure('lost');
+  }
+
+  @override
+  Future<Map<String, dynamic>?> lookup(
+    String botId,
+    String id, {
+    bool fence = false,
+  }) async {
+    await _gate.future;
+    lookups.add(id);
+    if (id == 'send-2' && !found) throw StateError('lookup down');
+    if (id == 'send-2' && found) {
+      return {...running(), 'runId': id, 'input': 'two'};
+    }
+    return null;
+  }
+
+  @override
+  Future<Map<String, dynamic>> stop(
+    String botId,
+    String id,
+    String commandId,
+  ) async => {'runId': id};
+}
+
+class _ReceiptThenFailedRun implements ChatTransport {
+  bool refuseNext = false;
+  String? sent;
+
+  @override
+  Future<Map<String, dynamic>> page(String botId, {String? before}) async => {
+    'runs': [
+      if (sent != null)
+        {
+          'runId': sent,
+          'admittedAt': '2026-09-05T01:00:00Z',
+          'input': 'Hello',
+          'status': 'failed',
+          'events': <Object>[],
+          'outcome': {'type': 'failed', 'message': 'The model stopped.'},
+        },
+    ],
+    'page': {'truncated': false},
+  };
+
+  @override
+  Future<void> send(
+    String botId,
+    String id,
+    String text, {
+    String? supersedes,
+    String? retryOf,
+  }) async {
+    if (refuseNext) throw const RequestFailure('no', 400);
+    sent = id;
+  }
+
+  @override
+  Future<Map<String, dynamic>?> lookup(
+    String botId,
+    String id, {
+    bool fence = false,
+  }) async => null;
+
+  @override
+  Future<Map<String, dynamic>> stop(
+    String botId,
+    String id,
+    String commandId,
+  ) async => {'runId': id};
 }

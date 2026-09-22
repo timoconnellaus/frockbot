@@ -93,6 +93,22 @@ export async function admitTurnV1(
 }
 
 /**
+ * The admission half of {@link admitTurnV1}. The command is durable, and
+ * execution continues on the authority's drive rather than on this call.
+ */
+export async function acceptTurnV1(
+  state: ShellBotStateV1,
+  command: OwnedBotTurnCommand,
+): Promise<{ runId: string }> {
+  await syncCompositionFromUser(state, {
+    userId: command.userId,
+    botId: command.botId,
+  });
+  const admission = await state.authority.admit(command);
+  return { runId: admission.runId };
+}
+
+/**
  * The narrow store activation drives. Reads come from the mirror the
  * admission already pinned; a commit or a failure is recorded on the User,
  * where the generation lives, and the mirror is refreshed so the next

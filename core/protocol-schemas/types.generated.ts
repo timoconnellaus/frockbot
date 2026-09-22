@@ -733,6 +733,7 @@ export type BotWriter = {
   sessionId: string;
   turnId: Identifier;
 };
+export type TurnAdmission = { schemaVersion: 1; runId: Identifier };
 export type TurnResponse = {
   schemaVersion: 1;
   runId: Identifier;
@@ -1022,6 +1023,7 @@ export interface ProtocolTypes {
   RunLookup: RunLookup;
   BotIdentity: BotIdentity;
   BotWriter: BotWriter;
+  TurnAdmission: TurnAdmission;
   TurnResponse: TurnResponse;
   SettingsChangeCommand: SettingsChangeCommand;
   SettingsReceipt: SettingsReceipt;

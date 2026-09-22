@@ -50,7 +50,6 @@ import {
   decodeClientRunLookupV1,
   decodeClientRunListV1,
   decodeClientRunStopReceiptV1,
-  decodeClientTurnV1,
   projectClientRunLookupV1,
   projectClientRunListV1,
   projectClientRunV1,
@@ -296,6 +295,10 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
         reason: "no workspace in this test",
       }),
     run: ({ botId, command }) => state.run(botId, command),
+    admitRun: async ({ botId, command }) => {
+      const turn = await state.run(botId, command);
+      return { schemaVersion: 1 as const, runId: turn.runId };
+    },
     listRuns: ({ botId, query }) => state.listRuns(botId, query),
     lookupRun: ({ botId, query }) => state.lookupRun(botId, query),
     fenceRunAdmission: ({ botId, query }) =>
@@ -1845,37 +1848,42 @@ describe("Cloudflare user application gateway", () => {
         }),
       }),
     );
-    expect(turn.status).toBe(200);
-    const publicTurn: unknown = await turn.json();
-    expect(decodeClientTurnV1(publicTurn)).toMatchObject({
-      text: "Echo: hello workers",
-      events: expect.arrayContaining([
-        expect.objectContaining({
-          type: "tool/call",
-          call: expect.objectContaining({
-            name: "call_dynamic_tool",
-            // A first-party tool names itself to the client and nothing more:
-            // its arguments never leave the Bot.
-            input: { namespace: "frockbot", toolName: "echo" },
+    expect(turn.status).toBe(202);
+    expect((await turn.json()) as unknown).toEqual({
+      schemaVersion: 1,
+      runId: "workers-turn-1",
+    });
+    const lookup = await gateway(
+      request("/api/bots/primary/turns/workers-turn-1", "alice"),
+    );
+    expect(lookup.status).toBe(200);
+    const publicTurn: unknown = await lookup.json();
+    expect(decodeClientRunLookupV1(publicTurn)).toMatchObject({
+      state: "terminal",
+      run: {
+        responseText: "Echo: hello workers",
+        events: expect.arrayContaining([
+          expect.objectContaining({
+            type: "tool/call",
+            call: expect.objectContaining({
+              name: "call_dynamic_tool",
+              // A first-party tool names itself to the client and nothing more:
+              // its arguments never leave the Bot.
+              input: { namespace: "frockbot", toolName: "echo" },
+            }),
           }),
-        }),
-        expect.objectContaining({
-          type: "tool/result",
-          content: "hello workers",
-        }),
-        expect.objectContaining({
-          type: "send/to-user",
-          payload: { type: "text", text: "Echo: hello workers" },
-        }),
-      ]),
+          expect.objectContaining({
+            type: "tool/result",
+            content: "hello workers",
+          }),
+          expect.objectContaining({
+            type: "send/to-user",
+            payload: { type: "text", text: "Echo: hello workers" },
+          }),
+        ]),
+      },
     });
     const wire = JSON.stringify(publicTurn);
-    expect(Object.keys(publicTurn as Record<string, unknown>).sort()).toEqual([
-      "events",
-      "runId",
-      "schemaVersion",
-      "text",
-    ]);
     expect(wire).not.toContain("model/request");
     expect(wire).not.toContain("input/queued");
     expect(wire).not.toContain("tool-input-secret");
@@ -1928,7 +1936,7 @@ describe("Cloudflare user application gateway", () => {
           }),
         }),
       );
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(202);
     }
 
     const alpha = await gateway(request("/api/bots/alpha/turns", "alice"));
@@ -1955,7 +1963,7 @@ describe("Cloudflare user application gateway", () => {
         }),
       }),
     );
-    expect(admitted.status).toBe(200);
+    expect(admitted.status).toBe(202);
 
     const response = await gateway(
       request("/api/bots/primary/turns/lookup-turn-1", "alice"),
@@ -2105,7 +2113,7 @@ describe("Cloudflare user application gateway", () => {
           }),
         }),
       );
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(202);
       responses.push((await response.json()) as BotTurnResult);
     }
     expect(responses.every((response) => response.schemaVersion === 1)).toBe(
@@ -2142,7 +2150,7 @@ describe("Cloudflare user application gateway", () => {
           }),
         }),
       );
-      expect(response.status).toBe(200);
+      expect(response.status).toBe(202);
     }
 
     expect(new Set(loader.ids)).toEqual(
@@ -2902,8 +2910,11 @@ describe("Cross-origin access for configured clients", () => {
         }),
       }),
     );
-    expect(response.status).toBe(200);
-    expect(await response.json()).toMatchObject({ text: "Echo: hello mobile" });
+    expect(response.status).toBe(202);
+    expect((await response.json()) as unknown).toEqual({
+      schemaVersion: 1,
+      runId: "mobile-turn-1",
+    });
     expect(response.headers.get("access-control-allow-origin")).toBe(
       CLIENT_ORIGIN,
     );
