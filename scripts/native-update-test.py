@@ -108,6 +108,33 @@ class UpdatesTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "No Android build-tools aapt"):
                 updates.build_tool("aapt")
 
+    def test_build_tools_follow_the_sdk_the_build_wrote(self):
+        root = updates.STATE / "native"
+        sdk = updates.STATE / "flutter-sdk"
+        tool = sdk / "build-tools" / "36.0.0" / "aapt"
+        tool.parent.mkdir(parents=True)
+        tool.write_text("")
+        properties = root / "android" / "local.properties"
+        properties.parent.mkdir(parents=True)
+        properties.write_text(f"sdk.dir={sdk}\n")
+        env = {key: value for key, value in os.environ.items() if key not in ("ANDROID_HOME", "ANDROID_SDK_ROOT")}
+        with patch.object(updates, "NATIVE", root), patch.dict(os.environ, env, clear=True):
+            self.assertEqual(updates.build_tool("aapt"), tool)
+
+    def test_explicit_android_home_wins_over_the_build_sdk(self):
+        root = updates.STATE / "native"
+        chosen = updates.STATE / "chosen-sdk"
+        other = updates.STATE / "other-sdk"
+        for sdk in (chosen, other):
+            tool = sdk / "build-tools" / "36.0.0" / "aapt"
+            tool.parent.mkdir(parents=True)
+            tool.write_text("")
+        properties = root / "android" / "local.properties"
+        properties.parent.mkdir(parents=True)
+        properties.write_text(f"sdk.dir={other}\n")
+        with patch.object(updates, "NATIVE", root), patch.dict(os.environ, {"ANDROID_HOME": str(chosen)}):
+            self.assertEqual(updates.build_tool("aapt"), chosen / "build-tools/36.0.0/aapt")
+
     def test_download_and_no_directory_access(self):
         (updates.STATE / "release.apk").write_bytes(b"complete apk")
         (updates.STATE / "latest.json").write_text(json.dumps({"versionCode": 50, "file": "release.apk"}))
