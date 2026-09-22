@@ -24,6 +24,7 @@ import {
 import {
   decodeVoiceAssistantPcmEnvelopeV1,
   encodeVoiceAssistantPcmEnvelopeV1,
+  VOICE_ASSISTANT_PCM_HEADER_BYTES_V1,
 } from "@frockbot/app/voice/opening";
 import { GEMINI_VOICES_V1 } from "@frockbot/app/voice/appearance";
 import {
@@ -133,18 +134,24 @@ interface Opened {
   closed: Promise<{ code: number; reason: string }>;
 }
 
-function binaryFrameBytes(value: unknown): Uint8Array {
+function binaryFrameBytes(value: unknown): Uint8Array | undefined {
   if (value instanceof ArrayBuffer) return new Uint8Array(value);
   if (ArrayBuffer.isView(value)) {
     return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
   }
-  throw new Error("unexpected binary voice frame");
+  return undefined;
 }
 
 /** PCM payload length on the wire. The envelope is stripped, not metered. */
 function pcmPayloadBytes(value: unknown): number {
+  if (typeof Blob !== "undefined" && value instanceof Blob) {
+    return Math.max(0, value.size - VOICE_ASSISTANT_PCM_HEADER_BYTES_V1);
+  }
   const bytes = binaryFrameBytes(value);
-  return decodeVoiceAssistantPcmEnvelopeV1(bytes)?.pcm.byteLength ?? bytes.byteLength;
+  if (!bytes) throw new Error("unexpected binary voice frame");
+  return (
+    decodeVoiceAssistantPcmEnvelopeV1(bytes)?.pcm.byteLength ?? bytes.byteLength
+  );
 }
 
 async function open(
