@@ -38,6 +38,12 @@ import {
   decodeUserFeaturesV1,
   type UserFeaturesV1,
 } from "@frockbot/app/admin/shared";
+import {
+  decodeAccountPreparationStampV1,
+  decodeAccountPreparationV1,
+  type AccountPreparationStampV1,
+  type AccountPreparationV1,
+} from "@frockbot/app/shell/prepared-inputs";
 import { appletRpcSnapshotV1 } from "@frockbot/app/applets-host/records";
 import {
   decodeDirectoryViewV1,
@@ -588,6 +594,71 @@ export function userAccountFeaturesReaderV1(
  * One read answers every feature gate, so a Turn asks the User object once
  * rather than once per switch.
  */
+function userConfigurationRpc(state: ShellBotStateV1, userId: string) {
+  const id = state.env.USER_CONFIGURATIONS.idFromName(userId);
+  return state.env.USER_CONFIGURATIONS.get(id);
+}
+
+/** Account configuration, features and Composition, one User-object call. */
+export async function prepareAccountV1(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+): Promise<AccountPreparationV1> {
+  return decodeAccountPreparationV1(
+    await userConfigurationRpc(state, identity.userId).prepareAccount({
+      schemaVersion: 1,
+      userId: identity.userId,
+    }),
+  );
+}
+
+/** The revision stamp gathered a moment later, to see whether it moved. */
+export async function readAccountPreparationStampV1(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+): Promise<AccountPreparationStampV1> {
+  return decodeAccountPreparationStampV1(
+    await userConfigurationRpc(
+      state,
+      identity.userId,
+    ).readAccountPreparationStamp({
+      schemaVersion: 1,
+      userId: identity.userId,
+    }),
+  );
+}
+
+/**
+ * Whether the Connection a Turn admitted is still permitted. Revocation and a
+ * generation change refuse the call; a failed read refuses it too.
+ */
+export async function connectionStillPermittedV1(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+  connection: { connectionId: string; generation?: string },
+): Promise<boolean> {
+  try {
+    const current = await userConfigurationRpc(
+      state,
+      identity.userId,
+    ).getConnection({
+      schemaVersion: 1,
+      userId: identity.userId,
+      connectionId: connection.connectionId,
+    });
+    if (!current || typeof current !== "object") return false;
+    const view = current as { state?: unknown; generation?: unknown };
+    return (
+      view.state === "ready" &&
+      (connection.generation === undefined
+        ? view.generation === undefined
+        : view.generation === connection.generation)
+    );
+  } catch {
+    return false;
+  }
+}
+
 export async function userAccountFeaturesV1(
   state: ShellBotStateV1,
   identity: BotIdentity,

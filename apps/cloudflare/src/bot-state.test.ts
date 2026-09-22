@@ -6,7 +6,10 @@ import {
 import type { UserSettingsViewV1 } from "@frockbot/core/configuration";
 import type { StoredRun } from "@frockbot/app/shell/backend-contracts";
 import { randomAvatarAppearanceV1 } from "@frockbot/app/flock/shared";
-import { memoryUserCompositionV1 } from "@frockbot/app/composition/user.fixture";
+import {
+  accountPreparationRpcV1,
+  memoryUserCompositionV1,
+} from "@frockbot/app/composition/user.fixture";
 import type { BotStateEnv } from "./bot-state.js";
 import { hydrateStoredRunEventsV1 } from "../test/session-log-probe.js";
 
@@ -176,6 +179,7 @@ describe("BotState Ollama execution", () => {
     };
     const leases: Array<Record<string, unknown>> = [];
     const settlements: Array<Record<string, unknown>> = [];
+    const userComposition = memoryUserCompositionV1();
     const rpc = {
       getBotRegistration: () =>
         Promise.resolve({
@@ -186,6 +190,7 @@ describe("BotState Ollama execution", () => {
           avatar: randomAvatarAppearanceV1(() => 0),
         }),
       readConfiguration: () => Promise.resolve(structuredClone(user)),
+      ...accountPreparationRpcV1(() => user, userComposition),
       listBots: () =>
         Promise.resolve({ schemaVersion: 1 as const, revision: 0, bots: [] }),
       deliverPush: () => Promise.resolve(),
@@ -259,8 +264,6 @@ describe("BotState Ollama execution", () => {
         ),
       );
     }) as typeof fetch;
-    // The Composition is the User's, so the Bot mirrors it from here.
-    const userComposition = memoryUserCompositionV1();
     const env = {
       CREDENTIAL_KEYRING: credentialKeyring,
       USER_CONFIGURATIONS: {

@@ -99,7 +99,9 @@ import {
   DurableWorkspaceGenerations,
 } from "@frockbot/core/durable";
 import {
+  COMPOSITION_CURRENT_KEY,
   decodeCompositionGenerationV1,
+  decodeCompositionPinV1,
   type CompositionFailureInputV1,
   type CompositionOriginV1,
 } from "@frockbot/core/durable";
@@ -802,6 +804,71 @@ export class UserConfiguration
           .map((pkg) => pkg.packageId),
       },
     );
+  }
+
+  /**
+   * Configuration, features and Composition in one call. Secrets and
+   * credential leases stay on their own RPCs. Composition reconciliation can
+   * fail without dropping the settings the Turn still needs.
+   */
+  async prepareAccount(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    const features = decodeUserFeaturesV1(
+      (await this.ctx.storage.get<unknown>(USER_FEATURES_KEY)) ??
+        defaultUserFeaturesV1(),
+    );
+    const settings = await (
+      await this.settingsContribution()
+    ).readConfiguration({ schemaVersion: 1, userId });
+    let composition:
+      Awaited<ReturnType<typeof readUserCompositionV1>> | undefined;
+    try {
+      composition = await readUserCompositionV1(
+        { ctx: this.ctx },
+        {
+          userId,
+          catalog: this.env.BOT_PACKAGES
+            ? DEPLOYMENT_PLUGIN_CATALOG_V1
+            : ([] as typeof DEPLOYMENT_PLUGIN_CATALOG_V1),
+          adminOpened: features.plugins,
+          installedPackageIds: settings.packages
+            .filter((pkg) => pkg.state === "installed")
+            .map((pkg) => pkg.packageId),
+        },
+      );
+    } catch {
+      composition = undefined;
+    }
+    return {
+      schemaVersion: 1 as const,
+      features,
+      settings,
+      ...(composition ? { composition } : {}),
+    };
+  }
+
+  /** Revision stamps only. Does not reconcile Composition or bootstrap packages. */
+  async readAccountPreparationStamp(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertUserIdentity(request.userId as string);
+    const features = decodeUserFeaturesV1(
+      (await this.ctx.storage.get<unknown>(USER_FEATURES_KEY)) ??
+        defaultUserFeaturesV1(),
+    );
+    const settings = await (await this.settingsContribution()).readSnapshot();
+    const pin = await this.ctx.storage.get<unknown>(COMPOSITION_CURRENT_KEY);
+    return {
+      schemaVersion: 1 as const,
+      revision: settings.revision,
+      features: {
+        applets: features.applets,
+        pluginAuthoring: features.pluginAuthoring,
+        plugins: [...features.plugins],
+      },
+      compositionGenerationId:
+        pin === undefined ? "" : decodeCompositionPinV1(pin).generationId,
+    };
   }
 
   async readCompositionGeneration(input: unknown) {

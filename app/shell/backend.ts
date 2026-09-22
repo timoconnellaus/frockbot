@@ -25,7 +25,6 @@ import {
   settleScheduledWork,
 } from "@frockbot/app/routines/bot";
 import {
-  admittedBotSettingsV1,
   materializeBotSettingsV1,
   readBotSettingsV1,
 } from "@frockbot/app/settings/bot";
@@ -48,8 +47,10 @@ import type {
 import {
   admitRun,
   alarm,
+  assertAdmittedPreparationV1,
   executeTurn,
   fenceRunAdmission,
+  preparedInputsForAdmissionV1,
   resolveAdmissionSnapshot,
   run,
 } from "./turn.js";
@@ -65,12 +66,13 @@ export class ShellBotBackendContribution {
     this.state = new ShellBotStateV1(host, (state) => ({
       resolveAdmissionSnapshot: (command) =>
         resolveAdmissionSnapshot(state, command),
+      preparedInputs: (snapshot) => preparedInputsForAdmissionV1(snapshot),
       bootstrapComposition: () =>
         Promise.resolve(
           bootstrapCompositionGeneration(new Date().toISOString()),
         ),
       admittedSnapshot: (transaction, resolved) =>
-        admittedBotSettingsV1(transaction, resolved),
+        assertAdmittedPreparationV1(transaction, resolved),
       executeTurn: (input) => executeTurn(state, input),
       eventRecords: messageRecords,
       eventsCommitted: () => host.messagesCommitted?.(),

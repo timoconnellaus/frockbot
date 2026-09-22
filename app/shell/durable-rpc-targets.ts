@@ -33,6 +33,11 @@ export interface BotUserConfigurationRpcTargetV1
   extends Rpc.DurableObjectBranded {
   readFeatures(input: UserRpcEnvelopeV1): Promise<object>;
   readConfiguration(input: UserRpcEnvelopeV1<{ view: 2 }>): Promise<object>;
+  prepareAccount(input: UserRpcEnvelopeV1): Promise<object>;
+  readAccountPreparationStamp(input: UserRpcEnvelopeV1): Promise<object>;
+  getConnection(
+    input: UserRpcEnvelopeV1<{ connectionId: string }>,
+  ): Promise<object | undefined>;
   executeConfiguration(
     input: UserRpcEnvelopeV1<{
       command: Extract<ConfigurationCommandV1, { type: `user/${string}` }>;

@@ -11,6 +11,7 @@ import {
   migrateStoredBotSettingsV1,
   type BotSettingsViewV1,
 } from "@frockbot/core/configuration";
+import { decodePreparedTurnInputsV1 } from "./prepared-inputs.js";
 
 export {
   botStopCommandFingerprintV1,
@@ -40,6 +41,7 @@ export const storedRunCodecV1: StoredRunCodecV1<BotSettingsViewV1> =
     decodeRunId: decodeRunIdV1,
     decodeConfigurationSnapshot: (stored) =>
       decodeBotSettingsViewV1(migrateStoredBotSettingsV1(stored)),
+    decodePreparedInputs: (stored) => decodePreparedTurnInputsV1(stored),
   });
 
 export function requireStoredRunV1(input: unknown): StoredRun {

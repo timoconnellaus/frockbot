@@ -14,12 +14,16 @@ import {
 import {
   activateCompositionV1,
   ACTIVE_RUN_KEY,
+  COMPOSITION_CURRENT_KEY,
+  decodeCompositionPinV1,
   IDENTITY_KEY,
+  requireConversationHeadV1,
   RUN_PREFIX,
   SessionEventLog,
   STORED_EFFECT_ADMISSIONS_MAX,
   storedRunRecordV2,
   storedRunIsRoutineDeliveryV1,
+  workingContextHeadKeyV1,
   type BotIdentity,
   type BotTurnExecutionInput,
   type CompositionFailureV1,
@@ -46,7 +50,13 @@ import { isolateMountOptions } from "@frockbot/app/isolates/bot";
 import { settlePluginHealthV1 } from "@frockbot/app/plugins/health";
 import { pendingBotInputPreambleV1 } from "@frockbot/app/routines/inbox";
 import { requeueDrainedInputsV1 } from "@frockbot/app/routines/inbox-store";
-import { resolveExecutionContextV1 } from "@frockbot/app/settings/bot";
+import {
+  admittedBotSettingsV1,
+  prepareAccountV1,
+  readAccountPreparationStampV1,
+  readBotSettingsV1,
+} from "@frockbot/app/settings/bot";
+import { readPluginEnablementV1 } from "@frockbot/app/plugins/enablement";
 import {
   createShellCompositionHost,
   type ShellAppletMountOptions,
@@ -67,6 +77,14 @@ import type { ShellBotStateV1 } from "./backend-state.js";
 import { yieldCompactionWorkV1 } from "./compaction-scheduler.js";
 import { notificationIdV1 } from "./notification-id.js";
 import { agentRuntime } from "./runtime-mount.js";
+import {
+  decodePreparedTurnInputsV1,
+  gatherPreparedTurnInputsV1,
+  pluginSkillsFromMembersV1,
+  PreparationConflictError,
+  type PreparedTurnInputsV1,
+  type PreparationPortsV1,
+} from "./prepared-inputs.js";
 import {
   createClientRunStopReceiptV1,
   decodeClientRunLookupQueryV1,
@@ -246,6 +264,10 @@ export async function executeTurn(
   // than holding it. Free when none is running, and an abort when one is, so
   // this Turn is the only writer of the session log.
   await yieldCompactionWorkV1(input.command.sessionId);
+  if (input.preparedInputs === undefined) {
+    throw new Error("this Turn has no admitted preparation");
+  }
+  const prepared = decodePreparedTurnInputsV1(input.preparedInputs);
   const settings = input.configurationSnapshot;
   const turn = {
     runId: input.command.runId,
@@ -297,6 +319,7 @@ export async function executeTurn(
     settings,
     input.admittedRequest,
     turn,
+    prepared,
   );
   const promptParts = [
     `You are ${settings.profile.name}.`,
@@ -324,6 +347,16 @@ export async function executeTurn(
     : undefined;
   const host: CompositionMountHost<ShellMountedComposition> = {
     mount: async (mounting, signal) => {
+      // Skills follow this mount, including a fail-closed fallback. The array
+      // is the one the Skills host already holds, filled before features run.
+      runtime.pluginSkills.splice(
+        0,
+        runtime.pluginSkills.length,
+        ...pluginSkillsFromMembersV1(
+          mounting.members,
+          runtime.pluginEnablement,
+        ),
+      );
       // The User installed the set; which of it this Bot runs is its own map,
       // and that is also what decides the worker's egress policy.
       const enabled = enabledSeededPluginIdsV1(
@@ -427,6 +460,12 @@ export async function executeTurn(
       activation.fallback.generationId,
     );
   }
+  await recordMountedPreparationV1(
+    state,
+    input.command.runId,
+    prepared,
+    activation.mounted.generation.generationId,
+  );
   // The exact resident Agent this Turn runs on, so a durable Stop reaches
   // that run and never a different one.
   const active = {
@@ -580,11 +619,128 @@ async function recordCompositionFailureNotification(
   });
 }
 
+const preparedForAdmission = new WeakMap<
+  BotSettingsViewV1,
+  PreparedTurnInputsV1
+>();
+
+function preparationPorts(
+  state: ShellBotStateV1,
+  command: OwnedBotTurnCommand,
+): PreparationPortsV1 {
+  const readHead = async () => {
+    const stored = await state.ctx.storage.get(
+      workingContextHeadKeyV1(command.sessionId),
+    );
+    return requireConversationHeadV1(stored, command.sessionId);
+  };
+  return {
+    readAccount: () => prepareAccountV1(state, command),
+    readAccountStamp: () => readAccountPreparationStampV1(state, command),
+    readBot: async () => {
+      const [settings, enablement, head] = await Promise.all([
+        readBotSettingsV1(state, command),
+        readPluginEnablementV1(state.ctx.storage),
+        readHead(),
+      ]);
+      return {
+        settings,
+        enablement,
+        contextRevision: head?.revision ?? 0,
+        contextSequence: head?.nextSeq ?? 0,
+      };
+    },
+    readBotStamp: async () => {
+      const [settings, enablement, pin] = await Promise.all([
+        readBotSettingsV1(state, command),
+        readPluginEnablementV1(state.ctx.storage),
+        state.ctx.storage.get(COMPOSITION_CURRENT_KEY),
+      ]);
+      return {
+        settingsRevision: settings.revision,
+        pluginEnablementRevision: enablement.revision,
+        compositionGenerationId:
+          pin === undefined ? "" : decodeCompositionPinV1(pin).generationId,
+      };
+    },
+    adoptComposition: async (snapshot) => {
+      await state.authority.composition.adopt(snapshot);
+    },
+    ensureComposition: async () => {
+      await state.authority.composition.materialize();
+      return state.authority.composition.current();
+    },
+  };
+}
+
 export async function resolveAdmissionSnapshot(
   state: ShellBotStateV1,
   command: OwnedBotTurnCommand,
 ): Promise<BotSettingsViewV1> {
-  return (await resolveExecutionContextV1(state, command)).settings;
+  const prepared = await gatherPreparedTurnInputsV1(
+    { userId: command.userId, botId: command.botId },
+    preparationPorts(state, command),
+  );
+  preparedForAdmission.set(prepared.bot.settings, prepared);
+  return prepared.bot.settings;
+}
+
+/** Bot-local revisions still match the value admission is about to store. */
+export async function assertAdmittedPreparationV1(
+  transaction: DurableObjectTransaction,
+  resolved: BotSettingsViewV1,
+): Promise<BotSettingsViewV1> {
+  const prepared = preparedForAdmission.get(resolved);
+  const settings = await admittedBotSettingsV1(transaction, resolved);
+  if (!prepared) return settings;
+  if (settings.revision !== prepared.bot.revision) {
+    throw new PreparationConflictError("bot settings");
+  }
+  const enablement = await readPluginEnablementV1(transaction);
+  if (enablement.revision !== prepared.bot.pluginEnablementRevision) {
+    throw new PreparationConflictError("plugin enablement");
+  }
+  const pin = await transaction.get(COMPOSITION_CURRENT_KEY);
+  const generationId =
+    pin === undefined ? "" : decodeCompositionPinV1(pin).generationId;
+  if (generationId !== prepared.composition.requestedGenerationId) {
+    throw new PreparationConflictError("composition");
+  }
+  return settings;
+}
+
+export function preparedInputsForAdmissionV1(
+  settings: BotSettingsViewV1,
+): PreparedTurnInputsV1 | undefined {
+  return preparedForAdmission.get(settings);
+}
+
+/** The generation activation actually mounted, on the admitted preparation. */
+async function recordMountedPreparationV1(
+  state: ShellBotStateV1,
+  runId: string,
+  prepared: PreparedTurnInputsV1,
+  mountedGenerationId: string,
+): Promise<void> {
+  if (prepared.composition.mountedGenerationId === mountedGenerationId) return;
+  const next = decodePreparedTurnInputsV1({
+    ...prepared,
+    composition: {
+      ...prepared.composition,
+      mountedGenerationId,
+    },
+  });
+  await state.ctx.storage.transaction(async (transaction) => {
+    const key = `${RUN_PREFIX}${runId}`;
+    const stored = await transaction.get<unknown>(key);
+    if (stored === undefined) return;
+    const run = requireStoredRunV1(stored);
+    if (run.status !== "running") return;
+    await transaction.put(
+      key,
+      storedRunRecordV2({ ...run, preparedInputs: next }),
+    );
+  });
 }
 
 export async function alarm(state: ShellBotStateV1): Promise<void> {

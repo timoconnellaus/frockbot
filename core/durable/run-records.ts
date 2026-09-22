@@ -14,6 +14,8 @@ import {
 export interface StoredRunCodecOptionsV1<Snapshot> {
   decodeRunId(value: unknown): string;
   decodeConfigurationSnapshot(value: unknown): Snapshot;
+  /** Validates the admission preparation when a run carries one. */
+  decodePreparedInputs?(value: unknown): unknown;
 }
 
 export interface StoredRunCodecV1<Snapshot> {
@@ -237,6 +239,12 @@ export interface StoredRunV1<Snapshot = unknown> {
    */
   mountedCompositionGenerationId?: string;
   /**
+   * Account, Bot, Composition and context versions this Turn was admitted
+   * under. Absent on a record that has not been prepared; execution refuses
+   * those rather than substituting the live account.
+   */
+  preparedInputs?: unknown;
+  /**
    * Set once a `model/request` is durable. Supersede reads this header instead
    * of the journal: a Turn that has not dispatched is left to finish.
    */
@@ -413,6 +421,7 @@ const STORED_RUN_OPTIONAL_KEYS = [
   "messageAdmittedAt",
   "mountedCompositionGenerationId",
   "hasModelIntent",
+  "preparedInputs",
 ] as const;
 const UTF8_ENCODER = new TextEncoder();
 
@@ -930,6 +939,19 @@ function requireStoredRunRecordV1<Snapshot>(
   const configurationSnapshot = options.decodeConfigurationSnapshot(
     candidate.configurationSnapshot,
   );
+  let preparedInputs: unknown;
+  if (candidate.preparedInputs !== undefined) {
+    if (
+      !candidate.preparedInputs ||
+      typeof candidate.preparedInputs !== "object" ||
+      Array.isArray(candidate.preparedInputs)
+    ) {
+      throw new Error(`run "${runId}" has invalid prepared inputs`);
+    }
+    preparedInputs = options.decodePreparedInputs
+      ? options.decodePreparedInputs(candidate.preparedInputs)
+      : candidate.preparedInputs;
+  }
   if (
     candidate.responseText !== undefined &&
     !boundedString(candidate.responseText, 64_000, true)
@@ -1010,6 +1032,7 @@ function requireStoredRunRecordV1<Snapshot>(
     ...(candidate.hasModelIntent === true
       ? { hasModelIntent: true as const }
       : {}),
+    ...(preparedInputs === undefined ? {} : { preparedInputs }),
     configurationSnapshot,
     previousEventCount: candidate.previousEventCount as number,
     ...(candidate.responseText === undefined

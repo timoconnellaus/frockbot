@@ -20,6 +20,7 @@ import type {
   UserCompositionRpcV1,
   UserCompositionSnapshotV1,
 } from "./user.js";
+import { withStablePreparationV1 } from "@frockbot/app/shell/prepared-inputs";
 
 /**
  * The User object's Composition RPCs, addressed by this Bot's User. The User
@@ -85,11 +86,7 @@ export async function admitTurnV1(
   state: ShellBotStateV1,
   command: OwnedBotTurnCommand,
 ): Promise<BotTurnCompletion> {
-  await syncCompositionFromUser(state, {
-    userId: command.userId,
-    botId: command.botId,
-  });
-  return state.authority.run(command);
+  return withStablePreparationV1(() => state.authority.run(command));
 }
 
 /**
@@ -100,11 +97,7 @@ export async function admitTurnCommandV1(
   state: ShellBotStateV1,
   command: OwnedBotTurnCommand,
 ): Promise<import("@frockbot/core/durable").RunAdmissionReceiptV1> {
-  await syncCompositionFromUser(state, {
-    userId: command.userId,
-    botId: command.botId,
-  });
-  return state.authority.admit(command);
+  return withStablePreparationV1(() => state.authority.admit(command));
 }
 
 /**

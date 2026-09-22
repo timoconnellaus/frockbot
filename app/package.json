@@ -201,6 +201,7 @@
     "./shell/identity": "./shell/identity.ts",
     "./shell/moment": "./shell/moment.ts",
     "./shell/notification-id": "./shell/notification-id.ts",
+    "./shell/prepared-inputs": "./shell/prepared-inputs.ts",
     "./shell/reads": "./shell/reads.ts",
     "./shell/reply-to-caller": "./shell/reply-to-caller.ts",
     "./shell/run-cursor": "./shell/run-cursor.ts",
