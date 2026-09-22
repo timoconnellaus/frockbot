@@ -59,6 +59,7 @@ import {
 import {
   VoiceLedgerV1,
   voiceCallIsStaleV1,
+  voiceCallRejoinWindowMsV1,
   voiceTurnOrdinalV1,
   type VoiceCallRecordV1,
   type VoiceDelegationRecordV1,
@@ -98,7 +99,6 @@ import {
   VOICE_ASSISTANT_METER_BLOCK_SECONDS_V1,
   VOICE_ASSISTANT_OUTPUT_BYTES_PER_SECOND_V1,
   VOICE_ASSISTANT_OUTPUT_SAMPLE_RATE_V1,
-  VOICE_ASSISTANT_REJOIN_WINDOW_MS_V1,
   VOICE_ASSISTANT_SERVER_IDLE_SLEEP_MS_V1,
   VOICE_DICTATION_LEASE_RENEW_MS_V1,
   VOICE_DICTATION_RESERVE_SECONDS_V1,
@@ -906,7 +906,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         await this.deliverCallTranscript(current);
         await this.ledger().endStaleCall(now);
       } else {
-        await this.scheduleCallAbandon(current.callId);
+        await this.scheduleCallAbandon(current);
       }
     }
     const protectedCalls = new Set(
@@ -1040,17 +1040,22 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
 
   /**
    * A socket closed without the person ending the call. The call is left
-   * live for the rejoin window — a network change must not cost them the
-   * conversation — and this alarm is what finishes it if nobody comes back.
+   * live for its rejoin window — a network change must not cost them the
+   * conversation, and a Pause whose socket the OS then killed is still
+   * that call — and this alarm is what finishes it if nobody comes back.
    */
   private async scheduleCallAbandon(
-    callId: string,
+    call: VoiceCallRecordV1,
     idempotent = true,
   ): Promise<void> {
+    const remaining =
+      Date.parse(call.lastSeenAt) +
+      voiceCallRejoinWindowMsV1(call) -
+      this.now().getTime();
     await this.schedule<MemoryFinalizationPayload>(
-      Math.ceil(VOICE_ASSISTANT_REJOIN_WINDOW_MS_V1 / 1000) + 5,
+      Math.max(1, Math.ceil(remaining / 1000)) + 5,
       "abandonVoiceCall",
-      { callId },
+      { callId: call.callId },
       { idempotent },
     );
   }
@@ -1067,7 +1072,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     if (this.liveCallFor(call.callId)) return;
     if (!voiceCallIsStaleV1(call, this.now())) {
       // Somebody rejoined and has spoken since. Look again after the window.
-      await this.scheduleCallAbandon(call.callId, false);
+      await this.scheduleCallAbandon(call, false);
       return;
     }
     this.traceMemory("call-abandoned", { call: call.callId });
@@ -1350,12 +1355,18 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     // A socket going is not the person hanging up. The session is closed and
     // its meter settled at once, but the call record stays: a client that
     // comes straight back from a network change continues this conversation
-    // rather than starting a new one with nothing behind it. The alarm below
-    // is what ends it, and hands it to memory, if nobody comes back.
+    // rather than starting a new one with nothing behind it. A Pause whose
+    // socket the OS then killed is the same record, on the long window,
+    // written here before the in-memory call is dropped so a race with the
+    // sleep frame cannot expire it in a minute.
+    const live = this.#calls.get(connection.id);
+    if (live?.paused) {
+      await this.ledger().setCallPaused(connection.id, true, this.now());
+    }
     await this.releaseCallResources(connection.id);
     const current = await this.ledger().currentCall();
     if (current && current.connectionId === connection.id) {
-      await this.scheduleCallAbandon(current.callId);
+      await this.scheduleCallAbandon(current);
     }
     this.#traced.delete(connection.id);
     this.#targets.delete(connection.id);
@@ -1453,10 +1464,16 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     switch (custom.type) {
       case "voice/sleep":
         call.paused = custom.paused === true;
+        await this.ledger().setCallPaused(
+          connection.id,
+          call.paused,
+          this.now(),
+        );
         await this.sleepSession(connection, call);
         break;
       case "voice/wake":
         call.paused = false;
+        await this.ledger().setCallPaused(connection.id, false, this.now());
         if (!call.muted && !call.exhausted) {
           await this.wakeSession(connection, call);
         }
@@ -1572,7 +1589,8 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   // -- call lifecycle -------------------------------------------------------
 
   /**
-   * `start_call`: admits the call in the ledger, then opens the session.
+   * `start_call`: admits the call in the ledger, then opens the session
+   * unless this is a Pause coming back — Gemini stays closed until Resume.
    *
    * Everything durable happens before the socket to Google does, because the
    * record is what an eviction leaves behind and the socket is not.
@@ -1684,7 +1702,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         this.timingSink(connection),
       ),
       muted: false,
-      paused: false,
+      paused: admission.call.paused === true,
       exhausted: false,
       quotaSaid: false,
       status: "idle",
@@ -1724,6 +1742,14 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       format: "pcm16",
       sampleRate: VOICE_ASSISTANT_OUTPUT_SAMPLE_RATE_V1,
     });
+    // A Pause coming back is still that call, and Gemini stays closed until
+    // Resume: opening it here would bill the empty room. Listening is the
+    // call being up, not the model being on the line.
+    if (call.paused) {
+      this.setStatus(connection, call, "listening");
+      this.sendState(connection, call);
+      return;
+    }
     await this.openSession(connection, call, {});
   }
 

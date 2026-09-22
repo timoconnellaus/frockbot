@@ -11,6 +11,7 @@ import {
   VOICE_METER_CAPS_V1,
   VOICE_DELEGATION_PREFIX_V1,
   voiceMeterDayV1,
+  type VoiceCallRecordV1,
   type VoiceDelegationRecordV1,
   type VoiceMeterV1,
   type VoiceTurnRecordV1,
@@ -893,6 +894,79 @@ describe("pausing and coming back", () => {
     );
     expect(refusal).toMatchObject({ code: "superseded" });
     await first.waitFor(status("idle"), "the older call going idle");
+  });
+
+  test("a paused socket that drops still rejoins after the short window", async () => {
+    const userId = `voice-paused-rejoin-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const first = await open(userId, {}, "phone");
+    await startCall(first);
+    await first.waitFor(state("awake"), "awake");
+    const callId = await callIdOf(stub);
+    first.socket.send(
+      JSON.stringify({
+        schemaVersion: 1,
+        type: "voice/sleep",
+        paused: true,
+      }),
+    );
+    await first.waitFor(state("asleep"), "asleep");
+    first.socket.close();
+    await first.closed;
+    await stub.probeSetNow(new Date(Date.now() + 10 * 60_000).toISOString());
+    const second = await open(userId, {}, "phone");
+    await startCall(second);
+    const current = Object.values(
+      await stub.probeStorage("voice:call:"),
+    )[0] as VoiceCallRecordV1;
+    expect(current.callId).toBe(callId);
+    expect(current.paused).toBe(true);
+    expect(await stub.probeUpstreamCount()).toBe(1);
+    await second.waitFor(state("asleep"), "still asleep after the rejoin");
+    second.socket.send(
+      JSON.stringify({ schemaVersion: 1, type: "voice/wake" }),
+    );
+    await eventually(
+      async () => await stub.probeUpstreamCount(),
+      (count) => count === 2,
+      "Resume reopened Gemini",
+    );
+  });
+
+  test("a paused drop past a day is a new call", async () => {
+    const userId = `voice-paused-stale-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const first = await open(userId, {}, "phone");
+    await startCall(first);
+    await first.waitFor(state("awake"), "awake");
+    const callId = await callIdOf(stub);
+    first.socket.send(
+      JSON.stringify({
+        schemaVersion: 1,
+        type: "voice/sleep",
+        paused: true,
+      }),
+    );
+    await first.waitFor(state("asleep"), "asleep");
+    first.socket.close();
+    await first.closed;
+    await stub.probeSetNow(
+      new Date(Date.now() + 25 * 60 * 60_000).toISOString(),
+    );
+    await stub.probeAbandonCall(callId);
+    await eventually(
+      () => stub.probeMemoryJobs(),
+      (jobs) => jobs.some((job) => job.callId === callId),
+      "the paused call's abandoned memory job",
+    );
+    const second = await open(userId, {}, "phone");
+    await startCall(second);
+    const current = Object.values(
+      await stub.probeStorage("voice:call:"),
+    )[0] as VoiceCallRecordV1;
+    expect(current.callId).not.toBe(callId);
+    expect(current.paused).toBeUndefined();
+    second.socket.close();
   });
 });
 

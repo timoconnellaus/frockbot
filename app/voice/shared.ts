@@ -112,8 +112,25 @@ export const VOICE_ASSISTANT_MAX_DELEGATIONS_PER_TURN_V1 = 8;
  * policy about the person's own device coming back, and the 1008 is what
  * actually decides between resuming a session and opening a fresh one with a
  * handover.
+ *
+ * A live conversation uses this short window — a network flap continues the
+ * call, a longer gap is a new one. A Pause, or the app leaving the screen,
+ * uses the paused window instead: Gemini is
+ * already closed, nothing is billed, and the person is coming back to the
+ * same day rather than recovering from a drop.
  */
 export const VOICE_ASSISTANT_REJOIN_WINDOW_MS_V1 = 60_000;
+/**
+ * How long a paused call stays on the ledger after its socket goes.
+ *
+ * Pause and leaving the app both close Gemini first, so a socket the OS
+ * then kills is not a hang-up. The same device coming back inside this
+ * window continues the conversation; past it, the abandoned-call alarm
+ * ends it the way the short window does for a live drop. Twenty-four
+ * hours, not a calendar day: the meters still roll at UTC midnight, and
+ * a call that crossed that line is still this call until they hang up.
+ */
+export const VOICE_ASSISTANT_PAUSED_REJOIN_WINDOW_MS_V1 = 24 * 60 * 60_000;
 
 // ---------------------------------------------------------------------------
 // Dictation frames

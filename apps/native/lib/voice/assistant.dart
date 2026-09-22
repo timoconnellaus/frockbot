@@ -21,16 +21,19 @@
 /// few seconds, not the end of the call. An error that carries a `code` is the
 /// call itself failing — the server has already ended it — and so is a
 /// refusal or this client's own failure. The server's end of the socket
-/// finishing first also ends the call, without anything having failed: the
-/// surface says it has ended rather than going on claiming a live call.
+/// finishing first ends a live conversation the same way. A Pause, or the
+/// app off screen, keeps the call and opens a new socket when they come
+/// back.
 ///
 /// Nothing here caps how long a call may last. A sleeping upstream costs
 /// nothing, so the footer may stay open silently for hours; what the server
 /// meters is what it spends, and it says so itself.
 ///
-/// There is no reconnect loop. A refused initial connect is retried once;
-/// a timeout is not. Then an error the person can act on — a client that
-/// reconnects forever is a client that spends money forever.
+/// A refused initial connect is retried once; a timeout is not. Then an
+/// error the person can act on — a client that reconnects forever is a
+/// client that spends money forever. A socket that dies while the person
+/// paused, or while the app is off screen, is not that: the call stays up
+/// and [enterForeground] opens a new socket onto the same durable call.
 library;
 
 import 'dart:async';
@@ -230,6 +233,11 @@ class AssistantSessionController extends ChangeNotifier {
   /// microphone is not held in the background.
   bool _away = false;
   bool _pausedForAway = false;
+
+  /// Completes when a reconnect's `start_call` has gone out, so Resume
+  /// cannot beat the handshake.
+  Completer<void>? _handshake;
+  Future<void>? _rejoining;
 
   /// How long a notice about the last reply stays on the call's surface.
   static const noticeDuration = Duration(seconds: 4);
@@ -431,7 +439,7 @@ class AssistantSessionController extends ChangeNotifier {
     _inbound = socket.messages.listen(
       _onMessage,
       onError: (Object _) => unawaited(_fail('Voice stopped. Try again.')),
-      onDone: () => unawaited(_ended()),
+      onDone: () => unawaited(_socketDropped()),
     );
     _armStartTimer();
   }
@@ -485,8 +493,13 @@ class AssistantSessionController extends ChangeNotifier {
   /// One attempt gets the full connect timeout. A timeout is the object
   /// still starting, so it is not retried — a second upgrade would only
   /// race the first. A refused socket is retried once, then it is an
-  /// error, not a loop.
-  Future<VoiceSocket?> _connectOnce(int generation) async {
+  /// error, not a loop. A reconnect whose upgrade fails is not that
+  /// error: the call is still up, and the next return to the screen tries
+  /// again.
+  Future<VoiceSocket?> _connectOnce(
+    int generation, {
+    bool fatal = true,
+  }) async {
     var attempts = 0;
     Future<VoiceSocket> attempt() async {
       final at = ++attempts;
@@ -515,7 +528,11 @@ class AssistantSessionController extends ChangeNotifier {
       return await attempt();
     } on TimeoutException {
       if (generation != _generation || _disposed) return null;
-      await _fail('Couldn’t reach voice. Check your connection and try again.');
+      if (fatal) {
+        await _fail(
+          'Couldn’t reach voice. Check your connection and try again.',
+        );
+      }
       return null;
     } on Object {
       if (generation != _generation || _disposed) return null;
@@ -523,9 +540,11 @@ class AssistantSessionController extends ChangeNotifier {
         return await attempt();
       } on Object {
         if (generation != _generation || _disposed) return null;
-        await _fail(
-          'Couldn’t reach voice. Check your connection and try again.',
-        );
+        if (fatal) {
+          await _fail(
+            'Couldn’t reach voice. Check your connection and try again.',
+          );
+        }
         return null;
       }
     }
@@ -803,9 +822,12 @@ class AssistantSessionController extends ChangeNotifier {
 
   /// `hello` and `start_call`, once the server has welcomed and the
   /// microphone is open: the opening audio goes up behind them in order.
+  /// A reconnect while paused or muted has no microphone yet and still
+  /// starts the call — Gemini stays asleep until Resume or unmute.
   void _beginCall() {
     final socket = _socket;
-    if (socket == null || !_welcomed || _started || _frames == null) return;
+    if (socket == null || !_welcomed || _started) return;
+    if (_frames == null && !muted && !_paused) return;
     socket.sendText(encodeAssistantHelloV1());
     // Who the call is with, before it starts: the SDK's own frame has no
     // room for it, and the server needs it to build the first prompt.
@@ -822,6 +844,13 @@ class AssistantSessionController extends ChangeNotifier {
       socket.sendBinary(_opening.removeFirst());
     }
     _openingBytes = 0;
+    if (_paused) {
+      socket.sendText(encodeVoiceSleepV1(paused: true));
+    } else if (muted) {
+      socket.sendText(encodeVoiceMuteV1(true));
+    }
+    final handshake = _handshake;
+    if (handshake != null && !handshake.isCompleted) handshake.complete();
   }
 
   /// Points an open call at another Bot (ADR 0029).
@@ -914,10 +943,16 @@ class AssistantSessionController extends ChangeNotifier {
   ///
   /// [reason] names the path that ended it — the End button, the view
   /// detaching — and travels in the socket's close frame, where the
-  /// server logs it.
+  /// server logs it. A Pause whose socket the OS already killed reconnects
+  /// just long enough to say `end_call`, so the accordion is this hang-up
+  /// and not the abandoned-call alarm a day later.
   Future<void> end({required String reason}) async {
     if (_phase == VoiceSessionPhase.idle || _phase == VoiceSessionPhase.ended) {
       return;
+    }
+    if (_rejoining != null) await _rejoining;
+    if (_socket == null && active && _phase != VoiceSessionPhase.ending) {
+      await _rejoin();
     }
     _generation++;
     // The path that ended it, which is a token this app names — never
@@ -929,6 +964,77 @@ class AssistantSessionController extends ChangeNotifier {
     await _teardown(reason: reason);
     _status = VoiceStatusV1.idle;
     _set(VoiceSessionPhase.ended);
+  }
+
+  /// The server's end of the socket finished first. A live conversation
+  /// treats that as the call ending. A Pause, or the app off screen, does
+  /// not: the durable call is still there, and a new socket continues it.
+  Future<void> _socketDropped() async {
+    if (_disposed ||
+        _error != null ||
+        !active ||
+        _phase == VoiceSessionPhase.ending) {
+      return;
+    }
+    final keep = _phase == VoiceSessionPhase.live && (_away || _paused);
+    if (!keep) {
+      await _ended();
+      return;
+    }
+    _inbound = null;
+    _socket = null;
+    _welcomed = false;
+    _started = false;
+    _startTimer?.cancel();
+    _startTimer = null;
+    diagnostics?.mark('call.socket-dropped');
+    _notify();
+    if (!_away) unawaited(_rejoin());
+  }
+
+  /// Opens a new socket onto the durable call. Used when the OS killed the
+  /// last one while the person still had this call, and when hang-up has
+  /// to reach the server after that.
+  Future<void> _rejoin() {
+    return _rejoining ??= _rejoinNow().whenComplete(() {
+      _rejoining = null;
+    });
+  }
+
+  Future<void> _rejoinNow() async {
+    if (_socket != null ||
+        _disposed ||
+        !active ||
+        _phase == VoiceSessionPhase.ending) {
+      return;
+    }
+    final generation = _generation;
+    _welcomed = false;
+    _started = false;
+    _opening.clear();
+    _openingBytes = 0;
+    final handshake = Completer<void>();
+    _handshake = handshake;
+    try {
+      final socket = await _connectOnce(generation, fatal: false);
+      if (socket == null) return;
+      if (generation != _generation ||
+          _disposed ||
+          !active ||
+          _phase == VoiceSessionPhase.ending) {
+        await _abandon(socket);
+        return;
+      }
+      _attach(socket);
+      if (!_started) {
+        await handshake.future.timeout(startTimeout, onTimeout: () {});
+      }
+    } finally {
+      if (identical(_handshake, handshake) && !handshake.isCompleted) {
+        handshake.complete();
+      }
+      if (identical(_handshake, handshake)) _handshake = null;
+    }
   }
 
   /// The server's end of the socket finished first: the call is over and
@@ -1014,6 +1120,10 @@ class AssistantSessionController extends ChangeNotifier {
     _paused = false;
     _away = false;
     _pausedForAway = false;
+    _rejoining = null;
+    final handshake = _handshake;
+    _handshake = null;
+    if (handshake != null && !handshake.isCompleted) handshake.complete();
   }
 
   /// A recorder, a speaker or a socket that fails to close — or to carry the
@@ -1117,11 +1227,13 @@ class AssistantSessionController extends ChangeNotifier {
   /// is released. The socket stays; [enterForeground] is coming back.
   ///
   /// A Pause the person already started is left alone. Mute has already
-  /// closed the device. `detached` hangs up from the shell instead.
+  /// closed the device; Pause is still written so a socket the OS then
+  /// kills keeps the long rejoin window. `detached` hangs up from the
+  /// shell instead.
   Future<void> leaveForeground() async {
     if (!active || _away || _phase == VoiceSessionPhase.ending) return;
     _away = true;
-    if (!_paused && !muted) {
+    if (!_paused) {
       pause();
       _pausedForAway = true;
     } else {
@@ -1132,8 +1244,9 @@ class AssistantSessionController extends ChangeNotifier {
   }
 
   /// The app is on screen again. The microphone comes back unless it is
-  /// muted, and a sleep this controller started for the background
-  /// resumes. A Pause the person started still waits for Resume.
+  /// muted, a socket the OS killed is opened again onto the same call,
+  /// and a sleep this controller started for the background resumes. A
+  /// Pause the person started still waits for Resume.
   Future<void> enterForeground() async {
     if (!_away) return;
     _away = false;
@@ -1146,6 +1259,17 @@ class AssistantSessionController extends ChangeNotifier {
       final opened = await _openCapture(generation);
       if (_away || generation != _generation || _disposed) {
         if (opened) await _closeCapture();
+        return;
+      }
+    }
+    _beginCall();
+    if (_socket == null) {
+      await _rejoin();
+      if (_away ||
+          generation != _generation ||
+          _disposed ||
+          !active ||
+          _phase == VoiceSessionPhase.ending) {
         return;
       }
     }

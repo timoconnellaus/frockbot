@@ -552,13 +552,17 @@ subagent admitted.
   `voice/wake`. Pause starts nothing and cancels nothing: a `subagent` Turn
   already admitted is the Bot's work, not this socket's, so it carries on, and
   what finishes meanwhile is counted on the Resume control rather than
-  unhibernating Gemini.
+  unhibernating Gemini. The call record is marked paused, so a socket that
+  then dies keeps the long rejoin window rather than the 60 s one.
 - **Leaving the app** is Pause for the background: `hidden` and `paused`
   send the same `voice/sleep` with `paused: true`, release the microphone,
   and keep the client socket. Coming back wakes it. A Pause the person
   already started stays paused. `detached` still hangs up — the view is
-  gone. A socket the OS kills without `end_call` is the 60 s rejoin window,
-  as it always was.
+  gone. A socket the OS kills without `end_call` is not a hang-up: the
+  surface stays up, and coming back opens a new socket onto the same
+  durable call. The record lasts twenty-four hours from that Pause, not
+  60 s. A live conversation that drops without pausing is still the 60 s
+  window, as it always was.
 - Server reports `{type:"voice/state",schemaVersion:1,upstream:"awake"|"asleep"|"starting",muted:boolean}`.
 
 Between `voice/sleep` and `voice/wake` the client sends no audio. While
@@ -589,10 +593,11 @@ spoken turn, then the object does the same as the client's frame and closes
 the socket so the surface says the call ended. The server closes the Live session, settles
 its meters, and answers `status: idle`. Closing the
 socket without `end_call` closes the Live session and settles its meters the
-same way, but does **not** end the call: the call record survives the 60 s
-rejoin window so a client back from a network change continues the same
+same way, but does **not** end the call: the call record survives the rejoin
+window so a client back from a network change continues the same
 conversation, and an alarm ends it if nobody comes back (see "Session
-memory"). A Bot Turn the assistant already admitted keeps running; its answer
+memory"). A live drop has 60 s; a Pause, or the app leaving the screen, has
+twenty-four hours. A Bot Turn the assistant already admitted keeps running; its answer
 is told on this call if the same device rejoins it in time, on a later call
 if one is already up, and written into chat if nobody is listening. Hang-up
 also writes the call's spoken turns onto that Bot's thread as one collapsible
@@ -982,13 +987,13 @@ call nobody ever answered still gets its end from the turn they said it in.
 
 ### What ends a call, and what does not
 
-| Event                                | What happens                                                                                                                                                                                                                |
-| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `end_call`                           | The job is written, _then_ the call record is deleted, then the finalization is scheduled.                                                                                                                                  |
-| The socket closes with no `end_call` | The upstream closes and its meter settles, but the call record **stays**: a client back inside the 60 s rejoin window continues the same conversation. An `abandonVoiceCall` alarm is scheduled for the end of that window. |
-| Nobody comes back                    | The alarm ends the call and queues its memory. Nothing waits for a future request to notice it.                                                                                                                             |
-| Another device takes over            | The displaced call's job is written _before_ the record naming it is replaced.                                                                                                                                              |
-| Eviction                             | `onStart` ends a call already past the rejoin window and queues it; inside the window it schedules the alarm instead.                                                                                                       |
+| Event                                | What happens                                                                                                                                                                                                                                                                 |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `end_call`                           | The job is written, _then_ the call record is deleted, then the finalization is scheduled.                                                                                                                                                                                   |
+| The socket closes with no `end_call` | The upstream closes and its meter settles, but the call record **stays**: a client back inside the rejoin window continues the same conversation. An `abandonVoiceCall` alarm is scheduled for the end of that window — 60 s for a live drop, twenty-four hours for a Pause. |
+| Nobody comes back                    | The alarm ends the call and queues its memory. Nothing waits for a future request to notice it.                                                                                                                                                                              |
+| Another device takes over            | The displaced call's job is written _before_ the record naming it is replaced.                                                                                                                                                                                               |
+| Eviction                             | `onStart` ends a call already past the rejoin window and queues it; inside the window it schedules the alarm instead.                                                                                                                                                        |
 
 The job is written before the call record is deleted in every one of these,
 because the record is the only place the call id was: the other order leaves a
@@ -1070,7 +1075,10 @@ leaves the footer open; the day rolls at UTC midnight. One live
 call per account: a second device supersedes the first. Transport rotation
 (a socket that is replaced by a newer one from the same device within 60 s,
 for instance after a network change) rejoins the same durable call record
-rather than opening a new one. Raw audio is never stored anywhere.
+rather than opening a new one. A Pause, or the app leaving the screen, keeps
+that record for twenty-four hours, and a new socket from the same device
+continues it without opening Gemini until Resume. Raw audio is never stored
+anywhere.
 
 ## Credentials
 
@@ -1279,7 +1287,9 @@ object without waiting for its Agent `onStart` RPC; recovery still runs as
 that fetch starts the object. One connect attempt is given ten seconds — a
 cold object can spend most of that starting — and a timeout is not retried,
 because a second upgrade would only race the first. A refused socket is
-retried once. `hello`/`start_call` — which wake a
+retried once. A socket that dies while paused, or while the app is off
+screen, is not a hang-up: the surface stays, and coming back opens a new
+socket onto the same durable call. `hello`/`start_call` — which wake a
 metered upstream — wait for both the server's `welcome` and an open
 microphone, so a person still answering the permission prompt is not billed.
 
