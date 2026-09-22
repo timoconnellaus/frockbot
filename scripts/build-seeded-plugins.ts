@@ -251,10 +251,19 @@ async function sourceHashV1(pluginId: string): Promise<string> {
         .map((name) => `references/${name}`),
     );
   }
+  // `Bun.file().exists()` follows the volume's case folding, so on macOS
+  // `skill.md` is `SKILL.md` and the skill is hashed twice.
+  const present = new Set(readdirSync(directory));
   const sources = await Promise.all(
     files.map(async (file) => {
-      const source = Bun.file(new URL(file, directory));
-      return (await source.exists()) ? source.text() : "";
+      const name = file.split("/").at(-1)!;
+      const folder = file.includes("/")
+        ? new URL(`${file.slice(0, file.lastIndexOf("/"))}/`, directory)
+        : directory;
+      const names =
+        folder === directory ? present : new Set(readdirSync(folder));
+      if (!names.has(name)) return "";
+      return Bun.file(new URL(file, directory)).text();
     }),
   );
   return sha256Hex(sources.join("\0"));
