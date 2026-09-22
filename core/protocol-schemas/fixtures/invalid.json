@@ -714,6 +714,23 @@
     "value": null
   },
   {
+    "name": "ConversationKind wrong shape",
+    "schema": "ConversationKind",
+    "value": "secrets"
+  },
+  {
+    "name": "ConversationEntityId wrong shape",
+    "schema": "ConversationEntityId",
+    "value": ""
+  },
+  {
+    "name": "ConversationMessageUpdate wrong shape",
+    "schema": "ConversationMessageUpdate",
+    "value": {
+      "runId": "command-1"
+    }
+  },
+  {
     "name": "ObserverState wrong shape",
     "schema": "ObserverState",
     "value": null
@@ -898,6 +915,7 @@
     "value": {
       "schemaVersion": 1,
       "type": "state/ready",
+      "epoch": "1",
       "cursor": "-1"
     }
   },
@@ -907,6 +925,7 @@
     "value": {
       "schemaVersion": 1,
       "type": "state/ready",
+      "epoch": "1",
       "cursor": "01"
     }
   },
@@ -916,6 +935,7 @@
     "value": {
       "schemaVersion": 1,
       "type": "state/ready",
+      "epoch": "1",
       "cursor": "9007199254740992"
     }
   },
@@ -925,6 +945,7 @@
     "value": {
       "schemaVersion": 1,
       "type": "state/ready",
+      "epoch": "1",
       "cursor": "9999999999999999"
     }
   },
@@ -934,6 +955,7 @@
     "value": {
       "schemaVersion": 1,
       "type": "state/ready",
+      "epoch": "1",
       "cursor": "1.0"
     }
   },
@@ -943,6 +965,7 @@
     "value": {
       "schemaVersion": 1,
       "type": "state/ready",
+      "epoch": "1",
       "cursor": "1e3"
     }
   },
@@ -952,17 +975,22 @@
     "value": {
       "schemaVersion": 1,
       "type": "state/ready",
+      "epoch": "1",
       "cursor": ""
     }
   },
   {
-    "name": "unknown state topic",
+    "name": "unknown conversation kind",
     "schema": "StateFrame",
     "value": {
       "schemaVersion": 1,
-      "type": "state/event",
+      "type": "state/update",
+      "epoch": "1",
       "cursor": "1",
-      "topic": "secrets"
+      "kind": "secrets",
+      "entityId": "computer",
+      "revision": 1,
+      "payload": {}
     }
   },
   {
@@ -971,6 +999,7 @@
     "value": {
       "schemaVersion": 1,
       "type": "state/ready",
+      "epoch": "1",
       "cursor": "0",
       "token": "secret"
     }

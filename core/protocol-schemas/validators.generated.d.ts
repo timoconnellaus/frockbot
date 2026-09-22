@@ -97,6 +97,15 @@ declare const validators: {
   ): value is ProtocolTypes["ConversationProjection"];
   isStopReceipt(value: unknown): value is ProtocolTypes["StopReceipt"];
   isObserverCursor(value: unknown): value is ProtocolTypes["ObserverCursor"];
+  isConversationEntityId(
+    value: unknown,
+  ): value is ProtocolTypes["ConversationEntityId"];
+  isConversationKind(
+    value: unknown,
+  ): value is ProtocolTypes["ConversationKind"];
+  isConversationMessageUpdate(
+    value: unknown,
+  ): value is ProtocolTypes["ConversationMessageUpdate"];
   isStateFrame(value: unknown): value is ProtocolTypes["StateFrame"];
   isObserverState(value: unknown): value is ProtocolTypes["ObserverState"];
   isNotification(value: unknown): value is ProtocolTypes["Notification"];
