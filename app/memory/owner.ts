@@ -5,7 +5,9 @@ import { MemoryEngineV1 } from "./engine.js";
 import { settleMemoryChannelsV1 } from "./hybrid.js";
 import {
   MEMORY_POLICY_V1,
+  clipMemoryItemsToTokensV1,
   memoryDeadlineMsV1,
+  memoryPolicyTokensV1,
 } from "./policy.js";
 import type { MemorySemanticSearchV1 } from "./semantic.js";
 import {
@@ -192,21 +194,33 @@ export class MemoryRecordsV1 {
     const statuses = [localResult?.status, remoteResult?.status].filter(
       (value): value is NonNullable<typeof value> => value !== undefined,
     );
+    const ordered = hits
+      .slice()
+      .sort((left, right) => (right.score ?? 0) - (left.score ?? 0));
+    const clipped = clipMemoryItemsToTokensV1(
+      ordered,
+      MEMORY_POLICY_V1.activeRecallTokens,
+      (hit) => memoryPolicyTokensV1(hit.item.text),
+    );
+    if (clipped.omitted > 0) {
+      mergedOmissions.push({
+        reason: `${clipped.omitted} memory item(s) were outside the shared token budget`,
+      });
+    }
     const status =
       statuses.includes("unavailable") || statuses.includes("refused")
         ? statuses.includes("unavailable")
           ? "unavailable"
           : "refused"
-        : hits.length === 0
-          ? "empty"
-          : statuses.includes("partial")
+        : clipped.kept.length === 0
+          ? hits.length === 0
+            ? "empty"
+            : "partial"
+          : statuses.includes("partial") || clipped.omitted > 0
             ? "partial"
             : "complete";
-    const ordered = hits
-      .slice()
-      .sort((left, right) => (right.score ?? 0) - (left.score ?? 0));
     return {
-      hits: ordered,
+      hits: clipped.kept,
       status,
       omissions: mergedOmissions,
       membershipRevision: request.authority.membershipRevision,
@@ -222,9 +236,10 @@ export class MemoryRecordsV1 {
         localResult?.channels,
         remoteResult?.channels,
       ),
-      tokensEstimated:
-        (localResult?.tokensEstimated ?? 0) +
-        (remoteResult?.tokensEstimated ?? 0),
+      tokensEstimated: clipped.kept.reduce(
+        (sum, hit) => sum + memoryPolicyTokensV1(hit.item.text),
+        0,
+      ),
     };
   }
 
