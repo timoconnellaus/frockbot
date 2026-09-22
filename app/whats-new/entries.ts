@@ -25,7 +25,8 @@ export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
     id: "voice-call-card",
     title: "A live call is a card",
-    summary: "It sits at the top of the chat, with mute and hang-up under the wave.",
+    summary:
+      "It sits at the top of the chat, with mute and hang-up under the wave.",
     kind: "improvement",
     image: {
       file: "voice-call-card.webp",
