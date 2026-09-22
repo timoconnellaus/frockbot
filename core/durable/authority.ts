@@ -440,7 +440,10 @@ export class BotDurableAuthority<Snapshot> {
   private scheduleDrive(runId: string): void {
     const next = (this.drive ?? Promise.resolve())
       .catch(() => undefined)
-      .then(() => this.pumpUntil(runId));
+      .then(() => this.pumpUntil(runId))
+      // The admission caller does not await this promise. A rejection after
+      // the run has already settled would be unhandled.
+      .catch(() => undefined);
     this.drive = next;
     void next.finally(() => {
       if (this.drive === next) this.drive = undefined;
