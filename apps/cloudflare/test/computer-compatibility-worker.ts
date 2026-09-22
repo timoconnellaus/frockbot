@@ -1092,7 +1092,10 @@ export class CompositionProbe extends DurableObject {
   }
 
   async storedPin(runId: string): Promise<string | undefined> {
-    return (await this.authority.readRun(runId))?.compositionGenerationId;
+    // Fail-closed activation keeps the requested pin and records the generation
+    // the Turn actually mounted beside it. Recovery remounts that one.
+    const run = await this.authority.readRun(runId);
+    return run?.mountedCompositionGenerationId ?? run?.compositionGenerationId;
   }
 
   async currentGenerationId(): Promise<string> {
