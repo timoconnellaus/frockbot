@@ -7,6 +7,7 @@ import {
   decodeTurnTypeV1,
   latestOpenStepPositionV1,
   type FirstPartyCardDrawsV1,
+  type LlmMessage,
   type SendToUserPayloadV1,
   type Session,
   type ToolDefinition,
@@ -20,6 +21,7 @@ import {
   automationParentPointerV1,
   chatWindowV1,
   CHAT_HISTORY_BUDGET_CHARS_V1,
+  type ChatWindowV1,
   turnTypesByTurnV1,
 } from "./history.js";
 import { assembleJournalContextV1 } from "./working-context.js";
@@ -605,6 +607,39 @@ function createWakeParentTool(sessions: {
 export const WAKE_PARENT_MESSAGE_LIMIT_V1 = 32_000;
 
 /**
+ * The window compaction is measured against.
+ *
+ * The active-run journal is only the Turn that just ended. History lives in
+ * the working-context projection, which is also what the next request carries,
+ * so the trigger has to read that or a long conversation never crosses it.
+ */
+async function compactionWindowV1(
+  session: Session,
+  turn: number,
+): Promise<ChatWindowV1> {
+  const currentMessages = session.deriveTurnMessages(turn);
+  const load = (
+    session.workingContextSelector as
+      | {
+          compactionWindow?(input: {
+            sessionId: string;
+            currentTurn: number;
+            currentMessages: readonly LlmMessage[];
+          }): Promise<ChatWindowV1>;
+        }
+      | undefined
+  )?.compactionWindow;
+  if (load) {
+    return load({
+      sessionId: session.id,
+      currentTurn: turn,
+      currentMessages,
+    });
+  }
+  return chatWindowV1(session.activeRunJournal, session.deriveMessages());
+}
+
+/**
  * The Shell's runtime Contribution. Registers `send_to_user`, the Bot's voice
  * to its User, and `wake_parent`, a background Turn's hand-off to the
  * conversation that started it, each bounded by the turn types its manifest
@@ -672,13 +707,9 @@ export const shellAgentFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
         const types = turnTypesByTurnV1(session.activeRunJournal);
         if ((types.get(turn) ?? "chat") !== "chat") return;
         compactionWorkV1(session.id).start(async (signal) => {
-          if (signal.aborted) return;
           await runCompactionV1({
             session,
-            window: chatWindowV1(
-              session.activeRunJournal,
-              session.deriveMessages(),
-            ),
+            window: await compactionWindowV1(session, turn),
             budget: CHAT_HISTORY_BUDGET_CHARS_V1,
             currentTurn: turn,
             newEffectId: () => `compaction-${crypto.randomUUID()}`,

@@ -32,8 +32,11 @@ import {
   workingContextTurnPrefixV1,
   workingContextVoiceKeyV1,
 } from "@frockbot/core/durable";
-import { historyCharsV1 } from "./compaction.js";
-import { CHAT_HISTORY_BUDGET_CHARS_V1 } from "./history.js";
+import { historyCharsV1, type CompactionStateV1 } from "./compaction.js";
+import {
+  CHAT_HISTORY_BUDGET_CHARS_V1,
+  type ChatWindowV1,
+} from "./history.js";
 import {
   chooseWorkingTurnsV1,
   emptyVoiceExcerptV1,
@@ -511,6 +514,122 @@ export interface StoredContextRequestV1 {
   currentMessages: readonly LlmMessage[];
   budget?: number;
   pointer?(input: { sessionId: string; chatTurns: number }): string;
+}
+
+function compactionStateFromHead(
+  head: ConversationHeadV1 | undefined,
+): CompactionStateV1 {
+  const summary = head?.compaction;
+  return {
+    failures: head?.compactionFailures ?? 0,
+    lastFailureThroughTurn: head?.lastFailureThroughTurn ?? 0,
+    ...(head?.unsettledCompaction
+      ? { unsettled: head.unsettledCompaction }
+      : {}),
+    ...(summary
+      ? {
+          compaction: {
+            effectId: summary.effectId,
+            fromTurn: summary.fromTurn,
+            throughTurn: summary.throughTurn,
+            summary: summary.summary,
+            identifiers: summary.identifiers,
+            provider: summary.provider,
+            model: summary.model,
+          },
+        }
+      : {}),
+  };
+}
+
+function chatTurn(turnType: TurnTypeV1 | "unspecified"): boolean {
+  return (
+    turnType === "chat" || turnType === "agent" || turnType === "unspecified"
+  );
+}
+
+/**
+ * The chat window a Turn-end compaction measures.
+ *
+ * Prior Turns come from the projection. The Turn that just ended comes from
+ * the caller, because its messages are already in hand and loading them again
+ * would count them twice.
+ */
+export async function storedCompactionWindowV1(
+  storage: WorkingContextStorageV1,
+  input: {
+    sessionId: string;
+    currentTurn: number;
+    currentMessages: readonly LlmMessage[];
+  },
+): Promise<ChatWindowV1> {
+  let head: ConversationHeadV1 | undefined;
+  try {
+    head = requireConversationHeadV1(
+      await storage.get(workingContextHeadKeyV1(input.sessionId)),
+      input.sessionId,
+    );
+  } catch {
+    head = undefined;
+  }
+  const state = compactionStateFromHead(head);
+  const covered =
+    state.compaction && state.compaction.throughTurn < input.currentTurn
+      ? state.compaction.throughTurn
+      : 0;
+  const indexes: TurnContextIndexV1[] = [];
+  if (head?.status === "ready") {
+    let start: string | undefined;
+    for (;;) {
+      const page = await storage.list<TurnContextIndexV1>({
+        prefix: workingContextTurnPrefixV1(input.sessionId),
+        limit: TURN_LIST_LIMIT_V1,
+        ...(start ? { start } : {}),
+      });
+      if (page.size === 0) break;
+      const entries = [...page.entries()].sort(([left], [right]) =>
+        left.localeCompare(right),
+      );
+      for (const [, turn] of entries) indexes.push(turn);
+      if (page.size < TURN_LIST_LIMIT_V1) break;
+      start = `${entries[entries.length - 1]![0]}\0`;
+    }
+  }
+  const messages: LlmMessage[] = [];
+  const turns: number[] = [];
+  for (const index of indexes) {
+    if (index.turn >= input.currentTurn) continue;
+    if (!chatTurn(index.turnType) || !index.messageBearing) continue;
+    if (index.turn <= covered) continue;
+    const loaded = await readMessages(storage, input.sessionId, index);
+    for (const message of loaded) {
+      messages.push(message);
+      turns.push(index.turn);
+    }
+  }
+  for (const message of input.currentMessages) {
+    messages.push(message);
+    turns.push(input.currentTurn);
+  }
+  const chatTurns = [
+    ...new Set(
+      [
+        ...indexes
+          .filter((index) => chatTurn(index.turnType))
+          .map((index) => index.turn),
+        input.currentTurn,
+      ].sort((left, right) => left - right),
+    ),
+  ];
+  return {
+    messages,
+    turns,
+    chatTurns,
+    state,
+    ...(state.compaction && state.compaction.throughTurn < input.currentTurn
+      ? { compaction: state.compaction }
+      : {}),
+  };
 }
 
 /**

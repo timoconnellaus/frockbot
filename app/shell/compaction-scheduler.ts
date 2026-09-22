@@ -48,8 +48,11 @@ class CompactionWork {
       // session log is the one thing detaching them could get wrong.
       await previous;
       try {
-        // Aborted before it ever began — a Turn was admitted in the same tick.
-        if (!controller.signal.aborted) await run(controller.signal);
+        // Already aborted still runs once. The next admission aborts in the
+        // same tick the previous Turn scheduled this, and skipping the body
+        // dropped the intent before it was ever written. The body stops at
+        // the summariser when the signal is already aborted.
+        await run(controller.signal);
       } catch {
         // A compaction that fails is a conversation that carries on under
         // oldest-first eviction. There is nobody to tell.
