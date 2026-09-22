@@ -199,9 +199,9 @@ test("a provider Plugin compacts a long conversation durably under the compactio
   // model effect; neither the mounted provider nor its in-memory tickets
   // survive to make this assertion pass accidentally.
   await evictDurableObject(bot(identity));
-  await runInDurableObject(bot(identity), (_instance, state) =>
-    state.storage.setAlarm(Date.now() + 60_000),
-  );
+  await runInDurableObject(bot(identity), async (_instance, state) => {
+    await state.storage.setAlarm(Date.now() + 60_000);
+  });
   expect(await runDurableObjectAlarm(bot(identity))).toBe(true);
   expect(await calls()).toEqual(beforeEviction);
 
