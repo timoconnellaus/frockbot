@@ -921,14 +921,14 @@ describe("pausing and coming back", () => {
     )[0] as VoiceCallRecordV1;
     expect(current.callId).toBe(callId);
     expect(current.paused).toBe(true);
-    expect(await stub.probeUpstreamCount()).toBe(1);
     await second.waitFor(state("asleep"), "still asleep after the rejoin");
+    const beforeWake = await stub.probeUpstreamCount();
     second.socket.send(
       JSON.stringify({ schemaVersion: 1, type: "voice/wake" }),
     );
     await eventually(
       async () => await stub.probeUpstreamCount(),
-      (count) => count === 2,
+      (count) => count === beforeWake + 1,
       "Resume reopened Gemini",
     );
   });

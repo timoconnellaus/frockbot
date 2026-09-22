@@ -582,30 +582,27 @@ void main() {
     },
   );
 
-  test(
-    'a socket that dies while paused keeps the call and rejoins',
-    () async {
-      final harness = Harness();
-      await harness.live();
-      final next = FakeVoiceSocket();
-      harness.opener = () => next;
-      harness.controller.pause();
-      await harness.socket.finish();
-      await settle();
-      expect(harness.controller.phase, VoiceSessionPhase.live);
-      expect(harness.controller.paused, isTrue);
-      expect(harness.controller.endedLine, isNull);
+  test('a socket that dies while paused keeps the call and rejoins', () async {
+    final harness = Harness();
+    await harness.live();
+    final next = FakeVoiceSocket();
+    harness.opener = () => next;
+    harness.controller.pause();
+    await harness.socket.finish();
+    await settle();
+    expect(harness.controller.phase, VoiceSessionPhase.live);
+    expect(harness.controller.paused, isTrue);
+    expect(harness.controller.endedLine, isNull);
 
-      next.deliver(jsonEncode({'type': 'welcome', 'protocol_version': 1}));
-      next.deliver(jsonEncode({'type': 'status', 'status': 'listening'}));
-      await settle();
-      expect(next.texts, contains(encodeAssistantStartCallV1()));
-      expect(next.texts, contains(encodeVoiceSleepV1(paused: true)));
-      expect(harness.controller.paused, isTrue);
-      expect(harness.controller.active, isTrue);
-      harness.controller.dispose();
-    },
-  );
+    next.deliver(jsonEncode({'type': 'welcome', 'protocol_version': 1}));
+    next.deliver(jsonEncode({'type': 'status', 'status': 'listening'}));
+    await settle();
+    expect(next.texts, contains(encodeAssistantStartCallV1()));
+    expect(next.texts, contains(encodeVoiceSleepV1(paused: true)));
+    expect(harness.controller.paused, isTrue);
+    expect(harness.controller.active, isTrue);
+    harness.controller.dispose();
+  });
 
   test('hanging up after a dropped pause still sends end_call', () async {
     final harness = Harness();

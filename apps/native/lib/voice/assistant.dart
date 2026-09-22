@@ -239,6 +239,10 @@ class AssistantSessionController extends ChangeNotifier {
   Completer<void>? _handshake;
   Future<void>? _rejoining;
 
+  /// Resume ran before `start_call` went out on a reconnect. The wake waits
+  /// for the handshake so it is not dropped on a socket that has no call.
+  bool _pendingWake = false;
+
   /// How long a notice about the last reply stays on the call's surface.
   static const noticeDuration = Duration(seconds: 4);
 
@@ -357,6 +361,7 @@ class AssistantSessionController extends ChangeNotifier {
     _paused = false;
     _away = false;
     _pausedForAway = false;
+    _pendingWake = false;
     _started = false;
     _welcomed = false;
     _barged = false;
@@ -496,10 +501,7 @@ class AssistantSessionController extends ChangeNotifier {
   /// error, not a loop. A reconnect whose upgrade fails is not that
   /// error: the call is still up, and the next return to the screen tries
   /// again.
-  Future<VoiceSocket?> _connectOnce(
-    int generation, {
-    bool fatal = true,
-  }) async {
+  Future<VoiceSocket?> _connectOnce(int generation, {bool fatal = true}) async {
     var attempts = 0;
     Future<VoiceSocket> attempt() async {
       final at = ++attempts;
@@ -844,7 +846,10 @@ class AssistantSessionController extends ChangeNotifier {
       socket.sendBinary(_opening.removeFirst());
     }
     _openingBytes = 0;
-    if (_paused) {
+    if (_pendingWake) {
+      _pendingWake = false;
+      socket.sendText(encodeVoiceWakeV1());
+    } else if (_paused) {
       socket.sendText(encodeVoiceSleepV1(paused: true));
     } else if (muted) {
       socket.sendText(encodeVoiceMuteV1(true));
@@ -951,8 +956,15 @@ class AssistantSessionController extends ChangeNotifier {
       return;
     }
     if (_rejoining != null) await _rejoining;
-    if (_socket == null && active && _phase != VoiceSessionPhase.ending) {
-      await _rejoin();
+    if (!_started) {
+      final handshake = _handshake;
+      if (handshake != null && !handshake.isCompleted) {
+        await handshake.future.timeout(startTimeout, onTimeout: () {});
+      } else if (_socket == null &&
+          active &&
+          _phase != VoiceSessionPhase.ending) {
+        await _rejoin(waitForHandshake: true);
+      }
     }
     _generation++;
     // The path that ended it, which is a token this app names — never
@@ -995,13 +1007,14 @@ class AssistantSessionController extends ChangeNotifier {
   /// Opens a new socket onto the durable call. Used when the OS killed the
   /// last one while the person still had this call, and when hang-up has
   /// to reach the server after that.
-  Future<void> _rejoin() {
-    return _rejoining ??= _rejoinNow().whenComplete(() {
-      _rejoining = null;
-    });
+  Future<void> _rejoin({bool waitForHandshake = false}) {
+    return _rejoining ??= _rejoinNow(waitForHandshake: waitForHandshake)
+        .whenComplete(() {
+          _rejoining = null;
+        });
   }
 
-  Future<void> _rejoinNow() async {
+  Future<void> _rejoinNow({required bool waitForHandshake}) async {
     if (_socket != null ||
         _disposed ||
         !active ||
@@ -1026,14 +1039,15 @@ class AssistantSessionController extends ChangeNotifier {
         return;
       }
       _attach(socket);
-      if (!_started) {
+      if (waitForHandshake && !_started) {
         await handshake.future.timeout(startTimeout, onTimeout: () {});
       }
     } finally {
-      if (identical(_handshake, handshake) && !handshake.isCompleted) {
+      if (waitForHandshake &&
+          identical(_handshake, handshake) &&
+          !handshake.isCompleted) {
         handshake.complete();
       }
-      if (identical(_handshake, handshake)) _handshake = null;
     }
   }
 
@@ -1121,6 +1135,7 @@ class AssistantSessionController extends ChangeNotifier {
     _away = false;
     _pausedForAway = false;
     _rejoining = null;
+    _pendingWake = false;
     final handshake = _handshake;
     _handshake = null;
     if (handshake != null && !handshake.isCompleted) handshake.complete();
@@ -1218,7 +1233,11 @@ class AssistantSessionController extends ChangeNotifier {
         state: _delegations[i].state,
       );
     }
-    _socket?.sendText(encodeVoiceWakeV1());
+    if (_started) {
+      _socket?.sendText(encodeVoiceWakeV1());
+    } else {
+      _pendingWake = true;
+    }
     _notify();
   }
 
