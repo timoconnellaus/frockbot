@@ -5,8 +5,11 @@
 // detail here; everything above them is Package policy behind narrow hooks.
 import {
   decodeSessionEvent,
+  emptyCommittedContextV1,
   validateToolOccurrenceJournal,
+  type CommittedContextV1,
   type NormalizedModelRequest,
+  type SessionCursorV1,
   type SessionEvent,
 } from "@frockbot/core/contracts";
 import type { CompositionGenerationV1 } from "./composition/generation.js";
@@ -45,8 +48,8 @@ import {
   eventsForFailedRun,
   latestModelRequestJournalState,
   planBotRunRecovery,
-  repairedSessionLogV1,
 } from "./run-recovery.js";
+import { readSessionCursorV1 } from "./working-context.js";
 import { runLivenessV1, STALE_RUNNING_RUN_FAILURE_V1 } from "./run-liveness.js";
 
 /** Liveness only asks whether a `turn/end` already closed the opened Turn. */
@@ -80,6 +83,33 @@ import {
   storedRunAdmissionFences,
 } from "./storage-keys.js";
 
+function turnContextSeedV1(
+  read: Awaited<ReturnType<typeof readSessionCursorV1>>,
+  journal: readonly SessionEvent[],
+): {
+  cursor: SessionCursorV1;
+  contextAvailability: "ready" | "empty" | "unavailable";
+  contextReason?: string;
+  context: CommittedContextV1;
+  journal: readonly SessionEvent[];
+} {
+  if (read.availability === "unavailable") {
+    return {
+      cursor: read.cursor,
+      contextAvailability: "unavailable",
+      contextReason: read.reason,
+      context: emptyCommittedContextV1(),
+      journal,
+    };
+  }
+  return {
+    cursor: read.cursor,
+    contextAvailability: read.availability,
+    context: emptyCommittedContextV1(),
+    journal,
+  };
+}
+
 export interface BotIdentity {
   userId: string;
   botId: string;
@@ -91,7 +121,17 @@ export interface OwnedBotTurnCommand extends BotTurnCommand, BotIdentity {}
 export interface BotTurnExecutionInput<Snapshot> {
   identity: BotIdentity;
   command: BotTurnCommand;
-  previousEvents: readonly SessionEvent[];
+  /** Absolute allocation cursor. Not derived from an event array's length. */
+  cursor: SessionCursorV1;
+  /**
+   * `empty` is a new log. `ready` has a projection. `unavailable` admits the
+   * command and refuses to assemble a model request from a partial history.
+   */
+  contextAvailability: "ready" | "empty" | "unavailable";
+  contextReason?: string;
+  context: CommittedContextV1;
+  /** Exact events already durable for this run. Empty when it has not appended. */
+  journal: readonly SessionEvent[];
   configurationSnapshot: Snapshot;
   /** The Composition generation pinned to this Turn at admission. */
   compositionGenerationId: string;
@@ -325,7 +365,7 @@ export class BotDurableAuthority<Snapshot> {
     }
     return this.executeAcceptedRun(
       command,
-      admission.previous,
+      admission.seed,
       admission.settings,
       admission.compositionGenerationId,
     );
@@ -373,7 +413,7 @@ export class BotDurableAuthority<Snapshot> {
         }
         return this.executeAcceptedRun(
           command,
-          promoted.previous,
+          promoted.seed,
           promoted.settings,
           promoted.compositionGenerationId,
         );
@@ -411,7 +451,7 @@ export class BotDurableAuthority<Snapshot> {
     | "not-queued"
     | "blocked"
     | {
-        previous: SessionEvent[];
+        seed: ReturnType<typeof turnContextSeedV1>;
         settings: Snapshot;
         compositionGenerationId: string;
       }
@@ -447,14 +487,9 @@ export class BotDurableAuthority<Snapshot> {
       if (await transaction.get<string>(ACTIVE_RUN_KEY)) {
         return "blocked" as const;
       }
-      const eventLog = new SessionEventLog(transaction);
-      const storedEvents = await eventLog.migrate(run.sessionId);
-      // A queued Turn was admitted while another was executing, so admission
-      // could not repair the log: something was still entitled to close that
-      // Turn. Here the active-run marker is gone and nothing is, so the same
-      // repair applies before this Turn starts on it.
-      const repaired = repairedSessionLogV1(run.sessionId, storedEvents);
-      const latestEvents = repaired ?? storedEvents;
+      // The Turn starts from the projection cursor. Repairing a buried open
+      // Turn by rereading and renumbering the archive is not this admission.
+      const seeded = await readSessionCursorV1(transaction, run.sessionId);
       // The pointer is materialized at admission, so it is there; a Bot whose
       // record somehow is not keeps the generation it was admitted under
       // rather than failing a Turn it is owed.
@@ -467,10 +502,9 @@ export class BotDurableAuthority<Snapshot> {
         ...run,
         phase: "admitted",
         compositionGenerationId,
-        previousEventCount: latestEvents.length,
-        ...storedRunEventFieldsV2(latestEvents.length, []),
+        previousEventCount: seeded.cursor.nextSeq,
+        ...storedRunEventFieldsV2(seeded.cursor.nextSeq, []),
       } satisfies StoredRunV1<Snapshot>);
-      if (repaired) await eventLog.rewrite(run.sessionId, latestEvents);
       await transaction.put({
         [key]: structuredClone(storedRunRecordV2(promoted)),
         [ACTIVE_RUN_KEY]: runId,
@@ -482,7 +516,7 @@ export class BotDurableAuthority<Snapshot> {
       }
       await this.refreshRecoveryAlarm(transaction);
       return {
-        previous: latestEvents,
+        seed: turnContextSeedV1(seeded, []),
         settings: promoted.configurationSnapshot,
         compositionGenerationId: promoted.compositionGenerationId,
       };
@@ -522,13 +556,13 @@ export class BotDurableAuthority<Snapshot> {
 
   private async executeAcceptedRun(
     command: OwnedBotTurnCommand,
-    previous: SessionEvent[],
+    seed: ReturnType<typeof turnContextSeedV1>,
     settings: Snapshot,
     compositionGenerationId: string,
   ): Promise<BotTurnCompletion> {
     const activity = this.executeAdmittedRun(
       command,
-      previous,
+      seed,
       settings,
       compositionGenerationId,
     );
@@ -544,7 +578,7 @@ export class BotDurableAuthority<Snapshot> {
 
   private async executeAdmittedRun(
     command: OwnedBotTurnCommand,
-    previous: SessionEvent[],
+    seed: ReturnType<typeof turnContextSeedV1>,
     settings: Snapshot,
     compositionGenerationId: string,
   ): Promise<BotTurnCompletion> {
@@ -568,7 +602,11 @@ export class BotDurableAuthority<Snapshot> {
       const result = await this.hooks.executeTurn({
         identity: command,
         command,
-        previousEvents: previous,
+        cursor: seed.cursor,
+        contextAvailability: seed.contextAvailability,
+        ...(seed.contextReason ? { contextReason: seed.contextReason } : {}),
+        context: seed.context,
+        journal: seed.journal,
         configurationSnapshot: settings,
         compositionGenerationId,
         persistSessionEvents: (_sessionId, events) =>
@@ -576,7 +614,7 @@ export class BotDurableAuthority<Snapshot> {
         resume: false,
       });
       const completed = this.withNotification(settings, result);
-      await this.completeRun(command.runId, previous, completed, settings);
+      await this.completeRun(command.runId, [], completed, settings);
       return completed;
     } catch (error) {
       const durableRun = await this.readRun(command.runId);
@@ -587,7 +625,7 @@ export class BotDurableAuthority<Snapshot> {
         await this.deferRunRecovery(command.runId);
         throw new Error(message);
       }
-      await this.failRun(command.runId, previous, events, message);
+      await this.failRun(command.runId, [], events, message);
       // `settledTerminalRunResult`, not `discardedRunResult`: a Turn the Package failed
       // outright — a provider 401, a step limit — reaches a `turn/end` and a
       // durable `failed` record just as surely as a stopped one does, and
@@ -660,14 +698,17 @@ export class BotDurableAuthority<Snapshot> {
   private async executeResumedRun(
     identity: BotIdentity,
     run: StoredRunV1<Snapshot>,
-    latest: SessionEvent[],
     settings: Snapshot,
   ): Promise<BotTurnCompletion> {
     this.executingRunId = run.runId;
     this.codec.require(run);
-    const previous = latest.slice(0, run.previousEventCount);
+    const seed = turnContextSeedV1(
+      await readSessionCursorV1(this.ctx.storage, run.sessionId),
+      run.events,
+    );
     try {
-      const modelState = latestModelRequestJournalState(latest);
+      // The recorded request, not one rebuilt from today's context.
+      const modelState = latestModelRequestJournalState(run.events);
       const result = await this.hooks.executeTurn({
         identity,
         command: {
@@ -686,7 +727,11 @@ export class BotDurableAuthority<Snapshot> {
           ...(run.admission?.origin ? { origin: run.admission.origin } : {}),
           ...(run.directTool ? { directTool: run.directTool } : {}),
         },
-        previousEvents: latest,
+        cursor: seed.cursor,
+        contextAvailability: seed.contextAvailability,
+        ...(seed.contextReason ? { contextReason: seed.contextReason } : {}),
+        context: seed.context,
+        journal: run.events,
         configurationSnapshot: settings,
         compositionGenerationId: run.compositionGenerationId,
         persistSessionEvents: (_sessionId, events) =>
@@ -703,7 +748,7 @@ export class BotDurableAuthority<Snapshot> {
         events: durableRun.events,
       } satisfies BotTurnCompletion;
       const completed = this.withNotification(settings, fullResult);
-      await this.completeRun(run.runId, previous, completed, settings);
+      await this.completeRun(run.runId, [], completed, settings);
       return completed;
     } catch (error) {
       const durableRun = await this.readRun(run.runId);
@@ -714,7 +759,7 @@ export class BotDurableAuthority<Snapshot> {
         await this.deferRunRecovery(run.runId);
         throw new Error(message);
       }
-      await this.failRun(run.runId, previous, events, message);
+      await this.failRun(run.runId, [], events, message);
       const settled = await this.settledTerminalRunResult(run.runId);
       if (settled) return settled;
       throw new Error(message);
@@ -1256,17 +1301,12 @@ export class BotDurableAuthority<Snapshot> {
         SESSION_TURN_END_TYPES,
       );
       if (runLivenessV1({ run, sessionEvents }).working) return;
-      const previous = await eventLog.readRange(
-        run.sessionId,
-        0,
-        run.previousEventCount,
-      );
       await failStoredRun(
         this.codec,
         transaction,
         this.terminalKeys(runId),
         runId,
-        previous,
+        [],
         run.events,
         STALE_RUNNING_RUN_FAILURE_V1,
         this.supersededPackageRecords(),
@@ -1378,7 +1418,7 @@ export class BotDurableAuthority<Snapshot> {
   private async acceptRun(command: OwnedBotTurnCommand): Promise<
     | {
         kind: "active";
-        previous: SessionEvent[];
+        seed: ReturnType<typeof turnContextSeedV1>;
         settings: Snapshot;
         compositionGenerationId: string;
       }
@@ -1516,34 +1556,10 @@ export class BotDurableAuthority<Snapshot> {
           `bot agent queue is full (${MAX_PENDING_AGENT_RUNS_V1} Turns)`,
         );
       }
-      const eventLog = new SessionEventLog(transaction);
-      const storedEvents = await eventLog.migrate(command.sessionId);
-      // A Turn that died between `turn/start` and `turn/end` — an event the
-      // encoder refused, a durable write that failed — left the log open, and
-      // every later Turn failed validation with "turn N started while turn
-      // N-1 is open". Nothing owned that repair, because the run that would
-      // have closed it is already terminal, so admission does: with nothing
-      // executing, an open Turn is one nobody is going to finish.
-      //
-      // The pointer alone is not the test. A Bot can hold an `active-run` id
-      // whose record is already terminal — a settlement that landed while the
-      // pointer clear did not, a supersede whose Turn ended between the two
-      // writes — and gating the repair on the pointer left exactly those Bots
-      // wedged. What matters is whether anything is still entitled to write
-      // that Turn's end: a `running` record is. Nothing else is.
-      const stillOwned = activeRun?.status === "running";
-      //
-      // The repair rewrites the whole log rather than appending to it: by the
-      // time anyone notices, the abandoned Turn is usually no longer the last
-      // thing in the log. Each refused message journals its own `turn/start`
-      // before it assembles the request that discovers the breakage, and its
-      // `finally` writes the matching `turn/end`, so the log ends closed with
-      // the abandoned Turn still open behind it. Appending cannot close that.
-      const repaired = stillOwned
-        ? undefined
-        : repairedSessionLogV1(command.sessionId, storedEvents);
-      const latestEvents = repaired ?? storedEvents;
-      if (repaired) await eventLog.rewrite(command.sessionId, latestEvents);
+      // Sequence comes from the projection head. Loading the archive here
+      // made every admission pay for every retained model request, and a
+      // truncated copy of that archive is not a Session seed.
+      const seeded = await readSessionCursorV1(transaction, command.sessionId);
       const admittedSettings = await this.hooks.admittedSnapshot(
         transaction,
         settings,
@@ -1572,7 +1588,7 @@ export class BotDurableAuthority<Snapshot> {
         phase: queued ? "queued" : "admitted",
         compositionGenerationId: pin.generationId,
         configurationSnapshot: structuredClone(admittedSettings),
-        previousEventCount: latestEvents.length,
+        previousEventCount: seeded.cursor.nextSeq,
         ...storedRunAdmissionV1(
           command.turnType,
           command.origin,
@@ -1624,7 +1640,7 @@ export class BotDurableAuthority<Snapshot> {
       }
       return {
         kind: "active" as const,
-        previous: latestEvents,
+        seed: turnContextSeedV1(seeded, []),
         settings: admittedSettings,
         compositionGenerationId: pin.generationId,
       };
@@ -1734,7 +1750,7 @@ export class BotDurableAuthority<Snapshot> {
       // anything, and the whole body runs in one transaction. It goes first
       // so that a batch which does not continue the log is still refused for
       // that reason rather than by the run record's own range check.
-      await eventLog.append(run.sessionId, durableEvents);
+      await eventLog.append(run.sessionId, durableEvents, { runId });
       const next = this.codec.require({
         ...run,
         ...storedRunEventFieldsV2(run.previousEventCount, [
@@ -1900,7 +1916,7 @@ export class BotDurableAuthority<Snapshot> {
     if (!run) throw new Error(`run "${pendingRunId}" was not accepted`);
     await this.executeAcceptedRun(
       this.recoveredCommand(durableIdentity, run),
-      promoted.previous,
+      promoted.seed,
       promoted.settings,
       promoted.compositionGenerationId,
     );
@@ -1945,15 +1961,9 @@ export class BotDurableAuthority<Snapshot> {
         return undefined;
       }
       const eventLog = new SessionEventLog(transaction);
-      // The prefix the Turn started from, not the whole conversation. `read`
-      // hydrates every exact model request the Session has ever retained, and
-      // chrome polls plus the recovery alarm were doing that on a 128 MB
-      // isolate. Planning only needs this prefix plus `run.events`.
-      const previous = await eventLog.readRange(
-        run.sessionId,
-        0,
-        run.previousEventCount,
-      );
+      // Malformed legacy history must throw before any run rewrite. A paged
+      // log is left unread: it was decoded when its pages were written.
+      await eventLog.ensureLegacyLogDecodable(run.sessionId);
       // A Turn the User stopped, or one a later message replaced, is terminal
       // in intent before recovery ever looks at it. There is nothing to
       // recover: no answer is owed, and the provider outcome cannot change what
@@ -1970,7 +1980,7 @@ export class BotDurableAuthority<Snapshot> {
           transaction,
           this.terminalKeys(run.runId),
           run.runId,
-          previous,
+          [],
           run.events,
           DISCARDED_RUN_RECOVERY_FAILURE_V1,
           this.supersededPackageRecords(),
@@ -1978,7 +1988,7 @@ export class BotDurableAuthority<Snapshot> {
         await this.refreshRecoveryAlarm(transaction);
         return undefined;
       }
-      const plan = planBotRunRecovery(run, previous, this.codec);
+      const plan = planBotRunRecovery(run, run.events, this.codec);
       if (plan.kind === "complete") {
         const result = {
           runId: run.runId,
@@ -1994,7 +2004,7 @@ export class BotDurableAuthority<Snapshot> {
           transaction,
           this.terminalKeys(run.runId),
           run.runId,
-          previous,
+          [],
           completed,
           this.terminalPackageRecords(run.configurationSnapshot),
           this.supersededPackageRecords(),
@@ -2008,7 +2018,7 @@ export class BotDurableAuthority<Snapshot> {
           transaction,
           this.terminalKeys(run.runId),
           run.runId,
-          previous,
+          [],
           run.events,
           plan.failure,
           this.supersededPackageRecords(),
@@ -2019,17 +2029,19 @@ export class BotDurableAuthority<Snapshot> {
       }
       if (plan.kind === "restart") {
         const settings = run.configurationSnapshot;
-        await eventLog.rewrite(run.sessionId, plan.previous);
+        // Drop the run's suffix. Earlier events keep their sequence numbers.
+        await eventLog.truncateSuffix(run.sessionId, run.previousEventCount);
+        const seeded = await readSessionCursorV1(transaction, run.sessionId);
         await transaction.put(
           key,
           storedRunRecordV2({
             ...run,
             events: [],
             eventRange: {
-              startSeq: plan.previous.length,
-              endSeq: plan.previous.length,
+              startSeq: run.previousEventCount,
+              endSeq: run.previousEventCount,
             },
-            previousEventCount: plan.previous.length,
+            previousEventCount: run.previousEventCount,
             phase: "admitted",
           } satisfies StoredRunV1<Snapshot>),
         );
@@ -2037,7 +2049,7 @@ export class BotDurableAuthority<Snapshot> {
         return {
           kind: "restart" as const,
           run,
-          previous: plan.previous,
+          seed: turnContextSeedV1(seeded, []),
           settings,
         };
       }
@@ -2053,7 +2065,6 @@ export class BotDurableAuthority<Snapshot> {
       return {
         kind: "resume" as const,
         run,
-        latest: [...previous, ...run.events],
         settings,
       };
     });
@@ -2063,7 +2074,6 @@ export class BotDurableAuthority<Snapshot> {
       await this.executeResumedRun(
         durableIdentity,
         recovery.run,
-        recovery.latest,
         recovery.settings,
       );
       return;
@@ -2089,7 +2099,7 @@ export class BotDurableAuthority<Snapshot> {
           ? { directTool: recovery.run.directTool }
           : {}),
       },
-      recovery.previous,
+      recovery.seed,
       recovery.settings,
       recovery.run.compositionGenerationId,
     );

@@ -57,7 +57,7 @@ export function interruptedRunSettlementV1(
     });
   }
   session.reconcileInterrupted();
-  return [...session.events.slice(run.previousEventCount)];
+  return [...session.activeRunJournal.slice(run.previousEventCount)];
 }
 
 export function planBotRunRecovery(

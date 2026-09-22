@@ -20,9 +20,9 @@ import {
   automationParentPointerV1,
   chatWindowV1,
   CHAT_HISTORY_BUDGET_CHARS_V1,
-  turnScopedMessagesV1,
   turnTypesByTurnV1,
 } from "./history.js";
+import { assembleJournalContextV1 } from "./working-context.js";
 import {
   COMPACTION_RESPONSE_SCHEMA_V1,
   type CompactionSummaryPayloadV1,
@@ -119,7 +119,7 @@ export async function recordSendToUserV1(
     };
   }
   if (
-    !session.events.some(
+    !session.activeRunJournal.some(
       (event) =>
         event.type === "send/to-user" &&
         event.occurrenceId === where.occurrenceId,
@@ -681,13 +681,16 @@ export const shellAgentFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
     runtime.hooks.add({
       turnStopping: async (agent, turn) => {
         const session = agent.session;
-        const types = turnTypesByTurnV1(session.events);
+        const types = turnTypesByTurnV1(session.activeRunJournal);
         if ((types.get(turn) ?? "chat") !== "chat") return;
         compactionWorkV1(session.id).start(async (signal) => {
           if (signal.aborted) return;
           await runCompactionV1({
             session,
-            window: chatWindowV1(session.events, session.deriveMessages()),
+            window: chatWindowV1(
+              session.activeRunJournal,
+              session.deriveMessages(),
+            ),
             budget: CHAT_HISTORY_BUDGET_CHARS_V1,
             currentTurn: turn,
             newEffectId: () => `compaction-${crypto.randomUUID()}`,
@@ -747,13 +750,35 @@ export const shellAgentFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
     // what history a request carries — the one rule the visible transcript
     // rests on.
     runtime.hooks.add({
-      messageWindow: async (agent, _messages, _turn, _step, _signal, next) => {
-        const proposed = await next();
-        return turnScopedMessagesV1({
-          events: agent.session.events,
-          messages: proposed,
+      messageWindow: async (agent, _messages, turn, _step, _signal, next) => {
+        await next();
+        const session = agent.session;
+        const currentMessages = session.deriveTurnMessages(turn);
+        const currentTurnType = session.turnType(turn);
+        if (session.workingContextSelector) {
+          return session.workingContextSelector({
+            sessionId: session.id,
+            epoch: session.cursor.epoch,
+            currentTurn: turn,
+            currentTurnType,
+            currentMessages,
+            budget: CHAT_HISTORY_BUDGET_CHARS_V1,
+            pointer: automationParentPointerV1,
+          });
+        }
+        const journalStart = session.activeRunJournal[0]?.seq ?? 0;
+        if (journalStart > 0) {
+          throw new Error(
+            "working context is unavailable for this active-run journal",
+          );
+        }
+        return assembleJournalContextV1({
+          events: session.activeRunJournal,
+          sessionId: session.id,
+          currentTurn: turn,
+          currentTurnType,
+          currentMessages,
           pointer: automationParentPointerV1,
-          sessionId: agent.session.id,
         });
       },
     }),

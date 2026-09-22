@@ -72,7 +72,11 @@ async function sealedLease(effectId: string) {
 interface BotStateStub {
   modelTransports: PluginModelDispatchRegistryV1;
   /** The host's own session reference, as the mount captured it. */
-  session: { id: string; events: Array<Record<string, unknown>> };
+  session: {
+    id: string;
+    events: Array<Record<string, unknown>>;
+    activeRunJournal: Array<Record<string, unknown>>;
+  };
 }
 
 /** A stand-in session: what the transport reads of the host's own reference. */
@@ -80,7 +84,7 @@ function session(
   events: Array<Record<string, unknown>> = [],
   id = SCOPE.sessionId,
 ) {
-  return { id, events };
+  return { id, events, activeRunJournal: events };
 }
 
 function begin(
@@ -285,7 +289,11 @@ function botState(options: {
   fetch?: (url: string, init: RequestInit) => Promise<Response>;
 }) {
   const requestId = options.requestId ?? SCOPE.requestId;
-  const session = { id: SCOPE.sessionId, events: options.events };
+  const session = {
+    id: SCOPE.sessionId,
+    events: options.events,
+    activeRunJournal: options.events,
+  };
   return {
     session,
     modelTransports: new PluginModelDispatchRegistryV1(),

@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { Session, type SessionEvent } from "@frockbot/core/contracts";
+import {
+  decodeSessionEvent,
+  Session,
+  type SessionEvent,
+} from "@frockbot/core/contracts";
 import { MemoryStorage } from "./memory-storage.fixture.ts";
 import {
   SESSION_EVENT_PAGE_BYTES_V1,
@@ -47,7 +51,7 @@ function journal(systemBytes = 80_000): SessionEvent[] {
     { type: "step/end", turn: 1, step: 1, outcome: "completed" },
     { type: "turn/end", turn: 1, outcome: "completed" },
   ]);
-  return [...session.events];
+  return [...session.activeRunJournal];
 }
 
 describe("the paged Session event log", () => {
@@ -136,7 +140,7 @@ describe("the paged Session event log", () => {
       { type: "step/end", turn: 1, step: 1, outcome: "completed" },
       { type: "turn/end", turn: 1, outcome: "completed" },
     ]);
-    const events = [...session.events];
+    const events = [...session.activeRunJournal];
 
     await log.rewrite(SESSION_ID, events);
 
@@ -188,7 +192,7 @@ describe("the paged Session event log", () => {
         { type: "turn/end", turn, outcome: "completed" },
       ]);
     }
-    const events = [...session.events];
+    const events = [...session.activeRunJournal];
 
     await log.rewrite(SESSION_ID, events.slice(0, 101));
     await log.append(SESSION_ID, events.slice(101));
@@ -273,7 +277,7 @@ describe("the paged Session event log", () => {
       ]);
     }
     const log = new SessionEventLog(storage);
-    await log.rewrite(SESSION_ID, [...session.events]);
+    await log.rewrite(SESSION_ID, [...session.activeRunJournal]);
 
     const reads: string[] = [];
     const get = storage.get.bind(storage);
@@ -284,7 +288,7 @@ describe("the paged Session event log", () => {
 
     const range = await log.readRange(SESSION_ID, 0, 1);
 
-    expect(range).toEqual([session.events[0]!]);
+    expect(range).toEqual([session.activeRunJournal[0]!]);
     expect(
       reads.filter((key) =>
         key.startsWith(sessionEventPayloadPrefixV1(SESSION_ID)),
@@ -318,7 +322,7 @@ describe("the paged Session event log", () => {
       ]);
     }
     const log = new SessionEventLog(storage);
-    await log.rewrite(SESSION_ID, [...session.events]);
+    await log.rewrite(SESSION_ID, [...session.activeRunJournal]);
 
     const reads: string[] = [];
     const get = storage.get.bind(storage);
@@ -329,7 +333,7 @@ describe("the paged Session event log", () => {
 
     const range = await log.readRange(SESSION_ID, 30, 33);
 
-    expect(range).toEqual(session.events.slice(30, 33));
+    expect(range).toEqual(session.activeRunJournal.slice(30, 33));
     const payloads = new Set(
       reads
         .filter((key) =>
@@ -337,7 +341,7 @@ describe("the paged Session event log", () => {
         )
         .map((key) => key.slice(0, key.lastIndexOf(":"))),
     );
-    const requestSeq = session.events
+    const requestSeq = session.activeRunJournal
       .slice(30, 33)
       .find((event) => event.type === "model/request")!.seq;
     expect([...payloads]).toEqual([
@@ -415,7 +419,7 @@ describe("the paged Session event log", () => {
       model: "large-context",
     });
     const log = new SessionEventLog(storage);
-    await log.rewrite(SESSION_ID, [...session.events]);
+    await log.rewrite(SESSION_ID, [...session.activeRunJournal]);
 
     const reads: string[] = [];
     const get = storage.get.bind(storage);
@@ -456,5 +460,36 @@ describe("the paged Session event log", () => {
       true,
     );
     expect(await log.read(SESSION_ID)).toEqual(events);
+  });
+
+  test("drops a suffix without reading earlier payload bytes", async () => {
+    const storage = new MemoryStorage();
+    const log = new SessionEventLog(storage);
+    const early = journal();
+    await log.append(SESSION_ID, early);
+    const later = [
+      decodeSessionEvent({
+        type: "turn/end",
+        turn: 9,
+        outcome: "completed",
+        seq: early.length,
+        timestamp: "2026-09-04T00:00:00.000Z",
+      }),
+    ];
+    await log.append(SESSION_ID, later);
+    const reads: string[] = [];
+    const original = storage.get.bind(storage);
+    storage.get = ((key: string) => {
+      reads.push(key);
+      return original(key);
+    }) as typeof storage.get;
+    await log.truncateSuffix(SESSION_ID, early.length);
+    expect(
+      reads.filter((key) =>
+        key.startsWith(sessionEventPayloadPrefixV1(SESSION_ID)),
+      ),
+    ).toEqual([]);
+    expect(await log.eventCount(SESSION_ID)).toBe(early.length);
+    expect(await log.readRange(SESSION_ID, 0, early.length)).toEqual(early);
   });
 });

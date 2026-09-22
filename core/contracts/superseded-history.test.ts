@@ -105,7 +105,7 @@ describe("the next Turn's request derives from what the superseded Turn recorded
     ]);
     // The Turn ended, and the log says so. Nothing was invented for the effect
     // that never returned: it is present, and it is an error.
-    expect(target.events.at(-1)).toMatchObject({
+    expect(target.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "interrupted",
     });
@@ -137,7 +137,7 @@ describe("the next Turn's request derives from what the superseded Turn recorded
     expect(target.deriveMessages()).toEqual(messages);
     const replayed = new Session(
       "user-1:primary",
-      target.events as readonly SessionEvent[],
+      target.activeRunJournal as readonly SessionEvent[],
     );
     expect(replayed.deriveMessages()).toEqual(messages);
   });

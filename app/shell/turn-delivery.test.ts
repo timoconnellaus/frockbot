@@ -148,7 +148,7 @@ function chatAdmission(): SessionEvent[] {
     { type: "turn/start", turn: 1 },
     { type: "turn/admission", turn: 1, turnType: "chat" } as SessionEvent,
   ]);
-  return [...session.events];
+  return [...session.activeRunJournal];
 }
 
 describe("a delivery Turn that did not deliver", () => {

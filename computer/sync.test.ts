@@ -151,7 +151,7 @@ async function runTurn(
   });
   handle.agent.send("use the Computer");
   await handle.agent.whenIdle();
-  const events = [...handle.agent.session.events];
+  const events = [...handle.agent.session.activeRunJournal];
   await loop.dispose();
   await runtime.dispose();
   return events;

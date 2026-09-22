@@ -34,21 +34,25 @@ export class MemoryStorage {
 
   list<T>(options: {
     prefix?: string;
+    start?: string;
     end?: string;
     reverse?: boolean;
     limit?: number;
   }): Promise<Map<string, T>> {
     const entries = [...this.values.entries()]
-      .filter(
-        ([key]) =>
-          key.startsWith(options.prefix ?? "") &&
-          (options.end === undefined || key < options.end),
-      )
+      .filter(([key]) => {
+        if (options.prefix !== undefined && !key.startsWith(options.prefix)) {
+          return false;
+        }
+        if (options.start !== undefined && key < options.start) return false;
+        if (options.end !== undefined && key >= options.end) return false;
+        return true;
+      })
       .sort(([left], [right]) => left.localeCompare(right));
     if (options.reverse) entries.reverse();
-    return Promise.resolve(
-      new Map(entries.slice(0, options.limit) as Array<[string, T]>),
-    );
+    const limited =
+      options.limit === undefined ? entries : entries.slice(0, options.limit);
+    return Promise.resolve(new Map(limited as Array<[string, T]>));
   }
 
   /**

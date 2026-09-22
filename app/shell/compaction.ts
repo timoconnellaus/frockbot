@@ -506,7 +506,7 @@ export async function runCompactionV1(
     return { kind: "skipped", assessment };
   }
   const { throughTurn, fromTurn } = assessment;
-  const binding = compactionModelV1(input.session.events);
+  const binding = compactionModelV1(input.session.activeRunJournal);
   if (!binding) return { kind: "skipped", assessment };
   const covered: LlmMessage[] = [];
   for (const [index, message] of input.window.messages.entries()) {

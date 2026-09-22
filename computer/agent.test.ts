@@ -374,7 +374,7 @@ describe("computer agent contribution", () => {
     await preStep(2);
     expect((await assemble()).text).not.toContain(HUMAN_CONTROL_PROMPT_LINE);
 
-    const injected = session.events.filter(
+    const injected = session.activeRunJournal.filter(
       (event) => event.type === "computer/injected",
     );
     expect(injected).toMatchObject([

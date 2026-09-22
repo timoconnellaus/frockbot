@@ -1485,7 +1485,9 @@ describe("Bot recovery", () => {
       provider: "fake",
       model: "large-context",
     });
-    await new SessionEventLog(storage).rewrite(sessionId, [...session.events]);
+    await new SessionEventLog(storage).rewrite(sessionId, [
+      ...session.activeRunJournal,
+    ]);
     storage.gets.length = 0;
 
     const page = await contribution.listRuns({ schemaVersion: 1 });

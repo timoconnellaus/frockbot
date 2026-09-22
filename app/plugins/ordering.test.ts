@@ -79,7 +79,7 @@ async function runPluginTool(name: string, effectId: string) {
   // appended a card without declaring the ordering, so this closes the run
   // rather than leaking it.
   await harness.dispose();
-  return { result, ordered, events: [...session.events] };
+  return { result, ordered, events: [...session.activeRunJournal] };
 }
 
 for (const name of ["plugin_publish", "plugin_enable"]) {

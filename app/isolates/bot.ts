@@ -554,11 +554,11 @@ async function invokeBotToolForIsolateV1(
     };
   }
   const effectId = await isolateToolEffectId(input.packageId, request.callId);
-  const priorCall = session.events.find(
+  const priorCall = session.activeRunJournal.find(
     (event) =>
       event.type === "package/tool-call" && event.effectId === effectId,
   );
-  const priorResult = session.events.find(
+  const priorResult = session.activeRunJournal.find(
     (event) =>
       event.type === "package/tool-result" && event.effectId === effectId,
   );

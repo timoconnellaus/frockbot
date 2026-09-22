@@ -389,7 +389,7 @@ describe("projecting a run the loop actually produced", () => {
       return {
         runId: "run-1",
         status: "completed",
-        events: handle.agent.session.events,
+        events: handle.agent.session.activeRunJournal,
         acceptedAt: AT,
       };
     } finally {

@@ -2976,6 +2976,31 @@ export class BotState
     return revertComposition(shell.state, identity, command);
   }
 
+  async readVoiceContext(input: unknown) {
+    if (!input || typeof input !== "object") {
+      throw new Error("voice context request is invalid");
+    }
+    const request = input as {
+      schemaVersion?: number;
+      userId?: string;
+      botId?: string;
+      limit?: number;
+    };
+    if (
+      request.schemaVersion !== 1 ||
+      typeof request.userId !== "string" ||
+      typeof request.botId !== "string"
+    ) {
+      throw new Error("voice context request is invalid");
+    }
+    const identity = { userId: request.userId, botId: request.botId };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return shell.readVoiceContext(
+      typeof request.limit === "number" ? request.limit : 6,
+    );
+  }
+
   async listRuns(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,

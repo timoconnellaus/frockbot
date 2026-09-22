@@ -116,7 +116,7 @@ export function createReplyToRequestToolV1(
       // The occurrence is the fence, exactly as it is for a send: a replayed
       // Turn records one answer, not two.
       if (
-        !session.events.some(
+        !session.activeRunJournal.some(
           (event) =>
             event.type === "reply/to-caller" &&
             event.occurrenceId === context.effectId,

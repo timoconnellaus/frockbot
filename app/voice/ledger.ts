@@ -28,11 +28,18 @@ export interface VoiceLedgerStorageV1 {
   get<T>(key: string): Promise<T | undefined>;
   put<T>(key: string, value: T): Promise<void>;
   delete(key: string): Promise<boolean | void>;
-  list<T>(options: { prefix: string }): Promise<Map<string, T>>;
+  list<T>(options: {
+    prefix: string;
+    start?: string;
+    end?: string;
+    reverse?: boolean;
+    limit?: number;
+  }): Promise<Map<string, T>>;
 }
 
 export const VOICE_CALL_KEY_V1 = "voice:call:current";
-export const VOICE_TURN_PREFIX_V1 = "voice:turn:";
+/** Turns of one call, ordered by sequence. Not a list of every retained call. */
+export const VOICE_TURN_PREFIX_V1 = "voice:call-turn:";
 export const VOICE_DELEGATION_PREFIX_V1 = "voice:delegation:";
 export const VOICE_METER_PREFIX_V1 = "voice:meter:";
 export const VOICE_DICTATION_LEASE_KEY_V1 = "voice:dictation:lease";
@@ -529,16 +536,17 @@ export class VoiceLedgerV1 {
    * said — which is exactly the turn most likely to have been the request to
    * remember something.
    */
-  async turnsForCall(callId: string): Promise<VoiceTurnRecordV1[]> {
+  async turnsForCall(
+    callId: string,
+    options?: { limit?: number },
+  ): Promise<VoiceTurnRecordV1[]> {
+    const limit = options?.limit;
     const rows = await this.storage.list<VoiceTurnRecordV1>({
-      prefix: VOICE_TURN_PREFIX_V1,
+      prefix: callTurnPrefix(callId),
+      ...(limit !== undefined ? { reverse: true, limit } : {}),
     });
-    return (
-      [...rows.values()]
-        .filter((turn) => turn.callId === callId)
-        // The sequence, not the clock: two turns admitted in the same
-        // millisecond still have an order, and `10` must not sort before `9`.
-        .sort((left, right) => turnSequence(left) - turnSequence(right))
+    return [...rows.values()].sort(
+      (left, right) => turnSequence(left) - turnSequence(right),
     );
   }
 
@@ -973,6 +981,13 @@ export class VoiceLedgerV1 {
     pending: VoiceDelegationRecordV1[];
   }> {
     const abandonedTurns: string[] = [];
+    // The previous turn key was not ordered by call. Those records are
+    // disposable test state; a bounded batch is deleted on each wake.
+    const legacyTurns = await this.storage.list<unknown>({
+      prefix: "voice:turn:",
+      limit: 32,
+    });
+    for (const key of legacyTurns.keys()) await this.storage.delete(key);
     const turns = await this.storage.list<VoiceTurnRecordV1>({
       prefix: VOICE_TURN_PREFIX_V1,
     });
@@ -1044,7 +1059,13 @@ function turnSequence(turn: VoiceTurnRecordV1): number {
 }
 
 function turnKey(turnId: string): string {
-  return `${VOICE_TURN_PREFIX_V1}${turnId}`;
+  const sequence = voiceTurnOrdinalV1(turnId);
+  const callId = turnId.slice(0, turnId.lastIndexOf(":"));
+  return `${callTurnPrefix(callId)}${String(sequence).padStart(10, "0")}`;
+}
+
+function callTurnPrefix(callId: string): string {
+  return `${VOICE_TURN_PREFIX_V1}${encodeURIComponent(callId)}:`;
 }
 
 function delegationKey(runId: string): string {
@@ -1070,14 +1091,27 @@ export function createMemoryVoiceLedgerStorageV1(): VoiceLedgerStorageV1 & {
       entries.set(key, structuredClone(value));
     },
     delete: async (key) => entries.delete(key),
-    list: async <T>({ prefix }: { prefix: string }) => {
-      const found = new Map<string, T>();
-      for (const [key, value] of [...entries.entries()].sort(([a], [b]) =>
-        a.localeCompare(b),
-      )) {
-        if (key.startsWith(prefix)) found.set(key, structuredClone(value) as T);
+    list: async <T>(options: {
+      prefix: string;
+      start?: string;
+      end?: string;
+      reverse?: boolean;
+      limit?: number;
+    }) => {
+      const found: Array<[string, T]> = [];
+      for (const [key, value] of entries) {
+        if (!key.startsWith(options.prefix)) continue;
+        if (options.start !== undefined && key < options.start) continue;
+        if (options.end !== undefined && key >= options.end) continue;
+        found.push([key, structuredClone(value) as T]);
       }
-      return found;
+      found.sort(([left], [right]) => left.localeCompare(right));
+      if (options.reverse) found.reverse();
+      const limited =
+        options.limit === undefined ? found : found.slice(0, options.limit);
+      const map = new Map<string, T>();
+      for (const [key, value] of limited) map.set(key, value);
+      return map;
     },
   };
 }

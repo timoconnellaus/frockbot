@@ -6,6 +6,7 @@
 // Durable Object and the recovery tests still reach through the object.
 
 import { messageRecords } from "@frockbot/app/notifications/messages";
+import "./working-context-store.js";
 import { defineBotBackendContribution } from "@frockbot/core/contracts/contributions";
 import type { SessionEvent } from "@frockbot/core/contracts";
 import type { BotIdentity, OwnedBotTurnCommand } from "@frockbot/core/durable";
@@ -97,6 +98,11 @@ export class ShellBotBackendContribution {
 
   async getSettings(identity: BotIdentity): Promise<BotSettingsViewV1> {
     return readBotSettingsV1(this.state, identity);
+  }
+
+  async readVoiceContext(limit: number) {
+    const { readVoiceContextV1 } = await import("./voice-context.js");
+    return readVoiceContextV1(this.state, limit);
   }
 
   async listAnnouncements(): Promise<SessionEvent[]> {

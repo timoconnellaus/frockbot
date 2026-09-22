@@ -467,7 +467,7 @@ describe("running a compaction", () => {
   ) {
     return {
       session,
-      window: chatWindowV1(session.events, session.deriveMessages()),
+      window: chatWindowV1(session.activeRunJournal, session.deriveMessages()),
       budget: 4_000,
       currentTurn,
       newEffectId: () => "effect-1",
@@ -481,11 +481,11 @@ describe("running a compaction", () => {
     const session = await sessionFrom([MODEL_REQUEST, ...wordy(10, 400)]);
     const outcome = await runCompactionV1(runner(session, async () => SUMMARY));
     expect(outcome).toEqual({ kind: "compacted", throughTurn: 6, fromTurn: 1 });
-    const types = session.events.map((event) => event.type);
+    const types = session.activeRunJournal.map((event) => event.type);
     expect(
       types.filter((t) => t === "conversation/compaction-intent"),
     ).toHaveLength(1);
-    const compacted = session.events.findLast(
+    const compacted = session.activeRunJournal.findLast(
       (event) => event.type === "conversation/compacted",
     );
     expect(
@@ -498,7 +498,7 @@ describe("running a compaction", () => {
       model: "kimi-k2",
     });
     // Every event it wrote decodes, so a reload reads back what it stored.
-    for (const event of session.events) {
+    for (const event of session.activeRunJournal) {
       expect(() => decodeSessionEvent(event)).not.toThrow();
     }
   });
@@ -512,7 +512,7 @@ describe("running a compaction", () => {
         return SUMMARY;
       }),
     );
-    const intent = session.events.find(
+    const intent = session.activeRunJournal.find(
       (event) => event.type === "conversation/compaction-intent",
     );
     expect(
@@ -541,7 +541,9 @@ describe("running a compaction", () => {
     expect(calls).toBe(1);
     expect(again.kind).toBe("skipped");
     expect(
-      session.events.filter((event) => event.type === "conversation/compacted"),
+      session.activeRunJournal.filter(
+        (event) => event.type === "conversation/compacted",
+      ),
     ).toHaveLength(1);
   });
 
@@ -571,9 +573,13 @@ describe("running a compaction", () => {
       reason: "interrupted",
     });
     expect(
-      session.events.some((event) => event.type === "conversation/compacted"),
+      session.activeRunJournal.some(
+        (event) => event.type === "conversation/compacted",
+      ),
     ).toBe(false);
-    expect(compactionStateV1(session.events).unsettled).toBeUndefined();
+    expect(
+      compactionStateV1(session.activeRunJournal).unsettled,
+    ).toBeUndefined();
   });
 
   test("records a failure and leaves the conversation alone", async () => {
@@ -584,7 +590,7 @@ describe("running a compaction", () => {
       }),
     );
     expect(outcome.kind).toBe("failed");
-    const failure = session.events.findLast(
+    const failure = session.activeRunJournal.findLast(
       (event) => event.type === "conversation/compaction-failed",
     );
     expect(
@@ -592,7 +598,9 @@ describe("running a compaction", () => {
     ).toBe("provider refused the request");
     // The request that follows is exactly the one that would be assembled
     // without a compaction.
-    expect(compactionStateV1(session.events).compaction).toBeUndefined();
+    expect(
+      compactionStateV1(session.activeRunJournal).compaction,
+    ).toBeUndefined();
   });
 
   test("folds a previous summary into the range it extends", async () => {

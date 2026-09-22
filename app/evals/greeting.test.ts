@@ -49,7 +49,7 @@ test("greeting grader reads a batched send as the call the model made", async ()
     });
     handle.agent.send("Hi");
     await handle.agent.whenIdle();
-    const result = gradeGreeting(handle.agent.session.events);
+    const result = gradeGreeting(handle.agent.session.activeRunJournal);
     expect(result.checks.onlySendToUser).toBe(true);
     expect(result.checks.finalDisposition).toBe(true);
     expect(result.passed).toBe(true);
@@ -103,7 +103,7 @@ for (const repairFirst of [false, true]) {
       });
       handle.agent.send("Hi");
       await handle.agent.whenIdle();
-      const result = gradeGreeting(handle.agent.session.events);
+      const result = gradeGreeting(handle.agent.session.activeRunJournal);
       expect(result.passed).toBe(!repairFirst);
       expect(result.checks.oneVisibleReply).toBe(true);
       expect(result.checks.oneModelCall).toBe(!repairFirst);

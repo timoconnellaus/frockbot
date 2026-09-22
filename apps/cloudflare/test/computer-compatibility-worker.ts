@@ -462,7 +462,7 @@ export class WorkerdBotState extends BotState {
         signal: new AbortController().signal,
       },
     );
-    const events = [...session.events];
+    const events = [...session.activeRunJournal];
     sessions.dispose();
     return { ...result, events };
   }

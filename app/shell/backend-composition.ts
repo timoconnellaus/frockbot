@@ -11,6 +11,10 @@ import {
   type RuntimeModelSelection,
 } from "@frockbot/app/agent-runtime";
 import type { AgentEffectAdmission } from "@frockbot/core/agent-loop/agent";
+import type {
+  SessionSeedV1,
+  WorkingContextSelectorV1,
+} from "@frockbot/core/contracts";
 import {
   bootstrapGeneration,
   compositionAppletMemberReachesV1,
@@ -159,7 +163,10 @@ export interface ShellCompositionMountOptions {
   billing?: ModelBilling;
   botId: string;
   sessionId: string;
-  sessionEvents: readonly SessionEvent[];
+  sessionEvents?: readonly SessionEvent[];
+  /** Absolute seed. Used instead of `sessionEvents` when the journal is not the archive. */
+  sessionSeed?: SessionSeedV1;
+  selectWorkingContext?: WorkingContextSelectorV1;
   persistSessionEvents?: PersistSessionEvents;
   agentPackages?: readonly FoundationAgentPackage[];
   modelSelection?: RuntimeModelSelection;
@@ -241,7 +248,12 @@ export function createShellCompositionHost(
         agentId: options.botId,
         billing: options.billing,
         sessionId: options.sessionId,
-        sessionEvents: options.sessionEvents,
+        ...(options.sessionSeed
+          ? { sessionSeed: options.sessionSeed }
+          : { sessionEvents: options.sessionEvents }),
+        ...(options.selectWorkingContext
+          ? { selectWorkingContext: options.selectWorkingContext }
+          : {}),
         composition: {
           generationId: generation.generationId,
           artifactSetHash: generation.artifactSetHash,
