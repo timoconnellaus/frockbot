@@ -173,7 +173,9 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
           "abort",
           () => {
             clearTimeout(timer);
-            reject(new DOMException("The operation was aborted.", "AbortError"));
+            reject(
+              new DOMException("The operation was aborted.", "AbortError"),
+            );
           },
           { once: true },
         );

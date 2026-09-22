@@ -281,7 +281,8 @@ async function startCall(
     (f) => f.type === "voice/admitted" && f.attemptId === attemptId,
     "admitted",
   );
-  opened.callId = typeof admitted.callId === "string" ? admitted.callId : undefined;
+  opened.callId =
+    typeof admitted.callId === "string" ? admitted.callId : undefined;
   // `ready` is Gemini setup. A paused or muted admit has no upstream.
   if (!intent.paused && !intent.muted && admitted.paused !== true) {
     await opened.waitFor(

@@ -113,7 +113,8 @@ export function offerVoiceResumptionV1(input: {
 }): VoiceResumptionOfferV1 {
   const record = input.record;
   if (!record) return { status: "fresh", reason: "missing" };
-  if (record.callId !== input.callId) return { status: "fresh", reason: "call" };
+  if (record.callId !== input.callId)
+    return { status: "fresh", reason: "call" };
   if (record.botId !== input.botId) return { status: "fresh", reason: "bot" };
   if (record.model !== input.model) return { status: "fresh", reason: "model" };
   if (record.fingerprint !== input.fingerprint) {

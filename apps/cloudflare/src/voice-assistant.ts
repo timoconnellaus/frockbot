@@ -2120,7 +2120,11 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     if (call && custom.action === "mute") call.muted = custom.muted === true;
     if (custom.action === "end") {
       const ended = await this.ledger().endedReceipt();
-      if (!call && ended && (!custom.attemptId || attempt?.owningCallId === ended.callId)) {
+      if (
+        !call &&
+        ended &&
+        (!custom.attemptId || attempt?.owningCallId === ended.callId)
+      ) {
         this.send(connection, {
           schemaVersion: 1,
           type: "voice/control-ack",
@@ -2514,7 +2518,9 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       tools,
       googleSearch: true,
       memoryIdentity: voiceMemoryIdentityV1({
-        durableIds: (sessionMemory?.record.durable ?? []).map((entry) => entry.id),
+        durableIds: (sessionMemory?.record.durable ?? []).map(
+          (entry) => entry.id,
+        ),
         forgottenIds: (sessionMemory?.record.forgotten ?? []).map(
           (entry) => entry.id,
         ),

@@ -63,7 +63,9 @@ describe("pcm envelope", () => {
   });
 
   test("refuses a short frame, a wrong version, or odd pcm", () => {
-    expect(decodeVoiceAssistantPcmEnvelopeV1(new Uint8Array(20))).toBeUndefined();
+    expect(
+      decodeVoiceAssistantPcmEnvelopeV1(new Uint8Array(20)),
+    ).toBeUndefined();
     const frame = encodeVoiceAssistantPcmEnvelopeV1({
       attemptId: ATTEMPT,
       sequence: 0,
@@ -116,11 +118,17 @@ describe("setup fingerprint", () => {
     };
     const first = await voiceSetupFingerprintV1(base);
     expect(first).toMatch(/^[0-9a-f]{64}$/);
-    expect(await voiceSetupFingerprintV1({ ...base, tools: ["googleSearch", "subagent"] })).toBe(
-      first,
-    );
     expect(
-      await voiceSetupFingerprintV1({ ...base, memoryIdentity: "fact-a|fact-a" }),
+      await voiceSetupFingerprintV1({
+        ...base,
+        tools: ["googleSearch", "subagent"],
+      }),
+    ).toBe(first);
+    expect(
+      await voiceSetupFingerprintV1({
+        ...base,
+        memoryIdentity: "fact-a|fact-a",
+      }),
     ).not.toBe(first);
   });
 });

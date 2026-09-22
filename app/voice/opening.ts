@@ -31,11 +31,7 @@ export const VOICE_ASSISTANT_PCM_HEADER_BYTES_V1 = 1 + 16 + 4;
 export const VOICE_ASSISTANT_PCM_SEQUENCE_WRAP_V1 = 0xfffffff0;
 
 export type VoiceOpeningPhaseV1 =
-  | "admitting"
-  | "preparing"
-  | "configuring"
-  | "ready"
-  | "closed";
+  "admitting" | "preparing" | "configuring" | "ready" | "closed";
 
 const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
@@ -145,7 +141,9 @@ export function decideVoicePcmSequenceV1(
     return { kind: "drop" };
   }
   if (lastAccepted === undefined) {
-    return sequence === 0 ? { kind: "accept", sequence } : { kind: "gap", sequence };
+    return sequence === 0
+      ? { kind: "accept", sequence }
+      : { kind: "gap", sequence };
   }
   if (sequence === lastAccepted) return { kind: "drop" };
   if (sequence === lastAccepted + 1) return { kind: "accept", sequence };
