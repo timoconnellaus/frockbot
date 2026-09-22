@@ -230,6 +230,7 @@
     "./shell/terminal-records": "./shell/terminal-records.ts",
     "./shell/tool-catalog-pin": "./shell/tool-catalog-pin.ts",
     "./shell/turn": "./shell/turn.ts",
+    "./shell/working-context-store": "./shell/working-context-store.ts",
     "./shell/unread": "./shell/unread.ts",
     "./shell/voice-reply": "./shell/voice-reply.ts",
     "./skills": "./skills/index.ts",

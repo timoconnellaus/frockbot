@@ -29,6 +29,7 @@ import { cleanIncidentTestChatsV1 } from "./test-chat-cleanup.js";
 import { cleanBotAvatarTestState } from "./avatar-state-cleanup.js";
 import { cleanBotProfileMirrorTestState } from "./directory-profile-cleanup.js";
 import { cleanRetiredPublicationStateV1 } from "./publication-state-cleanup.js";
+import { projectUnprojectedSessionsV1 } from "./working-context-cleanup.js";
 import {
   deliverProfileMirrorV1,
   PROFILE_MIRROR_KEY_V1,
@@ -617,6 +618,7 @@ export class BotState
       await cleanUnpreparedRunsV1(this.ctx.storage);
       await cleanUndecodableSkillIndexesV1(this.ctx.storage);
       await cleanRetiredPublicationStateV1(this.ctx.storage);
+      await projectUnprojectedSessionsV1(this.ctx.storage);
       const identity = await this.ctx.storage.get<{
         userId: string;
         botId: string;
