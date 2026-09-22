@@ -13,6 +13,7 @@ import 'package:frockbot_native/voice/capture.dart';
 import 'package:frockbot_native/voice/player.dart';
 import 'package:frockbot_native/voice/route.dart';
 import 'package:frockbot_native/voice/socket.dart';
+import 'package:frockbot_native/voice/speech_classifier.dart';
 
 /// Lets the pending microtasks run, which is how a fake stream delivers.
 Future<void> settle([int rounds = 3]) async {
@@ -196,6 +197,32 @@ class FakeVoicePlayer extends VoicePlayer {
     closed = true;
     finishPlayback(clean: false);
   }
+}
+
+/// A classifier whose probability the test writes, so the gate's Silero
+/// path can be driven without an ONNX runtime.
+class ScriptedSpeechClassifier implements SpeechClassifier {
+  ScriptedSpeechClassifier({this.score = 0, this.ready = true});
+
+  double score;
+
+  @override
+  bool ready;
+
+  @override
+  double get probability => score;
+
+  @override
+  void offer(Uint8List pcm16) {}
+
+  @override
+  Future<void> prepare() async {}
+
+  @override
+  void reset() {}
+
+  @override
+  Future<void> dispose() async {}
 }
 
 /// One PCM16 frame of a constant amplitude, so its RMS is exactly [level].

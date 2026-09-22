@@ -71,7 +71,7 @@ abstract interface class VoiceCapture {
   ///
   /// The assistant may stream microphone frames while it speaks only when
   /// this is true. Without that guarantee, speaker output is indistinguishable
-  /// from a person to both the local energy gate and the model's VAD.
+  /// from a person to both the local speech gate and the model's VAD.
   bool get cancelsPlaybackEcho;
 
   /// Releases the device. One capture serves the whole app — the microphone

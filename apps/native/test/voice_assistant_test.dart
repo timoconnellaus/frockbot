@@ -17,6 +17,7 @@ import 'package:frockbot_native/voice/assistant.dart';
 import 'package:frockbot_native/voice/capture.dart';
 import 'package:frockbot_native/voice/protocol.dart';
 import 'package:frockbot_native/voice/socket.dart';
+import 'package:frockbot_native/voice/speech_classifier.dart';
 
 import 'voice_fakes.dart';
 
@@ -38,6 +39,7 @@ class Harness {
   Harness({
     Completer<VoiceSocket>? deferred,
     bool cancelsPlaybackEcho = false,
+    SpeechClassifier? speechClassifier,
   }) {
     capture = FakeVoiceCapture(cancelsPlaybackEcho: cancelsPlaybackEcho);
     opener = () => socket;
@@ -45,6 +47,7 @@ class Harness {
       openSocket: () => deferred?.future ?? Future.value(opener()),
       capture: capture,
       player: player,
+      speechClassifier: speechClassifier ?? const EnergySpeechClassifier(),
     );
   }
 
@@ -656,6 +659,31 @@ void main() {
     harness.controller.dispose();
   });
 
+  test(
+    'a speech classifier, not energy, decides when a sleeping call wakes',
+    () async {
+      final classifier = ScriptedSpeechClassifier(score: 0.1);
+      final harness = Harness(speechClassifier: classifier);
+      await harness.live();
+      await harness.feed(_quiet, 121000);
+      expect(harness.controller.asleep, isTrue);
+      final before = harness.audioCount;
+
+      // Loud energy, not speech: a slammed door must not spend a wake.
+      await harness.feed(_speech, 400);
+      expect(harness.controller.asleep, isTrue);
+      expect(harness.audioCount, before);
+      expect(harness.texts, isNot(contains(encodeVoiceWakeV1())));
+
+      classifier.score = 0.9;
+      await harness.feed(_quiet, 120);
+      expect(harness.controller.asleep, isFalse);
+      expect(harness.texts, contains(encodeVoiceWakeV1()));
+      expect(harness.audioCount, greaterThan(before));
+      harness.controller.dispose();
+    },
+  );
+
   test('mute stops the frames at once and unmute waits for an onset', () async {
     final harness = Harness();
     await harness.live();
@@ -721,6 +749,33 @@ void main() {
         1,
         reason: 'one interrupt per reply, not one a frame',
       );
+      harness.controller.dispose();
+    },
+  );
+
+  test(
+    'barge-in follows the classifier when energy would have interrupted',
+    () async {
+      final classifier = ScriptedSpeechClassifier(score: 0.55);
+      final harness = Harness(
+        cancelsPlaybackEcho: true,
+        speechClassifier: classifier,
+      );
+      await harness.live();
+      await harness.feed(_quiet, 600);
+      harness.status('speaking');
+      await settle();
+      await harness.feed(0.3, 400);
+      expect(
+        harness.player.interrupts,
+        0,
+        reason: '0.55 is onset, not barge-in',
+      );
+
+      classifier.score = 0.85;
+      await harness.feed(_quiet, 200);
+      expect(harness.player.interrupts, 1);
+      expect(harness.texts, contains(encodeAssistantInterruptV1()));
       harness.controller.dispose();
     },
   );

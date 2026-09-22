@@ -71,6 +71,7 @@ import '../voice/player.dart';
 import '../voice/route.dart';
 import '../voice/protocol.dart' show voiceUnavailableMessage;
 import '../voice/socket.dart';
+import '../voice/speech_classifier.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import 'bot_actions.dart';
 import 'bot_page.dart';
@@ -577,6 +578,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       ),
       player: PcmVoicePlayer(),
       route: audioRoute,
+      speechClassifier: createSpeechClassifierV1(),
     );
     // The Bot can hand the conversation over itself (ADR 0029, `switch_bot`),
     // and the person can press voice on another Bot's page. Either way the

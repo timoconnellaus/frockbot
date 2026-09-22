@@ -11,10 +11,10 @@
 /// An awake upstream gets a frame every 40 ms — speech, pauses and the
 /// silence after a sentence alike. A capture with effective echo cancellation
 /// keeps sending the room while the reply plays, so Gemini's detector owns the
-/// barge-in decision; the local energy gate only stops playback sooner. A
-/// capture without it sends silence while playback is audible and disables
-/// local barge-in, because speaker echo is not evidence that a person spoke.
-/// The energy gate is not consulted about individual frames.
+/// barge-in decision; the local gate only stops playback sooner. A capture
+/// without it sends silence while playback is audible and disables local
+/// barge-in, because speaker echo is not evidence that a person spoke. The
+/// gate is not consulted about individual frames.
 ///
 /// A per-turn error from the server — a reply that produced no text, a
 /// sentence that never became sound — is a notice on the call's surface for a
@@ -47,6 +47,7 @@ import 'player.dart';
 import 'protocol.dart';
 import 'route.dart';
 import 'socket.dart';
+import 'speech_classifier.dart';
 import 'speech_gate.dart';
 import 'waveform.dart' show VoiceMeterMode;
 
@@ -86,6 +87,7 @@ class AssistantSessionController extends ChangeNotifier {
   final VoicePlayer player;
   final VoiceAudioRoute route;
   final SpeechGateConfig gateConfig;
+  final SpeechClassifier speechClassifier;
   final Duration startTimeout;
   final Duration sleepAfter;
   final Duration connectTimeout;
@@ -124,8 +126,9 @@ class AssistantSessionController extends ChangeNotifier {
   ///   zeros still produces this one, which is how a deaf capture is told from
   ///   one that never opened.
   /// * `microphone.first-signal` — the first frame carrying the room at all.
-  /// * `microphone.first-speech` — the first frame the energy gate called
-  ///   speech. Not a transcript and not a word: an amplitude decision.
+  /// * `microphone.first-speech` — the first frame the gate called speech.
+  ///   Not a transcript and not a word: Silero's probability when the
+  ///   classifier is up, otherwise an amplitude decision.
   /// * `upstream.asleep` / `upstream.starting` / `upstream.awake` — the first
   ///   `voice/state` frame saying each; `awake` means the server's Live session
   ///   acknowledged its setup.
@@ -151,6 +154,7 @@ class AssistantSessionController extends ChangeNotifier {
     this.diagnostics,
     VoiceAudioRoute? route,
     this.gateConfig = const SpeechGateConfig(),
+    this.speechClassifier = const EnergySpeechClassifier(),
     this.startTimeout = voiceAssistantStartTimeoutV1,
     this.sleepAfter = voiceAssistantSleepAfterV1,
     this.connectTimeout = voiceAssistantConnectTimeoutV1,
@@ -223,7 +227,7 @@ class AssistantSessionController extends ChangeNotifier {
   final List<VoiceDelegationEntryV1> _delegations = [];
 
   /// Whether the person put the call to sleep. Distinct from [_asleep],
-  /// which the energy gate also sets: a paused call sends nothing and wakes
+  /// which the gate also sets: a paused call sends nothing and wakes
   /// for nothing but Resume.
   bool _paused = false;
 
@@ -368,6 +372,8 @@ class AssistantSessionController extends ChangeNotifier {
     _status = VoiceStatusV1.idle;
     _upstream = VoiceUpstreamStateV1.starting;
     _gate = SpeechGate(config: gateConfig);
+    speechClassifier.reset();
+    unawaited(speechClassifier.prepare());
     _teardownDone = null;
     _opening.clear();
     _openingBytes = 0;
@@ -617,7 +623,13 @@ class AssistantSessionController extends ChangeNotifier {
       _microphoneHeard = true;
     }
     _watchForDeafness(frame.atMs);
-    final decision = _gate.offer(frame.bytes, frame.level, frame.atMs);
+    speechClassifier.offer(frame.bytes);
+    final decision = _gate.offer(
+      frame.bytes,
+      frame.level,
+      frame.atMs,
+      speechScore: speechClassifier.ready ? speechClassifier.probability : null,
+    );
     if (decision.open) diagnostics?.markOnce('microphone.first-speech');
     // A capture with AEC lets Gemini hear the room throughout playback. The
     // local gate may stop the speaker sooner, but Gemini's VAD remains the
@@ -927,6 +939,7 @@ class AssistantSessionController extends ChangeNotifier {
     }
     _socket?.sendText(encodeVoiceMuteV1(now));
     _gate.reset();
+    speechClassifier.reset();
     // A client that is not sending is, to the upstream, asleep: the next
     // onset must wake it explicitly.
     _asleep = true;
@@ -1126,6 +1139,7 @@ class AssistantSessionController extends ChangeNotifier {
       await _settled(route.end);
     }
     await _settled(() async => socket?.close(code: code, reason: reason));
+    await _settled(speechClassifier.dispose);
     _micLevel = 0;
     _opening.clear();
     _openingBytes = 0;
@@ -1211,6 +1225,7 @@ class AssistantSessionController extends ChangeNotifier {
     _asleep = true;
     _upstream = VoiceUpstreamStateV1.asleep;
     _gate.reset();
+    speechClassifier.reset();
     unawaited(player.interrupt());
     _socket?.sendText(encodeVoiceSleepV1(paused: true));
     _notify();
@@ -1224,6 +1239,7 @@ class AssistantSessionController extends ChangeNotifier {
     _asleep = false;
     _upstream = VoiceUpstreamStateV1.starting;
     _gate.reset();
+    speechClassifier.reset();
     for (var i = 0; i < _delegations.length; i++) {
       if (!_delegations[i].finishedWhilePaused) continue;
       _delegations[i] = VoiceDelegationEntryV1(

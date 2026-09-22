@@ -413,18 +413,21 @@ passed.
 
 On a capture path with effective acoustic echo cancellation, the client sends
 the cleaned microphone continuously while playback is audible. Its local
-energy gate may stop the speaker immediately on a sustained onset and send
+speech gate may stop the speaker immediately on a sustained onset and send
 `{type:"interrupt"}` as a latency optimisation, but it does not gate the
 audio Gemini hears. Gemini's automatic activity detector is authoritative:
 its `serverContent.interrupted` confirms the interruption upstream.
 
 On a capture path without effective echo cancellation, the client sends
 silence while playback is audible and disables local barge-in. Speaker output
-is otherwise indistinguishable from the person to an energy gate or to
+is otherwise indistinguishable from the person to the local gate or to
 Gemini, and sending it created self-interrupting reply loops. These surfaces
-therefore require the person to wait until playback finishes. Background
-noise below the adapted floor does not trip the local gate on AEC surfaces;
-the gate remains an energy heuristic, not verified speech detection.
+therefore require the person to wait until playback finishes. Native Android,
+iOS and macOS label each frame with Silero v6 (ONNX) so a slammed door is
+not an onset; the browser, and a native runtime that failed to load the
+model, keep the energy heuristic. Timing — 120 ms onset, 900 ms hangover,
+500 ms pre-roll — is the same on every path. The gate still does not decide
+which frames an awake session sends.
 
 An interrupt never cancels a Bot Turn the session already started with
 `subagent`: that work is durable in the Bot.
@@ -511,11 +514,15 @@ costs about 3.6x input. So the session is closed when nobody is talking, and
 nothing at all is spent in between — no listening, no deliberating, no
 subagent admitted.
 
-- The client runs an energy gate on every frame: an adaptive noise floor, an
-  onset that needs several consecutive loud frames, and a 500 ms pre-roll
-  ring. It is an energy gate, not verified speech detection; it decides when
-  to **wake** a closed session and, only with effective AEC, when to stop its
-  own speaker early.
+- The client runs a speech gate on every frame: an onset that needs several
+  consecutive speech frames, a 900 ms hangover, and a 500 ms pre-roll ring.
+  Native Android, iOS and macOS label a frame with Silero v6 over the PCM
+  capture already owns — the plugin never opens a second microphone. The
+  browser, and a native runtime that cannot load the model, compare energy
+  to an adaptive floor. The gate decides when to **wake** a closed session
+  and, only with effective AEC, when to stop its own speaker early. It is
+  not a turn detector and does not decide which frames an awake session
+  sends.
 - While the session is open the client sends a frame every 40 ms, speech and
   silence alike, through pauses inside a sentence. While the model is
   answering, AEC surfaces keep sending the cleaned microphone so Gemini owns
@@ -637,7 +644,7 @@ zero bytes is a turn that never became sound), `turn-silent` (a turn that had
 said nothing after the guard's window, so the client was told), `tool` (a
 function call, by name and id, never its arguments), `tool-cancelled`,
 `interrupted` (with `source`: `model` when the session's own detector heard
-someone, `client` when the phone's energy gate did), `call-switched` (with the
+someone, `client` when the phone's speech gate did), `call-switched` (with the
 Bot and voice the session reopened as), `answer-told` (a subagent result went
 back, under its own call id, as a turn, or as a chat message after hang-up),
 `usage` (the session's own token counts at a turn's end),
@@ -708,7 +715,7 @@ never subtract one side's elapsed from another's.
   `socket.open`/`socket.ready` per attempt, `socket.welcome`,
   `call.start-sent`, `microphone.first-frame` (with `silent`, so a device
   handing over zeros is told from one that never opened),
-  `microphone.first-signal`, `microphone.first-speech` (the energy gate's
+  `microphone.first-signal`, `microphone.first-speech` (the gate's speech
   decision, not a transcript), `upstream.asleep`/`upstream.starting`/
   `upstream.awake`, `call.listening`, `audio.first-down`, `player.first-feed`,
   `player.first-played`, and `call.end`/`call.ended`/`call.failed`. Read the
