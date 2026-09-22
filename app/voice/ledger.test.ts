@@ -126,6 +126,61 @@ describe("voice ledger calls", () => {
     });
     expect(fresh.status).toBe("superseded");
   });
+
+  test("a paused call from the same device still rejoins after the short window", async () => {
+    const { ledger: l } = ledger();
+    await liveCall(l);
+    await l.setCallPaused("c1", true, later(1_000));
+    const rejoined = await l.beginCall({
+      callId: "call-x",
+      deviceKey: "phone",
+      connectionId: "c1b",
+      at: later(10 * 60_000),
+    });
+    expect(rejoined.status).toBe("admitted");
+    if (rejoined.status !== "admitted") throw new Error("unreachable");
+    expect(rejoined.rejoined).toBe(true);
+    expect(rejoined.call.callId).toBe("call-1");
+    expect(rejoined.call.paused).toBe(true);
+  });
+
+  test("clearing the pause restores the short window", async () => {
+    const { ledger: l } = ledger();
+    await liveCall(l);
+    await l.setCallPaused("c1", true, t0);
+    await l.setCallPaused("c1", false, t0);
+    expect((await l.currentCall())?.paused).toBeUndefined();
+    const fresh = await l.beginCall({
+      callId: "call-2",
+      deviceKey: "phone",
+      connectionId: "c3",
+      at: later(90_000),
+    });
+    expect(fresh.status).toBe("superseded");
+  });
+
+  test("a paused call from the same device after a day starts a new call", async () => {
+    const { ledger: l } = ledger();
+    await liveCall(l);
+    await l.setCallPaused("c1", true, t0);
+    const fresh = await l.beginCall({
+      callId: "call-2",
+      deviceKey: "phone",
+      connectionId: "c3",
+      at: later(25 * 60 * 60_000),
+    });
+    expect(fresh.status).toBe("superseded");
+  });
+
+  test("a paused call is not stale until the long window ends", async () => {
+    const { ledger: l } = ledger();
+    await liveCall(l);
+    await l.setCallPaused("c1", true, t0);
+    expect(await l.endStaleCall(later(10 * 60_000))).toBeUndefined();
+    expect((await l.endStaleCall(later(25 * 60 * 60_000)))?.callId).toBe(
+      "call-1",
+    );
+  });
 });
 
 describe("voice ledger turns", () => {

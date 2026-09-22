@@ -28,9 +28,10 @@ const _frameMs = 40;
 
 class Harness {
   late final FakeVoiceCapture capture;
-  final FakeVoiceSocket socket = FakeVoiceSocket();
+  FakeVoiceSocket socket = FakeVoiceSocket();
   final FakeVoicePlayer player = FakeVoicePlayer();
   late final AssistantSessionController controller;
+  late VoiceSocket Function() opener;
   int at = 0;
   int mark = 0;
 
@@ -39,8 +40,9 @@ class Harness {
     bool cancelsPlaybackEcho = false,
   }) {
     capture = FakeVoiceCapture(cancelsPlaybackEcho: cancelsPlaybackEcho);
+    opener = () => socket;
     controller = AssistantSessionController(
-      openSocket: () => deferred?.future ?? Future.value(socket),
+      openSocket: () => deferred?.future ?? Future.value(opener()),
       capture: capture,
       player: player,
     );
@@ -542,6 +544,84 @@ void main() {
       harness.controller.dispose();
     },
   );
+
+  test(
+    'a socket that dies while away keeps the call and rejoins on return',
+    () async {
+      final harness = Harness();
+      await harness.live();
+      await harness.controller.leaveForeground();
+      await harness.socket.finish();
+      await settle();
+      expect(harness.controller.phase, VoiceSessionPhase.live);
+      expect(harness.controller.active, isTrue);
+      expect(harness.controller.endedLine, isNull);
+      expect(harness.controller.paused, isTrue);
+
+      final next = FakeVoiceSocket();
+      harness.opener = () => next;
+      await harness.controller.enterForeground();
+      await settle();
+      next.deliver(jsonEncode({'type': 'welcome', 'protocol_version': 1}));
+      next.deliver(
+        jsonEncode({
+          'type': 'audio_config',
+          'format': 'pcm16',
+          'sampleRate': 24000,
+        }),
+      );
+      next.deliver(jsonEncode({'type': 'status', 'status': 'listening'}));
+      await settle();
+      expect(next.texts, contains(encodeAssistantStartCallV1()));
+      expect(next.texts, contains(encodeVoiceWakeV1()));
+      expect(harness.controller.paused, isFalse);
+      expect(harness.controller.phase, VoiceSessionPhase.live);
+      expect(harness.controller.endedLine, isNull);
+      expect(harness.capture.starts, 2);
+      harness.controller.dispose();
+    },
+  );
+
+  test('a socket that dies while paused keeps the call and rejoins', () async {
+    final harness = Harness();
+    await harness.live();
+    final next = FakeVoiceSocket();
+    harness.opener = () => next;
+    harness.controller.pause();
+    await harness.socket.finish();
+    await settle();
+    expect(harness.controller.phase, VoiceSessionPhase.live);
+    expect(harness.controller.paused, isTrue);
+    expect(harness.controller.endedLine, isNull);
+
+    next.deliver(jsonEncode({'type': 'welcome', 'protocol_version': 1}));
+    next.deliver(jsonEncode({'type': 'status', 'status': 'listening'}));
+    await settle();
+    expect(next.texts, contains(encodeAssistantStartCallV1()));
+    expect(next.texts, contains(encodeVoiceSleepV1(paused: true)));
+    expect(harness.controller.paused, isTrue);
+    expect(harness.controller.active, isTrue);
+    harness.controller.dispose();
+  });
+
+  test('hanging up after a dropped pause still sends end_call', () async {
+    final harness = Harness();
+    await harness.live();
+    final next = FakeVoiceSocket();
+    harness.opener = () => next;
+    harness.controller.pause();
+    await harness.socket.finish();
+    await settle();
+    next.deliver(jsonEncode({'type': 'welcome', 'protocol_version': 1}));
+    next.deliver(jsonEncode({'type': 'status', 'status': 'listening'}));
+    await settle();
+
+    await harness.controller.end(reason: 'end-button');
+    expect(next.texts, contains(encodeAssistantEndCallV1()));
+    expect(harness.controller.phase, VoiceSessionPhase.ended);
+    expect(harness.controller.endedLine, isNull);
+    harness.controller.dispose();
+  });
 
   test('the next onset wakes it, pre-roll first and then live', () async {
     final harness = Harness();
