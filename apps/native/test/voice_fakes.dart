@@ -6,12 +6,15 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 
 import 'package:frockbot_native/voice/capture.dart';
 import 'package:frockbot_native/voice/connect_sound.dart';
 import 'package:frockbot_native/voice/player.dart';
+import 'package:frockbot_native/voice/protocol.dart';
 import 'package:frockbot_native/voice/route.dart';
 import 'package:frockbot_native/voice/socket.dart';
 import 'package:frockbot_native/voice/speech_classifier.dart';
@@ -75,8 +78,131 @@ class FakeVoiceSocket implements VoiceSocket {
   List<String> get texts => sent.whereType<String>().toList();
   List<Uint8List> get binaries => sent.whereType<Uint8List>().toList();
 
-  /// The first byte of each binary frame, which is how a test labels audio.
-  List<int> get audioMarks => [for (final frame in binaries) frame.first];
+  /// PCM payload of each envelope, which is how a test labels audio.
+  List<Uint8List> get pcmPayloads => [
+    for (final frame in binaries)
+      decodeVoiceAssistantPcmEnvelopeV1(frame)?.pcm ?? frame,
+  ];
+
+  /// The first byte of each binary frame's PCM, which is how a test labels audio.
+  List<int> get audioMarks => [
+    for (final payload in pcmPayloads) payload.first,
+  ];
+
+  Map<String, Object?>? _asMap(String text) {
+    try {
+      final parsed = jsonDecode(text);
+      return parsed is Map ? Map<String, Object?>.from(parsed) : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  String? get lastAttemptId {
+    for (final text in texts.reversed) {
+      final parsed = _asMap(text);
+      if (parsed != null && parsed['type'] == 'voice/open') {
+        final id = parsed['attemptId'];
+        return id is String ? id : null;
+      }
+    }
+    return null;
+  }
+
+  bool hasOpen({VoiceOpeningModeV1? mode, bool? paused}) {
+    return texts.any((text) {
+      final parsed = _asMap(text);
+      if (parsed == null || parsed['type'] != 'voice/open') return false;
+      if (mode != null && parsed['mode'] != mode.name) return false;
+      if (paused != null && parsed['paused'] != paused) return false;
+      return true;
+    });
+  }
+
+  int openCount({VoiceOpeningModeV1? mode}) => texts.where((text) {
+    final parsed = _asMap(text);
+    if (parsed == null || parsed['type'] != 'voice/open') return false;
+    if (mode != null && parsed['mode'] != mode.name) return false;
+    return true;
+  }).length;
+
+  bool hasControl(VoiceControlActionV1 action, {bool? muted}) {
+    return texts.any((text) {
+      final parsed = _asMap(text);
+      if (parsed == null || parsed['type'] != 'voice/control') return false;
+      if (parsed['action'] != action.name) return false;
+      if (muted != null && parsed['muted'] != muted) return false;
+      return true;
+    });
+  }
+
+  List<bool> get muteAnnouncements {
+    final announced = <bool>[];
+    for (final text in texts) {
+      final parsed = _asMap(text);
+      if (parsed == null ||
+          parsed['type'] != 'voice/control' ||
+          parsed['action'] != 'mute') {
+        continue;
+      }
+      announced.add(parsed['muted'] == true);
+    }
+    return announced;
+  }
+
+  void admit({
+    bool paused = false,
+    bool muted = false,
+    String callId = 'call-1',
+  }) {
+    final attemptId = lastAttemptId;
+    if (attemptId == null) return;
+    deliver(
+      jsonEncode({
+        'schemaVersion': 1,
+        'type': 'voice/admitted',
+        'attemptId': attemptId,
+        'callId': callId,
+        'paused': paused,
+        'muted': muted,
+      }),
+    );
+  }
+
+  void ready({String callId = 'call-1'}) {
+    final attemptId = lastAttemptId;
+    if (attemptId == null) return;
+    deliver(
+      jsonEncode({
+        'schemaVersion': 1,
+        'type': 'voice/ready',
+        'attemptId': attemptId,
+        'callId': callId,
+      }),
+    );
+  }
+
+  /// Durable ownership, then Gemini setup, unless this open is paused or muted.
+  void completeOpen({
+    bool paused = false,
+    bool muted = false,
+    String callId = 'call-1',
+  }) {
+    admit(paused: paused, muted: muted, callId: callId);
+    if (!paused && !muted) ready(callId: callId);
+  }
+
+  void deliverPcm(List<int> pcm, {int sequence = 0}) {
+    final attemptId = lastAttemptId;
+    if (attemptId == null) return;
+    deliver(
+      encodeVoiceAssistantPcmEnvelopeV1(
+        attemptId: attemptId,
+        sequence: sequence,
+        pcm: Uint8List.fromList(pcm),
+      ),
+    );
+  }
 }
 
 class FakeVoiceCapture implements VoiceCapture {

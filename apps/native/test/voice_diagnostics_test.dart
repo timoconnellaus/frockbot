@@ -65,6 +65,8 @@ class Harness {
     await controller.start();
     await settle();
     socket.deliver(jsonEncode({'type': 'welcome', 'protocol_version': 1}));
+    await settle();
+    socket.completeOpen();
     socket.deliver(jsonEncode({'type': 'status', 'status': 'listening'}));
     await settle();
   }

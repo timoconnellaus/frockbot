@@ -120,7 +120,7 @@ class AssistantSessionController extends ChangeNotifier {
   /// * `socket.open` / `socket.ready` — around one connect attempt, each
   ///   carrying `attempt`. The gap is DNS, TLS and the upgrade round trip.
   /// * `socket.welcome` — the server's `welcome` frame arrived.
-  /// * `call.start-sent` — `start_call` went out, with `openingFrames`: how
+  /// * `call.start-sent` — `voice/open` went out, with `openingFrames`: how
   ///   much audio was captured before the handshake and is about to be
   ///   drained behind it.
   /// * `microphone.first-frame` — the first frame the device handed over, with
@@ -245,14 +245,15 @@ class AssistantSessionController extends ChangeNotifier {
   bool _away = false;
   bool _pausedForAway = false;
 
-  /// Completes when a reconnect's `start_call` has gone out, so Resume
+  /// Completes when a reconnect's `voice/open` has gone out, so Resume
   /// cannot beat the handshake.
   Completer<void>? _handshake;
   Future<void>? _rejoining;
 
-  /// Resume ran before `start_call` went out on a reconnect. The wake waits
+  /// Resume ran before `voice/open` went out on a reconnect. The wake waits
   /// for the handshake so it is not dropped on a socket that has no call.
   bool _pendingWake = false;
+  bool _hangingUp = false;
 
   /// How long a notice about the last reply stays on the call's surface.
   static const noticeDuration = Duration(seconds: 4);
@@ -278,10 +279,16 @@ class AssistantSessionController extends ChangeNotifier {
   int _generation = 0;
   bool _reportedPlaying = false;
 
-  /// Audio captured before `start_call` went out, bounded at 10 s and drained
-  /// in order once it has.
+  /// Audio captured before this attempt is ready, bounded at 10 s and drained
+  /// in order once `voice/ready` arrives.
   final ListQueue<Uint8List> _opening = ListQueue<Uint8List>();
   int _openingBytes = 0;
+  String? _attemptId;
+  String? _callId;
+  bool _ready = false;
+  int _controlSequence = 0;
+  int _outboundSequence = 0;
+  int? _inboundSequence;
 
   VoiceSessionPhase get phase => _phase;
   VoiceStatusV1 get status => _status;
@@ -359,7 +366,7 @@ class AssistantSessionController extends ChangeNotifier {
   /// Opens the call: the microphone and the socket at the same time, so the
   /// slow part of each — the permission prompt, the upgrade round trip — is
   /// paid once rather than twice over. The handshake itself waits for both:
-  /// `start_call` wakes a metered upstream, and it is not sent while the
+  /// `voice/open` wakes a metered upstream, and it is not sent while the
   /// person is still answering the permission prompt.
   Future<void> start() async {
     if (active || _disposed) return;
@@ -373,6 +380,7 @@ class AssistantSessionController extends ChangeNotifier {
     _away = false;
     _pausedForAway = false;
     _pendingWake = false;
+    _hangingUp = false;
     _started = false;
     _welcomed = false;
     _barged = false;
@@ -385,6 +393,12 @@ class AssistantSessionController extends ChangeNotifier {
     _teardownDone = null;
     _opening.clear();
     _openingBytes = 0;
+    _attemptId = newVoiceAttemptIdV1();
+    _callId = null;
+    _ready = false;
+    _controlSequence = 0;
+    _outboundSequence = 0;
+    _inboundSequence = null;
     _microphoneHeard = false;
     _deafNoticed = false;
     _deafSinceMs = null;
@@ -657,28 +671,19 @@ class AssistantSessionController extends ChangeNotifier {
     // A paused call is not listening: the gate's onset must not wake an
     // upstream the person deliberately put to sleep.
     if (_paused) return;
-    if (!_started) {
-      _opening.addLast(frame.bytes);
-      _openingBytes += frame.bytes.length;
-      while (_openingBytes > voiceAssistantOpeningBufferBytesV1 &&
-          _opening.isNotEmpty) {
-        _openingBytes -= _opening.removeFirst().length;
-      }
+    if (!_ready) {
+      _holdOpening(_outbound(frame.bytes));
       return;
     }
     final socket = _socket;
     if (socket == null) return;
     if (_asleep) {
       // Asleep, the gate is the only thing that can wake the upstream: a
-      // verified onset, then the pre-roll in order, then live frames.
+      // verified onset, then the pre-roll held until this wake is ready.
       if (!decision.onset) return;
-      socket.sendText(encodeVoiceWakeV1());
-      _asleep = false;
-      _upstream = VoiceUpstreamStateV1.starting;
-      // The pre-roll is captured audio like any other and obeys the same
-      // rule as the live frames below.
+      _beginWake();
       for (final piece in decision.emit) {
-        socket.sendBinary(_outbound(piece));
+        _holdOpening(_outbound(piece));
       }
       _notify();
       return;
@@ -690,17 +695,71 @@ class AssistantSessionController extends ChangeNotifier {
         _gate.quietForMs(frame.atMs) >= sleepAfter.inMilliseconds) {
       socket.sendText(encodeVoiceSleepV1());
       _asleep = true;
+      _ready = false;
       _upstream = VoiceUpstreamStateV1.asleep;
       _notify();
       return;
     }
     // Awake means a frame every 40 ms, speech and silence alike, through
-    // pauses and while the assistant is thinking. The server's transcriber
-    // decides where a turn ends and needs the silence after the words to
-    // decide it — about half a second; a client that cut the audio off right
-    // after the last syllable would leave the transcript hanging until the
-    // upstream timed out. What each frame carries is [_outbound]'s rule.
-    socket.sendBinary(_outbound(frame.bytes));
+    // pauses and while the assistant is thinking.
+    _sendPcm(_outbound(frame.bytes));
+  }
+
+  void _holdOpening(Uint8List bytes) {
+    if (_openingBytes + bytes.length > voiceAssistantOpeningBufferBytesV1) {
+      unawaited(
+        _fail(voiceOpeningFailMessage(VoiceOpeningFailCodeV1.overflow)),
+      );
+      return;
+    }
+    _opening.addLast(bytes);
+    _openingBytes += bytes.length;
+  }
+
+  void _beginWake() {
+    _attemptId = newVoiceAttemptIdV1();
+    _ready = false;
+    _outboundSequence = 0;
+    _inboundSequence = null;
+    _asleep = false;
+    _upstream = VoiceUpstreamStateV1.starting;
+    final socket = _socket;
+    if (socket == null || _attemptId == null) return;
+    socket.sendText(
+      encodeVoiceOpenV1(
+        attemptId: _attemptId!,
+        mode: VoiceOpeningModeV1.wake,
+        botId: botId,
+        callId: _callId,
+        paused: false,
+        muted: muted,
+      ),
+    );
+  }
+
+  void _sendPcm(Uint8List pcm) {
+    final socket = _socket;
+    final attemptId = _attemptId;
+    if (socket == null || attemptId == null || !_ready) return;
+    final sequence = _outboundSequence;
+    _outboundSequence += 1;
+    socket.sendBinary(
+      encodeVoiceAssistantPcmEnvelopeV1(
+        attemptId: attemptId,
+        sequence: sequence,
+        pcm: pcm,
+      ),
+    );
+  }
+
+  void _drainOpening() {
+    diagnostics?.markOnce('call.start-sent', {
+      'openingFrames': _opening.length,
+    });
+    while (_opening.isNotEmpty) {
+      _sendPcm(_opening.removeFirst());
+    }
+    _openingBytes = 0;
   }
 
   /// What may go on the wire for one piece of captured audio.
@@ -727,10 +786,28 @@ class AssistantSessionController extends ChangeNotifier {
     // because the app has already built the next session's player.
     if (_disposed || !active || _phase == VoiceSessionPhase.ending) return;
     if (message is List<int>) {
-      diagnostics?.markOnce('audio.first-down', {'bytes': message.length});
-      player.write(
-        message is Uint8List ? message : Uint8List.fromList(message),
-      );
+      final bytes = message is Uint8List
+          ? message
+          : Uint8List.fromList(message);
+      final envelope = decodeVoiceAssistantPcmEnvelopeV1(bytes);
+      if (envelope == null) return;
+      if (_attemptId == null || envelope.attemptId != _attemptId) return;
+      if (_inboundSequence != null && envelope.sequence == _inboundSequence) {
+        return;
+      }
+      if (_inboundSequence != null &&
+          envelope.sequence > _inboundSequence! + 1) {
+        unawaited(player.interrupt());
+        _showNotice('That audio didn’t come through. Say it again.');
+        _inboundSequence = envelope.sequence;
+        return;
+      }
+      if (_inboundSequence != null && envelope.sequence < _inboundSequence!) {
+        return;
+      }
+      _inboundSequence = envelope.sequence;
+      diagnostics?.markOnce('audio.first-down', {'bytes': envelope.pcm.length});
+      player.write(envelope.pcm);
       return;
     }
     if (message is! String) return;
@@ -819,9 +896,42 @@ class AssistantSessionController extends ChangeNotifier {
         // One reply failed — no text, or a sentence that never became sound.
         // The server is still listening; so is this client.
         _showNotice('That reply didn’t come through. Say it again.');
+      case AssistantVoiceAdmittedV1(
+        :final attemptId,
+        :final callId,
+        :final paused,
+      ):
+        if (_attemptId != null && attemptId != _attemptId) {
+          _opening.clear();
+          _openingBytes = 0;
+          _attemptId = attemptId;
+          _outboundSequence = 0;
+          _inboundSequence = null;
+          _ready = false;
+        }
+        _attemptId ??= attemptId;
+        _callId = callId;
+        if (paused) _paused = true;
+        _started = true;
+        final handshake = _handshake;
+        if (handshake != null && !handshake.isCompleted) handshake.complete();
+        if (paused || muted) {
+          _startTimer?.cancel();
+          _startTimer = null;
+        }
+        _notify();
+      case AssistantVoiceReadyV1(:final attemptId):
+        if (attemptId != _attemptId) return;
+        _ready = true;
+        _asleep = false;
+        _drainOpening();
+        _notify();
+      case AssistantVoiceOpenFailedV1(:final attemptId, :final code):
+        if (attemptId != _attemptId) return;
+        unawaited(_fail(voiceOpeningFailMessage(code)));
+      case AssistantVoiceControlAckV1():
       case AssistantTranscriptV1():
       case AssistantDiagnosticV1():
-        // The footer shows no transcript and no diagnostics.
         break;
     }
   }
@@ -848,8 +958,8 @@ class AssistantSessionController extends ChangeNotifier {
     }
   }
 
-  /// `hello` and `start_call`, once the server has welcomed and the
-  /// microphone is open: the opening audio goes up behind them in order.
+  /// `hello` and `voice/open`, once the server has welcomed and the
+  /// microphone is open: opening audio stays held until `voice/ready`.
   /// A reconnect while paused or muted has no microphone yet and still
   /// starts the call — Gemini stays asleep until Resume or unmute.
   void _beginCall() {
@@ -857,31 +967,45 @@ class AssistantSessionController extends ChangeNotifier {
     if (socket == null || !_welcomed || _started) return;
     if (_frames == null && !muted && !_paused) return;
     socket.sendText(encodeAssistantHelloV1());
-    // Who the call is with, before it starts: the SDK's own frame has no
-    // room for it, and the server needs it to build the first prompt.
-    final target = botId;
-    if (target != null && target.isNotEmpty) {
-      socket.sendText(encodeVoiceTargetV1(target));
-    }
-    socket.sendText(encodeAssistantStartCallV1());
+    _attemptId ??= newVoiceAttemptIdV1();
+    final mode = _hangingUp
+        ? VoiceOpeningModeV1.control
+        : (!_chimed ? VoiceOpeningModeV1.start : VoiceOpeningModeV1.rejoin);
+    socket.sendText(
+      encodeVoiceOpenV1(
+        attemptId: _attemptId!,
+        mode: mode,
+        botId: botId,
+        callId: _callId,
+        paused: _paused,
+        muted: muted,
+      ),
+    );
     diagnostics?.markOnce('call.start-sent', {
       'openingFrames': _opening.length,
     });
     _started = true;
-    while (_opening.isNotEmpty) {
-      socket.sendBinary(_opening.removeFirst());
-    }
-    _openingBytes = 0;
     if (_pendingWake) {
       _pendingWake = false;
-      socket.sendText(encodeVoiceWakeV1());
-    } else if (_paused) {
-      socket.sendText(encodeVoiceSleepV1(paused: true));
-    } else if (muted) {
-      socket.sendText(encodeVoiceMuteV1(true));
+      _beginWake();
     }
     final handshake = _handshake;
     if (handshake != null && !handshake.isCompleted) handshake.complete();
+  }
+
+  void _sendControl(VoiceControlActionV1 action, {bool? muted}) {
+    final socket = _socket;
+    final attemptId = _attemptId;
+    if (socket == null || attemptId == null) return;
+    _controlSequence += 1;
+    socket.sendText(
+      encodeVoiceControlV1(
+        attemptId: attemptId,
+        sequence: _controlSequence,
+        action: action,
+        muted: muted,
+      ),
+    );
   }
 
   /// Points an open call at another Bot (ADR 0029).
@@ -951,7 +1075,7 @@ class AssistantSessionController extends ChangeNotifier {
       _notify();
       return;
     }
-    _socket?.sendText(encodeVoiceMuteV1(now));
+    _sendControl(VoiceControlActionV1.mute, muted: now);
     _gate.reset();
     speechClassifier.reset();
     // A client that is not sending is, to the upstream, asleep: the next
@@ -976,12 +1100,13 @@ class AssistantSessionController extends ChangeNotifier {
   /// [reason] names the path that ended it — the End button, the view
   /// detaching — and travels in the socket's close frame, where the
   /// server logs it. A Pause whose socket the OS already killed reconnects
-  /// just long enough to say `end_call`, so the accordion is this hang-up
+  /// just long enough to say hang-up, so the accordion is this hang-up
   /// and not the abandoned-call alarm a day later.
   Future<void> end({required String reason}) async {
     if (_phase == VoiceSessionPhase.idle || _phase == VoiceSessionPhase.ended) {
       return;
     }
+    _hangingUp = true;
     if (_rejoining != null) await _rejoining;
     if (!_started) {
       final handshake = _handshake;
@@ -998,8 +1123,7 @@ class AssistantSessionController extends ChangeNotifier {
     // anything the person said or the server sent.
     diagnostics?.mark('call.end', {'reason': reason});
     _set(VoiceSessionPhase.ending);
-    final socket = _socket;
-    await _settled(() async => socket?.sendText(encodeAssistantEndCallV1()));
+    await _settled(() async => _sendControl(VoiceControlActionV1.end));
     await _teardown(reason: reason);
     _status = VoiceStatusV1.idle;
     _set(VoiceSessionPhase.ended);
@@ -1051,6 +1175,10 @@ class AssistantSessionController extends ChangeNotifier {
     final generation = _generation;
     _welcomed = false;
     _started = false;
+    _ready = false;
+    _attemptId = newVoiceAttemptIdV1();
+    _outboundSequence = 0;
+    _inboundSequence = null;
     _opening.clear();
     _openingBytes = 0;
     final handshake = Completer<void>();
@@ -1238,11 +1366,12 @@ class AssistantSessionController extends ChangeNotifier {
     if (_paused || !active) return;
     _paused = true;
     _asleep = true;
+    _ready = false;
     _upstream = VoiceUpstreamStateV1.asleep;
     _gate.reset();
     speechClassifier.reset();
     unawaited(player.interrupt());
-    _socket?.sendText(encodeVoiceSleepV1(paused: true));
+    _sendControl(VoiceControlActionV1.pause);
     _notify();
   }
 
@@ -1265,7 +1394,7 @@ class AssistantSessionController extends ChangeNotifier {
       );
     }
     if (_started) {
-      _socket?.sendText(encodeVoiceWakeV1());
+      _beginWake();
     } else {
       _pendingWake = true;
     }

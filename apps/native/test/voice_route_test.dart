@@ -64,6 +64,8 @@ class _Harness {
     unawaited(controller.start());
     await settle();
     socket.deliver(jsonEncode({'type': 'welcome', 'protocol_version': 1}));
+    await settle();
+    socket.completeOpen();
     socket.deliver(jsonEncode({'type': 'status', 'status': 'listening'}));
     await settle();
   }
@@ -142,27 +144,30 @@ void main() {
     expect(h.capture.active, isFalse);
   });
 
-  test('a call answers when its devices are closed, not when it ends', () async {
-    final h = _Harness();
-    await h.open();
-    final stop = Completer<void>();
-    h.capture.stopGate = stop;
-    final ending = h.controller.end(reason: 'test');
-    await settle();
-    var released = false;
-    unawaited(h.controller.released.then((_) => released = true));
-    await settle();
-    // The shell lends the capture and the audio session to one call at a
-    // time: it waits here before the next call opens them.
-    expect(released, isFalse);
-    expect(h.route.ends, 0);
+  test(
+    'a call answers when its devices are closed, not when it ends',
+    () async {
+      final h = _Harness();
+      await h.open();
+      final stop = Completer<void>();
+      h.capture.stopGate = stop;
+      final ending = h.controller.end(reason: 'test');
+      await settle();
+      var released = false;
+      unawaited(h.controller.released.then((_) => released = true));
+      await settle();
+      // The shell lends the capture and the audio session to one call at a
+      // time: it waits here before the next call opens them.
+      expect(released, isFalse);
+      expect(h.route.ends, 0);
 
-    stop.complete();
-    await ending;
-    await settle();
-    expect(released, isTrue);
-    expect(h.route.ends, 1);
-  });
+      stop.complete();
+      await ending;
+      await settle();
+      expect(released, isTrue);
+      expect(h.route.ends, 1);
+    },
+  );
 
   test('the call that follows is never ended by the one before it', () async {
     // The capture and the audio session are the shell's, lent to one call at
@@ -190,6 +195,8 @@ void main() {
       unawaited(controller.start());
       await settle();
       socket.deliver(jsonEncode({'type': 'welcome', 'protocol_version': 1}));
+      await settle();
+      socket.completeOpen();
       socket.deliver(jsonEncode({'type': 'status', 'status': 'listening'}));
       await settle();
     }
@@ -263,6 +270,8 @@ void main() {
     expect(h.controller.meterMode, VoiceMeterMode.connecting);
     await settle();
     h.socket.deliver(jsonEncode({'type': 'welcome', 'protocol_version': 1}));
+    await settle();
+    h.socket.completeOpen();
     h.socket.deliver(jsonEncode({'type': 'status', 'status': 'listening'}));
     await settle();
     expect(h.controller.meterMode, VoiceMeterMode.listening);
@@ -291,10 +300,8 @@ void main() {
     expect(h.socket.texts, isEmpty);
     h.capture.permission!.complete();
     await settle();
-    expect(h.socket.texts, [
-      encodeAssistantHelloV1(),
-      encodeAssistantStartCallV1(),
-    ]);
+    expect(h.socket.texts.first, encodeAssistantHelloV1());
+    expect(h.socket.hasOpen(mode: VoiceOpeningModeV1.start), isTrue);
     await h.controller.end(reason: 'test');
   });
 }

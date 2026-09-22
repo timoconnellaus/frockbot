@@ -192,6 +192,8 @@ void main() {
         await call.start();
         await settle();
         callSocket.deliver('{"type":"welcome","protocol_version":1}');
+        await settle();
+        callSocket.completeOpen();
         callSocket.deliver('{"type":"status","status":"listening"}');
         await settle();
         await microphone.acquireForDictation();
@@ -212,6 +214,8 @@ void main() {
         for (var i = 0; i < 8; i++) {
           device.emit(AudioFrame(pcmFrame(0.08), 0.08, i * 40));
         }
+        await settle();
+        callSocket.completeOpen();
         await settle();
         expect(callSocket.binaries.length, greaterThan(heard));
         await call.end(reason: 'end-button');
@@ -249,6 +253,8 @@ void main() {
     await call.start();
     await settle();
     callSocket.deliver('{"type":"welcome","protocol_version":1}');
+    await settle();
+    callSocket.completeOpen();
     callSocket.deliver('{"type":"status","status":"listening"}');
     await settle();
 
@@ -270,7 +276,10 @@ void main() {
     await dictation.start('bot-a');
     await settle();
     expect(call.muted, isTrue);
-    expect(callSocket.texts, contains(encodeVoiceMuteV1(true)));
+    expect(
+      callSocket.hasControl(VoiceControlActionV1.mute, muted: true),
+      isTrue,
+    );
 
     dictationSocket.deliver('{"schemaVersion":1,"type":"ready"}');
     await settle();
@@ -289,10 +298,15 @@ void main() {
     await settle();
 
     expect(call.muted, isFalse);
-    expect(callSocket.texts, contains(encodeVoiceMuteV1(false)));
+    expect(
+      callSocket.hasControl(VoiceControlActionV1.mute, muted: false),
+      isTrue,
+    );
     expect(device.active, isTrue, reason: 'the call reopened the device');
 
     await speak(5);
+    callSocket.completeOpen();
+    await settle();
     expect(
       callSocket.binaries.length,
       greaterThan(heardBefore),
