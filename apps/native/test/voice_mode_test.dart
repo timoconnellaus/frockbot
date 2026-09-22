@@ -138,34 +138,41 @@ void main() {
     expect(find.byType(Composer), findsOneWidget);
     expect(find.byType(VoiceFooter), findsNothing);
     expect(byIdentifier(VoiceIds.callChrome), findsOneWidget);
-    expect(find.text('Rosemary'), findsWidgets);
-    expect(find.byTooltip('Your Bots'), findsNothing);
+    expect(
+      tester.getCenter(byIdentifier(VoiceIds.callBot)).dx,
+      lessThan(tester.getCenter(byIdentifier(VoiceIds.callUser)).dx),
+    );
+
+    await tester.tap(find.byKey(const ValueKey('composer-voice')));
+    await tester.pump();
+    await tester.pump();
+    expect(byIdentifier(VoiceIds.callChrome), findsNothing);
+    expect(find.byTooltip('Talk to this Bot'), findsOneWidget);
     await harness.dispose(tester);
   });
 
-  testWidgets(
-    'on a Mac a call keeps the sidebar and the overlay chrome',
-    (tester) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-      try {
-        final harness = VoiceShellHarness();
-        await harness.mount(tester, width: 1280, brightness: Brightness.dark);
-        await harness.call.start();
-        harness.showCall(botId: 'voice-bot');
-        await tester.pump();
+  testWidgets('on a Mac a call keeps the sidebar and the overlay chrome', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    try {
+      final harness = VoiceShellHarness();
+      await harness.mount(tester, width: 1280, brightness: Brightness.dark);
+      await harness.call.start();
+      harness.showCall(botId: 'voice-bot');
+      await tester.pump();
 
-        expect(
-          tester.getSize(byIdentifier(ShellIds.sidebar)).width,
-          greaterThan(0),
-        );
-        expect(find.byType(AppBar), findsNothing);
-        expect(byIdentifier(VoiceIds.callChrome), findsOneWidget);
-        await harness.dispose(tester);
-      } finally {
-        debugDefaultTargetPlatformOverride = null;
-      }
-    },
-  );
+      expect(
+        tester.getSize(byIdentifier(ShellIds.sidebar)).width,
+        greaterThan(0),
+      );
+      expect(find.byType(AppBar), findsNothing);
+      expect(byIdentifier(VoiceIds.callChrome), findsOneWidget);
+      await harness.dispose(tester);
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
 
   testWidgets('a call with another Bot leaves this Bot its thread', (
     tester,

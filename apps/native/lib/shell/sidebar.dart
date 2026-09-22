@@ -27,6 +27,7 @@ import '../update/desktop_update.dart';
 import 'chat_icons.dart';
 import 'desktop_layout.dart';
 import 'focus.dart';
+import 'person_avatar.dart';
 import 'semantics.dart';
 import 'sidebar_order.dart';
 
@@ -258,6 +259,10 @@ class ShellSidebar extends StatelessWidget {
   final VoidCallback onSearch;
   final VoidCallback onProfile;
 
+  /// The person's face on the You control: Google photo, or initials.
+  final String? profileName;
+  final String? profileImageUrl;
+
   /// Opens the Marketplace: the services a Bot can be given, and the accounts
   /// already on them. Where it is drawn depends on [phone].
   final VoidCallback onMarketplace;
@@ -311,6 +316,8 @@ class ShellSidebar extends StatelessWidget {
     this.onMove,
     this.phone = false,
     this.error,
+    this.profileName,
+    this.profileImageUrl,
   });
 
   String _id(wire.BotRegistration bot) => bot.botId.value;
@@ -361,6 +368,8 @@ class ShellSidebar extends StatelessWidget {
           onCreateBot: onCreateBot,
           onSearch: phone ? onSearch : null,
           onProfile: onProfile,
+          profileName: profileName,
+          profileImageUrl: profileImageUrl,
           onMarketplace: phone ? onMarketplace : null,
         ),
         if (!phone)
@@ -1582,6 +1591,8 @@ class _Header extends StatelessWidget {
   final VoidCallback onCreateBot;
   final VoidCallback? onSearch;
   final VoidCallback onProfile;
+  final String? profileName;
+  final String? profileImageUrl;
 
   /// The Marketplace, where the header is the place for it; null where the
   /// column's foot names it instead.
@@ -1591,6 +1602,8 @@ class _Header extends StatelessWidget {
     required this.onCreateBot,
     required this.onSearch,
     required this.onProfile,
+    this.profileName,
+    this.profileImageUrl,
     this.onMarketplace,
   });
 
@@ -1632,21 +1645,12 @@ class _Header extends StatelessWidget {
                 tooltip: 'You',
                 onPressed: onProfile,
                 style: quiet,
-                icon: Container(
-                  width: 32,
-                  height: 32,
-                  decoration: BoxDecoration(
-                    color: scheme.onSurface.withValues(alpha: 0.08),
-                    shape: BoxShape.circle,
-                    border: Border.all(
-                      color: scheme.onSurface.withValues(alpha: 0.08),
-                    ),
-                  ),
-                  child: Icon(
-                    Icons.person_rounded,
-                    size: 20,
-                    color: scheme.onSurfaceVariant,
-                  ),
+                icon: PersonAvatar(
+                  name: profileName?.trim().isNotEmpty == true
+                      ? profileName!
+                      : 'You',
+                  imageUrl: profileImageUrl,
+                  size: 32,
                 ),
               ),
             ),

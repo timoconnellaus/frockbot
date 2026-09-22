@@ -189,6 +189,16 @@ test("identity prefills an unsaved profile while saved fields remain authoritati
     "tim@example.test",
     "UTC",
   ]);
+  expect(
+    applicationSettingsFrame("tim", user, [provider], {
+      name: "Timothy",
+      email: "tim@example.test",
+      image: "https://lh3.googleusercontent.com/a/photo",
+    }).sections[0]!.fields.map((f) => ({ id: f.id, value: f.value })),
+  ).toContainEqual({
+    id: "photo",
+    value: "https://lh3.googleusercontent.com/a/photo",
+  });
   expect(user.profile).toEqual({ name: "FrockBot user" });
   user.profile = { name: "Tim", email: "chosen@example.test" };
   expect(

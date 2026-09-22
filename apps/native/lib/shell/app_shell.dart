@@ -81,6 +81,7 @@ import 'hot_panel.dart';
 import 'lifecycle.dart';
 import 'message_actions.dart';
 import 'exchange_view.dart';
+import 'person_avatar.dart';
 import 'run_view.dart';
 import 'semantics.dart';
 import 'focus.dart' show sidebarUnreadFor;
@@ -296,6 +297,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   bool showHidden = false;
   TranscriptLine? openRun;
 
+  /// The person's name and Google photo, for the call and the You surfaces.
+  String? profileName;
+  String? profileImageUrl;
+
   /// The exchange chat the right panel holds, while it holds one.
   ExchangeController? exchangeController;
 
@@ -349,6 +354,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // is what locks the zone until it is accounted for.
     unawaited(lifecycle.restore());
     unawaited(load());
+    unawaited(_loadProfile());
     unawaited(_loadAppearance());
     unawaited(_readWhatsNew());
     _startPolling();
@@ -506,15 +512,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (!directoryLoaded) unawaited(load());
   }
 
-  /// The composer's voice control: it starts a call with this Bot, or moves
-  /// a live one to it. Since the sidebar's list-root control went it is the
-  /// only way in, so a call always names a Bot (ADR 0029).
+  /// The composer's voice control: it starts a call with this Bot, moves a
+  /// live one onto it, or ends the call when pressed on the Bot already on
+  /// the line. Since the sidebar's list-root control went it is the only way
+  /// in, so a call always names a Bot (ADR 0029).
   ///
-  /// It never ends a call: hang-up is the header chrome. A call that is
-  /// already over is not moved, it is replaced: the person pressed the
-  /// control to talk to this Bot.
+  /// A call that is already over is not moved, it is replaced: the person
+  /// pressed the control to talk to this Bot.
   Future<void> _startOrSwitchVoice({required String botId}) {
     final session = voiceSession;
+    if (footerOpen && session != null && voiceBotId == botId) {
+      return _endVoice(reason: 'composer-button');
+    }
     if (!footerOpen || session == null || !session.active) {
       return _startVoice(botId: botId);
     }
@@ -2543,7 +2552,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           ? null
           : VoiceCallChrome(
               session: liveSession,
-              userInitials: widget.userId,
+              userInitials: profileName ?? '',
+              userImageUrl: profileImageUrl,
               botName: _name(bot),
               characterId: bot.avatar.characterId,
               primary: bot.avatar.primary,
@@ -2645,6 +2655,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                             onCreateBot: () => unawaited(_createBot()),
                             onSearch: _openSearch,
                             onProfile: _openProfile,
+                            profileName: profileName,
+                            profileImageUrl: profileImageUrl,
                             onMarketplace: _openMarketplace,
                             phone: single,
                             onToggleHidden: () =>
@@ -2997,21 +3009,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                           padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
                           child: Row(
                             children: [
-                              Container(
-                                width: 44,
-                                height: 44,
-                                decoration: BoxDecoration(
-                                  color: Theme.of(context).colorScheme.onSurface
-                                      .withValues(alpha: 0.08),
-                                  shape: BoxShape.circle,
-                                ),
-                                child: Icon(
-                                  Icons.person_rounded,
-                                  size: 22,
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant,
-                                ),
+                              PersonAvatar(
+                                name: profileName ?? '',
+                                imageUrl: profileImageUrl,
+                                size: 44,
                               ),
                               const SizedBox(width: 14),
                               Expanded(
@@ -3286,9 +3287,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     VoidCallback onTap,
   ) => identified(id, FrockRow(icon: icon, title: title, onTap: onTap));
 
-  /// The saved profile name, falling back to the account this session holds.
-  /// A name is a courtesy: a read that fails leaves the page usable.
-  Future<String> _displayName() async {
+  /// The saved profile name and photo, falling back to nothing rather than
+  /// the account id: an id's first letter is not a face.
+  Future<void> _loadProfile() async {
+    String? name;
+    String? photo;
     try {
       final settings =
           (await widget.api.request('/api/settings/application'))! as Map;
@@ -3297,15 +3300,33 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           .cast<Map>()
           .where((section) => section['id'] == 'profile')
           .firstOrNull;
-      final name = (profile?['fields'] as List?)
-          ?.cast<Map>()
+      final fields = (profile?['fields'] as List?)?.cast<Map>() ?? const [];
+      final saved = fields
           .where((field) => field['id'] == 'name')
           .firstOrNull?['value'];
-      if (name is String && name.trim().isNotEmpty) return name.trim();
+      if (saved is String && saved.trim().isNotEmpty) name = saved.trim();
+      final image = fields
+          .where((field) => field['id'] == 'photo')
+          .firstOrNull?['value'];
+      if (image is String && image.startsWith('https://')) photo = image;
     } catch (_) {
-      // Nothing is lost but the name.
+      // Initials can wait; the page stays usable.
     }
-    return widget.userId;
+    if (!mounted) return;
+    setState(() {
+      profileName = name;
+      profileImageUrl = photo;
+    });
+  }
+
+  /// The saved profile name, falling back to the account this session holds.
+  /// A name is a courtesy: a read that fails leaves the page usable.
+  Future<String> _displayName() async {
+    if (profileName != null && profileName!.trim().isNotEmpty) {
+      return profileName!;
+    }
+    await _loadProfile();
+    return profileName ?? widget.userId;
   }
 
   @override

@@ -342,9 +342,9 @@ class _ComposerState extends State<Composer> {
   /// The voice control: always this one thing, whatever the draft is doing.
   ///
   /// It does not morph with the action beside it (ADR 0029), so the target
-  /// under the thumb never moves. It starts a call with this Bot, and while
-  /// that call is up it stays here in the Bot's primary. Hang-up is the
-  /// header's. While a previous call is still closing it is held.
+  /// under the thumb never moves. It starts a call with this Bot, and the
+  /// same press ends that call. While a previous call is still closing it
+  /// is held.
   Widget _voiceButton(BuildContext context, double extent) {
     final theme = Theme.of(context);
     final closing = widget.voiceClosing;
@@ -353,7 +353,7 @@ class _ComposerState extends State<Composer> {
       VoiceIds.composerVoice,
       IconButton(
         key: const ValueKey('composer-voice'),
-        tooltip: active ? 'Talking to this Bot' : 'Talk to this Bot',
+        tooltip: active ? 'End voice' : 'Talk to this Bot',
         onPressed: closing ? null : widget.onVoice,
         style: IconButton.styleFrom(
           minimumSize: Size.square(extent),

@@ -1010,6 +1010,12 @@ export function createGateway(
               ...(identity?.email?.trim()
                 ? { identityEmail: identity.email.trim().slice(0, 320) }
                 : {}),
+              ...(identity &&
+              "image" in identity &&
+              typeof identity.image === "string" &&
+              identity.image.startsWith("https://")
+                ? { identityImage: identity.image.slice(0, 2048) }
+                : {}),
             }),
           );
           // The frame is what this route produces; `as=document` asks for the

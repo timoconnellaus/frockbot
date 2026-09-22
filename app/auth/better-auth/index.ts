@@ -204,6 +204,10 @@ function betterAuthPackage(
             name: user.name,
             email: user.email,
             emailVerified: user.emailVerified === true,
+            ...(typeof user.image === "string" &&
+            user.image.startsWith("https://")
+              ? { image: user.image }
+              : {}),
           }
         : null;
     },

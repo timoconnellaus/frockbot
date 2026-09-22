@@ -30,6 +30,8 @@ export interface AuthProfileV1 {
   name?: string;
   email?: string;
   emailVerified?: boolean;
+  /** https profile photo from the identity provider, when it has one. */
+  image?: string;
 }
 
 /** One identity an auth Package has stored, as it stored it. */

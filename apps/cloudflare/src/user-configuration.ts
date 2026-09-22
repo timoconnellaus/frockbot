@@ -987,7 +987,11 @@ export class UserConfiguration
         userId: rpcIdentifier,
         home: rpcEnum(["application", "models"]),
       },
-      { identityName: rpcString(100), identityEmail: rpcString(320) },
+      {
+        identityName: rpcString(100),
+        identityEmail: rpcString(320),
+        identityImage: rpcString(2048),
+      },
     );
     await this.assertUserIdentity(request.userId as string);
     return (await this.settingsContribution()).readSettingsFrame(
@@ -999,6 +1003,9 @@ export class UserConfiguration
           : {}),
         ...(request.identityEmail
           ? { email: request.identityEmail as string }
+          : {}),
+        ...(request.identityImage
+          ? { image: request.identityImage as string }
           : {}),
       },
     );

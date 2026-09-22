@@ -1,4 +1,4 @@
-/// Compact call chrome in the conversation header: you, the wave, the Bot.
+/// Compact call chrome in the conversation header: the Bot, the wave, you.
 ///
 /// The thread and the composer stay. This row is the only extra furniture a
 /// live call adds. Every in-call state uses the same cluster: connecting,
@@ -158,10 +158,22 @@ class _VoiceCallChromeState extends State<VoiceCallChrome> {
               crossAxisAlignment: CrossAxisAlignment.center,
               children: [
                 identified(
-                  VoiceIds.callUser,
-                  _UserDot(
-                    initials: widget.userInitials,
-                    imageUrl: widget.userImageUrl,
+                  VoiceIds.callBot,
+                  SizedBox.square(
+                    dimension: voiceCallBotSize,
+                    child: Center(
+                      child: CharacterAvatar(
+                        size: voiceCallBotSize,
+                        characterId: widget.characterId,
+                        primary: widget.primary,
+                        cropToInk: true,
+                        motion: CharacterMotion.quiet,
+                        activity: _shown.speaking
+                            ? CharacterActivity.thinking
+                            : CharacterActivity.idle,
+                        semanticsLabel: '${widget.botName} on the call',
+                      ),
+                    ),
                   ),
                 ),
                 const SizedBox(width: 10),
@@ -210,22 +222,10 @@ class _VoiceCallChromeState extends State<VoiceCallChrome> {
                 ),
                 const SizedBox(width: 10),
                 identified(
-                  VoiceIds.callBot,
-                  SizedBox.square(
-                    dimension: voiceCallBotSize,
-                    child: Center(
-                      child: CharacterAvatar(
-                        size: voiceCallBotSize,
-                        characterId: widget.characterId,
-                        primary: widget.primary,
-                        cropToInk: true,
-                        motion: CharacterMotion.quiet,
-                        activity: _shown.speaking
-                            ? CharacterActivity.thinking
-                            : CharacterActivity.idle,
-                        semanticsLabel: '${widget.botName} on the call',
-                      ),
-                    ),
+                  VoiceIds.callUser,
+                  _UserDot(
+                    initials: widget.userInitials,
+                    imageUrl: widget.userImageUrl,
                   ),
                 ),
                 const SizedBox(width: 6),
