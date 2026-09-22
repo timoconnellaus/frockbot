@@ -1072,6 +1072,24 @@ export async function enableCustomModels(page: Page): Promise<void> {
 }
 
 /**
+ * Type into the Marketplace search and wait until the field holds it.
+ *
+ * `fill()` sets the DOM input's value. A Flutter field only reads that while
+ * an editing session is open, so a fill against a closed session reports
+ * success and leaves the catalog unfiltered. [answerInputs] opens the session
+ * and types.
+ */
+export async function searchMarketplace(
+  page: Page,
+  query: string,
+): Promise<void> {
+  const search = sem(page, "marketplace-search").locator("input, textarea");
+  await expect(search.first()).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
+  await answerInputs([[search.first(), query]]);
+  await settle(page);
+}
+
+/**
  * Install the Ollama Cloud provider from the Marketplace catalog. Models
  * only lists providers already added; Connectors offers the key form once
  * the Package is installed. `connectOllama` picks up from Models.
@@ -1085,10 +1103,7 @@ export async function chooseOllamaProvider(page: Page): Promise<void> {
   }
   await closeOverlay(page);
   await openConnectors(page);
-  const search = sem(page, "marketplace-search").locator("input, textarea");
-  await expect(search.first()).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
-  await search.first().fill("Ollama Cloud");
-  await settle(page);
+  await searchMarketplace(page, "Ollama Cloud");
   const offer = group(page, "Ollama Cloud");
   await expect(offer).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
   const add = sem(offer, "view-action-add-provider-ollama-cloud");

@@ -3317,6 +3317,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       // Initials can wait; the page stays usable.
     }
     if (!mounted) return;
+    // The You page reads this again whenever it opens, and that read is still
+    // in flight while a later page — Marketplace — is on screen. A setState
+    // for a name the shell already shows rebuilds that page and tears down
+    // the text field's editing session, so a search typed into it never lands.
+    if (profileName == name && profileImageUrl == photo) return;
     setState(() {
       profileName = name;
       profileImageUrl = photo;
