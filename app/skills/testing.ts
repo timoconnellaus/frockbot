@@ -4,6 +4,16 @@
 // Package deliberately implements none of it. This fake exists so the loader's
 // behaviour can be proven against the contract rather than against a host.
 import {
+  beginSkillIndexPublicationV1,
+  commitSkillDocumentV1,
+  commitSkillReferenceV1,
+  emptySkillMetadataIndexV1,
+  isSkillIndexPathV1,
+  skillBodyKeyV1,
+  type SkillMetadataIndexV1,
+} from "./metadata-index.js";
+import { isSkillDocumentPathV1 } from "./skill-md.js";
+import {
   normalizeWorkspaceRelativePathV1,
   WORKSPACE_MAX_LIST_ENTRIES,
   workspaceRootKeyV1,
@@ -190,6 +200,21 @@ export class FakeWorkspace implements WorkspaceFilesV1 {
     });
   }
 
+  /** Current files, for a test that publishes a Skill index without listing. */
+  snapshot(): Array<{
+    root: WorkspaceRootV1;
+    path: string;
+    bytes: Uint8Array;
+    generation: WorkspaceGenerationV1;
+  }> {
+    return [...this.#files.values()].map((stored) => ({
+      root: stored.entry.path.root,
+      path: stored.entry.path.path,
+      bytes: stored.bytes,
+      generation: stored.entry.generation,
+    }));
+  }
+
   #key(path: WorkspacePathV1): string {
     return `${workspaceRootKeyV1(path.root)}|${path.path}`;
   }
@@ -206,4 +231,76 @@ export function skillMarkdown(
   body: string,
 ): string {
   return `---\nname: ${name}\ndescription: ${description}\n---\n\n${body}\n`;
+}
+
+/**
+ * Publishes the fake's current instruction-root files into an index. Bodies
+ * stay addressable after a later edit, so a catalog that already loaded can
+ * still read the admitted hash.
+ */
+export function skillIndexSourceForFake(
+  workspace: FakeWorkspace,
+  owner: { userId: string; botId: string },
+) {
+  const bodies = new Map<string, Uint8Array>();
+  return {
+    async load() {
+      let bot: SkillMetadataIndexV1 = emptySkillMetadataIndexV1();
+      let user: SkillMetadataIndexV1 = emptySkillMetadataIndexV1();
+      const files = workspace
+        .snapshot()
+        .filter((file) => isSkillIndexPathV1(file.path))
+        .sort((left, right) => left.path.localeCompare(right.path));
+      for (const file of files) {
+        if (
+          file.root.kind !== "bot-instructions" &&
+          file.root.kind !== "user-instructions"
+        ) {
+          continue;
+        }
+        if (
+          file.root.kind === "bot-instructions" &&
+          (file.root.userId !== owner.userId || file.root.botId !== owner.botId)
+        ) {
+          continue;
+        }
+        if (
+          file.root.kind === "user-instructions" &&
+          file.root.userId !== owner.userId
+        ) {
+          continue;
+        }
+        bodies.set(file.generation.contentHash, file.bytes);
+        const current = file.root.kind === "bot-instructions" ? bot : user;
+        const begun = await beginSkillIndexPublicationV1(
+          current,
+          file.path,
+          file.generation.generationId,
+          false,
+        );
+        const next = isSkillDocumentPathV1(file.path)
+          ? await commitSkillDocumentV1(
+              begun,
+              file.root,
+              file.path,
+              file.generation,
+              file.bytes,
+            )
+          : await commitSkillReferenceV1(
+              begun,
+              file.root,
+              file.path,
+              file.generation,
+            );
+        if (file.root.kind === "bot-instructions") bot = next;
+        else user = next;
+      }
+      return { bot, user, liveBot: bot, liveUser: user };
+    },
+    async readBody(bodyKey: string, contentHash: string) {
+      const bytes = bodies.get(contentHash);
+      if (!bytes || skillBodyKeyV1(contentHash) !== bodyKey) return undefined;
+      return bytes;
+    },
+  };
 }

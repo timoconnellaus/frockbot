@@ -135,6 +135,27 @@ export const WORKSPACE_CONFLICT_PREFIX = "workspace:conflict:";
 export const WORKSPACE_SYNC_EFFECT_PREFIX = "workspace:sync-effect:";
 /** The monotonic cursor every minted Workspace generation id advances. */
 export const WORKSPACE_GENERATION_CURSOR_KEY = "workspace:generation-cursor";
+/**
+ * Skill metadata for one instruction root. Current pointer, immutable
+ * revision snapshots, and holds for admitted runs. Bodies live in object
+ * storage under `skill-bodies/v1/`, not under these keys.
+ */
+export const SKILL_INDEX_PREFIX = "skill-index:v1:";
+
+export function skillIndexCurrentKeyV1(rootKey: string): string {
+  return `${SKILL_INDEX_PREFIX}current:${rootKey}`;
+}
+
+export function skillIndexSnapshotKeyV1(
+  rootKey: string,
+  revision: string,
+): string {
+  return `${SKILL_INDEX_PREFIX}rev:${rootKey}:${revision}`;
+}
+
+export function skillIndexHoldKeyV1(runId: string): string {
+  return `${SKILL_INDEX_PREFIX}hold:${runId}`;
+}
 /** Longest readable key tail before it is fingerprinted; Durable Object keys are bounded. */
 const WORKSPACE_KEY_TAIL_LIMIT = 900;
 

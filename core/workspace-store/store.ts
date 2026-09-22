@@ -48,6 +48,7 @@ import {
   WORKSPACE_MAX_FILE_BYTES,
   WORKSPACE_MAX_LIST_ENTRIES,
   isWorkspaceComputerReadOnlyRootV1,
+  isWorkspaceInstructionRootV1,
   isWorkspaceMemoryRootV1,
   normalizeWorkspaceRelativePathV1,
   workspaceWriterMayWriteV1,
@@ -142,6 +143,22 @@ function isTombstoneMarkerV1(head: ObjectHeadV1): boolean {
  */
 export type WorkspaceStoreSurfaceV1 = "kernel" | "memory" | "sync";
 
+/**
+ * One generation the store has put into object storage, at the two moments
+ * the Skill index has to hear about: before the ledger record (so a failed
+ * record cannot leave the previous entry trusted) and after it commits.
+ */
+export interface WorkspaceGenerationPublicationV1 {
+  phase: "begin" | "commit";
+  root: WorkspaceRootV1;
+  path: string;
+  generation: WorkspaceGenerationV1;
+  bytes?: Uint8Array;
+  deleted: boolean;
+  /** The generation record did not commit. The path stays unavailable. */
+  ledgerPending: boolean;
+}
+
 export interface ObjectWorkspaceFilesOptionsV1 {
   bucket: ObjectBucketV1;
   /** The owning Durable Object's generation ledger. */
@@ -150,6 +167,13 @@ export interface ObjectWorkspaceFilesOptionsV1 {
   /** The User whose durable roots this store serves, when it serves one. */
   owner?: { userId: string };
   surface?: WorkspaceStoreSurfaceV1;
+  /**
+   * Instruction-root generations. Skill metadata is published here, not in
+   * the Skill tool, so every writer of the root hits the same index.
+   */
+  onInstructionPublication?: (
+    event: WorkspaceGenerationPublicationV1,
+  ) => Promise<void>;
 }
 
 class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
@@ -158,6 +182,8 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
   private readonly clock: () => Date;
   private readonly owner: { userId: string } | undefined;
   private readonly surface: WorkspaceStoreSurfaceV1;
+  private readonly onInstructionPublication:
+    ((event: WorkspaceGenerationPublicationV1) => Promise<void>) | undefined;
 
   constructor(options: ObjectWorkspaceFilesOptionsV1) {
     this.bucket = options.bucket;
@@ -165,6 +191,20 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
     this.clock = options.clock ?? (() => new Date());
     this.owner = options.owner;
     this.surface = options.surface ?? "kernel";
+    this.onInstructionPublication = options.onInstructionPublication;
+  }
+
+  /**
+   * Tells the Skill index about an instruction-root generation. A failure
+   * here is the caller's: the bytes may already be durable, and the index
+   * must say so rather than keep serving the previous entry.
+   */
+  private async publishInstruction(
+    event: WorkspaceGenerationPublicationV1,
+  ): Promise<void> {
+    if (!this.onInstructionPublication) return;
+    if (!isWorkspaceInstructionRootV1(event.root)) return;
+    await this.onInstructionPublication(event);
   }
 
   /**
@@ -305,12 +345,40 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
     head: ObjectHeadV1,
     generation: WorkspaceGenerationV1,
     recorded: WorkspaceGenerationRecordV1 | undefined,
+    bytes?: Uint8Array,
   ): Promise<void> {
     if (isTombstoneMarkerV1(head)) return;
     if (
       recorded &&
       recorded.generation.generationId >= generation.generationId
     ) {
+      return;
+    }
+    let body = bytes;
+    if (
+      !body &&
+      this.onInstructionPublication &&
+      isWorkspaceInstructionRootV1(root)
+    ) {
+      try {
+        body = await (await this.bucket.get(head.key))?.bytes();
+      } catch {
+        body = undefined;
+      }
+    }
+    try {
+      await this.publishInstruction({
+        phase: "begin",
+        root,
+        path,
+        generation,
+        ...(body ? { bytes: body } : {}),
+        deleted: false,
+        ledgerPending: false,
+      });
+    } catch {
+      // The index could not drop the previous entry. Leave the ledger for
+      // the next read rather than recording a generation the index missed.
       return;
     }
     try {
@@ -322,9 +390,28 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
         etag: head.etag,
       });
     } catch {
+      await this.publishInstruction({
+        phase: "begin",
+        root,
+        path,
+        generation,
+        deleted: false,
+        ledgerPending: true,
+      }).catch(() => undefined);
       // The ledger is briefly unreachable. The generation still rides beside
       // the bytes, so the next read repairs it rather than wedging the file.
+      return;
     }
+    if (!body) return;
+    await this.publishInstruction({
+      phase: "commit",
+      root,
+      path,
+      generation,
+      bytes: body,
+      deleted: false,
+      ledgerPending: false,
+    }).catch(() => undefined);
   }
 
   /**
@@ -358,7 +445,7 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
     }
     const beside = this.decodeMetadata(head);
     if (beside) {
-      await this.reconcile(root, path, head, beside, recorded);
+      await this.reconcile(root, path, head, beside, recorded, bytes);
       return beside;
     }
     const body = bytes ?? (await (await this.bucket.get(head.key))?.bytes());
@@ -619,6 +706,25 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
         // divergence the record exists to prevent. So the ledger call is
         // retried, and a still-failing ledger is `ok` with `ledgerPending`:
         // the metadata beside the bytes lets `reconcile` repair the entry.
+        //
+        // The Skill index hears about the path before that record. A record
+        // that fails must not leave the previous entry trusted.
+        try {
+          await this.publishInstruction({
+            phase: "begin",
+            root,
+            path: relative,
+            generation,
+            bytes: request.bytes,
+            deleted: false,
+            ledgerPending: false,
+          });
+        } catch (error) {
+          return failure(
+            "unavailable",
+            error instanceof Error ? error.message : String(error),
+          );
+        }
         try {
           await retryOnceV1(() =>
             this.generations.record({
@@ -630,7 +736,31 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
             }),
           );
         } catch {
+          await this.publishInstruction({
+            phase: "begin",
+            root,
+            path: relative,
+            generation,
+            deleted: false,
+            ledgerPending: true,
+          }).catch(() => undefined);
           return { status: "ok", generation, ledgerPending: true };
+        }
+        try {
+          await this.publishInstruction({
+            phase: "commit",
+            root,
+            path: relative,
+            generation,
+            bytes: request.bytes,
+            deleted: false,
+            ledgerPending: false,
+          });
+        } catch (error) {
+          return failure(
+            "unavailable",
+            error instanceof Error ? error.message : String(error),
+          );
         }
         return { status: "ok", generation };
       }
@@ -798,6 +928,21 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
       );
     }
     try {
+      await this.publishInstruction({
+        phase: "begin",
+        root,
+        path: relative,
+        generation: tombstone,
+        deleted: true,
+        ledgerPending: false,
+      });
+    } catch (error) {
+      return failure(
+        "unavailable",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    try {
       // The ledger tombstone is the durable evidence that the file was
       // removed, by whom, and when: the marker is an absence in object
       // storage, and object storage forgets a key entirely once the marker is
@@ -811,13 +956,36 @@ class ObjectWorkspaceFiles implements WorkspaceFilesV1 {
         etag: fenced.etag,
         deleted: true,
       });
-      return { status: "ok", generation: tombstone };
+    } catch (error) {
+      await this.publishInstruction({
+        phase: "begin",
+        root,
+        path: relative,
+        generation: tombstone,
+        deleted: true,
+        ledgerPending: true,
+      }).catch(() => undefined);
+      return failure(
+        "unavailable",
+        error instanceof Error ? error.message : String(error),
+      );
+    }
+    try {
+      await this.publishInstruction({
+        phase: "commit",
+        root,
+        path: relative,
+        generation: tombstone,
+        deleted: true,
+        ledgerPending: false,
+      });
     } catch (error) {
       return failure(
         "unavailable",
         error instanceof Error ? error.message : String(error),
       );
     }
+    return { status: "ok", generation: tombstone };
   }
 }
 
