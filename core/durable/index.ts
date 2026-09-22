@@ -11,6 +11,7 @@ export * from "./run-recovery.js";
 export * from "./run-terminal.js";
 export * from "./session-event-log.js";
 export * from "./working-context.js";
+export * from "./publication.js";
 export * from "./storage-keys.js";
 export * from "./turn-errors.js";
 export * from "./workspace-generations.js";

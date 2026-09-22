@@ -8,16 +8,21 @@ describe("What’s New feed", () => {
     const feed = whatsNewFeedV1();
     expect(feed.schemaVersion).toBe(1);
     expect(feed.entries[0]).toMatchObject({
+      id: "committed-chat",
+      title: "Replies land as they are sent",
+      kind: "improvement",
+    });
+    expect(feed.entries[1]).toMatchObject({
       id: "chat-scroll",
       title: "Earlier messages stay in reach",
       kind: "fix",
     });
-    expect(feed.entries[1]).toMatchObject({
+    expect(feed.entries[2]).toMatchObject({
       id: "marketplace-installed",
       title: "Installed in the Marketplace",
       kind: "improvement",
     });
-    expect(feed.entries[2]).toMatchObject({
+    expect(feed.entries[3]).toMatchObject({
       id: "chat-type",
       title: "Easier reading in chat",
       kind: "improvement",

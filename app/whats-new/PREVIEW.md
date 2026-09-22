@@ -2,6 +2,12 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
+## Replies land as they are sent
+
+improvement
+
+A Bot’s message appears in the thread as soon as it is committed, without waiting for a refresh.
+
 ## Earlier messages stay in reach
 
 fix

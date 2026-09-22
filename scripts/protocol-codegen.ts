@@ -29,6 +29,13 @@ export const source = JSON.parse(
     minimumNativeVersion: string;
     catalogs: { id: string; digest: string }[];
   };
+  "x-frockbot-state-channel": {
+    frameMaxBytes: number;
+    partMaxBytes: number;
+    assembledMaxBytes: number;
+    replayMaxBytes: number;
+    replayMaxEvents: number;
+  };
 };
 export function tsType(s: Schema): string {
   if (s.$ref) return s.$ref.split("/").at(-1)!;

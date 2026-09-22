@@ -3247,6 +3247,57 @@
       "maxLength": 16,
       "pattern": "^(?:0|[1-9][0-9]{0,14}|[1-8][0-9]{15}|900[0-6][0-9]{12}|90070[0-9]{11}|90071[0-8][0-9]{10}|900719[0-8][0-9]{9}|9007199[0-1][0-9]{8}|90071992[0-4][0-9]{7}|900719925[0-3][0-9]{6}|9007199254[0-6][0-9]{5}|90071992547[0-3][0-9]{4}|9007199254740[0-8][0-9]{2}|90071992547409[0-8][0-9]{1}|9007199254740990|9007199254740991)$"
     },
+    "ConversationEntityId": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 320
+    },
+    "ConversationKind": {
+      "enum": [
+        "message",
+        "run-status",
+        "announcement",
+        "card-revision",
+        "computer"
+      ]
+    },
+    "ConversationMessageUpdate": {
+      "type": "object",
+      "properties": {
+        "runId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "sessionId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 320
+        },
+        "occurrenceId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256
+        },
+        "event": {
+          "type": "object",
+          "properties": {
+            "type": {
+              "const": "send/to-user"
+            },
+            "payload": {
+              "$ref": "#/$defs/SendPayload"
+            },
+            "ordinal": {
+              "type": "integer",
+              "minimum": 0
+            }
+          },
+          "required": ["type", "payload", "ordinal"],
+          "additionalProperties": false
+        }
+      },
+      "required": ["runId", "sessionId", "occurrenceId", "event"],
+      "additionalProperties": false
+    },
     "StateFrame": {
       "oneOf": [
         {
@@ -3256,16 +3307,86 @@
               "const": 1
             },
             "type": {
-              "const": "state/event"
+              "const": "state/update"
+            },
+            "epoch": {
+              "$ref": "#/$defs/ObserverCursor"
             },
             "cursor": {
               "$ref": "#/$defs/ObserverCursor"
             },
-            "topic": {
-              "enum": ["computer", "runs"]
+            "kind": {
+              "$ref": "#/$defs/ConversationKind"
+            },
+            "entityId": {
+              "$ref": "#/$defs/ConversationEntityId"
+            },
+            "revision": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            },
+            "payload": {
+              "oneOf": [
+                {
+                  "$ref": "#/$defs/ConversationMessageUpdate"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "run": {
+                      "$ref": "#/$defs/Run"
+                    }
+                  },
+                  "required": ["run"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "announcement": {
+                      "$ref": "#/$defs/Announcement"
+                    }
+                  },
+                  "required": ["announcement"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "surfaceId": {
+                      "type": "string",
+                      "minLength": 1,
+                      "maxLength": 256
+                    },
+                    "revision": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "maximum": 9007199254740991
+                    }
+                  },
+                  "required": ["surfaceId", "revision"],
+                  "additionalProperties": false
+                },
+                {
+                  "type": "object",
+                  "properties": {},
+                  "required": [],
+                  "additionalProperties": false
+                }
+              ]
             }
           },
-          "required": ["schemaVersion", "type", "cursor", "topic"],
+          "required": [
+            "schemaVersion",
+            "type",
+            "epoch",
+            "cursor",
+            "kind",
+            "entityId",
+            "revision",
+            "payload"
+          ],
           "additionalProperties": false
         },
         {
@@ -3275,16 +3396,77 @@
               "const": 1
             },
             "type": {
-              "const": "state/reset"
+              "const": "state/snapshot"
+            },
+            "epoch": {
+              "$ref": "#/$defs/ObserverCursor"
             },
             "cursor": {
               "$ref": "#/$defs/ObserverCursor"
             },
             "reason": {
-              "enum": ["initial", "gap", "cursor-ahead"]
+              "enum": ["initial", "gap", "cursor-ahead", "epoch"]
+            },
+            "conversation": {
+              "$ref": "#/$defs/ConversationProjection"
             }
           },
-          "required": ["schemaVersion", "type", "cursor", "reason"],
+          "required": [
+            "schemaVersion",
+            "type",
+            "epoch",
+            "cursor",
+            "reason",
+            "conversation"
+          ],
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "const": 1
+            },
+            "type": {
+              "const": "state/part"
+            },
+            "epoch": {
+              "$ref": "#/$defs/ObserverCursor"
+            },
+            "cursor": {
+              "$ref": "#/$defs/ObserverCursor"
+            },
+            "eventId": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 64
+            },
+            "part": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 255
+            },
+            "parts": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 256
+            },
+            "data": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 49152
+            }
+          },
+          "required": [
+            "schemaVersion",
+            "type",
+            "epoch",
+            "cursor",
+            "eventId",
+            "part",
+            "parts",
+            "data"
+          ],
           "additionalProperties": false
         },
         {
@@ -3296,11 +3478,14 @@
             "type": {
               "const": "state/ready"
             },
+            "epoch": {
+              "$ref": "#/$defs/ObserverCursor"
+            },
             "cursor": {
               "$ref": "#/$defs/ObserverCursor"
             }
           },
-          "required": ["schemaVersion", "type", "cursor"],
+          "required": ["schemaVersion", "type", "epoch", "cursor"],
           "additionalProperties": false
         }
       ]
@@ -3315,6 +3500,9 @@
           "$ref": "#/$defs/BotId"
         },
         "cursor": {
+          "$ref": "#/$defs/ObserverCursor"
+        },
+        "epoch": {
           "$ref": "#/$defs/ObserverCursor"
         },
         "status": {
@@ -5341,5 +5529,12 @@
     "protocolMax": 1,
     "minimumNativeVersion": "1.6.0",
     "catalogs": []
+  },
+  "x-frockbot-state-channel": {
+    "frameMaxBytes": 65536,
+    "partMaxBytes": 49152,
+    "assembledMaxBytes": 524288,
+    "replayMaxBytes": 1048576,
+    "replayMaxEvents": 64
   }
 }

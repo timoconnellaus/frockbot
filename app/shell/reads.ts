@@ -7,6 +7,11 @@ import {
   type SessionEvent,
 } from "@frockbot/core/contracts";
 import {
+  commitPublicationsV1,
+  type PublicationTransactionV1,
+} from "@frockbot/core/durable";
+import { announcementPublicationV1 } from "./conversation-publication.js";
+import {
   optionalProjectedSendV1,
   sentAutomationRunKeyV1,
 } from "@frockbot/app/notifications/storage-keys";
@@ -49,6 +54,7 @@ export interface BotAnnouncementTransaction {
   put(entries: Record<string, unknown>): Promise<void>;
   list<T>(options: { prefix: string }): Promise<Map<string, T>>;
   delete(keys: string[]): Promise<number>;
+  setAlarm?(scheduledTime: number): Promise<void>;
 }
 
 /**
@@ -77,6 +83,13 @@ export async function appendAnnouncement(
     .sort()
     .slice(0, Math.max(0, stored.size - BOT_ANNOUNCEMENT_RETENTION));
   if (expired.length > 0) await transaction.delete(expired);
+  const contribution = announcementPublicationV1(event);
+  if (contribution) {
+    await commitPublicationsV1(transaction as PublicationTransactionV1, [
+      contribution,
+    ]);
+    await transaction.setAlarm?.(Date.now());
+  }
 }
 
 /**

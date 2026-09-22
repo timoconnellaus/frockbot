@@ -195,6 +195,8 @@
     "./shell/backend-runtime": "./shell/backend-runtime.ts",
     "./shell/backend-state": "./shell/backend-state.ts",
     "./shell/composition-views": "./shell/composition-views.ts",
+    "./shell/conversation-publication": "./shell/conversation-publication.ts",
+    "./shell/conversation-snapshot": "./shell/conversation-snapshot.ts",
     "./shell/debug": "./shell/debug.ts",
     "./shell/debug-protocol": "./shell/debug-protocol.ts",
     "./shell/durable-rpc-targets": "./shell/durable-rpc-targets.ts",

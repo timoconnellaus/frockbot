@@ -5,44 +5,58 @@ import {
 } from "./index.js";
 
 describe("Bot-state channel protocol", () => {
-  test("decodes each exact version 1 frame", () => {
+  test("decodes each committed-update frame", () => {
     expect(
       decodeBotStateChannelFrameV1(
         JSON.stringify({
           schemaVersion: 1,
-          type: "state/event",
+          type: "state/update",
+          epoch: "1",
           cursor: "12",
-          topic: "computer",
+          kind: "computer",
+          entityId: "computer",
+          revision: 12,
+          payload: {},
         }),
       ),
-    ).toEqual({
-      schemaVersion: 1,
-      type: "state/event",
+    ).toMatchObject({
+      type: "state/update",
+      kind: "computer",
       cursor: "12",
-      topic: "computer",
     });
     expect(
       decodeBotStateChannelFrameV1(
         JSON.stringify({
           schemaVersion: 1,
-          type: "state/reset",
+          type: "state/snapshot",
+          epoch: "1",
           cursor: "4",
           reason: "gap",
+          conversation: {
+            schemaVersion: 1,
+            runs: [],
+            page: { truncated: false },
+          },
         }),
       ),
-    ).toMatchObject({ type: "state/reset", reason: "gap" });
+    ).toMatchObject({ type: "state/snapshot", reason: "gap" });
     expect(
       decodeBotStateChannelFrameV1(
         JSON.stringify({
           schemaVersion: 1,
-          type: "state/ready",
-          cursor: "0",
+          type: "state/part",
+          epoch: "1",
+          cursor: "9",
+          eventId: "1:9",
+          part: 0,
+          parts: 2,
+          data: "abc",
         }),
       ),
-    ).toMatchObject({ type: "state/ready", cursor: "0" });
+    ).toMatchObject({ type: "state/part", part: 0, parts: 2 });
   });
 
-  test("rejects non-canonical cursors and protocol extensions", () => {
+  test("rejects non-canonical cursors, superseded invalidations, and extras", () => {
     for (const cursor of ["", "01", "-1", "1.5", "9007199254740992"]) {
       expect(() => decodeBotStateCursorV1(cursor)).toThrow();
     }
@@ -50,7 +64,18 @@ describe("Bot-state channel protocol", () => {
       decodeBotStateChannelFrameV1(
         JSON.stringify({
           schemaVersion: 1,
+          type: "state/event",
+          cursor: "1",
+          topic: "runs",
+        }),
+      ),
+    ).toThrow();
+    expect(() =>
+      decodeBotStateChannelFrameV1(
+        JSON.stringify({
+          schemaVersion: 1,
           type: "state/ready",
+          epoch: "1",
           cursor: "0",
           extra: true,
         }),

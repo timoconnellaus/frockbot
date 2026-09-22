@@ -23,6 +23,13 @@ export type WhatsNewEntrySourceV1 = {
  */
 export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
+    id: "committed-chat",
+    title: "Replies land as they are sent",
+    summary:
+      "A Bot’s message appears in the thread as soon as it is committed, without waiting for a refresh.",
+    kind: "improvement",
+  },
+  {
     id: "chat-scroll",
     title: "Earlier messages stay in reach",
     summary:

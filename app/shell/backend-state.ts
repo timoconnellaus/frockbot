@@ -137,6 +137,9 @@ export interface ShellBotBackendHost extends ShellApplicationV1 {
   ): Promise<void>;
   outboundFetch?: typeof fetch;
   messagesCommitted?(): void;
+  deliverPublication?(
+    updates: readonly import("@frockbot/core/durable").ConversationUpdateV1[],
+  ): Promise<void>;
   /** Supplied by the Durable Object; defaults to the kernel implementation. */
   createAuthority?: CreateBotDurableAuthority;
   /**

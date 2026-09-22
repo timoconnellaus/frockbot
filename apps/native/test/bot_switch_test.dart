@@ -12,8 +12,21 @@ import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/main.dart';
 import 'package:frockbot_native/shell/chat_header.dart';
 import 'package:frockbot_native/shell/semantics.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'navigation_test.dart' show identifiedBy;
+
+class OfflineSocketApi extends NativeApi {
+  OfflineSocketApi(super.store);
+  @override
+  Future<WebSocketChannel> socket(
+    String botId, {
+    String? cursor,
+    String? epoch,
+  }) async {
+    throw StateError('offline');
+  }
+}
 
 /// A store whose values are resident, and whose writes only complete when the
 /// test says so — the platform keystore is slow and the UI cannot wait for it.
@@ -139,7 +152,7 @@ void main() {
     store.values[pageCacheKey('user-1', 'bot-two')] = encodePageCache([
       run('cached-run', 'Cached Clementine conversation'),
     ], null);
-    await tester.pumpWidget(FrockBotApp(store: store));
+    await tester.pumpWidget(FrockBotApp(store: store, api: OfflineSocketApi(store)));
     await tester.pump();
     await tester.pump();
     expect(find.byType(ChatHeader), findsOneWidget);

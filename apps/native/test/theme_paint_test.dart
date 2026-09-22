@@ -9,8 +9,24 @@ import 'package:frockbot_native/theme/frock_theme.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
 import 'package:frockbot_native/client/transport.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'bot_switch_test.dart' show LatchedStore, registration, session;
+
+/// Theme paint never needs a live observer; refuse the socket at once so the
+/// test does not leave WebSocket connect timers pending after dispose.
+class ThemePaintApi extends NativeApi {
+  ThemePaintApi(super.store, {super.client});
+
+  @override
+  Future<WebSocketChannel> socket(
+    String botId, {
+    String? cursor,
+    String? epoch,
+  }) async {
+    throw StateError('offline');
+  }
+}
 
 Map<String, Object?> studioDocument() => {
   'schemaVersion': 1,
@@ -68,7 +84,9 @@ void main() {
         ],
       });
       store.values['selection.user-1'] = 'bot-one';
-      await tester.pumpWidget(FrockBotApp(store: store));
+      await tester.pumpWidget(
+        FrockBotApp(store: store, api: ThemePaintApi(store)),
+      );
       await tester.pump();
       await tester.pump();
       final ink = FrockTheme.fromDocument(ThemeDocument.ink);
@@ -121,7 +139,9 @@ void main() {
         ],
       });
       store.values['selection.user-1'] = 'bot-one';
-      await tester.pumpWidget(FrockBotApp(store: store));
+      await tester.pumpWidget(
+        FrockBotApp(store: store, api: ThemePaintApi(store)),
+      );
       await tester.pump();
       await tester.pump();
       final paper = FrockTheme.fromDocument(ThemeDocument.paper);
@@ -171,7 +191,7 @@ void main() {
       store.values['selection.user-1'] = 'bot-one';
       final botsGate = Completer<void>();
       final seen = <String>[];
-      final api = NativeApi(
+      final api = ThemePaintApi(
         store,
         client: MockClient((request) async {
           seen.add('${request.method} ${request.url.path}');
@@ -237,7 +257,9 @@ void main() {
         ],
       });
       store.values['selection.user-1'] = 'bot-one';
-      await tester.pumpWidget(FrockBotApp(store: store));
+      await tester.pumpWidget(
+        FrockBotApp(store: store, api: ThemePaintApi(store)),
+      );
       await tester.pump();
       await tester.pump();
       expect(find.byKey(const ValueKey('thread-theme-bot-one')), findsNothing);

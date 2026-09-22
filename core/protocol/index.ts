@@ -1,3 +1,9 @@
+import {
+  decodeProtocol,
+  STATE_FRAME_MAX_BYTES,
+  type StateFrame,
+} from "../protocol-schemas/index.js";
+
 export interface PromptRequest {
   runId: string;
   text: string;
@@ -15,38 +21,15 @@ export interface PromptRequest {
 export const DEPLOYMENT_HEADER_V1 = "x-frockbot-application-v1";
 
 /**
- * Version 1 of the Bot-state observer protocol. Frames are invalidations, not
- * authority: a client that receives one re-reads the owning HTTP projection.
+ * Version 1 of the Bot-state observer protocol. Frames are committed
+ * conversation updates, snapshots, and Computer invalidations.
  */
 export const BOT_STATE_CHANNEL_VERSION = 1 as const;
 
-/**
- * What a frame says has moved. `computer` is the Computer projection;
- * `runs` is this Bot's durable run records — a Turn started, said more, or
- * settled — so a client that is not holding the Turn's POST still learns.
- */
-export type BotStateTopicV1 = "computer" | "runs";
-
-export type BotStateChannelFrameV1 =
-  | {
-      schemaVersion: 1;
-      type: "state/event";
-      cursor: string;
-      topic: BotStateTopicV1;
-    }
-  | {
-      schemaVersion: 1;
-      type: "state/reset";
-      cursor: string;
-      reason: "initial" | "gap" | "cursor-ahead";
-    }
-  | {
-      schemaVersion: 1;
-      type: "state/ready";
-      cursor: string;
-    };
+export type BotStateChannelFrameV1 = StateFrame;
 
 const BOT_STATE_CURSOR_PATTERN = /^(?:0|[1-9][0-9]{0,15})$/u;
+const utf8 = new TextEncoder();
 
 export function decodeBotStateCursorV1(value: unknown): string {
   if (
@@ -59,28 +42,13 @@ export function decodeBotStateCursorV1(value: unknown): string {
   return value;
 }
 
-function exactObject(
-  value: unknown,
-  required: readonly string[],
-): Record<string, unknown> {
-  if (typeof value !== "object" || value === null || Array.isArray(value)) {
-    throw new Error("invalid Bot-state frame");
-  }
-  const record = value as Record<string, unknown>;
-  const allowed = new Set(required);
-  if (
-    !required.every((key) => Object.hasOwn(record, key)) ||
-    Object.keys(record).some((key) => !allowed.has(key))
-  ) {
-    throw new Error("invalid Bot-state frame");
-  }
-  return record;
-}
-
 export function decodeBotStateChannelFrameV1(
   value: unknown,
 ): BotStateChannelFrameV1 {
-  if (typeof value !== "string" || value.length > 4_096) {
+  if (
+    typeof value !== "string" ||
+    utf8.encode(value).length > STATE_FRAME_MAX_BYTES
+  ) {
     throw new Error("invalid Bot-state frame");
   }
   let parsed: unknown;
@@ -89,62 +57,11 @@ export function decodeBotStateChannelFrameV1(
   } catch {
     throw new Error("invalid Bot-state frame");
   }
-  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+  try {
+    return decodeProtocol("StateFrame", parsed);
+  } catch {
     throw new Error("invalid Bot-state frame");
   }
-  const type = (parsed as Record<string, unknown>).type;
-  if (type === "state/event") {
-    const frame = exactObject(parsed, [
-      "schemaVersion",
-      "type",
-      "cursor",
-      "topic",
-    ]);
-    if (
-      frame.schemaVersion !== 1 ||
-      (frame.topic !== "computer" && frame.topic !== "runs")
-    ) {
-      throw new Error("invalid Bot-state frame");
-    }
-    return {
-      schemaVersion: 1,
-      type,
-      cursor: decodeBotStateCursorV1(frame.cursor),
-      topic: frame.topic,
-    };
-  }
-  if (type === "state/reset") {
-    const frame = exactObject(parsed, [
-      "schemaVersion",
-      "type",
-      "cursor",
-      "reason",
-    ]);
-    if (
-      frame.schemaVersion !== 1 ||
-      (frame.reason !== "initial" &&
-        frame.reason !== "gap" &&
-        frame.reason !== "cursor-ahead")
-    ) {
-      throw new Error("invalid Bot-state frame");
-    }
-    return {
-      schemaVersion: 1,
-      type,
-      cursor: decodeBotStateCursorV1(frame.cursor),
-      reason: frame.reason,
-    };
-  }
-  if (type === "state/ready") {
-    const frame = exactObject(parsed, ["schemaVersion", "type", "cursor"]);
-    if (frame.schemaVersion !== 1) throw new Error("invalid Bot-state frame");
-    return {
-      schemaVersion: 1,
-      type,
-      cursor: decodeBotStateCursorV1(frame.cursor),
-    };
-  }
-  throw new Error("invalid Bot-state frame");
 }
 
 export type AgentCommand =

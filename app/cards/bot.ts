@@ -11,7 +11,8 @@
 // the Plugin's own handler with the Bot's authority, and everything else is
 // conversation input the Bot's next Turn reads — never a sentence the User is
 // made to have said.
-import type { BotIdentity } from "@frockbot/core/durable";
+import { commitPublicationsV1, type BotIdentity } from "@frockbot/core/durable";
+import { cardRevisionPublicationV1 } from "@frockbot/app/shell/conversation-publication";
 import {
   a2uiByteLengthV1,
   A2UI_LIMITS_V1,
@@ -254,6 +255,13 @@ async function foldHandlerMessages(
       return { card: current, failure: cardFailureV1(error.message) };
     }
     await transaction.put(key, folded);
+    await commitPublicationsV1(transaction, [
+      cardRevisionPublicationV1({
+        surfaceId,
+        revision: folded.revision,
+      }),
+    ]);
+    await state.authority.refreshRecoveryAlarm(transaction);
     return { card: folded };
   });
 }
@@ -419,6 +427,9 @@ export async function cardAction(
       runId,
       outcome.messages,
     );
+    if (folded.failure === undefined) {
+      await state.authority.drainCommittedPublication();
+    }
     // The one thing a handler may say to the Bot rather than to the card.
     // Queued only when the fold landed: a Card the person is not looking at
     // must not put words in front of the Bot about a change nobody saw.

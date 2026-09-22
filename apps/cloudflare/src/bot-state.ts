@@ -28,6 +28,7 @@ import type { PushUpdate } from "./push.js";
 import { cleanIncidentTestChatsV1 } from "./test-chat-cleanup.js";
 import { cleanBotAvatarTestState } from "./avatar-state-cleanup.js";
 import { cleanBotProfileMirrorTestState } from "./directory-profile-cleanup.js";
+import { cleanRetiredPublicationStateV1 } from "./publication-state-cleanup.js";
 import {
   deliverProfileMirrorV1,
   PROFILE_MIRROR_KEY_V1,
@@ -603,6 +604,7 @@ export class BotState
       await cleanRetiredRoutineStateV1(this.ctx.storage);
       await cleanUnpreparedRunsV1(this.ctx.storage);
       await cleanUndecodableSkillIndexesV1(this.ctx.storage);
+      await cleanRetiredPublicationStateV1(this.ctx.storage);
       const identity = await this.ctx.storage.get<{
         userId: string;
         botId: string;
@@ -740,17 +742,16 @@ export class BotState
             env: this.backendEnv,
             outboundFetch: this.outboundFetch,
             messagesCommitted: () => this.ctx.waitUntil(this.drainPush()),
+            deliverPublication: (updates) => {
+              this.stateChannel.broadcastCommitted(updates);
+              return Promise.resolve();
+            },
             // The Durable Object owns the kernel authority; the Shell
             // Package supplies only its configuration and Composition
-            // hooks.
-            // The authority writes through the channel's storage facade, so
-            // every committed run write pushes a `runs` invalidation to
-            // attached browsers. The kernel is unaware it is observed.
-            createAuthority: (options) =>
-              new BotDurableAuthority({
-                ...options,
-                state: this.stateChannel.observeRuns(options.state),
-              }),
+            // hooks. Chat delivery is a commit contribution, not a
+            // storage interceptor: an observed write is not proof it
+            // committed.
+            createAuthority: (options) => new BotDurableAuthority(options),
             // The Computer Contribution's projection cache and its share of
             // the authority's one durable alarm, reached through the table
             // once it has mounted.
@@ -1956,9 +1957,10 @@ export class BotState
           at: request.command.endedAt,
         },
       });
+      await shell.state.authority.refreshRecoveryAlarm(transaction);
       committed = true;
     });
-    if (committed) this.stateChannel.noticeRuns();
+    if (committed) await shell.state.authority.drainCommittedPublication();
     return { status: "accepted" as const };
   }
 
@@ -2587,10 +2589,6 @@ export class BotState
       identity,
       request.command as CardActionCommandV1,
     );
-    // A Card is part of the transcript, so an attached client is told to read
-    // again the way it is told a Turn moved. The fold happened outside the
-    // authority's own storage, which is what observes run writes.
-    this.stateChannel.noticeRuns();
     return receipt;
   }
 

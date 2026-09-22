@@ -517,24 +517,60 @@ export type StopReceipt = {
   run: Run;
 };
 export type ObserverCursor = string;
+export type ConversationEntityId = string;
+export type ConversationKind =
+  "message" | "run-status" | "announcement" | "card-revision" | "computer";
+export type ConversationMessageUpdate = {
+  runId: Identifier;
+  sessionId: string;
+  occurrenceId: string;
+  event: { type: "send/to-user"; payload: SendPayload; ordinal: number };
+};
 export type StateFrame =
   | {
       schemaVersion: 1;
-      type: "state/event";
+      type: "state/update";
+      epoch: ObserverCursor;
       cursor: ObserverCursor;
-      topic: "computer" | "runs";
+      kind: ConversationKind;
+      entityId: ConversationEntityId;
+      revision: number;
+      payload:
+        | ConversationMessageUpdate
+        | { run: Run }
+        | { announcement: Announcement }
+        | { surfaceId: string; revision: number }
+        | {};
     }
   | {
       schemaVersion: 1;
-      type: "state/reset";
+      type: "state/snapshot";
+      epoch: ObserverCursor;
       cursor: ObserverCursor;
-      reason: "initial" | "gap" | "cursor-ahead";
+      reason: "initial" | "gap" | "cursor-ahead" | "epoch";
+      conversation: ConversationProjection;
     }
-  | { schemaVersion: 1; type: "state/ready"; cursor: ObserverCursor };
+  | {
+      schemaVersion: 1;
+      type: "state/part";
+      epoch: ObserverCursor;
+      cursor: ObserverCursor;
+      eventId: string;
+      part: number;
+      parts: number;
+      data: string;
+    }
+  | {
+      schemaVersion: 1;
+      type: "state/ready";
+      epoch: ObserverCursor;
+      cursor: ObserverCursor;
+    };
 export type ObserverState = {
   schemaVersion: 1;
   botId: BotId;
   cursor: ObserverCursor;
+  epoch?: ObserverCursor;
   status: "connecting" | "open" | "fallback" | "hidden";
 };
 export type Notification = {
@@ -1030,6 +1066,9 @@ export interface ProtocolTypes {
   ConversationProjection: ConversationProjection;
   StopReceipt: StopReceipt;
   ObserverCursor: ObserverCursor;
+  ConversationEntityId: ConversationEntityId;
+  ConversationKind: ConversationKind;
+  ConversationMessageUpdate: ConversationMessageUpdate;
   StateFrame: StateFrame;
   ObserverState: ObserverState;
   Notification: Notification;
