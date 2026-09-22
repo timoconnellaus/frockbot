@@ -35,6 +35,7 @@ import {
   routineHookDigestV1,
 } from "@frockbot/app/routines/hook";
 import { routineHookPathV1 } from "@frockbot/app/routines/shared";
+import { profileMirrorDeadlineV1 } from "@frockbot/app/flock/profile-mirror";
 import { firstPartyFeatureOnForBotV1 } from "@frockbot/app/plugins/catalog";
 import { readPluginEnablementV1 } from "@frockbot/app/plugins/enablement";
 import type { RoutinesRuntimeHostV1 } from "@frockbot/app/routines/agent";
@@ -544,6 +545,7 @@ export async function scheduledDeadlines(
     // a child that never reported, and the child runs the Turn it was handed
     // on its next alarm rather than on a floating promise.
     ...(await subagentDeadlines(transaction)),
+    ...(await profileMirrorDeadlineV1(transaction)),
     ...(state.hostScheduled.deadlines
       ? await state.hostScheduled.deadlines(transaction)
       : []),

@@ -30,6 +30,11 @@ import {
 } from "@frockbot/core/connection";
 import { IDENTITY_KEY, type BotIdentity } from "@frockbot/core/durable";
 import {
+  directoryProfileFromBotProfileV1,
+  profileProjectionChangedV1,
+  queueProfileMirrorV1,
+} from "@frockbot/app/flock/profile-mirror";
+import {
   decodeUserFeaturesV1,
   type UserFeaturesV1,
 } from "@frockbot/app/admin/shared";
@@ -38,6 +43,7 @@ import {
   decodeDirectoryViewV1,
   decodeFlockReceiptV1,
   decodeVoiceIdentityViewV1,
+  type BotDirectoryProfileV1,
   type BotDirectoryViewV1,
   type BotLookV1,
   type CreateBotCommandV1,
@@ -392,6 +398,19 @@ async function applySimpleConfigurationCommand(
       [BOT_CONFIGURATION_KEY]: next,
       [receiptKey]: { commandFingerprint, receipt },
     });
+    // The mirror rides the same transaction as the settings write. Delivery
+    // happens after commit; the record is what an eviction retries.
+    if (
+      (command.type === "bot/update-profile" ||
+        command.type === "bot/set-profile") &&
+      profileProjectionChangedV1(current.profile, next.profile)
+    ) {
+      await queueProfileMirrorV1(
+        transaction,
+        directoryProfileFromBotProfileV1(next.profile, revision),
+        Date.now(),
+      );
+    }
     // A rename is durable history, not a settings side effect: the Session
     // records it so the conversation shows who renamed the Bot and when.
     if (next.profile.name !== current.profile.name) {
@@ -483,6 +502,11 @@ export interface UserConfigurationRpcV1 {
     botId: string,
     look: BotLookV1,
     document: ThemeDocumentV1 | undefined,
+  ): Promise<BotDirectoryViewV1>;
+  mirrorBotProfile(
+    userId: string,
+    botId: string,
+    profile: BotDirectoryProfileV1,
   ): Promise<BotDirectoryViewV1>;
   createBot(
     userId: string,
@@ -652,6 +676,15 @@ export function userConfigurationV1(
           botId,
           look,
           ...(document === undefined ? {} : { document }),
+        }),
+      ),
+    mirrorBotProfile: async (userId, botId, profile) =>
+      decodeDirectoryViewV1(
+        await rpc.mirrorBotProfile({
+          schemaVersion: 1,
+          userId,
+          botId,
+          profile,
         }),
       ),
     executeTemplateCommand: async (userId, command) =>

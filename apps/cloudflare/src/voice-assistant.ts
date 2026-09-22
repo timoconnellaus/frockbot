@@ -21,6 +21,10 @@ import {
   type WSMessage,
 } from "agents";
 import {
+  listDirectoryActivityV1,
+  projectOpeningDirectoryV1,
+} from "@frockbot/app/voice/directory";
+import {
   parseChatCompletionStreamV1,
   renderVoiceChatResultV1,
   renderVoiceSubagentResultV1,
@@ -3451,14 +3455,11 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   }
 
   /**
-   * What a Bot is called *now*. The registration seed in the User object is
-   * immutable, so a Bot the person has since renamed or re-described would be
-   * announced under a name they no longer use. Its own object owns the
-   * editable profile, and that is what the assistant speaks and prompts with.
-   * An unreadable profile is a failed read, never permission to revive stale
-   * identity from the seed.
+   * What the selected Bot is called, read from its own settings. Opening uses
+   * this for the Bot the call is wearing. Other Bots keep the directory
+   * projection, which is not a live read.
    */
-  private async botIdentity(
+  protected async botIdentity(
     userId: string,
     botId: string,
   ): Promise<{ botId: string; name: string; description?: string }> {
@@ -3470,43 +3471,29 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     };
   }
 
-  /** Every Bot, as it is named today, with its live activity preserved. */
+  /**
+   * Opening reuses the directory admission already read. `list_bots` is the
+   * path that asks each Bot what it is doing, with bounded concurrency.
+   */
   protected async listBots(
     userId: string,
     reuse?: VoiceBotReuseContextV1,
   ): Promise<VoiceBotSummaryV1[]> {
-    // Only a successful revisioned admission snapshot is reusable. If target
-    // admission could not read membership, retry here so a transient failure
-    // does not erase the Bot directory from the prompt.
-    const directory = reuse?.target.directory ?? (await this.directory(userId));
-    return Promise.all(
-      directory.bots.map(async (bot): Promise<VoiceBotSummaryV1> => {
-        if (reuse?.target.botId === bot.botId) {
-          const history = await reuse.history;
-          return {
-            botId: reuse.target.botId,
-            name: reuse.target.name,
-            ...(reuse.target.description
-              ? { description: reuse.target.description }
-              : {}),
-            ...(history ? { activity: history.activity } : {}),
-          };
-        }
-        const [identity, runs] = await Promise.all([
-          this.botIdentity(userId, bot.botId),
-          this.recentRuns(userId, bot.botId).catch(() => undefined),
-        ]);
-        return {
-          ...identity,
-          ...(runs
-            ? {
-                activity: runs.some((run) => run.status === "running")
-                  ? ("working" as const)
-                  : ("idle" as const),
-              }
-            : {}),
-        };
+    if (reuse) {
+      const directory =
+        reuse.target.directory ?? (await this.directory(userId));
+      return projectOpeningDirectoryV1({
+        directory,
+        target: reuse.target,
+      });
+    }
+    const directory = await this.directory(userId);
+    return listDirectoryActivityV1(
+      projectOpeningDirectoryV1({
+        directory,
+        target: { botId: "", name: "" },
       }),
+      (botId) => this.recentRuns(userId, botId),
     );
   }
 
@@ -3521,7 +3508,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     return this.botIdentity(userId, botId);
   }
 
-  private async recentRuns(
+  protected async recentRuns(
     userId: string,
     botId: string,
   ): Promise<ClientRunV1[]> {

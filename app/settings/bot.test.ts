@@ -21,6 +21,7 @@ import {
   resolveConfiguration,
   userAccountFeaturesReaderV1,
 } from "@frockbot/app/settings/bot";
+import { PROFILE_MIRROR_KEY_V1 } from "@frockbot/app/flock/profile-mirror";
 import { notificationIdV1 } from "@frockbot/app/shell/notification-id";
 
 class MemoryStorage {
@@ -58,11 +59,15 @@ class MemoryStorage {
     return callback(this);
   }
 
-  setAlarm(): Promise<void> {
+  alarm: number | null = null;
+
+  setAlarm(time?: number): Promise<void> {
+    this.alarm = time ?? Date.now();
     return Promise.resolve();
   }
 
   deleteAlarm(): Promise<void> {
+    this.alarm = null;
     return Promise.resolve();
   }
 }
@@ -225,6 +230,79 @@ describe("Bot configuration admission", () => {
     expect(written).not.toHaveProperty("assignments");
     expect(written).not.toHaveProperty("assignmentOperations");
     expect(written).not.toHaveProperty("model");
+  });
+
+  test("a rename queues one profile mirror on the Bot alarm", async () => {
+    const storage = new MemoryStorage();
+    const contribution = host(storage, configuredUser);
+    const identity = { userId: "user-1", botId: "primary" };
+    await contribution.materializeSettings(identity, { name: "Primary" });
+    await executeConfiguration(
+      contribution.state,
+      request({
+        schemaVersion: 1,
+        type: "bot/update-notifications",
+        commandId: "mute",
+        botId: "primary",
+        expectedRevision: 0,
+        notifications: { enabled: false },
+      }),
+    );
+    expect(storage.values.has(PROFILE_MIRROR_KEY_V1)).toBe(false);
+
+    await executeConfiguration(
+      contribution.state,
+      request({
+        schemaVersion: 1,
+        type: "bot/update-profile",
+        commandId: "rename",
+        botId: "primary",
+        expectedRevision: 1,
+        profile: { name: "Atlas", description: "Keeps the list" },
+      }),
+    );
+    expect(storage.values.get(PROFILE_MIRROR_KEY_V1)).toMatchObject({
+      name: "Atlas",
+      description: "Keeps the list",
+      sourceRevision: 2,
+    });
+    expect(storage.alarm).not.toBeNull();
+
+    await executeConfiguration(
+      contribution.state,
+      request({
+        schemaVersion: 1,
+        type: "bot/set-profile",
+        commandId: "retitle",
+        botId: "primary",
+        expectedRevision: 2,
+        profile: { title: "Chief" },
+      }),
+    );
+    expect(storage.values.get(PROFILE_MIRROR_KEY_V1)).toMatchObject({
+      sourceRevision: 2,
+      name: "Atlas",
+    });
+
+    await executeConfiguration(
+      contribution.state,
+      request({
+        schemaVersion: 1,
+        type: "bot/set-profile",
+        commandId: "redescribe",
+        botId: "primary",
+        expectedRevision: 3,
+        profile: { description: "Updated" },
+      }),
+    );
+    expect(storage.values.get(PROFILE_MIRROR_KEY_V1)).toMatchObject({
+      name: "Atlas",
+      description: "Updated",
+      sourceRevision: 4,
+    });
+    expect(
+      [...storage.values.keys()].filter((key) => key === PROFILE_MIRROR_KEY_V1),
+    ).toHaveLength(1);
   });
 
   test("rejects an unmaterialized Bot without writing durable state", async () => {

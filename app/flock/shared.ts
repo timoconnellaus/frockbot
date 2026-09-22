@@ -100,6 +100,18 @@ export interface BotRegistrationV1 {
    * otherwise compiles `look` locally — never waits on a hook to switch Bots.
    */
   document?: ThemeDocumentV1;
+  /**
+   * The name and description the directory currently shows. The Bot's settings
+   * remain the authority; this is the revisioned projection voice opening
+   * reads so it does not call every other Bot. `sourceRevision` is that
+   * settings revision. The creation seeds stay the materialization inputs.
+   */
+  currentProfile?: BotDirectoryProfileV1;
+}
+export interface BotDirectoryProfileV1 {
+  name: string;
+  description?: string;
+  sourceRevision: number;
 }
 export interface BotMembershipViewV1 {
   schemaVersion: 1;
@@ -547,7 +559,14 @@ export function decodeBotRegistrationV1(input: unknown): BotRegistrationV1 {
   exact(
     bot,
     ["schemaVersion", "botId", "registeredAt", "initialName", "avatar"],
-    ["initialDescription", "createdBy", "voice", "look", "document"],
+    [
+      "initialDescription",
+      "createdBy",
+      "voice",
+      "look",
+      "document",
+      "currentProfile",
+    ],
   );
   if (bot.schemaVersion !== 1)
     throw new FlockDecodeError("unsupported Bot registration");
@@ -578,6 +597,29 @@ export function decodeBotRegistrationV1(input: unknown): BotRegistrationV1 {
     ...(bot.document === undefined
       ? {}
       : { document: decodeThemeDocumentV1(bot.document) }),
+    ...(bot.currentProfile === undefined
+      ? {}
+      : { currentProfile: decodeBotDirectoryProfileV1(bot.currentProfile) }),
+  };
+}
+
+export function decodeBotDirectoryProfileV1(
+  input: unknown,
+): BotDirectoryProfileV1 {
+  const value = record(input, "directory profile");
+  exact(value, ["name", "sourceRevision"], ["description"]);
+  return {
+    name: boundedText(value.name, "currentProfile.name", 100),
+    ...(value.description === undefined
+      ? {}
+      : {
+          description: boundedText(
+            value.description,
+            "currentProfile.description",
+            10_000,
+          ),
+        }),
+    sourceRevision: revision(value.sourceRevision),
   };
 }
 

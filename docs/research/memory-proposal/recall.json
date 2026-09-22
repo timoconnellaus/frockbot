@@ -9,11 +9,7 @@
       {
         "id": "core-start",
         "label": "1 · Ready to converse",
-        "focus": [
-          "ready",
-          "core",
-          "context"
-        ],
+        "focus": ["ready", "core", "context"],
         "note": "Opening chat or voice loads a small, current core. Query-based recall begins when there is something to retrieve for."
       },
       {
@@ -33,11 +29,7 @@
       {
         "id": "expand-evidence",
         "label": "3 · Read more",
-        "focus": [
-          "detail",
-          "sources",
-          "context"
-        ],
+        "focus": ["detail", "sources", "context"],
         "note": "When more evidence is needed, fetch a cited memory or search conversation history, with another bounded result."
       }
     ]
@@ -56,14 +48,7 @@
       "label": "On demand · source detail and conversation history"
     }
   ],
-  "mainPath": [
-    "query",
-    "scope",
-    "exact",
-    "verify",
-    "budget",
-    "context"
-  ],
+  "mainPath": ["query", "scope", "exact", "verify", "budget", "context"],
   "nodes": [
     {
       "id": "ready",

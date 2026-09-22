@@ -379,6 +379,14 @@
     "value": null
   },
   {
+    "name": "BotDirectoryProfile negative revision",
+    "schema": "BotDirectoryProfile",
+    "value": {
+      "name": "Atlas",
+      "sourceRevision": -1
+    }
+  },
+  {
     "name": "BotRegistration wrong shape",
     "schema": "BotRegistration",
     "value": null

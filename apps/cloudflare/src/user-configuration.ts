@@ -24,6 +24,7 @@ import { decodeThemeDocumentV1, decodeBotLookV1 } from "@frockbot/core/theme";
 import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { DurableObject } from "cloudflare:workers";
 import { cleanUserAvatarTestState } from "./avatar-state-cleanup.js";
+import { cleanDirectoryProfileTestState } from "./directory-profile-cleanup.js";
 import {
   decodeNativeSessionOperation,
   nativeSessionOperation,
@@ -66,6 +67,7 @@ import type {
   TemplateImportWriterV1,
 } from "@frockbot/app/bot-template/user";
 import {
+  decodeBotDirectoryProfileV1,
   decodeBotLifecycleCommandV1,
   decodeBotLifecycleReceiptV1,
   decodeBotLifecycleViewV1,
@@ -257,6 +259,7 @@ export class UserConfiguration
     this.ctx.blockConcurrencyWhile(async () => {
       await cleanAppletTestStateV1(this.ctx.storage);
       await cleanUserAvatarTestState(this.ctx.storage);
+      await cleanDirectoryProfileTestState(this.ctx.storage);
       await cleanDefaultPackagesMarkerV1(this.ctx.storage);
       if (
         (
@@ -2290,6 +2293,20 @@ export class UserConfiguration
       ).mirrorLook(botId, identity.look, identity.document);
     }
     return receipt;
+  }
+
+  async mirrorBotProfile(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      profile: rpcDecoded(decodeBotDirectoryProfileV1),
+    });
+    const userId = request.userId as string;
+    await this.assertFlockIdentity(userId);
+    return (await this.flockContribution()).mirrorProfile(
+      request.botId as string,
+      request.profile as ReturnType<typeof decodeBotDirectoryProfileV1>,
+    );
   }
 
   async mirrorBotLook(input: unknown) {

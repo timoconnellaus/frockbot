@@ -9,12 +9,7 @@
       {
         "id": "chat-entry",
         "label": "1 \u00b7 Reach the Bot",
-        "focus": [
-          "chat-send",
-          "chat-auth",
-          "chat-route",
-          "chat-materialize"
-        ],
+        "focus": ["chat-send", "chat-auth", "chat-route", "chat-materialize"],
         "note": "Flutter sends a command through the gateway and application isolate to one Bot."
       },
       {
@@ -33,12 +28,7 @@
       {
         "id": "chat-answer",
         "label": "3 \u00b7 Show a reply",
-        "focus": [
-          "chat-fence",
-          "chat-model",
-          "chat-delivery",
-          "chat-visible"
-        ],
+        "focus": ["chat-fence", "chat-model", "chat-delivery", "chat-visible"],
         "note": "The client sees committed send_to_user content after an invalidation and REST refresh."
       }
     ]

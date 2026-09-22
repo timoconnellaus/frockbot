@@ -25,6 +25,11 @@ import {
 import type { PushUpdate } from "./push.js";
 import { cleanIncidentTestChatsV1 } from "./test-chat-cleanup.js";
 import { cleanBotAvatarTestState } from "./avatar-state-cleanup.js";
+import { cleanBotProfileMirrorTestState } from "./directory-profile-cleanup.js";
+import {
+  deliverProfileMirrorV1,
+  PROFILE_MIRROR_KEY_V1,
+} from "@frockbot/app/flock/profile-mirror";
 import { DurableObject } from "cloudflare:workers";
 import {
   BotStateChannel,
@@ -584,6 +589,7 @@ export class BotState
       await cleanNotificationTestState(this.ctx.storage);
       await cleanHiddenBotNotifications(this.ctx.storage);
       await cleanBotAvatarTestState(this.ctx.storage);
+      await cleanBotProfileMirrorTestState(this.ctx.storage);
       await cleanRetiredRoutineStateV1(this.ctx.storage);
     });
     this.outboundFetch = dependencies.outboundFetch;
@@ -762,6 +768,7 @@ export class BotState
                 .get(computerBotContribution)
                 ?.settleScheduledWork() ?? Promise.resolve());
               await this.assembleThemeIfDue();
+              await this.deliverProfileMirror();
             },
             // An archived Bot admits no configuration command; the Flock
             // Contribution owns that durable lifecycle state.
@@ -1124,6 +1131,13 @@ export class BotState
       botId: request.botId,
     });
     const receipt = await executeConfiguration(shell.state, request);
+    if (
+      receipt.status === "applied" &&
+      (request.command.type === "bot/update-profile" ||
+        request.command.type === "bot/set-profile")
+    ) {
+      this.ctx.waitUntil(this.deliverProfileMirror().catch(() => undefined));
+    }
     if (request.command.type === "bot/set-package-settings") {
       this.ctx.waitUntil(
         this.assembleTheme({
@@ -1424,6 +1438,35 @@ export class BotState
           document,
         );
       },
+    });
+  }
+
+  /**
+   * Sends the queued profile mirror, if one is due. The alarm path and the
+   * post-commit attempt share this. A miss keeps the record for the alarm.
+   */
+  private async deliverProfileMirror(): Promise<void> {
+    const pending = await this.ctx.storage.get(PROFILE_MIRROR_KEY_V1);
+    if (pending === undefined) return;
+    const identity = await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
+    if (!identity) return;
+    const shell = await this.contribution();
+    await deliverProfileMirrorV1({
+      storage: this.ctx.storage,
+      now: Date.now(),
+      botId: identity.botId,
+      mirror: (profile) =>
+        userConfigurationV1(shell.state, identity).mirrorBotProfile(
+          identity.userId,
+          identity.botId,
+          profile,
+        ),
+      refreshAlarm: (transaction) =>
+        shell.state.authority.refreshRecoveryAlarm(
+          transaction as unknown as Parameters<
+            typeof shell.state.authority.refreshRecoveryAlarm
+          >[0],
+        ),
     });
   }
 

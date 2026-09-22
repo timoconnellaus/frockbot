@@ -4,6 +4,7 @@ import type { AppletProvenanceV1 } from "@frockbot/core/contracts";
 import type { MachineCommandV1 } from "@frockbot/core/machine-protocol";
 import type { TemplateCommandV1 } from "@frockbot/app/bot-template/shared";
 import type {
+  BotDirectoryProfileV1,
   BotLookV1,
   CreateBotCommandV1,
   ThemeDocumentV1,
@@ -75,6 +76,9 @@ export interface BotUserConfigurationRpcTargetV1
       look: BotLookV1;
       document?: ThemeDocumentV1;
     }>,
+  ): Promise<object>;
+  mirrorBotProfile(
+    input: BotRpcEnvelopeV1<{ profile: BotDirectoryProfileV1 }>,
   ): Promise<object>;
   executeTemplateCommand(
     input: UserRpcEnvelopeV1<{ command: TemplateCommandV1 }>,

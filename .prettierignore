@@ -37,3 +37,7 @@ apps/native/android/.kotlin/
 
 # Throwaway visual references (docs/voice.md); kept byte-identical to what was approved.
 app/shell/client/voice-prototype/
+
+# Generated archify diagrams. Formatting would rewrite the generator's bytes.
+docs/research/memory-proposal/*.html
+docs/research/startup-maps/*.html
