@@ -47,6 +47,7 @@
     "./composition/user.fixture": "./composition/user.fixture.ts",
     "./connect": "./connect/index.ts",
     "./connect/agent": "./connect/agent.ts",
+    "./connect/account-catalog": "./connect/account-catalog.ts",
     "./connect/backend": "./connect/backend.ts",
     "./connect/catalog": "./connect/catalog.ts",
     "./connect/composio": "./connect/composio.ts",

@@ -208,6 +208,26 @@ export interface ToolRegistrationOptions {
   subagentRoleCeiling?: readonly string[];
 }
 
+/**
+ * What a lazy namespace answers when a complete schema or a dispatch needs
+ * it. Listing the namespace must not call this.
+ */
+export type LazyNamespaceResolutionV1 =
+  | {
+      status: "ready";
+      tools: readonly ToolDefinition[];
+      registration?: ToolRegistrationOptions;
+    }
+  | {
+      status: "unavailable" | "stale-contract";
+      message: string;
+    };
+
+export interface ToolNamespaceDirectoryEntryV1 {
+  name: string;
+  description: string;
+}
+
 export interface ToolNamespaceRegistration {
   name: string;
   description?: string;
@@ -216,6 +236,16 @@ export interface ToolNamespaceRegistration {
   external?: boolean;
   /** Namespace-level instructions rendered in the dynamic catalog prompt. */
   useInstructions?: string;
+  /**
+   * Names already known from durable metadata. Bare listing and pattern
+   * search use these and must not call `resolve`.
+   */
+  directory?: readonly ToolNamespaceDirectoryEntryV1[];
+  /**
+   * Loads complete schemas. Called only when a schema is returned or a tool
+   * in the namespace is dispatched.
+   */
+  resolve?: () => Promise<LazyNamespaceResolutionV1>;
 }
 
 /** Contributing Packages register tool definitions through this surface. */
