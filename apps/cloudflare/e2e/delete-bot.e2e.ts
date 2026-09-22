@@ -100,7 +100,7 @@ test("deleting a Bot from its settings removes it for good", async ({
   await expect(dialog).toBeVisible();
   await expect(dialog).toContainText("Delete Beta?");
   await expect(dialog).toContainText(
-    "This removes its conversation and Applets, and cannot be undone",
+    "This removes its conversation and cannot be undone",
   );
   await settle(page);
 
@@ -190,7 +190,7 @@ test("manage mode offers Archive and Delete, and Delete confirms first", async (
   await pressable(page, "Delete Bot").first().click();
   await expect(page.getByText("Delete Doomed?")).toBeVisible();
   await expect(
-    page.getByText("This removes its conversation and Applets."),
+    page.getByText("This removes its conversation. It cannot be undone."),
   ).toBeVisible();
   await settle(page);
 
