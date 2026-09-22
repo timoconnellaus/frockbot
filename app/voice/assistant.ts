@@ -372,6 +372,21 @@ export function renderVoiceSystemPromptV1(
         carried: input.session.carried,
       }),
     );
+    // Canonical Memory's prepared core is rebuilt after the call, so the
+    // preference kept in this ledger is what the next opening can already
+    // say. Once that projection contains the same sentence it is not repeated.
+    const covered = input.preparedCore ?? "";
+    const standing = input.session.record.durable.filter(
+      (entry) => entry.text.length > 0 && !covered.includes(entry.text),
+    );
+    if (standing.length > 0) {
+      lines.push("<memory>");
+      lines.push("How this person wants spoken conversations to work:");
+      for (const entry of standing) {
+        lines.push(`- ${escapeTag(entry.text)}`);
+      }
+      lines.push("</memory>");
+    }
   }
   if (input.handover && input.handover.length > 0) {
     // A session reopened past its resumption window: the model has no memory
@@ -875,15 +890,9 @@ export async function runVoiceToolV1(
             ? args.replaces.trim()
             : undefined;
         const until = args.until === "week" ? "week" : "today";
-        if (kind !== "open" && kind !== "temporary" && host.rememberLongTerm) {
-          return {
-            result: await host.rememberLongTerm(
-              stringArgument(args, "text"),
-              replaces,
-            ),
-            memoryInvalidated: true,
-          };
-        }
+        // Standing preferences stay on the voice ledger the next call reads.
+        // Canonical Memory is a second copy the end-of-call path attempts; this
+        // tool cannot wait on that cross-object write.
         return {
           result: await host.remember({
             text: stringArgument(args, "text"),

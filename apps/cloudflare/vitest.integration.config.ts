@@ -85,8 +85,9 @@ export default defineConfig({
         r2Buckets: ["APPLICATION_ARTIFACTS", "MEMORY_FILES"],
         d1Databases: ["AUTH_DB"],
         durableObjects: {
-          // Production classes, not probes.
-          BOT_STATES: "BotState",
+          // Production classes, not probes. `BotState` is a sqlite class in
+          // `wrangler.jsonc`; miniflare does not infer that from the migration.
+          BOT_STATES: { className: "BotState", useSQLite: true },
           // `wrangler.jsonc` lists `UserConfiguration` in `new_sqlite_classes`,
           // so the transcript index has SQL storage in production; miniflare
           // needs that said explicitly.

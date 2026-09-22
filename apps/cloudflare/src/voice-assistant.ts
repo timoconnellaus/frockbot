@@ -77,7 +77,9 @@ import {
   sealVoiceCallV1,
   VoiceMaintenanceSchedulerV1,
   VOICE_MAINTENANCE_BATCH_V1,
+  VOICE_SEALED_CALL_PREFIX_V1,
   voiceDeliveryBackoffSecondsV1,
+  type VoiceSealedCallV1,
 } from "@frockbot/app/voice/recovery";
 import {
   renderVoiceBotStatusV1,
@@ -1382,35 +1384,49 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     const standing = update.operations.filter((operation) =>
       operation.kind.startsWith("durable/"),
     );
-    if (standing.length > 0) {
-      const call = await this.ledger().currentCall();
-      if (call?.callId === payload.callId && call.botId) {
-        for (const operation of standing) {
-          if (operation.kind === "durable/add") {
-            await this.writeCanonicalMemory(
-              this.name,
-              call.botId,
-              operation.text,
-            ).catch(() => undefined);
-          } else if (operation.kind === "durable/remove") {
-            await this.forgetCanonicalMemory(
-              this.name,
-              call.botId,
-              operation.id,
-            ).catch(() => undefined);
+    const botId = await this.standingMemoryBotId(payload.callId);
+    if (standing.length > 0 && botId) {
+      for (const operation of standing) {
+        try {
+          const outcome =
+            operation.kind === "durable/add"
+              ? await this.writeCanonicalMemory(
+                  this.name,
+                  botId,
+                  operation.text,
+                )
+              : operation.kind === "durable/remove"
+                ? await this.forgetCanonicalMemory(
+                    this.name,
+                    botId,
+                    operation.id,
+                  )
+                : undefined;
+          if (outcome?.startsWith("Refused")) {
+            this.traceMemory(
+              "canonical-memory-refused",
+              { call: payload.callId, message: outcome },
+              "warn",
+            );
           }
+        } catch (error) {
+          // The voice ledger still holds the fact. A cross-object write that
+          // fails must not abandon the turns that produced it.
+          this.traceMemory(
+            "canonical-memory-failed",
+            {
+              call: payload.callId,
+              message: error instanceof Error ? error.message : String(error),
+            },
+            "warn",
+          );
         }
       }
     }
     const applied = await memory.applyChunk({
       callId: payload.callId,
       chunk,
-      update: {
-        ...update,
-        operations: update.operations.filter(
-          (operation) => !operation.kind.startsWith("durable/"),
-        ),
-      },
+      update,
       timezone: await this.userTimezone(this.name),
       at: this.now(),
     });
@@ -2277,6 +2293,12 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     );
     if (!this.stillOpening(connection, attempt)) return;
     this.timing(connection, "target-resolved");
+    // The client often names no Bot. The resolved one — General, usually —
+    // has to be on the ledger before hang-up, or the sealed call cannot say
+    // which Memory the standing preference belongs to.
+    if (target.botId && admission.call.botId !== target.botId) {
+      await ledger.retargetCall(connection.id, target.botId, now);
+    }
     if (admission.replaced) {
       const replacedId = admission.replaced.connectionId;
       for (const other of this.getConnections()) {
@@ -3342,6 +3364,17 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     return hits
       .map((hit, index) => `[${index + 1}] ${hit.item?.text ?? ""}`)
       .join("\n");
+  }
+
+  private async standingMemoryBotId(
+    callId: string,
+  ): Promise<string | undefined> {
+    const call = await this.ledger().currentCall();
+    if (call?.callId === callId && call.botId) return call.botId;
+    const sealed = await this.voiceStorage().get<VoiceSealedCallV1>(
+      `${VOICE_SEALED_CALL_PREFIX_V1}${callId}`,
+    );
+    return sealed?.botId;
   }
 
   private async preparedCoreText(

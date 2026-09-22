@@ -282,6 +282,11 @@ class ChatController extends ChangeNotifier {
 
   void _put(Map<String, dynamic> run) {
     final id = run['runId'] as String;
+    final existing = _runs[id];
+    // A page fetched while the Turn was still open can arrive after the live
+    // channel has already settled it. Putting that page back would light the
+    // working indicator again, and nothing in the live log would clear it.
+    if (existing != null && _settledRun(existing) && !_settledRun(run)) return;
     _cachedRunIds.remove(id);
     _optimisticRunIds.remove(id);
     _runs[id] = run;
@@ -302,6 +307,18 @@ class ChatController extends ChangeNotifier {
   /// Runs this client drew for itself, so it can take them back if the
   /// submission behind one turns out never to have been admitted.
   final _optimisticRunIds = <String>{};
+
+  bool _settledRun(Map<String, dynamic> run) {
+    switch (run['status']) {
+      case 'completed':
+      case 'failed':
+      case 'cancelled':
+      case 'superseded':
+        return true;
+      default:
+        return false;
+    }
+  }
 
   /// Commands whose admission this client has already accepted. A later
   /// timeout on their POST must not put them back into uncertain delivery.
