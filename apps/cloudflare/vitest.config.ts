@@ -118,7 +118,11 @@ export default defineConfig({
         d1Databases: ["AUTH_DB"],
         durableObjects: {
           BOT_ISOLATES: "BotIsolateProbe",
-          BOT_STATES: "WorkerdBotState",
+          // `wrangler.jsonc` lists `BotState` in `new_sqlite_classes`, so
+          // Memory and the transcript index have SQL in production. Miniflare
+          // needs that said on the binding or the first `sql` call breaks
+          // the object.
+          BOT_STATES: { className: "WorkerdBotState", useSQLite: true },
           COMPOSITIONS: "CompositionProbe",
           COMPUTER_HOST_CLIENT: "FlyHostTransportProbeV1",
           COMPUTER_COMPATIBILITY: "ComputerCompatibilityProbe",
