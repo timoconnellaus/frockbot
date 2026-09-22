@@ -256,9 +256,7 @@ export interface BotDurableAuthorityHooks<Snapshot> {
    * transaction. Absent means there is no subscriber; the attempt still
    * completes so an idle object is not kept awake.
    */
-  deliverPublication?(
-    pending: readonly ConversationUpdateV1[],
-  ): Promise<void>;
+  deliverPublication?(pending: readonly ConversationUpdateV1[]): Promise<void>;
   /**
    * Advisory interrupt of the exact Turn named, after the durable intent that
    * justifies it is already written. The reason is an opaque bounded string

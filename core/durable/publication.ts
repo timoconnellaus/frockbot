@@ -97,10 +97,7 @@ export interface PublicationTransactionV1 {
 }
 
 export interface PublicationDrainStorageV1 extends PublicationTransactionV1 {
-  list<T>(options: {
-    prefix: string;
-    limit?: number;
-  }): Promise<Map<string, T>>;
+  list<T>(options: { prefix: string; limit?: number }): Promise<Map<string, T>>;
   transaction<T>(
     callback: (transaction: PublicationTransactionV1) => Promise<T>,
   ): Promise<T>;
@@ -225,13 +222,14 @@ export function decodePendingPublicationV1(
     cursor: requireSafeInteger(value.cursor, "pending publication cursor"),
     entityId: requireEntityId(value.entityId),
     kind: value.kind,
-    revision: requireSafeInteger(value.revision, "pending publication revision"),
+    revision: requireSafeInteger(
+      value.revision,
+      "pending publication revision",
+    ),
   };
 }
 
-function decodeVisibleIndex(
-  value: unknown,
-): ConversationVisibleIndexV1 {
+function decodeVisibleIndex(value: unknown): ConversationVisibleIndexV1 {
   if (value === undefined) {
     return { schemaVersion: 1, runEntityIds: [], announcementEntityIds: [] };
   }
@@ -348,8 +346,7 @@ export async function commitPublicationsV1(
     const stored = writes[rowKey] ?? (await transaction.get<unknown>(rowKey));
     const current =
       stored === undefined ? undefined : decodeConversationRowV1(stored);
-    const nextRevision =
-      contribution.revision ?? (current?.revision ?? 0) + 1;
+    const nextRevision = contribution.revision ?? (current?.revision ?? 0) + 1;
     if (
       !Number.isSafeInteger(nextRevision) ||
       nextRevision < 1 ||
@@ -439,9 +436,7 @@ export async function readConversationUpdateV1(
   cursor: number,
 ): Promise<ConversationUpdateV1 | undefined> {
   const stored = await storage.get<unknown>(conversationUpdateKeyV1(cursor));
-  return stored === undefined
-    ? undefined
-    : decodeConversationUpdateV1(stored);
+  return stored === undefined ? undefined : decodeConversationUpdateV1(stored);
 }
 
 export async function readVisibleIndexV1(

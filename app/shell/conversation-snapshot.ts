@@ -65,9 +65,13 @@ async function snapshotFromIndex(
       typeof row.payload === "object" &&
       row.payload !== null &&
       "announcement" in row.payload
-        ? (row.payload as { announcement: NonNullable<
-            ClientRunListV1["announcements"]
-          >[number] }).announcement
+        ? (
+            row.payload as {
+              announcement: NonNullable<
+                ClientRunListV1["announcements"]
+              >[number];
+            }
+          ).announcement
         : undefined;
     if (announcement) announcements.push(announcement);
   }
@@ -101,9 +105,7 @@ async function snapshotFromArchive(
   });
   const entries = [...index.entries()];
   const truncated = entries.length > CLIENT_RUN_PAGE_LIMIT;
-  const kept = truncated
-    ? entries.slice(0, CLIENT_RUN_PAGE_LIMIT)
-    : entries;
+  const kept = truncated ? entries.slice(0, CLIENT_RUN_PAGE_LIMIT) : entries;
   const runs: ClientRunV1[] = [];
   let nextCursor: string | undefined;
   for (const [cursor, runId] of kept) {

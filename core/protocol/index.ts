@@ -45,7 +45,10 @@ export function decodeBotStateCursorV1(value: unknown): string {
 export function decodeBotStateChannelFrameV1(
   value: unknown,
 ): BotStateChannelFrameV1 {
-  if (typeof value !== "string" || utf8.encode(value).length > STATE_FRAME_MAX_BYTES) {
+  if (
+    typeof value !== "string" ||
+    utf8.encode(value).length > STATE_FRAME_MAX_BYTES
+  ) {
     throw new Error("invalid Bot-state frame");
   }
   let parsed: unknown;

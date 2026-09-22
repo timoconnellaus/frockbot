@@ -39,7 +39,10 @@ describe("conversation snapshot", () => {
     const storage = new MemoryStorage();
     for (let i = 0; i < CLIENT_RUN_PAGE_LIMIT + 2; i += 1) {
       const runId = `run-${i}`;
-      await storage.put(`${RUN_INDEX_PREFIX}2026-09-22T00:00:00.000Z:${runId}`, runId);
+      await storage.put(
+        `${RUN_INDEX_PREFIX}2026-09-22T00:00:00.000Z:${runId}`,
+        runId,
+      );
       await storage.put(`run:${runId}`, {
         runId,
         sessionId: "user-1:scout",

@@ -168,11 +168,14 @@ describe("committed publication", () => {
     await storage.transaction(async (transaction) => {
       await commitPublicationsV1(
         transaction,
-        Array.from({ length: PUBLICATION_REPLAY_MAX_EVENTS_V1 + 8 }, (_, i) => ({
-          kind: "run-status" as const,
-          entityId: runEntityIdV1(`run-${i}`),
-          payload: { runId: `run-${i}` },
-        })),
+        Array.from(
+          { length: PUBLICATION_REPLAY_MAX_EVENTS_V1 + 8 },
+          (_, i) => ({
+            kind: "run-status" as const,
+            entityId: runEntityIdV1(`run-${i}`),
+            payload: { runId: `run-${i}` },
+          }),
+        ),
       );
     });
     const head = await readPublicationHeadV1(storage);
@@ -197,7 +200,9 @@ describe("committed publication", () => {
   });
 
   test("empty head is a valid starting epoch", () => {
-    expect(decodePublicationHeadV1(undefined)).toEqual(emptyPublicationHeadV1());
+    expect(decodePublicationHeadV1(undefined)).toEqual(
+      emptyPublicationHeadV1(),
+    );
     expect(utf8BytesV1({ a: 1 })).toBeGreaterThan(0);
   });
 });

@@ -61,7 +61,7 @@ function splitUtf8(text: string, maxBytes: number): string[] {
   const bytes = utf8.encode(text);
   if (bytes.length <= maxBytes) return [text];
   const parts: string[] = [];
-  for (let offset = 0; offset < bytes.length; ) {
+  for (let offset = 0; offset < bytes.length;) {
     let end = Math.min(offset + maxBytes, bytes.length);
     if (end < bytes.length) {
       while (end > offset && (bytes[end]! & 0xc0) === 0x80) end -= 1;
@@ -107,11 +107,7 @@ function framesFor(frame: StateFrame): string[] {
 }
 
 export type HandshakeReasonV1 =
-  | "initial"
-  | "gap"
-  | "cursor-ahead"
-  | "epoch"
-  | "replay";
+  "initial" | "gap" | "cursor-ahead" | "epoch" | "replay";
 
 /** Which handshake to send for a presented epoch/cursor. */
 export function planHandshakeV1(
@@ -258,8 +254,7 @@ class ChannelComputerStorage implements ComputerBotStorage {
 export class BotStateChannel {
   readonly computerStorage: ComputerBotStorage;
   private alarmRefresher:
-    | ((transaction: DurableObjectTransaction) => Promise<void>)
-    | undefined;
+    ((transaction: DurableObjectTransaction) => Promise<void>) | undefined;
   private computerNotice: Promise<void> | undefined;
   private computerPending = false;
   private computerNoticeAt = 0;
