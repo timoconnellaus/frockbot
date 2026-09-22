@@ -109,7 +109,14 @@ async function startCall(label: string): Promise<CallOutcome> {
   };
   socket.send(JSON.stringify({ type: "hello", protocol_version: 1 }));
   socket.send(
-    JSON.stringify({ type: "start_call", preferred_format: "pcm16" }),
+    JSON.stringify({
+      schemaVersion: 1,
+      type: "voice/open",
+      attemptId: crypto.randomUUID(),
+      mode: "start",
+      paused: false,
+      muted: false,
+    }),
   );
   const outcome = await settled();
   socket.close();

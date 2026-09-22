@@ -102,7 +102,14 @@ describe("voice through the gateway", () => {
     await seen.waitFor((f) => f.type === "welcome", "welcome");
     socket.send(JSON.stringify({ type: "hello", protocol_version: 1 }));
     socket.send(
-      JSON.stringify({ type: "start_call", preferred_format: "pcm16" }),
+      JSON.stringify({
+        schemaVersion: 1,
+        type: "voice/open",
+        attemptId: crypto.randomUUID(),
+        mode: "start",
+        paused: false,
+        muted: false,
+      }),
     );
     const refusal = await seen.waitFor(
       (f) => f.type === "voice/refusal",
