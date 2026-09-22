@@ -480,10 +480,9 @@ async function clearWorkingContextKeysV1(
 }
 
 /**
- * Deletes one session's projection in bounded batches.
- *
- * Disposable test state only: the event log is left in place. Repeat until
- * `done`. Ordinary startup does not call this to reconstruct history.
+ * Drops one session's derived context and records that requests must not be
+ * assembled until it is projected again. The event log is left in place.
+ * Ordinary startup does not call this.
  */
 export async function clearWorkingContextV1(
   storage: WorkingContextStorageV1,

@@ -981,6 +981,13 @@ export class VoiceLedgerV1 {
     pending: VoiceDelegationRecordV1[];
   }> {
     const abandonedTurns: string[] = [];
+    // The previous turn key was not ordered by call. Those records are
+    // disposable test state; a bounded batch is deleted on each wake.
+    const legacyTurns = await this.storage.list<unknown>({
+      prefix: "voice:turn:",
+      limit: 32,
+    });
+    for (const key of legacyTurns.keys()) await this.storage.delete(key);
     const turns = await this.storage.list<VoiceTurnRecordV1>({
       prefix: VOICE_TURN_PREFIX_V1,
     });
