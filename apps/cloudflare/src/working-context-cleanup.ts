@@ -4,17 +4,14 @@
 // append to a log with events but no head is refused as a gap, so every Turn
 // on such a Session failed before its first event. Rebuilding is an archive
 // read, which ordinary startup never does; the receipt makes it once per
-// object. A log this process cannot read gets an empty context that starts
-// after it, so the Bot answers without that history rather than not at all.
+// object. A log this process cannot read or project gets an empty context
+// that starts after it, so the Bot answers without that history rather than
+// not at all.
 
-import {
-  emptyConversationHeadV1,
-  type SessionEvent,
-} from "@frockbot/core/contracts";
+import { emptyConversationHeadV1 } from "@frockbot/core/contracts";
 import {
   SESSION_EVENT_LOG_INDEX_PREFIX,
   SessionEventLog,
-  requireConversationHeadV1,
   workingContextHeadKeyV1,
   type WorkingContextStorageV1,
 } from "@frockbot/core/durable";
@@ -55,35 +52,41 @@ export async function projectUnprojectedSessionsV1(
   const rebuilt: { sessionId: string; events: number; from: string }[] = [];
   for (const { sessionId, eventCount } of sessions) {
     if (await storage.get(workingContextHeadKeyV1(sessionId))) continue;
-    let events: SessionEvent[] | undefined;
-    try {
-      events = await new SessionEventLog(storage).read(sessionId);
-    } catch {
-      events = undefined;
-    }
-    await storage.transaction(async (tx) => {
-      const existing = requireConversationHeadV1(
-        await tx.get(workingContextHeadKeyV1(sessionId)),
-        sessionId,
-      );
-      if (existing) return;
-      if (events) {
-        await replaceWorkingContextV1(tx, sessionId, events);
-        return;
+    // Display fidelity leaves each model request as its bounded projection;
+    // the reducer never reads one back.
+    const events = await new SessionEventLog(storage)
+      .readDisplayRange(sessionId, 0, eventCount)
+      .catch(() => undefined);
+    let from: "log" | "empty" = "log";
+    if (events) {
+      try {
+        await storage.transaction(async (tx) => {
+          if (await tx.get(workingContextHeadKeyV1(sessionId))) return;
+          await replaceWorkingContextV1(tx, sessionId, events);
+        });
+      } catch {
+        from = "empty";
       }
-      // Every Turn writes at least one event, so no earlier Turn number
-      // reaches past the event count.
-      await tx.put(workingContextHeadKeyV1(sessionId), {
-        ...emptyConversationHeadV1(sessionId),
-        nextSeq: eventCount,
-        projectedThroughSeq: eventCount,
-        nextTurn: eventCount + 1,
-      });
-    });
+    } else {
+      from = "empty";
+    }
+    if (from === "empty") {
+      // A throw here would reset the object on every wake, so the fallback is
+      // a plain write. Every Turn writes at least one event, so no earlier
+      // Turn number reaches past the event count.
+      if (!(await storage.get(workingContextHeadKeyV1(sessionId)))) {
+        await storage.put(workingContextHeadKeyV1(sessionId), {
+          ...emptyConversationHeadV1(sessionId),
+          nextSeq: eventCount,
+          projectedThroughSeq: eventCount,
+          nextTurn: eventCount + 1,
+        });
+      }
+    }
     rebuilt.push({
       sessionId,
       events: eventCount,
-      from: events ? "log" : "empty",
+      from,
     });
   }
   await storage.put(RECEIPT, { schemaVersion: 1, rebuilt });

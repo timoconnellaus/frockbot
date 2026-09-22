@@ -105,6 +105,34 @@ test("an unreadable log gets an empty context after its end", async () => {
   expect(cursor.cursor.nextTurn).toBeGreaterThan(2);
 });
 
+test("a projection that throws still leaves the next Turn able to append", async () => {
+  const { storage, count } = await unprojectedLog();
+  const transaction = storage.transaction.bind(storage);
+  let refuse = true;
+  storage.transaction = (<T>(body: (tx: MemoryStorage) => Promise<T>) => {
+    if (refuse) {
+      refuse = false;
+      return Promise.reject(new Error("page exceeds its byte budget"));
+    }
+    return transaction(body);
+  }) as typeof storage.transaction;
+
+  await projectUnprojectedSessionsV1(storage);
+
+  const cursor = await readSessionCursorV1(storage, SESSION);
+  expect(cursor.availability).toBe("ready");
+  expect(cursor.cursor.nextSeq).toBe(count);
+  await storage.transaction((tx) =>
+    new SessionEventLog(tx).append(
+      SESSION,
+      chatTurn(cursor.cursor.nextTurn, "next", count),
+    ),
+  );
+  expect((await readSessionCursorV1(storage, SESSION)).cursor.nextSeq).toBe(
+    count + 7,
+  );
+});
+
 test("the walk runs once per object", async () => {
   const { storage } = await unprojectedLog();
   await projectUnprojectedSessionsV1(storage);
