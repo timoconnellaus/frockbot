@@ -5,6 +5,12 @@
 // so eviction re-arms from the due index.
 
 import { MemoryEngineV1 } from "@frockbot/app/memory/engine";
+import { createMemoryEmbedder } from "@frockbot/app/memory/embeddings";
+import {
+  drainMemoryProcessingV1,
+  type MemoryDrainResultV1,
+  type MemoryProcessingAdaptersV1,
+} from "@frockbot/app/memory/processing";
 import {
   MemoryRecordsV1,
   type MemoryRemoteOwnerV1,
@@ -24,6 +30,10 @@ import type {
   MemoryWriteResultV1,
 } from "@frockbot/app/memory/records";
 import type { MemorySqlStorageV1 } from "@frockbot/app/memory/sql";
+import type {
+  MemoryAiBinding,
+  MemoryVectorIndex,
+} from "@frockbot/app/memory/types";
 import { remoteCallV1 } from "@frockbot/core/contracts";
 
 export interface DurableMemoryStorageV1 {
@@ -147,4 +157,19 @@ export function dispatchMemoryOperateV1(
       throw new Error(`unknown Memory action ${String(exhausted)}`);
     }
   }
+}
+
+export interface DurableMemoryIndexBindingsV1 {
+  vectors?: MemoryVectorIndex;
+  ai?: MemoryAiBinding;
+}
+
+export async function drainDurableMemoryV1(
+  engine: MemoryEngineV1,
+  bindings: DurableMemoryIndexBindingsV1 = {},
+): Promise<MemoryDrainResultV1> {
+  const adapters: MemoryProcessingAdaptersV1 = {};
+  if (bindings.vectors) adapters.vectors = bindings.vectors;
+  if (bindings.ai) adapters.embed = createMemoryEmbedder(bindings.ai);
+  return drainMemoryProcessingV1(engine, adapters);
 }

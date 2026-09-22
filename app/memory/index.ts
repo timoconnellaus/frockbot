@@ -8,6 +8,7 @@ export * from "./engine-tools.js";
 export * from "./facts.js";
 export * from "./indexer.js";
 export * from "./owner.js";
+export * from "./processing.js";
 export * from "./projects.js";
 export * from "./records.js";
 export * from "./render.js";

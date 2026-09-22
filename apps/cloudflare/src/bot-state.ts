@@ -334,9 +334,14 @@ import {
 } from "./memory.js";
 import {
   createBotMemoryEngineV1,
+  drainDurableMemoryV1,
   durableObjectHasSqlV1,
 } from "./memory-records.js";
 import type { MemoryEngineV1 } from "@frockbot/app/memory/engine";
+import type {
+  MemoryAiBinding,
+  MemoryVectorIndex,
+} from "@frockbot/app/memory/types";
 import {
   createFrockAiGatewayHostV1,
   type FrockAiGatewayHostV1,
@@ -820,6 +825,7 @@ export class BotState
                 ?.settleScheduledWork() ?? Promise.resolve());
               await this.assembleThemeIfDue();
               await this.deliverProfileMirror();
+              await this.drainMemoryProcessing();
             },
             // An archived Bot admits no configuration command; the Flock
             // Contribution owns that durable lifecycle state.
@@ -939,6 +945,16 @@ export class BotState
   private memoryEngine(): MemoryEngineV1 {
     this.#memoryEngine ??= createBotMemoryEngineV1(this.ctx.storage);
     return this.#memoryEngine;
+  }
+
+  private async drainMemoryProcessing(): Promise<void> {
+    if (!durableObjectHasSqlV1(this.ctx.storage)) return;
+    await drainDurableMemoryV1(this.memoryEngine(), {
+      ...(this.env.MEMORY_INDEX
+        ? { vectors: this.env.MEMORY_INDEX as MemoryVectorIndex }
+        : {}),
+      ...(this.env.AI ? { ai: this.env.AI as MemoryAiBinding } : {}),
+    });
   }
 
   /**

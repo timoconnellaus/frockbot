@@ -165,10 +165,15 @@ import type { MemoryProjectV1 } from "@frockbot/app/memory/agent";
 import {
   createUserMemoryEngineV1,
   dispatchMemoryOperateV1,
+  drainDurableMemoryV1,
   durableObjectHasSqlV1,
   type MemoryOperateActionV1,
 } from "./memory-records.js";
 import type { MemoryEngineV1 } from "@frockbot/app/memory/engine";
+import type {
+  MemoryAiBinding,
+  MemoryVectorIndex,
+} from "@frockbot/app/memory/types";
 import {
   SEARCH_MAX_ROW_PAGE_V1,
   decodeSearchQueryV1,
@@ -248,6 +253,10 @@ interface UserConfigurationEnv extends BillingEnv {
   APPLET_STATES?: DurableObjectNamespace<AppletState>;
   /** The bucket behind durable roots, where a deleted Applet's source is removed. */
   MEMORY_FILES?: R2Bucket;
+  /** Derived Memory vectors for User and shared scopes. Same Worker binding as Bot. */
+  MEMORY_INDEX?: MemoryVectorIndex;
+  /** Workers AI embeddings for User and shared Memory. */
+  AI?: MemoryAiBinding;
   /**
    * The Plugin worker loader. The User object never loads anything with it;
    * it reads it to know whether this deployment can run a Plugin at all,
@@ -1976,6 +1985,13 @@ export class UserConfiguration
     return this.#memoryEngine;
   }
 
+  private async drainMemoryProcessing(): Promise<void> {
+    await drainDurableMemoryV1(this.memoryEngine(), {
+      ...(this.env.MEMORY_INDEX ? { vectors: this.env.MEMORY_INDEX } : {}),
+      ...(this.env.AI ? { ai: this.env.AI } : {}),
+    });
+  }
+
   /**
    * User and shared Group Chat Memory. Membership is loaded here and overwrites
    * anything the Bot RPC claimed, so a caller-supplied scope id is never enough.
@@ -2159,6 +2175,7 @@ export class UserConfiguration
     const userId = await this.provenIdentity();
     if (userId) await this.sweepAppletCleanups(userId);
     if (durableObjectHasSqlV1(this.ctx.storage)) {
+      await this.drainMemoryProcessing();
       const memoryDue = this.memoryEngine().nextWakeupAt();
       if (memoryDue !== undefined) {
         const current = await this.ctx.storage.getAlarm();
