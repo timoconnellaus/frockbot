@@ -138,7 +138,7 @@ describe("generating an image", () => {
     const replayed = (await expectOkJson(
       await postAsUser(userId, `/api/bots/${botId}/turns`, body),
     )) as TurnView;
-    const replayedResult = replayed.activeRunJournal.find(
+    const replayedResult = replayed.events.find(
       (event) => event.type === "tool/result",
     );
     expect(replayedResult?.content).toBe(result?.content);
