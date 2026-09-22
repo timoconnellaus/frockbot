@@ -130,6 +130,8 @@ function projectSection(
   let dropped = false;
   const resettable: { id: string; label: string }[] = [];
   for (const field of section.fields) {
+    // Identity photo is a face the client draws, not a setting to edit.
+    if (field.id === "photo") continue;
     const id = projectedFieldIdV1(field, index);
     if (!id) {
       dropped = true;

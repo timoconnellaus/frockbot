@@ -466,10 +466,20 @@ describe("the seeded email Plugin", () => {
           .map((name) => `references/${name}`),
       );
     }
+    // Exact names: a case-folding volume would treat skill.md as SKILL.md.
+    const namesIn = (folder: URL) => new Set(readdirSync(folder));
+    const pluginNames = namesIn(directory);
     const sources = await Promise.all(
       files.map(async (file) => {
-        const source = Bun.file(new URL(file, directory));
-        return (await source.exists()) ? source.text() : "";
+        const slash = file.lastIndexOf("/");
+        const name = slash === -1 ? file : file.slice(slash + 1);
+        const folder =
+          slash === -1
+            ? directory
+            : new URL(`${file.slice(0, slash)}/`, directory);
+        const names = slash === -1 ? pluginNames : namesIn(folder);
+        if (!names.has(name)) return "";
+        return Bun.file(new URL(file, directory)).text();
       }),
     );
     const sourceDigest = await crypto.subtle.digest(

@@ -119,7 +119,7 @@ export function applicationSettingsFrame(
   userId: string,
   settings: UserSettingsViewV1,
   catalog: readonly AvailableUserPackage[],
-  identity?: { name?: string; email?: string },
+  identity?: { name?: string; email?: string; image?: string },
 ): SettingsFrame {
   const sections: SettingsFrame["sections"] = [
     {
@@ -158,6 +158,21 @@ export function applicationSettingsFrame(
           hint: "Your Routines use this time zone.",
           choices: timezoneChoicesV1(userTimezoneV1(settings.profile)),
         },
+        // The Google photo, when the identity provider has one. Settings
+        // does not edit it; the client reads it for the person's face.
+        ...(typeof identity?.image === "string" &&
+        identity.image.startsWith("https://")
+          ? [
+              {
+                id: "photo",
+                label: "Photo",
+                kind: "text" as const,
+                value: identity.image.slice(0, 2048),
+                editable: false,
+                maxLength: 2048,
+              },
+            ]
+          : []),
       ],
     },
     {

@@ -729,7 +729,7 @@ export class UserSettingsBackendContribution {
   async readSettingsFrame(
     userId: string,
     home: "application" | "models",
-    identity?: { name?: string; email?: string },
+    identity?: { name?: string; email?: string; image?: string },
   ) {
     const frame =
       home === "models" ? modelsSettingsFrame : applicationSettingsFrame;
