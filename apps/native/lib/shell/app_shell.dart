@@ -1433,7 +1433,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
-
   void _push(Widget page) {
     push.reading(null);
     Navigator.of(context).push(
@@ -2445,10 +2444,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final ownLook = _botHasOwnLook(bot);
     final botTheme = ownLook ? _botThemeOf(context, bot!) : accountTheme;
     final session = voiceSession;
-    // This Bot is the one on the call: the header wears the pair, the
-    // composer control goes primary, and the dock stays off. A call with
-    // another Bot keeps the small dock, so looking at one Bot while talking
-    // to another still works.
+    // This Bot is the one on the call: the card sits at the top of the
+    // thread, the composer control goes primary, and the dock stays off. A
+    // call with another Bot keeps the small dock, so looking at one Bot
+    // while talking to another still works.
     final liveSession =
         footerOpen && bot != null && voiceBotId == bot.botId.value
         ? session
@@ -2457,24 +2456,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final rightPanel = _rightPanel();
     ChatHeader conversationHeader({Widget? companion}) => ChatHeader(
       name: _name(bot!),
-      companion: voiceHere ? null : companion,
-      voiceChrome: liveSession == null
-          ? null
-          : VoiceCallChrome(
-              session: liveSession,
-              userInitials: profileName ?? '',
-              userImageUrl: profileImageUrl,
-              botName: _name(bot),
-              characterId: bot.avatar.characterId,
-              primary: bot.avatar.primary,
-              onEnd: () => unawaited(_endVoice(reason: 'end-button')),
-            ),
+      companion: companion,
       connection: _selectedConnection,
       textScale: MediaQuery.textScalerOf(context).scale(14) / 14,
       // A phone's bar is Back and the panel switch. A desk opens the Bot
       // page and the Computer from the column beside the thread, so the
       // overlay keeps only the switch that shows or hides that column.
-      // Back still leaves the page: the call stays up in the header, or
+      // Back still leaves the page: the call stays on this Bot's card, or
       // the dock on another Bot.
       onBack: single ? _openBack : null,
       phone: single,
@@ -2531,49 +2519,48 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     rightPanel: rightPanel,
                     panelTheme: ownLook ? botTheme : null,
                     sidebar: ShellSidebar(
-                            bots: bots,
-                            profiles: profiles,
-                            unread: activity.unread,
-                            archived: archived,
-                            // The count for the Bot being read is suppressed
-                            // here rather than waited out: the receipt that
-                            // clears it is a round trip behind the message.
-                            focusedBotId: _focusedBotId,
-                            // A phone's list is a list of doors, not a selection: no row
-                            // is the current one once the conversation is a page.
-                            activeBotId: single ? null : bot?.botId.value,
-                            workingBotId: _workingRunId == null
-                                ? null
-                                : bot?.botId.value,
-                            loaded: loaded,
-                            error: error,
-                            showHidden: showHidden,
-                            onSelect: _select,
-                            onCreateBot: () => unawaited(_createBot()),
-                            onSearch: _openSearch,
-                            onProfile: _openProfile,
-                            profileName: profileName,
-                            profileImageUrl: profileImageUrl,
-                            onMarketplace: _openMarketplace,
-                            phone: single,
-                            onToggleHidden: () =>
-                                setState(() => showHidden = !showHidden),
-                            onRetry: load,
-                            onMove: (drop) => unawaited(_moveBot(drop)),
-                            onActions: (botId, {position}) => unawaited(
-                              _botActions(botId, position: position),
-                            ),
-                            onSwipeRead: (botId) => unawaited(
-                              _runBotAction(
-                                botId,
-                                _botActionState(botId).unread
-                                    ? BotAction.markRead
-                                    : BotAction.markUnread,
-                              ),
-                            ),
-                            onSwipeHide: (botId) =>
-                                unawaited(_runBotAction(botId, BotAction.hide)),
-                          ),
+                      bots: bots,
+                      profiles: profiles,
+                      unread: activity.unread,
+                      archived: archived,
+                      // The count for the Bot being read is suppressed
+                      // here rather than waited out: the receipt that
+                      // clears it is a round trip behind the message.
+                      focusedBotId: _focusedBotId,
+                      // A phone's list is a list of doors, not a selection: no row
+                      // is the current one once the conversation is a page.
+                      activeBotId: single ? null : bot?.botId.value,
+                      workingBotId: _workingRunId == null
+                          ? null
+                          : bot?.botId.value,
+                      loaded: loaded,
+                      error: error,
+                      showHidden: showHidden,
+                      onSelect: _select,
+                      onCreateBot: () => unawaited(_createBot()),
+                      onSearch: _openSearch,
+                      onProfile: _openProfile,
+                      profileName: profileName,
+                      profileImageUrl: profileImageUrl,
+                      onMarketplace: _openMarketplace,
+                      phone: single,
+                      onToggleHidden: () =>
+                          setState(() => showHidden = !showHidden),
+                      onRetry: load,
+                      onMove: (drop) => unawaited(_moveBot(drop)),
+                      onActions: (botId, {position}) =>
+                          unawaited(_botActions(botId, position: position)),
+                      onSwipeRead: (botId) => unawaited(
+                        _runBotAction(
+                          botId,
+                          _botActionState(botId).unread
+                              ? BotAction.markRead
+                              : BotAction.markUnread,
+                        ),
+                      ),
+                      onSwipeHide: (botId) =>
+                          unawaited(_runBotAction(botId, BotAction.hide)),
+                    ),
                     conversation: _maybeBotLookScope(
                       wrap: ownLook,
                       key: 'thread-theme-${bot?.botId.value ?? 'none'}',
@@ -2610,8 +2597,34 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                   ?.unreadFromMessageId,
                               background: _background(bot.botId.value),
                               primary: _primary(bot.botId.value),
-                              overlay: (companion) =>
+                              overlay: (companion) => Stack(
+                                fit: StackFit.expand,
+                                children: [
                                   conversationHeader(companion: companion),
+                                  if (liveSession != null)
+                                    Positioned(
+                                      top:
+                                          chatHeaderChromeTop +
+                                          chatCompanionSize +
+                                          12,
+                                      left: 0,
+                                      right: 0,
+                                      child: Center(
+                                        child: VoiceCallChrome(
+                                          session: liveSession,
+                                          userInitials: profileName ?? '',
+                                          userImageUrl: profileImageUrl,
+                                          botName: _name(bot),
+                                          characterId: bot.avatar.characterId,
+                                          primary: bot.avatar.primary,
+                                          onEnd: () => unawaited(
+                                            _endVoice(reason: 'end-button'),
+                                          ),
+                                        ),
+                                      ),
+                                    ),
+                                ],
+                              ),
                               onDictate: () => unawaited(_dictate()),
                               onStopDictation: () =>
                                   unawaited(_stopDictation()),

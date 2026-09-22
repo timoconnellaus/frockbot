@@ -142,6 +142,10 @@ void main() {
       tester.getCenter(byIdentifier(VoiceIds.callBot)).dx,
       lessThan(tester.getCenter(byIdentifier(VoiceIds.callUser)).dx),
     );
+    expect(
+      tester.getCenter(byIdentifier(VoiceIds.mute)).dx,
+      lessThan(tester.getCenter(byIdentifier(VoiceIds.hangUp)).dx),
+    );
 
     await tester.tap(find.byKey(const ValueKey('composer-voice')));
     await tester.pump();

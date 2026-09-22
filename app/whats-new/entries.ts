@@ -23,6 +23,17 @@ export type WhatsNewEntrySourceV1 = {
  */
 export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
+    id: "voice-call-card",
+    title: "A live call is a card",
+    summary:
+      "It sits at the top of the chat, with mute and hang-up under the wave.",
+    kind: "improvement",
+    image: {
+      file: "voice-call-card.webp",
+      alt: "A phone chat with the live call in a card under the header: the Bot, the wave, and you, with mute and hang-up on the row below.",
+    },
+  },
+  {
     id: "header-align",
     title: "Chat header lines up",
     summary: "The back arrow, avatar, name, and panel icon share one center.",
