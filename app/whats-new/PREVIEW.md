@@ -2,6 +2,14 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
+## A live call is a card
+
+improvement
+
+It sits at the top of the chat, with mute and hang-up under the wave.
+
+![A phone chat with the live call in a card under the header: the Bot, the wave, and you, with mute and hang-up on the row below.](media/voice-call-card.webp)
+
 ## Chat header lines up
 
 fix

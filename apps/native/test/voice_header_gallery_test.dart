@@ -7,6 +7,7 @@ import 'dart:convert';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show FontLoader, rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/shell/composer.dart';
 import 'package:frockbot_native/shell/semantics.dart';
@@ -65,8 +66,22 @@ Size _chromeSize(WidgetTester tester, {required int index}) {
 }
 
 void main() {
+  const visual = String.fromEnvironment('VOICE_VISUAL_OUTPUT');
+  if (visual.isNotEmpty) {
+    setUpAll(() async {
+      final inter = FontLoader('Inter');
+      for (final weight in [400, 500, 600, 700]) {
+        inter.addFont(rootBundle.load('assets/fonts/inter-latin-$weight.ttf'));
+      }
+      await inter.load();
+      await (FontLoader(
+        'MaterialIcons',
+      )..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'))).load();
+    });
+  }
+
   testWidgets('header chrome states write a labeled gallery', (tester) async {
-    tester.view.physicalSize = const Size(720, 820);
+    tester.view.physicalSize = const Size(720, 1280);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
 
@@ -200,28 +215,19 @@ void main() {
       tester.element(find.byKey(const ValueKey('composer-voice'))),
     );
     expect(_voiceIconColor(tester), theme.colorScheme.primary);
-    expect(
-      tester.getSize(byIdentifier(VoiceIds.callChrome)),
-      connectingSize,
-    );
+    expect(tester.getSize(byIdentifier(VoiceIds.callChrome)), connectingSize);
     await capture(tester, harness.boundary, '07-desktop-listening');
 
     harness.callCapture.emit(AudioFrame(Uint8List(0), 0.8, 40));
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 360));
-    expect(
-      tester.getSize(byIdentifier(VoiceIds.callChrome)),
-      connectingSize,
-    );
+    expect(tester.getSize(byIdentifier(VoiceIds.callChrome)), connectingSize);
     await capture(tester, harness.boundary, '13-desktop-talking');
 
     harness.call.pause();
     await tester.pump();
     expect(find.text('Paused'), findsOneWidget);
-    expect(
-      tester.getSize(byIdentifier(VoiceIds.callChrome)),
-      connectingSize,
-    );
+    expect(tester.getSize(byIdentifier(VoiceIds.callChrome)), connectingSize);
     await capture(tester, harness.boundary, '14-desktop-paused');
     await harness.dispose(tester);
   });
@@ -265,10 +271,23 @@ void main() {
     await tester.pump();
     await tester.pump(const Duration(milliseconds: 400));
     expect(find.text('Connecting'), findsOneWidget);
+    expect(find.text('Rosemary'), findsWidgets);
     expect(find.byTooltip('Your Bots'), findsOneWidget);
     final phoneConnecting = tester.getSize(byIdentifier(VoiceIds.callChrome));
     expect(phoneConnecting.width, voiceCallClusterWidth);
     expect(phoneConnecting.height, voiceCallChromeHeight);
+    expect(
+      tester.getCenter(byIdentifier(VoiceIds.callChrome)).dx,
+      closeTo(195, 1),
+    );
+    expect(
+      tester.getCenter(byIdentifier(VoiceIds.mute)).dx,
+      lessThan(tester.getCenter(byIdentifier(VoiceIds.hangUp)).dx),
+    );
+    expect(
+      tester.getCenter(byIdentifier(VoiceIds.mute)).dy,
+      greaterThan(tester.getCenter(byIdentifier(VoiceIds.callWave)).dy),
+    );
     await capture(tester, harness.boundary, '15-phone-connecting');
 
     harness.callSocket.deliver(
@@ -282,10 +301,7 @@ void main() {
     expect(find.byType(Composer), findsOneWidget);
     expect(byIdentifier(VoiceIds.callChrome), findsOneWidget);
     expect(find.byTooltip('Your Bots'), findsOneWidget);
-    expect(
-      tester.getSize(byIdentifier(VoiceIds.callChrome)),
-      phoneConnecting,
-    );
+    expect(tester.getSize(byIdentifier(VoiceIds.callChrome)), phoneConnecting);
     await capture(tester, harness.boundary, '09-phone-listening');
     await harness.dispose(tester);
   });
