@@ -26,7 +26,11 @@ class OfflineApi extends NativeApi {
   // A socket that is refused at once, rather than one left connecting under
   // the transport's own deadline for the length of the test.
   @override
-  Future<WebSocketChannel> socket(String botId, String? cursor) async =>
+  Future<WebSocketChannel> socket(
+    String botId, {
+    String? cursor,
+    String? epoch,
+  }) async =>
       throw const FormatException('offline fixture');
 }
 
@@ -50,7 +54,11 @@ class DirectoryApi extends NativeApi {
   };
 
   @override
-  Future<WebSocketChannel> socket(String botId, String? cursor) async =>
+  Future<WebSocketChannel> socket(
+    String botId, {
+    String? cursor,
+    String? epoch,
+  }) async =>
       throw const FormatException('outside this fixture');
 }
 

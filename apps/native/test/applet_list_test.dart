@@ -92,7 +92,11 @@ class AppletListApi extends NativeApi {
   }
 
   @override
-  Future<WebSocketChannel> socket(String botId, String? cursor) async =>
+  Future<WebSocketChannel> socket(
+    String botId, {
+    String? cursor,
+    String? epoch,
+  }) async =>
       throw const FormatException('offline fixture');
 }
 

@@ -7,12 +7,27 @@ import '../protocol/client_wire.generated.dart' as wire;
 import 'chat_controller.dart';
 import 'transport.dart';
 
+class _AssemblingPart {
+  _AssemblingPart({
+    required this.epoch,
+    required this.cursor,
+    required this.eventId,
+    required this.parts,
+  });
+  final String epoch;
+  final String cursor;
+  final String eventId;
+  final int parts;
+  final chunks = <int, String>{};
+}
+
 class BotStateChannel {
   final NativeApi api;
   final LocalStore store;
   final String key;
   final String botId;
-  final Future<void> Function() invalidate;
+  final Future<void> Function(Map<String, dynamic> frame) apply;
+  final ({String? epoch, String? cursor}) Function() resumeFrom;
   final void Function(ConnectionState) status;
   WebSocketChannel? _socket;
   Timer? _retry;
@@ -27,12 +42,16 @@ class BotStateChannel {
   bool _offline = false;
   ConnectionState? _reported;
   String? _cursor;
+  String? _publicationEpoch;
+  final _pending = <Map<String, dynamic>>[];
+  _AssemblingPart? _part;
   BotStateChannel({
     required this.api,
     required this.store,
     required this.key,
     required this.botId,
-    required this.invalidate,
+    required this.apply,
+    required this.resumeFrom,
     required this.status,
   });
   Future<void> connect() => _connect(reportProgress: true);
@@ -56,10 +75,21 @@ class BotStateChannel {
     await old?.sink.close();
     if (epoch != _epoch || _disposed || _paused) return;
     _dirty = false;
+    _pending.clear();
+    _part = null;
     try {
-      final saved = await store.read(key);
-      _cursor = wire.isProtocolValue('ObserverCursor', saved) ? saved : null;
-      final socket = await api.socket(botId, _cursor);
+      final saved = resumeFrom();
+      _cursor = wire.isProtocolValue('ObserverCursor', saved.cursor)
+          ? saved.cursor
+          : null;
+      _publicationEpoch = wire.isProtocolValue('ObserverCursor', saved.epoch)
+          ? saved.epoch
+          : null;
+      final socket = await api.socket(
+        botId,
+        cursor: _cursor,
+        epoch: _publicationEpoch,
+      );
       if (epoch != _epoch || _disposed || _paused) {
         await socket.sink.close();
         return;
@@ -72,38 +102,19 @@ class BotStateChannel {
           queue = queue
               .then((_) async {
                 if (epoch != _epoch) return;
-                if (value is! String || utf8.encode(value).length > 4096) {
+                if (value is! String ||
+                    utf8.encode(value).length > wire.stateFrameMaxBytes) {
                   throw const FormatException('Invalid state frame');
                 }
                 final frame =
                     wire.StateFrame.fromJson(
-                          decodeBoundedJson(value, maxBytes: 4096),
+                          decodeBoundedJson(
+                            value,
+                            maxBytes: wire.stateFrameMaxBytes,
+                          ),
                         ).toJson()
                         as Map<String, dynamic>;
-                final cursor = frame['cursor'] as String;
-                if (frame['type'] == 'state/ready') {
-                  if (cursor != _cursor) {
-                    throw const FormatException('Discontinuous ready');
-                  }
-                  _deadline?.cancel();
-                  _attempt = 0;
-                  _hasSynchronized = true;
-                  _offline = false;
-                  _report(ConnectionState.connected);
-                  return;
-                }
-                if (frame['type'] == 'state/event' &&
-                    (_cursor == null ||
-                        int.parse(cursor) != int.parse(_cursor!) + 1)) {
-                  throw const FormatException('Discontinuous event');
-                }
-                // The cursor moves at once so the next frame checks out. It is
-                // persisted only after one refresh has applied everything up
-                // to it: a replayed backlog costs one fetch, not one per event,
-                // so `state/ready` is processed well inside its deadline.
-                _cursor = cursor;
-                _dirty = true;
-                _flush();
+                await _accept(frame);
               })
               .catchError((Object _) {
                 _failed(epoch);
@@ -117,8 +128,97 @@ class BotStateChannel {
     }
   }
 
-  /// One refresh covers every frame that arrived while the previous one ran.
-  /// A refresh that fails tears the socket down like any other frame error;
+  Future<void> _accept(Map<String, dynamic> frame) async {
+    final type = frame['type'] as String;
+    final cursor = frame['cursor'] as String;
+    final epoch = frame['epoch'] as String?;
+    if (type == 'state/part') {
+      final assembled = _assemble(frame);
+      if (assembled == null) return;
+      await _accept(assembled);
+      return;
+    }
+    if (type == 'state/ready') {
+      if (epoch != _publicationEpoch || cursor != _cursor) {
+        throw const FormatException('Discontinuous ready');
+      }
+      _deadline?.cancel();
+      _attempt = 0;
+      _hasSynchronized = true;
+      _offline = false;
+      _report(ConnectionState.connected);
+      return;
+    }
+    if (type == 'state/snapshot') {
+      _publicationEpoch = epoch;
+      _cursor = cursor;
+      _part = null;
+      _pending.add(frame);
+      _dirty = true;
+      _flush();
+      return;
+    }
+    if (type != 'state/update') {
+      throw const FormatException('Invalid state frame');
+    }
+    if (epoch != _publicationEpoch) {
+      throw const FormatException('Epoch mismatch');
+    }
+    if (_cursor == null || int.parse(cursor) != int.parse(_cursor!) + 1) {
+      throw const FormatException('Discontinuous event');
+    }
+    _cursor = cursor;
+    _pending.add(frame);
+    _dirty = true;
+    _flush();
+  }
+
+  Map<String, dynamic>? _assemble(Map<String, dynamic> frame) {
+    final eventId = frame['eventId'] as String;
+    final part = frame['part'] as int;
+    final parts = frame['parts'] as int;
+    final data = frame['data'] as String;
+    final epoch = frame['epoch'] as String;
+    final cursor = frame['cursor'] as String;
+    final current = _part;
+    if (current == null ||
+        current.eventId != eventId ||
+        current.epoch != epoch ||
+        current.cursor != cursor ||
+        current.parts != parts ||
+        current.chunks.containsKey(part)) {
+      if (part != 0) {
+        throw const FormatException('Inconsistent state part');
+      }
+      _part = _AssemblingPart(
+        epoch: epoch,
+        cursor: cursor,
+        eventId: eventId,
+        parts: parts,
+      );
+    }
+    final assembling = _part!;
+    assembling.chunks[part] = data;
+    if (assembling.chunks.length != assembling.parts) return null;
+    final buffer = StringBuffer();
+    for (var index = 0; index < assembling.parts; index += 1) {
+      final chunk = assembling.chunks[index];
+      if (chunk == null) throw const FormatException('Missing state part');
+      buffer.write(chunk);
+    }
+    _part = null;
+    final assembled = buffer.toString();
+    if (utf8.encode(assembled).length > wire.stateAssembledMaxBytes) {
+      throw const FormatException('Assembled state frame too large');
+    }
+    return wire.StateFrame.fromJson(
+          decodeBoundedJson(assembled, maxBytes: wire.stateAssembledMaxBytes),
+        ).toJson()
+        as Map<String, dynamic>;
+  }
+
+  /// One apply covers every frame that arrived while the previous one ran.
+  /// An apply that fails tears the socket down like any other frame error;
   /// the reconnect replays from the last persisted cursor.
   void _flush() {
     if (_flushing) return;
@@ -128,11 +228,13 @@ class BotStateChannel {
         while (_dirty && !_disposed) {
           _dirty = false;
           final epoch = _epoch;
-          final target = _cursor;
+          final batch = [..._pending];
+          _pending.clear();
           try {
-            await invalidate();
-            if (epoch != _epoch || target == null) continue;
-            await store.write(key, target);
+            for (final frame in batch) {
+              await apply(frame);
+            }
+            if (epoch != _epoch) continue;
           } catch (_) {
             _failed(epoch);
             return;
@@ -159,6 +261,7 @@ class BotStateChannel {
     _deadline?.cancel();
     final socket = _socket;
     _socket = null;
+    _part = null;
     unawaited(socket?.sink.close());
     if (!_paused) _offline = true;
     _report(_paused ? ConnectionState.paused : ConnectionState.disconnected);

@@ -238,18 +238,26 @@ class NativeApi {
     return null;
   }
 
-  Future<WebSocketChannel> socket(String botId, String? cursor) async {
+  Future<WebSocketChannel> socket(
+    String botId, {
+    String? cursor,
+    String? epoch,
+  }) async {
     final origin = Uri.parse(hostedOrigin);
     final uri = origin.replace(
       // Plain HTTP only ever names the local stack.
       scheme: origin.scheme == 'http' ? 'ws' : 'wss',
       path: '/api/bots/$botId/state-channel',
-      queryParameters: {'version': '1', 'cursor': ?cursor},
+      queryParameters: {
+        'version': '1',
+        if (cursor != null) 'cursor': cursor,
+        if (epoch != null) 'epoch': epoch,
+      },
     );
     return connectSocketV1(
       uri,
       await headers(),
-    ).timeout(const Duration(seconds: 5));
+    );
   }
 
   void close() => _client.close();
