@@ -137,7 +137,6 @@ function memoryHost(
     setUserFeatures: (userId, command, updatedBy) => {
       const next: UserFeaturesV1 = {
         schemaVersion: 1,
-        applets: command.applets,
         pluginAuthoring: command.pluginAuthoring ?? false,
         plugins: command.plugins ?? [],
         updatedAt: "2026-09-11T00:00:00.000Z",
@@ -431,7 +430,7 @@ describe("the account list", () => {
     expect(
       isUserFeaturesUnavailable(first!.features)
         ? undefined
-        : first!.features.applets,
+        : first!.features.pluginAuthoring,
     ).toBe(false);
     // Only the admin-gated entries: an account is never offered a Plugin the
     // catalog already seeds for everyone.
@@ -468,7 +467,6 @@ describe("an account's features", () => {
       command: {
         schemaVersion: 1,
         type: "user/set-features",
-        applets: true,
         pluginAuthoring: true,
         plugins: ["gated-plugin"],
       },
@@ -476,7 +474,6 @@ describe("an account's features", () => {
     });
 
     expect(written).toMatchObject({
-      applets: true,
       pluginAuthoring: true,
       plugins: ["gated-plugin"],
       updatedBy: owner,
@@ -494,7 +491,6 @@ describe("an account's features", () => {
         command: {
           schemaVersion: 1,
           type: "user/set-features",
-          applets: false,
           plugins: ["open-plugin"],
         },
         updatedBy: owner,
@@ -511,7 +507,7 @@ describe("an account's features", () => {
       admin.setAccountFeatures({
         schemaVersion: 1,
         userId: "guest",
-        command: { schemaVersion: 1, type: "user/set-features" },
+        command: { schemaVersion: 1, type: "user/oops" } as never,
         updatedBy: owner,
       }),
     ).rejects.toThrow();

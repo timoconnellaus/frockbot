@@ -1634,7 +1634,6 @@ jobs:
           STRIPE_MONTHLY_PRICE_ID: ${{ secrets.STRIPE_MONTHLY_PRICE_ID }}
           BILLING_MODEL_RATES: ${{ secrets.BILLING_MODEL_RATES }}
           FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
-          APPLET_VIEWER_SECRET: ${{ secrets.APPLET_VIEWER_SECRET }}
           APPLET_BUILD_TOKEN: ${{ secrets.APPLET_BUILD_TOKEN }}
           # The manifest requires both voice keys; the deploy step below
           # already passes them. Without them here the check reported them
@@ -1816,19 +1815,14 @@ jobs:
           CREDENTIAL_KEYRING: ${{ secrets.CREDENTIAL_KEYRING }}
           ROUTINE_HOOK_SECRET: ${{ secrets.ROUTINE_HOOK_SECRET }}
           MACHINE_TOKEN_SECRET: ${{ secrets.MACHINE_TOKEN_SECRET }}
-          # Required: signs the viewer token an open Applet's page presents.
-          # Absent, every published Applet answers 503 — which is exactly what
-          # production did, unnoticed, from the day the Applet authority
-          # shipped until 2026-09-05.
           STRIPE_SECRET_KEY: ${{ secrets.STRIPE_SECRET_KEY }}
           STRIPE_WEBHOOK_SECRET: ${{ secrets.STRIPE_WEBHOOK_SECRET }}
           STRIPE_MONTHLY_PRICE_ID: ${{ secrets.STRIPE_MONTHLY_PRICE_ID }}
           BILLING_MODEL_RATES: ${{ secrets.BILLING_MODEL_RATES }}
           FCM_SERVICE_ACCOUNT: ${{ secrets.FCM_SERVICE_ACCOUNT }}
-          APPLET_VIEWER_SECRET: ${{ secrets.APPLET_VIEWER_SECRET }}
-          # Required: the same shared secret the Applet build Worker and its
-          # container check. A Turn's applet_check and applet_publish both call
-          # the service, so without it no Applet can be built or published.
+          # Required: the same shared secret the plugin build Worker and its
+          # container check. A Turn's plugin_check and plugin_publish both call
+          # the service, so without it no Plugin can be built or published.
           APPLET_BUILD_TOKEN: ${{ secrets.APPLET_BUILD_TOKEN }}
           # Required: the composer's dictation upstream (OpenAI Realtime) and
           # the voice session itself (Gemini Live). The hosted product must

@@ -9,11 +9,6 @@
  * required name is missing, and `production-secrets.test.ts` fails when the
  * `Env` interface names a setting these lists do not.
  *
- * The bug that produced this: `APPLET_VIEWER_SECRET` was set in every test
- * environment and in none of production, so from the moment the Applet
- * authority shipped, every published Applet answered 503 and no check
- * anywhere noticed (2026-09-05).
- *
  * A second, quieter hazard runs the other way. `wrangler deploy
  * --secrets-file` is *additive*: it adds and overwrites the names the file
  * carries and leaves every other secret the Worker already holds exactly
@@ -162,11 +157,7 @@ export const REQUIRED_PRODUCTION_SECRETS_V1: readonly ProductionSecretV1[] = [
   },
   {
     name: "APPLET_BUILD_TOKEN",
-    why: "Presented on every call to the Applet build service. Absent, no Applet can be checked or published.",
-  },
-  {
-    name: "APPLET_VIEWER_SECRET",
-    why: "Signs the viewer token an open Applet's page presents. Absent, every published Applet answers 503.",
+    why: "Presented on every call to the plugin build service. Absent, no Plugin can be checked or published.",
   },
   {
     name: "OPENAI_API_KEY",

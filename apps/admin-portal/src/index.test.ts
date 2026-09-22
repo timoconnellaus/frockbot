@@ -48,7 +48,6 @@ function accounts(): AdminUserListViewV1 {
         name: "Person One",
         features: {
           ...defaultUserFeaturesV1(),
-          applets: true,
           plugins: ["weather"],
         },
         billing: {
@@ -280,7 +279,6 @@ describe("the page", () => {
     expect(body).toContain(">Active</span>");
     expect(body).toContain('<input type="hidden" name="revision" value="7">');
     // Features, checked from the record rather than from a default.
-    expect(body).toContain('type="checkbox" name="applets" checked');
     expect(body).toContain('value="weather" checked');
     expect(body).toContain("US$2.50 complimentary");
     // The unreadable account is present and honest about being unreadable.
@@ -434,7 +432,6 @@ describe("a write", () => {
       command: {
         schemaVersion: 1,
         type: "user/set-features",
-        applets: false,
         pluginAuthoring: true,
         plugins: ["weather"],
       },

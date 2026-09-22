@@ -33,7 +33,7 @@ import {
   decodeUserFeaturesV1,
   type UserFeaturesV1,
 } from "@frockbot/app/admin/shared";
-import { appletRpcSnapshotV1 } from "@frockbot/app/applets-host/records";
+import { rpcJsonSnapshotV1 } from "@frockbot/app/durable-rpc";
 import {
   decodeDirectoryViewV1,
   decodeFlockReceiptV1,
@@ -571,7 +571,7 @@ export async function userAccountFeaturesV1(
   const id = state.env.USER_CONFIGURATIONS.idFromName(identity.userId);
   const rpc = state.env.USER_CONFIGURATIONS.get(id);
   return decodeUserFeaturesV1(
-    appletRpcSnapshotV1(
+    rpcJsonSnapshotV1(
       await rpc.readFeatures({ schemaVersion: 1, userId: identity.userId }),
     ),
   );

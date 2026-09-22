@@ -6,12 +6,6 @@ import {
   decodeBotStateCursorV1,
 } from "@frockbot/core/protocol";
 import {
-  decodeAppletViewerTokenV1,
-  decodeAppletListViewV1,
-  decodeAppletOpenFocusV1,
-  decodeAppletOpenViewV1,
-  decodeAppletSummaryV1,
-  decodeBotAppletImpactViewV1,
   decodeSendToUserPayloadV1,
   decodeSkillRefV1,
 } from "@frockbot/core/contracts";
@@ -52,10 +46,6 @@ import { decodeCompositionGenerationListViewV1 } from "@frockbot/core/configurat
 const existing: Record<string, (value: unknown) => unknown> = {
   TurnCommand: decodeClientTurnCommandV1,
   TurnResponse: decodeClientTurnV1,
-  AppletDirectory: decodeAppletListViewV1,
-  AppletSummary: decodeAppletSummaryV1,
-  AppletOpenView: decodeAppletOpenViewV1,
-  AppletOpenFocus: decodeAppletOpenFocusV1,
   StopCommand: decodeClientRunStopCommandV1,
   StopReceipt: decodeClientRunStopReceiptV1,
   RunFenceCommand: decodeClientRunAdmissionFenceCommandV1,
@@ -79,8 +69,6 @@ const existing: Record<string, (value: unknown) => unknown> = {
     if (typeof value !== "string") throw new Error("not a cursor");
     return decodeRunCursorV1(value);
   },
-  AppletViewerToken: decodeAppletViewerTokenV1,
-  BotAppletImpact: decodeBotAppletImpactViewV1,
   SendPayload: decodeSendToUserPayloadV1,
   SkillRef: decodeSkillRefV1,
   NotificationList: decodeClientNotificationListV1,

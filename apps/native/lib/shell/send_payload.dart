@@ -28,7 +28,6 @@ library;
 
 import 'package:flutter/material.dart';
 
-import '../applets/chat_card.dart';
 import '../cards/chat_card.dart';
 import 'markdown.dart';
 import 'transcript_model.dart';
@@ -73,11 +72,7 @@ class SendPayloadView extends StatelessWidget {
           onOpenLink: onOpenLink,
         );
       case 'applet':
-        final appletId = payload['appletId'];
-        if (appletId is! String || appletId.isEmpty) {
-          return const _Unsupported();
-        }
-        return AppletChatCard(key: ValueKey(appletId), appletId: appletId);
+        return const _Unsupported();
       case 'card':
         final surfaceId = payload['surfaceId'];
         if (surfaceId is! String || surfaceId.isEmpty) {

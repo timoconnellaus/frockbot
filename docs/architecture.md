@@ -81,20 +81,11 @@ Five classes in the app Worker, exported from `apps/cloudflare/src/index.ts`. `c
 
 - Binding `USER_CONFIGURATIONS`; id `idFromName(userId)`.
 - Authoritative for the User's Composition — the installed Plugin set, its generations, last known good and quarantine — reached through the composition RPCs a Bot calls (§5).
-- Authoritative for the Applet directory: which Bot owns each Applet, which Bots it is shared with, and whether it is available (§9). The Bot lifecycle saga applies each lifecycle's Applet consequence in the same transaction.
-- Its constructor runs receipted, disposable cleanups under `blockConcurrencyWhile` (`applet-test-state-cleanup.ts`, `avatar-state-cleanup.ts`, `default-packages-marker-cleanup.ts`) before any request or alarm. `cleanDefaultPackagesMarkerV1` (`default-packages-marker-cleanup.ts`) deletes pre-ledger `{ schemaVersion: 1 | 2 | 3 }` bootstrap markers under `maintenance:default-packages-marker:2026-09-20`; the default-Package bootstrap decoder accepts only the v4 ledger.
+- Its constructor runs receipted, disposable cleanups under `blockConcurrencyWhile` before any request or alarm: Plugin-panels (`plugin-panels-cleanup.ts`) drops directory entries, Composition `applets[]`, the account `applets` flag and cleanup to-dos; `cleanDefaultPackagesMarkerV1` (`default-packages-marker-cleanup.ts`) deletes pre-ledger `{ schemaVersion: 1 | 2 | 3 }` bootstrap markers under `maintenance:default-packages-marker:2026-09-20`; the default-Package bootstrap decoder accepts only the v4 ledger.
 - The only class that uses SQLite, and it does not own the tables. `ctx.storage.sql` is handed to two plugin stores: transcript search FTS5 (`app/search/index-store.ts:143-177`) and audit (`app/audit/store.ts:166-175`). All other state is key-value.
-- One `alarm()` serving credential leases, publisher and template recovery, flock sagas, archived-Bot sweeps and deleted Applets' state and source cleanup.
+- One `alarm()` serving credential leases, publisher and template recovery, flock sagas and archived-Bot sweeps.
 - Owns [General bootstrap](../app/flock/README.md#general-bootstrap); the [first-run guidance](../README.md#getting-started) describes how the shared Flutter client opens it and offers editable suggestions.
 - No `fetch()`, no WebSockets.
-
-### `AppletState` — `apps/cloudflare/src/applet-state.ts:228`
-
-- Binding `APPLET_STATES`; id `idFromName("<userId>:<appletId>")` (`core/durable/applets.ts:139`).
-- Authoritative for one Applet instance's generation history, pointers, failures, mount input and trial record. Key-value storage.
-- The Applet's own code and data live in a facet mounted from an R2 artifact through the `APPLETS` Worker Loader (`:245-289`).
-- `fetch()` at `:872` forwards the Applet socket upgrade into the facet. `alarm()` at `:924` is scheduled only through `holdAlarmForFacet` (`:913`), because facets cannot set their own alarms.
-- `AppletCapabilities` (`:182`) is a `WorkerEntrypoint`, not a Durable Object.
 
 ### `DeploymentPolicy` — `apps/cloudflare/src/deployment-policy.ts`
 
@@ -233,7 +224,7 @@ Composition is the untrusted layer and nothing else. First-party Packages are or
 
 1. On first use the User Durable Object materializes an empty bootstrap generation (`app/composition/user.ts`; `core/durable/composition/generation.ts`), and a Bot's first admission mirrors it. A User who has installed nothing composes nothing, which is why a release no longer has to rewrite every generation to follow the deploy.
 2. At admission, `activateCompositionV1` (`app/shell/turn.ts:317`) reads the mirrored pin, mounts, verifies, then commits and records last-known-good on the User.
-3. Mounting builds one runtime per Turn (`backend-composition.ts`): the registries, a `LoopHookListV1`, and the features the host lists, mounted in that order by `mountRuntimeFeaturesV1`. Neither the Shell nor `app/agent-runtime.ts` imports an application: the Shell's Bot host carries the deployment's `PackageDefinitionV1` list, its one Package version, and four factories — `base`, `hosted`, `enabled`, `model` — that turn a Package id into a mounted feature (`app/shell/backend-runtime.ts`). `app/runtime.ts` fills them in as `foundationShellApplicationV1`, and `apps/cloudflare/src/bot-state.ts` spreads that into the host. The base Packages — identity, the built-in model, the two demo tools and the Shell's own voice — are appended last, so a provider an earlier Package registered is already there. Every member goes through `PluginWorkerHost`, which mounts the generation's Plugins as one Dynamic Worker per User; each open hook event is registered once on the same list after the app's, over the Plugins this Bot's enable map leaves on that declared it. Applet members register as tools routed to `APPLET_STATES`.
+3. Mounting builds one runtime per Turn (`backend-composition.ts`): the registries, a `LoopHookListV1`, and the features the host lists, mounted in that order by `mountRuntimeFeaturesV1`. Neither the Shell nor `app/agent-runtime.ts` imports an application: the Shell's Bot host carries the deployment's `PackageDefinitionV1` list, its one Package version, and four factories — `base`, `hosted`, `enabled`, `model` — that turn a Package id into a mounted feature (`app/shell/backend-runtime.ts`). `app/runtime.ts` fills them in as `foundationShellApplicationV1`, and `apps/cloudflare/src/bot-state.ts` spreads that into the host. The base Packages — identity, the built-in model, the two demo tools and the Shell's own voice — are appended last, so a provider an earlier Package registered is already there. Every member goes through `PluginWorkerHost`, which mounts the generation's Plugins as one Dynamic Worker per User; each open hook event is registered once on the same list after the app's, over the Plugins this Bot's enable map leaves on that declared it. `panel_focus` mounts only when this Bot's conversation-panel bag is non-empty.
 
 ### Generation shape
 
@@ -241,15 +232,15 @@ Composition is the untrusted layer and nothing else. First-party Packages are or
 
 ```
 { schemaVersion: 1, generationId, artifactSetHash, parentGenerationId?,
-  summary?, createdAt, origin, members[], applets?, status }
+  summary?, createdAt, origin, members[], status }
 ```
 
 - `status ∈ pending | active | superseded | failed | quarantined`.
 - `origin ∈ bootstrap | bot-authored | revert`.
 - `members[]` is `{packageId, version, provenance, artifact, descriptor}`; `provenance ∈ user | bot | installed`. Every member is untrusted, so the artifact and the Frock Compose descriptor are required, not optional.
-- `artifactSetHash = sha256(canonicalJson(members sorted by packageId))`, or over `{members, applets}` when Applets exist.
+- `artifactSetHash = sha256(canonicalJson(members sorted by packageId))`.
 - `generationId = "<createdAt>:<artifactSetHash[0..16]>"`.
-- Caps: 64 members, 64 applets, 64 applet tools, 160-character summary.
+- Caps: 64 members, 160-character summary.
 
 ### Where the pin lives
 
@@ -543,22 +534,7 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
   the computers a Bot may reach, plus the pairing code the host holds
 - `TemplatesPage` — `lib/templates/page.dart`: the same host twice, a tab
   apiece — what this Bot is packed into, and what this account has imported
-- `AppletCanvas` — `lib/applets/canvas.dart`: the Applet directory, its focus,
-  the building states and the live Applet, as a page of its own at every width.
-  One row of chrome — the way back, the Applet's own name, and the switch
-  between the Applet and its code — and the Applet filling everything under it.
-  It is not a `right-panel` entry: a 380-point column is not where you read an
-  Applet
-- `AppletList` — `lib/applets/list.dart`: the selected Bot's Applets, each
-  labelled Owner or Shared by its owner Bot. At the wider tiers it is the left
-  sidebar's Applets mode, with a way back to the Bots; on the phone the same
-  list is a pushed page. The Bot page's All Applets row is the one door. A row opens the Applet on the canvas; only an
-  owned row offers delete, which names the Bots that also use the Applet
-  before it destroys its data and versions
-- `AppletChatCard` — `lib/applets/chat_card.dart`: a live Applet embedded in
-  the thread, from a `send_to_user` payload of type `applet`. It keeps its
-  in-progress state while scrolled off-screen and suspends its refresh until
-  it is visible again
+- `PanelCanvas` — `lib/panels/canvas.dart`: the conversation panel for this Bot. A host tab strip over the focused Plugin's `ViewDocument`, in the right column on a wide window and a pushed page on a phone. The bag, the Session focus and the `bot.nav` doors come from `GET /api/bots/:bot/panels/open`. Empty bag: the region is not offered
 - `ComputerCard` → `ComputerViewerPage` — `lib/computer/card.dart`: the Bot's
   screen, live or as its last capture, and the full-window viewer it opens
 - `PackagePageFrame` — `lib/packages/frame.dart`: a first-party or Bot-authored
@@ -1032,55 +1008,15 @@ Adjacent, outside the loop: image generation uses Workers AI ids directly (`app/
 
 ---
 
-## 9. Applets
+## 9. Plugin panels
 
-### Authoring
+A Plugin may render a host-drawn `ViewDocument` in two open slots beside `settings.sections` ([ADR 0034](adr/0034-plugin-panels.md)). The plugin ships no markup. `conversation.panel` is the page beside the chat: a bag of at most eight surfaces, in Composition mount order, drawn as host tabs in `PanelCanvas` (`apps/native/lib/panels/canvas.dart`). `bot.nav` is a door on this Bot's page; a panel with no nav view still gets a host-drawn door. One tab is visible. An empty bag is not offered. A strip of one tab is omitted.
 
-The Bot writes Applet code with the Applets tools; no Computer is in the path. `applets/` exposes fourteen tools — `applet_list`, `applet_create`, `applet_files`, `applet_read_file`, `applet_write_file`, `applet_check`, `applet_publish`, `applet_revert`, `applet_delete`, `applet_share`, `applet_unshare`, `applet_transfer`, `applet_focus`, `applet_generations` — as an ordinary first-party runtime feature, `createAppletsFeature` (`applets/feature.ts`), mounted for one admitted Turn beside Memory and Skills (`app/runtime.ts`). Its host is `createAppletCapabilityHostV1` (`app/applets-host/records.ts`), wired for one Bot by `app/applets-host/bot.ts`. Source lives in the durable root `applets/source/<appletId>/` (`applets/root.ts`): `applet_create` scaffolds the SDK template into it, `applet_write_file` supersedes one file's generation, and both read and write through the one Workspace surface the Bot Durable Object holds. That root is object storage and nothing else — the Applets Package declares no root to the Computer (`applets/definition.ts`), so nothing is mirrored onto a Sprite. Guidance ships at `applets/skills/applets/`.
+The selected tab is a Session pointer on the Bot Durable Object (`core/durable/panels.ts`). Absent or `{ pluginId: null }` closes the region. A tab press, a nav press and the first-party `panel_focus` tool write the same record. `panel_focus` mounts on a Turn only when the bag is non-empty. If the focused surface leaves the bag, the pointer clears and the region closes.
 
-### Ownership and access
+`GET /api/bots/:bot/panels/open` answers `PanelOpenView`: the bag, the focus, the focused document and the doors. `GET` and `POST /api/bots/:bot/panels/focus` read and write the pointer. Both slots render as the Bot whose page they are on; `renderView` already carries `botId`.
 
-Every Applet has one owner Bot and may be shared with other active Bots of the same User ([ADR 0027](adr/0027-bot-owned-applets.md)). The directory entry (`AppletDirectoryEntryV1`, `apps/cloudflare/src/applet-directory.ts`) carries `ownerBotId`, `sharedWithBotIds` and `available` beside the publication `status`, and every User Durable Object RPC over it names the Bot acting: `listApplets`, `readApplet` (with `owner` to require ownership), `createApplet`, `recordAppletGeneration`, `deleteApplet`, `shareApplet`, `unshareApplet`, `transferApplet` and `readBotAppletImpact`. An Applet the Bot cannot reach is `AppletUnavailableError`, answered exactly as a missing one; a shared Bot asking for an owner's verb is `AppletNotOwnerError`, a 403 with `code: "applet-not-owner"` on the routes. The Applets host (`app/applets-host/records.ts`) asks for ownership before every source read or write, check, publish, revert and generations read; the directory refuses the writes itself. A transfer changes two fields: the source root, the `AppletState` object, the generations and the data are the User's. Tool names stay unique across the account (`readAppletToolNameClashes`), so no share or transfer can put two tools of one name in one Bot's catalog.
-
-A Composition generation is still the User's. Its Applet members carry `ownerBotId` and `sharedWithBotIds`, so the access a Turn runs under is pinned and hashed with the generation; `createShellCompositionHost` registers only the members that reach the mounting Bot (`compositionAppletMemberReachesV1`). An access change advances `applets:directory-revision` and reaches the next admitted Turn; an admitted Turn keeps what it pinned. The management verbs check the directory when called.
-
-The Bot lifecycle saga (`app/flock/user.ts`) carries the Applet consequence through `lifecycleEffects`, which the User Durable Object implements over the same storage transaction: archiving the owner sets `available` false on its Applets, restoring sets it back, deleting it tombstones them — shared or not — and takes the deleted Bot off every share, each with one revision advance. A deletion writes an `applets:cleanup:<appletId>` to-do with the tombstone; the object then deletes the `AppletState` storage and the source prefix (`deleteAppletSourceV1`) and drops the to-do, and its alarm retries whatever did not finish. `GET /api/bots/:bot/applets/impact` answers the owned Applets and who shares them with an FNV-1a fingerprint (`appletImpactFingerprintV1`); a `bot/delete` from a person carries it as `appletImpact`, the saga's `admit` compares it before recording anything, and a stale one is a 409 `applet-impact-changed`.
-
-`cleanAppletTestStateV1` (`apps/cloudflare/src/applet-test-state-cleanup.ts`) runs once per User Durable Object in its constructor under the receipt `maintenance:bot-owned-applets:2026-09-14`: it removes directory entries of the pre-ownership shape and queues their cleanup, and replaces a Composition generation holding old-shape Applet members with one holding the same Plugins and no Applets.
-
-### The loop
-
-The loop is `applet_write_file` → `applet_check` → `applet_publish`. A check builds and stores the artifacts without recording a generation, and answers with the tools the built code declares and a preview URL — `https://ui.<host>/packages/<uiHash>.html`, the same anonymous artifact route a published page is served from, so the hash is the whole of the capability and the page reaches no data. A failure at either verb is the build's own diagnostics, `path:line:col message`, returned as the tool result.
-
-### Build
-
-One Applet pipeline, `applets/sdk/src/build/`, in five named stages: `descriptor`, `typecheck`, `lint`, `bundle`, `describe` (`pipeline.ts`). The server bundle is ESM, `platform: neutral`, with `cloudflare:workers` external. The UI bundle is IIFE, minified and inlined into one self-contained HTML page. The tool declaration is derived by booting the built Durable Object in Miniflare 5 and calling `/health` and `/describe` (`artifacts.ts`) — never by reading the source, because the kernel admits a generation by comparing the manifest to the mounted facet's own `health()`. esbuild's module path comments are rewritten to labels relative to the Applet root and the SDK root (`stableModulePaths`), so the same source hashes the same wherever it is built. A Plugin builds through a second pipeline beside it (`plugin.ts`, `@frockbot/applet-sdk/build/plugin`) in four stages — `descriptor`, `typecheck`, `bundle`, `describe`, no lint — typechecked against the declarations-only `@frockbot/applet-sdk/plugin` entry and bundled into one ESM module whose manifest is read by booting it in Miniflare with every outbound fetch answered 403 (`apps/applet-build/README.md`).
-
-One thing runs it: `apps/applet-build`, a Worker with no routes, reached through the app's `APPLET_BUILD` service binding, fronting a Cloudflare Container with no egress. The image copies `applets/sdk` out of the repository rather than installing it from npm, so the pipeline in the image is the pipeline in the commit. Its contract is `applets/build-contract.ts` — `POST /build` taking `{version, effectId, kind, id, mode, files}` and answering `{status: "built", manifest, server, ui}` for an Applet, `{status: "built", manifest, module}` for a Plugin, or `{status: "failed", stage, diagnostics}`, with the artifact ceilings enforced in the service as diagnostics. The container holds no storage and no credential; the app Worker keeps the R2 write and the hash verification. `container/build.test.ts` posts the SDK template and builds the same source beside the service, and holds the two to the same hashes.
-
-`applet_check` and `applet_publish` both call it in `mode: "build"`: the host lists the Applet's source prefix, reads each file, posts them with the Turn's effect id as the idempotency key, and hash-verifies the artifacts that come back against the manifest the service derived by running them. `APPLET_BUILD_TOKEN` is a required production secret.
-
-### Storage
-
-Source is the durable root, in R2 through the Workspace store, keyed by `workspaceObjectKeyV1` (`core/workspace-store/keys.ts`). Artifacts are R2 `APPLICATION_ARTIFACTS`, content-addressed as `packages/<sha256>.mjs` and `.html`, written by the app Worker (`app/applets-host/bot.ts`) after verifying the hash. The server bundle is hashed in full when a generation activates, and the R2 etag of the object that was hashed is pinned in the durable mount input; a later mount that finds that etag under the same key is holding the same object version and skips the hash, and any other etag is hashed in full (`apps/cloudflare/src/applet-artifact.ts`, ADR 0025). The UI page is served through the Workers Cache in front of the bucket (`servePackageUiArtifact`); a miss reads and hash-verifies, a hit does neither. A content-addressed put is idempotent by its own key, so a check followed by a publish of unchanged source stores one pair of objects. Generations, pointers and failures live in `AppletState`; the directory, with its ownership and shares, lives in `UserConfiguration`.
-
-### Execution
-
-- **Server.** `env.APPLETS.get(...)` with `globalOutbound: null`, an env of exactly `IDENTITY` and `CAPABILITIES`, and `limits {cpuMs: 5000, subRequests: 10}` (`applet-state.ts`, `#load`). The loaded stub is held per Durable Object instance by loader id, so a socket or a tool call after the first in an instance reads nothing from R2. The loaded class is mounted as a Durable Object facet (`#facet`) under a snapshot, trial and commit publish protocol with `facets.clone` rollback (`#activate`). `AppletState.open({ warm: true })`, which the open route calls, mounts the resident generation behind its answer so the socket that follows finds the facet and its schema up.
-- **UI.** `ui.html` is served from the anonymous origin `ui.<host>` (`apps/cloudflare/src/gateway.ts:139-176`) and nested in an `<iframe sandbox="allow-scripts">` inside the Applets Package's own `canvas.html`, handshaken by postMessage, then connected over a WebSocket gated by an HMAC viewer token (`gateway.ts`, `routeAppletSocket`). The token's claims are `{u, b, a, g, exp}` — the User, the Bot the Applet was opened for, the Applet and the generation — and the door asks `appletAccessFor` whether that Bot may still reach the Applet before it forwards, so an unshare, a transfer or the owner's archive reaches the next connection.
-- **Opening.** The canvas reads `GET /api/bots/:bot/applets/open` (`AppletOpenViewV1`): that Bot's directory, the Session's focus, and for a published focus the generation, the page URL and a viewer token, from one `AppletState.open` read beside a parallel directory listing and focus read. The frame is given its page before the source or the last build is asked for; those are the code view's, read when it is shown, and only for an Applet the Bot owns — a shared Applet has no Code tab. `/api/bots/:bot/applets/:id/ui` and `/token` serve the chat card, as the Bot whose conversation holds it, and read one directory entry each. The frame's identity is the generation and the page URL; a token re-minted three minutes before expiry reaches the running page as an `init`-shaped `refresh` and the transport reconnects in place. The frame is held off stage from the moment the Bot is adopted (`_appletFrameHolder`) and moved into the canvas page under one `GlobalKey` when that is pushed — at every width, since the canvas is a page everywhere. Looking at the code puts the frame off stage rather than taking it out of the tree, so the document and its socket outlive the switch. ADR 0025 records why.
-
-### First-party pages
-
-`list.html` and `canvas.html` (`applets/pages/`) are declared by a static registry, `FIRST_PARTY_PACKAGE_UI_V1` (`applets/pages.ts`): page id, digest, html, the tool names that page may call, and where it mounts. `projectFirstPartyPackageIframeV1` (`app/shell/composition-views.ts`) reshapes it for the client and `requirePackageUiToolDeclarationV1` authorizes a page's tool command against it. There is no Composition generation in either: a first-party page ships in the deployment, so there is nothing for a generation to fence. The bridge protocol (`PACKAGE_IFRAME_HELPER_JS_V1`) is unchanged — it is the page contract a Bot-authored page will reuse.
-
-### SDK
-
-`@frockbot/applet-sdk` exports `server`, `client`, `kit`, `lint`, `protocol`, `build`, and for Plugins the declarations-only `plugin` entry beside `build/plugin`. It has no CLI and no `bin`: the service is the only thing that builds an Applet, and nothing installs the SDK on a Computer. The server API is an `Applet` base class with schema-first `tables`, `this.tool({description, input}, handler)` and an optional `migrate`. The client API is `createApplet<TServer>()` producing TanStack DB collections plus `useLiveQuery`. Wire protocol v1, JSON capped at 64 KB: `hello`, `snapshot`, `changes`, `ack`, `reject` downstream; `hello`, `mutate` upstream.
-
-### Persistence
-
-The facet's own SQLite inside the per-`<userId>:<appletId>` Durable Object, with additive `ALTER TABLE` migration and a 2000-row `_applet_changes` log (`applets/sdk/src/server/store.ts:32-80`). Data is the User's and shared across viewers and across the Bots with access, survives publish, revert and transfer, and is destroyed only by a deletion: the owner Bot's `applet_delete`, the User's own from the owner Bot's Applets list over `POST /api/bots/<botId>/applets/<appletId>/delete`, or the owner Bot's deletion. All three tombstone the entry and queue the cleanup that destroys the Applet's Durable Object state and its source. An id the directory does not list is an `AppletUnavailableError` (`apps/cloudflare/src/applet-directory.ts`), recognised by its `name` and answered as a 404 rather than a retryable failure, so deleting an Applet that is already gone settles instead of failing forever.
+The Applet product is gone: no `AppletState`, no `applet_*` tools, no account `applets` switch, no `send_to_user` type `applet`, no Composition `applets[]`. `apps/applet-build` still builds Plugins. Disposable storage is dropped once per User and Bot under `maintenance:plugin-panels:2026-09-21` (`apps/cloudflare/src/plugin-panels-cleanup.ts`). Migration `deleted_classes` includes `AppletState`.
 
 ---
 
@@ -1159,18 +1095,18 @@ All from `computer/`; neither implementation registers one.
 
 Bindings are declared in `apps/cloudflare/wrangler.jsonc`.
 
-| Binding                                                                   | Kind               | Contents                                                                                                                                                           |
-| ------------------------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| `USER_APPLICATIONS` (:20)                                                 | Worker Loader      | The per-user foundation application artifact (`apps/cloudflare/src/index.ts:2229`, `src/user-configuration.ts:201`, `src/package-publication.ts:120`)              |
-| `BOT_PACKAGES` (:26)                                                      | Worker Loader      | The per-User Plugin worker, whose `globalOutbound` is the `PluginEgress` loopback, or disabled when no enabled Plugin declared network (`app/isolates/bot.ts:107`) |
-| `APPLETS` (:33)                                                           | Worker Loader      | Applet server artifacts, mounted as facets (`apps/cloudflare/src/applet-state.ts:94`, `:249`)                                                                      |
-| `COMPUTER_HOST` (:47)                                                     | Service            | `frockbot-computer-host` (`apps/cloudflare/src/bot-state.ts:465-474`)                                                                                              |
-| `APPLICATION_ARTIFACTS` (:53)                                             | R2                 | Application, Package and Applet artifacts, content-addressed                                                                                                       |
-| `MEMORY_FILES` (:57)                                                      | R2                 | Memory and workspace file bodies (`apps/cloudflare/src/workspace.ts:126`, `:157`)                                                                                  |
-| `AUTH_DB` (:70)                                                           | D1 `frockbot-auth` | better-auth only                                                                                                                                                   |
-| `MEMORY_INDEX` (:78)                                                      | Vectorize          | Memory embeddings; the app Worker uses the binding only for deletion (`bot-state.ts:820-825`)                                                                      |
-| `AI` (:83)                                                                | Workers AI         | Frock AI gateway transport and image generation                                                                                                                    |
-| `BOT_STATES`, `USER_CONFIGURATIONS`, `DEPLOYMENT_POLICY`, `APPLET_STATES` | Durable Objects    | §2                                                                                                                                                                 |
+| Binding                                                  | Kind               | Contents                                                                                                                                                           |
+| -------------------------------------------------------- | ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| `USER_APPLICATIONS` (:20)                                | Worker Loader      | The per-user foundation application artifact (`apps/cloudflare/src/index.ts:2229`, `src/user-configuration.ts:201`, `src/package-publication.ts:120`)              |
+| `BOT_PACKAGES` (:26)                                     | Worker Loader      | The per-User Plugin worker, whose `globalOutbound` is the `PluginEgress` loopback, or disabled when no enabled Plugin declared network (`app/isolates/bot.ts:107`) |
+| `APPLETS` (:33)                                          | Worker Loader      | Applet server artifacts, mounted as facets (`apps/cloudflare/src/applet-state.ts:94`, `:249`)                                                                      |
+| `COMPUTER_HOST` (:47)                                    | Service            | `frockbot-computer-host` (`apps/cloudflare/src/bot-state.ts:465-474`)                                                                                              |
+| `APPLICATION_ARTIFACTS` (:53)                            | R2                 | Application, Package and Applet artifacts, content-addressed                                                                                                       |
+| `MEMORY_FILES` (:57)                                     | R2                 | Memory and workspace file bodies (`apps/cloudflare/src/workspace.ts:126`, `:157`)                                                                                  |
+| `AUTH_DB` (:70)                                          | D1 `frockbot-auth` | better-auth only                                                                                                                                                   |
+| `MEMORY_INDEX` (:78)                                     | Vectorize          | Memory embeddings; the app Worker uses the binding only for deletion (`bot-state.ts:820-825`)                                                                      |
+| `AI` (:83)                                               | Workers AI         | Frock AI gateway transport and image generation                                                                                                                    |
+| `BOT_STATES`, `USER_CONFIGURATIONS`, `DEPLOYMENT_POLICY` | Durable Objects    | §2                                                                                                                                                                 |
 
 D1 schema: `apps/cloudflare/migrations/` holds `0001_better_auth.sql`, defining `user`, `session`, `account` and `verification` with their indexes, and `0002_drop_account_issuer.sql`, which removes the `account.issuer` column and its unique index — better-auth wrote that column through 1.7.2 only, and from 1.7.3 refuses every `/api/auth/*` request while a column it never writes is `not null`. All other product state lives in Durable Objects.
 
@@ -1180,7 +1116,7 @@ Not used anywhere in the repository: KV namespaces, Queues, Workflows, Hyperdriv
 
 Top-level vars: `NATIVE_SLICE_2_AUTH`, `DEFAULT_APPLICATION_HASH`, `FROCK_AI_GATEWAY_ID`, `FROCK_AI_ACCOUNT_ID`, `FROCK_AI_AUTO_ROUTE`, `UI_ARTIFACT_HOSTS`. `ALLOWED_CLIENT_ORIGINS` is read but set nowhere: the web app is same-origin and the Flutter app sends no `Origin`.
 
-Secrets are declared in `apps/cloudflare/src/production-secrets.ts`, where a required secret may belong to one auth Package: the hosted build requires `BETTER_AUTH_*` and `GOOGLE_*`, and an Access build requires `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` instead. Required of the hosted build: `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SPRITES_TOKEN`, `COMPUTER_HOST_TOKEN`, `CREDENTIAL_KEYRING`, `ROUTINE_HOOK_SECRET`, `MACHINE_TOKEN_SECRET`, `APPLET_BUILD_TOKEN`, `APPLET_VIEWER_SECRET`, `OPENAI_API_KEY` (composer dictation), `GEMINI_API_KEY` (the voice session). Optional: `FROCKBOT_ADMIN_EMAILS`, `DEBUG_TOKEN`, `COMPOSIO_API_KEY` (Connected apps, §8), `COMPOSIO_WEBHOOK_SECRET` (Connected-app Routine events, §8), `FROCK_AI_GATEWAY_TOKEN`, `JEV_API_KEY` (hosted turn supervision, routine-event rejector, dictation tidy review). `VOICE_ASSISTANT_MODEL` and `VOICE_DICTATION_CLEANUP_MODEL` are optional vars; `VOICE_DICTATION_UPSTREAM_URL` and `VOICE_ASSISTANT_UPSTREAM_URL` are harness-only doors the release gate refuses to find live.
+Secrets are declared in `apps/cloudflare/src/production-secrets.ts`, where a required secret may belong to one auth Package: the hosted build requires `BETTER_AUTH_*` and `GOOGLE_*`, and an Access build requires `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` instead. Required of the hosted build: `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SPRITES_TOKEN`, `COMPUTER_HOST_TOKEN`, `CREDENTIAL_KEYRING`, `ROUTINE_HOOK_SECRET`, `MACHINE_TOKEN_SECRET`, `APPLET_BUILD_TOKEN`, `OPENAI_API_KEY` (composer dictation), `GEMINI_API_KEY` (the voice session). Optional: `FROCKBOT_ADMIN_EMAILS`, `DEBUG_TOKEN`, `COMPOSIO_API_KEY` (Connected apps, §8), `COMPOSIO_WEBHOOK_SECRET` (Connected-app Routine events, §8), `FROCK_AI_GATEWAY_TOKEN`, `JEV_API_KEY` (hosted turn supervision, routine-event rejector, dictation tidy review). `VOICE_ASSISTANT_MODEL` and `VOICE_DICTATION_CLEANUP_MODEL` are optional vars; `VOICE_DICTATION_UPSTREAM_URL` and `VOICE_ASSISTANT_UPSTREAM_URL` are harness-only doors the release gate refuses to find live.
 
 ---
 

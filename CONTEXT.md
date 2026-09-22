@@ -92,7 +92,7 @@ _Avoid_: Package
 
 **Plugin**:
 Code that wraps a Bot's loop, adds tools, keeps its own data or reaches the network, and was not there at build time: seeded by the deployment at runtime or written by a Bot. It declares itself with a Frock Compose descriptor — hooks, tools, hosts, grants, slots, settings schema, provides and consumes, triggers, model providers, contract version — and is installed per User, enabled per Bot. A **model provider Plugin** serves one provider's model protocol: the kernel hands it a normalized request, it answers with normalized stream events, and its one upstream call goes through the host, which is the only thing holding the Connection's credential (ADR 0032). The user-facing noun for the Plugins page, which also lists the first-party features a User may turn off per Bot; those are app code with a flag, never a Plugin.
-_Avoid_: Package, extension, capability
+_Avoid_: Package, extension, capability, Applet
 
 **Plugin worker**:
 The one Dynamic Worker per User that holds every installed Plugin as a module map behind a generated index. Its identity is the hash of the artifacts, the index, the binding digest and the hook contract version, so a deploy of unchanged code leaves it alone, and a new index or contract version is a new worker. The Bot Durable Object calls it once per open hook per Turn with the Bot's enabled list.
@@ -154,60 +154,28 @@ _Avoid_: Skill id, skill path, handle
 A User attaching a Skill ref to a message, which expands that Skill's body into the Turn's first step. Distinct from a Bot loading a Skill on its own initiative, and from merely mentioning one.
 _Avoid_: Run a skill, trigger, call
 
-**Applet**:
-A small real-time application a Bot builds and the User opens beside the conversation: one Package's Instance Contribution, one durable instance of it, its UI, and the tools it exposes to the Bots with access to it. Its code is a Package; its state is not. Its source, state, generations and data are the User's, so which Bot owns it is metadata ([ADR 0027](docs/adr/0027-bot-owned-applets.md)).
-_Avoid_: App, gadget, application, widget
+**Canvas**:
+The host region beside the conversation that holds a Bot's Plugin panel tabs. Closed by default on a phone until opened.
+_Avoid_: Preview pane, right panel (the Flutter shell slot, not this surface)
 
-**Owner Bot**:
-The one Bot an Applet names as `ownerBotId`. Ownership implies access, and only the owner may read or change the source, check, publish, revert, read the generations, delete, share, unshare or transfer. Every Applet has exactly one.
-_Avoid_: Author, creator (the provenance, which never changes), User-owned Applet
+**Conversation panel**:
+A Plugin `conversation.panel` view: a host-drawn `ViewDocument` page in the Canvas. Several Plugins may declare one; the host shows them as tabs and one page at a time ([ADR 0034](docs/adr/0034-plugin-panels.md)).
+_Avoid_: Applet, widget, iframe
 
-**Shared Bot**:
-An active Bot of the same User named in an Applet's `sharedWithBotIds`. A shared Bot may list the Applet, open or focus it, use its page and call its published tools, and nothing else.
-_Avoid_: Collaborator, member, viewer
+**Bot nav**:
+A Plugin `bot.nav` view: a door on this Bot's page, with Settings / Routines / Plugins. A press focuses that Plugin's conversation panel.
+_Avoid_: Sidebar entry, Bot list row
 
-**Applet access**:
-Being the owner Bot or a shared Bot of an Applet that is available. Every list, Composition, focus, open, chat card and viewer token is scoped to the Bot acting; a Bot without access is told the Applet does not exist. Access changes reach new Turns and new opens; an admitted Turn keeps the Applet tools its Composition pinned.
-_Avoid_: Permission, grant (a Plugin's), visibility
-
-**Transfer**:
-The owner Bot making another active Bot of the same User the owner. The former owner keeps shared access. Metadata only: the source, state, generations and data stay where they are.
-_Avoid_: Move, reassign, copy
-
-**Applet availability**:
-Whether an Applet is usable at all, separate from its publication status (`draft` or `published`). Archiving its owner Bot makes it unavailable to every Bot without deleting anything; restoring the owner makes it available again. Deleting the owner deletes it.
-_Avoid_: Status, archived Applet, hidden
-
-**Applet impact**:
-What archiving or deleting a Bot does to Applets: the Applets it owns and the Bots they are shared with, with a fingerprint a delete must present so it cannot destroy an Applet the confirmation did not name.
-_Avoid_: Preview, dependents, blast radius
+**Panel focus**:
+The Session's selected conversation-panel tab, `{ pluginId, surfaceId }`, or closed. Written by a tab click, a bot-nav press, or the Bot's `panel_focus` tool. The cloud is the authority.
+_Avoid_: Active applet, selected gadget
 
 **Account feature**:
-A capability an administrator turns on for one account from the admin portal; Applets is the first, Plugin authoring the second. Off is silence on every surface — no tools, no Composition members, no canvas, no managed Skill — and the account's data is kept. Held by the User, set only by an admin.
+A capability an administrator turns on for one account from the admin portal. Plugin authoring is one. Off is silence on every surface — no tools, no managed Skill — and the account's data is kept. Held by the User, set only by an admin.
 _Avoid_: Feature flag, beta, entitlement, plan
 
-**Instance Contribution**:
-The part of a Package that runs as a Durable Object facet under a kernel-owned Applet Durable Object: a server class with its own storage, a UI page, and declared tools. Its storage is User product state that survives every code generation.
-_Avoid_: Backend, facet package, stateful plugin
-
-**Applet generation**:
-One immutable, content-addressed publication of an Applet's code. The current generation is a pointer the kernel moves; revert moves it back and is itself recorded. Never a branch.
-_Avoid_: Version number, draft, preview branch
-
-**Canvas**:
-The surface beside the conversation where the Session's focused Applet renders. Closed by default on a phone until opened.
-_Avoid_: Preview pane, right panel (the slot, not the surface)
-
-**Focused Applet**:
-The one Applet a Session is currently building or using, always one its Bot has access to; what the Canvas shows and what `applet_*` tools act on when no Applet is named.
-_Avoid_: Active app, selected gadget
-
-**Applets SDK**:
-The package a Bot writes an Applet against on the Computer: the server base class, schema-first tables, the TanStack DB client, the component kit, the linter, the template, and the embedded workerd dev runner.
-_Avoid_: Framework, runtime
-
 **Isolate**:
-A Dynamic Worker loaded to execute code that was not in the deploy — the User's Plugin worker, an Applet's server — with no ambient network and only the loopback bindings its User's authority grants, masked per Bot per Turn.
+A Dynamic Worker loaded to execute code that was not in the deploy — the User's Plugin worker — with no ambient network and only the loopback bindings its User's authority grants, masked per Bot per Turn.
 _Avoid_: Sandbox, container, worker
 
 **Keyring**:

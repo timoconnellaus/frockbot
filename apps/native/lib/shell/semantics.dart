@@ -157,6 +157,9 @@ abstract final class VoiceIds {
   static const callTranscript = 'voice-call-transcript';
   static const modeMeter = 'voice-mode-meter';
   static const headerPill = 'voice-header-pill';
+
+  /// The person's own face on a call, never the word "Voice".
+  static const person = 'voice-person';
   static String chip(String runId) => 'voice-chip-$runId';
 
   /// The Bot's voice under its settings: the row, the page and its pickers.
@@ -172,6 +175,8 @@ abstract final class VoiceIds {
   static const custom = 'voice-custom';
   static const picker = 'voice-picker';
 
+  /// The fixed voice control at the far right of the composer (ADR 0029).
+  /// Unlike the morphing action beside it, it is always this one thing.
   static const composerVoice = 'composer-voice';
   static const composerDictate = 'composer-dictate';
   static const composerDictationStop = 'composer-dictation-stop';

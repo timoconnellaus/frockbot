@@ -1,4 +1,3 @@
-import { APPLET_ID_V1 } from "./applets.js";
 import {
   A2UI_IDENTIFIER_V1,
   A2UI_LIMITS_V1,
@@ -54,7 +53,6 @@ export type SendToUserPayloadV1 =
       messages: A2uiAgentMessageV1[];
     }
   | { type: "attachment"; url: string; name?: string; mediaType?: string }
-  | { type: "applet"; appletId: string }
   | { type: "widget"; widget: SendToUserWidgetV1 }
   | { type: "secret-request"; prompt: string; secretName: string }
   | { type: "agent-card"; agentId: string; title: string; body?: string }
@@ -84,7 +82,6 @@ export const SEND_TO_USER_PAYLOAD_TYPES_V1: readonly SendToUserPayloadV1["type"]
     "widget",
     "secret-request",
     "agent-card",
-    "applet",
     "approval",
     "card",
   ];
@@ -383,17 +380,6 @@ export function decodeSendToUserPayloadV1(
           ? {}
           : { expiresInSeconds: payload.expiresInSeconds }),
       };
-    }
-    case "applet": {
-      exactPayloadKeys(payload, ["type", "appletId"], label);
-      const appletId = boundedString(
-        payload.appletId,
-        129,
-        `${label}.appletId`,
-      );
-      if (!APPLET_ID_V1.test(appletId))
-        throw new Error(`${label}.appletId is invalid`);
-      return { type: "applet", appletId };
     }
     case "card": {
       exactPayloadKeys(payload, ["type", "surfaceId", "messages"], label);

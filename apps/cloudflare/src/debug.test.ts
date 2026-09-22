@@ -44,7 +44,6 @@ function surface(
       features.push({ userId, command });
       return Promise.resolve({
         ...defaultUserFeaturesV1(),
-        applets: command.applets,
         pluginAuthoring: command.pluginAuthoring ?? false,
         plugins: command.plugins ?? [],
         updatedBy: "operator",
@@ -277,7 +276,6 @@ describe("debug route", () => {
         body: JSON.stringify({
           schemaVersion: 1,
           type: "user/set-features",
-          applets: true,
           pluginAuthoring: true,
         }),
       },
@@ -287,7 +285,6 @@ describe("debug route", () => {
 
     expect(response?.status).toBe(200);
     expect(await response?.json()).toMatchObject({
-      applets: true,
       pluginAuthoring: true,
       updatedBy: "operator",
     });
@@ -297,7 +294,6 @@ describe("debug route", () => {
         command: {
           schemaVersion: 1,
           type: "user/set-features",
-          applets: true,
           pluginAuthoring: true,
         },
       },
@@ -318,7 +314,6 @@ describe("debug route", () => {
     const command = {
       schemaVersion: 1,
       type: "user/set-features",
-      applets: true,
     };
     const unauthorized = post({}, command);
     expect((await route(unauthorized, new URL(unauthorized.url)))?.status).toBe(
@@ -326,7 +321,7 @@ describe("debug route", () => {
     );
 
     const malformed = post(authorized, {
-      schemaVersion: 1,
+      schemaVersion: 2,
       type: "user/set-features",
     });
     expect((await route(malformed, new URL(malformed.url)))?.status).toBe(400);

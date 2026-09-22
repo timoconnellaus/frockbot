@@ -121,44 +121,47 @@ class ExchangeView extends StatelessWidget {
                             ),
                     ),
                   )
-                : ListView(
+                : SingleChildScrollView(
                     reverse: true,
                     padding: const EdgeInsets.symmetric(vertical: 12),
-                    children: [
-                      for (final exchange in exchanges.reversed)
-                        _ExchangeRows(
-                          key: ValueKey('exchange:${exchange.id}'),
-                          exchange: exchange,
-                          self: self,
-                          other: other,
-                          onOpenLink: onOpenLink,
-                          clock: clock,
-                        ),
-                      if (error != null)
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
-                          child: Text(
-                            error!,
-                            textAlign: TextAlign.center,
-                            style: theme.textTheme.bodySmall?.copyWith(
-                              color: theme.colorScheme.error,
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        if (hasEarlier)
+                          Center(
+                            child: TextButton(
+                              onPressed: loading ? null : onOlder,
+                              style: TextButton.styleFrom(
+                                foregroundColor:
+                                    theme.colorScheme.onSurfaceVariant,
+                                textStyle: theme.textTheme.labelMedium,
+                                minimumSize: const Size(0, 32),
+                              ),
+                              child: const Text('Earlier messages'),
                             ),
                           ),
-                        ),
-                      if (hasEarlier)
-                        Center(
-                          child: TextButton(
-                            onPressed: loading ? null : onOlder,
-                            style: TextButton.styleFrom(
-                              foregroundColor:
-                                  theme.colorScheme.onSurfaceVariant,
-                              textStyle: theme.textTheme.labelMedium,
-                              minimumSize: const Size(0, 32),
+                        if (error != null)
+                          Padding(
+                            padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
+                            child: Text(
+                              error!,
+                              textAlign: TextAlign.center,
+                              style: theme.textTheme.bodySmall?.copyWith(
+                                color: theme.colorScheme.error,
+                              ),
                             ),
-                            child: const Text('Earlier messages'),
                           ),
-                        ),
-                    ],
+                        for (final exchange in exchanges)
+                          _ExchangeRows(
+                            key: ValueKey('exchange:${exchange.id}'),
+                            exchange: exchange,
+                            self: self,
+                            other: other,
+                            onOpenLink: onOpenLink,
+                            clock: clock,
+                          ),
+                      ],
+                    ),
                   ),
           ),
           const Divider(height: 1),

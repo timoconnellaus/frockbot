@@ -9,6 +9,7 @@ import {
   botPluginsDocumentV1,
   decodeBotPluginsCommandV1,
 } from "@frockbot/app/plugins/page";
+import { decodePanelFocusCommandV1 } from "@frockbot/app/plugins/panels";
 import { accessEmailV1 } from "@frockbot/app/admin/shared";
 import {
   admissionRefusedResponse,
@@ -29,10 +30,6 @@ import {
   isPublicIdentifier,
 } from "@frockbot/core/configuration";
 import { DEPLOYMENT_HEADER_V1 } from "@frockbot/core/protocol";
-import {
-  AppletViewerTokenError,
-  verifyAppletViewerTokenV1,
-} from "@frockbot/core/durable";
 import {
   DEVELOPMENT_USER_ID,
   isDeploymentAdminV1,
@@ -127,12 +124,11 @@ export function packageUiGatewayOriginV1(url: URL): string {
  * both named rather than wildcarded, and both derived from the request so a
  * deployment on any hostname gets exactly its own:
  *
- * - `connect-src <gateway origin> <gateway ws origin>` lets an Applet's UI open
- *   its viewer socket back to the `AppletState` object on the gateway, which
- *   is the only endpoint it is given.
+ * - `connect-src <gateway origin> <gateway ws origin>` lets a plugin's panel
+ *   open its socket back to the gateway, which is the only endpoint it is given.
  * - `frame-src <artifact origin>` lets a page nest another page on the same
- *   anonymous origin — the Applets canvas page nesting the Applet's own UI.
- *   The nested frame is served by this very route, with this very policy.
+ *   anonymous origin. The nested frame is served by this very route, with
+ *   this very policy.
  *
  * No `frame-ancestors` relaxation and no `form-action`.
  */
@@ -356,142 +352,6 @@ function withClientOrigin(response: Response, origin: string): Response {
   return shared;
 }
 
-const APPLET_SOCKET_PATH = /^\/api\/applets\/([^/]+)\/socket$/;
-
-/**
- * `GET /api/applets/:appletId/socket?token=…`.
- *
- * Ahead of session authentication on purpose, and for the same reason the
- * machine door is: an Applet's page runs in a cookieless sandboxed iframe and
- * carries no session. The signed viewer token is the credential — it names the
- * User, the Bot it was opened for, the Applet, and the generation, it was
- * minted by this deployment, and it expires in fifteen minutes. A token that
- * does not verify never reaches a Durable Object, so an anonymous caller cannot
- * create one. A token that does verify is still refused when its Bot has lost
- * access since it was minted: access changes reach the next open (ADR 0027).
- */
-async function routeAppletSocket(
-  request: Request,
-  url: URL,
-  dependencies: GatewayDependencies,
-): Promise<Response> {
-  if (request.method !== "GET") return jsonError(405, "method not allowed");
-  if (!dependencies.appletViewerSecret || !dependencies.appletStateFor) {
-    return jsonError(503, "Applet viewer sessions are not configured");
-  }
-  let appletId: string;
-  try {
-    appletId = decodeURIComponent(url.pathname.match(APPLET_SOCKET_PATH)![1]);
-  } catch {
-    return jsonError(400, "invalid applet id");
-  }
-  let claims;
-  try {
-    claims = await verifyAppletViewerTokenV1(
-      dependencies.appletViewerSecret,
-      appletViewerTokenFromRequest(request, url),
-    );
-  } catch (error) {
-    return jsonError(
-      error instanceof AppletViewerTokenError ? error.status : 401,
-      "Applet viewer token is invalid",
-    );
-  }
-  // The token is scoped to one Applet: a valid token for another Applet of the
-  // same User is not a token for this one.
-  if (claims.a !== appletId) {
-    return jsonError(401, "Applet viewer token is invalid");
-  }
-  if (!dependencies.admitAppletViewer || !dependencies.appletAccessFor) {
-    return jsonError(503, "Applet viewer sessions are not configured");
-  }
-  if (!dependencies.allowDevelopmentIdentity) {
-    let admission;
-    try {
-      admission = await dependencies.admitAppletViewer(claims.u);
-    } catch {
-      return admissionUnavailableResponse();
-    }
-    if (!admission) return jsonError(401, "Applet viewer token is invalid");
-    if (!admission.admitted) {
-      return admissionRefusedResponse(admission.reason, false);
-    }
-  }
-  let reachable: boolean;
-  try {
-    reachable = await dependencies.appletAccessFor(
-      claims.u,
-      claims.b,
-      claims.a,
-    );
-  } catch {
-    return jsonError(503, "Applet access could not be checked");
-  }
-  // The same answer as a token for an Applet that does not exist: a Bot that
-  // lost access learns nothing about what it lost.
-  if (!reachable) return jsonError(404, "Applet is unavailable");
-  const forwarded = new URL(url);
-  forwarded.searchParams.delete("token");
-  forwarded.searchParams.set("u", claims.u);
-  forwarded.searchParams.set("a", claims.a);
-  forwarded.searchParams.set("g", claims.g);
-  // `fetch`, not an RPC method: a 101 response with its WebSocket only
-  // crosses the stub boundary on the object's HTTP door. The body goes with
-  // it, so the outer drain must not reach for it afterwards.
-  const headers = new Headers(request.headers);
-  headers.delete("sec-websocket-protocol");
-  headers.delete("authorization");
-  headers.delete("cookie");
-  headers.delete("referer");
-  const response = await dependencies
-    .appletStateFor(claims.u, claims.a)
-    .fetch(
-      forwardingBodyV1(
-        request,
-        new Request(forwarded, { method: request.method, headers }),
-      ),
-    );
-  if (
-    response.status === 101 &&
-    response.webSocket &&
-    request.headers.has("sec-websocket-protocol") &&
-    !url.searchParams.has("token")
-  ) {
-    // A browser that offered protocols requires a selected protocol in the
-    // upgrade response. Select only the public application protocol; the
-    // credential-bearing offer was consumed here and never reaches the facet.
-    const responseHeaders = new Headers(response.headers);
-    responseHeaders.set("sec-websocket-protocol", "frockbot.applet.v1");
-    return new Response(null, {
-      status: 101,
-      headers: responseHeaders,
-      webSocket: response.webSocket,
-    });
-  }
-  return response;
-}
-
-/** Native fallback carries the scoped token in the handshake, never the URL. */
-export function appletViewerTokenFromRequest(
-  request: Request,
-  url: URL,
-): string | null {
-  const protocols = (request.headers.get("sec-websocket-protocol") ?? "")
-    .split(",")
-    .map((v) => v.trim());
-  const tokens = protocols.filter((v) => v.startsWith("frockbot.viewer."));
-  if (tokens.length > 0) {
-    if (
-      tokens.length !== 1 ||
-      !protocols.includes("frockbot.applet.v1") ||
-      url.searchParams.has("token")
-    )
-      return null;
-    return tokens[0]!.slice("frockbot.viewer.".length);
-  }
-  return url.searchParams.get("token");
-}
-
 /**
  * The one door into a User's loaded application.
  *
@@ -646,9 +506,6 @@ export function createGateway(
     }
     if (url.pathname.startsWith("/api/auth/")) {
       return dependencies.auth.handler(request);
-    }
-    if (APPLET_SOCKET_PATH.test(url.pathname)) {
-      return routeAppletSocket(request, url, dependencies);
     }
     if (url.pathname === "/sign-out") {
       if (request.method !== "GET") return jsonError(405, "method not allowed");
@@ -1136,6 +993,92 @@ export function createGateway(
       }
     }
 
+    const botPanelsOpenMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/panels\/open$/,
+    );
+    if (botPanelsOpenMatch) {
+      try {
+        if (request.method !== "GET") {
+          return jsonError(405, "method not allowed");
+        }
+        const botId = decodeBotPathSegment(botPanelsOpenMatch[1]);
+        return Response.json(
+          await dependencies
+            .botConfigurationFor(userId, botId)
+            .openFocusedPanel({
+              schemaVersion: 1,
+              userId,
+              botId,
+            }),
+          { headers: { "cache-control": "no-store" } },
+        );
+      } catch (error) {
+        if (error instanceof ConfigurationDecodeError) {
+          return jsonError(400, "invalid bot id");
+        }
+        return jsonError(503, "Panels are temporarily unavailable.");
+      }
+    }
+
+    const botPanelsFocusMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/panels\/focus$/,
+    );
+    if (botPanelsFocusMatch) {
+      try {
+        const botId = decodeBotPathSegment(botPanelsFocusMatch[1]);
+        const binding = dependencies.botConfigurationFor(userId, botId);
+        if (request.method === "GET") {
+          const opened = await binding.openFocusedPanel({
+            schemaVersion: 1,
+            userId,
+            botId,
+          });
+          return Response.json(
+            {
+              schemaVersion: 1,
+              pluginId: opened.focus.pluginId,
+              ...(opened.focus.surfaceId
+                ? { surfaceId: opened.focus.surfaceId }
+                : {}),
+            },
+            { headers: { "cache-control": "no-store" } },
+          );
+        }
+        if (request.method !== "POST") {
+          return jsonError(405, "method not allowed");
+        }
+        let command;
+        try {
+          command = decodePanelFocusCommandV1(await request.json());
+        } catch (error) {
+          return jsonError(
+            400,
+            error instanceof Error && !(error instanceof SyntaxError)
+              ? error.message
+              : "invalid panel focus",
+          );
+        }
+        const result = await binding.setFocusedPanel({
+          schemaVersion: 1,
+          userId,
+          botId,
+          pluginId: command.pluginId,
+          ...(command.surfaceId ? { surfaceId: command.surfaceId } : {}),
+        });
+        if (result.status === "error") {
+          return jsonError(400, result.failure);
+        }
+        return Response.json(result.focus, {
+          headers: { "cache-control": "no-store" },
+        });
+      } catch (error) {
+        if (error instanceof ConfigurationDecodeError) {
+          return jsonError(400, "invalid bot id");
+        }
+        return jsonError(503, "Panels are temporarily unavailable.");
+      }
+    }
+
     const botSettingsMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/settings$/,
     );
@@ -1336,23 +1279,10 @@ export function createGateway(
     );
     const isApiPath = url.pathname.startsWith("/api/");
     const presentedOrigin = request.headers.get("origin");
-    // The Applet viewer socket is the one `/api/*` upgrade that does not come
-    // from the app. Its page runs in a sandboxed iframe with no
-    // `allow-same-origin`, so the browser sends the literal `Origin: null` — an
-    // opaque origin — and a page on the artifact host itself would send
-    // `ui.<this host>`. Either is admitted here and nothing else: the page is
-    // cookieless, so this guard protects nothing on that path, and the signed
-    // token in the URL is the whole of the decision.
-    const appletSocketFromArtifactOrigin =
-      APPLET_SOCKET_PATH.test(url.pathname) &&
-      presentedOrigin !== null &&
-      (presentedOrigin === "null" ||
-        isPackageUiArtifactOriginFor(presentedOrigin, url));
     if (
       isApiPath &&
       presentedOrigin &&
       !origin &&
-      !appletSocketFromArtifactOrigin &&
       (request.method !== "GET" ||
         request.headers.get("upgrade")?.toLowerCase() === "websocket") &&
       request.method !== "HEAD"

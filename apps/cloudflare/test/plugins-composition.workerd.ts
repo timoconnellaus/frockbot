@@ -107,8 +107,6 @@ interface CompositionRpc {
     input: unknown,
   ): Promise<{ generations: { generationId: string; status: string }[] }>;
   setFeatures(input: unknown): Promise<unknown>;
-  createApplet(input: unknown): Promise<{ appletId: string }>;
-  recordAppletGeneration(input: unknown): Promise<{ appletId: string }>;
 }
 
 interface FeaturesRpc {
@@ -822,79 +820,6 @@ describe("the User-owned Composition", () => {
     );
   });
 
-  test("an Applet the User's directory gained lands in the User's Composition", async () => {
-    // Publishing an Applet proposes a new generation. It has to be proposed
-    // into the User's store, or the id the next Turn pins is one the User has
-    // never heard of.
-    const userId = `user-${crypto.randomUUID()}`;
-    const identity = { userId, botId: "bot-1" };
-    await provisionBot(identity);
-    // What an admin does before an account's Bots see Applets at all.
-    await user(userId).setFeatures({
-      schemaVersion: 1,
-      userId,
-      command: { schemaVersion: 1, type: "user/set-features", applets: true },
-      updatedBy: "workerd-admin",
-    });
-    await turn(identity, "run-1");
-    const before = (
-      await user(userId).readComposition({ schemaVersion: 1, userId })
-    ).current;
-
-    const applet = await user(userId).createApplet({
-      schemaVersion: 1,
-      userId,
-      botId: identity.botId,
-      displayName: "Expenses",
-      provenance: { kind: "user" },
-    });
-    await user(userId).recordAppletGeneration({
-      schemaVersion: 1,
-      userId,
-      botId: identity.botId,
-      appletId: applet.appletId,
-      generationId: "applet-g1",
-      tools: [
-        {
-          name: "file_expense",
-          description: "Files an expense",
-          inputSchema: { type: "object" },
-        },
-      ],
-    });
-
-    await turn(identity, "run-2");
-
-    const after = await user(userId).readComposition({
-      schemaVersion: 1,
-      userId,
-    });
-    expect(after.current.generationId).not.toBe(before.generationId);
-    expect(after.current.status).toBe("active");
-    expect(await pinnedGeneration(identity, "run-2")).toBe(
-      after.current.generationId,
-    );
-    const generation = await user(userId).readCompositionGeneration({
-      schemaVersion: 1,
-      userId,
-      generationId: after.current.generationId,
-    });
-    expect(
-      (
-        generation as unknown as {
-          applets?: { appletId: string; generationId: string }[];
-        }
-      ).applets,
-    ).toEqual([
-      expect.objectContaining({
-        appletId: applet.appletId,
-        generationId: "applet-g1",
-        ownerBotId: identity.botId,
-        sharedWithBotIds: [],
-      }),
-    ]);
-  });
-
   test("a Bot's enable map is its own", async () => {
     const userId = `user-${crypto.randomUUID()}`;
     const identity = { userId, botId: "bot-1" };
@@ -1290,7 +1215,6 @@ describe("the User-owned Composition", () => {
       command: {
         schemaVersion: 1,
         type: "user/set-features",
-        applets: false,
         pluginAuthoring: true,
       },
       updatedBy: "test",

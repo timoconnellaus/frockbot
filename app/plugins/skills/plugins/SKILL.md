@@ -69,6 +69,7 @@ Load one with `skill_load` — `{"path": "managed/plugins", "reference": "module
 - `providers.md` — `modelProviders` and `ctx.modelTransport`.
 - `triggers.md` — inbound deliveries and `routine_manage`.
 - `sections.md` — a settings.sections view on the Plugin's card.
+- `panels.md` — `conversation.panel` and `bot.nav`, and `panel_focus`.
 - `cards.md` — declaring a card, drawing it, approvals and actions.
 - `limits.md` — what you cannot do, and what a publish never is.
 - `troubleshooting.md` — check, publish, mount and health failures.

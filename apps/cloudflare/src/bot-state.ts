@@ -80,10 +80,6 @@ import {
   stopTaskForUser,
 } from "@frockbot/app/subagents/bot";
 import {
-  readFocusedApplet,
-  setFocusedApplet,
-} from "@frockbot/app/applets-host/bot";
-import {
   isolateConnection,
   isolateModelTransport,
   isolateAuthority,
@@ -206,11 +202,8 @@ import {
   decodeIsolateWorkspacePathV1,
   decodeIsolateWorkspaceWriteRequestV1,
   decodeNormalizedModelRequestV1,
-  appletSourceArtefactPathV1,
 } from "@frockbot/core/contracts";
 import type {
-  AppletBuildViewV1,
-  AppletSourceViewV1,
   NormalizedModelRequest,
   WorkspaceFilesV1,
   WorkspaceGenerationsV1,
@@ -218,12 +211,7 @@ import type {
   WorkspaceRootV1,
   WorkspaceSyncEffectsV1,
 } from "@frockbot/core/contracts";
-import {
-  APPLET_ID_V1,
-  APPLET_SOURCE_MAX_BYTES_V1,
-  APPLET_SOURCE_MAX_FILES_V1,
-  decodeWorkspacePathV1,
-} from "@frockbot/core/contracts";
+import { decodeWorkspacePathV1 } from "@frockbot/core/contracts";
 
 function hostedModelLimits(raw?: string) {
   const rates = Object.values(decodeModelRates(raw));
@@ -244,8 +232,6 @@ function hostedModelLimits(raw?: string) {
  * the ids that name it, restated here because the canvas's read is served from
  * the Bot Durable Object rather than from the Package's own module.
  */
-const APPLETS_SOURCE_PACKAGE_ID_V1 = "applets";
-const APPLETS_SOURCE_ROOT_ID_V1 = "source";
 
 /** Base64 without a Node Buffer: this object runs in workerd. */
 function bytesToBase64(bytes: Uint8Array): string {
@@ -327,7 +313,6 @@ import {
   decodeVoiceChatResultRpcV1,
   decodeVoiceCallTranscriptRpcV1,
   decodeRpcEnvelopeV1,
-  rpcAppletIdOrNull,
   rpcBoolean,
   rpcBotId,
   rpcDecoded,
@@ -336,6 +321,7 @@ import {
   rpcJsonSnapshotV1,
   rpcObject,
   rpcPattern,
+  rpcPluginIdOrNull,
   rpcString,
 } from "./durable-rpc.js";
 import { answeredEntryV1, loggedEntryV1 } from "./entry-boundary.js";
@@ -355,6 +341,12 @@ import {
   decodeSetBotPluginEnabledCommandV1,
 } from "@frockbot/app/plugins/page";
 import { executeBotPluginToolV1 } from "@frockbot/app/plugins/views-bot";
+import {
+  applyPanelFocusV1,
+  openFocusedPanelV1,
+  readFocusedPanelV1,
+} from "@frockbot/app/plugins/panels-bot";
+import { cleanBotAppletsV1 } from "./plugin-panels-cleanup.js";
 import {
   assembleBotThemeV1,
   themeAssembleDeadlineV1,
@@ -585,6 +577,7 @@ export class BotState
       await cleanHiddenBotNotifications(this.ctx.storage);
       await cleanBotAvatarTestState(this.ctx.storage);
       await cleanRetiredRoutineStateV1(this.ctx.storage);
+      await cleanBotAppletsV1(this.ctx.storage);
     });
     this.outboundFetch = dependencies.outboundFetch;
     const emailSender = createBindingEmailSenderV1(
@@ -1230,6 +1223,61 @@ export class BotState
     );
   }
 
+  /** The canvas's one read: this Bot's panel bag, doors, and focused page. */
+  async openFocusedPanel(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return openFocusedPanelV1(shell.state, identity);
+  }
+
+  async readFocusedPanel(input: unknown) {
+    const identity = decodeBotIdentityRpcV1(input);
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    const focus = await readFocusedPanelV1(shell.state.ctx.storage);
+    return (
+      focus ?? {
+        schemaVersion: 1,
+        pluginId: null,
+        changedAt: new Date(0).toISOString(),
+      }
+    );
+  }
+
+  async setFocusedPanel(input: unknown) {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      {
+        userId: rpcIdentifier,
+        botId: rpcBotId,
+        pluginId: rpcPluginIdOrNull,
+      },
+      {
+        surfaceId: rpcPattern(/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/, 128),
+      },
+    );
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return applyPanelFocusV1(shell.state, identity, {
+      pluginId: request.pluginId as string | null,
+      ...(typeof request.surfaceId === "string"
+        ? { surfaceId: request.surfaceId }
+        : {}),
+    });
+  }
+
   /**
    * Flips one switch for this Bot, fenced on the revision the page read. A
    * stale revision, a locked Plugin or an unavailable feature is a receipt,
@@ -1650,28 +1698,6 @@ export class BotState
     );
   }
 
-  /** The Session's focused Applet (plan §6). One per Session by decision D10. */
-  async readFocusedApplet(input: unknown) {
-    const identity = decodeBotIdentityRpcV1(input);
-    return readFocusedApplet((await this.contribution()).state, identity);
-  }
-
-  async setFocusedApplet(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-      appletId: rpcAppletIdOrNull,
-    });
-    return setFocusedApplet(
-      (await this.contribution()).state,
-      {
-        userId: request.userId as string,
-        botId: request.botId as string,
-      },
-      request.appletId as string | null,
-    );
-  }
-
   async resolveConfiguration(input: unknown) {
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
@@ -2008,99 +2034,6 @@ export class BotState
       size: outcome.file.generation.size,
       bytesBase64: bytesToBase64(outcome.file.bytes),
     };
-  }
-
-  /*
-   * An Applet's source, for the canvas's building state.
-   *
-   * The Workspace store is read and nothing else: the Applets Package's
-   * declared root is User-scoped, so this answers from object storage while
-   * the Computer is hibernated, exactly as the plan requires ("the store is
-   * read, never the Computer"). Text only and bounded, because this is a
-   * projection for a person watching a Bot write code, not a file transfer.
-   */
-  async readAppletSourceV1(input: unknown): Promise<AppletSourceViewV1> {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-      appletId: rpcPattern(APPLET_ID_V1, 129),
-    });
-    const identity = {
-      userId: request.userId as string,
-      botId: request.botId as string,
-    };
-    const { shell } = await this.materialized(identity);
-    await shell.validateIdentity(identity);
-    const appletId = request.appletId as string;
-    const files = this.backendEnv.WORKSPACE_FILES;
-    if (!files) return { appletId, files: [], truncated: false };
-    const root: WorkspaceRootV1 = {
-      kind: "package-declared",
-      userId: identity.userId,
-      packageId: APPLETS_SOURCE_PACKAGE_ID_V1,
-      rootId: APPLETS_SOURCE_ROOT_ID_V1,
-    };
-    const listing = await files.list({
-      root,
-      prefix: appletId,
-      limit: APPLET_SOURCE_MAX_FILES_V1,
-    });
-    if (listing.status !== "ok")
-      return { appletId, files: [], truncated: false };
-    const decoder = new TextDecoder("utf-8", { fatal: true });
-    const source: AppletSourceViewV1["files"] = [];
-    let bytes = 0;
-    let truncated = listing.cursor !== undefined;
-    for (const entry of listing.entries) {
-      const relative = entry.path.path.slice(appletId.length + 1);
-      if (!relative) continue;
-      // Machine output is not source: `dist/`, `.wrangler/` and
-      // `node_modules/` are build leftovers a Bot may have written, and the
-      // canvas shows the files it authors.
-      if (appletSourceArtefactPathV1(relative)) continue;
-      if (bytes + entry.generation.size > APPLET_SOURCE_MAX_BYTES_V1) {
-        truncated = true;
-        continue;
-      }
-      const outcome = await files.read(entry.path);
-      if (outcome.status !== "ok") continue;
-      let text: string;
-      try {
-        text = decoder.decode(outcome.file.bytes);
-      } catch {
-        // A binary artifact under the root is not source; the canvas says
-        // nothing about it rather than drawing mojibake.
-        continue;
-      }
-      bytes += outcome.file.generation.size;
-      source.push({
-        path: relative,
-        text,
-        generationId: outcome.file.generation.generationId,
-        changedAt: outcome.file.generation.writtenAt,
-      });
-    }
-    return { appletId, files: source, truncated };
-  }
-
-  /**
-   * The outcome the Bot last recorded for `applet_check`.
-   * Until the Applet authority records one, this is honestly `unknown` rather
-   * than a green tick nobody earned.
-   */
-  async readAppletBuildV1(input: unknown): Promise<AppletBuildViewV1> {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-      appletId: rpcPattern(APPLET_ID_V1, 129),
-    });
-    const identity = {
-      userId: request.userId as string,
-      botId: request.botId as string,
-    };
-    const { shell } = await this.materialized(identity);
-    await shell.validateIdentity(identity);
-    return { status: "unknown" };
   }
 
   async listSkills(input: unknown) {

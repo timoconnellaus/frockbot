@@ -54,7 +54,6 @@ describe("the first-party card mapping", () => {
     ]);
     expect(isFirstPartyCardMemberV1("text")).toBe(false);
     expect(isFirstPartyCardMemberV1("card")).toBe(false);
-    expect(isFirstPartyCardMemberV1("applet")).toBe(false);
     for (const member of FIRST_PARTY_CARD_MEMBERS_V1) {
       expect(isFirstPartyCardMemberV1(member)).toBe(true);
     }
@@ -63,7 +62,6 @@ describe("the first-party card mapping", () => {
   test("a payload that draws no card asks for no draw", async () => {
     for (const payload of [
       { type: "text", text: "hi" },
-      { type: "applet", appletId: "applet-1" },
     ] satisfies SendToUserPayloadV1[]) {
       expect(firstPartyCardDrawV1(payload)).toBeUndefined();
       const drawn: unknown[] = [];

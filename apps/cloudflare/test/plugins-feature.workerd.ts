@@ -34,7 +34,6 @@ async function setPluginAuthoring(
     command: {
       schemaVersion: 1,
       type: "user/set-features",
-      applets: false,
       pluginAuthoring,
     },
     updatedBy: "workerd-admin",

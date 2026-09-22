@@ -130,7 +130,6 @@ describe("the send payload codec", () => {
   test("round-trips every declared payload type", () => {
     const payloads: SendToUserPayloadV1[] = [
       { type: "text", text: "Booked." },
-      { type: "applet", appletId: "alice.todo" },
       {
         type: "attachment",
         url: "https://files.example/receipt.pdf",

@@ -650,7 +650,7 @@ export async function createRoutineThroughApi(
 async function setAccountFeatures(
   page: Page,
   userId: string,
-  features: { applets: boolean; pluginAuthoring?: boolean },
+  features: { pluginAuthoring?: boolean; plugins?: string[] },
 ): Promise<void> {
   const response = await page.request.post(
     `/api/debug/users/${encodeURIComponent(userId)}/features`,
@@ -662,20 +662,12 @@ async function setAccountFeatures(
   expect(response.status(), await response.text()).toBe(200);
 }
 
-/** Applets are off for every account until an administrator turns them on. */
-export function enableApplets(page: Page, userId: string): Promise<void> {
-  return setAccountFeatures(page, userId, { applets: true });
-}
-
-/** Plugin authoring, ADR 0026's master toggle. Applets stay off. */
+/** Plugin authoring, ADR 0026's master toggle. */
 export function enablePluginAuthoring(
   page: Page,
   userId: string,
 ): Promise<void> {
-  return setAccountFeatures(page, userId, {
-    applets: false,
-    pluginAuthoring: true,
-  });
+  return setAccountFeatures(page, userId, { pluginAuthoring: true });
 }
 
 /**

@@ -12,7 +12,7 @@ import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 
 import { bootedWithin } from "./boot.js";
 
-/** Pinned with the SDK: the runtime an Applet is checked against. */
+/** Pinned with the SDK: the runtime a Plugin build is checked against. */
 export const APPLET_COMPATIBILITY_DATE = "2026-08-27";
 
 /**

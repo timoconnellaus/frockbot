@@ -507,7 +507,7 @@ describe("beta access authority in workerd", () => {
     expect(await admin.readPolicy()).toEqual(before);
   });
 
-  test("an admin turns Applets on for an account without provisioning or admitting it", async () => {
+  test("an admin turns Plugin authoring on for an account without provisioning or admitting it", async () => {
     const guest = {
       userId: `guest-${crypto.randomUUID()}`,
       email: "guest@example.com",
@@ -521,7 +521,7 @@ describe("beta access authority in workerd", () => {
         user.userId,
         isUserFeaturesUnavailable(user.features)
           ? "unavailable"
-          : user.features.applets,
+          : user.features.pluginAuthoring,
       ]),
     ).toEqual([[guest.userId, false]]);
     // No access record and no sign-in: the list says so rather than guessing.
@@ -535,11 +535,15 @@ describe("beta access authority in workerd", () => {
     const enabled = await admin.setAccountFeatures({
       schemaVersion: 1,
       userId: guest.userId,
-      command: { schemaVersion: 1, type: "user/set-features", applets: true },
+      command: {
+        schemaVersion: 1,
+        type: "user/set-features",
+        pluginAuthoring: true,
+      },
       updatedBy: owner,
     });
-    expect(enabled).toMatchObject({ applets: true, updatedBy: owner });
-    expect((await readFeatures(guest.userId)).applets).toBe(true);
+    expect(enabled).toMatchObject({ pluginAuthoring: true, updatedBy: owner });
+    expect((await readFeatures(guest.userId)).pluginAuthoring).toBe(true);
     expect(await provisioned(guest.userId)).toBe(false);
   });
 
@@ -556,7 +560,7 @@ describe("beta access authority in workerd", () => {
     };
     await setFeatures(
       guest.userId,
-      { schemaVersion: 1, type: "user/set-features", applets: true },
+      { schemaVersion: 1, type: "user/set-features", pluginAuthoring: true },
       owner,
     );
     const admin = operations([wedged, guest], new Set([wedged.userId]));
@@ -567,7 +571,7 @@ describe("beta access authority in workerd", () => {
         user.userId,
         isUserFeaturesUnavailable(user.features)
           ? "unavailable"
-          : user.features.applets,
+          : user.features.pluginAuthoring,
       ]),
     ).toEqual([
       [wedged.userId, "unavailable"],

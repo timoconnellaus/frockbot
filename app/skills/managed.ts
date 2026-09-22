@@ -19,11 +19,6 @@ import type { LoadedSkillV1, SkillRefusalV1 } from "./catalog.js";
 import { loadArtifactSkillsV1 } from "./artifact.js";
 import { MANAGED_RECIPE_SKILLS_V1 } from "./managed-recipes.generated.js";
 import {
-  APPLETS_SKILL_DOCUMENT_V1,
-  APPLETS_SKILL_REFERENCES_V1,
-  APPLETS_SKILL_SLUG_V1,
-} from "./managed-applets.generated.js";
-import {
   PLUGINS_SKILL_DOCUMENT_V1,
   PLUGINS_SKILL_REFERENCES_V1,
   PLUGINS_SKILL_SLUG_V1,
@@ -37,7 +32,7 @@ import {
 // Re-exported because the generated modules they come from are not package
 // exports, and a caller outside this package needs the slugs to withhold them.
 // `a2ui` is not among them: it is offered to every Bot, so nothing withholds it.
-export { APPLETS_SKILL_SLUG_V1, PLUGINS_SKILL_SLUG_V1 };
+export { PLUGINS_SKILL_SLUG_V1 };
 
 /** The directory prefix a managed Skill is listed and loadable under. */
 export const MANAGED_SKILL_PATH_PREFIX = "managed";
@@ -63,11 +58,6 @@ export interface ManagedSkillDocumentV1 {
  */
 export const MANAGED_SKILL_DOCUMENTS_V1: readonly ManagedSkillDocumentV1[] = [
   ...MANAGED_RECIPE_SKILLS_V1,
-  {
-    slug: APPLETS_SKILL_SLUG_V1,
-    text: APPLETS_SKILL_DOCUMENT_V1,
-    references: APPLETS_SKILL_REFERENCES_V1,
-  },
   {
     slug: PLUGINS_SKILL_SLUG_V1,
     text: PLUGINS_SKILL_DOCUMENT_V1,

@@ -18,7 +18,6 @@ import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter/services.dart';
 
 import '../acceptance_metrics.dart';
-import '../applets/chat_card.dart';
 import '../cards/approvals.dart';
 import '../cards/chat_card.dart';
 import '../client/bot_sessions.dart';
@@ -673,10 +672,7 @@ class _ConversationViewState extends State<ConversationView> {
   }
 
   @override
-  Widget build(BuildContext context) => AppletChatScope(
-    api: session.api,
-    botId: session.botId,
-    child: CardChatScope(
+  Widget build(BuildContext context) => CardChatScope(
       api: session.api,
       botId: session.botId,
       invalidations: session.controller.invalidations,
@@ -716,7 +712,6 @@ class _ConversationViewState extends State<ConversationView> {
           dictationElapsed: widget.dictationElapsed,
         ),
       ),
-    ),
   );
 
   @override

@@ -64,20 +64,16 @@ const workerdBindings = {
   // mint the token a machine presents and forge one that must be
   // refused.
   MACHINE_TOKEN_SECRET: "workerd-machine-token-secret-0123456789ab",
-  // A leak canary: a Bot isolate — and an Applet facet — must never see
-  // a host binding.
+  // A leak canary: a Bot isolate must never see a host binding.
   SECRET_TOKEN: "host-only-secret",
   // The voice session's upstream, pointed at a stand-in. The object still
   // builds the URL and puts its key on it; `voice-assistant-probe.ts`
   // answers the open with one half of a `WebSocketPair`.
   VOICE_ASSISTANT_UPSTREAM_URL: "wss://voice-upstream.invalid/live",
   GEMINI_API_KEY: "workerd-gemini-key",
-  // The Applet viewer door's signing secret. Fixed, so a test can mint
-  // the token a page presents and forge one that must be refused.
-  APPLET_VIEWER_SECRET: "workerd-applet-viewer-secret-0123456789ab",
-  // The build service's token, so the Applet and Plugin hosts find a build
-  // service behind the `APPLET_BUILD` binding below rather than reporting the
-  // deployment as unable to build.
+  // The build service's token, so Plugin hosts find a build service behind
+  // the `APPLET_BUILD` binding rather than reporting the deployment unable
+  // to build.
   APPLET_BUILD_TOKEN: FAKE_APPLET_BUILD_TOKEN,
 };
 
@@ -104,9 +100,6 @@ export default defineConfig({
         compatibilityFlags: ["nodejs_compat"],
         workerLoaders: {
           BOT_PACKAGES: {},
-          // Applet server artifacts, mounted as a facet of the AppletState
-          // Durable Object.
-          APPLETS: {},
         },
         // The shared Computer host as the Durable Object sees it:
         // a service binding, decoding the real v1 protocol.
@@ -139,10 +132,6 @@ export default defineConfig({
           // live in this suite.
           USER_CONFIGURATIONS: {
             className: "UserConfiguration",
-            useSQLite: true,
-          },
-          APPLET_STATES: {
-            className: "AppletState",
             useSQLite: true,
           },
           DEPLOYMENT_POLICY: {

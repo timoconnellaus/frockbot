@@ -1,8 +1,4 @@
-import {
-  APPLET_ID_V1,
-  decodeSkillRefsV1,
-  type SkillRefV1,
-} from "@frockbot/core/contracts";
+import { decodeSkillRefsV1, type SkillRefV1 } from "@frockbot/core/contracts";
 import { decodeBotIdV1, isRpcIdentifier } from "@frockbot/core/configuration";
 import { decodeRunIdV1 } from "@frockbot/app/shell/backend-contracts";
 import {
@@ -128,19 +124,16 @@ export function rpcPattern(pattern: RegExp, maximum = 256): RpcValueDecoder {
   };
 }
 
-/**
- * An Applet id, or `null` to close the canvas. The one nullable identifier in
- * this file, because "no focused Applet" is a real value the Session holds.
- */
-export const rpcAppletIdOrNull: RpcValueDecoder = (value, label) => {
+/** A Plugin id, or `null` to close the conversation panel. */
+export const rpcPluginIdOrNull: RpcValueDecoder = (value, label) => {
   if (value === null) return null;
   if (
     typeof value !== "string" ||
     value.length === 0 ||
-    value.length > 129 ||
-    !APPLET_ID_V1.test(value)
+    value.length > 64 ||
+    !/^[a-z][a-z0-9-]{0,63}$/.test(value)
   ) {
-    throw new Error(`${label} must be an Applet id or null`);
+    throw new Error(`${label} must be a plugin id or null`);
   }
   return value;
 };

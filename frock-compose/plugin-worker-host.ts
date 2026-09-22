@@ -142,10 +142,15 @@ const OPEN_PLUGIN_GRANTS_V1: readonly PluginGrantV1[] = [
 ];
 
 /**
- * The slots this deployment draws. `settings.sections` renders on a Plugin's
- * card (ADR 0026 step 9); the other four wait on the surfaces that use them.
+ * The slots this deployment draws. `settings.sections` is the Plugin card;
+ * `conversation.panel` and `bot.nav` are the page beside the chat and its
+ * door (ADR 0034). The rest wait on the surfaces that use them.
  */
-const OPEN_PLUGIN_SLOTS_V1: readonly PluginSlotV1[] = ["settings.sections"];
+const OPEN_PLUGIN_SLOTS_V1: readonly PluginSlotV1[] = [
+  "settings.sections",
+  "conversation.panel",
+  "bot.nav",
+];
 
 const PLUGIN_WORKER_HEALTH_CACHE_LIMIT_V1 = 64;
 const pluginWorkerHealthCacheV1 = new WeakMap<

@@ -279,83 +279,6 @@ export interface UserBotStateBinding {
     botId: string;
     path: unknown;
   }): Promise<ClientWorkspaceFileV1>;
-  /**
-   * One Bot's Applets, and the two short-lived projections an open Applet
-   * needs. Each names the Bot acting (ADR 0027); they sit on this User-scoped
-   * binding because it is the only door the hosted application has to the
-   * User Durable Object.
-   */
-  deleteApplet(input: {
-    schemaVersion: 1;
-    botId: string;
-    appletId: string;
-  }): Promise<unknown>;
-  listApplets(input: { schemaVersion: 1; botId: string }): Promise<unknown>;
-  /** What archiving or deleting the Bot does to the Applets it owns. */
-  readBotAppletImpact(input: {
-    schemaVersion: 1;
-    botId: string;
-  }): Promise<unknown>;
-  mintAppletViewerToken(input: {
-    schemaVersion: 1;
-    botId: string;
-    appletId: string;
-  }): Promise<{
-    token: string;
-    expiresAt: string;
-    appletId: string;
-    generationId: string;
-  }>;
-  readAppletUi(input: {
-    schemaVersion: 1;
-    botId: string;
-    appletId: string;
-  }): Promise<{
-    appletId: string;
-    generationId: string;
-    contentHash: string;
-  }>;
-  /**
-   * The focused Applet, opened in one read: the directory, and for the focus
-   * the generation, UI artifact hash and a viewer token. The route composes
-   * the URLs from its own origin.
-   */
-  openFocusedApplet(input: { schemaVersion: 1; botId: string }): Promise<{
-    schemaVersion: 1;
-    applets: unknown[];
-    focused?: {
-      appletId: string;
-      generationId?: string;
-      uiHash?: string;
-      token?: string;
-      expiresAt?: string;
-    };
-  }>;
-  readFocusedApplet(input: {
-    schemaVersion: 1;
-    botId: string;
-  }): Promise<unknown>;
-  setFocusedApplet(input: {
-    schemaVersion: 1;
-    botId: string;
-    appletId: string | null;
-  }): Promise<unknown>;
-  /**
-   * An Applet's source, for the Applet canvas's building state. The root is
-   * User-scoped, but only the Applet's owner Bot may read it: a shared Bot is
-   * refused before the Durable Object holding the Workspace binding is asked.
-   */
-  readAppletSourceV1(input: {
-    schemaVersion: 1;
-    botId: string;
-    appletId: string;
-  }): Promise<import("@frockbot/core/contracts").AppletSourceViewV1>;
-  /** The outcome last recorded for `applet_check`. */
-  readAppletBuildV1(input: {
-    schemaVersion: 1;
-    botId: string;
-    appletId: string;
-  }): Promise<import("@frockbot/core/contracts").AppletBuildViewV1>;
   listNotifications(input: {
     schemaVersion: 1;
     botId: string;
@@ -714,6 +637,24 @@ export interface BotConfigurationBinding {
     botId: string;
     command: PluginToolCommandV1;
   }): Promise<BotPluginToolReceiptV1>;
+  openFocusedPanel(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+  }): Promise<import("@frockbot/app/plugins/panels-bot").PanelOpenViewV1>;
+  setFocusedPanel(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    pluginId: string | null;
+    surfaceId?: string;
+  }): Promise<
+    | {
+        status: "applied";
+        focus: import("@frockbot/core/durable").FocusedPanelV1;
+      }
+    | { status: "error"; failure: string }
+  >;
   listCompositionGenerations(request: {
     schemaVersion: 1;
     userId: string;
@@ -846,33 +787,6 @@ export interface GatewayDependencies {
   botStateFor(userId: string): UserBotStateBinding;
   userConfigurationFor(userId: string): UserConfigurationBinding;
   botConfigurationFor(userId: string, botId: string): BotConfigurationBinding;
-  /**
-   * The Applet viewer door. Both absent in a deployment without Applets, and
-   * `/api/applets/:id/socket` then reports itself unconfigured rather than the
-   * Worker failing to construct.
-   */
-  appletViewerSecret?: string;
-  admitAppletViewer?(
-    userId: string,
-  ): Promise<AccountAdmissionDecisionV1 | null>;
-  /**
-   * The Applet object's HTTP door, for the viewer socket: a 101 response and
-   * its WebSocket only cross the stub boundary over `fetch`.
-   */
-  appletStateFor?(
-    userId: string,
-    appletId: string,
-  ): { fetch(request: Request): Promise<Response> };
-  /**
-   * Whether the Bot a viewer token names may still open the Applet. Asked at
-   * every socket open, so an unshare, a transfer or the owner's archive
-   * reaches the next connection rather than waiting out the token.
-   */
-  appletAccessFor?(
-    userId: string,
-    botId: string,
-    appletId: string,
-  ): Promise<boolean>;
   /** Authenticated observer transport into the Bot Durable Object. */
   openBotStateChannel?(
     userId: string,

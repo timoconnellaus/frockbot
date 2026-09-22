@@ -6,10 +6,7 @@ import {
   type MachineResultDeliveryV1,
 } from "@frockbot/app/machine/delivery";
 import {
-  APPLET_ID_V1,
   decodePackageIframeToolCommandV1,
-  type AppletBuildViewV1,
-  type AppletSourceViewV1,
   type AuthIdentityCandidateV1,
   type AuthPackageIdentityStoreV1,
   type PackageIframeCompositionV1,
@@ -17,7 +14,6 @@ import {
 import { sha256HexV1 as sha256Hex } from "@frockbot/core/crypto";
 import type { ClientSkillCatalogV1 } from "@frockbot/app/shell/skill-protocol";
 import { createFoundationBackendContributions } from "@frockbot/app/runtime";
-import { FIRST_PARTY_PACKAGE_ARTIFACTS_V1 } from "@frockbot/applets/pages";
 import {
   decodeBotLifecycleDirectoryViewV1,
   decodeBotLifecycleReceiptV1,
@@ -189,7 +185,6 @@ import { voiceAssistantEdgeTimingOfV1 } from "@frockbot/app/voice/diagnostics";
 import type { VoiceGatewayDependencies } from "./contracts.js";
 import {
   decodeRpcEnvelopeV1,
-  rpcAppletIdOrNull,
   rpcBotId,
   rpcDecoded,
   rpcDecodedValue,
@@ -210,23 +205,8 @@ import { RoutineHookError } from "@frockbot/app/routines/hook";
 import type { ConnectTriggerOfferV1 } from "@frockbot/app/connect/triggers";
 import type { ConnectEventV1 } from "@frockbot/app/connect/events";
 
-import {
-  appletStateNameV1,
-  mintAppletViewerTokenV1,
-  APPLETS_UNAVAILABLE_MESSAGE_V1,
-  APPLET_VIEWER_TOKEN_TTL_MS,
-  APPLET_VIEWER_UNCONFIGURED_DETAIL_V1,
-} from "@frockbot/core/durable";
-import {
-  decodeAppletSummaryV1,
-  type AppletSummaryV1,
-} from "@frockbot/core/contracts";
-import type { AppletState } from "./applet-state.js";
 export { BotCapabilities } from "./bot-capabilities.js";
 export { PluginEgress } from "./plugin-egress.js";
-// The Applet authority: the Durable Object that owns one Applet instance,
-// and the loopback `CAPABILITIES` entrypoint its facet is handed.
-export { AppletCapabilities, AppletState } from "./applet-state.js";
 export { BotState, DeploymentPolicy, UserConfiguration };
 // Administration, reached only by the admin portal over a service binding
 // (ADR 0028). No route in this Worker answers for it.
@@ -247,21 +227,6 @@ interface Env {
   // `globalOutbound` disabled (plan Step 4). A separate loader namespace from
   // USER_APPLICATIONS so the two never share an identity.
   BOT_PACKAGES: BotPackageLoader;
-  /**
-   * Applet server artifacts, loaded from the Applet Durable Object and mounted
-   * as a facet. Its own loader namespace: a loader id keeps the `env` it was
-   * first loaded with, and an Applet's `env` is not a Bot Package's.
-   */
-  APPLETS: WorkerLoader;
-  /** One Durable Object per Applet instance, `idFromName("<userId>:<appletId>")`. */
-  APPLET_STATES: DurableObjectNamespace<AppletState>;
-  /**
-   * Signs the short-lived viewer token an open Applet's page presents. The
-   * page runs in a cookieless sandboxed iframe and can carry no credential, so
-   * this secret is the whole of the door. Absent closes it: a token is refused
-   * rather than minted under a signature nothing could verify.
-   */
-  APPLET_VIEWER_SECRET?: string;
   APPLICATION_ARTIFACTS: R2Bucket;
   UI_ARTIFACT_HOSTS?: string;
   MEMORY_FILES: R2Bucket;
@@ -304,12 +269,12 @@ interface Env {
   /** Shared secret presented on every Computer host call. */
   COMPUTER_HOST_TOKEN?: string;
   /**
-   * The Applet build service. It is handed source and returns artifacts; this
+   * The plugin build service. It is handed source and returns artifacts; this
    * Worker keeps the R2 write and the hash verification, so the builder holds
    * no authority of its own.
    */
   APPLET_BUILD: Fetcher;
-  /** Shared secret presented on every Applet build call. */
+  /** Shared secret presented on every plugin build call. */
   APPLET_BUILD_TOKEN?: string;
   /**
    * The identity store, on a build whose auth Package has one. The Access
@@ -359,25 +324,6 @@ interface Env {
    * and dictation tidy review. Absent, those choosers are unavailable.
    */
   JEV_API_KEY?: string;
-}
-
-/**
- * The deployment cannot sign Applet viewer tokens.
- *
- * The operator detail names the secret and goes to the Worker log; the thrown
- * message is the sentence a person reads, and carries no configuration.
- */
-function appletsUnconfigured(): Error {
-  console.error(APPLET_VIEWER_UNCONFIGURED_DETAIL_V1);
-  return new Error(APPLETS_UNAVAILABLE_MESSAGE_V1);
-}
-
-/** The summaries of a directory listing, decoded at this seam. */
-function appletsOf(listed: unknown): AppletSummaryV1[] {
-  const answer = rpcJsonSnapshotV1(listed) as { applets?: unknown };
-  return (Array.isArray(answer.applets) ? answer.applets : []).map((value) =>
-    decodeAppletSummaryV1(value),
-  );
 }
 
 /**
@@ -488,8 +434,6 @@ interface BotStateRpc extends BotConfigurationBinding {
   run(command: OwnedBotTurnCommand): Promise<BotTurnResult>;
   listRuns(query: ClientRunListQueryV1): Promise<ClientRunListV1>;
   debugSnapshot(query: BotDebugQueryV1): Promise<unknown>;
-  readFocusedApplet(input: unknown): Promise<unknown>;
-  setFocusedApplet(input: unknown): Promise<unknown>;
   lookupRun(query: ClientRunLookupQueryV1): Promise<ClientRunLookupV1>;
   fenceRunAdmission(query: ClientRunLookupQueryV1): Promise<ClientRunLookupV1>;
   listSkills(): Promise<ClientSkillCatalogV1>;
@@ -498,8 +442,6 @@ interface BotStateRpc extends BotConfigurationBinding {
     command: import("@frockbot/core/contracts").PackageIframeToolCommandV1,
   ): Promise<BotTurnResult>;
   readWorkspaceFileV1(path: unknown): Promise<ClientWorkspaceFileV1>;
-  readAppletSourceV1(appletId: string): Promise<AppletSourceViewV1>;
-  readAppletBuildV1(appletId: string): Promise<AppletBuildViewV1>;
   listNotifications(): Promise<BotNotificationIntent[]>;
   acknowledgeNotification(notificationId: string): Promise<void>;
   listApprovals(): Promise<ApprovalListViewV1>;
@@ -579,6 +521,8 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     readBotPluginsFrame: (request) => rpc.readBotPluginsFrame(request),
     setBotPluginEnabled: (request) => rpc.setBotPluginEnabled(request),
     executeBotPluginTool: (request) => rpc.executeBotPluginTool(request),
+    openFocusedPanel: (request) => rpc.openFocusedPanel(request),
+    setFocusedPanel: (request) => rpc.setFocusedPanel(request),
     listRoutines: (request) => rpc.listRoutines(request),
     readRoutinesFrame: (request) => rpc.readRoutinesFrame(request),
     listTasks: (request) => rpc.listTasks(request),
@@ -633,10 +577,6 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
       rpc.runPackageUiTool({ schemaVersion: 1, userId, botId, command }),
     readWorkspaceFileV1: (path) =>
       rpc.readWorkspaceFileV1({ schemaVersion: 1, userId, botId, path }),
-    readAppletSourceV1: (appletId) =>
-      rpc.readAppletSourceV1({ schemaVersion: 1, userId, botId, appletId }),
-    readAppletBuildV1: (appletId) =>
-      rpc.readAppletBuildV1({ schemaVersion: 1, userId, botId, appletId }),
     listNotifications: () =>
       rpc.listNotifications({ schemaVersion: 1, userId, botId }),
     listApprovals: () => rpc.listApprovals({ schemaVersion: 1, userId, botId }),
@@ -665,8 +605,6 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
       }),
     stopRun: (command) =>
       rpc.stopRun({ schemaVersion: 1, userId, botId, command }),
-    readFocusedApplet: (input) => rpc.readFocusedApplet(input),
-    setFocusedApplet: (input) => rpc.setFocusedApplet(input),
   };
 }
 
@@ -975,26 +913,6 @@ function userAuditStub(env: Env, userId: string): UserAuditRpc {
   return env.USER_CONFIGURATIONS.get(id) as unknown as UserAuditRpc;
 }
 
-/**
- * The User Durable Object's Applet directory, addressed by User and always
- * asked as one of that User's Bots (ADR 0027).
- */
-interface UserAppletDirectoryRpc {
-  listApplets(input: unknown): Promise<unknown>;
-  readApplet(input: unknown): Promise<unknown>;
-  deleteApplet(input: unknown): Promise<unknown>;
-  readBotAppletImpact(input: unknown): Promise<unknown>;
-}
-
-function userAppletDirectoryStub(
-  env: Env,
-  userId: string,
-): UserAppletDirectoryRpc {
-  const id = env.USER_CONFIGURATIONS.idFromName(userId);
-  // SAFETY: Wrangler binds USER_CONFIGURATIONS to UserConfiguration; workers-types cannot infer its generated Applet directory RPC surface.
-  return env.USER_CONFIGURATIONS.get(id) as unknown as UserAppletDirectoryRpc;
-}
-
 function userSearchStub(env: Env, userId: string): UserSearchRpc {
   const id = env.USER_CONFIGURATIONS.idFromName(userId);
   // SAFETY: Wrangler binds USER_CONFIGURATIONS to UserConfiguration; workers-types cannot infer its generated Search RPC surface.
@@ -1151,387 +1069,6 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     ).readWorkspaceFileV1(request.path);
   }
 
-  // --- Applets -------------------------------------------------------------
-  //
-  // A deployment with no `APPLET_VIEWER_SECRET` can sign nothing, so it says
-  // so once, honestly, in two places at once: a final sentence for the person
-  // whose Applet will not open, and the secret's name in the Worker log for
-  // whoever can fix it. The release now refuses to ship without the secret
-  // (`apps/cloudflare/src/production-secrets.ts`); this is what happens if it
-  // ever goes missing anyway.
-  //
-  // Every one of these acts as the Bot the route names: the directory answers
-  // only what that Bot owns or is shared, and a viewer token names that Bot
-  // (ADR 0027). They sit on the User-scoped entrypoint the hosted application
-  // already holds, because the application Worker reaches the User Durable
-  // Object only through here; it never gets a namespace of its own.
-
-  /**
-   * The account's Applets switch, as an administrator set it. Off is silence
-   * for every Applet route this entrypoint serves: the client never asks for
-   * them then, and a caller that does is told why in one sentence.
-   */
-  private async requireApplets(): Promise<void> {
-    const userId = this.ctx.props.userId;
-    const features = decodeUserFeaturesV1(
-      rpcJsonSnapshotV1(
-        await userFeaturesStub(this.env, userId).readFeatures({
-          schemaVersion: 1,
-          userId,
-        }),
-      ),
-    );
-    if (!features.applets) {
-      throw new Error("Applets are not turned on for this account");
-    }
-  }
-
-  /** The owner Bot's deletion; a shared Bot is refused by the directory. */
-  async deleteApplet(input: unknown): Promise<unknown> {
-    const request = decodeRpcEnvelopeV1(input, {
-      botId: rpcBotId,
-      appletId: rpcString(129),
-    });
-    const userId = this.ctx.props.userId;
-    await this.requireApplets();
-    return rpcJsonSnapshotV1(
-      await userAppletDirectoryStub(this.env, userId).deleteApplet({
-        schemaVersion: 1,
-        userId,
-        botId: request.botId,
-        appletId: request.appletId,
-      }),
-    );
-  }
-
-  /** The Applets one Bot owns or is shared. */
-  async listApplets(input: unknown): Promise<unknown> {
-    const request = decodeRpcEnvelopeV1(input, { botId: rpcBotId });
-    const userId = this.ctx.props.userId;
-    await this.requireApplets();
-    return rpcJsonSnapshotV1(
-      await userAppletDirectoryStub(this.env, userId).listApplets({
-        schemaVersion: 1,
-        userId,
-        botId: request.botId,
-      }),
-    );
-  }
-
-  /**
-   * What archiving or deleting a Bot does to the Applets it owns. Not behind
-   * the Applets switch: an account whose feature is off still holds its
-   * Applets, and deleting its Bots still deletes them.
-   */
-  async readBotAppletImpact(input: unknown): Promise<unknown> {
-    const request = decodeRpcEnvelopeV1(input, { botId: rpcBotId });
-    const userId = this.ctx.props.userId;
-    return rpcJsonSnapshotV1(
-      await userAppletDirectoryStub(this.env, userId).readBotAppletImpact({
-        schemaVersion: 1,
-        userId,
-        botId: request.botId,
-      }),
-    );
-  }
-
-  /**
-   * A short-lived viewer token for one Applet, minted only for a Bot of the
-   * User this entrypoint is scoped to that may open it, and only against the
-   * Applet's *current* generation.
-   *
-   * The Applet's page runs in a cookieless sandboxed iframe and can carry no
-   * credential, so this is the whole of its authority — and it names the User,
-   * the Bot, the Applet, and the generation, for fifteen minutes.
-   */
-  async mintAppletViewerToken(input: unknown): Promise<{
-    token: string;
-    expiresAt: string;
-    appletId: string;
-    generationId: string;
-  }> {
-    const request = decodeRpcEnvelopeV1(input, {
-      botId: rpcBotId,
-      appletId: rpcString(129),
-    });
-    const userId = this.ctx.props.userId;
-    const botId = request.botId as string;
-    const appletId = request.appletId as string;
-    await this.requireApplets();
-    const secret = this.env.APPLET_VIEWER_SECRET;
-    if (!secret) throw appletsUnconfigured();
-    const state = await this.appletCurrentGeneration(userId, botId, appletId);
-    const minted = await this.mintViewerToken(secret, {
-      userId,
-      botId,
-      appletId,
-      generationId: state.generationId,
-    });
-    return { ...minted, appletId, generationId: state.generationId };
-  }
-
-  /** The current generation's UI artifact, for a Bot that may open it. */
-  async readAppletUi(input: unknown): Promise<{
-    appletId: string;
-    generationId: string;
-    contentHash: string;
-  }> {
-    const request = decodeRpcEnvelopeV1(input, {
-      botId: rpcBotId,
-      appletId: rpcString(129),
-    });
-    const userId = this.ctx.props.userId;
-    const appletId = request.appletId as string;
-    await this.requireApplets();
-    const state = await this.appletCurrentGeneration(
-      userId,
-      request.botId as string,
-      appletId,
-    );
-    return {
-      appletId,
-      generationId: state.generationId,
-      contentHash: state.uiContentHash,
-    };
-  }
-
-  /**
-   * The focused Applet, opened: the directory, the focus, and for the focused
-   * Applet the generation, the UI artifact and a viewer token — one answer,
-   * where the canvas used to make seven requests in series.
-   *
-   * The directory and the focus are two Durable Objects and are read in
-   * parallel; the generation is one `AppletState.open` read; the token is
-   * signed here. The route composes the URLs, because they are the request's
-   * origin and not this entrypoint's to know.
-   */
-  async openFocusedApplet(input: unknown): Promise<{
-    schemaVersion: 1;
-    applets: unknown[];
-    focused?: {
-      appletId: string;
-      generationId?: string;
-      uiHash?: string;
-      token?: string;
-      expiresAt?: string;
-    };
-  }> {
-    const request = decodeRpcEnvelopeV1(input, { botId: rpcBotId });
-    const userId = this.ctx.props.userId;
-    const botId = request.botId as string;
-    await this.requireApplets();
-    const directory = userAppletDirectoryStub(this.env, userId);
-    const [listed, focus] = await Promise.all([
-      directory.listApplets({ schemaVersion: 1, userId, botId }),
-      botStateStub(this.env, userId, botId).readFocusedApplet({
-        schemaVersion: 1,
-        userId,
-        botId,
-      }),
-    ]);
-    let applets = appletsOf(listed);
-    const focusedId = (rpcJsonSnapshotV1(focus) as { appletId?: unknown })
-      .appletId;
-    if (typeof focusedId !== "string") return { schemaVersion: 1, applets };
-    let entry = applets.find((applet) => applet.appletId === focusedId);
-    if (!entry) {
-      // The listing was read beside the focus, so an Applet the Turn created
-      // and focused in between cannot be in it. The focus read already clears
-      // a focus its own directory read no longer lists, so a focus this
-      // listing has never heard of is a stale listing rather than a stale
-      // focus: list once more.
-      applets = appletsOf(
-        await directory.listApplets({ schemaVersion: 1, userId, botId }),
-      );
-      entry = applets.find((applet) => applet.appletId === focusedId);
-      if (!entry) return { schemaVersion: 1, applets };
-    }
-    if (!entry.currentGenerationId) {
-      return { schemaVersion: 1, applets, focused: { appletId: focusedId } };
-    }
-    const state = await this.appletOpenState(userId, focusedId);
-    if (!state) {
-      return { schemaVersion: 1, applets, focused: { appletId: focusedId } };
-    }
-    const secret = this.env.APPLET_VIEWER_SECRET;
-    if (!secret) throw appletsUnconfigured();
-    const minted = await this.mintViewerToken(secret, {
-      userId,
-      botId,
-      appletId: focusedId,
-      generationId: state.generationId,
-    });
-    return {
-      schemaVersion: 1,
-      applets,
-      focused: {
-        appletId: focusedId,
-        generationId: state.generationId,
-        uiHash: state.uiContentHash,
-        token: minted.token,
-        expiresAt: minted.expiresAt,
-      },
-    };
-  }
-
-  private async mintViewerToken(
-    secret: string,
-    claims: {
-      userId: string;
-      botId: string;
-      appletId: string;
-      generationId: string;
-    },
-  ): Promise<{ token: string; expiresAt: string }> {
-    const expiresAt = new Date(Date.now() + APPLET_VIEWER_TOKEN_TTL_MS);
-    return {
-      token: await mintAppletViewerTokenV1(secret, {
-        u: claims.userId,
-        b: claims.botId,
-        a: claims.appletId,
-        g: claims.generationId,
-        exp: Math.floor(expiresAt.getTime() / 1_000),
-      }),
-      expiresAt: expiresAt.toISOString(),
-    };
-  }
-
-  /** The current generation, or nothing while none is active. One DO read. */
-  private async appletOpenState(
-    userId: string,
-    appletId: string,
-  ): Promise<{ generationId: string; uiContentHash: string } | undefined> {
-    const namespace = this.env.APPLET_STATES;
-    // `warm`: the facet comes up behind this answer, so the socket the page
-    // opens next finds the isolate and its schema already there.
-    const opened = rpcJsonSnapshotV1(
-      await namespace
-        .get(namespace.idFromName(appletStateNameV1(userId, appletId)))
-        .open({ schemaVersion: 1, userId, appletId, warm: true }),
-    ) as { current?: { generationId?: unknown; uiHash?: unknown } };
-    const generationId = opened.current?.generationId;
-    const uiContentHash = opened.current?.uiHash;
-    if (typeof generationId !== "string" || typeof uiContentHash !== "string")
-      return undefined;
-    return { generationId, uiContentHash };
-  }
-
-  /**
-   * The current generation of one Applet, for the two single-Applet routes.
-   * One directory entry and one `AppletState.open` read; an Applet with
-   * nothing active is a settled 404 to the caller.
-   */
-  private async appletCurrentGeneration(
-    userId: string,
-    botId: string,
-    appletId: string,
-  ): Promise<{ generationId: string; uiContentHash: string }> {
-    const directory = decodeAppletSummaryV1(
-      await this.requireAppletSummary(userId, botId, appletId),
-    );
-    if (directory.status === "deleted" || !directory.currentGenerationId) {
-      throw new Error(`Applet "${appletId}" has no active generation`);
-    }
-    const state = await this.appletOpenState(userId, appletId);
-    if (!state) {
-      throw new Error(`Applet "${appletId}" has no active generation`);
-    }
-    return state;
-  }
-
-  /**
-   * One Applet as the Bot sees it, or the directory's settled refusal. With
-   * `owner`, a shared Bot is refused as `AppletNotOwnerError`.
-   */
-  private async requireAppletSummary(
-    userId: string,
-    botId: string,
-    appletId: string,
-    options: { owner?: boolean } = {},
-  ): Promise<unknown> {
-    return rpcJsonSnapshotV1(
-      await userAppletDirectoryStub(this.env, userId).readApplet({
-        schemaVersion: 1,
-        userId,
-        botId,
-        appletId,
-        ...(options.owner ? { owner: true } : {}),
-      }),
-    );
-  }
-
-  async readFocusedApplet(input: unknown): Promise<unknown> {
-    const request = decodeRpcEnvelopeV1(input, { botId: rpcBotId });
-    const userId = this.ctx.props.userId;
-    await this.requireApplets();
-    const botId = request.botId as string;
-    return rpcJsonSnapshotV1(
-      await botStateStub(this.env, userId, botId).readFocusedApplet({
-        schemaVersion: 1,
-        userId,
-        botId,
-      }),
-    );
-  }
-
-  async setFocusedApplet(input: unknown): Promise<unknown> {
-    const request = decodeRpcEnvelopeV1(input, {
-      botId: rpcBotId,
-      appletId: rpcAppletIdOrNull,
-    });
-    const userId = this.ctx.props.userId;
-    await this.requireApplets();
-    const botId = request.botId as string;
-    return rpcJsonSnapshotV1(
-      await botStateStub(this.env, userId, botId).setFocusedApplet({
-        schemaVersion: 1,
-        userId,
-        botId,
-        appletId: request.appletId as string | null,
-      }),
-    );
-  }
-
-  /** An Applet's source, for its owner Bot only. */
-  async readAppletSourceV1(input: unknown): Promise<AppletSourceViewV1> {
-    const request = decodeRpcEnvelopeV1(input, {
-      botId: rpcBotId,
-      appletId: rpcPattern(APPLET_ID_V1, 129),
-    });
-    await this.requireApplets();
-    await this.requireAppletSummary(
-      this.ctx.props.userId,
-      request.botId as string,
-      request.appletId as string,
-      { owner: true },
-    );
-    return botStateStub(
-      this.env,
-      this.ctx.props.userId,
-      request.botId as string,
-    ).readAppletSourceV1(request.appletId as string);
-  }
-
-  /** An Applet's last build, for its owner Bot only. */
-  async readAppletBuildV1(input: unknown): Promise<AppletBuildViewV1> {
-    const request = decodeRpcEnvelopeV1(input, {
-      botId: rpcBotId,
-      appletId: rpcPattern(APPLET_ID_V1, 129),
-    });
-    await this.requireApplets();
-    await this.requireAppletSummary(
-      this.ctx.props.userId,
-      request.botId as string,
-      request.appletId as string,
-      { owner: true },
-    );
-    return botStateStub(
-      this.env,
-      this.ctx.props.userId,
-      request.botId as string,
-    ).readAppletBuildV1(request.appletId as string);
-  }
-
   async listNotifications(input: unknown): Promise<BotNotificationIntent[]> {
     const request = decodeRpcEnvelopeV1(input, { botId: rpcBotId });
     return botStateStub(
@@ -1684,9 +1221,8 @@ class R2ApplicationArtifacts
   ): Promise<string | undefined> {
     const key = packageUiArtifactKey(contentHash);
     const object = await this.bucket.get(key);
-    const html = object
-      ? await object.text()
-      : FIRST_PARTY_PACKAGE_ARTIFACTS_V1.get(key);
+    if (!object) return undefined;
+    const html = await object.text();
     if (html === undefined) return undefined;
     if ((await sha256Hex(html)) !== contentHash) {
       throw new Error(
@@ -2754,34 +2290,6 @@ export default {
             userConfigurationStub(env, userId),
           botConfigurationFor: (userId, botId): BotConfigurationBinding =>
             botStateStub(env, userId, botId),
-          ...(env.APPLET_VIEWER_SECRET
-            ? { appletViewerSecret: env.APPLET_VIEWER_SECRET }
-            : {}),
-          admitAppletViewer: (userId) => checkStoredAccount(env, userId),
-          appletStateFor: (userId, appletId) =>
-            env.APPLET_STATES.get(
-              env.APPLET_STATES.idFromName(appletStateNameV1(userId, appletId)),
-            ),
-          appletAccessFor: async (userId, botId, appletId) => {
-            try {
-              await userAppletDirectoryStub(env, userId).readApplet({
-                schemaVersion: 1,
-                userId,
-                botId,
-                appletId,
-              });
-              return true;
-            } catch (error) {
-              // Only the directory's settled "no access" closes the door; a
-              // blip is thrown so the socket fails as retryable, not as gone.
-              if (
-                error instanceof Error &&
-                error.name === "AppletUnavailableError"
-              )
-                return false;
-              throw error;
-            }
-          },
           openBotStateChannel: (userId, botId, request, context) =>
             openOwnedBotStateChannel(env, userId, botId, request, context),
           voice: voiceGatewayDependencies(env),

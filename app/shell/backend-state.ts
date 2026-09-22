@@ -19,7 +19,6 @@ import {
   createBotSubagentDurableBindingV1,
   type SubagentDurableBindingV1,
 } from "@frockbot/app/subagents/durable-binding";
-import type { AppletInstanceNamespaceV1 } from "@frockbot/app/applets-host/records";
 import { PluginModelDispatchRegistryV1 } from "@frockbot/app/isolates/model-dispatch";
 import type { ShellMountedComposition } from "./backend-composition.js";
 import { storedRunCodecV1 } from "./backend-contracts.js";
@@ -60,13 +59,6 @@ export interface BotStateEnv {
    * so on its face rather than failing when a person presses Send.
    */
   EMAIL_SENDER?: EmailSenderV1;
-  /**
-   * One Applet Durable Object per Applet instance. Optional so a host without
-   * Applets still compiles; a Composition generation carrying an Applet member
-   * then fails verification, exactly as an isolate member does without a
-   * loader.
-   */
-  APPLET_STATES?: AppletInstanceNamespaceV1;
   /** Optional in local and workerd hosts, which have no Vectorize simulator. */
   MEMORY_INDEX?: VectorizeIndex;
   /** The native AI binding consumed through the image Package adapter. */

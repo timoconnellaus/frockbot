@@ -12,7 +12,6 @@ import { BOT_ISOLATE_HOOK_EVENTS_V1 } from "../core/contracts/loop-events.ts";
 import { PLUGIN_GRANTS_V1 } from "../core/contracts/plugin-descriptor.ts";
 import { parseSkillDocumentV1 } from "../app/skills/skill-md.ts";
 import {
-  APPLET_TOOL_NAMES_V1,
   FORBIDDEN_MANAGED_SKILL_SLUGS_V1,
   FORBIDDEN_SKILL_TOKENS_V1,
   MANAGED_SKILL_AUTHORSHIPS_V1,
@@ -96,8 +95,6 @@ function requiredTokensFor(slug: string): readonly string[] {
       return ["cannot import"];
     case "write-skill":
       return ["skill_write", "skill_load", "reference"];
-    case "applets":
-      return APPLET_TOOL_NAMES_V1;
     case "plugins":
       return [
         ...PLUGIN_AUTHORING_TOOL_NAMES_V1,

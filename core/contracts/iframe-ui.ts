@@ -1,9 +1,7 @@
-import {
-  APPLET_ID_V1,
-  type AppletBuildViewV1,
-  type AppletSummaryV1,
-} from "./applets.js";
 import { exactKeysV1, recordV1 } from "./records.js";
+
+/** An id shape the iframe focus message still accepts. */
+const APPLET_ID_V1 = /^[a-zA-Z0-9][a-zA-Z0-9_-]{0,95}\.[a-z0-9-]{1,64}$/;
 
 /** Versioned, deliberately tiny postMessage seam for sandboxed Package pages. */
 export const PACKAGE_IFRAME_BRIDGE_VERSION = 2 as const;
@@ -73,34 +71,8 @@ export type PackageIframePageMessageV2 =
     };
 
 /** The tool a Package declares before its pages may change the focused Applet. */
+/** Kept for the iframe bridge constant; now a no-op since Applets are deleted. */
 export const PACKAGE_IFRAME_FOCUS_TOOL_V2 = "applet_focus";
-
-/** The host state name that carries the Applets feed to a v2 page. */
-export const PACKAGE_IFRAME_APPLETS_STATE_V2 = "applets";
-
-/**
- * What a v2 page receives on the `applets` state.
- *
- * The viewer credential is short-lived and scoped to one Applet generation, so
- * a page holding one past its expiry reconnects; nothing here is durable
- * state, and nothing here is an authority.
- */
-export interface PackageIframeAppletsStateV2 {
-  focused: AppletSummaryV1 | null;
-  list: AppletSummaryV1[];
-  viewer: {
-    token: string;
-    socketUrl: string;
-    uiUrl: string;
-    generationId: string;
-  } | null;
-  /**
-   * The last check or build outcome. The source itself is not on the feed:
-   * the shell renders the code view natively, and a source tree is far larger
-   * than the 64 KB a bridge message may carry.
-   */
-  build?: AppletBuildViewV1;
-}
 
 /** The only entry slot in this slice. */
 export const PACKAGE_IFRAME_ENTRY_SLOT_V1 = "frockbot.sidebar-actions";

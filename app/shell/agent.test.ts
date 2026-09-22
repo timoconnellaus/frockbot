@@ -469,7 +469,6 @@ describe("the conversation prompt section", () => {
     const samples: Record<SendToUserPayloadV1["type"], SendToUserPayloadV1> = {
       text: { type: "text", text: "Booked." },
       attachment: { type: "attachment", url: "https://files.test/a.pdf" },
-      applet: { type: "applet", appletId: "user-1.todo" },
       widget: {
         type: "widget",
         widget: { prompt: "Which one?", options: ["Tuesday"] },

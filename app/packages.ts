@@ -11,7 +11,6 @@ import {
   type PackageDefinitionV1,
 } from "@frockbot/core/contracts";
 import { adminDefinitionV1 } from "@frockbot/app/admin/definition";
-import { appletsDefinitionV1 } from "@frockbot/applets/definition";
 import { auditDefinitionV1 } from "@frockbot/app/audit/definition";
 import { authDefinitionV1 } from "@frockbot/app/auth/definition";
 import { botTemplateDefinitionV1 } from "@frockbot/app/bot-template/definition";
@@ -76,7 +75,6 @@ export const FOUNDATION_PACKAGE_CATALOG_V1 = indexPackageCatalogV1(
     userMachineDefinitionV1,
     machineMessagesDefinitionV1,
     subagentsDefinitionV1,
-    appletsDefinitionV1,
   ] satisfies readonly PackageDefinitionV1[],
   ({ id }) => ({ packageId: id }),
 );
