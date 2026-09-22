@@ -2905,11 +2905,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                           padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
                           child: Row(
                             children: [
+                              // Unlabeled on purpose. An image label on this face merges
+                              // into the profile-name node, and the person's name
+                              // stops being text.
                               PersonAvatar(
                                 name: profileName ?? '',
                                 imageUrl: profileImageUrl,
                                 size: 44,
-                                semanticsLabel: 'You',
                               ),
                               const SizedBox(width: 14),
                               Expanded(
@@ -3221,12 +3223,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     });
   }
 
-  /// The saved profile name, falling back to the account this session holds.
-  /// A name is a courtesy: a read that fails leaves the page usable.
+  /// The saved profile name, read again so a save on Settings shows up here.
+  ///
+  /// The shell already holds a name from startup. Returning that cache left
+  /// the You page on the name from before the save. A read that fails leaves
+  /// the page usable.
   Future<String> _displayName() async {
-    if (profileName != null && profileName!.trim().isNotEmpty) {
-      return profileName!;
-    }
     await _loadProfile();
     return profileName ?? widget.userId;
   }
