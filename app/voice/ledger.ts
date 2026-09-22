@@ -22,6 +22,7 @@ import {
   VOICE_ASSISTANT_REJOIN_WINDOW_MS_V1,
 } from "./shared.js";
 import { sha256HexTextV1 } from "@frockbot/core/crypto";
+import { putVoiceWorkV1 } from "./recovery.js";
 
 /** The key-value surface a Durable Object's storage already offers. */
 export interface VoiceLedgerStorageV1 {
@@ -35,6 +36,13 @@ export interface VoiceLedgerStorageV1 {
     reverse?: boolean;
     limit?: number;
   }): Promise<Map<string, T>>;
+  /**
+   * Atomic read-modify-write. A throw rolls the attempt back. Hosts without
+   * a transaction run the body on themselves; tests must implement rollback.
+   */
+  transaction?<T>(
+    run: (storage: VoiceLedgerStorageV1) => Promise<T>,
+  ): Promise<T>;
 }
 
 export const VOICE_CALL_KEY_V1 = "voice:call:current";
@@ -612,6 +620,17 @@ export class VoiceLedgerV1 {
       ...meter,
       delegations: meter.delegations + 1,
     });
+    await putVoiceWorkV1(this.storage, {
+      schemaVersion: 1,
+      kind: "delegation",
+      id: runId,
+      ref: delegationKey(runId),
+      callId: turn.callId,
+      botId: input.botId,
+      state: "pending",
+      nextAt: input.at.getTime(),
+      attempts: 0,
+    });
     return { status: "admitted", delegation };
   }
 
@@ -1091,6 +1110,32 @@ export function createMemoryVoiceLedgerStorageV1(): VoiceLedgerStorageV1 & {
       entries.set(key, structuredClone(value));
     },
     delete: async (key) => entries.delete(key),
+    transaction: async <T>(
+      run: (storage: VoiceLedgerStorageV1) => Promise<T>,
+    ) => {
+      const snapshot = new Map(
+        [...entries].map(
+          ([key, value]) => [key, structuredClone(value)] as const,
+        ),
+      );
+      const view = createMemoryVoiceLedgerStorageV1();
+      for (const [key, value] of entries) view.entries.set(key, value);
+      const commit = () => {
+        entries.clear();
+        for (const [key, value] of view.entries) {
+          entries.set(key, structuredClone(value));
+        }
+      };
+      try {
+        const result = await run(view);
+        commit();
+        return result;
+      } catch (error) {
+        entries.clear();
+        for (const [key, value] of snapshot) entries.set(key, value);
+        throw error;
+      }
+    },
     list: async <T>(options: {
       prefix: string;
       start?: string;

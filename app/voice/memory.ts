@@ -48,6 +48,11 @@
 import { refuseMemorySecretV1 } from "@frockbot/app/memory/secrets";
 import { canonicalJson } from "@frockbot/core/contracts";
 import type { VoiceLedgerStorageV1 } from "./ledger.js";
+import {
+  VOICE_ACTIVATION_KEY_V1,
+  voiceActiveKeyV1,
+  type VoiceActiveWorkV1,
+} from "./recovery.js";
 
 export const VOICE_MEMORY_RECORD_KEY_V1 = "voice:memory:record";
 export const VOICE_MEMORY_JOB_PREFIX_V1 = "voice:memory:job:";
@@ -1596,6 +1601,20 @@ async function rememberJob(
   next: VoiceMemoryJobV1,
 ): Promise<void> {
   await storage.put(jobKey(next.callId), next);
+  if (next.state === "spending") {
+    const activation =
+      (await storage.get<string>(VOICE_ACTIVATION_KEY_V1)) ?? "unactivated";
+    await storage.put(voiceActiveKeyV1("memory", next.callId), {
+      schemaVersion: 1,
+      kind: "memory",
+      id: next.callId,
+      callId: next.callId,
+      requestId: next.callId,
+      activation,
+    } satisfies VoiceActiveWorkV1);
+  } else if (previous?.state === "spending") {
+    await storage.delete(voiceActiveKeyV1("memory", next.callId));
+  }
   if (previous) {
     await storage.delete(jobDueKey(previous));
     if (previous.state !== "applied" && next.state === "applied") {
