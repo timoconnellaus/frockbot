@@ -10,8 +10,9 @@ patch:   `shorebird patch android` against the baseline's exact version+build, s
          Shorebird found native or asset differences: only a full release can carry that change.
 promote: move a patch to the stable track.
 publish: publish an already-built APK for download.  serve/setup: the download server.
-export-apk: write the current enabling Shorebird APK, re-signed with the phone's key.
-         Does not cut a release: a new one on every tag would move the patch target off the phone.
+export-apk: write the newest active Shorebird APK, re-signed with the phone's key.
+         A tag whose patch exits 3 cuts `release` in the pipeline and uploads those
+         bytes itself. `export-apk` is the sideload for every other tag.
 
 The Shorebird CLI comes from NATIVE_SHOREBIRD or PATH. There is no stock Flutter fallback: a stock
 build carries no patch key, so it could never be patched.
@@ -109,8 +110,27 @@ def stream(args, **kwargs):
     return process.returncode, "".join(lines)
 
 
+def android_sdk():
+    """The SDK whose build-tools inspect and re-sign an APK.
+
+    An explicit `ANDROID_HOME` or `ANDROID_SDK_ROOT` wins. Otherwise use the
+    `sdk.dir` the Flutter build wrote: a Shorebird release on a runner with no
+    preinstalled SDK leaves `aapt` and `apksigner` there, and pointing
+    `ANDROID_HOME` at a partial SDK beforehand would make that build fail.
+    """
+    explicit = os.environ.get("ANDROID_HOME") or os.environ.get("ANDROID_SDK_ROOT")
+    if explicit:
+        return Path(explicit)
+    local = NATIVE / "android" / "local.properties"
+    if local.is_file():
+        match = re.search(r"^sdk\.dir=(.*)$", local.read_text(), re.M)
+        if match and match[1].strip():
+            return Path(match[1].strip())
+    return Path.home() / "Library/Android/sdk"
+
+
 def build_tool(name):
-    sdk = Path(os.environ.get("ANDROID_HOME", Path.home() / "Library/Android/sdk"))
+    sdk = android_sdk()
     versions = [d for d in (sdk / "build-tools").glob("*") if (d / name).is_file()]
     if not versions:
         raise RuntimeError(f"No Android build-tools {name} under {sdk}. Install the Android SDK build-tools "
@@ -250,9 +270,10 @@ def release_code(release):
 def service_baseline(cli):
     """The newest active Android release Shorebird has for this app, in the shape `baseline.json` uses.
 
-    The pipeline has no state directory: the release that was installed once as the enabling APK
-    is, by the rules in apps/native/README.md, the newest one uploaded. What the service cannot say
-    is which public key that release carries, so the key-pair check below is the only key check here.
+    The pipeline has no state directory. The release it last cut — the patch baseline, or a full
+    release when a patch could not carry the diff — is the newest active one. What the service
+    cannot say is which public key that release carries, so the key-pair check below is the only
+    key check here.
     """
     expected = app_id()
     releases = [release for release in shorebird_json(cli, ["releases", "list"])["releases"]
@@ -310,9 +331,9 @@ def sign_apk(apk, keystore):
 def export_apk(destination):
     """Write the newest active Shorebird release's APK to `destination`.
 
-    The bytes are that release, not a new one. Cutting `shorebird release` from
-    the tag pipeline would make the next patch target an APK the phone does not
-    have installed.
+    The bytes are that release. A tag that had to cut a full release uploads
+    the APK that release just built; this path is the sideload for a tag that
+    patched, or left the client unchanged.
     """
     keystore = keystore_path()
     cli = shorebird_cli()
@@ -502,7 +523,7 @@ def patch(track="staging", baseline_source="local", result=None):
             # The CLI stops before uploading anything, so there is no upload to reconcile.
             pending.unlink()
             raise FullReleaseRequired(f"Shorebird found changes a patch cannot carry against {base['releaseVersion']}. "
-                                      "Cut a full release (`bun run native:release`) and install it once on the phone.")
+                                      "A full release carries them.")
         raise subprocess.CalledProcessError(status, args)
     record = {"track": track, "createdAt": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
               "number": patch_number(cli, base["releaseVersion"]), "patchArgs": args[1:], **source()}
