@@ -173,15 +173,10 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                   _chromeInset(
                     identified(
                       ShellIds.sidebarToggle,
-                      _ChromePill(
-                        tooltip: 'Your Bots',
-                        onPressed: onBack,
-                        size: _glyphTarget,
-                        child: Icon(
-                          Icons.arrow_back_rounded,
-                          size: chatIconSize,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
+                      _iconButton(
+                        'Your Bots',
+                        Icon(Icons.arrow_back_rounded, size: chatIconSize),
+                        onBack,
                       ),
                     ),
                   ),
@@ -233,17 +228,11 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                   _chromeInset(
                     identified(
                       ShellIds.rightPanelToggle,
-                      phone
-                          ? _glyphPill(
-                              panelShown ? 'Hide the panel' : 'Show the panel',
-                              ChatIconKind.panel,
-                              onTogglePanel,
-                            )
-                          : _glyphButton(
-                              panelShown ? 'Hide the panel' : 'Show the panel',
-                              ChatIconKind.panel,
-                              onTogglePanel,
-                            ),
+                      _glyphButton(
+                        panelShown ? 'Hide the panel' : 'Show the panel',
+                        ChatIconKind.panel,
+                        onTogglePanel,
+                      ),
                     ),
                   ),
                 ],
@@ -308,12 +297,11 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     ),
   );
 
-  /// The panel switch sits on the fade with no stadium around it: the Bot
-  /// page and the Computer already live in that column, so this control is
-  /// only "is the column there".
-  Widget _glyphButton(
+  /// A header icon with no stadium. The phone's back arrow and panel switch
+  /// are the same kind of control as the desk's panel switch.
+  Widget _iconButton(
     String label,
-    ChatIconKind icon,
+    Widget icon,
     VoidCallback? open, {
     Color? color,
   }) => Builder(
@@ -330,9 +318,16 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
         iconSize: chatIconSize,
         tapTargetSize: MaterialTapTargetSize.shrinkWrap,
       ),
-      icon: ChatIcon(icon),
+      icon: icon,
     ),
   );
+
+  Widget _glyphButton(
+    String label,
+    ChatIconKind icon,
+    VoidCallback? open, {
+    Color? color,
+  }) => _iconButton(label, ChatIcon(icon), open, color: color);
 
   Widget _title(
     BuildContext context, {

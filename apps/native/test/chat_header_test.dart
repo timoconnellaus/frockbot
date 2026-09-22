@@ -582,21 +582,24 @@ void main() {
     },
   );
 
-  testWidgets('the panel switch is a frosted pill on a phone', (tester) async {
+  testWidgets('a phone header has no stadium around its buttons', (
+    tester,
+  ) async {
     await tester.pumpWidget(
-      host(ChatHeader(name: 'Rosemary', phone: true, onTogglePanel: () {})),
+      host(
+        ChatHeader(
+          name: 'Rosemary',
+          phone: true,
+          onBack: () {},
+          onTogglePanel: () {},
+        ),
+      ),
     );
     await tester.pump();
-    final material = tester.widget<Material>(
-      find
-          .descendant(
-            of: find.byTooltip('Show the panel'),
-            matching: find.byType(Material),
-          )
-          .first,
-    );
-    expect(material.color, isNot(Colors.transparent));
-    expect(material.color!.a, lessThan(1));
+    expect(find.byType(BackdropFilter), findsNothing);
+    expect(find.byTooltip('Your Bots'), findsOneWidget);
+    expect(find.byTooltip('Show the panel'), findsOneWidget);
+    expect(find.byType(IconButton), findsNWidgets(2));
     expect(find.byTooltip('Open Rosemary'), findsNothing);
   });
 
