@@ -1907,6 +1907,30 @@ describe("Bot recovery", () => {
     );
     expect(sends).toHaveLength(1);
     expect(sends[0]).toMatchObject({ ordinal: 0 });
+    // The live channel is what an already-open chat draws. The message is not
+    // a journal send, so without this publication the thread stays empty.
+    const said = (sends[0]!.payload as { text?: string }).text;
+    expect(said).toBeTruthy();
+    const published = [
+      ...(await storage.list({ prefix: "conversation:update:v1:" })).values(),
+    ] as Array<{
+      kind?: string;
+      payload?: { run?: { events?: Array<{ payload?: { text?: string } }> } };
+    }>;
+    expect(published).toEqual([
+      expect.objectContaining({
+        kind: "run-status",
+        payload: expect.objectContaining({
+          run: expect.objectContaining({
+            events: [
+              expect.objectContaining({
+                payload: expect.objectContaining({ text: said }),
+              }),
+            ],
+          }),
+        }),
+      }),
+    ]);
 
     // One message, one outbox entry the device drains, one alert.
     expect((await storage.list({ prefix: MESSAGE_PREFIX })).size).toBe(1);

@@ -102,7 +102,12 @@ import {
   TASK_ACTIVE_PREFIX,
   TASK_CONTEXT_PREFIX,
 } from "@frockbot/app/subagents/storage-keys";
-import type { BotIdentity } from "@frockbot/core/durable";
+import {
+  commitPublicationsV1,
+  runEntityIdV1,
+  type BotIdentity,
+} from "@frockbot/core/durable";
+import { projectClientRunV1 } from "@frockbot/app/shell/run-protocol";
 import type { SessionEvent } from "@frockbot/core/contracts";
 import {
   classifyRoutineFireOnceV1,
@@ -886,6 +891,20 @@ async function notifyFailedFiring(
     for (const [key, value] of Object.entries(records)) {
       await transaction.put(key, value);
     }
+    // The message is not a journal send, so the Turn's own settlement published
+    // nothing a chat can draw. The live transcript is that publication: opening
+    // the Bot does not refetch, and a badge with an empty thread is the hole.
+    if (run) {
+      await commitPublicationsV1(transaction, [
+        {
+          kind: "run-status",
+          entityId: runEntityIdV1(run.runId),
+          payload: {
+            run: projectClientRunV1(run, { ordinal, text: body }),
+          },
+        },
+      ]);
+    }
     await transaction.put(receiptKey, {
       schemaVersion: 1,
       // The directory id the failure used to be filed under, kept so the
@@ -899,7 +918,10 @@ async function notifyFailedFiring(
   // The message is written here rather than through the Turn's own settlement,
   // so the drain that a committed message wakes is asked for here too: a
   // broken Routine reaches the device now, not on whatever alarm comes next.
-  if (committed) state.messagesCommitted();
+  if (committed) {
+    state.messagesCommitted();
+    await state.authority.drainCommittedPublication();
+  }
 }
 
 async function readRoutineRecordV1(
