@@ -340,6 +340,10 @@ others. `app/voice/shared.ts` is where a frame is spelled once.
    Or `{type:"error",message,code?,retryable?}` followed by `status: idle` when
    the call was refused or failed to start.
 
+The first `listening` of a call plays a short confirm
+(`assets/voice/connect.wav`). A later `listening` — a wake, a rejoin — does
+not.
+
 The Gemini setup enables both session resumption and sliding-window context
 compression. Resumption carries a call across a closed or replaced socket;
 compression keeps a long audio conversation within Gemini's context window.

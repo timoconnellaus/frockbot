@@ -25,6 +25,8 @@ This speaker changes Android native code and removes a native plugin dependency.
 
 Silero v6 (`vad_plus`) labels assistant-capture frames as speech on Android, iOS and macOS. It is a native plugin plus a bundled ONNX model, so the first delivery that includes it is also a **full enabling APK**. The plugin is asked only to score PCM the existing recorder already captured; it must not open a second microphone. Flutter web keeps the energy gate: `vad_plus` does not support web, and the app origin's `script-src 'self'` would refuse a CDN ONNX runtime. macOS's deployment target is 13.4, which is the plugin's floor.
 
+The connect chime is `assets/voice/connect.wav` played by `audioplayers`. That is an asset and a native plugin, so the first Android delivery that includes it is also a **full enabling APK**. It mixes with the call and does not take audio focus.
+
 ## Android upgrade
 
 Use `scripts/native-acceptance.sh inventory` to record the installed version and certificate, then follow the Shorebird release procedure below. Phone upgrades use `adb install -r` with the exact published APK; never uninstall or clear app data. The acceptance runner’s stock-Flutter build is for qualification, not routine phone delivery.

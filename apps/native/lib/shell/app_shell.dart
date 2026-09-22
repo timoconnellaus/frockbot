@@ -61,6 +61,7 @@ import '../whats_new/page.dart';
 import '../voice/assistant.dart';
 import '../voice/capabilities.dart';
 import '../voice/capture.dart';
+import '../voice/connect_sound.dart';
 import '../voice/diagnostics.dart';
 import '../voice/dictation.dart';
 import '../voice/footer.dart';
@@ -579,6 +580,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       player: PcmVoicePlayer(),
       route: audioRoute,
       speechClassifier: createSpeechClassifierV1(),
+      connectSound: AssetVoiceConnectSound(),
     );
     // The Bot can hand the conversation over itself (ADR 0029, `switch_bot`),
     // and the person can press voice on another Bot's page. Either way the

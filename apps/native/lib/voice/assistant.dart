@@ -42,6 +42,7 @@ import 'dart:collection';
 import 'package:flutter/foundation.dart';
 
 import 'capture.dart';
+import 'connect_sound.dart';
 import 'diagnostics.dart';
 import 'player.dart';
 import 'protocol.dart';
@@ -88,6 +89,7 @@ class AssistantSessionController extends ChangeNotifier {
   final VoiceAudioRoute route;
   final SpeechGateConfig gateConfig;
   final SpeechClassifier speechClassifier;
+  final VoiceConnectSound connectSound;
   final Duration startTimeout;
   final Duration sleepAfter;
   final Duration connectTimeout;
@@ -155,6 +157,7 @@ class AssistantSessionController extends ChangeNotifier {
     VoiceAudioRoute? route,
     this.gateConfig = const SpeechGateConfig(),
     this.speechClassifier = const EnergySpeechClassifier(),
+    this.connectSound = const SilentVoiceConnectSound(),
     this.startTimeout = voiceAssistantStartTimeoutV1,
     this.sleepAfter = voiceAssistantSleepAfterV1,
     this.connectTimeout = voiceAssistantConnectTimeoutV1,
@@ -186,6 +189,10 @@ class AssistantSessionController extends ChangeNotifier {
   /// microphone is open too.
   bool _welcomed = false;
   bool _barged = false;
+
+  /// The connect chime has played for this call. A later `listening` — wake,
+  /// rejoin — does not play it again. [start] clears it.
+  bool _chimed = false;
 
   /// The Bot the call is with, as the server last said. Read by the shell so
   /// the screen and the composer control follow the voice.
@@ -369,6 +376,7 @@ class AssistantSessionController extends ChangeNotifier {
     _started = false;
     _welcomed = false;
     _barged = false;
+    _chimed = false;
     _status = VoiceStatusV1.idle;
     _upstream = VoiceUpstreamStateV1.starting;
     _gate = SpeechGate(config: gateConfig);
@@ -744,6 +752,12 @@ class AssistantSessionController extends ChangeNotifier {
           _startTimer = null;
           if (!_asleep) _upstream = VoiceUpstreamStateV1.awake;
           _set(VoiceSessionPhase.live);
+          // Once per call. A wake and a rejoin both say listening again,
+          // and neither is someone picking up.
+          if (!_chimed) {
+            _chimed = true;
+            unawaited(connectSound.play());
+          }
         }
         _notify();
       case AssistantAudioConfigV1(:final sampleRate):
@@ -1140,6 +1154,7 @@ class AssistantSessionController extends ChangeNotifier {
     }
     await _settled(() async => socket?.close(code: code, reason: reason));
     await _settled(speechClassifier.dispose);
+    await _settled(connectSound.dispose);
     _micLevel = 0;
     _opening.clear();
     _openingBytes = 0;
