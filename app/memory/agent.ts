@@ -283,7 +283,10 @@ export class MemoryProjection {
 
   /** Reads every tier, renders the block, and records the injection. */
   async refresh(turn: number, session: Session): Promise<MemoryInjectionV1> {
-    if (this.#host.records) return this.refreshCanonical(turn, session);
+    // Canonical Memory is what `memory_write` records now. The file tiers
+    // still render: a note fades at read time, and a shard keeps the headings
+    // the conversation has always shown. A fact already in that text is not
+    // repeated from the core.
     const store = this.#host.store;
     const owner = this.#host.owner;
     // A new Turn reads membership again; within one Turn the read is shared.
@@ -328,6 +331,41 @@ export class MemoryProjection {
       joined: projects,
       noteCutoff,
     });
+    const canonicalSources: Array<{
+      scope: "user" | "bot" | "project";
+      projectId: string;
+      path: string;
+      generationId: string;
+      contentHash: string;
+    }> = [];
+    if (this.#host.records) {
+      const canonical = await this.loadCanonical();
+      canonicalSources.push(...canonical.sources);
+      const extra = canonical.facts.filter(
+        (fact) =>
+          fact.text.length > 0 && !this.#injection.text.includes(fact.text),
+      );
+      if (extra.length > 0) {
+        const rank = (scope: string) =>
+          scope === "user" ? 0 : scope === "project" ? 1 : 2;
+        extra.sort((left, right) => rank(left.scope) - rank(right.scope));
+        // Ahead of the file block, in the same scope order that block uses,
+        // so a fact recorded only in canonical Memory is where a reader of
+        // the file render looks first.
+        this.#injection = {
+          ...this.#injection,
+          text: [
+            "<memory>",
+            ...extra.map((fact) => fact.text),
+            "</memory>",
+            this.#injection.text,
+          ]
+            .filter((line) => line.length > 0)
+            .join("\n"),
+          facts: [...extra, ...this.#injection.facts],
+        };
+      }
+    }
     if (unavailable) {
       this.#injection.omissions.push({ scope: "project", reason: unavailable });
     }
@@ -355,13 +393,16 @@ export class MemoryProjection {
     session.append({
       type: "memory/injected",
       turn,
-      sources: sources.map(({ source, scope, projectId }) => ({
-        scope,
-        projectId,
-        path: source.path,
-        generationId: source.generationId,
-        contentHash: source.contentHash,
-      })),
+      sources: [
+        ...sources.map(({ source, scope, projectId }) => ({
+          scope,
+          projectId,
+          path: source.path,
+          generationId: source.generationId,
+          contentHash: source.contentHash,
+        })),
+        ...canonicalSources,
+      ],
       facts: this.#injection.facts,
       omissions: this.#injection.omissions,
       faded: this.#injection.faded,
@@ -387,12 +428,18 @@ export class MemoryProjection {
    * Prepared core from the canonical engine. No Memory-file walk.
    * Recalled blocks are rendered later, beside the current turn.
    */
-  private async refreshCanonical(
-    turn: number,
-    session: Session,
-  ): Promise<MemoryInjectionV1> {
+  private async loadCanonical(): Promise<{
+    facts: MemoryInjectionV1["facts"];
+    sources: Array<{
+      scope: "user" | "bot" | "project";
+      projectId: string;
+      path: string;
+      generationId: string;
+      contentHash: string;
+    }>;
+  }> {
     const records = this.#host.records;
-    if (!records) return this.#injection;
+    if (!records) return { facts: [], sources: [] };
     this.#recall = emptyMemoryTurnRecallV1();
     this.#recallStatus = "empty";
     const authority = await authorityOf({
@@ -410,15 +457,13 @@ export class MemoryProjection {
       budget: 1_024,
     });
     const learnedAt = memoryDayV1(this.#host.clock?.() ?? new Date());
-    this.#injection = renderCanonicalMemoryInjectionV1({
+    const rendered = renderCanonicalMemoryInjectionV1({
       blocks: core.blocks,
       omissions: core.omissions,
       learnedAt,
     });
-    this.#turn = turn;
-    session.append({
-      type: "memory/injected",
-      turn,
+    return {
+      facts: rendered.facts,
       sources: core.blocks.flatMap((block) =>
         block.manifest.map((leaf) => ({
           scope: engineScopeName(block.scope.kind),
@@ -431,16 +476,7 @@ export class MemoryProjection {
           contentHash: String(block.generation),
         })),
       ),
-      facts: this.#injection.facts,
-      omissions: this.#injection.omissions,
-      faded: [],
-      noteCutoff: learnedAt,
-      noteTtlDays: MEMORY_NOTE_TTL_DAYS,
-    });
-    await session.flush();
-    this.#rendered = { documents: [], complete: true };
-    this.#indexReady = true;
-    return this.#injection;
+    };
   }
 
   async recallForTurn(query: string, signature: string): Promise<void> {

@@ -1097,6 +1097,39 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
     };
   }
 
+  /**
+   * Rebuilds a scope's core when the projection is missing or older than the
+   * latest write. The background job waits out its wakeup so a write itself
+   * stays cheap; the next Turn's prompt cannot.
+   */
+  refreshPreparedCores(request: MemoryPreparedCoreRequestV1): void {
+    this.open();
+    for (const scope of request.scopes) {
+      if (this.refuseOwned(scope)) continue;
+      if (authorizeMemoryScopeV1(request.authority, scope)) continue;
+      const scopeKey = memoryScopeKeyV1(scope);
+      const epoch = this.invalidationEpoch(scopeKey);
+      const row = this.#sql
+        .exec<{ checked_invalidation_epoch: number; manifest: string }>(
+          `SELECT checked_invalidation_epoch, manifest FROM memory_projection
+           WHERE scope_key = ? AND name = 'core'`,
+          scopeKey,
+        )
+        .toArray()[0];
+      const covers =
+        row !== undefined &&
+        Number(row.checked_invalidation_epoch) === epoch &&
+        this.coreMatchesSelection(scopeKey, decodeManifestV1(row.manifest));
+      if (covers) continue;
+      this.rebuildCore(scopeKey);
+      this.#sql.exec(
+        `UPDATE memory_job SET state = 'done', claim_token = NULL
+         WHERE id = ? AND state != 'done'`,
+        `core-rebuild:${scopeKey}`,
+      );
+    }
+  }
+
   preparedCore(
     request: MemoryPreparedCoreRequestV1,
   ): MemoryPreparedCoreResultV1 {
@@ -2837,6 +2870,20 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
       return undefined;
     }
     return undefined;
+  }
+
+  /** A write bumps the scope generation without the invalidation epoch, so a still-valid older manifest hides the new item until the core is rebuilt. */
+  private coreMatchesSelection(
+    scopeKey: string,
+    leaves: MemoryLeafManifestV1[],
+  ): boolean {
+    const selected = this.selectCoreItems(scopeKey);
+    if (selected.length !== leaves.length) return false;
+    return selected.every(
+      (item, index) =>
+        item.id === leaves[index]?.itemId &&
+        Number(item.generation) === leaves[index]?.generation,
+    );
   }
 
   private selectCoreItems(scopeKey: string): ItemRow[] {

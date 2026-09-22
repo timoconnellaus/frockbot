@@ -626,6 +626,23 @@ export class SessionEventLog {
     for (const event of legacy) decodeSessionEvent(event);
   }
 
+  /**
+   * Pages a legacy `latest-events` blob before a Turn reads its cursor.
+   *
+   * Admission used to seed `nextSeq` from the paged index only. A bot that
+   * still held the single blob looked empty, the new Turn numbered from zero,
+   * and the migration inside the first append then failed the contiguity
+   * check and rolled itself back — so the blob stayed, one write from
+   * SQLITE_TOOBIG.
+   */
+  async migrateLegacyBlobIfPresent(sessionId: string): Promise<void> {
+    const index = await this.storage.get(sessionEventLogIndexKeyV1(sessionId));
+    if (index !== undefined) return;
+    const legacy = await this.storage.get(LATEST_EVENTS_KEY);
+    if (legacy === undefined) return;
+    await this.migrate(sessionId);
+  }
+
   /** Reads the legacy value and rewrites it as pages when necessary. */
   async migrate(sessionId: string): Promise<SessionEvent[]> {
     const index = requireIndex(

@@ -1869,6 +1869,13 @@ export class BotDurableAuthority<Snapshot> {
     const settings = await this.hooks.resolveAdmissionSnapshot(command);
     // Materialized before the transaction; the pin itself is read inside it.
     await this.composition.materialize();
+    // The cursor below is the paged head. A legacy blob has to become that
+    // head first, or the Turn numbers from zero and the blob never moves.
+    await this.ctx.storage.transaction(async (transaction) => {
+      await new SessionEventLog(transaction).migrateLegacyBlobIfPresent(
+        command.sessionId,
+      );
+    });
     const key = `${RUN_PREFIX}${command.runId}`;
     return this.ctx.storage.transaction(async (transaction) => {
       const existing = this.codec.optional(await transaction.get<unknown>(key));

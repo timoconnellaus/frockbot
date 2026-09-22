@@ -150,8 +150,11 @@ export function dispatchMemoryOperateV1(
       return engine.expand(request as MemoryExpandRequestV1);
     case "browse":
       return engine.browse(request as MemoryBrowseRequestV1);
-    case "preparedCore":
-      return engine.preparedCore(request as MemoryPreparedCoreRequestV1);
+    case "preparedCore": {
+      const coreRequest = request as MemoryPreparedCoreRequestV1;
+      engine.refreshPreparedCores(coreRequest);
+      return engine.preparedCore(coreRequest);
+    }
     default: {
       const exhausted: never = action;
       throw new Error(`unknown Memory action ${String(exhausted)}`);

@@ -21,7 +21,9 @@
 // `app/shell/compaction.test.ts`. Nothing this Worker can
 // reach produces a tool result large enough for the prune floor.
 import { env } from "cloudflare:workers";
+import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
+import { whenCompactionSettledV1 } from "../../../app/shell/compaction-scheduler.ts";
 import { provisionBot } from "./provision-bot.ts";
 import { STALLED_SUMMARISER_SENTINEL } from "./harness/miniflare.ts";
 
@@ -59,6 +61,10 @@ describe("conversation compaction in Workerd", () => {
         },
       });
       expect(result.text).toBe("Ollama reply");
+      // The Turn returns before the detached summary. The next admission
+      // aborts a summary still in flight, so this one is allowed to finish
+      // first. A person's send does not wait.
+      await runInDurableObject(stub, () => whenCompactionSettledV1(name));
     }
 
     // Eleven Turns is comfortably past 70% of the 150k character budget, and

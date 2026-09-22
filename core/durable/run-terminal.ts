@@ -88,6 +88,33 @@ async function commitSuffixV1(
   await log.append(sessionId, missing);
 }
 
+/**
+ * The journal settlement stores for one run.
+ *
+ * The snapshot is the Turn. A detached compaction can append past it, and
+ * then commit, before this settlement writes. Storing the snapshot alone
+ * shrinks the run back over that event: the log keeps it, the range does
+ * not, and the next append has a hole where the event was.
+ */
+async function journalCoveringLogV1(
+  storage: RunTerminalStorage,
+  sessionId: string,
+  previousEventCount: number,
+  events: readonly SessionEvent[],
+): Promise<SessionEvent[]> {
+  const snapshot = events.map((event) => decodeSessionEvent(event));
+  const logCount = await new SessionEventLog(storage).eventCount(sessionId);
+  const snapshotEnd = previousEventCount + snapshot.length;
+  if (logCount <= snapshotEnd) return snapshot;
+  const covered = await new SessionEventLog(storage).readRange(
+    sessionId,
+    previousEventCount,
+    logCount,
+  );
+  if (covered.length !== logCount - previousEventCount) return snapshot;
+  return covered;
+}
+
 export interface RunTerminalStorage extends SessionEventLogStorage {}
 
 export interface RunTerminalKeys {
@@ -293,9 +320,16 @@ export async function completeStoredRun<Snapshot>(
     await storage.delete(keys.activeRun);
     return "cancelled";
   }
+  await commitSuffixV1(storage, run.sessionId, run.previousEventCount, events);
+  const journal = await journalCoveringLogV1(
+    storage,
+    run.sessionId,
+    run.previousEventCount,
+    events,
+  );
   const completed = codec.require({
     ...run,
-    ...storedRunEventFieldsV2(run.previousEventCount, events),
+    ...storedRunEventFieldsV2(run.previousEventCount, journal),
     status: "completed",
     responseText: result.text,
   } satisfies StoredRunV1<Snapshot>);
@@ -316,7 +350,6 @@ export async function completeStoredRun<Snapshot>(
       records[key] = structuredClone(value);
     }
   }
-  await commitSuffixV1(storage, run.sessionId, run.previousEventCount, events);
   await storage.put(records);
   await storage.delete(keys.activeRun);
   return "completed";

@@ -32,7 +32,10 @@ import {
   type StoredRunOriginV1,
 } from "@frockbot/core/durable";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
-import { selectStoredWorkingContextV1 } from "./working-context-store.js";
+import {
+  selectStoredWorkingContextV1,
+  storedCompactionWindowV1,
+} from "./working-context-store.js";
 import {
   admitTurnCommandV1,
   admitTurnV1,
@@ -374,15 +377,25 @@ export async function executeTurn(
             events: input.journal,
           },
         },
-        selectWorkingContext:
+        selectWorkingContext: Object.assign(
           input.contextAvailability === "unavailable"
             ? async () => {
                 throw new Error(
                   input.contextReason ?? "working context is unavailable",
                 );
               }
-            : (request) =>
+            : (request: Parameters<typeof selectStoredWorkingContextV1>[1]) =>
                 selectStoredWorkingContextV1(state.ctx.storage, request),
+          {
+            compactionWindow: (window: {
+              sessionId: string;
+              currentTurn: number;
+              currentMessages: Parameters<
+                typeof storedCompactionWindowV1
+              >[1]["currentMessages"];
+            }) => storedCompactionWindowV1(state.ctx.storage, window),
+          },
+        ),
         billing: state.env.BILLING?.(
           input.identity.userId,
           input.identity.botId,
