@@ -263,7 +263,7 @@ class _BotRecoveryDetailState extends State<BotRecoveryDetail> {
     await controller.confirmChange(
       botId,
       type,
-      confirm: (applets) async {
+      confirm: () async {
         if (!mounted) return false;
         return agreed = await confirm(
           '${deleting
@@ -271,14 +271,11 @@ class _BotRecoveryDetailState extends State<BotRecoveryDetail> {
               : restoring
               ? 'Restore'
               : 'Archive'} ${widget.bot.initialName}?',
-          [
-            deleting
-                ? 'This removes its conversation and Applets. It cannot be undone.'
-                : restoring
-                ? 'Bring this Bot back to your active list. Its history will still be there.'
-                : 'This Bot will leave your active list and stop accepting new messages. Its history is preserved, and you can restore it later.',
-            ?applets,
-          ].join('\n\n'),
+          deleting
+              ? 'This removes its conversation. It cannot be undone.'
+              : restoring
+              ? 'Bring this Bot back to your active list. Its history will still be there.'
+              : 'This Bot will leave your active list and stop accepting new messages. Its history is preserved, and you can restore it later.',
           deleting
               ? 'Delete Bot'
               : restoring

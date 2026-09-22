@@ -114,7 +114,7 @@ describe("check --live", () => {
     expect(exitCode).toBe(0);
     // Every name the environment carries and the Worker does not hold yet.
     expect(output).toContain("This deploy adds");
-    expect(output).toContain("APPLET_VIEWER_SECRET");
+    expect(output).toContain("APPLET_BUILD_TOKEN");
     expect(output).toContain("It overwrites 1 secret(s) the Worker already");
     expect(output).toContain("a deploy never deletes a secret");
     // The hand-set secret survives the release; the old copy said it would be

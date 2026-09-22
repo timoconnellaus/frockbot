@@ -1022,18 +1022,14 @@ describe("client run protocol v1", () => {
   });
 
   test.each([
-    ["applet_publish", "owner.applet-one", '{"appletId":"owner.applet-one"}'],
-    [
-      "applet_write_file",
-      "owner.applet-two",
-      '{"appletId":"owner.applet-two"}',
-    ],
+    ["applet_publish", "owner.applet-one", undefined],
+    ["applet_write_file", "owner.applet-two", undefined],
     ["applet_check", "../invalid", undefined],
     ["applet_check", 42, undefined],
     ["computer_exec", "owner.applet-one", undefined],
     ["applet_create", "owner.applet-one", undefined],
   ])(
-    "projects only safe Applet attribution for %s (%s)",
+    "projects no Applet attribution after ADR 0034 for %s (%s)",
     (toolName, appletId, argumentsJson) => {
       const projected = projectClientTurnV1({
         runId: "run-applet-attribution",

@@ -26,13 +26,6 @@ dependencies:
   # `record` owns microphone permission. Playback uses the app’s device sink
   # so completion means samples were played, not just handed to the device.
   record: 7.1.1
-  # Silero v6 labels capture frames as speech. `processAudio` only — it must
-  # never open a second microphone. Web is unsupported; the browser keeps the
-  # energy gate. Native delivery is a full APK, not a Shorebird patch.
-  vad_plus: 0.3.1
-  # The connect chime. It mixes with the call and does not take audio focus.
-  # An asset plus this plugin, so the first Android delivery is a full APK.
-  audioplayers: 6.8.1
   flutter_slidable: 4.0.3
   rive: 0.14.11
   # The A2UI renderer a Card is drawn with (ADR 0030). `genui` speaks v0.9 and
@@ -54,7 +47,6 @@ flutter:
   assets:
     - assets/characters/
     - assets/connectors/
-    - assets/voice/connect.wav
     - shorebird.yaml
   fonts:
     - family: Inter

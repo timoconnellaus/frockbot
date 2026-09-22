@@ -42,16 +42,12 @@ import { writeSkillDocumentV1 } from "@frockbot/app/skills/write";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import { admitTurnV1 } from "@frockbot/app/composition/bot";
 import { projectFirstPartyPackageIframeV1 } from "@frockbot/app/shell/composition-views";
-import { appletsEnabled } from "@frockbot/app/applets-host/bot";
 import {
   userAccountFeaturesReaderV1,
   type UserAccountFeaturesReadV1,
 } from "@frockbot/app/settings/bot";
 import type { UserFeaturesV1 } from "@frockbot/app/admin/shared";
-import {
-  APPLETS_SKILL_SLUG_V1,
-  PLUGINS_SKILL_SLUG_V1,
-} from "@frockbot/app/skills/managed";
+import { PLUGINS_SKILL_SLUG_V1 } from "@frockbot/app/skills/managed";
 import { readBotPluginRosterV1 } from "@frockbot/app/plugins/worker-bot";
 import { PACKAGE_IFRAME_FOCUS_TOOL_V2 } from "@frockbot/core/contracts";
 import {
@@ -88,19 +84,13 @@ export interface BotSkillsEnv {
 /**
  * The managed Skills this Bot's account is not offered.
  *
- * The Applets Skill is the Applets Package's own reference: it teaches the
- * `applet_*` tools, so it goes exactly where those tools go. With the
- * account's switch off the tools are not mounted, and a switch that cannot be
- * read is off here for the same reason it is off for the tools — listing the
- * Skill would tell the model the tools were there.
+ * The same rule for each gated feature: the Skill goes exactly where the tools
+ * go, and a switch that cannot be read is off.
  */
 async function withheldManagedSkillSlugs(
   state: ShellBotStateV1,
   features: UserAccountFeaturesReadV1,
 ): Promise<readonly string[]> {
-  // The same rule for each gated feature: the Skill goes exactly where the
-  // tools go, and a switch that cannot be read is off. One read of the
-  // account's features answers every gate.
   let read: UserFeaturesV1 | undefined;
   try {
     read = await features();
@@ -108,7 +98,6 @@ async function withheldManagedSkillSlugs(
     read = undefined;
   }
   const withheld: string[] = [];
-  if (!read?.applets) withheld.push(APPLETS_SKILL_SLUG_V1);
   // The plugin tools also need the artifact bucket they store a module in, so
   // a deployment without it is handed no Skill teaching them either.
   if (!read?.pluginAuthoring || !state.env.APPLICATION_ARTIFACTS) {
@@ -325,21 +314,7 @@ export async function listPackageUi(
   identity: BotIdentity,
 ): Promise<PackageIframeCompositionV1> {
   await state.authority.validateIdentity(identity);
-  const projected = projectFirstPartyPackageIframeV1(identity.botId);
-  let enabled: boolean;
-  try {
-    enabled = await appletsEnabled(state, identity);
-  } catch {
-    enabled = false;
-  }
-  if (enabled) return projected;
-  return {
-    ...projected,
-    contributions: projected.contributions.filter(
-      (contribution) =>
-        !contribution.declaredTools.includes(PACKAGE_IFRAME_FOCUS_TOOL_V2),
-    ),
-  };
+  return projectFirstPartyPackageIframeV1(identity.botId);
 }
 
 /**

@@ -16,8 +16,8 @@ import type {
   ComputerAgentPluginConfig,
   ComputerProcessStorageV1,
 } from "@frockbot/computer/agent";
-import type { AppletsRuntimeHostV1 } from "@frockbot/applets/feature";
 import type { PluginAuthoringRuntimeHostV1 } from "@frockbot/app/plugins/feature";
+import type { PanelFocusRuntimeHostV1 } from "@frockbot/app/plugins/panel-focus";
 import type { BotTemplateRuntimeHostV1 } from "@frockbot/app/bot-template/agent";
 import type { FlockSelfRuntimeHostV1 } from "@frockbot/app/flock/agent";
 import type { ImageRuntimeHostV1 } from "@frockbot/app/image/agent";
@@ -165,19 +165,16 @@ export interface ShellHostedRuntimeHostV1 {
    */
   machineMessages?: MachineMessagesRuntimeHostV1;
   /**
-   * The Applets seam, supplied by the Bot Durable Object for one admitted
-   * Turn. Absent outside a Turn, and outside a deployment that can reach the
-   * Applet Durable Object, its artifact bucket and the Workspace — and the
-   * Applets Package is then not mounted at all: a publish is a durable effect
-   * whose intent record has to name the Turn that asked for it.
-   */
-  applets?: AppletsRuntimeHostV1;
-  /**
    * The Plugin authoring seam (ADR 0026), supplied by the Bot Durable Object
    * for one admitted Turn behind the account's Plugin-authoring switch.
    * Absent, and the `plugin_*` tools are not mounted at all.
    */
   plugins?: PluginAuthoringRuntimeHostV1;
+  /**
+   * The conversation-panel seam (ADR 0034), supplied when this Bot's enabled
+   * bag is non-empty. Absent, and `panel_focus` is not mounted.
+   */
+  panels?: PanelFocusRuntimeHostV1;
 }
 
 /** What the Shell hands the application to mount one Turn's enabled Packages. */

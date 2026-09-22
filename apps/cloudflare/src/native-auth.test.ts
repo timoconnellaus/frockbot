@@ -1165,37 +1165,6 @@ test("ambiguous browser callbacks are refused before identity resolution", async
   }
 });
 
-test("native Applet token transport rejects ambiguous or URL credentials", async () => {
-  const { appletViewerTokenFromRequest } = await import("./gateway.js");
-  const url = new URL(
-    "https://bot.frockbot.com/api/applets/user.counter/socket",
-  );
-  const request = (protocols: string) =>
-    new Request(url, { headers: { "sec-websocket-protocol": protocols } });
-  expect(
-    appletViewerTokenFromRequest(
-      request("frockbot.applet.v1, frockbot.viewer.synthetic"),
-      url,
-    ),
-  ).toBe("synthetic");
-  expect(
-    appletViewerTokenFromRequest(request("frockbot.viewer.synthetic"), url),
-  ).toBeNull();
-  expect(
-    appletViewerTokenFromRequest(
-      request("frockbot.applet.v1, frockbot.viewer.a, frockbot.viewer.b"),
-      url,
-    ),
-  ).toBeNull();
-  url.searchParams.set("token", "other");
-  expect(
-    appletViewerTokenFromRequest(
-      request("frockbot.applet.v1, frockbot.viewer.synthetic"),
-      url,
-    ),
-  ).toBeNull();
-});
-
 test("verified return associations name the existing Android signer and exact macOS path", async () => {
   const f = fixture();
   const android = await f.auth.route(f.request("/.well-known/assetlinks.json"));

@@ -281,7 +281,6 @@ describe("account access codecs", () => {
 describe("account feature codecs", () => {
   const features = {
     schemaVersion: 1,
-    applets: true,
     pluginAuthoring: false,
     plugins: [] as string[],
     updatedAt: "2026-09-11T00:00:00.000Z",
@@ -307,9 +306,8 @@ describe("account feature codecs", () => {
       decodeSetUserFeaturesCommandV1({
         schemaVersion: 1,
         type: "user/set-features",
-        applets: false,
       }),
-    ).toEqual({ schemaVersion: 1, type: "user/set-features", applets: false });
+    ).toEqual({ schemaVersion: 1, type: "user/set-features" });
     expect(
       decodeAdminUserListViewV1({
         schemaVersion: 1,
@@ -407,7 +405,7 @@ describe("account feature codecs", () => {
       "invalid",
     );
     expect(() =>
-      decodeAdminUserFeaturesV1({ unavailable: true, applets: false }),
+      decodeAdminUserFeaturesV1({ unavailable: true, pluginAuthoring: false }),
     ).toThrow("unknown fields");
     expect(() =>
       decodeAdminUserFeaturesV1({ ...features, unavailable: true }),
@@ -423,7 +421,7 @@ describe("account feature codecs", () => {
   });
 
   test("the default is off and rejects unknown fields", () => {
-    expect(defaultUserFeaturesV1().applets).toBe(false);
+    expect(defaultUserFeaturesV1().pluginAuthoring).toBe(false);
     expect(() => decodeUserFeaturesV1({ ...features, beta: true })).toThrow(
       "unknown fields",
     );
@@ -431,7 +429,7 @@ describe("account feature codecs", () => {
       decodeSetUserFeaturesCommandV1({
         schemaVersion: 1,
         type: "user/set-features",
-        applets: "yes",
+        pluginAuthoring: "yes",
       }),
     ).toThrow("invalid");
     expect(() =>

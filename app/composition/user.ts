@@ -281,10 +281,7 @@ export async function reconcileInstalledProviderPluginsV1(input: {
         installedMemberV1(plugin, input.userId, createdAt),
       ),
     ].toSorted((left, right) => left.packageId.localeCompare(right.packageId));
-    const artifactSetHash = await compositionArtifactSetHashV1(
-      members,
-      current.applets ?? [],
-    );
+    const artifactSetHash = await compositionArtifactSetHashV1(members);
     const generation = decodeCompositionGenerationV1({
       schemaVersion: 1,
       generationId: compositionGenerationIdV1(createdAt, artifactSetHash),
@@ -293,9 +290,6 @@ export async function reconcileInstalledProviderPluginsV1(input: {
       createdAt,
       origin: { kind: "bootstrap" },
       members,
-      ...(current.applets && current.applets.length > 0
-        ? { applets: current.applets }
-        : {}),
       status: "pending",
     });
     try {
@@ -343,10 +337,7 @@ export async function reconcileSeededCompositionV1(input: {
         seededMemberV1(plugin, input.userId, createdAt),
       ),
     ].toSorted((left, right) => left.packageId.localeCompare(right.packageId));
-    const artifactSetHash = await compositionArtifactSetHashV1(
-      members,
-      current.applets ?? [],
-    );
+    const artifactSetHash = await compositionArtifactSetHashV1(members);
     const generation = decodeCompositionGenerationV1({
       schemaVersion: 1,
       generationId: compositionGenerationIdV1(createdAt, artifactSetHash),
@@ -355,9 +346,6 @@ export async function reconcileSeededCompositionV1(input: {
       createdAt,
       origin: { kind: "bootstrap" },
       members,
-      ...(current.applets && current.applets.length > 0
-        ? { applets: current.applets }
-        : {}),
       status: "pending",
     });
     try {

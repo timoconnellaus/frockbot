@@ -100,21 +100,6 @@ void main() {
     );
   });
 
-  test('Applets are available on a declared tool, never on a Package id', () {
-    expect(PackageCatalog.fromJson(catalog()).appletsAvailable, isTrue);
-    expect(
-      PackageCatalog.fromJson(catalog(tools: const [])).appletsAvailable,
-      isFalse,
-    );
-    expect(
-      PackageCatalog.fromJson(catalog(tools: const []))
-          .contributions
-          .single
-          .allowsFocus,
-      isFalse,
-    );
-  });
-
   test('a page is served from the anonymous origin, by its hash', () {
     final held = PackageCatalog.fromJson(catalog());
     expect(

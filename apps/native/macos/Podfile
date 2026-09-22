@@ -1,6 +1,4 @@
-# vad_plus (Silero) requires 13.4. The Xcode project's MACOSX_DEPLOYMENT_TARGET
-# matches; CocoaPods reads this line, not the pbxproj.
-platform :osx, '13.4'
+platform :osx, '12.0'
 
 # CocoaPods analytics sends network stats synchronously affecting flutter build latency.
 ENV['COCOAPODS_DISABLE_STATS'] = 'true'

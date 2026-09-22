@@ -30,7 +30,11 @@ import type {
   CompositionGenerationV1,
   CompositionMemberV1,
 } from "@frockbot/core/durable";
-import type { AppletBuildServiceV1 } from "@frockbot/app/applets-host/records";
+/** The build service, as the plugin authoring host calls it. */
+export interface PluginBuildServiceV1 {
+  build(request: AppletBuildRequestV1): Promise<AppletBuildResponseV1>;
+}
+
 import {
   pluginApprovalActionV1,
   pluginApprovalIdV1,
@@ -123,7 +127,7 @@ export interface PluginAuthoringSeamsV1 {
   turn: PluginAuthoringTurnV1;
   workspace: WorkspaceFilesV1;
   /** Absent in a deployment with no build service; checks and publishes say so. */
-  buildService?: AppletBuildServiceV1;
+  buildService?: PluginBuildServiceV1;
   artifacts: {
     putPackageArtifact(contentHash: string, module: string): Promise<void>;
   };

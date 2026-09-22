@@ -33,13 +33,6 @@
     {
       "binding": "BOT_PACKAGES",
     },
-    // Applet server artifacts, loaded from the AppletState Durable Object and
-    // mounted as a facet (ADR 0022). Its own binding, because a loader id is
-    // served from cache with the env it was first loaded with, and an Applet's
-    // env is not a Bot Package's.
-    {
-      "binding": "APPLETS",
-    },
   ],
   // Wrangler's validator refuses a service with no target and a Vectorize
   // binding with no index, even in a config it never deploys, so both carry
@@ -52,8 +45,8 @@
       "binding": "COMPUTER_HOST",
       "service": "named-by-deployment-config",
     },
-    // The Applet build service (plan step 8). It type-checks, lints, bundles
-    // and boots an Applet's source and returns the artifacts; it holds no
+    // The plugin build service. It type-checks, lints, bundles
+    // and boots a plugin's source and returns the artifacts; it holds no
     // storage, so this Worker stays the only thing that writes R2 and the only
     // thing that hash-verifies what came back.
     {
@@ -98,13 +91,6 @@
         "name": "DEPLOYMENT_POLICY",
         "class_name": "DeploymentPolicy",
       },
-      // One object per Applet instance, `idFromName("<userId>:<appletId>")`.
-      // It is the kernel's authority for the instance and mounts the Applet's
-      // code as a facet of itself (ADR 0022).
-      {
-        "name": "APPLET_STATES",
-        "class_name": "AppletState",
-      },
       // The account-wide voice session, one object per User (docs/voice.md).
       // A Cloudflare Agents SDK class; the Bot runtime stays hand-rolled.
       {
@@ -146,6 +132,10 @@
       "tag": "v7",
       "new_sqlite_classes": ["VoiceAssistant"],
     },
+    {
+      "tag": "v8",
+      "deleted_classes": ["AppletState"],
+    },
   ],
   "vars": {
     "DEFAULT_APPLICATION_HASH": "foundation-v1",
@@ -176,9 +166,6 @@
         },
         {
           "binding": "BOT_PACKAGES",
-        },
-        {
-          "binding": "APPLETS",
         },
       ],
       "services": [
@@ -236,10 +223,6 @@
           {
             "name": "DEPLOYMENT_POLICY",
             "class_name": "DeploymentPolicy",
-          },
-          {
-            "name": "APPLET_STATES",
-            "class_name": "AppletState",
           },
           {
             "name": "VOICE_ASSISTANTS",
@@ -301,18 +284,13 @@
         {
           "binding": "BOT_PACKAGES",
         },
-        {
-          "binding": "APPLETS",
-        },
       ],
       // Declared as production declares them. The Computer host does not run
       // beside the harness, so `COMPUTER_HOST` reports "not connected" and no
       // spec uses a Computer; a binding that is declared but unreachable is
-      // what production looks like when a dependency is down. The Applet build
-      // service does run beside it — `e2e/harness.ts` starts
-      // `apps/applet-build` under its own `wrangler dev` in the dev service
-      // registry — so `applets-publish.e2e.ts` compiles an Applet with the
-      // container production compiles it with.
+      // what production looks like when a dependency is down. The plugin build
+      // service runs beside it — `e2e/harness.ts` starts `apps/applet-build`
+      // under its own `wrangler dev` in the dev service registry.
       "services": [
         {
           "binding": "COMPUTER_HOST",
@@ -364,10 +342,6 @@
           {
             "name": "DEPLOYMENT_POLICY",
             "class_name": "DeploymentPolicy",
-          },
-          {
-            "name": "APPLET_STATES",
-            "class_name": "AppletState",
           },
           {
             "name": "VOICE_ASSISTANTS",

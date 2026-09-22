@@ -1,9 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import { APPLET_BUILD_LIMITS } from "@frockbot/applets/build-contract";
-import {
-  appletSourcePathV1,
-  appletsSourceRootV1,
-} from "@frockbot/applets/root";
 import type {
   WorkspaceFailureStatusV1,
   WorkspaceFilesV1,
@@ -11,12 +7,10 @@ import type {
   WorkspaceRootV1,
   WorkspaceWriteRequestV1,
 } from "@frockbot/core/contracts";
-import { appletAuthoringSourceRepositoryV1 } from "../applets-host/records.js";
 import { pluginAuthoringSourceRepositoryV1 } from "../plugins/authoring.js";
 import { pluginSourcePathV1, pluginsSourceRootV1 } from "../plugins/root.js";
 
 const USER = "user-1";
-const APPLET = `${USER}.${"a".repeat(32)}`;
 const WRITER = {
   kind: "bot" as const,
   botId: "bot-1",
@@ -141,16 +135,6 @@ function workspace(root: WorkspaceRootV1) {
 }
 
 const adapters = [
-  {
-    name: "Applet",
-    artifactId: APPLET,
-    neighborId: `${USER}.${"b".repeat(32)}`,
-    root: appletsSourceRootV1(USER),
-    sourcePath: appletSourcePathV1,
-    repository: appletAuthoringSourceRepositoryV1,
-    sourceMediaType: "text/plain; charset=utf-8",
-    emptyFailure: `${APPLET} has no source. Call applet_create, or write server.ts, ui.tsx and applet.json with applet_write_file.`,
-  },
   {
     name: "Plugin",
     artifactId: "notes",
@@ -322,15 +306,6 @@ describe("Bot-authored source repositories", () => {
 
   test("adapters retain their intentional UTF-8 decoding policies", async () => {
     const invalidUtf8 = new Uint8Array([0xc3, 0x28]);
-    const appletStore = workspace(appletsSourceRootV1(USER));
-    appletStore.setBytes(`${appletSourcePathV1(APPLET)}server.ts`, invalidUtf8);
-    expect(
-      await appletAuthoringSourceRepositoryV1(appletStore.api, USER).read(
-        APPLET,
-        "server.ts",
-      ),
-    ).toBe("�(");
-
     const pluginStore = workspace(pluginsSourceRootV1(USER));
     pluginStore.setBytes(
       `${pluginSourcePathV1("notes")}plugin.ts`,

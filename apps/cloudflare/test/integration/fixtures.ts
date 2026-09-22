@@ -372,7 +372,6 @@ export async function setAccountFeaturesV1(
   command: {
     schemaVersion: 1;
     type: "user/set-features";
-    applets: boolean;
     pluginAuthoring?: boolean;
     plugins?: string[];
   },

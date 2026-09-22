@@ -70,7 +70,12 @@ function member(
     hooks?: BotIsolateHookEventNameV1[];
     grants?: PluginGrantV1[];
     slots?: string[];
-    views?: { slot: string; surfaceId: string }[];
+    views?: {
+      slot: string;
+      surfaceId: string;
+      label?: string;
+      opens?: string;
+    }[];
     cards?: { id: string; actions: string[] }[];
     tools?: string[];
     provides?: { name: string; version: number }[];
@@ -1129,7 +1134,7 @@ describe("what a descriptor may declare", () => {
     expect(subject.loads).toHaveLength(0);
   });
 
-  test("only the settings section slot is open; the others are refused by name", async () => {
+  test("closed slots are refused by name; conversation.panel and bot.nav are open", async () => {
     const subject = harness();
     const prepared = await subject.host.mount([
       member("weather", { slots: ["composer.toolbar"] }),
@@ -1143,6 +1148,34 @@ describe("what a descriptor may declare", () => {
       'plugin "panel" declares slots this deployment has not opened: bot.profile',
     ]);
     expect(subject.loads).toHaveLength(0);
+  });
+
+  test("conversation.panel and bot.nav views mount when the worker reports them", async () => {
+    const subject = harness({
+      health: (plugins) => ({
+        schemaVersion: 1,
+        contractVersion: ISOLATE_CONTRACT_VERSION,
+        plugins: plugins.map((pluginId) =>
+          healthy(pluginId, {
+            views: ["weather.board", "weather.door"],
+          }),
+        ),
+      }),
+    });
+    const prepared = await subject.host.mount([
+      member("weather", {
+        views: [
+          { slot: "conversation.panel", surfaceId: "weather.board" },
+          {
+            slot: "bot.nav",
+            surfaceId: "weather.door",
+            opens: "weather.board",
+          },
+        ],
+      }),
+    ]);
+    expect(prepared.mounted).toEqual(["weather"]);
+    expect(prepared.failures).toEqual([]);
   });
 
   test("a settings section view mounts when the worker reports it, and is a health failure when it does not", async () => {

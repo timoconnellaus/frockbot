@@ -123,9 +123,13 @@ The flip served the Flutter web build at `/` and took the Vue client out in the 
 
 A second deployment profile anyone installs into their own Cloudflare account with `bun run setup`: Cloudflare Access sign-in, no billing, no release ceremony, the Computer included. The hosted deployment is unchanged. The decisions and the staged plan are [ADR 0028](adr/0028-open-deployment.md).
 
+## Next: Plugin panels, Applets out
+
+Applets fold into Plugins by deletion, not by renaming the facet. A Plugin may put a host-drawn `ViewDocument` in `conversation.panel` (tabbed page beside the chat) and `bot.nav` (a door on this Bot). The Bot shows a tab with `panel_focus`. The Applet runtime, tools, canvas and account feature go. Decisions and cuts: [ADR 0034](adr/0034-plugin-panels.md).
+
 ## Not now
 
-Billing, package publishing, avatar wearables, and Applet sharing between Users. Each is an addition to the target, not a change to it. Voice exists, scoped to one Bot ([ADR 0029](adr/0029-voice-per-bot.md)) and, since [ADR 0031](adr/0031-voice-gemini-live.md), one Gemini Live session that is the Bot's other mode rather than a layer over its chat model.
+Billing, package publishing, a Plugin marketplace, and avatar wearables. Each is an addition to the target, not a change to it. Voice exists, scoped to one Bot ([ADR 0029](adr/0029-voice-per-bot.md)) and, since [ADR 0031](adr/0031-voice-gemini-live.md), one Gemini Live session that is the Bot's other mode rather than a layer over its chat model. Composer toolbar, message actions and bot-profile slots stay closed until a host region draws them.
 
 ## Billing implementation awaiting launch
 

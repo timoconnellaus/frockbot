@@ -168,47 +168,6 @@ describe("the turn-start preamble, driven end to end", () => {
   });
 });
 
-/** What an admin does to an account's Applets switch. */
-async function setApplets(userId: string, applets: boolean): Promise<void> {
-  await (
-    env.USER_CONFIGURATIONS.getByName(userId) as unknown as {
-      setFeatures(input: unknown): Promise<unknown>;
-    }
-  ).setFeatures({
-    schemaVersion: 1,
-    userId,
-    command: { schemaVersion: 1, type: "user/set-features", applets },
-    updatedBy: "workerd-admin",
-  });
-}
-
-describe("the account-features read shared inside one mount", () => {
-  test("an admin switching Applets off is seen by the very next Turn of a resident Bot", async () => {
-    const id = crypto.randomUUID().slice(0, 8);
-    const identity = { userId: `features-user-${id}`, botId: `features-${id}` };
-    await provisionBot(identity);
-    await setApplets(identity.userId, true);
-
-    const on = await turn(
-      identity,
-      `run-on-${id}`,
-      toolCallTriggerPrompt(frockbotToolCall("applet_list")),
-    );
-    expect(results(on).join("\n")).toContain("no Applets yet");
-
-    // No eviction: the same resident Bot object, one Turn later. The features
-    // memo lives as long as the mount that made it, so the switch is read
-    // again here rather than remembered from the Turn above.
-    await setApplets(identity.userId, false);
-    const off = await turn(
-      identity,
-      `run-off-${id}`,
-      toolCallTriggerPrompt(frockbotToolCall("applet_list")),
-    );
-    expect(results(off).join("\n")).toContain('Tool not found: "applet_list"');
-  });
-});
-
 describe("a Bot whose Memory spans many files across two scopes", () => {
   test("every fact still reaches the injected block, in tier order", async () => {
     const id = crypto.randomUUID().slice(0, 8);

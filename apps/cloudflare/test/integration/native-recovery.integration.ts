@@ -79,17 +79,11 @@ test("native and browser share archive, restore, deletion and redacted history a
   ).toEqual(await (await asUser(userId, auditPath)).json());
   const stranger = freshUserId("recovery-stranger");
   expect((await postAsUser(stranger, path, restore)).status).toBe(404);
-  // A deletion from a person carries the Applet impact its confirmation read.
-  const impact = (await (
-    await native(`/api/bots/${botId}/applets/impact`)
-  ).json()) as { fingerprint: string; applets: unknown[] };
-  expect(impact.applets).toEqual([]);
   const deletion = {
     schemaVersion: 1,
     type: "bot/delete",
     commandId: "native-delete",
     botId,
-    appletImpact: impact.fingerprint,
   };
   const deleted = decodeProtocol(
     "BotLifecycleReceipt",

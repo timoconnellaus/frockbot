@@ -45,16 +45,6 @@ class DeleteHarness extends NativeApi {
       return {'schemaVersion': 1, 'lifecycles': []};
     }
     if (path == '/api/bots/identities') return {'identities': []};
-    final appletImpact = RegExp(r'^/api/bots/(\w+)/applets/impact$')
-        .firstMatch(path);
-    if (appletImpact != null) {
-      return {
-        'schemaVersion': 1,
-        'botId': appletImpact.group(1),
-        'fingerprint': '0123456789abcdef',
-        'applets': <Object?>[],
-      };
-    }
     final settings = RegExp(r'^/api/bots/(\w+)/settings$').firstMatch(path);
     if (settings != null && body == null) {
       return {

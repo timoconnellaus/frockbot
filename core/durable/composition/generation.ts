@@ -1,15 +1,13 @@
-// A Composition generation is the durable, versioned set of plugins a Bot
-// mounts: Bot-authored Packages and the User's Applets, and nothing else.
-// First-party code ships with the deploy and is never a member — there is
-// nothing about it a generation could pin that the deployment does not already
-// decide.
+// A Composition generation is the durable, versioned set of Plugins a Bot
+// mounts. First-party code ships with the deploy and is never a member —
+// there is nothing about it a generation could pin that the deployment does
+// not already decide.
 //
 // This module declares the record and its exact v1 codec. The Durable Object
 // owns the storage (`../composition-store.ts`) and the Package that mounts it
 // owns the host.
+
 import {
-  APPLET_BOT_ID_V1,
-  APPLET_MAX_SHARES_V1,
   canonicalJson,
   decodePluginDescriptorV1,
   sha256,
@@ -78,77 +76,6 @@ export type CompositionOriginV1 =
       turnId: string;
     };
 
-/**
- * An Applet's tools inside one Bot's pinned Composition.
- *
- * Not a Package member: an Applet contributes no module to the Bot's isolate
- * set, and a Bot can neither author, install, nor remove one. It follows the
- * User's Applet directory, and it is recorded here so every admitted Turn
- * records exactly which Applet generation's tools it ran under — a published
- * generation activates at the next admitted Turn, and an in-flight Turn keeps
- * the set it pinned. A tool call routes to the Applet Durable Object, which
- * forwards it to the facet; the facet's storage is never Composition.
- *
- * The generation is the User's, but the access is recorded with it: a Bot
- * registers a member's tools only when it is the owner or a shared Bot, so
- * the Bots an Applet reached are pinned with the Turn exactly like its tools
- * (ADR 0027).
- */
-export interface CompositionAppletMemberV1 {
-  kind: "applet";
-  appletId: string;
-  generationId: string;
-  tools: CompositionAppletToolV1[];
-  provenance: PackageProvenanceV1;
-  ownerBotId: string;
-  sharedWithBotIds: string[];
-}
-
-/** Whether one Bot may use an Applet member of a pinned generation. */
-export function compositionAppletMemberReachesV1(
-  member: Pick<CompositionAppletMemberV1, "ownerBotId" | "sharedWithBotIds">,
-  botId: string,
-): boolean {
-  return member.ownerBotId === botId || member.sharedWithBotIds.includes(botId);
-}
-
-/**
- * Plain JSON, spelled out.
- *
- * A Composition generation crosses a Durable Object RPC boundary, and `unknown`
- * is not transferable there — a record typed with it collapses the whole
- * answer to `never` at the call site. The schema really is JSON, so it says so.
- */
-type CompositionJsonScalarV1 = null | boolean | number | string;
-type CompositionJsonDepth1V1 =
-  | CompositionJsonScalarV1
-  | CompositionJsonScalarV1[]
-  | { [key: string]: CompositionJsonScalarV1 };
-type CompositionJsonDepth2V1 =
-  | CompositionJsonScalarV1
-  | CompositionJsonDepth1V1[]
-  | { [key: string]: CompositionJsonDepth1V1 };
-type CompositionJsonDepth3V1 =
-  | CompositionJsonScalarV1
-  | CompositionJsonDepth2V1[]
-  | { [key: string]: CompositionJsonDepth2V1 };
-/**
- * Bounded rather than recursive on purpose: a self-referential JSON type makes
- * the Durable Object RPC serializability mapper give up ("type instantiation is
- * excessively deep"), and a tool's input schema is four levels at the outside.
- */
-export type CompositionJsonValueV1 =
-  | CompositionJsonScalarV1
-  | CompositionJsonDepth3V1[]
-  | { [key: string]: CompositionJsonDepth3V1 };
-
-/** One tool an Applet generation declares, as the Composition records it. */
-export interface CompositionAppletToolV1 {
-  name: string;
-  description: string;
-  inputSchema: { [key: string]: CompositionJsonValueV1 };
-}
-
 export type CompositionGenerationStatusV1 =
   "pending" | "active" | "superseded" | "failed" | "quarantined";
 
@@ -164,21 +91,14 @@ export interface CompositionGenerationV1 {
   createdAt: string;
   origin: CompositionOriginV1;
   members: CompositionMemberV1[];
-  /**
-   * The Applet members resolved from the User's Applet directory when this
-   * generation was created. Absent means none. They are their own list rather
-   * than a variant of `members` because they carry no artifact and no
-   * descriptor, and every existing reader of `members` means "Package".
-   */
-  applets?: CompositionAppletMemberV1[];
   status: CompositionGenerationStatusV1;
 }
 
 /**
  * A pinning proposal lost the race for `composition:current`.
  *
- * Two writers derive a generation from the pointer and then yield — an Applet
- * publish, a Turn bundling the Package it just authored. Whichever writes
+ * Two writers derive a generation from the pointer and then yield — a seeded
+ * reconcile, a Turn bundling the Plugin it just authored. Whichever writes
  * second would otherwise replace the pointer with a generation derived from a
  * set that no longer exists, dropping every member the other one added.
  * Compare-and-swap turns that into this error, and the caller re-reads and
@@ -278,11 +198,7 @@ const GENERATION_REQUIRED_KEYS = [
   "members",
   "status",
 ] as const;
-const GENERATION_OPTIONAL_KEYS = [
-  "parentGenerationId",
-  "summary",
-  "applets",
-] as const;
+const GENERATION_OPTIONAL_KEYS = ["parentGenerationId", "summary"] as const;
 const MEMBER_KEYS = [
   "packageId",
   "version",
@@ -302,9 +218,6 @@ const ARTIFACT_KEYS = [
  * Package as well.
  */
 export const MAX_COMPOSITION_MEMBERS_V1 = 64;
-const MAX_COMPOSITION_APPLETS = 64;
-const MAX_COMPOSITION_APPLET_TOOLS = 64;
-const COMPOSITION_APPLET_TOOL_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 export const MAX_COMPOSITION_SUMMARY_V1 = 160;
 
@@ -445,103 +358,6 @@ export function decodeCompositionMemberV1(
   };
 }
 
-function decodeCompositionAppletToolV1(
-  input: unknown,
-  label: string,
-): CompositionAppletToolV1 {
-  const value = record(input, label);
-  exactKeys(value, ["name", "description", "inputSchema"], [], label);
-  const name = boundedString(value.name, `${label}.name`, 64);
-  if (!COMPOSITION_APPLET_TOOL_NAME.test(name)) {
-    throw new Error(`${label}.name is invalid`);
-  }
-  const inputSchema = record(value.inputSchema, `${label}.inputSchema`);
-  return {
-    name,
-    description: boundedString(
-      value.description,
-      `${label}.description`,
-      1_024,
-    ),
-    // The round trip is the normalization: what survives it is JSON, which is
-    // exactly `CompositionJsonValueV1`, and what does not was never a schema.
-    inputSchema: JSON.parse(JSON.stringify(inputSchema)) as {
-      [key: string]: CompositionJsonValueV1;
-    },
-  };
-}
-
-export function decodeCompositionAppletMemberV1(
-  input: unknown,
-  label = "composition applet member",
-): CompositionAppletMemberV1 {
-  const value = record(input, label);
-  exactKeys(
-    value,
-    [
-      "kind",
-      "appletId",
-      "generationId",
-      "tools",
-      "provenance",
-      "ownerBotId",
-      "sharedWithBotIds",
-    ],
-    [],
-    label,
-  );
-  if (value.kind !== "applet") throw new Error(`${label}.kind is invalid`);
-  if (
-    typeof value.ownerBotId !== "string" ||
-    !APPLET_BOT_ID_V1.test(value.ownerBotId)
-  ) {
-    throw new Error(`${label}.ownerBotId is invalid`);
-  }
-  if (
-    !Array.isArray(value.sharedWithBotIds) ||
-    value.sharedWithBotIds.length > APPLET_MAX_SHARES_V1 ||
-    value.sharedWithBotIds.some(
-      (id) =>
-        typeof id !== "string" ||
-        !APPLET_BOT_ID_V1.test(id) ||
-        id === value.ownerBotId,
-    ) ||
-    new Set(value.sharedWithBotIds).size !== value.sharedWithBotIds.length
-  ) {
-    throw new Error(`${label}.sharedWithBotIds is invalid`);
-  }
-  const ownerBotId = value.ownerBotId;
-  const sharedWithBotIds = [...(value.sharedWithBotIds as string[])];
-  if (
-    !Array.isArray(value.tools) ||
-    value.tools.length > MAX_COMPOSITION_APPLET_TOOLS
-  ) {
-    throw new Error(`${label}.tools must be a bounded array`);
-  }
-  const tools = value.tools.map((tool, index) =>
-    decodeCompositionAppletToolV1(tool, `${label}.tools[${index}]`),
-  );
-  if (new Set(tools.map((tool) => tool.name)).size !== tools.length) {
-    throw new Error(`${label}.tools contains duplicate names`);
-  }
-  return {
-    kind: "applet",
-    appletId: boundedString(value.appletId, `${label}.appletId`, 129),
-    generationId: boundedString(
-      value.generationId,
-      `${label}.generationId`,
-      128,
-    ),
-    tools,
-    provenance: decodePackageProvenanceV1(
-      value.provenance,
-      `${label}.provenance`,
-    ),
-    ownerBotId,
-    sharedWithBotIds,
-  };
-}
-
 function decodeCompositionOriginV1(
   input: unknown,
   label: string,
@@ -612,23 +428,6 @@ export function decodeCompositionGenerationV1(
   if (packageIds.size !== members.length) {
     throw new Error(`${label}.members contains duplicate packages`);
   }
-  let applets: CompositionAppletMemberV1[] | undefined;
-  if (value.applets !== undefined) {
-    if (!Array.isArray(value.applets)) {
-      throw new Error(`${label}.applets must be an array`);
-    }
-    if (value.applets.length > MAX_COMPOSITION_APPLETS) {
-      throw new Error(`${label}.applets exceeds its bound`);
-    }
-    applets = value.applets.map((applet, index) =>
-      decodeCompositionAppletMemberV1(applet, `${label}.applets[${index}]`),
-    );
-    if (
-      new Set(applets.map((applet) => applet.appletId)).size !== applets.length
-    ) {
-      throw new Error(`${label}.applets contains duplicate Applets`);
-    }
-  }
   const status = COMPOSITION_GENERATION_STATUSES.find(
     (candidate) => candidate === value.status,
   );
@@ -660,42 +459,24 @@ export function decodeCompositionGenerationV1(
     ...(value.summary === undefined
       ? {}
       : { summary: value.summary as string }),
-    ...(applets === undefined ? {} : { applets }),
   };
 }
 
-/**
- * The loader identity: sha-256 over the canonical, package-ordered member list.
- *
- * Applet members are covered too, and only when there are any — a generation
- * with no Applets hashes exactly as it did before Applets existed.
- */
+/** The loader identity: sha-256 over the canonical, package-ordered member list. */
 export function compositionArtifactSetHashV1(
   members: readonly CompositionMemberV1[],
-  applets: readonly CompositionAppletMemberV1[] = [],
 ): Promise<string> {
   const orderedMembers = [...members].sort((left, right) =>
     left.packageId.localeCompare(right.packageId),
   );
-  if (applets.length === 0) return sha256(canonicalJson(orderedMembers));
-  return sha256(
-    canonicalJson({
-      members: orderedMembers,
-      applets: [...applets].sort((left, right) =>
-        left.appletId.localeCompare(right.appletId),
-      ),
-    }),
-  );
+  return sha256(canonicalJson(orderedMembers));
 }
 
 /** Rejects a generation whose recorded hash does not match its member list. */
 export async function assertCompositionArtifactSetHashV1(
   generation: CompositionGenerationV1,
 ): Promise<void> {
-  const expected = await compositionArtifactSetHashV1(
-    generation.members,
-    generation.applets ?? [],
-  );
+  const expected = await compositionArtifactSetHashV1(generation.members);
   if (expected !== generation.artifactSetHash) {
     throw new Error(
       `composition generation "${generation.generationId}" has a mismatched artifact set hash`,

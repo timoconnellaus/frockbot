@@ -1,6 +1,5 @@
 import { sentTextV1 } from "./sent-text.js";
 import {
-  APPLET_ID_V1,
   BATCH_TOOL_NAME,
   decodeSendToUserPayloadV1,
   decodeSkillRefsV1,
@@ -635,30 +634,10 @@ export function clientToolCallNameV1(call: {
   return `${namespace}/${toolName}`;
 }
 
-const APPLET_ATTRIBUTION_TOOLS = new Set([
-  "applet_files",
-  "applet_read_file",
-  "applet_write_file",
-  "applet_check",
-  "applet_publish",
-  "applet_revert",
-  "applet_delete",
-  "applet_share",
-  "applet_unshare",
-  "applet_transfer",
-  "applet_focus",
-  "applet_generations",
-]);
-
-function appletAttribution(input: Record<string, unknown>): string | undefined {
-  if (!APPLET_ATTRIBUTION_TOOLS.has(String(input.toolName))) return undefined;
-  const args = input.arguments;
-  if (!args || typeof args !== "object" || Array.isArray(args))
-    return undefined;
-  const id = (args as Record<string, unknown>).appletId;
-  return typeof id === "string" && APPLET_ID_V1.test(id)
-    ? JSON.stringify({ appletId: id })
-    : undefined;
+function appletAttribution(
+  _input: Record<string, unknown>,
+): string | undefined {
+  return undefined;
 }
 
 function dynamicToolCallInput(

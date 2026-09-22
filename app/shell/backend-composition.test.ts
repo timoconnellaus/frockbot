@@ -1,10 +1,3 @@
-// An Applet member contributes no module and nothing to health-check, so the
-// only thing this seam does with it is register its tools. What matters is
-// *which* generation those tools reach: the description handed to the model
-// names the pinned generation, and the call names it too, so the Applet
-// Durable Object executes that generation or refuses. A DTO that carried only
-// the Applet id let a publish landing mid-Turn run new code behind the schema
-// and provenance the model was shown.
 import { describe, expect, test } from "bun:test";
 import {
   cardSurfacePrefixV1,
@@ -18,7 +11,6 @@ import {
 import {
   compositionArtifactSetHashV1,
   decodeCompositionGenerationV1,
-  type CompositionAppletMemberV1,
   type CompositionGenerationV1,
   type CompositionMemberV1,
 } from "@frockbot/core/durable";
@@ -38,153 +30,6 @@ import {
 } from "./cards.js";
 
 const USER = "user-1";
-const APPLET = "applet-1";
-
-const APPLET_MEMBER: CompositionAppletMemberV1 = {
-  kind: "applet",
-  appletId: APPLET,
-  generationId: "2026-09-05T00:00:00.000Z:A",
-  tools: [
-    {
-      name: "add_todo",
-      description: "Add a todo",
-      inputSchema: {
-        type: "object",
-        properties: { title: { type: "string" } },
-      },
-    },
-  ],
-  provenance: {
-    kind: "user",
-    packageId: APPLET,
-    version: "2026-09-05T00:00:00.000Z:A",
-    userId: USER,
-    authoredAt: "2026-09-05T00:00:00.000Z",
-  },
-  ownerBotId: "bot-1",
-  sharedWithBotIds: ["bot-2"],
-};
-
-async function generationWithApplet(
-  applets: CompositionAppletMemberV1[] = [APPLET_MEMBER],
-): Promise<CompositionGenerationV1> {
-  const members: CompositionMemberV1[] = [];
-  const artifactSetHash = await compositionArtifactSetHashV1(members, applets);
-  return decodeCompositionGenerationV1({
-    schemaVersion: 1,
-    generationId: `2026-09-05T00:00:00.000Z:${artifactSetHash.slice(0, 16)}`,
-    artifactSetHash,
-    createdAt: "2026-09-05T00:00:00.000Z",
-    origin: { kind: "bootstrap" },
-    members,
-    applets,
-    status: "active",
-  });
-}
-
-describe("Applet tools mounted into a Turn's Composition", () => {
-  test("the call carries the generation the Turn pinned, not just the Applet id", async () => {
-    const calls: Array<{ appletId: string; generationId: string }> = [];
-    const generation = await generationWithApplet();
-    const { signal } = new AbortController();
-    const mounted = await createShellCompositionHost({
-      botId: "bot-1",
-      sessionId: `${USER}:bot-1`,
-      sessionEvents: [],
-      admitEffect: () => Promise.resolve(true),
-      applets: {
-        invokeTool: (request) => {
-          calls.push({
-            appletId: request.appletId,
-            generationId: request.generationId,
-          });
-          return Promise.resolve({ status: "ok" as const, content: "added" });
-        },
-      },
-    }).mount(generation, signal);
-    try {
-      await mounted.verify(signal);
-      const schema = mounted.runtime.services.tools
-        .schemas({ turnType: "chat" })
-        .find((entry) => entry.name === "add_todo");
-      expect(schema).toBeDefined();
-      // The pin the model is shown, and the pin the call carries, are one
-      // string. If they ever diverge the Turn stops being reconstructable.
-      expect(schema?.description).toContain(APPLET_MEMBER.generationId);
-
-      const call = { id: "call-1", name: "add_todo", input: { title: "milk" } };
-      const context = {
-        botId: "bot-1",
-        agentId: "bot-1",
-        sessionId: `${USER}:bot-1`,
-        compositionGenerationId: generation.generationId,
-        effectId: "effect-1",
-        toolCall: call,
-        turnType: "chat" as const,
-        signal,
-      };
-      const prepared = await mounted.runtime.services.tools.prepare(
-        call,
-        context,
-      );
-      expect(prepared.kind).toBe("ready");
-      const outcome = await mounted.runtime.services.tools.executePrepared(
-        prepared as Extract<typeof prepared, { kind: "ready" }>,
-        context,
-      );
-      expect(outcome).toMatchObject({ isError: false });
-      expect(calls).toEqual([
-        { appletId: APPLET, generationId: APPLET_MEMBER.generationId },
-      ]);
-    } finally {
-      await mounted.dispose();
-    }
-  });
-
-  // The generation is the User's and names every available Applet, so the
-  // mount is where a Bot's access is applied — from the access the generation
-  // pinned, not from whatever the directory says mid-Turn (ADR 0027).
-  test("registers only the Applets the mounting Bot owns or is shared", async () => {
-    const generation = await generationWithApplet([
-      APPLET_MEMBER,
-      {
-        ...APPLET_MEMBER,
-        appletId: "applet-2",
-        tools: [{ ...APPLET_MEMBER.tools[0]!, name: "other_bots_tool" }],
-        ownerBotId: "bot-3",
-        sharedWithBotIds: [],
-      },
-    ]);
-    const { signal } = new AbortController();
-    for (const [botId, expected] of [
-      ["bot-1", ["add_todo"]],
-      ["bot-2", ["add_todo"]],
-      ["bot-3", ["other_bots_tool"]],
-      ["bot-4", []],
-    ] as const) {
-      const mounted = await createShellCompositionHost({
-        botId,
-        sessionId: `${USER}:${botId}`,
-        sessionEvents: [],
-        admitEffect: () => Promise.resolve(true),
-        applets: {
-          invokeTool: () =>
-            Promise.resolve({ status: "ok" as const, content: "ok" }),
-        },
-      }).mount(generation, signal);
-      try {
-        await mounted.verify(signal);
-        const names = mounted.runtime.services.tools
-          .schemas({ turnType: "chat" })
-          .map((entry) => entry.name)
-          .filter((name) => name === "add_todo" || name === "other_bots_tool");
-        expect(names).toEqual([...expected]);
-      } finally {
-        await mounted.dispose();
-      }
-    }
-  });
-});
 
 function pluginMember(id: string, contentHash: string): CompositionMemberV1 {
   return {
@@ -227,7 +72,7 @@ async function generationWithPlugins(): Promise<CompositionGenerationV1> {
     pluginMember("good", "a".repeat(64)),
     pluginMember("bad", "b".repeat(64)),
   ];
-  const artifactSetHash = await compositionArtifactSetHashV1(members, []);
+  const artifactSetHash = await compositionArtifactSetHashV1(members);
   return decodeCompositionGenerationV1({
     schemaVersion: 1,
     generationId: `2026-09-05T00:00:00.000Z:${artifactSetHash.slice(0, 16)}`,
@@ -416,7 +261,7 @@ describe("the Approvals a Plugin's Card asks for", () => {
 
   async function cardGeneration(): Promise<CompositionGenerationV1> {
     const members = [cardMember()];
-    const artifactSetHash = await compositionArtifactSetHashV1(members, []);
+    const artifactSetHash = await compositionArtifactSetHashV1(members);
     return decodeCompositionGenerationV1({
       schemaVersion: 1,
       generationId: `2026-09-05T00:00:00.000Z:${artifactSetHash.slice(0, 16)}`,

@@ -135,7 +135,13 @@ export async function executeBotPluginToolV1(
       failure: `"${member.descriptor.displayName}" is off for this Bot`,
     };
   }
-  if (pluginSectionSurfacesV1(member).length === 0) {
+  const actionSlots = (member.descriptor.views ?? []).some(
+    (view) =>
+      view.slot === "settings.sections" ||
+      view.slot === "conversation.panel" ||
+      view.slot === "bot.nav",
+  );
+  if (!actionSlots) {
     return {
       status: "rejected",
       failure: `"${member.descriptor.displayName}" has no controls`,

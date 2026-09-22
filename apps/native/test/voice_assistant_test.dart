@@ -15,10 +15,8 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/voice/assistant.dart';
 import 'package:frockbot_native/voice/capture.dart';
-import 'package:frockbot_native/voice/connect_sound.dart';
 import 'package:frockbot_native/voice/protocol.dart';
 import 'package:frockbot_native/voice/socket.dart';
-import 'package:frockbot_native/voice/speech_classifier.dart';
 
 import 'voice_fakes.dart';
 
@@ -30,28 +28,21 @@ const _frameMs = 40;
 
 class Harness {
   late final FakeVoiceCapture capture;
-  FakeVoiceSocket socket = FakeVoiceSocket();
+  final FakeVoiceSocket socket = FakeVoiceSocket();
   final FakeVoicePlayer player = FakeVoicePlayer();
   late final AssistantSessionController controller;
-  late VoiceSocket Function() opener;
-  final RecordingConnectSound? chime;
   int at = 0;
   int mark = 0;
 
   Harness({
     Completer<VoiceSocket>? deferred,
     bool cancelsPlaybackEcho = false,
-    SpeechClassifier? speechClassifier,
-    bool recordChime = false,
-  }) : chime = recordChime ? RecordingConnectSound() : null {
+  }) {
     capture = FakeVoiceCapture(cancelsPlaybackEcho: cancelsPlaybackEcho);
-    opener = () => socket;
     controller = AssistantSessionController(
-      openSocket: () => deferred?.future ?? Future.value(opener()),
+      openSocket: () => deferred?.future ?? Future.value(socket),
       capture: capture,
       player: player,
-      speechClassifier: speechClassifier ?? const EnergySpeechClassifier(),
-      connectSound: chime ?? const SilentVoiceConnectSound(),
     );
   }
 
@@ -100,41 +91,6 @@ void main() {
     expect(harness.capture.sampleRate, voiceAssistantInputSampleRateV1);
     expect(harness.capture.frame, voiceAssistantFrame);
     expect(harness.player.sampleRate, 24000);
-    harness.controller.dispose();
-  });
-
-  test('the connect sound plays once, on the first listening', () async {
-    final harness = Harness(recordChime: true);
-    await harness.controller.start();
-    await settle();
-    expect(harness.chime!.plays, 0, reason: 'not before the call is up');
-
-    harness.socket.deliver(
-      jsonEncode({'type': 'welcome', 'protocol_version': 1}),
-    );
-    harness.socket.deliver(
-      jsonEncode({
-        'type': 'audio_config',
-        'format': 'pcm16',
-        'sampleRate': 24000,
-      }),
-    );
-    await settle();
-    expect(harness.chime!.plays, 0);
-
-    harness.status('listening');
-    await settle();
-    expect(harness.chime!.plays, 1);
-
-    harness.status('speaking');
-    await settle();
-    harness.status('listening');
-    await settle();
-    expect(
-      harness.chime!.plays,
-      1,
-      reason: 'a later listening is not a connect',
-    );
     harness.controller.dispose();
   });
 
@@ -587,84 +543,6 @@ void main() {
     },
   );
 
-  test(
-    'a socket that dies while away keeps the call and rejoins on return',
-    () async {
-      final harness = Harness();
-      await harness.live();
-      await harness.controller.leaveForeground();
-      await harness.socket.finish();
-      await settle();
-      expect(harness.controller.phase, VoiceSessionPhase.live);
-      expect(harness.controller.active, isTrue);
-      expect(harness.controller.endedLine, isNull);
-      expect(harness.controller.paused, isTrue);
-
-      final next = FakeVoiceSocket();
-      harness.opener = () => next;
-      await harness.controller.enterForeground();
-      await settle();
-      next.deliver(jsonEncode({'type': 'welcome', 'protocol_version': 1}));
-      next.deliver(
-        jsonEncode({
-          'type': 'audio_config',
-          'format': 'pcm16',
-          'sampleRate': 24000,
-        }),
-      );
-      next.deliver(jsonEncode({'type': 'status', 'status': 'listening'}));
-      await settle();
-      expect(next.texts, contains(encodeAssistantStartCallV1()));
-      expect(next.texts, contains(encodeVoiceWakeV1()));
-      expect(harness.controller.paused, isFalse);
-      expect(harness.controller.phase, VoiceSessionPhase.live);
-      expect(harness.controller.endedLine, isNull);
-      expect(harness.capture.starts, 2);
-      harness.controller.dispose();
-    },
-  );
-
-  test('a socket that dies while paused keeps the call and rejoins', () async {
-    final harness = Harness();
-    await harness.live();
-    final next = FakeVoiceSocket();
-    harness.opener = () => next;
-    harness.controller.pause();
-    await harness.socket.finish();
-    await settle();
-    expect(harness.controller.phase, VoiceSessionPhase.live);
-    expect(harness.controller.paused, isTrue);
-    expect(harness.controller.endedLine, isNull);
-
-    next.deliver(jsonEncode({'type': 'welcome', 'protocol_version': 1}));
-    next.deliver(jsonEncode({'type': 'status', 'status': 'listening'}));
-    await settle();
-    expect(next.texts, contains(encodeAssistantStartCallV1()));
-    expect(next.texts, contains(encodeVoiceSleepV1(paused: true)));
-    expect(harness.controller.paused, isTrue);
-    expect(harness.controller.active, isTrue);
-    harness.controller.dispose();
-  });
-
-  test('hanging up after a dropped pause still sends end_call', () async {
-    final harness = Harness();
-    await harness.live();
-    final next = FakeVoiceSocket();
-    harness.opener = () => next;
-    harness.controller.pause();
-    await harness.socket.finish();
-    await settle();
-    next.deliver(jsonEncode({'type': 'welcome', 'protocol_version': 1}));
-    next.deliver(jsonEncode({'type': 'status', 'status': 'listening'}));
-    await settle();
-
-    await harness.controller.end(reason: 'end-button');
-    expect(next.texts, contains(encodeAssistantEndCallV1()));
-    expect(harness.controller.phase, VoiceSessionPhase.ended);
-    expect(harness.controller.endedLine, isNull);
-    harness.controller.dispose();
-  });
-
   test('the next onset wakes it, pre-roll first and then live', () async {
     final harness = Harness();
     await harness.live();
@@ -697,31 +575,6 @@ void main() {
     }
     harness.controller.dispose();
   });
-
-  test(
-    'a speech classifier, not energy, decides when a sleeping call wakes',
-    () async {
-      final classifier = ScriptedSpeechClassifier(score: 0.1);
-      final harness = Harness(speechClassifier: classifier);
-      await harness.live();
-      await harness.feed(_quiet, 121000);
-      expect(harness.controller.asleep, isTrue);
-      final before = harness.audioCount;
-
-      // Loud energy, not speech: a slammed door must not spend a wake.
-      await harness.feed(_speech, 400);
-      expect(harness.controller.asleep, isTrue);
-      expect(harness.audioCount, before);
-      expect(harness.texts, isNot(contains(encodeVoiceWakeV1())));
-
-      classifier.score = 0.9;
-      await harness.feed(_quiet, 120);
-      expect(harness.controller.asleep, isFalse);
-      expect(harness.texts, contains(encodeVoiceWakeV1()));
-      expect(harness.audioCount, greaterThan(before));
-      harness.controller.dispose();
-    },
-  );
 
   test('mute stops the frames at once and unmute waits for an onset', () async {
     final harness = Harness();
@@ -788,33 +641,6 @@ void main() {
         1,
         reason: 'one interrupt per reply, not one a frame',
       );
-      harness.controller.dispose();
-    },
-  );
-
-  test(
-    'barge-in follows the classifier when energy would have interrupted',
-    () async {
-      final classifier = ScriptedSpeechClassifier(score: 0.55);
-      final harness = Harness(
-        cancelsPlaybackEcho: true,
-        speechClassifier: classifier,
-      );
-      await harness.live();
-      await harness.feed(_quiet, 600);
-      harness.status('speaking');
-      await settle();
-      await harness.feed(0.3, 400);
-      expect(
-        harness.player.interrupts,
-        0,
-        reason: '0.55 is onset, not barge-in',
-      );
-
-      classifier.score = 0.85;
-      await harness.feed(_quiet, 200);
-      expect(harness.player.interrupts, 1);
-      expect(harness.texts, contains(encodeAssistantInterruptV1()));
       harness.controller.dispose();
     },
   );

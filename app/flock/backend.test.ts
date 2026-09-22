@@ -225,7 +225,7 @@ describe("Flock gateway Contribution", () => {
     });
   });
 
-  test("a person's Bot deletion names the Applets it confirmed, and a stale one is a 409", async () => {
+  test("a person's Bot deletion is issued to the lifecycle", async () => {
     const issued: unknown[] = [];
     let stale = false;
     const contribution = createFlockBackendContribution({
@@ -279,43 +279,12 @@ describe("Flock gateway Contribution", () => {
       commandId: "delete-1",
       botId: "alpha",
     };
-    const unconfirmed = await contribution.route(
+    const confirmed = await contribution.route(
       request("/api/bots/alpha/lifecycle", remove),
       url,
       context,
     );
-    expect(unconfirmed?.status).toBe(400);
-    expect(await unconfirmed?.json()).toMatchObject({
-      code: "invalid-request",
-      definitive: true,
-    });
-    expect(issued).toEqual([]);
-
-    const confirmed = await contribution.route(
-      request("/api/bots/alpha/lifecycle", {
-        ...remove,
-        appletImpact: "0123456789abcdef",
-      }),
-      url,
-      context,
-    );
     expect(confirmed?.status).toBe(200);
-    expect(issued).toEqual([{ ...remove, appletImpact: "0123456789abcdef" }]);
-
-    stale = true;
-    const changed = await contribution.route(
-      request("/api/bots/alpha/lifecycle", {
-        ...remove,
-        commandId: "delete-2",
-        appletImpact: "0123456789abcdef",
-      }),
-      url,
-      context,
-    );
-    expect(changed?.status).toBe(409);
-    expect(await changed?.json()).toMatchObject({
-      code: "applet-impact-changed",
-      definitive: true,
-    });
+    expect(issued).toEqual([remove]);
   });
 });

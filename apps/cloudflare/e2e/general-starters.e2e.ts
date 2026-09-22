@@ -127,7 +127,6 @@ test("racing account reads make one General and deleting it survives re-entry", 
   // Re-entry from a fresh client must also honor the account's deletion marker.
   await page.evaluate(() => localStorage.clear());
   await page.goto("about:blank");
-  const impact = await read(`/api/bots/${generalBotId}/applets/impact`);
   const response = await page.request.post(
     `/api/bots/${generalBotId}/lifecycle`,
     {
@@ -137,7 +136,6 @@ test("racing account reads make one General and deleting it survives re-entry", 
         type: "bot/delete",
         botId: generalBotId,
         commandId: crypto.randomUUID(),
-        appletImpact: impact.fingerprint,
       },
     },
   );

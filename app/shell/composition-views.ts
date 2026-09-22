@@ -24,7 +24,6 @@ import {
 } from "@frockbot/app/composition/bot";
 import type { ShellBotStateV1 } from "./backend-state.js";
 import type { PackageIframeCompositionV1 } from "@frockbot/core/contracts";
-import { FIRST_PARTY_PACKAGE_UI_V1 } from "@frockbot/applets/pages";
 import type {
   CompositionFailureV1,
   CompositionQuarantineV1,
@@ -45,48 +44,14 @@ export type CompositionMemberSourceReaderV1 = (
   member: CompositionMemberV1,
 ) => Promise<string | undefined>;
 
-/** What a first-party page's inline html records as the tool that made it. */
-const FIRST_PARTY_PAGE_BUNDLER_V1 = "frockbot-inline-html@1";
-
 /**
- * The pages this deployment ships, as the client's inert iframe metadata.
- *
- * A page is not a Composition member. It ships in this bundle, so there is no
- * manifest to read, no artifact to fetch and no generation to fence: the
- * registry in `@frockbot/applets/pages` is the declaration, and this
- * only reshapes it for the client. `declaredTools` is the union of what the
- * Package's pages may call, because the command a page sends names a Package
- * and a tool and never a page.
+ * First-party package iframe pages. With Applets deleted (ADR 0034) there are
+ * no first-party pages; this returns an empty contribution list.
  */
 export function projectFirstPartyPackageIframeV1(
   botId: string,
 ): PackageIframeCompositionV1 {
-  return {
-    schemaVersion: 1,
-    botId,
-    contributions: FIRST_PARTY_PACKAGE_UI_V1.map((contribution) => ({
-      packageId: contribution.packageId,
-      displayName: contribution.displayName,
-      provenance: "FrockBot" as const,
-      pages: contribution.pages.map((page) => ({
-        id: page.pageId,
-        artifact: {
-          contentHash: page.contentHash,
-          size: page.size,
-          mediaType: "text/html" as const,
-          bundlerVersion: FIRST_PARTY_PAGE_BUNDLER_V1,
-        },
-        mounts: page.mounts.map((mount) => ({ ...mount })),
-      })),
-      entries: contribution.entries.map((entry) => ({
-        ...entry,
-        opens: { ...entry.opens },
-      })),
-      declaredTools: [
-        ...new Set(contribution.pages.flatMap((page) => [...page.tools])),
-      ],
-    })).sort((left, right) => left.packageId.localeCompare(right.packageId)),
-  };
+  return { schemaVersion: 1, botId, contributions: [] };
 }
 
 function provenanceView(

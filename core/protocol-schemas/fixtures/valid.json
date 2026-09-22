@@ -363,17 +363,6 @@
     }
   },
   {
-    "name": "BotLifecycleCommand delete fenced on its Applet impact",
-    "schema": "BotLifecycleCommand",
-    "value": {
-      "schemaVersion": 1,
-      "type": "bot/delete",
-      "commandId": "command-2",
-      "botId": "default",
-      "appletImpact": "cbf29ce484222325"
-    }
-  },
-  {
     "name": "BotCreateCommand valid",
     "schema": "BotCreateCommand",
     "value": {
@@ -833,24 +822,6 @@
       "revision": 0,
       "ownerId": "command-1",
       "sections": []
-    }
-  },
-  {
-    "name": "AppletViewerToken valid",
-    "schema": "AppletViewerToken",
-    "value": {
-      "token": "1.1.0",
-      "expiresAt": "2026-09-05T00:00:00.000Z",
-      "socketUrl": "wss://bot.frockbot.com/view"
-    }
-  },
-  {
-    "name": "AppletViewerToken accepts a loopback socket for local development",
-    "schema": "AppletViewerToken",
-    "value": {
-      "token": "1.1.0",
-      "expiresAt": "2026-09-05T00:00:00.000Z",
-      "socketUrl": "ws://127.0.0.1:8797/api/applets/a.b/socket?token=x"
     }
   },
   {
@@ -1659,96 +1630,6 @@
     }
   },
   {
-    "name": "AppletSummary valid",
-    "schema": "AppletSummary",
-    "value": {
-      "appletId": "tim.counter",
-      "displayName": "Counter",
-      "status": "published",
-      "currentGenerationId": "generation-1",
-      "tools": ["increment"],
-      "createdAt": "2026-09-05T00:00:00.000Z",
-      "ownerBotId": "default",
-      "access": "owner",
-      "sharedWithBotIds": ["helper"]
-    }
-  },
-  {
-    "name": "AppletDirectory valid",
-    "schema": "AppletDirectory",
-    "value": {
-      "schemaVersion": 1,
-      "applets": [
-        {
-          "appletId": "tim.counter",
-          "displayName": "Counter",
-          "status": "published",
-          "currentGenerationId": "generation-1",
-          "tools": ["increment"],
-          "createdAt": "2026-09-05T00:00:00.000Z",
-          "ownerBotId": "default",
-          "access": "shared",
-          "sharedWithBotIds": []
-        }
-      ]
-    }
-  },
-  {
-    "name": "AppletOpenView valid",
-    "schema": "AppletOpenView",
-    "value": {
-      "schemaVersion": 1,
-      "applets": [
-        {
-          "appletId": "tim.counter",
-          "displayName": "Counter",
-          "status": "published",
-          "currentGenerationId": "generation-1",
-          "tools": ["increment"],
-          "createdAt": "2026-09-05T00:00:00.000Z",
-          "ownerBotId": "default",
-          "access": "shared",
-          "sharedWithBotIds": []
-        }
-      ],
-      "focused": {
-        "appletId": "tim.counter",
-        "generationId": "generation-1",
-        "uiUrl": "https://ui.bot.frockbot.com/packages/aaaa.html",
-        "token": "signed.token",
-        "socketUrl": "wss://bot.frockbot.com/api/applets/tim.counter/socket",
-        "expiresAt": "2026-09-05T00:15:00.000Z"
-      }
-    }
-  },
-  {
-    "name": "AppletOpenView with nothing focused",
-    "schema": "AppletOpenView",
-    "value": {
-      "schemaVersion": 1,
-      "applets": []
-    }
-  },
-  {
-    "name": "AppletOpenFocus for an unpublished Applet",
-    "schema": "AppletOpenFocus",
-    "value": {
-      "appletId": "tim.counter"
-    }
-  },
-  {
-    "name": "AppletOpenFocus accepts a loopback socket for local development",
-    "schema": "AppletOpenFocus",
-    "value": {
-      "appletId": "tim.counter",
-      "generationId": "generation-1",
-      "uiUrl": "http://ui.localhost:8797/packages/aaaa.html",
-      "token": "signed.token",
-      "socketUrl": "ws://127.0.0.1:8797/api/applets/tim.counter/socket",
-      "expiresAt": "2026-09-05T00:15:00.000Z"
-    }
-  },
-  {
     "name": "SettingsChangeCommand valid",
     "schema": "SettingsChangeCommand",
     "value": {
@@ -1805,53 +1686,6 @@
     "name": "GenerationId published timestamp and digest",
     "schema": "GenerationId",
     "value": "2026-09-05T00:52:26.826Z:e0e3ce78fabf9eca"
-  },
-  {
-    "name": "AppletSummary accepts published generation",
-    "schema": "AppletSummary",
-    "value": {
-      "appletId": "tim.counter",
-      "displayName": "Counter",
-      "status": "published",
-      "currentGenerationId": "2026-09-05T00:52:26.826Z:e0e3ce78fabf9eca",
-      "tools": ["increment"],
-      "createdAt": "2026-09-05T00:00:00.000Z",
-      "ownerBotId": "default",
-      "access": "owner",
-      "sharedWithBotIds": []
-    }
-  },
-  {
-    "name": "AppletImpactFingerprint valid",
-    "schema": "AppletImpactFingerprint",
-    "value": "cbf29ce484222325"
-  },
-  {
-    "name": "BotAppletImpact valid",
-    "schema": "BotAppletImpact",
-    "value": {
-      "schemaVersion": 1,
-      "botId": "default",
-      "fingerprint": "cbf29ce484222325",
-      "applets": [
-        {
-          "appletId": "tim.counter",
-          "displayName": "Counter",
-          "status": "published",
-          "sharedWithBotIds": ["helper"]
-        }
-      ]
-    }
-  },
-  {
-    "name": "BotAppletImpact with no owned Applets",
-    "schema": "BotAppletImpact",
-    "value": {
-      "schemaVersion": 1,
-      "botId": "default",
-      "fingerprint": "cbf29ce484222325",
-      "applets": []
-    }
   },
   {
     "name": "SettingChoice typed value",
@@ -2283,6 +2117,82 @@
             "dataModel": {
               "subject": "Re: Following up"
             }
+          }
+        }
+      ]
+    }
+  },
+  {
+    "name": "PanelBagEntry valid",
+    "schema": "PanelBagEntry",
+    "value": {
+      "pluginId": "notes",
+      "displayName": "Notes",
+      "surfaceId": "board",
+      "label": "Notes"
+    }
+  },
+  {
+    "name": "PanelFocus closed valid",
+    "schema": "PanelFocus",
+    "value": {
+      "pluginId": null
+    }
+  },
+  {
+    "name": "PanelFocus open valid",
+    "schema": "PanelFocus",
+    "value": {
+      "pluginId": "notes",
+      "surfaceId": "board"
+    }
+  },
+  {
+    "name": "PanelDoor valid",
+    "schema": "PanelDoor",
+    "value": {
+      "pluginId": "notes",
+      "label": "Notes",
+      "opens": {
+        "pluginId": "notes",
+        "surfaceId": "board"
+      }
+    }
+  },
+  {
+    "name": "PanelOpenView valid",
+    "schema": "PanelOpenView",
+    "value": {
+      "schemaVersion": 1,
+      "bag": [
+        {
+          "pluginId": "notes",
+          "displayName": "Notes",
+          "surfaceId": "board",
+          "label": "Notes"
+        }
+      ],
+      "focus": {
+        "pluginId": "notes",
+        "surfaceId": "board"
+      },
+      "document": {
+        "schemaVersion": 1,
+        "surfaceId": "panel-notes-board",
+        "revision": 0,
+        "root": {
+          "type": "text",
+          "text": "Hello"
+        },
+        "actions": []
+      },
+      "doors": [
+        {
+          "pluginId": "notes",
+          "label": "Notes",
+          "opens": {
+            "pluginId": "notes",
+            "surfaceId": "board"
           }
         }
       ]

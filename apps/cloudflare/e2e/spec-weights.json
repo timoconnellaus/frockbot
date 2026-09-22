@@ -6,9 +6,6 @@
   },
   "regenerate": "bun e2e/harvest-spec-weights.ts <run id | directory>",
   "seconds": {
-    "applets-publish.e2e.ts": 112,
-    "applets-shell.e2e.ts": 99.6,
-    "applets.e2e.ts": 129.5,
     "bot-info.e2e.ts": 33.9,
     "bot-plugins.e2e.ts": 66.3,
     "bot-settings.e2e.ts": 39.2,

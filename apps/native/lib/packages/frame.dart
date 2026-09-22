@@ -91,9 +91,6 @@ class PackagePageFrame extends StatefulWidget {
   /// times (2026-09-05).
   final String? surfaceTitle;
 
-  /// What the Session's focused Applet becomes when a page asks. Absent where
-  /// the host has no focus to change.
-  final Future<void> Function(String? appletId)? onFocus;
   const PackagePageFrame({
     super.key,
     required this.api,
@@ -106,7 +103,6 @@ class PackagePageFrame extends StatefulWidget {
     this.layout = PackageFrameLayout.flow,
     this.attribution = true,
     this.surfaceTitle,
-    this.onFocus,
   });
 
   @override
@@ -159,16 +155,9 @@ class _PackagePageFrameState extends State<PackagePageFrame> {
         if (height is! num || !height.isFinite) return;
         setState(() => _height = height.roundToDouble().clamp(96, 1200));
       case 'focus':
-        if (!widget.contribution.allowsFocus) {
-          setState(
-            () => _failure = 'This plugin can’t change which Applet is open.',
-          );
-          return;
-        }
-        final appletId = message['appletId'];
-        if (appletId != null && appletId is! String) return;
-        setState(() => _failure = null);
-        await widget.onFocus?.call(appletId as String?);
+        setState(
+          () => _failure = 'This page can’t change the conversation panel.',
+        );
       case 'openExternal':
         final url = message['url'];
         if (url is! String || !widget.catalog.allowsExternal(url)) {

@@ -98,9 +98,9 @@ describe("Package UI artifact route", () => {
   });
 });
 
-describe("the Applet socket's origin admission", () => {
+describe("Package UI artifact origin admission", () => {
   test("admits only this gateway's own artifact origin", () => {
-    const gateway = new URL("https://bot.frockbot.com/api/applets/x/socket");
+    const gateway = new URL("https://bot.frockbot.com/api/bots/x/panels/open");
     expect(
       isPackageUiArtifactOriginFor("https://ui.bot.frockbot.com", gateway),
     ).toBe(true);
@@ -112,7 +112,7 @@ describe("the Applet socket's origin admission", () => {
     ).toBe(false);
     // Development: the app on either loopback spelling, the pages on
     // `ui.localhost`, both on the same port.
-    const local = new URL("http://127.0.0.1:8787/api/applets/x/socket");
+    const local = new URL("http://127.0.0.1:8787/api/bots/x/panels/open");
     expect(
       isPackageUiArtifactOriginFor("http://ui.localhost:8787", local),
     ).toBe(true);

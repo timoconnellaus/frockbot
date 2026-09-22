@@ -17,7 +17,6 @@ import { provisionBot } from "./provision-bot.ts";
 const MANAGED_PATHS = [
   "managed/a2ui/SKILL.md",
   "managed/add-connector/SKILL.md",
-  "managed/applets/SKILL.md",
   "managed/export-bot-template/SKILL.md",
   "managed/import-bot-template/SKILL.md",
   "managed/plugins/SKILL.md",

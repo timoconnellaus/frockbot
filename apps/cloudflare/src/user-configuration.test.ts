@@ -100,8 +100,8 @@ function identity(userId: string): {
       toString: () => name,
     }) as unknown as DurableObjectId;
   return {
-    // Constructor cleanup runs when storage has a transaction. The Applet
-    // fixture lives in `applet-test-state-cleanup.test.ts`.
+    // The constructor's disposable panel cleanup is exercised against real
+    // storage in integration tests; these fakes hold none.
     ctx: (storage: unknown) =>
       ({
         storage,

@@ -32,13 +32,7 @@ function pressable(page: Page, text: string | RegExp) {
   return page.locator("[flt-tappable]").filter({ hasText: text });
 }
 
-/**
- * The deletion the client sends once the confirmation is accepted.
- *
- * A person's `bot/delete` must carry the fingerprint of the Applet impact the
- * confirmation read (ADR 0027), or the route refuses it. Registered before the
- * press, so the request cannot slip past it.
- */
+/** The deletion the client sends once the confirmation is accepted. */
 function deletionSent(page: Page) {
   return page.waitForRequest(
     (request) =>
@@ -50,34 +44,14 @@ function deletionSent(page: Page) {
   );
 }
 
-/** What the deletion names, checked against what the impact route answers. */
-async function expectDeletionCarriesImpact(
-  page: Page,
+/** The deletion request the confirmation triggered, once it completes. */
+async function expectDeletionApplied(
+  _page: Page,
   sent: Promise<Request>,
 ): Promise<void> {
   const request = await sent;
-  const command = request.postDataJSON() as {
-    botId: string;
-    appletImpact?: string;
-  };
-  expect(command.appletImpact).toMatch(/^[0-9a-f]{16}$/u);
   const response = await request.response();
   expect(response?.status()).toBe(200);
-  // The Bot is gone now, so its impact cannot be read back; a Bot with no
-  // Applets has the fingerprint of the empty set, which a fresh Bot shares.
-  const probe = (await (await page.request.get("/api/bots")).json()) as {
-    bots: Array<{ botId: string }>;
-  };
-  const survivor = probe.bots[0]?.botId;
-  if (survivor) {
-    const impact = (await (
-      await page.request.get(
-        `/api/bots/${encodeURIComponent(survivor)}/applets/impact`,
-      )
-    ).json()) as { fingerprint: string; applets: unknown[] };
-    expect(impact.applets).toEqual([]);
-    expect(command.appletImpact).toBe(impact.fingerprint);
-  }
 }
 
 /** One Bot's row in the sidebar, by the name a person reads on it. */
@@ -149,7 +123,7 @@ test("deleting a Bot from its settings removes it for good", async ({
   // Gone from the sidebar without a reload, and the surviving Bot is still
   // there.
   await expect(sidebarRow(page, "Beta")).toHaveCount(0, { timeout: 60_000 });
-  await expectDeletionCarriesImpact(page, sent);
+  await expectDeletionApplied(page, sent);
   await expect(sidebarRow(page, "Alpha")).toHaveCount(1);
 
   // And gone after a reload, because the registration was removed rather than
@@ -232,7 +206,7 @@ test("manage mode offers Archive and Delete, and Delete confirms first", async (
   await pressable(page, "Delete Bot").last().click();
   await expect(manage).toBeVisible({ timeout: 60_000 });
   await expect(pressable(page, "Doomed")).toHaveCount(0, { timeout: 60_000 });
-  await expectDeletionCarriesImpact(page, sent);
+  await expectDeletionApplied(page, sent);
   await expect(pressable(page, "Keeper").first()).toBeVisible();
   await settle(page);
 

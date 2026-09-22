@@ -130,14 +130,6 @@ describe("the production secrets manifest", () => {
     ).toEqual([]);
   });
 
-  test("requires the Applet viewer secret", () => {
-    // The regression this manifest was written for: absent, every published
-    // Applet answered 503 in production for weeks.
-    expect(
-      REQUIRED_PRODUCTION_SECRETS_V1.map((secret) => secret.name),
-    ).toContain("APPLET_VIEWER_SECRET");
-  });
-
   test("is carried by the release workflow's deploy step", () => {
     // The deploy is the only thing that writes a secret, so a name the deploy
     // step does not receive is a value frozen at whatever production last
@@ -178,14 +170,14 @@ describe("the production secrets report", () => {
   });
 
   test("fails naming the missing secret and why it matters", () => {
-    const { APPLET_VIEWER_SECRET: _missing, ...rest } = complete;
+    const { BETTER_AUTH_SECRET: _missing, ...rest } = complete;
     const report = productionSecretsReportV1(rest);
     expect(report.ok).toBe(false);
     expect(report.failures).toHaveLength(1);
     expect(report.failures[0]).toContain(
-      "Missing production configuration: APPLET_VIEWER_SECRET",
+      "Missing production configuration: BETTER_AUTH_SECRET",
     );
-    expect(report.failures[0]).toContain("every published Applet answers 503");
+    expect(report.failures[0]).toContain("nobody can sign in");
   });
 
   test("treats a blank value as missing", () => {
@@ -214,7 +206,7 @@ describe("the production secrets report", () => {
       complete,
     );
     expect(plan.updated).toEqual(["BETTER_AUTH_SECRET"]);
-    expect(plan.added).toContain("APPLET_VIEWER_SECRET");
+    expect(plan.added).toContain("GEMINI_API_KEY");
     expect(plan.added).not.toContain("BETTER_AUTH_SECRET");
     expect(plan.leftInPlace).toEqual(["SOMETHING_SET_BY_HAND"]);
     expect(plan.forbidden).toEqual([]);

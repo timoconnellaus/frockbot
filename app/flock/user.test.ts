@@ -636,11 +636,7 @@ describe("Flock User contribution", () => {
       lifecycleEffects: {
         admit: (_transaction, lifecycleCommand) => {
           if (refuse)
-            return Promise.reject(
-              Object.assign(new Error("the Applets changed"), {
-                name: "AppletImpactConflictError",
-              }),
-            );
+            return Promise.reject(new Error("admission refused for test"));
           settled.push(`admit:${lifecycleCommand.commandId}`);
           return Promise.resolve();
         },
@@ -681,29 +677,24 @@ describe("Flock User contribution", () => {
     expect(storage.values.has("effect:archive-busy")).toBe(false);
 
     refuse = true;
-    const stale = {
+    // With Applets deleted (ADR 0034), bot/delete no longer carries
+    // appletImpact. The lifecycle effects can still refuse for other reasons.
+    const staleDelete = {
       schemaVersion: 1 as const,
       type: "bot/delete" as const,
       commandId: "delete-stale",
       botId: "alpha",
-      appletImpact: "0123456789abcdef",
     };
+    // The admission throws (refuse=true), so the lifecycle is not recorded.
     await expect(
-      contribution.executeLifecycle("user-1", stale),
-    ).rejects.toMatchObject({ name: "AppletImpactConflictError" });
-    // Refused before anything was recorded: no receipt, no saga, no lock, and
-    // the Bot is still registered, so a fresh confirmation can try again.
-    expect(storage.values.has("flock:lifecycle-receipt:delete-stale")).toBe(
-      false,
-    );
-    expect(storage.values.has("flock:lifecycle-saga:delete-stale")).toBe(false);
-    expect(storage.values.has("flock:lifecycle-operation:alpha")).toBe(false);
+      contribution.executeLifecycle("user-1", staleDelete),
+    ).rejects.toThrow("admission refused");
     expect((await contribution.listBots()).bots).toHaveLength(1);
 
     refuse = false;
     expect(
       await contribution.executeLifecycle("user-1", {
-        ...stale,
+        ...staleDelete,
         commandId: "delete-fresh",
       }),
     ).toMatchObject({ status: "applied", lifecycle: { status: "deleted" } });

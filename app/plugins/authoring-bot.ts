@@ -15,7 +15,14 @@ import {
   type CompositionGenerationV1,
   type CompositionMemberV1,
 } from "@frockbot/core/durable";
-import { appletBuildService } from "@frockbot/app/applets-host/bot";
+import {
+  APPLET_BUILD_ROUTE,
+  APPLET_BUILD_TOKEN_HEADER,
+  decodeAppletBuildProblemV1,
+  decodeAppletBuildResponseV1,
+  encodeAppletBuildRequestV1,
+} from "@frockbot/applets/build-contract";
+import type { PluginBuildServiceV1 } from "@frockbot/app/plugins/authoring";
 import {
   currentUserCompositionV1,
   proposeUserCompositionV1,
@@ -37,6 +44,45 @@ import type { PluginAuthoringRuntimeHostV1 } from "./feature.js";
 
 /** How many times a proposal re-reads and retries after losing the pin race. */
 const PROPOSE_ATTEMPTS = 3;
+
+/**
+ * The Plugin build service over the `APPLET_BUILD` binding, or `undefined`
+ * when this deployment has no binding or no token.
+ */
+function pluginBuildService(
+  state: ShellBotStateV1,
+): PluginBuildServiceV1 | undefined {
+  const fetcher = state.env.APPLET_BUILD;
+  const token = state.env.APPLET_BUILD_TOKEN?.trim();
+  if (!fetcher || !token) return undefined;
+  return {
+    async build(request) {
+      const response = await fetcher.fetch(
+        new Request(`https://applet-build.internal${APPLET_BUILD_ROUTE}`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            [APPLET_BUILD_TOKEN_HEADER]: token,
+          },
+          body: JSON.stringify(encodeAppletBuildRequestV1(request)),
+        }),
+      );
+      let body: unknown;
+      try {
+        body = await response.json();
+      } catch {
+        throw new Error(
+          `the build service answered ${response.status} with no JSON body`,
+        );
+      }
+      if (!response.ok) {
+        const problem = decodeAppletBuildProblemV1(body);
+        throw new Error(`${problem.code}: ${problem.message}`);
+      }
+      return decodeAppletBuildResponseV1(body);
+    },
+  };
+}
 
 /**
  * The Plugins feature's seam for one admitted Turn, or `undefined` when this
@@ -62,7 +108,7 @@ export async function pluginAuthoringRuntimeHost(
   }
   if (!enabled) return undefined;
   const bucket = artifacts;
-  const buildService = appletBuildService(state);
+  const buildService = pluginBuildService(state);
   const plugins = createPluginAuthoringHostV1({
     userId: identity.userId,
     botId: identity.botId,
@@ -125,10 +171,7 @@ export async function generationWithPluginV1(
 ): Promise<CompositionGenerationV1> {
   const members = membersWithPluginV1(current.members, member);
   const createdAt = now.toISOString();
-  const artifactSetHash = await compositionArtifactSetHashV1(
-    members,
-    current.applets ?? [],
-  );
+  const artifactSetHash = await compositionArtifactSetHashV1(members);
   return decodeCompositionGenerationV1({
     schemaVersion: 1,
     generationId: compositionGenerationIdV1(createdAt, artifactSetHash),
@@ -143,9 +186,6 @@ export async function generationWithPluginV1(
       turnId: intent.turnId,
     },
     members,
-    ...(current.applets && current.applets.length > 0
-      ? { applets: current.applets }
-      : {}),
     status: "pending",
   });
 }

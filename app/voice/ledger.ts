@@ -18,7 +18,6 @@ import {
   VOICE_ASSISTANT_DAILY_AUDIO_OUT_SECONDS_V1,
   VOICE_ASSISTANT_DAILY_TURNS_V1,
   VOICE_ASSISTANT_MAX_DELEGATIONS_PER_TURN_V1,
-  VOICE_ASSISTANT_PAUSED_REJOIN_WINDOW_MS_V1,
   VOICE_ASSISTANT_REJOIN_WINDOW_MS_V1,
 } from "./shared.js";
 import { sha256HexTextV1 } from "@frockbot/core/crypto";
@@ -58,12 +57,6 @@ export interface VoiceCallRecordV1 {
    * client that never named one; the object falls back to General.
    */
   botId?: string;
-  /**
-   * The person paused, or the app left the screen. A socket that then dies
-   * is not a hang-up: the same device has the long rejoin window rather
-   * than the short one. Absent means the call was live when last seen.
-   */
-  paused?: true;
 }
 
 export type VoiceTurnStateV1 = "admitted" | "answered" | "failed" | "abandoned";
@@ -200,19 +193,6 @@ export type VoiceDelegationAdmissionV1 =
   | { status: "refused"; reason: string };
 
 /**
- * How long this call's own device has to come back after the socket goes.
- *
- * A live drop is the short window; a Pause, or the app leaving the screen,
- * is the long one. The record names which, so the alarm and a later
- * `start_call` ask the same question.
- */
-export function voiceCallRejoinWindowMsV1(call: VoiceCallRecordV1): number {
-  return call.paused === true
-    ? VOICE_ASSISTANT_PAUSED_REJOIN_WINDOW_MS_V1
-    : VOICE_ASSISTANT_REJOIN_WINDOW_MS_V1;
-}
-
-/**
  * A socket from the same device, inside the rejoin window, is the same call:
  * a network change or a brief drop continues the conversation rather than
  * starting one. Anything else — another device, or a longer gap — is new.
@@ -225,14 +205,15 @@ export function voiceCallRejoinsV1(
   return (
     call.deviceKey === deviceKey &&
     at.getTime() - Date.parse(call.lastSeenAt) <=
-      voiceCallRejoinWindowMsV1(call)
+      VOICE_ASSISTANT_REJOIN_WINDOW_MS_V1
   );
 }
 
 /** The other side of the same rule: nobody can still be on this call. */
 export function voiceCallIsStaleV1(call: VoiceCallRecordV1, at: Date): boolean {
   return (
-    at.getTime() - Date.parse(call.lastSeenAt) > voiceCallRejoinWindowMsV1(call)
+    at.getTime() - Date.parse(call.lastSeenAt) >
+    VOICE_ASSISTANT_REJOIN_WINDOW_MS_V1
   );
 }
 
@@ -387,33 +368,6 @@ export class VoiceLedgerV1 {
       ...call,
       lastSeenAt: at.toISOString(),
     });
-  }
-
-  /**
-   * Records that this connection paused, or that it woke. The rejoin window
-   * follows this bit, so it is written before the socket is allowed to go:
-   * a Pause whose close then races the write would otherwise expire in a
-   * minute.
-   */
-  async setCallPaused(
-    connectionId: string,
-    paused: boolean,
-    at: Date,
-  ): Promise<void> {
-    const call = await this.currentCall();
-    if (!call || call.connectionId !== connectionId) return;
-    const next: VoiceCallRecordV1 = {
-      schemaVersion: 1,
-      callId: call.callId,
-      deviceKey: call.deviceKey,
-      connectionId: call.connectionId,
-      startedAt: call.startedAt,
-      lastSeenAt: at.toISOString(),
-      turnSequence: call.turnSequence,
-      ...(call.botId ? { botId: call.botId } : {}),
-      ...(paused ? { paused: true as const } : {}),
-    };
-    await this.storage.put(VOICE_CALL_KEY_V1, next);
   }
 
   /**

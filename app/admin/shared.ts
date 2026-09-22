@@ -665,15 +665,13 @@ export class AccountAccessConflictError extends Error {
 
 // --- Account features --------------------------------------------------------
 //
-// What an administrator has turned on for one account. Applets is the first:
-// a feature that is off offers no `applet_*` tools to that account's Bots,
-// mounts no Applet members into their Compositions, and shows no Applet
-// surfaces in the client. The record is the account's, so the User Durable
-// Object holds it; only an admin writes it.
+// What an administrator has turned on for one account: whether its Bots may
+// author Plugins, and which admin-gated seeded Plugins are open. The record
+// is the account's, so the User Durable Object holds it; only an admin writes
+// it.
 
 export interface UserFeaturesV1 {
   schemaVersion: 1;
-  applets: boolean;
   /** Whether this account's Bots may author Plugins (ADR 0026's master toggle). */
   pluginAuthoring: boolean;
   /** The admin-gated seeded Plugins an admin has opened for this account. */
@@ -685,7 +683,6 @@ export interface UserFeaturesV1 {
 export interface SetUserFeaturesCommandV1 {
   schemaVersion: 1;
   type: "user/set-features";
-  applets: boolean;
   pluginAuthoring?: boolean;
   plugins?: string[];
 }
@@ -792,7 +789,6 @@ export const USER_FEATURES_DEFAULT_UPDATED_BY = "deployment-default";
 export function defaultUserFeaturesV1(): UserFeaturesV1 {
   return {
     schemaVersion: 1,
-    applets: false,
     pluginAuthoring: false,
     plugins: [],
     updatedAt: new Date(0).toISOString(),
@@ -824,15 +820,12 @@ export function decodeUserFeaturesV1(input: unknown): UserFeaturesV1 {
   // written without them reads as closed and none opened.
   exactKeys(
     features,
-    ["schemaVersion", "applets", "updatedAt", "updatedBy"],
+    ["schemaVersion", "updatedAt", "updatedBy"],
     "user features",
     ["pluginAuthoring", "plugins"],
   );
   if (features.schemaVersion !== 1) {
     throw new Error("user features.schemaVersion is invalid");
-  }
-  if (typeof features.applets !== "boolean") {
-    throw new Error("user features.applets is invalid");
   }
   if (
     features.pluginAuthoring !== undefined &&
@@ -842,7 +835,6 @@ export function decodeUserFeaturesV1(input: unknown): UserFeaturesV1 {
   }
   return {
     schemaVersion: 1,
-    applets: features.applets,
     pluginAuthoring: features.pluginAuthoring === true,
     plugins: pluginIds(features.plugins, "user features.plugins"),
     updatedAt: isoTimestamp(features.updatedAt, "user features.updatedAt"),
@@ -877,16 +869,13 @@ export function decodeSetUserFeaturesCommandV1(
   input: unknown,
 ): SetUserFeaturesCommandV1 {
   const command = record(input, "user features command");
-  exactKeys(
-    command,
-    ["schemaVersion", "type", "applets"],
-    "user features command",
-    ["pluginAuthoring", "plugins"],
-  );
+  exactKeys(command, ["schemaVersion", "type"], "user features command", [
+    "pluginAuthoring",
+    "plugins",
+  ]);
   if (
     command.schemaVersion !== 1 ||
     command.type !== "user/set-features" ||
-    typeof command.applets !== "boolean" ||
     (command.pluginAuthoring !== undefined &&
       typeof command.pluginAuthoring !== "boolean")
   ) {
@@ -895,7 +884,6 @@ export function decodeSetUserFeaturesCommandV1(
   return {
     schemaVersion: 1,
     type: "user/set-features",
-    applets: command.applets,
     ...(command.pluginAuthoring === undefined
       ? {}
       : { pluginAuthoring: command.pluginAuthoring }),

@@ -269,12 +269,8 @@ describe("production setup", () => {
       STRIPE_MONTHLY_PRICE_ID: "price_production_monthly",
       BILLING_MODEL_RATES:
         '{"@cf/test/model":{"inputMicrosPerToken":1,"cachedInputMicrosPerToken":1,"outputMicrosPerToken":2,"maximumInputTokens":1000,"maximumOutputTokens":1000}}',
-      // Required since 2026-09-05: without it every published Applet answers
-      // 503, which is what production did until the manifest was added.
-      APPLET_VIEWER_SECRET:
-        "1d6f7c2b9a3e4058c7d1e2f3a4b5c6d7e8f90a1b2c3d4e5f60718293a4b5c6d7",
-      // Required since plan step 8 cut 2: a Turn's `applet_check` and
-      // `applet_publish` both call the build service with it.
+      // Required since plan step 8: a Turn's `plugin_check` and
+      // `plugin_publish` both call the build service with it.
       APPLET_BUILD_TOKEN:
         "8b7a6959483726150e9d8c7b6a5948372615f0e9d8c7b6a5948372615f0e9d8c",
       // Required with voice (docs/voice.md): the hosted product must dictate
@@ -421,9 +417,8 @@ exit 1
     expect(forwarded.MACHINE_TOKEN_SECRET).toBe(
       productionEnvironment.MACHINE_TOKEN_SECRET,
     );
-    // The secret whose absence closed every published Applet in production.
-    expect(forwarded.APPLET_VIEWER_SECRET).toBe(
-      productionEnvironment.APPLET_VIEWER_SECRET,
+    expect(forwarded.APPLET_BUILD_TOKEN).toBe(
+      productionEnvironment.APPLET_BUILD_TOKEN,
     );
   });
 });
