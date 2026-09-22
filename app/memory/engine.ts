@@ -2490,7 +2490,6 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
       scopeKey,
       itemId,
       generation,
-      operation,
     });
     if (operation === "upsert") {
       this.#sql.exec(

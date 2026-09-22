@@ -342,13 +342,11 @@ export function memoryItemVectorIdV1(input: {
   scopeKey: string;
   itemId: string;
   generation: number;
-  operation: "upsert" | "delete";
   policyId?: string;
 }): string {
   const policy = input.policyId ?? MEMORY_EMBEDDING_POLICY_ID_V1;
-  // The intent row records upsert versus delete. The vector id must not:
-  // a delete that names a different id leaves the upsert in the index.
-  void input.operation;
+  // Upsert and delete share this id. The intent row records which operation
+  // it is; putting the operation in the id would leave the upsert behind.
   return `${input.scopeKey}:${input.itemId}:${input.generation}:${policy}`;
 }
 
