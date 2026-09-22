@@ -293,7 +293,11 @@ export class MemoryRecordsV1 {
     }
     return {
       ranks,
-      status: missing ? (ranks.length > 0 ? "partial" : "unavailable") : "complete",
+      status: missing
+        ? ranks.length > 0
+          ? "partial"
+          : "unavailable"
+        : "complete",
     };
   }
 

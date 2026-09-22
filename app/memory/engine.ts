@@ -752,9 +752,7 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
       }
       items.set(`${hit.scopeKey}\u0000${hit.itemId}`, this.fusionItem(row));
     }
-    const seedIds = new Set(
-      [...items.values()].map((item) => item.itemId),
-    );
+    const seedIds = new Set([...items.values()].map((item) => item.itemId));
     const neighbors = this.recallNeighbors(page.selected, seedIds);
     const fused = fuseMemoryRecallV1({
       channels: channels.channels,
@@ -800,7 +798,8 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
       });
     }
     const ftsFailed = channels.channels.some(
-      (channel) => channel.channel === "fts" && channel.status === "unavailable",
+      (channel) =>
+        channel.channel === "fts" && channel.status === "unavailable",
     );
     const semanticStatus = channels.channels.find(
       (channel) => channel.channel === "semantic",
@@ -2107,7 +2106,10 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
     let ftsFailed = false;
     const match = memoryMatchExpressionV1(query);
     const exact = memoryCanonicalKeyV1(query);
-    const channelLimit = Math.min(budget, MEMORY_POLICY_V1.candidatesPerChannel);
+    const channelLimit = Math.min(
+      budget,
+      MEMORY_POLICY_V1.candidatesPerChannel,
+    );
     for (const scope of scopes) {
       if (fts.length >= channelLimit) break;
       const scopeKey = memoryScopeKeyV1(scope);
@@ -2209,13 +2211,11 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
     const semantic = (request.semanticRanks ?? [])
       .filter((rank) => allowed.has(rank.scopeKey))
       .slice(0, channelLimit)
-      .map(
-        (rank, index): MemorySemanticRankV1 => ({
-          scopeKey: rank.scopeKey,
-          itemId: rank.itemId,
-          rank: index + 1,
-        }),
-      );
+      .map((rank, index): MemorySemanticRankV1 => ({
+        scopeKey: rank.scopeKey,
+        itemId: rank.itemId,
+        rank: index + 1,
+      }));
     const semanticStatus: MemoryRecallChannelStatusV1 =
       request.semanticStatus ??
       (request.semanticRanks ? "complete" : "skipped");
@@ -2223,7 +2223,11 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
       channels: [
         {
           channel: "fts",
-          status: ftsFailed ? (fts.length > 0 ? "partial" : "unavailable") : "complete",
+          status: ftsFailed
+            ? fts.length > 0
+              ? "partial"
+              : "unavailable"
+            : "complete",
           ranked: fts,
         },
         { channel: "semantic", status: semanticStatus, ranked: semantic },

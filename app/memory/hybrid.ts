@@ -56,7 +56,8 @@ export function reciprocalRankFusionV1(
       const score = 1 / (MEMORY_POLICY_V1.rrfK + hit.rank);
       const existing = scores.get(key);
       if (existing) existing.score += score;
-      else scores.set(key, { scopeKey: hit.scopeKey, itemId: hit.itemId, score });
+      else
+        scores.set(key, { scopeKey: hit.scopeKey, itemId: hit.itemId, score });
     }
   }
   return [...scores.values()].sort((left, right) => {
@@ -146,7 +147,9 @@ export function preferCoveringObservationsV1(
       if (!contradicted) drop.add(itemKey(leaf.scopeKey, leaf.itemId));
     }
   }
-  return ordered.filter((item) => !drop.has(itemKey(item.scopeKey, item.itemId)));
+  return ordered.filter(
+    (item) => !drop.has(itemKey(item.scopeKey, item.itemId)),
+  );
 }
 
 export function expandMemoryNeighborsV1(
@@ -154,7 +157,9 @@ export function expandMemoryNeighborsV1(
   neighbors: readonly MemoryNeighborV1[],
   hydrate: (scopeKey: string, itemId: string) => FusionMemoryItemV1 | undefined,
 ): FusionMemoryItemV1[] {
-  const seen = new Set(seeds.map((item) => itemKey(item.scopeKey, item.itemId)));
+  const seen = new Set(
+    seeds.map((item) => itemKey(item.scopeKey, item.itemId)),
+  );
   const extra: FusionMemoryItemV1[] = [];
   for (const neighbor of neighbors) {
     if (extra.length >= MEMORY_POLICY_V1.graphExpansionRecords) break;
@@ -203,7 +208,9 @@ export function fuseMemoryRecallV1(input: {
   const seedIds = new Set(seeds.map((item) => item.itemId));
   const neighborItems = expandMemoryNeighborsV1(
     seeds,
-    input.neighbors.filter((neighbor) => seedIds.has(neighbor.itemId) === false),
+    input.neighbors.filter(
+      (neighbor) => seedIds.has(neighbor.itemId) === false,
+    ),
     input.hydrateNeighbor,
   );
   // Neighbors are keyed by the seed they came from; the caller passes the
@@ -296,7 +303,8 @@ export async function settleMemoryChannelsV1<T>(
         if (!task || abort.signal.aborted) return;
         try {
           const value = await task.run(abort.signal);
-          if (!abort.signal.aborted) results[index] = { status: "complete", value };
+          if (!abort.signal.aborted)
+            results[index] = { status: "complete", value };
         } catch {
           if (!abort.signal.aborted) results[index] = { status: "partial" };
         }
@@ -369,7 +377,8 @@ export function initialMemoryQueryV1(
   userText: string,
   searchesUsed: number,
 ): { query: string; signature: string } | undefined {
-  if (searchesUsed >= MEMORY_POLICY_V1.automaticInitialSearches) return undefined;
+  if (searchesUsed >= MEMORY_POLICY_V1.automaticInitialSearches)
+    return undefined;
   if (isControlOnlyMemoryInputV1(userText)) return undefined;
   const query = userText.trim().slice(0, 500);
   const signature = query.toLowerCase().replace(/\s+/g, " ");

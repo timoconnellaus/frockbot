@@ -7,15 +7,17 @@ import {
 describe("retired memory fact objects", () => {
   test("profile and log files are fact roots; other workspace files are not", () => {
     expect(
+      isRetiredMemoryFactObjectKeyV1("bot-memory:u:b/by-agent/b/profile.md"),
+    ).toBe(true);
+    expect(
       isRetiredMemoryFactObjectKeyV1(
-        "bot-memory:u:b/by-agent/b/profile.md",
+        "bot-memory:u:b/by-agent/b/log/2026-09.md",
       ),
     ).toBe(true);
     expect(
-      isRetiredMemoryFactObjectKeyV1("bot-memory:u:b/by-agent/b/log/2026-09.md"),
-    ).toBe(true);
-    expect(
-      isRetiredMemoryFactObjectKeyV1("bot-instructions:u:b/skills/kiln/SKILL.md"),
+      isRetiredMemoryFactObjectKeyV1(
+        "bot-instructions:u:b/skills/kiln/SKILL.md",
+      ),
     ).toBe(false);
     expect(
       isRetiredMemoryFactObjectKeyV1("user-memory:u/notes/ordinary.txt"),

@@ -91,10 +91,7 @@ import { authorityOf } from "./engine-tools.js";
 import { explicitDatesInQueryV1 } from "./hybrid.js";
 import { isControlOnlyMemoryInputV1 } from "./policy.js";
 import { memoryDayV1 } from "./facts.js";
-import {
-  productScopeToEngineV1,
-  type MemoryScopeRefV1,
-} from "./records.js";
+import { productScopeToEngineV1, type MemoryScopeRefV1 } from "./records.js";
 import type {
   EmbedMemory,
   MemoryAiBinding,
@@ -403,7 +400,10 @@ export class MemoryProjection {
       records,
       ...(this.#host.projects ? { projects: this.#host.projects } : {}),
     });
-    const scopes = memoryScopesForHostV1(this.#host.owner, authority.joinedGroupChatIds);
+    const scopes = memoryScopesForHostV1(
+      this.#host.owner,
+      authority.joinedGroupChatIds,
+    );
     const core = await records.preparedCore({
       authority,
       scopes,
@@ -470,7 +470,9 @@ export class MemoryProjection {
     );
   }
 
-  renderMessages(messages: Parameters<typeof renderMemoryRequestMessagesV1>[0]) {
+  renderMessages(
+    messages: Parameters<typeof renderMemoryRequestMessagesV1>[0],
+  ) {
     const records = this.#host.records;
     return renderMemoryRequestMessagesV1(messages, {
       blocks: this.#recall.blocks,
@@ -1683,7 +1685,14 @@ export function createMemoryRuntimeFeature(
     );
     disposers.push(
       runtime.hooks.add({
-        messageWindow: async (_agent, messages, _turn, _step, _signal, next) => {
+        messageWindow: async (
+          _agent,
+          messages,
+          _turn,
+          _step,
+          _signal,
+          next,
+        ) => {
           const windowed = await next();
           if (!host.records) return windowed;
           return projection.renderMessages(windowed);
@@ -1754,9 +1763,7 @@ export function createMemoryRuntimeFeature(
   };
 }
 
-function engineScopeName(
-  kind: string,
-): "bot" | "user" | "project" {
+function engineScopeName(kind: string): "bot" | "user" | "project" {
   if (kind === "user") return "user";
   if (kind === "groupChat") return "project";
   return "bot";

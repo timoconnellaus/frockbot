@@ -19,11 +19,7 @@ export interface VoiceMemoryPrefetchEntryV1<T> {
 export class VoiceMemoryPrefetchCacheV1<T> {
   #current: VoiceMemoryPrefetchEntryV1<T> | undefined;
 
-  start(
-    attemptId: string,
-    query: string,
-    run: () => Promise<T>,
-  ): void {
+  start(attemptId: string, query: string, run: () => Promise<T>): void {
     this.#current = { attemptId, query, result: run() };
   }
 

@@ -3,10 +3,7 @@
 // survives into the next model request.
 
 import type { LlmMessage } from "@frockbot/core/contracts";
-import {
-  followupMemoryQueryV1,
-  initialMemoryQueryV1,
-} from "./hybrid.js";
+import { followupMemoryQueryV1, initialMemoryQueryV1 } from "./hybrid.js";
 import {
   MEMORY_POLICY_V1,
   clipMemoryItemsToTokensV1,
@@ -120,7 +117,8 @@ export function planMemoryRecallV1(input: {
 }): { query: string; signature: string } | undefined {
   if (input.step <= 1) {
     const initial = initialMemoryQueryV1(input.userText, input.state.searches);
-    if (!initial || input.state.signatures.has(initial.signature)) return undefined;
+    if (!initial || input.state.signatures.has(initial.signature))
+      return undefined;
     return initial;
   }
   return followupMemoryQueryV1({
@@ -138,7 +136,9 @@ export function noteMemoryRecallV1(
 ): void {
   state.searches += 1;
   state.signatures.add(signature);
-  const seen = new Set(state.blocks.map((block) => `${block.itemId}:${block.generation}`));
+  const seen = new Set(
+    state.blocks.map((block) => `${block.itemId}:${block.generation}`),
+  );
   for (const block of blocks) {
     const key = `${block.itemId}:${block.generation}`;
     if (seen.has(key)) continue;
@@ -201,7 +201,10 @@ export function renderMemoryRequestMessagesV1(
       ),
   );
   const toolTokens = withoutPrior
-    .filter((message) => message.role === "tool" && message.name.startsWith("memory_"))
+    .filter(
+      (message) =>
+        message.role === "tool" && message.name.startsWith("memory_"),
+    )
     .reduce((sum, message) => sum + memoryPolicyTokensV1(message.content), 0);
   const room = Math.max(
     0,
@@ -210,10 +213,8 @@ export function renderMemoryRequestMessagesV1(
       MEMORY_POLICY_V1.totalContributionTokens - input.coreTokens - toolTokens,
     ),
   );
-  const clipped = clipMemoryItemsToTokensV1(
-    input.blocks,
-    room,
-    (block) => memoryPolicyTokensV1(block.text),
+  const clipped = clipMemoryItemsToTokensV1(input.blocks, room, (block) =>
+    memoryPolicyTokensV1(block.text),
   );
   if (clipped.kept.length === 0) return withoutPrior;
   const block: LlmMessage = {

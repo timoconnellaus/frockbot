@@ -3337,7 +3337,8 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       effort: "automatic",
     })) as { hits?: Array<{ item?: { text?: string } }>; status?: string };
     const hits = result.hits ?? [];
-    if (hits.length === 0) return `No memory matches (${result.status ?? "empty"}).`;
+    if (hits.length === 0)
+      return `No memory matches (${result.status ?? "empty"}).`;
     return hits
       .map((hit, index) => `[${index + 1}] ${hit.item?.text ?? ""}`)
       .join("\n");
@@ -3452,7 +3453,9 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     const sections = result.sections ?? [];
     if (sections.length === 0) return "Nothing to browse.";
     return sections
-      .map((section) => `${section.title ?? "Memory"}: ${section.summary ?? ""}`)
+      .map(
+        (section) => `${section.title ?? "Memory"}: ${section.summary ?? ""}`,
+      )
       .join("\n");
   }
 
@@ -3902,7 +3905,8 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       },
       recallProject: async (projectId) => {
         if (!isMemoryProjectIdV1(projectId)) return "That is not a Project id.";
-        if (!call.botId) return "Memory is unavailable until a Bot is selected.";
+        if (!call.botId)
+          return "Memory is unavailable until a Bot is selected.";
         return this.browseCanonicalMemory(userId, call.botId, projectId);
       },
     };

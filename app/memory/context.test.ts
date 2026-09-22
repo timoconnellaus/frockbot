@@ -23,9 +23,9 @@ describe("chat memory context", () => {
       learnedAt: "2026-09-22",
     });
     expect(injection.facts.length).toBeLessThan(8);
-    expect(injection.omissions.some((entry) => entry.reason.includes("1024"))).toBe(
-      true,
-    );
+    expect(
+      injection.omissions.some((entry) => entry.reason.includes("1024")),
+    ).toBe(true);
     expect(injection.text.startsWith("<memory>")).toBe(true);
   });
 

@@ -686,7 +686,11 @@ export async function isolateMemoryRead(
       value: await memory.records.preparedCore({
         authority,
         scopes: [
-          productScopeToEngineV1(request.scope, memory.owner, request.projectId),
+          productScopeToEngineV1(
+            request.scope,
+            memory.owner,
+            request.projectId,
+          ),
         ],
       }),
     };

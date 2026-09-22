@@ -157,10 +157,12 @@ describe("automatic recall planning", () => {
   test("a greeting is not a search and a question is", () => {
     expect(initialMemoryQueryV1("hi", 0)).toBeUndefined();
     expect(initialMemoryQueryV1("", 0)).toBeUndefined();
-    expect(initialMemoryQueryV1("Where did I leave the kiln?", 0)?.query).toContain(
-      "kiln",
-    );
-    expect(initialMemoryQueryV1("Where did I leave the kiln?", 1)).toBeUndefined();
+    expect(
+      initialMemoryQueryV1("Where did I leave the kiln?", 0)?.query,
+    ).toContain("kiln");
+    expect(
+      initialMemoryQueryV1("Where did I leave the kiln?", 1),
+    ).toBeUndefined();
   });
 
   test("a later step searches new names once", () => {
@@ -320,7 +322,9 @@ describe("engine hybrid recall", () => {
       authority,
       query: "Wollongong studio",
       scopes: [BOT],
-      semanticRanks: [{ scopeKey: "bot:user-1:bot-1", itemId: "stale", rank: 1 }],
+      semanticRanks: [
+        { scopeKey: "bot:user-1:bot-1", itemId: "stale", rank: 1 },
+      ],
       semanticStatus: "complete",
     });
     expect(after.hits.map((hit) => hit.item.text)).not.toContain(

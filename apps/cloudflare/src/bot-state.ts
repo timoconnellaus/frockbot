@@ -1111,7 +1111,12 @@ export class BotState
         engine: this.memoryEngine(),
         remote: createUserMemoryRecordsRemoteV1(rpc, identity),
         ...(vectors && ai
-          ? { semantic: createVectorMemorySearchV1(vectors, createMemoryEmbedder(ai)) }
+          ? {
+              semantic: createVectorMemorySearchV1(
+                vectors,
+                createMemoryEmbedder(ai),
+              ),
+            }
           : {}),
       });
     }
