@@ -33,11 +33,7 @@
       {
         "id": "voice-audio",
         "label": "3 \u00b7 Listen + respond",
-        "focus": [
-          "voice-gemini",
-          "voice-listening",
-          "voice-audio"
-        ],
+        "focus": ["voice-gemini", "voice-listening", "voice-audio"],
         "note": "Gemini setup acknowledgement permits listening. First output also crosses a durable turn admission."
       }
     ]

@@ -9,35 +9,19 @@
       {
         "id": "accept-change",
         "label": "1 · Save the change",
-        "focus": [
-          "change",
-          "admit",
-          "records",
-          "visible",
-          "ack"
-        ],
+        "focus": ["change", "admit", "records", "visible", "ack"],
         "note": "Commit the fact or removal with its scope, source and version. Update immediate reads before acknowledging success."
       },
       {
         "id": "index-later",
         "label": "2 · Index in background",
-        "focus": [
-          "records",
-          "outbox",
-          "embed",
-          "publish",
-          "settle"
-        ],
+        "focus": ["records", "outbox", "embed", "publish", "settle"],
         "note": "Durable jobs update Vectorize after the write. New facts remain findable through exact lookup until indexed."
       },
       {
         "id": "prevent-stale",
         "label": "3 · Keep recall current",
-        "focus": [
-          "records",
-          "visible",
-          "publish"
-        ],
+        "focus": ["records", "visible", "publish"],
         "note": "Recall checks current versions and removals. A stale vector cannot restore a fact the user has forgotten."
       }
     ]
@@ -56,13 +40,7 @@
       "label": "Background work · recoverable after eviction"
     }
   ],
-  "mainPath": [
-    "change",
-    "admit",
-    "records",
-    "visible",
-    "ack"
-  ],
+  "mainPath": ["change", "admit", "records", "visible", "ack"],
   "nodes": [
     {
       "id": "change",
