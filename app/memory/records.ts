@@ -346,7 +346,10 @@ export function memoryItemVectorIdV1(input: {
   policyId?: string;
 }): string {
   const policy = input.policyId ?? MEMORY_EMBEDDING_POLICY_ID_V1;
-  return `${input.scopeKey}:${input.itemId}:${input.generation}:${policy}:${input.operation}`;
+  // The intent row records upsert versus delete. The vector id must not:
+  // a delete that names a different id leaves the upsert in the index.
+  void input.operation;
+  return `${input.scopeKey}:${input.itemId}:${input.generation}:${policy}`;
 }
 
 export function isMemoryProfileSubjectV1(
