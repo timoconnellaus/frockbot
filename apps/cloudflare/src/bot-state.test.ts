@@ -81,6 +81,10 @@ class MemoryStorage {
     return callback(this);
   }
 
+  getAlarm(): Promise<number | null> {
+    return Promise.resolve(this.alarmAt ?? null);
+  }
+
   setAlarm(scheduledTime: number): Promise<void> {
     this.alarmAt = scheduledTime;
     return Promise.resolve();
