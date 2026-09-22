@@ -75,7 +75,6 @@ import {
   LATEST_EVENTS_KEY,
   MAX_RUN_ADMISSION_FENCES,
   NOTIFICATION_PREFIX,
-  PUBLICATION_CURSOR_KEY,
   PUBLICATION_PENDING_PREFIX,
   RECOVERY_ALARM_DELAY_MS,
   REPAIR_DUE_PREFIX,
@@ -84,12 +83,18 @@ import {
   RUN_INDEX_PREFIX,
   RUN_PREFIX,
   pendingAgentRunKey,
-  publicationPendingKey,
   repairDueKey,
   repairRunKey,
   runIndexKey,
   storedRunAdmissionFences,
 } from "./storage-keys.js";
+import {
+  commitPublicationsV1,
+  drainPendingPublicationV1,
+  runEntityIdV1,
+  type ConversationUpdateV1,
+  type PublicationContributionV1,
+} from "./publication.js";
 
 function turnContextSeedV1(
   read: Awaited<ReturnType<typeof readSessionCursorV1>>,
@@ -185,6 +190,15 @@ export interface BotDurableAuthorityHooks<Snapshot> {
     read<T>(key: string): Promise<T | undefined>;
   }): Promise<Record<string, unknown>>;
   eventsCommitted?(): void;
+  /**
+   * Visible conversation updates for one committed change. Returned
+   * contributions are written in the same transaction as the source record.
+   */
+  visiblePublications?(input: {
+    cause: "admission" | "events" | "terminal";
+    run: StoredRunV1<Snapshot>;
+    events?: readonly SessionEvent[];
+  }): Promise<PublicationContributionV1[]> | PublicationContributionV1[];
   /** Notification policy; `undefined` records no notification. */
   notification(
     snapshot: Snapshot,
@@ -243,7 +257,7 @@ export interface BotDurableAuthorityHooks<Snapshot> {
    * completes so an idle object is not kept awake.
    */
   deliverPublication?(
-    pending: readonly Record<string, unknown>[],
+    pending: readonly ConversationUpdateV1[],
   ): Promise<void>;
   /**
    * Advisory interrupt of the exact Turn named, after the durable intent that
@@ -427,6 +441,7 @@ export class BotDurableAuthority<Snapshot> {
       );
     }
     this.kickDriver();
+    await this.drainPublication();
     return {
       schemaVersion: 1,
       runId: command.runId,
@@ -1444,6 +1459,13 @@ export class BotDurableAuthority<Snapshot> {
         this.supersededPackageRecords(),
         this.failedRunRecords(),
       );
+      const settled = await this.readRunFrom(transaction, runId);
+      if (settled) {
+        await this.commitVisible(transaction, {
+          cause: "terminal",
+          run: settled,
+        });
+      }
       await this.refreshRecoveryAlarm(transaction);
     });
   }
@@ -1460,33 +1482,51 @@ export class BotDurableAuthority<Snapshot> {
   }
 
   /**
-   * Delivers a bounded batch of committed publication, then drops those
-   * obligations. External delivery stays outside the storage transaction.
-   * Returns whether further publication is still pending.
+   * Delivers a bounded batch of committed publication, then advances
+   * `broadcastThrough`. External delivery stays outside the storage
+   * transaction. Returns whether further publication is still pending.
    */
+  async drainCommittedPublication(): Promise<boolean> {
+    return this.drainPublication();
+  }
+
   private async drainPublication(): Promise<boolean> {
-    const pending = await this.ctx.storage.list<Record<string, unknown>>({
-      prefix: PUBLICATION_PENDING_PREFIX,
-      limit: MAINTENANCE_BATCH_V1,
-    });
-    if (pending.size === 0) return false;
-    const keys = [...pending.keys()];
-    try {
-      await this.hooks.deliverPublication?.([...pending.values()]);
-    } catch (error) {
-      console.error(
-        `Bot publication drain failed: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      );
-      return true;
-    }
-    await this.ctx.storage.delete(keys);
-    const more = await this.ctx.storage.list({
-      prefix: PUBLICATION_PENDING_PREFIX,
-      limit: 1,
-    });
-    return more.size > 0;
+    return drainPendingPublicationV1(
+      this.ctx.storage,
+      async (updates) => {
+        await this.hooks.deliverPublication?.(updates);
+      },
+      {
+        refreshAlarm: (transaction) => this.refreshRecoveryAlarm(transaction),
+      },
+    );
+  }
+
+  private async commitVisible(
+    transaction: DurableObjectTransaction,
+    input: {
+      cause: "admission" | "events" | "terminal";
+      run: StoredRunV1<Snapshot>;
+      events?: readonly SessionEvent[];
+    },
+  ): Promise<void> {
+    const contributed = await this.hooks.visiblePublications?.(input);
+    const contributions =
+      contributed ??
+      (input.cause === "events"
+        ? []
+        : [
+            {
+              kind: "run-status" as const,
+              entityId: runEntityIdV1(input.run.runId),
+              payload: {
+                runId: input.run.runId,
+                status: input.run.status,
+                phase: input.run.phase,
+              },
+            },
+          ]);
+    await commitPublicationsV1(transaction, contributions);
   }
 
   /**
@@ -1513,6 +1553,7 @@ export class BotDurableAuthority<Snapshot> {
         continue;
       }
       await this.settleStaleRun(runId);
+      await this.drainPublication();
       const after = await this.readRunHeader(runId);
       if (!after || after.status !== "running") {
         await this.ctx.storage.delete([key, repairRunKey(runId)]);
@@ -1795,8 +1836,6 @@ export class BotDurableAuthority<Snapshot> {
         Date.parse(command.acceptedAt) +
         TURN_DEADLINE_MS_V1 +
         STALE_RUNNING_RUN_GRACE_MS_V1;
-      const publicationCursor =
-        ((await transaction.get<number>(PUBLICATION_CURSOR_KEY)) ?? 0) + 1;
       const admittedRun = this.codec.require({
         runId: command.runId,
         commandFingerprint: botTurnCommandFingerprintV1(command),
@@ -1857,18 +1896,14 @@ export class BotDurableAuthority<Snapshot> {
           userId: command.userId,
           botId: command.botId,
         },
-        [PUBLICATION_CURSOR_KEY]: publicationCursor,
-        [publicationPendingKey(publicationCursor)]: {
-          schemaVersion: 1,
-          cursor: publicationCursor,
-          runId: command.runId,
-          phase: queued ? "queued" : "admitted",
-          status: "running",
-        },
         [repairRunKey(command.runId)]: repairAt,
         [repairDueKey(repairAt, command.runId)]: command.runId,
       });
       const interrupted = supersede ? await supersede(command.runId) : false;
+      await this.commitVisible(transaction, {
+        cause: "admission",
+        run: admittedRun,
+      });
       await this.refreshRecoveryAlarm(transaction);
       if (queued) {
         return {
@@ -2013,9 +2048,15 @@ export class BotDurableAuthority<Snapshot> {
       if (records && Object.keys(records).length)
         await transaction.put(records);
       await transaction.put(key, structuredClone(storedRunRecordV2(next)));
+      await this.commitVisible(transaction, {
+        cause: "events",
+        run: next,
+        events: durableEvents,
+      });
       await this.refreshRecoveryAlarm(transaction);
     });
     this.hooks.eventsCommitted?.();
+    await this.drainPublication();
   }
 
   /**
@@ -2091,9 +2132,19 @@ export class BotDurableAuthority<Snapshot> {
         this.terminalPackageRecords(snapshot),
         this.supersededPackageRecords(),
       );
+      const settled = await this.readRunFrom(transaction, runId);
+      if (settled) {
+        await this.commitVisible(transaction, {
+          cause: "terminal",
+          run: settled,
+        });
+      }
       await this.refreshRecoveryAlarm(transaction);
       await this.clearRunRepair(transaction, runId);
     });
+    // Drain before waiters are released so the driver is not still inside
+    // this Turn when they mutate storage to model eviction.
+    await this.drainPublication();
     this.notifySettlement();
   }
 
@@ -2129,9 +2180,17 @@ export class BotDurableAuthority<Snapshot> {
         this.supersededPackageRecords(),
         this.failedRunRecords(),
       );
+      const settled = await this.readRunFrom(transaction, runId);
+      if (settled) {
+        await this.commitVisible(transaction, {
+          cause: "terminal",
+          run: settled,
+        });
+      }
       await this.refreshRecoveryAlarm(transaction);
       await this.clearRunRepair(transaction, runId);
     });
+    await this.drainPublication();
     this.notifySettlement();
   }
 
@@ -2238,6 +2297,13 @@ export class BotDurableAuthority<Snapshot> {
           DISCARDED_RUN_RECOVERY_FAILURE_V1,
           this.supersededPackageRecords(),
         );
+        const settled = await this.readRunFrom(transaction, run.runId);
+        if (settled) {
+          await this.commitVisible(transaction, {
+            cause: "terminal",
+            run: settled,
+          });
+        }
         await this.clearRunRepair(transaction, run.runId);
         await this.refreshRecoveryAlarm(transaction);
         return undefined;
@@ -2263,6 +2329,13 @@ export class BotDurableAuthority<Snapshot> {
           this.terminalPackageRecords(run.configurationSnapshot),
           this.supersededPackageRecords(),
         );
+        const settled = await this.readRunFrom(transaction, run.runId);
+        if (settled) {
+          await this.commitVisible(transaction, {
+            cause: "terminal",
+            run: settled,
+          });
+        }
         await this.clearRunRepair(transaction, run.runId);
         await this.refreshRecoveryAlarm(transaction);
         return undefined;
@@ -2279,6 +2352,13 @@ export class BotDurableAuthority<Snapshot> {
           this.supersededPackageRecords(),
           this.failedRunRecords(),
         );
+        const settled = await this.readRunFrom(transaction, run.runId);
+        if (settled) {
+          await this.commitVisible(transaction, {
+            cause: "terminal",
+            run: settled,
+          });
+        }
         await this.clearRunRepair(transaction, run.runId);
         await this.refreshRecoveryAlarm(transaction);
         return undefined;
@@ -2325,6 +2405,7 @@ export class BotDurableAuthority<Snapshot> {
       };
     });
     if (!recovery) {
+      await this.drainPublication();
       this.notifySettlement();
       return;
     }

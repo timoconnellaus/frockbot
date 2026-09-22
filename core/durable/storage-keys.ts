@@ -28,9 +28,22 @@ export const REPAIR_DUE_PREFIX = "repair-due:";
 export const REPAIR_RUN_PREFIX = "repair-run:";
 /** Committed visible-status publication the alarm drains without starting a Turn. */
 export const PUBLICATION_PENDING_PREFIX = "publication-pending:";
+/** @deprecated S5 merged this scalar into PublicationHead.lastCursor. */
 export const PUBLICATION_CURSOR_KEY = "publication-cursor";
+export const PUBLICATION_HEAD_KEY = "publication:head:v1";
+export const CONVERSATION_ROW_PREFIX = "conversation:row:v1:";
+export const CONVERSATION_UPDATE_PREFIX = "conversation:update:v1:";
+export const CONVERSATION_VISIBLE_INDEX_KEY = "conversation:visible-index:v1";
 /** Local maintenance drained in one alarm pass. */
 export const MAINTENANCE_BATCH_V1 = 8;
+/** Replay keeps this many committed updates, by count. */
+export const PUBLICATION_REPLAY_MAX_EVENTS_V1 = 64;
+/** Replay keeps at most this many UTF-8 bytes of retained update payloads. */
+export const PUBLICATION_REPLAY_MAX_BYTES_V1 = 1_048_576;
+/** Newest visible runs retained in the conversation snapshot index. */
+export const CONVERSATION_VISIBLE_RUN_LIMIT_V1 = 32;
+/** Newest announcements retained in the conversation snapshot index. */
+export const CONVERSATION_VISIBLE_ANNOUNCEMENT_LIMIT_V1 = 32;
 
 export function repairDueKey(dueAt: number, runId: string): string {
   return `${REPAIR_DUE_PREFIX}${String(dueAt).padStart(16, "0")}:${runId}`;
@@ -42,6 +55,14 @@ export function repairRunKey(runId: string): string {
 
 export function publicationPendingKey(cursor: number): string {
   return `${PUBLICATION_PENDING_PREFIX}${String(cursor).padStart(16, "0")}`;
+}
+
+export function conversationRowKeyV1(entityId: string): string {
+  return `${CONVERSATION_ROW_PREFIX}${entityId}`;
+}
+
+export function conversationUpdateKeyV1(cursor: number): string {
+  return `${CONVERSATION_UPDATE_PREFIX}${String(cursor).padStart(16, "0")}`;
 }
 
 /** Whether one durable key changes the run state projected to a client. */
