@@ -229,6 +229,11 @@ export async function listRuns(
         botMessageCallV1(event)?.botId === counterpart.botId,
     );
   };
+  // An eviction mid-Turn leaves the run `running` and the alarm cleared once
+  // the previous settlement finished. The transcript is the next touch, and
+  // it is what remounts that Turn — on the turn type the admission recorded —
+  // before anything is projected from the stale record.
+  if (!query.before) await state.authority.recoverActiveRun();
   const activeRunId = query.before
     ? undefined
     : await state.authority.readActiveRunId();
