@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "deliver",
+  "type": "workflow",
+  "input": "/Users/tim/.codex/worktrees/73f7/grokbot-headless/docs/research/startup-maps/voice.json",
+  "output": "/Users/tim/.codex/worktrees/73f7/grokbot-headless/docs/research/startup-maps/voice.html",
+  "specification": {
+    "sha256": "957ede440c5e65af97c815a4e5aba24846b7a67632a7269c2c290757e3348a04",
+    "bytes": 6785
+  },
+  "artifact": {
+    "sha256": "801e3f4757ec3ef8d312e1fe2ba3f5d00c3c3b707a4ad14af546b5a49a384d9d",
+    "bytes": 721734
+  },
+  "validation": {
+    "checksPassed": 9,
+    "checkCount": 9,
+    "compositionProfile": "showcase",
+    "compositionStatus": "pass",
+    "errors": 0,
+    "warnings": 0
+  }
+}

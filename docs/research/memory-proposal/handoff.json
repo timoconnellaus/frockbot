@@ -1,0 +1,26 @@
+{
+  "diagrams": [
+    {
+      "diagram_type": "workflow",
+      "output": "/Users/tim/.codex/worktrees/73f7/grokbot-headless/docs/research/memory-proposal/recall.html",
+      "specification_sha256": "c4ff7d6f0b8e35b9d436c9719778cba518edf34390608b7379265c811c4d9e59",
+      "artifact_sha256": "34ed636616808983a00fe73922ff58a0214f5b14af73cfa210f8e2c348b2a29d",
+      "validation": "9/9 showcase, 0 errors, 0 warnings",
+      "browser_evidence": "passed",
+      "visual_review": "passed",
+      "correction_rounds": 1,
+      "review_notes": "Inspected light and dark screenshots; readable node copy and routes, contained cards, balanced desktop composition. Recall lane label clarified after the first visual review."
+    },
+    {
+      "diagram_type": "workflow",
+      "output": "/Users/tim/.codex/worktrees/73f7/grokbot-headless/docs/research/memory-proposal/writes.html",
+      "specification_sha256": "de6eeb9c23c5672d77dedcff5c6710baa06e33b36f07c234684bc59e4f97b253",
+      "artifact_sha256": "86bfba7df002c3f7b82a37fdef8c540f0adbe2b1feeb56d6b604e7a5309f2605",
+      "validation": "9/9 showcase, 0 errors, 0 warnings",
+      "browser_evidence": "passed",
+      "visual_review": "passed",
+      "correction_rounds": 0,
+      "review_notes": "Inspected light and dark screenshots; readable node copy and routes, contained cards, balanced desktop composition."
+    }
+  ]
+}

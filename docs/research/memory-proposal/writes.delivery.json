@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "deliver",
+  "type": "workflow",
+  "input": "/Users/tim/.codex/worktrees/73f7/grokbot-headless/docs/research/memory-proposal/writes.json",
+  "output": "/Users/tim/.codex/worktrees/73f7/grokbot-headless/docs/research/memory-proposal/writes.html",
+  "specification": {
+    "sha256": "de6eeb9c23c5672d77dedcff5c6710baa06e33b36f07c234684bc59e4f97b253",
+    "bytes": 5214
+  },
+  "artifact": {
+    "sha256": "86bfba7df002c3f7b82a37fdef8c540f0adbe2b1feeb56d6b604e7a5309f2605",
+    "bytes": 715261
+  },
+  "validation": {
+    "checksPassed": 9,
+    "checkCount": 9,
+    "compositionProfile": "showcase",
+    "compositionStatus": "pass",
+    "errors": 0,
+    "warnings": 0
+  }
+}

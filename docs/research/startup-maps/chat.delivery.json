@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "deliver",
+  "type": "workflow",
+  "input": "/Users/tim/.codex/worktrees/73f7/grokbot-headless/docs/research/startup-maps/chat.json",
+  "output": "/Users/tim/.codex/worktrees/73f7/grokbot-headless/docs/research/startup-maps/chat.html",
+  "specification": {
+    "sha256": "77befae3ce312a072beb47912a7b72cf6d1c706288cbc7611e0f043f0770bd81",
+    "bytes": 6345
+  },
+  "artifact": {
+    "sha256": "dd54c590e344dc848b2685e230993b7b9dee224ab9b1f2b33d12332a3fe3201a",
+    "bytes": 719160
+  },
+  "validation": {
+    "checksPassed": 9,
+    "checkCount": 9,
+    "compositionProfile": "showcase",
+    "compositionStatus": "pass",
+    "errors": 0,
+    "warnings": 0
+  }
+}

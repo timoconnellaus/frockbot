@@ -1,0 +1,24 @@
+{
+  "schemaVersion": 1,
+  "ok": true,
+  "command": "deliver",
+  "type": "workflow",
+  "input": "/Users/tim/.codex/worktrees/73f7/grokbot-headless/docs/research/memory-proposal/recall.json",
+  "output": "/Users/tim/.codex/worktrees/73f7/grokbot-headless/docs/research/memory-proposal/recall.html",
+  "specification": {
+    "sha256": "c4ff7d6f0b8e35b9d436c9719778cba518edf34390608b7379265c811c4d9e59",
+    "bytes": 5980
+  },
+  "artifact": {
+    "sha256": "34ed636616808983a00fe73922ff58a0214f5b14af73cfa210f8e2c348b2a29d",
+    "bytes": 719783
+  },
+  "validation": {
+    "checksPassed": 9,
+    "checkCount": 9,
+    "compositionProfile": "showcase",
+    "compositionStatus": "pass",
+    "errors": 0,
+    "warnings": 0
+  }
+}

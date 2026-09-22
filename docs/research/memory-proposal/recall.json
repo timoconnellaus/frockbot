@@ -1,0 +1,271 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Proposed Memory · recall",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "core-start",
+        "label": "1 · Ready to converse",
+        "focus": [
+          "ready",
+          "core",
+          "context"
+        ],
+        "note": "Opening chat or voice loads a small, current core. Query-based recall begins when there is something to retrieve for."
+      },
+      {
+        "id": "relevant-recall",
+        "label": "2 · Relevant recall",
+        "focus": [
+          "query",
+          "scope",
+          "vector",
+          "exact",
+          "verify",
+          "budget",
+          "context"
+        ],
+        "note": "Search meanings and exact terms in parallel; verify current facts and fit excerpts into a shared token budget."
+      },
+      {
+        "id": "expand-evidence",
+        "label": "3 · Read more",
+        "focus": [
+          "detail",
+          "sources",
+          "context"
+        ],
+        "note": "When more evidence is needed, fetch a cited memory or search conversation history, with another bounded result."
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "startup",
+      "label": "Prepared core + semantic index"
+    },
+    {
+      "id": "turn",
+      "label": "Each substantive message · shared by chat and voice"
+    },
+    {
+      "id": "evidence",
+      "label": "On demand · source detail and conversation history"
+    }
+  ],
+  "mainPath": [
+    "query",
+    "scope",
+    "exact",
+    "verify",
+    "budget",
+    "context"
+  ],
+  "nodes": [
+    {
+      "id": "ready",
+      "lane": "startup",
+      "col": 3,
+      "type": "frontend",
+      "label": "Open chat / voice",
+      "sublabel": "No query required",
+      "width": 146
+    },
+    {
+      "id": "core",
+      "lane": "startup",
+      "col": 4,
+      "type": "database",
+      "label": "Prepared core",
+      "sublabel": "Preferences + commitments",
+      "width": 146,
+      "tag": "Version-checked at use"
+    },
+    {
+      "id": "query",
+      "lane": "turn",
+      "col": 0,
+      "type": "frontend",
+      "label": "New message",
+      "sublabel": "Text or spoken intent",
+      "width": 146
+    },
+    {
+      "id": "scope",
+      "lane": "turn",
+      "col": 1,
+      "type": "security",
+      "label": "Select allowed scopes",
+      "sublabel": "Bot + User + joined Projects",
+      "width": 146
+    },
+    {
+      "id": "vector",
+      "lane": "startup",
+      "col": 2,
+      "type": "cloud",
+      "label": "Vectorize recall",
+      "sublabel": "Query embedding → meaning",
+      "width": 146,
+      "tag": "Candidate IDs + versions"
+    },
+    {
+      "id": "exact",
+      "lane": "turn",
+      "col": 2,
+      "type": "database",
+      "label": "Exact / keyword",
+      "sublabel": "Indexed current memories",
+      "width": 146,
+      "tag": "Includes pending vectors"
+    },
+    {
+      "id": "verify",
+      "lane": "turn",
+      "col": 3,
+      "type": "security",
+      "label": "Check current facts",
+      "sublabel": "Merge + dedupe + validate",
+      "width": 146,
+      "tag": "Reject deleted / superseded"
+    },
+    {
+      "id": "budget",
+      "lane": "turn",
+      "col": 4,
+      "type": "backend",
+      "label": "Fit context budget",
+      "sublabel": "Core + ranked excerpts",
+      "width": 146,
+      "tag": "Keep source references"
+    },
+    {
+      "id": "context",
+      "lane": "turn",
+      "col": 5,
+      "type": "backend",
+      "label": "Model context",
+      "sublabel": "Chat prompt / voice context",
+      "width": 146,
+      "tag": "One shared Memory service"
+    },
+    {
+      "id": "detail",
+      "lane": "evidence",
+      "col": 0,
+      "type": "backend",
+      "label": "Need more detail?",
+      "sublabel": "Agent asks for evidence",
+      "width": 146
+    },
+    {
+      "id": "sources",
+      "lane": "evidence",
+      "col": 3,
+      "type": "database",
+      "label": "Read source / history",
+      "sublabel": "Memory IDs + transcript FTS",
+      "width": 146,
+      "tag": "Current records; dated history"
+    }
+  ],
+  "edges": [
+    {
+      "to": "core",
+      "role": "main",
+      "from": "ready",
+      "label": "small read"
+    },
+    {
+      "to": "context",
+      "role": "branch",
+      "from": "core",
+      "label": "core at opening"
+    },
+    {
+      "to": "budget",
+      "role": "branch",
+      "from": "core",
+      "label": "core"
+    },
+    {
+      "to": "scope",
+      "role": "main",
+      "from": "query"
+    },
+    {
+      "to": "vector",
+      "role": "branch",
+      "from": "scope"
+    },
+    {
+      "to": "exact",
+      "role": "main",
+      "from": "scope"
+    },
+    {
+      "to": "verify",
+      "role": "branch",
+      "from": "vector",
+      "label": "semantic hits"
+    },
+    {
+      "to": "verify",
+      "role": "main",
+      "from": "exact",
+      "label": "exact hits"
+    },
+    {
+      "to": "budget",
+      "role": "main",
+      "from": "verify"
+    },
+    {
+      "to": "context",
+      "role": "main",
+      "from": "budget",
+      "label": "bounded context"
+    },
+    {
+      "to": "sources",
+      "role": "branch",
+      "from": "detail",
+      "label": "explicit lookup"
+    },
+    {
+      "to": "context",
+      "role": "branch",
+      "from": "sources",
+      "label": "bounded evidence"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "cyan",
+      "title": "Speed",
+      "items": [
+        "Core is prepared when Memory changes.",
+        "No full file scan or embedding build at startup."
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Tokens",
+      "items": [
+        "One budget covers core + recalled excerpts.",
+        "Source IDs allow selective expansion."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Proposal · decisions still open",
+      "items": [
+        "Backing store and recall deadline remain to choose.",
+        "Gemini context delivery needs a separate design."
+      ]
+    }
+  ]
+}

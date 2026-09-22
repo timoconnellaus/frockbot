@@ -1,0 +1,294 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Voice \u00b7 before the first sound",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "voice-connect",
+        "label": "1 \u00b7 Mic + connection",
+        "focus": [
+          "voice-press",
+          "voice-mic",
+          "voice-auth",
+          "voice-startup",
+          "voice-start-call"
+        ],
+        "note": "Microphone setup and socket connection overlap. start_call waits for both mic and server welcome."
+      },
+      {
+        "id": "voice-context",
+        "label": "2 \u00b7 Prepare Gemini",
+        "focus": [
+          "voice-admission",
+          "voice-selected",
+          "voice-directory",
+          "voice-memory",
+          "voice-gemini"
+        ],
+        "note": "The complete prompt waits for selected Bot context, every Bot's directory reads, and shared memory."
+      },
+      {
+        "id": "voice-audio",
+        "label": "3 \u00b7 Listen + respond",
+        "focus": [
+          "voice-gemini",
+          "voice-listening",
+          "voice-audio"
+        ],
+        "note": "Gemini setup acknowledgement permits listening. First output also crosses a durable turn admission."
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "voice-client",
+      "label": "Device + selected Bot"
+    },
+    {
+      "id": "voice-server",
+      "label": "Main call path"
+    },
+    {
+      "id": "voice-reads",
+      "label": "Connection + shared context"
+    },
+    {
+      "id": "voice-playback",
+      "label": "Output"
+    }
+  ],
+  "mainPath": [
+    "voice-press",
+    "voice-auth",
+    "voice-startup",
+    "voice-start-call",
+    "voice-admission",
+    "voice-selected",
+    "voice-gemini",
+    "voice-listening",
+    "voice-audio"
+  ],
+  "nodes": [
+    {
+      "id": "voice-press",
+      "lane": "voice-server",
+      "col": 0,
+      "type": "frontend",
+      "label": "Press Voice",
+      "sublabel": "Show call UI now",
+      "width": 158
+    },
+    {
+      "id": "voice-mic",
+      "lane": "voice-client",
+      "col": 1,
+      "type": "frontend",
+      "label": "Open microphone",
+      "sublabel": "Permission + audio route",
+      "tag": "Alongside connection",
+      "width": 158
+    },
+    {
+      "id": "voice-start-call",
+      "lane": "voice-server",
+      "col": 2,
+      "type": "messagebus",
+      "label": "Send start_call",
+      "sublabel": "Wait: mic + welcome",
+      "width": 158
+    },
+    {
+      "id": "voice-auth",
+      "lane": "voice-reads",
+      "col": 0,
+      "type": "security",
+      "label": "Authenticate socket",
+      "sublabel": "Gateway + access check",
+      "width": 158
+    },
+    {
+      "id": "voice-startup",
+      "lane": "voice-reads",
+      "col": 1,
+      "type": "backend",
+      "label": "Activate voice Agent",
+      "sublabel": "Recovery \u2192 welcome",
+      "tag": "One per User",
+      "width": 158
+    },
+    {
+      "id": "voice-admission",
+      "lane": "voice-server",
+      "col": 3,
+      "type": "database",
+      "label": "Admit + select Bot",
+      "sublabel": "Caps, ledger, identity, voice",
+      "width": 158
+    },
+    {
+      "id": "voice-selected",
+      "lane": "voice-client",
+      "col": 4,
+      "type": "backend",
+      "label": "Selected Bot context",
+      "sublabel": "History + Bot Memory",
+      "width": 158
+    },
+    {
+      "id": "voice-directory",
+      "lane": "voice-server",
+      "col": 4,
+      "type": "database",
+      "label": "Query every Bot",
+      "sublabel": "Names + recent activity",
+      "tag": "Wakes unrelated Bots",
+      "width": 158
+    },
+    {
+      "id": "voice-memory",
+      "lane": "voice-reads",
+      "col": 4,
+      "type": "database",
+      "label": "Shared context",
+      "sublabel": "User + voice Memory, clock",
+      "width": 158
+    },
+    {
+      "id": "voice-gemini",
+      "lane": "voice-server",
+      "col": 5,
+      "type": "external",
+      "label": "Open Gemini Live",
+      "sublabel": "Wait for complete prompt",
+      "tag": "Socket + setup",
+      "width": 158
+    },
+    {
+      "id": "voice-listening",
+      "lane": "voice-reads",
+      "col": 5,
+      "type": "frontend",
+      "label": "Listening",
+      "sublabel": "Gemini setup acknowledged",
+      "width": 158
+    },
+    {
+      "id": "voice-audio",
+      "lane": "voice-playback",
+      "col": 5,
+      "type": "frontend",
+      "label": "First spoken reply",
+      "sublabel": "Gemini \u2192 ledger \u2192 player",
+      "width": 158
+    }
+  ],
+  "edges": [
+    {
+      "from": "voice-press",
+      "to": "voice-mic",
+      "role": "branch"
+    },
+    {
+      "from": "voice-press",
+      "to": "voice-auth",
+      "role": "main",
+      "label": "open socket"
+    },
+    {
+      "from": "voice-auth",
+      "to": "voice-startup",
+      "role": "main"
+    },
+    {
+      "from": "voice-startup",
+      "to": "voice-start-call",
+      "role": "main",
+      "label": "welcome"
+    },
+    {
+      "from": "voice-mic",
+      "to": "voice-start-call",
+      "role": "branch",
+      "label": "mic ready"
+    },
+    {
+      "from": "voice-start-call",
+      "to": "voice-admission",
+      "role": "main"
+    },
+    {
+      "from": "voice-admission",
+      "to": "voice-selected",
+      "role": "main"
+    },
+    {
+      "from": "voice-selected",
+      "to": "voice-gemini",
+      "role": "main",
+      "label": "Bot context"
+    },
+    {
+      "from": "voice-admission",
+      "to": "voice-directory",
+      "role": "branch"
+    },
+    {
+      "from": "voice-admission",
+      "to": "voice-memory",
+      "role": "branch"
+    },
+    {
+      "from": "voice-directory",
+      "to": "voice-gemini",
+      "role": "branch",
+      "label": "directory"
+    },
+    {
+      "from": "voice-memory",
+      "to": "voice-gemini",
+      "role": "branch",
+      "label": "shared context"
+    },
+    {
+      "from": "voice-gemini",
+      "to": "voice-listening",
+      "role": "main",
+      "label": "setup ACK"
+    },
+    {
+      "from": "voice-listening",
+      "to": "voice-audio",
+      "role": "main",
+      "label": "after speech"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "amber",
+      "title": "Two startup dependencies",
+      "items": [
+        "Cold Agent recovery finishes before socket upgrade.",
+        "Prompt assembly awaits activity reads from every Bot."
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "What already overlaps",
+      "items": [
+        "The microphone and client socket open concurrently.",
+        "Prompt reads fan out; Gemini waits for them to finish."
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "Beyond startup",
+      "items": [
+        "Gemini handles live audio; long work goes to Bot Turns.",
+        "Listening is readiness, not the first audible response."
+      ]
+    }
+  ]
+}

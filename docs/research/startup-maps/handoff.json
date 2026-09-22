@@ -1,0 +1,26 @@
+[
+  {
+    "diagram_type": "workflow",
+    "output": "/Users/tim/.codex/worktrees/73f7/grokbot-headless/docs/research/startup-maps/chat.html",
+    "specification_sha256": "77befae3ce312a072beb47912a7b72cf6d1c706288cbc7611e0f043f0770bd81",
+    "artifact_sha256": "dd54c590e344dc848b2685e230993b7b9dee224ab9b1f2b33d12332a3fe3201a",
+    "validation": "9/9 showcase, 0 errors, 0 warnings",
+    "browser_evidence": "passed",
+    "visual_review": "passed",
+    "correction_rounds": 1,
+    "visual_review_scope": "Rendered light/dark screenshots at 1440x900 and 2048x1320; no clipping or confusing crossings. Automated containment passes at all four required desktop sizes.",
+    "interaction_review": "Voice guided chapter, story focus and reset; chat node lookup, passport and close verified in Codex browser. Export interaction not exercised."
+  },
+  {
+    "diagram_type": "workflow",
+    "output": "/Users/tim/.codex/worktrees/73f7/grokbot-headless/docs/research/startup-maps/voice.html",
+    "specification_sha256": "957ede440c5e65af97c815a4e5aba24846b7a67632a7269c2c290757e3348a04",
+    "artifact_sha256": "801e3f4757ec3ef8d312e1fe2ba3f5d00c3c3b707a4ad14af546b5a49a384d9d",
+    "validation": "9/9 showcase, 0 errors, 0 warnings",
+    "browser_evidence": "passed",
+    "visual_review": "passed",
+    "correction_rounds": 1,
+    "visual_review_scope": "Rendered light/dark screenshots at 1440x900 and 2048x1320; no clipping or confusing crossings. Automated containment passes at all four required desktop sizes.",
+    "interaction_review": "Voice guided chapter, story focus and reset; chat node lookup, passport and close verified in Codex browser. Export interaction not exercised."
+  }
+]
