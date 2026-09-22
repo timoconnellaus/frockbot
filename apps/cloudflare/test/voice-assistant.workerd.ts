@@ -21,7 +21,10 @@ import {
   VOICE_ASSISTANT_METER_BLOCK_SECONDS_V1,
   VOICE_ASSISTANT_OUTPUT_BYTES_PER_SECOND_V1,
 } from "@frockbot/app/voice/shared";
-import { encodeVoiceAssistantPcmEnvelopeV1 } from "@frockbot/app/voice/opening";
+import {
+  decodeVoiceAssistantPcmEnvelopeV1,
+  encodeVoiceAssistantPcmEnvelopeV1,
+} from "@frockbot/app/voice/opening";
 import { GEMINI_VOICES_V1 } from "@frockbot/app/voice/appearance";
 import {
   VoiceMemoryLedgerV1,
@@ -130,11 +133,18 @@ interface Opened {
   closed: Promise<{ code: number; reason: string }>;
 }
 
-function binaryFrameBytes(value: unknown): number {
-  if (value instanceof ArrayBuffer || ArrayBuffer.isView(value))
-    return value.byteLength;
-  if (value instanceof Blob) return value.size;
+function binaryFrameBytes(value: unknown): Uint8Array {
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
   throw new Error("unexpected binary voice frame");
+}
+
+/** PCM payload length on the wire. The envelope is stripped, not metered. */
+function pcmPayloadBytes(value: unknown): number {
+  const bytes = binaryFrameBytes(value);
+  return decodeVoiceAssistantPcmEnvelopeV1(bytes)?.pcm.byteLength ?? bytes.byteLength;
 }
 
 async function open(
@@ -171,7 +181,7 @@ async function open(
   }[] = [];
   socket.addEventListener("message", (event) => {
     if (typeof event.data !== "string") {
-      audio.push(binaryFrameBytes(event.data));
+      audio.push(pcmPayloadBytes(event.data));
       return;
     }
     const frame = JSON.parse(event.data) as Record<string, unknown>;
@@ -265,7 +275,8 @@ async function startCall(
     "admitted",
   );
   opened.callId = typeof admitted.callId === "string" ? admitted.callId : undefined;
-  if (!intent.paused && !intent.muted) {
+  // `ready` is Gemini setup. A paused or muted admit has no upstream.
+  if (!intent.paused && !intent.muted && admitted.paused !== true) {
     await opened.waitFor(
       (f) => f.type === "voice/ready" && f.attemptId === attemptId,
       "ready",
@@ -569,8 +580,9 @@ describe("the session the call talks through", () => {
     expect(sent.map((frame) => frame.tag)).toEqual([1, 2, 3]);
     expect(sent.map((frame) => frame.bytes)).toEqual([1280, 1280, 1280]);
 
-    // Down: the model's 24 kHz audio reaches the client as binary, unchanged,
-    // and the status frames say what the call is doing.
+    // Down: the model's 24 kHz audio reaches the client as enveloped PCM,
+    // and the status frames say what the call is doing. Metering is payload
+    // bytes, not the envelope.
     const bytes =
       VOICE_ASSISTANT_OUTPUT_BYTES_PER_SECOND_V1 *
       VOICE_ASSISTANT_METER_BLOCK_SECONDS_V1;
@@ -1000,7 +1012,7 @@ describe("pausing and coming back", () => {
     await first.closed;
     await stub.probeSetNow(new Date(Date.now() + 10 * 60_000).toISOString());
     const second = await open(userId, {}, "phone");
-    await startCall(second);
+    await startCall(second, undefined, { paused: true });
     const current = Object.values(
       await stub.probeStorage("voice:call:"),
     )[0] as VoiceCallRecordV1;
@@ -1818,7 +1830,8 @@ describe("timing a call that asked to be timed", () => {
       upstream,
     );
     // Every constituent of the prompt is on record, because any one of them
-    // can be the slow one.
+    // can be the slow one. Session Memory is `prompt-voice-memory` on the
+    // first open; a wake or handover re-reads it as `session-voice-memory`.
     for (const read of [
       "prompt-directory",
       "prompt-user-memory",
@@ -1827,7 +1840,6 @@ describe("timing a call that asked to be timed", () => {
       "prompt-bot-identity",
       "prompt-bot-memory",
       "prompt-bot-history",
-      "session-voice-memory",
     ]) {
       expect(events).toContain(read);
       expect(
