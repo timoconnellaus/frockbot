@@ -1,20 +1,8 @@
-// The lazy Memory index against a bucket that blinks.
+// A file-read blip against canonical Memory.
 //
-// One claim: a transient object-storage failure on the Turn's Memory read must
-// not blind `memory_search` for the rest of that Turn.
-//
-// The render reads every Memory tier once and keeps that document snapshot for
-// the derived index, which the Turn's first search builds from it. A read that
-// answers `unavailable` leaves the snapshot short of a tier, so that first
-// search can only refuse to index it — the indexer reads an absent document as
-// a deleted one, and applying a short listing would delete chunks permanently
-// and silently. The *next* search in the same Turn must go back to the files
-// instead of treating the incomplete snapshot as this Turn's index: the blip
-// is over, and the bot's Memory is one round trip away.
-//
-// Driven through a real Bot Durable Object over real R2 with the production
-// Memory surface, store, projection and `memory_search` tool, and exactly one
-// read answered `unavailable` (`memorySearchAfterTransientReadFailure`).
+// One claim: a transient object-storage failure while the Turn renders Memory
+// files must not hide a fact `memory_write` already recorded. Search reads the
+// canonical engine, not the file snapshot the blip shortened.
 import { env } from "cloudflare:workers";
 import { describe, expect, test } from "vitest";
 import { provisionBot } from "./provision-bot.ts";
@@ -45,12 +33,10 @@ describe("the lazy Memory index after a transient read failure", () => {
       query: "Brompton station",
     });
 
-    // The Turn's snapshot is missing the tier whose read failed, so the first
-    // search has nothing to search and says so.
-    expect(searched.first).toBe("No memory matches.");
-    expect(searched.chunks[0]).toBe(0);
-    // The second search reads the files again and finds what is there.
+    // The fact lives in canonical Memory, so a file-read blip does not hide
+    // it. The file index stays empty; the search does not consult it.
+    expect(searched.first).toContain(FACT);
     expect(searched.second).toContain(FACT);
-    expect(searched.chunks[1]).toBeGreaterThan(0);
+    expect(searched.chunks).toEqual([0, 0]);
   });
 });

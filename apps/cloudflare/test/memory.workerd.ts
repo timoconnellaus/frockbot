@@ -72,28 +72,26 @@ describe("Memory in Workerd", () => {
     expect(record).toBeDefined();
     expect(intent!.seq).toBeLessThan(record!.seq);
     if (record?.type !== "memory/written") throw new Error("unreachable");
-    expect(record.path).toBe(`by-agent/${learner.botId}/profile.md`);
+    // Canonical Memory records the scope and tier. The file shard path was
+    // the ledger when a write was a Workspace file.
+    expect(record.path).toBe("user/profile");
+    expect(record.generationId).toBe("records");
 
     const root = userMemoryRoot(userId);
     const shardPath = `by-agent/${learner.botId}/profile.md`;
 
-    // THE LEDGER. The User Durable Object holds the generation…
+    // The file ledger is not where this write lives. The User object's
+    // Memory engine is, which the sibling Turn below reads.
     const userStub = env.USER_CONFIGURATIONS.getByName(userId);
     await evictDurableObject(userStub);
-    const recorded = await userStub.currentWorkspaceGeneration({
-      schemaVersion: 1,
-      userId,
-      root,
-      path: shardPath,
-    });
-    expect(recorded).toBeDefined();
-    expect(recorded?.generation.generationId).toBe(record.generationId);
-    expect(recorded?.generation.writer).toMatchObject({
-      kind: "bot",
-      botId: learner.botId,
-    });
-
-    // …and the writing Bot's own object does not.
+    expect(
+      await userStub.currentWorkspaceGeneration({
+        schemaVersion: 1,
+        userId,
+        root,
+        path: shardPath,
+      }),
+    ).toBeUndefined();
     expect(
       await learnerStub.botLedgerGeneration({ root, path: shardPath }),
     ).toBeUndefined();
@@ -115,8 +113,6 @@ describe("Memory in Workerd", () => {
     const events = await readerStub.durableSessionEvents();
     const request = events.find((event) => event.type === "model/request");
     if (request?.type !== "model/request") throw new Error("unreachable");
-    expect(request.request.system).toContain("User memory:");
-    expect(request.request.system).toContain("About the user (shared):");
     expect(request.request.system).toContain(FACT);
     // A shared fact is credited by name or not at all. This deployment gives
     // the memory store no Bot names, so the fact is uncredited rather than
@@ -138,13 +134,13 @@ describe("Memory in Workerd", () => {
       learnedAt: expect.any(String),
       text: FACT,
     });
-    expect(injected.sources).toContainEqual({
-      scope: "user",
-      projectId: "",
-      path: shardPath,
-      generationId: record.generationId,
-      contentHash: expect.any(String),
-    });
+    expect(injected.sources).toContainEqual(
+      expect.objectContaining({
+        scope: "user",
+        projectId: "",
+        path: expect.stringMatching(/^item:/),
+      }),
+    );
   });
 
   test("a Bot writes its own shard of a shared Memory root on real R2, and another Bot's is refused", async () => {

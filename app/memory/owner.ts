@@ -375,6 +375,9 @@ export class MemoryRecordsV1 {
     const remote = request.scopes.filter(
       (scope) => !ownsScope(this.#owner, scope),
     );
+    if (local.length > 0) {
+      this.engine.refreshPreparedCores({ ...request, scopes: local });
+    }
     const localResult =
       local.length > 0
         ? this.engine.preparedCore({ ...request, scopes: local })
