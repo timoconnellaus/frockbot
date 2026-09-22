@@ -1,10 +1,21 @@
-import type {
-  BotStateChannelFrameV1,
-  BotStateTopicV1,
-} from "@frockbot/core/protocol";
+import type { StateFrame } from "@frockbot/core/protocol-schemas";
+import {
+  STATE_ASSEMBLED_MAX_BYTES,
+  STATE_FRAME_MAX_BYTES,
+  STATE_PART_MAX_BYTES,
+} from "@frockbot/core/protocol-schemas";
 import { decodeBotStateCursorV1 } from "@frockbot/core/protocol";
-import { isRunStateStorageKeyV1 } from "@frockbot/core/durable";
-import { CARD_PREFIX } from "@frockbot/app/shell/cards";
+import {
+  commitPublicationsV1,
+  COMPUTER_ENTITY_ID_V1,
+  drainPendingPublicationV1,
+  PUBLICATION_REPLAY_MAX_EVENTS_V1,
+  readPublicationHeadV1,
+  readReplayUpdatesV1,
+  type ConversationUpdateV1,
+  type PublicationHeadV1,
+} from "@frockbot/core/durable";
+import { readConversationSnapshotV1 } from "@frockbot/app/shell/conversation-snapshot";
 import type {
   ComputerBotStorage,
   ComputerBotTransaction,
@@ -12,20 +23,11 @@ import type {
 
 const CHANNEL_TAG = "bot-state-v1";
 export const BOT_STATE_CHANNEL_INTERNAL_PATH = "/internal/bot-state-channel/v1";
-const CHANNEL_META_KEY = "bot-state-channel:meta:v1";
-const CHANNEL_EVENT_PREFIX = "bot-state-channel:event:v1:";
-export const BOT_STATE_CHANNEL_RETENTION = 64;
+export const BOT_STATE_CHANNEL_RETENTION = PUBLICATION_REPLAY_MAX_EVENTS_V1;
 
 /**
- * The shortest gap between two `runs` invalidations.
- *
- * A Turn's answer is journaled a text delta at a time, so a streaming reply
- * lands one durable run write per token and, uncoalesced, one notice and one
- * `GET /turns` per token with it. The observer only ever needs to know that it
- * should read again, so the burst is spread: the first write notices at once —
- * a Turn that starts, ends, or says one short thing is never delayed — and
- * everything behind it is collapsed into one notice per interval. The last
- * write always gets a notice, because the pending flag outlives the wait.
+ * The shortest gap between two Computer invalidations. Conversation frames
+ * are not coalesced: a committed send is worth an immediate observer write.
  */
 export const BOT_STATE_RUNS_NOTICE_INTERVAL_MS = 250;
 
@@ -40,60 +42,106 @@ function delay(ms: number): Promise<void> {
   });
 }
 
-interface ChannelMetaV1 {
-  schemaVersion: 1;
-  first: number;
-  last: number;
-}
-
 interface ChannelAttachmentV1 {
   schemaVersion: 1;
   userId: string;
   botId: string;
+  epoch: string;
   lastSent: string;
 }
 
-interface StoredChannelEventV1 {
-  schemaVersion: 1;
-  cursor: string;
-  topic: BotStateTopicV1;
+const utf8 = new TextEncoder();
+const utf8Decoder = new TextDecoder();
+
+function encodeFrame(frame: StateFrame): string {
+  return JSON.stringify(frame);
 }
 
-function eventKey(cursor: number): string {
-  return `${CHANNEL_EVENT_PREFIX}${String(cursor).padStart(16, "0")}`;
-}
-
-function decodeMeta(value: unknown): ChannelMetaV1 {
-  if (
-    !value ||
-    typeof value !== "object" ||
-    Array.isArray(value) ||
-    (value as ChannelMetaV1).schemaVersion !== 1 ||
-    !Number.isSafeInteger((value as ChannelMetaV1).first) ||
-    !Number.isSafeInteger((value as ChannelMetaV1).last) ||
-    (value as ChannelMetaV1).first < 1 ||
-    (value as ChannelMetaV1).last < (value as ChannelMetaV1).first
-  ) {
-    throw new Error("Bot-state channel metadata is corrupt");
+function splitUtf8(text: string, maxBytes: number): string[] {
+  const bytes = utf8.encode(text);
+  if (bytes.length <= maxBytes) return [text];
+  const parts: string[] = [];
+  for (let offset = 0; offset < bytes.length; ) {
+    let end = Math.min(offset + maxBytes, bytes.length);
+    if (end < bytes.length) {
+      while (end > offset && (bytes[end]! & 0xc0) === 0x80) end -= 1;
+    }
+    if (end <= offset) end = Math.min(offset + maxBytes, bytes.length);
+    parts.push(utf8Decoder.decode(bytes.subarray(offset, end)));
+    offset = end;
   }
-  return value as ChannelMetaV1;
+  return parts;
 }
 
-function decodeStoredEvent(value: unknown): StoredChannelEventV1 {
-  if (
-    !value ||
-    typeof value !== "object" ||
-    Array.isArray(value) ||
-    Object.keys(value).length !== 3 ||
-    (value as StoredChannelEventV1).schemaVersion !== 1 ||
-    ((value as StoredChannelEventV1).topic !== "computer" &&
-      (value as StoredChannelEventV1).topic !== "runs")
-  ) {
-    throw new Error("Bot-state channel event is corrupt");
+function framesFor(frame: StateFrame): string[] {
+  const encoded = encodeFrame(frame);
+  if (utf8.encode(encoded).length <= STATE_FRAME_MAX_BYTES) return [encoded];
+  if (frame.type === "state/ready" || frame.type === "state/part") {
+    throw new Error("Bot-state frame exceeds the bound");
   }
-  const event = value as StoredChannelEventV1;
-  decodeBotStateCursorV1(event.cursor);
-  return event;
+  const chunks = splitUtf8(encoded, STATE_PART_MAX_BYTES);
+  if (chunks.length > 256) {
+    throw new Error("Bot-state frame exceeds the assembled bound");
+  }
+  let assembled = 0;
+  const parts: string[] = [];
+  for (const [index, data] of chunks.entries()) {
+    assembled += utf8.encode(data).length;
+    if (assembled > STATE_ASSEMBLED_MAX_BYTES) {
+      throw new Error("Bot-state frame exceeds the assembled bound");
+    }
+    parts.push(
+      encodeFrame({
+        schemaVersion: 1,
+        type: "state/part",
+        epoch: frame.epoch,
+        cursor: frame.cursor,
+        eventId: `${frame.epoch}:${frame.cursor}`,
+        part: index,
+        parts: chunks.length,
+        data,
+      }),
+    );
+  }
+  return parts;
+}
+
+export type HandshakeReasonV1 =
+  | "initial"
+  | "gap"
+  | "cursor-ahead"
+  | "epoch"
+  | "replay";
+
+/** Which handshake to send for a presented epoch/cursor. */
+export function planHandshakeV1(
+  head: PublicationHeadV1,
+  cursor: number | undefined,
+  epoch: number | undefined,
+): HandshakeReasonV1 {
+  if (cursor === undefined) return "initial";
+  if (epoch !== head.epoch) return "epoch";
+  if (cursor > head.lastCursor) return "cursor-ahead";
+  if (cursor < head.firstRetainedCursor - 1) return "gap";
+  return "replay";
+}
+
+function updateFrame(update: ConversationUpdateV1): StateFrame {
+  return {
+    schemaVersion: 1,
+    type: "state/update",
+    epoch: String(update.epoch),
+    cursor: String(update.cursor),
+    kind: update.kind,
+    entityId: update.entityId,
+    revision: update.revision,
+    payload: (update.payload ?? {}) as StateFrame extends {
+      type: "state/update";
+      payload: infer Payload;
+    }
+      ? Payload
+      : never,
+  };
 }
 
 function decodeAttachment(value: unknown): ChannelAttachmentV1 | undefined {
@@ -101,7 +149,7 @@ function decodeAttachment(value: unknown): ChannelAttachmentV1 | undefined {
     !value ||
     typeof value !== "object" ||
     Array.isArray(value) ||
-    Object.keys(value).length !== 4
+    Object.keys(value).length !== 5
   ) {
     return undefined;
   }
@@ -117,14 +165,11 @@ function decodeAttachment(value: unknown): ChannelAttachmentV1 | undefined {
   }
   try {
     decodeBotStateCursorV1(attachment.lastSent);
+    decodeBotStateCursorV1(attachment.epoch);
   } catch {
     return undefined;
   }
   return attachment;
-}
-
-function encodeFrame(frame: BotStateChannelFrameV1): string {
-  return JSON.stringify(frame);
 }
 
 /**
@@ -149,39 +194,36 @@ class ChannelComputerStorage implements ComputerBotStorage {
     keyOrEntries: string | Record<string, unknown>,
     value?: T,
   ): Promise<void> {
-    let event: StoredChannelEventV1 | undefined;
     await this.storage.transaction(async (transaction) => {
       if (typeof keyOrEntries === "string") {
         await transaction.put(keyOrEntries, value);
       } else {
         await transaction.put(keyOrEntries);
       }
-      event = await this.channel.append(transaction, "computer");
+      await this.channel.commitComputer(transaction);
       await this.channel.refreshAlarm(transaction);
     });
-    this.channel.broadcast(event);
+    await this.channel.drainBroadcast();
   }
 
   async delete(key: string): Promise<boolean> {
     let deleted = false;
-    let event: StoredChannelEventV1 | undefined;
     await this.storage.transaction(async (transaction) => {
       deleted = await transaction.delete(key);
       if (deleted) {
-        event = await this.channel.append(transaction, "computer");
+        await this.channel.commitComputer(transaction);
         await this.channel.refreshAlarm(transaction);
       }
     });
-    this.channel.broadcast(event);
+    if (deleted) await this.channel.drainBroadcast();
     return deleted;
   }
 
   async transaction<T>(
     callback: (storage: ComputerBotTransaction) => Promise<T>,
   ): Promise<T> {
-    let event: StoredChannelEventV1 | undefined;
+    let changed = false;
     const result = await this.storage.transaction(async (transaction) => {
-      let changed = false;
       const wrapped: ComputerBotTransaction = {
         get: <Value>(key: string) => transaction.get<Value>(key),
         put: async <Value>(
@@ -203,52 +245,25 @@ class ChannelComputerStorage implements ComputerBotStorage {
       };
       const value = await callback(wrapped);
       if (changed) {
-        event = await this.channel.append(transaction, "computer");
+        await this.channel.commitComputer(transaction);
         await this.channel.refreshAlarm(transaction);
       }
       return value;
     });
-    this.channel.broadcast(event);
+    if (changed) await this.channel.drainBroadcast();
     return result;
   }
-}
-
-/**
- * The durable keys that hold what a browser draws as the conversation: the
- * run records themselves, their index, the two pointers that say which Turn is
- * executing and which is waiting, and the Cards a `card` send folded into
- * (ADR 0030). A write to any of them means the transcript moved.
- */
-function namesRunState(key: string): boolean {
-  return isRunStateStorageKeyV1(key) || key.startsWith(CARD_PREFIX);
-}
-
-function writtenKeys(keyOrEntries: unknown): readonly string[] {
-  if (typeof keyOrEntries === "string") return [keyOrEntries];
-  if (Array.isArray(keyOrEntries)) {
-    return keyOrEntries.filter((key): key is string => typeof key === "string");
-  }
-  if (keyOrEntries && typeof keyOrEntries === "object") {
-    return Object.keys(keyOrEntries as Record<string, unknown>);
-  }
-  return [];
 }
 
 export class BotStateChannel {
   readonly computerStorage: ComputerBotStorage;
   private alarmRefresher:
-    ((transaction: DurableObjectTransaction) => Promise<void>) | undefined;
-  /** The in-flight `runs` notice, and whether another write arrived behind it. */
-  private runsNotice: Promise<void> | undefined;
-  private runsPending = false;
-  /** When the last `runs` notice was appended; the throttle's only clock. */
-  private runsNoticeAt = 0;
-  private readonly runsNoticeIntervalMs: number;
-  /** The same coalescing pair for `computer`, which a Turn writes as often. */
+    | ((transaction: DurableObjectTransaction) => Promise<void>)
+    | undefined;
   private computerNotice: Promise<void> | undefined;
   private computerPending = false;
   private computerNoticeAt = 0;
-  /** Set once the Bot is torn down; no notice may write storage after that. */
+  private readonly runsNoticeIntervalMs: number;
   private silenced = false;
 
   constructor(
@@ -274,118 +289,52 @@ export class BotStateChannel {
     this.alarmRefresher = refresh;
   }
 
-  /**
-   * This object's storage, seen through the channel: any committed write to a
-   * run record appends a `runs` invalidation and pushes it to attached
-   * observers. The frame is advisory — a client that receives one re-reads
-   * `GET /api/bots/:bot/turns` — so the notice is deliberately outside the
-   * caller's transaction: it must never be able to fail an authoritative
-   * write, and a notice for a rolled-back write costs one redundant read.
-   *
-   * The authority is handed this in place of the raw Durable Object state, so
-   * the kernel stays unaware that anybody is watching.
-   */
-  observeRuns(state: DurableObjectState): DurableObjectState {
-    const channel = this;
-    const source = state.storage;
-    const observe = (keys: readonly string[]): void => {
-      if (keys.some(namesRunState)) channel.noticeRuns();
-    };
-    const wrapTransaction = (
-      transaction: DurableObjectTransaction,
-    ): DurableObjectTransaction =>
-      new Proxy(transaction, {
-        get(target, property) {
-          if (property === "put" || property === "delete") {
-            return (...args: unknown[]) => {
-              observe(writtenKeys(args[0]));
-              return (target[property] as (...input: unknown[]) => unknown)(
-                ...args,
-              );
-            };
-          }
-          const value = Reflect.get(target, property, target);
-          return typeof value === "function" ? value.bind(target) : value;
-        },
-      }) as DurableObjectTransaction;
-    const storage = new Proxy(source, {
-      get(target, property) {
-        if (property === "put" || property === "delete") {
-          return (...args: unknown[]) => {
-            const keys = writtenKeys(args[0]);
-            const result = (
-              target[property] as (...input: unknown[]) => unknown
-            )(...args);
-            return result instanceof Promise
-              ? result.then((value) => {
-                  observe(keys);
-                  return value;
-                })
-              : result;
-          };
-        }
-        if (property === "transaction") {
-          return <T>(
-            callback: (transaction: DurableObjectTransaction) => Promise<T>,
-          ) =>
-            target.transaction((transaction) =>
-              callback(wrapTransaction(transaction)),
-            );
-        }
-        const value = Reflect.get(target, property, target);
-        return typeof value === "function" ? value.bind(target) : value;
+  async commitComputer(
+    transaction: DurableObjectTransaction,
+  ): Promise<ConversationUpdateV1[]> {
+    return commitPublicationsV1(transaction, [
+      {
+        kind: "computer",
+        entityId: COMPUTER_ENTITY_ID_V1,
+        payload: {},
       },
-    }) as DurableObjectStorage;
-    return new Proxy(state, {
-      get(target, property) {
-        if (property === "storage") return storage;
-        const value = Reflect.get(target, property, target);
-        return typeof value === "function" ? value.bind(target) : value;
-      },
-    }) as DurableObjectState;
+    ]);
   }
 
   /**
-   * Append and broadcast one `runs` invalidation, coalescing the burst a
-   * single Turn produces: a Turn writes its run record on admission, on every
-   * session flush and on settlement, and an observer only ever needs to know
-   * that it should read again.
-   *
-   * Public because a Card action folds outside the authority's own storage —
-   * the only writer `observeRuns` watches — and the card it changed is part
-   * of the transcript the notice is about.
+   * Delivers one bounded batch of committed publication to attached
+   * observers, then advances `broadcastThrough`. Missing subscribers still
+   * complete the attempt so an idle object is not kept awake.
    */
-  noticeRuns(): void {
-    if (this.silenced) return;
-    this.runsPending = true;
-    if (this.runsNotice) return;
-    this.runsNotice = (async () => {
-      while (this.runsPending) {
-        // A notice inside the interval since the last one waits out the
-        // remainder, so a streaming answer's per-token writes become one
-        // notice per interval rather than one each. Whatever arrived during
-        // the wait is still pending, so the loop runs again and the final
-        // write always notices.
-        const wait =
-          this.runsNoticeIntervalMs - (Date.now() - this.runsNoticeAt);
-        if (wait > 0) await delay(wait);
-        this.runsPending = false;
-        this.runsNoticeAt = Date.now();
-        if (this.silenced) return;
-        let event: StoredChannelEventV1 | undefined;
-        await this.state.storage.transaction(async (transaction) => {
-          event = await this.append(transaction, "runs");
-        });
-        this.broadcast(event);
+  async drainBroadcast(): Promise<boolean> {
+    if (this.silenced) return false;
+    return drainPendingPublicationV1(
+      this.state.storage,
+      (updates) => {
+        this.broadcastCommitted(updates);
+      },
+      {
+        refreshAlarm: (transaction) => this.refreshAlarm(transaction),
+      },
+    );
+  }
+
+  /**
+   * Broadcasts already-committed updates over hibernating observer sockets.
+   * Delivery is an attempt: one slow reader cannot hold the Turn, and a
+   * crash after send but before the marker may repeat frames.
+   */
+  broadcastCommitted(updates: readonly ConversationUpdateV1[]): void {
+    if (this.silenced || updates.length === 0) return;
+    for (const update of updates) {
+      let frames: string[];
+      try {
+        frames = framesFor(updateFrame(update));
+      } catch {
+        continue;
       }
-    })()
-      .catch(() => {
-        // An observer notice is never authority. A dropped one costs the
-        // client its next poll, and the durable write it described stands.
-      })
-      .finally(() => {
-        this.runsNotice = undefined;
-      });
+      this.sendFrames(frames, update.epoch, update.cursor);
+    }
   }
 
   /**
@@ -393,10 +342,9 @@ export class BotStateChannel {
    * outside this Durable Object's storage.
    *
    * A screenshot the Bot files mid-Turn lands in the Workspace, not in DO
-   * storage, so no `ChannelComputerStorage` write announces it and an
-   * attached browser would not read the fresher capture until its next poll.
-   * Coalesced on the same interval as `runs`: a Turn running Computer actions
-   * back to back only ever needs the browser to know it should read again.
+   * storage, so no `ChannelComputerStorage` write announces it. Coalesced on
+   * the Computer interval: a Turn running Computer actions back to back only
+   * ever needs the browser to know it should read again.
    */
   noticeComputer(): void {
     if (this.silenced) return;
@@ -410,11 +358,11 @@ export class BotStateChannel {
         this.computerPending = false;
         this.computerNoticeAt = Date.now();
         if (this.silenced) return;
-        let event: StoredChannelEventV1 | undefined;
         await this.state.storage.transaction(async (transaction) => {
-          event = await this.append(transaction, "computer");
+          await this.commitComputer(transaction);
+          await this.refreshAlarm(transaction);
         });
-        this.broadcast(event);
+        await this.drainBroadcast();
       }
     })()
       .catch(() => {
@@ -429,24 +377,9 @@ export class BotStateChannel {
   /**
    * Stops this channel writing, for good. Called by the Bot's teardown before
    * it wipes storage.
-   *
-   * A notice is deliberately deferred — the throttle is what stops a streaming
-   * answer writing one channel event per token — so at any moment there can be
-   * a notice waiting out its interval with a `transaction` still to run. A
-   * delete landing in that window let the wait finish against an object that no
-   * longer exists, and `append` recreated `bot-state-channel:meta:v1` and an
-   * event *after* `deleteAll()`. The Bot was tombstoned and holding storage
-   * again, which is exactly what the teardown exists to prevent.
-   *
-   * The notice is worth nothing by then in any case: it says "the runs moved,
-   * read them again", about runs that have been deleted, to observers whose
-   * next read is a 404. So the flag is checked both before scheduling and
-   * again after the wait, which is the only place the object can be torn down
-   * underneath an in-flight notice.
    */
   silence(): void {
     this.silenced = true;
-    this.runsPending = false;
     this.computerPending = false;
   }
 
@@ -455,62 +388,16 @@ export class BotStateChannel {
     return this.alarmRefresher?.(transaction) ?? Promise.resolve();
   }
 
-  async append(
-    transaction: DurableObjectTransaction,
-    topic: BotStateTopicV1,
-  ): Promise<StoredChannelEventV1> {
-    const storedMeta = await transaction.get<unknown>(CHANNEL_META_KEY);
-    const previous =
-      storedMeta === undefined ? undefined : decodeMeta(storedMeta);
-    const last = (previous?.last ?? 0) + 1;
-    if (!Number.isSafeInteger(last)) {
-      throw new Error("Bot-state channel cursor is exhausted");
-    }
-    const first = Math.max(
-      previous?.first ?? 1,
-      last - BOT_STATE_CHANNEL_RETENTION + 1,
-    );
-    const event = {
-      schemaVersion: 1,
-      cursor: String(last),
-      topic,
-    } satisfies StoredChannelEventV1;
-    await transaction.put({
-      [CHANNEL_META_KEY]: {
-        schemaVersion: 1,
-        first,
-        last,
-      } satisfies ChannelMetaV1,
-      [eventKey(last)]: event,
-    });
-    if (previous && first > previous.first) {
-      await transaction.delete(eventKey(previous.first));
-    }
-    return event;
-  }
-
-  broadcast(event: StoredChannelEventV1 | undefined): void {
-    if (!event) return;
+  private sendFrames(frames: string[], epoch: number, cursor: number): void {
     for (const socket of this.state.getWebSockets(CHANNEL_TAG)) {
       try {
         const attachment = decodeAttachment(socket.deserializeAttachment());
-        if (
-          !attachment ||
-          Number(attachment.lastSent) >= Number(event.cursor)
-        ) {
-          continue;
-        }
-        socket.send(
-          encodeFrame({
-            schemaVersion: 1,
-            type: "state/event",
-            cursor: event.cursor,
-            topic: event.topic,
-          }),
-        );
+        if (!attachment || Number(attachment.epoch) !== epoch) continue;
+        if (Number(attachment.lastSent) >= cursor) continue;
+        for (const frame of frames) socket.send(frame);
         socket.serializeAttachment({
           ...attachment,
-          lastSent: event.cursor,
+          lastSent: String(cursor),
         } satisfies ChannelAttachmentV1);
       } catch {
         try {
@@ -540,7 +427,9 @@ export class BotStateChannel {
       );
     }
     const presentedCursor = url.searchParams.get("cursor");
+    const presentedEpoch = url.searchParams.get("epoch");
     let cursor: number | undefined;
+    let epoch: number | undefined;
     if (presentedCursor !== null) {
       try {
         cursor = Number(decodeBotStateCursorV1(presentedCursor));
@@ -551,69 +440,32 @@ export class BotStateChannel {
         );
       }
     }
+    if (presentedEpoch !== null) {
+      try {
+        epoch = Number(decodeBotStateCursorV1(presentedEpoch));
+      } catch {
+        return Response.json(
+          { error: "invalid Bot-state epoch" },
+          { status: 400 },
+        );
+      }
+    }
 
-    // Keep the replay snapshot and socket registration contiguous with respect
-    // to other object events. Otherwise a Computer write could commit after
-    // the snapshot but before the socket is registered, silently skipping its
-    // invalidation.
+    // Keep the snapshot and socket registration contiguous with respect to
+    // other object events. Otherwise a write could commit after the snapshot
+    // but before the socket is registered, silently skipping its update.
     return this.state.blockConcurrencyWhile(async () => {
-      const replay = await this.state.storage.transaction(
+      const handshake = await this.state.storage.transaction(
         async (transaction) => {
-          const value = await transaction.get<unknown>(CHANNEL_META_KEY);
-          const meta = value === undefined ? undefined : decodeMeta(value);
-          const last = meta?.last ?? 0;
-          if (cursor === undefined) {
-            return {
-              last,
-              frames: [
-                {
-                  schemaVersion: 1,
-                  type: "state/reset",
-                  cursor: String(last),
-                  reason: "initial",
-                } satisfies BotStateChannelFrameV1,
-              ],
-            };
-          }
-          if (cursor > last) {
-            return {
-              last,
-              frames: [
-                {
-                  schemaVersion: 1,
-                  type: "state/reset",
-                  cursor: String(last),
-                  reason: "cursor-ahead",
-                } satisfies BotStateChannelFrameV1,
-              ],
-            };
-          }
-          if (meta && cursor < meta.first - 1) {
-            return {
-              last,
-              frames: [
-                {
-                  schemaVersion: 1,
-                  type: "state/reset",
-                  cursor: String(last),
-                  reason: "gap",
-                } satisfies BotStateChannelFrameV1,
-              ],
-            };
-          }
-          const frames: BotStateChannelFrameV1[] = [];
-          for (let next = cursor + 1; next <= last; next += 1) {
-            const stored = decodeStoredEvent(
-              await transaction.get<unknown>(eventKey(next)),
-            );
-            frames.push({
-              schemaVersion: 1,
-              type: "state/event",
-              cursor: stored.cursor,
-              topic: stored.topic,
-            });
-          }
-          return { last, frames };
+          const head = await readPublicationHeadV1(transaction);
+          const conversation = await readConversationSnapshotV1(transaction);
+          return this.handshakeFrames(
+            transaction,
+            head,
+            conversation,
+            cursor,
+            epoch,
+          );
         },
       );
 
@@ -623,18 +475,61 @@ export class BotStateChannel {
       server.serializeAttachment({
         schemaVersion: 1,
         ...identity,
-        lastSent: String(replay.last),
+        epoch: handshake.epoch,
+        lastSent: handshake.lastSent,
       } satisfies ChannelAttachmentV1);
-      for (const frame of replay.frames) server.send(encodeFrame(frame));
-      server.send(
-        encodeFrame({
-          schemaVersion: 1,
-          type: "state/ready",
-          cursor: String(replay.last),
-        }),
-      );
+      for (const frame of handshake.frames) {
+        try {
+          for (const encoded of framesFor(frame)) server.send(encoded);
+        } catch {
+          server.close(1011, "handshake failed");
+          return new Response(null, { status: 101, webSocket: client });
+        }
+      }
       return new Response(null, { status: 101, webSocket: client });
     });
+  }
+
+  private async handshakeFrames(
+    storage: {
+      get<T>(key: string): Promise<T | undefined>;
+    },
+    head: PublicationHeadV1,
+    conversation: Awaited<ReturnType<typeof readConversationSnapshotV1>>,
+    cursor: number | undefined,
+    epoch: number | undefined,
+  ): Promise<{ epoch: string; lastSent: string; frames: StateFrame[] }> {
+    const snapshot = (
+      reason: "initial" | "gap" | "cursor-ahead" | "epoch",
+    ): StateFrame => ({
+      schemaVersion: 1,
+      type: "state/snapshot",
+      epoch: String(head.epoch),
+      cursor: String(head.lastCursor),
+      reason,
+      conversation,
+    });
+    const ready: StateFrame = {
+      schemaVersion: 1,
+      type: "state/ready",
+      epoch: String(head.epoch),
+      cursor: String(head.lastCursor),
+    };
+    const withReady = (frames: StateFrame[]) => ({
+      epoch: String(head.epoch),
+      lastSent: String(head.lastCursor),
+      frames: [...frames, ready],
+    });
+    const reason = planHandshakeV1(head, cursor, epoch);
+    if (reason !== "replay") {
+      return withReady([snapshot(reason)]);
+    }
+    try {
+      const updates = await readReplayUpdatesV1(storage, head, cursor!);
+      return withReady(updates.map(updateFrame));
+    } catch {
+      return withReady([snapshot("gap")]);
+    }
   }
 
   message(socket: WebSocket): void {

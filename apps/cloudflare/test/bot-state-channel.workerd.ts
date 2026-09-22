@@ -21,6 +21,7 @@ function bot(identity: { userId: string; botId: string }) {
 async function openSocket(
   identity: { userId: string; botId: string },
   cursor?: string,
+  epoch?: string,
 ): Promise<WebSocket> {
   const url = new URL(
     BOT_STATE_CHANNEL_INTERNAL_PATH,
@@ -28,6 +29,7 @@ async function openSocket(
   );
   url.searchParams.set("version", "1");
   if (cursor !== undefined) url.searchParams.set("cursor", cursor);
+  if (epoch !== undefined) url.searchParams.set("epoch", epoch);
   const response = await bot(identity).fetch(
     new Request(url, {
       headers: {
@@ -97,7 +99,7 @@ describe("hibernatable Bot-state channel", () => {
 
     const socket = await openSocket(identity);
     expect(await nextFrame(socket)).toMatchObject({
-      type: "state/reset",
+      type: "state/snapshot",
       reason: "initial",
     });
     expect(await nextFrame(socket)).toMatchObject({ type: "state/ready" });
@@ -106,8 +108,8 @@ describe("hibernatable Bot-state channel", () => {
     const pushed = nextFrame(socket);
     expect(await runDurableObjectAlarm(stub)).toBe(true);
     expect(await pushed).toMatchObject({
-      type: "state/event",
-      topic: "computer",
+      type: "state/update",
+      kind: "computer",
     });
     expect(
       decodeComputerProjectionV1(
@@ -132,18 +134,21 @@ describe("hibernatable Bot-state channel", () => {
       await channel.computerStorage.put("computer:test:three", 3);
     });
 
-    const socket = await openSocket(identity, "1");
+    const socket = await openSocket(identity, "1", "1");
     expect(await nextFrame(socket)).toMatchObject({
-      type: "state/event",
+      type: "state/update",
       cursor: "2",
+      kind: "computer",
     });
     expect(await nextFrame(socket)).toMatchObject({
-      type: "state/event",
+      type: "state/update",
       cursor: "3",
+      kind: "computer",
     });
     expect(await nextFrame(socket)).toEqual({
       schemaVersion: 1,
       type: "state/ready",
+      epoch: "1",
       cursor: "3",
     });
     socket.close(1000, "done");
@@ -164,11 +169,9 @@ describe("hibernatable Bot-state channel", () => {
       }
     });
 
-    const socket = await openSocket(identity, "0");
-    expect(await nextFrame(socket)).toEqual({
-      schemaVersion: 1,
-      type: "state/reset",
-      cursor: String(BOT_STATE_CHANNEL_RETENTION + 1),
+    const socket = await openSocket(identity, "0", "1");
+    expect(await nextFrame(socket)).toMatchObject({
+      type: "state/snapshot",
       reason: "gap",
     });
     expect(await nextFrame(socket)).toMatchObject({ type: "state/ready" });

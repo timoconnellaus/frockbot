@@ -3,63 +3,57 @@ import {
   COMPUTER_CONNECT_START_DELAY_MS,
   createComputerBotBackendContribution,
 } from "@frockbot/computer/bot";
-import { BotStateChannel } from "./bot-state-channel.js";
+import { MemoryStorage } from "@frockbot/core/durable/testing";
+import {
+  commitPublicationsV1,
+  emptyPublicationHeadV1,
+  messageEntityIdV1,
+  PUBLICATION_REPLAY_MAX_EVENTS_V1,
+  readPublicationHeadV1,
+} from "@frockbot/core/durable";
+import { BotStateChannel, planHandshakeV1 } from "./bot-state-channel.js";
 
-class MemoryStorage {
-  readonly values = new Map<string, unknown>();
-  alarmAt: number | null = null;
-
-  get<T>(key: string): Promise<T | undefined> {
-    return Promise.resolve(structuredClone(this.values.get(key)) as T);
-  }
-
-  put(key: string | Record<string, unknown>, value?: unknown): Promise<void> {
-    if (typeof key === "string") {
-      this.values.set(key, structuredClone(value));
-    } else {
-      for (const [entry, item] of Object.entries(key)) {
-        this.values.set(entry, structuredClone(item));
-      }
-    }
-    return Promise.resolve();
-  }
-
-  delete(key: string): Promise<boolean> {
-    return Promise.resolve(this.values.delete(key));
-  }
-
-  list<T>(options: { prefix?: string }): Promise<Map<string, T>> {
-    return Promise.resolve(
-      new Map(
-        [...this.values.entries()].filter(([key]) =>
-          key.startsWith(options.prefix ?? ""),
-        ) as Array<[string, T]>,
-      ),
-    );
-  }
-
-  transaction<T>(callback: (storage: MemoryStorage) => Promise<T>): Promise<T> {
-    return callback(this);
-  }
-
+class ChannelStorage extends MemoryStorage {
   getAlarm(): Promise<number | null> {
-    return Promise.resolve(this.alarmAt);
+    return Promise.resolve(this.alarmAt ?? null);
   }
+}
 
-  setAlarm(scheduledTime: number): Promise<void> {
-    this.alarmAt = scheduledTime;
-    return Promise.resolve();
-  }
-
-  deleteAlarm(): Promise<void> {
-    this.alarmAt = null;
-    return Promise.resolve();
-  }
+function attachedChannel(runsNoticeIntervalMs = 0): {
+  channel: BotStateChannel;
+  storage: ChannelStorage;
+  sent: string[];
+  lastSent: { value: string };
+} {
+  const storage = new ChannelStorage();
+  const sent: string[] = [];
+  const lastSent = { value: "0" };
+  const socket = {
+    deserializeAttachment: () => ({
+      schemaVersion: 1,
+      userId: "user-1",
+      botId: "scout",
+      epoch: "1",
+      lastSent: lastSent.value,
+    }),
+    serializeAttachment: (value: { lastSent: string }) => {
+      lastSent.value = value.lastSent;
+    },
+    send: (frame: string) => sent.push(frame),
+    close: () => undefined,
+  };
+  const state = {
+    storage,
+    getWebSockets: () => [socket],
+    blockConcurrencyWhile: async <T>(callback: () => Promise<T>) => callback(),
+  } as unknown as DurableObjectState;
+  const channel = new BotStateChannel(state, { runsNoticeIntervalMs });
+  return { channel, storage, sent, lastSent };
 }
 
 describe("Bot-state channel Computer storage", () => {
   test("leaves the authority alarm armed immediately after connect admission", async () => {
-    const storage = new MemoryStorage();
+    const storage = new ChannelStorage();
     const state = {
       storage,
       getWebSockets: () => [],
@@ -94,117 +88,174 @@ describe("Bot-state channel Computer storage", () => {
   });
 });
 
-describe("Bot-state channel run observation", () => {
-  function observedChannel(runsNoticeIntervalMs = 0): {
-    channel: BotStateChannel;
-    storage: MemoryStorage;
-    sent: string[];
-    observed: DurableObjectState;
-  } {
-    const storage = new MemoryStorage();
-    const sent: string[] = [];
-    const socket = {
-      deserializeAttachment: () => ({
+describe("Bot-state channel committed updates", () => {
+  test("a committed computer write reaches an attached observer as a typed update", async () => {
+    const { channel, storage, sent } = attachedChannel();
+
+    await channel.computerStorage.put("computer:one", 1);
+
+    expect(storage.values.get("computer:one")).toBe(1);
+    expect(sent.map((frame) => JSON.parse(frame) as unknown)).toEqual([
+      {
         schemaVersion: 1,
-        userId: "user-1",
-        botId: "scout",
-        lastSent: "0",
+        type: "state/update",
+        epoch: "1",
+        cursor: "1",
+        kind: "computer",
+        entityId: "computer",
+        revision: 1,
+        payload: {},
+      },
+    ]);
+    expect(await readPublicationHeadV1(storage)).toMatchObject({
+      lastCursor: 1,
+      broadcastThrough: 1,
+    });
+  });
+
+  test("a rolled-back computer write produces no visible event", async () => {
+    const { channel, sent } = attachedChannel();
+
+    await expect(
+      channel.computerStorage.transaction(async (transaction) => {
+        await transaction.put("computer:one", 1);
+        throw new Error("rolled back");
       }),
-      serializeAttachment: () => undefined,
-      send: (frame: string) => sent.push(frame),
-      close: () => undefined,
-    };
-    const state = {
-      storage,
-      getWebSockets: () => [socket],
-    } as unknown as DurableObjectState;
-    const channel = new BotStateChannel(state, { runsNoticeIntervalMs });
-    return { channel, storage, sent, observed: channel.observeRuns(state) };
-  }
-
-  /** The notice is appended after the write, so it lands a task later. */
-  const settle = (): Promise<void> =>
-    new Promise<void>((resolve) => {
-      setTimeout(() => resolve(), 0);
-    });
-
-  test("a committed run write reaches an attached observer", async () => {
-    const { storage, sent, observed } = observedChannel();
-
-    await observed.storage.put("run:run-1", { status: "running" });
-    await settle();
-
-    expect(storage.values.get("run:run-1")).toEqual({ status: "running" });
-    expect(sent.map((frame) => JSON.parse(frame) as unknown)).toEqual([
-      { schemaVersion: 1, type: "state/event", cursor: "1", topic: "runs" },
-    ]);
-  });
-
-  test("a run write inside a transaction is observed too", async () => {
-    const { sent, observed } = observedChannel();
-
-    await observed.storage.transaction(async (transaction) => {
-      await transaction.put({ "active-run": "run-1" });
-    });
-    await settle();
-
-    expect(sent.map((frame) => JSON.parse(frame) as unknown)).toEqual([
-      { schemaVersion: 1, type: "state/event", cursor: "1", topic: "runs" },
-    ]);
-  });
-
-  test("writes that are not run state say nothing", async () => {
-    const { sent, observed } = observedChannel();
-
-    await observed.storage.put("identity", { botId: "scout" });
-    await observed.storage.transaction(async (transaction) => {
-      await transaction.put("latest-events", []);
-    });
-    await settle();
+    ).rejects.toThrow(/rolled back/);
 
     expect(sent).toEqual([]);
   });
 
-  test("a burst of run writes is coalesced", async () => {
-    const { sent, observed } = observedChannel();
-
-    await Promise.all([
-      observed.storage.put("run:run-1", { status: "running" }),
-      observed.storage.put("run:run-1", { status: "running" }),
-      observed.storage.put("run:run-1", { status: "completed" }),
-    ]);
-    await settle();
-
-    // Fewer notices than writes, and never none: an observer only ever needs
-    // to know that it should read again.
-    expect(sent.length).toBeGreaterThan(0);
-    expect(sent.length).toBeLessThan(3);
+  test("conversation updates are not coalesced", async () => {
+    const { channel, storage, sent } = attachedChannel(40);
+    await storage.transaction((transaction) =>
+      commitPublicationsV1(transaction, [
+        {
+          kind: "message",
+          entityId: messageEntityIdV1({
+            sessionId: "user-1:scout",
+            runId: "run-1",
+            occurrenceId: "occ-1",
+          }),
+          payload: {
+            runId: "run-1",
+            sessionId: "user-1:scout",
+            occurrenceId: "occ-1",
+            event: {
+              type: "send/to-user",
+              payload: { type: "text", text: "one" },
+              ordinal: 0,
+            },
+          },
+        },
+        {
+          kind: "message",
+          entityId: messageEntityIdV1({
+            sessionId: "user-1:scout",
+            runId: "run-1",
+            occurrenceId: "occ-2",
+          }),
+          payload: {
+            runId: "run-1",
+            sessionId: "user-1:scout",
+            occurrenceId: "occ-2",
+            event: {
+              type: "send/to-user",
+              payload: { type: "text", text: "two" },
+              ordinal: 1,
+            },
+          },
+        },
+      ]),
+    );
+    await channel.drainBroadcast();
+    expect(sent).toHaveLength(2);
+    expect(JSON.parse(sent[0]!).kind).toBe("message");
+    expect(JSON.parse(sent[1]!).kind).toBe("message");
   });
 
-  // A streaming answer journals one run write per text delta. Throttled, the
-  // observer is told once immediately and once per interval after that, rather
-  // than once per token — and it is always told about the last write.
-  test("a stream of run writes notices once, then once per interval", async () => {
-    const { sent, observed } = observedChannel(40);
-
-    await observed.storage.put("run:run-1", { text: "one" });
-    await settle();
-    // The first write is never delayed: a Turn that starts or ends says so at
-    // once.
+  test("duplicate delivery is skipped by the observer cursor", async () => {
+    const { channel, sent } = attachedChannel();
+    await channel.computerStorage.put("computer:one", 1);
     expect(sent).toHaveLength(1);
-
-    for (const text of ["two", "three", "four", "five"]) {
-      await observed.storage.put("run:run-1", { text });
-      await settle();
-    }
-    // Four more writes inside one interval, and still only the first notice.
+    channel.broadcastCommitted([
+      {
+        schemaVersion: 1,
+        epoch: 1,
+        cursor: 1,
+        kind: "computer",
+        entityId: "computer",
+        revision: 1,
+        payload: {},
+      },
+    ]);
     expect(sent).toHaveLength(1);
+  });
 
-    await new Promise<void>((resolve) => {
-      setTimeout(resolve, 120);
+  test("no attached observer still completes the broadcast attempt", async () => {
+    const storage = new ChannelStorage();
+    const state = {
+      storage,
+      getWebSockets: () => [],
+    } as unknown as DurableObjectState;
+    const channel = new BotStateChannel(state);
+    await channel.computerStorage.put("computer:one", 1);
+    expect(await readPublicationHeadV1(storage)).toMatchObject({
+      lastCursor: 1,
+      broadcastThrough: 1,
     });
-    // The last write is never dropped: the pending flag outlives the wait.
-    expect(sent).toHaveLength(2);
-    expect(JSON.parse(sent[1]!) as unknown).toMatchObject({ topic: "runs" });
+  });
+
+  test("retention count is the named replay bound", () => {
+    expect(PUBLICATION_REPLAY_MAX_EVENTS_V1).toBe(64);
+  });
+
+  test("crash after commit and before drain leaves the pending marker", async () => {
+    const storage = new ChannelStorage();
+    await storage.transaction((transaction) =>
+      commitPublicationsV1(transaction, [
+        {
+          kind: "message",
+          entityId: messageEntityIdV1({
+            sessionId: "user-1:scout",
+            runId: "run-1",
+            occurrenceId: "occ-1",
+          }),
+          payload: {
+            runId: "run-1",
+            sessionId: "user-1:scout",
+            occurrenceId: "occ-1",
+            event: {
+              type: "send/to-user",
+              payload: { type: "text", text: "held" },
+              ordinal: 0,
+            },
+          },
+        },
+      ]),
+    );
+    expect(await readPublicationHeadV1(storage)).toMatchObject({
+      lastCursor: 1,
+      broadcastThrough: 0,
+    });
+    expect(
+      [...storage.values.keys()].some((key) =>
+        key.startsWith("publication-pending:"),
+      ),
+    ).toBe(true);
+  });
+
+  test("handshake reasons distinguish initial, replay, gap and epoch", () => {
+    const head = {
+      ...emptyPublicationHeadV1(),
+      lastCursor: 10,
+      firstRetainedCursor: 5,
+      broadcastThrough: 10,
+    };
+    expect(planHandshakeV1(head, undefined, undefined)).toBe("initial");
+    expect(planHandshakeV1(head, 7, 1)).toBe("replay");
+    expect(planHandshakeV1(head, 3, 1)).toBe("gap");
+    expect(planHandshakeV1(head, 12, 1)).toBe("cursor-ahead");
+    expect(planHandshakeV1(head, 7, 2)).toBe("epoch");
   });
 });
