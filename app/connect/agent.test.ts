@@ -77,6 +77,7 @@ async function mount(options: {
   connection?: ConnectionView;
   apiKey?: string;
   pinned?: Map<string, unknown>;
+  permitConnection?: () => Promise<boolean>;
 }) {
   const requests: { url: URL; init: RequestInit | undefined }[] = [];
   const root = createAgentRuntimeHarness();
@@ -100,6 +101,9 @@ async function mount(options: {
             return value;
           },
         }
+      : {}),
+    ...(options.permitConnection
+      ? { permitConnection: options.permitConnection }
       : {}),
   });
   if (feature) await root.mount(feature);
@@ -128,6 +132,30 @@ describe("a connected app in a Bot's Turn", () => {
       apiKey: "",
     });
     expect(keyless.feature).toBeUndefined();
+  });
+
+  test("a revoked Connection refuses the call the admitted snapshot still names", async () => {
+    const { root, requests } = await mount({
+      respond: (url) =>
+        url.pathname.endsWith("/tools")
+          ? Response.json(TOOL_LIST)
+          : Response.json({
+              successful: true,
+              data: { id: "msg_1" },
+              error: null,
+            }),
+      permitConnection: async () => false,
+    });
+    const result = await run(
+      root,
+      call("gmail", "send_email", { to: "a@example.com", body: "hi" }),
+    );
+    expect(result.isError).toBe(true);
+    expect(result.content).toContain("revoked");
+    expect(
+      requests.some((entry) => entry.url.pathname.includes("/execute/")),
+    ).toBe(false);
+    await root.dispose();
   });
 
   test("registers the app's namespace with its important tools, and executes one", async () => {

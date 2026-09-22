@@ -48,6 +48,8 @@ export interface ConnectRuntimeConfig {
     connectionId: string,
     read: () => Promise<unknown>,
   ): Promise<unknown>;
+  /** Live permission for this Connection. Absent keeps the admitted snapshot. */
+  permitConnection?(): Promise<boolean>;
 }
 
 /** The pinned catalog, as a later mount of the same Turn reads it back. */
@@ -144,13 +146,23 @@ export function createConnectFeature(
             description: tool.description,
             inputSchema: tool.inputSchema,
             idempotent: false,
-            execute: (input) =>
-              executeConnectTool(client, {
+            execute: async (input) => {
+              if (
+                config.permitConnection &&
+                !(await config.permitConnection())
+              ) {
+                return {
+                  content: "Access to this app was revoked. Connect it again.",
+                  isError: true,
+                };
+              }
+              return executeConnectTool(client, {
                 userId: config.userId,
                 connectedAccountId: metadata.connectedAccountId,
                 tool,
                 input,
-              }),
+              });
+            },
           },
           {
             admissionCeiling: ["chat", "agent", "automation", "subagent"],
@@ -243,6 +255,7 @@ export function createConfiguredConnectRuntimeContribution(config: {
   apiBaseUrl?: string;
   fetch?: ComposioFetch;
   pinToolCatalog?: ConnectRuntimeConfig["pinToolCatalog"];
+  permitConnection?: ConnectRuntimeConfig["permitConnection"];
 }): RuntimeFeatureV1<AgentRuntimeV1> | undefined {
   if (
     config.capability.packageId !== CONNECT_PACKAGE_ID ||
@@ -261,5 +274,8 @@ export function createConfiguredConnectRuntimeContribution(config: {
     ...(config.apiBaseUrl ? { apiBaseUrl: config.apiBaseUrl } : {}),
     ...(config.fetch ? { fetch: config.fetch } : {}),
     ...(config.pinToolCatalog ? { pinToolCatalog: config.pinToolCatalog } : {}),
+    ...(config.permitConnection
+      ? { permitConnection: config.permitConnection }
+      : {}),
   });
 }

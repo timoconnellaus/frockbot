@@ -7,7 +7,10 @@ import type { UserSettingsViewV1 } from "@frockbot/core/configuration";
 import { SessionEventLog } from "@frockbot/core/durable";
 import { createShellBotBackendContribution } from "@frockbot/app/shell/backend";
 import type { StoredRun } from "@frockbot/app/shell/backend-contracts";
-import { memoryUserCompositionV1 } from "@frockbot/app/composition/user.fixture";
+import {
+  accountPreparationRpcV1,
+  memoryUserCompositionV1,
+} from "@frockbot/app/composition/user.fixture";
 import { foundationShellApplicationV1 } from "./runtime.js";
 
 class MemoryStorage {
@@ -147,6 +150,7 @@ describe("Bot recovery on this application", () => {
     let settlementFailures = 0;
     const rpc = {
       readConfiguration: () => Promise.resolve(structuredClone(userSettings)),
+      ...accountPreparationRpcV1(() => userSettings, userComposition),
       listBots: () =>
         Promise.resolve({ schemaVersion: 1 as const, revision: 0, bots: [] }),
       leaseModelCredential: (input: unknown) => {

@@ -13,7 +13,10 @@ import {
   isolateAuthoritySnapshot,
   isolateConnection,
 } from "@frockbot/app/isolates/bot";
-import { memoryUserCompositionV1 } from "@frockbot/app/composition/user.fixture";
+import {
+  accountPreparationRpcV1,
+  memoryUserCompositionV1,
+} from "@frockbot/app/composition/user.fixture";
 import { listNotifications } from "@frockbot/app/notifications/bot";
 import {
   executeConfiguration,
@@ -140,6 +143,7 @@ function host(storage: MemoryStorage, readUser: () => UserSettingsViewV1) {
         idFromName: () => "user-1",
         get: () => ({
           readConfiguration: () => Promise.resolve(structuredClone(readUser())),
+          ...accountPreparationRpcV1(readUser, userComposition),
           listBots: () =>
             Promise.resolve({ schemaVersion: 1, revision: 0, bots: [] }),
           ...userComposition,
@@ -570,6 +574,40 @@ describe("generic per-Turn model resolution", () => {
     const settings = await contribution.getSettings(identity);
     expect(settings).toMatchObject({ revision: 0, packageValues: {} });
     expect(Object.hasOwn(settings, "model")).toBe(false);
+  });
+
+  test("an admitted Turn keeps its account revision after the account moves", async () => {
+    const storage = new MemoryStorage();
+    let revision = 4;
+    const contribution = host(storage, () => {
+      const user = configuredUser();
+      return { ...user, revision };
+    });
+    const identity = { userId: "user-1", botId: "primary" };
+    await contribution.materializeSettings(identity, { name: "Primary" });
+    await contribution.run({
+      ...identity,
+      runId: "pinned-run",
+      sessionId: "user-1:primary",
+      acceptedAt: "2026-09-02T00:00:00.000Z",
+      text: "hello",
+    });
+    revision = 11;
+    const pinned = await storage.get<{
+      preparedInputs?: { account?: { revision?: number } };
+    }>("run:pinned-run");
+    expect(pinned?.preparedInputs?.account?.revision).toBe(4);
+    await contribution.run({
+      ...identity,
+      runId: "next-run",
+      sessionId: "user-1:primary",
+      acceptedAt: "2026-09-02T00:00:01.000Z",
+      text: "again",
+    });
+    const next = await storage.get<{
+      preparedInputs?: { account?: { revision?: number } };
+    }>("run:next-run");
+    expect(next?.preparedInputs?.account?.revision).toBe(11);
   });
 
   test("a Connection disabled after admission is unavailable and records a visible failure", async () => {

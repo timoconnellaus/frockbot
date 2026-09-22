@@ -1305,11 +1305,33 @@ describe("Bot recovery", () => {
         USER_CONFIGURATIONS: {
           idFromName: () => "user-1",
           get: () => ({
-            readConfiguration: async () => {
+            prepareAccount: async () => {
               contextStarted.resolve();
               await continueContext.promise;
-              return user;
+              return {
+                schemaVersion: 1,
+                settings: user,
+                features: {
+                  schemaVersion: 1,
+                  applets: false,
+                  pluginAuthoring: false,
+                  plugins: [],
+                  updatedAt: "2026-09-22T00:00:00.000Z",
+                  updatedBy: "test",
+                },
+              };
             },
+            readAccountPreparationStamp: async () => ({
+              schemaVersion: 1,
+              revision: user.revision,
+              features: {
+                applets: false,
+                pluginAuthoring: false,
+                plugins: [],
+              },
+              compositionGenerationId: "",
+            }),
+            readConfiguration: async () => user,
           }),
         },
       } as never,

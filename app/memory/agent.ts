@@ -77,6 +77,7 @@ import {
 } from "./roots.js";
 import { formatMemoryResultsV1, searchMemoryV1 } from "./searcher.js";
 import { MemoryStore, MEMORY_MAX_FACT_LENGTH } from "./store.js";
+import { readLongTermMemoryV1 } from "./reader.js";
 import type {
   EmbedMemory,
   MemoryAiBinding,
@@ -268,10 +269,14 @@ export class MemoryProjection {
     // — and the ceiling stays what the helper says it is rather than squaring.
     const inFlight = createConcurrencyLimiterV1();
     const [ownTier, userTier, ...projectReads] = await Promise.all([
-      store.read(own, { inFlight }),
-      store.read(user, { inFlight }),
+      readLongTermMemoryV1(store, own, { inFlight }),
+      readLongTermMemoryV1(store, user, { inFlight }),
       ...projects.map((project) =>
-        store.read(projectMemoryRootV1(owner, project.projectId), { inFlight }),
+        readLongTermMemoryV1(
+          store,
+          projectMemoryRootV1(owner, project.projectId),
+          { inFlight },
+        ),
       ),
     ]);
     const projectTiers: MemoryProjectTierV1[] = projects.map(

@@ -4,9 +4,12 @@
 // to the real store — propose, commit, fail, quarantine — rather than to a
 // second authority that only exists in tests.
 import {
+  COMPOSITION_CURRENT_KEY,
   decodeCompositionGenerationV1,
+  decodeCompositionPinV1,
   type CompositionOriginV1,
 } from "@frockbot/core/durable";
+import type { UserSettingsViewV1 } from "@frockbot/core/configuration";
 import { MemoryStorage } from "@frockbot/core/durable/testing";
 import type { SeededPluginV1 } from "@frockbot/app/plugins/catalog";
 import {
@@ -72,5 +75,48 @@ export function memoryUserCompositionV1(
       failures().quarantine(request.generationId),
     clearCompositionFailures: (request) =>
       failures().clear(request.generationId),
+  };
+}
+
+/** The account-preparation RPCs a Bot harness needs beside `readConfiguration`. */
+export function accountPreparationRpcV1(
+  readSettings: () => UserSettingsViewV1,
+  composition: Pick<
+    ReturnType<typeof memoryUserCompositionV1>,
+    "readComposition" | "storage"
+  >,
+) {
+  const features = {
+    schemaVersion: 1 as const,
+    applets: false,
+    pluginAuthoring: false,
+    plugins: [] as string[],
+    updatedAt: "1970-01-01T00:00:00.000Z",
+    updatedBy: "test",
+  };
+  return {
+    prepareAccount: async (input: { userId: string }) => ({
+      schemaVersion: 1 as const,
+      settings: structuredClone(readSettings()),
+      features,
+      composition: await composition.readComposition({
+        schemaVersion: 1,
+        userId: input.userId,
+      }),
+    }),
+    readAccountPreparationStamp: async () => {
+      const pin = await composition.storage.get(COMPOSITION_CURRENT_KEY);
+      return {
+        schemaVersion: 1 as const,
+        revision: readSettings().revision,
+        features: {
+          applets: false,
+          pluginAuthoring: false,
+          plugins: [] as string[],
+        },
+        compositionGenerationId:
+          pin === undefined ? "" : decodeCompositionPinV1(pin).generationId,
+      };
+    },
   };
 }

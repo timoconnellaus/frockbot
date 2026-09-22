@@ -65,11 +65,14 @@ import {
   projectRoutineAccountTimezoneV1,
 } from "@frockbot/app/routines/bot";
 import {
+  connectionStillPermittedV1,
   executeConfigurationCommand,
   readBotSettingsV1,
   userAccountFeaturesReaderV1,
   userConfigurationV1,
 } from "@frockbot/app/settings/bot";
+import type { PreparedTurnInputsV1 } from "./prepared-inputs.js";
+import type { PluginSkillContributionV1 } from "@frockbot/app/skills/plugin";
 import { createBotSkillsHost } from "@frockbot/app/skills/bot";
 import { subagentsRuntimeHost } from "@frockbot/app/subagents/bot";
 import {
@@ -205,6 +208,7 @@ export async function agentRuntime(
     /** How many `subagent` hand-offs deep this Turn is; absent means none. */
     handoffDepth?: number;
   },
+  prepared?: PreparedTurnInputsV1,
 ): Promise<{
   agentPackages: FoundationAgentPackage[];
   capabilities: EnabledCapabilityV1[];
@@ -218,21 +222,31 @@ export async function agentRuntime(
    * into the Turn's `llm` registry through it.
    */
   pluginModel?: ShellPluginModelHostV1;
+  /**
+   * Filled by the mount with the generation actually being mounted, before
+   * Skill features run. Empty when this runtime was not given prepared inputs.
+   */
+  pluginSkills: PluginSkillContributionV1[];
 }> {
   const userConfiguration = userConfigurationV1(state, identity);
-  // Three gates below ask the User object for the same account features
-  // record. One mount, one read: see `userAccountFeaturesReaderV1`.
-  const accountFeatures = userAccountFeaturesReaderV1(state, identity);
-  // User configuration and Bot-local Plugin enablement are independent
-  // authorities. Start both together: serializing them put two storage/DO
-  // round trips ahead of every text response.
-  const [user, enablement] = await Promise.all([
-    userConfiguration.readConfiguration({
-      schemaVersion: 1,
-      userId: identity.userId,
-    }),
-    readPluginEnablementV1(state.ctx.storage),
-  ]);
+  // One admitted Turn reuses the account preparation it stored. A caller
+  // without one — an isolate's `ai` grant — still reads the live account.
+  const accountFeatures = prepared
+    ? async () => structuredClone(prepared.account.features)
+    : userAccountFeaturesReaderV1(state, identity);
+  const pluginSkills: PluginSkillContributionV1[] = [];
+  const [user, enablement] = prepared
+    ? [
+        structuredClone(prepared.account.settings),
+        structuredClone(prepared.bot.enablement),
+      ]
+    : await Promise.all([
+        userConfiguration.readConfiguration({
+          schemaVersion: 1,
+          userId: identity.userId,
+        }),
+        readPluginEnablementV1(state.ctx.storage),
+      ]);
   await projectRoutineAccountTimezoneV1(
     state,
     userTimezoneV1(user.profile),
@@ -347,7 +361,13 @@ export async function agentRuntime(
     ? pluginAuthoringRuntimeHost(state, identity, turn, accountFeatures)
     : Promise.resolve(undefined);
   const skillsPromise = turn
-    ? createBotSkillsHost(state, identity, turn, accountFeatures)
+    ? createBotSkillsHost(
+        state,
+        identity,
+        turn,
+        accountFeatures,
+        prepared ? pluginSkills : undefined,
+      )
     : Promise.resolve(undefined);
   // These gates share the account-feature read above but otherwise touch
   // independent authorities. Resolve them as one preparation stage.
@@ -628,6 +648,8 @@ export async function agentRuntime(
       userId: identity.userId,
       readSecret,
       authorizeConnection: authorizeEnabledConnection,
+      permitConnection: (connection) =>
+        connectionStillPermittedV1(state, identity, connection),
       ...(turn
         ? {
             pinToolCatalog: turnToolCatalogPin(state.ctx.storage, turn.turnId),
@@ -810,6 +832,7 @@ export async function agentRuntime(
     agentPackages,
     capabilities: structuredClone(plan.capabilities),
     pluginEnablement: structuredClone(enablement),
+    pluginSkills,
     ...(pluginModel ? { pluginModel } : {}),
     modelSelection: {
       provider: binding.providerType,

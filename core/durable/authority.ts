@@ -150,6 +150,8 @@ export interface BotTurnExecutionInput<Snapshot> {
   resume: boolean;
   /** Present when a resumed Turn already has a durable model request. */
   admittedRequest?: NormalizedModelRequest;
+  /** Versions recorded at admission. The shell decodes them. */
+  preparedInputs?: unknown;
 }
 
 /**
@@ -161,6 +163,11 @@ export interface BotTurnExecutionInput<Snapshot> {
 export interface BotDurableAuthorityHooks<Snapshot> {
   /** Configuration snapshot a Turn is admitted under, resolved before admission. */
   resolveAdmissionSnapshot(command: OwnedBotTurnCommand): Promise<Snapshot>;
+  /**
+   * Preparation resolved with the snapshot. Recorded on the run in the same
+   * admission transaction. Opaque to the kernel.
+   */
+  preparedInputs?(snapshot: Snapshot): unknown;
   /** The first-party generation a Bot with no Composition records starts on. */
   bootstrapComposition(): Promise<CompositionGenerationV1>;
   /** Durable snapshot read inside the admission transaction. */
@@ -691,12 +698,14 @@ export class BotDurableAuthority<Snapshot> {
   ): Promise<BotTurnCompletion> {
     this.executingRunId = command.runId;
     try {
+      let preparedInputs: unknown;
       await this.ctx.storage.transaction(async (transaction) => {
         const key = `${RUN_PREFIX}${command.runId}`;
         const run = this.codec.optional(await transaction.get<unknown>(key));
         if (!run || run.status !== "running") {
           throw new Error(`run "${command.runId}" is not resumable`);
         }
+        preparedInputs = run.preparedInputs;
         await transaction.put(
           key,
           storedRunRecordV2({
@@ -716,6 +725,7 @@ export class BotDurableAuthority<Snapshot> {
         journal: seed.journal,
         configurationSnapshot: settings,
         compositionGenerationId,
+        ...(preparedInputs === undefined ? {} : { preparedInputs }),
         persistSessionEvents: (_sessionId, events) =>
           this.persistRunEvents(command.runId, events),
         resume: false,
@@ -842,6 +852,9 @@ export class BotDurableAuthority<Snapshot> {
         configurationSnapshot: settings,
         compositionGenerationId:
           run.mountedCompositionGenerationId ?? run.compositionGenerationId,
+        ...(run.preparedInputs === undefined
+          ? {}
+          : { preparedInputs: run.preparedInputs }),
         persistSessionEvents: (_sessionId, events) =>
           this.persistRunEvents(run.runId, events),
         resume: true,
@@ -1776,6 +1789,7 @@ export class BotDurableAuthority<Snapshot> {
         transaction,
         settings,
       );
+      const preparedInputs = this.hooks.preparedInputs?.(settings);
       const pin = await this.composition.pin(transaction);
       const repairAt =
         Date.parse(command.acceptedAt) +
@@ -1805,6 +1819,7 @@ export class BotDurableAuthority<Snapshot> {
         // when it is promoted, because the Turn ahead of it is still writing.
         phase: queued ? "queued" : "admitted",
         compositionGenerationId: pin.generationId,
+        ...(preparedInputs === undefined ? {} : { preparedInputs }),
         configurationSnapshot: structuredClone(admittedSettings),
         previousEventCount: seeded.cursor.nextSeq,
         ...storedRunAdmissionV1(

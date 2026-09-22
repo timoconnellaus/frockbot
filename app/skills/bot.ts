@@ -186,11 +186,23 @@ export async function createBotSkillsHost(
   identity: BotSkillsIdentity,
   turn: BotSkillsTurn,
   features: UserAccountFeaturesReadV1,
+  /**
+   * When the caller supplies this array, it is the mounted generation's
+   * Skills and it is not fetched again. The caller may fill it before the
+   * catalog is constructed.
+   */
+  pluginSkills?: PluginSkillContributionV1[],
 ): Promise<SkillsRuntimeHostV1 | undefined> {
   // Absence is a supported state, not an error: a host that binds no
   // Workspace mounts no Skills.
   const files = state.env.WORKSPACE_FILES;
   if (!files) return undefined;
+  const gates = pluginSkills
+    ? {
+        withheldManagedSlugs: await withheldManagedSkillSlugs(state, features),
+        pluginSkills,
+      }
+    : await botSkillGatesV1(state, identity, features);
   return {
     owner: { userId: identity.userId, botId: identity.botId },
     reads: files,
@@ -202,7 +214,7 @@ export async function createBotSkillsHost(
       turnId: turn.turnId,
       runId: turn.runId,
     },
-    ...(await botSkillGatesV1(state, identity, features)),
+    ...gates,
   };
 }
 
