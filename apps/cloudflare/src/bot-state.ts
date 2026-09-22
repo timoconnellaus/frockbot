@@ -8,6 +8,7 @@ import {
 import { cleanNotificationTestState } from "./notification-state-cleanup.js";
 import { cleanHiddenBotNotifications } from "./hidden-bot-notifications-cleanup.js";
 import { cleanRetiredRoutineStateV1 } from "./routine-state-cleanup.js";
+import { cleanUnpreparedRunsV1 } from "./prepared-input-cleanup.js";
 import {
   messageIdV1,
   visibleMessageRecordsV1,
@@ -591,6 +592,7 @@ export class BotState
       await cleanBotAvatarTestState(this.ctx.storage);
       await cleanBotProfileMirrorTestState(this.ctx.storage);
       await cleanRetiredRoutineStateV1(this.ctx.storage);
+      await cleanUnpreparedRunsV1(this.ctx.storage);
     });
     this.outboundFetch = dependencies.outboundFetch;
     const emailSender = createBindingEmailSenderV1(
