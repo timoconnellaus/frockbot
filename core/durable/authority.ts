@@ -1961,6 +1961,9 @@ export class BotDurableAuthority<Snapshot> {
         return undefined;
       }
       const eventLog = new SessionEventLog(transaction);
+      // Malformed legacy history must throw before any run rewrite. A paged
+      // log is left unread: it was decoded when its pages were written.
+      await eventLog.ensureLegacyLogDecodable(run.sessionId);
       // A Turn the User stopped, or one a later message replaced, is terminal
       // in intent before recovery ever looks at it. There is nothing to
       // recover: no answer is owed, and the provider outcome cannot change what

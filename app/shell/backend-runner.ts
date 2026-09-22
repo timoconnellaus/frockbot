@@ -28,7 +28,20 @@ export { BotTurnExecutionError, BotTurnRecoveryRequiredError };
 function journalSuffix(
   seededCount: number,
   journal: readonly SessionEvent[],
+  startSeq?: number,
 ): SessionEvent[] {
+  // The admission boundary is an absolute sequence. Events the Session
+  // appended while mounting — `session/created` on a new log — belong to
+  // this run even though they are already in the journal when execution
+  // starts. Slicing them off leaves the suffix past `previousEventCount`.
+  if (startSeq !== undefined) {
+    const start = journal.findIndex((event) => event.seq >= startSeq);
+    const events = start < 0 ? [] : journal.slice(start);
+    if (events.length > 0 && events[0]!.seq !== startSeq) {
+      throw new Error(`active-run journal is missing sequence ${startSeq}`);
+    }
+    return structuredClone(events);
+  }
   if (journal.length < seededCount) {
     throw new Error("active-run journal lost events it started with");
   }
@@ -43,6 +56,7 @@ function settleBotTurn(
   handle: AgentHandle,
   command: BotTurnCommand,
   seededCount: number,
+  startSeq?: number,
 ): BotTurnCompletion {
   const events = [...handle.agent.session.activeRunJournal];
   const turnStart = events.findLast((event) => event.type === "turn/start");
@@ -65,18 +79,18 @@ function settleBotTurn(
       );
     if (hasDurableOutcome) {
       throw new BotTurnRecoveryRequiredError(
-        journalSuffix(seededCount, events),
+        journalSuffix(seededCount, events, startSeq),
       );
     }
     throw new BotTurnExecutionError(
       "Bot turn did not reach a durable terminal state",
-      journalSuffix(seededCount, events),
+      journalSuffix(seededCount, events, startSeq),
     );
   }
   if (terminalTurn.outcome !== "completed") {
     throw new BotTurnExecutionError(
       turnFailureMessage(terminalTurn.outcome, terminalTurn.reason),
-      journalSuffix(seededCount, events),
+      journalSuffix(seededCount, events, startSeq),
     );
   }
   const message = handle.agent.session.deriveMessages().at(-1);
@@ -91,7 +105,7 @@ function settleBotTurn(
               (event) => "turn" in event && event.turn === currentTurn,
             ),
           ),
-    events: journalSuffix(seededCount, events),
+    events: journalSuffix(seededCount, events, startSeq),
   };
 }
 
@@ -99,6 +113,7 @@ function turnExecutionError(
   error: unknown,
   seededCount: number,
   events: readonly SessionEvent[],
+  startSeq?: number,
 ): never {
   if (
     error instanceof BotTurnExecutionError ||
@@ -108,7 +123,7 @@ function turnExecutionError(
   }
   throw new BotTurnExecutionError(
     error instanceof Error ? error.message : "Bot turn failed",
-    journalSuffix(seededCount, events),
+    journalSuffix(seededCount, events, startSeq),
   );
 }
 
@@ -117,6 +132,11 @@ export interface ExecuteBotTurnOptions {
   /** The mounted Composition for the generation this Turn was pinned to. */
   composition: ShellMountedComposition;
   resume?: boolean;
+  /**
+   * Absolute sequence this run was admitted at. The completion suffix starts
+   * here, including events appended while the Session was mounted.
+   */
+  suffixStartSeq?: number;
 }
 
 export interface ExecuteDirectToolTurnOptions {
@@ -126,6 +146,8 @@ export interface ExecuteDirectToolTurnOptions {
   composition: ShellMountedComposition;
   admitEffect(effect: AgentEffectAdmission): Promise<boolean>;
   signal: AbortSignal;
+  /** @see ExecuteBotTurnOptions.suffixStartSeq */
+  suffixStartSeq?: number;
 }
 
 /**
@@ -287,7 +309,11 @@ export async function executeDirectToolTurn(
     return {
       runId: command.runId,
       text: "",
-      events: journalSuffix(seededCount, session.activeRunJournal),
+      events: journalSuffix(
+        seededCount,
+        session.activeRunJournal,
+        options.suffixStartSeq,
+      ),
     };
   } finally {
     await composition.dispose();
@@ -309,11 +335,19 @@ export async function executeBotTurn(
       });
     }
     await runtime.agent.agent.whenIdle();
-    return settleBotTurn(runtime.agent, command, seededCount);
+    return settleBotTurn(
+      runtime.agent,
+      command,
+      seededCount,
+      options.suffixStartSeq,
+    );
   } catch (error) {
-    return turnExecutionError(error, seededCount, [
-      ...runtime.agent.agent.session.activeRunJournal,
-    ]);
+    return turnExecutionError(
+      error,
+      seededCount,
+      [...runtime.agent.agent.session.activeRunJournal],
+      options.suffixStartSeq,
+    );
   } finally {
     // A compaction outlives the Turn that triggered it, and it runs on this
     // Composition's model binding — so the Composition outlives the Turn too,

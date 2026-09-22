@@ -610,6 +610,22 @@ export class SessionEventLog {
     return projected;
   }
 
+  /**
+   * A legacy `latest-events` value that cannot be decoded must fail before
+   * recovery rewrites the active run. A paged log was decoded when it was
+   * written, so this does not read the archive.
+   */
+  async ensureLegacyLogDecodable(sessionId: string): Promise<void> {
+    const index = await this.storage.get(sessionEventLogIndexKeyV1(sessionId));
+    if (index !== undefined) return;
+    const legacy = await this.storage.get<unknown>(LATEST_EVENTS_KEY);
+    if (legacy === undefined) return;
+    if (!Array.isArray(legacy)) {
+      throw new Error("latest-events is not a session event list");
+    }
+    for (const event of legacy) decodeSessionEvent(event);
+  }
+
   /** Reads the legacy value and rewrites it as pages when necessary. */
   async migrate(sessionId: string): Promise<SessionEvent[]> {
     const index = requireIndex(

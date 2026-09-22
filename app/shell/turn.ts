@@ -440,6 +440,7 @@ export async function executeTurn(
             effect,
           ),
         signal: controller.signal,
+        suffixStartSeq: input.cursor.nextSeq,
       });
     }
     const ordinaryInput = await turnInputTextV1(state, input.command);
@@ -464,6 +465,10 @@ export async function executeTurn(
       },
       composition: activation.mounted,
       resume: input.resume,
+      // A resumed journal is the run's own suffix, already numbered from
+      // `previousEventCount`. A fresh Turn must include events the Session
+      // appended at the admission cursor before `send`.
+      ...(input.resume ? {} : { suffixStartSeq: input.cursor.nextSeq }),
     });
   } finally {
     state.turn.clear(active);
