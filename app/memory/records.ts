@@ -2,8 +2,8 @@
 //
 // Prepared core, recall, expand, browse, write and forget are the engine's
 // public surface. Retrieval, projections and Vectorize live on top of these
-// rows; they are not a second source of truth. The live Markdown file store
-// remains until M3 cutover; this module is the tested foundation.
+// rows; they are not a second source of truth. Live chat and voice read
+// these operations. Authored Markdown fact files are not a second store.
 
 import { MEMORY_MAX_FACT_LENGTH } from "./store.js";
 import { memoryFactKeyV1 } from "./facts.js";
@@ -206,6 +206,9 @@ export type MemoryForgetResultV1 =
   | { status: "refused"; reason: string }
   | { status: "unavailable"; reason: string };
 
+export type MemoryRecallChannelStatusV1 =
+  "complete" | "partial" | "unavailable" | "skipped";
+
 export interface MemoryRecallResultV1 {
   hits: MemoryHitV1[];
   status: MemoryCompletenessV1;
@@ -213,6 +216,11 @@ export interface MemoryRecallResultV1 {
   omissions: MemoryEngineOmissionV1[];
   membershipRevision: string;
   semanticCoverage?: MemorySemanticCoverageV1;
+  channels?: Partial<
+    Record<"fts" | "semantic" | "time", MemoryRecallChannelStatusV1>
+  >;
+  /** UTF-8 estimate of the returned hits, including the wrapper allowance. */
+  tokensEstimated?: number;
 }
 
 export interface MemoryExpandResultV1 {
@@ -356,13 +364,32 @@ export interface MemoryForgetRequestV1 {
   exactKey?: string;
 }
 
+export interface MemorySemanticRankV1 {
+  scopeKey: string;
+  itemId: string;
+  rank: number;
+}
+
 export interface MemoryRecallRequestV1 {
   authority: MemoryAuthorityV1;
   query: string;
   scopes: readonly MemoryScopeRefV1[];
-  filters?: { kind?: MemoryItemKindV1; subjectKey?: string };
+  filters?: {
+    kind?: MemoryItemKindV1;
+    subjectKey?: string;
+    occurredFrom?: string;
+    occurredTo?: string;
+  };
   budget?: number;
+  /** Active-recall token cap. Defaults to the policy's 2,048. */
+  tokenBudget?: number;
   cursor?: string;
+  effort?: "automatic" | "explicit";
+  /** Ranks from a namespace-scoped vector query. Absent means semantic was not run. */
+  semanticRanks?: readonly MemorySemanticRankV1[];
+  semanticStatus?: MemoryRecallChannelStatusV1;
+  /** Searched even when the fair page would otherwise omit it. */
+  focusScope?: MemoryScopeRefV1;
 }
 
 export interface MemoryExpandRequestV1 {

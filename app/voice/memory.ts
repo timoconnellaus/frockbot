@@ -848,18 +848,13 @@ export function renderVoiceMemoryLinesV1(
   options: { carried?: readonly VoiceMemorySourceTurnV1[] } = {},
 ): string[] {
   const lines: string[] = [];
-  if (!voiceMemoryIsEmptyV1(record)) {
+  const continuity =
+    record.ongoing.length > 0 ||
+    record.recent.length > 0 ||
+    (options.carried?.length ?? 0) > 0;
+  if (continuity) {
     lines.push("<voice-memory>");
     lines.push("What you remember from your previous conversations:");
-    const durable = record.durable;
-    if (durable.length > 0) {
-      lines.push("Keep to these:");
-      for (const entry of durable) {
-        lines.push(
-          `- (${escapeVoiceTagV1(entry.id)}) ${escapeVoiceTagV1(entry.text)}`,
-        );
-      }
-    }
     const ongoing = record.ongoing;
     if (ongoing.length > 0) {
       lines.push("Still open:");
@@ -1142,6 +1137,22 @@ export class VoiceMemoryLedgerV1 {
 
   async read(): Promise<VoiceMemoryRecordV1> {
     return this.compose(await this.readForgotten());
+  }
+
+  /** Drops the retired long-term fact list. Ongoing and recent continuity stay. */
+  async retireLongTermFacts(): Promise<number> {
+    return this.serial(async () => {
+      const stored = await this.storage.get<VoiceMemoryRecordV1>(
+        VOICE_MEMORY_RECORD_KEY_V1,
+      );
+      if (!stored || stored.durable.length === 0) return 0;
+      const removed = stored.durable.length;
+      await this.storage.put(VOICE_MEMORY_RECORD_KEY_V1, {
+        ...stored,
+        durable: [],
+      });
+      return removed;
+    });
   }
 
   /** The stored fences, one per removed thing, in key order. */

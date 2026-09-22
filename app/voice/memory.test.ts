@@ -172,7 +172,7 @@ describe("what the model answered with", () => {
 });
 
 describe("what memory keeps", () => {
-  test("a durable preference survives into the next conversation's prompt", () => {
+  test("a durable preference is not a second long-term prompt", () => {
     const first = apply(
       emptyVoiceMemoryRecordV1(),
       [
@@ -185,8 +185,11 @@ describe("what memory keeps", () => {
       ],
       [turn({ at: "2026-09-01T10:00:00.000Z" })],
     );
-    expect(renderVoiceMemoryLinesV1(first.record).join("\n")).toContain(
-      "(short-answers) Keep answers short.",
+    expect(first.record.durable.map((entry) => entry.text)).toEqual([
+      "Keep answers short.",
+    ]);
+    expect(renderVoiceMemoryLinesV1(first.record).join("\n")).not.toContain(
+      "Keep answers short.",
     );
   });
 

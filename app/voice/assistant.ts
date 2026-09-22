@@ -97,6 +97,11 @@ export interface VoiceAssistantPromptInputV1 {
   bot?: VoiceCurrentBotV1;
   bots: readonly VoiceBotSummaryV1[];
   memory: VoiceAssistantMemoryContextV1;
+  /**
+   * Prepared core from the canonical engine, shared with chat. When present
+   * it replaces the Markdown fact roots.
+   */
+  preparedCore?: string;
   /** What this session remembers of its own previous conversations. */
   session?: VoiceSessionMemoryContextV1;
   now: Date;
@@ -242,7 +247,7 @@ export function renderVoiceSystemPromptV1(
       ? renderVoiceInstructionV1(self.voice.delivery)
       : "";
     if (delivery) lines.push(delivery);
-    if (self.memory) {
+    if (self.memory && !input.preparedCore) {
       const own = voiceMemoryTierLinesV1(self.memory, {
         now: input.now,
         logDays: input.memory.logDays,
@@ -338,7 +343,12 @@ export function renderVoiceSystemPromptV1(
         : "The account has no Bots yet.",
     );
   }
-  const memory = input.memory.user;
+  if (input.preparedCore) {
+    lines.push("<memory>");
+    lines.push(input.preparedCore);
+    lines.push("</memory>");
+  }
+  const memory = input.preparedCore ? undefined : input.memory.user;
   if (memory) {
     const facts = voiceMemoryTierLinesV1(memory, {
       now: input.now,
@@ -571,6 +581,60 @@ export const VOICE_FUNCTION_DECLARATIONS_V1: readonly GeminiFunctionDeclarationV
       },
       behavior: "NON_BLOCKING",
     },
+    {
+      name: "memory_search",
+      description:
+        "Search long-term memory for this person and this Bot. Blocking: wait for the result before you answer from memory.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          query: { type: "STRING" },
+        },
+        required: ["query"],
+      },
+    },
+    {
+      name: "memory_expand",
+      description:
+        "Open the supporting evidence for one memory item returned by memory_search.",
+      parameters: {
+        type: "OBJECT",
+        properties: { item_id: { type: "STRING" } },
+        required: ["item_id"],
+      },
+    },
+    {
+      name: "memory_browse",
+      description:
+        "Read a page of long-term memory, optionally about one topic.",
+      parameters: {
+        type: "OBJECT",
+        properties: { topic: { type: "STRING" } },
+      },
+    },
+    {
+      name: "memory_write",
+      description:
+        "Record one long-term fact in this Bot's memory. Not for a password, key or token, and not for something that only matters for this call.",
+      parameters: {
+        type: "OBJECT",
+        properties: {
+          text: { type: "STRING" },
+          replaces: { type: "STRING" },
+        },
+        required: ["text"],
+      },
+    },
+    {
+      name: "memory_forget",
+      description:
+        "Forget one long-term fact by the words the person used or the item id.",
+      parameters: {
+        type: "OBJECT",
+        properties: { text: { type: "STRING" } },
+        required: ["text"],
+      },
+    },
   ];
 
 export type VoiceToolNameV1 =
@@ -587,6 +651,11 @@ const VOICE_BOT_TOOL_NAMES_V1: readonly string[] = [
   "subagent",
   "cancel",
   "switch_bot",
+  "memory_search",
+  "memory_expand",
+  "memory_browse",
+  "memory_write",
+  "memory_forget",
 ];
 
 /**
@@ -669,6 +738,17 @@ export interface VoiceAssistantHostV1 {
     until?: VoiceRememberHorizonV1;
   }): Promise<string>;
   forget(text: string): Promise<string>;
+  /**
+   * Canonical long-term memory. Absent in tests that only exercise call
+   * continuity. A standing preference uses this instead of the voice record.
+   */
+  memorySearch?(query: string): Promise<string>;
+  memoryExpand?(itemId: string): Promise<string>;
+  memoryBrowse?(topic?: string): Promise<string>;
+  memoryWrite?(text: string, replaces?: string): Promise<string>;
+  memoryForget?(text: string): Promise<string>;
+  /** Standing preferences. When present, they are not stored on the voice record. */
+  rememberLongTerm?(text: string, replaces?: string): Promise<string>;
 }
 
 /** What one executed function call did, beyond the words it answers with. */
@@ -687,6 +767,11 @@ export interface VoiceToolOutcomeV1 {
    * current turn ends, so a goodbye said before or after the tool is heard.
    */
   endCall?: boolean;
+  /**
+   * Injected memory can no longer be withdrawn. The host reopens with valid
+   * continuity and does not resume the previous upstream session.
+   */
+  memoryInvalidated?: boolean;
 }
 
 /**
@@ -790,6 +875,15 @@ export async function runVoiceToolV1(
             ? args.replaces.trim()
             : undefined;
         const until = args.until === "week" ? "week" : "today";
+        if (kind !== "open" && kind !== "temporary" && host.rememberLongTerm) {
+          return {
+            result: await host.rememberLongTerm(
+              stringArgument(args, "text"),
+              replaces,
+            ),
+            memoryInvalidated: true,
+          };
+        }
         return {
           result: await host.remember({
             text: stringArgument(args, "text"),
@@ -799,6 +893,43 @@ export async function runVoiceToolV1(
           }),
         };
       }
+      case "memory_search":
+        return {
+          result: host.memorySearch
+            ? await host.memorySearch(stringArgument(args, "query"))
+            : "Long-term memory search is unavailable.",
+        };
+      case "memory_expand":
+        return {
+          result: host.memoryExpand
+            ? await host.memoryExpand(stringArgument(args, "item_id"))
+            : "Long-term memory is unavailable.",
+        };
+      case "memory_browse":
+        return {
+          result: host.memoryBrowse
+            ? await host.memoryBrowse(
+                typeof args.topic === "string" ? args.topic : undefined,
+              )
+            : "Long-term memory is unavailable.",
+        };
+      case "memory_write":
+        return {
+          result: host.memoryWrite
+            ? await host.memoryWrite(
+                stringArgument(args, "text"),
+                typeof args.replaces === "string" ? args.replaces : undefined,
+              )
+            : "Long-term memory is unavailable.",
+          memoryInvalidated: Boolean(host.memoryWrite),
+        };
+      case "memory_forget":
+        return {
+          result: host.memoryForget
+            ? await host.memoryForget(stringArgument(args, "text"))
+            : "Long-term memory is unavailable.",
+          memoryInvalidated: Boolean(host.memoryForget),
+        };
       case "forget":
         return { result: await host.forget(stringArgument(args, "text")) };
       case "recall_project":

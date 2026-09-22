@@ -145,6 +145,8 @@ import {
   releaseUnreferencedSkillSnapshotsV1,
 } from "@frockbot/app/skills/index-store";
 import { decodeWorkspaceGenerationV1 } from "@frockbot/core/contracts";
+import { workspaceObjectPrefixV1 } from "@frockbot/core/workspace-store";
+import { cleanRetiredMemoryFactObjectsV1 } from "@frockbot/app/memory/cleanup";
 import { createR2ObjectBucketV1 } from "./workspace.js";
 import { cleanDefaultPackagesMarkerV1 } from "./default-packages-marker-cleanup.js";
 import {
@@ -305,6 +307,22 @@ export class UserConfiguration
           root: { kind: "user-instructions", userId },
           receiptKey: "maintenance:skill-index:user:2026-09-22",
         });
+        const bucket = createR2ObjectBucketV1(this.env.MEMORY_FILES);
+        await cleanRetiredMemoryFactObjectsV1(
+          this.ctx.storage,
+          {
+            list: async (options) => {
+              const page = await bucket.list(options);
+              return {
+                keys: page.objects.map((object) => object.key),
+                ...(page.cursor ? { cursor: page.cursor } : {}),
+                truncated: page.truncated,
+              };
+            },
+            delete: (key) => bucket.delete(key),
+          },
+          workspaceObjectPrefixV1({ kind: "user-memory", userId }),
+        );
       }
       if (
         (

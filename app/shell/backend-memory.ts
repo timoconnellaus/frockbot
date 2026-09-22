@@ -26,6 +26,7 @@ import type {
 } from "@frockbot/app/memory/agent";
 import { MemoryStore } from "@frockbot/app/memory/store";
 import type { MemoryChunkIndexWriterV1 } from "@frockbot/app/memory/chunk-index";
+import type { MemoryRecordsV1 } from "@frockbot/app/memory/owner";
 
 /** The Bot and User whose Memory a Turn may read and write. */
 export interface BotMemoryIdentity {
@@ -53,6 +54,8 @@ export interface BotMemoryEnv {
   MEMORY_BOT_NAMES?: Readonly<Record<string, string>>;
   /** Bot-scoped vector-id ledger supplied by the Durable Object host. */
   MEMORY_CHUNK_INDEX?: MemoryChunkIndexWriterV1;
+  /** Canonical Memory. When present, chat no longer writes Markdown fact files. */
+  MEMORY_RECORDS?: MemoryRecordsV1;
 }
 
 /**
@@ -91,5 +94,6 @@ export function createBotMemoryHost(
     ...(bindings.MEMORY_CHUNK_INDEX
       ? { chunkIndex: bindings.MEMORY_CHUNK_INDEX }
       : {}),
+    ...(bindings.MEMORY_RECORDS ? { records: bindings.MEMORY_RECORDS } : {}),
   };
 }

@@ -105,6 +105,12 @@ import {
   type VoiceMemorySourceReaderV1,
   type VoiceMemorySourceTurnV1,
 } from "@frockbot/app/voice/memory";
+import { VoiceMemoryPrefetchCacheV1 } from "@frockbot/app/voice/memory-recall";
+import { isControlOnlyMemoryInputV1 } from "@frockbot/app/memory/policy";
+import {
+  productScopeToEngineV1,
+  type MemoryAuthorityV1,
+} from "@frockbot/app/memory/records";
 import { refuseMemorySecretV1 } from "@frockbot/app/memory/secrets";
 import {
   decodeVoiceAssistantClientMessageV1,
@@ -140,14 +146,8 @@ import {
   type VoiceResumptionRecordV1,
 } from "@frockbot/app/voice/resumption";
 import { MemoryStore } from "@frockbot/app/memory/store";
-import { readLongTermMemoryV1 } from "@frockbot/app/memory/reader";
 import { voiceOpeningRereadsSessionMemoryV1 } from "@frockbot/app/voice/session-memory";
-import {
-  botMemoryRootV1,
-  projectMemoryRootV1,
-  userMemoryRootV1,
-  isMemoryProjectIdV1,
-} from "@frockbot/app/memory/roots";
+import { isMemoryProjectIdV1 } from "@frockbot/app/memory/roots";
 import {
   decodeDirectoryViewV1,
   decodeFlockBootstrapViewV1,
@@ -1037,8 +1037,10 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   }
 
   #memory: VoiceMemoryLedgerV1 | undefined;
+  readonly #memoryPrefetch = new VoiceMemoryPrefetchCacheV1<string>();
 
   async onStart(): Promise<void> {
+    await this.memory().retireLongTermFacts();
     const now = this.now();
     // Indexed active paid work only. A full history scan is not startup.
     const activation = crypto.randomUUID();
@@ -1377,10 +1379,38 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       if (again) await this.scheduleMemoryFinalization(payload.callId, false);
       return;
     }
+    const standing = update.operations.filter((operation) =>
+      operation.kind.startsWith("durable/"),
+    );
+    if (standing.length > 0) {
+      const call = await this.ledger().currentCall();
+      if (call?.callId === payload.callId && call.botId) {
+        for (const operation of standing) {
+          if (operation.kind === "durable/add") {
+            await this.writeCanonicalMemory(
+              this.name,
+              call.botId,
+              operation.text,
+            ).catch(() => undefined);
+          } else if (operation.kind === "durable/remove") {
+            await this.forgetCanonicalMemory(
+              this.name,
+              call.botId,
+              operation.id,
+            ).catch(() => undefined);
+          }
+        }
+      }
+    }
     const applied = await memory.applyChunk({
       callId: payload.callId,
       chunk,
-      update,
+      update: {
+        ...update,
+        operations: update.operations.filter(
+          (operation) => !operation.kind.startsWith("durable/"),
+        ),
+      },
       timezone: await this.userTimezone(this.name),
       at: this.now(),
     });
@@ -1861,6 +1891,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         code: "cancelled",
       });
       previous.cancel();
+      this.#memoryPrefetch.cancel(previous.id);
       this.#attempts.delete(previous.id);
     }
     const attempt = new OpeningAttempt(
@@ -2908,6 +2939,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         // written again when the turn settles.
         call.transcript =
           `${call.transcript}${call.transcript ? " " : ""}${event.text}`.trim();
+        this.prefetchMemory(call, event.text);
         this.sendRaw(connection, {
           type: "transcript",
           role: "user",
@@ -3242,17 +3274,189 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         call.pendingEnd = true;
       }
       if (call.cancelledCalls.delete(request.id)) continue;
+      const memoryTool = request.name.startsWith("memory_");
       call.session?.send(
         encodeGeminiToolResponseV1([
           {
             id: request.id,
             name: request.name,
             response: voiceToolResponseV1(outcome),
-            scheduling: "WHEN_IDLE",
+            ...(memoryTool ? {} : { scheduling: "WHEN_IDLE" as const }),
           },
         ]),
       );
+      if (outcome.memoryInvalidated) {
+        await this.reopenAfterMemoryInvalidation(connection, call);
+      }
     }
+  }
+
+  /**
+   * Injected memory cannot be withdrawn from a live Gemini session. Close it
+   * and open a fresh one with bounded continuity. Do not resume the handle.
+   */
+  private async reopenAfterMemoryInvalidation(
+    connection: Connection,
+    call: LiveCall,
+  ): Promise<void> {
+    if (call.attemptId) this.#memoryPrefetch.cancel(call.attemptId);
+    call.session?.close();
+    call.session = undefined;
+    call.resumptionHandle = undefined;
+    call.resumable = false;
+    await this.ledger().clearResumption(call.callId);
+    const next = this.announceAttempt(connection, call, "start");
+    await this.openSession(connection, call, next, { handover: true });
+  }
+
+  private prefetchMemory(call: LiveCall, transcript: string): void {
+    const query = transcript.trim();
+    if (!call.attemptId || !call.botId || isControlOnlyMemoryInputV1(query)) {
+      return;
+    }
+    const attemptId = call.attemptId;
+    const userId = this.name;
+    this.#memoryPrefetch.start(attemptId, query, () =>
+      this.searchCanonicalMemory(userId, call.botId, query),
+    );
+  }
+
+  private async searchCanonicalMemory(
+    userId: string,
+    botId: string,
+    query: string,
+  ): Promise<string> {
+    const authority = voiceMemoryAuthorityV1(userId, botId);
+    const result = (await this.botDoor(userId, botId).operateMemory("recall", {
+      authority,
+      query,
+      scopes: [
+        productScopeToEngineV1("bot", { userId, botId }),
+        productScopeToEngineV1("user", { userId, botId }),
+      ],
+      effort: "automatic",
+    })) as { hits?: Array<{ item?: { text?: string } }>; status?: string };
+    const hits = result.hits ?? [];
+    if (hits.length === 0)
+      return `No memory matches (${result.status ?? "empty"}).`;
+    return hits
+      .map((hit, index) => `[${index + 1}] ${hit.item?.text ?? ""}`)
+      .join("\n");
+  }
+
+  private async preparedCoreText(
+    userId: string,
+    botId: string,
+  ): Promise<string | undefined> {
+    if (!botId) return undefined;
+    try {
+      const core = (await this.botDoor(userId, botId).operateMemory(
+        "preparedCore",
+        {
+          authority: voiceMemoryAuthorityV1(userId, botId),
+          scopes: [
+            productScopeToEngineV1("bot", { userId, botId }),
+            productScopeToEngineV1("user", { userId, botId }),
+          ],
+        },
+      )) as { blocks?: Array<{ text?: string }> };
+      const text = (core.blocks ?? [])
+        .map((block) => block.text ?? "")
+        .filter((line) => line.length > 0)
+        .join("\n");
+      return text || undefined;
+    } catch {
+      return undefined;
+    }
+  }
+
+  private async writeCanonicalMemory(
+    userId: string,
+    botId: string,
+    text: string,
+    replaces?: string,
+  ): Promise<string> {
+    const sentence = text.trim();
+    if (!sentence) return "Refused: there was nothing to remember.";
+    const secret = refuseMemorySecretV1(sentence);
+    if (secret) return `Refused: ${secret.reason}`;
+    const result = (await this.botDoor(userId, botId).operateMemory("write", {
+      authority: voiceMemoryAuthorityV1(userId, botId),
+      scope: productScopeToEngineV1("user", { userId, botId }),
+      content: sentence,
+      operationKey: `voice:${botId}:${sentence}`,
+      subjectKey: "preference",
+      ...(replaces ? { replaces } : {}),
+      kind: "fact",
+    })) as { status?: string; reason?: string };
+    if (result.status !== "ok") {
+      return `Refused: ${result.reason ?? result.status ?? "memory write failed"}.`;
+    }
+    return "Kept. Acknowledge it plainly and follow it from here.";
+  }
+
+  private async forgetCanonicalMemory(
+    userId: string,
+    botId: string,
+    text: string,
+  ): Promise<string> {
+    const result = (await this.botDoor(userId, botId).operateMemory("forget", {
+      authority: voiceMemoryAuthorityV1(userId, botId),
+      scope: productScopeToEngineV1("user", { userId, botId }),
+      operationKey: `voice-forget:${botId}:${text}`,
+      exactKey: text,
+    })) as { status?: string; reason?: string };
+    if (result.status !== "ok") {
+      return `Refused: ${result.reason ?? "that could not be dropped"}.`;
+    }
+    return "Dropped. Acknowledge it plainly and do not do it any more.";
+  }
+
+  private async expandCanonicalMemory(
+    userId: string,
+    botId: string,
+    itemId: string,
+  ): Promise<string> {
+    const result = (await this.botDoor(userId, botId).operateMemory("expand", {
+      authority: voiceMemoryAuthorityV1(userId, botId),
+      sourceRefs: [
+        {
+          scope: productScopeToEngineV1("user", { userId, botId }),
+          itemId,
+        },
+        {
+          scope: productScopeToEngineV1("bot", { userId, botId }),
+          itemId,
+        },
+      ],
+    })) as {
+      evidence?: Array<{ excerpt?: string; unavailable?: string }>;
+      status?: string;
+    };
+    const lines = (result.evidence ?? []).map(
+      (item) => item.excerpt ?? item.unavailable ?? "",
+    );
+    if (lines.length === 0) return `No evidence (${result.status ?? "empty"}).`;
+    return lines.join("\n");
+  }
+
+  private async browseCanonicalMemory(
+    userId: string,
+    botId: string,
+    topic?: string,
+  ): Promise<string> {
+    const result = (await this.botDoor(userId, botId).operateMemory("browse", {
+      authority: voiceMemoryAuthorityV1(userId, botId),
+      scope: productScopeToEngineV1("user", { userId, botId }),
+      ...(topic ? { topic } : {}),
+    })) as { sections?: Array<{ title?: string; summary?: string }> };
+    const sections = result.sections ?? [];
+    if (sections.length === 0) return "Nothing to browse.";
+    return sections
+      .map(
+        (section) => `${section.title ?? "Memory"}: ${section.summary ?? ""}`,
+      )
+      .join("\n");
   }
 
   /**
@@ -3487,6 +3691,23 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         });
         return "Dropped. Acknowledge it plainly and do not do it any more.";
       },
+      rememberLongTerm: async (text, replaces) =>
+        this.writeCanonicalMemory(userId, call.botId, text, replaces),
+      memorySearch: async (query) => {
+        const cached = call.attemptId
+          ? this.#memoryPrefetch.take(call.attemptId, query)
+          : undefined;
+        if (cached) return cached;
+        return this.searchCanonicalMemory(userId, call.botId, query);
+      },
+      memoryExpand: (itemId) =>
+        this.expandCanonicalMemory(userId, call.botId, itemId),
+      memoryBrowse: (topic) =>
+        this.browseCanonicalMemory(userId, call.botId, topic),
+      memoryWrite: (text, replaces) =>
+        this.writeCanonicalMemory(userId, call.botId, text, replaces),
+      memoryForget: (text) =>
+        this.forgetCanonicalMemory(userId, call.botId, text),
       listBots: () => this.listBots(userId),
       botStatus: async (botId) => {
         const bot = await this.ownedBot(userId, botId);
@@ -3684,23 +3905,9 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       },
       recallProject: async (projectId) => {
         if (!isMemoryProjectIdV1(projectId)) return "That is not a Project id.";
-        const store = this.memoryStore(userId);
-        if (!store) return "Memory is unavailable on this deployment.";
-        const tier = await readLongTermMemoryV1(
-          store,
-          projectMemoryRootV1({ userId, botId: "voice" }, projectId),
-        );
-        if (tier.unavailable)
-          return `Project memory could not be read: ${tier.unavailable}`;
-        const lines = [
-          ...tier.profile.slice(-20).map((fact) => `- ${fact.text}`),
-          ...tier.recent
-            .slice(-20)
-            .map((fact) => `- ${fact.date}: ${fact.text}`),
-        ];
-        return lines.length === 0
-          ? "That Project has no memory yet."
-          : lines.join("\n");
+        if (!call.botId)
+          return "Memory is unavailable until a Bot is selected.";
+        return this.browseCanonicalMemory(userId, call.botId, projectId);
       },
     };
   }
@@ -4172,6 +4379,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       readConfiguration(input: unknown): Promise<unknown>;
       deliverVoiceChatResult(input: unknown): Promise<unknown>;
       deliverVoiceCallTranscript(input: unknown): Promise<unknown>;
+      operateMemory(input: unknown): Promise<unknown>;
     };
     return {
       readConfiguration: async () =>
@@ -4233,6 +4441,14 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         commandId: string;
         runId: string;
       }) => rpc.stopRun({ schemaVersion: 1, userId, botId, command }),
+      operateMemory: (action: string, request: unknown) =>
+        rpc.operateMemory({
+          schemaVersion: 1,
+          userId,
+          botId,
+          action,
+          request,
+        }),
     };
   }
 
@@ -4428,27 +4644,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       timed(
         timing,
         "prompt-user-memory",
-        (async () => {
-          const store = this.memoryStore(userId);
-          if (!store) return undefined;
-          try {
-            return await readLongTermMemoryV1(
-              store,
-              userMemoryRootV1({ userId, botId: "voice" }),
-            );
-          } catch (error) {
-            return {
-              root: userMemoryRootV1({ userId, botId: "voice" }),
-              profile: [],
-              recent: [],
-              sources: [],
-              documents: [],
-              logTotal: 0,
-              unavailable:
-                error instanceof Error ? error.message : String(error),
-            };
-          }
-        })(),
+        this.preparedCoreText(userId, target.botId),
       ),
       timed(timing, "prompt-timezone", this.userTimezone(userId)),
       timed(timing, "prompt-voice-memory", this.sessionMemoryContext()),
@@ -4460,8 +4656,8 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       timezone,
       session,
       ...(bot ? { bot } : {}),
+      ...(memory ? { preparedCore: memory } : {}),
       memory: {
-        ...(memory ? { user: memory } : {}),
         logDays: VOICE_ASSISTANT_MEMORY_LOG_DAYS,
       },
     };
@@ -4490,31 +4686,13 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     timing?.("prompt-bot-identity", {
       durationMs: target.identityReadDurationMs ?? 0,
     });
-    const [memory, loadedHistory] = await Promise.all([
-      timed(
-        timing,
-        "prompt-bot-memory",
-        (async () => {
-          const store = this.memoryStore(userId);
-          if (!store) return undefined;
-          try {
-            return await readLongTermMemoryV1(
-              store,
-              botMemoryRootV1({ userId, botId }),
-            );
-          } catch {
-            return undefined;
-          }
-        })(),
-      ),
-      history,
-    ]);
+    const [loadedHistory] = await Promise.all([history]);
+    timing?.("prompt-bot-memory", { durationMs: 0 });
     return {
       botId: bot.botId,
       name: bot.name,
       ...(bot.description ? { description: bot.description } : {}),
       ...(loadedHistory?.activity ? { activity: loadedHistory.activity } : {}),
-      ...(memory ? { memory } : {}),
       ...(loadedHistory?.thread ? { thread: loadedHistory.thread } : {}),
     };
   }
@@ -4542,4 +4720,17 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       return undefined;
     }
   }
+}
+
+function voiceMemoryAuthorityV1(
+  userId: string,
+  botId: string,
+): MemoryAuthorityV1 {
+  return {
+    userId,
+    botId,
+    actor: "bot",
+    joinedGroupChatIds: [],
+    membershipRevision: "0",
+  };
 }
