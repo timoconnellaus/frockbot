@@ -6,6 +6,7 @@
 // Durable Object and the recovery tests still reach through the object.
 
 import { messageRecords } from "@frockbot/app/notifications/messages";
+import { visiblePublicationsV1 } from "./conversation-publication.js";
 import "./working-context-store.js";
 import { defineBotBackendContribution } from "@frockbot/core/contracts/contributions";
 import type { SessionEvent } from "@frockbot/core/contracts";
@@ -76,6 +77,9 @@ export class ShellBotBackendContribution {
       executeTurn: (input) => executeTurn(state, input),
       eventRecords: messageRecords,
       eventsCommitted: () => host.messagesCommitted?.(),
+      visiblePublications: (input) => visiblePublicationsV1(input),
+      deliverPublication: (updates) =>
+        host.deliverPublication?.(updates) ?? Promise.resolve(),
       notification: () => undefined,
       failureRecords: (snapshot, failed, read) =>
         failedTurnRecordsV1({ settings: snapshot, failed, read }),

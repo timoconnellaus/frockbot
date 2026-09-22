@@ -322,7 +322,7 @@ async function applySimpleConfigurationCommand(
   packageValues?: Record<string, unknown>,
   packageUnset: readonly string[] = [],
 ): Promise<OperationReceiptV1> {
-  return state.ctx.storage.transaction(async (transaction) => {
+  const receipt = await state.ctx.storage.transaction(async (transaction) => {
     await state.lifecycleAdmission?.(transaction, identity.botId);
     const receiptKey = `${CONFIGURATION_RECEIPT_PREFIX}${command.commandId}`;
     const existing =
@@ -437,6 +437,8 @@ async function applySimpleConfigurationCommand(
     await state.authority.refreshRecoveryAlarm(transaction);
     return receipt;
   });
+  await state.authority.drainCommittedPublication();
+  return receipt;
 }
 
 /**
