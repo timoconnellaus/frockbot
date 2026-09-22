@@ -23,6 +23,20 @@ export type WhatsNewEntrySourceV1 = {
  */
 export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
+    id: "voice-opening",
+    title: "The first words of a call are kept",
+    summary:
+      "Speech at the start of a call is held until the line is ready, then sent in order.",
+    kind: "improvement",
+  },
+  {
+    id: "committed-chat",
+    title: "Replies land as they are sent",
+    summary:
+      "A Bot’s message appears in the thread as soon as it is committed, without waiting for a refresh.",
+    kind: "improvement",
+  },
+  {
     id: "voice-call-card",
     title: "A live call is a card",
     summary:

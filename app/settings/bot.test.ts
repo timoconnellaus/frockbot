@@ -13,7 +13,10 @@ import {
   isolateAuthoritySnapshot,
   isolateConnection,
 } from "@frockbot/app/isolates/bot";
-import { memoryUserCompositionV1 } from "@frockbot/app/composition/user.fixture";
+import {
+  accountPreparationRpcV1,
+  memoryUserCompositionV1,
+} from "@frockbot/app/composition/user.fixture";
 import { listNotifications } from "@frockbot/app/notifications/bot";
 import {
   executeConfiguration,
@@ -21,6 +24,7 @@ import {
   resolveConfiguration,
   userAccountFeaturesReaderV1,
 } from "@frockbot/app/settings/bot";
+import { PROFILE_MIRROR_KEY_V1 } from "@frockbot/app/flock/profile-mirror";
 import { notificationIdV1 } from "@frockbot/app/shell/notification-id";
 
 class MemoryStorage {
@@ -58,11 +62,15 @@ class MemoryStorage {
     return callback(this);
   }
 
-  setAlarm(): Promise<void> {
+  alarm: number | null = null;
+
+  setAlarm(time?: number): Promise<void> {
+    this.alarm = time ?? Date.now();
     return Promise.resolve();
   }
 
   deleteAlarm(): Promise<void> {
+    this.alarm = null;
     return Promise.resolve();
   }
 }
@@ -135,6 +143,7 @@ function host(storage: MemoryStorage, readUser: () => UserSettingsViewV1) {
         idFromName: () => "user-1",
         get: () => ({
           readConfiguration: () => Promise.resolve(structuredClone(readUser())),
+          ...accountPreparationRpcV1(readUser, userComposition),
           listBots: () =>
             Promise.resolve({ schemaVersion: 1, revision: 0, bots: [] }),
           ...userComposition,
@@ -225,6 +234,79 @@ describe("Bot configuration admission", () => {
     expect(written).not.toHaveProperty("assignments");
     expect(written).not.toHaveProperty("assignmentOperations");
     expect(written).not.toHaveProperty("model");
+  });
+
+  test("a rename queues one profile mirror on the Bot alarm", async () => {
+    const storage = new MemoryStorage();
+    const contribution = host(storage, configuredUser);
+    const identity = { userId: "user-1", botId: "primary" };
+    await contribution.materializeSettings(identity, { name: "Primary" });
+    await executeConfiguration(
+      contribution.state,
+      request({
+        schemaVersion: 1,
+        type: "bot/update-notifications",
+        commandId: "mute",
+        botId: "primary",
+        expectedRevision: 0,
+        notifications: { enabled: false },
+      }),
+    );
+    expect(storage.values.has(PROFILE_MIRROR_KEY_V1)).toBe(false);
+
+    await executeConfiguration(
+      contribution.state,
+      request({
+        schemaVersion: 1,
+        type: "bot/update-profile",
+        commandId: "rename",
+        botId: "primary",
+        expectedRevision: 1,
+        profile: { name: "Atlas", description: "Keeps the list" },
+      }),
+    );
+    expect(storage.values.get(PROFILE_MIRROR_KEY_V1)).toMatchObject({
+      name: "Atlas",
+      description: "Keeps the list",
+      sourceRevision: 2,
+    });
+    expect(storage.alarm).not.toBeNull();
+
+    await executeConfiguration(
+      contribution.state,
+      request({
+        schemaVersion: 1,
+        type: "bot/set-profile",
+        commandId: "retitle",
+        botId: "primary",
+        expectedRevision: 2,
+        profile: { title: "Chief" },
+      }),
+    );
+    expect(storage.values.get(PROFILE_MIRROR_KEY_V1)).toMatchObject({
+      sourceRevision: 2,
+      name: "Atlas",
+    });
+
+    await executeConfiguration(
+      contribution.state,
+      request({
+        schemaVersion: 1,
+        type: "bot/set-profile",
+        commandId: "redescribe",
+        botId: "primary",
+        expectedRevision: 3,
+        profile: { description: "Updated" },
+      }),
+    );
+    expect(storage.values.get(PROFILE_MIRROR_KEY_V1)).toMatchObject({
+      name: "Atlas",
+      description: "Updated",
+      sourceRevision: 4,
+    });
+    expect(
+      [...storage.values.keys()].filter((key) => key === PROFILE_MIRROR_KEY_V1),
+    ).toHaveLength(1);
   });
 
   test("rejects an unmaterialized Bot without writing durable state", async () => {
@@ -492,6 +574,40 @@ describe("generic per-Turn model resolution", () => {
     const settings = await contribution.getSettings(identity);
     expect(settings).toMatchObject({ revision: 0, packageValues: {} });
     expect(Object.hasOwn(settings, "model")).toBe(false);
+  });
+
+  test("an admitted Turn keeps its account revision after the account moves", async () => {
+    const storage = new MemoryStorage();
+    let revision = 4;
+    const contribution = host(storage, () => {
+      const user = configuredUser();
+      return { ...user, revision };
+    });
+    const identity = { userId: "user-1", botId: "primary" };
+    await contribution.materializeSettings(identity, { name: "Primary" });
+    await contribution.run({
+      ...identity,
+      runId: "pinned-run",
+      sessionId: "user-1:primary",
+      acceptedAt: "2026-09-02T00:00:00.000Z",
+      text: "hello",
+    });
+    revision = 11;
+    const pinned = await storage.get<{
+      preparedInputs?: { account?: { revision?: number } };
+    }>("run:pinned-run");
+    expect(pinned?.preparedInputs?.account?.revision).toBe(4);
+    await contribution.run({
+      ...identity,
+      runId: "next-run",
+      sessionId: "user-1:primary",
+      acceptedAt: "2026-09-02T00:00:01.000Z",
+      text: "again",
+    });
+    const next = await storage.get<{
+      preparedInputs?: { account?: { revision?: number } };
+    }>("run:next-run");
+    expect(next?.preparedInputs?.account?.revision).toBe(11);
   });
 
   test("a Connection disabled after admission is unavailable and records a visible failure", async () => {

@@ -2,6 +2,7 @@ import type { ConfigurationCommandV1 } from "@frockbot/core/configuration";
 import type { MachineCommandV1 } from "@frockbot/core/machine-protocol";
 import type { TemplateCommandV1 } from "@frockbot/app/bot-template/shared";
 import type {
+  BotDirectoryProfileV1,
   BotLookV1,
   CreateBotCommandV1,
   ThemeDocumentV1,
@@ -30,6 +31,45 @@ export interface BotUserConfigurationRpcTargetV1
   extends Rpc.DurableObjectBranded {
   readFeatures(input: UserRpcEnvelopeV1): Promise<object>;
   readConfiguration(input: UserRpcEnvelopeV1<{ view: 2 }>): Promise<object>;
+  prepareAccount(input: UserRpcEnvelopeV1): Promise<object>;
+  readAccountPreparationStamp(input: UserRpcEnvelopeV1): Promise<object>;
+  beginSkillIndex(
+    input: UserRpcEnvelopeV1<{
+      root: object;
+      path: string;
+      generationId: string;
+      ledgerPending: boolean;
+      generation?: object;
+    }>,
+  ): Promise<void>;
+  commitSkillIndex(
+    input: UserRpcEnvelopeV1<{
+      root: object;
+      path: string;
+      generation: object;
+      deleted: boolean;
+      bytesBase64?: string;
+    }>,
+  ): Promise<void>;
+  readSkillIndex(
+    input: UserRpcEnvelopeV1<{ root: object; revision?: string }>,
+  ): Promise<object>;
+  holdSkillIndex(
+    input: UserRpcEnvelopeV1<{ runId: string; revision: string }>,
+  ): Promise<void>;
+  releaseSkillIndexHold(
+    input: UserRpcEnvelopeV1<{ runId: string }>,
+  ): Promise<void>;
+  readConnectToolCatalog(
+    input: UserRpcEnvelopeV1<{
+      connectionId: string;
+      generation: string;
+      disclose: boolean;
+    }>,
+  ): Promise<object>;
+  getConnection(
+    input: UserRpcEnvelopeV1<{ connectionId: string }>,
+  ): Promise<object | undefined>;
   executeConfiguration(
     input: UserRpcEnvelopeV1<{
       command: Extract<ConfigurationCommandV1, { type: `user/${string}` }>;
@@ -73,6 +113,9 @@ export interface BotUserConfigurationRpcTargetV1
       look: BotLookV1;
       document?: ThemeDocumentV1;
     }>,
+  ): Promise<object>;
+  mirrorBotProfile(
+    input: BotRpcEnvelopeV1<{ profile: BotDirectoryProfileV1 }>,
   ): Promise<object>;
   executeTemplateCommand(
     input: UserRpcEnvelopeV1<{ command: TemplateCommandV1 }>,
@@ -119,6 +162,9 @@ export interface BotUserConfigurationRpcTargetV1
       routineId: string;
     }>,
   ): Promise<void>;
+  operateMemory(
+    input: BotRpcEnvelopeV1<{ action: string; request: object }>,
+  ): Promise<object>;
 }
 
 export interface BotStateRpcTargetV1 extends SubagentDurableObjectRpcTargetV1 {

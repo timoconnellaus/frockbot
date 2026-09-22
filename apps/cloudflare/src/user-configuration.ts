@@ -24,6 +24,7 @@ import { decodeThemeDocumentV1, decodeBotLookV1 } from "@frockbot/core/theme";
 import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { DurableObject } from "cloudflare:workers";
 import { cleanUserAvatarTestState } from "./avatar-state-cleanup.js";
+import { cleanDirectoryProfileTestState } from "./directory-profile-cleanup.js";
 import {
   decodeNativeSessionOperation,
   nativeSessionOperation,
@@ -66,6 +67,7 @@ import type {
   TemplateImportWriterV1,
 } from "@frockbot/app/bot-template/user";
 import {
+  decodeBotDirectoryProfileV1,
   decodeBotLifecycleCommandV1,
   decodeBotLifecycleReceiptV1,
   decodeBotLifecycleViewV1,
@@ -93,7 +95,9 @@ import {
 import { machineTokenClaimsV1 } from "@frockbot/core/machine-protocol";
 import { DurableWorkspaceGenerations } from "@frockbot/core/durable";
 import {
+  COMPOSITION_CURRENT_KEY,
   decodeCompositionGenerationV1,
+  decodeCompositionPinV1,
   type CompositionFailureInputV1,
   type CompositionOriginV1,
 } from "@frockbot/core/durable";
@@ -107,6 +111,24 @@ import {
   DEPLOYMENT_PLUGIN_CATALOG_V1,
   marketplacePluginPackageIdsV1,
 } from "@frockbot/app/plugins/catalog";
+import { cleanUndecodableSkillIndexesV1 } from "./skill-index-cleanup.js";
+import { cleanUndecodableConnectCatalogsV1 } from "@frockbot/app/connect/account-catalog";
+import { reseedInstructionRootV1 } from "@frockbot/app/skills/reseed";
+import {
+  base64ToBytes,
+  beginDurableSkillPublicationV1,
+  commitDurableSkillPublicationV1,
+  heldSkillRevisionsV1,
+  holdSkillIndexRevisionsV1,
+  readDurableSkillIndexV1,
+  readDurableSkillSnapshotV1,
+  releaseSkillIndexHoldV1,
+  releaseUnreferencedSkillSnapshotsV1,
+} from "@frockbot/app/skills/index-store";
+import { decodeWorkspaceGenerationV1 } from "@frockbot/core/contracts";
+import { workspaceObjectPrefixV1 } from "@frockbot/core/workspace-store";
+import { cleanRetiredMemoryFactObjectsV1 } from "@frockbot/app/memory/cleanup";
+import { createR2ObjectBucketV1 } from "./workspace.js";
 import { cleanUserAppletsV1 } from "./plugin-panels-cleanup.js";
 import { cleanDefaultPackagesMarkerV1 } from "./default-packages-marker-cleanup.js";
 import type { FlockUserTransaction } from "@frockbot/app/flock/user";
@@ -119,6 +141,18 @@ import {
   type WorkspaceRootV1,
 } from "@frockbot/core/contracts";
 import type { MemoryProjectV1 } from "@frockbot/app/memory/agent";
+import {
+  createUserMemoryEngineV1,
+  dispatchMemoryOperateV1,
+  drainDurableMemoryV1,
+  durableObjectHasSqlV1,
+  type MemoryOperateActionV1,
+} from "./memory-records.js";
+import type { MemoryEngineV1 } from "@frockbot/app/memory/engine";
+import type {
+  MemoryAiBinding,
+  MemoryVectorIndex,
+} from "@frockbot/app/memory/types";
 import {
   SEARCH_MAX_ROW_PAGE_V1,
   decodeSearchQueryV1,
@@ -190,6 +224,10 @@ interface UserConfigurationEnv extends BillingEnv {
   /** The loader that health-checks a candidate artifact before activation. */
   USER_APPLICATIONS: WorkerLoader;
   MEMORY_FILES?: R2Bucket;
+  /** Derived Memory vectors for User and shared scopes. Same Worker binding as Bot. */
+  MEMORY_INDEX?: MemoryVectorIndex;
+  /** Workers AI embeddings for User and shared Memory. */
+  AI?: MemoryAiBinding;
   /**
    * The Plugin worker loader. The User object never loads anything with it;
    * it reads it to know whether this deployment can run a Plugin at all,
@@ -211,7 +249,46 @@ export class UserConfiguration
     this.ctx.blockConcurrencyWhile(async () => {
       await cleanUserAppletsV1(this.ctx.storage);
       await cleanUserAvatarTestState(this.ctx.storage);
+      await cleanDirectoryProfileTestState(this.ctx.storage);
       await cleanDefaultPackagesMarkerV1(this.ctx.storage);
+      await cleanUndecodableSkillIndexesV1(this.ctx.storage);
+      await cleanUndecodableConnectCatalogsV1(this.ctx.storage);
+      const userId = await this.ctx.storage.get<string>(USER_IDENTITY_KEY);
+      if (typeof userId === "string" && this.env.MEMORY_FILES) {
+        await reseedInstructionRootV1({
+          storage: this.ctx.storage,
+          bucket: createR2ObjectBucketV1(this.env.MEMORY_FILES),
+          root: { kind: "user-instructions", userId },
+          receiptKey: "maintenance:skill-index:user:2026-09-22",
+        });
+        const bucket = createR2ObjectBucketV1(this.env.MEMORY_FILES);
+        await cleanRetiredMemoryFactObjectsV1(
+          this.ctx.storage,
+          {
+            list: async (options) => {
+              const page = await bucket.list(options);
+              return {
+                keys: page.objects.map((object) => object.key),
+                ...(page.cursor ? { cursor: page.cursor } : {}),
+                truncated: page.truncated,
+              };
+            },
+            delete: (key) => bucket.delete(key),
+          },
+          workspaceObjectPrefixV1({ kind: "user-memory", userId }),
+        );
+      }
+      if (durableObjectHasSqlV1(this.ctx.storage)) {
+        const memoryDue = createUserMemoryEngineV1(
+          this.ctx.storage,
+        ).nextWakeupAt();
+        if (
+          memoryDue !== undefined &&
+          (await this.ctx.storage.getAlarm()) === null
+        ) {
+          await this.ctx.storage.setAlarm(memoryDue);
+        }
+      }
     });
   }
 
@@ -719,6 +796,78 @@ export class UserConfiguration
           .map((pkg) => pkg.packageId),
       },
     );
+  }
+
+  /**
+   * Configuration, features and Composition in one call. Secrets and
+   * credential leases stay on their own RPCs. Composition reconciliation can
+   * fail without dropping the settings the Turn still needs.
+   */
+  async prepareAccount(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    const features = decodeUserFeaturesV1(
+      (await this.ctx.storage.get<unknown>(USER_FEATURES_KEY)) ??
+        defaultUserFeaturesV1(),
+    );
+    const settings = await (
+      await this.settingsContribution()
+    ).readConfiguration({ schemaVersion: 1, userId });
+    let composition:
+      Awaited<ReturnType<typeof readUserCompositionV1>> | undefined;
+    try {
+      composition = await readUserCompositionV1(
+        { ctx: this.ctx },
+        {
+          userId,
+          catalog: this.env.BOT_PACKAGES
+            ? DEPLOYMENT_PLUGIN_CATALOG_V1
+            : ([] as typeof DEPLOYMENT_PLUGIN_CATALOG_V1),
+          adminOpened: features.plugins,
+          installedPackageIds: settings.packages
+            .filter((pkg) => pkg.state === "installed")
+            .map((pkg) => pkg.packageId),
+        },
+      );
+    } catch {
+      composition = undefined;
+    }
+    const skillIndex = await readDurableSkillIndexV1(this.skillIndexStorage(), {
+      kind: "user-instructions",
+      userId,
+    });
+    return {
+      schemaVersion: 1 as const,
+      features,
+      settings,
+      skillIndexRevision: skillIndex.deleted ? "" : skillIndex.revision,
+      ...(composition ? { composition } : {}),
+    };
+  }
+
+  /** Revision stamps only. Does not reconcile Composition or bootstrap packages. */
+  async readAccountPreparationStamp(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertUserIdentity(request.userId as string);
+    const features = decodeUserFeaturesV1(
+      (await this.ctx.storage.get<unknown>(USER_FEATURES_KEY)) ??
+        defaultUserFeaturesV1(),
+    );
+    const settings = await (await this.settingsContribution()).readSnapshot();
+    const pin = await this.ctx.storage.get<unknown>(COMPOSITION_CURRENT_KEY);
+    return {
+      schemaVersion: 1 as const,
+      revision: settings.revision,
+      features: {
+        pluginAuthoring: features.pluginAuthoring,
+        plugins: [...features.plugins],
+      },
+      compositionGenerationId:
+        pin === undefined ? "" : decodeCompositionPinV1(pin).generationId,
+      skillIndexRevision: await this.userSkillIndexRevision(
+        request.userId as string,
+      ),
+    };
   }
 
   async readCompositionGeneration(input: unknown) {
@@ -1509,6 +1658,203 @@ export class UserConfiguration
     );
   }
 
+  private skillIndexStorage() {
+    const storage = this.ctx.storage;
+    return {
+      get: (key: string) => storage.get(key),
+      put: (key: string, value: unknown) => storage.put(key, value),
+      delete: (key: string) => storage.delete(key),
+      list: (options: { prefix?: string; limit?: number; start?: string }) =>
+        storage.list(options),
+    };
+  }
+
+  private skillBodies() {
+    const bucket = this.env.MEMORY_FILES;
+    if (!bucket) throw new Error("no Workspace bucket is bound");
+    const objects = createR2ObjectBucketV1(bucket);
+    return {
+      put: async (key: string, bytes: Uint8Array) => {
+        await objects.put(key, bytes);
+      },
+      get: async (key: string) => {
+        const object = await objects.get(key);
+        return object ? object.bytes() : undefined;
+      },
+      delete: (key: string) => objects.delete(key),
+    };
+  }
+
+  private async userSkillIndexRevision(userId: string): Promise<string> {
+    const index = await readDurableSkillIndexV1(this.skillIndexStorage(), {
+      kind: "user-instructions",
+      userId,
+    });
+    return index.deleted ? "" : index.revision;
+  }
+
+  private userInstructionRoot(userId: string, value: unknown) {
+    const root = decodeWorkspaceRootV1(value);
+    if (root.kind !== "user-instructions" || root.userId !== userId) {
+      throw new Error("skill index root is not this User's instruction root");
+    }
+    return root;
+  }
+
+  async beginSkillIndex(input: unknown): Promise<void> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      root: rpcDecodedValue,
+      path: rpcString(1_024),
+      generationId: rpcString(128),
+      ledgerPending: (value, label) => {
+        if (typeof value !== "boolean") {
+          throw new Error(`${label} must be a boolean`);
+        }
+        return value;
+      },
+    });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    const root = this.userInstructionRoot(userId, request.root);
+    await beginDurableSkillPublicationV1(
+      this.skillIndexStorage(),
+      root,
+      normalizeWorkspaceRelativePathV1(request.path as string),
+      request.generationId as string,
+      request.ledgerPending === true,
+    );
+  }
+
+  async commitSkillIndex(input: unknown): Promise<void> {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      {
+        userId: rpcIdentifier,
+        root: rpcDecodedValue,
+        path: rpcString(1_024),
+        generation: rpcDecodedValue,
+        deleted: (value, label) => {
+          if (typeof value !== "boolean") {
+            throw new Error(`${label} must be a boolean`);
+          }
+          return value;
+        },
+      },
+      { bytesBase64: rpcString(200_000) },
+    );
+    const userId = await this.assertUserIdentity(request.userId as string);
+    const root = this.userInstructionRoot(userId, request.root);
+    const generation = decodeWorkspaceGenerationV1(request.generation);
+    const bytes =
+      typeof request.bytesBase64 === "string"
+        ? base64ToBytes(request.bytesBase64)
+        : undefined;
+    const storage = this.skillIndexStorage();
+    await commitDurableSkillPublicationV1(
+      storage,
+      this.skillBodies(),
+      root,
+      normalizeWorkspaceRelativePathV1(request.path as string),
+      generation,
+      bytes,
+      request.deleted === true,
+    );
+    const held = await heldSkillRevisionsV1(storage);
+    if (!held.truncated) {
+      await releaseUnreferencedSkillSnapshotsV1(
+        storage,
+        this.skillBodies(),
+        root,
+        held.revisions,
+      );
+    }
+  }
+
+  async readSkillIndex(input: unknown): Promise<object> {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      {
+        userId: rpcIdentifier,
+        root: rpcDecodedValue,
+      },
+      {
+        revision: (value, label) => {
+          if (typeof value !== "string" || value.length > 64) {
+            throw new Error(`${label} is invalid`);
+          }
+          return value;
+        },
+      },
+    );
+    const userId = await this.assertUserIdentity(request.userId as string);
+    const root = this.userInstructionRoot(userId, request.root);
+    if (typeof request.revision === "string") {
+      return readDurableSkillSnapshotV1(
+        this.skillIndexStorage(),
+        root,
+        request.revision,
+      );
+    }
+    return readDurableSkillIndexV1(this.skillIndexStorage(), root);
+  }
+
+  async readConnectToolCatalog(input: unknown): Promise<object> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      connectionId: rpcIdentifier,
+      generation: rpcString(128),
+      disclose: (value, label) => {
+        if (typeof value !== "boolean") throw new Error(`${label} is invalid`);
+        return value;
+      },
+    });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    return (await this.connectContribution()).readToolCatalog({
+      userId,
+      connectionId: request.connectionId as string,
+      generation: request.generation as string,
+      disclose: request.disclose as boolean,
+    });
+  }
+
+  async holdSkillIndex(input: unknown): Promise<void> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      runId: rpcString(128),
+      revision: (value, label) => {
+        if (typeof value !== "string" || value.length > 64) {
+          throw new Error(`${label} is invalid`);
+        }
+        return value;
+      },
+    });
+    await this.assertUserIdentity(request.userId as string);
+    await holdSkillIndexRevisionsV1(
+      this.skillIndexStorage(),
+      request.runId as string,
+      { botRevision: "", userRevision: request.revision as string },
+    );
+  }
+
+  async releaseSkillIndexHold(input: unknown): Promise<void> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      runId: rpcString(128),
+    });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    const storage = this.skillIndexStorage();
+    await releaseSkillIndexHoldV1(storage, request.runId as string);
+    if (!this.env.MEMORY_FILES) return;
+    const held = await heldSkillRevisionsV1(storage);
+    if (held.truncated) return;
+    await releaseUnreferencedSkillSnapshotsV1(
+      storage,
+      this.skillBodies(),
+      { kind: "user-instructions", userId },
+      held.revisions,
+    );
+  }
+
   // ---------------------------------------------------------------------
   // Project membership.
   //
@@ -1567,6 +1913,74 @@ export class UserConfiguration
     });
     await this.assertFlockIdentity(request.userId as string);
     return this.membership(request.botId as string);
+  }
+
+  #memoryEngine: MemoryEngineV1 | undefined;
+
+  private memoryEngine(): MemoryEngineV1 {
+    this.#memoryEngine ??= createUserMemoryEngineV1(this.ctx.storage);
+    return this.#memoryEngine;
+  }
+
+  private async drainMemoryProcessing(): Promise<void> {
+    await drainDurableMemoryV1(this.memoryEngine(), {
+      ...(this.env.MEMORY_INDEX ? { vectors: this.env.MEMORY_INDEX } : {}),
+      ...(this.env.AI ? { ai: this.env.AI } : {}),
+    });
+  }
+
+  /**
+   * User and shared Group Chat Memory. Membership is loaded here and overwrites
+   * anything the Bot RPC claimed, so a caller-supplied scope id is never enough.
+   */
+  async operateMemory(input: unknown): Promise<object> {
+    const envelope = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      action: rpcEnum([
+        "write",
+        "forget",
+        "recall",
+        "expand",
+        "browse",
+        "preparedCore",
+      ]),
+      request: rpcDecodedValue,
+    });
+    const userId = envelope.userId as string;
+    const botId = envelope.botId as string;
+    await this.assertFlockIdentity(userId);
+    const joined = await this.membership(botId);
+    const revision =
+      (await this.ctx.storage.get<number>(
+        `${MEMORY_PROJECTS_KEY}:${botId}:rev`,
+      )) ?? 0;
+    const inner = (envelope.request ?? {}) as Record<string, unknown>;
+    const claimed = inner.authority;
+    if (claimed && typeof claimed === "object" && !Array.isArray(claimed)) {
+      inner.authority = {
+        ...(claimed as Record<string, unknown>),
+        userId,
+        botId,
+        actor:
+          (claimed as { actor?: unknown }).actor === "user" ? "user" : "bot",
+        joinedGroupChatIds: joined.map((project) => project.projectId),
+        membershipRevision: String(revision),
+      };
+    }
+    const result = dispatchMemoryOperateV1(
+      this.memoryEngine(),
+      envelope.action as MemoryOperateActionV1,
+      inner,
+    );
+    const due = this.memoryEngine().nextWakeupAt();
+    if (due !== undefined) {
+      const current = await this.ctx.storage.getAlarm();
+      if (current === null || current > due) {
+        await this.ctx.storage.setAlarm(due);
+      }
+    }
+    return result as object;
   }
 
   /**
@@ -1643,6 +2057,10 @@ export class UserConfiguration
       `${MEMORY_PROJECTS_KEY}:${botId}`,
       [...joined].sort(),
     );
+    const revisionKey = `${MEMORY_PROJECTS_KEY}:${botId}:rev`;
+    const revision =
+      ((await this.ctx.storage.get<number>(revisionKey)) ?? 0) + 1;
+    await this.ctx.storage.put(revisionKey, revision);
     return { status: "ok", joined: await this.membership(botId) };
   }
 
@@ -1689,6 +2107,16 @@ export class UserConfiguration
     for (const botId of await contributions.flock.listDeletedBotIds()) {
       await this.forgetDeletedBot(botId);
     }
+    if (durableObjectHasSqlV1(this.ctx.storage)) {
+      await this.drainMemoryProcessing();
+      const memoryDue = this.memoryEngine().nextWakeupAt();
+      if (memoryDue !== undefined) {
+        const current = await this.ctx.storage.getAlarm();
+        if (current === null || current > memoryDue) {
+          await this.ctx.storage.setAlarm(memoryDue);
+        }
+      }
+    }
   }
 
   /**
@@ -1703,6 +2131,7 @@ export class UserConfiguration
     contributions.search.purge(botId);
     contributions.audit.purgeAuditForBot(botId);
     await this.ctx.storage.delete(`${MEMORY_PROJECTS_KEY}:${botId}`);
+    await this.ctx.storage.delete(`${MEMORY_PROJECTS_KEY}:${botId}:rev`);
     await contributions.flock.forgetDeletedBot(botId);
   }
 
@@ -1919,6 +2348,20 @@ export class UserConfiguration
       ).mirrorLook(botId, identity.look, identity.document);
     }
     return receipt;
+  }
+
+  async mirrorBotProfile(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      profile: rpcDecoded(decodeBotDirectoryProfileV1),
+    });
+    const userId = request.userId as string;
+    await this.assertFlockIdentity(userId);
+    return (await this.flockContribution()).mirrorProfile(
+      request.botId as string,
+      request.profile as ReturnType<typeof decodeBotDirectoryProfileV1>,
+    );
   }
 
   async mirrorBotLook(input: unknown) {

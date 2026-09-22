@@ -545,8 +545,8 @@ async function recordTaskCompletion(
   const outcome = task.outcome;
   if (!outcome) return;
   const at = outcome.settledAt;
-  await state.ctx.storage.transaction((transaction) =>
-    appendAnnouncement(transaction, (seq) => ({
+  await state.ctx.storage.transaction(async (transaction) => {
+    await appendAnnouncement(transaction, (seq) => ({
       type: "task/settled",
       seq,
       timestamp: at,
@@ -555,8 +555,10 @@ async function recordTaskCompletion(
       ...(outcome.summary === undefined
         ? {}
         : { summary: outcome.summary.slice(0, ROUTINE_INBOX_TEXT_MAX) }),
-    })),
-  );
+    }));
+    await state.authority.refreshRecoveryAlarm(transaction);
+  });
+  await state.authority.drainCommittedPublication();
   // The dispatching Turn is still running: it is waiting on this task and
   // will read the outcome as its own tool result.
   if ((await state.authority.readActiveRunId()) === task.dispatch.runId) {
@@ -720,15 +722,17 @@ async function stopTask(
     }
     return { status: "refused", reason: requested.reason };
   }
-  await state.ctx.storage.transaction((transaction) =>
-    appendAnnouncement(transaction, (seq) => ({
+  await state.ctx.storage.transaction(async (transaction) => {
+    await appendAnnouncement(transaction, (seq) => ({
       type: "task/stopped",
       seq,
       timestamp: new Date().toISOString(),
       taskId,
       requestedBy,
-    })),
-  );
+    }));
+    await state.authority.refreshRecoveryAlarm(transaction);
+  });
+  await state.authority.drainCommittedPublication();
   const binding = state.subagentBinding;
   if (binding) {
     try {

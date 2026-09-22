@@ -10,6 +10,7 @@ const ajv = new Ajv2020({
   inlineRefs: false,
 });
 ajv.addKeyword("x-frockbot-compatibility");
+ajv.addKeyword("x-frockbot-state-channel");
 ajv.addSchema(source);
 const names = Object.keys(source.$defs);
 const refs = Object.fromEntries(
@@ -48,6 +49,6 @@ await output(
 await output(
   "core/protocol-schemas/compatibility.generated.ts",
   banner +
-    `export const CLIENT_COMPATIBILITY = ${JSON.stringify({ schemaVersion: 1, ...source["x-frockbot-compatibility"] })} as const;\nexport const SUPPORTED_PROTOCOL_MIN = CLIENT_COMPATIBILITY.protocolMin;\nexport const SUPPORTED_PROTOCOL_MAX = CLIENT_COMPATIBILITY.protocolMax;\nexport const CLIENT_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_MAX;\nexport const MINIMUM_NATIVE_VERSION = CLIENT_COMPATIBILITY.minimumNativeVersion;\n`,
+    `export const CLIENT_COMPATIBILITY = ${JSON.stringify({ schemaVersion: 1, ...source["x-frockbot-compatibility"] })} as const;\nexport const SUPPORTED_PROTOCOL_MIN = CLIENT_COMPATIBILITY.protocolMin;\nexport const SUPPORTED_PROTOCOL_MAX = CLIENT_COMPATIBILITY.protocolMax;\nexport const CLIENT_PROTOCOL_VERSION = SUPPORTED_PROTOCOL_MAX;\nexport const MINIMUM_NATIVE_VERSION = CLIENT_COMPATIBILITY.minimumNativeVersion;\nexport const STATE_FRAME_MAX_BYTES = ${source["x-frockbot-state-channel"].frameMaxBytes} as const;\nexport const STATE_PART_MAX_BYTES = ${source["x-frockbot-state-channel"].partMaxBytes} as const;\nexport const STATE_ASSEMBLED_MAX_BYTES = ${source["x-frockbot-state-channel"].assembledMaxBytes} as const;\nexport const STATE_REPLAY_MAX_BYTES = ${source["x-frockbot-state-channel"].replayMaxBytes} as const;\nexport const STATE_REPLAY_MAX_EVENTS = ${source["x-frockbot-state-channel"].replayMaxEvents} as const;\n`,
   "typescript",
 );

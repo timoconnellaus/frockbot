@@ -30,14 +30,26 @@ import {
 } from "@frockbot/core/connection";
 import { IDENTITY_KEY, type BotIdentity } from "@frockbot/core/durable";
 import {
+  directoryProfileFromBotProfileV1,
+  profileProjectionChangedV1,
+  queueProfileMirrorV1,
+} from "@frockbot/app/flock/profile-mirror";
+import {
   decodeUserFeaturesV1,
   type UserFeaturesV1,
 } from "@frockbot/app/admin/shared";
+import {
+  decodeAccountPreparationStampV1,
+  decodeAccountPreparationV1,
+  type AccountPreparationStampV1,
+  type AccountPreparationV1,
+} from "@frockbot/app/shell/prepared-inputs";
 import { rpcJsonSnapshotV1 } from "@frockbot/app/durable-rpc";
 import {
   decodeDirectoryViewV1,
   decodeFlockReceiptV1,
   decodeVoiceIdentityViewV1,
+  type BotDirectoryProfileV1,
   type BotDirectoryViewV1,
   type BotLookV1,
   type CreateBotCommandV1,
@@ -310,7 +322,7 @@ async function applySimpleConfigurationCommand(
   packageValues?: Record<string, unknown>,
   packageUnset: readonly string[] = [],
 ): Promise<OperationReceiptV1> {
-  return state.ctx.storage.transaction(async (transaction) => {
+  const receipt = await state.ctx.storage.transaction(async (transaction) => {
     await state.lifecycleAdmission?.(transaction, identity.botId);
     const receiptKey = `${CONFIGURATION_RECEIPT_PREFIX}${command.commandId}`;
     const existing =
@@ -392,6 +404,19 @@ async function applySimpleConfigurationCommand(
       [BOT_CONFIGURATION_KEY]: next,
       [receiptKey]: { commandFingerprint, receipt },
     });
+    // The mirror rides the same transaction as the settings write. Delivery
+    // happens after commit; the record is what an eviction retries.
+    if (
+      (command.type === "bot/update-profile" ||
+        command.type === "bot/set-profile") &&
+      profileProjectionChangedV1(current.profile, next.profile)
+    ) {
+      await queueProfileMirrorV1(
+        transaction,
+        directoryProfileFromBotProfileV1(next.profile, revision),
+        Date.now(),
+      );
+    }
     // A rename is durable history, not a settings side effect: the Session
     // records it so the conversation shows who renamed the Bot and when.
     if (next.profile.name !== current.profile.name) {
@@ -412,6 +437,8 @@ async function applySimpleConfigurationCommand(
     await state.authority.refreshRecoveryAlarm(transaction);
     return receipt;
   });
+  await state.authority.drainCommittedPublication();
+  return receipt;
 }
 
 /**
@@ -483,6 +510,11 @@ export interface UserConfigurationRpcV1 {
     botId: string,
     look: BotLookV1,
     document: ThemeDocumentV1 | undefined,
+  ): Promise<BotDirectoryViewV1>;
+  mirrorBotProfile(
+    userId: string,
+    botId: string,
+    profile: BotDirectoryProfileV1,
   ): Promise<BotDirectoryViewV1>;
   createBot(
     userId: string,
@@ -564,6 +596,71 @@ export function userAccountFeaturesReaderV1(
  * One read answers every feature gate, so a Turn asks the User object once
  * rather than once per switch.
  */
+function userConfigurationRpc(state: ShellBotStateV1, userId: string) {
+  const id = state.env.USER_CONFIGURATIONS.idFromName(userId);
+  return state.env.USER_CONFIGURATIONS.get(id);
+}
+
+/** Account configuration, features and Composition, one User-object call. */
+export async function prepareAccountV1(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+): Promise<AccountPreparationV1> {
+  return decodeAccountPreparationV1(
+    await userConfigurationRpc(state, identity.userId).prepareAccount({
+      schemaVersion: 1,
+      userId: identity.userId,
+    }),
+  );
+}
+
+/** The revision stamp gathered a moment later, to see whether it moved. */
+export async function readAccountPreparationStampV1(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+): Promise<AccountPreparationStampV1> {
+  return decodeAccountPreparationStampV1(
+    await userConfigurationRpc(
+      state,
+      identity.userId,
+    ).readAccountPreparationStamp({
+      schemaVersion: 1,
+      userId: identity.userId,
+    }),
+  );
+}
+
+/**
+ * Whether the Connection a Turn admitted is still permitted. Revocation and a
+ * generation change refuse the call; a failed read refuses it too.
+ */
+export async function connectionStillPermittedV1(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+  connection: { connectionId: string; generation?: string },
+): Promise<boolean> {
+  try {
+    const current = await userConfigurationRpc(
+      state,
+      identity.userId,
+    ).getConnection({
+      schemaVersion: 1,
+      userId: identity.userId,
+      connectionId: connection.connectionId,
+    });
+    if (!current || typeof current !== "object") return false;
+    const view = current as { state?: unknown; generation?: unknown };
+    return (
+      view.state === "ready" &&
+      (connection.generation === undefined
+        ? view.generation === undefined
+        : view.generation === connection.generation)
+    );
+  } catch {
+    return false;
+  }
+}
+
 export async function userAccountFeaturesV1(
   state: ShellBotStateV1,
   identity: BotIdentity,
@@ -652,6 +749,15 @@ export function userConfigurationV1(
           botId,
           look,
           ...(document === undefined ? {} : { document }),
+        }),
+      ),
+    mirrorBotProfile: async (userId, botId, profile) =>
+      decodeDirectoryViewV1(
+        await rpc.mirrorBotProfile({
+          schemaVersion: 1,
+          userId,
+          botId,
+          profile,
         }),
       ),
     executeTemplateCommand: async (userId, command) =>

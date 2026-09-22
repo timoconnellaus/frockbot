@@ -16,11 +16,10 @@ describe("Package iframe direct tool Turn", () => {
       idempotent: true,
       execute: async () => {
         calls += 1;
-        expect(session.events.at(-1)?.type).toBe("tool/call");
+        expect(session.activeRunJournal.at(-1)?.type).toBe("tool/call");
         return { content: '{"temperature":21}', isError: false };
       },
     });
-    const previous = [...session.events];
     const generation = {
       schemaVersion: 1 as const,
       generationId: "generation-1",
@@ -52,7 +51,6 @@ describe("Package iframe direct tool Turn", () => {
           input: { city: "Sydney" },
         },
       },
-      previousEvents: previous,
       composition,
       admitEffect: () => Promise.resolve(true),
       signal: new AbortController().signal,

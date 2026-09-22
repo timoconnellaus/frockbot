@@ -1,0 +1,267 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Chat \u00b7 before the first reply",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "chat-entry",
+        "label": "1 \u00b7 Reach the Bot",
+        "focus": ["chat-send", "chat-auth", "chat-route", "chat-materialize"],
+        "note": "Flutter sends a command through the gateway and application isolate to one Bot."
+      },
+      {
+        "id": "chat-preparation",
+        "label": "2 \u00b7 Prepare the Turn",
+        "focus": [
+          "chat-materialize",
+          "chat-composition",
+          "chat-admission",
+          "chat-runtime",
+          "chat-context",
+          "chat-fence"
+        ],
+        "note": "All of these stages precede the first model call. Admission includes retained historical requests."
+      },
+      {
+        "id": "chat-answer",
+        "label": "3 \u00b7 Show a reply",
+        "focus": ["chat-fence", "chat-model", "chat-delivery", "chat-visible"],
+        "note": "The client sees committed send_to_user content after an invalidation and REST refresh."
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "chat-intake",
+      "label": "Client"
+    },
+    {
+      "id": "chat-execution",
+      "label": "Request processing"
+    },
+    {
+      "id": "chat-output",
+      "label": "Preparation + durable state"
+    }
+  ],
+  "mainPath": [
+    "chat-send",
+    "chat-auth",
+    "chat-route",
+    "chat-materialize",
+    "chat-composition",
+    "chat-admission",
+    "chat-runtime",
+    "chat-context",
+    "chat-fence",
+    "chat-model",
+    "chat-delivery",
+    "chat-visible"
+  ],
+  "nodes": [
+    {
+      "id": "chat-send",
+      "lane": "chat-intake",
+      "col": 0,
+      "type": "frontend",
+      "label": "Send message",
+      "sublabel": "Flutter client",
+      "width": 158
+    },
+    {
+      "id": "chat-auth",
+      "lane": "chat-execution",
+      "col": 0,
+      "type": "security",
+      "label": "Authenticate",
+      "sublabel": "Gateway + access check",
+      "width": 158
+    },
+    {
+      "id": "chat-route",
+      "lane": "chat-execution",
+      "col": 1,
+      "type": "cloud",
+      "label": "Route application",
+      "sublabel": "Per-User isolate",
+      "tag": "R2 on cache miss",
+      "width": 158
+    },
+    {
+      "id": "chat-materialize",
+      "lane": "chat-output",
+      "col": 1,
+      "type": "backend",
+      "label": "Open BotState",
+      "sublabel": "Registration + settings",
+      "tag": "Custom DurableObject",
+      "width": 158
+    },
+    {
+      "id": "chat-composition",
+      "lane": "chat-output",
+      "col": 2,
+      "type": "backend",
+      "label": "Resolve composition",
+      "sublabel": "Applets + Plugins",
+      "width": 158
+    },
+    {
+      "id": "chat-admission",
+      "lane": "chat-execution",
+      "col": 2,
+      "type": "database",
+      "label": "Admit the Turn",
+      "sublabel": "Recover \u2192 history \u2192 save",
+      "tag": "Reads old requests",
+      "width": 158
+    },
+    {
+      "id": "chat-runtime",
+      "lane": "chat-execution",
+      "col": 3,
+      "type": "backend",
+      "label": "Build Turn runtime",
+      "sublabel": "Account + capabilities",
+      "tag": "Mount Plugins",
+      "width": 158
+    },
+    {
+      "id": "chat-context",
+      "lane": "chat-output",
+      "col": 3,
+      "type": "database",
+      "label": "Prepare context",
+      "sublabel": "Memory + Skills + prompt",
+      "tag": "Ordered read stages",
+      "width": 158
+    },
+    {
+      "id": "chat-fence",
+      "lane": "chat-output",
+      "col": 4,
+      "type": "security",
+      "label": "Record model intent",
+      "sublabel": "Persist + effect admission",
+      "width": 158
+    },
+    {
+      "id": "chat-model",
+      "lane": "chat-execution",
+      "col": 4,
+      "type": "external",
+      "label": "Call the model",
+      "sublabel": "First provider request",
+      "tag": "Tools may add steps",
+      "width": 158
+    },
+    {
+      "id": "chat-delivery",
+      "lane": "chat-execution",
+      "col": 5,
+      "type": "messagebus",
+      "label": "Commit visible send",
+      "sublabel": "send_to_user \u2192 notice",
+      "width": 158
+    },
+    {
+      "id": "chat-visible",
+      "lane": "chat-intake",
+      "col": 5,
+      "type": "frontend",
+      "label": "Render reply",
+      "sublabel": "REST refresh \u2192 Flutter",
+      "width": 158
+    }
+  ],
+  "edges": [
+    {
+      "from": "chat-send",
+      "to": "chat-auth",
+      "role": "main"
+    },
+    {
+      "from": "chat-auth",
+      "to": "chat-route",
+      "role": "main"
+    },
+    {
+      "from": "chat-route",
+      "to": "chat-materialize",
+      "role": "main",
+      "label": "RPC"
+    },
+    {
+      "from": "chat-materialize",
+      "to": "chat-composition",
+      "role": "main"
+    },
+    {
+      "from": "chat-composition",
+      "to": "chat-admission",
+      "role": "main"
+    },
+    {
+      "from": "chat-admission",
+      "to": "chat-runtime",
+      "role": "main",
+      "label": "when active"
+    },
+    {
+      "from": "chat-runtime",
+      "to": "chat-context",
+      "role": "main"
+    },
+    {
+      "from": "chat-context",
+      "to": "chat-fence",
+      "role": "main"
+    },
+    {
+      "from": "chat-fence",
+      "to": "chat-model",
+      "role": "main"
+    },
+    {
+      "from": "chat-model",
+      "to": "chat-delivery",
+      "role": "main",
+      "label": "send tool"
+    },
+    {
+      "from": "chat-delivery",
+      "to": "chat-visible",
+      "role": "main",
+      "label": "re-fetch"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "amber",
+      "title": "Work before the model",
+      "items": [
+        "Admission hydrates retained model-request payloads.",
+        "Account data, runtime and context are prepared per Turn."
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Cold / warm / parallel",
+      "items": [
+        "Cold Bot construction runs cleanup before requests.",
+        "Some config and Memory reads overlap inside these stages."
+      ]
+    },
+    {
+      "dot": "violet",
+      "title": "How to read this",
+      "items": [
+        "Arrows show dependencies, not elapsed time.",
+        "Labels summarize stages; branch and failure detail is omitted."
+      ]
+    }
+  ]
+}

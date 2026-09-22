@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
   SESSION_ATTACHMENT_MAX_BASE64,
+  Session,
   SessionStore,
   latestOpenStepPositionV1,
   type SessionStoreConfig,
@@ -430,10 +431,10 @@ describe("SessionStore", () => {
       { type: "turn/end", turn: 1, outcome: "completed" },
     ]);
 
-    const recorded = session.events.find(
+    const recorded = session.activeRunJournal.find(
       (event) => event.type === "model/request",
     );
-    const pin = session.events.find(
+    const pin = session.activeRunJournal.find(
       (event) => event.type === "composition/pinned",
     );
     expect(
@@ -450,7 +451,7 @@ describe("SessionStore", () => {
       generationId: "2026-08-31T00:00:00.000Z:0123456789abcdef",
       artifactSetHash: "a".repeat(64),
     });
-    const authored = session.events.find(
+    const authored = session.activeRunJournal.find(
       (event) => event.type === "package/authored",
     );
     expect(
@@ -477,14 +478,16 @@ describe("SessionStore", () => {
         : undefined,
     ).toBe(false);
     expect(
-      session.events.map((event) => decodeSessionEvent(structuredClone(event))),
-    ).toEqual([...session.events]);
+      session.activeRunJournal.map((event) =>
+        decodeSessionEvent(structuredClone(event)),
+      ),
+    ).toEqual([...session.activeRunJournal]);
     expect(session.deriveMessages()).toEqual([
       { role: "user", content: "Hello" },
       { role: "assistant", content: "Hi", toolCalls: [] },
     ]);
-    expect(session.events.map((event) => event.seq)).toEqual(
-      session.events.map((_, index) => index),
+    expect(session.activeRunJournal.map((event) => event.seq)).toEqual(
+      session.activeRunJournal.map((_, index) => index),
     );
   });
 
@@ -549,27 +552,48 @@ describe("SessionStore", () => {
       { type: "turn/start", turn: 1 },
       { type: "turn/end", turn: 1, outcome: "completed" },
     ]);
-    const stored = structuredClone([...first.events]);
+    const stored = structuredClone([...first.activeRunJournal]);
 
     const secondStore = createStore({ "durable-session": stored });
     const rehydrated = secondStore.create("durable-session");
-    expect(rehydrated.events).toEqual(stored);
+    expect(rehydrated.activeRunJournal).toEqual(stored);
     expect(rehydrated.nextTurn()).toBe(2);
     expect(rehydrated.append({ type: "turn/start", turn: 2 }).seq).toBe(3);
   });
 
-  test("rejects a non-contiguous durable event log", async () => {
+  test("rejects a gapped active-run journal", async () => {
     const store = createStore({
       broken: [
         {
           type: "session/created",
           createdAt: "2026-08-27T00:00:00.000Z",
-          seq: 1,
+          seq: 0,
           timestamp: "2026-08-27T00:00:00.000Z",
+        },
+        {
+          type: "turn/start",
+          turn: 1,
+          seq: 2,
+          timestamp: "2026-08-27T00:00:01.000Z",
         },
       ],
     });
-    expect(() => store.create("broken")).toThrow("non-contiguous event log");
+    expect(() => store.create("broken")).toThrow("not contiguous");
+  });
+
+  test("keeps absolute sequence numbers on a journal that does not start at zero", () => {
+    const session = new Session("user-1:primary", [
+      {
+        type: "turn/start",
+        turn: 4,
+        seq: 20,
+        timestamp: "2026-08-27T00:00:00.000Z",
+      },
+    ]);
+    expect(session.cursor).toMatchObject({ nextSeq: 21, nextTurn: 5 });
+    expect(
+      session.append({ type: "turn/end", turn: 4, outcome: "completed" }).seq,
+    ).toBe(21);
   });
 
   test("preserves open tool intents for effect reconciliation on resume", async () => {
@@ -599,10 +623,10 @@ describe("SessionStore", () => {
 
     expect(session.reconcileForResume()).toEqual([]);
     expect(
-      validateToolOccurrenceJournal(session.events).get("tool:1:1:0"),
+      validateToolOccurrenceJournal(session.activeRunJournal).get("tool:1:1:0"),
     ).toMatchObject({ intent: { occurrenceId: "tool:1:1:0" } });
     expect(
-      session.events.some(
+      session.activeRunJournal.some(
         (event) =>
           event.type === "tool/result" ||
           event.type === "step/end" ||
@@ -669,7 +693,7 @@ describe("SessionStore", () => {
     stores.splice(stores.indexOf(store), 1);
 
     expect(session.disposed).toBe(true);
-    expect(session.events.at(-1)?.type).toBe("session/disposed");
+    expect(session.activeRunJournal.at(-1)?.type).toBe("session/disposed");
   });
   test("decodes invoked Skills on an input, and refuses a malformed one", () => {
     const base = {
@@ -904,7 +928,7 @@ describe("resolved attachment bytes", () => {
     });
 
     // And they never become durable: the event still holds a reference only.
-    const recorded = session.events.findLast(
+    const recorded = session.activeRunJournal.findLast(
       (event) => event.type === "tool/result",
     );
     expect(JSON.stringify(recorded)).not.toContain("AAAA");
@@ -1036,7 +1060,7 @@ describe("a batch's sub-calls and the message count", () => {
     // When these two disagreed the throw was not one Turn's: the events are
     // durable, so every later Turn in that session died the same way, before
     // the model was ever called.
-    expect(messageTurnsV1(session.events)).toHaveLength(
+    expect(messageTurnsV1(session.activeRunJournal)).toHaveLength(
       session.deriveMessages().length,
     );
   });

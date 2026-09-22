@@ -32,8 +32,7 @@ does, observed rather than remembered, is in
 ## A call talks to one Bot
 
 Since ADR 0029 a call addresses a Bot rather than the account. The client
-names it in a `voice/target` frame just before `start_call` — the SDK's own
-frame carries only a preferred format — and the id is written into the call
+names it on `voice/open` together with pause and mute — and the id is written into the call
 record, so it survives eviction and a rejoin — and a rejoin that names a Bot
 honours that one, because the person pressed voice on it just now. A client
 that names none, or names a Bot this account does not own, gets the account's
@@ -327,29 +326,34 @@ others. `app/voice/shared.ts` is where a frame is spelled once.
 
 1. Connect. Server sends `{type:"welcome",protocol_version:1}` then
    `{type:"status",status:"idle"}`.
-2. Client sends `{type:"hello",protocol_version:1}`, then — if it is
-   addressing a Bot — `{"type":"voice/target","schemaVersion":1,"botId":"…"}`,
-   then `{type:"start_call",preferred_format:"pcm16"}`. The same frame sent
-   once the call is live is a hand-over instead; who the call is on is above.
-3. Server answers `{type:"audio_config",format:"pcm16",sampleRate:24000}` then,
-   once the Live session has acknowledged its setup,
-   `{type:"status",status:"listening"}`. It
-   also sends `voice/target` back — on admission and again on every hand-over
+2. Client sends `{type:"hello",protocol_version:1}`, then one opening attempt:
+   `{"type":"voice/open","schemaVersion":1,"attemptId":"<uuid>","mode":"start"|"wake"|"rejoin"|"control","botId"?,"callId"?,"paused":false,"muted":false}`.
+   Mid-call retarget is still `voice/target` on an already admitted call.
+3. Server answers `voice/admitted` once the call is owned, then
+   `{type:"audio_config",format:"pcm16",sampleRate:24000}`. `voice/ready`
+   follows when this attempt's Gemini setup is acknowledged. A paused or muted
+   rejoin is admitted and `listening` without opening Gemini. Then
+   `{type:"status",status:"listening"}`.
+   It also sends `voice/target` back — on admission and again on every hand-over
    — naming the Bot the call is actually on, which is the only authority on
    that; a client that guessed could name a Bot the audio never reached.
-   Or `{type:"error",message,code?,retryable?}` followed by `status: idle` when
+   Or `voice/open-failed` / `{type:"error",message,code?,retryable?}` when
    the call was refused or failed to start.
 
 The first `listening` of a call plays a short confirm
 (`assets/voice/connect.wav`). A later `listening` — a wake, a rejoin — does
 not.
 
+Assistant PCM in both directions is a binary envelope: version 1, a 16-byte
+attempt UUID, a little-endian unsigned 32-bit sequence, then PCM16. The client
+holds opening audio until `voice/ready` for this attempt.
+
 The Gemini setup enables both session resumption and sliding-window context
 compression. Resumption carries a call across a closed or replaced socket;
 compression keeps a long audio conversation within Gemini's context window.
 Neither replaces the durable call ledger.
 
-Before `start_call` is accepted the server may send a custom refusal so the
+Before `voice/open` is accepted the server may send a custom refusal so the
 client can say why:
 
 ```json
@@ -362,20 +366,20 @@ the server ends the older call (that client sees `status: idle` and a
 
 ### Audio up
 
-Binary frames: PCM16 little-endian, mono, **16 kHz**. Frame size is the
-client's choice; 40 ms (1280 bytes) is what both clients send. Each frame is
-base64'd into one `realtimeInput.audio` message at `audio/pcm;rate=16000`,
-which is the rate Gemini Live wants, so nothing is resampled anywhere. Audio
-that arrives before the session has acknowledged its setup is held in order
-(bounded, 10 s) and sent the moment it is ready, so the first syllable after a
-wake is not the one that goes missing.
+Binary frames: a version-1 envelope (16-byte attempt UUID, little-endian
+unsigned 32-bit sequence) then PCM16 little-endian, mono, **16 kHz**. Frame
+size is the client's choice; 40 ms (1280 bytes of PCM) is what both clients
+send. Each payload is base64'd into one `realtimeInput.audio` message at
+`audio/pcm;rate=16000`, which is the rate Gemini Live wants, so nothing is
+resampled anywhere. The client holds opening audio until `voice/ready` for
+this attempt. The server's own setup buffer is only bounded defense.
 
 ### Audio down
 
-Binary frames: PCM16 little-endian, mono, **24 kHz**, arbitrary chunk
-boundaries (a chunk may end on an odd byte; carry the byte). This is Gemini's
-own output rate, sent on as it arrives. The client plays them in order and
-measures amplitude from what it is playing.
+Binary frames: the same envelope, then PCM16 little-endian, mono, **24 kHz**,
+arbitrary chunk boundaries (a chunk may end on an odd byte; carry the byte).
+This is Gemini's own output rate, sent on as it arrives. The client plays them
+in order and measures amplitude from what it is playing.
 
 `voice/delegation` (`botId`, `botName`, `runId`, `state` ∈ `asked |
 answering | finished`) tells the voice surface where a request to a Bot is:
@@ -538,8 +542,9 @@ subagent admitted.
   (Gemini is gone, no billing) and keeps its newest resumption handle. Capture
   continues locally. A `subagent` that settles in that window wakes Gemini
   again so the person hears the answer without speaking first.
-- On the next onset the client sends `{type:"voice/wake",schemaVersion:1}`,
-  then the last **500 ms** of audio from its pre-roll ring, then live frames.
+- On the next onset the client sends `voice/open` with `mode:"wake"`,
+  holds the last **500 ms** of audio from its pre-roll ring until `voice/ready`,
+  then drains it and live frames.
   The pre-roll obeys the same rule as any other frame: on a capture without
   AEC, a wake that happens while the speaker is still audible replays silence
   rather than what the microphone heard of the speaker.
@@ -558,25 +563,25 @@ subagent admitted.
 - The object also sleeps on its own after 30 s without an audio frame, so a
   client that never says `voice/sleep` still stops the meter.
 - **Pause** is the person doing the same thing deliberately: the client sends
-  `voice/sleep` with `paused: true`, stops the reply that is playing, and —
+  `voice/control` with `action:"pause"`, stops the reply that is playing, and —
   unlike the gate's own sleep — wakes for nothing but Resume, which sends
-  `voice/wake`. Pause starts nothing and cancels nothing: a `subagent` Turn
+  `voice/open` with `mode:"wake"`. Pause starts nothing and cancels nothing: a `subagent` Turn
   already admitted is the Bot's work, not this socket's, so it carries on, and
   what finishes meanwhile is counted on the Resume control rather than
   unhibernating Gemini. The call record is marked paused, so a socket that
   then dies keeps the long rejoin window rather than the 60 s one.
 - **Leaving the app** is Pause for the background: `hidden` and `paused`
-  send the same `voice/sleep` with `paused: true`, release the microphone,
+  send the same `voice/control` pause, release the microphone,
   and keep the client socket. Coming back wakes it. A Pause the person
   already started stays paused. `detached` still hangs up — the view is
-  gone. A socket the OS kills without `end_call` is not a hang-up: the
+  gone. A socket the OS kills without hang-up is not a hang-up: the
   surface stays up, and coming back opens a new socket onto the same
   durable call. The record lasts twenty-four hours from that Pause, not
   60 s. A live conversation that drops without pausing is still the 60 s
   window, as it always was.
 - Server reports `{type:"voice/state",schemaVersion:1,upstream:"awake"|"asleep"|"starting",muted:boolean}`.
 
-Between `voice/sleep` and `voice/wake` the client sends no audio. While
+Between idle `voice/sleep` and a wake `voice/open` the client sends no audio. While
 asleep, `status` stays `listening` on both sides; the footer keeps animating
 from the local microphone.
 
@@ -585,7 +590,7 @@ session. Acceptable, and stated so in ADR 0031 — the person asks again.
 
 ### Mute
 
-`{type:"voice/mute",schemaVersion:1,muted:true}`: the client stops sending
+`voice/control` with `action:"mute"` and `muted:true`: the client stops sending
 frames; the server closes the Live session at once. `muted:false` resumes
 gating; the next speech onset reopens it as above. Mute does not end the call
 and does not stop playback of a reply already in flight.
@@ -598,9 +603,9 @@ rather than unmuting them.
 
 ### End
 
-`{type:"end_call"}` then close. The model can also call `end_call` as a
+`voice/control` with `action:"end"`, then close. The model can also call `end_call` as a
 Live function when the person says they are done; hang-up waits for that
-spoken turn, then the object does the same as the client's frame and closes
+spoken turn, then the object does the same as the client's hang-up and closes
 the socket so the surface says the call ended. The server closes the Live session, settles
 its meters, and answers `status: idle`. Closing the
 socket without `end_call` closes the Live session and settles its meters the
@@ -1300,7 +1305,7 @@ cold object can spend most of that starting — and a timeout is not retried,
 because a second upgrade would only race the first. A refused socket is
 retried once. A socket that dies while paused, or while the app is off
 screen, is not a hang-up: the surface stays, and coming back opens a new
-socket onto the same durable call. `hello`/`start_call` — which wake a
+socket onto the same durable call. `hello`/`voice/open` — which wake a
 metered upstream — wait for both the server's `welcome` and an open
 microphone, so a person still answering the permission prompt is not billed.
 
@@ -1480,7 +1485,7 @@ pause of about a second mid-sentence produces two items, and therefore two
 Turns; that is accepted.
 
 Then the object itself, under `wrangler dev --env development` on port 8799
-with the real key (`?as_user=development`): `welcome`, `hello`, `start_call` →
+with the real key (`?as_user=development`): `welcome`, `hello`, `voice/open` →
 `voice/state upstream:"starting"` → `status:"listening"` → `voice/state
 upstream:"awake"` → the same speech up as 40 ms frames →
 `transcript_interim` frames → `transcript role:"user"` with the sentence →

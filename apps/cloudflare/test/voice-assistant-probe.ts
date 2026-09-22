@@ -133,6 +133,8 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
   #timings: VoiceTimingLine[] = [];
   #now: string | undefined;
   #memoryRequests: VoiceMemoryRequest[] = [];
+  #identityReads = 0;
+  #activityReads = 0;
   #silenceTimeoutMs: number | undefined;
   #idleSleepMs: number | undefined;
 
@@ -153,12 +155,35 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
    * from `VOICE_ASSISTANT_UPSTREAM_URL`, so the test still proves the object
    * reads the var and puts its key on it.
    */
-  protected override async openGeminiSocket(url: string): Promise<WebSocket> {
+  protected override async openGeminiSocket(
+    url: string,
+    signal?: AbortSignal,
+  ): Promise<WebSocket> {
+    if (signal?.aborted) {
+      throw new DOMException("The operation was aborted.", "AbortError");
+    }
     if (this.#script.refuseUpstream) {
       throw new Error("upstream refused the upgrade (503)");
     }
     const slow = this.#script.slowUpstreamMs;
-    if (slow) await new Promise((resolve) => setTimeout(resolve, slow));
+    if (slow) {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, slow);
+        signal?.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(timer);
+            reject(
+              new DOMException("The operation was aborted.", "AbortError"),
+            );
+          },
+          { once: true },
+        );
+      });
+    }
+    if (signal?.aborted) {
+      throw new DOMException("The operation was aborted.", "AbortError");
+    }
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
     // The production seam accepts the socket before handing it back; a socket
@@ -245,6 +270,19 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     } finally {
       console.info = info;
     }
+  }
+
+  protected override async botIdentity(
+    userId: string,
+    botId: string,
+  ): Promise<{ botId: string; name: string; description?: string }> {
+    this.#identityReads += 1;
+    return super.botIdentity(userId, botId);
+  }
+
+  protected override async recentRuns(userId: string, botId: string) {
+    this.#activityReads += 1;
+    return super.recentRuns(userId, botId);
   }
 
   /** The directory, as slow as a test asked for. */
@@ -422,6 +460,10 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
 
   async probeTimings(): Promise<VoiceTimingLine[]> {
     return [...this.#timings];
+  }
+
+  async probeDirectoryReads(): Promise<{ identity: number; activity: number }> {
+    return { identity: this.#identityReads, activity: this.#activityReads };
   }
 
   async probeSetScript(script: VoiceProbeScript): Promise<void> {

@@ -491,7 +491,7 @@ describe("the Approvals a Plugin's Card asks for", () => {
     sessionId: string = `${USER}:bot-1`,
   ): string[] {
     const session = mounted.runtime.services.sessions.get(sessionId);
-    return (session?.events ?? [])
+    return (session?.activeRunJournal ?? [])
       .filter(
         (event) =>
           event.type === "send/to-user" &&
@@ -511,7 +511,7 @@ describe("the Approvals a Plugin's Card asks for", () => {
     sessionId: string = `${USER}:bot-1`,
   ): string[] {
     const session = mounted.runtime.services.sessions.get(sessionId);
-    return (session?.events ?? [])
+    return (session?.activeRunJournal ?? [])
       .filter(
         (event) =>
           event.type === "send/to-user" &&
@@ -527,7 +527,7 @@ describe("the Approvals a Plugin's Card asks for", () => {
   /** The approvalId the card in the conversation actually points at. */
   function cardApprovalId(mounted: ShellMountedComposition): string {
     const session = mounted.runtime.services.sessions.get(`${USER}:bot-1`);
-    const cards = (session?.events ?? []).filter(
+    const cards = (session?.activeRunJournal ?? []).filter(
       (event) =>
         event.type === "send/to-user" &&
         (event as { payload?: { type?: string } }).payload?.type === "card",
@@ -676,7 +676,7 @@ describe("the Approvals a Plugin's Card asks for", () => {
       expect(bindingKeys(values)).toEqual([]);
       const session = mounted.runtime.services.sessions.get(`${USER}:bot-1`);
       expect(
-        (session?.events ?? []).filter(
+        (session?.activeRunJournal ?? []).filter(
           (event) => event.type === "send/to-user",
         ),
       ).toEqual([]);

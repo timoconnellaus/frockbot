@@ -74,8 +74,15 @@ class MemoryStorage {
     return Promise.resolve();
   }
 
-  delete(key: string): Promise<boolean> {
-    return Promise.resolve(this.values.delete(key));
+  delete(key: string): Promise<boolean>;
+  delete(keys: string[]): Promise<number>;
+  delete(key: string | string[]): Promise<boolean | number> {
+    if (typeof key === "string") {
+      return Promise.resolve(this.values.delete(key));
+    }
+    return Promise.resolve(
+      key.filter((entry) => this.values.delete(entry)).length,
+    );
   }
 
   list<T>(options: {
@@ -202,9 +209,23 @@ describe("Bot recovery", () => {
       env: {} as never,
     });
 
-    await expect(contribution.listRuns({ schemaVersion: 1 })).rejects.toThrow(
-      "stored run has invalid fields",
-    );
+    await expect(contribution.listRuns({ schemaVersion: 1 })).resolves.toEqual({
+      schemaVersion: 1,
+      runs: [
+        expect.objectContaining({
+          runId: "run-malformed",
+          status: "failed",
+          outcome: {
+            type: "failed",
+            message: "This Turn's record could not be read.",
+          },
+        }),
+      ],
+      page: { truncated: false },
+    });
+    await expect(
+      contribution.state.authority.recoverActiveRun(),
+    ).rejects.toThrow("stored run has invalid fields");
     expect(await storage.get<string>("active-run")).toBe("run-malformed");
   });
 
@@ -222,6 +243,8 @@ describe("Bot recovery", () => {
       runs: [],
       page: { truncated: false },
     });
+    expect(storage.alarmAt).toBeUndefined();
+    await contribution.state.authority.recoverActiveRun();
 
     expect(await storage.get<string>("active-run")).toBe("run-missing");
     expect(typeof storage.alarmAt).toBe("number");
@@ -270,9 +293,9 @@ describe("Bot recovery", () => {
       env: {} as never,
     });
 
-    await expect(contribution.listRuns({ schemaVersion: 1 })).rejects.toThrow(
-      `run "${run.runId}" has invalid failure`,
-    );
+    await expect(
+      contribution.state.authority.recoverActiveRun(),
+    ).rejects.toThrow(`run "${run.runId}" has invalid failure`);
     expect(await storage.get<string>("active-run")).toBe(run.runId);
     expect(await storage.get<StoredRun>(`run:${run.runId}`)).toEqual(run);
   });
@@ -414,6 +437,7 @@ describe("Bot recovery", () => {
       env: {} as never,
     });
 
+    await recovered.state.authority.recoverActiveRun();
     await expect(recovered.listRuns()).resolves.toEqual({
       schemaVersion: 1,
       runs: [
@@ -516,7 +540,7 @@ describe("Bot recovery", () => {
 
     expect(planBotRunRecovery(run, events)).toEqual({ kind: "resume" });
 
-    await recovered.listRuns();
+    await recovered.state.authority.recoverActiveRun();
 
     const settled = storage.values.get("run:run-lost-marker") as StoredRun;
     expect(settled.status).toBe("failed");
@@ -552,7 +576,7 @@ describe("Bot recovery", () => {
       env: {} as never,
     });
 
-    await recovered.listRuns();
+    await recovered.state.authority.recoverActiveRun();
 
     const [notification, ...rest] = await recovered.listNotifications();
     expect(rest).toEqual([]);
@@ -607,7 +631,7 @@ describe("Bot recovery", () => {
       env: {} as never,
     });
 
-    await recovered.listRuns();
+    await recovered.state.authority.recoverActiveRun();
 
     expect((storage.values.get(`run:${run.runId}`) as StoredRun).status).toBe(
       "failed",
@@ -1288,11 +1312,44 @@ describe("Bot recovery", () => {
         USER_CONFIGURATIONS: {
           idFromName: () => "user-1",
           get: () => ({
-            readConfiguration: async () => {
+            prepareAccount: async () => {
               contextStarted.resolve();
               await continueContext.promise;
-              return user;
+              return {
+                schemaVersion: 1,
+                settings: user,
+                features: {
+                  schemaVersion: 1,
+                  pluginAuthoring: false,
+                  plugins: [],
+                  updatedAt: "2026-09-22T00:00:00.000Z",
+                  updatedBy: "test",
+                },
+                skillIndexRevision: "",
+              };
             },
+            readAccountPreparationStamp: async () => ({
+              schemaVersion: 1,
+              revision: user.revision,
+              features: {
+                pluginAuthoring: false,
+                plugins: [],
+              },
+              compositionGenerationId: "",
+              skillIndexRevision: "",
+            }),
+            readConfiguration: async () => user,
+            readSkillIndex: async () => ({
+              schemaVersion: 1 as const,
+              revision: "",
+              status: "ready" as const,
+              deleted: false,
+              entries: [],
+              pending: [],
+              detachedReferences: [],
+            }),
+            holdSkillIndex: async () => undefined,
+            releaseSkillIndexHold: async () => undefined,
           }),
         },
       } as never,
@@ -1485,7 +1542,9 @@ describe("Bot recovery", () => {
       provider: "fake",
       model: "large-context",
     });
-    await new SessionEventLog(storage).rewrite(sessionId, [...session.events]);
+    await new SessionEventLog(storage).rewrite(sessionId, [
+      ...session.activeRunJournal,
+    ]);
     storage.gets.length = 0;
 
     const page = await contribution.listRuns({ schemaVersion: 1 });

@@ -185,7 +185,19 @@ export interface ShellEnabledRuntimeHostV1 {
     connectionId: string,
     read: () => Promise<unknown>,
   ): Promise<unknown>;
+  readConnectToolCatalog?(
+    connection: { connectionId: string; generation?: string },
+    disclose: boolean,
+  ): Promise<unknown>;
   authorizeConnection(capability: EnabledCapabilityV1): Promise<ConnectionView>;
+  /**
+   * Live Connection state at use. An admitted snapshot does not keep a
+   * revoked Connection usable.
+   */
+  permitConnection?(connection: {
+    connectionId: string;
+    generation?: string;
+  }): Promise<boolean>;
   /**
    * One Package's durable User-level setting values. Supplied by the host
    * that read the User's settings for this Turn; a host that supplies none

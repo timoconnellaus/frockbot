@@ -72,7 +72,7 @@ function createAuthority(
     bootstrapComposition: () => bootstrap(),
     admittedSnapshot: () => Promise.resolve(undefined),
     executeTurn: async (input) => {
-      let seq = input.previousEvents.length;
+      let seq = input.cursor.nextSeq;
       const appended: SessionEvent[] = [];
       const persist = async (
         ...events: Omit<SessionEvent, "seq" | "timestamp">[]

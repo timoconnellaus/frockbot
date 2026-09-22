@@ -371,7 +371,7 @@ class LoopAgent implements Agent, LoopRuntime {
   }
 
   async #resumeTurn(signal: AbortSignal): Promise<void> {
-    const plan = planResumptionV1(this.session.events);
+    const plan = planResumptionV1(this.session.activeRunJournal);
     const openTurn = plan.openTurn;
     if (openTurn === undefined)
       throw new Error("session has no resumable turn");
@@ -697,7 +697,7 @@ class LoopAgent implements Agent, LoopRuntime {
   }
 
   async #settleCancelledStep(turn: number, step: number): Promise<void> {
-    const assistant = this.session.events.findLast(
+    const assistant = this.session.activeRunJournal.findLast(
       (event) =>
         event.type === "assistant/message" &&
         event.turn === turn &&
@@ -711,7 +711,9 @@ class LoopAgent implements Agent, LoopRuntime {
       return;
     }
 
-    const journal = validateToolOccurrenceJournal(this.session.events);
+    const journal = validateToolOccurrenceJournal(
+      this.session.activeRunJournal,
+    );
     for (const occurrence of expandToolCallOccurrencesV1(
       turn,
       step,

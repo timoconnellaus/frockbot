@@ -38,6 +38,8 @@ import {
   IDENTITY_KEY,
   LATEST_EVENTS_KEY,
   RUN_PREFIX,
+  repairDueKey,
+  repairRunKey,
   runIndexKey,
 } from "./storage-keys.ts";
 
@@ -221,7 +223,7 @@ const longAgo = new Date(
   Date.now() - TURN_DEADLINE_MS_V1 - STALE_RUNNING_RUN_GRACE_MS_V1 - 60_000,
 ).toISOString();
 
-describe("the read that repairs what it finds", () => {
+describe("liveness is reported by the read and repaired by the alarm", () => {
   test("reports a fresh Turn as working and touches nothing", async () => {
     const { storage, authority } = await seed({
       acceptedAt: new Date().toISOString(),
@@ -235,26 +237,34 @@ describe("the read that repairs what it finds", () => {
     expect(await storage.get<string>(ACTIVE_RUN_KEY)).toBe("run-1");
   });
 
-  test("settles one that outlived the Turn deadline", async () => {
+  test("a read reports a deadline miss and the alarm settles it", async () => {
     const { storage, authority } = await seed({
       acceptedAt: longAgo,
       events: openTurn,
       log: openTurn,
     });
     expect(await authority.resolveRunWorking("run-1")).toBe(false);
+    expect(
+      (await storage.get<StoredRunV1<undefined>>(`${RUN_PREFIX}run-1`))?.status,
+    ).toBe("running");
+    const due = Date.now() - 1_000;
+    await storage.put({
+      [repairRunKey("run-1")]: due,
+      [repairDueKey(due, "run-1")]: "run-1",
+    });
+    await storage.delete(ACTIVE_RUN_KEY);
+    await authority.alarm();
     const settled = await storage.get<StoredRunV1<undefined>>(
       `${RUN_PREFIX}run-1`,
     );
     expect(settled?.status).toBe("failed");
     expect(settled?.failure).toBe(STALE_RUNNING_RUN_FAILURE_V1);
-    // The Bot is free: nothing holds the object, and the next Turn admits
-    // against a log that reads as a complete history.
     expect(await storage.get<string>(ACTIVE_RUN_KEY)).toBeUndefined();
     const log = await new SessionEventLog(storage).read("user-1:primary");
     expect(log.some((entry) => entry.type === "turn/end")).toBe(true);
   });
 
-  test("settles one whose Turn the log already closed", async () => {
+  test("a read reports a closed Turn and recovery settles it", async () => {
     const { storage, authority } = await seed({
       acceptedAt: new Date().toISOString(),
       events: openTurn,
@@ -263,20 +273,32 @@ describe("the read that repairs what it finds", () => {
     expect(await authority.resolveRunWorking("run-1")).toBe(false);
     expect(
       (await storage.get<StoredRunV1<undefined>>(`${RUN_PREFIX}run-1`))?.status,
+    ).toBe("running");
+    await authority.recoverActiveRun();
+    expect(
+      (await storage.get<StoredRunV1<undefined>>(`${RUN_PREFIX}run-1`))?.status,
     ).toBe("failed");
   });
 
-  test("is idempotent: a second read settles nothing and still says no ring", async () => {
+  test("is idempotent: the read never settles, and a second alarm does not rewrite", async () => {
     const { storage, authority } = await seed({
       acceptedAt: longAgo,
       events: openTurn,
       log: openTurn,
     });
     expect(await authority.resolveRunWorking("run-1")).toBe(false);
+    const due = Date.now() - 1_000;
+    await storage.put({
+      [repairRunKey("run-1")]: due,
+      [repairDueKey(due, "run-1")]: "run-1",
+    });
+    await storage.delete(ACTIVE_RUN_KEY);
+    await authority.alarm();
     const first = await storage.get<StoredRunV1<undefined>>(
       `${RUN_PREFIX}run-1`,
     );
     expect(await authority.resolveRunWorking("run-1")).toBe(false);
+    await authority.alarm();
     expect(
       await storage.get<StoredRunV1<undefined>>(`${RUN_PREFIX}run-1`),
     ).toEqual(first!);
@@ -318,7 +340,7 @@ describe("the read that repairs what it finds", () => {
       { type: "turn/start", turn: 9 },
       { type: "step/start", turn: 9, step: 1 },
     ]);
-    const log = [...conversation.events];
+    const log = [...conversation.activeRunJournal];
     await new SessionEventLog(storage).rewrite("user-1:primary", log);
     const stored = run({
       acceptedAt: new Date().toISOString(),

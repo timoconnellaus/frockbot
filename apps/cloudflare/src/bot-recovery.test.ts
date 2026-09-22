@@ -38,8 +38,8 @@ describe("Bot run recovery", () => {
     };
     expect(planBotRunRecovery(run([queued]), [created, queued])).toEqual({
       kind: "restart",
-      previous: [created],
     });
+    expect(run([queued]).previousEventCount).toBe(1);
   });
 
   test("resumes an unanswered model request under its own key", () => {

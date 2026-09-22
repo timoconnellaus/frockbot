@@ -6,6 +6,8 @@
 // Durable Object and the recovery tests still reach through the object.
 
 import { messageRecords } from "@frockbot/app/notifications/messages";
+import { visiblePublicationsV1 } from "./conversation-publication.js";
+import "./working-context-store.js";
 import { defineBotBackendContribution } from "@frockbot/core/contracts/contributions";
 import type { SessionEvent } from "@frockbot/core/contracts";
 import type { BotIdentity, OwnedBotTurnCommand } from "@frockbot/core/durable";
@@ -24,7 +26,6 @@ import {
   settleScheduledWork,
 } from "@frockbot/app/routines/bot";
 import {
-  admittedBotSettingsV1,
   materializeBotSettingsV1,
   readBotSettingsV1,
 } from "@frockbot/app/settings/bot";
@@ -47,8 +48,10 @@ import type {
 import {
   admit as admitTurn,
   alarm,
+  assertAdmittedPreparationV1,
   executeTurn,
   fenceRunAdmission,
+  preparedInputsForAdmissionV1,
   resolveAdmissionSnapshot,
   run,
 } from "./turn.js";
@@ -64,15 +67,19 @@ export class ShellBotBackendContribution {
     this.state = new ShellBotStateV1(host, (state) => ({
       resolveAdmissionSnapshot: (command) =>
         resolveAdmissionSnapshot(state, command),
+      preparedInputs: (snapshot) => preparedInputsForAdmissionV1(snapshot),
       bootstrapComposition: () =>
         Promise.resolve(
           bootstrapCompositionGeneration(new Date().toISOString()),
         ),
       admittedSnapshot: (transaction, resolved) =>
-        admittedBotSettingsV1(transaction, resolved),
+        assertAdmittedPreparationV1(transaction, resolved),
       executeTurn: (input) => executeTurn(state, input),
       eventRecords: messageRecords,
       eventsCommitted: () => host.messagesCommitted?.(),
+      visiblePublications: (input) => visiblePublicationsV1(input),
+      deliverPublication: (updates) =>
+        host.deliverPublication?.(updates) ?? Promise.resolve(),
       notification: () => undefined,
       failureRecords: (snapshot, failed, read) =>
         failedTurnRecordsV1({ settings: snapshot, failed, read }),
@@ -101,6 +108,11 @@ export class ShellBotBackendContribution {
     return readBotSettingsV1(this.state, identity);
   }
 
+  async readVoiceContext(limit: number) {
+    const { readVoiceContextV1 } = await import("./voice-context.js");
+    return readVoiceContextV1(this.state, limit);
+  }
+
   async listAnnouncements(): Promise<SessionEvent[]> {
     return listAnnouncements(this.state);
   }
@@ -113,6 +125,7 @@ export class ShellBotBackendContribution {
     return run(this.state, command);
   }
 
+  /** Durable receipt. Does not wait for the previous Turn's inference. */
   async admit(
     command: OwnedBotTurnCommand,
   ): Promise<{ schemaVersion: 1; runId: string }> {

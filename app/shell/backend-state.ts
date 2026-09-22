@@ -129,6 +129,9 @@ export interface ShellBotBackendHost extends ShellApplicationV1 {
   ): Promise<void>;
   outboundFetch?: typeof fetch;
   messagesCommitted?(): void;
+  deliverPublication?(
+    updates: readonly import("@frockbot/core/durable").ConversationUpdateV1[],
+  ): Promise<void>;
   /**
    * A run reached a durable terminal state. Search and audit ride this,
    * because the composer no longer waits for the Turn to finish.

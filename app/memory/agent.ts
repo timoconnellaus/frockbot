@@ -58,7 +58,7 @@ export type {
   MemoryProjectsOutcomeV1,
   MemoryProjectV1,
 } from "./projects.js";
-import { memoryDayV1, renderMemoryMarkerV1 } from "./facts.js";
+import { renderMemoryMarkerV1 } from "./facts.js";
 import {
   MEMORY_NOTE_TTL_DAYS,
   renderMemoryInjectionV1,
@@ -77,11 +77,34 @@ import {
 } from "./roots.js";
 import { formatMemoryResultsV1, searchMemoryV1 } from "./searcher.js";
 import { MemoryStore, MEMORY_MAX_FACT_LENGTH } from "./store.js";
+import { readLongTermMemoryV1 } from "./reader.js";
+import {
+  emptyMemoryTurnRecallV1,
+  noteMemoryRecallV1,
+  planMemoryRecallV1,
+  recallBlocksFromHitsV1,
+  renderCanonicalMemoryInjectionV1,
+  renderMemoryRequestMessagesV1,
+  type MemoryTurnRecallV1,
+} from "./context.js";
+import { authorityOf } from "./engine-tools.js";
+import { explicitDatesInQueryV1 } from "./hybrid.js";
+import { isControlOnlyMemoryInputV1 } from "./policy.js";
+import { memoryDayV1 } from "./facts.js";
+import { productScopeToEngineV1, type MemoryScopeRefV1 } from "./records.js";
 import type {
   EmbedMemory,
   MemoryAiBinding,
   MemoryVectorIndex,
 } from "./types.js";
+import type { MemoryRecordsV1 } from "./owner.js";
+import {
+  createMemoryBrowseTool,
+  createMemoryExpandTool,
+  executeRecordsForgetV1,
+  executeRecordsSearchV1,
+  executeRecordsWriteV1,
+} from "./engine-tools.js";
 
 /** Bot write provenance: the Session and Turn that recorded a fact. */
 export interface MemoryWriterIdentityV1 {
@@ -115,6 +138,11 @@ export interface MemoryRuntimeHostV1 {
    * own, because a write's date is decided where the write happens.
    */
   clock?: () => Date;
+  /**
+   * Canonical SQLite Memory. When present, injection, recall and writes use
+   * it. The Markdown store is not a second source of truth on that path.
+   */
+  records?: MemoryRecordsV1;
 }
 
 export const sha256HexV1 = sha256HexTextV1;
@@ -168,6 +196,8 @@ export class MemoryProjection {
       }>
     | undefined;
   #turn: number | undefined;
+  #recall: MemoryTurnRecallV1 = emptyMemoryTurnRecallV1();
+  #recallStatus = "empty";
   /**
    * The documents this Turn's tier reads already decoded, kept for the index
    * built from that snapshot on the first search. Taken exactly once and
@@ -253,6 +283,7 @@ export class MemoryProjection {
 
   /** Reads every tier, renders the block, and records the injection. */
   async refresh(turn: number, session: Session): Promise<MemoryInjectionV1> {
+    if (this.#host.records) return this.refreshCanonical(turn, session);
     const store = this.#host.store;
     const owner = this.#host.owner;
     // A new Turn reads membership again; within one Turn the read is shared.
@@ -268,10 +299,14 @@ export class MemoryProjection {
     // — and the ceiling stays what the helper says it is rather than squaring.
     const inFlight = createConcurrencyLimiterV1();
     const [ownTier, userTier, ...projectReads] = await Promise.all([
-      store.read(own, { inFlight }),
-      store.read(user, { inFlight }),
+      readLongTermMemoryV1(store, own, { inFlight }),
+      readLongTermMemoryV1(store, user, { inFlight }),
       ...projects.map((project) =>
-        store.read(projectMemoryRootV1(owner, project.projectId), { inFlight }),
+        readLongTermMemoryV1(
+          store,
+          projectMemoryRootV1(owner, project.projectId),
+          { inFlight },
+        ),
       ),
     ]);
     const projectTiers: MemoryProjectTierV1[] = projects.map(
@@ -346,6 +381,122 @@ export class MemoryProjection {
     };
     this.#indexReady = false;
     return this.#injection;
+  }
+
+  /**
+   * Prepared core from the canonical engine. No Memory-file walk.
+   * Recalled blocks are rendered later, beside the current turn.
+   */
+  private async refreshCanonical(
+    turn: number,
+    session: Session,
+  ): Promise<MemoryInjectionV1> {
+    const records = this.#host.records;
+    if (!records) return this.#injection;
+    this.#recall = emptyMemoryTurnRecallV1();
+    this.#recallStatus = "empty";
+    const authority = await authorityOf({
+      owner: this.#host.owner,
+      records,
+      ...(this.#host.projects ? { projects: this.#host.projects } : {}),
+    });
+    const scopes = memoryScopesForHostV1(
+      this.#host.owner,
+      authority.joinedGroupChatIds,
+    );
+    const core = await records.preparedCore({
+      authority,
+      scopes,
+      budget: 1_024,
+    });
+    const learnedAt = memoryDayV1(this.#host.clock?.() ?? new Date());
+    this.#injection = renderCanonicalMemoryInjectionV1({
+      blocks: core.blocks,
+      omissions: core.omissions,
+      learnedAt,
+    });
+    this.#turn = turn;
+    session.append({
+      type: "memory/injected",
+      turn,
+      sources: core.blocks.flatMap((block) =>
+        block.manifest.map((leaf) => ({
+          scope: engineScopeName(block.scope.kind),
+          projectId:
+            block.scope.kind === "groupChat"
+              ? (block.scope.groupChatId ?? "")
+              : "",
+          path: `item:${leaf.itemId}`,
+          generationId: String(leaf.generation),
+          contentHash: String(block.generation),
+        })),
+      ),
+      facts: this.#injection.facts,
+      omissions: this.#injection.omissions,
+      faded: [],
+      noteCutoff: learnedAt,
+      noteTtlDays: MEMORY_NOTE_TTL_DAYS,
+    });
+    await session.flush();
+    this.#rendered = { documents: [], complete: true };
+    this.#indexReady = true;
+    return this.#injection;
+  }
+
+  async recallForTurn(query: string, signature: string): Promise<void> {
+    const records = this.#host.records;
+    if (!records) return;
+    const authority = await authorityOf({
+      owner: this.#host.owner,
+      records,
+      ...(this.#host.projects ? { projects: this.#host.projects } : {}),
+    });
+    const dates = explicitDatesInQueryV1(query);
+    const recalled = await records.recall({
+      authority,
+      query,
+      scopes: memoryScopesForHostV1(
+        this.#host.owner,
+        authority.joinedGroupChatIds,
+      ),
+      effort: "automatic",
+      ...(dates.occurredFrom ? { filters: dates } : {}),
+    });
+    this.#recallStatus = recalled.status;
+    noteMemoryRecallV1(
+      this.#recall,
+      signature,
+      recallBlocksFromHitsV1(recalled.hits),
+    );
+  }
+
+  renderMessages(
+    messages: Parameters<typeof renderMemoryRequestMessagesV1>[0],
+  ) {
+    const records = this.#host.records;
+    return renderMemoryRequestMessagesV1(messages, {
+      blocks: this.#recall.blocks,
+      status: this.#recallStatus,
+      coreTokens: this.#injection.text
+        ? new TextEncoder().encode(this.#injection.text).byteLength + 16
+        : 0,
+      active: (itemId, generation) => {
+        if (!records) return true;
+        const scopes = [
+          productScopeToEngineV1("bot", this.#host.owner),
+          productScopeToEngineV1("user", this.#host.owner),
+        ];
+        const seen = scopes.map((scope) =>
+          records.engine.itemVisibility(scope, itemId, generation),
+        );
+        if (seen.includes("inactive")) return false;
+        return true;
+      },
+    });
+  }
+
+  recallState(): MemoryTurnRecallV1 {
+    return this.#recall;
   }
 
   /**
@@ -818,6 +969,30 @@ export function createMemoryWriteTool(
       });
       await session.flush();
 
+      if (host.records) {
+        const result = await executeRecordsWriteV1(
+          { ...host, records: host.records },
+          decoded,
+          effectId,
+        );
+        if (!result.isError) {
+          session.append({
+            type: "memory/written",
+            ...position,
+            effectId,
+            action: "write",
+            scope: decoded.scope,
+            projectId: decoded.project ?? "",
+            tier: decoded.tier,
+            path: `${decoded.scope}/${decoded.tier}`,
+            generationId: "records",
+            contentHash,
+          });
+          await session.flush();
+        }
+        return result;
+      }
+
       const outcome = await host.store.write({
         root,
         tier: decoded.tier,
@@ -930,6 +1105,30 @@ export function createMemoryForgetTool(
         contentHash,
       });
       await session.flush();
+
+      if (host.records) {
+        const result = await executeRecordsForgetV1(
+          { ...host, records: host.records },
+          decoded,
+          effectId,
+        );
+        if (!result.isError) {
+          session.append({
+            type: "memory/written",
+            ...position,
+            effectId,
+            action: "forget",
+            scope: decoded.scope,
+            projectId: decoded.project ?? "",
+            tier: "log",
+            path: "",
+            generationId: "records",
+            contentHash,
+          });
+          await session.flush();
+        }
+        return result;
+      }
 
       const outcome = await host.store.forget({
         root,
@@ -1080,6 +1279,12 @@ export function createMemorySearchTool(
       } catch (error) {
         return refusal(
           `memory_search was refused: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      if (host.records) {
+        return executeRecordsSearchV1(
+          { ...host, records: host.records },
+          value,
         );
       }
       const embed = memoryEmbedderV1(host);
@@ -1367,9 +1572,22 @@ export function createMemoryRuntimeFeature(
     disposers.push(
       runtime.tools.register(createMemorySearchTool(host, projection)),
     );
-    disposers.push(
-      runtime.tools.register(createMemoryRebuildIndexTool(projection)),
-    );
+    if (host.records) {
+      disposers.push(
+        runtime.tools.register(
+          createMemoryExpandTool({ ...host, records: host.records }),
+        ),
+      );
+      disposers.push(
+        runtime.tools.register(
+          createMemoryBrowseTool({ ...host, records: host.records }),
+        ),
+      );
+    } else {
+      disposers.push(
+        runtime.tools.register(createMemoryRebuildIndexTool(projection)),
+      );
+    }
     if (host.writer) {
       const writing = { ...host, writer: host.writer };
       disposers.push(
@@ -1394,7 +1612,7 @@ export function createMemoryRuntimeFeature(
     }
     disposers.push(
       runtime.hooks.add({
-        preStep: async (agent, _inputs, turn, step, next) => {
+        preStep: async (agent, inputs, turn, step, next) => {
           // Once per Turn, at its first step. Memory a Turn writes reaches its
           // own prompt on the next Turn, which is what makes the injected
           // block and the `memory/injected` record describe the same thing.
@@ -1425,15 +1643,141 @@ export function createMemoryRuntimeFeature(
               await agent.session.flush();
             }
           }
+          if (host.records) {
+            const userText =
+              step === 1
+                ? inputs.map((input) => input.text).join("\n")
+                : agent.session.activeRunJournal
+                    .flatMap((event) =>
+                      event.type === "user/message" && event.turn === turn
+                        ? [event.text]
+                        : [],
+                    )
+                    .join("\n");
+            const toolTexts =
+              step === 1
+                ? []
+                : agent.session.activeRunJournal.flatMap((event) =>
+                    event.type === "tool/result" &&
+                    event.turn === turn &&
+                    !event.name.startsWith("memory_")
+                      ? [event.content]
+                      : [],
+                  );
+            const plan = planMemoryRecallV1({
+              userText,
+              toolTexts,
+              state: projection.recallState(),
+              step,
+            });
+            if (plan) {
+              try {
+                await projection.recallForTurn(plan.query, plan.signature);
+              } catch {
+                // A timed-out or failed channel is a partial recall, not a
+                // failed Turn. The model still has its tools.
+              }
+            }
+          }
           return next();
         },
       }),
     );
+    disposers.push(
+      runtime.hooks.add({
+        messageWindow: async (
+          _agent,
+          messages,
+          _turn,
+          _step,
+          _signal,
+          next,
+        ) => {
+          const windowed = await next();
+          if (!host.records) return windowed;
+          return projection.renderMessages(windowed);
+        },
+      }),
+    );
+    if (host.records && host.writer) {
+      const records = host.records;
+      const writer = host.writer;
+      disposers.push(
+        runtime.hooks.add({
+          turnStopping: async (agent, turn) => {
+            const text = agent.session.activeRunJournal
+              .flatMap((event) =>
+                event.type === "user/message" && event.turn === turn
+                  ? [event.text]
+                  : [],
+              )
+              .join("\n")
+              .trim()
+              .slice(0, 8_000);
+            if (!text || isControlOnlyMemoryInputV1(text)) return;
+            try {
+              const authority = await authorityOf({
+                owner: host.owner,
+                records,
+                ...(host.projects ? { projects: host.projects } : {}),
+              });
+              records.captureExtraction({
+                authority,
+                scope: productScopeToEngineV1("bot", host.owner),
+                principal: {
+                  userId: host.owner.userId,
+                  botId: host.owner.botId,
+                  actor: "bot",
+                  turnId: writer.turnId,
+                  sessionId: writer.sessionId,
+                  runId: writer.runId,
+                },
+                source: {
+                  sourceId: `${writer.sessionId}:${turn}`,
+                  sourceRevision: writer.runId,
+                  kind: "chat",
+                  locator: {
+                    kind: "chat",
+                    botId: host.owner.botId,
+                    sessionId: writer.sessionId,
+                    runId: writer.runId,
+                    eventSeq: turn,
+                    revision: writer.runId,
+                  },
+                  capturedText: text,
+                },
+              });
+            } catch {
+              // The Turn already settled. The obligation is retried only when
+              // this capture itself committed; a throw here is visible as a
+              // missing job, not a second writer.
+            }
+          },
+        }),
+      );
+    }
     return () => {
       for (const dispose of disposers.toReversed()) dispose();
       projection.invalidate();
     };
   };
+}
+
+function engineScopeName(kind: string): "bot" | "user" | "project" {
+  if (kind === "user") return "user";
+  if (kind === "groupChat") return "project";
+  return "bot";
+}
+
+function memoryScopesForHostV1(
+  owner: MemoryOwnerV1,
+  joined: readonly string[],
+): MemoryScopeRefV1[] {
+  return [
+    productScopeToEngineV1("bot", owner),
+    productScopeToEngineV1("user", owner),
+    ...joined.map((id) => productScopeToEngineV1("project", owner, id)),
+  ];
 }
 
 export default createMemoryRuntimeFeature;

@@ -11,7 +11,6 @@ import type {
 } from "./run-records.js";
 import { storedRunRecordV2 } from "./run-records.js";
 import { storedRunEventFieldsV2 } from "./run-records.js";
-import { repairedSessionLogV1 } from "./run-recovery.js";
 import {
   SessionEventLog,
   type SessionEventLogStorage,
@@ -41,27 +40,52 @@ import {
  */
 function settledEventsV1(
   sessionId: string,
-  previous: readonly SessionEvent[],
   events: readonly SessionEvent[],
-): { events: SessionEvent[]; latestEvents: SessionEvent[] } {
+): SessionEvent[] {
   const decoded = events.map(decodeSessionEvent);
-  const latest = [...previous, ...decoded].map(decodeSessionEvent);
-  let repairs: SessionEvent[] = [];
+  // Close the run's own journal. Repairs continue its absolute sequence.
+  // Older runs stay in the archive; inserting events into them and
+  // renumbering the suffix would change identities that later ranges name.
+  if (decoded.length === 0) return [];
   try {
-    repairs = new Session(sessionId, latest).reconcileInterrupted();
+    const session = new Session(sessionId, decoded);
+    const repairs = session.reconcileInterrupted();
+    return [...decoded, ...repairs];
   } catch {
-    repairs = [];
+    return decoded;
   }
-  const settled = [...latest, ...repairs];
-  // A Turn abandoned earlier in the log cannot be closed by appending, and a
-  // settlement that only appends leaves it open forever. The run's own events
-  // are committed as they stand — that record is this run's account, not the
-  // conversation's — while the forward log is repaired in place so the next
-  // Turn starts on a log that reads as a complete history.
-  return {
-    events: [...decoded, ...repairs],
-    latestEvents: repairedSessionLogV1(sessionId, settled) ?? settled,
-  };
+}
+
+/**
+ * Appends the part of `events` the log does not already hold.
+ *
+ * `events` is the run suffix, numbered from `startSeq`. A flush that already
+ * stored a prefix of that suffix is not written again.
+ */
+async function commitSuffixV1(
+  storage: RunTerminalStorage,
+  sessionId: string,
+  startSeq: number,
+  events: readonly SessionEvent[],
+): Promise<void> {
+  if (events.length === 0) return;
+  const log = new SessionEventLog(storage);
+  const count = await log.eventCount(sessionId);
+  if (count < startSeq) {
+    throw new Error(
+      `session "${sessionId}" is missing events before ${startSeq}`,
+    );
+  }
+  const have = count - startSeq;
+  if (have > events.length) return;
+  const missing = events.slice(have).map(decodeSessionEvent);
+  if (missing.length === 0) return;
+  if (missing[0]!.seq !== count) {
+    throw new Error(
+      `session "${sessionId}" suffix does not continue at ${count}`,
+    );
+  }
+  await log.append(sessionId, missing);
 }
 
 export interface RunTerminalStorage extends SessionEventLogStorage {}
@@ -174,8 +198,7 @@ export async function supersedeStoredRun<Snapshot>(
   if (!run.supersededAt) {
     throw new Error(`run "${runId}" has no durable supersede intent`);
   }
-  const settledEvents = settledEventsV1(run.sessionId, previous, events);
-  const decodedEvents = settledEvents.events;
+  const decodedEvents = settledEventsV1(run.sessionId, events);
   const { responseText: _text, failure: _failure, ...settled } = run;
   // A run superseded while still queued never started, never appended an
   // event, and never spoke: it settles as a record on its own and leaves both
@@ -204,9 +227,11 @@ export async function supersedeStoredRun<Snapshot>(
     }
   }
   if (!queued) {
-    await new SessionEventLog(storage).rewrite(
+    await commitSuffixV1(
+      storage,
       run.sessionId,
-      settledEvents.latestEvents,
+      run.previousEventCount,
+      decodedEvents,
     );
   }
   await storage.put(records);
@@ -231,7 +256,7 @@ export async function completeStoredRun<Snapshot>(
   const run = await hydratedRun(codec, storage, keys.run);
   if (!run) throw new Error(`run "${runId}" was not accepted`);
   const events = result.events.map(decodeSessionEvent);
-  const latestEvents = [...previous, ...events].map(decodeSessionEvent);
+  void previous;
   // Stop outranks supersede: the User asked for this Turn to stop, and a
   // message that arrived after that does not turn their cancellation into
   // something else.
@@ -256,7 +281,12 @@ export async function completeStoredRun<Snapshot>(
       status: "cancelled",
       phase: settled.phase,
     } satisfies StoredRunV1<Snapshot>);
-    await new SessionEventLog(storage).rewrite(run.sessionId, latestEvents);
+    await commitSuffixV1(
+      storage,
+      run.sessionId,
+      run.previousEventCount,
+      events,
+    );
     await storage.put({
       [keys.run]: structuredClone(storedRunRecordV2(cancelled)),
     });
@@ -286,7 +316,7 @@ export async function completeStoredRun<Snapshot>(
       records[key] = structuredClone(value);
     }
   }
-  await new SessionEventLog(storage).rewrite(run.sessionId, latestEvents);
+  await commitSuffixV1(storage, run.sessionId, run.previousEventCount, events);
   await storage.put(records);
   await storage.delete(keys.activeRun);
   return "completed";
@@ -310,9 +340,7 @@ export async function cancelStoredRun<Snapshot>(
   if (!run.stopRequestedAt) {
     throw new Error(`run "${runId}" has no durable stop intent`);
   }
-  const settledEvents = settledEventsV1(run.sessionId, previous, events);
-  const decodedEvents = settledEvents.events;
-  const latestEvents = settledEvents.latestEvents;
+  const decodedEvents = settledEventsV1(run.sessionId, events);
   const { responseText: _text, failure: _failure, ...settled } = run;
   const cancelled = codec.require({
     ...settled,
@@ -320,7 +348,12 @@ export async function cancelStoredRun<Snapshot>(
     status: "cancelled",
     phase: settled.phase,
   } satisfies StoredRunV1<Snapshot>);
-  await new SessionEventLog(storage).rewrite(run.sessionId, latestEvents);
+  await commitSuffixV1(
+    storage,
+    run.sessionId,
+    run.previousEventCount,
+    decodedEvents,
+  );
   await storage.put({
     [keys.run]: structuredClone(storedRunRecordV2(cancelled)),
   });
@@ -366,9 +399,7 @@ export async function failStoredRun<Snapshot>(
       supersededRecords,
     );
   }
-  const settledEvents = settledEventsV1(run.sessionId, previous, events);
-  const decodedEvents = settledEvents.events;
-  const latestEvents = settledEvents.latestEvents;
+  const decodedEvents = settledEventsV1(run.sessionId, events);
   const failed = codec.require({
     ...run,
     ...storedRunEventFieldsV2(run.previousEventCount, decodedEvents),
@@ -391,7 +422,12 @@ export async function failStoredRun<Snapshot>(
     }
     records[key] = structuredClone(value);
   }
-  await new SessionEventLog(storage).rewrite(run.sessionId, latestEvents);
+  await commitSuffixV1(
+    storage,
+    run.sessionId,
+    run.previousEventCount,
+    decodedEvents,
+  );
   await storage.put(records);
   if ((await storage.get<string>(keys.activeRun)) === runId) {
     await storage.delete(keys.activeRun);

@@ -7,7 +7,6 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
-import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/voice/assistant.dart';
@@ -65,6 +64,8 @@ class Harness {
     await controller.start();
     await settle();
     socket.deliver(jsonEncode({'type': 'welcome', 'protocol_version': 1}));
+    await settle();
+    socket.completeOpen();
     socket.deliver(jsonEncode({'type': 'status', 'status': 'listening'}));
     await settle();
   }
@@ -109,7 +110,7 @@ void main() {
         final harness = Harness(diagnostics: false);
         await harness.live();
         await harness.feed(_speech, frames: 4);
-        harness.socket.deliver(Uint8List(320));
+        harness.socket.deliverPcm(List<int>.filled(320, 0));
         await settle();
         await harness.controller.end(reason: 'hang-up');
         expect(harness.lines, isEmpty);
@@ -226,7 +227,7 @@ void main() {
   test('the reply arrives, is fed, and is played, in order', () async {
     final harness = Harness();
     await harness.live();
-    harness.socket.deliver(Uint8List(640));
+    harness.socket.deliverPcm(List<int>.filled(640, 0));
     await settle();
     expect(harness.only('audio.first-down')['bytes'], 640);
     // The speaker's own seam: the controller lent the player a plain

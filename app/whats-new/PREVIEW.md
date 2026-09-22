@@ -2,6 +2,18 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
+## The first words of a call are kept
+
+improvement
+
+Speech at the start of a call is held until the line is ready, then sent in order.
+
+## Replies land as they are sent
+
+improvement
+
+A Bot’s message appears in the thread as soon as it is committed, without waiting for a refresh.
+
 ## A live call is a card
 
 improvement

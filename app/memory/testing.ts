@@ -17,6 +17,7 @@ import type { MemoryProjectsOutcomeV1, MemoryProjectsV1 } from "./projects.js";
 import type { MemoryProjectV1 } from "./render.js";
 import { MemoryStore } from "./store.js";
 import type { MemoryOwnerV1 } from "./roots.js";
+import type { MemoryAuthorityV1 } from "./records.js";
 
 /** The Memory surface, over the same store production uses. */
 export function createTestMemoryFilesV1(options: {
@@ -95,4 +96,18 @@ export function createTestMemoryStoreV1(options: {
     ...(options.botNames ? { botNames: options.botNames } : {}),
     ...(clock ? { clock } : {}),
   });
+}
+
+/** The authority one engine call carries, with membership already resolved. */
+export function createTestMemoryAuthorityV1(
+  overrides: Partial<MemoryAuthorityV1> = {},
+): MemoryAuthorityV1 {
+  return {
+    userId: "user-1",
+    botId: "bot-1",
+    actor: "bot",
+    joinedGroupChatIds: [],
+    membershipRevision: "1",
+    ...overrides,
+  };
 }

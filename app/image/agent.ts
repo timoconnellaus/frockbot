@@ -235,7 +235,7 @@ export function openImageTurnPositionV1(session: Session): {
   turn: number;
   step: number;
 } {
-  const started = session.events.findLast(
+  const started = session.activeRunJournal.findLast(
     (event) => event.type === "step/start",
   );
   if (started?.type !== "step/start") {
@@ -255,7 +255,7 @@ function recordedIntentPositionV1(
   session: Session,
   effectId: string,
 ): { turn: number; step: number } | undefined {
-  const intent = session.events.findLast(
+  const intent = session.activeRunJournal.findLast(
     (event): event is SessionEvent<"image/generate-intent"> =>
       event.type === "image/generate-intent" && event.effectId === effectId,
   );
@@ -263,7 +263,7 @@ function recordedIntentPositionV1(
 }
 
 function alreadyRecorded(session: Session, effectId: string): boolean {
-  return session.events.some(
+  return session.activeRunJournal.some(
     (event) => event.type === "image/generated" && event.effectId === effectId,
   );
 }

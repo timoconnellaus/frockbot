@@ -58,7 +58,7 @@ async function run(
     if (initial) handle.agent.resume();
     else handle.agent.send("hi");
     await handle.agent.whenIdle();
-    return [...handle.agent.session.events];
+    return [...handle.agent.session.activeRunJournal];
   } finally {
     await loop.dispose();
     await root.dispose();

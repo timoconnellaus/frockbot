@@ -123,6 +123,12 @@ class ChatController extends ChangeNotifier {
   /// otherwise.
   String? focusRunId;
   final Map<String, Map<String, dynamic>> _runs = {};
+  /// Publication envelope restored with the page cache. A reconnect presents
+  /// both, never a later cursor against an older page.
+  String? publicationEpoch;
+  String? publicationCursor;
+  int _syncGeneration = 0;
+  final Map<String, int> _entityRevision = {};
   List<Map<String, dynamic>> get runs => _runs.values.toList()
     ..sort(
       (a, b) =>
@@ -227,12 +233,15 @@ class ChatController extends ChangeNotifier {
     }
     before = cached.before;
     _cachedCursor = before != null;
+    announcements = cached.announcements;
+    publicationEpoch = cached.epoch;
+    publicationCursor = cached.cursor;
   }
 
   bool _initialized = false;
   bool _cachedCursor = false;
   final Set<String> _cachedRunIds = {};
-  Future<void> initialize() async {
+  Future<void> initialize({bool liveChannel = false}) async {
     if (_initialized) return;
     _initialized = true;
     final snapshot = store is SnapshotStore ? store as SnapshotStore : null;
@@ -252,7 +261,7 @@ class ChatController extends ChangeNotifier {
       }
       ready = true;
       changed();
-      await refresh();
+      if (!liveChannel) await refresh();
       if (pending.isNotEmpty) await checkDelivery();
       // A stored Stop is observed, never dispatched merely because the app opened.
     } catch (_) {
@@ -356,6 +365,146 @@ class ChatController extends ChangeNotifier {
     }
   }
 
+  /// Applies one committed state-channel frame. Ordinary replies land here
+  /// without a transcript GET. A snapshot replaces the live page; an older
+  /// GET never overwrites a newer live revision.
+  Future<void> applyFrame(Map<String, dynamic> frame) async {
+    if (_disposed) return;
+    final type = frame['type'] as String?;
+    final generation = _syncGeneration;
+    if (type == 'state/snapshot') {
+      _syncGeneration += 1;
+      _applySnapshot(frame);
+    } else if (type == 'state/update') {
+      _applyUpdate(frame);
+    } else {
+      return;
+    }
+    if (_disposed || generation > _syncGeneration) return;
+    await _persistEnvelope();
+    changed();
+    if (pending.isNotEmpty && !sending) await checkDelivery();
+  }
+
+  void _applySnapshot(Map<String, dynamic> frame) {
+    final conversation = Map<String, dynamic>.from(frame['conversation'] as Map);
+    for (final id in _cachedRunIds) {
+      _runs.remove(id);
+    }
+    _cachedRunIds.clear();
+    _entityRevision.clear();
+    for (final run in conversation['runs'] as List? ?? const []) {
+      _put(Map<String, dynamic>.from(run as Map));
+    }
+    announcements = (conversation['announcements'] as List?) ?? const [];
+    before = ((conversation['page'] as Map?)?['nextCursor']) as String?;
+    _cachedCursor = false;
+    publicationEpoch = frame['epoch'] as String?;
+    publicationCursor = frame['cursor'] as String?;
+    if (!_disposed) invalidations.value++;
+  }
+
+  void _applyUpdate(Map<String, dynamic> frame) {
+    final entityId = frame['entityId'] as String?;
+    final revision = frame['revision'];
+    if (entityId != null && revision is int) {
+      final seen = _entityRevision[entityId];
+      if (seen != null && revision <= seen) return;
+      _entityRevision[entityId] = revision;
+    }
+    publicationEpoch = frame['epoch'] as String? ?? publicationEpoch;
+    publicationCursor = frame['cursor'] as String? ?? publicationCursor;
+    final kind = frame['kind'] as String?;
+    final payload = frame['payload'];
+    if (kind == 'run-status' && payload is Map && payload['run'] is Map) {
+      _put(Map<String, dynamic>.from(payload['run'] as Map));
+      return;
+    }
+    if (kind == 'message' && payload is Map) {
+      _applyMessage(Map<String, dynamic>.from(payload));
+      return;
+    }
+    if (kind == 'announcement' &&
+        payload is Map &&
+        payload['announcement'] != null) {
+      _upsertAnnouncement(payload['announcement']);
+      return;
+    }
+    if (kind == 'card-revision' && payload is Map) {
+      if (!_disposed) invalidations.value++;
+      return;
+    }
+  }
+
+  void _applyMessage(Map<String, dynamic> payload) {
+    final runId = payload['runId'] as String?;
+    final event = payload['event'];
+    if (runId == null || event is! Map) return;
+    final send = Map<String, dynamic>.from(event);
+    final existing = _runs[runId];
+    if (existing == null) {
+      _runs[runId] = {
+        'runId': runId,
+        'sessionId': payload['sessionId'],
+        'admittedAt': DateTime.now().toUtc().toIso8601String(),
+        'input': '',
+        'status': 'running',
+        'events': [send],
+      };
+      return;
+    }
+    final events = [
+      for (final item in (existing['events'] as List?) ?? const [])
+        Map<String, dynamic>.from(item as Map),
+    ];
+    final ordinal = send['ordinal'];
+    final index = events.indexWhere(
+      (item) => item['type'] == 'send/to-user' && item['ordinal'] == ordinal,
+    );
+    if (index >= 0) {
+      events[index] = send;
+    } else {
+      events.add(send);
+      events.sort(
+        (left, right) => ((left['ordinal'] as int?) ?? 0).compareTo(
+          (right['ordinal'] as int?) ?? 0,
+        ),
+      );
+    }
+    _runs[runId] = {...existing, 'events': events};
+  }
+
+  void _upsertAnnouncement(Object? announcement) {
+    if (announcement is! Map) return;
+    final id = announcement['announcementId'];
+    final next = [...announcements];
+    final index = next.indexWhere(
+      (item) => item is Map && item['announcementId'] == id,
+    );
+    if (index >= 0) {
+      next[index] = announcement;
+    } else {
+      next.add(announcement);
+    }
+    announcements = next;
+  }
+
+  Future<void> _persistEnvelope() async {
+    await writePageCache(
+      store,
+      userId,
+      botId,
+      [
+        for (final run in runs)
+          if (!_optimisticRunIds.contains(run['runId'])) run,
+      ],
+      before,
+      epoch: publicationEpoch,
+      cursor: publicationCursor,
+      announcements: announcements,
+    );
+  }
+
   Future<void> _refreshQueue = Future.value();
   Future<void> refresh({bool older = false}) {
     // A newer observer event must fetch after any in-flight stale request.
@@ -380,7 +529,9 @@ class ChatController extends ChangeNotifier {
         _cachedRunIds.clear();
       }
       for (final run in page['runs'] as List) {
-        _put(Map<String, dynamic>.from(run as Map));
+        final row = Map<String, dynamic>.from(run as Map);
+        if (older && _runs.containsKey(row['runId'])) continue;
+        _put(row);
       }
       if (!older) announcements = (page['announcements'] as List?) ?? const [];
       if (older || before == null || _cachedCursor) {
@@ -392,12 +543,7 @@ class ChatController extends ChangeNotifier {
       {
         // Never the rows this client drew for itself: a cache that holds one
         // reopens the conversation with a Turn that may never have existed.
-        unawaited(
-          writePageCache(store, userId, botId, [
-            for (final run in runs)
-              if (!_optimisticRunIds.contains(run['runId'])) run,
-          ], before),
-        );
+        unawaited(_persistEnvelope());
       }
     } finally {
       loading = false;

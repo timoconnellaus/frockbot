@@ -60,6 +60,7 @@ class Harness {
     await controller.start();
     await settle();
     socket.deliver(jsonEncode({'type': 'welcome', 'protocol_version': 1}));
+    await settle();
     socket.deliver(
       jsonEncode({
         'type': 'audio_config',
@@ -67,6 +68,7 @@ class Harness {
         'sampleRate': 24000,
       }),
     );
+    socket.completeOpen();
     socket.deliver(jsonEncode({'type': 'status', 'status': 'listening'}));
     await settle();
   }
@@ -88,13 +90,11 @@ class Harness {
 }
 
 void main() {
-  test('the handshake is welcome, hello, start_call, listening', () async {
+  test('the handshake is welcome, hello, voice/open, listening', () async {
     final harness = Harness();
     await harness.live();
-    expect(harness.texts.take(2), [
-      encodeAssistantHelloV1(),
-      encodeAssistantStartCallV1(),
-    ]);
+    expect(harness.texts.first, encodeAssistantHelloV1());
+    expect(harness.socket.hasOpen(mode: VoiceOpeningModeV1.start), isTrue);
     expect(harness.controller.status, VoiceStatusV1.listening);
     expect(harness.controller.phase, VoiceSessionPhase.live);
     expect(harness.capture.sampleRate, voiceAssistantInputSampleRateV1);
@@ -139,7 +139,7 @@ void main() {
   });
 
   test(
-    'opening audio is held until start_call and then drained in order',
+    'opening audio is held until voice/ready and then drained in order',
     () async {
       final deferred = Completer<VoiceSocket>();
       final harness = Harness(deferred: deferred);
@@ -150,16 +150,39 @@ void main() {
 
       deferred.complete(harness.socket);
       await settle();
-      expect(harness.audioCount, 0, reason: 'nothing goes before start_call');
+      expect(harness.audioCount, 0, reason: 'nothing goes before voice/open');
 
       harness.socket.deliver(
         jsonEncode({'type': 'welcome', 'protocol_version': 1}),
       );
       await settle();
+      expect(harness.audioCount, 0, reason: 'held until voice/ready');
+      harness.socket.completeOpen();
+      await settle();
       expect(harness.socket.audioMarks, [1, 2, 3]);
       harness.controller.dispose();
     },
   );
+
+  test('opening overflow fails with an explicit retry', () async {
+    final deferred = Completer<VoiceSocket>();
+    final harness = Harness(deferred: deferred);
+    unawaited(harness.controller.start());
+    await settle();
+    harness.capture.emit(
+      AudioFrame(Uint8List(voiceAssistantOpeningBufferBytesV1), _speech, 0),
+    );
+    await settle();
+    expect(harness.controller.phase, isNot(VoiceSessionPhase.error));
+    harness.capture.emit(AudioFrame(Uint8List(2), _speech, 40));
+    await settle();
+    expect(harness.controller.phase, VoiceSessionPhase.error);
+    expect(
+      harness.controller.error,
+      voiceOpeningFailMessage(VoiceOpeningFailCodeV1.overflow),
+    );
+    harness.controller.dispose();
+  });
 
   test('an awake upstream gets a frame every 40 ms, pauses and all', () async {
     final harness = Harness();
@@ -189,7 +212,7 @@ void main() {
     await settle();
     await harness.feed(_quiet, 200);
     expect(harness.audioCount, spoken + 75 + 10);
-    final whileSpeaking = harness.socket.binaries.sublist(spoken + 75 + 5);
+    final whileSpeaking = harness.socket.pcmPayloads.sublist(spoken + 75 + 5);
     expect(whileSpeaking, everyElement(everyElement(0)));
     harness.controller.dispose();
   });
@@ -218,10 +241,17 @@ void main() {
         .whereType<Uint8List>()
         .skip(before);
     expect(beforeInterrupt, isNotEmpty);
-    expect(beforeInterrupt, everyElement(isNot(everyElement(0))));
+    final beforePcm = [
+      for (final frame in beforeInterrupt)
+        decodeVoiceAssistantPcmEnvelopeV1(frame)?.pcm ?? frame,
+    ];
+    expect(beforePcm, everyElement(isNot(everyElement(0))));
     final real = frames.sublist(interruptAt + 1).whereType<Uint8List>();
     expect(real, isNotEmpty);
-    final marks = [for (final frame in real) frame.first];
+    final marks = [
+      for (final frame in real)
+        (decodeVoiceAssistantPcmEnvelopeV1(frame)?.pcm ?? frame).first,
+    ];
     expect(marks, everyElement(isNot(0)));
     for (var i = 1; i < marks.length; i++) {
       expect(marks[i], (marks[i - 1] + 1) % 251, reason: 'frame $i');
@@ -253,7 +283,7 @@ void main() {
       expect(harness.player.interrupts, 0);
       expect(harness.texts, isNot(contains(encodeAssistantInterruptV1())));
       expect(
-        harness.socket.binaries.sublist(before),
+        harness.socket.pcmPayloads.sublist(before),
         everyElement(everyElement(0)),
       );
 
@@ -262,7 +292,7 @@ void main() {
       final afterPlayback = harness.audioCount;
       await harness.feed(_speech, 80);
       expect(
-        harness.socket.binaries.sublist(afterPlayback),
+        harness.socket.pcmPayloads.sublist(afterPlayback),
         everyElement(isNot(everyElement(0))),
       );
       harness.controller.dispose();
@@ -290,11 +320,11 @@ void main() {
 
       final before = harness.audioCount;
       await harness.feed(0.3, 200);
-      final wake = harness.socket.sent.indexOf(encodeVoiceWakeV1());
-      expect(wake, greaterThanOrEqualTo(0), reason: 'the onset wakes it');
-      final replayed = harness.socket.sent
-          .sublist(wake + 1)
-          .whereType<Uint8List>();
+      expect(harness.socket.hasOpen(mode: VoiceOpeningModeV1.wake), isTrue);
+      expect(harness.audioCount, before, reason: 'held until voice/ready');
+      harness.socket.completeOpen();
+      await settle();
+      final replayed = harness.socket.pcmPayloads.sublist(before);
       expect(replayed, isNotEmpty);
       expect(replayed, everyElement(everyElement(0)));
       // The cadence is unmoved: silence takes the bytes' place, no frame is
@@ -317,7 +347,7 @@ void main() {
       final before = harness.audioCount;
       await harness.feed(_quiet, 200);
       expect(
-        harness.socket.binaries.sublist(before),
+        harness.socket.pcmPayloads.sublist(before),
         everyElement(everyElement(0)),
       );
       harness.player.level = 0;
@@ -504,7 +534,7 @@ void main() {
     final harness = Harness();
     await harness.live();
     harness.controller.pause();
-    expect(harness.texts, contains(encodeVoiceSleepV1(paused: true)));
+    expect(harness.socket.hasControl(VoiceControlActionV1.pause), isTrue);
     expect(harness.controller.paused, isTrue);
     expect(harness.controller.asleep, isTrue);
 
@@ -529,7 +559,7 @@ void main() {
       await harness.live();
       expect(harness.capture.starts, 1);
       await harness.controller.leaveForeground();
-      expect(harness.texts, contains(encodeVoiceSleepV1(paused: true)));
+      expect(harness.socket.hasControl(VoiceControlActionV1.pause), isTrue);
       expect(harness.controller.paused, isTrue);
       expect(harness.controller.asleep, isTrue);
       expect(harness.controller.active, isTrue);
@@ -557,7 +587,7 @@ void main() {
       await harness.controller.enterForeground();
       await settle();
       expect(harness.controller.paused, isFalse);
-      expect(harness.texts, contains(encodeVoiceWakeV1()));
+      expect(harness.socket.hasOpen(mode: VoiceOpeningModeV1.wake), isTrue);
       expect(harness.capture.starts, 2);
       expect(harness.capture.active, isTrue);
       expect(harness.socket.closed, isFalse);
@@ -578,10 +608,7 @@ void main() {
       await harness.controller.enterForeground();
       await settle();
       expect(harness.controller.paused, isTrue);
-      expect(
-        harness.texts.where((text) => text == encodeVoiceWakeV1()),
-        isEmpty,
-      );
+      expect(harness.socket.openCount(mode: VoiceOpeningModeV1.wake), 0);
       expect(harness.capture.starts, 2);
       harness.controller.dispose();
     },
@@ -605,6 +632,8 @@ void main() {
       await harness.controller.enterForeground();
       await settle();
       next.deliver(jsonEncode({'type': 'welcome', 'protocol_version': 1}));
+      await settle();
+      next.completeOpen();
       next.deliver(
         jsonEncode({
           'type': 'audio_config',
@@ -614,8 +643,8 @@ void main() {
       );
       next.deliver(jsonEncode({'type': 'status', 'status': 'listening'}));
       await settle();
-      expect(next.texts, contains(encodeAssistantStartCallV1()));
-      expect(next.texts, contains(encodeVoiceWakeV1()));
+      expect(next.hasOpen(mode: VoiceOpeningModeV1.rejoin), isTrue);
+      expect(next.hasOpen(mode: VoiceOpeningModeV1.wake), isTrue);
       expect(harness.controller.paused, isFalse);
       expect(harness.controller.phase, VoiceSessionPhase.live);
       expect(harness.controller.endedLine, isNull);
@@ -637,16 +666,17 @@ void main() {
     expect(harness.controller.endedLine, isNull);
 
     next.deliver(jsonEncode({'type': 'welcome', 'protocol_version': 1}));
+    await settle();
+    next.completeOpen(paused: true);
     next.deliver(jsonEncode({'type': 'status', 'status': 'listening'}));
     await settle();
-    expect(next.texts, contains(encodeAssistantStartCallV1()));
-    expect(next.texts, contains(encodeVoiceSleepV1(paused: true)));
+    expect(next.hasOpen(mode: VoiceOpeningModeV1.rejoin, paused: true), isTrue);
     expect(harness.controller.paused, isTrue);
     expect(harness.controller.active, isTrue);
     harness.controller.dispose();
   });
 
-  test('hanging up after a dropped pause still sends end_call', () async {
+  test('hanging up after a dropped pause still sends hang-up', () async {
     final harness = Harness();
     await harness.live();
     final next = FakeVoiceSocket();
@@ -655,11 +685,13 @@ void main() {
     await harness.socket.finish();
     await settle();
     next.deliver(jsonEncode({'type': 'welcome', 'protocol_version': 1}));
+    await settle();
+    next.completeOpen(paused: true);
     next.deliver(jsonEncode({'type': 'status', 'status': 'listening'}));
     await settle();
 
     await harness.controller.end(reason: 'end-button');
-    expect(next.texts, contains(encodeAssistantEndCallV1()));
+    expect(next.hasControl(VoiceControlActionV1.end), isTrue);
     expect(harness.controller.phase, VoiceSessionPhase.ended);
     expect(harness.controller.endedLine, isNull);
     harness.controller.dispose();
@@ -671,13 +703,15 @@ void main() {
     await harness.feed(_quiet, 121000);
     expect(harness.controller.asleep, isTrue);
     final beforeWake = harness.audioCount;
-    final wakeIndex = harness.socket.sent.length;
 
     // Three frames: the third is the verified onset that wakes it.
     await harness.feed(_speech, 120);
     expect(harness.controller.asleep, isFalse);
     // The wake goes out before any audio does.
-    expect(harness.socket.sent[wakeIndex], encodeVoiceWakeV1());
+    expect(harness.socket.hasOpen(mode: VoiceOpeningModeV1.wake), isTrue);
+    expect(harness.audioCount, beforeWake, reason: 'held until voice/ready');
+    harness.socket.completeOpen();
+    await settle();
     // 500 ms of pre-roll at 40 ms, ending with the frame that woke it.
     expect(harness.audioCount - beforeWake, 13);
 
@@ -712,12 +746,15 @@ void main() {
       await harness.feed(_speech, 400);
       expect(harness.controller.asleep, isTrue);
       expect(harness.audioCount, before);
-      expect(harness.texts, isNot(contains(encodeVoiceWakeV1())));
+      expect(harness.socket.openCount(mode: VoiceOpeningModeV1.wake), 0);
 
       classifier.score = 0.9;
       await harness.feed(_quiet, 120);
       expect(harness.controller.asleep, isFalse);
-      expect(harness.texts, contains(encodeVoiceWakeV1()));
+      expect(harness.socket.hasOpen(mode: VoiceOpeningModeV1.wake), isTrue);
+      expect(harness.audioCount, before, reason: 'held until voice/ready');
+      harness.socket.completeOpen();
+      await settle();
       expect(harness.audioCount, greaterThan(before));
       harness.controller.dispose();
     },
@@ -730,26 +767,36 @@ void main() {
     final beforeMute = harness.audioCount;
 
     harness.controller.setMuted(true);
-    expect(harness.texts, contains(encodeVoiceMuteV1(true)));
+    expect(
+      harness.socket.hasControl(VoiceControlActionV1.mute, muted: true),
+      isTrue,
+    );
     await harness.feed(_speech, 400);
     expect(harness.audioCount, beforeMute);
     expect(harness.controller.muted, isTrue);
 
     harness.controller.setMuted(false);
-    expect(harness.texts, contains(encodeVoiceMuteV1(false)));
+    expect(
+      harness.socket.hasControl(VoiceControlActionV1.mute, muted: false),
+      isTrue,
+    );
     await harness.feed(_quiet, 400);
     expect(harness.audioCount, beforeMute, reason: 'silence does not wake it');
 
     await harness.feed(_speech, 200);
+    expect(harness.socket.hasOpen(mode: VoiceOpeningModeV1.wake), isTrue);
+    expect(harness.audioCount, beforeMute, reason: 'held until voice/ready');
+    harness.socket.completeOpen();
+    await settle();
     expect(harness.audioCount, greaterThan(beforeMute));
-    expect(harness.texts.where((t) => t == encodeVoiceWakeV1()).length, 1);
+    expect(harness.socket.openCount(mode: VoiceOpeningModeV1.wake), 1);
     harness.controller.dispose();
   });
 
   test('playback_interrupt drops everything the speaker holds', () async {
     final harness = Harness();
     await harness.live();
-    harness.socket.deliver([1, 2, 3, 4]);
+    harness.socket.deliverPcm([1, 2, 3, 4]);
     await settle();
     expect(harness.player.written, hasLength(1));
 
@@ -849,11 +896,11 @@ void main() {
     harness.controller.dispose();
   });
 
-  test('ending says end_call and takes everything down', () async {
+  test('ending says hang-up and takes everything down', () async {
     final harness = Harness();
     await harness.live();
     await harness.controller.end(reason: 'lifecycle:paused');
-    expect(harness.texts.last, encodeAssistantEndCallV1());
+    expect(harness.socket.hasControl(VoiceControlActionV1.end), isTrue);
     expect(harness.controller.phase, VoiceSessionPhase.ended);
     // The person's own end has nothing to explain: their surface is going
     // away, and the line about the call ending is only for one nobody asked
@@ -975,7 +1022,10 @@ void main() {
       expect(harness.controller.muted, isTrue);
       expect(harness.controller.userMuted, isFalse);
       // The transcriber is billed by the second, so it sleeps for the loan.
-      expect(harness.texts, contains(encodeVoiceMuteV1(true)));
+      expect(
+        harness.socket.hasControl(VoiceControlActionV1.mute, muted: true),
+        isTrue,
+      );
       expect(
         harness.capture.stops,
         1,
@@ -986,12 +1036,18 @@ void main() {
       await harness.controller.holdMicrophone(false);
       await settle();
       expect(harness.controller.muted, isFalse);
-      expect(harness.texts, contains(encodeVoiceMuteV1(false)));
+      expect(
+        harness.socket.hasControl(VoiceControlActionV1.mute, muted: false),
+        isTrue,
+      );
       expect(harness.capture.starts, 2, reason: 'the stream is reopened');
       expect(harness.capture.active, isTrue);
 
       // And the resubscribed stream actually reaches the wire again.
       await harness.feed(_speech, 200);
+      expect(harness.socket.hasOpen(mode: VoiceOpeningModeV1.wake), isTrue);
+      harness.socket.completeOpen();
+      await settle();
       expect(harness.audioCount, greaterThan(beforeHold));
       harness.controller.dispose();
     });
@@ -1001,8 +1057,7 @@ void main() {
       await harness.live();
       harness.controller.setMuted(true);
       await settle();
-      final announced = harness.texts.where((t) => t.contains('voice/mute'));
-      expect(announced, [encodeVoiceMuteV1(true)]);
+      expect(harness.socket.muteAnnouncements, [true]);
 
       await harness.controller.holdMicrophone(true);
       await harness.controller.holdMicrophone(false);
@@ -1010,8 +1065,8 @@ void main() {
 
       expect(harness.controller.muted, isTrue);
       expect(harness.controller.userMuted, isTrue);
-      expect(harness.texts.where((t) => t.contains('voice/mute')), [
-        encodeVoiceMuteV1(true),
+      expect(harness.socket.muteAnnouncements, [
+        true,
       ], reason: 'nothing was ever unmuted on their behalf');
       final beforeFrames = harness.audioCount;
       await harness.feed(_speech, 400);
@@ -1023,7 +1078,10 @@ void main() {
       final harness = Harness();
       await harness.live();
       await harness.controller.holdMicrophone(true);
-      expect(harness.texts, contains(encodeVoiceMuteV1(true)));
+      expect(
+        harness.socket.hasControl(VoiceControlActionV1.mute, muted: true),
+        isTrue,
+      );
 
       // The person reaches for the toggle while the microphone is lent out.
       harness.controller.setMuted(true);
@@ -1032,8 +1090,8 @@ void main() {
 
       expect(harness.controller.muted, isTrue);
       expect(
-        harness.texts.where((t) => t == encodeVoiceMuteV1(false)),
-        isEmpty,
+        harness.socket.hasControl(VoiceControlActionV1.mute, muted: false),
+        isFalse,
       );
       expect(harness.capture.active, isFalse);
       harness.controller.dispose();

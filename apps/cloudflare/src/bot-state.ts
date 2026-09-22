@@ -8,6 +8,8 @@ import {
 import { cleanNotificationTestState } from "./notification-state-cleanup.js";
 import { cleanHiddenBotNotifications } from "./hidden-bot-notifications-cleanup.js";
 import { cleanRetiredRoutineStateV1 } from "./routine-state-cleanup.js";
+import { cleanUnpreparedRunsV1 } from "./prepared-input-cleanup.js";
+import { cleanUndecodableSkillIndexesV1 } from "./skill-index-cleanup.js";
 import {
   messageIdV1,
   visibleMessageRecordsV1,
@@ -25,6 +27,12 @@ import {
 import type { PushUpdate } from "./push.js";
 import { cleanIncidentTestChatsV1 } from "./test-chat-cleanup.js";
 import { cleanBotAvatarTestState } from "./avatar-state-cleanup.js";
+import { cleanBotProfileMirrorTestState } from "./directory-profile-cleanup.js";
+import { cleanRetiredPublicationStateV1 } from "./publication-state-cleanup.js";
+import {
+  deliverProfileMirrorV1,
+  PROFILE_MIRROR_KEY_V1,
+} from "@frockbot/app/flock/profile-mirror";
 import { DurableObject } from "cloudflare:workers";
 import {
   BotStateChannel,
@@ -263,8 +271,20 @@ import {
 } from "@frockbot/app/machine/delivery";
 import {
   createDurableWorkspaceFilesV1,
+  createR2ObjectBucketV1,
   deleteBotWorkspaceRootsV1,
 } from "./workspace.js";
+import {
+  publishWorkspaceSkillGenerationV1,
+  readDurableSkillIndexV1,
+} from "@frockbot/app/skills/index-store";
+import { decodeSkillMetadataIndexV1 } from "@frockbot/app/skills/metadata-index";
+import { reseedInstructionRootV1 } from "@frockbot/app/skills/reseed";
+import {
+  workspaceObjectPrefixV1,
+  type WorkspaceGenerationPublicationV1,
+} from "@frockbot/core/workspace-store";
+import { cleanRetiredMemoryFactObjectsV1 } from "@frockbot/app/memory/cleanup";
 import type { ClientWorkspaceFileV1 } from "./contracts.js";
 import {
   DurableWorkspaceGenerations,
@@ -302,6 +322,20 @@ import {
   createUserWorkspaceGenerationsV1,
   type UserMemoryRpc,
 } from "./memory.js";
+import { createMemoryEmbedder } from "@frockbot/app/memory/embeddings";
+import { MemoryRecordsV1 } from "@frockbot/app/memory/owner";
+import { createVectorMemorySearchV1 } from "@frockbot/app/memory/semantic";
+import {
+  createBotMemoryEngineV1,
+  createUserMemoryRecordsRemoteV1,
+  drainDurableMemoryV1,
+  durableObjectHasSqlV1,
+} from "./memory-records.js";
+import type { MemoryEngineV1 } from "@frockbot/app/memory/engine";
+import type {
+  MemoryAiBinding,
+  MemoryVectorIndex,
+} from "@frockbot/app/memory/types";
 import {
   createFrockAiGatewayHostV1,
   type FrockAiGatewayHostV1,
@@ -498,6 +532,7 @@ export class BotState
     WORKSPACE_FILES?: WorkspaceFilesV1;
     MEMORY_WORKSPACE_FILES?: WorkspaceFilesV1;
     MEMORY_PROJECTS?: MemoryProjectsV1;
+    MEMORY_RECORDS?: MemoryRecordsV1;
     MEMORY_CHUNK_INDEX?: MemoryChunkIndexWriterV1;
     WORKSPACE_SYNC_FILES?: WorkspaceFilesV1;
     WORKSPACE_SYNC_EFFECTS?: WorkspaceSyncEffectsV1;
@@ -576,8 +611,59 @@ export class BotState
       await cleanNotificationTestState(this.ctx.storage);
       await cleanHiddenBotNotifications(this.ctx.storage);
       await cleanBotAvatarTestState(this.ctx.storage);
+      await cleanBotProfileMirrorTestState(this.ctx.storage);
       await cleanRetiredRoutineStateV1(this.ctx.storage);
       await cleanBotAppletsV1(this.ctx.storage);
+      await cleanUnpreparedRunsV1(this.ctx.storage);
+      await cleanUndecodableSkillIndexesV1(this.ctx.storage);
+      await cleanRetiredPublicationStateV1(this.ctx.storage);
+      const identity = await this.ctx.storage.get<{
+        userId: string;
+        botId: string;
+      }>(IDENTITY_KEY);
+      if (identity && this.env.MEMORY_FILES) {
+        await reseedInstructionRootV1({
+          storage: this.ctx.storage,
+          bucket: createR2ObjectBucketV1(this.env.MEMORY_FILES),
+          root: {
+            kind: "bot-instructions",
+            userId: identity.userId,
+            botId: identity.botId,
+          },
+          receiptKey: "maintenance:skill-index:bot:2026-09-22",
+        });
+        const bucket = createR2ObjectBucketV1(this.env.MEMORY_FILES);
+        await cleanRetiredMemoryFactObjectsV1(
+          this.ctx.storage,
+          {
+            list: async (options) => {
+              const page = await bucket.list(options);
+              return {
+                keys: page.objects.map((object) => object.key),
+                ...(page.cursor ? { cursor: page.cursor } : {}),
+                truncated: page.truncated,
+              };
+            },
+            delete: (key) => bucket.delete(key),
+          },
+          workspaceObjectPrefixV1({
+            kind: "bot-memory",
+            userId: identity.userId,
+            botId: identity.botId,
+          }),
+        );
+      }
+      if (durableObjectHasSqlV1(this.ctx.storage)) {
+        const memoryDue = createBotMemoryEngineV1(
+          this.ctx.storage,
+        ).nextWakeupAt();
+        if (
+          memoryDue !== undefined &&
+          (await this.ctx.storage.getAlarm()) === null
+        ) {
+          await this.ctx.storage.setAlarm(memoryDue);
+        }
+      }
     });
     this.outboundFetch = dependencies.outboundFetch;
     const emailSender = createBindingEmailSenderV1(
@@ -699,18 +785,17 @@ export class BotState
             env: this.backendEnv,
             outboundFetch: this.outboundFetch,
             messagesCommitted: () => this.ctx.waitUntil(this.drainPush()),
+            deliverPublication: (updates) => {
+              this.stateChannel.broadcastCommitted(updates);
+              return Promise.resolve();
+            },
             runSettled: (runId) => this.projectSettled(requireShell(), runId),
             // The Durable Object owns the kernel authority; the Shell
             // Package supplies only its configuration and Composition
-            // hooks.
-            // The authority writes through the channel's storage facade, so
-            // every committed run write pushes a `runs` invalidation to
-            // attached browsers. The kernel is unaware it is observed.
-            createAuthority: (options) =>
-              new BotDurableAuthority({
-                ...options,
-                state: this.stateChannel.observeRuns(options.state),
-              }),
+            // hooks. Chat delivery is a commit contribution, not a
+            // storage interceptor: an observed write is not proof it
+            // committed.
+            createAuthority: (options) => new BotDurableAuthority(options),
             // The Computer Contribution's projection cache and its share of
             // the authority's one durable alarm, reached through the table
             // once it has mounted.
@@ -742,6 +827,12 @@ export class BotState
                 ? [Date.now() + 30_000]
                 : []),
               ...(await themeAssembleDeadlineV1(transaction)),
+              ...(durableObjectHasSqlV1(this.ctx.storage)
+                ? (() => {
+                    const due = this.memoryEngine().nextWakeupAt();
+                    return due === undefined ? [] : [due];
+                  })()
+                : []),
             ],
             scheduledWorkInFlight: () =>
               mountedContributions
@@ -756,6 +847,8 @@ export class BotState
                 .get(computerBotContribution)
                 ?.settleScheduledWork() ?? Promise.resolve());
               await this.assembleThemeIfDue();
+              await this.deliverProfileMirror();
+              await this.drainMemoryProcessing();
             },
             // An archived Bot admits no configuration command; the Flock
             // Contribution owns that durable lifecycle state.
@@ -870,6 +963,23 @@ export class BotState
     return this.env.USER_CONFIGURATIONS.get(id) as unknown as UserMemoryRpc;
   }
 
+  #memoryEngine: MemoryEngineV1 | undefined;
+
+  private memoryEngine(): MemoryEngineV1 {
+    this.#memoryEngine ??= createBotMemoryEngineV1(this.ctx.storage);
+    return this.#memoryEngine;
+  }
+
+  private async drainMemoryProcessing(): Promise<void> {
+    if (!durableObjectHasSqlV1(this.ctx.storage)) return;
+    await drainDurableMemoryV1(this.memoryEngine(), {
+      ...(this.env.MEMORY_INDEX
+        ? { vectors: this.env.MEMORY_INDEX as MemoryVectorIndex }
+        : {}),
+      ...(this.env.AI ? { ai: this.env.AI as MemoryAiBinding } : {}),
+    });
+  }
+
   /**
    * Builds the Workspace and Memory file surfaces for one identity.
    *
@@ -888,6 +998,54 @@ export class BotState
    * Bot's Durable Object before it runs (§ Computer and Workspace), so an
    * interrupted push is read back rather than repeated.
    */
+  protected async skillIndexLoad(identity: { userId: string; botId: string }) {
+    const storage = this.ctx.storage;
+    const bot = await readDurableSkillIndexV1(storage, {
+      kind: "bot-instructions",
+      userId: identity.userId,
+      botId: identity.botId,
+    });
+    const userStub = this.env.USER_CONFIGURATIONS.get(
+      this.env.USER_CONFIGURATIONS.idFromName(identity.userId),
+    );
+    const user = decodeSkillMetadataIndexV1(
+      await userStub.readSkillIndex({
+        schemaVersion: 1,
+        userId: identity.userId,
+        root: { kind: "user-instructions", userId: identity.userId },
+      }),
+    );
+    return { bot, user, liveBot: bot, liveUser: user };
+  }
+
+  protected instructionPublication(
+    userId: string,
+  ): (event: WorkspaceGenerationPublicationV1) => Promise<void> {
+    const storage = this.ctx.storage;
+    const bucket = this.env.MEMORY_FILES;
+    const objects = createR2ObjectBucketV1(bucket);
+    const user = this.env.USER_CONFIGURATIONS.get(
+      this.env.USER_CONFIGURATIONS.idFromName(userId),
+    );
+    return (event) =>
+      publishWorkspaceSkillGenerationV1({
+        event,
+        userId,
+        storage,
+        bodies: {
+          put: async (key, bytes) => {
+            await objects.put(key, bytes);
+          },
+          get: async (key) => {
+            const object = await objects.get(key);
+            return object ? object.bytes() : undefined;
+          },
+          delete: (key) => objects.delete(key),
+        },
+        user,
+      });
+  }
+
   protected bindSurfaces(identity: { userId: string; botId: string }): void {
     const key = `${identity.userId}\u0000${identity.botId}`;
     if (this.surfacesFor === key) return;
@@ -900,9 +1058,13 @@ export class BotState
     // the Memory and sync surfaces, and only a shared Memory root is routed to
     // the User object.
     const bot = this.workspaceGenerations;
+    const onInstructionPublication = this.instructionPublication(
+      identity.userId,
+    );
     const workspace = createDurableWorkspaceFilesV1(this.env, {
       owner,
       generations: bot,
+      onInstructionPublication,
     });
     const rpc = this.userMemoryRpc(identity.userId);
     const routed = createRoutedWorkspaceGenerationsV1({
@@ -918,6 +1080,7 @@ export class BotState
       owner,
       surface: "sync",
       generations: routed,
+      onInstructionPublication,
     });
     if (workspace) this.backendEnv.WORKSPACE_FILES = workspace;
     if (sync) {
@@ -933,6 +1096,23 @@ export class BotState
         rpc,
         identity,
       );
+    }
+    if (durableObjectHasSqlV1(this.ctx.storage)) {
+      const vectors = this.env.MEMORY_INDEX as MemoryVectorIndex | undefined;
+      const ai = this.env.AI as MemoryAiBinding | undefined;
+      this.backendEnv.MEMORY_RECORDS = new MemoryRecordsV1({
+        owner: "bot",
+        engine: this.memoryEngine(),
+        remote: createUserMemoryRecordsRemoteV1(rpc, identity),
+        ...(vectors && ai
+          ? {
+              semantic: createVectorMemorySearchV1(
+                vectors,
+                createMemoryEmbedder(ai),
+              ),
+            }
+          : {}),
+      });
     }
     // The transcript index is User-scoped state, so its authority is the User
     // Durable Object and this object reaches it through a narrow binding —
@@ -1118,6 +1298,13 @@ export class BotState
       botId: request.botId,
     });
     const receipt = await executeConfiguration(shell.state, request);
+    if (
+      receipt.status === "applied" &&
+      (request.command.type === "bot/update-profile" ||
+        request.command.type === "bot/set-profile")
+    ) {
+      this.ctx.waitUntil(this.deliverProfileMirror().catch(() => undefined));
+    }
     if (request.command.type === "bot/set-package-settings") {
       this.ctx.waitUntil(
         this.assembleTheme({
@@ -1473,6 +1660,35 @@ export class BotState
           document,
         );
       },
+    });
+  }
+
+  /**
+   * Sends the queued profile mirror, if one is due. The alarm path and the
+   * post-commit attempt share this. A miss keeps the record for the alarm.
+   */
+  private async deliverProfileMirror(): Promise<void> {
+    const pending = await this.ctx.storage.get(PROFILE_MIRROR_KEY_V1);
+    if (pending === undefined) return;
+    const identity = await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
+    if (!identity) return;
+    const shell = await this.contribution();
+    await deliverProfileMirrorV1({
+      storage: this.ctx.storage,
+      now: Date.now(),
+      botId: identity.botId,
+      mirror: (profile) =>
+        userConfigurationV1(shell.state, identity).mirrorBotProfile(
+          identity.userId,
+          identity.botId,
+          profile,
+        ),
+      refreshAlarm: (transaction) =>
+        shell.state.authority.refreshRecoveryAlarm(
+          transaction as unknown as Parameters<
+            typeof shell.state.authority.refreshRecoveryAlarm
+          >[0],
+        ),
     });
   }
 
@@ -1864,9 +2080,10 @@ export class BotState
           at: request.command.endedAt,
         },
       });
+      await shell.state.authority.refreshRecoveryAlarm(transaction);
       committed = true;
     });
-    if (committed) this.stateChannel.noticeRuns();
+    if (committed) await shell.state.authority.drainCommittedPublication();
     return { status: "accepted" as const };
   }
 
@@ -2413,10 +2630,6 @@ export class BotState
       identity,
       request.command as CardActionCommandV1,
     );
-    // A Card is part of the transcript, so an attached client is told to read
-    // again the way it is told a Turn moved. The fold happened outside the
-    // authority's own storage, which is what observes run writes.
-    this.stateChannel.noticeRuns();
     return receipt;
   }
 
@@ -2900,6 +3113,98 @@ export class BotState
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
     return revertComposition(shell.state, identity, command);
+  }
+
+  /**
+   * Canonical Memory for the selected Bot. Voice uses this for prepared core,
+   * blocking tools and standing preferences. Membership is filled here.
+   */
+  async operateMemory(input: unknown): Promise<unknown> {
+    if (!input || typeof input !== "object") {
+      throw new Error("memory request is invalid");
+    }
+    const request = input as {
+      schemaVersion?: number;
+      userId?: string;
+      botId?: string;
+      action?: string;
+      request?: unknown;
+    };
+    if (
+      request.schemaVersion !== 1 ||
+      typeof request.userId !== "string" ||
+      typeof request.botId !== "string" ||
+      typeof request.action !== "string"
+    ) {
+      throw new Error("memory request is invalid");
+    }
+    const identity = { userId: request.userId, botId: request.botId };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    const records = this.backendEnv.MEMORY_RECORDS;
+    if (!records) throw new Error("Memory is unavailable");
+    const body = { ...((request.request ?? {}) as Record<string, unknown>) };
+    const projects = this.backendEnv.MEMORY_PROJECTS;
+    const joined = projects ? await projects.joined() : [];
+    const claimed = body.authority;
+    if (claimed && typeof claimed === "object" && !Array.isArray(claimed)) {
+      body.authority = {
+        ...(claimed as Record<string, unknown>),
+        userId: identity.userId,
+        botId: identity.botId,
+        actor:
+          (claimed as { actor?: unknown }).actor === "user" ? "user" : "bot",
+        joinedGroupChatIds: joined.map((project) => project.projectId),
+        membershipRevision:
+          joined
+            .map((project) => project.projectId)
+            .sort()
+            .join(",") || "0",
+      };
+    }
+    switch (request.action) {
+      case "write":
+        return records.write(body as never);
+      case "forget":
+        return records.forget(body as never);
+      case "recall":
+        return records.recall(body as never);
+      case "expand":
+        return records.expand(body as never);
+      case "browse":
+        return records.browse(body as never);
+      case "preparedCore":
+        return records.preparedCore(body as never);
+      case "capture":
+        return records.captureExtraction(body as never);
+      default:
+        throw new Error(`unknown Memory action ${request.action}`);
+    }
+  }
+
+  async readVoiceContext(input: unknown) {
+    if (!input || typeof input !== "object") {
+      throw new Error("voice context request is invalid");
+    }
+    const request = input as {
+      schemaVersion?: number;
+      userId?: string;
+      botId?: string;
+      limit?: number;
+    };
+    if (
+      request.schemaVersion !== 1 ||
+      typeof request.userId !== "string" ||
+      typeof request.botId !== "string"
+    ) {
+      throw new Error("voice context request is invalid");
+    }
+    const identity = { userId: request.userId, botId: request.botId };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return shell.readVoiceContext(
+      typeof request.limit === "number" ? request.limit : 6,
+    );
   }
 
   async listRuns(input: unknown) {

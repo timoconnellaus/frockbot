@@ -8,6 +8,7 @@ import {
   type OwnedBotTurnCommand,
 } from "./authority.ts";
 import { MemoryStorage } from "./memory-storage.fixture.ts";
+import { SessionEventLog } from "./session-event-log.ts";
 import {
   BotTurnExecutionError,
   BotTurnRecoveryRequiredError,
@@ -63,10 +64,7 @@ function probe(
       admitted.push(structuredClone(record(storage, input.command.runId)));
       if (options.evict === input.command.runId)
         throw new BotTurnRecoveryRequiredError([]);
-      const turn =
-        1 +
-        input.previousEvents.filter((event) => event.type === "turn/start")
-          .length;
+      const turn = input.cursor.nextTurn;
       const requestId = crypto.randomUUID();
       requests.push(requestId);
       const fail = options.fail?.has(input.command.runId) ?? false;
@@ -124,7 +122,7 @@ function probe(
         (event, index) =>
           ({
             ...event,
-            seq: input.previousEvents.length + index,
+            seq: input.cursor.nextSeq + index,
             timestamp: input.command.acceptedAt,
           }) as SessionEvent,
       );
@@ -198,10 +196,12 @@ describe("retrying one visible message under a fresh execution identity", () => 
         ),
     ).toBe(true);
     expect(new Set(p.requests).size).toBe(3);
+    expect(p.observed[2]!.journal).toEqual([]);
+    const beforeThird = (
+      await new SessionEventLog(storage).read("user-1:primary")
+    ).filter((event) => event.seq < p.observed[2]!.cursor.nextSeq);
     expect(
-      p.observed[2]!.previousEvents.filter(
-        (event) => event.type === "send/to-user",
-      ),
+      beforeThird.filter((event) => event.type === "send/to-user"),
     ).toHaveLength(2);
     await expect(
       p.authority.run({ ...command("third", "first") }),

@@ -69,7 +69,7 @@ function legacyEvents(): SessionEvent[] {
     { type: "step/end", turn: 1, step: 1, outcome: "completed" },
     { type: "turn/end", turn: 1, outcome: "completed" },
   ]);
-  return [...session.events];
+  return [...session.activeRunJournal];
 }
 
 function legacyRun(events: SessionEvent[]): StoredRunV1<undefined> {
@@ -109,7 +109,7 @@ describe("a near-limit legacy Session in workerd SQLite", () => {
         bootstrapComposition: () => bootstrap(),
         admittedSnapshot: () => Promise.resolve(undefined),
         executeTurn: async (input) => {
-          let seq = input.previousEvents.length;
+          let seq = input.cursor.nextSeq;
           const events: SessionEvent[] = [];
           const persist = async (
             batch: Array<Omit<SessionEvent, "seq" | "timestamp">>,

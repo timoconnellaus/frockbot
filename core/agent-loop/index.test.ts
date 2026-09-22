@@ -180,7 +180,7 @@ describe("AgentLoop", () => {
     await handle.agent.whenIdle();
 
     expect(
-      handle.agent.session.events.filter(
+      handle.agent.session.activeRunJournal.filter(
         (event) => event.type === "model/usage",
       ),
     ).toEqual([
@@ -217,7 +217,7 @@ describe("AgentLoop", () => {
     handle.agent.send("count approximately");
     await handle.agent.whenIdle();
 
-    const usage = handle.agent.session.events.filter(
+    const usage = handle.agent.session.activeRunJournal.filter(
       (event) => event.type === "model/usage",
     );
     expect(usage).toHaveLength(1);
@@ -258,7 +258,7 @@ describe("AgentLoop", () => {
     handle.agent.send("try once");
     await handle.agent.whenIdle();
 
-    const usage = handle.agent.session.events.filter(
+    const usage = handle.agent.session.activeRunJournal.filter(
       (event) => event.type === "model/usage",
     );
     expect(usage).toHaveLength(1);
@@ -271,18 +271,18 @@ describe("AgentLoop", () => {
     if (usage[0]?.type !== "model/usage") throw new Error("usage missing");
     expect(usage[0].inputTokens).toBeGreaterThan(0);
     expect(
-      handle.agent.session.events.find(
+      handle.agent.session.activeRunJournal.find(
         (event) => event.type === "model/request",
       ),
     ).toMatchObject({ request: { requestId: usage[0].requestId } });
     expect(dispatches).toBe(1);
     expect(
-      handle.agent.session.events.filter(
+      handle.agent.session.activeRunJournal.filter(
         (event) => event.type === "model/retry",
       ),
     ).toHaveLength(0);
     expect(
-      handle.agent.session.events.findLast(
+      handle.agent.session.activeRunJournal.findLast(
         (event) => event.type === "turn/end",
       ),
     ).toMatchObject({ type: "turn/end", outcome: "model-error" });
@@ -316,13 +316,13 @@ describe("AgentLoop", () => {
     await handle.agent.whenIdle();
 
     expect(
-      handle.agent.session.events.filter(
+      handle.agent.session.activeRunJournal.filter(
         (event) => event.type === "model/usage",
       ),
     ).toHaveLength(0);
     expect(dispatches).toBe(1);
     expect(
-      handle.agent.session.events.findLast(
+      handle.agent.session.activeRunJournal.findLast(
         (event) => event.type === "turn/end",
       ),
     ).toMatchObject({ type: "turn/end", outcome: "model-error" });
@@ -355,12 +355,12 @@ describe("AgentLoop", () => {
     await handle.agent.whenIdle();
 
     expect(
-      handle.agent.session.events.filter(
+      handle.agent.session.activeRunJournal.filter(
         (event) => event.type === "model/usage",
       ),
     ).toHaveLength(0);
     expect(
-      handle.agent.session.events.findLast(
+      handle.agent.session.activeRunJournal.findLast(
         (event) => event.type === "turn/end",
       ),
     ).toMatchObject({
@@ -416,7 +416,7 @@ describe("AgentLoop", () => {
     await handle.agent.whenIdle();
 
     expect(
-      handle.agent.session.events.find(
+      handle.agent.session.activeRunJournal.find(
         (event) => event.type === "model/response-format-note",
       ),
     ).toMatchObject({
@@ -424,7 +424,7 @@ describe("AgentLoop", () => {
       note: { effective: "prompt" },
     });
     expect(
-      handle.agent.session.events.find(
+      handle.agent.session.activeRunJournal.find(
         (event) => event.type === "model/response-failed",
       ),
     ).toMatchObject({
@@ -432,7 +432,7 @@ describe("AgentLoop", () => {
       failure: { code: "schema-mismatch" },
     });
     expect(
-      handle.agent.session.events.filter(
+      handle.agent.session.activeRunJournal.filter(
         (event) => event.type === "model/usage",
       ),
     ).toEqual([
@@ -443,7 +443,7 @@ describe("AgentLoop", () => {
       }),
     ]);
     expect(
-      handle.agent.session.events.findLast(
+      handle.agent.session.activeRunJournal.findLast(
         (event) => event.type === "turn/end",
       ),
     ).toMatchObject({ type: "turn/end", outcome: "model-error" });
@@ -501,7 +501,7 @@ describe("AgentLoop", () => {
     handle.agent.send("shape the request");
     await handle.agent.whenIdle();
 
-    const recorded = handle.agent.session.events.find(
+    const recorded = handle.agent.session.activeRunJournal.find(
       (event) => event.type === "model/request",
     );
     if (recorded?.type !== "model/request" || !received) {
@@ -536,7 +536,7 @@ describe("AgentLoop", () => {
         intentWasDurable =
           runtime.sessions
             .get("fenced-model")
-            ?.events.some(
+            ?.activeRunJournal.some(
               (event) =>
                 event.type === "model/request" &&
                 event.request.requestId === effect.effectId,
@@ -555,7 +555,7 @@ describe("AgentLoop", () => {
     handle.agent.send("stop before dispatch");
     await handle.agent.whenIdle();
 
-    const request = handle.agent.session.events.find(
+    const request = handle.agent.session.activeRunJournal.find(
       (event) => event.type === "model/request",
     );
     if (request?.type !== "model/request") throw new Error("request missing");
@@ -564,7 +564,7 @@ describe("AgentLoop", () => {
       { kind: "model", effectId: request.request.requestId },
     ]);
     expect(streams).toBe(0);
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "cancelled",
     });
@@ -603,7 +603,7 @@ describe("AgentLoop", () => {
           toolIntentWasDurable =
             runtime.sessions
               .get("fenced-tool")
-              ?.events.some(
+              ?.activeRunJournal.some(
                 (event) =>
                   event.type === "tool/call" &&
                   event.occurrenceId === effect.effectId,
@@ -624,10 +624,10 @@ describe("AgentLoop", () => {
     handle.agent.send("stop before the tool");
     await handle.agent.whenIdle();
 
-    const request = handle.agent.session.events.find(
+    const request = handle.agent.session.activeRunJournal.find(
       (event) => event.type === "model/request",
     );
-    const call = handle.agent.session.events.find(
+    const call = handle.agent.session.activeRunJournal.find(
       (event) => event.type === "tool/call",
     );
     if (request?.type !== "model/request") throw new Error("request missing");
@@ -639,14 +639,14 @@ describe("AgentLoop", () => {
     ]);
     expect(streams).toBe(1);
     expect(executions).toBe(0);
-    expect(handle.agent.session.events).toContainEqual(
+    expect(handle.agent.session.activeRunJournal).toContainEqual(
       expect.objectContaining({
         type: "tool/result",
         occurrenceId: call.occurrenceId,
         status: "interrupted",
       }),
     );
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "cancelled",
     });
@@ -719,7 +719,7 @@ describe("AgentLoop", () => {
     handle.agent.send("Run again");
     await handle.agent.whenIdle();
 
-    const pins = handle.agent.session.events.filter(
+    const pins = handle.agent.session.activeRunJournal.filter(
       (event) => event.type === "composition/pinned",
     );
     expect(pins).toEqual([
@@ -731,7 +731,9 @@ describe("AgentLoop", () => {
       }),
       expect.objectContaining({ type: "composition/pinned", turn: 2 }),
     ]);
-    const types = handle.agent.session.events.map((event) => event.type);
+    const types = handle.agent.session.activeRunJournal.map(
+      (event) => event.type,
+    );
     expect(types.indexOf("composition/pinned")).toBe(
       types.indexOf("turn/start") + 1,
     );
@@ -773,11 +775,13 @@ describe("AgentLoop", () => {
     handle.agent.send("Run the automation");
     await handle.agent.whenIdle();
 
-    const types = handle.agent.session.events.map((event) => event.type);
+    const types = handle.agent.session.activeRunJournal.map(
+      (event) => event.type,
+    );
     expect(types.indexOf("turn/admission")).toBe(
       types.indexOf("composition/pinned") + 1,
     );
-    const admission = handle.agent.session.events.find(
+    const admission = handle.agent.session.activeRunJournal.find(
       (event) => event.type === "turn/admission",
     );
     expect(admission).toMatchObject({
@@ -789,7 +793,7 @@ describe("AgentLoop", () => {
 
     // The recorded request *is* the trimmed catalog, so the Turn stays
     // reconstructable from the log alone.
-    const request = handle.agent.session.events.find(
+    const request = handle.agent.session.activeRunJournal.find(
       (event) => event.type === "model/request",
     );
     if (request?.type !== "model/request") throw new Error("request missing");
@@ -836,7 +840,7 @@ describe("AgentLoop", () => {
     handle.agent.resume();
     await handle.agent.whenIdle();
 
-    const request = handle.agent.session.events.find(
+    const request = handle.agent.session.activeRunJournal.find(
       (event) => event.type === "model/request",
     );
     if (request?.type !== "model/request") throw new Error("request missing");
@@ -847,7 +851,7 @@ describe("AgentLoop", () => {
       "call_dynamic_tool",
     ]);
     expect(
-      handle.agent.session.events.some(
+      handle.agent.session.activeRunJournal.some(
         (event) => event.type === "turn/admission",
       ),
     ).toBe(false);
@@ -889,7 +893,7 @@ describe("AgentLoop", () => {
     await handle.agent.whenIdle();
 
     expect(executions).toBe(0);
-    expect(handle.agent.session.events).toContainEqual(
+    expect(handle.agent.session.activeRunJournal).toContainEqual(
       expect.objectContaining({
         type: "tool/result",
         name: "send_to_user",
@@ -936,18 +940,20 @@ describe("AgentLoop", () => {
 
     expect(streams).toBe(1);
     expect(
-      handle.agent.session.events.filter(
+      handle.agent.session.activeRunJournal.filter(
         (event) => event.type === "model/request",
       ),
     ).toHaveLength(1);
-    const types = handle.agent.session.events.map((event) => event.type);
+    const types = handle.agent.session.activeRunJournal.map(
+      (event) => event.type,
+    );
     expect(types.at(-1)).toBe("turn/end");
     expect(types.at(-2)).toBe("step/end");
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "completed",
     });
-    expect(handle.agent.session.events.at(-2)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-2)).toMatchObject({
       type: "step/end",
       step: 1,
       outcome: "completed",
@@ -1019,11 +1025,11 @@ describe("AgentLoop", () => {
 
     expect(streams).toBe(0);
     expect(
-      handle.agent.session.events.filter(
+      handle.agent.session.activeRunJournal.filter(
         (event) => event.type === "model/request",
       ),
     ).toHaveLength(1);
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "completed",
     });
@@ -1058,14 +1064,16 @@ describe("AgentLoop", () => {
 
     expect(attempts).toBe(1);
     expect(
-      handle.agent.session.events.some((event) => event.type === "turn/end"),
+      handle.agent.session.activeRunJournal.some(
+        (event) => event.type === "turn/end",
+      ),
     ).toBe(false);
 
     handle.agent.resume();
     await handle.agent.whenIdle();
 
     expect(attempts).toBe(2);
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "completed",
     });
@@ -1126,7 +1134,7 @@ describe("AgentLoop", () => {
     await handle.agent.whenIdle();
 
     expect(committed).toEqual(["durable-assistant-request"]);
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "completed",
     });
@@ -1178,14 +1186,14 @@ describe("AgentLoop", () => {
     // The exact request the log carries, sent again under its own id: at most
     // once for a provider that honours the key, and never investigated.
     expect(dispatched).toEqual(["durable-request-1"]);
-    expect(handle.agent.session.events).toContainEqual(
+    expect(handle.agent.session.activeRunJournal).toContainEqual(
       expect.objectContaining({
         type: "assistant/message",
         requestId: "durable-request-1",
         text: "Answered once",
       }),
     );
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "completed",
     });
@@ -1241,7 +1249,7 @@ describe("AgentLoop", () => {
 
     // Two sends of one key. The second `model/request` is what tells every
     // reader of the answer so far that the words before it were abandoned.
-    const timeline = handle.agent.session.events.flatMap((event) =>
+    const timeline = handle.agent.session.activeRunJournal.flatMap((event) =>
       (event.type === "model/request" &&
         event.request.requestId === "partial-request") ||
       (event.type === "assistant/chunk" &&
@@ -1250,7 +1258,7 @@ describe("AgentLoop", () => {
         : [],
     );
     expect(timeline).toEqual(["sent", "A", "sent", "Finished."]);
-    expect(handle.agent.session.events).toContainEqual(
+    expect(handle.agent.session.activeRunJournal).toContainEqual(
       expect.objectContaining({
         type: "assistant/message",
         requestId: "partial-request",
@@ -1289,11 +1297,11 @@ describe("AgentLoop", () => {
     expect(dispatched).toHaveLength(2);
     expect(dispatched[0]).toBe(dispatched[1]);
     expect(
-      handle.agent.session.events.filter(
+      handle.agent.session.activeRunJournal.filter(
         (event) => event.type === "model/request",
       ),
     ).toHaveLength(2);
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "completed",
     });
@@ -1327,7 +1335,7 @@ describe("AgentLoop", () => {
     handle.agent.send("Wait forever.");
     await eventually(() =>
       expect(
-        handle.agent.session.events.some(
+        handle.agent.session.activeRunJournal.some(
           (event) => event.type === "model/request",
         ),
       ).toBe(true),
@@ -1338,12 +1346,12 @@ describe("AgentLoop", () => {
     // The request stays in the log with no answer — it is keyed, so a resume
     // could send it again — and the Turn is closed either way rather than
     // parked on a question nobody can answer.
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "cancelled",
     });
     expect(
-      handle.agent.session.events.some(
+      handle.agent.session.activeRunJournal.some(
         (event) => event.type === "assistant/message",
       ),
     ).toBe(false);
@@ -1370,7 +1378,7 @@ describe("AgentLoop", () => {
     handle.agent.send("Try once.");
     await handle.agent.whenIdle();
 
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "model-error",
       reason: expect.stringContaining("provider rejected before effect"),
@@ -1450,7 +1458,8 @@ describe("AgentLoop", () => {
         typeof (input as { value?: unknown }).value === "string",
       async execute(input, context) {
         const session = runtime.loop.get("general")?.session;
-        toolWasJournaled = session?.events.at(-1)?.type === "tool/call";
+        toolWasJournaled =
+          session?.activeRunJournal.at(-1)?.type === "tool/call";
         toolIntentWasDurable = durableEventTypes.at(-1) === "tool/call";
         const identifiedContext = context as typeof context & {
           agentId: string;
@@ -1482,7 +1491,7 @@ describe("AgentLoop", () => {
     runtime.hooks.add({
       turnStopping: (agent) => {
         turnStoppingSawCompletedJournal =
-          agent.session.events.at(-1)?.type === "turn/end";
+          agent.session.activeRunJournal.at(-1)?.type === "turn/end";
         return Promise.resolve();
       },
     });
@@ -1498,7 +1507,7 @@ describe("AgentLoop", () => {
     handle.agent.send("Use the echo tool.");
     await handle.agent.whenIdle();
 
-    const events = handle.agent.session.events;
+    const events = handle.agent.session.activeRunJournal;
     expect(requests).toHaveLength(2);
     expect(toolWasJournaled).toBe(true);
     expect(modelIntentWasDurable).toBe(true);
@@ -1562,7 +1571,7 @@ describe("AgentLoop", () => {
     const session = handle.agent.session;
     await handle.dispose();
     expect(runtime.loop.list()).toEqual([]);
-    expect(session.events.at(-1)?.type).toBe("session/disposed");
+    expect(session.activeRunJournal.at(-1)?.type).toBe("session/disposed");
   });
 
   test("cancels after a re-issued assistant response is durably flushed", async () => {
@@ -1616,18 +1625,18 @@ describe("AgentLoop", () => {
     handle.agent.resume();
     await handle.agent.whenIdle();
 
-    expect(handle.agent.session.events).toContainEqual(
+    expect(handle.agent.session.activeRunJournal).toContainEqual(
       expect.objectContaining({
         type: "assistant/message",
         text: "Recovered answer",
       }),
     );
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "cancelled",
     });
     expect(
-      handle.agent.session.events.filter(
+      handle.agent.session.activeRunJournal.filter(
         (event) => event.type === "turn/end" && event.outcome === "completed",
       ),
     ).toEqual([]);
@@ -1674,7 +1683,9 @@ describe("AgentLoop", () => {
     handle.agent.send("Start an external effect.");
     await eventually(() =>
       expect(
-        handle.agent.session.events.some((event) => event.type === "tool/call"),
+        handle.agent.session.activeRunJournal.some(
+          (event) => event.type === "tool/call",
+        ),
       ).toBe(true),
     );
     handle.agent.cancel();
@@ -1684,14 +1695,14 @@ describe("AgentLoop", () => {
     // the occurrence closes as interrupted and the Turn ends.
     expect(effectId).toBe("tool:1:1:0");
     expect(executions).toBe(1);
-    expect(handle.agent.session.events).toContainEqual(
+    expect(handle.agent.session.activeRunJournal).toContainEqual(
       expect.objectContaining({
         type: "tool/result",
         occurrenceId: "tool:1:1:0",
         status: "interrupted",
       }),
     );
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "cancelled",
     });
@@ -1744,7 +1755,7 @@ describe("AgentLoop", () => {
     await handle.agent.whenIdle();
 
     expect(executions).toBe(0);
-    expect(handle.agent.session.events).toContainEqual(
+    expect(handle.agent.session.activeRunJournal).toContainEqual(
       expect.objectContaining({
         type: "tool/result",
         occurrenceId: "tool:1:1:0",
@@ -1793,7 +1804,7 @@ describe("AgentLoop", () => {
     // to find out what the interrupted call did.
     expect(executed).toEqual(["tool:1:1:0"]);
     expect(modelRequests).toBe(1);
-    expect(handle.agent.session.events).toContainEqual(
+    expect(handle.agent.session.activeRunJournal).toContainEqual(
       expect.objectContaining({
         type: "tool/result",
         occurrenceId: "tool:1:1:0",
@@ -1801,7 +1812,7 @@ describe("AgentLoop", () => {
         status: "completed",
       }),
     );
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "completed",
     });
@@ -1878,19 +1889,19 @@ describe("AgentLoop", () => {
 
     expect(effects).toEqual(["tool:1:1:0"]);
     expect(
-      handle.agent.session.events.filter(
+      handle.agent.session.activeRunJournal.filter(
         (event) =>
           event.type === "tool/call" && event.occurrenceId === "tool:1:1:0",
       ),
     ).toHaveLength(1);
-    expect(handle.agent.session.events).toContainEqual(
+    expect(handle.agent.session.activeRunJournal).toContainEqual(
       expect.objectContaining({
         type: "tool/result",
         occurrenceId: "tool:1:1:0",
         status: "completed",
       }),
     );
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "completed",
     });
@@ -1956,7 +1967,7 @@ describe("AgentLoop", () => {
 
     expect(executions).toEqual(["first"]);
     expect(
-      handle.agent.session.events.flatMap((event) =>
+      handle.agent.session.activeRunJournal.flatMap((event) =>
         (event.type === "tool/call" || event.type === "tool/result") &&
         event.turn === 1
           ? [
@@ -1984,7 +1995,7 @@ describe("AgentLoop", () => {
         status: "interrupted",
       },
     ]);
-    expect(handle.agent.session.events).toContainEqual(
+    expect(handle.agent.session.activeRunJournal).toContainEqual(
       expect.objectContaining({
         type: "turn/end",
         turn: 1,
@@ -1997,7 +2008,7 @@ describe("AgentLoop", () => {
 
     expect(requests).toBe(2);
     expect(executions).toEqual(["first"]);
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       turn: 2,
       outcome: "completed",
@@ -2054,7 +2065,7 @@ describe("AgentLoop", () => {
     handle.agent.send("Use the failing tool.");
     await handle.agent.whenIdle();
 
-    expect(handle.agent.session.events).toContainEqual(
+    expect(handle.agent.session.activeRunJournal).toContainEqual(
       expect.objectContaining({
         type: "tool/result",
         occurrenceId: "tool:1:1:0",
@@ -2125,18 +2136,18 @@ describe("AgentLoop", () => {
     await handle.agent.whenIdle();
 
     expect(
-      handle.agent.session.events.filter(
+      handle.agent.session.activeRunJournal.filter(
         (event) => event.type === "input/admitted",
       ),
     ).toHaveLength(1);
     // Two sends of one key, and exactly one answer.
     expect(
-      handle.agent.session.events.filter(
+      handle.agent.session.activeRunJournal.filter(
         (event) => event.type === "model/request",
       ),
     ).toHaveLength(2);
     expect(
-      handle.agent.session.events.filter(
+      handle.agent.session.activeRunJournal.filter(
         (event) => event.type === "assistant/message",
       ),
     ).toEqual([
@@ -2145,7 +2156,7 @@ describe("AgentLoop", () => {
         requestId: "uncertain-request",
       }),
     ]);
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "completed",
     });
@@ -2230,7 +2241,7 @@ describe("AgentLoop", () => {
 
     expect(toolExecutions).toBe(1);
     expect(modelRequests).toBe(1);
-    expect(handle.agent.session.events).toContainEqual(
+    expect(handle.agent.session.activeRunJournal).toContainEqual(
       expect.objectContaining({
         type: "tool/call",
         occurrenceId: "tool:1:1:0",
@@ -2238,7 +2249,7 @@ describe("AgentLoop", () => {
         input: call.input,
       }),
     );
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "completed",
     });
@@ -2348,7 +2359,7 @@ describe("AgentLoop", () => {
 
     expect(executions).toEqual(["second"]);
     expect(followUpRequests).toBe(1);
-    const journal = handle.agent.session.events.filter(
+    const journal = handle.agent.session.activeRunJournal.filter(
       (event) => event.type === "tool/call" || event.type === "tool/result",
     );
     expect(journal.map((event) => event.occurrenceId)).toEqual([
@@ -2358,7 +2369,7 @@ describe("AgentLoop", () => {
       "tool:1:1:1",
     ]);
     expect(JSON.stringify(journal)).not.toContain("duplicate-provider-id");
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "completed",
     });
@@ -2438,7 +2449,7 @@ describe("AgentLoop", () => {
     await handle.agent.whenIdle();
 
     expect(executions).toBe(0);
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "model-error",
     });
@@ -2536,7 +2547,7 @@ describe("AgentLoop", () => {
 
     expect(modelRequests).toBe(0);
     expect(toolExecutions).toBe(0);
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "model-error",
     });
@@ -2591,11 +2602,11 @@ describe("AgentLoop", () => {
     await handle.agent.whenIdle();
 
     expect(
-      handle.agent.session.events.filter(
+      handle.agent.session.activeRunJournal.filter(
         (event) => event.type === "model/request",
       ),
     ).toHaveLength(1);
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "completed",
     });
@@ -2651,13 +2662,13 @@ describe("AgentLoop", () => {
     await handle.agent.whenIdle();
 
     expect(
-      handle.agent.session.events.filter(
+      handle.agent.session.activeRunJournal.filter(
         (event) =>
           event.type === "step/end" && event.turn === 1 && event.step === 1,
       ),
     ).toHaveLength(1);
     expect(
-      handle.agent.session.events.filter(
+      handle.agent.session.activeRunJournal.filter(
         (event) => event.type === "turn/end" && event.turn === 1,
       ),
     ).toEqual([expect.objectContaining({ outcome: "completed" })]);
@@ -2742,15 +2753,15 @@ describe("AgentLoop", () => {
 
     expect(modelRequests).toBe(1);
     expect(
-      handle.agent.session.events.filter(
+      handle.agent.session.activeRunJournal.filter(
         (event) =>
           event.type === "step/start" && event.turn === 1 && event.step === 2,
       ),
     ).toHaveLength(1);
-    expect(handle.agent.session.events).toContainEqual(
+    expect(handle.agent.session.activeRunJournal).toContainEqual(
       expect.objectContaining({ type: "model/request", turn: 1, step: 2 }),
     );
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "completed",
     });
@@ -2776,7 +2787,7 @@ describe("AgentLoop", () => {
     handle.agent.send("Say hello.");
     await handle.agent.whenIdle();
 
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       turn: 1,
       outcome: "model-error",
@@ -2803,7 +2814,7 @@ describe("AgentLoop", () => {
     handle.agent.send("Say hello.");
     await handle.agent.whenIdle();
 
-    const end = handle.agent.session.events.at(-1);
+    const end = handle.agent.session.activeRunJournal.at(-1);
     expect(end?.type).toBe("turn/end");
     expect(end?.type === "turn/end" ? end.reason : undefined).toBe(
       "x".repeat(500),
@@ -2831,7 +2842,7 @@ describe("AgentLoop", () => {
     handle.agent.send("Say hello.");
     await handle.agent.whenIdle();
 
-    const end = handle.agent.session.events.at(-1);
+    const end = handle.agent.session.activeRunJournal.at(-1);
     expect(end).toMatchObject({ type: "turn/end", outcome: "completed" });
     expect(end && Object.hasOwn(end, "reason")).toBe(false);
   });
@@ -2868,14 +2879,14 @@ describe("AgentLoop", () => {
     handle.agent.send("keep going");
     await handle.agent.whenIdle();
 
-    expect(handle.agent.session.events.at(-1)).toMatchObject({
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "interrupted",
       reason: STEP_LIMIT_REASON_V1,
     });
     // Nothing about the model failed, so the journal reports no model error.
     expect(
-      handle.agent.session.events.some(
+      handle.agent.session.activeRunJournal.some(
         (event) => event.type === "turn/end" && event.outcome === "model-error",
       ),
     ).toBe(false);
@@ -2919,7 +2930,7 @@ describe("AgentLoop", () => {
     expect(writes).toBe(attempts);
     expect(streams).toBe(0);
     expect(
-      handle.agent.session.events.filter(
+      handle.agent.session.activeRunJournal.filter(
         (event) => event.type === "turn/start",
       ),
     ).toHaveLength(1);

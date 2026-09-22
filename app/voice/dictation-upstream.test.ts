@@ -206,10 +206,13 @@ describe("the shared voice frames", () => {
     expect(
       decodeVoiceAssistantClientMessageV1({
         schemaVersion: 1,
-        type: "voice/mute",
-        muted: true,
+        type: "voice/open",
+        attemptId: "2e780bb8-b4e9-42af-a9bc-f3f6aaf37070",
+        mode: "start",
+        paused: false,
+        muted: false,
       }),
-    ).toEqual({ schemaVersion: 1, type: "voice/mute", muted: true });
+    ).toMatchObject({ type: "voice/open", mode: "start" });
     expect(
       decodeVoiceAssistantClientMessageV1({ type: "hello" }),
     ).toBeUndefined();

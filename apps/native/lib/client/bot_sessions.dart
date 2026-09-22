@@ -27,7 +27,7 @@ class BotSession {
   Future<void> start() => _started ??= _start();
 
   Future<void> _start() async {
-    await controller.initialize();
+    await controller.initialize(liveChannel: true);
     if (!disposed) await channel.connect();
   }
 
@@ -71,9 +71,17 @@ class BotSessions {
       store: store,
       key: 'cursor/$userId/$botId',
       botId: botId,
-      invalidate: controller.invalidate,
+      apply: controller.applyFrame,
+      resumeFrom: () => (
+        epoch: controller.publicationEpoch,
+        cursor: controller.publicationCursor,
+      ),
       status: (state) {
         controller.connection = state;
+        if (state == ConnectionState.disconnected &&
+            controller.publicationCursor == null) {
+          unawaited(controller.refresh().catchError((Object _) {}));
+        }
         controller.changed();
       },
     );

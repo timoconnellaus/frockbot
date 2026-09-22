@@ -107,7 +107,7 @@ for (const scenario of cases) {
       });
       handle.agent.send(scenario.input);
       await handle.agent.whenIdle();
-      const events = [...handle.agent.session.events];
+      const events = [...handle.agent.session.activeRunJournal];
       const sends = events.filter((e) => e.type === "send/to-user");
       const calls = modelToolCallsV1(events);
       const messages = sends.flatMap((e) =>

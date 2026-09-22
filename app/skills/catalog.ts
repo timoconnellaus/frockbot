@@ -67,6 +67,11 @@ import {
   SKILL_MAX_REFERENCES,
   SKILL_REFERENCES_DIRECTORY,
 } from "./skill-md.js";
+import {
+  emptySkillMetadataIndexV1,
+  skillIndexPinV1,
+  type SkillMetadataIndexV1,
+} from "./metadata-index.js";
 
 /** The Bot whose instruction root is being loaded, and its User. */
 export interface SkillOwnerV1 {
@@ -138,6 +143,12 @@ export interface SkillReferenceV1 {
   /** Listed the way the Skill's own path is: relative to the root, or synthetic. */
   path: string;
   generationId: string;
+  contentHash?: string;
+  /**
+   * Content-addressed bytes for a Workspace reference. Absent for a reference
+   * whose text already travels in an immutable artifact.
+   */
+  bodyKey?: string;
   /**
    * Who wrote this reference, when it was not this Bot. A reference is an
    * instruction, so it carries the attribution its Skill does: the `SKILL.md`
@@ -190,6 +201,12 @@ export interface LoadedSkillV1 {
   references: SkillReferenceV1[];
   generationId: string;
   contentHash: string;
+  /**
+   * Content-addressed body of a Workspace Skill. Startup leaves `body` empty
+   * and `skill_load` reads this key. Absent when `body` is already the
+   * artifact text.
+   */
+  bodyKey?: string;
 }
 
 export type SkillRefusalKindV1 =
@@ -833,6 +850,145 @@ export function assembleSkillCatalogV1(
  * the catalog, exactly as a tool the host did not mount appears nowhere in
  * the Turn.
  */
+export interface SkillIndexLoadV1 {
+  bot: SkillMetadataIndexV1;
+  user: SkillMetadataIndexV1;
+  liveBot?: SkillMetadataIndexV1;
+  liveUser?: SkillMetadataIndexV1;
+}
+
+/**
+ * Metadata for one admitted index. Does not read a body or list a root.
+ * A missing snapshot is an unavailable source, never the live index.
+ */
+export function skillCatalogFromIndexV1(
+  admitted: SkillMetadataIndexV1,
+  live: SkillMetadataIndexV1,
+  owner: SkillOwnerV1,
+  source: "bot" | "user",
+): SkillSourceResultV1 {
+  const root =
+    source === "user"
+      ? userInstructionRootV1(owner)
+      : botInstructionRootV1(owner);
+  if (admitted.missing || live.deleted) {
+    return {
+      skills: [],
+      refusals: [
+        {
+          path: "",
+          kind: "unreadable",
+          reason: live.deleted
+            ? `the ${source} instruction root was deleted`
+            : `the admitted ${source} skill index is unavailable`,
+        },
+      ],
+    };
+  }
+  const skills: LoadedSkillV1[] = [];
+  const refusals: SkillRefusalV1[] = [];
+  for (const entry of admitted.entries) {
+    const generation = {
+      schemaVersion: 1 as const,
+      generationId: entry.generationId,
+      contentHash: entry.contentHash,
+      size: entry.size,
+      writer: entry.writer,
+      writtenAt: "1970-01-01T00:00:00.000Z",
+    };
+    const pin = skillIndexPinV1(
+      live,
+      root,
+      entry.path,
+      entry.writer,
+      generation,
+    );
+    if (pin === "deleted" || pin === "removed") {
+      refusals.push({
+        path: entry.path,
+        kind: "unreadable",
+        reason:
+          pin === "deleted"
+            ? `the ${source} instruction root was deleted`
+            : "the Skill was removed",
+      });
+      continue;
+    }
+    if (entry.refusal) {
+      refusals.push({
+        path: entry.path,
+        kind: entry.refusal.kind,
+        reason: entry.refusal.reason,
+      });
+      continue;
+    }
+    if (pin === "revoked") {
+      refusals.push({
+        path: entry.path,
+        kind: "authority",
+        reason: `written by a writer who may no longer author an instruction under the ${source} root`,
+      });
+      continue;
+    }
+    const slug = skillSlugFromDocumentPathV1(entry.path);
+    const skillSource = {
+      path: { root, path: entry.path },
+      writer: entry.writer,
+      generation,
+    };
+    skills.push({
+      path: entry.path,
+      source,
+      ...(slug ? { ref: { schemaVersion: 1 as const, source, slug } } : {}),
+      ...(attributionFor(skillSource, owner)
+        ? { by: attributionFor(skillSource, owner) }
+        : {}),
+      name: entry.name ?? "",
+      description: entry.description ?? "",
+      body: "",
+      bodyKey: entry.bodyKey,
+      references: entry.references.map((reference) => {
+        const referenceSource = {
+          path: { root, path: reference.path },
+          writer: reference.writer,
+          generation: {
+            ...generation,
+            generationId: reference.generationId,
+            contentHash: reference.contentHash,
+            size: reference.size,
+            writer: reference.writer,
+          },
+        };
+        return {
+          path: reference.path,
+          generationId: reference.generationId,
+          contentHash: reference.contentHash,
+          bodyKey: reference.bodyKey,
+          ...(attributionFor(referenceSource, owner)
+            ? { by: attributionFor(referenceSource, owner) }
+            : {}),
+        };
+      }),
+      generationId: entry.generationId,
+      contentHash: entry.contentHash,
+    });
+  }
+  if (admitted.revision === live.revision) {
+    for (const pending of live.pending) {
+      if (!isSkillDocumentPathV1(pending.path)) continue;
+      refusals.push({
+        path: pending.path,
+        kind: "unreadable",
+        reason:
+          pending.reason === "ledger-failed"
+            ? "the Skill generation was not recorded, so the previous instructions are not trusted"
+            : "the Skill index is rebuilding for this path",
+      });
+    }
+  }
+  return { skills, refusals };
+}
+
 export async function loadFullSkillCatalogV1(
   reads: WorkspaceReadsV1,
   owner: SkillOwnerV1,
@@ -847,22 +1003,26 @@ export async function loadFullSkillCatalogV1(
      */
     pluginSkills?: readonly PluginSkillContributionV1[];
     caps?: SkillCatalogCapsV1;
+    /**
+     * Admitted metadata for the two instruction roots. Startup reads this and
+     * does not walk the root or open a Skill body. Absent indexes are empty,
+     * not a scan.
+     */
+    indexes?: SkillIndexLoadV1;
   } = {},
 ): Promise<SkillCatalogV1> {
+  // `reads` remains on the signature for the administrative rebuild and the
+  // quota walk. The Turn catalog does not use it.
+  void reads;
   const sources: SkillCatalogSourcesV1 = {};
-  // The two roots are independent; reading them in sequence doubled the wall
-  // clock of a phase that is already on the turn-start path.
-  const roots = skillInstructionRootsV1(owner);
-  const inFlight = createConcurrencyLimiterV1();
-  const loaded = await Promise.all(
-    roots.map(({ source, root }) =>
-      loadSkillCatalogV1(reads, owner, { root, source, inFlight }),
-    ),
-  );
-  for (const [index, { source }] of roots.entries()) {
-    const catalog = loaded[index]!;
-    sources[source] = { skills: catalog.skills, refusals: catalog.refusals };
-  }
+  const indexes = options.indexes ?? {
+    bot: emptySkillMetadataIndexV1(),
+    user: emptySkillMetadataIndexV1(),
+  };
+  const liveBot = indexes.liveBot ?? indexes.bot;
+  const liveUser = indexes.liveUser ?? indexes.user;
+  sources.bot = skillCatalogFromIndexV1(indexes.bot, liveBot, owner, "bot");
+  sources.user = skillCatalogFromIndexV1(indexes.user, liveUser, owner, "user");
   if (options.managed !== false) {
     const withheld = options.withheldManagedSlugs ?? [];
     sources.managed = await loadManagedSkillsV1(

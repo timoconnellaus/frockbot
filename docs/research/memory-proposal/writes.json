@@ -1,0 +1,204 @@
+{
+  "schema_version": 2,
+  "diagram_type": "workflow",
+  "meta": {
+    "title": "Proposed Memory · remember and forget",
+    "locale": "en",
+    "quality_profile": "showcase",
+    "views": [
+      {
+        "id": "accept-change",
+        "label": "1 · Save the change",
+        "focus": ["change", "admit", "records", "visible", "ack"],
+        "note": "Commit the fact or removal with its scope, source and version. Update immediate reads before acknowledging success."
+      },
+      {
+        "id": "index-later",
+        "label": "2 · Index in background",
+        "focus": ["records", "outbox", "embed", "publish", "settle"],
+        "note": "Durable jobs update Vectorize after the write. New facts remain findable through exact lookup until indexed."
+      },
+      {
+        "id": "prevent-stale",
+        "label": "3 · Keep recall current",
+        "focus": ["records", "visible", "publish"],
+        "note": "Recall checks current versions and removals. A stale vector cannot restore a fact the user has forgotten."
+      }
+    ]
+  },
+  "lanes": [
+    {
+      "id": "foreground",
+      "label": "Shared write path · chat and voice"
+    },
+    {
+      "id": "authority",
+      "label": "Durable memory · scoped records and current read views"
+    },
+    {
+      "id": "background",
+      "label": "Background work · recoverable after eviction"
+    }
+  ],
+  "mainPath": ["change", "admit", "records", "visible", "ack"],
+  "nodes": [
+    {
+      "id": "change",
+      "lane": "foreground",
+      "col": 0,
+      "type": "frontend",
+      "label": "Memory change",
+      "sublabel": "Remember / correct / forget",
+      "width": 164
+    },
+    {
+      "id": "admit",
+      "lane": "foreground",
+      "col": 1,
+      "type": "security",
+      "label": "Admit scoped write",
+      "sublabel": "Authority + source + intent",
+      "width": 164
+    },
+    {
+      "id": "records",
+      "lane": "authority",
+      "col": 2,
+      "type": "database",
+      "label": "Commit current truth",
+      "sublabel": "Fact ID + version + removal",
+      "width": 164,
+      "tag": "Bot / User / Project scope"
+    },
+    {
+      "id": "visible",
+      "lane": "authority",
+      "col": 4,
+      "type": "database",
+      "label": "Publish current views",
+      "sublabel": "Core + exact lookup + delta",
+      "width": 164,
+      "tag": "Read your own writes"
+    },
+    {
+      "id": "ack",
+      "lane": "foreground",
+      "col": 5,
+      "type": "frontend",
+      "label": "Acknowledge saved",
+      "sublabel": "Chat and voice see change",
+      "width": 164
+    },
+    {
+      "id": "outbox",
+      "lane": "background",
+      "col": 2,
+      "type": "messagebus",
+      "label": "Durable index job",
+      "sublabel": "Recorded with the change",
+      "width": 164,
+      "tag": "Retries survive eviction"
+    },
+    {
+      "id": "embed",
+      "lane": "background",
+      "col": 3,
+      "type": "backend",
+      "label": "Process changed facts",
+      "sublabel": "Embed upserts; delete by ID",
+      "width": 164
+    },
+    {
+      "id": "publish",
+      "lane": "background",
+      "col": 4,
+      "type": "cloud",
+      "label": "Update Vectorize",
+      "sublabel": "Scoped IDs + source versions",
+      "width": 164,
+      "tag": "Asynchronous mutations"
+    },
+    {
+      "id": "settle",
+      "lane": "background",
+      "col": 5,
+      "type": "database",
+      "label": "Track index progress",
+      "sublabel": "Keep delta until searchable",
+      "width": 164,
+      "tag": "Reject obsolete jobs"
+    }
+  ],
+  "edges": [
+    {
+      "to": "admit",
+      "role": "main",
+      "from": "change"
+    },
+    {
+      "to": "records",
+      "role": "main",
+      "from": "admit"
+    },
+    {
+      "to": "visible",
+      "role": "main",
+      "from": "records",
+      "label": "apply change"
+    },
+    {
+      "to": "ack",
+      "role": "main",
+      "from": "visible",
+      "label": "visible now"
+    },
+    {
+      "to": "outbox",
+      "role": "async",
+      "from": "records",
+      "label": "durable intent"
+    },
+    {
+      "to": "embed",
+      "role": "async",
+      "from": "outbox"
+    },
+    {
+      "to": "publish",
+      "role": "async",
+      "from": "embed"
+    },
+    {
+      "to": "settle",
+      "role": "async",
+      "from": "publish",
+      "label": "confirm progress"
+    }
+  ],
+  "cards": [
+    {
+      "dot": "emerald",
+      "title": "Reliable recall",
+      "items": [
+        "A removal takes effect before vector deletion finishes.",
+        "Exact lookup bridges newly written, unindexed facts."
+      ]
+    },
+    {
+      "dot": "cyan",
+      "title": "Efficient maintenance",
+      "items": [
+        "Index only changed facts; reuse unchanged vectors.",
+        "Optional extraction runs after the reply, with a budget."
+      ]
+    },
+    {
+      "dot": "amber",
+      "title": "Logical contract · proposed",
+      "items": [
+        "Source records may remain in R2; storage is undecided.",
+        "Transaction and publication details still need design."
+      ]
+    }
+  ]
+}

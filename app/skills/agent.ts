@@ -22,7 +22,7 @@
 // It never calls the Computer interface and never wakes a Computer; see the
 // hibernation seam documented in `./catalog.ts`.
 import { latestOpenStepPositionV1 } from "@frockbot/core/contracts";
-import { sha256HexTextV1 } from "@frockbot/core/crypto";
+import { sha256HexBytesV1, sha256HexTextV1 } from "@frockbot/core/crypto";
 import type {
   Session,
   SkillRefV1,
@@ -42,6 +42,7 @@ import {
   countSkillDocumentsV1,
   emptySkillCatalogV1,
   type InvokedSkillV1,
+  type SkillIndexLoadV1,
   loadFullSkillCatalogV1,
   renderInvokedSkillsPromptV1,
   renderSkillCatalogPromptV1,
@@ -51,6 +52,7 @@ import {
   type SkillOwnerV1,
   userInstructionRootV1,
 } from "./catalog.js";
+import { parseSkillDocumentV1 } from "./skill-md.js";
 import type { PluginSkillContributionV1 } from "./plugin.js";
 import { writeSkillDocumentV1, writeSkillReferenceV1 } from "./write.js";
 import {
@@ -101,6 +103,19 @@ export interface SkillsRuntimeHostV1 {
    * would tell the model they were there.
    */
   withheldManagedSlugs?: readonly string[];
+  /**
+   * Admitted Skill metadata and the content-addressed bodies it names.
+   * Absent, the Turn has no Workspace Skills rather than scanning the root.
+   */
+  skillIndexes?: SkillIndexSourceV1;
+}
+
+export interface SkillIndexSourceV1 {
+  load(): Promise<SkillIndexLoadV1>;
+  readBody(
+    bodyKey: string,
+    contentHash: string,
+  ): Promise<Uint8Array | undefined>;
 }
 
 export const sha256HexV1 = sha256HexTextV1;
@@ -139,6 +154,7 @@ export class SkillCatalog {
   #reads: WorkspaceReadsV1;
   #withheldManagedSlugs: readonly string[];
   #pluginSkills: readonly PluginSkillContributionV1[];
+  #indexes: SkillIndexSourceV1 | undefined;
   #catalog: SkillCatalogV1;
   #turn: number | undefined;
   #invoked: InvokedSkillV1[] = [];
@@ -150,11 +166,13 @@ export class SkillCatalog {
     reads: WorkspaceReadsV1,
     withheldManagedSlugs: readonly string[] = [],
     pluginSkills: readonly PluginSkillContributionV1[] = [],
+    indexes?: SkillIndexSourceV1,
   ) {
     this.#owner = owner;
     this.#reads = reads;
     this.#withheldManagedSlugs = withheldManagedSlugs;
     this.#pluginSkills = pluginSkills;
+    this.#indexes = indexes;
     this.#catalog = emptySkillCatalogV1(owner);
   }
 
@@ -168,9 +186,11 @@ export class SkillCatalog {
 
   /** Loads the Turn's Skills and records the injection in the session log. */
   async refresh(turn: number, session: Session): Promise<SkillCatalogV1> {
+    const indexes = this.#indexes ? await this.#indexes.load() : undefined;
     this.#catalog = await loadFullSkillCatalogV1(this.#reads, this.#owner, {
       withheldManagedSlugs: this.#withheldManagedSlugs,
       pluginSkills: this.#pluginSkills,
+      ...(indexes ? { indexes } : {}),
     });
     this.#turn = turn;
     session.append({
@@ -223,14 +243,18 @@ export class SkillCatalog {
   ): Promise<SkillInvocationOutcomeV1> {
     const invoked: InvokedSkillV1[] = [];
     for (const ref of refs) {
-      const skill = resolveSkillRefV1(this.#catalog, ref);
-      if (!skill) {
+      const listed = resolveSkillRefV1(this.#catalog, ref);
+      if (!listed) {
         return {
           status: "unresolved",
           reason: `no Skill "${formatSkillRefV1(ref)}" is available to this Bot on this Turn`,
         };
       }
-      invoked.push({ ref, skill });
+      const materialized = await this.materialize(listed);
+      if (materialized.status !== "ok") {
+        return { status: "unresolved", reason: materialized.reason };
+      }
+      invoked.push({ ref, skill: materialized.skill });
     }
     if (invoked.length > 0) {
       session.appendBatch(
@@ -308,6 +332,24 @@ export class SkillCatalog {
         text: reference.text,
       };
     }
+    if (reference.bodyKey && reference.contentHash) {
+      const bytes = await this.readPinned(
+        reference.bodyKey,
+        reference.contentHash,
+      );
+      if (!bytes) {
+        return {
+          status: "refused",
+          reason: "the admitted reference bytes are unavailable",
+        };
+      }
+      return {
+        status: "ok",
+        path: reference.path,
+        ...(by ? { by } : {}),
+        text: new TextDecoder().decode(bytes),
+      };
+    }
     const root =
       skill.source === "user"
         ? userInstructionRootV1(this.#owner)
@@ -331,6 +373,46 @@ export class SkillCatalog {
       ...(by ? { by } : {}),
       text: new TextDecoder().decode(read.file.bytes),
     };
+  }
+
+  /**
+   * The admitted body. A Workspace Skill's catalog entry carries no body;
+   * this reads the content-addressed bytes the index named, and refuses when
+   * those bytes are gone instead of opening the mutable path.
+   */
+  async materialize(
+    skill: LoadedSkillV1,
+  ): Promise<
+    | { status: "ok"; skill: LoadedSkillV1 }
+    | { status: "unavailable"; reason: string }
+  > {
+    if (!skill.bodyKey) return { status: "ok", skill };
+    const bytes = await this.readPinned(skill.bodyKey, skill.contentHash);
+    if (!bytes) {
+      return {
+        status: "unavailable",
+        reason: `the admitted bytes for ${skill.path} are unavailable`,
+      };
+    }
+    const parsed = parseSkillDocumentV1(new TextDecoder().decode(bytes));
+    if (parsed.status !== "ok") {
+      return {
+        status: "unavailable",
+        reason: `the admitted bytes for ${skill.path} are unavailable`,
+      };
+    }
+    return { status: "ok", skill: { ...skill, body: parsed.document.body } };
+  }
+
+  private async readPinned(
+    bodyKey: string,
+    contentHash: string,
+  ): Promise<Uint8Array | undefined> {
+    if (!this.#indexes) return undefined;
+    const bytes = await this.#indexes.readBody(bodyKey, contentHash);
+    if (!bytes) return undefined;
+    const hash = await sha256HexBytesV1(bytes);
+    return hash === contentHash ? bytes : undefined;
   }
 
   /** Drops the catalog, so the next Turn reloads it rather than reusing it. */
@@ -639,11 +721,16 @@ export function createSkillLoadTool(catalog: SkillCatalog): ToolDefinition {
           isError: true,
         };
       }
+      const materialized = await catalog.materialize(skill);
+      if (materialized.status !== "ok") {
+        return { content: materialized.reason, isError: true };
+      }
+      const body = materialized.skill;
       const wanted = skillLoadReferenceV1(input);
       if (wanted !== undefined) {
         // Only a reference of a Skill this Turn loaded, at the generation the
         // catalog listed: the same disclosure rule the body follows.
-        const reference = await catalog.reference(skill, wanted);
+        const reference = await catalog.reference(body, wanted);
         if (reference.status !== "ok") {
           return { content: reference.reason, isError: true };
         }
@@ -659,10 +746,10 @@ export function createSkillLoadTool(catalog: SkillCatalog): ToolDefinition {
       }
       return {
         content: [
-          `# ${skill.name}`,
-          `${skill.ref ? `Ref: ${formatSkillRefV1(skill.ref)}\n` : ""}Path: ${skill.path} (generation ${skill.generationId})`,
+          `# ${body.name}`,
+          `${body.ref ? `Ref: ${formatSkillRefV1(body.ref)}\n` : ""}Path: ${body.path} (generation ${body.generationId})`,
           "",
-          skill.body,
+          body.body,
         ].join("\n"),
         isError: false,
       };
@@ -843,6 +930,7 @@ export function createSkillsRuntimeFeature(
       host.reads,
       host.withheldManagedSlugs ?? [],
       host.pluginSkills ?? [],
+      host.skillIndexes,
     );
     const disposers: Array<() => void> = [];
     disposers.push(

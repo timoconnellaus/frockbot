@@ -21,6 +21,11 @@ import {
   VOICE_ASSISTANT_METER_BLOCK_SECONDS_V1,
   VOICE_ASSISTANT_OUTPUT_BYTES_PER_SECOND_V1,
 } from "@frockbot/app/voice/shared";
+import {
+  decodeVoiceAssistantPcmEnvelopeV1,
+  encodeVoiceAssistantPcmEnvelopeV1,
+  VOICE_ASSISTANT_PCM_HEADER_BYTES_V1,
+} from "@frockbot/app/voice/opening";
 import { GEMINI_VOICES_V1 } from "@frockbot/app/voice/appearance";
 import {
   VoiceMemoryLedgerV1,
@@ -118,6 +123,9 @@ interface Opened {
   frames: Record<string, unknown>[];
   /** Every binary frame's byte length in arrival order. */
   audio: number[];
+  attemptId?: string;
+  callId?: string;
+  pcmSequence?: number;
   waitFor(
     predicate: (frame: Record<string, unknown>) => boolean,
     label: string,
@@ -126,11 +134,24 @@ interface Opened {
   closed: Promise<{ code: number; reason: string }>;
 }
 
-function binaryFrameBytes(value: unknown): number {
-  if (value instanceof ArrayBuffer || ArrayBuffer.isView(value))
-    return value.byteLength;
-  if (value instanceof Blob) return value.size;
-  throw new Error("unexpected binary voice frame");
+function binaryFrameBytes(value: unknown): Uint8Array | undefined {
+  if (value instanceof ArrayBuffer) return new Uint8Array(value);
+  if (ArrayBuffer.isView(value)) {
+    return new Uint8Array(value.buffer, value.byteOffset, value.byteLength);
+  }
+  return undefined;
+}
+
+/** PCM payload length on the wire. The envelope is stripped, not metered. */
+function pcmPayloadBytes(value: unknown): number {
+  if (typeof Blob !== "undefined" && value instanceof Blob) {
+    return Math.max(0, value.size - VOICE_ASSISTANT_PCM_HEADER_BYTES_V1);
+  }
+  const bytes = binaryFrameBytes(value);
+  if (!bytes) throw new Error("unexpected binary voice frame");
+  return (
+    decodeVoiceAssistantPcmEnvelopeV1(bytes)?.pcm.byteLength ?? bytes.byteLength
+  );
 }
 
 async function open(
@@ -167,7 +188,7 @@ async function open(
   }[] = [];
   socket.addEventListener("message", (event) => {
     if (typeof event.data !== "string") {
-      audio.push(binaryFrameBytes(event.data));
+      audio.push(pcmPayloadBytes(event.data));
       return;
     }
     const frame = JSON.parse(event.data) as Record<string, unknown>;
@@ -214,31 +235,97 @@ const status = (value: string) => (frame: Record<string, unknown>) =>
 const state = (upstream: string) => (frame: Record<string, unknown>) =>
   frame.type === "voice/state" && frame.upstream === upstream;
 
-function pcm(tag: number, bytes = 1280): ArrayBuffer {
-  const buffer = new Uint8Array(bytes);
-  buffer[0] = tag;
-  return buffer.buffer;
+function pcm(
+  tag: number,
+  bytes = 1280,
+  attemptId?: string,
+  sequence = 0,
+): ArrayBuffer {
+  const payload = new Uint8Array(bytes);
+  payload[0] = tag;
+  if (!attemptId) return payload.buffer as ArrayBuffer;
+  return encodeVoiceAssistantPcmEnvelopeV1({
+    attemptId,
+    sequence,
+    pcm: payload,
+  }).buffer as ArrayBuffer;
 }
 
 /**
  * Opens a call, optionally on a named Bot.
  *
- * Since ADR 0029 a call addresses one Bot, and the client says which before
- * `start_call` — that frame carries only a format. A test that omits it is a
- * client that named nobody, which the object answers with General.
+ * The client names the target on `voice/open` together with pause/mute, so
+ * a test that omits `botId` is a client that named nobody — General.
  */
-async function startCall(opened: Opened, botId?: string): Promise<void> {
+async function startCall(
+  opened: Opened,
+  botId?: string,
+  intent: { paused?: boolean; muted?: boolean } = {},
+): Promise<void> {
   await opened.waitFor((f) => f.type === "welcome", "welcome");
   opened.socket.send(JSON.stringify({ type: "hello", protocol_version: 1 }));
-  if (botId) {
-    opened.socket.send(
-      JSON.stringify({ schemaVersion: 1, type: "voice/target", botId }),
+  const attemptId = crypto.randomUUID();
+  opened.attemptId = attemptId;
+  opened.socket.send(
+    JSON.stringify({
+      schemaVersion: 1,
+      type: "voice/open",
+      attemptId,
+      mode: "start",
+      ...(botId ? { botId } : {}),
+      paused: intent.paused === true,
+      muted: intent.muted === true,
+    }),
+  );
+  const admitted = await opened.waitFor(
+    (f) => f.type === "voice/admitted" && f.attemptId === attemptId,
+    "admitted",
+  );
+  opened.callId =
+    typeof admitted.callId === "string" ? admitted.callId : undefined;
+  // `ready` is Gemini setup. A paused or muted admit has no upstream.
+  if (!intent.paused && !intent.muted && admitted.paused !== true) {
+    await opened.waitFor(
+      (f) => f.type === "voice/ready" && f.attemptId === attemptId,
+      "ready",
     );
   }
-  opened.socket.send(
-    JSON.stringify({ type: "start_call", preferred_format: "pcm16" }),
-  );
   await opened.waitFor(status("listening"), "listening");
+}
+
+function sendPcm(opened: Opened, tag: number, bytes = 1280): void {
+  const sequence = opened.pcmSequence ?? 0;
+  opened.pcmSequence = sequence + 1;
+  opened.socket.send(pcm(tag, bytes, opened.attemptId, sequence));
+}
+
+function sendEnd(opened: Opened): void {
+  const attemptId = opened.attemptId ?? crypto.randomUUID();
+  opened.socket.send(
+    JSON.stringify({
+      schemaVersion: 1,
+      type: "voice/control",
+      attemptId,
+      sequence: 1,
+      action: "end",
+    }),
+  );
+}
+
+function sendWake(opened: Opened): void {
+  const attemptId = crypto.randomUUID();
+  opened.attemptId = attemptId;
+  opened.pcmSequence = 0;
+  opened.socket.send(
+    JSON.stringify({
+      schemaVersion: 1,
+      type: "voice/open",
+      attemptId,
+      mode: "wake",
+      paused: false,
+      muted: false,
+    }),
+  );
 }
 
 async function settle(ms = 50): Promise<void> {
@@ -319,7 +406,9 @@ async function exchange(
   answered: string,
 ): Promise<void> {
   const before = (
-    Object.values(await stub.probeStorage("voice:turn:")) as VoiceTurnRecordV1[]
+    Object.values(
+      await stub.probeStorage("voice:call-turn:"),
+    ) as VoiceTurnRecordV1[]
   ).filter((turn) => turn.state !== "admitted").length;
   expect(await stub.probeHears(said)).toBe(true);
   expect(await stub.probeSays(answered)).toBe(true);
@@ -327,7 +416,7 @@ async function exchange(
     async () =>
       (
         Object.values(
-          await stub.probeStorage("voice:turn:"),
+          await stub.probeStorage("voice:call-turn:"),
         ) as VoiceTurnRecordV1[]
       ).filter((turn) => turn.state !== "admitted").length,
     (count) => count > before,
@@ -339,7 +428,7 @@ async function turns(
   stub: ReturnType<typeof assistant>,
 ): Promise<VoiceTurnRecordV1[]> {
   const rows = Object.values(
-    await stub.probeStorage("voice:turn:"),
+    await stub.probeStorage("voice:call-turn:"),
   ) as VoiceTurnRecordV1[];
   return rows.sort((left, right) => left.turnId.localeCompare(right.turnId));
 }
@@ -447,12 +536,13 @@ describe("the session the call talks through", () => {
     opened.socket.send(
       JSON.stringify({
         schemaVersion: 1,
-        type: "voice/target",
+        type: "voice/open",
+        attemptId: crypto.randomUUID(),
+        mode: "start",
         botId: identity.botId,
+        paused: false,
+        muted: false,
       }),
-    );
-    opened.socket.send(
-      JSON.stringify({ type: "start_call", preferred_format: "pcm16" }),
     );
 
     const refusal = await opened.waitFor(
@@ -486,7 +576,7 @@ describe("the session the call talks through", () => {
     await opened.waitFor(state("awake"), "awake");
 
     // Up: the client's 16 kHz frames reach the session in order.
-    for (const tag of [1, 2, 3]) opened.socket.send(pcm(tag));
+    for (const tag of [1, 2, 3]) sendPcm(opened, tag);
     const sent = await eventually(
       async () =>
         (await stub.probeUpstreamFrames()).filter(
@@ -498,8 +588,9 @@ describe("the session the call talks through", () => {
     expect(sent.map((frame) => frame.tag)).toEqual([1, 2, 3]);
     expect(sent.map((frame) => frame.bytes)).toEqual([1280, 1280, 1280]);
 
-    // Down: the model's 24 kHz audio reaches the client as binary, unchanged,
-    // and the status frames say what the call is doing.
+    // Down: the model's 24 kHz audio reaches the client as enveloped PCM,
+    // and the status frames say what the call is doing. Metering is payload
+    // bytes, not the envelope.
     const bytes =
       VOICE_ASSISTANT_OUTPUT_BYTES_PER_SECOND_V1 *
       VOICE_ASSISTANT_METER_BLOCK_SECONDS_V1;
@@ -796,11 +887,18 @@ describe("pausing and coming back", () => {
     );
     await opened.waitFor(state("asleep"), "asleep");
     // Nothing is listening: audio the client sends now reaches nothing.
-    opened.socket.send(pcm(9));
+    sendPcm(opened, 9);
     await settle(50);
 
     opened.socket.send(
-      JSON.stringify({ schemaVersion: 1, type: "voice/wake" }),
+      JSON.stringify({
+        schemaVersion: 1,
+        type: "voice/open",
+        attemptId: crypto.randomUUID(),
+        mode: "wake",
+        paused: false,
+        muted: false,
+      }),
     );
     await eventually(
       async () => await stub.probeUpstreamCount(),
@@ -829,7 +927,14 @@ describe("pausing and coming back", () => {
     // The next session is the one the server refuses with 1008.
     await stub.probeSetScript({ closeUpstreamWith: 1008 });
     opened.socket.send(
-      JSON.stringify({ schemaVersion: 1, type: "voice/wake" }),
+      JSON.stringify({
+        schemaVersion: 1,
+        type: "voice/open",
+        attemptId: crypto.randomUUID(),
+        mode: "wake",
+        paused: false,
+        muted: false,
+      }),
     );
     const setups = await eventually(
       async () =>
@@ -915,7 +1020,7 @@ describe("pausing and coming back", () => {
     await first.closed;
     await stub.probeSetNow(new Date(Date.now() + 10 * 60_000).toISOString());
     const second = await open(userId, {}, "phone");
-    await startCall(second);
+    await startCall(second, undefined, { paused: true });
     const current = Object.values(
       await stub.probeStorage("voice:call:"),
     )[0] as VoiceCallRecordV1;
@@ -924,7 +1029,14 @@ describe("pausing and coming back", () => {
     await second.waitFor(state("asleep"), "still asleep after the rejoin");
     const beforeWake = await stub.probeUpstreamCount();
     second.socket.send(
-      JSON.stringify({ schemaVersion: 1, type: "voice/wake" }),
+      JSON.stringify({
+        schemaVersion: 1,
+        type: "voice/open",
+        attemptId: crypto.randomUUID(),
+        mode: "wake",
+        paused: false,
+        muted: false,
+      }),
     );
     await eventually(
       async () => await stub.probeUpstreamCount(),
@@ -1047,7 +1159,14 @@ describe("handing work to the Bot", () => {
     expect((await delegations(stub))[0]!.state).toBe("settled");
 
     opened.socket.send(
-      JSON.stringify({ schemaVersion: 1, type: "voice/wake" }),
+      JSON.stringify({
+        schemaVersion: 1,
+        type: "voice/open",
+        attemptId: crypto.randomUUID(),
+        mode: "wake",
+        paused: false,
+        muted: false,
+      }),
     );
     await eventually(
       () => delegations(stub),
@@ -1229,7 +1348,7 @@ describe("handing work to the Bot", () => {
       (rows) => rows.length === 1,
       "the delegation record",
     );
-    opened.socket.send(JSON.stringify({ type: "end_call" }));
+    sendEnd(opened);
     await opened.waitFor(status("idle"), "idle");
     expect((await delegations(stub))[0]!.state).not.toBe("cancelled");
     const told = await eventually(
@@ -1281,7 +1400,7 @@ describe("handing work to the Bot", () => {
     await startCall(opened, identity.botId);
     await opened.waitFor(state("awake"), "awake");
     await exchange(stub, "plan my week", "On it.");
-    opened.socket.send(JSON.stringify({ type: "end_call" }));
+    sendEnd(opened);
     await opened.waitFor(status("idle"), "idle");
     const bot = env.BOT_STATES.getByName(
       `${identity.userId}:${identity.botId}`,
@@ -1367,7 +1486,7 @@ describe("the day's allowance", () => {
     } satisfies VoiceMeterV1);
     // One whole block of the person's own audio takes the day past its cap.
     const frame = 16_000 * 2 * VOICE_ASSISTANT_METER_BLOCK_SECONDS_V1;
-    opened.socket.send(pcm(1, frame));
+    sendPcm(opened, 1, frame);
     await opened.waitFor(
       (row) => row.type === "voice/refusal" && row.code === "quota",
       "the quota refusal",
@@ -1392,7 +1511,16 @@ describe("the day's allowance", () => {
     const opened = await open(userId);
     await opened.waitFor((frame) => frame.type === "welcome", "welcome");
     opened.socket.send(JSON.stringify({ type: "hello", protocol_version: 1 }));
-    opened.socket.send(JSON.stringify({ type: "start_call" }));
+    opened.socket.send(
+      JSON.stringify({
+        schemaVersion: 1,
+        type: "voice/open",
+        attemptId: crypto.randomUUID(),
+        mode: "start",
+        paused: false,
+        muted: false,
+      }),
+    );
     const refusal = await opened.waitFor(
       (frame) => frame.type === "voice/refusal",
       "the refusal",
@@ -1494,7 +1622,7 @@ describe("what the session remembers between calls", () => {
     opened: Opened,
   ): Promise<string> {
     const callId = await callIdOf(stub);
-    opened.socket.send(JSON.stringify({ type: "end_call" }));
+    sendEnd(opened);
     await opened.waitFor(status("idle"), "idle");
     opened.socket.close(1000, "end-button");
     await eventually(
@@ -1639,7 +1767,7 @@ describe("timing a call that asked to be timed", () => {
     const opened = await open(userId);
     await startCall(opened);
     await opened.waitFor(state("awake"), "awake");
-    opened.socket.send(pcm(1));
+    sendPcm(opened, 1);
     await settle();
     expect(await stub.probeTimings()).toEqual([]);
     // The ordinary operational record is untouched: diagnostics are extra
@@ -1710,7 +1838,8 @@ describe("timing a call that asked to be timed", () => {
       upstream,
     );
     // Every constituent of the prompt is on record, because any one of them
-    // can be the slow one.
+    // can be the slow one. Session Memory is `prompt-voice-memory` on the
+    // first open; a wake or handover re-reads it as `session-voice-memory`.
     for (const read of [
       "prompt-directory",
       "prompt-user-memory",
@@ -1719,7 +1848,6 @@ describe("timing a call that asked to be timed", () => {
       "prompt-bot-identity",
       "prompt-bot-memory",
       "prompt-bot-history",
-      "session-voice-memory",
     ]) {
       expect(events).toContain(read);
       expect(
@@ -1767,6 +1895,74 @@ describe("timing a call that asked to be timed", () => {
     );
   });
 
+  test("opening does not read unrelated Bots", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-directory-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    await provisionSiblingBot({
+      userId: identity.userId,
+      botId: `voice-sibling-${suffix}`,
+    });
+    const stub = assistant(identity.userId);
+    const opened = await open(identity.userId, {}, "phone", {
+      trace: traceId(),
+    });
+    await startCall(opened, identity.botId);
+    const reads = await stub.probeDirectoryReads();
+    expect(reads.activity).toBe(0);
+    expect(reads.identity).toBe(1);
+  });
+
+  test("pause during a slow directory admits without opening Gemini", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-pause-opening-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    await stub.probeSetScript({ slowDirectoryMs: 400 });
+    const opened = await open(identity.userId);
+    await opened.waitFor((f) => f.type === "welcome", "welcome");
+    opened.socket.send(JSON.stringify({ type: "hello", protocol_version: 1 }));
+    const attemptId = crypto.randomUUID();
+    opened.attemptId = attemptId;
+    opened.socket.send(
+      JSON.stringify({
+        schemaVersion: 1,
+        type: "voice/open",
+        attemptId,
+        mode: "start",
+        botId: identity.botId,
+        paused: false,
+        muted: false,
+      }),
+    );
+    opened.socket.send(
+      JSON.stringify({
+        schemaVersion: 1,
+        type: "voice/control",
+        attemptId,
+        sequence: 1,
+        action: "pause",
+      }),
+    );
+    const admitted = await opened.waitFor(
+      (f) => f.type === "voice/admitted" && f.attemptId === attemptId,
+      "admitted while paused",
+    );
+    expect(admitted.paused).toBe(true);
+    await opened.waitFor(status("listening"), "listening without Gemini");
+    expect(await stub.probeUpstreamCount()).toBe(0);
+    await opened.waitFor(
+      (f) => f.type === "voice/control-ack" && f.sequence === 1,
+      "control ack",
+    );
+  });
+
   test("a slow upstream is bounded by its own two milestones", async () => {
     const userId = `voice-slow-upstream-${crypto.randomUUID()}`;
     const stub = assistant(userId);
@@ -1792,7 +1988,7 @@ describe("timing a call that asked to be timed", () => {
     const opened = await open(userId, {}, "phone", { trace: traceId() });
     await startCall(opened);
     await opened.waitFor(state("awake"), "awake");
-    for (const tag of [1, 2, 3]) opened.socket.send(pcm(tag));
+    for (const tag of [1, 2, 3]) sendPcm(opened, tag);
     await stub.probeHears("what's the weather");
     await stub.probeSays("It is sunny in Sydney.", 960);
     const timings = await eventually(
@@ -1827,7 +2023,7 @@ describe("timing a call that asked to be timed", () => {
     const opened = await open(userId, {}, "phone", { trace: traceId() });
     await startCall(opened);
     await opened.waitFor(state("awake"), "awake");
-    opened.socket.send(pcm(1));
+    sendPcm(opened, 1);
     await exchange(
       stub,
       "my passphrase is hunter2",

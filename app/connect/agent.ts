@@ -30,6 +30,10 @@ import {
   type ConnectToolV1,
 } from "./composio.js";
 import { CONNECT_PACKAGE_ID } from "./catalog.js";
+import {
+  CONNECT_CATALOG_UNAVAILABLE_MESSAGE_V1,
+  CONNECT_STALE_CONTRACT_MESSAGE_V1,
+} from "./account-catalog.js";
 import { connectSafeMetadataV1 } from "./user.js";
 
 /** Longest tool answer handed back to the model. */
@@ -48,6 +52,14 @@ export interface ConnectRuntimeConfig {
     connectionId: string,
     read: () => Promise<unknown>,
   ): Promise<unknown>;
+  /**
+   * The User's account catalog. `disclose: false` is the directory only and
+   * must not fetch schemas. Absent, the Turn asks the provider when a schema
+   * is first required and pins that answer.
+   */
+  readAccountCatalog?(disclose: boolean): Promise<unknown>;
+  /** Live permission for this Connection. Absent keeps the admitted snapshot. */
+  permitConnection?(): Promise<boolean>;
 }
 
 /** The pinned catalog, as a later mount of the same Turn reads it back. */
@@ -90,7 +102,7 @@ function byteLength(value: string): number {
   return new TextEncoder().encode(value).byteLength;
 }
 
-/** Mount one connected app's namespace for one Turn. */
+/** Mount one connected app's namespace for one Turn. Schemas load on first disclosure. */
 export function createConnectFeature(
   config: ConnectRuntimeConfig,
 ): RuntimeFeatureV1<AgentRuntimeV1> {
@@ -106,61 +118,184 @@ export function createConnectFeature(
         ...(config.apiBaseUrl ? { baseUrl: config.apiBaseUrl } : {}),
         ...(config.fetch ? { fetch: config.fetch } : {}),
       });
-    const read = async (): Promise<ConnectToolCatalogV1> => ({
-      schemaVersion: 1,
-      toolkitSlug: metadata.toolkitSlug,
-      tools: await client.listImportantTools(metadata.toolkitSlug),
-    });
-    let catalog: ConnectToolCatalogV1 | undefined;
-    try {
-      catalog = decodeConnectToolCatalogV1(
-        config.pinToolCatalog
-          ? await config.pinToolCatalog(config.connection.connectionId, read)
-          : await read(),
-      );
-    } catch {
-      catalog = undefined;
-    }
-    const label =
-      config.connection.displayName === metadata.toolkitName
-        ? metadata.toolkitName
-        : `${metadata.toolkitName} (${config.connection.displayName})`;
+    const directory = await readDirectory(config);
     const cleanups = [
       runtime.tools.registerNamespace({
         name: metadata.namespace,
-        description: catalog
-          ? `${label}: the User's connected account.`
-          : `${label}: the User's connected account. Its tools could not be loaded for this Turn.`,
-        status: catalog ? "ready" : "error",
-        useInstructions: `Tools for the User's ${label} account. Read a tool's schema with get_dynamic_tools before calling it. Each call acts on the real account, so confirm anything that sends, posts or deletes.`,
+        description: `${labelOf(config, metadata)}: the User's connected account.`,
+        status: "ready",
+        directory,
+        useInstructions: `Tools for the User's ${labelOf(config, metadata)} account. Read a tool's schema with get_dynamic_tools before calling it. Each call acts on the real account, so confirm anything that sends, posts or deletes.`,
+        resolve: () => resolveConnectNamespace(config, client, metadata),
       }),
     ];
-    for (const tool of catalog?.tools ?? []) {
-      cleanups.push(
-        runtime.tools.register(
-          {
-            namespace: metadata.namespace,
-            name: tool.name,
-            description: tool.description,
-            inputSchema: tool.inputSchema,
-            idempotent: false,
-            execute: (input) =>
-              executeConnectTool(client, {
-                userId: config.userId,
-                connectedAccountId: metadata.connectedAccountId,
-                tool,
-                input,
-              }),
-          },
-          {
-            admissionCeiling: ["chat", "agent", "automation", "subagent"],
-            subagentRoleCeiling: ["executor"],
-          },
-        ),
-      );
-    }
     return cleanups;
   };
+}
+
+function labelOf(
+  config: ConnectRuntimeConfig,
+  metadata: NonNullable<ReturnType<typeof connectSafeMetadataV1>>,
+): string {
+  return config.connection.displayName === metadata.toolkitName
+    ? metadata.toolkitName
+    : `${metadata.toolkitName} (${config.connection.displayName})`;
+}
+
+async function readDirectory(
+  config: ConnectRuntimeConfig,
+): Promise<{ name: string; description: string }[]> {
+  if (!config.readAccountCatalog) return [];
+  try {
+    const answer = await config.readAccountCatalog(false);
+    if (
+      !answer ||
+      typeof answer !== "object" ||
+      (answer as { kind?: unknown }).kind !== "directory" ||
+      !Array.isArray((answer as { tools?: unknown }).tools)
+    ) {
+      return [];
+    }
+    return (
+      answer as { tools: { name?: unknown; description?: unknown }[] }
+    ).tools.flatMap((tool) =>
+      typeof tool.name === "string" && typeof tool.description === "string"
+        ? [{ name: tool.name, description: tool.description }]
+        : [],
+    );
+  } catch {
+    return [];
+  }
+}
+
+async function resolveConnectNamespace(
+  config: ConnectRuntimeConfig,
+  client: ComposioClient,
+  metadata: NonNullable<ReturnType<typeof connectSafeMetadataV1>>,
+): Promise<
+  | {
+      status: "ready";
+      tools: {
+        namespace: string;
+        name: string;
+        description: string;
+        inputSchema: Record<string, unknown>;
+        idempotent: false;
+        execute: (input: unknown) => Promise<ToolExecutionResult>;
+      }[];
+      registration: {
+        admissionCeiling: ["chat", "agent", "automation", "subagent"];
+        subagentRoleCeiling: ["executor"];
+      };
+    }
+  | { status: "unavailable" | "stale-contract"; message: string }
+> {
+  if (config.permitConnection && !(await config.permitConnection())) {
+    return {
+      status: "stale-contract",
+      message: CONNECT_STALE_CONTRACT_MESSAGE_V1,
+    };
+  }
+  let catalog: ConnectToolCatalogV1;
+  try {
+    catalog = await loadPinnedCatalog(config, client, metadata);
+  } catch (error) {
+    if (error instanceof ConnectCatalogRefusal) {
+      return { status: error.status, message: error.message };
+    }
+    return {
+      status: "unavailable",
+      message: CONNECT_CATALOG_UNAVAILABLE_MESSAGE_V1,
+    };
+  }
+  return {
+    status: "ready",
+    registration: {
+      admissionCeiling: ["chat", "agent", "automation", "subagent"],
+      subagentRoleCeiling: ["executor"],
+    },
+    tools: catalog.tools.map((tool) => ({
+      namespace: metadata.namespace,
+      name: tool.name,
+      description: tool.description,
+      inputSchema: tool.inputSchema,
+      idempotent: false,
+      execute: async (input) => {
+        if (config.permitConnection && !(await config.permitConnection())) {
+          return {
+            content: CONNECT_STALE_CONTRACT_MESSAGE_V1,
+            isError: true,
+          };
+        }
+        return executeConnectTool(client, {
+          userId: config.userId,
+          connectedAccountId: metadata.connectedAccountId,
+          tool,
+          input,
+        });
+      },
+    })),
+  };
+}
+
+class ConnectCatalogRefusal extends Error {
+  constructor(
+    readonly status: "unavailable" | "stale-contract",
+    message: string,
+  ) {
+    super(message);
+    this.name = "ConnectCatalogRefusal";
+  }
+}
+
+async function loadPinnedCatalog(
+  config: ConnectRuntimeConfig,
+  client: ComposioClient,
+  metadata: NonNullable<ReturnType<typeof connectSafeMetadataV1>>,
+): Promise<ConnectToolCatalogV1> {
+  const read = async (): Promise<ConnectToolCatalogV1> => {
+    if (config.readAccountCatalog) {
+      const answer = await config.readAccountCatalog(true);
+      if (
+        answer &&
+        typeof answer === "object" &&
+        (answer as { kind?: unknown }).kind === "catalog"
+      ) {
+        return decodeConnectToolCatalogV1(
+          (answer as { catalog: unknown }).catalog,
+        );
+      }
+      if (
+        answer &&
+        typeof answer === "object" &&
+        (answer as { kind?: unknown }).kind === "stale-contract"
+      ) {
+        throw new ConnectCatalogRefusal(
+          "stale-contract",
+          typeof (answer as { message?: unknown }).message === "string"
+            ? (answer as { message: string }).message
+            : CONNECT_STALE_CONTRACT_MESSAGE_V1,
+        );
+      }
+      throw new ConnectCatalogRefusal(
+        "unavailable",
+        answer &&
+          typeof answer === "object" &&
+          typeof (answer as { message?: unknown }).message === "string"
+          ? (answer as { message: string }).message
+          : CONNECT_CATALOG_UNAVAILABLE_MESSAGE_V1,
+      );
+    }
+    return {
+      schemaVersion: 1,
+      toolkitSlug: metadata.toolkitSlug,
+      tools: await client.listImportantTools(metadata.toolkitSlug),
+    };
+  };
+  const loaded = config.pinToolCatalog
+    ? await config.pinToolCatalog(config.connection.connectionId, read)
+    : await read();
+  return decodeConnectToolCatalogV1(loaded);
 }
 
 export async function executeConnectTool(
@@ -243,6 +378,8 @@ export function createConfiguredConnectRuntimeContribution(config: {
   apiBaseUrl?: string;
   fetch?: ComposioFetch;
   pinToolCatalog?: ConnectRuntimeConfig["pinToolCatalog"];
+  readAccountCatalog?: ConnectRuntimeConfig["readAccountCatalog"];
+  permitConnection?: ConnectRuntimeConfig["permitConnection"];
 }): RuntimeFeatureV1<AgentRuntimeV1> | undefined {
   if (
     config.capability.packageId !== CONNECT_PACKAGE_ID ||
@@ -261,5 +398,11 @@ export function createConfiguredConnectRuntimeContribution(config: {
     ...(config.apiBaseUrl ? { apiBaseUrl: config.apiBaseUrl } : {}),
     ...(config.fetch ? { fetch: config.fetch } : {}),
     ...(config.pinToolCatalog ? { pinToolCatalog: config.pinToolCatalog } : {}),
+    ...(config.readAccountCatalog
+      ? { readAccountCatalog: config.readAccountCatalog }
+      : {}),
+    ...(config.permitConnection
+      ? { permitConnection: config.permitConnection }
+      : {}),
   });
 }

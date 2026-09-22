@@ -80,7 +80,12 @@ describe("admission returns before execution", () => {
     });
 
     const receipt = await bot.admit(command("run-1", "hello"));
-    expect(receipt).toEqual({ runId: "run-1", state: "running" });
+    expect(receipt).toMatchObject({
+      schemaVersion: 1,
+      runId: "run-1",
+      disposition: "admitted",
+    });
+    expect(receipt.completion).toBeUndefined();
     const finished = bot.pendingWork();
     for (let turn = 0; turn < 8 && executions === 0; turn += 1) {
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -123,7 +128,9 @@ describe("admission returns before execution", () => {
     );
 
     expect(await bot.admit(command("run-1", "first"))).toMatchObject({
-      state: "running",
+      schemaVersion: 1,
+      runId: "run-1",
+      disposition: "admitted",
     });
     for (let turn = 0; turn < 8 && executions === 0; turn += 1) {
       await new Promise((resolve) => setTimeout(resolve, 0));
@@ -135,7 +142,12 @@ describe("admission returns before execution", () => {
         supersedes: { runId: "run-1" },
       }),
     );
-    expect(queued).toEqual({ runId: "run-2", state: "queued" });
+    expect(queued).toMatchObject({
+      schemaVersion: 1,
+      runId: "run-2",
+      disposition: "queued",
+    });
+    expect(queued.completion).toBeUndefined();
     expect((await bot.readStoredRun("run-1"))?.status).toBe("running");
     const interruptsBeforeReplay = interrupts.length;
 
@@ -145,7 +157,11 @@ describe("admission returns before execution", () => {
         supersedes: { runId: "run-1" },
       }),
     );
-    expect(again).toEqual({ runId: "run-2", state: "queued" });
+    expect(again).toMatchObject({
+      schemaVersion: 1,
+      runId: "run-2",
+      disposition: "queued",
+    });
     expect(interrupts).toHaveLength(interruptsBeforeReplay);
 
     releaseFirst();
@@ -215,9 +231,11 @@ describe("admission returns before execution", () => {
     await bot.pendingWork();
     expect(executions).toBe(1);
     expect(settled).toEqual(["run-1"]);
-    expect(await bot.admit(command("run-1", "hello"))).toEqual({
+    expect(await bot.admit(command("run-1", "hello"))).toMatchObject({
+      schemaVersion: 1,
       runId: "run-1",
-      state: "terminal",
+      disposition: "settled",
+      completion: { runId: "run-1", text: "done", events: [] },
     });
     expect(executions).toBe(1);
     expect(settled).toEqual(["run-1"]);

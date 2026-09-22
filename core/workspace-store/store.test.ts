@@ -14,7 +14,11 @@ import {
   type InMemoryObjectBucketV1,
   type InMemoryWorkspaceGenerationsV1,
 } from "./testing.js";
-import { createObjectWorkspaceFilesV1, gcTombstoneMarkersV1 } from "./store.js";
+import {
+  createObjectWorkspaceFilesV1,
+  gcTombstoneMarkersV1,
+  type WorkspaceGenerationPublicationV1,
+} from "./store.js";
 import { workspaceConflictKeyV1, workspaceObjectKeyV1 } from "./keys.js";
 
 const USER = "user-1";
@@ -988,5 +992,60 @@ describe("the tombstone marker is collected out of band, never swept", () => {
         expectedGenerationId: null,
       }),
     ).toMatchObject({ status: "ok" });
+  });
+});
+
+describe("instruction publication", () => {
+  test("begins before the ledger record and commits after it, including a failed record", async () => {
+    const events: WorkspaceGenerationPublicationV1[] = [];
+    let ticks = 0;
+    const clock = () => new Date(1_800_000_000_000 + ticks++ * 1000);
+    const bucket = createInMemoryObjectBucketV1(clock);
+    const generations = createInMemoryWorkspaceGenerationsV1(clock);
+    const files = createObjectWorkspaceFilesV1({
+      bucket,
+      generations,
+      clock,
+      owner: { userId: USER },
+      onInstructionPublication: async (event) => {
+        events.push(event);
+      },
+    });
+    const written = await files.write({
+      path: { root: INSTRUCTIONS, path: "skills/roster/SKILL.md" },
+      bytes: bytes("---\nname: Roster\ndescription: Use this.\n---\n\nBody.\n"),
+      writer: bot("bot-1"),
+      expectedGenerationId: null,
+    });
+    expect(written.status).toBe("ok");
+    expect(events.map((event) => event.phase)).toEqual(["begin", "commit"]);
+    expect(events[0]?.ledgerPending).toBe(false);
+    expect(events[1]?.bytes?.byteLength).toBeGreaterThan(0);
+
+    events.length = 0;
+    const record = generations.record.bind(generations);
+    generations.record = () => Promise.reject(new Error("ledger down"));
+    const again = await files.write({
+      path: { root: INSTRUCTIONS, path: "skills/roster/SKILL.md" },
+      bytes: bytes("---\nname: Roster\ndescription: Use this.\n---\n\nNext.\n"),
+      writer: bot("bot-1"),
+      expectedGenerationId:
+        written.status === "ok" ? written.generation.generationId : null,
+    });
+    expect(again).toMatchObject({ status: "ok", ledgerPending: true });
+    expect(events.some((event) => event.ledgerPending)).toBe(true);
+    expect(events.some((event) => event.phase === "commit")).toBe(false);
+    generations.record = record;
+
+    events.length = 0;
+    await files.write({
+      path: { root: INSTRUCTIONS, path: "notes.md" },
+      bytes: bytes("not a skill"),
+      writer: bot("bot-1"),
+      expectedGenerationId: null,
+    });
+    // The seam hears every instruction-root generation. The index publisher
+    // ignores paths that are not Skills.
+    expect(events.map((event) => event.path)).toEqual(["notes.md", "notes.md"]);
   });
 });

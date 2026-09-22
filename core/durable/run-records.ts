@@ -14,6 +14,8 @@ import {
 export interface StoredRunCodecOptionsV1<Snapshot> {
   decodeRunId(value: unknown): string;
   decodeConfigurationSnapshot(value: unknown): Snapshot;
+  /** Validates the admission preparation when a run carries one. */
+  decodePreparedInputs?(value: unknown): unknown;
 }
 
 export interface StoredRunCodecV1<Snapshot> {
@@ -231,6 +233,22 @@ export interface StoredRunV1<Snapshot = unknown> {
   supersededBy?: string;
   /** The Composition generation pinned in the same transaction that admitted the run. */
   compositionGenerationId: string;
+  /**
+   * The generation the Turn actually mounted when activation fell closed onto
+   * the last known good. The requested pin stays `compositionGenerationId`.
+   */
+  mountedCompositionGenerationId?: string;
+  /**
+   * Account, Bot, Composition and context versions this Turn was admitted
+   * under. Absent on a record that has not been prepared; execution refuses
+   * those rather than substituting the live account.
+   */
+  preparedInputs?: unknown;
+  /**
+   * Set once a `model/request` is durable. Supersede reads this header instead
+   * of the journal: a Turn that has not dispatched is left to finish.
+   */
+  hasModelIntent?: true;
   configurationSnapshot: Snapshot;
   previousEventCount: number;
   /** Absent ⇒ the run was admitted as a `chat` Turn. */
@@ -401,6 +419,9 @@ const STORED_RUN_OPTIONAL_KEYS = [
   "retriedBy",
   "messageRunId",
   "messageAdmittedAt",
+  "mountedCompositionGenerationId",
+  "hasModelIntent",
+  "preparedInputs",
 ] as const;
 const UTF8_ENCODER = new TextEncoder();
 
@@ -854,6 +875,20 @@ function requireStoredRunRecordV1<Snapshot>(
     throw new Error(`run "${runId}" has no valid Composition generation`);
   }
   if (
+    candidate.mountedCompositionGenerationId !== undefined &&
+    !boundedString(candidate.mountedCompositionGenerationId, 256)
+  ) {
+    throw new Error(
+      `run "${runId}" has no valid mounted Composition generation`,
+    );
+  }
+  if (
+    candidate.hasModelIntent !== undefined &&
+    candidate.hasModelIntent !== true
+  ) {
+    throw new Error(`run "${runId}" has invalid hasModelIntent`);
+  }
+  if (
     !Number.isSafeInteger(candidate.previousEventCount) ||
     (candidate.previousEventCount as number) < 0
   ) {
@@ -904,6 +939,19 @@ function requireStoredRunRecordV1<Snapshot>(
   const configurationSnapshot = options.decodeConfigurationSnapshot(
     candidate.configurationSnapshot,
   );
+  let preparedInputs: unknown;
+  if (candidate.preparedInputs !== undefined) {
+    if (
+      !candidate.preparedInputs ||
+      typeof candidate.preparedInputs !== "object" ||
+      Array.isArray(candidate.preparedInputs)
+    ) {
+      throw new Error(`run "${runId}" has invalid prepared inputs`);
+    }
+    preparedInputs = options.decodePreparedInputs
+      ? options.decodePreparedInputs(candidate.preparedInputs)
+      : candidate.preparedInputs;
+  }
   if (
     candidate.responseText !== undefined &&
     !boundedString(candidate.responseText, 64_000, true)
@@ -975,6 +1023,16 @@ function requireStoredRunRecordV1<Snapshot>(
     status,
     phase,
     compositionGenerationId: candidate.compositionGenerationId,
+    ...(candidate.mountedCompositionGenerationId === undefined
+      ? {}
+      : {
+          mountedCompositionGenerationId:
+            candidate.mountedCompositionGenerationId as string,
+        }),
+    ...(candidate.hasModelIntent === true
+      ? { hasModelIntent: true as const }
+      : {}),
+    ...(preparedInputs === undefined ? {} : { preparedInputs }),
     configurationSnapshot,
     previousEventCount: candidate.previousEventCount as number,
     ...(candidate.responseText === undefined

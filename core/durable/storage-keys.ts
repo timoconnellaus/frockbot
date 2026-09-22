@@ -20,6 +20,50 @@ export const PENDING_RUN_KEY = "pending-run";
 export const PENDING_AGENT_RUN_PREFIX = "pending-agent-run:";
 /** A Bot cannot accumulate an unbounded cross-Bot inbox. */
 export const MAX_PENDING_AGENT_RUNS_V1 = 32;
+/**
+ * Due repair of a running record that is no longer the active Turn.
+ * The due time is padded so a prefix list is chronological.
+ */
+export const REPAIR_DUE_PREFIX = "repair-due:";
+export const REPAIR_RUN_PREFIX = "repair-run:";
+/** Committed visible-status publication the alarm drains without starting a Turn. */
+export const PUBLICATION_PENDING_PREFIX = "publication-pending:";
+/** @deprecated S5 merged this scalar into PublicationHead.lastCursor. */
+export const PUBLICATION_CURSOR_KEY = "publication-cursor";
+export const PUBLICATION_HEAD_KEY = "publication:head:v1";
+export const CONVERSATION_ROW_PREFIX = "conversation:row:v1:";
+export const CONVERSATION_UPDATE_PREFIX = "conversation:update:v1:";
+export const CONVERSATION_VISIBLE_INDEX_KEY = "conversation:visible-index:v1";
+/** Local maintenance drained in one alarm pass. */
+export const MAINTENANCE_BATCH_V1 = 8;
+/** Replay keeps this many committed updates, by count. */
+export const PUBLICATION_REPLAY_MAX_EVENTS_V1 = 64;
+/** Replay keeps at most this many UTF-8 bytes of retained update payloads. */
+export const PUBLICATION_REPLAY_MAX_BYTES_V1 = 1_048_576;
+/** Newest visible runs retained in the conversation snapshot index. */
+export const CONVERSATION_VISIBLE_RUN_LIMIT_V1 = 32;
+/** Newest announcements retained in the conversation snapshot index. */
+export const CONVERSATION_VISIBLE_ANNOUNCEMENT_LIMIT_V1 = 32;
+
+export function repairDueKey(dueAt: number, runId: string): string {
+  return `${REPAIR_DUE_PREFIX}${String(dueAt).padStart(16, "0")}:${runId}`;
+}
+
+export function repairRunKey(runId: string): string {
+  return `${REPAIR_RUN_PREFIX}${runId}`;
+}
+
+export function publicationPendingKey(cursor: number): string {
+  return `${PUBLICATION_PENDING_PREFIX}${String(cursor).padStart(16, "0")}`;
+}
+
+export function conversationRowKeyV1(entityId: string): string {
+  return `${CONVERSATION_ROW_PREFIX}${entityId}`;
+}
+
+export function conversationUpdateKeyV1(cursor: number): string {
+  return `${CONVERSATION_UPDATE_PREFIX}${String(cursor).padStart(16, "0")}`;
+}
 
 /** Whether one durable key changes the run state projected to a client. */
 export function isRunStateStorageKeyV1(key: string): boolean {
@@ -36,6 +80,60 @@ export const SESSION_EVENT_LOG_PREFIX = "session-events:";
 export const SESSION_EVENT_LOG_INDEX_PREFIX = `${SESSION_EVENT_LOG_PREFIX}index:`;
 export const SESSION_EVENT_LOG_PAGE_PREFIX = `${SESSION_EVENT_LOG_PREFIX}page:`;
 export const SESSION_EVENT_PAYLOAD_PREFIX = `${SESSION_EVENT_LOG_PREFIX}payload:`;
+/** Working-context projection. Derived; the event log stays authoritative. */
+export const WORKING_CONTEXT_PREFIX = "context:";
+export const WORKING_CONTEXT_HEAD_PREFIX = `${WORKING_CONTEXT_PREFIX}head:`;
+export const WORKING_CONTEXT_TURN_PREFIX = `${WORKING_CONTEXT_PREFIX}turn:`;
+export const WORKING_CONTEXT_PAGE_PREFIX = `${WORKING_CONTEXT_PREFIX}page:`;
+export const WORKING_CONTEXT_CHUNK_PREFIX = `${WORKING_CONTEXT_PREFIX}chunk:`;
+export const WORKING_CONTEXT_VOICE_PREFIX = `${WORKING_CONTEXT_PREFIX}voice:`;
+
+function contextSessionPart(sessionId: string): string {
+  return encodeURIComponent(sessionId);
+}
+
+export function workingContextHeadKeyV1(sessionId: string): string {
+  return `${WORKING_CONTEXT_HEAD_PREFIX}${contextSessionPart(sessionId)}`;
+}
+
+export function workingContextTurnPrefixV1(sessionId: string): string {
+  return `${WORKING_CONTEXT_TURN_PREFIX}${contextSessionPart(sessionId)}:`;
+}
+
+export function workingContextTurnKeyV1(
+  sessionId: string,
+  turn: number,
+): string {
+  return `${workingContextTurnPrefixV1(sessionId)}${String(turn).padStart(10, "0")}`;
+}
+
+export function workingContextPagePrefixV1(
+  sessionId: string,
+  turn: number,
+): string {
+  return `${WORKING_CONTEXT_PAGE_PREFIX}${contextSessionPart(sessionId)}:${String(turn).padStart(10, "0")}:`;
+}
+
+export function workingContextPageKeyV1(
+  sessionId: string,
+  turn: number,
+  page: number,
+): string {
+  return `${workingContextPagePrefixV1(sessionId, turn)}${String(page).padStart(6, "0")}`;
+}
+
+export function workingContextChunkKeyV1(
+  sessionId: string,
+  turn: number,
+  messageIndex: number,
+  chunk: number,
+): string {
+  return `${WORKING_CONTEXT_CHUNK_PREFIX}${contextSessionPart(sessionId)}:${String(turn).padStart(10, "0")}:${String(messageIndex).padStart(6, "0")}:${String(chunk).padStart(6, "0")}`;
+}
+
+export function workingContextVoiceKeyV1(sessionId: string): string {
+  return `${WORKING_CONTEXT_VOICE_PREFIX}${contextSessionPart(sessionId)}`;
+}
 export const IDENTITY_KEY = "identity";
 export const NOTIFICATION_PREFIX = "notification:";
 // The Composition keys below are the User Durable Object's records (ADR 0026)
@@ -58,6 +156,27 @@ export const WORKSPACE_CONFLICT_PREFIX = "workspace:conflict:";
 export const WORKSPACE_SYNC_EFFECT_PREFIX = "workspace:sync-effect:";
 /** The monotonic cursor every minted Workspace generation id advances. */
 export const WORKSPACE_GENERATION_CURSOR_KEY = "workspace:generation-cursor";
+/**
+ * Skill metadata for one instruction root. Current pointer, immutable
+ * revision snapshots, and holds for admitted runs. Bodies live in object
+ * storage under `skill-bodies/v1/`, not under these keys.
+ */
+export const SKILL_INDEX_PREFIX = "skill-index:v1:";
+
+export function skillIndexCurrentKeyV1(rootKey: string): string {
+  return `${SKILL_INDEX_PREFIX}current:${rootKey}`;
+}
+
+export function skillIndexSnapshotKeyV1(
+  rootKey: string,
+  revision: string,
+): string {
+  return `${SKILL_INDEX_PREFIX}rev:${rootKey}:${revision}`;
+}
+
+export function skillIndexHoldKeyV1(runId: string): string {
+  return `${SKILL_INDEX_PREFIX}hold:${runId}`;
+}
 /** Longest readable key tail before it is fingerprinted; Durable Object keys are bounded. */
 const WORKSPACE_KEY_TAIL_LIMIT = 900;
 

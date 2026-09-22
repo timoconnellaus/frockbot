@@ -42,6 +42,7 @@ export interface UserMemoryRpc {
   listWorkspaceConflicts(input: unknown): Promise<unknown>;
   listMemoryProjects(input: unknown): Promise<unknown>;
   changeMemoryProjects(input: unknown): Promise<unknown>;
+  operateMemory(input: unknown): Promise<unknown>;
 }
 
 function decodeRecord(value: unknown): WorkspaceGenerationRecordV1 | undefined {

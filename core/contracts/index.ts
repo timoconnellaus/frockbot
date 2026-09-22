@@ -29,6 +29,7 @@ export * from "./structured-output.js";
 export * from "./tool-execution.js";
 export * from "./turn-deadline.js";
 export * from "./turn-history.js";
+export * from "./working-context.js";
 export * from "./turn-supervisor.js";
 export * from "./types.js";
 export * from "./workspace.js";

@@ -167,6 +167,10 @@ type EnabledRuntimeContributionFactory = (config: {
     connectionId: string,
     read: () => Promise<unknown>,
   ): Promise<unknown>;
+  readConnectToolCatalog?(
+    connection: { connectionId: string; generation?: string },
+    disclose: boolean,
+  ): Promise<unknown>;
   /** The Package's own outbound seam, when the host owns one. */
   fetch?: typeof fetch;
   /**
@@ -185,6 +189,10 @@ type EnabledRuntimeContributionFactory = (config: {
     expectedGeneration?: string,
   ): Promise<CredentialLeaseV1>;
   settleCredential?(effectId: string): Promise<void>;
+  permitConnection?(connection: {
+    connectionId: string;
+    generation?: string;
+  }): Promise<boolean>;
 }) => FoundationFeature | undefined | Promise<FoundationFeature | undefined>;
 
 const enabledRuntimeContributionFactories = new Map<
@@ -200,6 +208,8 @@ const enabledRuntimeContributionFactories = new Map<
       readSecret,
       fetch: outbound,
       pinToolCatalog,
+      readConnectToolCatalog,
+      permitConnection,
     }) =>
       createConfiguredConnectRuntimeContribution({
         capability,
@@ -210,6 +220,17 @@ const enabledRuntimeContributionFactories = new Map<
           : {}),
         ...(outbound ? { fetch: outbound } : {}),
         ...(pinToolCatalog ? { pinToolCatalog } : {}),
+        ...(readConnectToolCatalog && connection
+          ? {
+              readAccountCatalog: (disclose) =>
+                readConnectToolCatalog(connection, disclose),
+            }
+          : {}),
+        ...(permitConnection && connection
+          ? {
+              permitConnection: () => permitConnection(connection),
+            }
+          : {}),
       }),
   ],
   [
@@ -559,6 +580,9 @@ export async function createFoundationEnabledRuntimePackages(
       packageSettings: host.packageSettings?.(packageId) ?? {},
       readSecret: host.readSecret,
       ...(host.pinToolCatalog ? { pinToolCatalog: host.pinToolCatalog } : {}),
+      ...(host.readConnectToolCatalog
+        ? { readConnectToolCatalog: host.readConnectToolCatalog }
+        : {}),
       authorizeConnection: () => host.authorizeConnection(capability),
       ...(connection ? { connection } : {}),
       ...(host.fetch ? { fetch: host.fetch } : {}),
@@ -573,6 +597,9 @@ export async function createFoundationEnabledRuntimePackages(
             settleCredential: (effectId) =>
               host.settleCredential!(capability, effectId),
           }
+        : {}),
+      ...(host.permitConnection
+        ? { permitConnection: host.permitConnection }
         : {}),
     });
     if (!plugin) continue;

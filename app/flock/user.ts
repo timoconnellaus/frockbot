@@ -6,6 +6,7 @@ import {
   decodeBotLifecycleCommandV1,
   decodeBotLifecycleReceiptV1,
   decodeBotLifecycleViewV1,
+  decodeBotDirectoryProfileV1,
   decodeDirectoryViewV1,
   decodeStoredBotLifecycleReceiptV1,
   flockCommandFingerprint,
@@ -14,6 +15,7 @@ import {
   randomAvatarAppearanceV1,
   type AvatarAppearanceV1,
   type BotVoiceAppearanceV1,
+  type BotDirectoryProfileV1,
   type BotDirectoryViewV1,
   type BotLifecycleCommandV1,
   type BotLifecycleDirectoryViewV1,
@@ -233,6 +235,46 @@ export class FlockUserBackendContribution {
     });
   }
 
+  /**
+   * Records the Bot's current name after its settings committed.
+   *
+   * Only a newer settings revision is applied, and only onto a registration
+   * that still exists. A late or retried mirror cannot restore a deleted Bot
+   * or overwrite a rename that already landed.
+   */
+  async mirrorProfile(
+    botId: string,
+    profile: BotDirectoryProfileV1,
+  ): Promise<BotDirectoryViewV1> {
+    const nextProfile = decodeBotDirectoryProfileV1(profile);
+    return this.host.storage.transaction(async (storage) => {
+      const currentValue = await storage.get<unknown>(DIRECTORY_KEY);
+      const current =
+        currentValue === undefined
+          ? initialDirectory()
+          : decodeDirectoryViewV1(migrateStoredBotDirectoryV1(currentValue));
+      const found = current.bots.find((bot) => bot.botId === botId);
+      if (!found) return structuredClone(current);
+      if (
+        found.currentProfile !== undefined &&
+        found.currentProfile.sourceRevision >= nextProfile.sourceRevision
+      ) {
+        return structuredClone(current);
+      }
+      const next = {
+        ...current,
+        revision: current.revision + 1,
+        bots: current.bots.map((bot) =>
+          bot.botId === botId
+            ? { ...bot, currentProfile: structuredClone(nextProfile) }
+            : bot,
+        ),
+      } satisfies BotDirectoryViewV1;
+      await storage.put(DIRECTORY_KEY, next);
+      return structuredClone(next);
+    });
+  }
+
   async mirrorLook(
     botId: string,
     look: BotRegistrationV1["look"],
@@ -368,6 +410,15 @@ export class FlockUserBackendContribution {
       // which is decided when it speaks rather than frozen at registration.
       ...(bot.voice === undefined ? {} : { voice: structuredClone(bot.voice) }),
       look: "inherit",
+      // The seed is what materialization copies into settings. The projection
+      // is what opening reads, at the same revision settings start on.
+      currentProfile: {
+        name: bot.name,
+        ...(bot.description === undefined
+          ? {}
+          : { description: bot.description }),
+        sourceRevision: 0,
+      },
     };
     const next = {
       ...current,

@@ -39,6 +39,9 @@ declare const validators: {
   isThemeHex(value: unknown): value is ProtocolTypes["ThemeHex"];
   isThemeTokens(value: unknown): value is ProtocolTypes["ThemeTokens"];
   isThemeDocument(value: unknown): value is ProtocolTypes["ThemeDocument"];
+  isBotDirectoryProfile(
+    value: unknown,
+  ): value is ProtocolTypes["BotDirectoryProfile"];
   isBotRegistration(value: unknown): value is ProtocolTypes["BotRegistration"];
   isBotDirectory(value: unknown): value is ProtocolTypes["BotDirectory"];
   isBotLifecycle(value: unknown): value is ProtocolTypes["BotLifecycle"];
@@ -90,6 +93,15 @@ declare const validators: {
   ): value is ProtocolTypes["ConversationProjection"];
   isStopReceipt(value: unknown): value is ProtocolTypes["StopReceipt"];
   isObserverCursor(value: unknown): value is ProtocolTypes["ObserverCursor"];
+  isConversationEntityId(
+    value: unknown,
+  ): value is ProtocolTypes["ConversationEntityId"];
+  isConversationKind(
+    value: unknown,
+  ): value is ProtocolTypes["ConversationKind"];
+  isConversationMessageUpdate(
+    value: unknown,
+  ): value is ProtocolTypes["ConversationMessageUpdate"];
   isStateFrame(value: unknown): value is ProtocolTypes["StateFrame"];
   isObserverState(value: unknown): value is ProtocolTypes["ObserverState"];
   isNotification(value: unknown): value is ProtocolTypes["Notification"];

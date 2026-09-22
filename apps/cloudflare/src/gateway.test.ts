@@ -14,6 +14,7 @@ import type {
 import { describe, expect, test } from "bun:test";
 import {
   type AuthPackageV1,
+  emptyCommittedContextV1,
   type SessionEvent,
 } from "@frockbot/core/contracts";
 import type { ConnectionCommandReceiptV1 } from "@frockbot/core/connection";
@@ -112,6 +113,11 @@ class MemoryBotState implements BotStateBinding {
       throw new Error("bot already has an active run");
     }
     const previousEvents = this.sessions.get(botId) ?? [];
+    const nextTurn = previousEvents.reduce(
+      (next, event) =>
+        event.type === "turn/start" ? Math.max(next, event.turn + 1) : next,
+      1,
+    );
     const generation = await bootstrapCompositionGeneration(
       "2026-01-01T00:00:00.000Z",
     );
@@ -142,7 +148,20 @@ class MemoryBotState implements BotStateBinding {
       const composition = await createShellCompositionHost({
         botId,
         sessionId: command.sessionId,
-        sessionEvents: previousEvents,
+        // The active journal is this run, not the archive. Prior events stay
+        // on the session log so the next cursor keeps their sequence.
+        sessionSeed: {
+          cursor: {
+            sessionId: command.sessionId,
+            epoch: 1,
+            nextSeq: previousEvents.length,
+            nextTurn,
+          },
+          context: emptyCommittedContextV1(),
+          journal: { startSeq: previousEvents.length, events: [] },
+        },
+        selectWorkingContext: (request) =>
+          Promise.resolve([...request.currentMessages]),
         admitEffect: () => Promise.resolve(true),
         // The Bot Durable Object hands these over on a real Turn; this double
         // stands in for it, so it hands over the same base Packages.
@@ -150,8 +169,8 @@ class MemoryBotState implements BotStateBinding {
       }).mount(generation, new AbortController().signal);
       const result = await executeBotTurn({
         command,
-        previousEvents,
         composition,
+        suffixStartSeq: previousEvents.length,
       });
       run.events = structuredClone(result.events);
       run.status = "completed";

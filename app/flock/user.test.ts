@@ -178,6 +178,99 @@ describe("Flock User contribution", () => {
     expect(untouched.bots.map((bot) => bot.botId)).toEqual(["alpha"]);
   });
 
+  test("seeds the current profile at registration and applies only a newer mirror", async () => {
+    const storage = new MemoryStorage();
+    const contribution = createFlockUserBackendContribution({
+      storage,
+      commandBotLifecycle: () => Promise.reject(new Error("not used")),
+      readBotLifecycle: () => Promise.reject(new Error("not used")),
+    });
+    await contribution.createBot("user-1", {
+      ...command(),
+      description: "First persona",
+    });
+    expect((await contribution.listBots()).bots[0]).toMatchObject({
+      initialName: "Alpha",
+      initialDescription: "First persona",
+      currentProfile: {
+        name: "Alpha",
+        description: "First persona",
+        sourceRevision: 0,
+      },
+    });
+    const renamed = await contribution.mirrorProfile("alpha", {
+      name: "Atlas",
+      description: "Keeps the list",
+      sourceRevision: 2,
+    });
+    expect(renamed.revision).toBe(2);
+    expect(renamed.bots[0]?.currentProfile).toEqual({
+      name: "Atlas",
+      description: "Keeps the list",
+      sourceRevision: 2,
+    });
+    const stale = await contribution.mirrorProfile("alpha", {
+      name: "Alpha",
+      description: "First persona",
+      sourceRevision: 1,
+    });
+    expect(stale.revision).toBe(2);
+    expect(stale.bots[0]?.currentProfile?.name).toBe("Atlas");
+    const same = await contribution.mirrorProfile("alpha", {
+      name: "Someone else",
+      sourceRevision: 2,
+    });
+    expect(same.revision).toBe(2);
+    expect(same.bots[0]?.currentProfile?.name).toBe("Atlas");
+    const gone = await contribution.mirrorProfile("gone", {
+      name: "Ghost",
+      sourceRevision: 9,
+    });
+    expect(gone.bots.map((bot) => bot.botId)).toEqual(["alpha"]);
+  });
+
+  test("a profile mirror does not restore a deleted Bot", async () => {
+    const storage = new MemoryStorage();
+    let botStatus: "active" | "deleted" = "active";
+    const contribution = createFlockUserBackendContribution({
+      storage,
+      commandBotLifecycle: (_userId, lifecycleCommand) => {
+        botStatus = "deleted";
+        return Promise.resolve({
+          schemaVersion: 1 as const,
+          commandId: lifecycleCommand.commandId,
+          botId: lifecycleCommand.botId,
+          status: "applied" as const,
+          lifecycle: {
+            schemaVersion: 1 as const,
+            botId: lifecycleCommand.botId,
+            status: "deleted" as const,
+            revision: 1,
+          },
+        });
+      },
+      readBotLifecycle: (_userId, botId) =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          botId,
+          status: botStatus,
+          revision: 1,
+        }),
+    });
+    await contribution.createBot("user-1", command());
+    await contribution.executeLifecycle("user-1", {
+      schemaVersion: 1,
+      type: "bot/delete",
+      commandId: "delete-1",
+      botId: "alpha",
+    });
+    const mirrored = await contribution.mirrorProfile("alpha", {
+      name: "Atlas",
+      sourceRevision: 4,
+    });
+    expect(mirrored.bots).toEqual([]);
+  });
+
   test("mirrors an assembled look into the directory the client paints", async () => {
     const storage = new MemoryStorage();
     const contribution = createFlockUserBackendContribution({

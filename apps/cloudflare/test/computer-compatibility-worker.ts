@@ -301,6 +301,7 @@ export class WorkerdBotState extends BotState {
     const files = createDurableWorkspaceFilesV1(this.env, {
       owner,
       generations: this.generations(),
+      onInstructionPublication: this.instructionPublication(owner.userId),
     });
     if (!files) throw new Error("no Workspace bucket is bound");
     return files;
@@ -460,7 +461,7 @@ export class WorkerdBotState extends BotState {
         signal: new AbortController().signal,
       },
     );
-    const events = [...session.events];
+    const events = [...session.activeRunJournal];
     sessions.dispose();
     return { ...result, events };
   }
@@ -768,7 +769,9 @@ export class WorkerdBotState extends BotState {
     this.bindSurfaces(identity);
     const reads = createBotSkillsReads(this.backendEnv);
     if (!reads) throw new Error("no Workspace bucket is bound");
-    const catalog = await loadFullSkillCatalogV1(reads, identity);
+    const catalog = await loadFullSkillCatalogV1(reads, identity, {
+      indexes: await this.skillIndexLoad(identity),
+    });
     const generations = (await this.listCompositionGenerations({
       schemaVersion: 1,
       userId: identity.userId,

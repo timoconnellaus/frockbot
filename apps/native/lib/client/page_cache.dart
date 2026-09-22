@@ -3,8 +3,8 @@ import 'dart:convert';
 import 'transport.dart';
 
 /// The last transcript page seen for a Bot, kept so that switching to it paints
-/// its messages before the network answers. It is a cache, never a source of
-/// truth: the next projection replaces it wholesale.
+/// its messages before the network answers. Cache, epoch and cursor live in
+/// one envelope so a reconnect never pairs a later cursor with an older page.
 String pageCacheKey(String userId, String botId) => 'page/$userId/$botId';
 
 /// Beyond this the cache costs more to write than the blank frame it saves.
@@ -14,17 +14,25 @@ const cachedPageBytes = 256000;
 class CachedPage {
   final List<Map<String, dynamic>> runs;
   final String? before;
-  const CachedPage(this.runs, this.before);
+  final String? epoch;
+  final String? cursor;
+  final List<Object?> announcements;
+  const CachedPage(
+    this.runs,
+    this.before, {
+    this.epoch,
+    this.cursor,
+    this.announcements = const [],
+  });
 }
 
-/// The cached projection's shape. Bumped when a projection this build cannot
-/// read wholesale could otherwise be painted: version 2 is the first that
-/// carries a durable `ordinal` on every send, which is a message's identity.
-const pageCacheVersion = 2;
+/// The cached projection's shape. Version 3 is the first that stores the
+/// publication epoch and cursor with the rows they name.
+const pageCacheVersion = 3;
 
 /// Decodes a cache written by this shape; anything else — an older version, a
 /// row missing its run identity, a send with no durable ordinal — is discarded
-/// wholesale rather than shown, and the next projection refills it.
+/// wholesale rather than shown, and the next snapshot refills it.
 CachedPage? decodePageCache(String? saved) {
   if (saved == null) return null;
   try {
@@ -43,13 +51,33 @@ CachedPage? decodePageCache(String? saved) {
     }
     final before = value['before'];
     if (before != null && before is! String) return null;
-    return CachedPage(runs, before as String?);
+    final epoch = value['epoch'];
+    final cursor = value['cursor'];
+    if (epoch != null && epoch is! String) return null;
+    if (cursor != null && cursor is! String) return null;
+    // A cursor without its matching rows is unrecoverable: reconnect would
+    // skip events the cache no longer holds.
+    if (cursor != null && runs.isEmpty) return null;
+    final announcements = value['announcements'];
+    return CachedPage(
+      runs,
+      before as String?,
+      epoch: epoch as String?,
+      cursor: cursor as String?,
+      announcements: announcements is List ? List<Object?>.from(announcements) : const [],
+    );
   } catch (_) {
     return null;
   }
 }
 
-String encodePageCache(List<Map<String, dynamic>> runs, String? before) {
+String encodePageCache(
+  List<Map<String, dynamic>> runs,
+  String? before, {
+  String? epoch,
+  String? cursor,
+  List<Object?> announcements = const [],
+}) {
   final kept = runs.length > cachedRunLimit
       ? runs.sublist(runs.length - cachedRunLimit)
       : runs;
@@ -57,20 +85,33 @@ String encodePageCache(List<Map<String, dynamic>> runs, String? before) {
     'version': pageCacheVersion,
     'runs': kept,
     'before': before,
+    'epoch': ?epoch,
+    if (cursor != null && kept.isNotEmpty) 'cursor': cursor,
+    if (announcements.isNotEmpty) 'announcements': announcements,
   });
 }
 
 /// Never fails a caller: a transcript that could not be cached only costs the
-/// next switch a blank frame.
+/// next switch a blank frame. Persistence failure leaves the last durable
+/// envelope in place so a reconnect replays from a matching cache.
 Future<void> writePageCache(
   LocalStore store,
   String userId,
   String botId,
   List<Map<String, dynamic>> runs,
-  String? before,
-) async {
+  String? before, {
+  String? epoch,
+  String? cursor,
+  List<Object?> announcements = const [],
+}) async {
   try {
-    final encoded = encodePageCache(runs, before);
+    final encoded = encodePageCache(
+      runs,
+      before,
+      epoch: epoch,
+      cursor: cursor,
+      announcements: announcements,
+    );
     if (encoded.length > cachedPageBytes) return;
     await store.write(pageCacheKey(userId, botId), encoded);
   } catch (_) {

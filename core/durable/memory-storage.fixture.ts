@@ -7,6 +7,8 @@
 export class MemoryStorage {
   readonly values = new Map<string, unknown>();
   alarmAt: number | undefined;
+  /** The next setAlarm rejects and the transaction that called it rolls back. */
+  failNextAlarm = false;
 
   get<T>(key: string): Promise<T | undefined> {
     return Promise.resolve(this.values.get(key) as T | undefined);
@@ -34,21 +36,25 @@ export class MemoryStorage {
 
   list<T>(options: {
     prefix?: string;
+    start?: string;
     end?: string;
     reverse?: boolean;
     limit?: number;
   }): Promise<Map<string, T>> {
     const entries = [...this.values.entries()]
-      .filter(
-        ([key]) =>
-          key.startsWith(options.prefix ?? "") &&
-          (options.end === undefined || key < options.end),
-      )
+      .filter(([key]) => {
+        if (options.prefix !== undefined && !key.startsWith(options.prefix)) {
+          return false;
+        }
+        if (options.start !== undefined && key < options.start) return false;
+        if (options.end !== undefined && key >= options.end) return false;
+        return true;
+      })
       .sort(([left], [right]) => left.localeCompare(right));
     if (options.reverse) entries.reverse();
-    return Promise.resolve(
-      new Map(entries.slice(0, options.limit) as Array<[string, T]>),
-    );
+    const limited =
+      options.limit === undefined ? entries : entries.slice(0, options.limit);
+    return Promise.resolve(new Map(limited as Array<[string, T]>));
   }
 
   /**
@@ -61,14 +67,42 @@ export class MemoryStorage {
 
   transaction<T>(callback: (storage: MemoryStorage) => Promise<T>): Promise<T> {
     const next = this.#serialized.then(
-      () => callback(this),
-      () => callback(this),
+      () => this.#runTransaction(callback),
+      () => this.#runTransaction(callback),
     );
     this.#serialized = next.catch(() => undefined);
     return next;
   }
 
+  /**
+   * A thrown callback undoes every write in the attempt, including the alarm.
+   * Callers that mutate a value they read must `put` it; the snapshot is what
+   * rolls back, and a half-written pending index must not survive the throw.
+   */
+  async #runTransaction<T>(
+    callback: (storage: MemoryStorage) => Promise<T>,
+  ): Promise<T> {
+    const snapshot = new Map(
+      [...this.values].map(
+        ([key, value]) => [key, structuredClone(value)] as const,
+      ),
+    );
+    const alarmAt = this.alarmAt;
+    try {
+      return await callback(this);
+    } catch (error) {
+      this.values.clear();
+      for (const [key, value] of snapshot) this.values.set(key, value);
+      this.alarmAt = alarmAt;
+      throw error;
+    }
+  }
+
   setAlarm(scheduledTime: number): Promise<void> {
+    if (this.failNextAlarm) {
+      this.failNextAlarm = false;
+      return Promise.reject(new Error("alarm write failed"));
+    }
     this.alarmAt = scheduledTime;
     return Promise.resolve();
   }

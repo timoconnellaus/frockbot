@@ -175,25 +175,25 @@ export function priorOutcomeUnknownV1(
   session: Session,
   requestId: string,
 ): boolean {
-  const dispatches = session.events.filter(
+  const dispatches = session.activeRunJournal.filter(
     (
       event,
     ): event is Extract<
-      (typeof session.events)[number],
+      (typeof session.activeRunJournal)[number],
       { type: "model/request" }
     > =>
       event.type === "model/request" && event.request.requestId === requestId,
   );
   if (dispatches.length < 2) return false;
   if (
-    session.events.some(
+    session.activeRunJournal.some(
       (event) => event.type === "model/usage" && event.requestId === requestId,
     )
   ) {
     return false;
   }
   const previous = dispatches.at(-2)!;
-  return !session.events.some(
+  return !session.activeRunJournal.some(
     (event) =>
       event.type === "model/retry" &&
       event.turn === previous.turn &&
@@ -391,21 +391,21 @@ export async function isolateModelTransport(
   // the binding it named is what the call was admitted for. A summariser has
   // no `model/request`: its durable intent is the `conversation/compaction-intent`
   // it wrote before calling, keyed by the same effect id this dispatch names.
-  const attempts = session.events.filter(
+  const attempts = session.activeRunJournal.filter(
     (
       event,
     ): event is Extract<
-      (typeof session.events)[number],
+      (typeof session.activeRunJournal)[number],
       { type: "model/request" }
     > =>
       event.type === "model/request" &&
       event.request.requestId === dispatch.requestId,
   );
-  const intent = session.events.findLast(
+  const intent = session.activeRunJournal.findLast(
     (
       event,
     ): event is Extract<
-      (typeof session.events)[number],
+      (typeof session.activeRunJournal)[number],
       { type: "conversation/compaction-intent" }
     > =>
       event.type === "conversation/compaction-intent" &&
@@ -424,7 +424,7 @@ export async function isolateModelTransport(
     );
   }
   if (intent !== undefined) {
-    const settled = session.events.some(
+    const settled = session.activeRunJournal.some(
       (event) =>
         (event.type === "conversation/compacted" ||
           event.type === "conversation/compaction-failed") &&
@@ -442,7 +442,7 @@ export async function isolateModelTransport(
       dispatch.refusal = { httpStatus: 0, classification: "permanent" };
       return refused("the summariser that asked for this call is not running");
     }
-    const source = compactionModelV1(session.events);
+    const source = compactionModelV1(session.activeRunJournal);
     if (
       intent.provider !== dispatch.provider ||
       intent.model !== dispatch.model ||
@@ -497,7 +497,7 @@ export async function isolateModelTransport(
     // again costs nothing and adds nothing.
     return refusedBeforeFetch(
       dispatch,
-      session.events.some(
+      session.activeRunJournal.some(
         (event) =>
           event.type === "model/usage" &&
           event.requestId === dispatch.requestId,

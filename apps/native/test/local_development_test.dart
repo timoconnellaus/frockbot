@@ -60,7 +60,7 @@ void main() {
       final api = NativeApi(MemoryStore());
       addTearDown(api.close);
       expect(await api.request('/api/identity'), {'ok': true});
-      final socket = await api.socket('example', null);
+      final socket = await api.socket('example');
       await socket.sink.close();
       expect(seen, ['/api/identity', '/api/bots/example/state-channel']);
     },

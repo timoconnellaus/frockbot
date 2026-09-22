@@ -18,7 +18,11 @@ import {
   userInstructionRootV1,
 } from "./catalog.ts";
 import { loadManagedSkillsV1, MANAGED_SKILL_DOCUMENTS_V1 } from "./managed.ts";
-import { FakeWorkspace, skillMarkdown } from "./testing.ts";
+import {
+  FakeWorkspace,
+  skillIndexSourceForFake,
+  skillMarkdown,
+} from "./testing.ts";
 
 const OWNER = { userId: "user-1", botId: "bot-1" };
 const OWN_ROOT = botInstructionRootV1(OWNER);
@@ -297,6 +301,7 @@ describe("the rendered catalog block", () => {
 
     const catalog = await loadFullSkillCatalogV1(workspace, OWNER, {
       managed: false,
+      indexes: await skillIndexSourceForFake(workspace, OWNER).load(),
     });
     const rendered = renderSkillCatalogPromptV1(catalog);
 
@@ -369,9 +374,20 @@ describe("a Turn's whole catalog", () => {
       },
     ]);
     const { session, dispose } = await openSession();
-    const catalog = new SkillCatalog(OWNER, workspace);
+    const catalog = new SkillCatalog(
+      OWNER,
+      workspace,
+      [],
+      [],
+      skillIndexSourceForFake(workspace, OWNER),
+    );
 
     await catalog.refresh(1, session);
+    expect(
+      workspace.calls.filter(
+        (call) => call.startsWith("list:") || call.startsWith("read:"),
+      ),
+    ).toEqual([]);
 
     expect(catalog.current().skills.map((skill) => skill.ref?.source)).toEqual([
       "bot",
@@ -491,6 +507,7 @@ describe("the User-global instruction root", () => {
 
     const catalog = await loadFullSkillCatalogV1(workspace, OWNER, {
       managed: false,
+      indexes: await skillIndexSourceForFake(workspace, OWNER).load(),
     });
 
     expect(
@@ -565,11 +582,11 @@ describe("the User-global instruction root", () => {
     ).toBe("not-found");
 
     // Another Bot of the same User loads it, and is told who wrote it.
-    const catalog = await loadFullSkillCatalogV1(
-      workspace,
-      { userId: "user-1", botId: "bot-2" },
-      { managed: false },
-    );
+    const reader = { userId: "user-1", botId: "bot-2" };
+    const catalog = await loadFullSkillCatalogV1(workspace, reader, {
+      managed: false,
+      indexes: await skillIndexSourceForFake(workspace, reader).load(),
+    });
     expect(catalog.skills.map((skill) => [skill.name, skill.by])).toEqual([
       ["Daily standup", 'Bot "bot-1"'],
     ]);
