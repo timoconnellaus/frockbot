@@ -1123,7 +1123,14 @@ jobs:
     # after a later notarization succeeds uploads the image to the Release
     # already created.
     needs:
-      [verify, deploy-marketing, deploy-backend, macos-release, release-assets, android-apk]
+      [
+        verify,
+        deploy-marketing,
+        deploy-backend,
+        macos-release,
+        release-assets,
+        android-apk,
+      ]
     if: >-
       ${{ !cancelled()
       && needs.verify.result == 'success'
