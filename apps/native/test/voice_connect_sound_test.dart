@@ -1,4 +1,4 @@
-/// The connect chime is a short wav, not the padded download.
+/// The connect chime is the original recording, with the silent tail cut.
 library;
 
 import 'dart:typed_data';
@@ -7,7 +7,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 
 void main() {
-  test('connect.wav is under half a second of mono PCM', () async {
+  test('connect.wav is the original confirm, without the silent tail', () async {
     TestWidgetsFlutterBinding.ensureInitialized();
     final data = await rootBundle.load('assets/voice/connect.wav');
     final bytes = data.buffer.asUint8List(
@@ -27,9 +27,9 @@ void main() {
         rate = view.getUint32(offset + 12, Endian.little);
       }
       if (id == 'data') {
-        expect(channels, 1);
+        expect(channels, 2);
         expect(rate, 44100);
-        expect(size / 2 / rate!, inInclusiveRange(0.4, 0.55));
+        expect(size / 4 / rate!, inInclusiveRange(0.4, 0.55));
         return;
       }
       offset += 8 + size + (size.isOdd ? 1 : 0);
