@@ -392,6 +392,8 @@ void main() {
     await controller.start();
     await tester.pump();
     socket.deliver(jsonEncode({'type': 'welcome', 'protocol_version': 1}));
+    await tester.pump();
+    socket.completeOpen();
     socket.deliver(jsonEncode({'type': 'status', 'status': 'listening'}));
     await tester.pump();
     await tester.pump();
@@ -460,6 +462,8 @@ void main() {
     await controller.start();
     await tester.pump();
     socket.deliver(jsonEncode({'type': 'welcome', 'protocol_version': 1}));
+    await tester.pump();
+    socket.completeOpen();
     socket.deliver(jsonEncode({'type': 'status', 'status': 'listening'}));
     await tester.pump();
     await tester.pump();
@@ -579,7 +583,7 @@ void main() {
     await tester.pump();
     expect(
       socket.texts.map((text) => jsonDecode(text)['type']),
-      contains('voice/sleep'),
+      contains('voice/control'),
     );
     expect(controller.paused, isTrue);
     expect(find.text('Paused'), findsOneWidget);

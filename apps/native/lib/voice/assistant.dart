@@ -671,12 +671,6 @@ class AssistantSessionController extends ChangeNotifier {
     // A paused call is not listening: the gate's onset must not wake an
     // upstream the person deliberately put to sleep.
     if (_paused) return;
-    if (!_ready) {
-      _holdOpening(_outbound(frame.bytes));
-      return;
-    }
-    final socket = _socket;
-    if (socket == null) return;
     if (_asleep) {
       // Asleep, the gate is the only thing that can wake the upstream: a
       // verified onset, then the pre-roll held until this wake is ready.
@@ -688,6 +682,12 @@ class AssistantSessionController extends ChangeNotifier {
       _notify();
       return;
     }
+    if (!_ready) {
+      _holdOpening(_outbound(frame.bytes));
+      return;
+    }
+    final socket = _socket;
+    if (socket == null) return;
     // Quiet long enough while listening, and the upstream sleeps. This is the
     // only thing that stops the audio: nothing else is gated.
     if (!decision.open &&
