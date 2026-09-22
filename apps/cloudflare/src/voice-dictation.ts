@@ -125,18 +125,41 @@ export interface VoiceDictationRelayOptions {
 export async function fetchVoiceUpstreamSocketV1(
   url: string,
   headers: Record<string, string>,
+  signal?: AbortSignal,
 ): Promise<WebSocket> {
+  if (signal?.aborted) {
+    throw new DOMException("The operation was aborted.", "AbortError");
+  }
   const target = new URL(url);
   if (target.protocol === "wss:") target.protocol = "https:";
   if (target.protocol === "ws:") target.protocol = "http:";
   const response = await fetch(target, {
     headers: { ...headers, upgrade: "websocket" },
+    ...(signal ? { signal } : {}),
   });
   const socket = response.webSocket;
   if (response.status !== 101 || !socket) {
     throw new Error(`upstream refused the upgrade (${response.status})`);
   }
+  if (signal?.aborted) {
+    try {
+      socket.close();
+    } catch {
+      // A late upgrade is closed rather than accepted.
+    }
+    throw new DOMException("The operation was aborted.", "AbortError");
+  }
   socket.accept();
+  if (signal) {
+    const onAbort = () => {
+      try {
+        socket.close();
+      } catch {
+        // Already gone.
+      }
+    };
+    signal.addEventListener("abort", onAbort, { once: true });
+  }
   return socket;
 }
 

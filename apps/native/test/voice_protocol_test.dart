@@ -7,6 +7,7 @@
 library;
 
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/voice/protocol.dart';
@@ -40,11 +41,42 @@ void main() {
         'type': 'hello',
         'protocol_version': 1,
       });
-      expect(decoded(encodeAssistantStartCallV1()), {
-        'type': 'start_call',
-        'preferred_format': 'pcm16',
-      });
-      expect(decoded(encodeAssistantEndCallV1()), {'type': 'end_call'});
+      const attempt = '2e780bb8-b4e9-42af-a9bc-f3f6aaf37070';
+      expect(
+        decoded(
+          encodeVoiceOpenV1(
+            attemptId: attempt,
+            mode: VoiceOpeningModeV1.start,
+            botId: 'bot-1',
+            muted: true,
+          ),
+        ),
+        {
+          'schemaVersion': 1,
+          'type': 'voice/open',
+          'attemptId': attempt,
+          'mode': 'start',
+          'botId': 'bot-1',
+          'paused': false,
+          'muted': true,
+        },
+      );
+      expect(
+        decoded(
+          encodeVoiceControlV1(
+            attemptId: attempt,
+            sequence: 1,
+            action: VoiceControlActionV1.end,
+          ),
+        ),
+        {
+          'schemaVersion': 1,
+          'type': 'voice/control',
+          'attemptId': attempt,
+          'sequence': 1,
+          'action': 'end',
+        },
+      );
       expect(decoded(encodeAssistantInterruptV1()), {'type': 'interrupt'});
       expect(decoded(encodeVoiceSleepV1()), {
         'schemaVersion': 1,
@@ -54,15 +86,6 @@ void main() {
         'schemaVersion': 1,
         'type': 'voice/sleep',
         'paused': true,
-      });
-      expect(decoded(encodeVoiceWakeV1()), {
-        'schemaVersion': 1,
-        'type': 'voice/wake',
-      });
-      expect(decoded(encodeVoiceMuteV1(true)), {
-        'schemaVersion': 1,
-        'type': 'voice/mute',
-        'muted': true,
       });
     });
   });
@@ -250,6 +273,46 @@ void main() {
       expect(delegation.botName, 'Scout');
       expect(delegation.runId, 'run-1');
       expect(delegation.state, VoiceDelegationStateV1.answering);
+
+      const attempt = '2e780bb8-b4e9-42af-a9bc-f3f6aaf37070';
+      final admitted = round<AssistantVoiceAdmittedV1>({
+        'type': 'voice/admitted',
+        'schemaVersion': 1,
+        'attemptId': attempt,
+        'callId': 'call-1',
+        'paused': true,
+        'muted': false,
+      })!;
+      expect(admitted.attemptId, attempt);
+      expect(admitted.callId, 'call-1');
+      expect(admitted.paused, isTrue);
+      expect(
+        round({
+          'type': 'voice/ready',
+          'schemaVersion': 1,
+          'attemptId': attempt,
+          'callId': 'call-1',
+        }),
+        isA<AssistantVoiceReadyV1>(),
+      );
+      expect(
+        round({
+          'type': 'voice/open-failed',
+          'schemaVersion': 1,
+          'attemptId': attempt,
+          'code': 'overflow',
+        }),
+        isA<AssistantVoiceOpenFailedV1>(),
+      );
+      expect(
+        round({
+          'type': 'voice/control-ack',
+          'schemaVersion': 1,
+          'attemptId': attempt,
+          'sequence': 2,
+        }),
+        isA<AssistantVoiceControlAckV1>(),
+      );
     });
 
     test('what it ignores, rather than ending a call over', () {
@@ -312,5 +375,38 @@ void main() {
     expect(voiceAssistantConnectTimeoutV1, const Duration(seconds: 10));
     expect(voiceDictationOpeningBufferBytesV1, 30 * 24000 * 2);
     expect(voiceAssistantOpeningBufferBytesV1, 10 * 16000 * 2);
+    expect(voiceAssistantOpeningDeadlineV1, const Duration(seconds: 10));
   });
+
+  test('every opening failure has one sentence a person can act on', () {
+    for (final code in VoiceOpeningFailCodeV1.values) {
+      final message = voiceOpeningFailMessage(code);
+      expect(message, isNotEmpty);
+      expect(message.endsWith('.'), isTrue, reason: message);
+    }
+  });
+
+  test(
+    'the assistant pcm envelope is version, uuid, little-endian sequence',
+    () {
+      const attempt = '2e780bb8-b4e9-42af-a9bc-f3f6aaf37070';
+      final pcm = Uint8List.fromList([1, 0, 2, 0]);
+      final frame = encodeVoiceAssistantPcmEnvelopeV1(
+        attemptId: attempt,
+        sequence: 0x01020304,
+        pcm: pcm,
+      );
+      expect(frame.length, voiceAssistantPcmHeaderBytesV1 + 4);
+      expect(frame[0], 1);
+      expect(frame[17], 0x04);
+      expect(frame[18], 0x03);
+      expect(frame[19], 0x02);
+      expect(frame[20], 0x01);
+      final decoded = decodeVoiceAssistantPcmEnvelopeV1(frame)!;
+      expect(decoded.attemptId, attempt);
+      expect(decoded.sequence, 0x01020304);
+      expect(decoded.pcm, pcm);
+      expect(isVoiceAttemptIdV1(newVoiceAttemptIdV1()), isTrue);
+    },
+  );
 }

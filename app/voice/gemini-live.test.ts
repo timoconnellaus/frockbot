@@ -292,6 +292,16 @@ describe("decoding what the server sends", () => {
         '{"sessionResumptionUpdate":{"newHandle":"h-1","resumable":true}}',
       ),
     ).toEqual([{ kind: "resumption", handle: "h-1", resumable: true }]);
+    expect(
+      decodeGeminiServerFrameV1(
+        '{"sessionResumptionUpdate":{"resumable":false}}',
+      ),
+    ).toEqual([{ kind: "resumption", resumable: false }]);
+    expect(
+      decodeGeminiServerFrameV1(
+        '{"sessionResumptionUpdate":{"newHandle":"h-2","resumable":false}}',
+      ),
+    ).toEqual([{ kind: "resumption", handle: "h-2", resumable: false }]);
     expect(decodeGeminiServerFrameV1('{"goAway":{"timeLeft":"10s"}}')).toEqual([
       { kind: "go-away", timeLeft: "10s" },
     ]);

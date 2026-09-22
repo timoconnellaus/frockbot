@@ -12,6 +12,8 @@
 library;
 
 import 'dart:convert';
+import 'dart:math';
+import 'dart:typed_data';
 
 import '../client/transport.dart' show decodeBoundedJson;
 
@@ -58,18 +60,22 @@ String formatDictationElapsedV1(Duration elapsed) {
 /// Opening audio the client holds while the dictation socket opens: 30 s.
 const voiceDictationOpeningBufferBytesV1 = 30 * voiceDictationSampleRateV1 * 2;
 
-/// Opening audio the client holds before `start_call` is sent: 10 s.
+/// Opening audio the client holds until `voice/ready`: 10 s at the input format.
+const voiceAssistantOpeningBufferSecondsV1 = 10;
 const voiceAssistantOpeningBufferBytesV1 =
-    10 * voiceAssistantInputSampleRateV1 * 2;
+    voiceAssistantOpeningBufferSecondsV1 * voiceAssistantInputSampleRateV1 * 2;
+
+/// How long the handshake has to reach `listening` before it is a failure.
+const voiceAssistantStartTimeoutV1 = Duration(seconds: 15);
+
+/// Server opening deadline; kept below the client start timeout.
+const voiceAssistantOpeningDeadlineV1 = Duration(seconds: 10);
 
 /// Quiet this long while listening and the client sleeps the upstream.
 const voiceAssistantSleepAfterV1 = Duration(seconds: 120);
 
 /// Audio replayed ahead of a wake so the first syllable reaches the model.
 const voiceAssistantPreRollV1 = Duration(milliseconds: 500);
-
-/// How long the handshake has to reach `listening` before it is a failure.
-const voiceAssistantStartTimeoutV1 = Duration(seconds: 15);
 
 /// How long a live call may carry no signal at all before the surface says
 /// the microphone is not being heard. A working microphone picks up a room;
@@ -220,13 +226,26 @@ enum VoiceUpstreamStateV1 { asleep, starting, awake }
 
 enum VoiceRefusalCodeV1 { exclusive, superseded, quota, unconfigured }
 
+enum VoiceOpeningModeV1 { start, wake, rejoin, control }
+
+enum VoiceOpeningFailCodeV1 {
+  timeout,
+  cancelled,
+  overflow,
+  upstream,
+  quota,
+  unconfigured,
+  exclusive,
+  superseded,
+  ended,
+  protocol,
+  gap,
+}
+
+enum VoiceControlActionV1 { pause, mute, end }
+
 String encodeAssistantHelloV1() =>
     jsonEncode({'type': 'hello', 'protocol_version': 1});
-
-String encodeAssistantStartCallV1() =>
-    jsonEncode({'type': 'start_call', 'preferred_format': 'pcm16'});
-
-String encodeAssistantEndCallV1() => jsonEncode({'type': 'end_call'});
 
 String encodeAssistantInterruptV1() => jsonEncode({'type': 'interrupt'});
 
@@ -236,17 +255,39 @@ String encodeVoiceSleepV1({bool paused = false}) => jsonEncode({
   if (paused) 'paused': true,
 });
 
-String encodeVoiceWakeV1() =>
-    jsonEncode({'schemaVersion': 1, 'type': 'voice/wake'});
+String encodeVoiceOpenV1({
+  required String attemptId,
+  required VoiceOpeningModeV1 mode,
+  String? botId,
+  String? callId,
+  bool paused = false,
+  bool muted = false,
+}) => jsonEncode({
+  'schemaVersion': 1,
+  'type': 'voice/open',
+  'attemptId': attemptId,
+  'mode': mode.name,
+  if (botId != null && botId.isNotEmpty) 'botId': botId,
+  if (callId != null && callId.isNotEmpty) 'callId': callId,
+  'paused': paused,
+  'muted': muted,
+});
 
-String encodeVoiceMuteV1(bool muted) =>
-    jsonEncode({'schemaVersion': 1, 'type': 'voice/mute', 'muted': muted});
+String encodeVoiceControlV1({
+  required String attemptId,
+  required int sequence,
+  required VoiceControlActionV1 action,
+  bool? muted,
+}) => jsonEncode({
+  'schemaVersion': 1,
+  'type': 'voice/control',
+  'attemptId': attemptId,
+  'sequence': sequence,
+  'action': action.name,
+  if (action == VoiceControlActionV1.mute) 'muted': muted == true,
+});
 
-/// Which Bot this call is with (ADR 0029).
-///
-/// The SDK's own `start_call` frame carries only a preferred format, so the
-/// target is said separately, just before it. A call that never names one
-/// talks to the account's General Bot.
+/// Which Bot this call is with (ADR 0029). Mid-call retarget only.
 String encodeVoiceTargetV1(String botId) =>
     jsonEncode({'schemaVersion': 1, 'type': 'voice/target', 'botId': botId});
 
@@ -255,6 +296,84 @@ String encodeVoiceSpeechV1(bool playing) => jsonEncode({
   'type': 'voice/speech',
   'playing': playing,
 });
+
+final _uuidV4 = RegExp(
+  r'^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$',
+);
+
+bool isVoiceAttemptIdV1(String value) => _uuidV4.hasMatch(value);
+
+String newVoiceAttemptIdV1() {
+  final random = Random.secure();
+  final bytes = List<int>.generate(16, (_) => random.nextInt(256));
+  bytes[6] = (bytes[6] & 0x0f) | 0x40;
+  bytes[8] = (bytes[8] & 0x3f) | 0x80;
+  final hex = [for (final byte in bytes) byte.toRadixString(16).padLeft(2, '0')]
+      .join();
+  return '${hex.substring(0, 8)}-${hex.substring(8, 12)}-'
+      '${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
+}
+
+Uint8List? voiceAttemptIdBytesV1(String id) {
+  if (!isVoiceAttemptIdV1(id)) return null;
+  final hex = id.replaceAll('-', '');
+  return Uint8List.fromList([
+    for (var i = 0; i < 16; i++)
+      int.parse(hex.substring(i * 2, i * 2 + 2), radix: 16),
+  ]);
+}
+
+const voiceAssistantPcmHeaderBytesV1 = 21;
+
+Uint8List encodeVoiceAssistantPcmEnvelopeV1({
+  required String attemptId,
+  required int sequence,
+  required Uint8List pcm,
+}) {
+  final attempt = voiceAttemptIdBytesV1(attemptId);
+  if (attempt == null) {
+    throw FormatException('voice pcm envelope attemptId');
+  }
+  if (pcm.length.isOdd) {
+    throw FormatException('voice pcm envelope payload is misaligned');
+  }
+  final frame = Uint8List(voiceAssistantPcmHeaderBytesV1 + pcm.length);
+  frame[0] = 1;
+  frame.setRange(1, 17, attempt);
+  ByteData.sublistView(frame).setUint32(17, sequence, Endian.little);
+  frame.setRange(voiceAssistantPcmHeaderBytesV1, frame.length, pcm);
+  return frame;
+}
+
+class VoicePcmEnvelopeV1 {
+  final String attemptId;
+  final int sequence;
+  final Uint8List pcm;
+  const VoicePcmEnvelopeV1({
+    required this.attemptId,
+    required this.sequence,
+    required this.pcm,
+  });
+}
+
+VoicePcmEnvelopeV1? decodeVoiceAssistantPcmEnvelopeV1(Uint8List bytes) {
+  if (bytes.length < voiceAssistantPcmHeaderBytesV1) return null;
+  if (bytes[0] != 1) return null;
+  final pcmLength = bytes.length - voiceAssistantPcmHeaderBytesV1;
+  if (pcmLength == 0 || pcmLength.isOdd) return null;
+  final hex = [
+    for (var i = 1; i < 17; i++) bytes[i].toRadixString(16).padLeft(2, '0'),
+  ].join();
+  final attemptId =
+      '${hex.substring(0, 8)}-${hex.substring(8, 12)}-${hex.substring(12, 16)}-${hex.substring(16, 20)}-${hex.substring(20)}';
+  if (!isVoiceAttemptIdV1(attemptId)) return null;
+  final sequence = ByteData.sublistView(bytes).getUint32(17, Endian.little);
+  return VoicePcmEnvelopeV1(
+    attemptId: attemptId,
+    sequence: sequence,
+    pcm: bytes.sublist(voiceAssistantPcmHeaderBytesV1),
+  );
+}
 
 sealed class AssistantServerFrameV1 {
   const AssistantServerFrameV1();
@@ -336,6 +455,37 @@ final class AssistantDelegationV1 extends AssistantServerFrameV1 {
   const AssistantDelegationV1(this.botId, this.botName, this.runId, this.state);
 }
 
+final class AssistantVoiceAdmittedV1 extends AssistantServerFrameV1 {
+  final String attemptId;
+  final String callId;
+  final bool paused;
+  final bool muted;
+  const AssistantVoiceAdmittedV1(
+    this.attemptId,
+    this.callId, {
+    required this.paused,
+    required this.muted,
+  });
+}
+
+final class AssistantVoiceReadyV1 extends AssistantServerFrameV1 {
+  final String attemptId;
+  final String callId;
+  const AssistantVoiceReadyV1(this.attemptId, this.callId);
+}
+
+final class AssistantVoiceOpenFailedV1 extends AssistantServerFrameV1 {
+  final String attemptId;
+  final VoiceOpeningFailCodeV1 code;
+  const AssistantVoiceOpenFailedV1(this.attemptId, this.code);
+}
+
+final class AssistantVoiceControlAckV1 extends AssistantServerFrameV1 {
+  final String attemptId;
+  final int sequence;
+  const AssistantVoiceControlAckV1(this.attemptId, this.sequence);
+}
+
 /// One JSON text frame from the assistant socket.
 ///
 /// Answers null rather than throwing for anything unknown or malformed: the
@@ -396,6 +546,63 @@ AssistantServerFrameV1? decodeAssistantServerFrameV1(String raw) {
         return null;
       }
       return AssistantDelegationV1(botId, botName, runId, state);
+    case 'voice/admitted':
+      final attemptId = value['attemptId'];
+      final callId = value['callId'];
+      if (attemptId is! String ||
+          !isVoiceAttemptIdV1(attemptId) ||
+          callId is! String ||
+          callId.isEmpty) {
+        return null;
+      }
+      return AssistantVoiceAdmittedV1(
+        attemptId,
+        callId,
+        paused: value['paused'] == true,
+        muted: value['muted'] == true,
+      );
+    case 'voice/ready':
+      final attemptId = value['attemptId'];
+      final callId = value['callId'];
+      if (attemptId is! String ||
+          !isVoiceAttemptIdV1(attemptId) ||
+          callId is! String ||
+          callId.isEmpty) {
+        return null;
+      }
+      return AssistantVoiceReadyV1(attemptId, callId);
+    case 'voice/open-failed':
+      final attemptId = value['attemptId'];
+      final code = switch (value['code']) {
+        'timeout' => VoiceOpeningFailCodeV1.timeout,
+        'cancelled' => VoiceOpeningFailCodeV1.cancelled,
+        'overflow' => VoiceOpeningFailCodeV1.overflow,
+        'upstream' => VoiceOpeningFailCodeV1.upstream,
+        'quota' => VoiceOpeningFailCodeV1.quota,
+        'unconfigured' => VoiceOpeningFailCodeV1.unconfigured,
+        'exclusive' => VoiceOpeningFailCodeV1.exclusive,
+        'superseded' => VoiceOpeningFailCodeV1.superseded,
+        'ended' => VoiceOpeningFailCodeV1.ended,
+        'protocol' => VoiceOpeningFailCodeV1.protocol,
+        'gap' => VoiceOpeningFailCodeV1.gap,
+        _ => null,
+      };
+      if (attemptId is! String ||
+          !isVoiceAttemptIdV1(attemptId) ||
+          code == null) {
+        return null;
+      }
+      return AssistantVoiceOpenFailedV1(attemptId, code);
+    case 'voice/control-ack':
+      final attemptId = value['attemptId'];
+      final sequence = value['sequence'];
+      if (attemptId is! String ||
+          !isVoiceAttemptIdV1(attemptId) ||
+          sequence is! int ||
+          sequence < 0) {
+        return null;
+      }
+      return AssistantVoiceControlAckV1(attemptId, sequence);
     case 'welcome':
       final version = value['protocol_version'];
       return AssistantWelcomeV1(version is int ? version : 0);
@@ -453,6 +660,24 @@ String voiceRefusalMessage(VoiceRefusalCodeV1 code) => switch (code) {
   VoiceRefusalCodeV1.superseded => 'Voice moved to another device.',
   VoiceRefusalCodeV1.quota => 'Voice has used today’s allowance.',
   VoiceRefusalCodeV1.unconfigured => voiceUnavailableMessage,
+};
+
+String voiceOpeningFailMessage(VoiceOpeningFailCodeV1 code) => switch (code) {
+  VoiceOpeningFailCodeV1.timeout => 'Voice didn’t start. Try again.',
+  VoiceOpeningFailCodeV1.cancelled => 'Voice didn’t start. Try again.',
+  VoiceOpeningFailCodeV1.overflow =>
+    'Those first words didn’t fit. Start the call again.',
+  VoiceOpeningFailCodeV1.upstream =>
+    'The voice service could not be reached. Try again in a moment.',
+  VoiceOpeningFailCodeV1.quota => 'Voice has used today’s allowance.',
+  VoiceOpeningFailCodeV1.unconfigured => voiceUnavailableMessage,
+  VoiceOpeningFailCodeV1.exclusive =>
+    'Voice is already running on another device.',
+  VoiceOpeningFailCodeV1.superseded => 'Voice moved to another device.',
+  VoiceOpeningFailCodeV1.ended => 'The call ended.',
+  VoiceOpeningFailCodeV1.protocol => 'Voice didn’t start. Try again.',
+  VoiceOpeningFailCodeV1.gap =>
+    'That audio didn’t come through. Start the call again.',
 };
 
 // ---------------------------------------------------------------------------

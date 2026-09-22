@@ -155,12 +155,35 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
    * from `VOICE_ASSISTANT_UPSTREAM_URL`, so the test still proves the object
    * reads the var and puts its key on it.
    */
-  protected override async openGeminiSocket(url: string): Promise<WebSocket> {
+  protected override async openGeminiSocket(
+    url: string,
+    signal?: AbortSignal,
+  ): Promise<WebSocket> {
+    if (signal?.aborted) {
+      throw new DOMException("The operation was aborted.", "AbortError");
+    }
     if (this.#script.refuseUpstream) {
       throw new Error("upstream refused the upgrade (503)");
     }
     const slow = this.#script.slowUpstreamMs;
-    if (slow) await new Promise((resolve) => setTimeout(resolve, slow));
+    if (slow) {
+      await new Promise<void>((resolve, reject) => {
+        const timer = setTimeout(resolve, slow);
+        signal?.addEventListener(
+          "abort",
+          () => {
+            clearTimeout(timer);
+            reject(
+              new DOMException("The operation was aborted.", "AbortError"),
+            );
+          },
+          { once: true },
+        );
+      });
+    }
+    if (signal?.aborted) {
+      throw new DOMException("The operation was aborted.", "AbortError");
+    }
     const pair = new WebSocketPair();
     const [client, server] = Object.values(pair) as [WebSocket, WebSocket];
     // The production seam accepts the socket before handing it back; a socket

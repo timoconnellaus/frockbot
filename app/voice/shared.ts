@@ -99,6 +99,19 @@ export const VOICE_ASSISTANT_INPUT_BYTES_PER_SECOND_V1 =
 /** PCM16 mono at 24 kHz: what one second of the model costs it. */
 export const VOICE_ASSISTANT_OUTPUT_BYTES_PER_SECOND_V1 =
   VOICE_ASSISTANT_OUTPUT_SAMPLE_RATE_V1 * 2;
+/**
+ * Opening audio held until this attempt's `voice/ready`: ten seconds at the
+ * current input format. Derived from the rate, not a second magic number.
+ */
+export const VOICE_ASSISTANT_OPENING_BUFFER_SECONDS_V1 = 10;
+export const VOICE_ASSISTANT_OPENING_BUFFER_BYTES_V1 =
+  VOICE_ASSISTANT_OPENING_BUFFER_SECONDS_V1 *
+  VOICE_ASSISTANT_INPUT_BYTES_PER_SECOND_V1;
+/**
+ * How long the server may spend on one opening: preparation, connection and
+ * setup together. Kept below the client's 15 s start timeout.
+ */
+export const VOICE_ASSISTANT_OPENING_DEADLINE_MS_V1 = 10_000;
 export const VOICE_ASSISTANT_DAILY_TURNS_V1 = 600;
 export const VOICE_ASSISTANT_DAILY_DELEGATIONS_V1 = 200;
 /** Delegations one spoken turn may admit before the assistant is told to stop. */
@@ -246,10 +259,48 @@ export function decodeVoiceDictationServerFrameV1(
 export type VoiceAssistantStatusV1 =
   "idle" | "listening" | "thinking" | "speaking";
 
+export type VoiceOpeningModeV1 = "start" | "wake" | "rejoin" | "control";
+
+export type VoiceOpeningFailCodeV1 =
+  | "timeout"
+  | "cancelled"
+  | "overflow"
+  | "upstream"
+  | "quota"
+  | "unconfigured"
+  | "exclusive"
+  | "superseded"
+  | "ended"
+  | "protocol"
+  | "gap";
+
+export type VoiceControlActionV1 = "pause" | "mute" | "end";
+
 export type VoiceAssistantClientMessageV1 =
   | { schemaVersion: 1; type: "voice/sleep"; paused?: true }
-  | { schemaVersion: 1; type: "voice/wake" }
-  | { schemaVersion: 1; type: "voice/mute"; muted: boolean }
+  /**
+   * One opening attempt: start, wake, rejoin, or a control-only reconnect.
+   * Carries the target and the current pause/mute intent so they cannot race
+   * a separate `start_call`.
+   */
+  | {
+      schemaVersion: 1;
+      type: "voice/open";
+      attemptId: string;
+      mode: VoiceOpeningModeV1;
+      botId?: string;
+      callId?: string;
+      paused: boolean;
+      muted: boolean;
+    }
+  | {
+      schemaVersion: 1;
+      type: "voice/control";
+      attemptId: string;
+      sequence: number;
+      action: VoiceControlActionV1;
+      muted?: boolean;
+    }
   /**
    * What the speaker is doing, as the client's own player knows it. This is
    * what "a natural pause" means on the server: a Bot answer that arrives
@@ -258,13 +309,8 @@ export type VoiceAssistantClientMessageV1 =
    */
   | { schemaVersion: 1; type: "voice/speech"; playing: boolean }
   /**
-   * Which Bot this call is talking to (ADR 0029).
-   *
-   * The SDK's own `start_call` frame carries only a preferred format, so the
-   * target is said separately: the client sends this before `start_call` to
-   * open the call on a Bot, and the server sends the same shape back when
-   * `switch_bot` retargets it, so the screen follows the voice. A call that
-   * never says one talks to General.
+   * Mid-call retarget (ADR 0029). Who a new call opens on travels on
+   * `voice/open`; this frame moves an already admitted call.
    */
   | { schemaVersion: 1; type: "voice/target"; botId: string };
 
@@ -272,6 +318,15 @@ export type VoiceAssistantRefusalCodeV1 =
   "exclusive" | "superseded" | "quota" | "unconfigured";
 
 export type VoiceAssistantUpstreamStateV1 = "asleep" | "starting" | "awake";
+
+const ATTEMPT_ID_V1 =
+  /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+
+function attemptId(value: unknown): string | undefined {
+  return typeof value === "string" && ATTEMPT_ID_V1.test(value)
+    ? value
+    : undefined;
+}
 
 export type VoiceAssistantServerMessageV1 =
   /**
@@ -291,6 +346,36 @@ export type VoiceAssistantServerMessageV1 =
       type: "voice/state";
       upstream: VoiceAssistantUpstreamStateV1;
       muted: boolean;
+    }
+  /**
+   * Durable ownership for this attempt. `ready` is Gemini setup; this is
+   * the call existing, including a paused rejoin that never opens Gemini.
+   */
+  | {
+      schemaVersion: 1;
+      type: "voice/admitted";
+      attemptId: string;
+      callId: string;
+      paused: boolean;
+      muted: boolean;
+    }
+  | {
+      schemaVersion: 1;
+      type: "voice/ready";
+      attemptId: string;
+      callId: string;
+    }
+  | {
+      schemaVersion: 1;
+      type: "voice/open-failed";
+      attemptId: string;
+      code: VoiceOpeningFailCodeV1;
+    }
+  | {
+      schemaVersion: 1;
+      type: "voice/control-ack";
+      attemptId: string;
+      sequence: number;
     }
   /**
    * Where a request to a Bot is: asked, its answer being put into words by
@@ -342,13 +427,50 @@ export function decodeVoiceAssistantClientMessageV1(
       type: "voice/sleep",
       ...(value.paused === true ? { paused: true as const } : {}),
     };
-  if (value.type === "voice/wake")
-    return { schemaVersion: 1, type: "voice/wake" };
-  if (value.type === "voice/mute") {
+  if (value.type === "voice/open") {
+    const id = attemptId(value.attemptId);
+    const mode = value.mode;
+    if (
+      !id ||
+      (mode !== "start" &&
+        mode !== "wake" &&
+        mode !== "rejoin" &&
+        mode !== "control")
+    ) {
+      return undefined;
+    }
+    const botId = typeof value.botId === "string" ? value.botId.trim() : "";
+    const callId = typeof value.callId === "string" ? value.callId.trim() : "";
     return {
       schemaVersion: 1,
-      type: "voice/mute",
+      type: "voice/open",
+      attemptId: id,
+      mode,
+      ...(botId ? { botId } : {}),
+      ...(callId ? { callId } : {}),
+      paused: value.paused === true,
       muted: value.muted === true,
+    };
+  }
+  if (value.type === "voice/control") {
+    const id = attemptId(value.attemptId);
+    const action = value.action;
+    if (
+      !id ||
+      (action !== "pause" && action !== "mute" && action !== "end") ||
+      typeof value.sequence !== "number" ||
+      !Number.isInteger(value.sequence) ||
+      value.sequence < 0
+    ) {
+      return undefined;
+    }
+    return {
+      schemaVersion: 1,
+      type: "voice/control",
+      attemptId: id,
+      sequence: value.sequence,
+      action,
+      ...(action === "mute" ? { muted: value.muted === true } : {}),
     };
   }
   if (value.type === "voice/speech") {
@@ -457,6 +579,85 @@ export function decodeVoiceAssistantServerFrameV1(
         botName: value.botName,
         runId: value.runId,
         state: value.state,
+      },
+    };
+  }
+  if (type === "voice/admitted") {
+    const id = attemptId(value.attemptId);
+    const callId = typeof value.callId === "string" ? value.callId.trim() : "";
+    if (!id || !callId) return undefined;
+    return {
+      kind: "custom",
+      message: {
+        schemaVersion: 1,
+        type: "voice/admitted",
+        attemptId: id,
+        callId,
+        paused: value.paused === true,
+        muted: value.muted === true,
+      },
+    };
+  }
+  if (type === "voice/ready") {
+    const id = attemptId(value.attemptId);
+    const callId = typeof value.callId === "string" ? value.callId.trim() : "";
+    if (!id || !callId) return undefined;
+    return {
+      kind: "custom",
+      message: {
+        schemaVersion: 1,
+        type: "voice/ready",
+        attemptId: id,
+        callId,
+      },
+    };
+  }
+  if (type === "voice/open-failed") {
+    const id = attemptId(value.attemptId);
+    const code = value.code;
+    if (
+      !id ||
+      (code !== "timeout" &&
+        code !== "cancelled" &&
+        code !== "overflow" &&
+        code !== "upstream" &&
+        code !== "quota" &&
+        code !== "unconfigured" &&
+        code !== "exclusive" &&
+        code !== "superseded" &&
+        code !== "ended" &&
+        code !== "protocol" &&
+        code !== "gap")
+    ) {
+      return undefined;
+    }
+    return {
+      kind: "custom",
+      message: {
+        schemaVersion: 1,
+        type: "voice/open-failed",
+        attemptId: id,
+        code,
+      },
+    };
+  }
+  if (type === "voice/control-ack") {
+    const id = attemptId(value.attemptId);
+    if (
+      !id ||
+      typeof value.sequence !== "number" ||
+      !Number.isInteger(value.sequence) ||
+      value.sequence < 0
+    ) {
+      return undefined;
+    }
+    return {
+      kind: "custom",
+      message: {
+        schemaVersion: 1,
+        type: "voice/control-ack",
+        attemptId: id,
+        sequence: value.sequence,
       },
     };
   }

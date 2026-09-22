@@ -52,6 +52,7 @@ import {
   encodeGeminiToolResponseV1,
   geminiLiveUrlV1,
   GEMINI_LIVE_ENDPOINT_V1,
+  GEMINI_LIVE_MODEL_V1,
   GEMINI_LIVE_UNKNOWN_HANDLE_CLOSE_V1,
   type GeminiFunctionCallV1,
   type GeminiServerEventV1,
@@ -109,6 +110,8 @@ import {
   decodeVoiceAssistantClientMessageV1,
   VOICE_ASSISTANT_INPUT_BYTES_PER_SECOND_V1,
   VOICE_ASSISTANT_METER_BLOCK_SECONDS_V1,
+  VOICE_ASSISTANT_OPENING_BUFFER_BYTES_V1,
+  VOICE_ASSISTANT_OPENING_DEADLINE_MS_V1,
   VOICE_ASSISTANT_OUTPUT_BYTES_PER_SECOND_V1,
   VOICE_ASSISTANT_OUTPUT_SAMPLE_RATE_V1,
   VOICE_ASSISTANT_SERVER_IDLE_SLEEP_MS_V1,
@@ -119,7 +122,23 @@ import {
   type VoiceAssistantServerMessageV1,
   type VoiceAssistantStatusV1,
   type VoiceAssistantUpstreamStateV1,
+  type VoiceControlActionV1,
+  type VoiceOpeningFailCodeV1,
+  type VoiceOpeningModeV1,
 } from "@frockbot/app/voice/shared";
+import {
+  decodeVoiceAssistantPcmEnvelopeV1,
+  decideVoicePcmSequenceV1,
+  encodeVoiceAssistantPcmEnvelopeV1,
+  isVoiceAttemptIdV1,
+  voiceSetupFingerprintV1,
+  type VoiceOpeningPhaseV1,
+} from "@frockbot/app/voice/opening";
+import {
+  offerVoiceResumptionV1,
+  voiceMemoryIdentityV1,
+  type VoiceResumptionRecordV1,
+} from "@frockbot/app/voice/resumption";
 import { MemoryStore } from "@frockbot/app/memory/store";
 import { readLongTermMemoryV1 } from "@frockbot/app/memory/reader";
 import { voiceOpeningRereadsSessionMemoryV1 } from "@frockbot/app/voice/session-memory";
@@ -252,8 +271,8 @@ export const VOICE_ASSISTANT_MEMORY_LOG_DAYS = 30;
  * to the one place that can still see it.
  */
 const MODEL_SILENCE_TIMEOUT_MS = 8_000;
-/** Audio held while a session is opening, and replayed in order: 10 s at 16 kHz. */
-const PENDING_AUDIO_BYTES = 10 * 16_000 * 2;
+/** Audio held while a session is opening, as bounded defense: 10 s at 16 kHz. */
+const PENDING_AUDIO_BYTES = VOICE_ASSISTANT_OPENING_BUFFER_BYTES_V1;
 /** How long a delegation look-up waits before the first check, and its ceiling. */
 const DELEGATION_FIRST_CHECK_SECONDS = 8;
 const DELEGATION_MAX_CHECK_SECONDS = 5 * 60;
@@ -360,6 +379,14 @@ interface LiveCall {
    * with 1008, which is when the call reopens fresh with a handover instead.
    */
   resumptionHandle?: string;
+  /** False once the provider said this handle must not be offered. */
+  resumable: boolean;
+  /** Semantic setup identity this handle was issued for. */
+  setupFingerprint?: string;
+  /** The opening attempt currently bound to inbound and outbound PCM. */
+  attemptId?: string;
+  inboundSequence?: number;
+  outboundSequence: number;
   muted: boolean;
   /**
    * The person paused. Distinct from a quiet-room sleep: a finished task
@@ -482,6 +509,64 @@ const MEMORY_UPDATE_MAX_TOKENS = Math.ceil(
 const MEMORY_UPDATE_DEADLINE_MS = 60_000;
 
 /**
+ * One opening: start, wake, rejoin, handover, rotation, or control-only.
+ *
+ * The slot is allocated before the first await so a later command can cancel
+ * this attempt even while admission or Gemini is still in flight.
+ */
+class OpeningAttempt {
+  phase: VoiceOpeningPhaseV1 = "admitting";
+  cancelled = false;
+  owningCallId?: string;
+  session?: GeminiSessionV1;
+  lastControlSequence = 0;
+  lastControl?: { action: VoiceControlActionV1; muted?: boolean };
+  readonly abort = new AbortController();
+  readonly completion: Promise<void>;
+  private settleCompletion!: () => void;
+  deadline?: ReturnType<typeof setTimeout>;
+
+  constructor(
+    readonly id: string,
+    readonly connectionId: string,
+    readonly botId: string,
+    readonly mode: VoiceOpeningModeV1,
+    readonly paused: boolean,
+    readonly muted: boolean,
+  ) {
+    this.completion = new Promise((resolve) => {
+      this.settleCompletion = resolve;
+    });
+  }
+
+  cancel(): void {
+    if (this.cancelled) return;
+    this.cancelled = true;
+    this.phase = "closed";
+    if (this.deadline) {
+      clearTimeout(this.deadline);
+      this.deadline = undefined;
+    }
+    try {
+      this.abort.abort();
+    } catch {
+      // Already aborted.
+    }
+    this.session?.close();
+    this.session = undefined;
+    this.settleCompletion();
+  }
+
+  finish(): void {
+    if (this.deadline) {
+      clearTimeout(this.deadline);
+      this.deadline = undefined;
+    }
+    this.settleCompletion();
+  }
+}
+
+/**
  * One Gemini Live session, as the object drives it.
  *
  * It owns exactly one socket and the audio waiting for it to be ready. Every
@@ -512,10 +597,10 @@ class GeminiSessionV1 {
   constructor(
     private readonly options: {
       url: string;
-      setup: Record<string, unknown>;
       onEvent: (event: GeminiServerEventV1) => void | Promise<void>;
       onClosed: (code: number, reason: string) => void;
-      open: (url: string) => Promise<WebSocket>;
+      open: (url: string, signal?: AbortSignal) => Promise<WebSocket>;
+      signal?: AbortSignal;
       /**
        * Lifecycle milestones for an opt-in diagnostic trace, or absent —
        * which is every ordinary call. Never the url, which carries the key.
@@ -524,11 +609,18 @@ class GeminiSessionV1 {
     },
   ) {}
 
-  async start(): Promise<void> {
+  /**
+   * Transport only. Error and close handlers attach immediately; setup is
+   * sent later so prompt assembly can run beside the upgrade.
+   */
+  async connect(): Promise<void> {
     this.options.timing?.("upstream-open-start");
-    const socket = await this.options.open(this.options.url);
+    const socket = await this.options.open(
+      this.options.url,
+      this.options.signal,
+    );
     this.options.timing?.("upstream-socket-open");
-    if (this.closedByUs) {
+    if (this.closedByUs || this.options.signal?.aborted) {
       try {
         socket.close();
       } catch {
@@ -539,12 +631,6 @@ class GeminiSessionV1 {
     // Google sends binary JSON; Worker sockets otherwise deliver it as Blobs.
     socket.binaryType = "arraybuffer";
     this.socket = socket;
-    let openedAck: () => void = () => undefined;
-    let openedFail: (error: Error) => void = () => undefined;
-    const opened = new Promise<void>((resolve, reject) => {
-      openedAck = () => resolve();
-      openedFail = (error) => reject(error);
-    });
     socket.addEventListener("message", (event: MessageEvent) => {
       const raw =
         typeof event.data === "string"
@@ -556,11 +642,11 @@ class GeminiSessionV1 {
           this.state = "awake";
           this.options.timing?.("upstream-setup-ack");
           this.drain();
-          openedAck();
+          this.openedAck();
         }
-        const event = decoded;
+        const next = decoded;
         this.chain = this.chain
-          .then(() => this.options.onEvent(event))
+          .then(() => this.options.onEvent(next))
           .catch(() => undefined);
       }
     });
@@ -568,33 +654,48 @@ class GeminiSessionV1 {
       this.state = "asleep";
       this.socket = undefined;
       if (!this.closedByUs) {
-        openedFail(
+        this.openedFail(
           new Error(event.reason || "the voice service connection closed"),
         );
         this.options.onClosed(event.code, event.reason ?? "");
       } else {
-        openedAck();
+        this.openedAck();
       }
     });
     socket.addEventListener("error", () => {
       if (this.closedByUs) {
-        openedAck();
+        this.openedAck();
         return;
       }
       this.state = "asleep";
-      openedFail(new Error("the voice service connection failed"));
+      this.openedFail(new Error("the voice service connection failed"));
       this.options.onClosed(1006, "the voice service connection failed");
     });
-    this.send(this.options.setup);
+  }
+
+  /**
+   * Sends setup once the prompt is ready and waits for the acknowledgement.
+   * Audio, text and tool responses stay gated on `ready`.
+   */
+  async configure(setup: Record<string, unknown>): Promise<void> {
+    if (!this.socket || this.closedByUs) {
+      throw new Error("the voice service connection closed");
+    }
+    this.send(setup);
     this.options.timing?.("upstream-setup-sent");
     if (this.closedByUs) {
-      openedAck();
+      this.openedAck();
       return;
     }
-    // Unspoken answers flush after this; they need a session that can take
-    // a tool response, not one that has only been asked to start.
-    await opened;
+    await this.opened;
   }
+
+  private openedAck: () => void = () => undefined;
+  private openedFail: (error: Error) => void = () => undefined;
+  private readonly opened = new Promise<void>((resolve, reject) => {
+    this.openedAck = () => resolve();
+    this.openedFail = (error) => reject(error);
+  });
 
   send(frame: Record<string, unknown>): void {
     if (!this.socket) return;
@@ -741,13 +842,13 @@ function decodeVoiceClientFrameV1(
 export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   #calls = new Map<string, LiveCall>();
   /**
-   * The Bot a socket asked for before its call was admitted (ADR 0029).
-   *
-   * The `start_call` frame carries only a preferred format, so the target
-   * arrives as its own message just before it. Held per connection until the
-   * call is admitted, then it lives in the call record.
+   * The current opening attempt per connection. Allocated synchronously
+   * before the first await so pause/mute/end can cancel a start that has
+   * not yet admitted a LiveCall.
    */
-  #targets = new Map<string, string>();
+  #opening = new Map<string, OpeningAttempt>();
+  /** Attempts by id, so a duplicate `voice/open` joins the same promise. */
+  #attempts = new Map<string, OpeningAttempt>();
   /**
    * Answers being handed to the session right now, by run id. Two signals for
    * one answer — the Bot's wake and the scheduled look-up — arrive together;
@@ -803,8 +904,11 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   }
 
   /** Opens the upstream socket. One seam, so a test can refuse or script it. */
-  protected openGeminiSocket(url: string): Promise<WebSocket> {
-    return fetchVoiceUpstreamSocketV1(url, {});
+  protected openGeminiSocket(
+    url: string,
+    signal?: AbortSignal,
+  ): Promise<WebSocket> {
+    return fetchVoiceUpstreamSocketV1(url, {}, signal);
   }
 
   protected async chatCompletion(
@@ -856,6 +960,11 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   /** How long the server waits for audio before sleeping; a test shortens it. */
   protected serverIdleSleepMs(): number {
     return VOICE_ASSISTANT_SERVER_IDLE_SLEEP_MS_V1;
+  }
+
+  /** How long one opening may take; a test shortens it. */
+  protected openingDeadlineMs(): number {
+    return VOICE_ASSISTANT_OPENING_DEADLINE_MS_V1;
   }
 
   private workerVar(name: `FROCK_AI_${string}`): string | undefined {
@@ -1500,7 +1609,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       await this.scheduleCallAbandon(current);
     }
     this.#traced.delete(connection.id);
-    this.#targets.delete(connection.id);
+    this.cancelOpening(connection.id);
     // The id goes with the socket: nothing about this call outlives it, and a
     // reconnect brings its own or none.
     this.#timings.delete(connection.id);
@@ -1531,13 +1640,10 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     switch (frame.type) {
       case "hello":
         // Nothing to answer: the welcome went out on connect, and the call
-        // starts on the frame after this one.
-        return;
-      case "start_call":
-        await this.startCall(connection);
+        // starts on `voice/open`.
         return;
       case "end_call":
-        await this.endCall(connection);
+        // Retired admission path: hang-up is `voice/control` action end.
         return;
       case "interrupt": {
         const call = this.#calls.get(connection.id);
@@ -1558,6 +1664,8 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         call.session.send(encodeGeminiTextTurnV1(frame.text));
         return;
       }
+      case "start_call":
+        return;
     }
   }
 
@@ -1565,16 +1673,17 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     connection: Connection,
     custom: VoiceAssistantClientMessageV1,
   ): Promise<void> {
-    // The target is the one message that arrives before the call exists: the
-    // client says who it wants, then `start_call`. Once a call is live the
-    // same message is a hand-over the person asked for on the screen rather
-    // than in words, so it goes the same way `switch_bot` does.
+    if (custom.type === "voice/open") {
+      await this.onOpen(connection, custom);
+      return;
+    }
+    if (custom.type === "voice/control") {
+      await this.onControl(connection, custom);
+      return;
+    }
     if (custom.type === "voice/target") {
       const live = this.#calls.get(connection.id);
-      if (!live) {
-        this.#targets.set(connection.id, custom.botId);
-        return;
-      }
+      if (!live) return;
       const identity = this.identity(connection);
       if (!identity) return;
       const switched = await this.turnHost(
@@ -1602,18 +1711,6 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         );
         await this.sleepSession(connection, call);
         break;
-      case "voice/wake":
-        call.paused = false;
-        await this.ledger().setCallPaused(connection.id, false, this.now());
-        if (!call.muted && !call.exhausted) {
-          await this.wakeSession(connection, call);
-        }
-        break;
-      case "voice/mute":
-        call.muted = custom.muted;
-        if (custom.muted) await this.sleepSession(connection, call);
-        this.sendState(connection, call);
-        break;
       case "voice/speech":
         // What the speaker is doing, as the device knows it. Since the model
         // runs its own barge-in there is nothing durable to decide here, and
@@ -1637,14 +1734,32 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     this.sendRaw(connection, message as unknown as Record<string, unknown>);
   }
 
-  private sendBinary(connection: Connection, audio: Uint8Array) {
+  private sendBinary(
+    connection: Connection,
+    call: LiveCall,
+    audio: Uint8Array,
+  ) {
+    const attemptId = call.attemptId;
+    if (!attemptId) return;
+    const sequence = call.outboundSequence;
+    call.outboundSequence += 1;
+    let frame: Uint8Array;
+    try {
+      frame = encodeVoiceAssistantPcmEnvelopeV1({
+        attemptId,
+        sequence,
+        pcm: audio,
+      });
+    } catch {
+      return;
+    }
     try {
       // A copy, not a view: a view over a larger buffer would put whatever
       // else is in that buffer on the wire.
       connection.send(
-        audio.buffer.slice(
-          audio.byteOffset,
-          audio.byteOffset + audio.byteLength,
+        frame.buffer.slice(
+          frame.byteOffset,
+          frame.byteOffset + frame.byteLength,
         ) as ArrayBuffer,
       );
     } catch {
@@ -1717,55 +1832,389 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     });
   }
 
+  private cancelOpening(connectionId: string): void {
+    const attempt = this.#opening.get(connectionId);
+    if (!attempt) return;
+    this.#opening.delete(connectionId);
+    this.#attempts.delete(attempt.id);
+    attempt.cancel();
+  }
+
+  private beginAttempt(
+    connection: Connection,
+    input: {
+      attemptId: string;
+      mode: VoiceOpeningModeV1;
+      botId: string;
+      paused: boolean;
+      muted: boolean;
+    },
+  ): OpeningAttempt {
+    const existing = this.#attempts.get(input.attemptId);
+    if (existing && existing.connectionId === connection.id) return existing;
+    const previous = this.#opening.get(connection.id);
+    if (previous && previous.id !== input.attemptId) {
+      this.send(connection, {
+        schemaVersion: 1,
+        type: "voice/open-failed",
+        attemptId: previous.id,
+        code: "cancelled",
+      });
+      previous.cancel();
+      this.#attempts.delete(previous.id);
+    }
+    const attempt = new OpeningAttempt(
+      input.attemptId,
+      connection.id,
+      input.botId,
+      input.mode,
+      input.paused,
+      input.muted,
+    );
+    this.#opening.set(connection.id, attempt);
+    this.#attempts.set(attempt.id, attempt);
+    attempt.deadline = setTimeout(() => {
+      if (attempt.cancelled || attempt.phase === "ready") return;
+      void this.failOpen(connection, attempt, "timeout");
+    }, this.openingDeadlineMs());
+    return attempt;
+  }
+
+  private stillOpening(
+    connection: Connection,
+    attempt: OpeningAttempt,
+  ): boolean {
+    return (
+      !attempt.cancelled &&
+      this.#opening.get(connection.id) === attempt &&
+      this.#attempts.get(attempt.id) === attempt
+    );
+  }
+
+  /** Pause/mute sent against this attempt overlay the original open intent. */
+  private openingIntent(attempt: OpeningAttempt): {
+    paused: boolean;
+    muted: boolean;
+  } {
+    let paused = attempt.paused;
+    let muted = attempt.muted;
+    const control = attempt.lastControl;
+    if (control?.action === "pause") paused = true;
+    if (control?.action === "mute") muted = control.muted === true;
+    return { paused, muted };
+  }
+
+  private finishWithoutGemini(
+    connection: Connection,
+    call: LiveCall,
+    attempt: OpeningAttempt,
+  ): void {
+    call.session?.close();
+    call.session = undefined;
+    attempt.session = undefined;
+    attempt.phase = "ready";
+    this.setStatus(connection, call, "listening");
+    this.sendState(connection, call);
+    attempt.finish();
+  }
+
+  private sendAdmitted(
+    connection: Connection,
+    attempt: OpeningAttempt,
+    call: { callId: string; paused: boolean; muted: boolean },
+  ): void {
+    this.send(connection, {
+      schemaVersion: 1,
+      type: "voice/admitted",
+      attemptId: attempt.id,
+      callId: call.callId,
+      paused: call.paused,
+      muted: call.muted,
+    });
+  }
+
+  private sendReady(
+    connection: Connection,
+    attempt: OpeningAttempt,
+    callId: string,
+  ): void {
+    this.send(connection, {
+      schemaVersion: 1,
+      type: "voice/ready",
+      attemptId: attempt.id,
+      callId,
+    });
+  }
+
+  private async failOpen(
+    connection: Connection,
+    attempt: OpeningAttempt,
+    code: VoiceOpeningFailCodeV1,
+  ): Promise<void> {
+    if (attempt.cancelled) return;
+    this.trace(connection, "open-failed", { code, attempt: attempt.id });
+    this.send(connection, {
+      schemaVersion: 1,
+      type: "voice/open-failed",
+      attemptId: attempt.id,
+      code,
+    });
+    if (code === "quota" || code === "unconfigured" || code === "exclusive") {
+      this.refuse(
+        connection,
+        code === "quota"
+          ? "quota"
+          : code === "exclusive"
+            ? "exclusive"
+            : "unconfigured",
+        code === "quota"
+          ? "Today's voice allowance is used up. It resets at midnight UTC."
+          : code === "exclusive"
+            ? "Voice is already running on another device."
+            : "Voice isn't set up on this deployment yet.",
+      );
+    }
+    this.cancelOpening(connection.id);
+  }
+
   // -- call lifecycle -------------------------------------------------------
 
   /**
-   * `start_call`: admits the call in the ledger, then opens the session
-   * unless this is a Pause coming back — Gemini stays closed until Resume.
-   *
-   * Everything durable happens before the socket to Google does, because the
-   * record is what an eviction leaves behind and the socket is not.
+   * `voice/open`: admits the attempt synchronously, then opens Gemini unless
+   * this is a paused, muted, or control-only reconnect.
    */
-  private async startCall(connection: Connection): Promise<void> {
-    if (this.#calls.has(connection.id)) return;
-    // Before the first awaited read, so the gap to `cap-checked` below is
-    // storage and not this method being entered late.
+  private async onOpen(
+    connection: Connection,
+    custom: Extract<VoiceAssistantClientMessageV1, { type: "voice/open" }>,
+  ): Promise<void> {
+    if (!isVoiceAttemptIdV1(custom.attemptId)) return;
+    const duplicate = this.#attempts.get(custom.attemptId);
+    if (duplicate && duplicate.connectionId === connection.id) {
+      await duplicate.completion;
+      return;
+    }
+    const attempt = this.beginAttempt(connection, {
+      attemptId: custom.attemptId,
+      mode: custom.mode,
+      botId: custom.botId ?? "",
+      paused: custom.paused,
+      muted: custom.muted,
+    });
     this.timing(connection, "start-call");
+    try {
+      if (custom.mode === "control") {
+        await this.admitControlOnly(connection, attempt, custom);
+        return;
+      }
+      if (custom.mode === "wake") {
+        await this.wakeFromOpen(connection, attempt);
+        return;
+      }
+      await this.startCall(connection, attempt, custom);
+    } catch (error) {
+      if (!this.stillOpening(connection, attempt)) return;
+      this.trace(connection, "open-failed", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+      await this.failOpen(connection, attempt, "upstream");
+    }
+  }
+
+  private async admitControlOnly(
+    connection: Connection,
+    attempt: OpeningAttempt,
+    custom: Extract<VoiceAssistantClientMessageV1, { type: "voice/open" }>,
+  ): Promise<void> {
     const identity = this.identity(connection);
     if (!identity) {
-      this.refuse(
-        connection,
-        "unconfigured",
-        "This voice session is not signed in.",
-      );
+      await this.failOpen(connection, attempt, "unconfigured");
+      return;
+    }
+    const ledger = this.ledger();
+    const current = await ledger.currentCall();
+    if (current && current.deviceKey === identity.deviceKey) {
+      attempt.owningCallId = current.callId;
+      attempt.phase = "ready";
+      this.sendAdmitted(connection, attempt, {
+        callId: current.callId,
+        paused: current.paused === true,
+        muted: custom.muted,
+      });
+      attempt.finish();
+      return;
+    }
+    const ended = await ledger.endedReceipt();
+    if (
+      ended &&
+      ended.deviceKey === identity.deviceKey &&
+      (!custom.callId || custom.callId === ended.callId)
+    ) {
+      attempt.owningCallId = ended.callId;
+      attempt.phase = "closed";
+      this.sendAdmitted(connection, attempt, {
+        callId: ended.callId,
+        paused: false,
+        muted: custom.muted,
+      });
+      attempt.finish();
+      return;
+    }
+    await this.failOpen(connection, attempt, "ended");
+  }
+
+  private async wakeFromOpen(
+    connection: Connection,
+    attempt: OpeningAttempt,
+  ): Promise<void> {
+    const call = this.#calls.get(connection.id);
+    if (!call) {
+      await this.failOpen(connection, attempt, "protocol");
+      return;
+    }
+    call.paused = false;
+    const intent = this.openingIntent(attempt);
+    call.muted = intent.muted;
+    call.attemptId = attempt.id;
+    call.inboundSequence = undefined;
+    call.outboundSequence = 0;
+    attempt.owningCallId = call.callId;
+    await this.ledger().setCallPaused(connection.id, false, this.now());
+    this.sendAdmitted(connection, attempt, {
+      callId: call.callId,
+      paused: false,
+      muted: call.muted,
+    });
+    if (call.muted || call.exhausted) {
+      this.finishWithoutGemini(connection, call, attempt);
+      return;
+    }
+    await this.openSession(connection, call, attempt, {
+      ...(call.resumptionHandle && call.resumable
+        ? { handle: call.resumptionHandle }
+        : {}),
+    });
+  }
+
+  private async onControl(
+    connection: Connection,
+    custom: Extract<VoiceAssistantClientMessageV1, { type: "voice/control" }>,
+  ): Promise<void> {
+    const attempt =
+      this.#attempts.get(custom.attemptId) ?? this.#opening.get(connection.id);
+    if (attempt) {
+      if (custom.sequence < attempt.lastControlSequence) {
+        this.send(connection, {
+          schemaVersion: 1,
+          type: "voice/control-ack",
+          attemptId: attempt.id,
+          sequence: attempt.lastControlSequence,
+        });
+        return;
+      }
+      attempt.lastControlSequence = custom.sequence;
+      attempt.lastControl = { action: custom.action, muted: custom.muted };
+      if (custom.action === "end") attempt.cancel();
+    }
+    const call = this.#calls.get(connection.id);
+    if (call && custom.action === "pause") call.paused = true;
+    if (call && custom.action === "mute") call.muted = custom.muted === true;
+    if (custom.action === "end") {
+      const ended = await this.ledger().endedReceipt();
+      if (
+        !call &&
+        ended &&
+        (!custom.attemptId || attempt?.owningCallId === ended.callId)
+      ) {
+        this.send(connection, {
+          schemaVersion: 1,
+          type: "voice/control-ack",
+          attemptId: custom.attemptId,
+          sequence: custom.sequence,
+        });
+        return;
+      }
+      await this.endCall(connection);
+      this.send(connection, {
+        schemaVersion: 1,
+        type: "voice/control-ack",
+        attemptId: custom.attemptId,
+        sequence: custom.sequence,
+      });
+      return;
+    }
+    if (custom.action === "pause") {
+      if (call) {
+        call.paused = true;
+        await this.ledger().setCallPaused(connection.id, true, this.now());
+        await this.sleepSession(connection, call);
+      }
+    } else if (custom.action === "mute") {
+      const muted = custom.muted === true;
+      if (call) {
+        call.muted = muted;
+        if (muted) await this.sleepSession(connection, call);
+        this.sendState(connection, call);
+      }
+    }
+    this.send(connection, {
+      schemaVersion: 1,
+      type: "voice/control-ack",
+      attemptId: custom.attemptId,
+      sequence: custom.sequence,
+    });
+  }
+
+  /**
+   * Admits the call in the ledger, then opens the session unless this is a
+   * Pause coming back — Gemini stays closed until Resume.
+   */
+  private async startCall(
+    connection: Connection,
+    attempt: OpeningAttempt,
+    custom: Extract<VoiceAssistantClientMessageV1, { type: "voice/open" }>,
+  ): Promise<void> {
+    const intent = this.openingIntent(attempt);
+    if (this.#calls.has(connection.id) && custom.mode !== "rejoin") {
+      const live = this.#calls.get(connection.id)!;
+      live.attemptId = attempt.id;
+      live.inboundSequence = undefined;
+      live.outboundSequence = 0;
+      live.paused = intent.paused || live.paused;
+      live.muted = intent.muted;
+      attempt.owningCallId = live.callId;
+      this.sendAdmitted(connection, attempt, {
+        callId: live.callId,
+        paused: live.paused,
+        muted: live.muted,
+      });
+      if (live.paused || live.muted || live.exhausted) {
+        this.finishWithoutGemini(connection, live, attempt);
+        return;
+      }
+      await this.openSession(connection, live, attempt, {});
+      return;
+    }
+    const identity = this.identity(connection);
+    if (!identity) {
+      await this.failOpen(connection, attempt, "unconfigured");
       return;
     }
     if (!this.geminiUrl()) {
-      this.refuse(
-        connection,
-        "unconfigured",
-        "Voice isn't set up on this deployment yet.",
-      );
+      await this.failOpen(connection, attempt, "unconfigured");
       return;
     }
     const ledger = this.ledger();
     const now = this.now();
     if (await ledger.exceededCap(now)) {
-      this.refuse(
-        connection,
-        "quota",
-        "Today's voice allowance is used up. It resets at midnight UTC.",
-      );
+      await this.failOpen(connection, attempt, "quota");
       return;
     }
     this.timing(connection, "cap-checked");
+    if (!this.stillOpening(connection, attempt)) return;
     const directory = await this.callDirectory(identity.userId);
+    if (!this.stillOpening(connection, attempt)) return;
     if (!directory) {
-      this.refuse(
-        connection,
-        "unconfigured",
-        "Couldn't reach FrockBot. Try the call again.",
-      );
+      await this.failOpen(connection, attempt, "unconfigured");
       return;
     }
     // A call about to be displaced has its memory work recorded *before* the
@@ -1773,20 +2222,14 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     // in between would leave a call nothing remembers it has to finish. The
     // rejoin rule is the ledger's own, asked here rather than repeated.
     const displaced = await ledger.currentCall();
+    if (!this.stillOpening(connection, attempt)) return;
     if (displaced && !(await ledger.rejoins(identity.deviceKey, now))) {
       await this.beginMemoryFinalization(displaced);
     }
     this.timing(connection, "ledger-checked", {
       displaced: Boolean(displaced),
     });
-    // ADR 0029: a call addresses one Bot. The client says which before it
-    // says `start_call`, and that is what the call opens on whether it is a
-    // new call or a rejoin — the person pressed voice on a Bot just now, and
-    // a dropped call coming back on the Bot they left is not what they asked
-    // for. A rejoin that names none keeps the Bot its record has, and a
-    // client that names none — or names one this account does not own —
-    // gets General, so there is always somebody on the line.
-    const requested = this.#targets.get(connection.id);
+    const requested = custom.botId;
     const admission = await ledger.beginCall({
       callId: crypto.randomUUID(),
       deviceKey: identity.deviceKey,
@@ -1794,16 +2237,15 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       at: now,
       ...(requested ? { botId: requested } : {}),
     });
+    if (!this.stillOpening(connection, attempt)) return;
     this.timing(connection, "call-admitted", { admission: admission.status });
     const target = await this.resolveCallTarget(
       identity.userId,
       admission.call.botId ?? requested,
       directory,
     );
+    if (!this.stillOpening(connection, attempt)) return;
     this.timing(connection, "target-resolved");
-    // Whatever this admission displaced — another device's call, or this
-    // device's own earlier socket rejoining the same call — is ended now, so
-    // one account never holds two live sessions.
     if (admission.replaced) {
       const replacedId = admission.replaced.connectionId;
       for (const other of this.getConnections()) {
@@ -1819,6 +2261,8 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         this.sendRaw(other, { type: "status", status: "idle" });
       }
     }
+    const latest = this.openingIntent(attempt);
+    const paused = latest.paused || admission.call.paused === true;
     const call: LiveCall = {
       callId: admission.call.callId,
       connectionId: connection.id,
@@ -1832,8 +2276,11 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         target,
         this.timingSink(connection),
       ),
-      muted: false,
-      paused: admission.call.paused === true,
+      resumable: false,
+      attemptId: attempt.id,
+      outboundSequence: 0,
+      muted: latest.muted,
+      paused,
       exhausted: false,
       quotaSaid: false,
       status: "idle",
@@ -1849,6 +2296,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       meterOutBytes: 0,
     };
     this.#calls.set(connection.id, call);
+    attempt.owningCallId = call.callId;
     this.#traced.set(connection.id, {
       callId: call.callId,
       startedAt: call.startedAt,
@@ -1863,11 +2311,15 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       ...(call.botId ? { bot: call.botId } : {}),
       voice: call.voice.voiceName,
     });
-    // The choice is spent: from here the Bot lives in the call record, and a
-    // later `voice/target` on this socket is a hand-over, not a preference.
-    this.#targets.delete(connection.id);
+    if (paused) {
+      await ledger.setCallPaused(connection.id, true, now);
+    }
+    this.sendAdmitted(connection, attempt, {
+      callId: call.callId,
+      paused,
+      muted: call.muted,
+    });
     if (call.botId) this.sendTarget(connection, call.botId);
-    // The rate the client will be played at, said once and before any audio.
     this.sendRaw(connection, {
       type: "audio_config",
       format: "pcm16",
@@ -1876,12 +2328,11 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     // A Pause coming back is still that call, and Gemini stays closed until
     // Resume: opening it here would bill the empty room. Listening is the
     // call being up, not the model being on the line.
-    if (call.paused) {
-      this.setStatus(connection, call, "listening");
-      this.sendState(connection, call);
+    if (paused || call.muted) {
+      this.finishWithoutGemini(connection, call, attempt);
       return;
     }
-    await this.openSession(connection, call, {});
+    await this.openSession(connection, call, attempt, {});
   }
 
   /** `end_call`, and the hang-up's own bookkeeping. */
@@ -1899,24 +2350,139 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   /**
    * Opens the session this call talks through.
    *
-   * The instruction is rendered here rather than per turn, because a Live
-   * session is instructed once: everything the model will need for the whole
-   * call — the Bot, its memory, its thread, the directory, the clock — goes
-   * in now. A wake offers the resumption handle; a wake the server has
-   * forgotten comes back through `onSessionClosed` and reopens with a
-   * handover instead.
+   * After admission, prompt assembly and the upstream upgrade run together.
+   * Setup is sent only when both finish, and audio waits for the
+   * acknowledgement. A cancelled attempt never starts a paid session.
    */
   private async openSession(
     connection: Connection,
     call: LiveCall,
+    attempt: OpeningAttempt,
     options: { handle?: string; handover?: boolean },
   ): Promise<void> {
     const url = this.geminiUrl();
-    if (!url) return;
+    if (!url) {
+      await this.failOpen(connection, attempt, "unconfigured");
+      return;
+    }
+    if (!this.stillOpening(connection, attempt)) return;
+    if (call.paused || call.muted || call.exhausted) {
+      this.finishWithoutGemini(connection, call, attempt);
+      return;
+    }
+    attempt.phase = "preparing";
+    call.attemptId = attempt.id;
+    call.inboundSequence = undefined;
+    call.outboundSequence = 0;
+    const timing = this.timingSink(connection);
+    const session = new GeminiSessionV1({
+      url,
+      onEvent: (event) =>
+        this.onSessionEvent(connection.id, call.callId, event, attempt.id),
+      onClosed: (code, reason) => {
+        void this.onSessionClosed(
+          connection.id,
+          call.callId,
+          attempt.id,
+          code,
+          reason,
+        );
+      },
+      open: (target, signal) => this.openGeminiSocket(target, signal),
+      signal: attempt.abort.signal,
+      ...(timing ? { timing } : {}),
+    });
+    attempt.session = session;
+    call.session = session;
+    this.trace(connection, "upstream", {
+      state: "starting",
+      attempt: attempt.id,
+      ...(options.handle ? { resumed: true } : {}),
+    });
+    this.sendState(connection, call);
+
+    const prompt = this.prepareSessionSetup(connection, call, options);
+    try {
+      await Promise.all([prompt, session.connect()]);
+    } catch (error) {
+      if (!this.stillOpening(connection, attempt)) return;
+      if (call.paused || call.muted || call.exhausted) {
+        this.finishWithoutGemini(connection, call, attempt);
+        return;
+      }
+      this.trace(connection, "upstream-failed", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+      this.timing(connection, "upstream-failed");
+      call.session = undefined;
+      this.sendState(connection, call);
+      await this.failOpen(connection, attempt, "upstream");
+      return;
+    }
+    if (!this.stillOpening(connection, attempt)) {
+      session.close();
+      return;
+    }
+    if (call.paused || call.muted || call.exhausted) {
+      this.finishWithoutGemini(connection, call, attempt);
+      return;
+    }
+    const setup = await prompt;
+    if (!this.stillOpening(connection, attempt)) {
+      session.close();
+      return;
+    }
+    if (call.paused || call.muted || call.exhausted) {
+      this.finishWithoutGemini(connection, call, attempt);
+      return;
+    }
+    attempt.phase = "configuring";
+    try {
+      await session.configure(setup.frame);
+    } catch (error) {
+      if (!this.stillOpening(connection, attempt)) return;
+      if (call.paused || call.muted || call.exhausted) {
+        this.finishWithoutGemini(connection, call, attempt);
+        return;
+      }
+      this.trace(connection, "upstream-failed", {
+        message: error instanceof Error ? error.message : String(error),
+      });
+      this.timing(connection, "upstream-failed");
+      call.session = undefined;
+      this.sendState(connection, call);
+      await this.failOpen(connection, attempt, "upstream");
+      return;
+    }
+    if (!this.stillOpening(connection, attempt)) {
+      session.close();
+      return;
+    }
+    if (call.paused || call.muted || call.exhausted) {
+      this.finishWithoutGemini(connection, call, attempt);
+      return;
+    }
+    call.setupFingerprint = setup.fingerprint;
+    call.lastSystem = setup.instruction;
+    attempt.phase = "ready";
+    this.sendReady(connection, attempt, call.callId);
+    attempt.finish();
+    for (const delegation of await this.ledger().unspokenDelegations()) {
+      await this.announceDelegation({ runId: delegation.runId });
+    }
+    this.armIdleSleep(connection, call);
+  }
+
+  private async prepareSessionSetup(
+    connection: Connection,
+    call: LiveCall,
+    options: { handle?: string; handover?: boolean },
+  ): Promise<{
+    frame: Record<string, unknown>;
+    instruction: string;
+    fingerprint: string;
+  }> {
     const context = await call.promptContext;
-    // The prompt context as this session sees it: `prompt-context-ready` said
-    // when the reads finished, which for the first session of a call is
-    // usually before this line was reached at all.
     this.timing(connection, "prompt-context-awaited");
     const handover = options.handover
       ? await this.callHistory(call.callId)
@@ -1942,59 +2508,100 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       ...(handover.length > 0 ? { handover } : {}),
       ...(runningTasks.length > 0 ? { runningTasks } : {}),
     });
-    // The system message this call actually sent, kept for the end-of-call
-    // request's prefix. In memory only: a storage write per call for a cache
-    // hint would cost more than the hint is worth.
-    call.lastSystem = instruction;
-    const setup = buildGeminiLiveSetupV1({
-      systemInstruction: instruction,
+    const tools = call.botId
+      ? VOICE_FUNCTION_DECLARATIONS_V1.map((item) => item.name)
+      : VOICE_ACCOUNT_FUNCTION_DECLARATIONS_V1.map((item) => item.name);
+    const fingerprint = await voiceSetupFingerprintV1({
+      botId: call.botId,
+      model: GEMINI_LIVE_MODEL_V1,
       voiceName: call.voice.voiceName,
-      functionDeclarations: call.botId
-        ? VOICE_FUNCTION_DECLARATIONS_V1
-        : VOICE_ACCOUNT_FUNCTION_DECLARATIONS_V1,
+      tools,
       googleSearch: true,
-      ...(options.handle ? { resumptionHandle: options.handle } : {}),
+      memoryIdentity: voiceMemoryIdentityV1({
+        durableIds: (sessionMemory?.record.durable ?? []).map(
+          (entry) => entry.id,
+        ),
+        forgottenIds: (sessionMemory?.record.forgotten ?? []).map(
+          (entry) => entry.id,
+        ),
+      }),
     });
-    const timing = this.timingSink(connection);
-    const session = new GeminiSessionV1({
-      url,
-      setup,
-      onEvent: (event) =>
-        this.onSessionEvent(connection.id, call.callId, event),
-      onClosed: (code, reason) => {
-        void this.onSessionClosed(connection.id, call.callId, code, reason);
-      },
-      open: (target) => this.openGeminiSocket(target),
-      ...(timing ? { timing } : {}),
-    });
-    call.session = session;
-    this.trace(connection, "upstream", {
-      state: "starting",
-      ...(options.handle ? { resumed: true } : {}),
-      ...(handover.length > 0 ? { handover: handover.length } : {}),
-    });
-    this.sendState(connection, call);
-    try {
-      await session.start();
-    } catch (error) {
-      this.trace(connection, "upstream-failed", {
-        message: error instanceof Error ? error.message : String(error),
+    let handle = options.handle;
+    if (handle) {
+      const stored = await this.ledger().resumption(call.callId);
+      const offer = offerVoiceResumptionV1({
+        record: stored,
+        callId: call.callId,
+        botId: call.botId,
+        model: GEMINI_LIVE_MODEL_V1,
+        fingerprint,
+        uncertainEffects: await this.hasUncertainEffects(call),
       });
-      // The milestone, never the upstream's message: that text comes from
-      // outside and the url it was raised for carries the key.
-      this.timing(connection, "upstream-failed");
-      call.session = undefined;
-      this.sendState(connection, call);
-      this.sendError(
-        connection,
-        "The voice service could not be reached. Try again in a moment.",
-      );
-      return;
+      handle = offer.status === "offer" ? offer.handle : undefined;
     }
-    for (const delegation of await this.ledger().unspokenDelegations()) {
-      await this.announceDelegation({ runId: delegation.runId });
-    }
-    this.armIdleSleep(connection, call);
+    return {
+      instruction,
+      fingerprint,
+      frame: buildGeminiLiveSetupV1({
+        systemInstruction: instruction,
+        voiceName: call.voice.voiceName,
+        functionDeclarations: call.botId
+          ? VOICE_FUNCTION_DECLARATIONS_V1
+          : VOICE_ACCOUNT_FUNCTION_DECLARATIONS_V1,
+        googleSearch: true,
+        ...(handle ? { resumptionHandle: handle } : {}),
+      }),
+    };
+  }
+
+  private async hasUncertainEffects(call: LiveCall): Promise<boolean> {
+    if (call.turnId) return true;
+    const pending = await this.ledger().pendingDelegations();
+    return pending.some(
+      (delegation) =>
+        delegation.callId === call.callId &&
+        (delegation.state === "admitted" || delegation.state === "settled"),
+    );
+  }
+
+  private async persistResumption(call: LiveCall): Promise<void> {
+    if (!call.setupFingerprint) return;
+    const record: VoiceResumptionRecordV1 = {
+      schemaVersion: 1,
+      callId: call.callId,
+      botId: call.botId,
+      model: GEMINI_LIVE_MODEL_V1,
+      fingerprint: call.setupFingerprint,
+      ...(call.resumptionHandle ? { handle: call.resumptionHandle } : {}),
+      resumable: call.resumable === true,
+      updatedAt: this.now().toISOString(),
+      lastSettledTurnSequence: call.turnOrdinal ?? 0,
+    };
+    await this.ledger().putResumption(record);
+  }
+
+  private announceAttempt(
+    connection: Connection,
+    call: LiveCall,
+    mode: VoiceOpeningModeV1,
+  ): OpeningAttempt {
+    const attempt = this.beginAttempt(connection, {
+      attemptId: crypto.randomUUID(),
+      mode,
+      botId: call.botId,
+      paused: call.paused,
+      muted: call.muted,
+    });
+    attempt.owningCallId = call.callId;
+    call.attemptId = attempt.id;
+    call.inboundSequence = undefined;
+    call.outboundSequence = 0;
+    this.sendAdmitted(connection, attempt, {
+      callId: call.callId,
+      paused: call.paused,
+      muted: call.muted,
+    });
+    return attempt;
   }
 
   /** The person's microphone, on its way to the model. */
@@ -2015,20 +2622,37 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
             (message as ArrayBufferView).byteLength,
           );
     if (bytes.byteLength === 0) return;
-    // The first frame this session received from the person's microphone — a
-    // frame arriving before the call or the session exists, or while the call
-    // is muted or over its cap, writes no line, so this is not the
-    // microphone's own first frame — and nothing about the frames after it:
-    // this is a milestone, not a meter.
+    const envelope = decodeVoiceAssistantPcmEnvelopeV1(bytes);
+    if (!envelope) return;
+    if (!call.attemptId || envelope.attemptId !== call.attemptId) return;
+    const decision = decideVoicePcmSequenceV1(
+      call.inboundSequence,
+      envelope.sequence,
+    );
+    if (decision.kind === "drop") return;
+    if (decision.kind === "gap") {
+      this.trace(connection, "audio-gap", {
+        sequence: decision.sequence,
+        attempt: envelope.attemptId,
+      });
+      call.dropping = true;
+      this.sendRaw(connection, { type: "playback_interrupt" });
+      this.sendError(
+        connection,
+        "That audio didn’t come through. Say it again.",
+      );
+      return;
+    }
+    call.inboundSequence = decision.sequence;
     this.timing(
       connection,
       "client-audio-first",
-      { bytes: bytes.byteLength },
+      { bytes: envelope.pcm.byteLength },
       true,
     );
-    session.sendAudio(bytes);
+    session.sendAudio(envelope.pcm);
     this.armIdleSleep(connection, call);
-    await this.meterAudio(connection, call, "in", bytes.byteLength);
+    await this.meterAudio(connection, call, "in", envelope.pcm.byteLength);
   }
 
   /**
@@ -2143,8 +2767,11 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       return;
     }
     if (call.session) return;
-    const opening = this.openSession(connection, call, {
-      ...(call.resumptionHandle ? { handle: call.resumptionHandle } : {}),
+    const attempt = this.announceAttempt(connection, call, "wake");
+    const opening = this.openSession(connection, call, attempt, {
+      ...(call.resumptionHandle && call.resumable
+        ? { handle: call.resumptionHandle }
+        : {}),
     });
     call.waking = opening.finally(() => {
       call.waking = undefined;
@@ -2178,6 +2805,13 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     // that waking will end; the other order leaves a call nobody remembers
     // has to be read.
     await this.ledger().endCall(connection.id);
+    await this.ledger().putEndedReceipt({
+      schemaVersion: 1,
+      callId: call.callId,
+      deviceKey: call.deviceKey,
+      endedAt: this.now().toISOString(),
+    });
+    await this.ledger().clearResumption(call.callId);
     this.trace(connection, "call-memory", { call: call.callId });
   }
 
@@ -2217,10 +2851,12 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     connectionId: string,
     callId: string,
     event: GeminiServerEventV1,
+    attemptId: string,
   ): Promise<void> {
     const live = this.live(connectionId, callId);
     if (!live) return;
     const { connection, call } = live;
+    if (call.attemptId && call.attemptId !== attemptId) return;
     switch (event.kind) {
       case "setup-complete":
         this.trace(connection, "upstream", { state: "awake" });
@@ -2230,9 +2866,6 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         this.sendState(connection, call);
         return;
       case "audio": {
-        // The model's first sound, before the turn it belongs to is admitted:
-        // the await below is durable work, and a line written after it would
-        // charge that work to Google.
         this.timing(
           connection,
           "upstream-audio-first",
@@ -2249,9 +2882,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
           traced.audioChunks += 1;
           traced.audioBytes += event.pcm.byteLength;
         }
-        this.sendBinary(connection, event.pcm);
-        // Handed to the client's socket. What the gap to the line above holds
-        // is this object's own work — admitting the turn — and nothing else.
+        this.sendBinary(connection, call, event.pcm);
         this.timing(connection, "client-audio-out-first", {}, true);
         await this.meterAudio(connection, call, "out", event.pcm.byteLength);
         return;
@@ -2303,20 +2934,25 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         this.trace(connection, "tool-cancelled", { calls: event.ids.length });
         return;
       case "resumption":
+        call.resumable = event.resumable;
         if (event.handle) call.resumptionHandle = event.handle;
+        if (!event.resumable) call.resumptionHandle = event.handle;
+        await this.persistResumption(call);
         return;
       case "go-away":
-        // The server is about to close this connection. Reopening with the
-        // handle now keeps the conversation rather than losing it to a close
-        // the person would hear as silence.
         this.trace(connection, "upstream-goaway", {
           ...(event.timeLeft ? { timeLeft: event.timeLeft } : {}),
         });
         call.session?.close();
         call.session = undefined;
-        await this.openSession(connection, call, {
-          ...(call.resumptionHandle ? { handle: call.resumptionHandle } : {}),
-        });
+        {
+          const next = this.announceAttempt(connection, call, "wake");
+          await this.openSession(connection, call, next, {
+            ...(call.resumptionHandle && call.resumable
+              ? { handle: call.resumptionHandle }
+              : {}),
+          });
+        }
         return;
       case "usage":
         this.trace(connection, "usage", {
@@ -2338,12 +2974,14 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   private async onSessionClosed(
     connectionId: string,
     callId: string,
+    attemptId: string,
     code: number,
     reason: string,
   ): Promise<void> {
     const live = this.live(connectionId, callId);
     if (!live) return;
     const { connection, call } = live;
+    if (call.attemptId && call.attemptId !== attemptId) return;
     call.session = undefined;
     this.clearSilenceGuard(call);
     await this.settleOpenTurn(call, {
@@ -2353,13 +2991,16 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       code,
       reason: reason.slice(0, 200),
     });
-    if (call.exhausted || call.muted) {
+    if (call.exhausted || call.muted || call.paused) {
       this.sendState(connection, call);
       return;
     }
     if (code === GEMINI_LIVE_UNKNOWN_HANDLE_CLOSE_V1 && call.resumptionHandle) {
       call.resumptionHandle = undefined;
-      await this.openSession(connection, call, { handover: true });
+      call.resumable = false;
+      await this.ledger().clearResumption(call.callId);
+      const next = this.announceAttempt(connection, call, "rejoin");
+      await this.openSession(connection, call, next, { handover: true });
       return;
     }
     this.sendState(connection, call);
@@ -2478,6 +3119,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         spoken ? { answer: spoken } : { failure: "no_output" },
         call.transcript.trim(),
       );
+      await this.persistResumption(call);
       this.trace(connection, "turn-settled", {
         turn: turnId,
         ms: Math.max(0, Date.now() - (call.turnStartedAt ?? Date.now())),
@@ -2536,6 +3178,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     // A resumption handle belongs to the session that issued it, and that
     // session was another Bot. Nothing is resumed across a hand-over.
     call.resumptionHandle = undefined;
+    call.resumable = false;
     this.clearSilenceGuard(call);
     await this.settleOpenTurn(call, { failure: "the call was handed over" });
     this.sendTarget(connection, call.botId);
@@ -2544,7 +3187,9 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       voice: call.voice.voiceName,
       ...(target ? { requested: target.botId } : {}),
     });
-    await this.openSession(connection, call, { handover: true });
+    await this.ledger().clearResumption(call.callId);
+    const next = this.announceAttempt(connection, call, "start");
+    await this.openSession(connection, call, next, { handover: true });
   }
 
   /**
