@@ -1006,9 +1006,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
     });
   }
 
-  async admitRun(
-    input: unknown,
-  ): Promise<{ schemaVersion: 1; runId: string }> {
+  async admitRun(input: unknown): Promise<{ schemaVersion: 1; runId: string }> {
     const request = decodeUserBotTurnRpcV1(input);
     const command = request.command as BotTurnCommand;
     return botStateStub(

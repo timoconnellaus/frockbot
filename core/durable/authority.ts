@@ -378,7 +378,9 @@ export class BotDurableAuthority<Snapshot> {
     await this.assertMatchingRunCommand(command);
     const existing = await this.readRun(command.runId);
     if (existing) return this.replayAdmission(command, existing);
-    let accepted: Awaited<ReturnType<BotDurableAuthority<Snapshot>["acceptRun"]>>;
+    let accepted: Awaited<
+      ReturnType<BotDurableAuthority<Snapshot>["acceptRun"]>
+    >;
     try {
       accepted = await this.acceptRun(command);
     } catch (error) {
@@ -2135,7 +2137,9 @@ export class BotDurableAuthority<Snapshot> {
     identity: BotIdentity,
     run: StoredRunV1<Snapshot>,
   ): OwnedBotTurnCommand {
-    return this.liveCommands.get(run.runId) ?? this.recoveredCommand(identity, run);
+    return (
+      this.liveCommands.get(run.runId) ?? this.recoveredCommand(identity, run)
+    );
   }
 
   async recoverActiveRun(): Promise<void> {
