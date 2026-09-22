@@ -2,6 +2,14 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
+## Chat header lines up
+
+fix
+
+The back arrow, avatar, name, and panel icon share one center.
+
+![The phone chat header with Pixel, Dog, and Cow, each centered with the back arrow, name, and panel icon.](media/header-align.webp)
+
 ## Sends acknowledge immediately
 
 fix
