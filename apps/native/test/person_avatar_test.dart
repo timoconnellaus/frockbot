@@ -4,7 +4,6 @@ import 'package:frockbot_native/shell/person_avatar.dart';
 import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/shell/sidebar.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
-import 'package:frockbot_native/theme/initials.dart';
 
 Finder identifiedBy(String id) => find.byWidgetPredicate(
   (widget) => widget is Semantics && widget.properties.identifier == id,
@@ -56,8 +55,6 @@ void main() {
             onProfile: () {},
             profileName: 'Tim OConnell',
             onMarketplace: () {},
-            onVoice: () {},
-            voiceControl: VoiceControlState.idle,
             onToggleHidden: () {},
             onRetry: () async {},
           ),

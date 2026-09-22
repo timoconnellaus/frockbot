@@ -1,9 +1,12 @@
-/// An energy gate with a pre-roll: when someone started talking, and when the
+/// A speech gate with a pre-roll: when someone started talking, and when the
 /// room has been quiet long enough to stop paying for it.
 ///
-/// This is not a voice activity detector and does not pretend to be one. It
-/// compares frame energy to an adaptive floor. It cannot tell a voice from a
-/// slammed door, and nothing above it may assume it has rejected noise.
+/// Timing is this object's whole job — onset, hangover, pre-roll. The label
+/// "this frame is speech" can come from energy (the default: an adaptive
+/// floor) or from a speech probability the caller already computed, which is
+/// how Silero replaces the slammed-door failure without owning the clock.
+/// Either way this is not a turn detector. Nothing above it may assume noise
+/// has been rejected from the audio the upstream hears.
 ///
 /// It decides exactly two things, and the caller decides the rest:
 ///
@@ -23,9 +26,9 @@
 /// gate's). [quietForMs] exists for the one policy that does stop the audio:
 /// two minutes of quiet while listening.
 ///
-/// Pure Dart over a level and a timestamp: no audio API, no timers, no clock
-/// of its own. The caller supplies the timestamps, which is what lets a test
-/// run two minutes of silence in a millisecond.
+/// Pure Dart over a level, an optional probability and a timestamp: no audio
+/// API, no timers, no clock of its own. The caller supplies the timestamps,
+/// which is what lets a test run two minutes of silence in a millisecond.
 library;
 
 import 'dart:collection';
@@ -82,6 +85,13 @@ class SpeechGateConfig {
   /// Nothing quieter than this is speech, however quiet the room is.
   final double floor;
 
+  /// Speech probability at or above this is an onset, when the caller is
+  /// labelling frames (Silero) rather than using energy.
+  final double speechThreshold;
+
+  /// The stricter probability used for barge-in with a labelled frame.
+  final double bargeSpeechThreshold;
+
   const SpeechGateConfig({
     this.frame = const Duration(milliseconds: 40),
     this.onset = const Duration(milliseconds: 120),
@@ -91,6 +101,8 @@ class SpeechGateConfig {
     this.bargeInMargin = 4.5,
     this.bargeInHold = const Duration(milliseconds: 200),
     this.floor = 0.012,
+    this.speechThreshold = 0.5,
+    this.bargeSpeechThreshold = 0.7,
   });
 
   int get onsetFrames =>
@@ -162,20 +174,34 @@ class SpeechGate {
       math.max(_noiseFloor * config.onsetMargin, config.floor);
 
   /// Offers one frame and its level. [atMs] is the caller's clock.
-  SpeechGateDecision offer(Uint8List frame, double level, int atMs) {
+  ///
+  /// [speechScore] is a speech probability 0..1. When it is set, onset and
+  /// barge-in read it instead of energy — that is the Silero path. The energy
+  /// floor is left alone on that path: a slammed door is loud and not speech,
+  /// and must not train the fallback.
+  SpeechGateDecision offer(
+    Uint8List frame,
+    double level,
+    int atMs, {
+    double? speechScore,
+  }) {
     _lastAt = atMs;
-    final loud = level >= threshold;
+    final loud = speechScore != null
+        ? speechScore >= config.speechThreshold
+        : level >= threshold;
     // The floor only learns from quiet: adapting to speech would raise the
     // bar until nothing is speech.
-    if (!loud) {
+    if (speechScore == null && !loud) {
       final alpha = _adapted < 10 ? 0.25 : 0.05;
       _noiseFloor = _noiseFloor * (1 - alpha) + level * alpha;
       _adapted++;
     }
     _consecutive = loud ? _consecutive + 1 : 0;
 
-    final bargeLoud =
-        level >= math.max(_noiseFloor * config.bargeInMargin, config.floor * 2);
+    final bargeLoud = speechScore != null
+        ? speechScore >= config.bargeSpeechThreshold
+        : level >=
+              math.max(_noiseFloor * config.bargeInMargin, config.floor * 2);
     _bargeConsecutive = bargeLoud ? _bargeConsecutive + 1 : 0;
     final bargeIn = _bargeConsecutive >= config.bargeInFrames;
 

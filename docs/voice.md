@@ -340,6 +340,10 @@ others. `app/voice/shared.ts` is where a frame is spelled once.
    Or `{type:"error",message,code?,retryable?}` followed by `status: idle` when
    the call was refused or failed to start.
 
+The first `listening` of a call plays a short confirm
+(`assets/voice/connect.wav`). A later `listening` — a wake, a rejoin — does
+not.
+
 The Gemini setup enables both session resumption and sliding-window context
 compression. Resumption carries a call across a closed or replaced socket;
 compression keeps a long audio conversation within Gemini's context window.
@@ -413,18 +417,21 @@ passed.
 
 On a capture path with effective acoustic echo cancellation, the client sends
 the cleaned microphone continuously while playback is audible. Its local
-energy gate may stop the speaker immediately on a sustained onset and send
+speech gate may stop the speaker immediately on a sustained onset and send
 `{type:"interrupt"}` as a latency optimisation, but it does not gate the
 audio Gemini hears. Gemini's automatic activity detector is authoritative:
 its `serverContent.interrupted` confirms the interruption upstream.
 
 On a capture path without effective echo cancellation, the client sends
 silence while playback is audible and disables local barge-in. Speaker output
-is otherwise indistinguishable from the person to an energy gate or to
+is otherwise indistinguishable from the person to the local gate or to
 Gemini, and sending it created self-interrupting reply loops. These surfaces
-therefore require the person to wait until playback finishes. Background
-noise below the adapted floor does not trip the local gate on AEC surfaces;
-the gate remains an energy heuristic, not verified speech detection.
+therefore require the person to wait until playback finishes. Native Android,
+iOS and macOS label each frame with Silero v6 (ONNX) so a slammed door is
+not an onset; the browser, and a native runtime that failed to load the
+model, keep the energy heuristic. Timing — 120 ms onset, 900 ms hangover,
+500 ms pre-roll — is the same on every path. The gate still does not decide
+which frames an awake session sends.
 
 An interrupt never cancels a Bot Turn the session already started with
 `subagent`: that work is durable in the Bot.
@@ -511,11 +518,15 @@ costs about 3.6x input. So the session is closed when nobody is talking, and
 nothing at all is spent in between — no listening, no deliberating, no
 subagent admitted.
 
-- The client runs an energy gate on every frame: an adaptive noise floor, an
-  onset that needs several consecutive loud frames, and a 500 ms pre-roll
-  ring. It is an energy gate, not verified speech detection; it decides when
-  to **wake** a closed session and, only with effective AEC, when to stop its
-  own speaker early.
+- The client runs a speech gate on every frame: an onset that needs several
+  consecutive speech frames, a 900 ms hangover, and a 500 ms pre-roll ring.
+  Native Android, iOS and macOS label a frame with Silero v6 over the PCM
+  capture already owns — the plugin never opens a second microphone. The
+  browser, and a native runtime that cannot load the model, compare energy
+  to an adaptive floor. The gate decides when to **wake** a closed session
+  and, only with effective AEC, when to stop its own speaker early. It is
+  not a turn detector and does not decide which frames an awake session
+  sends.
 - While the session is open the client sends a frame every 40 ms, speech and
   silence alike, through pauses inside a sentence. While the model is
   answering, AEC surfaces keep sending the cleaned microphone so Gemini owns
@@ -552,13 +563,17 @@ subagent admitted.
   `voice/wake`. Pause starts nothing and cancels nothing: a `subagent` Turn
   already admitted is the Bot's work, not this socket's, so it carries on, and
   what finishes meanwhile is counted on the Resume control rather than
-  unhibernating Gemini.
+  unhibernating Gemini. The call record is marked paused, so a socket that
+  then dies keeps the long rejoin window rather than the 60 s one.
 - **Leaving the app** is Pause for the background: `hidden` and `paused`
   send the same `voice/sleep` with `paused: true`, release the microphone,
   and keep the client socket. Coming back wakes it. A Pause the person
   already started stays paused. `detached` still hangs up — the view is
-  gone. A socket the OS kills without `end_call` is the 60 s rejoin window,
-  as it always was.
+  gone. A socket the OS kills without `end_call` is not a hang-up: the
+  surface stays up, and coming back opens a new socket onto the same
+  durable call. The record lasts twenty-four hours from that Pause, not
+  60 s. A live conversation that drops without pausing is still the 60 s
+  window, as it always was.
 - Server reports `{type:"voice/state",schemaVersion:1,upstream:"awake"|"asleep"|"starting",muted:boolean}`.
 
 Between `voice/sleep` and `voice/wake` the client sends no audio. While
@@ -589,10 +604,11 @@ spoken turn, then the object does the same as the client's frame and closes
 the socket so the surface says the call ended. The server closes the Live session, settles
 its meters, and answers `status: idle`. Closing the
 socket without `end_call` closes the Live session and settles its meters the
-same way, but does **not** end the call: the call record survives the 60 s
-rejoin window so a client back from a network change continues the same
+same way, but does **not** end the call: the call record survives the rejoin
+window so a client back from a network change continues the same
 conversation, and an alarm ends it if nobody comes back (see "Session
-memory"). A Bot Turn the assistant already admitted keeps running; its answer
+memory"). A live drop has 60 s; a Pause, or the app leaving the screen, has
+twenty-four hours. A Bot Turn the assistant already admitted keeps running; its answer
 is told on this call if the same device rejoins it in time, on a later call
 if one is already up, and written into chat if nobody is listening. Hang-up
 also writes the call's spoken turns onto that Bot's thread as one collapsible
@@ -632,7 +648,7 @@ zero bytes is a turn that never became sound), `turn-silent` (a turn that had
 said nothing after the guard's window, so the client was told), `tool` (a
 function call, by name and id, never its arguments), `tool-cancelled`,
 `interrupted` (with `source`: `model` when the session's own detector heard
-someone, `client` when the phone's energy gate did), `call-switched` (with the
+someone, `client` when the phone's speech gate did), `call-switched` (with the
 Bot and voice the session reopened as), `answer-told` (a subagent result went
 back, under its own call id, as a turn, or as a chat message after hang-up),
 `usage` (the session's own token counts at a turn's end),
@@ -703,7 +719,7 @@ never subtract one side's elapsed from another's.
   `socket.open`/`socket.ready` per attempt, `socket.welcome`,
   `call.start-sent`, `microphone.first-frame` (with `silent`, so a device
   handing over zeros is told from one that never opened),
-  `microphone.first-signal`, `microphone.first-speech` (the energy gate's
+  `microphone.first-signal`, `microphone.first-speech` (the gate's speech
   decision, not a transcript), `upstream.asleep`/`upstream.starting`/
   `upstream.awake`, `call.listening`, `audio.first-down`, `player.first-feed`,
   `player.first-played`, and `call.end`/`call.ended`/`call.failed`. Read the
@@ -982,13 +998,13 @@ call nobody ever answered still gets its end from the turn they said it in.
 
 ### What ends a call, and what does not
 
-| Event                                | What happens                                                                                                                                                                                                                |
-| ------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `end_call`                           | The job is written, _then_ the call record is deleted, then the finalization is scheduled.                                                                                                                                  |
-| The socket closes with no `end_call` | The upstream closes and its meter settles, but the call record **stays**: a client back inside the 60 s rejoin window continues the same conversation. An `abandonVoiceCall` alarm is scheduled for the end of that window. |
-| Nobody comes back                    | The alarm ends the call and queues its memory. Nothing waits for a future request to notice it.                                                                                                                             |
-| Another device takes over            | The displaced call's job is written _before_ the record naming it is replaced.                                                                                                                                              |
-| Eviction                             | `onStart` ends a call already past the rejoin window and queues it; inside the window it schedules the alarm instead.                                                                                                       |
+| Event                                | What happens                                                                                                                                                                                                                                                                 |
+| ------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `end_call`                           | The job is written, _then_ the call record is deleted, then the finalization is scheduled.                                                                                                                                                                                   |
+| The socket closes with no `end_call` | The upstream closes and its meter settles, but the call record **stays**: a client back inside the rejoin window continues the same conversation. An `abandonVoiceCall` alarm is scheduled for the end of that window — 60 s for a live drop, twenty-four hours for a Pause. |
+| Nobody comes back                    | The alarm ends the call and queues its memory. Nothing waits for a future request to notice it.                                                                                                                                                                              |
+| Another device takes over            | The displaced call's job is written _before_ the record naming it is replaced.                                                                                                                                                                                               |
+| Eviction                             | `onStart` ends a call already past the rejoin window and queues it; inside the window it schedules the alarm instead.                                                                                                                                                        |
 
 The job is written before the call record is deleted in every one of these,
 because the record is the only place the call id was: the other order leaves a
@@ -1070,7 +1086,10 @@ leaves the footer open; the day rolls at UTC midnight. One live
 call per account: a second device supersedes the first. Transport rotation
 (a socket that is replaced by a newer one from the same device within 60 s,
 for instance after a network change) rejoins the same durable call record
-rather than opening a new one. Raw audio is never stored anywhere.
+rather than opening a new one. A Pause, or the app leaving the screen, keeps
+that record for twenty-four hours, and a new socket from the same device
+continues it without opening Gemini until Resume. Raw audio is never stored
+anywhere.
 
 ## Credentials
 
@@ -1279,7 +1298,9 @@ object without waiting for its Agent `onStart` RPC; recovery still runs as
 that fetch starts the object. One connect attempt is given ten seconds — a
 cold object can spend most of that starting — and a timeout is not retried,
 because a second upgrade would only race the first. A refused socket is
-retried once. `hello`/`start_call` — which wake a
+retried once. A socket that dies while paused, or while the app is off
+screen, is not a hang-up: the surface stays, and coming back opens a new
+socket onto the same durable call. `hello`/`start_call` — which wake a
 metered upstream — wait for both the server's `welcome` and an open
 microphone, so a person still answering the permission prompt is not billed.
 

@@ -58,7 +58,7 @@ packages:
     source: hosted
     version: "2.13.1"
   audioplayers:
-    dependency: transitive
+    dependency: "direct main"
     description:
       name: audioplayers
       sha256: "2ba4bb2944baacbdd5372ff8254a8e7feb8c10d7739545e392f5605a8f618745"
@@ -900,6 +900,14 @@ packages:
       url: "https://pub.dev"
     source: hosted
     version: "4.6.0"
+  vad_plus:
+    dependency: "direct main"
+    description:
+      name: vad_plus
+      sha256: "371fa4e9ffde8ffc85c07749f673b7595286856574840127de1d70f583dbd014"
+      url: "https://pub.dev"
+    source: hosted
+    version: "0.3.1"
   vector_math:
     dependency: transitive
     description:

@@ -60,6 +60,7 @@ import '../whats_new/page.dart';
 import '../voice/assistant.dart';
 import '../voice/capabilities.dart';
 import '../voice/capture.dart';
+import '../voice/connect_sound.dart';
 import '../voice/diagnostics.dart';
 import '../voice/dictation.dart';
 import '../voice/footer.dart';
@@ -70,6 +71,7 @@ import '../voice/player.dart';
 import '../voice/route.dart';
 import '../voice/protocol.dart' show voiceUnavailableMessage;
 import '../voice/socket.dart';
+import '../voice/speech_classifier.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import 'bot_actions.dart';
 import 'bot_page.dart';
@@ -78,7 +80,6 @@ import 'chat_header.dart';
 import 'desktop_layout.dart';
 import 'hot_panel.dart';
 import 'lifecycle.dart';
-import 'person_avatar.dart';
 import 'message_actions.dart';
 import 'exchange_view.dart';
 import 'person_avatar.dart';
@@ -561,6 +562,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       ),
       player: PcmVoicePlayer(),
       route: audioRoute,
+      speechClassifier: createSpeechClassifierV1(),
+      connectSound: AssetVoiceConnectSound(),
     );
     // The Bot can hand the conversation over itself (ADR 0029, `switch_bot`),
     // and the person can press voice on another Bot's page. Either way the
@@ -1789,7 +1792,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         slots,
         catalogRevision,
         avatarRevision,
-        if (panelCanvas != null) panelCanvas!,
+        ?panelCanvas,
       ]),
       builder: (context, _) => BotPageView(
         botName: _name(bot),

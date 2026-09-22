@@ -1,13 +1,15 @@
-/// The energy gate: when someone started, and when the room went quiet.
+/// The speech gate: when someone started, and when the room went quiet.
 ///
 /// The gate answers two questions and no others — wake and barge-in — so
-/// these are the tests for those two and for the pre-roll that makes a wake
-/// worth having.
+/// these are the tests for those two, for the pre-roll that makes a wake
+/// worth having, and for a speech score taking the place of energy.
 library;
 
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show TargetPlatform;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:frockbot_native/voice/speech_classifier.dart';
 import 'package:frockbot_native/voice/speech_gate.dart';
 
 import 'voice_fakes.dart';
@@ -170,10 +172,114 @@ void main() {
     });
   });
 
+  group('speech score', () {
+    test(
+      'a loud slam is not an onset when the score says it is not speech',
+      () {
+        var (:gate, :at) = settledGate();
+        SpeechGateDecision? decision;
+        for (var i = 0; i < 6; i++) {
+          decision = gate.offer(
+            pcmFrame(_speech),
+            _speech,
+            at,
+            speechScore: 0.1,
+          );
+          at += 40;
+        }
+        expect(decision!.onset, isFalse);
+        expect(gate.open, isFalse);
+      },
+    );
+
+    test('a quiet frame still opens on a held speech probability', () {
+      var (:gate, :at) = settledGate();
+      SpeechGateDecision? decision;
+      for (var i = 0; i < 2; i++) {
+        decision = gate.offer(pcmFrame(_quiet), _quiet, at, speechScore: 0.9);
+        at += 40;
+        expect(decision.onset, isFalse);
+      }
+      decision = gate.offer(pcmFrame(_quiet), _quiet, at, speechScore: 0.9);
+      expect(decision.onset, isTrue);
+      expect(gate.open, isTrue);
+    });
+
+    test('barge-in reads the stricter probability, not energy', () {
+      var (:gate, :at) = settledGate();
+      for (var i = 0; i < 10; i++) {
+        final decision = gate.offer(
+          pcmFrame(_speech),
+          _speech,
+          at,
+          speechScore: 0.55,
+        );
+        at += 40;
+        expect(decision.bargeIn, isFalse);
+      }
+      expect(gate.open, isTrue);
+
+      final marks = <bool>[];
+      for (var i = 0; i < 6; i++) {
+        marks.add(
+          gate.offer(pcmFrame(_quiet), _quiet, at, speechScore: 0.85).bargeIn,
+        );
+        at += 40;
+      }
+      expect(marks.take(4), everyElement(isFalse));
+      expect(marks[4], isTrue);
+    });
+  });
+
   test('the RMS of a silent frame is zero and of a full-scale one is one', () {
     expect(pcm16Rms(Uint8List(64)), 0);
     expect(pcm16Rms(pcmFrame(0.5)), closeTo(0.5, 0.01));
     // An odd trailing byte is not half a sample.
     expect(pcm16Rms(Uint8List.fromList([0, 0, 7])), 0);
+  });
+
+  test(
+    'the platform classifier is unready until the model has scored a frame',
+    () {
+      expect(createSpeechClassifierV1().ready, isFalse);
+    },
+  );
+
+  test('Silero is a phone and a Mac, not the browser or this Linux VM', () {
+    expect(
+      sileroSpeechClassifierSupportedV1(
+        platform: TargetPlatform.android,
+        web: false,
+      ),
+      isTrue,
+    );
+    expect(
+      sileroSpeechClassifierSupportedV1(
+        platform: TargetPlatform.iOS,
+        web: false,
+      ),
+      isTrue,
+    );
+    expect(
+      sileroSpeechClassifierSupportedV1(
+        platform: TargetPlatform.macOS,
+        web: false,
+      ),
+      isTrue,
+    );
+    expect(
+      sileroSpeechClassifierSupportedV1(
+        platform: TargetPlatform.linux,
+        web: false,
+      ),
+      isFalse,
+    );
+    expect(
+      sileroSpeechClassifierSupportedV1(
+        platform: TargetPlatform.android,
+        web: true,
+      ),
+      isFalse,
+    );
   });
 }

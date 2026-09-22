@@ -28,7 +28,6 @@ library;
 
 import 'package:flutter/material.dart';
 
-import '../client/transport.dart';
 import '../cards/chat_card.dart';
 import 'markdown.dart';
 import 'transcript_model.dart';

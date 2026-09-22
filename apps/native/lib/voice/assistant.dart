@@ -11,26 +11,29 @@
 /// An awake upstream gets a frame every 40 ms — speech, pauses and the
 /// silence after a sentence alike. A capture with effective echo cancellation
 /// keeps sending the room while the reply plays, so Gemini's detector owns the
-/// barge-in decision; the local energy gate only stops playback sooner. A
-/// capture without it sends silence while playback is audible and disables
-/// local barge-in, because speaker echo is not evidence that a person spoke.
-/// The energy gate is not consulted about individual frames.
+/// barge-in decision; the local gate only stops playback sooner. A capture
+/// without it sends silence while playback is audible and disables local
+/// barge-in, because speaker echo is not evidence that a person spoke. The
+/// gate is not consulted about individual frames.
 ///
 /// A per-turn error from the server — a reply that produced no text, a
 /// sentence that never became sound — is a notice on the call's surface for a
 /// few seconds, not the end of the call. An error that carries a `code` is the
 /// call itself failing — the server has already ended it — and so is a
 /// refusal or this client's own failure. The server's end of the socket
-/// finishing first also ends the call, without anything having failed: the
-/// surface says it has ended rather than going on claiming a live call.
+/// finishing first ends a live conversation the same way. A Pause, or the
+/// app off screen, keeps the call and opens a new socket when they come
+/// back.
 ///
 /// Nothing here caps how long a call may last. A sleeping upstream costs
 /// nothing, so the footer may stay open silently for hours; what the server
 /// meters is what it spends, and it says so itself.
 ///
-/// There is no reconnect loop. A refused initial connect is retried once;
-/// a timeout is not. Then an error the person can act on — a client that
-/// reconnects forever is a client that spends money forever.
+/// A refused initial connect is retried once; a timeout is not. Then an
+/// error the person can act on — a client that reconnects forever is a
+/// client that spends money forever. A socket that dies while the person
+/// paused, or while the app is off screen, is not that: the call stays up
+/// and [enterForeground] opens a new socket onto the same durable call.
 library;
 
 import 'dart:async';
@@ -39,11 +42,13 @@ import 'dart:collection';
 import 'package:flutter/foundation.dart';
 
 import 'capture.dart';
+import 'connect_sound.dart';
 import 'diagnostics.dart';
 import 'player.dart';
 import 'protocol.dart';
 import 'route.dart';
 import 'socket.dart';
+import 'speech_classifier.dart';
 import 'speech_gate.dart';
 import 'waveform.dart' show VoiceMeterMode;
 
@@ -83,6 +88,8 @@ class AssistantSessionController extends ChangeNotifier {
   final VoicePlayer player;
   final VoiceAudioRoute route;
   final SpeechGateConfig gateConfig;
+  final SpeechClassifier speechClassifier;
+  final VoiceConnectSound connectSound;
   final Duration startTimeout;
   final Duration sleepAfter;
   final Duration connectTimeout;
@@ -121,8 +128,9 @@ class AssistantSessionController extends ChangeNotifier {
   ///   zeros still produces this one, which is how a deaf capture is told from
   ///   one that never opened.
   /// * `microphone.first-signal` — the first frame carrying the room at all.
-  /// * `microphone.first-speech` — the first frame the energy gate called
-  ///   speech. Not a transcript and not a word: an amplitude decision.
+  /// * `microphone.first-speech` — the first frame the gate called speech.
+  ///   Not a transcript and not a word: Silero's probability when the
+  ///   classifier is up, otherwise an amplitude decision.
   /// * `upstream.asleep` / `upstream.starting` / `upstream.awake` — the first
   ///   `voice/state` frame saying each; `awake` means the server's Live session
   ///   acknowledged its setup.
@@ -148,6 +156,8 @@ class AssistantSessionController extends ChangeNotifier {
     this.diagnostics,
     VoiceAudioRoute? route,
     this.gateConfig = const SpeechGateConfig(),
+    this.speechClassifier = const EnergySpeechClassifier(),
+    this.connectSound = const SilentVoiceConnectSound(),
     this.startTimeout = voiceAssistantStartTimeoutV1,
     this.sleepAfter = voiceAssistantSleepAfterV1,
     this.connectTimeout = voiceAssistantConnectTimeoutV1,
@@ -179,6 +189,10 @@ class AssistantSessionController extends ChangeNotifier {
   /// microphone is open too.
   bool _welcomed = false;
   bool _barged = false;
+
+  /// The connect chime has played for this call. A later `listening` — wake,
+  /// rejoin — does not play it again. [start] clears it.
+  bool _chimed = false;
 
   /// The Bot the call is with, as the server last said. Read by the shell so
   /// the screen and the composer control follow the voice.
@@ -220,7 +234,7 @@ class AssistantSessionController extends ChangeNotifier {
   final List<VoiceDelegationEntryV1> _delegations = [];
 
   /// Whether the person put the call to sleep. Distinct from [_asleep],
-  /// which the energy gate also sets: a paused call sends nothing and wakes
+  /// which the gate also sets: a paused call sends nothing and wakes
   /// for nothing but Resume.
   bool _paused = false;
 
@@ -230,6 +244,15 @@ class AssistantSessionController extends ChangeNotifier {
   /// microphone is not held in the background.
   bool _away = false;
   bool _pausedForAway = false;
+
+  /// Completes when a reconnect's `start_call` has gone out, so Resume
+  /// cannot beat the handshake.
+  Completer<void>? _handshake;
+  Future<void>? _rejoining;
+
+  /// Resume ran before `start_call` went out on a reconnect. The wake waits
+  /// for the handshake so it is not dropped on a socket that has no call.
+  bool _pendingWake = false;
 
   /// How long a notice about the last reply stays on the call's surface.
   static const noticeDuration = Duration(seconds: 4);
@@ -349,12 +372,16 @@ class AssistantSessionController extends ChangeNotifier {
     _paused = false;
     _away = false;
     _pausedForAway = false;
+    _pendingWake = false;
     _started = false;
     _welcomed = false;
     _barged = false;
+    _chimed = false;
     _status = VoiceStatusV1.idle;
     _upstream = VoiceUpstreamStateV1.starting;
     _gate = SpeechGate(config: gateConfig);
+    speechClassifier.reset();
+    unawaited(speechClassifier.prepare());
     _teardownDone = null;
     _opening.clear();
     _openingBytes = 0;
@@ -431,7 +458,7 @@ class AssistantSessionController extends ChangeNotifier {
     _inbound = socket.messages.listen(
       _onMessage,
       onError: (Object _) => unawaited(_fail('Voice stopped. Try again.')),
-      onDone: () => unawaited(_ended()),
+      onDone: () => unawaited(_socketDropped()),
     );
     _armStartTimer();
   }
@@ -485,8 +512,10 @@ class AssistantSessionController extends ChangeNotifier {
   /// One attempt gets the full connect timeout. A timeout is the object
   /// still starting, so it is not retried — a second upgrade would only
   /// race the first. A refused socket is retried once, then it is an
-  /// error, not a loop.
-  Future<VoiceSocket?> _connectOnce(int generation) async {
+  /// error, not a loop. A reconnect whose upgrade fails is not that
+  /// error: the call is still up, and the next return to the screen tries
+  /// again.
+  Future<VoiceSocket?> _connectOnce(int generation, {bool fatal = true}) async {
     var attempts = 0;
     Future<VoiceSocket> attempt() async {
       final at = ++attempts;
@@ -515,7 +544,11 @@ class AssistantSessionController extends ChangeNotifier {
       return await attempt();
     } on TimeoutException {
       if (generation != _generation || _disposed) return null;
-      await _fail('Couldn’t reach voice. Check your connection and try again.');
+      if (fatal) {
+        await _fail(
+          'Couldn’t reach voice. Check your connection and try again.',
+        );
+      }
       return null;
     } on Object {
       if (generation != _generation || _disposed) return null;
@@ -523,9 +556,11 @@ class AssistantSessionController extends ChangeNotifier {
         return await attempt();
       } on Object {
         if (generation != _generation || _disposed) return null;
-        await _fail(
-          'Couldn’t reach voice. Check your connection and try again.',
-        );
+        if (fatal) {
+          await _fail(
+            'Couldn’t reach voice. Check your connection and try again.',
+          );
+        }
         return null;
       }
     }
@@ -596,7 +631,13 @@ class AssistantSessionController extends ChangeNotifier {
       _microphoneHeard = true;
     }
     _watchForDeafness(frame.atMs);
-    final decision = _gate.offer(frame.bytes, frame.level, frame.atMs);
+    speechClassifier.offer(frame.bytes);
+    final decision = _gate.offer(
+      frame.bytes,
+      frame.level,
+      frame.atMs,
+      speechScore: speechClassifier.ready ? speechClassifier.probability : null,
+    );
     if (decision.open) diagnostics?.markOnce('microphone.first-speech');
     // A capture with AEC lets Gemini hear the room throughout playback. The
     // local gate may stop the speaker sooner, but Gemini's VAD remains the
@@ -711,6 +752,12 @@ class AssistantSessionController extends ChangeNotifier {
           _startTimer = null;
           if (!_asleep) _upstream = VoiceUpstreamStateV1.awake;
           _set(VoiceSessionPhase.live);
+          // Once per call. A wake and a rejoin both say listening again,
+          // and neither is someone picking up.
+          if (!_chimed) {
+            _chimed = true;
+            unawaited(connectSound.play());
+          }
         }
         _notify();
       case AssistantAudioConfigV1(:final sampleRate):
@@ -803,9 +850,12 @@ class AssistantSessionController extends ChangeNotifier {
 
   /// `hello` and `start_call`, once the server has welcomed and the
   /// microphone is open: the opening audio goes up behind them in order.
+  /// A reconnect while paused or muted has no microphone yet and still
+  /// starts the call — Gemini stays asleep until Resume or unmute.
   void _beginCall() {
     final socket = _socket;
-    if (socket == null || !_welcomed || _started || _frames == null) return;
+    if (socket == null || !_welcomed || _started) return;
+    if (_frames == null && !muted && !_paused) return;
     socket.sendText(encodeAssistantHelloV1());
     // Who the call is with, before it starts: the SDK's own frame has no
     // room for it, and the server needs it to build the first prompt.
@@ -822,6 +872,16 @@ class AssistantSessionController extends ChangeNotifier {
       socket.sendBinary(_opening.removeFirst());
     }
     _openingBytes = 0;
+    if (_pendingWake) {
+      _pendingWake = false;
+      socket.sendText(encodeVoiceWakeV1());
+    } else if (_paused) {
+      socket.sendText(encodeVoiceSleepV1(paused: true));
+    } else if (muted) {
+      socket.sendText(encodeVoiceMuteV1(true));
+    }
+    final handshake = _handshake;
+    if (handshake != null && !handshake.isCompleted) handshake.complete();
   }
 
   /// Points an open call at another Bot (ADR 0029).
@@ -893,6 +953,7 @@ class AssistantSessionController extends ChangeNotifier {
     }
     _socket?.sendText(encodeVoiceMuteV1(now));
     _gate.reset();
+    speechClassifier.reset();
     // A client that is not sending is, to the upstream, asleep: the next
     // onset must wake it explicitly.
     _asleep = true;
@@ -914,10 +975,23 @@ class AssistantSessionController extends ChangeNotifier {
   ///
   /// [reason] names the path that ended it — the End button, the view
   /// detaching — and travels in the socket's close frame, where the
-  /// server logs it.
+  /// server logs it. A Pause whose socket the OS already killed reconnects
+  /// just long enough to say `end_call`, so the accordion is this hang-up
+  /// and not the abandoned-call alarm a day later.
   Future<void> end({required String reason}) async {
     if (_phase == VoiceSessionPhase.idle || _phase == VoiceSessionPhase.ended) {
       return;
+    }
+    if (_rejoining != null) await _rejoining;
+    if (!_started) {
+      final handshake = _handshake;
+      if (handshake != null && !handshake.isCompleted) {
+        await handshake.future.timeout(startTimeout, onTimeout: () {});
+      } else if (_socket == null &&
+          active &&
+          _phase != VoiceSessionPhase.ending) {
+        await _rejoin(waitForHandshake: true);
+      }
     }
     _generation++;
     // The path that ended it, which is a token this app names — never
@@ -929,6 +1003,79 @@ class AssistantSessionController extends ChangeNotifier {
     await _teardown(reason: reason);
     _status = VoiceStatusV1.idle;
     _set(VoiceSessionPhase.ended);
+  }
+
+  /// The server's end of the socket finished first. A live conversation
+  /// treats that as the call ending. A Pause, or the app off screen, does
+  /// not: the durable call is still there, and a new socket continues it.
+  Future<void> _socketDropped() async {
+    if (_disposed ||
+        _error != null ||
+        !active ||
+        _phase == VoiceSessionPhase.ending) {
+      return;
+    }
+    final keep = _phase == VoiceSessionPhase.live && (_away || _paused);
+    if (!keep) {
+      await _ended();
+      return;
+    }
+    _inbound = null;
+    _socket = null;
+    _welcomed = false;
+    _started = false;
+    _startTimer?.cancel();
+    _startTimer = null;
+    diagnostics?.mark('call.socket-dropped');
+    _notify();
+    if (!_away) unawaited(_rejoin());
+  }
+
+  /// Opens a new socket onto the durable call. Used when the OS killed the
+  /// last one while the person still had this call, and when hang-up has
+  /// to reach the server after that.
+  Future<void> _rejoin({bool waitForHandshake = false}) {
+    return _rejoining ??= _rejoinNow(waitForHandshake: waitForHandshake)
+        .whenComplete(() {
+          _rejoining = null;
+        });
+  }
+
+  Future<void> _rejoinNow({required bool waitForHandshake}) async {
+    if (_socket != null ||
+        _disposed ||
+        !active ||
+        _phase == VoiceSessionPhase.ending) {
+      return;
+    }
+    final generation = _generation;
+    _welcomed = false;
+    _started = false;
+    _opening.clear();
+    _openingBytes = 0;
+    final handshake = Completer<void>();
+    _handshake = handshake;
+    try {
+      final socket = await _connectOnce(generation, fatal: false);
+      if (socket == null) return;
+      if (generation != _generation ||
+          _disposed ||
+          !active ||
+          _phase == VoiceSessionPhase.ending) {
+        await _abandon(socket);
+        return;
+      }
+      _attach(socket);
+      if (waitForHandshake && !_started) {
+        await handshake.future.timeout(startTimeout, onTimeout: () {});
+      }
+    } finally {
+      if (waitForHandshake &&
+          identical(_handshake, handshake) &&
+          !handshake.isCompleted) {
+        handshake.complete();
+      }
+    }
   }
 
   /// The server's end of the socket finished first: the call is over and
@@ -1006,6 +1153,8 @@ class AssistantSessionController extends ChangeNotifier {
       await _settled(route.end);
     }
     await _settled(() async => socket?.close(code: code, reason: reason));
+    await _settled(speechClassifier.dispose);
+    await _settled(connectSound.dispose);
     _micLevel = 0;
     _opening.clear();
     _openingBytes = 0;
@@ -1014,6 +1163,11 @@ class AssistantSessionController extends ChangeNotifier {
     _paused = false;
     _away = false;
     _pausedForAway = false;
+    _rejoining = null;
+    _pendingWake = false;
+    final handshake = _handshake;
+    _handshake = null;
+    if (handshake != null && !handshake.isCompleted) handshake.complete();
   }
 
   /// A recorder, a speaker or a socket that fails to close — or to carry the
@@ -1086,6 +1240,7 @@ class AssistantSessionController extends ChangeNotifier {
     _asleep = true;
     _upstream = VoiceUpstreamStateV1.asleep;
     _gate.reset();
+    speechClassifier.reset();
     unawaited(player.interrupt());
     _socket?.sendText(encodeVoiceSleepV1(paused: true));
     _notify();
@@ -1099,6 +1254,7 @@ class AssistantSessionController extends ChangeNotifier {
     _asleep = false;
     _upstream = VoiceUpstreamStateV1.starting;
     _gate.reset();
+    speechClassifier.reset();
     for (var i = 0; i < _delegations.length; i++) {
       if (!_delegations[i].finishedWhilePaused) continue;
       _delegations[i] = VoiceDelegationEntryV1(
@@ -1108,7 +1264,11 @@ class AssistantSessionController extends ChangeNotifier {
         state: _delegations[i].state,
       );
     }
-    _socket?.sendText(encodeVoiceWakeV1());
+    if (_started) {
+      _socket?.sendText(encodeVoiceWakeV1());
+    } else {
+      _pendingWake = true;
+    }
     _notify();
   }
 
@@ -1117,11 +1277,13 @@ class AssistantSessionController extends ChangeNotifier {
   /// is released. The socket stays; [enterForeground] is coming back.
   ///
   /// A Pause the person already started is left alone. Mute has already
-  /// closed the device. `detached` hangs up from the shell instead.
+  /// closed the device; Pause is still written so a socket the OS then
+  /// kills keeps the long rejoin window. `detached` hangs up from the
+  /// shell instead.
   Future<void> leaveForeground() async {
     if (!active || _away || _phase == VoiceSessionPhase.ending) return;
     _away = true;
-    if (!_paused && !muted) {
+    if (!_paused) {
       pause();
       _pausedForAway = true;
     } else {
@@ -1132,8 +1294,9 @@ class AssistantSessionController extends ChangeNotifier {
   }
 
   /// The app is on screen again. The microphone comes back unless it is
-  /// muted, and a sleep this controller started for the background
-  /// resumes. A Pause the person started still waits for Resume.
+  /// muted, a socket the OS killed is opened again onto the same call,
+  /// and a sleep this controller started for the background resumes. A
+  /// Pause the person started still waits for Resume.
   Future<void> enterForeground() async {
     if (!_away) return;
     _away = false;
@@ -1146,6 +1309,17 @@ class AssistantSessionController extends ChangeNotifier {
       final opened = await _openCapture(generation);
       if (_away || generation != _generation || _disposed) {
         if (opened) await _closeCapture();
+        return;
+      }
+    }
+    _beginCall();
+    if (_socket == null) {
+      await _rejoin();
+      if (_away ||
+          generation != _generation ||
+          _disposed ||
+          !active ||
+          _phase == VoiceSessionPhase.ending) {
         return;
       }
     }
