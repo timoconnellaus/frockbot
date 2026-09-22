@@ -83,6 +83,14 @@ import type {
   MemoryAiBinding,
   MemoryVectorIndex,
 } from "./types.js";
+import type { MemoryRecordsV1 } from "./owner.js";
+import {
+  createMemoryBrowseTool,
+  createMemoryExpandTool,
+  executeRecordsForgetV1,
+  executeRecordsSearchV1,
+  executeRecordsWriteV1,
+} from "./engine-tools.js";
 
 /** Bot write provenance: the Session and Turn that recorded a fact. */
 export interface MemoryWriterIdentityV1 {
@@ -116,6 +124,12 @@ export interface MemoryRuntimeHostV1 {
    * own, because a write's date is decided where the write happens.
    */
   clock?: () => Date;
+  /**
+   * Canonical SQLite Memory. When present, write/forget/search use it and
+   * expand/browse are offered. The Markdown file store remains until M3
+   * cutover for injection.
+   */
+  records?: MemoryRecordsV1;
 }
 
 export const sha256HexV1 = sha256HexTextV1;
@@ -823,6 +837,30 @@ export function createMemoryWriteTool(
       });
       await session.flush();
 
+      if (host.records) {
+        const result = await executeRecordsWriteV1(
+          { ...host, records: host.records },
+          decoded,
+          effectId,
+        );
+        if (!result.isError) {
+          session.append({
+            type: "memory/written",
+            ...position,
+            effectId,
+            action: "write",
+            scope: decoded.scope,
+            projectId: decoded.project ?? "",
+            tier: decoded.tier,
+            path: `${decoded.scope}/${decoded.tier}`,
+            generationId: "records",
+            contentHash,
+          });
+          await session.flush();
+        }
+        return result;
+      }
+
       const outcome = await host.store.write({
         root,
         tier: decoded.tier,
@@ -935,6 +973,30 @@ export function createMemoryForgetTool(
         contentHash,
       });
       await session.flush();
+
+      if (host.records) {
+        const result = await executeRecordsForgetV1(
+          { ...host, records: host.records },
+          decoded,
+          effectId,
+        );
+        if (!result.isError) {
+          session.append({
+            type: "memory/written",
+            ...position,
+            effectId,
+            action: "forget",
+            scope: decoded.scope,
+            projectId: decoded.project ?? "",
+            tier: "log",
+            path: "",
+            generationId: "records",
+            contentHash,
+          });
+          await session.flush();
+        }
+        return result;
+      }
 
       const outcome = await host.store.forget({
         root,
@@ -1085,6 +1147,12 @@ export function createMemorySearchTool(
       } catch (error) {
         return refusal(
           `memory_search was refused: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      if (host.records) {
+        return executeRecordsSearchV1(
+          { ...host, records: host.records },
+          value,
         );
       }
       const embed = memoryEmbedderV1(host);
@@ -1372,6 +1440,18 @@ export function createMemoryRuntimeFeature(
     disposers.push(
       runtime.tools.register(createMemorySearchTool(host, projection)),
     );
+    if (host.records) {
+      disposers.push(
+        runtime.tools.register(
+          createMemoryExpandTool({ ...host, records: host.records }),
+        ),
+      );
+      disposers.push(
+        runtime.tools.register(
+          createMemoryBrowseTool({ ...host, records: host.records }),
+        ),
+      );
+    }
     disposers.push(
       runtime.tools.register(createMemoryRebuildIndexTool(projection)),
     );

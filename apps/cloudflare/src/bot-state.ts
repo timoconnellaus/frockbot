@@ -333,6 +333,11 @@ import {
   type UserMemoryRpc,
 } from "./memory.js";
 import {
+  createBotMemoryEngineV1,
+  durableObjectHasSqlV1,
+} from "./memory-records.js";
+import type { MemoryEngineV1 } from "@frockbot/app/memory/engine";
+import {
   createFrockAiGatewayHostV1,
   type FrockAiGatewayHostV1,
 } from "./frock-ai.js";
@@ -621,6 +626,17 @@ export class BotState
           receiptKey: "maintenance:skill-index:bot:2026-09-22",
         });
       }
+      if (durableObjectHasSqlV1(this.ctx.storage)) {
+        const memoryDue = createBotMemoryEngineV1(
+          this.ctx.storage,
+        ).nextWakeupAt();
+        if (
+          memoryDue !== undefined &&
+          (await this.ctx.storage.getAlarm()) === null
+        ) {
+          await this.ctx.storage.setAlarm(memoryDue);
+        }
+      }
     });
     this.outboundFetch = dependencies.outboundFetch;
     const emailSender = createBindingEmailSenderV1(
@@ -783,6 +799,12 @@ export class BotState
                 ? [Date.now() + 30_000]
                 : []),
               ...(await themeAssembleDeadlineV1(transaction)),
+              ...(durableObjectHasSqlV1(this.ctx.storage)
+                ? (() => {
+                    const due = this.memoryEngine().nextWakeupAt();
+                    return due === undefined ? [] : [due];
+                  })()
+                : []),
             ],
             scheduledWorkInFlight: () =>
               mountedContributions
@@ -910,6 +932,13 @@ export class BotState
     // SAFETY: USER_CONFIGURATIONS binds UserConfiguration; workers-types cannot
     // infer its generated Memory RPC surface.
     return this.env.USER_CONFIGURATIONS.get(id) as unknown as UserMemoryRpc;
+  }
+
+  #memoryEngine: MemoryEngineV1 | undefined;
+
+  private memoryEngine(): MemoryEngineV1 {
+    this.#memoryEngine ??= createBotMemoryEngineV1(this.ctx.storage);
+    return this.#memoryEngine;
   }
 
   /**
