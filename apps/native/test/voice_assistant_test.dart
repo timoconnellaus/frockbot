@@ -15,6 +15,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/voice/assistant.dart';
 import 'package:frockbot_native/voice/capture.dart';
+import 'package:frockbot_native/voice/connect_sound.dart';
 import 'package:frockbot_native/voice/protocol.dart';
 import 'package:frockbot_native/voice/socket.dart';
 import 'package:frockbot_native/voice/speech_classifier.dart';
@@ -33,6 +34,7 @@ class Harness {
   final FakeVoicePlayer player = FakeVoicePlayer();
   late final AssistantSessionController controller;
   late VoiceSocket Function() opener;
+  final RecordingConnectSound? chime;
   int at = 0;
   int mark = 0;
 
@@ -40,7 +42,8 @@ class Harness {
     Completer<VoiceSocket>? deferred,
     bool cancelsPlaybackEcho = false,
     SpeechClassifier? speechClassifier,
-  }) {
+    bool recordChime = false,
+  }) : chime = recordChime ? RecordingConnectSound() : null {
     capture = FakeVoiceCapture(cancelsPlaybackEcho: cancelsPlaybackEcho);
     opener = () => socket;
     controller = AssistantSessionController(
@@ -48,6 +51,7 @@ class Harness {
       capture: capture,
       player: player,
       speechClassifier: speechClassifier ?? const EnergySpeechClassifier(),
+      connectSound: chime ?? const SilentVoiceConnectSound(),
     );
   }
 
@@ -96,6 +100,41 @@ void main() {
     expect(harness.capture.sampleRate, voiceAssistantInputSampleRateV1);
     expect(harness.capture.frame, voiceAssistantFrame);
     expect(harness.player.sampleRate, 24000);
+    harness.controller.dispose();
+  });
+
+  test('the connect sound plays once, on the first listening', () async {
+    final harness = Harness(recordChime: true);
+    await harness.controller.start();
+    await settle();
+    expect(harness.chime!.plays, 0, reason: 'not before the call is up');
+
+    harness.socket.deliver(
+      jsonEncode({'type': 'welcome', 'protocol_version': 1}),
+    );
+    harness.socket.deliver(
+      jsonEncode({
+        'type': 'audio_config',
+        'format': 'pcm16',
+        'sampleRate': 24000,
+      }),
+    );
+    await settle();
+    expect(harness.chime!.plays, 0);
+
+    harness.status('listening');
+    await settle();
+    expect(harness.chime!.plays, 1);
+
+    harness.status('speaking');
+    await settle();
+    harness.status('listening');
+    await settle();
+    expect(
+      harness.chime!.plays,
+      1,
+      reason: 'a later listening is not a connect',
+    );
     harness.controller.dispose();
   });
 

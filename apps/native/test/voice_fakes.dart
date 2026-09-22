@@ -10,6 +10,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import 'package:frockbot_native/voice/capture.dart';
+import 'package:frockbot_native/voice/connect_sound.dart';
 import 'package:frockbot_native/voice/player.dart';
 import 'package:frockbot_native/voice/route.dart';
 import 'package:frockbot_native/voice/socket.dart';
@@ -20,6 +21,19 @@ Future<void> settle([int rounds = 3]) async {
   for (var i = 0; i < rounds; i++) {
     await Future<void>.delayed(Duration.zero);
   }
+}
+
+/// Counts connect chimes, so a test can prove the call plays one and only one.
+class RecordingConnectSound implements VoiceConnectSound {
+  int plays = 0;
+
+  @override
+  Future<void> play() async {
+    plays++;
+  }
+
+  @override
+  Future<void> dispose() async {}
 }
 
 class FakeVoiceSocket implements VoiceSocket {
