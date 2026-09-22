@@ -214,11 +214,14 @@ class ShorebirdHarness(unittest.TestCase):
         self.yaml = root / "shorebird.yaml"
         self.yaml.write_text(f"# comment\napp_id: {APP_ID}\n")
         self.apk = root / "app-release.apk"
+        self.keystore = root / "debug.keystore"
+        self.keystore.write_bytes(b"keystore")
         for tool in ("aapt", "apksigner", "zipalign"):
             path = root / "sdk/build-tools/36.0.0" / tool
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("")
-        self.environ = {**os.environ, "NATIVE_SHOREBIRD": str(self.cli), "ANDROID_HOME": str(root / "sdk")}
+        self.environ = {**os.environ, "NATIVE_SHOREBIRD": str(self.cli), "ANDROID_HOME": str(root / "sdk"),
+                        "FROCKBOT_ANDROID_KEYSTORE": str(self.keystore)}
         self.environ.pop("NATIVE_SHOREBIRD_PRIVATE_KEY", None)
         self.calls = []
         self.commands = []
@@ -357,6 +360,12 @@ class ReleaseTest(ShorebirdHarness):
         self.assertEqual(record["file"], published["file"])
         self.assertTrue((self.state / published["file"]).exists())
         self.assertFalse((self.state / "pending-release.json").exists())
+        # Shorebird's build is re-signed with the phone key before publish.
+        signed = [call for call in self.calls
+                  if Path(call[0]).name == "apksigner" and call[1:2] == ["sign"]]
+        self.assertEqual(len(signed), 1)
+        self.assertIn(str(self.keystore), signed[0])
+        self.assertIn(str(self.apk), signed[0])
 
     def test_wrong_built_version_does_not_replace_download(self):
         original = self.fake_command
