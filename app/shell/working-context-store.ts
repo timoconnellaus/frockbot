@@ -33,10 +33,7 @@ import {
   workingContextVoiceKeyV1,
 } from "@frockbot/core/durable";
 import { historyCharsV1, type CompactionStateV1 } from "./compaction.js";
-import {
-  CHAT_HISTORY_BUDGET_CHARS_V1,
-  type ChatWindowV1,
-} from "./history.js";
+import { CHAT_HISTORY_BUDGET_CHARS_V1, type ChatWindowV1 } from "./history.js";
 import {
   chooseWorkingTurnsV1,
   emptyVoiceExcerptV1,
