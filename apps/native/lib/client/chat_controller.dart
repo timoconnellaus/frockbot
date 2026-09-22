@@ -455,11 +455,12 @@ class ChatController extends ChangeNotifier {
         await _persist();
         error = failure.message;
       } else {
-        error = 'Checking whether your message went through…';
+        // The POST did not answer. The Turn may already be running, so this
+        // is a lookup rather than a failure the conversation should shout.
+        // The lookup says so itself when it cannot find the Turn.
         await checkDelivery();
       }
     } catch (_) {
-      error = 'Checking whether your message went through…';
       await checkDelivery();
     } finally {
       _inFlight -= 1;
@@ -481,13 +482,25 @@ class ChatController extends ChangeNotifier {
     ];
   }
 
+  /// The check already walking the list, so a submission whose POST answers
+  /// while that walk is open waits for it and then looks itself up. Checking
+  /// it inside the open walk would fence a POST that has not answered yet.
+  Future<void>? _deliveryCheck;
+
   /// Finds out what became of every submission this client has not confirmed.
   ///
-  /// Oldest first, over a snapshot of the list: a submission admitted while
-  /// this is running is left for the next call rather than checked before the
-  /// POST that carries it has had a chance to answer.
+  /// Oldest first, over a snapshot of the list. A submission admitted while
+  /// this is running waits until the walk finishes, then is looked up by the
+  /// call that follows its own POST — never before that POST has answered.
   Future<void> checkDelivery() async {
-    if (checking || pending.isEmpty) return;
+    if (pending.isEmpty) return;
+    final running = _deliveryCheck;
+    if (running != null) {
+      await running;
+      if (pending.isEmpty || _deliveryCheck != null) return;
+    }
+    final done = Completer<void>();
+    _deliveryCheck = done.future;
     checking = true;
     changed();
     try {
@@ -496,6 +509,8 @@ class ChatController extends ChangeNotifier {
       }
     } finally {
       checking = false;
+      _deliveryCheck = null;
+      if (!done.isCompleted) done.complete();
       changed();
     }
   }

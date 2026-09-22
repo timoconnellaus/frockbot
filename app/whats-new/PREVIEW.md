@@ -2,6 +2,12 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
+## Confirming a message stays quiet
+
+fix
+
+A sent message stays in the conversation while FrockBot confirms it.
+
 ## Earlier messages stay in reach
 
 fix

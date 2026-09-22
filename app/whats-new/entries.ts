@@ -23,6 +23,13 @@ export type WhatsNewEntrySourceV1 = {
  */
 export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
+    id: "quiet-delivery",
+    title: "Confirming a message stays quiet",
+    summary:
+      "A sent message stays in the conversation while FrockBot confirms it.",
+    kind: "fix",
+  },
+  {
     id: "chat-scroll",
     title: "Earlier messages stay in reach",
     summary:
