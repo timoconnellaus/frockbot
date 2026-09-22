@@ -14,7 +14,7 @@ function run(events: SessionEvent[]): StoredRunV1<BotSettingsViewV1> {
     events,
     previousEventCount: 0,
     configurationSnapshot: {} as BotSettingsViewV1,
-  } as StoredRunV1<BotSettingsViewV1>;
+  } as unknown as StoredRunV1<BotSettingsViewV1>;
 }
 
 describe("visiblePublicationsV1", () => {

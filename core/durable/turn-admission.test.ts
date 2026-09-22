@@ -19,6 +19,7 @@ import {
   type StoredRunOriginV1,
   type StoredRunV1,
 } from "./run-records.ts";
+import type { ConversationUpdateV1 } from "./publication.ts";
 
 const ROUTINE_ORIGIN: StoredRunOriginV1 = {
   kind: "routine",
@@ -811,7 +812,7 @@ describe("admission does not wait for the previous Turn", () => {
     const gate = new Promise<void>((resolve) => {
       release = resolve;
     });
-    const delivered: ReadonlyArray<Record<string, unknown>>[] = [];
+    const delivered: (readonly ConversationUpdateV1[])[] = [];
     let deferred = 0;
     let settled = 0;
     const authority = new BotDurableAuthority<undefined>({

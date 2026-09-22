@@ -1,4 +1,7 @@
-import type { StateFrame } from "@frockbot/core/protocol-schemas";
+import type {
+  StateFrame,
+  ConversationProjection,
+} from "@frockbot/core/protocol-schemas";
 import {
   STATE_ASSEMBLED_MAX_BYTES,
   STATE_FRAME_MAX_BYTES,
@@ -309,7 +312,8 @@ export class BotStateChannel {
         this.broadcastCommitted(updates);
       },
       {
-        refreshAlarm: (transaction) => this.refreshAlarm(transaction),
+        refreshAlarm: (transaction) =>
+          this.refreshAlarm(transaction as unknown as DurableObjectTransaction),
       },
     );
   }
@@ -502,7 +506,7 @@ export class BotStateChannel {
       epoch: String(head.epoch),
       cursor: String(head.lastCursor),
       reason,
-      conversation,
+      conversation: conversation as ConversationProjection,
     });
     const ready: StateFrame = {
       schemaVersion: 1,

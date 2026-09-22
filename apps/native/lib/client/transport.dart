@@ -250,8 +250,8 @@ class NativeApi {
       path: '/api/bots/$botId/state-channel',
       queryParameters: {
         'version': '1',
-        if (cursor != null) 'cursor': cursor,
-        if (epoch != null) 'epoch': epoch,
+        'cursor': ?cursor,
+        'epoch': ?epoch,
       },
     );
     return connectSocketV1(

@@ -1495,7 +1495,10 @@ export class BotDurableAuthority<Snapshot> {
         await this.hooks.deliverPublication?.(updates);
       },
       {
-        refreshAlarm: (transaction) => this.refreshRecoveryAlarm(transaction),
+        refreshAlarm: (transaction) =>
+          this.refreshRecoveryAlarm(
+            transaction as unknown as DurableObjectTransaction,
+          ),
       },
     );
   }

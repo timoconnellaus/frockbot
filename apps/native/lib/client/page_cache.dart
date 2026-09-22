@@ -85,7 +85,7 @@ String encodePageCache(
     'version': pageCacheVersion,
     'runs': kept,
     'before': before,
-    if (epoch != null) 'epoch': epoch,
+    'epoch': ?epoch,
     if (cursor != null && kept.isNotEmpty) 'cursor': cursor,
     if (announcements.isNotEmpty) 'announcements': announcements,
   });
