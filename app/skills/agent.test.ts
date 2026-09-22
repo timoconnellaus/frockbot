@@ -95,7 +95,7 @@ describe("the Skill catalog", () => {
 
     await catalog.refresh(4, session);
 
-    const injected = session.events.find(
+    const injected = session.activeRunJournal.find(
       (event) => event.type === "skill/injected",
     );
     // Ordering is the catalog's: the Bot's own Skills, then the managed set
@@ -156,7 +156,7 @@ describe("the Skill catalog", () => {
 
     await catalog.refresh(4, session);
 
-    const injected = session.events.find(
+    const injected = session.activeRunJournal.find(
       (event) => event.type === "skill/injected",
     );
     const first =
@@ -200,7 +200,7 @@ describe("the Skill catalog", () => {
     const paths = catalog.current().skills.map((skill) => skill.path);
     expect(paths).not.toContain("managed/applets/SKILL.md");
     expect(paths).toContain("managed/add-connector/SKILL.md");
-    const injected = session.events.find(
+    const injected = session.activeRunJournal.find(
       (event) => event.type === "skill/injected",
     );
     // Withheld is not refused: nothing about the document was wrong, so the
@@ -415,7 +415,7 @@ describe("the skill_load tool", () => {
     expect(reference.isError).toBe(false);
     expect(reference.content).toContain("By: your User");
 
-    const injected = session.events.find(
+    const injected = session.activeRunJournal.find(
       (event) => event.type === "skill/injected",
     );
     const recorded =
@@ -504,10 +504,10 @@ describe("the skill_write tool", () => {
     );
 
     expect(result.isError).toBe(false);
-    const intent = session.events.find(
+    const intent = session.activeRunJournal.find(
       (event) => event.type === "skill/write-intent",
     );
-    const written = session.events.find(
+    const written = session.activeRunJournal.find(
       (event) => event.type === "skill/written",
     );
     expect(intent).toMatchObject({
@@ -649,7 +649,7 @@ describe("the skill_write tool", () => {
       false,
     );
     expect(
-      session.events.some((event) => event.type === "skill/write-intent"),
+      session.activeRunJournal.some((event) => event.type === "skill/write-intent"),
     ).toBe(false);
     await dispose();
   });
@@ -734,7 +734,7 @@ describe("the skill_write tool", () => {
     expect(written.isError).toBe(false);
     expect(written.content).toContain("skills/standup/references/forms.md");
     expect(
-      session.events.find((event) => event.type === "skill/write-intent"),
+      session.activeRunJournal.find((event) => event.type === "skill/write-intent"),
     ).toMatchObject({ path: "skills/standup/references/forms.md" });
     // It is loadable on the next Turn, as one of that Skill's references.
     const catalog = new SkillCatalog(OWNER, workspace);

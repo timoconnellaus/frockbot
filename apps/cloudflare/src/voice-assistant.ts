@@ -863,7 +863,13 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       get: <T>(key: string) => storage.get<T>(key),
       put: <T>(key: string, value: T) => storage.put<T>(key, value),
       delete: (key: string) => storage.delete(key),
-      list: <T>(options: { prefix: string }) => storage.list<T>(options),
+      list: <T>(options: {
+        prefix: string;
+        start?: string;
+        end?: string;
+        reverse?: boolean;
+        limit?: number;
+      }) => storage.list<T>(options),
     };
     return new VoiceLedgerV1(surface, this.name);
   }
@@ -880,7 +886,13 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         get: <T>(key: string) => storage.get<T>(key),
         put: <T>(key: string, value: T) => storage.put<T>(key, value),
         delete: (key: string) => storage.delete(key),
-        list: <T>(options: { prefix: string }) => storage.list<T>(options),
+        list: <T>(options: {
+        prefix: string;
+        start?: string;
+        end?: string;
+        reverse?: boolean;
+        limit?: number;
+      }) => storage.list<T>(options),
       });
     }
     return this.#memory;
@@ -2722,15 +2734,43 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       },
       readBotHistory: async (botId, limit) => {
         const bot = await this.ownedBot(userId, botId);
-        const page = await this.botDoor(userId, botId).listRuns();
-        const runs = page.runs.slice(
-          -Math.max(1, Math.min(limit, VOICE_HISTORY_MAX_LIMIT_V1)),
-        );
+        const count = Math.max(1, Math.min(limit, VOICE_HISTORY_MAX_LIMIT_V1));
+        const excerpt = (await this.botDoor(userId, botId).readVoiceContext({
+          schemaVersion: 1,
+          userId,
+          botId,
+          limit: count,
+        })) as {
+          lines: Array<{
+            role: "user" | "assistant";
+            text: string;
+            turn: number;
+            at: string;
+            runId?: string;
+            to?: "user" | "voice" | "bot";
+          }>;
+        };
         return {
           botId,
           botName: bot.name,
-          runs,
-          hasMore: page.page.truncated || page.runs.length > runs.length,
+          runs: excerpt.lines.map((line) => ({
+            schemaVersion: 4 as const,
+            runId: line.runId ?? `turn-${line.turn}`,
+            admittedAt: line.at,
+            input: line.role === "user" ? line.text : "",
+            status: "completed" as const,
+            events:
+              line.role === "assistant"
+                ? [
+                    {
+                      type: "reply/to-caller" as const,
+                      caller: line.to === "bot" ? ("bot" as const) : ("voice" as const),
+                      text: line.text,
+                    },
+                  ]
+                : [],
+          })),
+          hasMore: false,
         };
       },
       searchBotHistory: async (botId, query, limit) => {
@@ -3358,6 +3398,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       runVoice(input: unknown): Promise<unknown>;
       lookupRun(input: unknown): Promise<unknown>;
       listRuns(input: unknown): Promise<unknown>;
+      readVoiceContext(input: unknown): Promise<unknown>;
       stopRun(input: unknown): Promise<unknown>;
       readConfiguration(input: unknown): Promise<unknown>;
       deliverVoiceChatResult(input: unknown): Promise<unknown>;
@@ -3416,6 +3457,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
             query: { schemaVersion: 1 },
           }),
         ) as { runs: ClientRunV1[]; page: { truncated: boolean } },
+      readVoiceContext: (input: unknown) => rpc.readVoiceContext(input),
       stopRun: (command: {
         schemaVersion: 1;
         action: "stop";

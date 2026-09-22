@@ -98,13 +98,13 @@ function conversational(events: readonly SessionEvent[], turn: number) {
 export const conversationDeliveryHooksV1: LoopHooksV1 = {
   async request(agent, _request, _turn, _step, _signal, next) {
     const request = await next();
-    const start = agent.session.events.findLast((e) => e.type === "turn/start");
+    const start = agent.session.activeRunJournal.findLast((e) => e.type === "turn/start");
     if (
       start?.type !== "turn/start" ||
-      !conversational(agent.session.events, start.turn)
+      !conversational(agent.session.activeRunJournal, start.turn)
     )
       return request;
-    const state = delivery(agent.session.events, start.turn);
+    const state = delivery(agent.session.activeRunJournal, start.turn);
     // Repair the step that failed to deliver, not the rest of the Turn: a Bot
     // that has already spoken keeps every tool it needs to finish the work.
     if (!state.required || !state.repair) return request;
@@ -141,8 +141,8 @@ export const conversationDeliveryHooksV1: LoopHooksV1 = {
   },
   async stepContinuation(agent, _decision, turn, _step, _signal, next) {
     const decision = await next();
-    if (!conversational(agent.session.events, turn)) return decision;
-    const state = delivery(agent.session.events, turn);
+    if (!conversational(agent.session.activeRunJournal, turn)) return decision;
+    const state = delivery(agent.session.activeRunJournal, turn);
     // This also runs on replay after a send/result or step/end was flushed.
     if (!state.required) return { kind: "stop" };
     if (decision.kind !== "stop") return decision;

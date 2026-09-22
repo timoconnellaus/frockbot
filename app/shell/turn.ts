@@ -29,6 +29,7 @@ import {
   type StoredRunOriginV1,
 } from "@frockbot/core/durable";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
+import { selectStoredWorkingContextV1 } from "./working-context-store.js";
 import { resolveAppletComposition } from "@frockbot/app/applets-host/bot";
 import {
   admitTurnV1,
@@ -309,7 +310,23 @@ export async function executeTurn(
       const mounted = await createShellCompositionHost({
         botId: input.identity.botId,
         sessionId: input.command.sessionId,
-        sessionEvents: input.previousEvents,
+        sessionSeed: {
+          cursor: input.cursor,
+          context: input.context,
+          journal: {
+            startSeq: input.journal[0]?.seq ?? input.cursor.nextSeq,
+            events: input.journal,
+          },
+        },
+        selectWorkingContext:
+          input.contextAvailability === "unavailable"
+            ? async () => {
+                throw new Error(
+                  input.contextReason ?? "working context is unavailable",
+                );
+              }
+            : (request) =>
+                selectStoredWorkingContextV1(state.ctx.storage, request),
         billing: state.env.BILLING?.(
           input.identity.userId,
           input.identity.botId,
@@ -413,7 +430,6 @@ export async function executeTurn(
       }
       return await executeDirectToolTurn({
         command: { ...input.command, directTool },
-        previousEvents: input.previousEvents,
         composition: activation.mounted,
         admitEffect: (effect) =>
           admitRunEffect(
@@ -446,7 +462,6 @@ export async function executeTurn(
         ...input.command,
         text: durableInput,
       },
-      previousEvents: input.previousEvents,
       composition: activation.mounted,
       resume: input.resume,
     });

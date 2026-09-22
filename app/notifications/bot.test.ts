@@ -20,7 +20,7 @@ function admitted(turnType: "chat" | "automation"): SessionEvent[] {
     { type: "turn/start", turn: 1 },
     { type: "turn/admission", turn: 1, turnType } as SessionEvent,
   ]);
-  return [...session.events];
+  return [...session.activeRunJournal];
 }
 
 const read = <T>(_key: string) => Promise.resolve(undefined as T | undefined);

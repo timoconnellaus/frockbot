@@ -79,6 +79,10 @@ test("voice reads and searches owned conversation records without admitting Bot 
       (message: { runId: string }) => message.runId === runId,
     ),
   ).toBe(true);
+  // The excerpt is visible sends and the person's words. Model requests and
+  // tool arguments are not part of it.
+  expect(result.history).not.toContain("model/request");
+  expect(result.history).not.toContain("tool/call");
   expect(
     JSON.parse(result.search).messages.some(
       (message: { runId: string }) => message.runId === runId,

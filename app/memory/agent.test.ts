@@ -127,10 +127,10 @@ describe("memory_write", () => {
     );
 
     expect(result.isError).toBe(false);
-    const intent = session.events.find(
+    const intent = session.activeRunJournal.find(
       (event) => event.type === "memory/write-intent",
     );
-    const written = session.events.find(
+    const written = session.activeRunJournal.find(
       (event) => event.type === "memory/written",
     );
     expect(intent).toMatchObject({
@@ -169,10 +169,10 @@ describe("memory_write", () => {
     // The intent is still recorded: the refusal is an observable outcome of an
     // attempt, not an event that never happened.
     expect(
-      session.events.some((event) => event.type === "memory/write-intent"),
+      session.activeRunJournal.some((event) => event.type === "memory/write-intent"),
     ).toBe(true);
     expect(
-      session.events.some((event) => event.type === "memory/written"),
+      session.activeRunJournal.some((event) => event.type === "memory/written"),
     ).toBe(false);
     await dispose();
   });
@@ -212,7 +212,7 @@ describe("memory_forget", () => {
     // retraction, the shard and "newest wins" are this Package's mechanics.
     expect(result.content).toContain("Forgotten");
     expect(result.content).not.toContain("shard");
-    const written = session.events.find(
+    const written = session.activeRunJournal.find(
       (event) => event.type === "memory/written",
     );
     if (written?.type !== "memory/written") throw new Error("unreachable");
@@ -259,7 +259,7 @@ describe("the note fade", () => {
     expect(injection.text).not.toContain("moved to eight");
     expect(injection.text).toContain("Tim teaches on Tuesdays.");
 
-    const injected = session.events.find(
+    const injected = session.activeRunJournal.find(
       (event) => event.type === "memory/injected",
     );
     if (injected?.type !== "memory/injected") throw new Error("unreachable");
@@ -313,7 +313,7 @@ describe("the Turn projection", () => {
     expect(injection.text).toContain(
       "- (learned 2026-08-31) [via School] Tim teaches on Tuesdays.",
     );
-    const injected = session.events.find(
+    const injected = session.activeRunJournal.find(
       (event) => event.type === "memory/injected",
     );
     if (injected?.type !== "memory/injected") throw new Error("unreachable");
@@ -388,10 +388,10 @@ describe("the Project tools", () => {
         : undefined,
     ).toEqual({ kind: "user", userId: "user-1" });
 
-    const intent = session.events.find(
+    const intent = session.activeRunJournal.find(
       (event) => event.type === "memory/project-intent",
     );
-    const changed = session.events.find(
+    const changed = session.activeRunJournal.find(
       (event) => event.type === "memory/project-changed",
     );
     expect(intent).toMatchObject({
@@ -749,7 +749,7 @@ describe("a Memory read that a bound cut short", () => {
 
     await new MemoryProjection(host).refresh(4, session);
 
-    const injected = session.events.find(
+    const injected = session.activeRunJournal.find(
       (event) => event.type === "memory/injected",
     );
     if (injected?.type !== "memory/injected") throw new Error("unreachable");
@@ -785,10 +785,10 @@ describe("a project-scope change to a Project the Bot never joined", () => {
     expect(forgotten.isError).toBe(true);
     expect(forgotten.content).toContain("you have not joined");
     expect(
-      session.events.some((event) => event.type === "memory/written"),
+      session.activeRunJournal.some((event) => event.type === "memory/written"),
     ).toBe(false);
     expect(
-      session.events.some((event) => event.type === "memory/write-intent"),
+      session.activeRunJournal.some((event) => event.type === "memory/write-intent"),
     ).toBe(false);
     await dispose();
   });
@@ -821,7 +821,7 @@ describe("a memory_forget that changes one file and then fails", () => {
 
     expect(result.isError).toBe(true);
     expect(result.content).toContain("after changing 1 file(s)");
-    const written = session.events.filter(
+    const written = session.activeRunJournal.filter(
       (event) => event.type === "memory/written",
     );
     expect(written).toHaveLength(1);
@@ -870,7 +870,7 @@ describe("project_create when the descriptor write conflicts", () => {
     expect(created.isError).toBe(true);
     expect(created.content).toContain("conflict");
     expect(
-      session.events.some((event) => event.type === "memory/project-changed"),
+      session.activeRunJournal.some((event) => event.type === "memory/project-changed"),
     ).toBe(false);
     expect(await host.projects.joined()).toEqual([]);
     await dispose();

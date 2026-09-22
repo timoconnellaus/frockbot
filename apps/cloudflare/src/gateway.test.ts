@@ -151,7 +151,6 @@ class MemoryBotState implements BotStateBinding {
       }).mount(generation, new AbortController().signal);
       const result = await executeBotTurn({
         command,
-        previousEvents,
         composition,
       });
       run.events = structuredClone(result.events);

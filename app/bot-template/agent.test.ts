@@ -177,7 +177,7 @@ describe("bot_export_template", () => {
       const result = await invoke(mounted, "chat");
       expect(result.isError).toBe(false);
       expect(result.content).toContain(SHARE_ID);
-      const sends = mounted.session.events.filter(
+      const sends = mounted.session.activeRunJournal.filter(
         (event) => event.type === "send/to-user",
       );
       expect(sends).toHaveLength(1);

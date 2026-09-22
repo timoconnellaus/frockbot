@@ -314,7 +314,7 @@ describe("a read", () => {
       expect(intent.turn).toBe(4);
       // Nothing was put on the session log: a read shows the user no card.
       expect(
-        harness.session.events.filter((event) => event.type === "send/to-user"),
+        harness.session.activeRunJournal.filter((event) => event.type === "send/to-user"),
       ).toEqual([]);
     } finally {
       await harness.dispose();
@@ -353,7 +353,7 @@ describe("the send", () => {
       expect(result.endsTurn).toBe(true);
       // Nothing reached the queue: the settlement dispatches, not the tool.
       expect(harness.dispatched).toEqual([]);
-      const sends = harness.session.events.filter(
+      const sends = harness.session.activeRunJournal.filter(
         (event) => event.type === "send/to-user",
       );
       expect(sends).toHaveLength(1);

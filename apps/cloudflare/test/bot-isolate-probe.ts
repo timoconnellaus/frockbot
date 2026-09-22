@@ -967,7 +967,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
       const message = composition.runtime.agent.agent.session
         .deriveMessages()
         .at(-1);
-      const loggedRequests = composition.runtime.agent.agent.session.events
+      const loggedRequests = composition.runtime.agent.agent.session.activeRunJournal
         .filter((event) => event.type === "model/request")
         .map((event) => structuredClone(event.request));
       const durableHookFailures = (

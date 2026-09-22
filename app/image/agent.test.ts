@@ -99,7 +99,7 @@ describe("generate_image", () => {
         input: { prompt: string; width: number; height: number },
       ) => {
         ordered.push(
-          `run:${session.events.filter((event) => event.type === "image/generate-intent").length}`,
+          `run:${session.activeRunJournal.filter((event) => event.type === "image/generate-intent").length}`,
         );
         return model.run(id, input);
       },
@@ -114,12 +114,12 @@ describe("generate_image", () => {
 
     // The model ran with exactly one intent already in the log.
     expect(ordered).toEqual(["run:1"]);
-    const types = session.events.map((event) => event.type);
+    const types = session.activeRunJournal.map((event) => event.type);
     expect(types.indexOf("image/generate-intent")).toBeLessThan(
       types.indexOf("image/generated"),
     );
 
-    const intent = session.events.find(
+    const intent = session.activeRunJournal.find(
       (event) => event.type === "image/generate-intent",
     );
     expect(intent).toMatchObject({
@@ -151,7 +151,7 @@ describe("generate_image", () => {
     expect(result.content.length).toBeLessThan(400);
 
     expect(
-      session.events.find((event) => event.type === "image/generated"),
+      session.activeRunJournal.find((event) => event.type === "image/generated"),
     ).toMatchObject({
       effectId: EFFECT_ID,
       path: parsed.path,
@@ -228,7 +228,7 @@ describe("generate_image", () => {
     // Nothing was promised: an intent for an effect that can never run would
     // leave a fence around nothing.
     expect(
-      session.events.some((event) => event.type === "image/generate-intent"),
+      session.activeRunJournal.some((event) => event.type === "image/generate-intent"),
     ).toBe(false);
     await dispose();
   });
@@ -296,10 +296,10 @@ describe("generate_image", () => {
     // The intent stands: the effect was attempted, and the empty key proves it
     // produced nothing, so a re-issued call generates rather than replays.
     expect(
-      session.events.some((event) => event.type === "image/generate-intent"),
+      session.activeRunJournal.some((event) => event.type === "image/generate-intent"),
     ).toBe(true);
     expect(
-      session.events.some((event) => event.type === "image/generated"),
+      session.activeRunJournal.some((event) => event.type === "image/generated"),
     ).toBe(false);
     await dispose();
   });
@@ -372,7 +372,7 @@ describe("re-running a generated image under its effect id", () => {
     expect(model.calls).toHaveLength(1);
     // And the outcome the interrupted attempt never recorded is recorded now.
     expect(
-      second.session.events.find((event) => event.type === "image/generated"),
+      second.session.activeRunJournal.find((event) => event.type === "image/generated"),
     ).toMatchObject({ effectId: EFFECT_ID, turn: 4, step: 2 });
     await second.dispose();
   });
@@ -404,7 +404,7 @@ describe("re-running a generated image under its effect id", () => {
     await tool.execute({ prompt: "a red barn" }, CONTEXT);
 
     expect(
-      session.events.filter((event) => event.type === "image/generated"),
+      session.activeRunJournal.filter((event) => event.type === "image/generated"),
     ).toHaveLength(1);
     expect(model.calls).toHaveLength(1);
     await dispose();

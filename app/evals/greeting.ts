@@ -91,7 +91,7 @@ if (import.meta.main) {
       });
       handle.agent.send("Hi");
       await handle.agent.whenIdle();
-      const events = [...handle.agent.session.events];
+      const events = [...handle.agent.session.activeRunJournal];
       const result = {
         repetition,
         ...gradeGreeting(events),

@@ -73,7 +73,7 @@ async function invoke(
 ) {
   const context = {
     ...contextFor(turnType),
-    effectId: `tool:4:2:${mounted.session.events.filter((e) => e.type === "send/to-user").length}`,
+    effectId: `tool:4:2:${mounted.session.activeRunJournal.filter((e) => e.type === "send/to-user").length}`,
   };
   const preparation = await mounted.root.tools.prepare(toolCall, context);
   if (preparation.kind === "denied") return preparation.result;
@@ -161,7 +161,7 @@ describe("the Shell's tool admission", () => {
         isError: true,
       });
       expect(
-        mounted.session.events.some((event) => event.type === "wake/parent"),
+        mounted.session.activeRunJournal.some((event) => event.type === "wake/parent"),
       ).toBe(false);
     } finally {
       await mounted.dispose();
@@ -187,7 +187,7 @@ describe("the Shell's tool admission", () => {
         });
       }
       expect(
-        mounted.session.events.some((event) => event.type === "send/to-user"),
+        mounted.session.activeRunJournal.some((event) => event.type === "send/to-user"),
       ).toBe(false);
     } finally {
       await mounted.dispose();
@@ -223,7 +223,7 @@ describe("send_to_user", () => {
       expect(result.isError).toBe(false);
       expect(result.endsTurn).toBeUndefined();
       expect(
-        mounted.session.events.find((event) => event.type === "send/to-user"),
+        mounted.session.activeRunJournal.find((event) => event.type === "send/to-user"),
       ).toMatchObject({
         turn: 4,
         step: 2,
@@ -310,7 +310,7 @@ describe("send_to_user", () => {
       expect(secret.endsTurn).toBeUndefined();
       expect(card.endsTurn).toBeUndefined();
       expect(
-        mounted.session.events
+        mounted.session.activeRunJournal
           .filter((event) => event.type === "send/to-user")
           .map((event) =>
             event.type === "send/to-user" ? event.payload.type : undefined,
@@ -344,7 +344,7 @@ describe("send_to_user", () => {
       expect(result.content).toContain("send_to_user.payload.type is invalid");
       expect(result.endsTurn).toBeUndefined();
       expect(
-        mounted.session.events.some((event) => event.type === "send/to-user"),
+        mounted.session.activeRunJournal.some((event) => event.type === "send/to-user"),
       ).toBe(false);
     } finally {
       await mounted.dispose();
@@ -364,7 +364,7 @@ describe("wake_parent", () => {
 
       expect(result).toMatchObject({ isError: false, endsTurn: true });
       expect(
-        mounted.session.events.find((event) => event.type === "wake/parent"),
+        mounted.session.activeRunJournal.find((event) => event.type === "wake/parent"),
       ).toMatchObject({
         turn: 4,
         step: 2,
@@ -388,7 +388,7 @@ describe("wake_parent", () => {
       expect(result.isError).toBe(true);
       expect(result.endsTurn).toBeUndefined();
       expect(
-        mounted.session.events.some((event) => event.type === "wake/parent"),
+        mounted.session.activeRunJournal.some((event) => event.type === "wake/parent"),
       ).toBe(false);
     } finally {
       await mounted.dispose();
@@ -576,7 +576,7 @@ describe("the acknowledgement reaches the user", () => {
         { turn: 4, step: 2, requestId: "request-1" },
       );
 
-      const sends = mounted.session.events.filter(
+      const sends = mounted.session.activeRunJournal.filter(
         (event) => event.type === "send/to-user",
       );
       expect(sends).toHaveLength(0);
@@ -612,7 +612,7 @@ describe("the acknowledgement reaches the user", () => {
         },
       );
 
-      const sends = mounted.session.events.filter(
+      const sends = mounted.session.activeRunJournal.filter(
         (event) => event.type === "send/to-user",
       );
       expect(sends).toHaveLength(0);
@@ -710,7 +710,7 @@ describe("the acknowledgement reaches the user", () => {
         { turn: 4, step: 2, requestId: "request-1" },
       );
 
-      const sends = mounted.session.events.filter(
+      const sends = mounted.session.activeRunJournal.filter(
         (event) => event.type === "send/to-user",
       );
       expect(sends).toHaveLength(1);
@@ -731,7 +731,7 @@ test("a send without an explicit disposition is refused before delivery", async 
     );
     expect(result.isError).toBe(true);
     expect(result.content).toContain("disposition");
-    expect(mounted.session.events.some((e) => e.type === "send/to-user")).toBe(
+    expect(mounted.session.activeRunJournal.some((e) => e.type === "send/to-user")).toBe(
       false,
     );
   } finally {

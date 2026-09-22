@@ -1279,7 +1279,7 @@ export class VoiceMemoryLedgerV1 {
         attempts: 0,
         ...(system ? { system } : {}),
       };
-      await this.storage.put(jobKey(input.callId), job);
+      await rememberJob(this.storage, undefined, job);
       return { status: "created" as const, job };
     });
   }
@@ -1330,7 +1330,7 @@ export class VoiceMemoryLedgerV1 {
         ...own.filter((turn) => turn.ordinal > job.cursor),
       ];
       if (turns.length === 0) {
-        await this.storage.put(jobKey(input.callId), {
+        await rememberJob(this.storage, job, {
           ...job,
           state: "applied",
           cursor: reachOf(own),
@@ -1344,7 +1344,7 @@ export class VoiceMemoryLedgerV1 {
         attempts: job.attempts + 1,
         spentAt: input.at.toISOString(),
       };
-      await this.storage.put(jobKey(input.callId), claimed);
+      await rememberJob(this.storage, job, claimed);
       const window = turns.slice(0, VOICE_MEMORY_CHUNK_TURNS_V1);
       const ownRead = window.filter((turn) => turn.callId === job.callId);
       return {
@@ -1373,7 +1373,7 @@ export class VoiceMemoryLedgerV1 {
     await this.serial(async () => {
       const job = await this.readJob(callId);
       if (!job || job.state !== "spending") return;
-      await this.storage.put(jobKey(callId), {
+      await rememberJob(this.storage, job, {
         ...job,
         state: "failed",
         failure,
@@ -1397,7 +1397,7 @@ export class VoiceMemoryLedgerV1 {
       const job = await this.readJob(callId);
       if (!job || job.state !== "spending") return false;
       const exhausted = job.attempts >= VOICE_MEMORY_MAX_ATTEMPTS_V1;
-      await this.storage.put(jobKey(callId), {
+      await rememberJob(this.storage, job, {
         ...job,
         state: exhausted ? "failed" : "pending",
         failure,
@@ -1461,7 +1461,7 @@ export class VoiceMemoryLedgerV1 {
           input.chunk.totals.find((item) => item.callId === turn.callId)
             ?.total ?? cursor;
         if (cursor < total) carriedLeft = true;
-        await this.storage.put(jobKey(turn.callId), {
+        await rememberJob(this.storage, other, {
           ...other,
           // Its own state is left alone until it is done: a failed carried
           // call must not become claimable again and spend a second time.
@@ -1474,7 +1474,7 @@ export class VoiceMemoryLedgerV1 {
       // carried has turns left: otherwise it goes round again and reads them,
       // rather than leaving them for whenever the next conversation happens.
       const done = input.chunk.to >= input.chunk.total && !carriedLeft;
-      await this.storage.put(jobKey(input.callId), {
+      await rememberJob(this.storage, current, {
         ...current,
         state: done ? "applied" : "pending",
         cursor: input.chunk.to,
@@ -1534,8 +1534,15 @@ export class VoiceMemoryLedgerV1 {
     read: VoiceMemorySourceReaderV1,
     limit = VOICE_MEMORY_CONTINUITY_TURNS_V1,
   ): Promise<VoiceMemorySourceTurnV1[]> {
-    const newestJob = (await this.unsummarisedJobs()).at(-1);
-    if (!newestJob) return [];
+    const open = await this.storage.list<string>({
+      prefix: VOICE_MEMORY_JOB_OPEN_PREFIX_V1,
+      reverse: true,
+      limit: 1,
+    });
+    const callId = open.values().next().value;
+    if (!callId) return [];
+    const newestJob = await this.readJob(callId);
+    if (!newestJob || newestJob.state === "applied") return [];
     const turns = await read(newestJob.callId);
     return turns
       .filter((turn) => turn.ordinal > newestJob.cursor)
@@ -1557,6 +1564,8 @@ export class VoiceMemoryLedgerV1 {
           VOICE_MEMORY_JOB_RETENTION_MS_V1
         ) {
           await this.storage.delete(jobKey(job.callId));
+          await this.storage.delete(jobOpenKey(job));
+          await this.storage.delete(jobDueKey(job));
           retired.push(job.callId);
         }
       }
@@ -1565,8 +1574,40 @@ export class VoiceMemoryLedgerV1 {
   }
 }
 
+export const VOICE_MEMORY_JOB_OPEN_PREFIX_V1 = "voice:memory:job-open:";
+export const VOICE_MEMORY_JOB_DUE_PREFIX_V1 = "voice:memory:job-due:";
+
 function jobKey(callId: string): string {
   return `${VOICE_MEMORY_JOB_PREFIX_V1}${callId}`;
+}
+
+function jobOpenKey(job: { sequence: number; callId: string }): string {
+  return `${VOICE_MEMORY_JOB_OPEN_PREFIX_V1}${String(job.sequence).padStart(16, "0")}:${encodeURIComponent(job.callId)}`;
+}
+
+function jobDueKey(job: VoiceMemoryJobV1): string {
+  const due = Date.parse(job.spentAt ?? job.settledAt ?? job.createdAt);
+  return `${VOICE_MEMORY_JOB_DUE_PREFIX_V1}${job.state}:${String(Number.isFinite(due) ? due : 0).padStart(16, "0")}:${encodeURIComponent(job.callId)}`;
+}
+
+async function rememberJob(
+  storage: VoiceLedgerStorageV1,
+  previous: VoiceMemoryJobV1 | undefined,
+  next: VoiceMemoryJobV1,
+): Promise<void> {
+  await storage.put(jobKey(next.callId), next);
+  if (previous) {
+    await storage.delete(jobDueKey(previous));
+    if (previous.state !== "applied" && next.state === "applied") {
+      await storage.delete(jobOpenKey(previous));
+    }
+  }
+  if (next.state === "applied") {
+    await storage.delete(jobOpenKey(next));
+    return;
+  }
+  await storage.put(jobOpenKey(next), next.callId);
+  await storage.put(jobDueKey(next), next.callId);
 }
 
 function forgottenKey(kind: VoiceMemoryKindV1, id: string): string {

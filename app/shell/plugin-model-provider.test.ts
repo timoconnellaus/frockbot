@@ -1199,7 +1199,7 @@ describe("the accounting a Stop before the provider start leaves behind", () => 
       else handle.agent.send("hello");
       await handle.agent.whenIdle();
       return {
-        events: [...handle.agent.session.events],
+        events: [...handle.agent.session.activeRunJournal],
         opened,
         began,
       };

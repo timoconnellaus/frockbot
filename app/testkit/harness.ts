@@ -55,12 +55,12 @@ function undeclaredConversationAppends(
   const observed = new Set<string>();
   for (const session of sessions.list()) {
     const calls = new Map<string, { name: string; input: unknown }>();
-    for (const event of session.events) {
+    for (const event of session.activeRunJournal) {
       if (event.type === "tool/call") {
         calls.set(event.occurrenceId, { name: event.name, input: event.input });
       }
     }
-    for (const event of session.events) {
+    for (const event of session.activeRunJournal) {
       if (
         !(CONVERSATION_POSITIONED_EVENTS_V1 as readonly string[]).includes(
           event.type,

@@ -11,7 +11,9 @@ import {
   type PersistSessionEvents,
   type RuntimeFeatureV1,
   type SessionEvent,
+  type SessionSeedV1,
   SessionStore,
+  type WorkingContextSelectorV1,
   type TurnTypeV1,
 } from "@frockbot/core/contracts";
 import type {
@@ -100,6 +102,8 @@ export interface FoundationRuntimeOptions {
   agentId?: string;
   sessionId?: string;
   sessionEvents?: readonly SessionEvent[];
+  sessionSeed?: SessionSeedV1;
+  selectWorkingContext?: WorkingContextSelectorV1;
   /** Mounted before the application's own features, in this order. */
   agentPackages?: readonly FoundationAgentPackage[];
   persistSessionEvents?: PersistSessionEvents;
@@ -135,10 +139,15 @@ export async function createFoundationRuntime(
   const sessionId = options.sessionId?.trim() || "barebones";
   const hooks = new LoopHookListV1();
   const sessions = new SessionStore({
-    initialSessions: options.sessionEvents
-      ? { [sessionId]: options.sessionEvents }
+    initialSessions:
+      options.sessionSeed || !options.sessionEvents
+        ? undefined
+        : { [sessionId]: options.sessionEvents },
+    initialSeeds: options.sessionSeed
+      ? { [sessionId]: options.sessionSeed }
       : undefined,
     persistEvents: options.persistSessionEvents,
+    selectWorkingContext: options.selectWorkingContext,
   });
   const systemPrompt = new SystemPromptRegistry(hooks);
   const llm = options.billing

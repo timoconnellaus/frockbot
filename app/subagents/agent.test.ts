@@ -576,7 +576,7 @@ describe("the subagent tools' conversation ordering", () => {
       });
       handle.agent.send("go");
       await handle.agent.whenIdle();
-      return [...handle.agent.session.events];
+      return [...handle.agent.session.activeRunJournal];
     } finally {
       await loop.dispose();
       await root.dispose();

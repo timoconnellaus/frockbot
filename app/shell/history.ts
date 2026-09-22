@@ -24,11 +24,9 @@ import {
   type SessionEvent,
   type TurnTypeV1,
 } from "@frockbot/core/contracts";
+import { assembleJournalContextV1 } from "./working-context.js";
 import {
-  compactionMessageV1,
   compactionStateV1,
-  historyCharsV1,
-  pruneToolOutputsV1,
   type CompactionStateV1,
 } from "./compaction.js";
 
@@ -101,50 +99,6 @@ export const CHAT_HISTORY_BUDGET_CHARS_V1 = 150_000;
  */
 export function omittedHistoryNoticeV1(turns: number): string {
   return `Earlier in this conversation there ${turns === 1 ? "was 1 Turn" : `were ${turns} Turns`} that are not included here. They are not summarised: if you need something from them, say so or search your memory rather than guessing.`;
-}
-
-function messageChars(message: LlmMessage): number {
-  return JSON.stringify(message).length;
-}
-
-/**
- * Narrows history to a character budget, oldest Turns first.
- *
- * Eviction is by whole Turn on purpose. A tool result whose call has been
- * dropped is a malformed request to every provider, and a Turn is the
- * smallest unit that always holds both.
- */
-function budgetedMessagesV1(
-  messages: readonly LlmMessage[],
-  turns: readonly number[],
-  current: number,
-  budget: number,
-): LlmMessage[] {
-  const total = messages.reduce(
-    (sum, message) => sum + messageChars(message),
-    0,
-  );
-  if (total <= budget) return [...messages];
-  const spendByTurn = new Map<number, number>();
-  for (const [index, message] of messages.entries()) {
-    const turn = turns[index]!;
-    spendByTurn.set(turn, (spendByTurn.get(turn) ?? 0) + messageChars(message));
-  }
-  const ordered = [...spendByTurn.keys()].sort((left, right) => right - left);
-  const kept = new Set<number>([current]);
-  let spent = spendByTurn.get(current) ?? 0;
-  for (const turn of ordered) {
-    if (turn === current) continue;
-    const cost = spendByTurn.get(turn) ?? 0;
-    if (spent + cost > budget) break;
-    kept.add(turn);
-    spent += cost;
-  }
-  const dropped = ordered.filter((turn) => !kept.has(turn)).length;
-  const narrowed = messages.filter((_, index) => kept.has(turns[index]!));
-  return dropped === 0
-    ? narrowed
-    : [{ role: "user", content: omittedHistoryNoticeV1(dropped) }, ...narrowed];
 }
 
 /** The conversation's own messages, after any compaction already recorded. */
@@ -232,40 +186,17 @@ export function turnScopedMessagesV1(
   }
   const types = turnTypesByTurnV1(input.events);
   const current = currentTurnV1(input.events);
-  const chatTurn = (turn: number) => {
-    const type = types.get(turn) ?? "chat";
-    return type === "chat" || type === "agent";
-  };
-  if (chatTurn(current)) {
-    const window = chatWindowV1(input.events, input.messages);
-    // The first tier of reduction, and the only one that costs nothing: a tool
-    // result older than the newest few Turns keeps its pairing and loses its
-    // payload.
-    const pruned = pruneToolOutputsV1(window.messages, window.turns);
-    const preamble = window.compaction
-      ? [compactionMessageV1(window.compaction)]
-      : [];
-    // The summary is never a candidate for eviction — it is what stands in for
-    // the Turns eviction would otherwise have dropped — so it is spent from
-    // the budget rather than measured against it.
-    const budget = Math.max(
-      0,
-      (input.budget ?? CHAT_HISTORY_BUDGET_CHARS_V1) - historyCharsV1(preamble),
-    );
-    return [
-      ...preamble,
-      ...budgetedMessagesV1(pruned, window.turns, current, budget),
-    ];
-  }
-  const own = input.messages.filter((_, index) => turns[index] === current);
-  const chatTurns = new Set(
-    turns.filter((turn) => turn !== current && chatTurn(turn)),
-  ).size;
-  return [
-    {
-      role: "user",
-      content: input.pointer({ sessionId: input.sessionId, chatTurns }),
-    },
-    ...own,
-  ];
+  const currentTurnType = types.get(current) ?? "unspecified";
+  const currentMessages = input.messages.filter(
+    (_, index) => turns[index] === current,
+  );
+  return assembleJournalContextV1({
+    events: input.events,
+    sessionId: input.sessionId,
+    ...(input.budget !== undefined ? { budget: input.budget } : {}),
+    pointer: input.pointer,
+    currentTurn: current,
+    currentTurnType,
+    currentMessages,
+  });
 }

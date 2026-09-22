@@ -25,20 +25,14 @@ import {
 
 export { BotTurnExecutionError, BotTurnRecoveryRequiredError };
 
-function appendedSessionEvents(
-  previous: readonly SessionEvent[],
-  candidate: readonly SessionEvent[],
+function journalSuffix(
+  seededCount: number,
+  journal: readonly SessionEvent[],
 ): SessionEvent[] {
-  if (
-    candidate.length < previous.length ||
-    previous.some(
-      (event, index) =>
-        JSON.stringify(event) !== JSON.stringify(candidate[index]),
-    )
-  ) {
-    throw new Error("candidate changed durable session history");
+  if (journal.length < seededCount) {
+    throw new Error("active-run journal lost events it started with");
   }
-  return structuredClone(candidate.slice(previous.length));
+  return structuredClone(journal.slice(seededCount));
 }
 
 /**
@@ -48,9 +42,9 @@ function appendedSessionEvents(
 function settleBotTurn(
   handle: AgentHandle,
   command: BotTurnCommand,
-  previousEvents: readonly SessionEvent[],
+  seededCount: number,
 ): BotTurnCompletion {
-  const events = [...handle.agent.session.events];
+  const events = [...handle.agent.session.activeRunJournal];
   const turnStart = events.findLast((event) => event.type === "turn/start");
   const currentTurn =
     turnStart?.type === "turn/start" ? turnStart.turn : undefined;
@@ -71,18 +65,18 @@ function settleBotTurn(
       );
     if (hasDurableOutcome) {
       throw new BotTurnRecoveryRequiredError(
-        appendedSessionEvents(previousEvents, events),
+        journalSuffix(seededCount, events),
       );
     }
     throw new BotTurnExecutionError(
       "Bot turn did not reach a durable terminal state",
-      appendedSessionEvents(previousEvents, events),
+      journalSuffix(seededCount, events),
     );
   }
   if (terminalTurn.outcome !== "completed") {
     throw new BotTurnExecutionError(
       turnFailureMessage(terminalTurn.outcome, terminalTurn.reason),
-      appendedSessionEvents(previousEvents, events),
+      journalSuffix(seededCount, events),
     );
   }
   const message = handle.agent.session.deriveMessages().at(-1);
@@ -97,13 +91,13 @@ function settleBotTurn(
               (event) => "turn" in event && event.turn === currentTurn,
             ),
           ),
-    events: appendedSessionEvents(previousEvents, events),
+    events: journalSuffix(seededCount, events),
   };
 }
 
 function turnExecutionError(
   error: unknown,
-  previousEvents: readonly SessionEvent[],
+  seededCount: number,
   events: readonly SessionEvent[],
 ): never {
   if (
@@ -114,13 +108,12 @@ function turnExecutionError(
   }
   throw new BotTurnExecutionError(
     error instanceof Error ? error.message : "Bot turn failed",
-    appendedSessionEvents(previousEvents, events),
+    journalSuffix(seededCount, events),
   );
 }
 
 export interface ExecuteBotTurnOptions {
   command: BotTurnCommand;
-  previousEvents: readonly SessionEvent[];
   /** The mounted Composition for the generation this Turn was pinned to. */
   composition: ShellMountedComposition;
   resume?: boolean;
@@ -130,7 +123,6 @@ export interface ExecuteDirectToolTurnOptions {
   command: BotTurnCommand & {
     directTool: NonNullable<BotTurnCommand["directTool"]>;
   };
-  previousEvents: readonly SessionEvent[];
   composition: ShellMountedComposition;
   admitEffect(effect: AgentEffectAdmission): Promise<boolean>;
   signal: AbortSignal;
@@ -144,8 +136,9 @@ export interface ExecuteDirectToolTurnOptions {
 export async function executeDirectToolTurn(
   options: ExecuteDirectToolTurnOptions,
 ): Promise<BotTurnCompletion> {
-  const { command, composition, previousEvents, admitEffect, signal } = options;
+  const { command, composition, admitEffect, signal } = options;
   const session = composition.runtime.agent.agent.session;
+  const seededCount = session.activeRunJournal.length;
   // The tool the page names is a registered first-party tool, called by its
   // discovered namespace: the same registry, guards and durable
   // occurrence a model-selected call goes through.
@@ -155,10 +148,10 @@ export async function executeDirectToolTurn(
     input: command.directTool.input,
   });
   try {
-    let turnStart = [...session.events].findLast(
+    let turnStart = [...session.activeRunJournal].findLast(
       (event) =>
         event.type === "turn/start" &&
-        !session.events.some(
+        !session.activeRunJournal.some(
           (candidate) =>
             candidate.type === "turn/end" && candidate.turn === event.turn,
         ),
@@ -189,7 +182,7 @@ export async function executeDirectToolTurn(
         },
       ]);
       await session.flush();
-      turnStart = session.events.findLast(
+      turnStart = session.activeRunJournal.findLast(
         (event) => event.type === "turn/start" && event.turn === turn,
       );
     }
@@ -198,7 +191,7 @@ export async function executeDirectToolTurn(
     }
     const turn = turnStart.turn;
     const occurrenceId = `tool:${turn}:1:0`;
-    const journal = validateToolOccurrenceJournal(session.events);
+    const journal = validateToolOccurrenceJournal(session.activeRunJournal);
     const existing = journal.get(occurrenceId);
     if (!existing) throw new Error("Package UI tool occurrence is unavailable");
 
@@ -281,7 +274,7 @@ export async function executeDirectToolTurn(
       });
       await session.flush();
     }
-    const hasTerminal = session.events.some(
+    const hasTerminal = session.activeRunJournal.some(
       (event) => event.type === "turn/end" && event.turn === turn,
     );
     if (!hasTerminal) {
@@ -294,7 +287,7 @@ export async function executeDirectToolTurn(
     return {
       runId: command.runId,
       text: "",
-      events: appendedSessionEvents(previousEvents, session.events),
+      events: journalSuffix(seededCount, session.activeRunJournal),
     };
   } finally {
     await composition.dispose();
@@ -304,8 +297,9 @@ export async function executeDirectToolTurn(
 export async function executeBotTurn(
   options: ExecuteBotTurnOptions,
 ): Promise<BotTurnCompletion> {
-  const { command, previousEvents, composition, resume } = options;
+  const { command, composition, resume } = options;
   const runtime = composition.runtime;
+  const seededCount = runtime.agent.agent.session.activeRunJournal.length;
   try {
     if (resume) runtime.agent.agent.resume();
     else {
@@ -315,10 +309,10 @@ export async function executeBotTurn(
       });
     }
     await runtime.agent.agent.whenIdle();
-    return settleBotTurn(runtime.agent, command, previousEvents);
+    return settleBotTurn(runtime.agent, command, seededCount);
   } catch (error) {
-    return turnExecutionError(error, previousEvents, [
-      ...runtime.agent.agent.session.events,
+    return turnExecutionError(error, seededCount, [
+      ...runtime.agent.agent.session.activeRunJournal,
     ]);
   } finally {
     // A compaction outlives the Turn that triggered it, and it runs on this

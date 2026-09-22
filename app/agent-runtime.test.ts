@@ -50,12 +50,12 @@ describe("foundation runtime", () => {
     runtime.agent.agent.send("hello");
     await runtime.agent.agent.whenIdle();
 
-    const chunks = runtime.agent.agent.session.events
+    const chunks = runtime.agent.agent.session.activeRunJournal
       .filter((event) => event.type === "assistant/chunk")
       .map((event) => event.text)
       .join("");
     expect(chunks).toBe("Built-in model: hello");
-    expect(runtime.agent.agent.session.events.at(-1)).toMatchObject({
+    expect(runtime.agent.agent.session.activeRunJournal.at(-1)).toMatchObject({
       type: "turn/end",
       outcome: "completed",
     });
@@ -72,7 +72,7 @@ describe("foundation runtime", () => {
     runtime.agent.agent.send("hello");
     await runtime.agent.agent.whenIdle();
 
-    const request = runtime.agent.agent.session.events.find(
+    const request = runtime.agent.agent.session.activeRunJournal.find(
       (event) => event.type === "model/request",
     );
     expect(request).toMatchObject({
@@ -89,12 +89,12 @@ describe("foundation runtime", () => {
     await runtime.agent.agent.whenIdle();
 
     expect(
-      runtime.agent.agent.session.events.filter(
+      runtime.agent.agent.session.activeRunJournal.filter(
         (event) => event.type === "tool/call",
       ),
     ).toHaveLength(1);
     expect(
-      runtime.agent.agent.session.events.filter(
+      runtime.agent.agent.session.activeRunJournal.filter(
         (event) => event.type === "tool/result",
       ),
     ).toHaveLength(1);
@@ -110,7 +110,7 @@ describe("foundation runtime", () => {
     await runtime.agent.agent.whenIdle();
 
     expect(
-      runtime.agent.agent.session.events.find(
+      runtime.agent.agent.session.activeRunJournal.find(
         (event) => event.type === "tool/call",
       ),
     ).toMatchObject({
@@ -151,7 +151,7 @@ describe("foundation runtime", () => {
     runtime.agent.agent.send("hello");
     await runtime.agent.agent.whenIdle();
 
-    const request = runtime.agent.agent.session.events.find(
+    const request = runtime.agent.agent.session.activeRunJournal.find(
       (event) => event.type === "model/request",
     );
     const offered =
@@ -178,7 +178,7 @@ describe("foundation runtime", () => {
     await runtime.agent.agent.whenIdle();
 
     expect(
-      runtime.agent.agent.session.events.find(
+      runtime.agent.agent.session.activeRunJournal.find(
         (event) => event.type === "turn/admission",
       ),
     ).toMatchObject({ turnType: "automation" });
@@ -230,7 +230,7 @@ describe("foundation runtime", () => {
     runtime.agent.agent.send("What is my dog's name?");
     await runtime.agent.agent.whenIdle();
 
-    const requests = runtime.agent.agent.session.events.filter(
+    const requests = runtime.agent.agent.session.activeRunJournal.filter(
       (event) => event.type === "model/request",
     );
     expect(requests.at(-1)).toMatchObject({
@@ -238,7 +238,7 @@ describe("foundation runtime", () => {
       request: { system: expect.stringContaining("dog is named Rex") },
     });
     expect(
-      runtime.agent.agent.session.events.some(
+      runtime.agent.agent.session.activeRunJournal.some(
         (event) => event.type === "memory/injected",
       ),
     ).toBe(true);

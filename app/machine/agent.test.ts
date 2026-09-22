@@ -291,7 +291,7 @@ describe("a control tool's approval", () => {
       expect(intent.decision).toBeUndefined();
 
       // The card is on the durable log, at the open step, as an approval.
-      const sends = harness.session.events.filter(
+      const sends = harness.session.activeRunJournal.filter(
         (event) => event.type === "send/to-user",
       );
       expect(sends).toHaveLength(1);
@@ -368,7 +368,7 @@ describe("a control tool's visible refusals", () => {
       // Nothing was recorded and nobody was asked.
       expect(harness.storage.size).toBe(0);
       expect(
-        harness.session.events.filter((event) => event.type === "send/to-user"),
+        harness.session.activeRunJournal.filter((event) => event.type === "send/to-user"),
       ).toHaveLength(0);
       return result.content;
     } finally {
