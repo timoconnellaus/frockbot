@@ -10,6 +10,8 @@ patch:   `shorebird patch android` against the baseline's exact version+build, s
          Shorebird found native or asset differences: only a full release can carry that change.
 promote: move a patch to the stable track.
 publish: publish an already-built APK for download.  serve/setup: the download server.
+export-apk: write the current enabling Shorebird APK, re-signed with the phone's key.
+         Does not cut a release: a new one on every tag would move the patch target off the phone.
 
 The Shorebird CLI comes from NATIVE_SHOREBIRD or PATH. There is no stock Flutter fallback: a stock
 build carries no patch key, so it could never be patched.
@@ -28,6 +30,7 @@ import re
 import shutil
 import subprocess
 import sys
+import tempfile
 import time
 import zipfile
 
@@ -261,6 +264,73 @@ def service_baseline(cli):
     return {"package": PACKAGE, "appId": newest["app_id"], "buildName": name, "buildNumber": int(code),
             "releaseVersion": newest["version"], "flutterVersion": newest["flutter_version"],
             "targetPlatform": TARGET_PLATFORM, "patches": []}
+
+
+def keystore_path():
+    path = Path(os.environ.get("FROCKBOT_ANDROID_KEYSTORE", Path.home() / ".android" / "debug.keystore"))
+    if not path.is_file():
+        raise RuntimeError(f"Existing Android signing key is missing: {path}. Set FROCKBOT_ANDROID_KEYSTORE. "
+                           "Never generate a replacement.")
+    return path
+
+
+def choose_exported_apk(directory):
+    """The one APK Shorebird produced for sideload.
+
+    `get-apks` prefers a universal APK. An arm64-only release has no universal
+    file and one split whose name contains `arm64`, which is the phone's ABI.
+    """
+    apks = [path for path in directory.rglob("*.apk") if path.is_file()]
+    universal = [path for path in apks if path.name == "universal.apk"]
+    if len(universal) == 1:
+        return universal[0]
+    arm64 = [path for path in apks if "arm64" in path.name]
+    if len(arm64) == 1:
+        return arm64[0]
+    if len(apks) == 1:
+        return apks[0]
+    names = ", ".join(sorted(path.name for path in apks)) or "(none)"
+    raise RuntimeError(f"Shorebird did not produce one APK to publish ({names}).")
+
+
+def sign_apk(apk, keystore):
+    """Replace bundletool's debug signature with the key the phone already trusts.
+
+    `shorebird releases get-apks` builds from the stored app bundle and signs
+    with bundletool's own key. Android would refuse that as an upgrade, and the
+    install would leave the patch channel.
+    """
+    aligned = apk.with_name(f"{apk.stem}.aligned.apk")
+    run([build_tool("zipalign"), "-f", "-p", "4", apk, aligned])
+    aligned.replace(apk)
+    run([build_tool("apksigner"), "sign", "--ks", keystore, "--ks-pass", "pass:android",
+         "--key-pass", "pass:android", "--ks-key-alias", "androiddebugkey", apk])
+
+
+def export_apk(destination):
+    """Write the newest active Shorebird release's APK to `destination`.
+
+    The bytes are that release, not a new one. Cutting `shorebird release` from
+    the tag pipeline would make the next patch target an APK the phone does not
+    have installed.
+    """
+    keystore = keystore_path()
+    cli = shorebird_cli()
+    base = service_baseline(cli)
+    with tempfile.TemporaryDirectory() as directory:
+        out = Path(directory)
+        subprocess.run([cli, "releases", "get-apks", f"--release-version={base['releaseVersion']}",
+                        "--out", str(out)], cwd=NATIVE, check=True)
+        apk = choose_exported_apk(out)
+        sign_apk(apk, keystore)
+        inspect_release(apk, public_key_der())
+        inspected = inspect_apk(apk)
+        if inspected["versionCode"] != base["buildNumber"] or inspected["versionName"] != base["buildName"]:
+            raise RuntimeError(f"Exported {inspected['versionName']}+{inspected['versionCode']}, "
+                               f"expected {base['releaseVersion']}.")
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        shutil.copyfile(apk, destination)
+    print(json.dumps({"release": base["releaseVersion"], "file": str(destination)}, indent=2))
 
 
 def patch_number(cli, release_version):
@@ -547,8 +617,10 @@ def setup():
 
 def main(argv=None):
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("command", choices=["build", "release", "patch", "promote", "publish", "serve", "setup"])
+    parser.add_argument("command", choices=["build", "release", "patch", "promote", "publish", "serve", "setup",
+                                            "export-apk"])
     parser.add_argument("--apk", type=Path)
+    parser.add_argument("--out", type=Path, help="export-apk: where to write frockbot.apk.")
     parser.add_argument("--baseline", default="local", choices=["local", "shorebird"],
                         help="Patch the saved release (local) or the newest active release Shorebird reports.")
     parser.add_argument("--result", type=Path, help="Write the patch outcome as JSON here as well as printing it.")
@@ -560,6 +632,11 @@ def main(argv=None):
     parser.add_argument("--track", default="staging", choices=["staging", "beta", "stable"])
     args = parser.parse_args(argv)
     STATE.mkdir(parents=True, exist_ok=True)
+    if args.command == "export-apk":
+        if args.out is None:
+            parser.error("export-apk requires --out")
+        export_apk(args.out)
+        return
     if args.command == "setup":
         setup()
         return

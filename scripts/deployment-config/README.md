@@ -206,10 +206,9 @@ has computed the digest of the artifact it downloaded; `deploy-backend` rewrites
 the written file in place instead, in its `Configure application artifact` step. A
 Worker whose var still says `foundation-v1` looks for an object that is not there.
 
-No APK is attached: a plain `flutter build apk` bakes `FROCKBOT_ORIGIN` in, so a
-deployer's APK can only be built against their own origin. The simple profile
-ships the web client, and a deployer who wants the phone app builds it themselves
-(`docs/app-updates.md`).
+`frockbot.apk` is also attached, by `android-apk`. It is the hosted phone app,
+not an installer asset: `bun run setup` does not download it, and a deployer
+who wants the phone app builds it against their own origin (`docs/app-updates.md`).
 
 [image-management]: https://developers.cloudflare.com/containers/image-management/
 

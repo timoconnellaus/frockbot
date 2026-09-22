@@ -120,10 +120,11 @@ download pointer → publish the in-app feed last. A failure at any step leaves
 the previous feed, and so every installed app, unchanged.
 
 **The simple profile ships the web client only.** `release.yml` attaches the
-Flutter web bundle to the Release ([ADR 0028](adr/0028-open-deployment.md)) but
-no APK, because a plain `flutter build apk` bakes `FROCKBOT_ORIGIN` in and a
-deployer's origin is not known at release time; a self-hoster who wants the phone
-app builds it against their own origin, and the update control never appears.
+Flutter web bundle to the Release ([ADR 0028](adr/0028-open-deployment.md)).
+It also attaches `frockbot.apk`, the hosted phone app, for sideloading from
+that Release. The APK has the hosted origin baked in, so a self-hoster who
+wants the phone app builds it against their own origin, and the update
+control never appears.
 
 **Staging then stable.** Prerelease tags publish only to staging feeds and
 tracks (Mac `appcast-staging.xml`, Shorebird staging, Play internal testing,
