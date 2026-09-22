@@ -1767,6 +1767,27 @@ describe("timing a call that asked to be timed", () => {
     );
   });
 
+  test("opening does not read unrelated Bots", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-directory-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    await provisionSiblingBot({
+      userId: identity.userId,
+      botId: `voice-sibling-${suffix}`,
+    });
+    const stub = assistant(identity.userId);
+    const opened = await open(identity.userId, {}, "phone", {
+      trace: traceId(),
+    });
+    await startCall(opened, identity.botId);
+    const reads = await stub.probeDirectoryReads();
+    expect(reads.activity).toBe(0);
+    expect(reads.identity).toBe(1);
+  });
+
   test("a slow upstream is bounded by its own two milestones", async () => {
     const userId = `voice-slow-upstream-${crypto.randomUUID()}`;
     const stub = assistant(userId);

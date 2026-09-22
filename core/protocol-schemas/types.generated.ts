@@ -115,6 +115,11 @@ export type ThemeDocument = {
   tokens: ThemeTokens;
   phases?: Array<{ after: string; tokens: ThemeTokens }>;
 };
+export type BotDirectoryProfile = {
+  name: string;
+  description?: string;
+  sourceRevision: number;
+};
 export type BotRegistration = {
   schemaVersion: 1;
   botId: BotId;
@@ -126,6 +131,7 @@ export type BotRegistration = {
   voice?: BotVoiceAppearance;
   look?: "inherit" | "studio" | "custom";
   document?: ThemeDocument;
+  currentProfile?: BotDirectoryProfile;
 };
 export type BotDirectory = {
   schemaVersion: 1;
@@ -988,6 +994,7 @@ export interface ProtocolTypes {
   ThemeHex: ThemeHex;
   ThemeTokens: ThemeTokens;
   ThemeDocument: ThemeDocument;
+  BotDirectoryProfile: BotDirectoryProfile;
   BotRegistration: BotRegistration;
   BotDirectory: BotDirectory;
   BotLifecycle: BotLifecycle;

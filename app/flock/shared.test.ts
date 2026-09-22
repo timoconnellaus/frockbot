@@ -10,6 +10,7 @@ import {
   decodeBotLifecycleReceiptV1,
   decodeBotLifecycleViewV1,
   decodeBotMembershipViewV1,
+  decodeBotDirectoryProfileV1,
   decodeBotRegistrationV1,
   decodeCreateBotCommandV1,
   decodeDirectoryViewV1,
@@ -187,6 +188,18 @@ describe("Flock v1 contracts", () => {
         registered: true,
       }),
     ).toThrow("botId is invalid");
+    const currentProfile = {
+      name: "Atlas",
+      description: "Keeps the list",
+      sourceRevision: 4,
+    };
+    expect(
+      decodeBotRegistrationV1({ ...registration, currentProfile }),
+    ).toEqual({ ...registration, currentProfile });
+    expect(decodeBotDirectoryProfileV1(currentProfile)).toEqual(currentProfile);
+    expect(() =>
+      decodeBotDirectoryProfileV1({ ...currentProfile, sourceRevision: -1 }),
+    ).toThrow("revision is invalid");
   });
 
   test("random appearances are legal and use the approved catalogue", () => {
