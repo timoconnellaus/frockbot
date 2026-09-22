@@ -338,6 +338,13 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('send')));
       await tester.pump();
       expect(t.calls, ['send:send-1']);
+      // The POST is still open and no Turn exists yet, so there is nothing
+      // to stop. The receipt is what makes the Turn real.
+      expect(find.byKey(const ValueKey('stop')), findsNothing);
+      t.observed = running();
+      t.completion.complete();
+      await tester.pump();
+      await tester.pump();
       await tester.tap(find.byKey(const ValueKey('stop')));
       await tester.pump();
       expect(find.text('Stopping…'), findsOneWidget);
@@ -348,8 +355,8 @@ void main() {
         'stop:stop-1',
       ]);
       t.observed = {...running(), 'status': 'cancelled'};
-      t.completion.complete();
-      await tester.pumpAndSettle();
+      await c.invalidate();
+      await tester.pump();
       expect(find.byKey(const ValueKey('stop')), findsNothing);
       await tester.pumpWidget(const SizedBox());
       c.dispose();
@@ -444,6 +451,7 @@ void main() {
     expect(transport.sentTexts, ['Hello', 'Hello', 'Hello\nworld']);
     expect(editor.text, isEmpty);
 
+    transport.observed = {...running(), 'status': 'completed'};
     transport.completion.complete();
     await tester.pumpAndSettle();
     await tester.pumpWidget(const SizedBox());
@@ -517,6 +525,7 @@ void main() {
       expect(transport.calls, ['send:send-1']);
       expect(transport.sentTexts, ['Hello']);
 
+      transport.observed = {...running(), 'status': 'completed'};
       transport.completion.complete();
       await tester.pumpAndSettle();
       await tester.pumpWidget(const SizedBox());
@@ -814,7 +823,7 @@ void main() {
         botId: 'bot-1',
       );
       await restored.initialize();
-      expect(second.calls, ['lookup:send-1']);
+      expect(second.calls, isEmpty);
       expect(restored.activeRunId, 'send-1');
       expect(restored.draft, '');
       first.observed = running();

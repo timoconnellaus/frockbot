@@ -152,14 +152,10 @@ class ChatController extends ChangeNotifier {
 
   /// Whether there is anything a Stop could reach.
   ///
-  /// A submission still being delivered counts: the Turn may well have been
-  /// admitted at the other end, and that is exactly when a person wants to
-  /// stop it. One the client has given up confirming does not — the
-  /// conversation is already saying it could not reach the Bot, and an offer
-  /// to stop a Turn that may never have existed is not one the product can
-  /// keep. What that state offers is "Check message status".
-  bool get stoppable =>
-      runningRunId != null || (pending.isNotEmpty && error == null);
+  /// Stop follows a Turn the transcript is already showing. A submission whose
+  /// admission is still unknown has no Turn to stop; what it offers is
+  /// "Check message status" once the client has given up confirming it.
+  bool get stoppable => runningRunId != null;
 
   /// The words of a submission the transcript does not carry yet, so the
   /// person sees what they wrote while it is being delivered. The newest, when
@@ -260,8 +256,8 @@ class ChatController extends ChangeNotifier {
       if (pending.isNotEmpty) await checkDelivery();
       // A stored Stop is observed, never dispatched merely because the app opened.
     } catch (_) {
-      error = 'Couldn’t restore this conversation. Please reconnect.';
-      changed();
+      _notice = 'Couldn’t restore this conversation. Please reconnect.';
+      _publish();
     }
   }
 
@@ -270,20 +266,59 @@ class ChatController extends ChangeNotifier {
     try {
       await _persist();
     } catch (_) {
-      error = 'Couldn’t save your draft. Please try again.';
-      changed();
+      _notice = 'Couldn’t save your draft. Please try again.';
+      _publish();
     }
   }
 
   void _put(Map<String, dynamic> run) {
-    _cachedRunIds.remove(run['runId']);
-    _optimisticRunIds.remove(run['runId']);
-    _runs[run['runId'] as String] = run;
+    final id = run['runId'] as String;
+    _cachedRunIds.remove(id);
+    _optimisticRunIds.remove(id);
+    _runs[id] = run;
+    // An authoritative row is proof of admission, including while its POST
+    // is still open. Pending delivery state for that command is over.
+    if (pending.any((submission) => submission.id == id)) {
+      _confirmed.add(id);
+      _commandErrors.remove(id);
+      pending = [
+        for (final submission in pending)
+          if (submission.id != id) submission,
+      ];
+      unawaited(_persist());
+      _publish();
+    }
   }
 
   /// Runs this client drew for itself, so it can take them back if the
   /// submission behind one turns out never to have been admitted.
   final _optimisticRunIds = <String>{};
+
+  /// Commands whose admission this client has already accepted. A later
+  /// timeout on their POST must not put them back into uncertain delivery.
+  final _confirmed = <String>{};
+
+  /// POSTs that have not returned. A transcript refresh that does not contain
+  /// one of them is not evidence it was never admitted.
+  final _openPosts = <String>{};
+
+  /// Unresolved delivery outcomes, keyed by command. One command settling
+  /// does not clear another command's outcome.
+  final _commandErrors = <String, String>{};
+
+  /// A failure that is not about one command's admission: saving a draft,
+  /// restoring the conversation, Stop, or a refusal the server answered.
+  String? _notice;
+
+  void _publish() {
+    if (_notice != null) {
+      error = _notice;
+    } else {
+      final messages = _commandErrors.values.toSet();
+      error = messages.isEmpty ? null : messages.join('\n');
+    }
+    changed();
+  }
 
   void _putOptimisticRun(PendingSend submission, {bool queued = true}) {
     // Never over a run authority already told this client about.
@@ -314,8 +349,11 @@ class ChatController extends ChangeNotifier {
   Future<void> invalidate() async {
     await refresh();
     if (!_disposed) invalidations.value++;
-    // An unrelated state event cannot fence a POST still being delivered.
-    if (pending.isNotEmpty && !sending) await checkDelivery();
+    // A refresh that missed a POST still in flight must not fence that
+    // command. Anything else still pending is reconciled on its own.
+    if (pending.any((submission) => !_openPosts.contains(submission.id))) {
+      await checkDelivery();
+    }
   }
 
   Future<void> _refreshQueue = Future.value();
@@ -349,7 +387,8 @@ class ChatController extends ChangeNotifier {
         before = (page['page'] as Map)['nextCursor'] as String?;
         _cachedCursor = false;
       }
-      error = null;
+      _notice = null;
+      _publish();
       {
         // Never the rows this client drew for itself: a cache that holds one
         // reopens the conversation with a Turn that may never have existed.
@@ -405,7 +444,13 @@ class ChatController extends ChangeNotifier {
   Future<void> _submit(PendingSend submission) async {
     final text = submission.text;
     _inFlight += 1;
-    error = null;
+    // A new send clears outcomes for commands that are already resolved.
+    // One that is still pending keeps its own.
+    _commandErrors.removeWhere(
+      (id, _) => !pending.any((entry) => entry.id == id),
+    );
+    _notice = null;
+    _publish();
     // The intent goes with every send, and the run this client had observed
     // rides along as provenance where there is one. Whether a Turn was showing
     // as running is a race — the transcript is a poll behind — so gating the
@@ -418,11 +463,8 @@ class ChatController extends ChangeNotifier {
     final waitsBehind = activeRunId != null;
     pending = [...pending, submission];
     // A message that displaces a running Turn joins the thread at once, greyed
-    // and queued, rather than waiting for a durable read. The send route does
-    // not answer until the Turn it replaced has settled, so the whole of the
-    // drain — the only window in which the thread has anything to say about
-    // it — is over by the time authority could have told this client. The
-    // durable projection replaces this by run id the moment it arrives.
+    // and queued. The receipt does not say whether it queued, so this row
+    // stands until the transcript replaces it.
     if (waitsBehind || submission.retryOf != null) {
       _putOptimisticRun(submission, queued: waitsBehind);
     }
@@ -434,11 +476,12 @@ class ChatController extends ChangeNotifier {
       _forget(submission);
       _restoreSubmission(submission);
       _inFlight -= 1;
-      error = 'Couldn’t save your message. Please try again.';
-      changed();
+      _notice = 'Couldn’t save your message. Please try again.';
+      _publish();
       return;
     }
     changed();
+    _openPosts.add(submission.id);
     try {
       await transport.send(
         botId,
@@ -447,24 +490,55 @@ class ChatController extends ChangeNotifier {
         supersedes: supersedes,
         retryOf: submission.retryOf,
       );
-      await checkDelivery();
+      await _acceptAdmission(submission);
     } on RequestFailure catch (failure) {
-      if (failure.refused) {
+      // The POST has answered, including by timing out. It is no longer
+      // in flight, so reconciliation may look it up.
+      _openPosts.remove(submission.id);
+      if (_confirmed.contains(submission.id)) {
+        // The transcript already admitted this command. The POST timing out
+        // afterwards does not make delivery uncertain again.
+      } else if (failure.refused) {
         _forget(submission);
         _restoreSubmission(submission);
         await _persist();
-        error = failure.message;
+        _notice = failure.message;
+        _publish();
       } else {
-        error = 'Checking whether your message went through…';
         await checkDelivery();
       }
     } catch (_) {
-      error = 'Checking whether your message went through…';
-      await checkDelivery();
+      _openPosts.remove(submission.id);
+      if (!_confirmed.contains(submission.id)) await checkDelivery();
     } finally {
+      _openPosts.remove(submission.id);
       _inFlight -= 1;
       changed();
     }
+  }
+
+  /// A receipt means the server has the command. The optimistic row stays
+  /// until the transcript replaces it, so the message does not disappear.
+  Future<void> _acceptAdmission(PendingSend submission) async {
+    _confirmed.add(submission.id);
+    _commandErrors.remove(submission.id);
+    if (!_runs.containsKey(submission.id)) {
+      _putOptimisticRun(submission, queued: false);
+    }
+    final kept = pending;
+    pending = [
+      for (final entry in pending)
+        if (entry.id != submission.id) entry,
+    ];
+    try {
+      await _persist();
+    } catch (_) {
+      pending = kept;
+      _commandErrors[submission.id] =
+          'Couldn’t confirm your message. Reconnect or check again.';
+    }
+    _publish();
+    await refresh();
   }
 
   void _restoreSubmission(PendingSend submission) {
@@ -481,21 +555,36 @@ class ChatController extends ChangeNotifier {
     ];
   }
 
+  /// The check already walking the list, so a submission whose POST answers
+  /// while that walk is open waits for it and then looks itself up. Checking
+  /// it inside the open walk would fence a POST that has not answered yet.
+  Future<void>? _deliveryCheck;
+
   /// Finds out what became of every submission this client has not confirmed.
   ///
-  /// Oldest first, over a snapshot of the list: a submission admitted while
-  /// this is running is left for the next call rather than checked before the
-  /// POST that carries it has had a chance to answer.
+  /// Oldest first, over a snapshot of the list. A submission admitted while
+  /// this is running waits until the walk finishes, then is looked up by the
+  /// call that follows its own POST — never before that POST has answered.
   Future<void> checkDelivery() async {
-    if (checking || pending.isEmpty) return;
+    if (pending.isEmpty) return;
+    final running = _deliveryCheck;
+    if (running != null) {
+      await running;
+      if (pending.isEmpty || _deliveryCheck != null) return;
+    }
+    final done = Completer<void>();
+    _deliveryCheck = done.future;
     checking = true;
     changed();
     try {
       for (final submission in [...pending]) {
+        if (_openPosts.contains(submission.id)) continue;
         await _confirm(submission);
       }
     } finally {
       checking = false;
+      _deliveryCheck = null;
+      if (!done.isCompleted) done.complete();
       changed();
     }
   }
@@ -504,6 +593,23 @@ class ChatController extends ChangeNotifier {
   /// the draft it came out of. A submission this cannot settle stays pending,
   /// which is what "Check message status" offers to try again.
   Future<void> _confirm(PendingSend submission) async {
+    if (_confirmed.contains(submission.id)) {
+      final kept = pending;
+      pending = [
+        for (final entry in pending)
+          if (entry.id != submission.id) entry,
+      ];
+      try {
+        await _persist();
+        _commandErrors.remove(submission.id);
+      } catch (_) {
+        pending = kept;
+        _commandErrors[submission.id] =
+            'Couldn’t confirm your message. Reconnect or check again.';
+      }
+      _publish();
+      return;
+    }
     try {
       final observed = await transport.lookup(botId, submission.id);
       // A read alone cannot prove a delayed POST will never be admitted.
@@ -511,17 +617,27 @@ class ChatController extends ChangeNotifier {
           observed ?? await transport.lookup(botId, submission.id, fence: true);
       final previousDraft = draft;
       if (run != null) {
-        _put(run);
-        error = null;
+        _confirmed.add(submission.id);
+        _commandErrors.remove(submission.id);
+        _cachedRunIds.remove(submission.id);
+        _optimisticRunIds.remove(submission.id);
+        _runs[submission.id] = run;
       } else {
         _restoreSubmission(submission);
-        error = submission.retryOf == null
+        _commandErrors[submission.id] = submission.retryOf == null
             ? 'Your message didn’t go through. You can send it again.'
             : 'Your retry didn’t go through. Try again on the original message.';
       }
       final reconciledDraft = draft;
       final kept = pending;
-      _forget(submission);
+      if (run != null) {
+        pending = [
+          for (final entry in pending)
+            if (entry.id != submission.id) entry,
+        ];
+      } else {
+        _forget(submission);
+      }
       try {
         await _persist();
       } catch (_) {
@@ -530,10 +646,16 @@ class ChatController extends ChangeNotifier {
           _putOptimisticRun(submission, queued: false);
         }
         if (draft == reconciledDraft) draft = previousDraft;
-        rethrow;
+        _commandErrors[submission.id] =
+            'Couldn’t confirm your message. Reconnect or check again.';
+        _publish();
+        return;
       }
+      _publish();
     } catch (_) {
-      error = 'Couldn’t confirm your message. Reconnect or check again.';
+      _commandErrors[submission.id] =
+          'Couldn’t confirm your message. Reconnect or check again.';
+      _publish();
     }
   }
 
@@ -541,8 +663,8 @@ class ChatController extends ChangeNotifier {
     final target = activeRunId;
     if (target == null || stopping) return;
     stopping = true;
-    error = null;
-    changed();
+    _notice = null;
+    _publish();
     try {
       if (stopTarget != target) {
         stopTarget = target;
@@ -552,7 +674,8 @@ class ChatController extends ChangeNotifier {
       _put(await transport.stop(botId, target, stopId!));
       // An accepted Stop can still be running. The projection decides completion.
     } catch (_) {
-      error = 'Couldn’t confirm Stop. You can try Stop again.';
+      _notice = 'Couldn’t confirm Stop. You can try Stop again.';
+      _publish();
     } finally {
       stopping = false;
       changed();

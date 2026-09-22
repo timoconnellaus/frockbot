@@ -975,7 +975,11 @@ function createUserApplicationRoute() {
         // and the Bot Durable Object's run RPC accepts exact keys too, so a
         // client cannot name one, and an absent turn type means `chat`. Only an
         // in-Durable-Object producer may admit another type.
-        await env.BOT_STATE.run({
+        //
+        // The answer is the admission receipt. Execution continues on the Bot
+        // object's drive and recovery alarm; this response does not wait for
+        // either.
+        await env.BOT_STATE.admitRun({
           schemaVersion: 1,
           botId,
           command: {
@@ -998,6 +1002,7 @@ function createUserApplicationRoute() {
               : {}),
           },
         }),
+        { status: 202 },
       );
     } catch (error) {
       const refusal = turnRefusal(error);

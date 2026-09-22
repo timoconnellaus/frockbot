@@ -296,12 +296,81 @@ export function asUser(
   return SELF.fetch(`${ORIGIN}${path}`, { ...init, headers });
 }
 
-export function postAsUser(
+export async function postAsUser(
   userId: string,
   path: string,
   body: unknown,
 ): Promise<Response> {
-  return asUser(userId, path, { method: "POST", body: JSON.stringify(body) });
+  const response = await asUser(userId, path, {
+    method: "POST",
+    body: JSON.stringify(body),
+  });
+  // The composer answers with an admission receipt and keeps executing.
+  // Callers of this helper are waiting on the Turn's outcome, so a 202 is
+  // followed here until the run is terminal and then returned as that
+  // outcome. A test of the receipt itself posts with `asUser`.
+  const turn = path.match(/^\/api\/bots\/([^/]+)\/turns$/);
+  if (!turn || response.status !== 202) return response;
+  const botId = decodeURIComponent(turn[1] ?? "");
+  const receipt = (await response.json()) as { runId?: string };
+  const runId = receipt.runId;
+  if (!runId) return response;
+  // Admission has returned. Search and audit are written by the same drive,
+  // after the run is already visible as terminal, so wait for that drive
+  // before reading the outcome.
+  const stub = env.BOT_STATES.get(
+    env.BOT_STATES.idFromName(`${userId}:${botId}`),
+  );
+  await runInDurableObject(stub, async (instance) => {
+    await (
+      instance as { joinAdmittedDrive(): Promise<void> }
+    ).joinAdmittedDrive();
+  });
+  const run = await waitForTerminalRun(userId, botId, runId);
+  const outcome = run.outcome;
+  const text =
+    outcome && "text" in outcome && typeof outcome.text === "string"
+      ? outcome.text
+      : outcome && "message" in outcome && typeof outcome.message === "string"
+        ? outcome.message
+        : "";
+  return Response.json(
+    { schemaVersion: 1, runId, text, events: run.events ?? [] },
+    { status: 200 },
+  );
+}
+
+async function waitForTerminalRun(
+  userId: string,
+  botId: string,
+  runId: string,
+): Promise<{
+  events?: unknown[];
+  outcome?: { text?: string; message?: string };
+}> {
+  const deadline = Date.now() + 60_000;
+  let last = "unseen";
+  while (Date.now() < deadline) {
+    const response = await asUser(
+      userId,
+      `/api/bots/${encodeURIComponent(botId)}/turns/${encodeURIComponent(runId)}`,
+    );
+    if (response.status === 200) {
+      const body = (await response.json()) as {
+        state?: string;
+        run?: {
+          events?: unknown[];
+          outcome?: { text?: string; message?: string };
+        };
+      };
+      if (body.state === "terminal" && body.run) return body.run;
+      last = body.state ?? "unknown";
+    } else {
+      last = String(response.status);
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`turn ${runId} did not settle (${last})`);
 }
 
 async function readJson(response: Response): Promise<unknown> {

@@ -432,6 +432,9 @@ interface BotStateRpc extends BotConfigurationBinding {
   readComputerPresence(): Promise<unknown>;
   executeComputerPresenceCommand(command: ComputerCommandV1): Promise<unknown>;
   run(command: OwnedBotTurnCommand): Promise<BotTurnResult>;
+  admitRun(
+    command: OwnedBotTurnCommand,
+  ): Promise<{ schemaVersion: 1; runId: string }>;
   listRuns(query: ClientRunListQueryV1): Promise<ClientRunListV1>;
   debugSnapshot(query: BotDebugQueryV1): Promise<unknown>;
   lookupRun(query: ClientRunLookupQueryV1): Promise<ClientRunLookupV1>;
@@ -484,6 +487,29 @@ type RpcBoundary<T> = {
     ? (input: unknown) => Result
     : never;
 };
+
+function botTurnRpcV1(command: OwnedBotTurnCommand) {
+  return {
+    schemaVersion: 1 as const,
+    userId: command.userId,
+    botId: command.botId,
+    command: {
+      runId: command.runId,
+      sessionId: command.sessionId,
+      acceptedAt: command.acceptedAt,
+      text: command.text,
+      ...(command.retryOf ? { retryOf: command.retryOf } : {}),
+      ...(command.skills ? { skills: command.skills } : {}),
+      // The composer's supersede intent and the lane it implies. This
+      // rebuilds the command field by field rather than spreading it, so
+      // anything not named here is dropped silently — which is exactly how
+      // a supersede reached the Bot Durable Object as an ordinary second
+      // command and came back "bot already has an active run".
+      ...(command.lane ? { lane: command.lane } : {}),
+      ...(command.supersedes ? { supersedes: command.supersedes } : {}),
+    },
+  };
+}
 
 function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
   // The one place a Bot Durable Object is named, and therefore the one place
@@ -542,27 +568,8 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     getCompositionGeneration: (request) =>
       rpc.getCompositionGeneration(request),
     revertComposition: (request) => rpc.revertComposition(request),
-    run: (command) =>
-      rpc.run({
-        schemaVersion: 1,
-        userId: command.userId,
-        botId: command.botId,
-        command: {
-          runId: command.runId,
-          sessionId: command.sessionId,
-          acceptedAt: command.acceptedAt,
-          text: command.text,
-          ...(command.retryOf ? { retryOf: command.retryOf } : {}),
-          ...(command.skills ? { skills: command.skills } : {}),
-          // The composer's supersede intent and the lane it implies. This
-          // rebuilds the command field by field rather than spreading it, so
-          // anything not named here is dropped silently — which is exactly how
-          // a supersede reached the Bot Durable Object as an ordinary second
-          // command and came back "bot already has an active run".
-          ...(command.lane ? { lane: command.lane } : {}),
-          ...(command.supersedes ? { supersedes: command.supersedes } : {}),
-        },
-      }),
+    run: (command) => rpc.run(botTurnRpcV1(command)),
+    admitRun: (command) => rpc.admitRun(botTurnRpcV1(command)),
     listRuns: (query) =>
       rpc.listRuns({ schemaVersion: 1, userId, botId, query }),
     debugSnapshot: (query) =>
@@ -919,6 +926,23 @@ function userSearchStub(env: Env, userId: string): UserSearchRpc {
   return env.USER_CONFIGURATIONS.get(id) as unknown as UserSearchRpc;
 }
 
+function decodeUserBotTurnRpcV1(input: unknown) {
+  return decodeRpcEnvelopeV1(input, {
+    botId: rpcBotId,
+    command: rpcObject(
+      {
+        runId: rpcIdentifier,
+        sessionId: rpcString(257),
+        acceptedAt: rpcString(64),
+        text: rpcString(100_000),
+      },
+      // The same optional members the Bot Durable Object's door accepts —
+      // a supersede the composer sends must not be refused one door earlier.
+      rpcBotTurnCommandOptionalsV1,
+    ),
+  });
+}
+
 function decodeUserBotRunLookupRpcV1(input: unknown): {
   botId: string;
   query: ClientRunLookupQueryV1;
@@ -969,26 +993,27 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
   }
 
   async run(input: unknown): Promise<BotTurnResult> {
-    const request = decodeRpcEnvelopeV1(input, {
-      botId: rpcBotId,
-      command: rpcObject(
-        {
-          runId: rpcIdentifier,
-          sessionId: rpcString(257),
-          acceptedAt: rpcString(64),
-          text: rpcString(100_000),
-        },
-        // The same optional members the Bot Durable Object's door accepts —
-        // a supersede the composer sends must not be refused one door earlier.
-        rpcBotTurnCommandOptionalsV1,
-      ),
-    });
+    const request = decodeUserBotTurnRpcV1(input);
     const command = request.command as BotTurnCommand;
     return botStateStub(
       this.env,
       this.ctx.props.userId,
       request.botId as string,
     ).run({
+      ...command,
+      userId: this.ctx.props.userId,
+      botId: request.botId as string,
+    });
+  }
+
+  async admitRun(input: unknown): Promise<{ schemaVersion: 1; runId: string }> {
+    const request = decodeUserBotTurnRpcV1(input);
+    const command = request.command as BotTurnCommand;
+    return botStateStub(
+      this.env,
+      this.ctx.props.userId,
+      request.botId as string,
+    ).admitRun({
       ...command,
       userId: this.ctx.props.userId,
       botId: request.botId as string,

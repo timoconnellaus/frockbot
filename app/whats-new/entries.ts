@@ -23,6 +23,13 @@ export type WhatsNewEntrySourceV1 = {
  */
 export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
+    id: "quiet-delivery",
+    title: "Sends acknowledge immediately",
+    summary:
+      "A message is accepted as soon as it is saved. A long reply no longer looks like the send failed.",
+    kind: "fix",
+  },
+  {
     id: "chat-scroll",
     title: "Earlier messages stay in reach",
     summary:

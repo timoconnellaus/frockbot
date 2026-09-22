@@ -38,6 +38,10 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
         reason: "no workspace in this test",
       }),
     run: ({ botId, command }) => state.run(botId, command),
+    admitRun: async ({ botId, command }) => {
+      const turn = await state.run(botId, command);
+      return { schemaVersion: 1 as const, runId: turn.runId };
+    },
     listRuns: ({ botId, query }) => state.listRuns(botId, query),
     lookupRun: ({ botId, query }) => state.lookupRun(botId, query),
     fenceRunAdmission: ({ botId, query }) =>
@@ -352,8 +356,11 @@ describe("user application Bot seam", () => {
       env,
     );
 
-    expect(response.status).toBe(200);
-    expect((await response.json()) as BotTurnResult).toEqual(result);
+    expect(response.status).toBe(202);
+    expect((await response.json()) as unknown).toEqual({
+      schemaVersion: 1,
+      runId: "run-1",
+    });
     expect(calls).toEqual([{ botId: "primary", text: "hello" }]);
   });
 
@@ -642,7 +649,7 @@ describe("user application Bot seam", () => {
       env,
     );
 
-    expect(response.status).toBe(200);
+    expect(response.status).toBe(202);
     // Absent means chat: the HTTP path never carries the field at all.
     expect(forwarded).toHaveLength(1);
     expect(Object.hasOwn(forwarded[0]!, "turnType")).toBe(false);
@@ -1201,4 +1208,41 @@ describe("run list failures", () => {
       error: 'run "run-1" has no valid Composition generation',
     });
   });
+});
+
+test("the public turn route forwards a retry target under its fresh command id", async () => {
+  const calls: unknown[] = [];
+  const binding = rpcBindingFor({} as BotStateBinding);
+  binding.admitRun = async (request) => {
+    calls.push(request);
+    return { schemaVersion: 1, runId: request.command.runId };
+  };
+  const response = await createUserApplication()(
+    new Request("https://app.example/api/bots/primary/turns", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        schemaVersion: 1,
+        commandId: "attempt-2",
+        retryOf: "attempt-1",
+        text: "Check the build",
+      }),
+    }),
+    {
+      BOT_STATE: binding,
+      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+    },
+  );
+  expect(response.status).toBe(202);
+  expect(calls).toEqual([
+    expect.objectContaining({
+      botId: "primary",
+      command: expect.objectContaining({
+        runId: "attempt-2",
+        retryOf: "attempt-1",
+        text: "Check the build",
+        sessionId: "alice:primary",
+      }),
+    }),
+  ]);
 });

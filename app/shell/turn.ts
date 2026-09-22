@@ -29,6 +29,7 @@ import {
 } from "@frockbot/core/durable";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import {
+  acceptTurnV1,
   admitTurnV1,
   compositionActivationStoreV1,
   compositionFailureLogV1,
@@ -104,6 +105,22 @@ export async function run(
   // from the previous Turn has already handed the log back.
   await yieldCompactionWorkV1(command.sessionId);
   return projectClientTurnV1(await admitTurnV1(state, command));
+}
+
+/**
+ * Durably accepts a composer command and returns before the Turn finishes.
+ *
+ * The same preparation `run` does — compaction yield, then the User's
+ * Composition — and then only the admission. Execution is the authority's
+ * drive and its recovery alarm.
+ */
+export async function admit(
+  state: ShellBotStateV1,
+  command: OwnedBotTurnCommand,
+): Promise<{ schemaVersion: 1; runId: string }> {
+  await yieldCompactionWorkV1(command.sessionId);
+  const admission = await acceptTurnV1(state, command);
+  return { schemaVersion: 1, runId: admission.runId };
 }
 
 /**

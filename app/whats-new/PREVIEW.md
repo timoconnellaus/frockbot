@@ -2,6 +2,12 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
+## Sends acknowledge immediately
+
+fix
+
+A message is accepted as soon as it is saved. A long reply no longer looks like the send failed.
+
 ## Earlier messages stay in reach
 
 fix

@@ -29,6 +29,7 @@ import {
   unreadableStoredRunV1,
   type BotNotificationIntent,
   type BotTurnCommand,
+  type BotTurnAdmission,
   type BotTurnCompletion,
   type StoredRunCodecV1,
   type StoredRunV1,
@@ -191,6 +192,12 @@ export interface BotDurableAuthorityHooks<Snapshot> {
    */
   interruptTurn?(runId: string, reason: string): void;
   /**
+   * A run has reached a durable terminal state. Projections that used to ride
+   * the composer's waiting POST — search, audit — happen here, because that
+   * POST now returns at admission.
+   */
+  runSettled?(runId: string): Promise<void>;
+  /**
    * Package records written in the same transaction that settles a Turn as
    * `superseded`. Same contract as `terminalRecords`: the kernel writes the
    * returned keys without reading them.
@@ -284,6 +291,34 @@ export class BotDurableAuthority<Snapshot> {
    * leaves them alone, so a queued Turn is promoted by exactly one path.
    */
   private readonly queuedWaiters = new Set<string>();
+  /**
+   * In-process execution of admitted work. The alarm is what survives
+   * eviction; this promise is what starts the Turn without waiting for that
+   * alarm, and what a completion-waiting caller awaits.
+   */
+  private drive: Promise<void> | undefined;
+  /**
+   * The recovery deferral the drive just recorded, so a completion-waiting
+   * caller still hears it. The alarm owns the resume; the drive does not
+   * retry that Turn in this isolate.
+   */
+  private driveError: Error | undefined;
+  /**
+   * Completion-waiting callers blocked on one run. Waking them is not the
+   * same as the drive finishing: a later Turn may still be on that promise.
+   */
+  private readonly settledWaiters = new Map<string, Array<() => void>>();
+  /**
+   * The command this isolate admitted, so the first execution runs that
+   * command. A reconstructed object has only the stored record, and recovery
+   * mounts from that instead.
+   */
+  private readonly liveCommands = new Map<string, OwnedBotTurnCommand>();
+
+  /** The drive currently settling admitted work, if this object is resident. */
+  pendingWork(): Promise<void> | undefined {
+    return this.drive;
+  }
 
   constructor(options: BotDurableAuthorityOptions<Snapshot>) {
     this.ctx = options.state;
@@ -300,35 +335,202 @@ export class BotDurableAuthority<Snapshot> {
 
   async run(input: OwnedBotTurnCommand): Promise<BotTurnCompletion> {
     const command = input;
-    await this.assertMatchingRunCommand(command);
-    // Recovering whatever this object was left holding must never decide the
-    // fate of a new command. `recoverActiveRun` executes the *previous* Turn
-    // inline and rethrows, so a recovery that failed — an uncertain effect, a
-    // mount failure, a provider that was down — threw before the new message
-    // was ever admitted, and the person's message was simply lost. The old
-    // Turn is durable either way and the alarm retries it; admission now
-    // refuses or supersedes on its own terms.
-    await this.recoverActiveRun().catch(() => undefined);
-    const replay = await this.settledReplayResult(command);
-    if (replay) return replay;
-    const admission = await this.acceptRun(command);
-    if (admission.kind === "queued") {
-      // Durably admitted, waiting for the object. The interrupt is advisory
-      // and always follows the intent that is already written.
-      if (admission.interrupt) {
-        this.hooks.interruptTurn?.(
-          admission.interrupt.runId,
-          SUPERSEDED_TURN_REASON_V1,
-        );
+    await this.admit(command);
+    // Wait for this run only. The drive may already be executing a later
+    // Turn, and a replay of a finished command must not wait for that.
+    for (;;) {
+      const settled = await this.completionOf(command.runId);
+      if (settled) return settled;
+      const run = await this.readRun(command.runId);
+      if (
+        this.driveError &&
+        run?.status === "running" &&
+        run.phase === "executing"
+      ) {
+        const deferred = this.driveError;
+        this.driveError = undefined;
+        throw deferred;
       }
-      return this.runQueuedRun(command);
+      if (!run || run.status !== "running") break;
+      if (run.phase === "queued" && !this.drive && !this.executingActivity) {
+        return this.runQueuedRun(command);
+      }
+      const watch = this.waitSettled(command.runId);
+      const becameSettled = await this.completionOf(command.runId);
+      if (becameSettled) return becameSettled;
+      await watch;
     }
-    return this.executeAcceptedRun(
-      command,
-      admission.previous,
-      admission.settings,
-      admission.compositionGenerationId,
+    const again = await this.completionOf(command.runId);
+    if (again) return again;
+    throw new Error(`run "${command.runId}" did not settle`);
+  }
+
+  /**
+   * Durably accepts a command and returns before execution finishes.
+   *
+   * The receipt means this object has the run, its queue position, and a
+   * recovery alarm. An identical command returns that receipt again and does
+   * not execute or supersede a second time. A different command on the same
+   * id is refused, as is one whose admission was already fenced.
+   */
+  async admit(input: OwnedBotTurnCommand): Promise<BotTurnAdmission> {
+    const command = input;
+    await this.assertMatchingRunCommand(command);
+    const existing = await this.readRun(command.runId);
+    if (existing) return this.replayAdmission(command, existing);
+    let accepted: Awaited<
+      ReturnType<BotDurableAuthority<Snapshot>["acceptRun"]>
+    >;
+    try {
+      accepted = await this.acceptRun(command);
+    } catch (error) {
+      const raced = await this.readRun(command.runId);
+      if (
+        raced &&
+        raced.commandFingerprint === botTurnCommandFingerprintV1(command)
+      ) {
+        return this.replayAdmission(command, raced);
+      }
+      throw error;
+    }
+    if (accepted.kind === "queued" && accepted.interrupt) {
+      this.hooks.interruptTurn?.(
+        accepted.interrupt.runId,
+        SUPERSEDED_TURN_REASON_V1,
+      );
+    }
+    this.liveCommands.set(command.runId, command);
+    this.scheduleDrive(command.runId);
+    return {
+      runId: command.runId,
+      state: accepted.kind === "queued" ? "queued" : "running",
+    };
+  }
+
+  private replayAdmission(
+    command: OwnedBotTurnCommand,
+    existing: StoredRunV1<Snapshot>,
+  ): BotTurnAdmission {
+    if (existing.commandFingerprint !== botTurnCommandFingerprintV1(command)) {
+      throw new BotTurnRefusedError(
+        "duplicate",
+        `Turn idempotency key "${command.runId}" was reused for a different command`,
+      );
+    }
+    const state: BotTurnAdmission["state"] =
+      existing.status !== "running"
+        ? "terminal"
+        : existing.phase === "queued"
+          ? "queued"
+          : "running";
+    // A replay must not execute again or repeat the supersede. Scheduling
+    // only reattaches work this object is not already driving.
+    if (state !== "terminal") {
+      this.liveCommands.set(command.runId, command);
+      this.scheduleDrive(command.runId);
+    }
+    return { runId: command.runId, state };
+  }
+
+  /**
+   * Starts admitted work in this isolate and arms nothing the alarm does not
+   * already cover. `waitUntil` keeps the isolate awake after the admission
+   * response; eviction still resumes from the recovery alarm.
+   */
+  private scheduleDrive(runId: string): void {
+    const next = (this.drive ?? Promise.resolve())
+      .catch(() => undefined)
+      .then(() => this.pumpUntil(runId))
+      // The admission caller does not await this promise. A rejection after
+      // the run has already settled would be unhandled.
+      .catch(() => undefined);
+    this.drive = next;
+    void next.finally(() => {
+      if (this.drive === next) this.drive = undefined;
+      this.wakeSettledWaiters();
+    });
+    const waitUntil = (
+      this.ctx as { waitUntil?: (promise: Promise<unknown>) => void }
+    ).waitUntil;
+    if (typeof waitUntil === "function") waitUntil.call(this.ctx, next);
+  }
+
+  /** Drives one admitted run to a terminal state, or leaves it for the alarm. */
+  private async pumpUntil(runId: string): Promise<void> {
+    for (let guard = 0; guard < 32; guard += 1) {
+      if (await this.completionOf(runId)) return;
+      const run = await this.readRun(runId);
+      if (!run || run.status !== "running") return;
+      if (this.executingRunId && this.executingActivity) {
+        await this.executingActivity.catch(() => undefined);
+        continue;
+      }
+      try {
+        await this.recoverActiveRun();
+      } catch (error) {
+        const stalled = await this.readRun(runId);
+        // Recovery already wrote the deferral and armed the alarm. Retrying
+        // here would run the same Turn again in the isolate that just gave
+        // it up.
+        if (stalled?.status === "running" && stalled.phase === "executing") {
+          this.driveError =
+            error instanceof Error ? error : new Error(String(error));
+          this.notifySettled(runId);
+          return;
+        }
+      }
+      if (await this.completionOf(runId)) return;
+      if (this.executingActivity) {
+        await this.executingActivity.catch(() => undefined);
+        continue;
+      }
+      const stalled = await this.readRun(runId);
+      if (stalled?.status === "running" && stalled.phase === "executing") {
+        this.notifySettled(runId);
+        return;
+      }
+    }
+  }
+
+  private waitSettled(runId: string): Promise<void> {
+    return new Promise((resolve) => {
+      const waiters = this.settledWaiters.get(runId) ?? [];
+      waiters.push(resolve);
+      this.settledWaiters.set(runId, waiters);
+    });
+  }
+
+  private notifySettled(runId: string): void {
+    const waiters = this.settledWaiters.get(runId);
+    if (!waiters) return;
+    this.settledWaiters.delete(runId);
+    for (const wake of waiters) wake();
+  }
+
+  private wakeSettledWaiters(): void {
+    const pending = [...this.settledWaiters.values()];
+    this.settledWaiters.clear();
+    for (const waiters of pending) {
+      for (const wake of waiters) wake();
+    }
+  }
+
+  private async completionOf(
+    runId: string,
+  ): Promise<BotTurnCompletion | undefined> {
+    return (
+      (await this.terminalRunResult(runId)) ??
+      (await this.settledTerminalRunResult(runId))
     );
+  }
+
+  private async noteSettled(runId: string): Promise<void> {
+    this.liveCommands.delete(runId);
+    const hook = this.hooks.runSettled;
+    if (hook) await hook.call(this.hooks, runId).catch(() => undefined);
+    // After the projection. A completion caller that returned first would
+    // read search and audit before this run's rows were written.
+    this.notifySettled(runId);
   }
 
   /**
@@ -1830,6 +2032,7 @@ export class BotDurableAuthority<Snapshot> {
       );
       await this.refreshRecoveryAlarm(transaction);
     });
+    await this.noteSettled(runId);
   }
 
   /**
@@ -1866,6 +2069,7 @@ export class BotDurableAuthority<Snapshot> {
       );
       await this.refreshRecoveryAlarm(transaction);
     });
+    await this.noteSettled(runId);
   }
 
   /**
@@ -1899,7 +2103,7 @@ export class BotDurableAuthority<Snapshot> {
     const run = await this.readRun(pendingRunId);
     if (!run) throw new Error(`run "${pendingRunId}" was not accepted`);
     await this.executeAcceptedRun(
-      this.recoveredCommand(durableIdentity, run),
+      this.executionCommand(durableIdentity, run),
       promoted.previous,
       promoted.settings,
       promoted.compositionGenerationId,
@@ -1927,6 +2131,19 @@ export class BotDurableAuthority<Snapshot> {
       ...(run.admission?.origin ? { origin: run.admission.origin } : {}),
       ...(run.directTool ? { directTool: run.directTool } : {}),
     };
+  }
+
+  /**
+   * Prefers the command this isolate admitted. Recovery after eviction has
+   * only the stored record, which names chat explicitly.
+   */
+  private executionCommand(
+    identity: BotIdentity,
+    run: StoredRunV1<Snapshot>,
+  ): OwnedBotTurnCommand {
+    return (
+      this.liveCommands.get(run.runId) ?? this.recoveredCommand(identity, run)
+    );
   }
 
   async recoverActiveRun(): Promise<void> {
@@ -1976,7 +2193,7 @@ export class BotDurableAuthority<Snapshot> {
           this.supersededPackageRecords(),
         );
         await this.refreshRecoveryAlarm(transaction);
-        return undefined;
+        return { kind: "settled" as const, runId: run.runId };
       }
       const plan = planBotRunRecovery(run, previous, this.codec);
       if (plan.kind === "complete") {
@@ -2000,7 +2217,7 @@ export class BotDurableAuthority<Snapshot> {
           this.supersededPackageRecords(),
         );
         await this.refreshRecoveryAlarm(transaction);
-        return undefined;
+        return { kind: "settled" as const, runId: run.runId };
       }
       if (plan.kind === "fail") {
         await failStoredRun(
@@ -2015,7 +2232,7 @@ export class BotDurableAuthority<Snapshot> {
           this.failedRunRecords(),
         );
         await this.refreshRecoveryAlarm(transaction);
-        return undefined;
+        return { kind: "settled" as const, runId: run.runId };
       }
       if (plan.kind === "restart") {
         const settings = run.configurationSnapshot;
@@ -2058,6 +2275,10 @@ export class BotDurableAuthority<Snapshot> {
       };
     });
     if (!recovery) return;
+    if (recovery.kind === "settled") {
+      await this.noteSettled(recovery.runId);
+      return;
+    }
     if (!durableIdentity) throw new Error("Bot identity is unavailable");
     if (recovery.kind === "resume") {
       await this.executeResumedRun(
@@ -2069,26 +2290,7 @@ export class BotDurableAuthority<Snapshot> {
       return;
     }
     await this.executeAcceptedRun(
-      {
-        userId: durableIdentity.userId,
-        botId: durableIdentity.botId,
-        runId: recovery.run.runId,
-        sessionId: recovery.run.sessionId,
-        acceptedAt: recovery.run.acceptedAt,
-        text: recovery.run.input,
-        ...(recovery.run.retryOf ? { retryOf: recovery.run.retryOf } : {}),
-        turnType: storedRunTurnTypeV1(recovery.run),
-        lane: storedRunLaneV1(recovery.run),
-        ...(storedRunSubagentRoleV1(recovery.run)
-          ? { subagentRole: storedRunSubagentRoleV1(recovery.run) }
-          : {}),
-        ...(recovery.run.admission?.origin
-          ? { origin: recovery.run.admission.origin }
-          : {}),
-        ...(recovery.run.directTool
-          ? { directTool: recovery.run.directTool }
-          : {}),
-      },
+      this.executionCommand(durableIdentity, recovery.run),
       recovery.previous,
       recovery.settings,
       recovery.run.compositionGenerationId,

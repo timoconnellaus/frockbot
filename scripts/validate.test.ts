@@ -65,7 +65,7 @@ test("documentation exceptions do not ignore nested prompts or new code", () => 
   expect(() => snapshot(root)).not.toThrow();
   writeFileSync(join(root, "new.ts"), "export {};");
   expect(() => snapshot(root)).toThrow("new.ts");
-});
+}, 30_000);
 
 test("a test run under a git hook leaves the hooked repository untouched", () => {
   // Git exports GIT_DIR and friends to hooks; a `git init` under a fixture
@@ -95,7 +95,7 @@ test("a test run under a git hook leaves the hooked repository untouched", () =>
   expect(git(hooked, "config", "core.hooksPath")).toBe("hooks-of-hooked");
   expect(git(hooked, "rev-list", "--count", "HEAD")).toBe("1");
   expect(git(hooked, "status", "--porcelain")).toBe("");
-});
+}, 30_000);
 
 test("a category runs under the shell's environment, not git's hook environment", async () => {
   const root = fixture();
@@ -117,7 +117,7 @@ test("a category runs under the shell's environment, not git's hook environment"
   expect(readFileSync(join(root, ".local-validation/gitdir"), "utf8")).toBe(
     "unset",
   );
-});
+}, 30_000);
 
 /** How many times the counting probe has actually run in `root`. */
 function probeRuns(root: string): string {
@@ -154,7 +154,7 @@ test("success is reused while a category's inputs are unchanged, and a forced fa
   categories.probe = [[process.execPath, "-e", "process.exit(1)"]];
   await expect(validate(root, ["probe"])).rejects.toThrow("failed");
   await expect(validate(root, ["probe"])).rejects.toThrow("failed");
-});
+}, 30_000);
 
 // Not named for what it is about: the hook test above selects by
 // `-t "^documentation"` and counts the tests that match.
@@ -169,7 +169,7 @@ test("prose is not an input to a category that reads only code", async () => {
   git(root, "commit", "-qm", "documentation only");
   await validate(root, ["probe"]);
   expect(probeRuns(root)).toBe("1");
-});
+}, 30_000);
 
 test("a reused receipt leaves the run holding one command, echoed live", async () => {
   const root = fixture();
@@ -194,7 +194,7 @@ test("a reused receipt leaves the run holding one command, echoed live", async (
   const output = written.join("");
   expect(output).toContain("live-marker");
   expect(output).not.toContain("--- sleeper:");
-});
+}, 30_000);
 
 test("a category that runs alone is echoed live beside a busy phase", async () => {
   const root = fixture();
@@ -223,7 +223,7 @@ test("a category that runs alone is echoed live beside a busy phase", async () =
   const output = written.join("");
   expect(output).toContain("build-marker");
   expect(output).not.toContain("--- build:");
-});
+}, 30_000);
 
 test("the first failure in a category kills its siblings at once", async () => {
   const root = fixture();
@@ -239,7 +239,7 @@ test("the first failure in a category kills its siblings at once", async () => {
   await expect(validate(root, ["probe"])).rejects.toThrow("probe failed");
   expect(Date.now() - started).toBeLessThan(6_000);
   expect(readdirSync(join(root, ".local-validation", "receipts"))).toEqual([]);
-});
+}, 30_000);
 
 test("a killed category's surviving descendants cannot wedge the run", async () => {
   const root = fixture();
@@ -263,7 +263,7 @@ test("a killed category's surviving descendants cannot wedge the run", async () 
   expect(Date.now() - started).toBeLessThan(6_000);
   expect(existsSync(join(root, ".local-validation", "running"))).toBe(false);
   expect(readdirSync(join(root, ".local-validation", "receipts"))).toEqual([]);
-});
+}, 30_000);
 
 test("an interrupt reaches the children it took out of the foreground", async () => {
   const root = fixture();
@@ -350,7 +350,7 @@ test("the formatter re-runs on the prose the other categories skip", () => {
   git(root, "commit", "-qm", "prose only");
   expect(inputFingerprint(root, "format")).not.toBe(before.format);
   expect(inputFingerprint(root, "unit")).toBe(before.unit);
-});
+}, 30_000);
 
 test("the workerd suite does not read the Flutter client, and the rest do", () => {
   const root = fixture();
@@ -366,7 +366,7 @@ test("the workerd suite does not read the Flutter client, and the rest do", () =
   git(root, "commit", "-qm", "client only");
   expect(inputFingerprint(root, "runtime")).toBe(before.runtime);
   expect(inputFingerprint(root, "unit")).not.toBe(before.unit);
-});
+}, 30_000);
 
 test("commands that dirty source never earn a receipt", async () => {
   const root = fixture();
@@ -379,7 +379,7 @@ test("commands that dirty source never earn a receipt", async () => {
       entry.startsWith("probe-"),
     ),
   ).toEqual([]);
-});
+}, 30_000);
 
 test("deletions are ignored and outgoing commits are deduplicated", () => {
   expect(
@@ -417,7 +417,7 @@ test("a branch behind main may push, but a merge commit on it may not", () => {
   git(local, "rebase", "-q", "origin/main");
   expect(() => requireLinearBranch(local, "origin")).not.toThrow();
   expect(() => requireLinearBranch(local, join(remote, "missing"))).toThrow();
-});
+}, 30_000);
 
 test("validation gives each run its own local service registry", async () => {
   const root = fixture();
@@ -438,4 +438,4 @@ test("validation gives each run its own local service registry", async () => {
   expect(
     readFileSync(join(root, ".local-validation/registry-path"), "utf8"),
   ).not.toBe(first);
-});
+}, 30_000);

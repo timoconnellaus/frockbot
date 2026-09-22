@@ -1620,6 +1620,14 @@
     }
   },
   {
+    "name": "turn admission valid",
+    "schema": "TurnAdmission",
+    "value": {
+      "schemaVersion": 1,
+      "runId": "turn-1"
+    }
+  },
+  {
     "name": "turn response valid",
     "schema": "TurnResponse",
     "value": {
