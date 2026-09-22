@@ -229,14 +229,22 @@ export async function listRuns(
         botMessageCallV1(event)?.botId === counterpart.botId,
     );
   };
-  // An eviction mid-Turn leaves the run `running` and the alarm cleared once
-  // the previous settlement finished. The transcript is the next touch, and
-  // it is what remounts that Turn — on the turn type the admission recorded —
-  // before anything is projected from the stale record.
-  if (!query.before) await state.authority.recoverActiveRun();
-  const activeRunId = query.before
-    ? undefined
-    : await state.authority.readActiveRunId();
+  // An eviction mid-Turn leaves a readable run `running` and the alarm cleared
+  // once the previous settlement finished. The transcript is the next touch,
+  // and it remounts that Turn — on the turn type the admission recorded —
+  // before anything is projected. A missing marker or a record nobody can
+  // decode is left for this read: recovery would raise an alarm or throw, and
+  // the transcript's job is to show the row.
+  let activeRunId: string | undefined;
+  if (!query.before) {
+    activeRunId = await state.authority.readActiveRunId();
+    if (activeRunId) {
+      const header = await state.authority.readRunHeaderForDisplay(activeRunId);
+      if (header?.readable && header.run.status === "running") {
+        await state.authority.recoverActiveRun();
+      }
+    }
+  }
   const candidates = await state.authority.listRunIndex({
     limit: CLIENT_RUN_PAGE_LIMIT + 1,
     ...(query.before ? { before: query.before } : {}),
