@@ -526,10 +526,11 @@ export class BotDurableAuthority<Snapshot> {
 
   private async noteSettled(runId: string): Promise<void> {
     this.liveCommands.delete(runId);
-    this.notifySettled(runId);
     const hook = this.hooks.runSettled;
-    if (!hook) return;
-    await hook.call(this.hooks, runId).catch(() => undefined);
+    if (hook) await hook.call(this.hooks, runId).catch(() => undefined);
+    // After the projection. A completion caller that returned first would
+    // read search and audit before this run's rows were written.
+    this.notifySettled(runId);
   }
 
   /**
