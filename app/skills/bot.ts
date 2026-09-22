@@ -31,11 +31,15 @@ import type {
   WorkspaceRootV1,
 } from "@frockbot/core/contracts";
 import type { BotIdentity } from "@frockbot/core/durable";
-import type { SkillsRuntimeHostV1 } from "@frockbot/app/skills/agent";
+import type {
+  SkillIndexSourceV1,
+  SkillsRuntimeHostV1,
+} from "@frockbot/app/skills/agent";
 import {
   loadFullSkillCatalogV1,
   loadSkillCatalogV1,
   skillRefForLoadedSkillV1,
+  type SkillIndexLoadV1,
 } from "@frockbot/app/skills/catalog";
 import type { PluginSkillContributionV1 } from "@frockbot/app/skills/plugin";
 import { writeSkillDocumentV1 } from "@frockbot/app/skills/write";
@@ -192,6 +196,7 @@ export async function createBotSkillsHost(
    * catalog is constructed.
    */
   pluginSkills?: PluginSkillContributionV1[],
+  admitted?: { botRevision: string; userRevision: string },
 ): Promise<SkillsRuntimeHostV1 | undefined> {
   // Absence is a supported state, not an error: a host that binds no
   // Workspace mounts no Skills.
@@ -215,6 +220,71 @@ export async function createBotSkillsHost(
       runId: turn.runId,
     },
     ...gates,
+    skillIndexes: skillIndexSourceForTurnV1(state, identity, admitted),
+  };
+}
+
+function skillIndexSourceForTurnV1(
+  state: ShellBotStateV1,
+  identity: BotSkillsIdentity,
+  admitted?: { botRevision: string; userRevision: string },
+): SkillIndexSourceV1 {
+  const storage = {
+    get: (key: string) => state.ctx.storage.get(key),
+    put: (key: string, value: unknown) => state.ctx.storage.put(key, value),
+    delete: (key: string) => state.ctx.storage.delete(key),
+    list: (options: { prefix?: string; limit?: number; start?: string }) =>
+      state.ctx.storage.list(options),
+  };
+  const user = () =>
+    state.env.USER_CONFIGURATIONS.get(
+      state.env.USER_CONFIGURATIONS.idFromName(identity.userId),
+    );
+  const loadRoot = async (
+    source: "bot" | "user",
+    revision: string | undefined,
+  ) => {
+    if (source === "bot") {
+      const { readDurableSkillIndexV1, readDurableSkillSnapshotV1 } =
+        await import("./index-store.js");
+      const root = {
+        kind: "bot-instructions" as const,
+        userId: identity.userId,
+        botId: identity.botId,
+      };
+      return revision === undefined
+        ? readDurableSkillIndexV1(storage, root)
+        : readDurableSkillSnapshotV1(storage, root, revision);
+    }
+    const loaded = await user().readSkillIndex({
+      schemaVersion: 1,
+      userId: identity.userId,
+      root: { kind: "user-instructions", userId: identity.userId },
+      ...(revision !== undefined ? { revision } : {}),
+    });
+    const { decodeSkillMetadataIndexV1 } = await import("./metadata-index.js");
+    return decodeSkillMetadataIndexV1(loaded);
+  };
+  return {
+    load: async (): Promise<SkillIndexLoadV1> => {
+      const [liveBot, liveUser] = await Promise.all([
+        loadRoot("bot", undefined),
+        loadRoot("user", undefined),
+      ]);
+      if (!admitted) {
+        return { bot: liveBot, user: liveUser, liveBot, liveUser };
+      }
+      const [bot, userIndex] = await Promise.all([
+        loadRoot("bot", admitted.botRevision),
+        loadRoot("user", admitted.userRevision),
+      ]);
+      return { bot, user: userIndex, liveBot, liveUser };
+    },
+    readBody: async (bodyKey) => {
+      const object = await state.env.MEMORY_FILES.get(bodyKey);
+      if (!object) return undefined;
+      return new Uint8Array(await object.arrayBuffer());
+    },
   };
 }
 
@@ -293,16 +363,18 @@ export async function listSkills(
   if (!reads) return { schemaVersion: 1, skills: [] };
   // The same withholding the Turn applies, so the popover never offers a
   // managed Skill the Turn would not list.
+  const gates = await botSkillGatesV1(
+    state,
+    identity,
+    userAccountFeaturesReaderV1(state, identity),
+  );
   const catalog = await loadFullSkillCatalogV1(
     reads,
     { userId: identity.userId, botId: identity.botId },
-    // And the same Plugin roster, so the popover offers exactly the Skills
-    // the Turn would load and never one from a Plugin this Bot has off.
-    await botSkillGatesV1(
-      state,
-      identity,
-      userAccountFeaturesReaderV1(state, identity),
-    ),
+    {
+      ...gates,
+      indexes: await skillIndexSourceForTurnV1(state, identity).load(),
+    },
   );
   const entries: ClientSkillCatalogEntryV1[] = [];
   for (const skill of catalog.skills) {

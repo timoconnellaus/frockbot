@@ -112,6 +112,8 @@ export interface AccountPreparationV1 {
   schemaVersion: 1;
   settings: UserSettingsViewV1;
   features: UserFeaturesV1;
+  /** Published User instruction-root index. Empty until one exists. */
+  skillIndexRevision: string;
   composition?: UserCompositionSnapshotV1;
 }
 
@@ -124,6 +126,7 @@ export interface AccountPreparationStampV1 {
     plugins: string[];
   };
   compositionGenerationId: string;
+  skillIndexRevision: string;
 }
 
 export interface BotLocalPreparationV1 {
@@ -131,6 +134,8 @@ export interface BotLocalPreparationV1 {
   enablement: PluginEnablementV1;
   contextRevision: number;
   contextSequence: number;
+  /** Published Bot instruction-root index. Empty until one exists. */
+  skillIndexRevision: string;
 }
 
 export interface PreparationPortsV1 {
@@ -141,6 +146,7 @@ export interface PreparationPortsV1 {
     settingsRevision: number;
     pluginEnablementRevision: number;
     compositionGenerationId: string;
+    skillIndexRevision: string;
   }>;
   adoptComposition(snapshot: UserCompositionSnapshotV1): Promise<void>;
   /** Materialize the Bot mirror and return the generation admission will pin. */
@@ -240,6 +246,7 @@ export function preparedSkillIndexesV1(
   members: readonly CompositionMemberV1[],
   enablement: PluginEnablementV1,
   identity: { userId: string; botId: string },
+  revisions: { bot: string; user: string } = { bot: "", user: "" },
 ): PreparedSkillIndexRefV1[] {
   const enabled = new Set(
     enabledSeededPluginIdsV1(members, enablement, DEPLOYMENT_PLUGIN_CATALOG_V1),
@@ -259,8 +266,8 @@ export function preparedSkillIndexesV1(
   });
   return [
     ...plugins,
-    { source: "bot", id: identity.botId, revision: "" },
-    { source: "user", id: identity.userId, revision: "" },
+    { source: "bot", id: identity.botId, revision: revisions.bot },
+    { source: "user", id: identity.userId, revision: revisions.user },
   ];
 }
 
@@ -347,6 +354,12 @@ export function decodeAccountPreparationV1(
     migrateStoredUserSettingsV1(record.settings),
   );
   const features = decodeUserFeaturesV1(record.features);
+  if (
+    typeof record.skillIndexRevision !== "string" ||
+    record.skillIndexRevision.length > 128
+  ) {
+    throw new Error("account preparation skillIndexRevision is invalid");
+  }
   let composition: UserCompositionSnapshotV1 | undefined;
   if (record.composition !== undefined) {
     const snapshot = plainRecord(record.composition, "account composition");
@@ -359,6 +372,7 @@ export function decodeAccountPreparationV1(
     schemaVersion: 1,
     settings,
     features,
+    skillIndexRevision: record.skillIndexRevision,
     ...(composition ? { composition } : {}),
   };
 }
@@ -388,6 +402,14 @@ export function decodeAccountPreparationStampV1(
       typeof record.compositionGenerationId === "string"
         ? record.compositionGenerationId
         : "",
+    skillIndexRevision:
+      typeof record.skillIndexRevision === "string"
+        ? record.skillIndexRevision
+        : (() => {
+            throw new Error(
+              "account preparation stamp skillIndexRevision is invalid",
+            );
+          })(),
   };
 }
 
@@ -554,6 +576,12 @@ export async function gatherPreparedTurnInputsV1(
   if (botStamp.compositionGenerationId !== requestedGenerationId) {
     throw new PreparationConflictError("composition");
   }
+  if (accountStamp.skillIndexRevision !== account.skillIndexRevision) {
+    throw new PreparationConflictError("skill index");
+  }
+  if (botStamp.skillIndexRevision !== bot.skillIndexRevision) {
+    throw new PreparationConflictError("skill index");
+  }
   const members = generation?.members ?? [];
   const prepared: PreparedTurnInputsV1 = {
     schemaVersion: 1,
@@ -575,7 +603,10 @@ export async function gatherPreparedTurnInputsV1(
     },
     connections: preparedConnectionRefsV1(account.settings),
     skills: {
-      indexes: preparedSkillIndexesV1(members, bot.enablement, identity),
+      indexes: preparedSkillIndexesV1(members, bot.enablement, identity, {
+        bot: bot.skillIndexRevision,
+        user: account.skillIndexRevision,
+      }),
     },
     context: {
       revision: bot.contextRevision,

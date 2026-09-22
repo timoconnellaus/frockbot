@@ -1319,6 +1319,7 @@ describe("Bot recovery", () => {
                   updatedAt: "2026-09-22T00:00:00.000Z",
                   updatedBy: "test",
                 },
+                skillIndexRevision: "",
               };
             },
             readAccountPreparationStamp: async () => ({
@@ -1330,6 +1331,7 @@ describe("Bot recovery", () => {
                 plugins: [],
               },
               compositionGenerationId: "",
+              skillIndexRevision: "",
             }),
             readConfiguration: async () => user,
           }),

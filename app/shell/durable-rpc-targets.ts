@@ -35,6 +35,33 @@ export interface BotUserConfigurationRpcTargetV1
   readConfiguration(input: UserRpcEnvelopeV1<{ view: 2 }>): Promise<object>;
   prepareAccount(input: UserRpcEnvelopeV1): Promise<object>;
   readAccountPreparationStamp(input: UserRpcEnvelopeV1): Promise<object>;
+  beginSkillIndex(
+    input: UserRpcEnvelopeV1<{
+      root: object;
+      path: string;
+      generationId: string;
+      ledgerPending: boolean;
+      generation?: object;
+    }>,
+  ): Promise<void>;
+  commitSkillIndex(
+    input: UserRpcEnvelopeV1<{
+      root: object;
+      path: string;
+      generation: object;
+      deleted: boolean;
+      bytesBase64?: string;
+    }>,
+  ): Promise<void>;
+  readSkillIndex(
+    input: UserRpcEnvelopeV1<{ root: object; revision?: string }>,
+  ): Promise<object>;
+  holdSkillIndex(
+    input: UserRpcEnvelopeV1<{ runId: string; revision: string }>,
+  ): Promise<void>;
+  releaseSkillIndexHold(
+    input: UserRpcEnvelopeV1<{ runId: string }>,
+  ): Promise<void>;
   getConnection(
     input: UserRpcEnvelopeV1<{ connectionId: string }>,
   ): Promise<object | undefined>;

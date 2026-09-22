@@ -9,6 +9,7 @@ import { cleanNotificationTestState } from "./notification-state-cleanup.js";
 import { cleanHiddenBotNotifications } from "./hidden-bot-notifications-cleanup.js";
 import { cleanRetiredRoutineStateV1 } from "./routine-state-cleanup.js";
 import { cleanUnpreparedRunsV1 } from "./prepared-input-cleanup.js";
+import { cleanUndecodableSkillIndexesV1 } from "./skill-index-cleanup.js";
 import {
   messageIdV1,
   visibleMessageRecordsV1,
@@ -283,8 +284,16 @@ import {
 } from "@frockbot/app/machine/delivery";
 import {
   createDurableWorkspaceFilesV1,
+  createR2ObjectBucketV1,
   deleteBotWorkspaceRootsV1,
 } from "./workspace.js";
+import {
+  publishWorkspaceSkillGenerationV1,
+  readDurableSkillIndexV1,
+} from "@frockbot/app/skills/index-store";
+import { decodeSkillMetadataIndexV1 } from "@frockbot/app/skills/metadata-index";
+import { reseedInstructionRootV1 } from "@frockbot/app/skills/reseed";
+import type { WorkspaceGenerationPublicationV1 } from "@frockbot/core/workspace-store";
 import type { ClientWorkspaceFileV1 } from "./contracts.js";
 import {
   DurableWorkspaceGenerations,
@@ -593,6 +602,23 @@ export class BotState
       await cleanBotProfileMirrorTestState(this.ctx.storage);
       await cleanRetiredRoutineStateV1(this.ctx.storage);
       await cleanUnpreparedRunsV1(this.ctx.storage);
+      await cleanUndecodableSkillIndexesV1(this.ctx.storage);
+      const identity = await this.ctx.storage.get<{
+        userId: string;
+        botId: string;
+      }>(IDENTITY_KEY);
+      if (identity && this.env.MEMORY_FILES) {
+        await reseedInstructionRootV1({
+          storage: this.ctx.storage,
+          bucket: createR2ObjectBucketV1(this.env.MEMORY_FILES),
+          root: {
+            kind: "bot-instructions",
+            userId: identity.userId,
+            botId: identity.botId,
+          },
+          receiptKey: "maintenance:skill-index:bot:2026-09-22",
+        });
+      }
     });
     this.outboundFetch = dependencies.outboundFetch;
     const emailSender = createBindingEmailSenderV1(
@@ -903,6 +929,54 @@ export class BotState
    * Bot's Durable Object before it runs (§ Computer and Workspace), so an
    * interrupted push is read back rather than repeated.
    */
+  protected async skillIndexLoad(identity: { userId: string; botId: string }) {
+    const storage = this.ctx.storage;
+    const bot = await readDurableSkillIndexV1(storage, {
+      kind: "bot-instructions",
+      userId: identity.userId,
+      botId: identity.botId,
+    });
+    const userStub = this.env.USER_CONFIGURATIONS.get(
+      this.env.USER_CONFIGURATIONS.idFromName(identity.userId),
+    );
+    const user = decodeSkillMetadataIndexV1(
+      await userStub.readSkillIndex({
+        schemaVersion: 1,
+        userId: identity.userId,
+        root: { kind: "user-instructions", userId: identity.userId },
+      }),
+    );
+    return { bot, user, liveBot: bot, liveUser: user };
+  }
+
+  protected instructionPublication(
+    userId: string,
+  ): (event: WorkspaceGenerationPublicationV1) => Promise<void> {
+    const storage = this.ctx.storage;
+    const bucket = this.env.MEMORY_FILES;
+    const objects = createR2ObjectBucketV1(bucket);
+    const user = this.env.USER_CONFIGURATIONS.get(
+      this.env.USER_CONFIGURATIONS.idFromName(userId),
+    );
+    return (event) =>
+      publishWorkspaceSkillGenerationV1({
+        event,
+        userId,
+        storage,
+        bodies: {
+          put: async (key, bytes) => {
+            await objects.put(key, bytes);
+          },
+          get: async (key) => {
+            const object = await objects.get(key);
+            return object ? object.bytes() : undefined;
+          },
+          delete: (key) => objects.delete(key),
+        },
+        user,
+      });
+  }
+
   protected bindSurfaces(identity: { userId: string; botId: string }): void {
     const key = `${identity.userId}\u0000${identity.botId}`;
     if (this.surfacesFor === key) return;
@@ -915,9 +989,13 @@ export class BotState
     // the Memory and sync surfaces, and only a shared Memory root is routed to
     // the User object.
     const bot = this.workspaceGenerations;
+    const onInstructionPublication = this.instructionPublication(
+      identity.userId,
+    );
     const workspace = createDurableWorkspaceFilesV1(this.env, {
       owner,
       generations: bot,
+      onInstructionPublication,
     });
     const rpc = this.userMemoryRpc(identity.userId);
     const routed = createRoutedWorkspaceGenerationsV1({
@@ -933,6 +1011,7 @@ export class BotState
       owner,
       surface: "sync",
       generations: routed,
+      onInstructionPublication,
     });
     if (workspace) this.backendEnv.WORKSPACE_FILES = workspace;
     if (sync) {

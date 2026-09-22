@@ -103,6 +103,7 @@ export function accountPreparationRpcV1(
         schemaVersion: 1,
         userId: input.userId,
       }),
+      skillIndexRevision: "",
     }),
     readAccountPreparationStamp: async () => {
       const pin = await composition.storage.get(COMPOSITION_CURRENT_KEY);
@@ -116,6 +117,7 @@ export function accountPreparationRpcV1(
         },
         compositionGenerationId:
           pin === undefined ? "" : decodeCompositionPinV1(pin).generationId,
+        skillIndexRevision: "",
       };
     },
   };
