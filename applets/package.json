@@ -15,8 +15,8 @@
     "@frockbot/core": "workspace:*"
   },
   "devDependencies": {
-    "@types/bun": "1.4.1",
-    "@types/node": "26.4.1",
+    "@types/bun": "1.4.2",
+    "@types/node": "26.6.0",
     "typescript": "^7.0.2"
   }
 }

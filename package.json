@@ -65,12 +65,12 @@
     "eval:dictation-cleanup": "bun scripts/eval-dictation-cleanup.ts"
   },
   "devDependencies": {
-    "@types/bun": "1.4.1",
+    "@types/bun": "1.4.2",
     "ajv": "8.20.0",
     "esbuild": "0.28.2",
     "husky": "^9.1.7",
     "json-schema-to-ts": "^3.1.1",
-    "lint-staged": "^17.5.0",
+    "lint-staged": "^17.5.1",
     "playwright": "1.63.0",
     "prettier": "^3.9.6",
     "prettier-plugin-sh": "^0.19.0",
