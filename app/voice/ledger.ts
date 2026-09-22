@@ -23,6 +23,14 @@ import {
 } from "./shared.js";
 import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import { putVoiceWorkV1 } from "./recovery.js";
+import {
+  decodeVoiceEndedReceiptV1,
+  decodeVoiceResumptionRecordV1,
+  VOICE_ENDED_RECEIPT_KEY_V1,
+  voiceResumptionKeyV1,
+  type VoiceEndedReceiptV1,
+  type VoiceResumptionRecordV1,
+} from "./resumption.js";
 
 /** The key-value surface a Durable Object's storage already offers. */
 export interface VoiceLedgerStorageV1 {
@@ -219,7 +227,7 @@ export type VoiceDelegationAdmissionV1 =
  *
  * A live drop is the short window; a Pause, or the app leaving the screen,
  * is the long one. The record names which, so the alarm and a later
- * `start_call` ask the same question.
+ * `voice/open` ask the same question.
  */
 export function voiceCallRejoinWindowMsV1(call: VoiceCallRecordV1): number {
   return call.paused === true
@@ -442,6 +450,36 @@ export class VoiceLedgerV1 {
     if (!call || call.connectionId !== connectionId) return undefined;
     await this.storage.delete(VOICE_CALL_KEY_V1);
     return call;
+  }
+
+  /**
+   * The one ended-call receipt a control-only reconnect may acknowledge.
+   * Bounded: one row, replaced on every hang-up, never a growing archive.
+   */
+  async putEndedReceipt(receipt: VoiceEndedReceiptV1): Promise<void> {
+    await this.storage.put(VOICE_ENDED_RECEIPT_KEY_V1, receipt);
+  }
+
+  async endedReceipt(): Promise<VoiceEndedReceiptV1 | undefined> {
+    return decodeVoiceEndedReceiptV1(
+      await this.storage.get(VOICE_ENDED_RECEIPT_KEY_V1),
+    );
+  }
+
+  async putResumption(record: VoiceResumptionRecordV1): Promise<void> {
+    await this.storage.put(voiceResumptionKeyV1(record.callId), record);
+  }
+
+  async resumption(
+    callId: string,
+  ): Promise<VoiceResumptionRecordV1 | undefined> {
+    return decodeVoiceResumptionRecordV1(
+      await this.storage.get(voiceResumptionKeyV1(callId)),
+    );
+  }
+
+  async clearResumption(callId: string): Promise<void> {
+    await this.storage.delete(voiceResumptionKeyV1(callId));
   }
 
   /**
