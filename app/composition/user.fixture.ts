@@ -103,6 +103,7 @@ export function accountPreparationRpcV1(
         schemaVersion: 1,
         userId: input.userId,
       }),
+      skillIndexRevision: "",
     }),
     readAccountPreparationStamp: async () => {
       const pin = await composition.storage.get(COMPOSITION_CURRENT_KEY);
@@ -116,7 +117,22 @@ export function accountPreparationRpcV1(
         },
         compositionGenerationId:
           pin === undefined ? "" : decodeCompositionPinV1(pin).generationId,
+        skillIndexRevision: "",
       };
     },
+    // Admission holds the User index revision beside the run. A harness that
+    // has no instruction root still has to answer, with an empty index.
+    readSkillIndex: () =>
+      Promise.resolve({
+        schemaVersion: 1 as const,
+        revision: "",
+        status: "ready" as const,
+        deleted: false,
+        entries: [],
+        pending: [],
+        detachedReferences: [],
+      }),
+    holdSkillIndex: () => Promise.resolve(),
+    releaseSkillIndexHold: () => Promise.resolve(),
   };
 }

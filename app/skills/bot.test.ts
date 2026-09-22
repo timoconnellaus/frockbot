@@ -31,6 +31,16 @@ function botState(options: {
         updatedBy: "owner",
       });
     },
+    readSkillIndex: () =>
+      Promise.resolve({
+        schemaVersion: 1,
+        revision: "",
+        status: "ready",
+        deleted: false,
+        entries: [],
+        pending: [],
+        detachedReferences: [],
+      }),
   };
   return {
     env: {
@@ -42,6 +52,14 @@ function botState(options: {
       ...(options.workspace ? { WORKSPACE_FILES: options.workspace } : {}),
     },
     authority: { validateIdentity: () => Promise.resolve() },
+    ctx: {
+      storage: {
+        get: () => Promise.resolve(undefined),
+        put: () => Promise.resolve(),
+        delete: () => Promise.resolve(true),
+        list: () => Promise.resolve(new Map()),
+      },
+    },
   } as unknown as ShellBotStateV1;
 }
 

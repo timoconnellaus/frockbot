@@ -24,6 +24,7 @@ import {
   workspaceObjectPrefixV1,
   type ObjectBucketV1,
   type ObjectHeadV1,
+  type WorkspaceGenerationPublicationV1,
   type WorkspaceStoreSurfaceV1,
 } from "@frockbot/core/workspace-store";
 
@@ -122,6 +123,9 @@ export function createDurableWorkspaceFilesV1(
      * store rather than reaching object storage.
      */
     owner?: { userId: string };
+    onInstructionPublication?: (
+      event: WorkspaceGenerationPublicationV1,
+    ) => Promise<void>;
   },
 ): WorkspaceFilesV1 | undefined {
   const bucket = env.MEMORY_FILES;
@@ -131,6 +135,9 @@ export function createDurableWorkspaceFilesV1(
     generations: options.generations,
     ...(options.owner ? { owner: options.owner } : {}),
     ...(options.surface ? { surface: options.surface } : {}),
+    ...(options.onInstructionPublication
+      ? { onInstructionPublication: options.onInstructionPublication }
+      : {}),
   });
 }
 

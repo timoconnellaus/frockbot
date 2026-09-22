@@ -367,6 +367,16 @@ export async function agentRuntime(
         turn,
         accountFeatures,
         prepared ? pluginSkills : undefined,
+        prepared
+          ? {
+              botRevision:
+                prepared.skills.indexes.find((index) => index.source === "bot")
+                  ?.revision ?? "",
+              userRevision:
+                prepared.skills.indexes.find((index) => index.source === "user")
+                  ?.revision ?? "",
+            }
+          : undefined,
       )
     : Promise.resolve(undefined);
   // These gates share the account-feature read above but otherwise touch

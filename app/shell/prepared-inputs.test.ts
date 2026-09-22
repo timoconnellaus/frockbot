@@ -58,6 +58,7 @@ function account(
     settings: userSettings(revision),
     features: defaultUserFeaturesV1(),
     composition: { current: generation, lastKnownGood: generation },
+    skillIndexRevision: "",
   };
 }
 
@@ -69,6 +70,7 @@ function localBot(): BotLocalPreparationV1 {
     enablement: { ...emptyPluginEnablementV1(new Date(0)), revision: 4 },
     contextRevision: 3,
     contextSequence: 9,
+    skillIndexRevision: "",
   };
 }
 
@@ -78,6 +80,7 @@ function stamp(generationId: string, revision = 1): AccountPreparationStampV1 {
     revision,
     features: { applets: false, pluginAuthoring: false, plugins: [] },
     compositionGenerationId: generationId,
+    skillIndexRevision: "",
   };
 }
 
@@ -102,6 +105,7 @@ function ports(options?: {
       settingsRevision: 2,
       pluginEnablementRevision: 4,
       compositionGenerationId: boot.generationId,
+      skillIndexRevision: "",
     }),
     adoptComposition: async () => undefined,
     ensureComposition: async () => boot,

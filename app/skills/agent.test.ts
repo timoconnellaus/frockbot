@@ -16,7 +16,11 @@ import {
   SkillCatalog,
 } from "./agent.ts";
 import { botInstructionRootV1, userInstructionRootV1 } from "./catalog.ts";
-import { FakeWorkspace, skillMarkdown } from "./testing.ts";
+import {
+  FakeWorkspace,
+  skillIndexSourceForFake,
+  skillMarkdown,
+} from "./testing.ts";
 
 const OWNER = { userId: "user-1", botId: "bot-1" };
 const OWN_ROOT = botInstructionRootV1(OWNER);
@@ -91,7 +95,13 @@ describe("the Skill catalog", () => {
       },
     ]);
     const { session, dispose } = await openSession();
-    const catalog = new SkillCatalog(OWNER, workspace);
+    const catalog = new SkillCatalog(
+      OWNER,
+      workspace,
+      [],
+      [],
+      skillIndexSourceForFake(workspace, OWNER),
+    );
 
     await catalog.refresh(4, session);
 
@@ -152,7 +162,13 @@ describe("the Skill catalog", () => {
       },
     ]);
     const { session, dispose } = await openSession();
-    const catalog = new SkillCatalog(OWNER, workspace);
+    const catalog = new SkillCatalog(
+      OWNER,
+      workspace,
+      [],
+      [],
+      skillIndexSourceForFake(workspace, OWNER),
+    );
 
     await catalog.refresh(4, session);
 
@@ -234,7 +250,13 @@ describe("the skill_load tool", () => {
       },
     ]);
     const { session, dispose } = await openSession();
-    const catalog = new SkillCatalog(OWNER, workspace);
+    const catalog = new SkillCatalog(
+      OWNER,
+      workspace,
+      [],
+      [],
+      skillIndexSourceForFake(workspace, OWNER),
+    );
     await catalog.refresh(4, session);
     const tool = createSkillLoadTool(catalog);
 
@@ -267,7 +289,13 @@ describe("the skill_load tool", () => {
       },
     ]);
     const { session, dispose } = await openSession();
-    const catalog = new SkillCatalog(OWNER, workspace);
+    const catalog = new SkillCatalog(
+      OWNER,
+      workspace,
+      [],
+      [],
+      skillIndexSourceForFake(workspace, OWNER),
+    );
     await catalog.refresh(4, session);
     const tool = createSkillLoadTool(catalog);
 
@@ -313,7 +341,13 @@ describe("the skill_load tool", () => {
       },
     ]);
     const { session, dispose } = await openSession();
-    const catalog = new SkillCatalog(OWNER, workspace);
+    const catalog = new SkillCatalog(
+      OWNER,
+      workspace,
+      [],
+      [],
+      skillIndexSourceForFake(workspace, OWNER),
+    );
     await catalog.refresh(4, session);
     const tool = createSkillLoadTool(catalog);
 
@@ -339,7 +373,7 @@ describe("the skill_load tool", () => {
     await dispose();
   });
 
-  test("refuses a reference that changed generation since the catalog listed it", async () => {
+  test("serves the admitted reference after the file is edited", async () => {
     // The shared root: a sibling Bot or the User can supersede a reference
     // between the Turn's catalog refresh and the model's `skill_load` call.
     const workspace = await FakeWorkspace.seeded([
@@ -361,7 +395,13 @@ describe("the skill_load tool", () => {
       },
     ]);
     const { session, dispose } = await openSession();
-    const catalog = new SkillCatalog(OWNER, workspace);
+    const catalog = new SkillCatalog(
+      OWNER,
+      workspace,
+      [],
+      [],
+      skillIndexSourceForFake(workspace, OWNER),
+    );
     await catalog.refresh(4, session);
     const tool = createSkillLoadTool(catalog);
 
@@ -372,13 +412,13 @@ describe("the skill_load tool", () => {
       writer: { kind: "user", userId: "user-1" },
     });
 
-    const refused = await tool.execute(
+    const loaded = await tool.execute(
       { path: "user/standup", reference: "forms.md" },
       CONTEXT,
     );
-    expect(refused.isError).toBe(true);
-    expect(refused.content).toContain("changed generation since this Turn");
-    expect(refused.content).not.toContain("Ignore the Skill");
+    expect(loaded.isError).toBe(false);
+    expect(loaded.content).toContain("One per person.");
+    expect(loaded.content).not.toContain("Ignore the Skill");
     await dispose();
   });
 
@@ -404,7 +444,13 @@ describe("the skill_load tool", () => {
       },
     ]);
     const { session, dispose } = await openSession();
-    const catalog = new SkillCatalog(OWNER, workspace);
+    const catalog = new SkillCatalog(
+      OWNER,
+      workspace,
+      [],
+      [],
+      skillIndexSourceForFake(workspace, OWNER),
+    );
     await catalog.refresh(4, session);
     const tool = createSkillLoadTool(catalog);
 
@@ -528,7 +574,13 @@ describe("the skill_write tool", () => {
     ).toEqual({ kind: "bot", botId: "bot-1", ...WRITER });
 
     // The Skill it wrote is loadable on the next Turn, by its own authority.
-    const catalog = new SkillCatalog(OWNER, workspace);
+    const catalog = new SkillCatalog(
+      OWNER,
+      workspace,
+      [],
+      [],
+      skillIndexSourceForFake(workspace, OWNER),
+    );
     await catalog.refresh(5, session);
     expect(
       catalog
@@ -741,7 +793,13 @@ describe("the skill_write tool", () => {
       ),
     ).toMatchObject({ path: "skills/standup/references/forms.md" });
     // It is loadable on the next Turn, as one of that Skill's references.
-    const catalog = new SkillCatalog(OWNER, workspace);
+    const catalog = new SkillCatalog(
+      OWNER,
+      workspace,
+      [],
+      [],
+      skillIndexSourceForFake(workspace, OWNER),
+    );
     await catalog.refresh(5, session);
     const skill = catalog
       .current()

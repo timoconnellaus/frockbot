@@ -78,6 +78,14 @@ import { yieldCompactionWorkV1 } from "./compaction-scheduler.js";
 import { notificationIdV1 } from "./notification-id.js";
 import { agentRuntime } from "./runtime-mount.js";
 import {
+  heldSkillRevisionsV1,
+  holdSkillIndexRevisionsV1,
+  readDurableSkillIndexV1,
+  releaseSettledSkillHoldsV1,
+  releaseUnreferencedSkillSnapshotsV1,
+} from "@frockbot/app/skills/index-store";
+import { botInstructionRootV1 } from "@frockbot/app/skills/catalog";
+import {
   decodePreparedTurnInputsV1,
   gatherPreparedTurnInputsV1,
   pluginSkillsFromMembersV1,
@@ -349,13 +357,21 @@ export async function executeTurn(
     mount: async (mounting, signal) => {
       // Skills follow this mount, including a fail-closed fallback. The array
       // is the one the Skills host already holds, filled before features run.
+      const liveEnablement = await readPluginEnablementV1(state.ctx.storage);
+      const livePlugins = new Set(
+        enabledSeededPluginIdsV1(
+          mounting.members,
+          liveEnablement,
+          DEPLOYMENT_PLUGIN_CATALOG_V1,
+        ),
+      );
       runtime.pluginSkills.splice(
         0,
         runtime.pluginSkills.length,
         ...pluginSkillsFromMembersV1(
           mounting.members,
           runtime.pluginEnablement,
-        ),
+        ).filter((contribution) => livePlugins.has(contribution.pluginId)),
       );
       // The User installed the set; which of it this Bot runs is its own map,
       // and that is also what decides the worker's egress policy.
@@ -643,11 +659,16 @@ function preparationPorts(
         readPluginEnablementV1(state.ctx.storage),
         readHead(),
       ]);
+      const skillIndex = await readDurableSkillIndexV1(
+        state.ctx.storage,
+        botInstructionRootV1(command),
+      );
       return {
         settings,
         enablement,
         contextRevision: head?.revision ?? 0,
         contextSequence: head?.nextSeq ?? 0,
+        skillIndexRevision: skillIndex.deleted ? "" : skillIndex.revision,
       };
     },
     readBotStamp: async () => {
@@ -656,11 +677,16 @@ function preparationPorts(
         readPluginEnablementV1(state.ctx.storage),
         state.ctx.storage.get(COMPOSITION_CURRENT_KEY),
       ]);
+      const skillIndex = await readDurableSkillIndexV1(
+        state.ctx.storage,
+        botInstructionRootV1(command),
+      );
       return {
         settingsRevision: settings.revision,
         pluginEnablementRevision: enablement.revision,
         compositionGenerationId:
           pin === undefined ? "" : decodeCompositionPinV1(pin).generationId,
+        skillIndexRevision: skillIndex.deleted ? "" : skillIndex.revision,
       };
     },
     adoptComposition: async (snapshot) => {
@@ -681,6 +707,55 @@ export async function resolveAdmissionSnapshot(
     { userId: command.userId, botId: command.botId },
     preparationPorts(state, command),
   );
+  const botRevision =
+    prepared.skills.indexes.find((index) => index.source === "bot")?.revision ??
+    "";
+  const userRevision =
+    prepared.skills.indexes.find((index) => index.source === "user")
+      ?.revision ?? "";
+  const settled = await releaseSettledSkillHoldsV1(state.ctx.storage);
+  const held = await heldSkillRevisionsV1(state.ctx.storage);
+  if (!held.truncated) {
+    await releaseUnreferencedSkillSnapshotsV1(
+      state.ctx.storage,
+      {
+        put: async (key, bytes) => {
+          await state.env.MEMORY_FILES.put(key, bytes);
+        },
+        get: async (key) => {
+          const object = await state.env.MEMORY_FILES.get(key);
+          return object
+            ? new Uint8Array(await object.arrayBuffer())
+            : undefined;
+        },
+        delete: async (key) => {
+          await state.env.MEMORY_FILES.delete(key);
+        },
+      },
+      botInstructionRootV1(command),
+      held.revisions,
+    );
+  }
+  const userConfiguration = state.env.USER_CONFIGURATIONS.get(
+    state.env.USER_CONFIGURATIONS.idFromName(command.userId),
+  );
+  for (const runId of settled) {
+    await userConfiguration.releaseSkillIndexHold({
+      schemaVersion: 1,
+      userId: command.userId,
+      runId,
+    });
+  }
+  await holdSkillIndexRevisionsV1(state.ctx.storage, command.runId, {
+    botRevision,
+    userRevision,
+  });
+  await userConfiguration.holdSkillIndex({
+    schemaVersion: 1,
+    userId: command.userId,
+    runId: command.runId,
+    revision: userRevision,
+  });
   preparedForAdmission.set(prepared.bot.settings, prepared);
   return prepared.bot.settings;
 }

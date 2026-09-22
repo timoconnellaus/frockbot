@@ -130,6 +130,21 @@ import {
 } from "./applet-directory.js";
 import type { AppletState } from "./applet-state.js";
 import { cleanAppletTestStateV1 } from "./applet-test-state-cleanup.js";
+import { cleanUndecodableSkillIndexesV1 } from "./skill-index-cleanup.js";
+import { reseedInstructionRootV1 } from "@frockbot/app/skills/reseed";
+import {
+  base64ToBytes,
+  beginDurableSkillPublicationV1,
+  commitDurableSkillPublicationV1,
+  heldSkillRevisionsV1,
+  holdSkillIndexRevisionsV1,
+  readDurableSkillIndexV1,
+  readDurableSkillSnapshotV1,
+  releaseSkillIndexHoldV1,
+  releaseUnreferencedSkillSnapshotsV1,
+} from "@frockbot/app/skills/index-store";
+import { decodeWorkspaceGenerationV1 } from "@frockbot/core/contracts";
+import { createR2ObjectBucketV1 } from "./workspace.js";
 import { cleanDefaultPackagesMarkerV1 } from "./default-packages-marker-cleanup.js";
 import {
   appletSourcePathV1,
@@ -263,6 +278,16 @@ export class UserConfiguration
       await cleanUserAvatarTestState(this.ctx.storage);
       await cleanDirectoryProfileTestState(this.ctx.storage);
       await cleanDefaultPackagesMarkerV1(this.ctx.storage);
+      await cleanUndecodableSkillIndexesV1(this.ctx.storage);
+      const userId = await this.ctx.storage.get<string>(USER_IDENTITY_KEY);
+      if (typeof userId === "string" && this.env.MEMORY_FILES) {
+        await reseedInstructionRootV1({
+          storage: this.ctx.storage,
+          bucket: createR2ObjectBucketV1(this.env.MEMORY_FILES),
+          root: { kind: "user-instructions", userId },
+          receiptKey: "maintenance:skill-index:user:2026-09-22",
+        });
+      }
       if (
         (
           await this.ctx.storage.list({
@@ -840,10 +865,15 @@ export class UserConfiguration
     } catch {
       composition = undefined;
     }
+    const skillIndex = await readDurableSkillIndexV1(this.skillIndexStorage(), {
+      kind: "user-instructions",
+      userId,
+    });
     return {
       schemaVersion: 1 as const,
       features,
       settings,
+      skillIndexRevision: skillIndex.deleted ? "" : skillIndex.revision,
       ...(composition ? { composition } : {}),
     };
   }
@@ -868,6 +898,9 @@ export class UserConfiguration
       },
       compositionGenerationId:
         pin === undefined ? "" : decodeCompositionPinV1(pin).generationId,
+      skillIndexRevision: await this.userSkillIndexRevision(
+        request.userId as string,
+      ),
     };
   }
 
@@ -1656,6 +1689,184 @@ export class UserConfiguration
     return this.workspaceGenerations.conflicts(
       root,
       normalizeWorkspaceRelativePathV1(request.path),
+    );
+  }
+
+  private skillIndexStorage() {
+    const storage = this.ctx.storage;
+    return {
+      get: (key: string) => storage.get(key),
+      put: (key: string, value: unknown) => storage.put(key, value),
+      delete: (key: string) => storage.delete(key),
+      list: (options: { prefix?: string; limit?: number; start?: string }) =>
+        storage.list(options),
+    };
+  }
+
+  private skillBodies() {
+    const bucket = this.env.MEMORY_FILES;
+    if (!bucket) throw new Error("no Workspace bucket is bound");
+    const objects = createR2ObjectBucketV1(bucket);
+    return {
+      put: async (key: string, bytes: Uint8Array) => {
+        await objects.put(key, bytes);
+      },
+      get: async (key: string) => {
+        const object = await objects.get(key);
+        return object ? object.bytes() : undefined;
+      },
+      delete: (key: string) => objects.delete(key),
+    };
+  }
+
+  private async userSkillIndexRevision(userId: string): Promise<string> {
+    const index = await readDurableSkillIndexV1(this.skillIndexStorage(), {
+      kind: "user-instructions",
+      userId,
+    });
+    return index.deleted ? "" : index.revision;
+  }
+
+  private userInstructionRoot(userId: string, value: unknown) {
+    const root = decodeWorkspaceRootV1(value);
+    if (root.kind !== "user-instructions" || root.userId !== userId) {
+      throw new Error("skill index root is not this User's instruction root");
+    }
+    return root;
+  }
+
+  async beginSkillIndex(input: unknown): Promise<void> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      root: rpcDecodedValue,
+      path: rpcString(1_024),
+      generationId: rpcString(128),
+      ledgerPending: (value, label) => {
+        if (typeof value !== "boolean") {
+          throw new Error(`${label} must be a boolean`);
+        }
+        return value;
+      },
+    });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    const root = this.userInstructionRoot(userId, request.root);
+    await beginDurableSkillPublicationV1(
+      this.skillIndexStorage(),
+      root,
+      normalizeWorkspaceRelativePathV1(request.path as string),
+      request.generationId as string,
+      request.ledgerPending === true,
+    );
+  }
+
+  async commitSkillIndex(input: unknown): Promise<void> {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      {
+        userId: rpcIdentifier,
+        root: rpcDecodedValue,
+        path: rpcString(1_024),
+        generation: rpcDecodedValue,
+        deleted: (value, label) => {
+          if (typeof value !== "boolean") {
+            throw new Error(`${label} must be a boolean`);
+          }
+          return value;
+        },
+      },
+      { bytesBase64: rpcString(200_000) },
+    );
+    const userId = await this.assertUserIdentity(request.userId as string);
+    const root = this.userInstructionRoot(userId, request.root);
+    const generation = decodeWorkspaceGenerationV1(request.generation);
+    const bytes =
+      typeof request.bytesBase64 === "string"
+        ? base64ToBytes(request.bytesBase64)
+        : undefined;
+    const storage = this.skillIndexStorage();
+    await commitDurableSkillPublicationV1(
+      storage,
+      this.skillBodies(),
+      root,
+      normalizeWorkspaceRelativePathV1(request.path as string),
+      generation,
+      bytes,
+      request.deleted === true,
+    );
+    const held = await heldSkillRevisionsV1(storage);
+    if (!held.truncated) {
+      await releaseUnreferencedSkillSnapshotsV1(
+        storage,
+        this.skillBodies(),
+        root,
+        held.revisions,
+      );
+    }
+  }
+
+  async readSkillIndex(input: unknown): Promise<object> {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      {
+        userId: rpcIdentifier,
+        root: rpcDecodedValue,
+      },
+      {
+        revision: (value, label) => {
+          if (typeof value !== "string" || value.length > 64) {
+            throw new Error(`${label} is invalid`);
+          }
+          return value;
+        },
+      },
+    );
+    const userId = await this.assertUserIdentity(request.userId as string);
+    const root = this.userInstructionRoot(userId, request.root);
+    if (typeof request.revision === "string") {
+      return readDurableSkillSnapshotV1(
+        this.skillIndexStorage(),
+        root,
+        request.revision,
+      );
+    }
+    return readDurableSkillIndexV1(this.skillIndexStorage(), root);
+  }
+
+  async holdSkillIndex(input: unknown): Promise<void> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      runId: rpcString(128),
+      revision: (value, label) => {
+        if (typeof value !== "string" || value.length > 64) {
+          throw new Error(`${label} is invalid`);
+        }
+        return value;
+      },
+    });
+    await this.assertUserIdentity(request.userId as string);
+    await holdSkillIndexRevisionsV1(
+      this.skillIndexStorage(),
+      request.runId as string,
+      { botRevision: "", userRevision: request.revision as string },
+    );
+  }
+
+  async releaseSkillIndexHold(input: unknown): Promise<void> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      runId: rpcString(128),
+    });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    const storage = this.skillIndexStorage();
+    await releaseSkillIndexHoldV1(storage, request.runId as string);
+    if (!this.env.MEMORY_FILES) return;
+    const held = await heldSkillRevisionsV1(storage);
+    if (held.truncated) return;
+    await releaseUnreferencedSkillSnapshotsV1(
+      storage,
+      this.skillBodies(),
+      { kind: "user-instructions", userId },
+      held.revisions,
     );
   }
 
