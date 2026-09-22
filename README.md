@@ -84,7 +84,7 @@ It mints seven secrets and sets them with the deploy: `CREDENTIAL_KEYRING`, `COM
 - **The zone.** It must already be active on the same account, and the credential wrangler deploys with must cover it.
 - **The two Access applications**, when your `CLOUDFLARE_API_TOKEN` is absent or lacks `Zero Trust: Access Apps and Policies Write`. The installer prints the dashboard steps for both, including the policy each needs, and waits.
 - **The audience tag.** Paste the Allow application's AUD when asked, or put it in `deployments/simple.json` and run `bun run setup` again. Until it is a real tag the Worker refuses every token, which is the right answer for a deployment whose Access application does not exist yet.
-- **An APK**, if you want the phone app. None is prebuilt; see [What the simple profile does not ship](#what-the-simple-profile-does-not-ship).
+- **An APK for your own deployment.** The `frockbot.apk` on a release is the hosted app. See [What the simple profile does not ship](#what-the-simple-profile-does-not-ship).
 
 ### Signing in the first time
 
@@ -109,7 +109,7 @@ bun run setup
 Nothing is gated. Every line of both profiles is in this repository, and a self-hoster who sets a secret gets what it switches on; the installer simply never asks for one.
 
 - **Billing.** Switched by `STRIPE_SECRET_KEY`, which the installer never asks for. Set one by hand and billing turns on.
-- **The Android and macOS release channel.** Shorebird patches and the Sparkle feed belong to the hosted deployment; both updaters are inert in a plain `flutter build`, and no APK is attached to a release because `flutter build apk` bakes `FROCKBOT_ORIGIN` in and your origin is not known at release time. Build your own against your own origin ([`docs/app-updates.md`](docs/app-updates.md), [`apps/native/README.md`](apps/native/README.md)); the update control never appears.
+- **The Android and macOS release channel.** Shorebird patches and the Sparkle feed belong to the hosted deployment; both updaters are inert in a plain `flutter build`. The release's `frockbot.apk` is that hosted app, with the hosted origin baked in, so it is not your phone app. Build your own against your own origin ([`docs/app-updates.md`](docs/app-updates.md), [`apps/native/README.md`](apps/native/README.md)); the update control never appears.
 - **Native sign-in, for now.** The `assetlinks.json` and `apple-app-site-association` the Worker serves name the hosted app's package and signing fingerprint, so a client you build and sign yourself has no verified return path on your hostname — the profile therefore enables no native sign-in targets, and the web client is the client until that association is per-deployment.
 - **The admin portal.** There is nothing for it to administer here: with Access deciding admission there are no admission modes, access records or invitations. An account's features — Applets, Plugin authoring — are turned on from the operator surface instead, `POST /api/debug/users/<userId>/features` under the deployment's `DEBUG_TOKEN`.
 - **The marketing site.** `apps/marketing` is `frockbot.com` and is hosted-only.
@@ -326,6 +326,8 @@ It names the quiet failures rather than waiting them out: a release whose packag
 #### Android patches
 
 The phone app ships from the same run. `Cut Android patch` builds a signed Shorebird patch of `apps/native` against the newest active Android release and puts it on the staging track as soon as the tag verifies; `Promote Android patch` moves it to stable once `Deploy FrockBot app` has succeeded, so the client goes stable together with the server it was built against, and never ahead of it. A tag whose `apps/native` matches the previous release tag cuts nothing. When Shorebird finds native, asset or plugin changes the job stops with a notice rather than failing: only a full release carries those, and a full release is cut by hand with `bun run native:release` and installed once on the phone (see [`apps/native/README.md`](apps/native/README.md)). Neither Android job is on the web deploy's path, so neither can hold production back.
+
+`Fetch Android APK` attaches `frockbot.apk` to the GitHub release: the current enabling Shorebird APK, re-signed with the keystore below. Installing that file and opening it picks up the stable patch. The job does not cut a Shorebird release, because that would move the patch target off the phone. It reads `SHOREBIRD_TOKEN` and `ANDROID_DEBUG_KEYSTORE_BASE64`; the patch private key stays on the patch jobs.
 
 The jobs read three repository secrets, set once from the machine that holds the originals:
 

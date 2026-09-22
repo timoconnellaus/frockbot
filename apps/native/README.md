@@ -91,11 +91,13 @@ The emulator has shown a signed staging patch download and restart, an offline b
 
 The release pipeline cuts this patch itself for every version tag whose `apps/native` differs from the previous tag. `release.yml`'s `Cut Android patch` runs `native-update.py patch --baseline shorebird`, which takes the baseline from Shorebird's release list instead of `baseline.json`: the newest active Android release is, by the rule above, the one installed on the phone. `Promote Android patch` runs `native-update.py promote` after the production deploy. The job installs the CLI version `qualification.json` records, takes the private key and the signer from repository secrets (see the root `README.md`, Releases → Android patches), and its patches show in `shorebird patches list`, not in the local `baseline.json`. Shorebird's native or asset diff verdict leaves the script with exit status 3, which the job reports as needing a full release. Full releases are never cut by the pipeline.
 
+Each version tag still attaches `frockbot.apk` to the GitHub release. `Fetch Android APK` runs `native-update.py export-apk`, which downloads that enabling release from Shorebird and re-signs it with the phone's key. The latest release's asset is the public sideload: `https://github.com/timoconnellaus/frockbot/releases/latest/download/frockbot.apk`. It does not cut a Shorebird release, so patches keep targeting the APK already on the phone.
+
 The application retains `com.frockbot.mobile`. Compile SDK 37 is required by secure storage 11; minSdk 24 and targetSdk 36 remain unchanged. Its API-28+ WebView directory is separate from Capacitor's retained directory, and cookies are disabled before the first WebView. API 24–27 isolation remains unqualified. The acceptance build checks only a random continuity sentinel; same-User/Bot re-auth is a separate device check.
 
 ## APK download service
 
-The same script serves the published APK over Tailscale on port 8443, reading `latest.json` from the state directory:
+The public copy of a published APK is `frockbot.apk` on the GitHub release. The same script also serves it over Tailscale on port 8443, reading `latest.json` from the state directory:
 
 ```sh
 python3 scripts/native-update.py setup   # one-off: launchd agent plus `tailscale serve` on 8443

@@ -1,6 +1,8 @@
 import base64
+from contextlib import redirect_stdout
 import hashlib
 import importlib.util
+import io
 import json
 import os
 from pathlib import Path
@@ -185,7 +187,7 @@ class ShorebirdHarness(unittest.TestCase):
         self.yaml = root / "shorebird.yaml"
         self.yaml.write_text(f"# comment\napp_id: {APP_ID}\n")
         self.apk = root / "app-release.apk"
-        for tool in ("aapt", "apksigner"):
+        for tool in ("aapt", "apksigner", "zipalign"):
             path = root / "sdk/build-tools/36.0.0" / tool
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text("")
@@ -214,6 +216,8 @@ class ShorebirdHarness(unittest.TestCase):
              "platform_statuses": {"android": "active"}},
         ]
         self.service_patches = [{"number": 1, "channel": "stable"}, {"number": 2, "channel": "staging"}]
+        self.export_names = ["universal.apk"]
+        self.badging_code = None
         self.patches = [
             patch.object(updates, "STATE", self.state), patch.object(updates, "PUBLIC_KEY", self.public),
             patch.object(updates, "SHOREBIRD_YAML", self.yaml), patch.object(updates, "APK_OUTPUT", self.apk),
@@ -232,6 +236,12 @@ class ShorebirdHarness(unittest.TestCase):
     def fake_run(self, args, *, binary=False, **kwargs):
         args = [str(a) for a in args]
         self.calls.append(args)
+        tool = Path(args[0]).name
+        if tool == "zipalign":
+            Path(args[-1]).write_bytes(Path(args[-2]).read_bytes())
+            return ""
+        if tool == "apksigner" and args[1] == "sign":
+            return ""
         if args[:2] == ["git", "rev-parse"]:
             return self.head + "\n"
         if args[:2] == ["git", "status"]:
@@ -243,7 +253,8 @@ class ShorebirdHarness(unittest.TestCase):
         if args[:2] == ["openssl", "rsa"]:
             return self.private_der
         if args[1:3] == ["dump", "badging"]:
-            return f"package: name='com.frockbot.mobile' versionCode='{self.built}' versionName='{BUILD_NAME}'"
+            code = self.badging_code if self.badging_code is not None else self.built
+            return f"package: name='com.frockbot.mobile' versionCode='{code}' versionName='{BUILD_NAME}'"
         if args[1:2] == ["verify"]:
             return f"Signer #1 certificate SHA-256 digest: {self.signer}"
         if args[1:3] == ["releases", "list"]:
@@ -267,7 +278,18 @@ class ShorebirdHarness(unittest.TestCase):
         self.commands.append((args, kwargs))
         if self.failure:
             raise subprocess.CalledProcessError(1, args)
-        if args[1] == "release":
+        if len(args) > 2 and args[1:3] == ["releases", "get-apks"]:
+            out = Path(args[args.index("--out") + 1])
+            out.mkdir(parents=True, exist_ok=True)
+            version = next(part.split("=", 1)[1] for part in args if part.startswith("--release-version="))
+            self.built = int(version.split("+", 1)[1])
+            for name in self.export_names:
+                with zipfile.ZipFile(out / name, "w") as archive:
+                    archive.writestr("classes.dex", os.urandom(16))
+                    archive.writestr(updates.EMBEDDED_YAML, f"app_id: {self.embedded_app_id}\n"
+                                     f"patch_public_key: {base64.b64encode(self.embedded_der).decode()}\n")
+            return subprocess.CompletedProcess(args, 0)
+        if args[0] == str(self.cli) and args[1] == "release":
             self.built = int(next(a for a in args if a.startswith("--build-number=")).split("=")[1])
             with zipfile.ZipFile(self.apk, "w") as archive:
                 archive.writestr("classes.dex", os.urandom(16))
@@ -740,6 +762,71 @@ class PromoteTest(ShorebirdHarness):
         with self.assertRaises(SystemExit):
             updates.main(["promote", "--release-version", f"{BUILD_NAME}+{NOW}"])
         self.assertEqual(self.shorebird(), [])
+
+
+class ExportApkTest(ShorebirdHarness):
+    def setUp(self):
+        super().setUp()
+        self.keystore = self.state / "debug.keystore"
+        self.keystore.write_bytes(b"not-a-real-keystore")
+        os.environ["FROCKBOT_ANDROID_KEYSTORE"] = str(self.keystore)
+
+    def test_exports_the_newest_active_release_resigned_with_the_phone_key(self):
+        destination = self.state / "out" / "frockbot.apk"
+        output = io.StringIO()
+        with redirect_stdout(output):
+            updates.export_apk(destination)
+        exported = [item for item in self.shorebird() if item[0][1:3] == ["releases", "get-apks"]]
+        (args, kwargs), = exported
+        self.assertEqual(args[1:], ["releases", "get-apks", f"--release-version={BUILD_NAME}+{NOW + 9}",
+                                    "--out", args[args.index("--out") + 1]])
+        self.assertEqual(kwargs["cwd"], updates.NATIVE)
+        self.assertTrue(kwargs["check"])
+        # Listing and downloading the existing release is the whole Shorebird conversation.
+        self.assertFalse(any(command[0][1] == "release" for command in self.shorebird()))
+        signed = [call for call in self.calls if Path(call[0]).name == "apksigner" and call[1] == "sign"]
+        self.assertEqual(signed[0][signed[0].index("--ks") + 1], str(self.keystore))
+        self.assertTrue(destination.is_file())
+        self.assertGreater(destination.stat().st_size, 0)
+        self.assertEqual(json.loads(output.getvalue()),
+                         {"release": f"{BUILD_NAME}+{NOW + 9}", "file": str(destination)})
+
+    def test_refuses_to_export_without_the_existing_keystore(self):
+        self.keystore.unlink()
+        with self.assertRaisesRegex(RuntimeError, "signing key"):
+            updates.export_apk(self.state / "frockbot.apk")
+        self.assertFalse(any(call[1:3] == ["releases", "list"] for call in self.calls))
+
+    def test_rejects_an_apk_signed_by_someone_else(self):
+        self.signer = "ab" * 32
+        with self.assertRaisesRegex(RuntimeError, "signer"):
+            updates.export_apk(self.state / "frockbot.apk")
+        self.assertFalse((self.state / "frockbot.apk").exists())
+
+    def test_rejects_an_apk_whose_version_is_not_the_release(self):
+        self.badging_code = 1
+        with self.assertRaisesRegex(RuntimeError, "expected"):
+            updates.export_apk(self.state / "frockbot.apk")
+
+    def test_rejects_an_apk_without_the_patch_key(self):
+        self.embedded_der = b"other"
+        with self.assertRaisesRegex(RuntimeError, "shorebird-public-key"):
+            updates.export_apk(self.state / "frockbot.apk")
+
+    def test_uses_the_arm64_split_when_there_is_no_universal_apk(self):
+        self.export_names = ["app-arm64-v8a.apk", "app-x86_64.apk"]
+        destination = self.state / "frockbot.apk"
+        updates.export_apk(destination)
+        self.assertTrue(destination.is_file())
+
+    def test_refuses_an_ambiguous_set_of_apks(self):
+        self.export_names = ["one.apk", "two.apk"]
+        with self.assertRaisesRegex(RuntimeError, "one APK"):
+            updates.export_apk(self.state / "frockbot.apk")
+
+    def test_cli_requires_an_output_path(self):
+        with self.assertRaises(SystemExit):
+            updates.main(["export-apk"])
 
 
 if __name__ == "__main__":

@@ -9,7 +9,7 @@ FrockBot runs persistent Bots. A Bot holds a conversation, remembers across
 sessions, runs on a schedule, uses a cloud computer of its own (browser,
 files, terminal), writes tools and plugins that extend it, talks and listens,
 and works inside connected apps (Gmail, Calendar, Drive, GitHub, Slack,
-Notion). One web + Mac + phone client (phone not yet distributed). Hosted at
+Notion). One web + Mac + phone client (the phone app sideloads from GitHub releases; it is not in a store). Hosted at
 frockbot.com for US$20/month (US$15 credit included), or self-hosted into
 your own Cloudflare account with one command. MIT licensed.
 
@@ -75,11 +75,11 @@ sovereignty, with "read the docs" as the CTA and GitHub stars as proof.
 - 40 model providers built in; OAuth sign-in where a provider offers it.
 - Voice: composer dictation plus a continuous voice session across all Bots.
 - Connected apps: Gmail, Google Calendar, Google Drive, GitHub, Slack, Notion.
-- Mac app download at /download/mac. Phone apps built but not distributed.
+- Mac app download at /download/mac. Phone app sideloads as frockbot.apk on GitHub releases.
 - Self-host: `bun run setup`, Workers Paid + a zone + Zero Trust + Fly token.
 
 ## Things not to claim
 
-- Phone app availability (not in stores yet).
+- Phone app availability in an app store (sideload from GitHub releases only).
 - Named integrations beyond the six above.
 - Any usage numbers, testimonials or star counts (none yet).
