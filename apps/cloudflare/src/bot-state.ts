@@ -294,7 +294,11 @@ import {
 } from "@frockbot/app/skills/index-store";
 import { decodeSkillMetadataIndexV1 } from "@frockbot/app/skills/metadata-index";
 import { reseedInstructionRootV1 } from "@frockbot/app/skills/reseed";
-import type { WorkspaceGenerationPublicationV1 } from "@frockbot/core/workspace-store";
+import {
+  workspaceObjectPrefixV1,
+  type WorkspaceGenerationPublicationV1,
+} from "@frockbot/core/workspace-store";
+import { cleanRetiredMemoryFactObjectsV1 } from "@frockbot/app/memory/cleanup";
 import type { ClientWorkspaceFileV1 } from "./contracts.js";
 import {
   DurableWorkspaceGenerations,
@@ -332,8 +336,12 @@ import {
   createUserWorkspaceGenerationsV1,
   type UserMemoryRpc,
 } from "./memory.js";
+import { createMemoryEmbedder } from "@frockbot/app/memory/embeddings";
+import { MemoryRecordsV1 } from "@frockbot/app/memory/owner";
+import { createVectorMemorySearchV1 } from "@frockbot/app/memory/semantic";
 import {
   createBotMemoryEngineV1,
+  createUserMemoryRecordsRemoteV1,
   drainDurableMemoryV1,
   durableObjectHasSqlV1,
 } from "./memory-records.js";
@@ -532,6 +540,7 @@ export class BotState
     WORKSPACE_FILES?: WorkspaceFilesV1;
     MEMORY_WORKSPACE_FILES?: WorkspaceFilesV1;
     MEMORY_PROJECTS?: MemoryProjectsV1;
+    MEMORY_RECORDS?: MemoryRecordsV1;
     MEMORY_CHUNK_INDEX?: MemoryChunkIndexWriterV1;
     WORKSPACE_SYNC_FILES?: WorkspaceFilesV1;
     WORKSPACE_SYNC_EFFECTS?: WorkspaceSyncEffectsV1;
@@ -630,6 +639,26 @@ export class BotState
           },
           receiptKey: "maintenance:skill-index:bot:2026-09-22",
         });
+        const bucket = createR2ObjectBucketV1(this.env.MEMORY_FILES);
+        await cleanRetiredMemoryFactObjectsV1(
+          this.ctx.storage,
+          {
+            list: async (options) => {
+              const page = await bucket.list(options);
+              return {
+                keys: page.objects.map((object) => object.key),
+                ...(page.cursor ? { cursor: page.cursor } : {}),
+                truncated: page.truncated,
+              };
+            },
+            delete: (key) => bucket.delete(key),
+          },
+          workspaceObjectPrefixV1({
+            kind: "bot-memory",
+            userId: identity.userId,
+            botId: identity.botId,
+          }),
+        );
       }
       if (durableObjectHasSqlV1(this.ctx.storage)) {
         const memoryDue = createBotMemoryEngineV1(
@@ -1073,6 +1102,18 @@ export class BotState
         rpc,
         identity,
       );
+    }
+    if (durableObjectHasSqlV1(this.ctx.storage)) {
+      const vectors = this.env.MEMORY_INDEX as MemoryVectorIndex | undefined;
+      const ai = this.env.AI as MemoryAiBinding | undefined;
+      this.backendEnv.MEMORY_RECORDS = new MemoryRecordsV1({
+        owner: "bot",
+        engine: this.memoryEngine(),
+        remote: createUserMemoryRecordsRemoteV1(rpc, identity),
+        ...(vectors && ai
+          ? { semantic: createVectorMemorySearchV1(vectors, createMemoryEmbedder(ai)) }
+          : {}),
+      });
     }
     // The transcript index is User-scoped state, so its authority is the User
     // Durable Object and this object reaches it through a narrow binding —
@@ -3117,6 +3158,73 @@ export class BotState
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
     return revertComposition(shell.state, identity, command);
+  }
+
+  /**
+   * Canonical Memory for the selected Bot. Voice uses this for prepared core,
+   * blocking tools and standing preferences. Membership is filled here.
+   */
+  async operateMemory(input: unknown): Promise<unknown> {
+    if (!input || typeof input !== "object") {
+      throw new Error("memory request is invalid");
+    }
+    const request = input as {
+      schemaVersion?: number;
+      userId?: string;
+      botId?: string;
+      action?: string;
+      request?: unknown;
+    };
+    if (
+      request.schemaVersion !== 1 ||
+      typeof request.userId !== "string" ||
+      typeof request.botId !== "string" ||
+      typeof request.action !== "string"
+    ) {
+      throw new Error("memory request is invalid");
+    }
+    const identity = { userId: request.userId, botId: request.botId };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    const records = this.backendEnv.MEMORY_RECORDS;
+    if (!records) throw new Error("Memory is unavailable");
+    const body = { ...((request.request ?? {}) as Record<string, unknown>) };
+    const projects = this.backendEnv.MEMORY_PROJECTS;
+    const joined = projects ? await projects.joined() : [];
+    const claimed = body.authority;
+    if (claimed && typeof claimed === "object" && !Array.isArray(claimed)) {
+      body.authority = {
+        ...(claimed as Record<string, unknown>),
+        userId: identity.userId,
+        botId: identity.botId,
+        actor:
+          (claimed as { actor?: unknown }).actor === "user" ? "user" : "bot",
+        joinedGroupChatIds: joined.map((project) => project.projectId),
+        membershipRevision:
+          joined
+            .map((project) => project.projectId)
+            .sort()
+            .join(",") || "0",
+      };
+    }
+    switch (request.action) {
+      case "write":
+        return records.write(body as never);
+      case "forget":
+        return records.forget(body as never);
+      case "recall":
+        return records.recall(body as never);
+      case "expand":
+        return records.expand(body as never);
+      case "browse":
+        return records.browse(body as never);
+      case "preparedCore":
+        return records.preparedCore(body as never);
+      case "capture":
+        return records.captureExtraction(body as never);
+      default:
+        throw new Error(`unknown Memory action ${request.action}`);
+    }
   }
 
   async readVoiceContext(input: unknown) {

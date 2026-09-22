@@ -12,6 +12,12 @@ import type {
   RuntimeModelSelection,
 } from "@frockbot/app/agent-runtime";
 import {
+  authorityOf,
+  executeRecordsForgetV1,
+  executeRecordsWriteV1,
+} from "@frockbot/app/memory/engine-tools";
+import { productScopeToEngineV1 } from "@frockbot/app/memory/records";
+import {
   canonicalJson,
   decodeIsolateMemoryReadRequestV1,
   decodeIsolateMemoryWriteRequestV1,
@@ -669,6 +675,22 @@ export async function isolateMemoryRead(
   const memory = await isolateMemoryHost(state, input, request);
   if (!memory)
     return { status: "unavailable", reason: "Memory is unavailable" };
+  if (memory.records) {
+    const authority = await authorityOf({
+      owner: memory.owner,
+      records: memory.records,
+      ...(memory.projects ? { projects: memory.projects } : {}),
+    });
+    return {
+      status: "available",
+      value: await memory.records.preparedCore({
+        authority,
+        scopes: [
+          productScopeToEngineV1(request.scope, memory.owner, request.projectId),
+        ],
+      }),
+    };
+  }
   return {
     status: "available",
     value: await memory.store.read(
@@ -685,6 +707,27 @@ export async function isolateMemoryWrite(
   const memory = await isolateMemoryHost(state, input, request);
   if (!memory?.writer) {
     return { status: "unavailable", reason: "Memory is unavailable" };
+  }
+  if (memory.records) {
+    const written = await executeRecordsWriteV1(
+      {
+        owner: memory.owner,
+        records: memory.records,
+        writer: memory.writer,
+        ...(memory.projects ? { projects: memory.projects } : {}),
+      },
+      {
+        scope: request.scope,
+        ...(request.projectId ? { project: request.projectId } : {}),
+        tier: request.tier ?? "log",
+        fact: request.fact,
+      },
+      `plugin:${input.packageId}:${input.turnId}:${request.fact}`,
+    );
+    return {
+      status: "available",
+      value: written,
+    };
   }
   return {
     status: "available",
@@ -709,6 +752,23 @@ export async function isolateMemoryForget(
   const memory = await isolateMemoryHost(state, input, request);
   if (!memory?.writer) {
     return { status: "unavailable", reason: "Memory is unavailable" };
+  }
+  if (memory.records) {
+    const forgotten = await executeRecordsForgetV1(
+      {
+        owner: memory.owner,
+        records: memory.records,
+        writer: memory.writer,
+        ...(memory.projects ? { projects: memory.projects } : {}),
+      },
+      {
+        scope: request.scope,
+        ...(request.projectId ? { project: request.projectId } : {}),
+        fact: request.fact,
+      },
+      `plugin-forget:${input.packageId}:${input.turnId}:${request.fact}`,
+    );
+    return { status: "available", value: forgotten };
   }
   return {
     status: "available",

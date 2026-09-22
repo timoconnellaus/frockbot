@@ -19,6 +19,7 @@ import {
   type MemoryProductScopeV1,
   type MemoryScopeRefV1,
 } from "./records.js";
+import { explicitDatesInQueryV1 } from "./hybrid.js";
 import { isMemoryProjectIdV1, type MemoryOwnerV1 } from "./roots.js";
 import type { MemoryProjectsV1 } from "./projects.js";
 import { MEMORY_MAX_FACT_LENGTH } from "./store.js";
@@ -30,7 +31,7 @@ export interface MemoryRecordsHostV1 {
   projects?: MemoryProjectsV1;
 }
 
-async function authorityOf(
+export async function authorityOf(
   host: MemoryRecordsHostV1,
 ): Promise<MemoryAuthorityV1> {
   let joinedGroupChatIds: string[] = [];
@@ -159,11 +160,15 @@ export async function executeRecordsSearchV1(
           productScopeToEngineV1("project", host.owner, id),
         ),
       ];
+  const dates = explicitDatesInQueryV1(input.query);
   const recalled = await host.records.recall({
     authority,
     query: input.query,
     scopes,
     budget: input.maxResults ?? 5,
+    effort: "explicit",
+    ...(dates.occurredFrom ? { filters: dates } : {}),
+    ...(scopes[0] && input.scope ? { focusScope: scopes[0] } : {}),
   });
   if (recalled.status === "refused" || recalled.status === "unavailable") {
     const reason =
@@ -172,17 +177,25 @@ export async function executeRecordsSearchV1(
   }
   if (recalled.hits.length === 0)
     return { content: "No memory matches.", isError: false };
+  const header = `status=${recalled.status} tokensEstimated=${recalled.tokensEstimated ?? 0}`;
   return {
-    content: recalled.hits
-      .map((hit, index) => {
+    content: [
+      header,
+      ...recalled.hits.map((hit, index) => {
         const where = engineScopeToProductV1(hit.item.scope);
         const project =
           hit.item.scope.kind === "groupChat"
             ? `/${hit.item.scope.groupChatId}`
             : "";
-        return `[${index + 1}] ${where}${project}:${hit.item.id}\n${hit.item.text}`;
-      })
-      .join("\n\n---\n\n"),
+        const scopeKey =
+          hit.item.scope.kind === "bot"
+            ? `bot:${hit.item.scope.userId}:${hit.item.scope.botId}`
+            : hit.item.scope.kind === "user"
+              ? `user:${hit.item.scope.userId}`
+              : `groupChat:${hit.item.scope.userId}:${hit.item.scope.groupChatId}`;
+        return `[${index + 1}] ${where}${project}:${hit.item.id}\nmemory-item ${scopeKey} ${hit.item.id} ${hit.item.generation}\n${hit.item.text}`;
+      }),
+    ].join("\n\n---\n\n"),
     isError: false,
   };
 }
