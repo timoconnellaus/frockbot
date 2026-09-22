@@ -450,7 +450,7 @@ export class BotDurableAuthority<Snapshot> {
   private async promoteQueuedRun(runId: string): Promise<
     | "not-queued"
     | "blocked"
-      | {
+    | {
         seed: ReturnType<typeof turnContextSeedV1>;
         settings: Snapshot;
         compositionGenerationId: string;

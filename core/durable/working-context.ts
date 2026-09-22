@@ -70,15 +70,12 @@ export function registerWorkingContextProjectorV1(
 }
 
 export function workingContextProjectorV1():
-  | WorkingContextProjectorV1
-  | undefined {
+  WorkingContextProjectorV1 | undefined {
   return projector;
 }
 
 export type CursorAdvanceV1 =
-  | { kind: "replay" }
-  | { kind: "reject"; reason: string }
-  | { kind: "apply" };
+  { kind: "replay" } | { kind: "reject"; reason: string } | { kind: "apply" };
 
 export function requireConversationHeadV1(
   value: unknown,
@@ -331,12 +328,7 @@ async function writeCursorOnlyV1(
     await storage.get(workingContextHeadKeyV1(sessionId)),
     sessionId,
   );
-  const plan = planCursorAdvanceV1(
-    existing,
-    sessionId,
-    events,
-    expectedEpoch,
-  );
+  const plan = planCursorAdvanceV1(existing, sessionId, events, expectedEpoch);
   if (plan.kind === "replay") return;
   if (plan.kind === "reject") throw new Error(plan.reason);
   const base = existing ?? {

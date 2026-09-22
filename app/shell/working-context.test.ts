@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { decodeSessionEvent, type SessionEventInput } from "@frockbot/core/contracts";
+import {
+  decodeSessionEvent,
+  type SessionEventInput,
+} from "@frockbot/core/contracts";
 import { MemoryStorage } from "@frockbot/core/durable/testing";
 import { SessionEventLog } from "@frockbot/core/durable";
 import {
@@ -11,7 +14,10 @@ import { assembleJournalContextV1 } from "./working-context.js";
 
 const SESSION = "user:bot";
 
-function stamp(inputs: SessionEventInput[], start = 0): ReturnType<typeof decodeSessionEvent>[] {
+function stamp(
+  inputs: SessionEventInput[],
+  start = 0,
+): ReturnType<typeof decodeSessionEvent>[] {
   return inputs.map((input, index) =>
     decodeSessionEvent({
       ...input,
@@ -21,7 +27,11 @@ function stamp(inputs: SessionEventInput[], start = 0): ReturnType<typeof decode
   );
 }
 
-function chatTurn(turn: number, text: string, toolChars = 0): SessionEventInput[] {
+function chatTurn(
+  turn: number,
+  text: string,
+  toolChars = 0,
+): SessionEventInput[] {
   const events: SessionEventInput[] = [
     { type: "turn/start", turn },
     { type: "turn/admission", turn, turnType: "chat" },
@@ -147,17 +157,16 @@ describe("working context projection", () => {
     const storage = new BoundedStorage();
     const events = stamp(chatTurn(1, "hello"));
     await applyWorkingContextAppendV1(storage, SESSION, events);
-    const before = await storage.get(`context:head:${encodeURIComponent(SESSION)}`);
+    const before = await storage.get(
+      `context:head:${encodeURIComponent(SESSION)}`,
+    );
     await applyWorkingContextAppendV1(storage, SESSION, events);
     expect(
       JSON.stringify(
         await storage.get(`context:head:${encodeURIComponent(SESSION)}`),
       ),
     ).toBe(JSON.stringify(before));
-    const gap = stamp(
-      [{ type: "turn/start", turn: 2 }],
-      events.length + 5,
-    );
+    const gap = stamp([{ type: "turn/start", turn: 2 }], events.length + 5);
     await expect(
       applyWorkingContextAppendV1(storage, SESSION, gap),
     ).rejects.toThrow(/gap or overlap/);

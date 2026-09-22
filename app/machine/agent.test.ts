@@ -368,7 +368,9 @@ describe("a control tool's visible refusals", () => {
       // Nothing was recorded and nobody was asked.
       expect(harness.storage.size).toBe(0);
       expect(
-        harness.session.activeRunJournal.filter((event) => event.type === "send/to-user"),
+        harness.session.activeRunJournal.filter(
+          (event) => event.type === "send/to-user",
+        ),
       ).toHaveLength(0);
       return result.content;
     } finally {

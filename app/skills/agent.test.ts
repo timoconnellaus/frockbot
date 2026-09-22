@@ -649,7 +649,9 @@ describe("the skill_write tool", () => {
       false,
     );
     expect(
-      session.activeRunJournal.some((event) => event.type === "skill/write-intent"),
+      session.activeRunJournal.some(
+        (event) => event.type === "skill/write-intent",
+      ),
     ).toBe(false);
     await dispose();
   });
@@ -734,7 +736,9 @@ describe("the skill_write tool", () => {
     expect(written.isError).toBe(false);
     expect(written.content).toContain("skills/standup/references/forms.md");
     expect(
-      session.activeRunJournal.find((event) => event.type === "skill/write-intent"),
+      session.activeRunJournal.find(
+        (event) => event.type === "skill/write-intent",
+      ),
     ).toMatchObject({ path: "skills/standup/references/forms.md" });
     // It is loadable on the next Turn, as one of that Skill's references.
     const catalog = new SkillCatalog(OWNER, workspace);

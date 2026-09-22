@@ -391,7 +391,9 @@ async function runBatchV1(
     const first = Math.min(...failures.keys());
     throw failures.get(first);
   }
-  const journal = validateToolOccurrenceJournal(runtime.session.activeRunJournal);
+  const journal = validateToolOccurrenceJournal(
+    runtime.session.activeRunJournal,
+  );
   const results: BatchCallReportV1[] = decoded.map((sub, index) => {
     const settled = journal.get(
       batchToolOccurrenceId(occurrence.occurrenceId, index),

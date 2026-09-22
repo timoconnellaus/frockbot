@@ -169,7 +169,9 @@ describe("memory_write", () => {
     // The intent is still recorded: the refusal is an observable outcome of an
     // attempt, not an event that never happened.
     expect(
-      session.activeRunJournal.some((event) => event.type === "memory/write-intent"),
+      session.activeRunJournal.some(
+        (event) => event.type === "memory/write-intent",
+      ),
     ).toBe(true);
     expect(
       session.activeRunJournal.some((event) => event.type === "memory/written"),
@@ -788,7 +790,9 @@ describe("a project-scope change to a Project the Bot never joined", () => {
       session.activeRunJournal.some((event) => event.type === "memory/written"),
     ).toBe(false);
     expect(
-      session.activeRunJournal.some((event) => event.type === "memory/write-intent"),
+      session.activeRunJournal.some(
+        (event) => event.type === "memory/write-intent",
+      ),
     ).toBe(false);
     await dispose();
   });
@@ -870,7 +874,9 @@ describe("project_create when the descriptor write conflicts", () => {
     expect(created.isError).toBe(true);
     expect(created.content).toContain("conflict");
     expect(
-      session.activeRunJournal.some((event) => event.type === "memory/project-changed"),
+      session.activeRunJournal.some(
+        (event) => event.type === "memory/project-changed",
+      ),
     ).toBe(false);
     expect(await host.projects.joined()).toEqual([]);
     await dispose();

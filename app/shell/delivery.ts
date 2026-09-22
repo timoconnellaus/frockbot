@@ -98,7 +98,9 @@ function conversational(events: readonly SessionEvent[], turn: number) {
 export const conversationDeliveryHooksV1: LoopHooksV1 = {
   async request(agent, _request, _turn, _step, _signal, next) {
     const request = await next();
-    const start = agent.session.activeRunJournal.findLast((e) => e.type === "turn/start");
+    const start = agent.session.activeRunJournal.findLast(
+      (e) => e.type === "turn/start",
+    );
     if (
       start?.type !== "turn/start" ||
       !conversational(agent.session.activeRunJournal, start.turn)

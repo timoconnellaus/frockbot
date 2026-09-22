@@ -316,12 +316,7 @@ export async function completeStoredRun<Snapshot>(
       records[key] = structuredClone(value);
     }
   }
-  await commitSuffixV1(
-    storage,
-    run.sessionId,
-    run.previousEventCount,
-    events,
-  );
+  await commitSuffixV1(storage, run.sessionId, run.previousEventCount, events);
   await storage.put(records);
   await storage.delete(keys.activeRun);
   return "completed";

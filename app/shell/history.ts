@@ -25,10 +25,7 @@ import {
   type TurnTypeV1,
 } from "@frockbot/core/contracts";
 import { assembleJournalContextV1 } from "./working-context.js";
-import {
-  compactionStateV1,
-  type CompactionStateV1,
-} from "./compaction.js";
+import { compactionStateV1, type CompactionStateV1 } from "./compaction.js";
 
 export { currentTurnV1 };
 

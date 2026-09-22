@@ -541,7 +541,9 @@ describe("running a compaction", () => {
     expect(calls).toBe(1);
     expect(again.kind).toBe("skipped");
     expect(
-      session.activeRunJournal.filter((event) => event.type === "conversation/compacted"),
+      session.activeRunJournal.filter(
+        (event) => event.type === "conversation/compacted",
+      ),
     ).toHaveLength(1);
   });
 
@@ -571,9 +573,13 @@ describe("running a compaction", () => {
       reason: "interrupted",
     });
     expect(
-      session.activeRunJournal.some((event) => event.type === "conversation/compacted"),
+      session.activeRunJournal.some(
+        (event) => event.type === "conversation/compacted",
+      ),
     ).toBe(false);
-    expect(compactionStateV1(session.activeRunJournal).unsettled).toBeUndefined();
+    expect(
+      compactionStateV1(session.activeRunJournal).unsettled,
+    ).toBeUndefined();
   });
 
   test("records a failure and leaves the conversation alone", async () => {
@@ -592,7 +598,9 @@ describe("running a compaction", () => {
     ).toBe("provider refused the request");
     // The request that follows is exactly the one that would be assembled
     // without a compaction.
-    expect(compactionStateV1(session.activeRunJournal).compaction).toBeUndefined();
+    expect(
+      compactionStateV1(session.activeRunJournal).compaction,
+    ).toBeUndefined();
   });
 
   test("folds a previous summary into the range it extends", async () => {

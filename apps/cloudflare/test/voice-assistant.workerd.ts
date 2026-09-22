@@ -319,7 +319,9 @@ async function exchange(
   answered: string,
 ): Promise<void> {
   const before = (
-    Object.values(await stub.probeStorage("voice:call-turn:")) as VoiceTurnRecordV1[]
+    Object.values(
+      await stub.probeStorage("voice:call-turn:"),
+    ) as VoiceTurnRecordV1[]
   ).filter((turn) => turn.state !== "admitted").length;
   expect(await stub.probeHears(said)).toBe(true);
   expect(await stub.probeSays(answered)).toBe(true);

@@ -49,9 +49,7 @@ export interface WorkingContextProjectionV1 {
 
 function chatLike(turnType: TurnContextIndexV1["turnType"]): boolean {
   return (
-    turnType === "chat" ||
-    turnType === "agent" ||
-    turnType === "unspecified"
+    turnType === "chat" || turnType === "agent" || turnType === "unspecified"
   );
 }
 
@@ -119,10 +117,7 @@ function countTurn(head: ConversationHeadV1, turn: TurnProjectionV1): void {
   head.chatTurnCount += 1;
 }
 
-function noteMessages(
-  head: ConversationHeadV1,
-  turn: TurnProjectionV1,
-): void {
+function noteMessages(head: ConversationHeadV1, turn: TurnProjectionV1): void {
   if (!chatLike(turn.index.turnType) || turn.messages.length === 0) return;
   if (turn.index.messageBearing) return;
   head.messageBearingChatTurns += 1;
@@ -147,10 +142,7 @@ function rememberOccurrence(
   }
 }
 
-function pushVoice(
-  voice: VoiceExcerptV1,
-  line: VoiceExcerptLineV1,
-): void {
+function pushVoice(voice: VoiceExcerptV1, line: VoiceExcerptLineV1): void {
   voice.lines.push(line);
   const extra = voice.lines.length - VOICE_HISTORY_MAX_LIMIT_V1;
   if (extra > 0) voice.lines.splice(0, extra);
@@ -318,10 +310,7 @@ export function reduceWorkingContextAppendV1(input: {
         throw new Error("compaction covers an empty Turn range");
       }
       const covered = turns.get(event.throughTurn);
-      if (
-        head.compaction &&
-        head.compaction.throughTurn > event.throughTurn
-      ) {
+      if (head.compaction && head.compaction.throughTurn > event.throughTurn) {
         throw new Error("compaction is older than the committed summary");
       }
       if (head.unsettledCompaction?.effectId === event.effectId) {
@@ -359,7 +348,10 @@ export function reduceWorkingContextAppendV1(input: {
 export function turnsTouchedV1(events: readonly SessionEvent[]): number[] {
   const turns = new Set<number>();
   for (const event of events) {
-    if ("turn" in event && typeof (event as { turn?: unknown }).turn === "number") {
+    if (
+      "turn" in event &&
+      typeof (event as { turn?: unknown }).turn === "number"
+    ) {
       turns.add((event as { turn: number }).turn);
     }
     if (event.type === "conversation/compacted") turns.add(event.throughTurn);

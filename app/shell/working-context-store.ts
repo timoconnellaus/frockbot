@@ -91,7 +91,9 @@ async function storeMessages(
   const stored: StoredContextMessageV1[] = [];
   for (const [index, message] of messages.entries()) {
     const serialized = JSON.stringify(message);
-    if (encoder.encode(serialized).byteLength <= WORKING_CONTEXT_PAGE_BYTES_V1) {
+    if (
+      encoder.encode(serialized).byteLength <= WORKING_CONTEXT_PAGE_BYTES_V1
+    ) {
       stored.push(message);
       continue;
     }
@@ -151,15 +153,18 @@ async function writePages(
     current = candidate;
   }
   if (current.length > 0 || pages.length === 0) flush();
-  const written = messages.length === 0 ? [] : pages.filter((page) => page.messages.length > 0);
+  const written =
+    messages.length === 0
+      ? []
+      : pages.filter((page) => page.messages.length > 0);
   for (const page of written) {
     if (bytes(page) > WORKING_CONTEXT_PAGE_BYTES_V1) {
       throw new Error("working context page exceeds its byte budget");
     }
-    await storage.put(
-      workingContextPageKeyV1(sessionId, turn, page.page),
-      { ...page, page: written.indexOf(page) },
-    );
+    await storage.put(workingContextPageKeyV1(sessionId, turn, page.page), {
+      ...page,
+      page: written.indexOf(page),
+    });
   }
   for (let page = written.length; page < previousPageCount; page += 1) {
     await storage.delete(workingContextPageKeyV1(sessionId, turn, page));
@@ -191,7 +196,13 @@ async function readMessages(
     for (const message of stored.messages) {
       if (isChunkedMessageRefV1(message)) {
         messages.push(
-          await readChunked(storage, sessionId, index.turn, messageIndex, message),
+          await readChunked(
+            storage,
+            sessionId,
+            index.turn,
+            messageIndex,
+            message,
+          ),
         );
       } else {
         messages.push(message);
@@ -432,10 +443,7 @@ export async function truncateWorkingContextV1(
   }
   const voice = await loadVoice(storage, sessionId);
   voice.lines = voice.lines.filter((line) => line.seq < startSeq);
-  if (
-    head.compaction &&
-    head.compaction.throughSeq > startSeq
-  ) {
+  if (head.compaction && head.compaction.throughSeq > startSeq) {
     delete head.compaction;
   }
   const { openTurn: _open, ...rest } = head;
@@ -590,7 +598,10 @@ export async function selectStoredWorkingContextV1(
               `working context turn ${turn} was not indexed`,
             );
           }
-          return { turn, messages: await readMessages(storage, request.sessionId, index) };
+          return {
+            turn,
+            messages: await readMessages(storage, request.sessionId, index),
+          };
         }),
       );
       return renderWorkingContextV1({

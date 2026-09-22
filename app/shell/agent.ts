@@ -687,7 +687,10 @@ export const shellAgentFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
           if (signal.aborted) return;
           await runCompactionV1({
             session,
-            window: chatWindowV1(session.activeRunJournal, session.deriveMessages()),
+            window: chatWindowV1(
+              session.activeRunJournal,
+              session.deriveMessages(),
+            ),
             budget: CHAT_HISTORY_BUDGET_CHARS_V1,
             currentTurn: turn,
             newEffectId: () => `compaction-${crypto.randomUUID()}`,

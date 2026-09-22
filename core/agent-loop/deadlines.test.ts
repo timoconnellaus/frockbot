@@ -361,7 +361,9 @@ describe("classified model retry policy", () => {
     expect(attempts).toBe(2);
     expect(sleeps).toEqual([500]);
     expect(
-      handle.agent.session.activeRunJournal.find((event) => event.type === "model/retry"),
+      handle.agent.session.activeRunJournal.find(
+        (event) => event.type === "model/retry",
+      ),
     ).toMatchObject({
       attempt: 2,
       classification: "transient",

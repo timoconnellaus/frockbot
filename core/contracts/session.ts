@@ -241,11 +241,7 @@ export function normalizedMessagesV1(
   const messages: LlmMessage[] = [];
   const journal = validateToolOccurrenceJournal(events);
   for (const event of messageEventsV1(events)) {
-    if (
-      onlyTurn !== undefined &&
-      "turn" in event &&
-      event.turn !== onlyTurn
-    ) {
+    if (onlyTurn !== undefined && "turn" in event && event.turn !== onlyTurn) {
       continue;
     }
     if (event.type === "user/message") {
@@ -255,9 +251,7 @@ export function normalizedMessagesV1(
         role: "assistant",
         content: event.text,
         toolCalls: event.toolCalls,
-        ...(event.providerState
-          ? { providerState: event.providerState }
-          : {}),
+        ...(event.providerState ? { providerState: event.providerState } : {}),
       });
     } else if (event.type === "tool/result") {
       const call = journal.get(event.occurrenceId)!.occurrence.call;
@@ -388,7 +382,9 @@ export class Session {
     this.#selector = selector;
     const resolved = resolveSessionSeedV1(id, seed);
     if (resolved.cursor.sessionId !== id) {
-      throw new Error(`session "${id}" was seeded for "${resolved.cursor.sessionId}"`);
+      throw new Error(
+        `session "${id}" was seeded for "${resolved.cursor.sessionId}"`,
+      );
     }
     this.#epoch = resolved.cursor.epoch;
     this.#nextSeq = resolved.cursor.nextSeq;
@@ -413,7 +409,10 @@ export class Session {
         );
       }
       this.#events = structuredClone([...journal]);
-    } else if (resolved.cursor.nextSeq === 0 && resolved.cursor.nextTurn === 1) {
+    } else if (
+      resolved.cursor.nextSeq === 0 &&
+      resolved.cursor.nextTurn === 1
+    ) {
       this.append({
         type: "session/created",
         createdAt: new Date().toISOString(),

@@ -314,7 +314,9 @@ describe("a read", () => {
       expect(intent.turn).toBe(4);
       // Nothing was put on the session log: a read shows the user no card.
       expect(
-        harness.session.activeRunJournal.filter((event) => event.type === "send/to-user"),
+        harness.session.activeRunJournal.filter(
+          (event) => event.type === "send/to-user",
+        ),
       ).toEqual([]);
     } finally {
       await harness.dispose();

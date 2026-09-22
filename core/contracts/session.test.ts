@@ -478,7 +478,9 @@ describe("SessionStore", () => {
         : undefined,
     ).toBe(false);
     expect(
-      session.activeRunJournal.map((event) => decodeSessionEvent(structuredClone(event))),
+      session.activeRunJournal.map((event) =>
+        decodeSessionEvent(structuredClone(event)),
+      ),
     ).toEqual([...session.activeRunJournal]);
     expect(session.deriveMessages()).toEqual([
       { role: "user", content: "Hello" },
@@ -589,9 +591,9 @@ describe("SessionStore", () => {
       },
     ]);
     expect(session.cursor).toMatchObject({ nextSeq: 21, nextTurn: 5 });
-    expect(session.append({ type: "turn/end", turn: 4, outcome: "completed" }).seq).toBe(
-      21,
-    );
+    expect(
+      session.append({ type: "turn/end", turn: 4, outcome: "completed" }).seq,
+    ).toBe(21);
   });
 
   test("preserves open tool intents for effect reconciliation on resume", async () => {

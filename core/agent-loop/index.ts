@@ -711,7 +711,9 @@ class LoopAgent implements Agent, LoopRuntime {
       return;
     }
 
-    const journal = validateToolOccurrenceJournal(this.session.activeRunJournal);
+    const journal = validateToolOccurrenceJournal(
+      this.session.activeRunJournal,
+    );
     for (const occurrence of expandToolCallOccurrencesV1(
       turn,
       step,

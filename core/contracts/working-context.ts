@@ -202,9 +202,7 @@ export function emptyCommittedContextV1(): CommittedContextV1 {
   return { turns: [], omittedTurns: 0 };
 }
 
-export function emptyConversationHeadV1(
-  sessionId: string,
-): ConversationHeadV1 {
+export function emptyConversationHeadV1(sessionId: string): ConversationHeadV1 {
   return {
     schemaVersion: WORKING_CONTEXT_SCHEMA_VERSION_V1,
     sessionId,

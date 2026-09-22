@@ -887,12 +887,12 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         put: <T>(key: string, value: T) => storage.put<T>(key, value),
         delete: (key: string) => storage.delete(key),
         list: <T>(options: {
-        prefix: string;
-        start?: string;
-        end?: string;
-        reverse?: boolean;
-        limit?: number;
-      }) => storage.list<T>(options),
+          prefix: string;
+          start?: string;
+          end?: string;
+          reverse?: boolean;
+          limit?: number;
+        }) => storage.list<T>(options),
       });
     }
     return this.#memory;
@@ -2764,7 +2764,10 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
                 ? [
                     {
                       type: "reply/to-caller" as const,
-                      caller: line.to === "bot" ? ("bot" as const) : ("voice" as const),
+                      caller:
+                        line.to === "bot"
+                          ? ("bot" as const)
+                          : ("voice" as const),
                       text: line.text,
                     },
                   ]

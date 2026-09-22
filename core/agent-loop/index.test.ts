@@ -731,7 +731,9 @@ describe("AgentLoop", () => {
       }),
       expect.objectContaining({ type: "composition/pinned", turn: 2 }),
     ]);
-    const types = handle.agent.session.activeRunJournal.map((event) => event.type);
+    const types = handle.agent.session.activeRunJournal.map(
+      (event) => event.type,
+    );
     expect(types.indexOf("composition/pinned")).toBe(
       types.indexOf("turn/start") + 1,
     );
@@ -773,7 +775,9 @@ describe("AgentLoop", () => {
     handle.agent.send("Run the automation");
     await handle.agent.whenIdle();
 
-    const types = handle.agent.session.activeRunJournal.map((event) => event.type);
+    const types = handle.agent.session.activeRunJournal.map(
+      (event) => event.type,
+    );
     expect(types.indexOf("turn/admission")).toBe(
       types.indexOf("composition/pinned") + 1,
     );
@@ -940,7 +944,9 @@ describe("AgentLoop", () => {
         (event) => event.type === "model/request",
       ),
     ).toHaveLength(1);
-    const types = handle.agent.session.activeRunJournal.map((event) => event.type);
+    const types = handle.agent.session.activeRunJournal.map(
+      (event) => event.type,
+    );
     expect(types.at(-1)).toBe("turn/end");
     expect(types.at(-2)).toBe("step/end");
     expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
@@ -1058,7 +1064,9 @@ describe("AgentLoop", () => {
 
     expect(attempts).toBe(1);
     expect(
-      handle.agent.session.activeRunJournal.some((event) => event.type === "turn/end"),
+      handle.agent.session.activeRunJournal.some(
+        (event) => event.type === "turn/end",
+      ),
     ).toBe(false);
 
     handle.agent.resume();
@@ -1450,7 +1458,8 @@ describe("AgentLoop", () => {
         typeof (input as { value?: unknown }).value === "string",
       async execute(input, context) {
         const session = runtime.loop.get("general")?.session;
-        toolWasJournaled = session?.activeRunJournal.at(-1)?.type === "tool/call";
+        toolWasJournaled =
+          session?.activeRunJournal.at(-1)?.type === "tool/call";
         toolIntentWasDurable = durableEventTypes.at(-1) === "tool/call";
         const identifiedContext = context as typeof context & {
           agentId: string;
@@ -1674,7 +1683,9 @@ describe("AgentLoop", () => {
     handle.agent.send("Start an external effect.");
     await eventually(() =>
       expect(
-        handle.agent.session.activeRunJournal.some((event) => event.type === "tool/call"),
+        handle.agent.session.activeRunJournal.some(
+          (event) => event.type === "tool/call",
+        ),
       ).toBe(true),
     );
     handle.agent.cancel();

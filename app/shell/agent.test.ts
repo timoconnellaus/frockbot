@@ -161,7 +161,9 @@ describe("the Shell's tool admission", () => {
         isError: true,
       });
       expect(
-        mounted.session.activeRunJournal.some((event) => event.type === "wake/parent"),
+        mounted.session.activeRunJournal.some(
+          (event) => event.type === "wake/parent",
+        ),
       ).toBe(false);
     } finally {
       await mounted.dispose();
@@ -187,7 +189,9 @@ describe("the Shell's tool admission", () => {
         });
       }
       expect(
-        mounted.session.activeRunJournal.some((event) => event.type === "send/to-user"),
+        mounted.session.activeRunJournal.some(
+          (event) => event.type === "send/to-user",
+        ),
       ).toBe(false);
     } finally {
       await mounted.dispose();
@@ -223,7 +227,9 @@ describe("send_to_user", () => {
       expect(result.isError).toBe(false);
       expect(result.endsTurn).toBeUndefined();
       expect(
-        mounted.session.activeRunJournal.find((event) => event.type === "send/to-user"),
+        mounted.session.activeRunJournal.find(
+          (event) => event.type === "send/to-user",
+        ),
       ).toMatchObject({
         turn: 4,
         step: 2,
@@ -344,7 +350,9 @@ describe("send_to_user", () => {
       expect(result.content).toContain("send_to_user.payload.type is invalid");
       expect(result.endsTurn).toBeUndefined();
       expect(
-        mounted.session.activeRunJournal.some((event) => event.type === "send/to-user"),
+        mounted.session.activeRunJournal.some(
+          (event) => event.type === "send/to-user",
+        ),
       ).toBe(false);
     } finally {
       await mounted.dispose();
@@ -364,7 +372,9 @@ describe("wake_parent", () => {
 
       expect(result).toMatchObject({ isError: false, endsTurn: true });
       expect(
-        mounted.session.activeRunJournal.find((event) => event.type === "wake/parent"),
+        mounted.session.activeRunJournal.find(
+          (event) => event.type === "wake/parent",
+        ),
       ).toMatchObject({
         turn: 4,
         step: 2,
@@ -388,7 +398,9 @@ describe("wake_parent", () => {
       expect(result.isError).toBe(true);
       expect(result.endsTurn).toBeUndefined();
       expect(
-        mounted.session.activeRunJournal.some((event) => event.type === "wake/parent"),
+        mounted.session.activeRunJournal.some(
+          (event) => event.type === "wake/parent",
+        ),
       ).toBe(false);
     } finally {
       await mounted.dispose();
@@ -731,9 +743,9 @@ test("a send without an explicit disposition is refused before delivery", async 
     );
     expect(result.isError).toBe(true);
     expect(result.content).toContain("disposition");
-    expect(mounted.session.activeRunJournal.some((e) => e.type === "send/to-user")).toBe(
-      false,
-    );
+    expect(
+      mounted.session.activeRunJournal.some((e) => e.type === "send/to-user"),
+    ).toBe(false);
   } finally {
     await mounted.dispose();
   }
