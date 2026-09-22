@@ -539,7 +539,12 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   }
 
   Widget _providerCard(Map<String, Object?> provider, int index) {
+    // The semantics identifier is the provider's name. A filter that swaps
+    // the card in this slot has to build a new element: Flutter keeps the
+    // previous identifier on a reused one, so the visible Ollama card was
+    // still `view-group-amazon-bedrock`.
     return _ProviderRow(
+      key: ValueKey(_rowKey(provider)),
       index: index,
       provider: provider,
       accounts: accountsOf(provider),
@@ -1071,6 +1076,7 @@ class _ProviderRow extends StatefulWidget {
   final VoidCallback? onAdd;
   final VoidCallback? onRemove;
   const _ProviderRow({
+    super.key,
     required this.index,
     required this.provider,
     required this.accounts,
