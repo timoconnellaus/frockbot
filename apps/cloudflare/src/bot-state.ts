@@ -1731,6 +1731,25 @@ export class BotState
     return turn;
   }
 
+  /**
+   * The person's send. The receipt is durable before this returns; the Turn
+   * keeps running on the driver, which `waitUntil` holds, and on the alarm
+   * if that kick is lost.
+   */
+  async admitRun(input: unknown) {
+    const request = decodeBotRunRpcV1(input);
+    const identity = { userId: request.userId, botId: request.botId };
+    const { shell } = await this.materialized(identity);
+    const receipt = await shell.admit({ ...identity, ...request.command });
+    this.ctx.waitUntil(
+      shell.state.authority.whenDriverSettled().then(async () => {
+        await this.projectSettledRun(shell, identity, request.command.runId);
+        await this.projectSettledAudit(shell, identity, request.command.runId);
+      }),
+    );
+    return receipt;
+  }
+
   async runAgent(input: unknown) {
     const request = decodeBotAgentRunRpcV1(input);
     const identity = { userId: request.userId, botId: request.botId };

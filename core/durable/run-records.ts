@@ -231,6 +231,16 @@ export interface StoredRunV1<Snapshot = unknown> {
   supersededBy?: string;
   /** The Composition generation pinned in the same transaction that admitted the run. */
   compositionGenerationId: string;
+  /**
+   * The generation the Turn actually mounted when activation fell closed onto
+   * the last known good. The requested pin stays `compositionGenerationId`.
+   */
+  mountedCompositionGenerationId?: string;
+  /**
+   * Set once a `model/request` is durable. Supersede reads this header instead
+   * of the journal: a Turn that has not dispatched is left to finish.
+   */
+  hasModelIntent?: true;
   configurationSnapshot: Snapshot;
   previousEventCount: number;
   /** Absent ⇒ the run was admitted as a `chat` Turn. */
@@ -401,6 +411,8 @@ const STORED_RUN_OPTIONAL_KEYS = [
   "retriedBy",
   "messageRunId",
   "messageAdmittedAt",
+  "mountedCompositionGenerationId",
+  "hasModelIntent",
 ] as const;
 const UTF8_ENCODER = new TextEncoder();
 
@@ -854,6 +866,20 @@ function requireStoredRunRecordV1<Snapshot>(
     throw new Error(`run "${runId}" has no valid Composition generation`);
   }
   if (
+    candidate.mountedCompositionGenerationId !== undefined &&
+    !boundedString(candidate.mountedCompositionGenerationId, 256)
+  ) {
+    throw new Error(
+      `run "${runId}" has no valid mounted Composition generation`,
+    );
+  }
+  if (
+    candidate.hasModelIntent !== undefined &&
+    candidate.hasModelIntent !== true
+  ) {
+    throw new Error(`run "${runId}" has invalid hasModelIntent`);
+  }
+  if (
     !Number.isSafeInteger(candidate.previousEventCount) ||
     (candidate.previousEventCount as number) < 0
   ) {
@@ -975,6 +1001,15 @@ function requireStoredRunRecordV1<Snapshot>(
     status,
     phase,
     compositionGenerationId: candidate.compositionGenerationId,
+    ...(candidate.mountedCompositionGenerationId === undefined
+      ? {}
+      : {
+          mountedCompositionGenerationId:
+            candidate.mountedCompositionGenerationId as string,
+        }),
+    ...(candidate.hasModelIntent === true
+      ? { hasModelIntent: true as const }
+      : {}),
     configurationSnapshot,
     previousEventCount: candidate.previousEventCount as number,
     ...(candidate.responseText === undefined

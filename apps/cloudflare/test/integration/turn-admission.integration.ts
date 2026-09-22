@@ -67,13 +67,34 @@ async function chatTurn(
   text: string,
   commandId: string,
 ): Promise<TurnView> {
-  return (await expectOkJson(
+  const receipt = (await expectOkJson(
     await postAsUser(userId, `/api/bots/${botId}/turns`, {
       schemaVersion: 1,
       commandId,
       text,
     }),
   )) as TurnView;
+  if (receipt.text || receipt.events.length > 0) return receipt;
+  for (let attempt = 0; attempt < 40; attempt += 1) {
+    const lookup = (await expectOkJson(
+      await asUser(userId, `/api/bots/${botId}/turns/${commandId}`),
+    )) as {
+      state: string;
+      run?: {
+        events: TurnView["events"];
+        outcome?: { text?: string; message?: string };
+      };
+    };
+    if (lookup.state === "terminal" && lookup.run) {
+      return {
+        runId: commandId,
+        text: lookup.run.outcome?.text ?? lookup.run.outcome?.message ?? "",
+        events: lookup.run.events,
+      };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error(`turn ${commandId} was admitted but did not settle`);
 }
 
 async function listRuns(userId: string, botId: string): Promise<RunView[]> {

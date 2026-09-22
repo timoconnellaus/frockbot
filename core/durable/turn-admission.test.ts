@@ -608,3 +608,253 @@ describe("a retried send is idempotent whatever run it names", () => {
     ).not.toBe(botTurnCommandFingerprintV1(command));
   });
 });
+
+describe("admission does not wait for the previous Turn", () => {
+  test("a new command is durable while the previous provider call is unresolved", async () => {
+    const storage = new MemoryStorage();
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const seen: string[] = [];
+    const authority = new BotDurableAuthority<undefined>({
+      state: { storage } as unknown as DurableObjectState,
+      codec,
+      hooks: {
+        resolveAdmissionSnapshot: () => Promise.resolve(undefined),
+        bootstrapComposition: () => bootstrap(),
+        admittedSnapshot: () => Promise.resolve(undefined),
+        executeTurn: async (input) => {
+          seen.push(input.command.runId);
+          if (input.command.runId === "run-1") await gate;
+          return { runId: input.command.runId, text: "ok", events: [] };
+        },
+        notification: () => undefined,
+        scheduledDeadlines: () => Promise.resolve([]),
+        scheduledWorkInFlight: () => false,
+        deferScheduledWork: () => Promise.resolve(),
+        settleScheduledWork: () => Promise.resolve(),
+      },
+    });
+    const first = authority.run({
+      ...command("run-1"),
+      lane: "user",
+      supersedes: {},
+    });
+    for (let attempt = 0; attempt < 20 && seen.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    const receipt = await authority.admit({
+      ...command("run-2"),
+      text: "next",
+      lane: "user",
+      supersedes: { runId: "run-1" },
+    });
+    expect(receipt).toMatchObject({
+      schemaVersion: 1,
+      runId: "run-2",
+      disposition: "queued",
+    });
+    expect(receipt.completion).toBeUndefined();
+    expect(storage.values.has("run:run-2")).toBe(true);
+    expect(seen).toEqual(["run-1"]);
+    release?.();
+    await first;
+    await authority.whenDriverSettled();
+    expect(
+      (storage.values.get("run:run-2") as StoredRunV1<undefined>).status,
+    ).toBe("completed");
+  });
+
+  test("eviction after admission and before the kick still runs on the alarm", async () => {
+    const storage = new MemoryStorage();
+    const started = new BotDurableAuthority<undefined>({
+      state: { storage } as unknown as DurableObjectState,
+      codec,
+      hooks: {
+        resolveAdmissionSnapshot: () => Promise.resolve(undefined),
+        bootstrapComposition: () => bootstrap(),
+        admittedSnapshot: () => Promise.resolve(undefined),
+        executeTurn: () => Promise.reject(new Error("the kick must not run")),
+        notification: () => undefined,
+        scheduledDeadlines: () => Promise.resolve([]),
+        scheduledWorkInFlight: () => false,
+        deferScheduledWork: () => Promise.resolve(),
+        settleScheduledWork: () => Promise.resolve(),
+      },
+      kickDriver: false,
+    });
+    const receipt = await started.admit(command("run-1"));
+    expect(receipt.disposition).toBe("admitted");
+    expect(storage.alarmAt).toBeTypeOf("number");
+    const ran: string[] = [];
+    const resumed = new BotDurableAuthority<undefined>({
+      state: { storage } as unknown as DurableObjectState,
+      codec,
+      hooks: {
+        resolveAdmissionSnapshot: () => Promise.resolve(undefined),
+        bootstrapComposition: () => bootstrap(),
+        admittedSnapshot: () => Promise.resolve(undefined),
+        executeTurn: async (input) => {
+          ran.push(input.command.runId);
+          return { runId: input.command.runId, text: "resumed", events: [] };
+        },
+        notification: () => undefined,
+        scheduledDeadlines: () => Promise.resolve([]),
+        scheduledWorkInFlight: () => false,
+        deferScheduledWork: () => Promise.resolve(),
+        settleScheduledWork: () => Promise.resolve(),
+      },
+    });
+    await resumed.alarm();
+    expect(ran).toEqual(["run-1"]);
+    expect(
+      (storage.values.get("run:run-1") as StoredRunV1<undefined>).status,
+    ).toBe("completed");
+  });
+
+  test("a queued Turn keeps the Composition it was admitted under", async () => {
+    const storage = new MemoryStorage();
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const pins: string[] = [];
+    const authority = new BotDurableAuthority<undefined>({
+      state: { storage } as unknown as DurableObjectState,
+      codec,
+      hooks: {
+        resolveAdmissionSnapshot: () => Promise.resolve(undefined),
+        bootstrapComposition: () => bootstrap(),
+        admittedSnapshot: () => Promise.resolve(undefined),
+        executeTurn: async (input) => {
+          pins.push(input.compositionGenerationId);
+          if (input.command.runId === "run-1") await gate;
+          return { runId: input.command.runId, text: "ok", events: [] };
+        },
+        notification: () => undefined,
+        scheduledDeadlines: () => Promise.resolve([Date.now() + 120_000]),
+        scheduledWorkInFlight: () => false,
+        deferScheduledWork: () => Promise.resolve(),
+        settleScheduledWork: () => Promise.resolve(),
+      },
+    });
+    const first = authority.run({
+      ...command("run-1"),
+      lane: "user",
+      supersedes: {},
+    });
+    for (let attempt = 0; attempt < 20 && pins.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    const admittedPin = (
+      storage.values.get("run:run-1") as StoredRunV1<undefined>
+    ).compositionGenerationId;
+    await authority.admit({
+      ...command("run-2"),
+      text: "later",
+      lane: "user",
+      supersedes: { runId: "run-1" },
+    });
+    const queuedPin = (
+      storage.values.get("run:run-2") as StoredRunV1<undefined>
+    ).compositionGenerationId;
+    storage.values.set("composition:current", {
+      schemaVersion: 1,
+      generationId: "generation-later",
+    });
+    release?.();
+    await first;
+    await authority.whenDriverSettled();
+    expect(queuedPin).toBe(admittedPin);
+    expect(pins.at(-1)).toBe(admittedPin);
+    expect(pins.at(-1)).not.toBe("generation-later");
+  });
+
+  test("a rolled-back admission leaves neither the run nor its publication", async () => {
+    const storage = new MemoryStorage();
+    storage.failNextAlarm = true;
+    const authority = new BotDurableAuthority<undefined>({
+      state: { storage } as unknown as DurableObjectState,
+      codec,
+      hooks: {
+        resolveAdmissionSnapshot: () => Promise.resolve(undefined),
+        bootstrapComposition: () => bootstrap(),
+        admittedSnapshot: () => Promise.resolve(undefined),
+        executeTurn: () => Promise.reject(new Error("must not execute")),
+        notification: () => undefined,
+        scheduledDeadlines: () => Promise.resolve([]),
+        scheduledWorkInFlight: () => false,
+        deferScheduledWork: () => Promise.resolve(),
+        settleScheduledWork: () => Promise.resolve(),
+      },
+      kickDriver: false,
+    });
+    await expect(authority.admit(command("run-1"))).rejects.toThrow(
+      /alarm write failed/,
+    );
+    expect(storage.values.has("run:run-1")).toBe(false);
+    expect(storage.values.has("active-run")).toBe(false);
+    expect(
+      [...storage.values.keys()].some((key) =>
+        key.startsWith("publication-pending:"),
+      ),
+    ).toBe(false);
+    expect(
+      [...storage.values.keys()].some((key) => key.startsWith("repair-due:")),
+    ).toBe(false);
+  });
+
+  test("publication drains while a Turn is executing, and a read does not", async () => {
+    const storage = new MemoryStorage();
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const delivered: ReadonlyArray<Record<string, unknown>>[] = [];
+    let deferred = 0;
+    let settled = 0;
+    const authority = new BotDurableAuthority<undefined>({
+      state: { storage } as unknown as DurableObjectState,
+      codec,
+      hooks: {
+        resolveAdmissionSnapshot: () => Promise.resolve(undefined),
+        bootstrapComposition: () => bootstrap(),
+        admittedSnapshot: () => Promise.resolve(undefined),
+        executeTurn: async (input) => {
+          await authority.alarm();
+          await gate;
+          return { runId: input.command.runId, text: "ok", events: [] };
+        },
+        notification: () => undefined,
+        scheduledDeadlines: () => Promise.resolve([Date.now() + 60_000]),
+        scheduledWorkInFlight: () => false,
+        deferScheduledWork: async () => {
+          deferred += 1;
+        },
+        settleScheduledWork: async () => {
+          settled += 1;
+        },
+        deliverPublication: async (pending) => {
+          delivered.push(pending);
+        },
+      },
+    });
+    const running = authority.run(command("run-1"));
+    for (
+      let attempt = 0;
+      attempt < 20 && delivered.length === 0;
+      attempt += 1
+    ) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(delivered.length).toBeGreaterThan(0);
+    expect(deferred).toBeGreaterThan(0);
+    expect(settled).toBe(0);
+    const before = delivered.length;
+    await authority.readRunHeader("run-1");
+    expect(delivered.length).toBe(before);
+    release?.();
+    await running;
+  });
+});

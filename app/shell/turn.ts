@@ -32,6 +32,7 @@ import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import { selectStoredWorkingContextV1 } from "./working-context-store.js";
 import { resolveAppletComposition } from "@frockbot/app/applets-host/bot";
 import {
+  admitTurnCommandV1,
   admitTurnV1,
   compositionActivationStoreV1,
   compositionFailureLogV1,
@@ -101,10 +102,10 @@ function optionalStoredRun(input: unknown): StoredRun | undefined {
   return input === undefined ? undefined : requireStoredRunV1(input);
 }
 
-export async function run(
+async function prepareTurnAdmission(
   state: ShellBotStateV1,
   command: OwnedBotTurnCommand,
-): Promise<ClientTurnV1> {
+): Promise<void> {
   // Before the authority reads the session log, so a compaction detached
   // from the previous Turn has already handed the log back.
   await yieldCompactionWorkV1(command.sessionId);
@@ -116,7 +117,37 @@ export async function run(
     { userId: command.userId, botId: command.botId },
     command,
   );
+}
+
+/**
+ * Completion-waiting entry. A Routine or another Bot needs the settled Turn.
+ * A person's send uses {@link admitRun}, which returns as soon as the command
+ * is durable.
+ */
+export async function run(
+  state: ShellBotStateV1,
+  command: OwnedBotTurnCommand,
+): Promise<ClientTurnV1> {
+  await prepareTurnAdmission(state, command);
   return projectClientTurnV1(await admitTurnV1(state, command));
+}
+
+export async function admitRun(
+  state: ShellBotStateV1,
+  command: OwnedBotTurnCommand,
+): Promise<ClientTurnV1> {
+  await prepareTurnAdmission(state, command);
+  const receipt = await admitTurnCommandV1(state, command);
+  if (receipt.completion) return projectClientTurnV1(receipt.completion);
+  // An accepted command is not a completed result. The body stays a
+  // TurnResponse so an installed client can confirm the run id; the answer
+  // is read from the run lookup once the driver settles it.
+  return {
+    schemaVersion: 1,
+    runId: receipt.runId,
+    text: "",
+    events: [],
+  };
 }
 
 /**
