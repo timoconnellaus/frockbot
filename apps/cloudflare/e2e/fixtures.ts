@@ -638,6 +638,39 @@ export async function createRoutineThroughApi(
 }
 
 /**
+ * Fire a Routine now, through the same `routine/run` command the panel's
+ * Run now sends.
+ *
+ * The alarm drains the queue after this returns. Call it only once a different
+ * chat is the one on screen: a failure that arrives in the open chat is marked
+ * read on arrival and never badges the row.
+ */
+export async function runRoutineThroughApi(
+  page: Page,
+  options: { botId: string; routineId: string },
+): Promise<void> {
+  const response = await page.request.post(
+    `/api/bots/${encodeURIComponent(options.botId)}/routines`,
+    {
+      data: {
+        schemaVersion: 1,
+        type: "routine/run",
+        commandId: crypto.randomUUID(),
+        botId: options.botId,
+        routineId: options.routineId,
+      },
+    },
+  );
+  const text = await response.text();
+  expect(
+    response.ok(),
+    `routine/run answered ${response.status()}: ${text.slice(0, 500)}`,
+  ).toBe(true);
+  const receipt = JSON.parse(text) as { status: string };
+  expect(receipt.status).toBe("fired");
+}
+
+/**
  * Turn an account's features on, as an administrator does.
  *
  * There is no product route for this any more: administration left the app
