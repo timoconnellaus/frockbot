@@ -78,7 +78,11 @@ class PackageDeskApi extends NativeApi {
   }
 
   @override
-  Future<WebSocketChannel> socket(String botId, String? cursor) async =>
+  Future<WebSocketChannel> socket(
+    String botId, {
+    String? cursor,
+    String? epoch,
+  }) async =>
       throw const FormatException('outside this fixture');
 }
 
