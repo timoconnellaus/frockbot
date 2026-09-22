@@ -3321,12 +3321,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     });
   }
 
-  /// The saved profile name, falling back to the account this session holds.
+  /// The saved profile name, read again so a save on Settings shows up here.
   /// A name is a courtesy: a read that fails leaves the page usable.
   Future<String> _displayName() async {
-    if (profileName != null && profileName!.trim().isNotEmpty) {
-      return profileName!;
-    }
     await _loadProfile();
     return profileName ?? widget.userId;
   }
