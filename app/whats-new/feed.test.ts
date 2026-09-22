@@ -8,23 +8,32 @@ describe("What’s New feed", () => {
     const feed = whatsNewFeedV1();
     expect(feed.schemaVersion).toBe(1);
     expect(feed.entries[0]).toMatchObject({
+      id: "header-align",
+      title: "Chat header lines up",
+      kind: "fix",
+      image: {
+        src: "/whats-new/header-align.webp",
+        alt: "The phone chat header with Pixel, Dog, and Cow, each centered with the back arrow, name, and panel icon.",
+      },
+    });
+    expect(feed.entries[1]).toMatchObject({
       id: "quiet-delivery",
       title: "Sends acknowledge immediately",
       kind: "fix",
       summary:
         "A message is accepted as soon as it is saved. A long reply no longer looks like the send failed.",
     });
-    expect(feed.entries[1]).toMatchObject({
+    expect(feed.entries[2]).toMatchObject({
       id: "chat-scroll",
       title: "Earlier messages stay in reach",
       kind: "fix",
     });
-    expect(feed.entries[2]).toMatchObject({
+    expect(feed.entries[3]).toMatchObject({
       id: "marketplace-installed",
       title: "Installed in the Marketplace",
       kind: "improvement",
     });
-    expect(feed.entries[3]).toMatchObject({
+    expect(feed.entries[4]).toMatchObject({
       id: "chat-type",
       title: "Easier reading in chat",
       kind: "improvement",

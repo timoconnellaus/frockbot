@@ -20,13 +20,13 @@ const chatCompanionSize = 88.0;
 /// How far the thread fade reaches down from the top of the conversation.
 const chatHeaderFadeHeight = 168.0;
 
-/// Shared inset from the top of the conversation. The companion sits a
-/// little above it. At a desk the name and panel switch sit a little
-/// below so the title meets the drawing's visual mass. On a phone the
-/// pills stay on this inset and the companion rises to them.
+/// Shared inset from the top of the conversation. At a desk the companion
+/// sits a little above it and the name and panel switch sit a little
+/// below, so the title meets the drawing's visual mass. On a phone the
+/// back arrow, companion, name and panel switch share one vertical center.
 const chatHeaderChromeTop = 20.0;
 
-/// How far the companion sits above [chatHeaderChromeTop].
+/// How far the desk companion sits above [chatHeaderChromeTop].
 const chatHeaderCompanionLift = 8.0;
 
 /// How far the desk name and panel switch sit below [chatHeaderChromeTop].
@@ -165,7 +165,9 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
           right: chatHeaderChromeSide,
           child: DesktopWindowDragRegion(
             child: Row(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment: _centerPhoneChrome
+                  ? CrossAxisAlignment.center
+                  : CrossAxisAlignment.start,
               children: [
                 if (onBack != null) ...[
                   _chromeInset(
@@ -193,16 +195,20 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                   )
                 else ...[
                   if (companion != null) ...[
-                    Transform.translate(
-                      offset: const Offset(0, -chatHeaderCompanionLift),
-                      child: IgnorePointer(child: companion!),
-                    ),
+                    _centerPhoneChrome
+                        ? IgnorePointer(child: companion!)
+                        : Transform.translate(
+                            offset: const Offset(0, -chatHeaderCompanionLift),
+                            child: IgnorePointer(child: companion!),
+                          ),
                     const SizedBox(width: 10),
                   ],
                   Expanded(
                     child: _chromeInset(
                       Align(
-                        alignment: Alignment.topLeft,
+                        alignment: _centerPhoneChrome
+                            ? Alignment.centerLeft
+                            : Alignment.topLeft,
                         child: _overlayName(context),
                       ),
                     ),
@@ -249,6 +255,10 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     );
   }
 
+  /// A phone conversation centers the back arrow, companion, name and panel
+  /// switch. The desk keeps the companion high and the title low.
+  bool get _centerPhoneChrome => phone && companion != null;
+
   Widget _chromeInset(Widget child) => phone
       ? child
       : Padding(
@@ -274,7 +284,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
       );
     }
     return Padding(
-      padding: const EdgeInsets.only(top: 12),
+      padding: EdgeInsets.only(top: _centerPhoneChrome ? 0 : 12),
       child: _title(context, chevron: false, flexible: true, prominent: true),
     );
   }

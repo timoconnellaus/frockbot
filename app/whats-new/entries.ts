@@ -23,6 +23,16 @@ export type WhatsNewEntrySourceV1 = {
  */
 export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
+    id: "header-align",
+    title: "Chat header lines up",
+    summary: "The back arrow, avatar, name, and panel icon share one center.",
+    kind: "fix",
+    image: {
+      file: "header-align.webp",
+      alt: "The phone chat header with Pixel, Dog, and Cow, each centered with the back arrow, name, and panel icon.",
+    },
+  },
+  {
     id: "quiet-delivery",
     title: "Sends acknowledge immediately",
     summary:
