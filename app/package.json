@@ -113,6 +113,7 @@
     "./memory/agent": "./memory/agent.ts",
     "./memory/chunk-index": "./memory/chunk-index.ts",
     "./memory/projects": "./memory/projects.ts",
+    "./memory/reader": "./memory/reader.ts",
     "./memory/roots": "./memory/roots.ts",
     "./memory/secrets": "./memory/secrets.ts",
     "./memory/store": "./memory/store.ts",

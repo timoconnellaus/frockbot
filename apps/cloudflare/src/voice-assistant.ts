@@ -121,6 +121,8 @@ import {
   type VoiceAssistantUpstreamStateV1,
 } from "@frockbot/app/voice/shared";
 import { MemoryStore } from "@frockbot/app/memory/store";
+import { readLongTermMemoryV1 } from "@frockbot/app/memory/reader";
+import { voiceOpeningRereadsSessionMemoryV1 } from "@frockbot/app/voice/session-memory";
 import {
   botMemoryRootV1,
   projectMemoryRootV1,
@@ -1926,13 +1928,16 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         text: delegation.text,
       }),
     );
+    const sessionMemory = voiceOpeningRereadsSessionMemoryV1(options)
+      ? await timed(
+          this.timingSink(connection),
+          "session-voice-memory",
+          this.sessionMemoryContext(),
+        )
+      : context.session;
     const instruction = renderVoiceSystemPromptV1({
       ...context,
-      session: await timed(
-        this.timingSink(connection),
-        "session-voice-memory",
-        this.sessionMemoryContext(),
-      ),
+      session: sessionMemory,
       now: this.now(),
       ...(handover.length > 0 ? { handover } : {}),
       ...(runningTasks.length > 0 ? { runningTasks } : {}),
@@ -3036,7 +3041,8 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         if (!isMemoryProjectIdV1(projectId)) return "That is not a Project id.";
         const store = this.memoryStore(userId);
         if (!store) return "Memory is unavailable on this deployment.";
-        const tier = await store.read(
+        const tier = await readLongTermMemoryV1(
+          store,
           projectMemoryRootV1({ userId, botId: "voice" }, projectId),
         );
         if (tier.unavailable)
@@ -3781,7 +3787,8 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
           const store = this.memoryStore(userId);
           if (!store) return undefined;
           try {
-            return await store.read(
+            return await readLongTermMemoryV1(
+              store,
               userMemoryRootV1({ userId, botId: "voice" }),
             );
           } catch (error) {
@@ -3846,7 +3853,10 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
           const store = this.memoryStore(userId);
           if (!store) return undefined;
           try {
-            return await store.read(botMemoryRootV1({ userId, botId }));
+            return await readLongTermMemoryV1(
+              store,
+              botMemoryRootV1({ userId, botId }),
+            );
           } catch {
             return undefined;
           }
