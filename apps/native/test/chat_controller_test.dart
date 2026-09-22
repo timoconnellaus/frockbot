@@ -8,6 +8,38 @@ import 'package:frockbot_native/shell/transcript_model.dart';
 
 import 'widget_test.dart' show MemoryStore;
 
+class _StaleRunningPage implements ChatTransport {
+  @override
+  Future<Map<String, dynamic>> page(String botId, {String? before}) async => {
+    'schemaVersion': 1,
+    'runs': [run(runId: 'run-1')],
+    'page': {'truncated': false},
+  };
+
+  @override
+  Future<void> send(
+    String botId,
+    String id,
+    String text, {
+    String? supersedes,
+    String? retryOf,
+  }) async {}
+
+  @override
+  Future<Map<String, dynamic>?> lookup(
+    String botId,
+    String id, {
+    bool fence = false,
+  }) async => null;
+
+  @override
+  Future<Map<String, dynamic>> stop(
+    String botId,
+    String id,
+    String commandId,
+  ) async => throw UnimplementedError();
+}
+
 class RecordingTransport implements ChatTransport {
   int pages = 0;
   @override
@@ -108,6 +140,42 @@ void main() {
     final cached = decodePageCache(store.values[pageCacheKey('user-1', 'bot-1')]);
     expect(cached?.cursor, '1');
     expect(cached?.epoch, '1');
+    controller.dispose();
+  });
+
+  test('a late page cannot put a settled Turn back to work', () async {
+    final store = MemoryStore();
+    final controller = ChatController(
+      transport: _StaleRunningPage(),
+      store: store,
+      userId: 'user-1',
+      botId: 'bot-1',
+    );
+    await controller.applyFrame({
+      'type': 'state/update',
+      'epoch': '1',
+      'cursor': '2',
+      'kind': 'run-status',
+      'entityId': 'run:run-1',
+      'revision': 2,
+      'payload': {
+        'run': {
+          ...run(runId: 'run-1'),
+          'status': 'completed',
+          'events': [
+            {
+              'type': 'send/to-user',
+              'payload': {'type': 'text', 'text': 'Rendered this for you'},
+              'ordinal': 0,
+            },
+          ],
+        },
+      },
+    });
+    expect(controller.activeRunId, isNull);
+    await controller.refresh();
+    expect(controller.runs.single['status'], 'completed');
+    expect(controller.activeRunId, isNull);
     controller.dispose();
   });
 
