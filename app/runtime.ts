@@ -171,6 +171,10 @@ type EnabledRuntimeContributionFactory = (config: {
     connectionId: string,
     read: () => Promise<unknown>,
   ): Promise<unknown>;
+  readConnectToolCatalog?(
+    connection: { connectionId: string; generation?: string },
+    disclose: boolean,
+  ): Promise<unknown>;
   /** The Package's own outbound seam, when the host owns one. */
   fetch?: typeof fetch;
   /**
@@ -208,6 +212,7 @@ const enabledRuntimeContributionFactories = new Map<
       readSecret,
       fetch: outbound,
       pinToolCatalog,
+      readConnectToolCatalog,
       permitConnection,
     }) =>
       createConfiguredConnectRuntimeContribution({
@@ -219,6 +224,12 @@ const enabledRuntimeContributionFactories = new Map<
           : {}),
         ...(outbound ? { fetch: outbound } : {}),
         ...(pinToolCatalog ? { pinToolCatalog } : {}),
+        ...(readConnectToolCatalog && connection
+          ? {
+              readAccountCatalog: (disclose) =>
+                readConnectToolCatalog(connection, disclose),
+            }
+          : {}),
         ...(permitConnection && connection
           ? {
               permitConnection: () => permitConnection(connection),
@@ -573,6 +584,9 @@ export async function createFoundationEnabledRuntimePackages(
       packageSettings: host.packageSettings?.(packageId) ?? {},
       readSecret: host.readSecret,
       ...(host.pinToolCatalog ? { pinToolCatalog: host.pinToolCatalog } : {}),
+      ...(host.readConnectToolCatalog
+        ? { readConnectToolCatalog: host.readConnectToolCatalog }
+        : {}),
       authorizeConnection: () => host.authorizeConnection(capability),
       ...(connection ? { connection } : {}),
       ...(host.fetch ? { fetch: host.fetch } : {}),

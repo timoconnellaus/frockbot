@@ -754,3 +754,118 @@ describe("a dynamic tool called by its bare name", () => {
     expect(result.content).toBe("Unknown tool: not_a_tool");
   });
 });
+
+describe("lazy namespace resolution", () => {
+  test("lists directory names without running the resolver", async () => {
+    const { tools } = toolsFixture();
+    let resolved = 0;
+    tools.registerNamespace({
+      name: "gmail",
+      directory: [{ name: "send_email", description: "Sends an email." }],
+      resolve: () => {
+        resolved += 1;
+        return Promise.resolve({
+          status: "ready",
+          tools: [dynamicTool("gmail", "send_email", "Sends an email.")],
+        });
+      },
+    });
+    const listed = await invoke(tools, GET_DYNAMIC_TOOLS_NAME, {});
+    const searched = await invoke(tools, GET_DYNAMIC_TOOLS_NAME, {
+      pattern: "send",
+    });
+    expect(resolved).toBe(0);
+    expect(listed.content).toContain("send_email");
+    expect(searched.content).toContain("send_email");
+    expect(listed.content).not.toContain("inputSchema");
+  });
+
+  test("pins schemas by resolving only when a complete schema is requested", async () => {
+    const { tools } = toolsFixture();
+    let resolved = 0;
+    tools.registerNamespace({
+      name: "gmail",
+      directory: [{ name: "send_email", description: "Sends an email." }],
+      resolve: () => {
+        resolved += 1;
+        return Promise.resolve({
+          status: "ready",
+          tools: [
+            dynamicTool("gmail", "send_email", "Sends an email."),
+            dynamicTool("gmail", "list_mail", "Lists mail."),
+          ],
+        });
+      },
+    });
+    const first = await invoke(tools, GET_DYNAMIC_TOOLS_NAME, {
+      namespace: "gmail",
+    });
+    const second = await invoke(tools, GET_DYNAMIC_TOOLS_NAME, {
+      namespace: "gmail",
+      toolName: "send_email",
+    });
+    expect(resolved).toBe(1);
+    expect(first.content).toContain("inputSchema");
+    expect(second.content).toContain("send_email");
+    const called = await invoke(tools, CALL_DYNAMIC_TOOL_NAME, {
+      namespace: "gmail",
+      toolName: "send_email",
+      arguments: { value: "hi" },
+    });
+    expect(called.isError).toBe(false);
+    expect(resolved).toBe(1);
+  });
+
+  test("a direct call resolves before dispatch", async () => {
+    const { tools } = toolsFixture();
+    let resolved = 0;
+    tools.registerNamespace({
+      name: "gmail",
+      resolve: () => {
+        resolved += 1;
+        return Promise.resolve({
+          status: "ready",
+          tools: [dynamicTool("gmail", "send_email")],
+        });
+      },
+    });
+    const called = await invoke(tools, CALL_DYNAMIC_TOOL_NAME, {
+      namespace: "gmail",
+      toolName: "send_email",
+      arguments: {},
+    });
+    expect(resolved).toBe(1);
+    expect(called.isError).toBe(false);
+  });
+
+  test("two disclosures share one resolution", async () => {
+    const { tools } = toolsFixture();
+    let resolved = 0;
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    tools.registerNamespace({
+      name: "gmail",
+      resolve: async () => {
+        resolved += 1;
+        await gate;
+        return {
+          status: "ready" as const,
+          tools: [dynamicTool("gmail", "send_email")],
+        };
+      },
+    });
+    const first = invoke(tools, GET_DYNAMIC_TOOLS_NAME, { namespace: "gmail" });
+    const second = invoke(tools, GET_DYNAMIC_TOOLS_NAME, {
+      namespace: "gmail",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    expect(resolved).toBe(1);
+    release!();
+    const [left, right] = await Promise.all([first, second]);
+    expect(left.isError).toBe(false);
+    expect(right.isError).toBe(false);
+    expect(resolved).toBe(1);
+  });
+});

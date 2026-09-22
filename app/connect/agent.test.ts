@@ -169,11 +169,12 @@ describe("a connected app in a Bot's Turn", () => {
               error: null,
             }),
     });
-    expect(root.tools.registeredNames?.()).toContain("gmail/send_email");
     // The tools are absent from the native schema list: disclosed on request.
     expect(root.tools.schemas({ turnType: "chat" }).map((s) => s.name)).toEqual(
       ["batch", "get_dynamic_tools", "call_dynamic_tool"],
     );
+    expect(requests).toHaveLength(0);
+    expect(root.tools.registeredNames?.()).not.toContain("gmail/send_email");
     const result = await run(
       root,
       call("gmail", "send_email", { to: "a@example.com", body: "hi" }),
@@ -192,6 +193,22 @@ describe("a connected app in a Bot's Turn", () => {
       arguments: { to: "a@example.com", body: "hi" },
       version: "20250930_00",
     });
+    expect(root.tools.registeredNames?.()).toContain("gmail/send_email");
+    await root.dispose();
+  });
+
+  test("listing namespaces does not ask the provider for schemas", async () => {
+    const { root, requests } = await mount({
+      respond: () => Response.json(TOOL_LIST),
+    });
+    const listed = await run(root, {
+      id: "list",
+      name: "get_dynamic_tools",
+      input: {},
+    });
+    expect(listed.isError).toBe(false);
+    expect(listed.content).toContain("gmail");
+    expect(requests).toHaveLength(0);
     await root.dispose();
   });
 
@@ -231,6 +248,12 @@ describe("a connected app in a Bot's Turn", () => {
       respond: () => Response.json(TOOL_LIST),
       pinned,
     });
+    expect(first.requests).toHaveLength(0);
+    await run(first.root, {
+      id: "disclose",
+      name: "get_dynamic_tools",
+      input: { namespace: "gmail" },
+    });
     expect(first.requests).toHaveLength(1);
     const second = await mount({
       respond: () => {
@@ -238,7 +261,14 @@ describe("a connected app in a Bot's Turn", () => {
       },
       pinned,
     });
+    const disclosed = await run(second.root, {
+      id: "disclose-again",
+      name: "get_dynamic_tools",
+      input: { namespace: "gmail" },
+    });
     expect(second.requests).toHaveLength(0);
+    expect(disclosed.isError).toBe(false);
+    expect(disclosed.content).toContain("send_email");
     expect(second.root.tools.registeredNames?.()).toContain("gmail/send_email");
   });
 

@@ -17,6 +17,7 @@ import {
   type ToolRegistrationOptions,
   type ToolSchema,
   type TurnTypeV1,
+  TURN_TYPES_V1,
 } from "@frockbot/core/contracts";
 
 export { BATCH_MAX_CALLS_V1, BATCH_TOOL_NAME };
@@ -408,12 +409,28 @@ export function frockbotToolCallV1(call: {
   };
 }
 
+function namespaceOfCall(call: ToolCall): string | undefined {
+  if (
+    !call.input ||
+    typeof call.input !== "object" ||
+    Array.isArray(call.input)
+  ) {
+    return undefined;
+  }
+  const namespace = (call.input as { namespace?: unknown }).namespace;
+  return typeof namespace === "string" && namespace.trim()
+    ? namespace
+    : undefined;
+}
+
 export class ToolRegistry implements ToolExecution {
   private nativeDefinitions = new Map<string, RegisteredTool>();
   private dynamicDefinitions = new Map<string, Map<string, RegisteredTool>>();
   private namespaces = new Map<string, ToolNamespaceRegistration>();
   private guards: ToolGuard[] = [];
   private preparedDefinitions = new WeakMap<object, RegisteredTool>();
+  private pendingResolve = new Map<string, Promise<void>>();
+  private resolvedCleanups = new Map<string, Array<() => void>>();
 
   constructor(
     private readonly hooks: LoopHookListV1,
@@ -505,6 +522,10 @@ export class ToolRegistry implements ToolExecution {
       if (this.namespaces.get(namespace.name) === registered) {
         this.namespaces.delete(namespace.name);
       }
+      for (const undo of this.resolvedCleanups.get(namespace.name) ?? [])
+        undo();
+      this.resolvedCleanups.delete(namespace.name);
+      this.pendingResolve.delete(namespace.name);
     };
   }
 
@@ -593,6 +614,11 @@ export class ToolRegistry implements ToolExecution {
     context: ToolExecutionContext,
   ): Promise<ToolPreparation> {
     if (call.name === CALL_DYNAMIC_TOOL_NAME) {
+      const namespace = namespaceOfCall(call);
+      if (namespace) {
+        const refusal = await this.ensureResolved(namespace);
+        if (refusal) return this.denied(call, refusal);
+      }
       const resolved = this.resolveDynamicCall(call);
       if ("error" in resolved) return this.denied(call, resolved.error);
       const metadata = this.namespaces.get(
@@ -864,18 +890,101 @@ export class ToolRegistry implements ToolExecution {
     turnType: TurnTypeV1;
     subagentRole?: string;
   }): AvailableNamespace[] {
-    return [...this.dynamicDefinitions]
-      .map(([name, definitions]) => ({
-        name,
-        metadata: this.namespaces.get(name),
-        tools: [...definitions.values()]
-          .filter((registered) => this.admitted(registered, admission))
-          .toSorted((left, right) =>
-            left.definition.name.localeCompare(right.definition.name),
-          ),
-      }))
-      .filter(({ tools }) => tools.length > 0)
+    const names = new Set<string>([
+      ...this.dynamicDefinitions.keys(),
+      ...[...this.namespaces.entries()]
+        .filter(
+          ([, metadata]) =>
+            metadata.resolve !== undefined || metadata.directory !== undefined,
+        )
+        .map(([name]) => name),
+    ]);
+    return [...names]
+      .map((name) => {
+        const definitions = this.dynamicDefinitions.get(name);
+        const metadata = this.namespaces.get(name);
+        const registered = definitions
+          ? [...definitions.values()].filter((tool) =>
+              this.admitted(tool, admission),
+            )
+          : [];
+        const tools = (
+          registered.length > 0 ? registered : this.directoryListings(metadata)
+        ).toSorted((left, right) =>
+          left.definition.name.localeCompare(right.definition.name),
+        );
+        return { name, ...(metadata ? { metadata } : {}), tools };
+      })
+      .filter(
+        ({ tools, metadata }) =>
+          tools.length > 0 || metadata?.resolve !== undefined,
+      )
       .toSorted((left, right) => left.name.localeCompare(right.name));
+  }
+
+  /**
+   * Names from durable metadata, used until `resolve` has registered the
+   * schemas. They are not executable: dispatch goes through `resolve`.
+   */
+  private directoryListings(
+    metadata: ToolNamespaceRegistration | undefined,
+  ): RegisteredTool[] {
+    if (!metadata?.directory) return [];
+    return metadata.directory.map((entry) => ({
+      definition: {
+        namespace: metadata.name,
+        name: entry.name,
+        description: entry.description,
+        inputSchema: { type: "object", properties: {} },
+        execute: () =>
+          Promise.resolve({
+            content: "The tool's schema is not loaded.",
+            isError: true,
+          }),
+      },
+      admitted: TURN_TYPES_V1,
+      admittedRoles: undefined,
+    }));
+  }
+
+  /**
+   * Loads a lazy namespace once per Turn. Concurrent disclosures share the
+   * same promise. A refusal is the message to show; a thrown error is too.
+   */
+  private async ensureResolved(name: string): Promise<string | undefined> {
+    const metadata = this.namespaces.get(name);
+    if (!metadata?.resolve) return undefined;
+    if ((this.dynamicDefinitions.get(name)?.size ?? 0) > 0) return undefined;
+    let pending = this.pendingResolve.get(name);
+    if (!pending) {
+      pending = metadata
+        .resolve()
+        .then((result) => {
+          if (result.status !== "ready") {
+            throw new Error(result.message);
+          }
+          const cleanups = this.resolvedCleanups.get(name) ?? [];
+          for (const tool of result.tools) {
+            if (tool.namespace !== name) continue;
+            cleanups.push(this.register(tool, result.registration));
+          }
+          this.resolvedCleanups.set(name, cleanups);
+        })
+        .finally(() => {
+          if (this.pendingResolve.get(name) === pending) {
+            this.pendingResolve.delete(name);
+          }
+        });
+      this.pendingResolve.set(name, pending);
+    }
+    try {
+      await pending;
+      return undefined;
+    } catch (error) {
+      return error instanceof Error
+        ? error.message
+        : "The tool catalog is unavailable";
+    }
   }
 
   private catalogNamespace(
@@ -958,14 +1067,33 @@ export class ToolRegistry implements ToolExecution {
     if (namespaceName && selected.length === 0) {
       return { content: "Namespace not found", isError: true };
     }
+    const completeSchema =
+      toolName !== undefined ||
+      (namespaceName !== undefined && pattern === undefined);
+    if (completeSchema && namespaceName) {
+      const refusal = await this.ensureResolved(namespaceName);
+      if (refusal) return { content: refusal, isError: true };
+    }
+    const resolvedNamespaces = completeSchema
+      ? this.availableNamespaces({
+          turnType: context.turnType,
+          ...(context.subagentRole === undefined
+            ? {}
+            : { subagentRole: context.subagentRole }),
+        })
+      : namespaces;
+    const resolvedSelected = namespaceName
+      ? resolvedNamespaces.filter(({ name }) => name === namespaceName)
+      : resolvedNamespaces;
     if (toolName !== undefined) {
-      const registered = selected[0]!.tools.find(
+      const namespace = resolvedSelected[0];
+      const registered = namespace?.tools.find(
         ({ definition }) => definition.name === toolName,
       );
-      if (!registered) {
+      if (!namespace || !registered) {
         return {
           content: `Tool not found: "${toolName}" in namespace "${namespaceName}". Tools in this namespace: ${listOrNone(
-            selected[0]!.tools.map(({ definition }) => definition.name),
+            (namespace?.tools ?? []).map(({ definition }) => definition.name),
           )}`,
           isError: true,
         };
@@ -1007,8 +1135,10 @@ export class ToolRegistry implements ToolExecution {
       };
     }
     if (pattern === undefined && namespaceName !== undefined) {
+      const namespace = resolvedSelected[0];
+      if (!namespace) return { content: "Namespace not found", isError: true };
       return {
-        content: JSON.stringify(this.fullNamespace(selected[0]!)),
+        content: JSON.stringify(this.fullNamespace(namespace)),
         isError: false,
       };
     }

@@ -32,7 +32,31 @@ import { defineUserBackendContribution } from "@frockbot/core/contracts/contribu
 import type {
   UserSettingsBackendContribution,
   UserSettingsStorage,
+  UserSettingsTransaction,
 } from "@frockbot/app/settings/user";
+import {
+  armConnectCatalogAlarmV1,
+  coalesceConnectCatalogDiscoveryV1,
+  commitConnectCatalogJobV1,
+  CONNECT_CATALOG_FIRST_USE_MS_V1,
+  CONNECT_CATALOG_JOB_PREFIX_V1,
+  connectCatalogDisclosableV1,
+  connectCatalogRefreshDueV1,
+  ConnectCatalogInvalidError,
+  dueConnectCatalogJobsV1,
+  invalidateConnectCatalogV1,
+  publishConnectCatalogV1,
+  readConnectCatalogBodyV1,
+  readConnectCatalogDirectoryV1,
+  recordConnectCatalogFailureV1,
+  CONNECT_CATALOG_UNAVAILABLE_MESSAGE_V1,
+  CONNECT_STALE_CONTRACT_MESSAGE_V1,
+  type ConnectAccountCatalogAnswerV1,
+  type ConnectCatalogDirectoryV1,
+  type ConnectCatalogJobV1,
+  type ConnectCatalogStorageV1,
+  type ConnectCatalogTransactionV1,
+} from "./account-catalog.js";
 import {
   CONNECT_PACKAGE_ID,
   connectToolkitForConnectionTypeV1,
@@ -43,6 +67,7 @@ import {
   ComposioRequestError,
   type ComposioFetch,
   type ConnectedAccountSummaryV1,
+  type ConnectToolV1,
 } from "./composio.js";
 import {
   connectReadyConnectionsV1,
@@ -124,7 +149,13 @@ interface StoredAuthConfig {
 export interface ConnectUserBackendHost {
   storage: UserSettingsStorage & {
     delete(key: string): Promise<boolean>;
-    list<T>(options: { prefix: string }): Promise<Map<string, T>>;
+    list<T>(options: {
+      prefix: string;
+      limit?: number;
+      start?: string;
+    }): Promise<Map<string, T>>;
+    getAlarm?(): Promise<number | null>;
+    setAlarm?(scheduledTime: number): Promise<void>;
   };
   settings: UserSettingsBackendContribution;
   /** The deployment's provider key. Absent, nothing can be connected. */
@@ -198,6 +229,11 @@ export class ConnectUserBackendContribution {
   private readonly now: () => number;
   private readonly randomId: () => string;
   private readonly bootstrapDeadlineMs: number;
+  /** One provider listing per Connection generation, shared by concurrent Turns. */
+  private readonly catalogDiscovery = new Map<
+    string,
+    Promise<ConnectAccountCatalogAnswerV1>
+  >();
 
   constructor(private readonly host: ConnectUserBackendHost) {
     this.client =
@@ -470,6 +506,11 @@ export class ConnectUserBackendContribution {
           failure: connectFailureLineV1({ status: "EXPIRED" }),
         } as ConnectionView,
       );
+      await invalidateConnectCatalogV1(
+        this.catalogStorage(),
+        connection.connectionId,
+        "failed",
+      );
     }
     return { connectionId: connection.connectionId, routines };
   }
@@ -637,6 +678,11 @@ export class ConnectUserBackendContribution {
       } as ConnectionView,
     );
     await this.host.storage.delete(`${POLL_PREFIX}${connection.connectionId}`);
+    await invalidateConnectCatalogV1(
+      this.catalogStorage(),
+      connection.connectionId,
+      "revoked",
+    );
     if (this.client && metadata) {
       try {
         await this.client.deleteConnectedAccount(metadata.connectedAccountId);
@@ -737,6 +783,11 @@ export class ConnectUserBackendContribution {
       } as ConnectionView,
     );
     await this.host.storage.delete(`${POLL_PREFIX}${connection.connectionId}`);
+    await invalidateConnectCatalogV1(
+      this.catalogStorage(),
+      connection.connectionId,
+      "revoked",
+    );
     return receipt("applied");
   }
 
@@ -820,6 +871,331 @@ export class ConnectUserBackendContribution {
       next,
     );
     await this.host.storage.delete(`${POLL_PREFIX}${connection.connectionId}`);
+    if (state === "ready" && next.generation) {
+      await this.scheduleCatalogRefresh(next);
+    }
+  }
+
+  /**
+   * The account catalog a Turn may list or disclose.
+   *
+   * `disclose: false` reads the directory only. Schemas are fetched only when
+   * a Turn asks to disclose them and the stored catalog is missing or older
+   * than the disclosure window.
+   */
+  async readToolCatalog(input: {
+    userId: string;
+    connectionId: string;
+    generation: string;
+    disclose: boolean;
+    /** Tests shorten the first-use bound. Production uses the policy constant. */
+    firstUseMs?: number;
+  }): Promise<ConnectAccountCatalogAnswerV1> {
+    if (!input.disclose) return this.readDirectoryAnswer(input);
+    return coalesceConnectCatalogDiscoveryV1(
+      this.catalogDiscovery,
+      `${input.connectionId}:${input.generation}`,
+      () => this.discloseCatalog(input),
+    );
+  }
+
+  private async readDirectoryAnswer(input: {
+    userId: string;
+    connectionId: string;
+    generation: string;
+  }): Promise<ConnectAccountCatalogAnswerV1> {
+    const connection = await this.host.settings.getConnection(
+      input.userId,
+      input.connectionId,
+    );
+    const metadata = connection && connectSafeMetadataV1(connection);
+    if (
+      !connection ||
+      !metadata ||
+      connection.state !== "ready" ||
+      connection.generation !== input.generation
+    ) {
+      return {
+        kind: "stale-contract",
+        message: CONNECT_STALE_CONTRACT_MESSAGE_V1,
+      };
+    }
+    const directory = await this.directoryOrUndefined(input.connectionId);
+    return {
+      kind: "directory",
+      tools:
+        directory &&
+        directory.status !== "revoked" &&
+        directory.generation === input.generation
+          ? directory.tools.map((tool) => ({
+              name: tool.name,
+              description: tool.description,
+            }))
+          : [],
+    };
+  }
+
+  private async discloseCatalog(input: {
+    userId: string;
+    connectionId: string;
+    generation: string;
+    firstUseMs?: number;
+  }): Promise<ConnectAccountCatalogAnswerV1> {
+    const connection = await this.host.settings.getConnection(
+      input.userId,
+      input.connectionId,
+    );
+    const metadata = connection && connectSafeMetadataV1(connection);
+    if (
+      !connection ||
+      !metadata ||
+      connection.state !== "ready" ||
+      connection.generation !== input.generation
+    ) {
+      return {
+        kind: "stale-contract",
+        message: CONNECT_STALE_CONTRACT_MESSAGE_V1,
+      };
+    }
+    const directory = await this.directoryOrUndefined(input.connectionId);
+    if (
+      directory &&
+      connectCatalogDisclosableV1(directory, input.generation, this.now())
+    ) {
+      if (connectCatalogRefreshDueV1(directory, this.now())) {
+        await this.scheduleCatalogRefresh(connection);
+      }
+      return this.catalogAnswer(input.connectionId, directory);
+    }
+    const firstUseMs = input.firstUseMs ?? CONNECT_CATALOG_FIRST_USE_MS_V1;
+    return this.discoverCatalog(connection, metadata, firstUseMs);
+  }
+
+  /** Drains due catalog refreshes. One provider fetch per firing. */
+  async alarm(): Promise<void> {
+    const due = await dueConnectCatalogJobsV1(
+      this.catalogStorage(),
+      this.now(),
+    );
+    const next = due[0];
+    if (next) await this.refreshJob(next);
+    const remaining = await dueConnectCatalogJobsV1(
+      this.catalogStorage(),
+      this.now(),
+    );
+    const waiting = remaining[0];
+    if (waiting) {
+      await armConnectCatalogAlarmV1(this.catalogStorage(), waiting.dueAt);
+      return;
+    }
+    const listed = await this.host.storage.list<unknown>({
+      prefix: CONNECT_CATALOG_JOB_PREFIX_V1,
+    });
+    let earliest = Number.POSITIVE_INFINITY;
+    for (const value of listed.values()) {
+      if (
+        value &&
+        typeof value === "object" &&
+        typeof (value as { dueAt?: unknown }).dueAt === "number"
+      ) {
+        earliest = Math.min(earliest, (value as { dueAt: number }).dueAt);
+      }
+    }
+    if (Number.isFinite(earliest)) {
+      await armConnectCatalogAlarmV1(this.catalogStorage(), earliest);
+    }
+  }
+
+  private catalogStorage(): ConnectCatalogStorageV1 {
+    const storage = this.host.storage;
+    return {
+      get: (key) => storage.get(key),
+      put: (key, value) => storage.put(key, value),
+      delete: (key) => storage.delete(key),
+      list: (options) => storage.list(options),
+      transaction: (callback) =>
+        storage.transaction((tx) =>
+          callback(tx as unknown as ConnectCatalogTransactionV1),
+        ),
+      ...(storage.getAlarm ? { getAlarm: () => storage.getAlarm!() } : {}),
+      ...(storage.setAlarm
+        ? { setAlarm: (time: number) => storage.setAlarm!(time) }
+        : {}),
+    };
+  }
+
+  private async directoryOrUndefined(
+    connectionId: string,
+  ): Promise<ConnectCatalogDirectoryV1 | undefined> {
+    try {
+      return await readConnectCatalogDirectoryV1(
+        this.catalogStorage(),
+        connectionId,
+      );
+    } catch {
+      return undefined;
+    }
+  }
+
+  private readConnection(userId: string, connectionId: string) {
+    return (tx: ConnectCatalogTransactionV1) =>
+      this.host.settings.getConnection(
+        userId,
+        connectionId,
+        tx as unknown as UserSettingsTransaction,
+      );
+  }
+
+  private async scheduleCatalogRefresh(
+    connection: ConnectionView,
+  ): Promise<void> {
+    const metadata = connectSafeMetadataV1(connection);
+    if (!metadata || !connection.generation || connection.state !== "ready") {
+      return;
+    }
+    await commitConnectCatalogJobV1(this.catalogStorage(), {
+      schemaVersion: 1,
+      connectionId: connection.connectionId,
+      generation: connection.generation,
+      toolkitSlug: metadata.toolkitSlug,
+      namespace: metadata.namespace,
+      dueAt: this.now(),
+      attempts: 0,
+    });
+  }
+
+  private async discoverCatalog(
+    connection: ConnectionView,
+    metadata: ConnectSafeMetadataV1,
+    firstUseMs: number,
+  ): Promise<ConnectAccountCatalogAnswerV1> {
+    await this.scheduleCatalogRefresh(connection);
+    const finished = this.refreshConnection(connection, metadata).then(
+      async () => {
+        const directory = await this.directoryOrUndefined(
+          connection.connectionId,
+        );
+        if (
+          !directory ||
+          !connectCatalogDisclosableV1(
+            directory,
+            connection.generation ?? "",
+            this.now(),
+          )
+        ) {
+          return {
+            kind: "unavailable" as const,
+            message: CONNECT_CATALOG_UNAVAILABLE_MESSAGE_V1,
+          };
+        }
+        return this.catalogAnswer(connection.connectionId, directory);
+      },
+    );
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeout = new Promise<ConnectAccountCatalogAnswerV1>((resolve) => {
+      timer = setTimeout(() => {
+        resolve({
+          kind: "unavailable",
+          message: CONNECT_CATALOG_UNAVAILABLE_MESSAGE_V1,
+        });
+      }, firstUseMs);
+    });
+    const answer = await Promise.race([finished, timeout]);
+    if (timer) clearTimeout(timer);
+    return answer;
+  }
+
+  private async refreshConnection(
+    connection: ConnectionView,
+    metadata: ConnectSafeMetadataV1,
+  ): Promise<void> {
+    if (!this.client || !connection.generation) return;
+    const job: ConnectCatalogJobV1 = {
+      schemaVersion: 1,
+      connectionId: connection.connectionId,
+      generation: connection.generation,
+      toolkitSlug: metadata.toolkitSlug,
+      namespace: metadata.namespace,
+      dueAt: this.now(),
+      attempts: 0,
+    };
+    await this.refreshJob(job);
+  }
+
+  private async refreshJob(job: ConnectCatalogJobV1): Promise<void> {
+    if (!this.client) return;
+    const userId = await this.catalogUserId();
+    if (!userId) return;
+    let tools: ConnectToolV1[];
+    try {
+      tools = await this.client.listImportantTools(job.toolkitSlug);
+    } catch (error) {
+      await recordConnectCatalogFailureV1(this.catalogStorage(), {
+        job,
+        message:
+          error instanceof Error
+            ? error.message.slice(0, 300)
+            : "The tool catalog could not be loaded",
+        now: this.now(),
+        readConnection: this.readConnection(userId, job.connectionId),
+      });
+      return;
+    }
+    try {
+      await publishConnectCatalogV1(this.catalogStorage(), {
+        connectionId: job.connectionId,
+        generation: job.generation,
+        toolkitSlug: job.toolkitSlug,
+        namespace: job.namespace,
+        tools,
+        now: this.now(),
+        readConnection: this.readConnection(userId, job.connectionId),
+      });
+    } catch (error) {
+      if (error instanceof ConnectCatalogInvalidError) {
+        await recordConnectCatalogFailureV1(this.catalogStorage(), {
+          job,
+          message: error.message,
+          now: this.now(),
+          readConnection: this.readConnection(userId, job.connectionId),
+        });
+        return;
+      }
+      throw error;
+    }
+  }
+
+  private async catalogUserId(): Promise<string | undefined> {
+    // The alarm has no caller. Settings already pinned this object's User
+    // when the account was provisioned.
+    const stored = await this.host.storage.get<unknown>("user-id");
+    return typeof stored === "string" ? stored : undefined;
+  }
+
+  private async catalogAnswer(
+    connectionId: string,
+    directory: ConnectCatalogDirectoryV1,
+  ): Promise<ConnectAccountCatalogAnswerV1> {
+    try {
+      const body = await readConnectCatalogBodyV1(
+        this.catalogStorage(),
+        connectionId,
+        directory.contentHash,
+      );
+      return {
+        kind: "catalog",
+        catalog: {
+          schemaVersion: 1,
+          toolkitSlug: directory.toolkitSlug,
+          tools: body.tools,
+        },
+      };
+    } catch {
+      return {
+        kind: "unavailable",
+        message: CONNECT_CATALOG_UNAVAILABLE_MESSAGE_V1,
+      };
+    }
   }
 }
 

@@ -663,6 +663,13 @@ export async function agentRuntime(
       ...(turn
         ? {
             pinToolCatalog: turnToolCatalogPin(state.ctx.storage, turn.turnId),
+            readConnectToolCatalog: (connection, disclose) =>
+              userConfigurationReadConnectToolCatalogV1(
+                state,
+                identity.userId,
+                connection,
+                disclose,
+              ),
           }
         : {}),
       packageSettings,
@@ -861,4 +868,29 @@ export async function agentRuntime(
         : {}),
     },
   };
+}
+
+async function userConfigurationReadConnectToolCatalogV1(
+  state: ShellBotStateV1,
+  userId: string,
+  connection: { connectionId: string; generation?: string },
+  disclose: boolean,
+): Promise<unknown> {
+  if (!connection.generation) {
+    return {
+      kind: "stale-contract",
+      message:
+        "stale-contract: Access to this app was revoked. Connect it again.",
+    };
+  }
+  const rpc = state.env.USER_CONFIGURATIONS.get(
+    state.env.USER_CONFIGURATIONS.idFromName(userId),
+  );
+  return rpc.readConnectToolCatalog({
+    schemaVersion: 1,
+    userId,
+    connectionId: connection.connectionId,
+    generation: connection.generation ?? "",
+    disclose,
+  });
 }

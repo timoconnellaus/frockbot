@@ -131,6 +131,7 @@ import {
 import type { AppletState } from "./applet-state.js";
 import { cleanAppletTestStateV1 } from "./applet-test-state-cleanup.js";
 import { cleanUndecodableSkillIndexesV1 } from "./skill-index-cleanup.js";
+import { cleanUndecodableConnectCatalogsV1 } from "@frockbot/app/connect/account-catalog";
 import { reseedInstructionRootV1 } from "@frockbot/app/skills/reseed";
 import {
   base64ToBytes,
@@ -279,6 +280,7 @@ export class UserConfiguration
       await cleanDirectoryProfileTestState(this.ctx.storage);
       await cleanDefaultPackagesMarkerV1(this.ctx.storage);
       await cleanUndecodableSkillIndexesV1(this.ctx.storage);
+      await cleanUndecodableConnectCatalogsV1(this.ctx.storage);
       const userId = await this.ctx.storage.get<string>(USER_IDENTITY_KEY);
       if (typeof userId === "string" && this.env.MEMORY_FILES) {
         await reseedInstructionRootV1({
@@ -1830,6 +1832,25 @@ export class UserConfiguration
       );
     }
     return readDurableSkillIndexV1(this.skillIndexStorage(), root);
+  }
+
+  async readConnectToolCatalog(input: unknown): Promise<object> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      connectionId: rpcIdentifier,
+      generation: rpcString(128),
+      disclose: (value, label) => {
+        if (typeof value !== "boolean") throw new Error(`${label} is invalid`);
+        return value;
+      },
+    });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    return (await this.connectContribution()).readToolCatalog({
+      userId,
+      connectionId: request.connectionId as string,
+      generation: request.generation as string,
+      disclose: request.disclose as boolean,
+    });
   }
 
   async holdSkillIndex(input: unknown): Promise<void> {

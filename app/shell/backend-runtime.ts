@@ -188,6 +188,10 @@ export interface ShellEnabledRuntimeHostV1 {
     connectionId: string,
     read: () => Promise<unknown>,
   ): Promise<unknown>;
+  readConnectToolCatalog?(
+    connection: { connectionId: string; generation?: string },
+    disclose: boolean,
+  ): Promise<unknown>;
   authorizeConnection(capability: EnabledCapabilityV1): Promise<ConnectionView>;
   /**
    * Live Connection state at use. An admitted snapshot does not keep a

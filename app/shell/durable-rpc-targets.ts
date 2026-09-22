@@ -62,6 +62,13 @@ export interface BotUserConfigurationRpcTargetV1
   releaseSkillIndexHold(
     input: UserRpcEnvelopeV1<{ runId: string }>,
   ): Promise<void>;
+  readConnectToolCatalog(
+    input: UserRpcEnvelopeV1<{
+      connectionId: string;
+      generation: string;
+      disclose: boolean;
+    }>,
+  ): Promise<object>;
   getConnection(
     input: UserRpcEnvelopeV1<{ connectionId: string }>,
   ): Promise<object | undefined>;
