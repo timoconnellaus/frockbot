@@ -17,6 +17,7 @@ import { env } from "cloudflare:workers";
 import { evictDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 import type { AuditEntryV1, AuditRebuildReceiptV1 } from "@frockbot/app/audit";
+import { computerOperationIdV1 } from "@frockbot/computer/core";
 import type { FakeExecScript } from "./computer-host-fake.ts";
 import { frockbotToolCallPrompt } from "./harness/miniflare.ts";
 import { provisionBot, provisionSiblingBot } from "./provision-bot.ts";
@@ -116,11 +117,17 @@ describe("the audit table in Workerd", () => {
     expect(page.entries.every((entry) => entry.target === "computer")).toBe(
       true,
     );
-    // The occurrence id places every entry in a Turn, and doubles as the
-    // effect id the Computer envelope carries.
+    // The occurrence id places every entry in a Turn, and the effect id is
+    // the one the Computer envelope carried for it.
     for (const entry of page.entries) {
       expect(entry.occurrenceId).toMatch(/^tool:\d+:\d+:\d+$/);
-      expect(entry.effectId).toBe(entry.occurrenceId);
+      expect(entry.effectId).toBe(
+        await computerOperationIdV1({
+          botId: entry.botId,
+          runId: entry.runId,
+          effectId: entry.occurrenceId,
+        }),
+      );
       expect(entry.argumentDigest).toMatch(/^[0-9a-f]{64}$/);
     }
 

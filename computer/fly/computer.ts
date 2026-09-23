@@ -365,21 +365,35 @@ export class FlyAgentComputer {
     command: string,
     signal: AbortSignal,
     limits: { timeoutMs?: number; maxOutputBytes?: number } = {},
+    effectId?: string,
   ): Promise<SpriteAgentExecResult> {
-    return this.computer.execForAgent(this.layout, command, signal, limits);
+    return this.computer.execForAgent(
+      this.layout,
+      command,
+      signal,
+      limits,
+      effectId,
+    );
   }
 
   runStorage(command: string, signal: AbortSignal): Promise<string> {
     return this.computer.runStorageForAgent(this.layout, command, signal);
   }
 
-  browser(action: BrowserAction, signal: AbortSignal): Promise<string> {
-    return this.computer.browserForAgent(this.layout, action, signal);
+  browser(
+    action: BrowserAction,
+    signal: AbortSignal,
+    effectId?: string,
+  ): Promise<string> {
+    return this.computer.browserForAgent(this.layout, action, signal, effectId);
   }
 
   /** Captures this tenant's own desktop. */
-  screenshot(signal: AbortSignal): Promise<SpriteScreenshotV1> {
-    return this.computer.screenshotForAgent(this.layout, signal);
+  screenshot(
+    signal: AbortSignal,
+    effectId?: string,
+  ): Promise<SpriteScreenshotV1> {
+    return this.computer.screenshotForAgent(this.layout, signal, effectId);
   }
 
   /** Runs the Computer's self-check for this tenant. */
@@ -391,12 +405,14 @@ export class FlyAgentComputer {
     processId: string,
     command: string,
     signal: AbortSignal,
+    effectId?: string,
   ): Promise<SpriteProcessLaunchV1> {
     return this.computer.launchProcessForAgent(
       this.layout,
       processId,
       command,
       signal,
+      effectId,
     );
   }
 
@@ -416,8 +432,14 @@ export class FlyAgentComputer {
   stopProcess(
     processId: string,
     signal: AbortSignal,
+    effectId?: string,
   ): Promise<SpriteProcessStateV1> {
-    return this.computer.stopProcessForAgent(this.layout, processId, signal);
+    return this.computer.stopProcessForAgent(
+      this.layout,
+      processId,
+      signal,
+      effectId,
+    );
   }
 
   /** The Computer's provisioning generation, once it has been opened. */
@@ -640,6 +662,7 @@ export class FlyComputer {
     command: string,
     signal: AbortSignal,
     limits: { timeoutMs?: number; maxOutputBytes?: number } = {},
+    effectId?: string,
   ): Promise<SpriteAgentExecResult> {
     const host = await this.readyHost(layout, signal);
     const maxOutput = Math.max(
@@ -661,6 +684,7 @@ export class FlyComputer {
       script,
       {
         signal,
+        effectId,
         timeoutMs: Math.max(
           1,
           Math.min(limits.timeoutMs ?? TIMEOUTS.command, TIMEOUTS.command),
@@ -736,6 +760,7 @@ export class FlyComputer {
   async screenshotForAgent(
     layout: AgentLayout,
     signal: AbortSignal,
+    effectId?: string,
   ): Promise<SpriteScreenshotV1> {
     const host = await this.readyHost(layout, signal);
     const display = this.displays.get(layout.key);
@@ -773,6 +798,7 @@ export class FlyComputer {
       script,
       {
         signal,
+        effectId,
         timeoutMs: TIMEOUTS.screenshot,
         maxOutputBytes: SCREENSHOT_INLINE_OUTPUT_BYTES,
       },
@@ -803,6 +829,7 @@ export class FlyComputer {
         : (
             await host.fileRead(path, {
               signal,
+              ...(effectId ? { effectId: `${effectId}:read` } : {}),
               timeoutMs: TIMEOUTS.screenshot,
             })
           ).bytesBase64;
@@ -907,6 +934,7 @@ export class FlyComputer {
     processId: string,
     command: string,
     signal: AbortSignal,
+    effectId?: string,
   ): Promise<SpriteProcessLaunchV1> {
     const host = await this.readyHost(layout, signal);
     const directory = this.processDirectory(layout, processId);
@@ -930,7 +958,12 @@ export class FlyComputer {
     const outcome = await this.execute(
       host,
       script,
-      { signal, timeoutMs: TIMEOUTS.control, maxOutputBytes: MAX_OUTPUT },
+      {
+        signal,
+        effectId,
+        timeoutMs: TIMEOUTS.control,
+        maxOutputBytes: MAX_OUTPUT,
+      },
       "Sprite background launch failed",
     );
     const pid = Number(
@@ -972,6 +1005,7 @@ export class FlyComputer {
     layout: AgentLayout,
     processId: string,
     signal: AbortSignal,
+    effectId?: string,
   ): Promise<SpriteProcessStateV1> {
     const host = await this.readyHost(layout, signal);
     const directory = this.processDirectory(layout, processId);
@@ -999,12 +1033,20 @@ export class FlyComputer {
       script,
       {
         signal,
+        effectId,
         timeoutMs: (PROCESS_STOP_GRACE_SECONDS + 10) * 1_000,
         maxOutputBytes: MAX_OUTPUT,
       },
       "Sprite background stop failed",
     );
-    return this.readProcess(host, layout, processId, signal);
+    return this.readProcess(
+      host,
+      layout,
+      processId,
+      signal,
+      undefined,
+      effectId && `${effectId}:read`,
+    );
   }
 
   /**
@@ -1041,6 +1083,7 @@ export class FlyComputer {
     processId: string,
     signal: AbortSignal,
     tailBytes = PROCESS_LOG_DEFAULT_TAIL_BYTES,
+    effectId?: string,
   ): Promise<SpriteProcessStateV1> {
     const bounded = Math.max(
       1,
@@ -1067,6 +1110,7 @@ export class FlyComputer {
       script,
       {
         signal,
+        effectId,
         timeoutMs: TIMEOUTS.control,
         maxOutputBytes: PROCESS_LOG_MAX_TAIL_BYTES * 4,
       },
@@ -1089,6 +1133,7 @@ export class FlyComputer {
     layout: AgentLayout,
     action: BrowserAction,
     signal: AbortSignal,
+    effectId?: string,
   ): Promise<string> {
     const host = await this.readyHost(layout, signal);
     const encoded = Buffer.from(JSON.stringify(action)).toString("base64url");
@@ -1102,7 +1147,12 @@ export class FlyComputer {
     const outcome = await this.execute(
       host,
       script,
-      { signal, timeoutMs: TIMEOUTS.browser, maxOutputBytes: MAX_OUTPUT * 2 },
+      {
+        signal,
+        effectId,
+        timeoutMs: TIMEOUTS.browser,
+        maxOutputBytes: MAX_OUTPUT * 2,
+      },
       "Sprite browser action failed",
     );
     return clipped(

@@ -6,8 +6,17 @@ import {
   type UsageSettlement,
 } from "@frockbot/app/billing/ledger";
 import {
+  createAgentRuntimeHarness,
+  frockbotToolCall,
+} from "@frockbot/app/testkit";
+import { createComputerAgentFeature } from "@frockbot/computer/agent";
+import { computerOperationIdV1 } from "@frockbot/computer/core";
+import {
   COMPUTER_HOST_ROUTES,
+  COMPUTER_HOST_STREAM_MEDIA_TYPE,
   decodeComputerHostHttpRequestV1,
+  encodeComputerHostExecFrameV1,
+  encodeComputerHostOpenFrameV1,
   encodeComputerHostRequestV1,
   type ComputerHostOperationV1,
 } from "@frockbot/computer/host-protocol";
@@ -17,6 +26,7 @@ import {
   COMPUTER_RATE_DESCRIPTION,
   prepaidComputerHost,
 } from "./billing-computer";
+import { createComputerHostV1 } from "./computer-host";
 
 function request(
   operation: ComputerHostOperationV1,
@@ -379,5 +389,142 @@ describe("prepaidComputerHost", () => {
 
     expect(account.reservations).toHaveLength(1);
     expect(account.settlements).toEqual([]);
+  });
+});
+
+describe("a Computer tool call's reservation", () => {
+  /** A host that opens the Computer, mints a viewer, and runs every command. */
+  function computerHost(): Fetcher {
+    return host(async (request) => {
+      const decoded = await decodeComputerHostHttpRequestV1(
+        request as unknown as Parameters<
+          typeof decodeComputerHostHttpRequestV1
+        >[0],
+      );
+      if (!decoded.ok) return decoded.response;
+      const { effectId, operation } = decoded.value;
+      if (operation.kind === "open") {
+        const result = {
+          version: 1 as const,
+          effectId,
+          instanceId: "computer-1",
+          directory: "agent-data/agents/tenant",
+          display: ":100",
+          generation: 1,
+        };
+        return operation.stream
+          ? new Response(
+              encodeComputerHostOpenFrameV1({ type: "result", result }),
+              { headers: { "content-type": COMPUTER_HOST_STREAM_MEDIA_TYPE } },
+            )
+          : Response.json(result);
+      }
+      if (operation.kind === "viewer") {
+        return Response.json({
+          version: 1,
+          effectId,
+          session: { id: "viewer-1", url: "https://viewer.invalid/" },
+        });
+      }
+      if (operation.kind === "exec" && operation.stream) {
+        return new Response(
+          encodeComputerHostExecFrameV1({
+            type: "exit",
+            exitCode: 0,
+            outputTruncated: false,
+          }),
+          { headers: { "content-type": COMPUTER_HOST_STREAM_MEDIA_TYPE } },
+        );
+      }
+      return Response.json({
+        version: 1,
+        effectId,
+        exitCode: 0,
+        stdoutBase64: "",
+        stderrBase64: "",
+        outputTruncated: false,
+      });
+    }).fetcher;
+  }
+
+  /** One `computer_exec` call from one Turn of one Bot, through billing. */
+  async function exec(
+    account: AccountSpy,
+    call: { botId: string; runId: string; sessionId: string },
+  ): Promise<void> {
+    const harness = createAgentRuntimeHarness();
+    harness.computers.register(
+      createComputerHostV1({
+        fetcher: prepaidComputerHost(computerHost(), () => account.rpc()),
+        hostToken: "host-token",
+      }),
+    );
+    await harness.mount(
+      createComputerAgentFeature({
+        userId: "user-1",
+        defaultProviderId: "computer-host",
+        writer: {
+          sessionId: call.sessionId,
+          turnId: call.runId,
+          runId: call.runId,
+        },
+      }),
+    );
+    const context = {
+      botId: call.botId,
+      agentId: call.runId,
+      compositionGenerationId: "bootstrap",
+      turnType: "chat" as const,
+      sessionId: call.sessionId,
+      // Every Session's first tool call.
+      effectId: "tool:1:1:0",
+      signal: new AbortController().signal,
+    };
+    const prepared = await harness.tools.prepare(
+      frockbotToolCall("computer_exec", { command: "true" }),
+      context,
+    );
+    if (prepared.kind !== "ready") throw new Error(prepared.result.content);
+    await harness.tools.executePrepared(prepared, context);
+    await harness.dispose();
+  }
+
+  /**
+   * The ids the tool call itself was billed under. Attaching the Computer
+   * names no call, so the transport gives each of its requests a random one.
+   */
+  function operationIds(billed: readonly { id: string }[]): string[] {
+    return billed
+      .map((entry) => entry.id)
+      .filter((id) => !/^computer:[0-9a-f]{8}-[0-9a-f-]{27}$/.test(id));
+  }
+
+  test("is the durable call's, so a second Session or Bot never shares it", async () => {
+    const account = new AccountSpy();
+    const chat = { botId: "bot-1", runId: "run-1", sessionId: "user-1:bot-1" };
+
+    await exec(account, chat);
+    await exec(account, {
+      botId: "bot-1",
+      runId: "run-2",
+      sessionId: "routine:daily",
+    });
+    // Run ids are only unique per Bot, so another Bot may reuse this one.
+    await exec(account, { ...chat, botId: "bot-2", sessionId: "user-1:bot-2" });
+    // A re-dispatched call is the same durable call.
+    await exec(account, chat);
+
+    const reserved = operationIds(account.reservations);
+    expect(reserved).toHaveLength(4);
+    expect(reserved[0]).toBe(
+      `computer:${await computerOperationIdV1({
+        botId: "bot-1",
+        runId: "run-1",
+        effectId: "tool:1:1:0",
+      })}`,
+    );
+    expect(new Set(reserved.slice(0, 3)).size).toBe(3);
+    expect(reserved[3]).toBe(reserved[0]);
+    expect(operationIds(account.settlements)).toEqual(reserved);
   });
 });

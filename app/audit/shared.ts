@@ -116,15 +116,17 @@ export interface AuditEntryV1 {
   schemaVersion: 1;
   botId: string;
   runId: string;
-  /** `tool:<turn>:<step>:<ordinal>`; also the Computer envelope's `effectId`. */
+  /** `tool:<turn>:<step>:<ordinal>`. */
   occurrenceId: string;
   turn: number;
   step: number;
   ordinal: number;
   /**
-   * The durable effect identifier. `plugin-shell` writes
-   * `occurrenceId: context.effectId`, so this is the same string the Computer
-   * host's envelope carries and the key a host-journal reconciliation joins on.
+   * The id the effect ran under, and the key a host-journal reconciliation
+   * joins on. A Computer tool's is the id its host envelope carried —
+   * `computerOperationIdV1` of the Bot, the run and the occurrence, because an
+   * occurrence id repeats across Sessions and Bots — and anything else's is
+   * its occurrence id.
    */
   effectId: string;
   /** ISO-8601: the run's admission time, so a rebuild reproduces it exactly. */

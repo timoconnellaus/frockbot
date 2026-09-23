@@ -1,3 +1,4 @@
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import {
   workspaceRootKeyV1,
   type WorkspaceRootKindV1,
@@ -240,7 +241,29 @@ export function normalizeComputerPath(path: string): string {
 
 export interface ComputerOperationOptions {
   signal?: AbortSignal;
+  /** The durable call this operation belongs to: see {@link computerOperationIdV1}. */
   effectId?: string;
+}
+
+/**
+ * The id one durable Computer call runs under on the host: its operations,
+ * its background process, and its billing reservation.
+ *
+ * A tool call's `effectId` restarts in every Session and repeats across Bots,
+ * while the Computer and its billing account are the User's, so the Bot and
+ * the run are part of it. A run id is stable across re-dispatch, so a replayed
+ * call runs under the same id. The audit derives it from the same three values
+ * to join the host's journal to the call that caused it.
+ */
+export async function computerOperationIdV1(call: {
+  botId: string;
+  runId: string;
+  effectId: string;
+}): Promise<string> {
+  const digest = await sha256HexTextV1(
+    `${call.botId}\u0000${call.runId}\u0000${call.effectId}`,
+  );
+  return `computer-${digest.slice(0, 32)}`;
 }
 
 /** Provider-neutral detail for provisioning nested under a connection step. */

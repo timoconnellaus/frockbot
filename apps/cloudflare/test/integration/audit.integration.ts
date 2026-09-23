@@ -11,6 +11,7 @@
 // argument list at all.
 import { env } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
+import { computerOperationIdV1 } from "@frockbot/computer/core";
 import type { AuditEntryV1 } from "@frockbot/app/audit";
 import type { FakeExecScript } from "../computer-host-fake.ts";
 import { frockbotToolCallPrompt } from "../harness/miniflare.ts";
@@ -102,7 +103,14 @@ describe("auditing one Turn's effects", () => {
     for (const entry of page.entries) {
       expect(entry.argumentDigest).toMatch(/^[0-9a-f]{64}$/);
       expect(entry.occurrenceId).toMatch(/^tool:\d+:\d+:\d+$/);
-      expect(entry.effectId).toBe(entry.occurrenceId);
+      // The effect id is the one the Computer envelope carried for it.
+      expect(entry.effectId).toBe(
+        await computerOperationIdV1({
+          botId: entry.botId,
+          runId: entry.runId,
+          effectId: entry.occurrenceId,
+        }),
+      );
     }
     const wire = JSON.stringify(page.entries);
     expect(wire).not.toContain("abcdefghijklmnopqrstuvwxyz0123");
