@@ -39,6 +39,46 @@ class _StaleRunningPage implements ChatTransport {
   ) async => throw UnimplementedError();
 }
 
+class _FixedPage implements ChatTransport {
+  _FixedPage(this.runs);
+  final List<Object> runs;
+
+  @override
+  Future<Map<String, dynamic>> page(String botId, {String? before}) async => {
+    'schemaVersion': 1,
+    'runs': runs,
+    'page': {'truncated': false},
+  };
+
+  @override
+  Future<void> send(
+    String botId,
+    String id,
+    String text, {
+    String? retryOf,
+  }) async {}
+
+  @override
+  Future<Map<String, dynamic>?> lookup(
+    String botId,
+    String id, {
+    bool fence = false,
+  }) async => null;
+
+  @override
+  Future<Map<String, dynamic>> stop(
+    String botId,
+    String id,
+    String commandId,
+  ) async => throw UnimplementedError();
+}
+
+Map<String, dynamic> send(int ordinal) => {
+  'type': 'send/to-user',
+  'payload': {'type': 'text', 'text': 'Send $ordinal'},
+  'ordinal': ordinal,
+};
+
 class RecordingTransport implements ChatTransport {
   int pages = 0;
   @override
@@ -175,6 +215,94 @@ void main() {
     expect(controller.runs.single['status'], 'completed');
     expect(controller.activeRunId, isNull);
     controller.dispose();
+  });
+
+  test('a late page cannot take back a send the live channel drew', () async {
+    final store = MemoryStore();
+    final controller = ChatController(
+      transport: _StaleRunningPage(),
+      store: store,
+      userId: 'user-1',
+      botId: 'bot-1',
+    );
+    await controller.applyFrame({
+      'type': 'state/update',
+      'epoch': '1',
+      'cursor': '1',
+      'kind': 'run-status',
+      'entityId': 'run:run-1',
+      'revision': 1,
+      'payload': {'run': run(runId: 'run-1')},
+    });
+    await controller.applyFrame({
+      'type': 'state/update',
+      'epoch': '1',
+      'cursor': '2',
+      'kind': 'message',
+      'entityId': 'msg:s:run-1:occ-1',
+      'revision': 1,
+      'payload': {
+        'runId': 'run-1',
+        'sessionId': 's',
+        'occurrenceId': 'occ-1',
+        'event': {
+          'type': 'send/to-user',
+          'payload': {'type': 'text', 'text': 'Still working on it'},
+          'ordinal': 0,
+        },
+      },
+    });
+    // The page was read before that send was delivered, and lands after it.
+    await controller.refresh();
+    expect(controller.activeRunId, 'run-1');
+    expect(controller.runs.single['events'], [
+      {
+        'type': 'send/to-user',
+        'payload': {'type': 'text', 'text': 'Still working on it'},
+        'ordinal': 0,
+      },
+    ]);
+    controller.dispose();
+  });
+
+  test('a page that cut a long Turn short keeps only the sends after its own', () async {
+    final truncated = {
+      'type': 'run/events-truncated',
+      'omittedInteractions': 3,
+    };
+    for (final (page, expected) in [
+      // Send 0 was cut from the page, 3 is on it, 4 came after it.
+      ([truncated, send(3)], [send(3), send(4)]),
+      // Every send was cut, so none can be told apart from one that came after.
+      ([truncated], <Object>[]),
+    ]) {
+      final controller = ChatController(
+        transport: _FixedPage([run(runId: 'run-1', events: page)]),
+        store: MemoryStore(),
+        userId: 'user-1',
+        botId: 'bot-1',
+      );
+      await controller.applyFrame({
+        'type': 'state/update',
+        'epoch': '1',
+        'cursor': '1',
+        'kind': 'run-status',
+        'entityId': 'run:run-1',
+        'revision': 1,
+        'payload': {
+          'run': run(runId: 'run-1', events: [send(0), send(3), send(4)]),
+        },
+      });
+      await controller.refresh();
+      expect(
+        [
+          for (final event in controller.runs.single['events'] as List)
+            if ((event as Map)['type'] == 'send/to-user') event,
+        ],
+        expected,
+      );
+      controller.dispose();
+    }
   });
 
   test('stale revisions and computer updates leave the transcript alone', () async {
