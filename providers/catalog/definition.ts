@@ -110,6 +110,14 @@ function setting(
   };
 }
 
+// Radius has no mark in the app's icon pack, so its card draws a letter tile.
+// Naming an asset the app does not bundle 404s on the web.
+const unmarkedProviderIds = new Set(["radius"]);
+
+function icon(providerId: string): { icon?: string } {
+  return unmarkedProviderIds.has(providerId) ? {} : { icon: providerId };
+}
+
 export const catalogProviderDefinitionsV1: PackageDefinitionV1[] =
   catalogProvidersV1.map<PackageDefinitionV1>((provider) => ({
     id: `provider-${provider.id}`,
@@ -129,7 +137,7 @@ export const catalogProviderDefinitionsV1: PackageDefinitionV1[] =
       {
         id: `${provider.id}-account`,
         displayName: `${provider.name} account`,
-        icon: provider.id,
+        ...icon(provider.id),
         allowMultiple: true,
         authorization: { kind: "api-key" as const, driverId: provider.id },
         capabilities: [`${provider.id}-models`],
@@ -150,7 +158,7 @@ export const catalogProviderDefinitionsV1: PackageDefinitionV1[] =
             {
               id: `${provider.id}-oauth`,
               displayName: `${provider.name} sign-in`,
-              icon: provider.id,
+              ...icon(provider.id),
               allowMultiple: true,
               authorization: { kind: "grant" as const, driverId: provider.id },
               capabilities: [`${provider.id}-models`],

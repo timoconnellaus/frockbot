@@ -42,6 +42,25 @@ describe("catalog provider registry", () => {
     });
   });
 
+  test("names only connector icons the app bundles", async () => {
+    const icons = new Set(
+      catalogProviderDefinitionsV1.flatMap((definition) =>
+        (definition.connectionTypes ?? []).flatMap((type) =>
+          type.icon ? [type.icon] : [],
+        ),
+      ),
+    );
+    const missing: string[] = [];
+    for (const icon of icons) {
+      const asset = new URL(
+        `../../apps/native/assets/connectors/${icon}.png`,
+        import.meta.url,
+      );
+      if (!(await Bun.file(asset).exists())) missing.push(icon);
+    }
+    expect(missing).toEqual([]);
+  });
+
   test("owns settings validation and runtime environment names", () => {
     expect(() =>
       validateCatalogSettingsV1(
