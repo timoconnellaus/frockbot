@@ -449,19 +449,23 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       shellTierForWidth(MediaQuery.sizeOf(context).width) == ShellTier.dual &&
       panelOpen;
 
-  void _readLatest(String botId, String? messageId) {
+  /// [messageId] is the newest message the open chat delivers, and
+  /// [onScreen] whether any of it is in view.
+  void _readLatest(String botId, String? messageId, {required bool onScreen}) {
     if (!mounted) return;
     final view = activity.unread[botId];
     final newest = _focusedBotId == botId ? messageId : null;
     final latest = view?.lastMessageId;
     final caughtUp = newest != null && latest == newest;
     if (caughtUp) _agreedLatest = (botId: botId, messageId: newest);
-    // Presence holds an alert back, so it is claimed only while this device
-    // shows the cloud's latest message or something newer. A reply reaches the
-    // chat a poll before the unread view names it, and dropping the claim
-    // there released the Turn's next send as an alert to the person reading
-    // it. A cloud ahead of this device names a message nobody here has seen,
-    // and holds nothing back.
+    // Presence holds an alert back while the person is in the chat — the same
+    // focus rule the badge is drawn by, scrolled to the end or not — and only
+    // while the chat holds the cloud's latest message or something newer. A
+    // reply reaches the chat a poll before the unread view names it, and
+    // dropping the claim there released the Turn's next send as an alert to
+    // the person reading it. A claim is only a delay: leaving without reading
+    // releases the alert. A cloud ahead of this device names a message nobody
+    // here has, and holds nothing back.
     final reading =
         caughtUp ||
         (newest != null &&
@@ -478,7 +482,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       _catchingUpTo = newest;
       unawaited(activity.load());
     }
-    if (!caughtUp || activity.loading || activity.busy(botId)) return;
+    if (!caughtUp || !onScreen || activity.loading || activity.busy(botId)) {
+      return;
+    }
     final manual = view?.manuallyUnread == true;
     if (!manual && (view?.count ?? 0) == 0) {
       // Opening a Bot clears its manual mark once. Seen with nothing to clear,
@@ -2638,8 +2644,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                               onMessageActions: (line, {position}) => unawaited(
                                 _messageActions(line, position: position),
                               ),
-                              onReadLatest: (messageId) =>
-                                  _readLatest(bot.botId.value, messageId),
+                              onReadLatest: (newest, onScreen) => _readLatest(
+                                bot.botId.value,
+                                newest,
+                                onScreen: onScreen,
+                              ),
                               unreadFromMessageId: activity
                                   .unread[bot.botId.value]
                                   ?.unreadFromMessageId,

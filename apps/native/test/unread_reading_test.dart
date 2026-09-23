@@ -14,6 +14,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/bot_sessions.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/shell/app_shell.dart';
+import 'package:frockbot_native/shell/transcript.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
@@ -157,7 +158,11 @@ void main() {
 
   /// A Mac at the widest tier with Alpha open, and the unread fan-out and the
   /// transcript both read.
-  Future<void> openAlpha(WidgetTester tester, {bool manual = false}) async {
+  Future<void> openAlpha(
+    WidgetTester tester, {
+    bool manual = false,
+    String first = 'First reply.',
+  }) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
     tester.view.physicalSize = const Size(1440, 900);
     tester.view.devicePixelRatio = 1;
@@ -173,7 +178,9 @@ void main() {
         });
     final store = MemoryStore();
     store.values['selection.test-user'] = 'alpha';
-    server = _Server(store)..manual = manual;
+    server = _Server(store)
+      ..manual = manual
+      ..turns = [_run('run-1', first, 0)];
     sessions = BotSessions(api: server, store: store);
     links = ValueNotifier<String?>(null);
     await tester.pumpWidget(
@@ -190,7 +197,7 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('First reply.'), findsOneWidget);
+    expect(find.text(first), findsOneWidget);
   }
 
   Future<void> close(WidgetTester tester) async {
@@ -273,6 +280,47 @@ void main() {
       expect(types(), ['bot/mark-read']);
       expect(server.commands.single['upToCursor'], _second);
       expect(server.count, 0);
+      await close(tester);
+    });
+
+    // Scrolled up in the open chat is still in the chat, which is what the
+    // badge already said: the reply drew no count on the row. An alert let
+    // through there sounded on the phone in hand and was taken down again at
+    // once. The claim holds it back instead, and the receipt still waits for
+    // the reply to come into view.
+    testWidgets('holds while scrolled up, and reads once the reply is seen', (
+      tester,
+    ) async {
+      await openAlpha(tester, first: List.filled(600, 'Earlier').join(' '));
+      final thread = tester.state<ScrollableState>(
+        find.descendant(
+          of: find.byType(TranscriptView),
+          matching: find.byType(Scrollable),
+        ),
+      );
+      thread.position.jumpTo(thread.position.maxScrollExtent);
+      await tester.pumpAndSettle();
+      final claimed = server.registrations.length;
+
+      server.reply(inChat: true);
+      await sessions.open('test-user', 'alpha').controller.refresh();
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 11));
+
+      expect(find.text('Second reply.'), findsNothing);
+      expect(server.registrations.last['activeBotId'], 'alpha');
+      expect(
+        server.registrations.skip(claimed).map((row) => row['activeBotId']),
+        everyElement('alpha'),
+      );
+      expect(server.commands, isEmpty);
+      expect(server.count, 1);
+
+      thread.position.jumpTo(0);
+      await tester.pumpAndSettle();
+      expect(find.text('Second reply.'), findsOneWidget);
+      expect(types(), ['bot/mark-read']);
+      expect(server.commands.single['upToCursor'], _second);
       await close(tester);
     });
 

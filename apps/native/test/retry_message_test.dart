@@ -128,7 +128,8 @@ void main() {
               hasEarlier: false,
               onRefresh: ({older = false}) async {},
               onOpenRun: (_) {},
-              onReadLatest: reports.add,
+              onReadLatest: (newest, onScreen) =>
+                  reports.add(onScreen ? newest : null),
               storageKey: 'hidden-failure-$status',
             ),
           ),
@@ -180,7 +181,8 @@ void main() {
             hasEarlier: false,
             onRefresh: ({older = false}) async {},
             onOpenRun: (_) {},
-            onReadLatest: reports.add,
+            onReadLatest: (newest, onScreen) =>
+                reports.add(onScreen ? newest : null),
             focusRunId: 'original',
             storageKey: 'retry-read',
           ),

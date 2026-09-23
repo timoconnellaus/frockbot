@@ -26,7 +26,7 @@ export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
     id: "unread-keeps-up",
     title: "Unread that keeps up",
     summary:
-      "A reply landing in the chat you’re reading no longer sends an alert, and Mark unread stays until you open the Bot again. On a Mac, the Dock badge updates while the window is minimised.",
+      "A reply landing in the chat you have open no longer sends an alert, and Mark unread stays until you open the Bot again. On a Mac, the Dock badge updates while the window is minimised.",
     kind: "fix",
   },
   {

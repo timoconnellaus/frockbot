@@ -93,6 +93,7 @@ void main() {
     'while the thread is pinned to its end',
     (tester) async {
       final reports = <String?>[];
+      final newest = <String?>[];
       final lines = [
         TranscriptLine(
           id: 'run-old:send:0',
@@ -125,7 +126,10 @@ void main() {
                 hasEarlier: false,
                 onRefresh: ({older = false}) async {},
                 onOpenRun: (_) {},
-                onReadLatest: reports.add,
+                onReadLatest: (message, onScreen) {
+                  newest.add(message);
+                  reports.add(onScreen ? message : null);
+                },
                 storageKey: 'read-test',
               ),
             ),
@@ -145,6 +149,9 @@ void main() {
       scrollable.position.jumpTo(scrollable.position.maxScrollExtent);
       await tester.pump();
       expect(reports.last, isNull);
+      // Out of view is not out of the chat: the newest is still named, so the
+      // shell can keep holding its alert back without reading it.
+      expect(newest.last, 'run-new:send:0');
     },
   );
 
