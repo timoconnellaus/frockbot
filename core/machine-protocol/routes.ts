@@ -97,9 +97,9 @@ const SEGMENT_SAFE = /^[A-Za-z0-9][A-Za-z0-9._:@-]*$/;
  * The concrete path for one route.
  *
  * Every substituted segment is checked against the same identifier rule the
- * decoders use and then percent-encoded: a `commandId` is an `effectId` and
- * carries colons, which are legal in a path segment, but nothing here trusts
- * that an id it was handed is one it minted.
+ * decoders use and then percent-encoded: an identifier may carry colons,
+ * which are legal in a path segment, but nothing here trusts that an id it
+ * was handed is one it minted.
  */
 export function machineRoutePathV1(
   name: MachineRouteNameV1,

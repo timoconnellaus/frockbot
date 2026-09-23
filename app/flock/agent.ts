@@ -122,6 +122,11 @@ export interface FlockSelfRuntimeHostV1 {
   owner: FlockSelfOwnerV1;
   /** The provenance every write this Turn records. */
   writer: BotSelfWriterV1;
+  /**
+   * The durable run this Turn is. Effect ids restart in every Session, so an
+   * id derived from one names the run as well.
+   */
+  runId: string;
   /** This Bot's durable settings, including the revision a command expects. */
   readSelf(): Promise<BotSettingsViewV1>;
   /** Applies one Bot-scoped configuration command to this Bot. */
@@ -533,15 +538,32 @@ function canonicalProfile(profile: BotProfile): unknown[] {
 const sha256HexV1 = sha256HexTextV1;
 
 /**
+ * One durable tool-call occurrence, as a digest: the User, the calling Bot,
+ * the run and the effect id. The run is there because effect ids restart in
+ * every Session — a Bot's first Routine Turn and its first chat Turn both call
+ * `tool:1:1:0` — and the Bot because run ids are unique only per Bot.
+ */
+function occurrenceDigestV1(
+  owner: FlockSelfOwnerV1,
+  runId: string,
+  effectId: string,
+): Promise<string> {
+  return sha256HexV1(
+    `${owner.userId}\u0000${owner.botId}\u0000${runId}\u0000${effectId}`,
+  );
+}
+
+/**
  * The Bot id one `bot_create` occurrence asks for.
  *
- * Derived from the User, the calling Bot and the durable tool-call occurrence,
- * so the same call always asks for the same id and a replay after eviction
- * collides with the Bot it already made instead of registering another. The
- * readable half is the requested name, exactly as the sidebar's create does.
+ * Derived from the occurrence, so the same call always asks for the same id
+ * and a replay after eviction collides with the Bot it already made instead of
+ * registering another. The readable half is the requested name, exactly as the
+ * sidebar's create does.
  */
 export async function createdBotIdV1(
   owner: FlockSelfOwnerV1,
+  runId: string,
   effectId: string,
   name: string,
 ): Promise<string> {
@@ -552,15 +574,21 @@ export async function createdBotIdV1(
       .replace(/[^a-z0-9]+/g, "-")
       .replace(/^-|-$/g, "")
       .slice(0, 80) || "bot";
-  const digest = await sha256HexV1(
-    `${owner.userId}\u0000${owner.botId}\u0000${effectId}`,
-  );
+  const digest = await occurrenceDigestV1(owner, runId, effectId);
   return `${base}-${digest.slice(0, 12)}`;
 }
 
-/** A `commandId` derived from the occurrence, so a retry reuses one receipt. */
-function occurrenceCommandIdV1(prefix: string, effectId: string): string {
-  return `${prefix}-${effectId.replace(/[^a-zA-Z0-9._-]/g, "-")}`;
+/**
+ * The `bot/create` command id one occurrence sends, so a retry reuses one
+ * receipt. The User Durable Object keys receipts by it across all its Bots.
+ */
+export async function botCreateCommandIdV1(
+  owner: FlockSelfOwnerV1,
+  runId: string,
+  effectId: string,
+): Promise<string> {
+  const digest = await occurrenceDigestV1(owner, runId, effectId);
+  return `bot-create-${digest.slice(0, 32)}`;
 }
 
 export function createBotUpdateTool(
@@ -789,8 +817,14 @@ export function createBotCreateTool(
       }
       const botId = await createdBotIdV1(
         host.owner,
+        host.runId,
         context.effectId,
         decoded.name,
+      );
+      const commandId = await botCreateCommandIdV1(
+        host.owner,
+        host.runId,
+        context.effectId,
       );
       const avatar = randomAvatarAppearanceV1(random);
       try {
@@ -808,7 +842,7 @@ export function createBotCreateTool(
             const receipt = await host.createBot({
               schemaVersion: 1,
               type: "bot/create",
-              commandId: occurrenceCommandIdV1("bot-create", context.effectId),
+              commandId,
               expectedRevision: directory.revision,
               botId,
               name: decoded.name,

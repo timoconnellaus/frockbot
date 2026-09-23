@@ -15,6 +15,8 @@ import {
 import type { TemplateShareReceiptV1 } from "./shared.ts";
 
 const SESSION_ID = "user-1:budget";
+const OWNER = { userId: "user-1", botId: "budget" };
+const RUN_ID = "run-chat-1";
 const SHARE_ID = `user-1.${"a".repeat(32)}`;
 
 function receipt(commandId: string): TemplateShareReceiptV1 {
@@ -47,6 +49,7 @@ async function mount(
     botId: string;
   }) => Promise<TemplateShareReceiptV1> = (input) =>
     Promise.resolve(receipt(input.commandId)),
+  runId = RUN_ID,
 ) {
   const runtime = createAgentRuntimeHarness();
   const session: Session = runtime.sessions.create(SESSION_ID);
@@ -56,7 +59,8 @@ async function mount(
   ]);
   await runtime.mount(
     createBotTemplateFeature({
-      owner: { userId: "user-1", botId: "budget" },
+      owner: OWNER,
+      runId,
       stageTemplate: stage,
     }),
   );
@@ -162,13 +166,28 @@ describe("bot_export_template", () => {
     try {
       await invoke(mounted, "chat");
       await invoke(mounted, "chat");
-      expect(staged).toEqual([
-        stageCommandIdV1("tool:1:0:0"),
-        stageCommandIdV1("tool:1:0:0"),
-      ]);
+      const expected = await stageCommandIdV1(OWNER, RUN_ID, "tool:1:0:0");
+      expect(staged).toEqual([expected, expected]);
     } finally {
       await mounted.dispose();
     }
+  });
+
+  it("stages another command for the same effect in another run or Bot", async () => {
+    // The User Durable Object keys receipts across all its Bots, and effect
+    // ids restart in every Session.
+    const id = await stageCommandIdV1(OWNER, RUN_ID, "tool:1:1:0");
+    expect(id).toMatch(/^template-stage-[0-9a-f]{32}$/);
+    expect(await stageCommandIdV1(OWNER, "run-chat-2", "tool:1:1:0")).not.toBe(
+      id,
+    );
+    expect(
+      await stageCommandIdV1(
+        { ...OWNER, botId: "research" },
+        RUN_ID,
+        "tool:1:1:0",
+      ),
+    ).not.toBe(id);
   });
 
   it("records an agent-card naming what was packed and scrubbed", async () => {

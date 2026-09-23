@@ -251,7 +251,11 @@ function createMessagesReadTool(config: {
         );
       }
 
-      const commandId = machineApprovalIdV1(context.effectId);
+      const commandId = await machineApprovalIdV1(
+        host.machines.botId,
+        host.machines.writer.runId,
+        context.effectId,
+      );
       const at = host.now?.() ?? new Date().toISOString();
       const intent: MachineIntentRecordV1 = {
         schemaVersion: 1,
@@ -449,7 +453,7 @@ export function createMachineMessagesReadTools(
  * The card, the record, the expiry alarm and the settlement are all
  * `plugin-shell`'s and unchanged; this passes the op it wants sent to the same
  * factory `machine_exec` is built from, so an approved send is dispatched by
- * the same settlement, with the same `commandId === effectId` idempotency, and
+ * the same settlement, with the same occurrence-derived `commandId`, and
  * a denied one reaches nobody's Mac.
  */
 export function createMachineMessagesSendTool(

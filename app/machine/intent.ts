@@ -10,15 +10,17 @@
 //
 // Three properties the rest of the slice rests on:
 //
-//  1. **`approvalId === commandId === effectId`.** One identity for the
-//     decision, the queue key and the Turn's durable occurrence, so a replayed
-//     settlement addresses the same command rather than queueing a second one.
+//  1. **`approvalId === commandId`, derived from the occurrence.** One
+//     identity for the decision, the queue key and the Turn's durable
+//     occurrence, so a replayed settlement addresses the same command rather
+//     than queueing a second one.
 //  2. **Written before the send.** "Record intent before an external effect."
 //     The record is durable before the card the User sees exists, so there is
 //     no window in which somebody could approve an action nothing describes.
 //  3. **Pure.** Everything here is a function of its arguments. The storage
 //     seam is in `approval.ts`; this module never reads a clock it was not
 //     handed.
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import {
   MACHINE_LIMITS_V1,
   MachineDecodeError,
@@ -28,19 +30,25 @@ import {
 } from "@frockbot/core/machine-protocol";
 
 /**
- * The approval id — and therefore the command id — one Turn's `effectId` maps
- * to.
+ * The approval id — and therefore the command id — one durable occurrence maps
+ * to: the Bot, the run and the Turn's `effectId`.
  *
- * `effectId` is `tool:<turn>:<step>:<ordinal>`, and an `approvalId` may not
- * carry a colon: it becomes a URL path segment and a durable storage key, and
+ * `effectId` alone is not enough. It restarts in every Session, and the User
+ * Durable Object queues and settles every Bot's machine commands by this id,
+ * so it names the Bot and the run as well. A digest, because an `approvalId`
+ * becomes a URL path segment and a durable storage key, and
  * `decodeSendToUserPayloadV1` refuses anything but letters, digits, dot,
- * underscore and dash. The mapping is total, deterministic and injective over
- * that format, so `commandId === approvalId` is still exactly one identity per
- * durable occurrence — which is all the idempotency rests on.
+ * underscore and dash.
  */
-export function machineApprovalIdV1(effectId: string): string {
-  const mapped = effectId.replace(/[^a-zA-Z0-9._-]/g, ".");
-  return /^[a-zA-Z0-9]/.test(mapped) ? mapped : `m${mapped}`;
+export async function machineApprovalIdV1(
+  botId: string,
+  runId: string,
+  effectId: string,
+): Promise<string> {
+  const digest = await sha256HexTextV1(
+    `${botId}\u0000${runId}\u0000${effectId}`,
+  );
+  return `machine-${digest.slice(0, 32)}`;
 }
 
 /** One intent per approval, in the Bot Durable Object's own storage. */

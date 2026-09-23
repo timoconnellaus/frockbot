@@ -469,6 +469,7 @@ export async function lookupRunQuestions(
         botId: question.botId,
         runId: await agentRunIdV1(
           identity,
+          query.runId,
           question.botId,
           question.occurrenceId,
         ),

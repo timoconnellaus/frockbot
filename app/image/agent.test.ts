@@ -142,7 +142,7 @@ describe("generate_image", () => {
       height: 1024,
     });
     expect(parsed.path).toBe(
-      generatedImagePathV1(OWNER, EFFECT_ID, "png").path,
+      generatedImagePathV1(OWNER, WRITER.runId, EFFECT_ID, "png").path,
     );
     expect(parsed.generationId).toBe("gen-0001");
     // Never the bytes: a base64 image would be replayed into every later
@@ -201,7 +201,7 @@ describe("generate_image", () => {
     await tool.execute({ prompt: "a red barn" }, CONTEXT);
 
     const stored = await files.read(
-      generatedImagePathV1(OWNER, EFFECT_ID, "png"),
+      generatedImagePathV1(OWNER, WRITER.runId, EFFECT_ID, "png"),
     );
     expect(stored.status).toBe("ok");
     expect(
@@ -402,6 +402,38 @@ describe("re-running a generated image under its effect id", () => {
     expect(result.isError).toBe(false);
     expect(model.calls).toHaveLength(1);
     await dispose();
+  });
+
+  test("generates again for the same effect id in another run", async () => {
+    // Effect ids restart in every Session: a Routine Turn's first image call
+    // is `tool:1:1:0` exactly as the conversation's first one was, and must
+    // not be answered with the conversation's image.
+    const files = new FakeImageWorkspace();
+    const model = new FakeImageModel();
+
+    const chat = await openSession();
+    const first = await createGenerateImageTool(
+      host({ model, files }),
+      chat.sessions,
+    ).execute({ prompt: "a red barn" }, CONTEXT);
+    await chat.dispose();
+
+    const routine = await openSession();
+    const second = await createGenerateImageTool(
+      host({ model, files, writer: { ...WRITER, runId: "run-10" } }),
+      routine.sessions,
+    ).execute({ prompt: "a blue barn" }, CONTEXT);
+    await routine.dispose();
+
+    expect(first.isError).toBe(false);
+    expect(second.isError).toBe(false);
+    expect(model.calls).toHaveLength(2);
+    expect(JSON.parse(second.content).path).toBe(
+      generatedImagePathV1(OWNER, "run-10", EFFECT_ID, "png").path,
+    );
+    expect(JSON.parse(second.content).path).not.toBe(
+      JSON.parse(first.content).path,
+    );
   });
 
   test("records the outcome only once across a re-issued call", async () => {

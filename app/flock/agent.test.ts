@@ -16,6 +16,7 @@ import {
 } from "@frockbot/core/configuration";
 import type { SessionEvent } from "@frockbot/core/contracts";
 import {
+  botCreateCommandIdV1,
   createBotCreateTool,
   createBotMessageTool,
   createGroupBotMessageTool,
@@ -34,6 +35,7 @@ import {
 } from "./shared.ts";
 
 const OWNER = { userId: "user-1", botId: "bot-1" };
+const RUN_ID = "run-chat-1";
 const WRITER = {
   kind: "bot" as const,
   botId: "bot-1",
@@ -130,6 +132,7 @@ function harness(initial?: Partial<BotSettingsViewV1>): Harness {
     host: {
       owner: OWNER,
       writer: WRITER,
+      runId: RUN_ID,
       readSelf: async () => structuredClone(settings),
       commandSelf: async (command): Promise<OperationReceiptV1> => {
         if (race) {
@@ -415,7 +418,7 @@ describe("bot_create", () => {
     expect(created.initialName).toBe("Budget");
     expect(created.initialDescription).toBe("Watches the money.");
     expect(created.botId).toBe(
-      await createdBotIdV1(OWNER, CONTEXT.effectId, "Budget"),
+      await createdBotIdV1(OWNER, RUN_ID, CONTEXT.effectId, "Budget"),
     );
     // Model and Capability authority resolve account-wide on the new Bot's
     // next admitted Turn; neither is copied into its registration.
@@ -466,6 +469,76 @@ describe("bot_create", () => {
 
     const ids = (await test1.host.listBots()).bots.map((bot) => bot.botId);
     expect(new Set(ids).size).toBe(2);
+  });
+
+  test("the same effect id in another run creates another Bot", async () => {
+    // Effect ids restart in every Session: a Bot's first Routine Turn calls
+    // `tool:1:1:0` exactly as its first chat Turn did.
+    const test1 = harness();
+    const commandIds: string[] = [];
+    const inRun = (runId: string): FlockSelfRuntimeHostV1 => ({
+      ...test1.host,
+      runId,
+      createBot: (command) => {
+        commandIds.push(command.commandId);
+        return test1.host.createBot(command);
+      },
+    });
+    const chat = inRun(RUN_ID);
+    const routine = inRun("run-routine-1");
+
+    const first = await createBotCreateTool(
+      chat,
+      createTurnBotDirectoryV1(chat),
+    ).execute({ name: "Budget" }, CONTEXT);
+    const second = await createBotCreateTool(
+      routine,
+      createTurnBotDirectoryV1(routine),
+    ).execute(
+      { name: "Budget" },
+      { ...CONTEXT, sessionId: "routine:daily", turnType: "automation" },
+    );
+
+    expect(first.isError).toBe(false);
+    expect(second.isError).toBe(false);
+    expect(second.content).not.toContain("already exists");
+    expect(commandIds).toHaveLength(2);
+    expect(commandIds[0]).not.toBe(commandIds[1]);
+    const ids = (await test1.host.listBots()).bots.map((bot) => bot.botId);
+    expect(ids).toEqual([
+      await createdBotIdV1(OWNER, RUN_ID, CONTEXT.effectId, "Budget"),
+      await createdBotIdV1(OWNER, "run-routine-1", CONTEXT.effectId, "Budget"),
+    ]);
+  });
+
+  test("derives the same ids for a replay within one run", async () => {
+    expect(
+      await createdBotIdV1(OWNER, RUN_ID, CONTEXT.effectId, "Budget"),
+    ).toBe(await createdBotIdV1(OWNER, RUN_ID, CONTEXT.effectId, "Budget"));
+    expect(await botCreateCommandIdV1(OWNER, RUN_ID, CONTEXT.effectId)).toBe(
+      await botCreateCommandIdV1(OWNER, RUN_ID, CONTEXT.effectId),
+    );
+    expect(
+      await createdBotIdV1(OWNER, RUN_ID, CONTEXT.effectId, "Budget"),
+    ).not.toBe(
+      await createdBotIdV1(OWNER, "run-routine-1", CONTEXT.effectId, "Budget"),
+    );
+    expect(
+      await botCreateCommandIdV1(OWNER, RUN_ID, CONTEXT.effectId),
+    ).not.toBe(
+      await botCreateCommandIdV1(OWNER, "run-routine-1", CONTEXT.effectId),
+    );
+    // The User Durable Object keys receipts across all its Bots, so another
+    // Bot's same run id and effect id is another command.
+    expect(
+      await botCreateCommandIdV1(OWNER, RUN_ID, CONTEXT.effectId),
+    ).not.toBe(
+      await botCreateCommandIdV1(
+        { ...OWNER, botId: "bot-2" },
+        RUN_ID,
+        CONTEXT.effectId,
+      ),
+    );
   });
 
   test("refuses a nameless call and an unknown field", async () => {

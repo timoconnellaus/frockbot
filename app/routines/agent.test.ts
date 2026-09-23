@@ -443,10 +443,46 @@ describe("routineManageCommandV1", () => {
 });
 
 describe("routineToolCommandIdV1", () => {
-  test("derives a stable identifier from the Turn's effect identifier", () => {
-    expect(routineToolCommandIdV1("tool:1:1:0")).toBe("rt-tool-1-1-0");
-    expect(routineToolCommandIdV1("tool:1:1:0")).toBe(
-      routineToolCommandIdV1("tool:1:1:0"),
+  test("derives a stable identifier from the Turn's run and effect", async () => {
+    const id = await routineToolCommandIdV1("run-9", "tool:1:1:0");
+    expect(id).toMatch(/^rt-[0-9a-f]{32}$/);
+    expect(await routineToolCommandIdV1("run-9", "tool:1:1:0")).toBe(id);
+  });
+
+  test("derives another identifier for the same effect in another run", async () => {
+    // Effect ids restart in every Session: a Routine Turn's first call is
+    // `tool:1:1:0` exactly as the conversation's first call was.
+    expect(await routineToolCommandIdV1("run-chat", "tool:1:1:0")).not.toBe(
+      await routineToolCommandIdV1("run-routine", "tool:1:1:0"),
     );
+  });
+
+  test("a create in another run with the same effect writes another Routine", async () => {
+    const seam = host();
+    const input = {
+      action: "create",
+      name: "Morning brief",
+      prompt: "Summarize overnight email.",
+      schedule: "@daily",
+    };
+    const chat = await createRoutineManageTool({
+      ...seam,
+      writer: WRITER,
+    }).execute(input, CONTEXT);
+    const routine = await createRoutineManageTool({
+      ...seam,
+      writer: {
+        sessionId: "routine:daily",
+        turnId: "run-10",
+        runId: "run-10",
+      },
+    }).execute(input, {
+      ...CONTEXT,
+      sessionId: "routine:daily",
+      turnType: "automation",
+    });
+    expect(chat.isError).toBe(false);
+    expect(routine.isError).toBe(false);
+    expect((await seam.list()).routines).toHaveLength(2);
   });
 });

@@ -32,6 +32,7 @@ import {
 } from "./agent.js";
 import {
   decodeMachineIntentRecordV1,
+  machineApprovalIdV1,
   machineIntentKeyV1,
   type MachineIntentRecordV1,
 } from "./intent.js";
@@ -40,8 +41,8 @@ import type { MachineTargetViewV1 } from "./target.js";
 const SESSION_ID = "user-1:bot-1";
 const NOW = "2026-09-01T00:00:00.000Z";
 const EFFECT_ID = "tool:4:2:0";
-/** The approval id that effect maps to; a card id may carry no colon. */
-const APPROVAL_ID = "tool.4.2.0";
+/** The approval id that effect maps to in this Bot's run. */
+const APPROVAL_ID = await machineApprovalIdV1("bot-1", "run-1", EFFECT_ID);
 
 function entry(
   overrides: Partial<MachineListEntryV1> = {},
@@ -522,5 +523,25 @@ describe("machine_command_check", () => {
     } finally {
       await harness.dispose();
     }
+  });
+});
+
+describe("machineApprovalIdV1", () => {
+  test("is one identity per occurrence, in a card id's character set", async () => {
+    expect(APPROVAL_ID).toMatch(/^machine-[0-9a-f]{32}$/);
+    expect(await machineApprovalIdV1("bot-1", "run-1", EFFECT_ID)).toBe(
+      APPROVAL_ID,
+    );
+  });
+
+  test("differs for the same effect in another run or another Bot", async () => {
+    // Effect ids restart in every Session, and the User Durable Object queues
+    // every Bot's commands by this id.
+    expect(await machineApprovalIdV1("bot-1", "run-2", EFFECT_ID)).not.toBe(
+      APPROVAL_ID,
+    );
+    expect(await machineApprovalIdV1("bot-2", "run-1", EFFECT_ID)).not.toBe(
+      APPROVAL_ID,
+    );
   });
 });

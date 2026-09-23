@@ -4,6 +4,7 @@ import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
 import type { ToolExecutionContext } from "@frockbot/core/contracts";
 import type { CredentialLeaseRuntime } from "@frockbot/app/credentials/user";
 import type { CredentialLeaseV1 } from "@frockbot/core/connection";
+import { webSearchEffectIdV1 } from "@frockbot/app/web/contract";
 import {
   createConfiguredOllamaWebSearchRuntimeContribution,
   ollamaWebSearchUrl,
@@ -169,8 +170,9 @@ describe("the Ollama Cloud web_search Capability", () => {
     });
     // The credential is leased per durable effect and settled afterwards, so
     // no key outlives the tool call that opened it.
-    expect(leased).toEqual(["effect-1"]);
-    expect(settled).toEqual(["effect-1"]);
+    const effectId = await webSearchEffectIdV1(toolContext());
+    expect(leased).toEqual([effectId]);
+    expect(settled).toEqual([effectId]);
     // And it never reaches the durable result.
     expect(result.content).not.toContain(API_KEY);
     await root.dispose();
@@ -287,7 +289,7 @@ describe("the Ollama Cloud web_search Capability", () => {
     expect(body.error).toBe("web-search-failed");
     expect(body.message).toContain("401");
     // The lease is settled even when the call fails.
-    expect(settled).toEqual(["effect-1"]);
+    expect(settled).toEqual([await webSearchEffectIdV1(toolContext())]);
     await root.dispose();
   });
 

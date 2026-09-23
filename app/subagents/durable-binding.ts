@@ -30,6 +30,7 @@ import {
   taskSessionIdV1,
 } from "@frockbot/app/subagents/storage-keys";
 import type { BotIdentity } from "@frockbot/core/durable";
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import { rpcJsonSnapshotV1, rpcRecordV1 } from "@frockbot/app/durable-rpc";
 
 /** The parent Turn that dispatched a task, as the child records it. */
@@ -358,17 +359,20 @@ export function decodeClaimedTaskMessagesV1(
 /** The queue's own bound, restated where the wire is decoded. */
 const CLAIMED_TASK_MESSAGE_LIMIT = 16;
 
-const TASK_ID_CHARACTER = /[^a-zA-Z0-9._-]/g;
-
 /**
  * The task id one tool call mints.
  *
- * Derived from the Turn's effect identifier, so a reconciled or retried call
- * finds the task it already dispatched instead of dispatching a second child.
+ * Derived from the dispatching run and the Turn's effect identifier, so a
+ * reconciled or retried call finds the task it already dispatched instead of
+ * dispatching a second child. The run is there because effect ids restart in
+ * every Session, and run ids are unique within the Bot whose tasks these are.
  */
-export function subagentTaskIdV1(effectId: string): string {
-  const sanitized = effectId.replace(TASK_ID_CHARACTER, "-").slice(0, 120);
-  return `tk-${sanitized || "call"}`;
+export async function subagentTaskIdV1(
+  runId: string,
+  effectId: string,
+): Promise<string> {
+  const digest = await sha256HexTextV1(`${runId}\u0000${effectId}`);
+  return `tk-${digest.slice(0, 32)}`;
 }
 
 /** The outcome a settled child run hands its parent. */

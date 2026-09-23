@@ -21,6 +21,7 @@ import type {
 import type { MachineRuntimeHostV1 } from "@frockbot/app/machine/agent";
 import {
   decodeMachineIntentRecordV1,
+  machineApprovalIdV1,
   machineIntentKeyV1,
 } from "@frockbot/app/machine/intent";
 import type { MachineTargetViewV1 } from "@frockbot/app/machine/target";
@@ -39,7 +40,7 @@ import {
 const SESSION_ID = "user-1:bot-1";
 const NOW = "2026-09-01T00:00:00.000Z";
 const EFFECT_ID = "tool:4:2:0";
-const COMMAND_ID = "tool.4.2.0";
+const COMMAND_ID = await machineApprovalIdV1("bot-1", "run-1", EFFECT_ID);
 
 const granted: MachineMessagesPermissionsV1 = {
   schemaVersion: 1,
