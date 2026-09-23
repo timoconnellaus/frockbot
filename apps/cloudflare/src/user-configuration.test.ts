@@ -5,6 +5,7 @@ import {
 } from "@frockbot/core/configuration";
 import type { WorkerLoader } from "./contracts.js";
 import { randomAvatarAppearanceV1 } from "@frockbot/app/flock/shared";
+import { FOUNDATION_PACKAGE_CATALOG_V1 } from "@frockbot/app/packages";
 
 // `mock.module` is process-global and the first registration in a suite run
 // fixes the module's shape, so this stub has to satisfy every consumer the run
@@ -333,6 +334,23 @@ describe("UserConfiguration Connection routing", () => {
         state: "disabled",
       }),
     );
+    // Frock AI is the one model provider a new account has: every other one
+    // is the account's to add from the Marketplace.
+    const modelProviders = new Set(
+      FOUNDATION_PACKAGE_CATALOG_V1.entries
+        .filter((pkg) =>
+          pkg.capabilities?.some((capability) => capability.kind === "model"),
+        )
+        .map((pkg) => pkg.id),
+    );
+    expect(
+      first.packages
+        .filter(
+          (pkg) =>
+            modelProviders.has(pkg.packageId) && pkg.state === "installed",
+        )
+        .map((pkg) => pkg.packageId),
+    ).toEqual(["provider-flock-ai"]);
     expect(first.packages.map((pkg) => pkg.packageId)).toContain("web");
   });
 
