@@ -9,7 +9,6 @@ library;
 import 'dart:async';
 import 'dart:convert';
 
-import 'package:flutter/foundation.dart' show kIsWeb;
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter/services.dart';
 
@@ -51,11 +50,9 @@ import '../settings/voice_settings.dart';
 import '../templates/page.dart';
 import '../theme/document.dart';
 import '../theme/frock_theme.dart';
-import '../theme/rows.dart';
 import '../update/app_version.dart';
 import '../view/sample_page.dart';
 import '../whats_new/feed.dart';
-import '../whats_new/mark.dart';
 import '../whats_new/page.dart';
 import '../voice/assistant.dart';
 import '../voice/capabilities.dart';
@@ -83,6 +80,7 @@ import 'lifecycle.dart';
 import 'message_actions.dart';
 import 'exchange_view.dart';
 import 'person_avatar.dart';
+import 'profile_page.dart';
 import 'run_view.dart';
 import 'semantics.dart';
 import 'focus.dart' show sidebarUnreadFor;
@@ -739,28 +737,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Future<void> _readWhatsNew() async {
     final feed = await readWhatsNewFeedV1(widget.api);
     final seen = await widget.store.read(whatsNewSeenKeyV1);
-    final previous = await widget.store.read(whatsNewLaunchedVersionKeyV1);
-    final current = (await widget.version()).label;
     if (!mounted) return;
     setState(() {
       whatsNew = feed;
       whatsNewSeenId = seen;
     });
-    final unseen = feed.unseenCount(seen);
-    final open = shouldOpenWhatsNewAfterLaunchV1(
-      web: kIsWeb,
-      previousVersion: previous,
-      currentVersion: current,
-      unseen: unseen,
-    );
-    if (current.isNotEmpty) {
-      await widget.store.write(whatsNewLaunchedVersionKeyV1, current);
-    }
-    if (open && mounted) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (mounted) _openWhatsNew();
-      });
-    }
   }
 
   void _openWhatsNew() {
@@ -1493,9 +1474,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
-  void _push(Widget page) {
+  Future<void> _push(Widget page) {
     push.reading(null);
-    Navigator.of(context).push(
+    return Navigator.of(context).push(
       MaterialPageRoute<void>(
         builder: (routeContext) => _withAccountTheme(routeContext, page),
       ),
@@ -2599,6 +2580,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                       onProfile: _openProfile,
                       profileName: profileName,
                       profileImageUrl: profileImageUrl,
+                      onWhatsNew: _openWhatsNew,
+                      whatsNewUnread: whatsNew.unseenCount(whatsNewSeenId) > 0,
                       onMarketplace: _openMarketplace,
                       phone: single,
                       onToggleHidden: () =>
@@ -2822,21 +2805,21 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           _openPanel('bot-page');
           _openPanel('bot-settings', push: true);
         case 'settings':
-          _openSettings();
+          _openAccount(
+            SettingsIds.profileSettings,
+            () => _push(_settingsPage()),
+          );
         case 'computer':
           unawaited(_openComputerViewer());
         case 'billing':
-          unawaited(_openBilling());
+          _openAccount(
+            SettingsIds.profileBilling,
+            () => unawaited(_openBilling()),
+          );
         case 'marketplace':
           _openMarketplace();
         case 'machines':
-          _push(
-            MachinesPage(
-              api: widget.api,
-              store: widget.store,
-              userId: widget.userId,
-            ),
-          );
+          _openAccount(MachineIds.profileEntry, () => _push(_machinesPage()));
         case 'routines':
           _openPanel('routines');
       }
@@ -2934,256 +2917,190 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
   }
 
-  void _openSettings() => _push(
-    SettingsPage(
-      api: widget.api,
-      store: widget.store,
-      userId: widget.userId,
-      onFeaturesChanged: _featuresChanged,
-    ),
+  Widget _settingsPage() => SettingsPage(
+    api: widget.api,
+    store: widget.store,
+    userId: widget.userId,
+    onFeaturesChanged: _featuresChanged,
   );
 
-  /// Account destinations push above Profile, so Back returns here.
-  ///
-  /// One sheet, GrokBot's shape: who is signed in, what is the account's, what
-  /// is every Bot's, and the door out. Each row is a name and a chevron; what
-  /// a destination is for is said on the destination.
-  void _openProfile() {
+  Widget _machinesPage() =>
+      MachinesPage(api: widget.api, store: widget.store, userId: widget.userId);
+
+  /// An account destination reached from search: on a phone its page over
+  /// the list; wider, You with it open, so the rest are a press away.
+  void _openAccount(String section, VoidCallback phone) {
+    if (shellTierForWidth(MediaQuery.sizeOf(context).width) ==
+        ShellTier.single) {
+      phone();
+      return;
+    }
+    _openProfile(section: section);
+  }
+
+  /// You: who is signed in, what is the account's, what is every Bot's, and
+  /// the door out. Each row is a name; what a destination is for is said on
+  /// the destination. A phone pushes each above the list, so Back returns
+  /// here; wider, [section] is the one open beside the rows.
+  void _openProfile({String? section}) {
     _push(
-      Scaffold(
-        appBar: DesktopHeader(child: AppBar(title: const Text('You'))),
-        body: identified(
-          SettingsIds.profileMenu,
-          SafeArea(
-            top: false,
-            child: SingleChildScrollView(
-              padding: const EdgeInsets.fromLTRB(16, 4, 16, 32),
-              child: Center(
-                child: ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 680),
+      ProfilePage(
+        initialSection: section,
+        open: _push,
+        identity: identified(
+          SettingsIds.profileName,
+          Padding(
+            padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
+            child: Row(
+              children: [
+                // Unlabeled on purpose. An image label on this face merges
+                // into the profile-name node, and the person's name stops
+                // being text.
+                PersonAvatar(
+                  name: profileName ?? '',
+                  imageUrl: profileImageUrl,
+                  size: 44,
+                ),
+                const SizedBox(width: 14),
+                Expanded(
                   child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      identified(
-                        SettingsIds.profileName,
-                        Padding(
-                          padding: const EdgeInsets.fromLTRB(4, 8, 4, 8),
-                          child: Row(
-                            children: [
-                              // Unlabeled on purpose. An image label on this face merges
-                              // into the profile-name node, and the person's name
-                              // stops being text.
-                              PersonAvatar(
-                                name: profileName ?? '',
-                                imageUrl: profileImageUrl,
-                                size: 44,
-                              ),
-                              const SizedBox(width: 14),
-                              Expanded(
-                                child: Column(
-                                  crossAxisAlignment: CrossAxisAlignment.start,
-                                  children: [
-                                    FutureBuilder<String>(
-                                      future: _displayName(),
-                                      builder: (context, answer) => Text(
-                                        answer.data ?? widget.userId,
-                                        maxLines: 1,
-                                        overflow: TextOverflow.ellipsis,
-                                        style: Theme.of(context)
-                                            .textTheme
-                                            .titleMedium,
-                                      ),
-                                    ),
-                                    const SizedBox(height: 2),
-                                    Text(
-                                      'Signed in',
-                                      style: Theme.of(context)
-                                          .textTheme
-                                          .bodySmall
-                                          ?.copyWith(
-                                            color: Theme.of(context)
-                                                .colorScheme
-                                                .onSurfaceVariant,
-                                          ),
-                                    ),
-                                  ],
-                                ),
-                              ),
-                            ],
-                          ),
+                      FutureBuilder<String>(
+                        future: _displayName(),
+                        builder: (context, answer) => Text(
+                          answer.data ?? widget.userId,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: Theme.of(context).textTheme.titleMedium,
                         ),
                       ),
-                      // What the account can spend, first, because it is the
-                      // one thing on this page that decides whether a Bot
-                      // replies at all.
-                      if (credit case final credit?)
-                        identified(
-                          SettingsIds.profileCredit,
-                          CreditTile(
-                            credit: credit,
-                            onTap: () => unawaited(_openBilling()),
-                          ),
-                        ),
-                      _profileGroup(null, [
-                        identified(
-                          SettingsIds.profileWhatsNew,
-                          FrockRow(
-                            icon: Icons.campaign_outlined,
-                            title: 'What’s New',
-                            trailing: whatsNew.unseenCount(whatsNewSeenId) > 0
-                                ? const WhatsNewUnreadMark()
-                                : null,
-                            onTap: _openWhatsNew,
-                          ),
-                        ),
-                      ]),
-                      _profileGroup('Account', [
-                        _profileRow(
-                          SettingsIds.profileSettings,
-                          Icons.settings_outlined,
-                          'Personal details',
-                          _openSettings,
-                        ),
-                      ]),
-                      _profileGroup('Bots', [
-                        _profileRow(
-                          SettingsIds.profileModels,
-                          Icons.auto_awesome_rounded,
-                          'Models',
-                          () => _push(
-                            SettingsPage(
-                              onFeaturesChanged: _featuresChanged,
-                              api: widget.api,
-                              store: widget.store,
-                              userId: widget.userId,
-                              home: 'models',
-                            ),
-                          ),
-                        ),
-                        _profileRow(
-                          'profile-billing',
-                          Icons.account_balance_wallet_outlined,
-                          'Billing & usage',
-                          () => unawaited(_openBilling()),
-                        ),
-                        _profileRow(
-                          MachineIds.profileEntry,
-                          Icons.computer_outlined,
-                          'Your computers',
-                          () => _push(
-                            MachinesPage(
-                              api: widget.api,
-                              store: widget.store,
-                              userId: widget.userId,
-                            ),
-                          ),
-                        ),
-                        _profileRow(
-                          TemplateIds.profileEntry,
-                          Icons.inventory_2_outlined,
-                          'Bot templates',
-                          () => _push(
-                            TemplatesPage(
-                              api: widget.api,
-                              store: widget.store,
-                              userId: widget.userId,
-                              botId: selected?.botId.value,
-                              botName: selected == null
-                                  ? null
-                                  : _name(selected!),
-                            ),
-                          ),
-                        ),
-                        _profileRow(
-                          SettingsIds.profileManageBots,
-                          Icons.manage_accounts_outlined,
-                          'Manage Bots',
-                          () => _push(
-                            BotRecoveryPage(
-                              api: widget.api,
-                              store: widget.store,
-                              userId: widget.userId,
-                              changed: load,
-                            ),
-                          ),
-                        ),
-                        _profileRow(
-                          AuditIds.recoveryEntry,
-                          Icons.history_rounded,
-                          'Activity & history',
-                          () => _push(
-                            AuditPage(
-                              api: widget.api,
-                              store: widget.store,
-                              userId: widget.userId,
-                            ),
-                          ),
-                        ),
-                      ]),
-                      // A development build can look at the ViewNode renderer
-                      // before a plugin produces a document; the shipped app
-                      // has no such door.
-                      if (developmentAuth)
-                        _profileGroup('This site', [
-                          _profileRow(
-                            'profile-view-sample',
-                            Icons.dashboard_customize_outlined,
-                            'View sample',
-                            () => _push(
-                              ViewSamplePage(
-                                store: widget.store,
-                                userId: widget.userId,
+                      const SizedBox(height: 2),
+                      Builder(
+                        builder: (context) => Text(
+                          'Signed in',
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
                               ),
-                            ),
-                          ),
-                        ]),
-                      if (!localDevelopment)
-                        _profileGroup(null, [
-                          identified(
-                            SettingsIds.profileSignOut,
-                            Builder(
-                              builder: (context) => FrockRow(
-                                icon: Icons.logout_rounded,
-                                title: 'Sign out',
-                                color: Theme.of(context).colorScheme.error,
-                                chevron: false,
-                                onTap: () {
-                                  Navigator.of(context).pop();
-                                  unawaited(appBadge.clear());
-                                  unawaited(
-                                    push.logout().then(
-                                      (_) => widget.onSignOut(),
-                                    ),
-                                  );
-                                },
-                              ),
-                            ),
-                          ),
-                        ]),
-                      // The last line on the page: which program this is, so
-                      // a report of what went wrong can say what was running.
-                      Padding(
-                        padding: const EdgeInsets.only(top: 24),
-                        child: FutureBuilder<AppVersion>(
-                          future: widget.version(),
-                          builder: (context, answer) => identified(
-                            SettingsIds.profileVersion,
-                            Text(
-                              (answer.data ?? const AppVersion()).label,
-                              textAlign: TextAlign.center,
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onSurfaceVariant,
-                                  ),
-                            ),
-                          ),
                         ),
                       ),
                     ],
                   ),
                 ),
+              ],
+            ),
+          ),
+        ),
+        credit: (onTap) => switch (credit) {
+          final credit? => identified(
+            SettingsIds.profileCredit,
+            CreditTile(credit: credit, onTap: onTap),
+          ),
+          null => null,
+        },
+        creditSection: SettingsIds.profileBilling,
+        groups: [
+          ProfileGroup('Account', [
+            ProfileSection(
+              id: SettingsIds.profileSettings,
+              icon: Icons.settings_outlined,
+              title: 'Personal details',
+              page: _settingsPage,
+            ),
+          ]),
+          ProfileGroup('Bots', [
+            ProfileSection(
+              id: SettingsIds.profileModels,
+              icon: Icons.auto_awesome_rounded,
+              title: 'Models',
+              page: () => SettingsPage(
+                onFeaturesChanged: _featuresChanged,
+                api: widget.api,
+                store: widget.store,
+                userId: widget.userId,
+                home: 'models',
+              ),
+            ),
+            ProfileSection(
+              id: SettingsIds.profileBilling,
+              icon: Icons.account_balance_wallet_outlined,
+              title: 'Billing & usage',
+              page: () => BillingPage(api: widget.api),
+              onLeave: _readCredit,
+            ),
+            ProfileSection(
+              id: MachineIds.profileEntry,
+              icon: Icons.computer_outlined,
+              title: 'Your computers',
+              page: _machinesPage,
+            ),
+            ProfileSection(
+              id: TemplateIds.profileEntry,
+              icon: Icons.inventory_2_outlined,
+              title: 'Bot templates',
+              page: () => TemplatesPage(
+                api: widget.api,
+                store: widget.store,
+                userId: widget.userId,
+                botId: selected?.botId.value,
+                botName: selected == null ? null : _name(selected!),
+              ),
+            ),
+            ProfileSection(
+              id: SettingsIds.profileManageBots,
+              icon: Icons.manage_accounts_outlined,
+              title: 'Manage Bots',
+              page: () => BotRecoveryPage(
+                api: widget.api,
+                store: widget.store,
+                userId: widget.userId,
+                changed: load,
+              ),
+            ),
+            ProfileSection(
+              id: AuditIds.recoveryEntry,
+              icon: Icons.history_rounded,
+              title: 'Activity & history',
+              page: () => AuditPage(
+                api: widget.api,
+                store: widget.store,
+                userId: widget.userId,
+              ),
+            ),
+          ]),
+          // A development build can look at the ViewNode renderer before a
+          // plugin produces a document; the shipped app has no such door.
+          if (developmentAuth)
+            ProfileGroup('This site', [
+              ProfileSection(
+                id: 'profile-view-sample',
+                icon: Icons.dashboard_customize_outlined,
+                title: 'View sample',
+                page: () =>
+                    ViewSamplePage(store: widget.store, userId: widget.userId),
+              ),
+            ]),
+        ],
+        onSignOut: localDevelopment
+            ? null
+            : () {
+                unawaited(appBadge.clear());
+                unawaited(push.logout().then((_) => widget.onSignOut()));
+              },
+        // The last line on the page: which program this is, so a report of
+        // what went wrong can say what was running.
+        version: FutureBuilder<AppVersion>(
+          future: widget.version(),
+          builder: (context, answer) => identified(
+            SettingsIds.profileVersion,
+            Text(
+              (answer.data ?? const AppVersion()).label,
+              textAlign: TextAlign.center,
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: Theme.of(context).colorScheme.onSurfaceVariant,
               ),
             ),
           ),
@@ -3191,36 +3108,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       ),
     );
   }
-
-  /// One card of rows, with the name of what they have in common above it.
-  Widget _profileGroup(String? title, List<Widget> rows) => Builder(
-    builder: (context) => Padding(
-      padding: const EdgeInsets.only(top: 18),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          if (title != null)
-            Padding(
-              padding: const EdgeInsets.fromLTRB(12, 0, 4, 6),
-              child: Text(
-                title.toUpperCase(),
-                style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                  color: Theme.of(context).colorScheme.onSurfaceVariant,
-                ),
-              ),
-            ),
-          FrockRowGroup(rows: rows),
-        ],
-      ),
-    ),
-  );
-
-  Widget _profileRow(
-    String id,
-    IconData icon,
-    String title,
-    VoidCallback onTap,
-  ) => identified(id, FrockRow(icon: icon, title: title, onTap: onTap));
 
   /// The saved profile name and photo, falling back to nothing rather than
   /// the account id: an id's first letter is not a face.

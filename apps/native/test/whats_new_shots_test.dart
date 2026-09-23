@@ -6,10 +6,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/shell/semantics.dart';
+import 'package:frockbot_native/shell/sidebar.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
-import 'package:frockbot_native/theme/rows.dart';
 import 'package:frockbot_native/whats_new/feed.dart';
-import 'package:frockbot_native/whats_new/mark.dart';
 import 'package:frockbot_native/whats_new/page.dart';
 
 import 'navigation_test.dart' show DirectoryApi, identifiedBy;
@@ -118,8 +117,10 @@ Future<void> _save(WidgetTester tester, String name) async {
 }
 
 void main() {
-  testWidgets('megaphone row with the unread mark', (tester) async {
-    tester.view.physicalSize = const Size(800, 280);
+  testWidgets('the megaphone beside the profile, with the unread mark', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(576, 400);
     tester.view.devicePixelRatio = 2;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -127,31 +128,41 @@ void main() {
       MaterialApp(
         theme: FrockTheme.theme(Brightness.dark),
         home: Scaffold(
-          body: Center(
-            child: ConstrainedBox(
-              constraints: const BoxConstraints(maxWidth: 420),
-              child: RepaintBoundary(
-                key: _shot,
-                child: FrockRowGroup(
-                  rows: [
-                    FrockRow(
-                      icon: Icons.campaign_outlined,
-                      title: 'What’s New',
-                      trailing: const WhatsNewUnreadMark(),
-                      onTap: () {},
-                    ),
-                  ],
-                ),
-              ),
+          body: RepaintBoundary(
+            key: _shot,
+            child: ShellSidebar(
+              bots: const [],
+              profiles: const {},
+              unread: const {},
+              archived: const {},
+              activeBotId: null,
+              focusedBotId: null,
+              workingBotId: null,
+              loaded: true,
+              showHidden: false,
+              onSelect: (_) {},
+              onCreateBot: () {},
+              onSearch: () {},
+              onProfile: () {},
+              onWhatsNew: () {},
+              whatsNewUnread: true,
+              onMarketplace: () {},
+              onToggleHidden: () {},
+              onRetry: () async {},
             ),
           ),
         ),
       ),
     );
     await tester.pump();
-    expect(find.byIcon(Icons.campaign_outlined), findsOneWidget);
-    expect(identifiedBy(WhatsNewIds.unread), findsOneWidget);
-    await _save(tester, 'whats_new_unread_row.png');
+    expect(
+      find.descendant(
+        of: identifiedBy(ShellIds.sidebarWhatsNew),
+        matching: identifiedBy(WhatsNewIds.unread),
+      ),
+      findsOneWidget,
+    );
+    await _save(tester, 'whats_new_sidebar.png');
   });
 
   testWidgets('open page with new news, read news, and a picture', (

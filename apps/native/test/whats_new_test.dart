@@ -122,48 +122,6 @@ void main() {
     expect(feed.isUnread('older', null), isTrue);
   });
 
-  test(
-    'the page opens itself after a native update, not on first launch or web',
-    () {
-      expect(
-        shouldOpenWhatsNewAfterLaunchV1(
-          web: false,
-          previousVersion: 'Version 1.5.0+1',
-          currentVersion: 'Version 1.6.0+1',
-          unseen: 1,
-        ),
-        isTrue,
-      );
-      expect(
-        shouldOpenWhatsNewAfterLaunchV1(
-          web: false,
-          previousVersion: null,
-          currentVersion: 'Version 1.6.0+1',
-          unseen: 1,
-        ),
-        isFalse,
-      );
-      expect(
-        shouldOpenWhatsNewAfterLaunchV1(
-          web: true,
-          previousVersion: 'Version 1.5.0+1',
-          currentVersion: 'Version 1.6.0+1',
-          unseen: 1,
-        ),
-        isFalse,
-      );
-      expect(
-        shouldOpenWhatsNewAfterLaunchV1(
-          web: false,
-          previousVersion: 'Version 1.6.0+1',
-          currentVersion: 'Version 1.6.0+1',
-          unseen: 1,
-        ),
-        isFalse,
-      );
-    },
-  );
-
   test('an image has to be a What’s New path on this origin', () {
     expect(
       WhatsNewFeed.decode({

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
@@ -30,8 +31,29 @@ class OfflineApi extends NativeApi {
     String botId, {
     String? cursor,
     String? epoch,
-  }) async =>
-      throw const FormatException('offline fixture');
+  }) async => throw const FormatException('offline fixture');
+}
+
+class WhatsNewApi extends OfflineApi {
+  WhatsNewApi(super.store);
+  @override
+  Future<Object?> request(
+    String path, {
+    Object? body,
+    int limit = 512000,
+    bool authenticated = true,
+  }) async => path == '/api/whats-new'
+      ? {
+          'entries': [
+            {
+              'id': 'search',
+              'title': 'Search across every Bot',
+              'summary': 'Find a conversation, a file, or a person.',
+              'kind': 'feature',
+            },
+          ],
+        }
+      : super.request(path, body: body, limit: limit);
 }
 
 class DirectoryApi extends NativeApi {
@@ -58,8 +80,7 @@ class DirectoryApi extends NativeApi {
     String botId, {
     String? cursor,
     String? epoch,
-  }) async =>
-      throw const FormatException('outside this fixture');
+  }) async => throw const FormatException('outside this fixture');
 }
 
 class WriteRefusingStore extends MemoryStore {
@@ -276,9 +297,73 @@ void main() {
       tester.getTopLeft(version).dy,
       greaterThan(tester.getBottomLeft(signOut).dy),
     );
-    expect(identifiedBy(SettingsIds.profileWhatsNew), findsOneWidget);
-    expect(find.text('What’s New'), findsOneWidget);
-    expect(find.byIcon(Icons.campaign_outlined), findsOneWidget);
+    // What’s New is the sidebar's megaphone, not a row here.
+    expect(find.text('What’s New'), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    sessions.clear();
+    links.dispose();
+    api.close();
+  });
+
+  testWidgets('What’s New is the megaphone beside the profile, and waits', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(900, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = MemoryStore();
+    final api = WhatsNewApi(store);
+    final sessions = BotSessions(api: api, store: store);
+    final links = ValueNotifier<String?>(null);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: AppShell(
+          api: api,
+          store: store,
+          sessions: sessions,
+          userId: 'test-user',
+          botLinks: links,
+          onSignOut: () async {},
+          version: () async => const AppVersion(release: '0.7.163', patch: 3),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    // Something unread does not open the page: the mark says so instead.
+    expect(identifiedBy(WhatsNewIds.page), findsNothing);
+    final megaphone = identifiedBy(ShellIds.sidebarWhatsNew);
+    expect(megaphone, findsOneWidget);
+    expect(
+      find.descendant(
+        of: megaphone,
+        matching: identifiedBy(WhatsNewIds.unread),
+      ),
+      findsOneWidget,
+    );
+    final profile = identifiedBy(ShellIds.sidebarProfile);
+    expect(tester.getCenter(megaphone).dy, tester.getCenter(profile).dy);
+    expect(
+      tester.getTopLeft(megaphone).dx,
+      greaterThan(tester.getTopRight(profile).dx),
+    );
+
+    await tester.tap(megaphone);
+    await tester.pumpAndSettle();
+    expect(identifiedBy(WhatsNewIds.page), findsOneWidget);
+    expect(find.text('Search across every Bot'), findsOneWidget);
+
+    await tester.pageBack();
+    await tester.pumpAndSettle();
+    expect(
+      find.descendant(
+        of: identifiedBy(ShellIds.sidebarWhatsNew),
+        matching: identifiedBy(WhatsNewIds.unread),
+      ),
+      findsNothing,
+    );
     await tester.pumpWidget(const SizedBox());
     sessions.clear();
     links.dispose();
@@ -356,8 +441,10 @@ void main() {
     api.close();
   });
 
-  testWidgets('Settings back returns to the Profile page', (tester) async {
-    tester.view.physicalSize = const Size(900, 900);
+  testWidgets('on a phone, Settings back returns to the Profile page', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(390, 844);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
@@ -388,6 +475,91 @@ void main() {
     await tester.pumpAndSettle();
     expect(identifiedBy(SettingsIds.profileMenu), findsOneWidget);
     expect(find.byType(BottomSheet), findsNothing);
+    await tester.pumpWidget(const SizedBox());
+    sessions.clear();
+    links.dispose();
+    api.close();
+  });
+  testWidgets('wider, You is a column beside the page each row opens', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1200, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = MemoryStore();
+    final api = OfflineApi(store);
+    final sessions = BotSessions(api: api, store: store);
+    final links = ValueNotifier<String?>(null);
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: AppShell(
+          api: api,
+          store: store,
+          sessions: sessions,
+          userId: 'test-user',
+          botLinks: links,
+          onSignOut: () async {},
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(identifiedBy(ShellIds.sidebarProfile));
+    await tester.pumpAndSettle();
+
+    // The first row is open beside the rows. The one Back is You's own.
+    final menu = identifiedBy(SettingsIds.profileMenu);
+    expect(menu, findsOneWidget);
+    expect(find.widgetWithText(AppBar, 'Personal details'), findsOneWidget);
+    expect(find.byType(BackButton), findsOneWidget);
+    expect(
+      tester.getTopRight(menu).dx,
+      lessThanOrEqualTo(
+        tester.getTopLeft(find.widgetWithText(AppBar, 'Personal details')).dx,
+      ),
+    );
+
+    // Another row swaps the page in place; the rows stay.
+    await tester.tap(identifiedBy(SettingsIds.profileModels));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(AppBar, 'Models'), findsOneWidget);
+    expect(find.widgetWithText(AppBar, 'Personal details'), findsNothing);
+    expect(menu, findsOneWidget);
+    await tester.tap(identifiedBy(SettingsIds.profileManageBots));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(AppBar, 'Models'), findsNothing);
+    expect(find.byType(BackButton), findsOneWidget);
+
+    // What a page opens stacks inside it, and a system Back leaves that
+    // first, then You.
+    final pane = tester.state<NavigatorState>(
+      find
+          .descendant(
+            of: find.byWidgetPredicate((w) => w is NavigatorPopHandler),
+            matching: find.byType(Navigator),
+          )
+          .first,
+    );
+    unawaited(
+      pane.push(
+        MaterialPageRoute<void>(
+          builder: (_) => const Scaffold(body: Text('Deeper')),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Deeper'), findsOneWidget);
+    expect(menu, findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(find.text('Deeper'), findsNothing);
+    expect(menu, findsOneWidget);
+    await tester.binding.handlePopRoute();
+    await tester.pumpAndSettle();
+    expect(menu, findsNothing);
+    expect(identifiedBy(ShellIds.sidebar).hitTestable(), findsOneWidget);
+
     await tester.pumpWidget(const SizedBox());
     sessions.clear();
     links.dispose();
@@ -466,9 +638,11 @@ void creditTests() {
       tester.getTopLeft(credit).dy,
       lessThan(tester.getTopLeft(identifiedBy(SettingsIds.profileSettings)).dy),
     );
+    // Wider, the balance opens Billing beside the rows.
     await tester.tap(credit);
     await tester.pumpAndSettle();
-    expect(find.text('Billing & usage'), findsOneWidget);
+    expect(find.widgetWithText(AppBar, 'Billing & usage'), findsOneWidget);
+    expect(identifiedBy(SettingsIds.profileMenu), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     sessions.clear();
     links.dispose();

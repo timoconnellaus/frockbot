@@ -459,7 +459,7 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
 - `SignInPage` — `lib/auth/sign_in_page.dart:5`
 - `AppShell` — `lib/shell/app_shell.dart`: the directory, the identities the
   sidebar groups by, the unread fan-out, the right-panel drawer, the slot
-  registry, the Bot's page, the account sheet and the selected Bot's Session,
+  registry, the Bot's page, You and the selected Bot's Session,
   whose controller the chrome's connection, working-Turn and Computer marks are
   read off rather than mirrored in the shell. Three tiers
   (`lib/shell/desktop_layout.dart`): columns at a desk; below 640 the Bot list
@@ -467,8 +467,13 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
   and the conversation's bar is GrokBot's — Back, the Bot's name as the way to
   its page, the Computer
 - `ShellSidebar` — `lib/shell/sidebar.dart`: pinned tiles in pin order, label
-  groups, unread badges, hidden Bots, and the list's three controls: the
-  account sheet, search, create
+  groups, unread badges, hidden Bots, and the list's own controls: You, What’s
+  New, search, create
+- `ProfilePage` — `lib/shell/profile_page.dart`: You, the account's
+  destinations. Below 640 a list whose rows each push their page; wider, the
+  rows are a column beside the chosen page, which keeps its own stack inside
+  a nested `Navigator`, so another row swaps the page in place and Back leaves
+  that stack before it leaves You
 - `ChatPane` / `ConversationView` — `lib/shell/chat_pane.dart` over
   `lib/shell/transcript.dart`, `composer.dart`, `markdown.dart`,
   `send_payload.dart` and `skill_menu.dart`
@@ -527,9 +532,9 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
 - `AuditPage` — `lib/audit/page.dart`: every effect a Bot performed, filtered
   by kind, with an audited effect's Turn opening on the Work view
 - `WhatsNewPage` — `lib/whats_new/page.dart`: the curated list of what
-  production shipped, from `GET /api/whats-new`. Reached from What’s New on
-  the account sheet, with an unread mark, and opened once after a native
-  client restarts into a newer build. Dates are the first production tag that
+  production shipped, from `GET /api/whats-new`. Reached from the megaphone
+  beside the profile in the sidebar, which wears an unread mark; it never
+  opens itself. Dates are the first production tag that
   contained the entry, not the pull request: the tag deploy writes them into
   the Worker with `app/whats-new/published.ts`, so every other build serves
   the entries undated and they read “New”. A still is optional, one WebP

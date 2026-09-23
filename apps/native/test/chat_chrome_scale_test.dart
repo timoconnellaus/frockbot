@@ -41,6 +41,7 @@ Widget _sidebar({required bool phone}) => MaterialApp(
       onCreateBot: () {},
       onSearch: () {},
       onProfile: () {},
+      onWhatsNew: () {},
       onMarketplace: () {},
       onToggleHidden: () {},
       onRetry: () async {},
