@@ -871,15 +871,22 @@ export function action(scope: Page | Locator, actionId: string): Locator {
  * that asserted a sentence the product was drawing correctly could fail over
  * which of the two the engine had chosen. This reads both.
  */
-export async function spokenText(scope: Locator): Promise<string> {
-  return scope.evaluate((node) => {
-    const said: string[] = [node.textContent ?? ""];
-    for (const labelled of [node, ...node.querySelectorAll("[aria-label]")]) {
-      const label = labelled.getAttribute("aria-label");
-      if (label) said.push(label);
-    }
-    return said.join("\n");
-  });
+export async function spokenText(
+  scope: Locator,
+  options?: { timeout?: number },
+): Promise<string> {
+  return scope.evaluate(
+    (node) => {
+      const said: string[] = [node.textContent ?? ""];
+      for (const labelled of [node, ...node.querySelectorAll("[aria-label]")]) {
+        const label = labelled.getAttribute("aria-label");
+        if (label) said.push(label);
+      }
+      return said.join("\n");
+    },
+    undefined,
+    options,
+  );
 }
 
 /**
@@ -1032,7 +1039,12 @@ export async function expectBotOpen(page: Page, name: string): Promise<void> {
       sem(page, "shell-right-panel").first(),
     ]) {
       if (!(await scope.isVisible().catch(() => false))) continue;
-      if ((await spokenText(scope)).includes(name)) return;
+      // A scope can go between the check and the read: the header's panel
+      // toggle leaves when the Bot page opens beside a new Bot. With no action
+      // timeout a read of a node that has gone waits for it for ever, and the
+      // whole check times out on a Bot that is plainly open.
+      const said = await spokenText(scope, { timeout: 1_000 }).catch(() => "");
+      if (said.includes(name)) return;
     }
     if (
       await page
