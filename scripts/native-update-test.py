@@ -94,6 +94,15 @@ class UpdatesTest(unittest.TestCase):
             with self.assertRaisesRegex(RuntimeError, "signer differs"):
                 updates.inspect_apk(Path("wrong-key.apk"))
 
+    def test_build_tools_37_signer_line_is_read(self):
+        outputs = [f"package: name='com.frockbot.mobile' versionCode='60' versionName='{BUILD_NAME}'",
+                   "V3.0 Signer: certificate DN: CN=Android Debug, O=Android, C=US\n"
+                   f"V3.0 Signer: certificate SHA-256 digest: {updates.SIGNER}\n"
+                   "V3.0 Signer: certificate SHA-1 digest: a7135076e9cd47c58089b884dee4151baff76495\n"]
+        with patch.object(updates, "build_tool", lambda name: Path(name)), \
+                patch.object(updates, "run", side_effect=outputs):
+            self.assertEqual(updates.inspect_apk(Path("phone-key.apk"))["versionCode"], 60)
+
     def test_newest_build_tools_version_is_used(self):
         sdk = updates.STATE / "sdk"
         for version in ("9.0.0", "36.0.0", "35.0.1"):

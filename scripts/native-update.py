@@ -145,7 +145,8 @@ def inspect_apk(apk):
     if not match or match[1] != PACKAGE:
         raise RuntimeError("Only the normal FrockBot APK may be published here; Dev is a separate app.")
     cert = run([build_tool("apksigner"), "verify", "--print-certs", apk])
-    signers = re.findall(r"Signer #\d+ certificate SHA-256 digest: ([a-fA-F0-9]+)", cert)
+    # Build-tools 37 names the signer by scheme ("V3.0 Signer: certificate …"); earlier ones number it.
+    signers = re.findall(r"Signer(?: #\d+|:) certificate SHA-256 digest: ([a-fA-F0-9]+)", cert)
     if [s.lower() for s in signers] != [SIGNER]:
         found = ", ".join(s.lower() for s in signers) or "(none)"
         raise RuntimeError(f"APK signer differs from the existing phone install "
