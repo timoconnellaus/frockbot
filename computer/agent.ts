@@ -69,9 +69,10 @@ import {
   COMPUTER_SCREENSHOTS_ROOT_ID,
 } from "./roots.js";
 import {
-  createComputerCaptureCadenceV1,
+  captureComputerFrameV1,
   elapsedMsV1,
   fileComputerScreenshotV1,
+  pruneComputerScreenshotsV1,
   timeComputerStepV1,
   type ComputerProjectionFileInvalidationV1,
   type ComputerProjectionFileKindV1,
@@ -81,6 +82,10 @@ import {
   decodeStoredComputerControlV1,
   isStoredComputerControlFreshV1,
 } from "./control-record.js";
+import {
+  computerFrameFromCaptureV1,
+  type ComputerFrameSinkV1,
+} from "./frame.js";
 
 export {
   COMPUTER_DOCTOR_ROOT_ID,
@@ -142,10 +147,12 @@ export interface ComputerAgentPluginConfig {
   /** Drops resident projection caches after this Turn's Workspace sync. */
   projectionFiles?: ComputerProjectionFileInvalidationV1;
   /**
-   * The shortest gap between two mid-Turn progress captures. Tests set it;
-   * production takes `COMPUTER_PROGRESS_CAPTURE_INTERVAL_MS`.
+   * Where the one frame the card shows goes: the Bot Durable Object's own
+   * storage, which for a subagent's Turn is its Bot's object rather than the
+   * task's. Absent, and no frame is kept: `computer_screenshot` still files
+   * its durable capture, and nothing else photographs the desktop.
    */
-  progressCaptureIntervalMs?: number;
+  frames?: ComputerFrameSinkV1;
   /** The Package's clock. Tests set it; production takes `Date.now`. */
   now?: () => number;
 }
@@ -702,13 +709,12 @@ export function createComputerAgentFeature(
     let currentTurn = 1;
     /** Local preview origins this Bot navigated to during the current Turn. */
     const previewOrigins = new Set<string>();
-    // One cadence per mounted plugin, which is one per Turn: a Turn's first
-    // Computer action always gets its capture, and the rest are debounced.
-    const progressCadence = createComputerCaptureCadenceV1(
-      config.progressCaptureIntervalMs === undefined
-        ? undefined
-        : { intervalMs: config.progressCaptureIntervalMs },
-    );
+    const frames = config.frames;
+    /**
+     * Whether this Turn filed a `computer_screenshot`: the Turn end prunes
+     * the durable captures only then, so a Turn that filed none lists nothing.
+     */
+    let screenshotFiledThisTurn = false;
     const projectionWrites = new Set<ComputerProjectionFileKindV1>();
     const noteProjectionWrite = (kind: ComputerProjectionFileKindV1): void => {
       projectionWrites.add(kind);
@@ -914,7 +920,6 @@ export function createComputerAgentFeature(
                 { signal: context.signal, effectId: context.effectId },
               ),
             );
-            await fileProgressCapture(computer, context);
             return {
               content: [text(result.stdout), text(result.stderr)]
                 .filter(Boolean)
@@ -1245,10 +1250,17 @@ export function createComputerAgentFeature(
 
     let captureSequence = 0;
 
+    /** This User's `screenshots` root, where `computer_screenshot` files. */
+    const screenshotsRoot = (): WorkspaceRootV1 => ({
+      kind: "package-declared",
+      userId,
+      packageId: "computer",
+      rootId: COMPUTER_SCREENSHOTS_ROOT_ID,
+    });
+
     /**
-     * Files one capture of this Bot's own desktop in the `screenshots` root,
-     * under this Turn: the one path the progress, explicit and Turn-end
-     * captures share.
+     * Files one `computer_screenshot` capture of this Bot's own desktop in the
+     * `screenshots` root, under this Turn.
      */
     const fileBotScreenshot = (input: {
       computer: ComputerHostSessionV1;
@@ -1265,12 +1277,7 @@ export function createComputerAgentFeature(
         computer: input.computer,
         workspace: input.workspace,
         path: {
-          root: {
-            kind: "package-declared",
-            userId,
-            packageId: "computer",
-            rootId: COMPUTER_SCREENSHOTS_ROOT_ID,
-          },
+          root: screenshotsRoot(),
           path: `${botKey}/${input.writer.turnId}-${captureSequence}.png`,
         },
         writer: {
@@ -1280,52 +1287,11 @@ export function createComputerAgentFeature(
           turnId: input.writer.turnId,
           runId: input.writer.runId,
         },
-        botKey,
         effectId: input.effectId,
         ...(input.signal ? { signal: input.signal } : {}),
         timing: input.steps,
         now,
       });
-    };
-
-    /**
-     * Files one capture of the desktop the Bot has just acted on, and tells
-     * the browser to read again.
-     *
-     * "Live while working" has two halves, and this is the one that works
-     * without a viewer session: the card that cannot open a stream still
-     * shows a picture of what the Bot did a second ago rather than what it
-     * did at the end of the last Turn. Debounced, best effort, and never the
-     * reason a tool call fails — the Bot's answer is the tool's result, and a
-     * photograph of the screen is a courtesy to the person watching.
-     */
-    const fileProgressCapture = async (
-      computer: ComputerHostSessionV1,
-      context: ToolExecutionContext,
-    ): Promise<void> => {
-      const workspace = computer.workspace;
-      if (!writer || !workspace || !computer.screenshot) return;
-      if (!progressCadence.admit(now())) return;
-      try {
-        await timingOf(context).capture((steps) =>
-          fileBotScreenshot({
-            computer,
-            workspace,
-            writer,
-            botId: context.botId,
-            effectId: `${context.effectId}:progress-screenshot`,
-            steps,
-          }),
-        );
-      } catch {
-        // A desktop that refused a capture — human control, a Computer that
-        // paused, a Computer with no screen — changes nothing the Bot did.
-        return;
-      }
-      noteProjectionWrite("screenshots");
-      // Flushed now rather than at Turn end: a capture nobody is told about
-      // is the delay this exists to remove.
-      invalidateProjectionWrites(context.botId);
     };
 
     /**
@@ -1398,12 +1364,20 @@ export function createComputerAgentFeature(
               }),
             );
             const path = filed.path;
-            noteProjectionWrite("screenshots");
-            // The Bot just looked at its own screen; so should the person
-            // watching the card. Recording the admission keeps the very
-            // next Computer action from filing a near-identical capture.
-            progressCadence.admit(now());
-            invalidateProjectionWrites(context.botId);
+            screenshotFiledThisTurn = true;
+            // The Bot just looked at its own screen; so does the card.
+            const frame = frames
+              ? await computerFrameFromCaptureV1(filed.captured)
+              : undefined;
+            if (frames && frame) {
+              try {
+                await frames.put(frame);
+                noteProjectionWrite("frame");
+                invalidateProjectionWrites(context.botId);
+              } catch {
+                // The card keeps its previous frame; the Bot has its capture.
+              }
+            }
             const dimensions = pngDimensionsV1(filed.captured.bytes);
             const attachment: ToolAttachmentV1 = {
               kind: "image",
@@ -1770,7 +1744,6 @@ export function createComputerAgentFeature(
               const origin = localPreviewOriginV1(action.url);
               if (origin) previewOrigins.add(origin);
             }
-            await fileProgressCapture(computer, context);
             return {
               content: result.accessibilitySnapshot,
               isError: false,
@@ -1817,23 +1790,53 @@ export function createComputerAgentFeature(
           );
           previewOrigins.clear();
         }
+        // The card's frame: how this Turn left the desktop, which is how it
+        // stays until the next one. One capture and one write, after the
+        // reply has gone.
         const workspace = computer.workspace;
-        if (writer && workspace && computer.screenshot) {
+        const prune = screenshotFiledThisTurn && writer && workspace;
+        screenshotFiledThisTurn = false;
+        if ((frames && computer.screenshot) || prune) {
           try {
-            await timing.capture((steps) =>
-              fileBotScreenshot({
-                computer,
-                workspace,
-                writer,
-                botId,
-                effectId: `computer:${writer.runId}:turn-end-screenshot`,
-                steps,
-              }),
-            );
-            noteProjectionWrite("screenshots");
+            await timing.capture(async (steps) => {
+              if (frames && computer.screenshot) {
+                try {
+                  if (
+                    await captureComputerFrameV1({
+                      computer,
+                      frames,
+                      effectId: `computer:${writer?.runId ?? sessionId}:${turn}:turn-end-frame`,
+                      timing: steps,
+                      now,
+                    })
+                  ) {
+                    noteProjectionWrite("frame");
+                  }
+                } catch {
+                  // Opportunistic capture never changes the Turn outcome.
+                  // The provider's human-control refusal is deliberately
+                  // preserved.
+                }
+              }
+              if (prune) {
+                await pruneComputerScreenshotsV1({
+                  workspace,
+                  root: screenshotsRoot(),
+                  botKey: computerBotPathKeyV1(botId),
+                  writer: {
+                    kind: "bot",
+                    botId,
+                    sessionId: writer.sessionId,
+                    turnId: writer.turnId,
+                    runId: writer.runId,
+                  },
+                  timing: steps,
+                  now,
+                });
+              }
+            });
           } catch {
-            // Opportunistic capture never changes the Turn outcome. The
-            // provider's human-control refusal is deliberately preserved.
+            // Retention is best effort; the Turn is already over.
           }
         }
         await turnSync.afterTurn(computer, sessionId, timing);
@@ -1864,9 +1867,7 @@ export function createComputerAgentFeature(
           if (turn !== currentTurn) {
             projectionWrites.clear();
             previewOrigins.clear();
-            // Every Turn's first Computer action is worth a capture, however
-            // soon after the previous Turn's last one it happens.
-            progressCadence.reset();
+            screenshotFiledThisTurn = false;
           }
           currentTurn = turn;
           turnSync.beginTurn(turn);

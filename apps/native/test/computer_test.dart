@@ -40,9 +40,8 @@ Map<String, Object?> projection({
       ? [
           {
             'version': 1,
-            'path': 'screen.png',
             'capturedAt': '2026-09-05T01:00:00.000Z',
-            'contentHash': 'abc',
+            'contentHash': captureHashV1,
             // The authority's own spelling: a path on this account's
             // authenticated origin, never an address anything anonymous can
             // read. `computer/bot.ts` builds exactly this.
@@ -52,9 +51,12 @@ Map<String, Object?> projection({
       : <Object?>[],
 };
 
-/// The Workspace read route, as the projection names it.
-const capturePathV1 =
-    '/api/bots/bot-1/workspace/file?path=%7B%22root%22%3A%7B%22kind%22%3A%22package-declared%22%7D%2C%22path%22%3A%22screen.png%22%7D';
+/// The frame's SHA-256, which is also its address.
+const captureHashV1 =
+    '0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef';
+
+/// The Bot's frame route, as the projection names it.
+const capturePathV1 = '/api/bots/bot-1/computer/frame/$captureHashV1';
 
 /// One decodable picture: a 1×1 PNG, which is what the route answers with.
 final capturePngV1 = base64Decode(
@@ -62,9 +64,9 @@ final capturePngV1 = base64Decode(
   '60e6kgAAAABJRU5ErkJggg==',
 );
 
-/// A gateway that answers the projection, and answers the capture's bytes the
-/// way the Workspace read route does — to the client that carries the session,
-/// and to nothing else.
+/// A gateway that answers the projection, and answers the frame's bytes the
+/// way the frame route does — to the client that carries the session, and to
+/// nothing else.
 class CaptureApi extends SettingsApi {
   CaptureApi(super.store, super.handler, {this.picture});
 
@@ -84,6 +86,30 @@ class CaptureApi extends SettingsApi {
 }
 
 void main() {
+  test(
+    'reads the Computer again when its notice arrives, until disposed',
+    () async {
+      var reads = 0;
+      final api = CaptureApi(MemoryStore(), (path, body) async {
+        if (path == '/api/bots/bot-1/computer') reads += 1;
+        return projection(viewer: false);
+      });
+      final notices = ValueNotifier(0);
+      final controller = ComputerController(api, 'bot-1', notices: notices);
+
+      notices.value++;
+      await pumpEventQueue();
+      expect(reads, 1);
+      expect(controller.state.screenshots.single.url, capturePathV1);
+
+      controller.dispose();
+      notices.value++;
+      await pumpEventQueue();
+      expect(reads, 1);
+      notices.dispose();
+    },
+  );
+
   group('Bot Computer activity', () {
     Map<String, Object?> run(Object call, {String status = 'running'}) => {
       'status': status,
@@ -126,7 +152,7 @@ void main() {
       final state = ComputerProjection.fromJson(projection());
       expect(state.phase, 'ready');
       expect(state.viewerUrl, contains('view_only=1'));
-      expect(state.screenshots.single.contentHash, 'abc');
+      expect(state.screenshots.single.contentHash, captureHashV1);
     });
 
     test('a phase this client does not know is refused whole', () {
@@ -393,11 +419,8 @@ void main() {
 
       expect(bytes, capturePngV1);
       expect(asked.single.method, 'GET');
-      expect(asked.single.url.path, '/api/bots/bot-1/workspace/file');
-      expect(
-        asked.single.url.queryParameters['path'],
-        contains('"path":"screen.png"'),
-      );
+      expect(asked.single.url.path, capturePathV1);
+      expect(asked.single.url.query, isEmpty);
       expect(asked.single.headers['authorization'], 'Bearer token-1');
       api.close();
     });

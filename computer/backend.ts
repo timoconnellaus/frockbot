@@ -14,6 +14,12 @@ import { defineGatewayContribution } from "@frockbot/core/contracts/contribution
 
 export interface ComputerGatewayHost {
   readComputer(userId: string, botId: string): Promise<ComputerProjectionV1>;
+  /** The Bot's current frame when its hash is `contentHash`, else nothing. */
+  readComputerFrame(
+    userId: string,
+    botId: string,
+    contentHash: string,
+  ): Promise<Uint8Array<ArrayBuffer> | undefined>;
   executeComputerCommand(
     userId: string,
     botId: string,
@@ -100,10 +106,14 @@ export function createComputerBackendContribution(
     async route(request, url, context) {
       if (!context.userId) return undefined;
       const read = /^\/api\/bots\/([^/]+)\/computer$/.exec(url.pathname);
+      const frame =
+        /^\/api\/bots\/([^/]+)\/computer\/frame\/([0-9a-f]{64})$/.exec(
+          url.pathname,
+        );
       const command = /^\/api\/bots\/([^/]+)\/computer\/commands$/.exec(
         url.pathname,
       );
-      const match = read ?? command;
+      const match = read ?? frame ?? command;
       if (!match) return undefined;
       if ([...url.searchParams.keys()].length > 0) {
         return errorResponse(
@@ -118,6 +128,33 @@ export function createComputerBackendContribution(
           throw new ComputerProtocolDecodeError("Computer botId is invalid");
         }
         const botId = pathId(encodedBotId);
+        if (frame) {
+          if (request.method !== "GET") {
+            return Response.json(
+              { error: "method not allowed" },
+              { status: 405 },
+            );
+          }
+          const bytes = await host.readComputerFrame(
+            context.userId,
+            botId,
+            frame[2]!,
+          );
+          if (!bytes) {
+            // Replaced since the projection named it; the card reads again.
+            return Response.json(
+              { error: "That frame is no longer current", code: "stale" },
+              { status: 404 },
+            );
+          }
+          return new Response(bytes, {
+            headers: {
+              "content-type": "image/png",
+              // The URL is the frame's hash, so its bytes never change.
+              "cache-control": "private, max-age=31536000, immutable",
+            },
+          });
+        }
         if (read) {
           if (request.method !== "GET") {
             return Response.json(

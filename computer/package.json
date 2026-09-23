@@ -8,6 +8,7 @@
     "./backend": "./backend.ts",
     "./bot": "./bot.ts",
     "./definition": "./definition.ts",
+    "./frame": "./frame.ts",
     "./protocol": "./protocol.ts",
     "./roots": "./roots.ts",
     "./core": "./core/core.ts",

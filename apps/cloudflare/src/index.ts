@@ -431,6 +431,9 @@ interface BotStateRpc extends BotConfigurationBinding {
     | { status: "dropped"; reason: string }
   >;
   readComputerPresence(): Promise<unknown>;
+  readComputerFrame(
+    contentHash: string,
+  ): Promise<{ bytesBase64: string } | null>;
   executeComputerPresenceCommand(command: ComputerCommandV1): Promise<unknown>;
   run(command: OwnedBotTurnCommand): Promise<BotTurnResult>;
   admitRun(
@@ -522,6 +525,8 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
   return {
     readComputerPresence: () =>
       rpc.readComputerPresence({ schemaVersion: 1, userId, botId }),
+    readComputerFrame: (contentHash) =>
+      rpc.readComputerFrame({ schemaVersion: 1, userId, botId, contentHash }),
     executeComputerPresenceCommand: (command) =>
       rpc.executeComputerPresenceCommand({
         schemaVersion: 1,
@@ -1789,6 +1794,22 @@ const createGatewayBackendContributions = (env: Env) =>
           ).readComputerPresence(),
         ),
       ),
+    readComputerFrame: async (
+      userId: string,
+      botId: string,
+      contentHash: string,
+    ) => {
+      const answer = await (
+        await ownedComputerBotState(env, userId, botId)
+      ).readComputerFrame(contentHash);
+      if (!answer) return undefined;
+      const binary = atob(answer.bytesBase64);
+      const bytes = new Uint8Array(binary.length);
+      for (let index = 0; index < binary.length; index += 1) {
+        bytes[index] = binary.charCodeAt(index);
+      }
+      return bytes;
+    },
     executeComputerCommand: async (
       userId: string,
       botId: string,

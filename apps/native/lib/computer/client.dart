@@ -329,7 +329,18 @@ const _activePhases = {'provisioning', 'updating', 'taking-control'};
 class ComputerController extends ChangeNotifier {
   final NativeApi api;
   final String botId;
-  ComputerController(this.api, this.botId);
+
+  /// Bumped when the server says this Bot's Computer changed — a new frame, a
+  /// phase — so the card reads again now rather than at its next poll.
+  final ValueListenable<int>? notices;
+
+  ComputerController(this.api, this.botId, {this.notices}) {
+    notices?.addListener(_noticed);
+  }
+
+  void _noticed() {
+    if (!_closed) unawaited(read());
+  }
 
   ComputerProjection state = ComputerProjection.unknown;
   bool available = false;
@@ -380,14 +391,14 @@ class ComputerController extends ChangeNotifier {
     _changed();
   }
 
-  /// The bytes of one filed capture.
+  /// The bytes of the Bot's frame.
   ///
-  /// The capture lives on the Workspace read route, which is this account's
-  /// own authenticated origin: the projection carries the path, and only the
-  /// client that holds the session can turn it into a picture. The bytes are
-  /// read once per [ComputerScreenshot.contentHash] — the same capture arrives
-  /// in every poll of an idle Computer, and asking for a picture that did not
-  /// change once a second would be a read a second for nothing.
+  /// The frame lives on its own route, on this account's authenticated
+  /// origin: the projection carries its URL, and only the client that holds
+  /// the session can turn it into a picture. The bytes are read once per
+  /// [ComputerScreenshot.contentHash] — the same frame arrives in every poll
+  /// of an idle Computer, and asking for a picture that did not change once a
+  /// second would be a read a second for nothing.
   Future<Uint8List> capture(ComputerScreenshot shot) {
     final held = _capture;
     if (held != null && _captureHash == shot.contentHash && !_captureStale) {
@@ -485,6 +496,7 @@ class ComputerController extends ChangeNotifier {
   @override
   void dispose() {
     _closed = true;
+    notices?.removeListener(_noticed);
     _poll?.cancel();
     super.dispose();
   }

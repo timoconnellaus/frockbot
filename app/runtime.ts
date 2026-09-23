@@ -551,6 +551,7 @@ export function createFoundationHostedRuntimePackages(
         ...(host.computerProjectionFiles
           ? { projectionFiles: host.computerProjectionFiles }
           : {}),
+        ...(host.computerFrames ? { frames: host.computerFrames } : {}),
       }),
     ),
   ];

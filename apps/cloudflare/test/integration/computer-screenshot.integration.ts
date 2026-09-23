@@ -83,8 +83,8 @@ describe("a Turn whose model asks for a screenshot", () => {
     const image = png();
 
     // The Computer this Turn will drive: `scrot` reports what it wrote, the
-    // Workspace write reports that it landed, and the prune's listing is
-    // empty because this is the first capture.
+    // Workspace write reports that it landed, and the Turn end's retention
+    // listing is empty because this is the first capture.
     await script({ match: SCREENSHOTS_ROOT, stdout: "" });
     await script({ match: "echo __WRITTEN__", stdout: "__WRITTEN__\n" });
     await script({ match: SCREENSHOT_PATH, stdout: "32\n" });
@@ -155,6 +155,18 @@ describe("a Turn whose model asks for a screenshot", () => {
       `/api/bots/${BOT_ID}/workspace/file?path=${encoded}`,
     );
     expect([200, 404, 409]).toContain(read.status);
+
+    // The card shows what the Bot last saw: one frame, kept in the Bot's own
+    // storage and served by its hash, never a file the card must list.
+    const presence = (await expectOkJson(
+      await asUser(userId, `/api/bots/${BOT_ID}/computer`),
+    )) as { screenshots: Array<{ contentHash: string; url: string }> };
+    expect(presence.screenshots).toHaveLength(1);
+    expect(presence.screenshots[0]!.contentHash).toBe(answer.contentHash);
+    const frame = await asUser(userId, presence.screenshots[0]!.url);
+    expect(frame.status).toBe(200);
+    expect(frame.headers.get("content-type")).toBe("image/png");
+    expect(new Uint8Array(await frame.arrayBuffer())).toEqual(image.bytes);
 
     // A path the decoder refuses is a refusal, not a crash.
     const refused = await asUser(

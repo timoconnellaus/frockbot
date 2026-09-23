@@ -19,6 +19,27 @@ import {
 } from "@frockbot/app/testkit";
 import { createComputerAgentFeature, pngDimensionsV1 } from "./agent.js";
 import { FakeWorkspace } from "@frockbot/computer/fake";
+import {
+  COMPUTER_FRAME_RECORD_KEY,
+  computerFrameSinkV1,
+  decodeStoredComputerFrameV1,
+} from "./frame.js";
+
+/** The Bot Durable Object storage the card's frame is kept in. */
+class FrameStorage {
+  readonly values = new Map<string, unknown>();
+  get<T>(key: string): Promise<T | undefined> {
+    return Promise.resolve(this.values.get(key) as T | undefined);
+  }
+  put(key: string, value: unknown): Promise<void> {
+    this.values.set(key, value);
+    return Promise.resolve();
+  }
+  frame() {
+    const value = this.values.get(COMPUTER_FRAME_RECORD_KEY);
+    return value === undefined ? undefined : decodeStoredComputerFrameV1(value);
+  }
+}
 
 /** A host that offers nothing beyond the operations under test. */
 const TEST_HOST_CAPABILITIES: ComputerHostCapabilitiesV1 = {
@@ -73,8 +94,9 @@ async function mount(
   provider: ComputerHostV1,
   writer = true,
   projectionFiles?: {
-    invalidate(botId: string, kind: "screenshots" | "doctor"): void;
+    invalidate(botId: string, kind: "frame" | "doctor"): void;
   },
+  frames?: FrameStorage,
 ) {
   const harness = createAgentRuntimeHarness();
   harness.computers.register(provider);
@@ -92,9 +114,19 @@ async function mount(
           }
         : {}),
       ...(projectionFiles ? { projectionFiles } : {}),
+      ...(frames ? { frames: computerFrameSinkV1(frames) } : {}),
     }),
   );
   return harness;
+}
+
+async function beginTurn(harness: AgentRuntimeHarness) {
+  const session = harness.sessions.create("session-1");
+  const agent = { botId: "bot-1", session };
+  await harness.hooks.preStep(agent as never, [], 1, 1, () =>
+    Promise.resolve({ kind: "enter" as const, inputs: [] }),
+  );
+  return agent;
 }
 
 async function executeTool(
@@ -180,7 +212,7 @@ describe("computer_screenshot", () => {
     await harness.dispose();
   });
 
-  test("prunes to the newest twenty captures for one Bot", async () => {
+  test("keeps the newest twenty captures, pruned at the Turn end and never during a call", async () => {
     const workspace = new FakeWorkspace();
     const harness = await mount(
       providerWith(workspace, () =>
@@ -192,8 +224,14 @@ describe("computer_screenshot", () => {
         }),
       ),
     );
+    const agent = await beginTurn(harness);
 
     for (let index = 0; index < 23; index += 1) await capture(harness);
+    // A capture is the Bot's; retention is not its call's cost.
+    expect(workspace.files.size).toBe(23);
+    expect(workspace.deleted).toEqual([]);
+
+    await harness.hooks.turnStopping(agent as never, 1);
 
     expect(workspace.files.size).toBe(20);
     expect(workspace.deleted).toEqual([
@@ -201,6 +239,39 @@ describe("computer_screenshot", () => {
       `${computerBotPathKeyV1("bot-1")}/run-9-2.png`,
       `${computerBotPathKeyV1("bot-1")}/run-9-3.png`,
     ]);
+    await harness.dispose();
+  });
+
+  test("a capture is also the card's frame", async () => {
+    const workspace = new FakeWorkspace();
+    const frames = new FrameStorage();
+    const invalidations: string[] = [];
+    const harness = await mount(
+      providerWith(workspace, () =>
+        Promise.resolve({
+          bytes: png(1280, 720),
+          mediaType: "image/png" as const,
+          display: ":100",
+          capturedAt: "2026-09-03T00:00:10.000Z",
+        }),
+      ),
+      true,
+      {
+        invalidate: (botId, kind) => invalidations.push(`${botId}:${kind}`),
+      },
+      frames,
+    );
+
+    const result = await capture(harness);
+
+    expect(result).toMatchObject({ isError: false });
+    expect(workspace.writes).toHaveLength(1);
+    expect(frames.frame()).toMatchObject({
+      bytes: png(1280, 720),
+      capturedAt: "2026-09-03T00:00:10.000Z",
+    });
+    // Announced as soon as it is kept, so an open card reads it now.
+    expect(invalidations).toEqual(["bot-1:frame"]);
     await harness.dispose();
   });
 
@@ -267,8 +338,9 @@ describe("computer_screenshot", () => {
     await harness.dispose();
   });
 
-  test("captures a final frame after a Turn that used the Computer", async () => {
+  test("keeps the desktop the Turn left as the card's frame, and files nothing", async () => {
     const workspace = new FakeWorkspace();
+    const frames = new FrameStorage();
     const invalidations: string[] = [];
     const harness = await mount(
       providerWith(workspace, () =>
@@ -283,61 +355,58 @@ describe("computer_screenshot", () => {
       {
         invalidate: (botId, kind) => invalidations.push(`${botId}:${kind}`),
       },
+      frames,
     );
-    const session = harness.sessions.create("session-1");
-    const agent = { botId: "bot-1", session };
-    await harness.hooks.preStep(agent as never, [], 1, 1, () =>
-      Promise.resolve({ kind: "enter" as const, inputs: [] }),
-    );
+    const agent = await beginTurn(harness);
     await executeTool(harness, "computer_exec", { command: "pwd" });
 
     await harness.hooks.turnStopping(agent as never, 1);
 
-    // One capture for the action the Bot just took, so the card can show it
-    // working, and one final frame at Turn end.
-    expect(workspace.writes).toHaveLength(2);
-    expect(workspace.writes[0]?.writer).toEqual({
-      kind: "bot",
-      botId: "bot-1",
-      sessionId: "session-1",
-      turnId: "run-9",
-      runId: "run-9",
+    expect(workspace.writes).toHaveLength(0);
+    expect(workspace.lists).toHaveLength(0);
+    expect(frames.frame()).toMatchObject({
+      bytes: png(1280, 720),
+      mediaType: "image/png",
+      capturedAt: "2026-09-03T00:00:10.000Z",
     });
-    // The mid-Turn capture is announced as soon as it is filed; waiting for
-    // Turn end is the delay the live card exists to remove.
-    expect(invalidations).toEqual(["bot-1:screenshots", "bot-1:screenshots"]);
+    expect(invalidations).toEqual(["bot-1:frame"]);
     await harness.dispose();
   });
 
-  test("a busy Turn files at most one progress capture per interval", async () => {
+  test("a Turn's Computer actions photograph nothing until the Turn ends", async () => {
     const workspace = new FakeWorkspace();
+    const frames = new FrameStorage();
+    let captures = 0;
     const harness = await mount(
-      providerWith(workspace, () =>
-        Promise.resolve({
+      providerWith(workspace, () => {
+        captures += 1;
+        return Promise.resolve({
           bytes: png(1280, 720),
           mediaType: "image/png" as const,
           display: ":100",
           capturedAt: "2026-09-03T00:00:10.000Z",
-        }),
-      ),
+        });
+      }),
       true,
+      undefined,
+      frames,
     );
-    const session = harness.sessions.create("session-1");
-    const agent = { botId: "bot-1", session };
-    await harness.hooks.preStep(agent as never, [], 1, 1, () =>
-      Promise.resolve({ kind: "enter" as const, inputs: [] }),
-    );
+    const agent = await beginTurn(harness);
     for (let call = 0; call < 5; call += 1) {
       await executeTool(harness, "computer_exec", { command: "pwd" });
     }
+    expect(captures).toBe(0);
 
-    // Five shell commands inside the debounce window, one photograph.
-    expect(workspace.writes).toHaveLength(1);
+    await harness.hooks.turnStopping(agent as never, 1);
+
+    expect(captures).toBe(1);
+    expect(workspace.writes).toHaveLength(0);
     await harness.dispose();
   });
 
   test("a final-frame capture is refused while the User holds control", async () => {
     const workspace = new FakeWorkspace();
+    const frames = new FrameStorage();
     let captures = 0;
     const harness = await mount(
       providerWith(workspace, () => {
@@ -346,20 +415,20 @@ describe("computer_screenshot", () => {
           new ComputerError("human-control-active", "held by User"),
         );
       }),
+      true,
+      undefined,
+      frames,
     );
-    const session = harness.sessions.create("session-1");
-    const agent = { botId: "bot-1", session };
-    await harness.hooks.preStep(agent as never, [], 1, 1, () =>
-      Promise.resolve({ kind: "enter" as const, inputs: [] }),
-    );
+    const agent = await beginTurn(harness);
     await executeTool(harness, "computer_exec", { command: "pwd" });
 
     await expect(
       harness.hooks.turnStopping(agent as never, 1),
     ).resolves.toBeUndefined();
-    // Both the progress capture and the final frame are refused, and neither
-    // refusal reaches the Bot's answer or the Turn's outcome.
-    expect(captures).toBe(2);
+    // The refusal reaches neither the Bot's answer nor the Turn's outcome,
+    // and the card keeps whatever frame it had.
+    expect(captures).toBe(1);
+    expect(frames.frame()).toBeUndefined();
     expect(workspace.writes).toHaveLength(0);
     await harness.dispose();
   });

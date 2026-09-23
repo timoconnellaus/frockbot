@@ -107,7 +107,10 @@ curl -s -H "authorization: Bearer $DEBUG_TOKEN" \
   can land after the Turn's end), and one `turn-end` after the push. Each
   phase is whole milliseconds: `attach`, `sync`, `selfCheck`, `operation`,
   `capture` split into `screenshot`/`write`/`list`/`prune`, and `total`. A
-  phase that did not run is absent.
+  phase that did not run is absent. Only `computer_screenshot` captures during
+  a call (`screenshot` + its durable `write`); the `turn-end` capture is the
+  card's frame (`screenshot` + one `write` to the Bot's storage), plus
+  `list`/`prune` only when the Turn filed a `computer_screenshot`.
 - `composition` — `currentGenerationId`, its `status`,
   `lastKnownGoodGenerationId`, and the last few generations each with their
   recorded `failures[]` (message + diagnostics) and `quarantined` flag.

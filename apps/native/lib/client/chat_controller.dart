@@ -516,6 +516,10 @@ class ChatController extends ChangeNotifier {
   /// a Turn streaming and say nothing about a record it may have written.
   final ValueNotifier<int> invalidations = ValueNotifier(0);
 
+  /// Bumped once per `computer` notice: this Bot's Computer changed, and its
+  /// card should read the projection again.
+  final ValueNotifier<int> computerNotices = ValueNotifier(0);
+
   Future<void> invalidate() async {
     await refresh();
     if (!_disposed) invalidations.value++;
@@ -595,6 +599,10 @@ class ChatController extends ChangeNotifier {
     }
     if (kind == 'card-revision' && payload is Map) {
       if (!_disposed) invalidations.value++;
+      return;
+    }
+    if (kind == 'computer') {
+      if (!_disposed) computerNotices.value++;
       return;
     }
   }
@@ -989,6 +997,7 @@ class ChatController extends ChangeNotifier {
     _disposed = true;
     _questionTimer?.cancel();
     invalidations.dispose();
+    computerNotices.dispose();
     super.dispose();
   }
 }

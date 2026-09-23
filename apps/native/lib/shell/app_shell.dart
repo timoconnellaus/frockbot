@@ -1232,7 +1232,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     canvas.addListener(_syncPanelCanvasSlot);
     unawaited(canvas.load());
 
-    final machine = ComputerController(widget.api, botId);
+    // Two adoptions of one Bot can both land; the controller the later one
+    // replaces must stop polling and listening.
+    computer?.removeListener(_repaint);
+    computer?.dispose();
+    final machine = ComputerController(
+      widget.api,
+      botId,
+      notices: _selectedChat?.computerNotices,
+    );
     computer = machine;
     // The Computer is not a panel entry: it is one destination, the desktop
     // full window, opened from the card and from the bar's own icon.

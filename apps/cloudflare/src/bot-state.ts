@@ -31,6 +31,12 @@ import { cleanBotAvatarTestState } from "./avatar-state-cleanup.js";
 import { cleanBotProfileMirrorTestState } from "./directory-profile-cleanup.js";
 import { cleanRetiredPublicationStateV1 } from "./publication-state-cleanup.js";
 import { projectUnprojectedSessionsV1 } from "./working-context-cleanup.js";
+import { cleanRetiredComputerScreenshotsV1 } from "./computer-screenshot-cleanup.js";
+import { computerBotPathKeyV1 } from "@frockbot/computer/core/bot-path";
+import {
+  decodeStoredComputerFrameV1,
+  type StoredComputerFrameV1,
+} from "@frockbot/computer/frame";
 import {
   deliverProfileMirrorV1,
   PROFILE_MIRROR_KEY_V1,
@@ -638,24 +644,39 @@ export class BotState
           receiptKey: "maintenance:skill-index:bot:2026-09-22",
         });
         const bucket = createR2ObjectBucketV1(this.env.MEMORY_FILES);
+        const listing = {
+          list: async (options: {
+            prefix: string;
+            limit: number;
+            cursor?: string;
+          }) => {
+            const page = await bucket.list(options);
+            return {
+              keys: page.objects.map((object) => object.key),
+              ...(page.cursor ? { cursor: page.cursor } : {}),
+              truncated: page.truncated,
+            };
+          },
+          delete: (key: string) => bucket.delete(key),
+        };
         await cleanRetiredMemoryFactObjectsV1(
           this.ctx.storage,
-          {
-            list: async (options) => {
-              const page = await bucket.list(options);
-              return {
-                keys: page.objects.map((object) => object.key),
-                ...(page.cursor ? { cursor: page.cursor } : {}),
-                truncated: page.truncated,
-              };
-            },
-            delete: (key) => bucket.delete(key),
-          },
+          listing,
           workspaceObjectPrefixV1({
             kind: "bot-memory",
             userId: identity.userId,
             botId: identity.botId,
           }),
+        );
+        await cleanRetiredComputerScreenshotsV1(
+          this.ctx.storage,
+          listing,
+          `${workspaceObjectPrefixV1({
+            kind: "package-declared",
+            userId: identity.userId,
+            packageId: "computer",
+            rootId: "screenshots",
+          })}${computerBotPathKeyV1(identity.botId)}/`,
         );
       }
       if (durableObjectHasSqlV1(this.ctx.storage)) {
@@ -817,9 +838,9 @@ export class BotState
                 .get(computerBotContribution)
                 ?.invalidateProjectionFile(userId, botId, kind);
               // Dropping the resident cache only makes the next read
-              // honest. The notice is what makes an attached browser take
-              // that read, so a capture filed mid-Turn reaches the card in
-              // about a second instead of at the next projection poll.
+              // honest. The notice is what makes an attached client take
+              // that read, so a new frame reaches the card in about a
+              // second instead of at the next projection poll.
               this.stateChannel.noticeComputer();
             },
             scheduledDeadlines: async (transaction) => [
@@ -1511,6 +1532,47 @@ export class BotState
     const { shell, computer } = await this.materialized(identity);
     await shell.validateIdentity(identity);
     return computer.read(identity.userId, identity.botId);
+  }
+
+  /**
+   * Keeps the frame a subagent's Turn left on the Bot's desktop as the card's.
+   * The subagent runs in its task's own object; the card reads this one.
+   */
+  async putComputerFrame(input: unknown): Promise<void> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      frame: rpcDecoded(decodeStoredComputerFrameV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell, computer } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    await computer.putFrame(request.frame as StoredComputerFrameV1);
+  }
+
+  /**
+   * The Bot's Computer frame, when `contentHash` still names it. Read from
+   * this object's own storage; no Computer wakes to serve it.
+   */
+  async readComputerFrame(
+    input: unknown,
+  ): Promise<{ bytesBase64: string } | null> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      contentHash: rpcIdentifier,
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell, computer } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    const frame = await computer.readFrame(request.contentHash as string);
+    return frame ? { bytesBase64: bytesToBase64(frame.bytes) } : null;
   }
 
   /** One durably admitted User command against this Bot's Computer. */

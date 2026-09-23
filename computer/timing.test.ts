@@ -24,8 +24,12 @@ import type {
 import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
 import { FakeWorkspace } from "@frockbot/computer/fake";
 import { createComputerAgentFeature } from "./agent.js";
-import { fileComputerScreenshotV1 } from "./capture.js";
+import {
+  fileComputerScreenshotV1,
+  pruneComputerScreenshotsV1,
+} from "./capture.js";
 import { COMPUTER_SCREENSHOT_RETENTION } from "./roots.js";
+import { computerFrameSinkV1 } from "./frame.js";
 
 const TEST_HOST_CAPABILITIES: ComputerHostCapabilitiesV1 = {
   viewerFrameOrigins: [],
@@ -55,6 +59,7 @@ const COST = {
   write: 200,
   list: 10,
   delete: 3,
+  frame: 2,
 } as const;
 
 class Clock {
@@ -88,6 +93,20 @@ class TimedWorkspace extends FakeWorkspace {
   override delete(request: { path: WorkspacePathV1 }) {
     this.clock.spend(COST.delete);
     return super.delete(request);
+  }
+}
+
+/** The Bot Durable Object storage the card's frame goes to, timed. */
+class TimedFrames {
+  readonly values = new Map<string, unknown>();
+  constructor(private readonly clock: Clock) {}
+  get<T>(key: string): Promise<T | undefined> {
+    return Promise.resolve(this.values.get(key) as T | undefined);
+  }
+  put(key: string, value: unknown): Promise<void> {
+    this.clock.spend(COST.frame);
+    this.values.set(key, value);
+    return Promise.resolve();
   }
 }
 
@@ -236,9 +255,7 @@ async function runTurn(
       userId: "user-1",
       defaultProviderId: "timed",
       writer: { sessionId: "session-1", turnId: "run-1", runId: "run-1" },
-      // Every action gets a progress capture, so the capture phase is always
-      // exercised; the cadence has its own suite.
-      progressCaptureIntervalMs: 0,
+      frames: computerFrameSinkV1(new TimedFrames(clock)),
       now: clock.now,
     }),
   );
@@ -269,11 +286,18 @@ function timings(events: readonly SessionEvent[]): TimingEvent[] {
   );
 }
 
+/** `computer_screenshot`'s filing: the capture and its durable write. */
 const CAPTURE = {
   screenshot: COST.screenshot,
   write: COST.write,
-  list: COST.list,
-  total: COST.screenshot + COST.write + COST.list,
+  total: COST.screenshot + COST.write,
+};
+
+/** The Turn end's frame: the capture and one write to the Bot's storage. */
+const FRAME = {
+  screenshot: COST.screenshot,
+  write: COST.frame,
+  total: COST.screenshot + COST.frame,
 };
 
 describe("computer/timing", () => {
@@ -296,20 +320,19 @@ describe("computer/timing", () => {
         sync,
         selfCheck,
         operation: COST.exec,
-        capture: CAPTURE,
-        total: COST.open + sync + selfCheck + COST.exec + CAPTURE.total,
+        total: COST.open + sync + selfCheck + COST.exec,
       },
     });
-    // Nothing was pruned, so no prune step is claimed.
-    expect(call?.ms.capture).not.toHaveProperty("prune");
+    // A Computer action photographs nothing.
+    expect(call?.ms).not.toHaveProperty("capture");
     expect(turnEnd).toMatchObject({
       turn: 1,
       scope: "turn-end",
       ms: {
         attach: COST.open,
-        capture: CAPTURE,
+        capture: FRAME,
         sync: COST.reconcile,
-        total: COST.open + CAPTURE.total + COST.reconcile,
+        total: COST.open + FRAME.total + COST.reconcile,
       },
     });
     expect(turnEnd).not.toHaveProperty("tool");
@@ -331,8 +354,7 @@ describe("computer/timing", () => {
       attach: COST.open,
       sync: COST.signal,
       operation: COST.exec,
-      capture: CAPTURE,
-      total: COST.open + COST.signal + COST.exec + CAPTURE.total,
+      total: COST.open + COST.signal + COST.exec,
     });
   });
 
@@ -397,11 +419,18 @@ describe("computer/timing", () => {
       { toolName: "computer_screenshot", arguments: {} },
     ]);
 
-    const [call] = timings(events);
+    const [call, turnEnd] = timings(events);
     expect(call?.tool).toBe("computer_screenshot");
     expect(call?.ms.capture).toEqual(CAPTURE);
     // The capture is the whole action; nothing else is claimed for it.
     expect(call?.ms).not.toHaveProperty("operation");
+    // Retention runs at the Turn end, and only because a capture was filed.
+    // One capture is within it, so nothing is pruned.
+    expect(turnEnd?.ms.capture).toEqual({
+      ...FRAME,
+      list: COST.list,
+      total: FRAME.total + COST.list,
+    });
   });
 
   test("a call refused before it reached the Computer records no timing", async () => {
@@ -418,7 +447,7 @@ describe("computer/timing", () => {
     expect(timings(events)).toEqual([]);
   });
 
-  test("a filing that prunes reports the prune as its own step", async () => {
+  test("a filing never lists or prunes, and the Turn end's prune reports its own steps", async () => {
     const clock = new Clock();
     const workspace = new TimedWorkspace(clock);
     const root: WorkspaceRootV1 = {
@@ -441,7 +470,7 @@ describe("computer/timing", () => {
         writer,
       });
     }
-    const timing: ComputerCaptureTimingV1 = { total: 0 };
+    const filing: ComputerCaptureTimingV1 = { total: 0 };
     clock.ms = 0;
 
     await fileComputerScreenshotV1({
@@ -453,18 +482,32 @@ describe("computer/timing", () => {
       workspace,
       path: { root, path: "bot/new.png" },
       writer,
-      botKey: "bot",
       effectId: "effect-1",
-      timing,
+      timing: filing,
       now: clock.now,
     });
 
-    expect(timing).toEqual({
+    expect(filing).toEqual({
       screenshot: COST.screenshot,
       write: COST.write,
+      total: 0,
+    });
+
+    const retention: ComputerCaptureTimingV1 = { total: 0 };
+    await pruneComputerScreenshotsV1({
+      workspace,
+      root,
+      botKey: "bot",
+      writer,
+      timing: retention,
+      now: clock.now,
+    });
+
+    expect(retention).toEqual({
       list: COST.list,
       prune: COST.delete,
       total: 0,
     });
+    expect(workspace.files.size).toBe(COMPUTER_SCREENSHOT_RETENTION);
   });
 });
