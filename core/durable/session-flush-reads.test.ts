@@ -154,7 +154,7 @@ describe("a durable flush of a Session whose log holds cut events", () => {
     const storage = new ReadRecordingStorage();
 
     // An earlier Turn, whose ten large model requests are all stored cut.
-    await createAuthority(
+    const earlierAuthority = createAuthority(
       storage,
       turnOf(1, [
         [{ type: "turn/start", turn: 1 } as never],
@@ -163,7 +163,12 @@ describe("a durable flush of a Session whose log holds cut events", () => {
         ]),
         [{ type: "turn/end", turn: 1, outcome: "completed" } as never],
       ]),
-    ).run(command("earlier-run"));
+    );
+    await earlierAuthority.run(command("earlier-run"));
+    // `run` resolves once the completion is durable, while the drive that
+    // produced it is still re-reading the run. Eviction ends that instance;
+    // here it keeps going, so let it finish before the recorded flush starts.
+    await (earlierAuthority as unknown as { drive?: Promise<void> }).drive;
 
     const payloadPrefix = sessionEventPayloadPrefixV1(SESSION_ID);
     const earlier = [...storage.values.keys()].filter((key) =>

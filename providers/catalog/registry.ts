@@ -1,13 +1,6 @@
 import data from "./providers.json";
 
-export const oauthProviderIdsV1 = [
-  "openai-codex",
-  "github-copilot",
-  "kimi-coding",
-  "openrouter",
-  "xai",
-  "radius",
-] as const;
+export const oauthProviderIdsV1 = ["openrouter", "xai", "radius"] as const;
 export type OAuthProviderIdV1 = (typeof oauthProviderIdsV1)[number];
 
 export const catalogSettingKeysV1 = [
@@ -49,7 +42,6 @@ export const catalogSettingsV1: Record<CatalogSettingKeyV1, CatalogSettingV1> =
   };
 
 type CatalogRuntimeAdapterV1 = "pi-ai" | "bedrock";
-type CatalogOAuthRequestAuthV1 = "api-key" | "bearer-header";
 type CatalogModelSourceV1 = "builtin" | "radius-gateway";
 type CatalogSettingsValidationV1 =
   "none" | "azure-endpoint" | "cloudflare-account" | "cloudflare-gateway";
@@ -57,28 +49,21 @@ type CatalogSettingsValidationV1 =
 export interface CatalogProviderV1 {
   id: string;
   name: string;
-  apiKey: boolean;
   oauthProviderId: OAuthProviderIdV1 | undefined;
   connectionSettings: readonly CatalogSettingKeyV1[];
   runtimeAdapter: CatalogRuntimeAdapterV1;
-  oauthRequestAuth: CatalogOAuthRequestAuthV1;
   modelSource: CatalogModelSourceV1;
   settingsValidation: CatalogSettingsValidationV1;
 }
 
 type CatalogProviderPolicyV1 = Pick<
   CatalogProviderV1,
-  | "connectionSettings"
-  | "runtimeAdapter"
-  | "oauthRequestAuth"
-  | "modelSource"
-  | "settingsValidation"
+  "connectionSettings" | "runtimeAdapter" | "modelSource" | "settingsValidation"
 >;
 
 const defaultPolicyV1: CatalogProviderPolicyV1 = {
   connectionSettings: [],
   runtimeAdapter: "pi-ai",
-  oauthRequestAuth: "api-key",
   modelSource: "builtin",
   settingsValidation: "none",
 };
@@ -100,17 +85,11 @@ const providerPoliciesV1: Record<string, Partial<CatalogProviderPolicyV1>> = {
     connectionSettings: ["account-id"],
     settingsValidation: "cloudflare-account",
   },
-  "kimi-coding": { oauthRequestAuth: "bearer-header" },
   radius: { modelSource: "radius-gateway" },
 };
 
 const oauthProviderIds = new Set<string>(oauthProviderIdsV1);
-const catalogProviderDataV1 = data.filter(
-  (provider) => provider.apiKey || provider.id === "openai-codex",
-);
-const catalogProviderIdsV1 = new Set(
-  catalogProviderDataV1.map((provider) => provider.id),
-);
+const catalogProviderIdsV1 = new Set(data.map((provider) => provider.id));
 for (const providerId of [
   ...oauthProviderIdsV1,
   ...Object.keys(providerPoliciesV1),
@@ -119,15 +98,14 @@ for (const providerId of [
     throw new Error(`Catalog policy references unknown provider ${providerId}`);
 }
 
-export const catalogProvidersV1: CatalogProviderV1[] =
-  catalogProviderDataV1.map((provider) => ({
-    ...provider,
-    ...defaultPolicyV1,
-    ...providerPoliciesV1[provider.id],
-    oauthProviderId: oauthProviderIds.has(provider.id)
-      ? (provider.id as OAuthProviderIdV1)
-      : undefined,
-  }));
+export const catalogProvidersV1: CatalogProviderV1[] = data.map((provider) => ({
+  ...provider,
+  ...defaultPolicyV1,
+  ...providerPoliciesV1[provider.id],
+  oauthProviderId: oauthProviderIds.has(provider.id)
+    ? (provider.id as OAuthProviderIdV1)
+    : undefined,
+}));
 
 export function catalogProviderV1(providerId: string): CatalogProviderV1 {
   const provider = catalogProvidersV1.find(({ id }) => id === providerId);

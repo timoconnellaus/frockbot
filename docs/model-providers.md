@@ -1,6 +1,6 @@
 # Model provider connections
 
-FrockBot ships 40 provider entries: 39 with API-key support and six with OAuth sign-in, including OAuth-only OpenAI Codex. They come from DeepSeek Harness’s pinned `@earendil-works/pi-ai` 0.85.1 catalog. Regional and subscription API-key endpoints are separate connections. Frock AI remains the zero-configuration default, and Ollama Cloud remains available.
+FrockBot ships 28 provider entries. Every one takes an API key, and three also offer OAuth sign-in. They come from DeepSeek Harness’s pinned `@earendil-works/pi-ai` 0.85.1 catalog, less the [excluded providers](#excluded-providers). Regional API-key endpoints are separate connections. Frock AI remains the zero-configuration default, and Ollama Cloud remains available.
 
 Add a provider from the Marketplace catalog — a keyed provider's key form opens straight away — connect its API key or choose **Sign in**, then press **Choose a model** on its card to pick one in Models. Installed is where an added provider is configured or removed; a provider removed with its key left behind is offered again as Add. Frock AI's own models appear in the picker marked as built in, needing no key. Connections belong to the User and are available to every Bot they own. Keys are encrypted server-side. Saving a catalog-provider key does not run a paid inference probe; invalid credentials are reported when a Turn first uses them. Radius reads its authenticated catalog when connecting.
 
@@ -18,12 +18,10 @@ DeepSeek is served by an installed Plugin rather than a compiled adapter ([ADR 0
 - Cloudflare Workers AI (`cloudflare-workers-ai`)
 - DeepSeek (`deepseek`)
 - Fireworks (`fireworks`)
-- GitHub Copilot (`github-copilot`)
 - Google (`google`)
 - Google Vertex AI (`google-vertex`)
 - Groq (`groq`)
 - Hugging Face (`huggingface`)
-- Kimi For Coding (`kimi-coding`)
 - MiniMax (`minimax`)
 - MiniMax CN (`minimax-cn`)
 - Mistral (`mistral`)
@@ -31,23 +29,13 @@ DeepSeek is served by an installed Plugin rather than a compiled adapter ([ADR 0
 - Moonshot AI CN (`moonshotai-cn`)
 - NVIDIA (`nvidia`)
 - OpenAI (`openai`)
-- OpenAI Codex (`openai-codex`, OAuth only)
 - OpenCode Zen (`opencode`)
-- OpenCode Go (`opencode-go`)
 - OpenRouter (`openrouter`)
-- Qwen Token Plan (`qwen-token-plan`)
-- Qwen Token Plan CN (`qwen-token-plan-cn`)
-- Qwen Token Plan Individual (`qwen-token-plan-individual`)
 - Radius (`radius`)
 - Together (`together`)
 - Vercel AI Gateway (`vercel-ai-gateway`)
 - xAI (`xai`)
 - Xiaomi (`xiaomi`)
-- Xiaomi Token Plan AMS (`xiaomi-token-plan-ams`)
-- Xiaomi Token Plan CN (`xiaomi-token-plan-cn`)
-- Xiaomi Token Plan SGP (`xiaomi-token-plan-sgp`)
-- Z.AI (`zai`)
-- Z.AI Coding CN (`zai-coding-cn`)
 
 ## Provider-specific setup
 
@@ -56,13 +44,12 @@ DeepSeek is served by an installed Plugin rather than a compiled adapter ([ADR 0
 - **Cloudflare Workers AI:** supply an API token and account ID, or a complete compatible endpoint.
 - **Cloudflare AI Gateway:** supply the account ID and gateway ID with the API token.
 - **Google Vertex AI:** use a Google Cloud API key. Local application-default credential files are not read by the hosted product.
-- **GitHub Copilot:** use a Copilot API token; a generic GitHub personal access token is not interchangeable with it.
 
 The model picker initially shows up to 90 catalog models per connection. Exact model resolution can select other models in the installed catalog. A custom endpoint override keeps that provider’s catalog and protocol choices; it does not discover arbitrary new gateway models.
 
 ## OAuth sign-in
 
-Sign-in is available for **OpenAI Codex, GitHub Copilot, Kimi Coding, OpenRouter, xAI, and Radius**. Existing API-key connections are independent and can coexist with signed-in accounts.
+Sign-in is available for **OpenRouter, xAI, and Radius**. Existing API-key connections are independent and can coexist with signed-in accounts.
 
 A provider that takes a key or a sign-in is one card in the Marketplace and on its Provider accounts page; **Connect** opens it on both ways, **Use an API key** and **Sign in**. Choose **Sign in** and a short-lived FrockBot sign-in page opens. For device-code providers, open the provider link and enter the displayed code. FrockBot finishes the connection in the background. OpenRouter uses PKCE: after authorizing, copy the return URL into the sign-in form and choose **Finish connecting**. The return address is set by FrockBot's HTTPS gateway.
 
@@ -70,9 +57,20 @@ A page refresh resumes a pending attempt. Closing the page does not cancel it; u
 
 Access tokens refresh server-side before a new model request when near expiry. Refresh is serialized across Bots sharing the connection. An interrupted exchange or refresh is not retried blindly because its token may already have been consumed: the connection asks the User to sign in again. Connect again, select the new connection for the Bot, and remove the failed connection. Disconnect removes the local credential; revoke access in the provider's account settings as well when needed. OpenRouter returns a permanent, user-revocable API key through its OAuth flow, so that connection does not need token refresh.
 
-Copilot currently supports github.com accounts, not GitHub Enterprise domains. Radius sign-in targets `radius.pi.dev`. Account entitlement and device-login availability are determined by the provider; Codex device authentication may need enabling in the account's security settings. See [OpenAI authentication](https://developers.openai.com/codex/auth/).
+Radius sign-in targets `radius.pi.dev`. Account entitlement and device-login availability are determined by the provider.
 
-Claude subscription OAuth is excluded because Anthropic disallows third-party applications offering Claude.ai login on behalf of users. Anthropic API-key connections remain available. See [Anthropic's authentication rules](https://code.claude.com/docs/en/legal-and-compliance).
+## Excluded providers
+
+Consumer subscriptions and coding plans are left out when the provider's terms forbid a hosted, general-purpose or unattended client, or when the adapter would present itself as another client. The list lives in `providers/catalog/generate.ts`, so a dependency update does not bring them back.
+
+- **Claude subscription sign-in:** Anthropic disallows third-party applications offering Claude.ai login on behalf of users. Anthropic API keys remain available. See [Anthropic's authentication rules](https://code.claude.com/docs/en/legal-and-compliance).
+- **OpenAI Codex** (`openai-codex`): ChatGPT sign-in is approved for OpenAI's clients, pure open-source clients and OpenAI's partners, not hosted agents. OpenAI API keys remain available.
+- **GitHub Copilot** (`github-copilot`): the adapter presents itself to GitHub as VS Code and signs in with GitHub's own client.
+- **Kimi For Coding** (`kimi-coding`): Kimi Code is for interactive use in coding agents and may not be resold as a service. Moonshot AI API keys remain available.
+- **Z.AI** (`zai`, `zai-coding-cn`): both entries use the GLM Coding Plan, which may not be used from bots or SaaS products.
+- **Qwen Token Plan** (`qwen-token-plan`, `qwen-token-plan-cn`, `qwen-token-plan-individual`): not for application backends or scheduled tasks.
+- **Xiaomi Token Plan** (`xiaomi-token-plan-ams`, `xiaomi-token-plan-cn`, `xiaomi-token-plan-sgp`): only for programming tools, not application backends. Xiaomi API keys remain available.
+- **OpenCode Go** (`opencode-go`): a subscription for OpenCode and other coding agents. OpenCode Zen remains available.
 
 ## Runtime guarantees
 

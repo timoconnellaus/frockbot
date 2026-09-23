@@ -52,7 +52,7 @@ const serializedKeyring = JSON.stringify({
 const authority = {
   accountId: "account-1",
   connectionId: "connection-1",
-  packageId: "provider-openai-codex",
+  packageId: "provider-xai",
   generation: "generation-1",
 };
 

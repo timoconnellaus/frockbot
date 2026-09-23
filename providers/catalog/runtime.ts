@@ -222,10 +222,9 @@ class CatalogProvider implements LlmProvider {
     const oauth = decodeOAuthTokenV1(secret);
     const apiKey = oauth?.access ?? secret;
     const endpoint =
-      oauth?.baseUrl ??
-      (typeof config.settings?.["api-base-url"] === "string"
+      typeof config.settings?.["api-base-url"] === "string"
         ? config.settings["api-base-url"]
-        : undefined);
+        : undefined;
     const catalog = await loadProviderModelsV1(
       config.catalogProvider,
       apiKey,
@@ -281,22 +280,12 @@ class CatalogProvider implements LlmProvider {
               model,
               catalogContextV1(request, model, plan.instruction),
               {
-                apiKey:
-                  oauth &&
-                  config.catalogProvider.oauthRequestAuth === "bearer-header"
-                    ? undefined
-                    : apiKey,
+                apiKey,
                 env,
                 signal: deadlineSignal,
                 maxRetries: 0,
                 transport: "sse",
-                headers: {
-                  "Idempotency-Key": request.requestId,
-                  ...(oauth &&
-                  config.catalogProvider.oauthRequestAuth === "bearer-header"
-                    ? { Authorization: `Bearer ${oauth.access}` }
-                    : {}),
-                },
+                headers: { "Idempotency-Key": request.requestId },
                 onResponse(response) {
                   status = response.status;
                 },

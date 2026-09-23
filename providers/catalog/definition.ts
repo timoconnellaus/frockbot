@@ -119,39 +119,32 @@ export const catalogProviderDefinitionsV1: PackageDefinitionV1[] =
         id: `${provider.id}-models`,
         kind: "model",
         connectionTypes: [
-          ...(provider.apiKey ? [`${provider.id}-account`] : []),
+          `${provider.id}-account`,
           ...(provider.oauthProviderId ? [`${provider.id}-oauth`] : []),
         ],
         admission: { turnTypes: ["chat", "agent", "automation", "subagent"] },
       },
     ],
     connectionTypes: [
-      ...(provider.apiKey
-        ? [
-            {
-              id: `${provider.id}-account`,
-              displayName: `${provider.name} account`,
-              icon: provider.id,
-              allowMultiple: true,
-              authorization: {
-                kind: "api-key" as const,
-                driverId: provider.id,
-              },
-              capabilities: [`${provider.id}-models`],
-              settings: [
-                setting(
-                  "api-base-url",
-                  "API base URL",
-                  "Optional endpoint override. Azure requires your resource endpoint.",
-                ),
-                ...provider.connectionSettings.map((id) => {
-                  const metadata = catalogSettingsV1[id];
-                  return setting(metadata.id, metadata.title);
-                }),
-              ],
-            },
-          ]
-        : []),
+      {
+        id: `${provider.id}-account`,
+        displayName: `${provider.name} account`,
+        icon: provider.id,
+        allowMultiple: true,
+        authorization: { kind: "api-key" as const, driverId: provider.id },
+        capabilities: [`${provider.id}-models`],
+        settings: [
+          setting(
+            "api-base-url",
+            "API base URL",
+            "Optional endpoint override. Azure requires your resource endpoint.",
+          ),
+          ...provider.connectionSettings.map((id) => {
+            const metadata = catalogSettingsV1[id];
+            return setting(metadata.id, metadata.title);
+          }),
+        ],
+      },
       ...(provider.oauthProviderId
         ? [
             {

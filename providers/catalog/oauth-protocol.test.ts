@@ -72,48 +72,13 @@ function deviceFlow(provider: OAuthProviderIdV1): OAuthFlowV1 {
 }
 
 describe("hosted OAuth protocol", () => {
-  test("starts all six provider flows with the expected request shape", async () => {
+  test("starts every provider flow with the expected request shape", async () => {
     const cases: Array<{
       provider: Exclude<OAuthProviderIdV1, "openrouter">;
       endpoint: string;
-      json?: boolean;
       scope?: string;
       response: Record<string, unknown>;
     }> = [
-      {
-        provider: "openai-codex",
-        endpoint: "https://auth.openai.com/api/accounts/deviceauth/usercode",
-        json: true,
-        response: {
-          device_auth_id: "openai-device",
-          user_code: "OPENAI",
-          expires_in: 900,
-          interval: 4,
-        },
-      },
-      {
-        provider: "github-copilot",
-        endpoint: "https://github.com/login/device/code",
-        scope: "read:user",
-        response: {
-          device_code: "github-device",
-          user_code: "GITHUB",
-          verification_uri: "https://github.com/login/device",
-          expires_in: 900,
-          interval: 5,
-        },
-      },
-      {
-        provider: "kimi-coding",
-        endpoint: "https://auth.kimi.com/api/oauth/device_authorization",
-        response: {
-          device_code: "kimi-device",
-          user_code: "KIMI",
-          verification_uri_complete: "https://auth.kimi.com/device?code=KIMI",
-          expires_in: 900,
-          interval: 3,
-        },
-      },
       {
         provider: "xai",
         endpoint: "https://auth.x.ai/oauth2/device/code",
@@ -157,9 +122,7 @@ describe("hosted OAuth protocol", () => {
         ...(item.scope ? { scope: item.scope } : {}),
       });
       expect(calls[0]?.init?.headers).toMatchObject({
-        "Content-Type": item.json
-          ? "application/json"
-          : "application/x-www-form-urlencoded",
+        "Content-Type": "application/x-www-form-urlencoded",
       });
       expect(flow).toMatchObject({
         state: "attempt-state",
@@ -196,16 +159,12 @@ describe("hosted OAuth protocol", () => {
     );
   });
 
-  test("polls all six flows using their provider-specific exchanges", async () => {
+  test("polls every flow using its provider-specific exchange", async () => {
     const now = 1_000_000;
     const ordinary: Array<{
-      provider: "kimi-coding" | "xai" | "radius";
+      provider: "xai" | "radius";
       endpoint: string;
     }> = [
-      {
-        provider: "kimi-coding",
-        endpoint: "https://auth.kimi.com/api/oauth/token",
-      },
       { provider: "xai", endpoint: "https://auth.x.ai/oauth2/token" },
       {
         provider: "radius",
@@ -234,69 +193,6 @@ describe("hosted OAuth protocol", () => {
       });
     }
 
-    let calls = mockFetch([
-      response({
-        authorization_code: "authorization-code",
-        code_verifier: "server-verifier",
-      }),
-      response({
-        access_token: "openai-access",
-        refresh_token: "openai-refresh",
-        expires_in: 60,
-      }),
-    ]);
-    await expect(
-      pollOAuthV1("openai-codex", deviceFlow("openai-codex"), undefined, now),
-    ).resolves.toEqual({
-      access: "openai-access",
-      refresh: "openai-refresh",
-      expires: now + 60_000,
-    });
-    expect(calls.map((call) => call.url)).toEqual([
-      "https://auth.openai.com/api/accounts/deviceauth/token",
-      "https://auth.openai.com/oauth/token",
-    ]);
-    expect(fields(calls[0]!)).toEqual({
-      device_auth_id: "DEVICE-CODE",
-      user_code: "USER-CODE",
-    });
-    expect(fields(calls[1]!)).toMatchObject({
-      grant_type: "authorization_code",
-      code: "authorization-code",
-      code_verifier: "server-verifier",
-      redirect_uri: "https://auth.openai.com/deviceauth/callback",
-    });
-
-    calls = mockFetch([
-      response({ access_token: "github-oauth-token" }),
-      response({
-        token:
-          "copilot-access;proxy-ep=proxy.business.githubcopilot.com;other=value",
-        expires_at: now / 1_000 + 600,
-      }),
-    ]);
-    await expect(
-      pollOAuthV1(
-        "github-copilot",
-        deviceFlow("github-copilot"),
-        undefined,
-        now,
-      ),
-    ).resolves.toEqual({
-      access:
-        "copilot-access;proxy-ep=proxy.business.githubcopilot.com;other=value",
-      refresh: "github-oauth-token",
-      expires: now + 600_000,
-      baseUrl: "https://api.business.githubcopilot.com",
-    });
-    expect(calls.map((call) => call.url)).toEqual([
-      "https://github.com/login/oauth/access_token",
-      "https://api.github.com/copilot_internal/v2/token",
-    ]);
-    expect(calls[1]?.init?.headers).toMatchObject({
-      Authorization: "Bearer github-oauth-token",
-    });
-
     const openrouterFlow: OAuthFlowV1 = {
       authorizationUrl: "https://openrouter.ai/auth",
       callbackUrl: "https://app.example/oauth/callback",
@@ -305,7 +201,7 @@ describe("hosted OAuth protocol", () => {
       expiresAt: 2_000_000,
       intervalMs: 5_000,
     };
-    calls = mockFetch([response({ key: "openrouter-key" })]);
+    const calls = mockFetch([response({ key: "openrouter-key" })]);
     await expect(
       pollOAuthV1(
         "openrouter",
@@ -326,7 +222,7 @@ describe("hosted OAuth protocol", () => {
     });
   });
 
-  test("refreshes all six credentials without losing retained refresh tokens", async () => {
+  test("refreshes every credential without losing retained refresh tokens", async () => {
     const now = 1_000_000;
     const current: OAuthTokenV1 = {
       access: "old-access",
@@ -334,17 +230,9 @@ describe("hosted OAuth protocol", () => {
       expires: now - 1,
     };
     const ordinary: Array<{
-      provider: "openai-codex" | "kimi-coding" | "xai" | "radius";
+      provider: "xai" | "radius";
       endpoint: string;
     }> = [
-      {
-        provider: "openai-codex",
-        endpoint: "https://auth.openai.com/oauth/token",
-      },
-      {
-        provider: "kimi-coding",
-        endpoint: "https://auth.kimi.com/api/oauth/token",
-      },
       { provider: "xai", endpoint: "https://auth.x.ai/oauth2/token" },
       {
         provider: "radius",
@@ -369,25 +257,7 @@ describe("hosted OAuth protocol", () => {
       });
     }
 
-    let calls = mockFetch([
-      response({
-        token: "copilot-next",
-        expires_at: now / 1_000 + 300,
-      }),
-    ]);
-    await expect(
-      refreshOAuthV1("github-copilot", current, now),
-    ).resolves.toEqual({
-      access: "copilot-next",
-      refresh: "old-refresh",
-      expires: now + 300_000,
-      baseUrl: "https://api.individual.githubcopilot.com",
-    });
-    expect(calls[0]?.init?.headers).toMatchObject({
-      Authorization: "Bearer old-refresh",
-    });
-
-    calls = mockFetch([]);
+    const calls = mockFetch([]);
     await expect(refreshOAuthV1("openrouter", current, now)).resolves.toBe(
       current,
     );
@@ -453,57 +323,17 @@ describe("hosted OAuth protocol", () => {
       "OAuth request rejected (403); sign in again",
     );
     expect((denied as Error).message).not.toContain("refresh-token-secret");
-
-    mockFetch([response({ error: "deviceauth_authorization_pending" }, 403)]);
-    await expect(
-      pollOAuthV1(
-        "openai-codex",
-        deviceFlow("openai-codex"),
-        undefined,
-        1_000_000,
-      ),
-    ).resolves.toBe("pending");
   });
 
-  test("rejects an untrusted Copilot proxy host and never exposes tokens in errors", async () => {
-    mockFetch([
-      response({ access_token: "github-refresh-secret" }),
-      response({
-        token: "copilot-access-secret;proxy-ep=evil.example",
-        expires_at: 1_600,
-      }),
-    ]);
-    const error = await pollOAuthV1(
-      "github-copilot",
-      deviceFlow("github-copilot"),
-      undefined,
-      1_000_000,
-    ).catch((reason: unknown) => reason);
-
-    expect(error).toBeInstanceOf(Error);
-    expect((error as Error).message).toBe("Invalid Copilot API host");
-    expect((error as Error).message).not.toContain("github-refresh-secret");
-    expect((error as Error).message).not.toContain("copilot-access-secret");
-  });
-
-  test("round-trips encrypted-store payloads and validates Copilot endpoints", () => {
+  test("round-trips encrypted-store payloads", () => {
     const credential: OAuthTokenV1 = {
       access: "access-secret",
       refresh: "refresh-secret",
       expires: 2_000_000,
-      baseUrl: "https://api.business.githubcopilot.com",
     };
     expect(decodeOAuthTokenV1(encodeOAuthTokenV1(credential))).toEqual(
       credential,
     );
     expect(decodeOAuthTokenV1("ordinary-api-key")).toBeUndefined();
-    expect(() =>
-      decodeOAuthTokenV1(
-        encodeOAuthTokenV1({
-          ...credential,
-          baseUrl: "https://githubcopilot.com.evil.example",
-        }),
-      ),
-    ).toThrow("Invalid OAuth endpoint");
   });
 });
