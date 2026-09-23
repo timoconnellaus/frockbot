@@ -1,6 +1,5 @@
 /**
- * The Plugin build (ADR 0026): four named stages over one directory, sharing
- * the Applet build's type checker, bundler and Miniflare boot.
+ * The Plugin build (ADR 0026): four named stages over one directory.
  *
  *  1. `descriptor` — `plugin.json` parses and names the Plugin the caller
  *     asked for. Nothing more is decided here: the app Worker holds the full
@@ -29,12 +28,41 @@ import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import ts from "typescript";
 
 import type { AppletDiagnostic } from "../lint/index.js";
-import { bootedWithin } from "./boot.js";
 import { stableModulePaths } from "./module-paths.js";
 import { SDK_PLUGIN_TYPES } from "./paths.js";
 
 /** Pinned with the SDK: the runtime a Plugin build is checked against. */
 const PLUGIN_COMPATIBILITY_DATE = "2026-08-27";
+
+/**
+ * A workerd boot takes well under a second; this is room for a loaded
+ * machine. Without it a runtime that never reported ready would hang the
+ * build container's request rather than answer.
+ */
+const BOOT_DEADLINE_MS = 30_000;
+
+/**
+ * Tearing a runtime down takes milliseconds, but Miniflare's dispose first
+ * waits out the startup, which can be the very thing that hung.
+ */
+const DISPOSE_DEADLINE_MS = 10_000;
+
+/** `work`, or an error naming what did not happen in time. */
+async function within<T>(
+  work: Promise<T>,
+  ms: number,
+  what: string,
+): Promise<T> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const deadline = new Promise<never>((_, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what} within ${ms}ms`)), ms);
+  });
+  try {
+    return await Promise.race([work, deadline]);
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 export type PluginBuildStage =
   "descriptor" | "typecheck" | "bundle" | "describe";
@@ -350,9 +378,9 @@ export default {
 `;
 
 /**
- * Ask the built module what it exports, by running it. The boot is bounded
- * (`boot.ts`), so a build answers rather than hanging on a runtime that never
- * came up.
+ * Ask the built module what it exports, by running it. Both the boot and the
+ * teardown are bounded, so a build answers rather than hanging on a runtime
+ * that never came up.
  */
 export async function describePlugin(
   moduleCode: string,
@@ -375,7 +403,11 @@ export async function describePlugin(
     }),
   );
   try {
-    const url = await bootedWithin(miniflare.ready);
+    const url = await within(
+      miniflare.ready,
+      BOOT_DEADLINE_MS,
+      "The Workers runtime did not start",
+    );
     const response = (await miniflare.dispatchFetch(
       new URL(`/describe?${randomUUID()}`, url).toString(),
     )) as unknown as Response;
@@ -391,7 +423,11 @@ export async function describePlugin(
     // is what kills workerd. Miniflare's fallback is a process exit hook,
     // `bun test` runs none, and a dispose still pending when the host exits
     // leaves workerd running.
-    await miniflare.dispose();
+    await within(
+      miniflare.dispose(),
+      DISPOSE_DEADLINE_MS,
+      "The Workers runtime did not stop",
+    );
   }
 }
 
