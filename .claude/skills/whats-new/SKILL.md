@@ -1,6 +1,6 @@
 ---
 name: whats-new
-description: Add or update a What’s New entry when a user-facing feature, improvement, or fix ships in the desktop or mobile app. Use when the user says what’s new, changelog, or ship notes, or when finishing a change people will see after an update. The pull request must show the still so it can be reviewed.
+description: Add or update a What’s New entry when a new feature people would care about ships in the desktop or mobile app — never for a bug fix or a tweak. Use when the user says what’s new, changelog, or ship notes, or when finishing a new feature. The pull request must show the still so it can be reviewed.
 ---
 
 # What’s New
@@ -15,13 +15,15 @@ one.
 
 ## When to add an entry
 
-Add one in the **same PR as the feature** when a person using the installed
-app would notice the change after an update.
+Add one in the **same PR as the feature** when it is a new thing a person
+using the installed app would care about. Noticing a change is not enough:
+it has to be new.
 
-One entry per noticeable thing. Prepend it to `WHATS_NEW_ENTRIES_V1`
+One entry per feature. Prepend it to `WHATS_NEW_ENTRIES_V1`
 (newest first).
 
-Skip refactors, docs, infra, tests, and anything that is not user-visible.
+Skip bug fixes, tweaks, polish, refactors, docs, infra, tests, and anything
+that is not user-visible.
 
 ## Add or edit
 
@@ -36,7 +38,7 @@ entry; reusing one inherits the earlier tag’s date. Do not set
 `publishedAt` — the first `vX.Y.Z` tag that contains the id is the day, and
 until then the row says “New”.
 
-`kind` is `feature`, `improvement`, or `fix`.
+A new entry’s `kind` is `feature`.
 
 1. Put a WebP in `app/whats-new/media/<id>.webp` when the entry has a
    picture. Slug filename, under 200 KiB. Same-origin only — not a Flutter
@@ -89,8 +91,7 @@ Use one when the change has a surface you can point at — a page, a card,
 a control, a result. The picture is what you would show someone to say
 what shipped, and the PR reviews it there.
 
-Skip the picture when there is nothing to see: copy, a crash, a speed-up,
-or a fix that does not change a surface. Do not decorate. An icon, a
+Skip the picture when there is nothing to see. Do not decorate. An icon, a
 gradient, or a screenshot of chrome around the feature is not a still.
 
 ## The still

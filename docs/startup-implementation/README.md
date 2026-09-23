@@ -64,7 +64,7 @@ Use deterministic fakes and call/read-count assertions. New timing measurements 
 
 For runtime, integration or native client changes, the repository requires full `bun run validate`; follow [local validation](../local-validation.md) for committing code inputs, receipts and environment setup. Flutter changes also need the applicable Dart checks; changes to wire contracts go through the schema generators and protocol checks. Use the repository's publication/no-mistakes workflow when publication is explicitly assigned. A missing tool or environment is reported as an unrun check, never a pass. Source inspection is not a substitute for the required executable checks during implementation.
 
-This handoff is not permission to merge, tag, deploy or run production cleanup. Before an authorized release, the release owner verifies the scoped cleanup and fresh text/voice conversation, preserves the native compatibility policy, and follows current repository release instructions. Include What's New for visible changes under the existing procedure. Backend/client protocol changes must be released coherently; coordinate the minimum-client version if required rather than keeping unsupported wire variants.
+This handoff is not permission to merge, tag, deploy or run production cleanup. Before an authorized release, the release owner verifies the scoped cleanup and fresh text/voice conversation, preserves the native compatibility policy, and follows current repository release instructions. Include What's New for new features under the existing procedure. Backend/client protocol changes must be released coherently; coordinate the minimum-client version if required rather than keeping unsupported wire variants.
 
 Every task report must include:
 
