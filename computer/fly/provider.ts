@@ -413,6 +413,7 @@ function handle(
             timeoutMs: request.timeoutMs,
             maxOutputBytes: request.maxOutputBytes,
           },
+          options?.effectId,
         );
         return {
           exitCode: result.exitCode,
@@ -426,6 +427,7 @@ function handle(
       capture: async (options) => {
         const captured = await computer.screenshot(
           options?.signal ?? new AbortController().signal,
+          options?.effectId,
         );
         return {
           bytes: captured.bytes,
@@ -461,6 +463,7 @@ function handle(
           request.processId,
           request.command,
           options?.signal ?? new AbortController().signal,
+          options?.effectId,
         );
         return {
           pid: launched.pid,
@@ -482,6 +485,7 @@ function handle(
         computer.stopProcess(
           processId,
           options?.signal ?? new AbortController().signal,
+          options?.effectId,
         ),
       // Asked of the host every time, never read from the cached open: a
       // process's whole reconciliation question is whether the Computer
@@ -494,6 +498,7 @@ function handle(
           await computer.browser(
             browserAction(action),
             options?.signal ?? new AbortController().signal,
+            options?.effectId,
           ),
         ),
     },

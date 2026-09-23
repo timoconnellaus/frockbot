@@ -222,7 +222,15 @@ export class AuditUserBackendContribution {
     }
     if (journal.length === 0) return 0;
     const known = new Set(this.store.all().map((entry) => entry.effectId));
-    return journal.filter((effectId) => !known.has(effectId)).length;
+    // A call's requests after its first are named `<call>:<step>`, and each
+    // is accounted for by the call that sent it.
+    const call = (effectId: string) =>
+      effectId.includes(":")
+        ? effectId.slice(0, effectId.lastIndexOf(":"))
+        : effectId;
+    return journal.filter(
+      (effectId) => !known.has(effectId) && !known.has(call(effectId)),
+    ).length;
   }
 }
 

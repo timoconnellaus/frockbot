@@ -41,7 +41,11 @@ import {
   type WorkspaceRootV1,
 } from "@frockbot/core/contracts";
 import { shellQuote } from "./fly/shell.js";
-import { computerBotPathKeyV1, ComputerError } from "@frockbot/computer/core";
+import {
+  computerBotPathKeyV1,
+  ComputerError,
+  computerOperationIdV1,
+} from "@frockbot/computer/core";
 import {
   type ComputerDoctorReportV1,
   type ComputerBackgroundStateV1,
@@ -731,6 +735,16 @@ export function createComputerAgentFeature(
     const callTimings = new WeakMap<ToolExecutionContext, ComputerCallTiming>();
     const timingOf = (context: ToolExecutionContext): ComputerCallTiming =>
       callTimings.get(context) ?? new ComputerCallTiming(now);
+    /**
+     * The id this tool call runs under on the Computer. Outside a Turn there
+     * is no run, and the Session stands in: its turn counter never restarts.
+     */
+    const operationIdOf = (context: ToolExecutionContext): Promise<string> =>
+      computerOperationIdV1({
+        botId: context.botId,
+        runId: config.writer?.runId ?? context.sessionId,
+        effectId: context.effectId,
+      });
     /** Times one Computer call itself, apart from what this Package does around it. */
     const operation = <T>(
       context: ToolExecutionContext,
@@ -900,6 +914,7 @@ export function createComputerAgentFeature(
               };
         }
         try {
+          const effectId = await operationIdOf(context);
           return await useComputer(await open(context), async (computer) => {
             const exec = computer.exec;
             if (!exec) {
@@ -917,7 +932,7 @@ export function createComputerAgentFeature(
                   timeoutMs: 120_000,
                   maxOutputBytes: 30_000,
                 },
-                { signal: context.signal, effectId: context.effectId },
+                { signal: context.signal, effectId },
               ),
             );
             return {
@@ -1051,6 +1066,7 @@ export function createComputerAgentFeature(
       // spend the Bot's whole 100-record budget having run nothing at all.
       let unsettled: ComputerProcessRecordV1 | undefined;
       try {
+        const effectId = await operationIdOf(context);
         return await useComputer(await open(context), async (computer) => {
           if (!computer.processes) {
             throw new ComputerError(
@@ -1059,7 +1075,7 @@ export function createComputerAgentFeature(
             );
           }
           const processes = computer.processes;
-          const processId = `p-${context.effectId.replaceAll(/[^a-zA-Z0-9._-]/g, "-")}`;
+          const processId = `p-${effectId}`;
           const generation = await operation(context, () =>
             processes.generation({ signal: context.signal }),
           );
@@ -1082,7 +1098,7 @@ export function createComputerAgentFeature(
           const launched = await operation(context, () =>
             processes.launch(
               { processId, command },
-              { signal: context.signal, effectId: context.effectId },
+              { signal: context.signal, effectId },
             ),
           );
           const running: ComputerProcessRecordV1 = {
@@ -1159,6 +1175,7 @@ export function createComputerAgentFeature(
         };
       }
       try {
+        const effectId = await operationIdOf(context);
         return await useComputer(await open(context), async (computer) => {
           if (!computer.processes) {
             throw new ComputerError(
@@ -1176,7 +1193,7 @@ export function createComputerAgentFeature(
               action === "stop"
                 ? processes.stop(processId, {
                     signal: context.signal,
-                    effectId: context.effectId,
+                    effectId,
                   })
                 : processes.inspect(processId, {
                     signal: context.signal,
@@ -1344,6 +1361,7 @@ export function createComputerAgentFeature(
           };
         }
         try {
+          const effectId = await operationIdOf(context);
           return await useComputer(await open(context), async (computer) => {
             const workspace = computer.workspace;
             if (!workspace) {
@@ -1358,7 +1376,7 @@ export function createComputerAgentFeature(
                 workspace,
                 writer,
                 botId: context.botId,
-                effectId: context.effectId,
+                effectId,
                 steps,
                 signal: context.signal,
               }),
@@ -1726,6 +1744,7 @@ export function createComputerAgentFeature(
         if (!action)
           return { content: browserInputRefusalV1(input), isError: true };
         try {
+          const effectId = await operationIdOf(context);
           return await useComputer(await open(context), async (computer) => {
             const browser = computer.browser;
             if (!browser) {
@@ -1735,10 +1754,7 @@ export function createComputerAgentFeature(
               );
             }
             const result = await operation(context, () =>
-              browser.perform(action, {
-                signal: context.signal,
-                effectId: context.effectId,
-              }),
+              browser.perform(action, { signal: context.signal, effectId }),
             );
             if (action.type === "navigate") {
               const origin = localPreviewOriginV1(action.url);
@@ -1768,6 +1784,12 @@ export function createComputerAgentFeature(
       turn: number,
       timing: ComputerCallTiming,
     ): Promise<void> => {
+      const turnEndIdOf = (step: string): Promise<string> =>
+        computerOperationIdV1({
+          botId,
+          runId: writer?.runId ?? sessionId,
+          effectId: `turn-end:${turn}:${step}`,
+        });
       let computer: ComputerHostSessionV1;
       try {
         computer = await timing.phase("attach", () =>
@@ -1781,12 +1803,9 @@ export function createComputerAgentFeature(
       try {
         if (computer.browser && previewOrigins.size > 0) {
           const origins = [...previewOrigins];
+          const effectId = await turnEndIdOf("close-preview-tabs");
           await timing.phase("operation", () =>
-            closePreviewTabs(
-              computer,
-              origins,
-              `computer:${writer?.runId ?? sessionId}:${turn}:close-preview-tabs`,
-            ),
+            closePreviewTabs(computer, origins, effectId),
           );
           previewOrigins.clear();
         }
@@ -1805,7 +1824,7 @@ export function createComputerAgentFeature(
                     await captureComputerFrameV1({
                       computer,
                       frames,
-                      effectId: `computer:${writer?.runId ?? sessionId}:${turn}:turn-end-frame`,
+                      effectId: await turnEndIdOf("frame"),
                       timing: steps,
                       now,
                     })

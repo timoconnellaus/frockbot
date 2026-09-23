@@ -21,6 +21,7 @@
 // It reads the *stored* run rather than the client projection, because the
 // client projection drops `call.input` and the argument digest needs the exact
 // arguments.
+import { computerOperationIdV1 } from "@frockbot/computer/core";
 import {
   auditKindForToolV1,
   dynamicToolInputV1,
@@ -159,9 +160,15 @@ export async function auditEntriesFromStoredRunV1(
       runId: run.runId,
       occurrenceId,
       ...coordinates,
-      // `plugin-shell` writes `occurrenceId: context.effectId`, so the
-      // Computer envelope's `effectId` and this string are the same key.
-      effectId: occurrenceId,
+      // A Computer tool runs on the host under the id derived from its
+      // occurrence, so that is the id the host's journal names it by.
+      effectId: toolName.startsWith("computer_")
+        ? await computerOperationIdV1({
+            botId,
+            runId: run.runId,
+            effectId: occurrenceId,
+          })
+        : occurrenceId,
       at,
       kind: classification.kind,
       target: classification.target,

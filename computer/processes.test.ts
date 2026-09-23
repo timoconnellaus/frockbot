@@ -121,14 +121,18 @@ function fakeComputer(options: { launchFails?: boolean } = {}): Computer {
   return computer;
 }
 
-async function mount(computer: Computer, held: ComputerProcessStorageV1) {
+async function mount(
+  computer: Computer,
+  held: ComputerProcessStorageV1,
+  writer = { sessionId: "session-1", turnId: "run-9", runId: "run-9" },
+) {
   const harness = createAgentRuntimeHarness();
   harness.computers.register(computer.provider);
   await harness.mount(
     createComputerAgentFeature({
       userId: "user-1",
       defaultProviderId: "fixture",
-      writer: { sessionId: "session-1", turnId: "run-9", runId: "run-9" },
+      writer,
       processes: held,
     }),
   );
@@ -140,13 +144,14 @@ async function call(
   name: string,
   input: unknown,
   effectId = "tool:1:1:0",
+  sessionId = "session-1",
 ) {
   const context = {
     botId: "bot-1",
     agentId: "run-9",
     compositionGenerationId: "bootstrap",
     turnType: "chat" as const,
-    sessionId: "session-1",
+    sessionId,
     effectId,
     signal: new AbortController().signal,
   };
@@ -192,6 +197,52 @@ describe("computer_exec with background:true", () => {
     // And the answer says out loud that nothing keeps the Computer awake.
     expect(result.content).toContain("hibernates");
     await harness.dispose();
+  });
+
+  test("gives the same first call in another Session its own process", async () => {
+    // A Routine's first Turn calls `tool:1:1:0` exactly as the chat's did, in
+    // the same Bot's storage and the same Bot directory on the Computer.
+    const computer = fakeComputer();
+    const held = storage();
+    const chat = await mount(computer, held);
+    const routine = await mount(computer, held, {
+      sessionId: "routine:daily",
+      turnId: "run-10",
+      runId: "run-10",
+    });
+
+    const first = JSON.parse(
+      (
+        await call(chat, "computer_exec", {
+          command: "npm run build",
+          background: true,
+        })
+      ).content,
+    ) as { processId: string };
+    const second = JSON.parse(
+      (
+        await call(
+          routine,
+          "computer_exec",
+          { command: "npm test", background: true },
+          "tool:1:1:0",
+          "routine:daily",
+        )
+      ).content,
+    ) as { processId: string };
+
+    expect(second.processId).not.toBe(first.processId);
+    expect(held.map.get(`computer-process:${first.processId}`)).toMatchObject({
+      sessionId: "session-1",
+      command: "npm run build",
+      status: "running",
+    });
+    expect(held.map.get(`computer-process:${second.processId}`)).toMatchObject({
+      sessionId: "routine:daily",
+      command: "npm test",
+    });
+    await chat.dispose();
+    await routine.dispose();
   });
 
   test("settles the intent a failed launch left behind", async () => {

@@ -59,6 +59,8 @@ export type FakeComputerRunnerV1 = (
 export interface FakeComputerCommandV1 {
   botId: string;
   script: string;
+  /** The envelope's effect id, when the caller named one. */
+  effectId?: string;
   timeoutMs?: number;
   maxOutputBytes?: number;
 }
@@ -98,7 +100,8 @@ export class FakeComputerHost {
   /** The bytes `file/read` answers with, by absolute path on the Computer. */
   readonly files = new Map<string, Uint8Array>();
   /** Every `file/read` the host was asked for, in order. */
-  readonly reads: Array<{ botId: string; path: string }> = [];
+  readonly reads: Array<{ botId: string; path: string; effectId?: string }> =
+    [];
 
   constructor(private runner: FakeComputerRunnerV1 = () => ({})) {}
 
@@ -154,6 +157,7 @@ export class FakeComputerHost {
         host.commands.push({
           botId,
           script: command.script,
+          ...(options?.effectId ? { effectId: options.effectId } : {}),
           ...(command.timeoutMs === undefined
             ? {}
             : { timeoutMs: command.timeoutMs }),
@@ -178,7 +182,11 @@ export class FakeComputerHost {
         options?: ComputerHostCallOptions,
       ): Promise<ComputerHostFileReadResultV1> {
         options?.signal?.throwIfAborted();
-        host.reads.push({ botId, path });
+        host.reads.push({
+          botId,
+          path,
+          ...(options?.effectId ? { effectId: options.effectId } : {}),
+        });
         const bytes = host.files.get(path);
         if (!bytes) {
           return Promise.reject(new Error(`no such file: ${path}`));

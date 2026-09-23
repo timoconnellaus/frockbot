@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import { createAgentLoop } from "@frockbot/core/agent-loop";
 import type { ToolCall } from "@frockbot/core/contracts";
 import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
+import { computerOperationIdV1 } from "@frockbot/computer/core";
 import {
   AuditOutboxV1,
   auditEntriesFromStoredRunV1,
@@ -65,9 +66,13 @@ describe("projecting a settled run", () => {
       botId: "foreman",
       runId: "run-1",
       occurrenceId: "tool:1:2:0",
-      // The occurrence id *is* the effect id: `plugin-shell` writes
-      // `occurrenceId: context.effectId`, so the Computer envelope joins here.
-      effectId: "tool:1:2:0",
+      // The id the Computer host was sent, so its journal joins here: the
+      // occurrence id alone repeats in every Session and every Bot.
+      effectId: await computerOperationIdV1({
+        botId: "foreman",
+        runId: "run-1",
+        effectId: "tool:1:2:0",
+      }),
       turn: 1,
       step: 2,
       ordinal: 0,

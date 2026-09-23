@@ -4,7 +4,7 @@ import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import type { ComputerConnectionProgressV1 } from "@frockbot/computer/core/host";
 import { COMPUTER_UNCONFIGURED_MESSAGE_V1 } from "@frockbot/computer/core";
-import { DESKTOP_GUI_LEASE_KEY } from "./runtime.js";
+import { BOTS_ROOT, DESKTOP_GUI_LEASE_KEY } from "./runtime.js";
 import {
   computerBotKey,
   FlyComputer,
@@ -607,6 +607,54 @@ describe("Fly Sprite computer", () => {
         ),
       ),
     ).toBe(true);
+  });
+
+  test("names each durable call's requests by its effect id, one id per request", async () => {
+    // The billing reservation and the host's cancel are both keyed by the
+    // envelope's effect id, so a call that sends two requests names each.
+    const capture = `${BOTS_ROOT}/${computerBotKey("health")}/screenshot.png`;
+    const host = new FakeComputerHost((script) => {
+      if (script.includes("setsid nohup")) {
+        return { stdout: "__FROCKBOT_PROCESS__4242\n" };
+      }
+      if (script.includes("scrot")) return { stdout: "64\n" };
+      return computerRunner(script);
+    });
+    host.files.set(capture, new Uint8Array(64).fill(1));
+    const computer = await new FlyComputerHostV1(attach(host)).open(
+      { userId: "owner" },
+      { botId: "health" },
+      { providerId: "computer-host", generation: 1 },
+    );
+    const call = (effectId: string) => ({ signal: signal(), effectId });
+
+    await computer.exec?.execute(
+      { executable: "/bin/bash", args: ["-lc", "pwd"] },
+      call("call-exec"),
+    );
+    await computer.browser?.perform({ type: "snapshot" }, call("call-browser"));
+    await computer.processes?.launch(
+      { processId: "p-1", command: "sleep 1" },
+      call("call-launch"),
+    );
+    await computer.processes?.stop("p-1", call("call-stop"));
+    await computer.screenshot?.capture(call("call-screenshot"));
+
+    expect(
+      host.commands.flatMap((command) =>
+        command.effectId ? [command.effectId] : [],
+      ),
+    ).toEqual([
+      "call-exec",
+      "call-browser",
+      "call-launch",
+      "call-stop",
+      "call-stop:read",
+      "call-screenshot",
+    ]);
+    expect(host.reads).toEqual([
+      { botId: "health", path: capture, effectId: "call-screenshot:read" },
+    ]);
   });
 
   test("a viewer and a control lease are reachable from the Durable Object", async () => {

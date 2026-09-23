@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   ComputerError,
   computerIdentityKeyV1,
+  computerOperationIdV1,
   workspaceMountPathV1,
   type WorkspaceLayoutV1,
   normalizeComputerPath,
@@ -83,6 +84,28 @@ describe("Computer paths", () => {
     ]) {
       expect(() => normalizeComputerPath(path)).toThrow(ComputerError);
     }
+  });
+});
+
+describe("computerOperationIdV1", () => {
+  const CALL = { botId: "bot-1", runId: "run-1", effectId: "tool:1:1:0" };
+
+  test("is the same identity when the same call is re-dispatched", async () => {
+    const id = await computerOperationIdV1(CALL);
+    expect(id).toMatch(/^computer-[0-9a-f]{32}$/);
+    expect(await computerOperationIdV1({ ...CALL })).toBe(id);
+  });
+
+  test("differs for the same effect in another run or another Bot", async () => {
+    // The Computer and its billing account are the User's, and a tool call's
+    // effect id restarts in every Session and repeats across Bots.
+    const id = await computerOperationIdV1(CALL);
+    expect(await computerOperationIdV1({ ...CALL, runId: "run-2" })).not.toBe(
+      id,
+    );
+    expect(await computerOperationIdV1({ ...CALL, botId: "bot-2" })).not.toBe(
+      id,
+    );
   });
 });
 
