@@ -23,6 +23,13 @@ export type WhatsNewEntrySourceV1 = {
  */
 export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
+    id: "avatar-colour-flash",
+    title: "Avatars open in their own colour",
+    summary:
+      "A Bot’s character no longer flashes its original colour when a screen opens.",
+    kind: "fix",
+  },
+  {
     id: "flock-palette",
     title: "Colours from the characters",
     summary:

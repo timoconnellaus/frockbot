@@ -567,39 +567,25 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
             fit: fit,
             excludeFromSemantics: true,
           )
-        : rive.RiveWidgetBuilder(
+        : _LiveCharacter(
             key: ValueKey(_characterId),
-            fileLoader: _loader,
-            dataBind: rive.DataBind.auto(),
+            loader: _loader,
             onLoaded: (loaded) {
               _loaded = loaded;
               _synced = null;
               _sync();
               if (widget.gaze != null) _gazeChanged();
             },
-            builder: (context, state) => switch (state) {
-              // Decoration only: the artboard takes no pointer and holds no
-              // focus. Hover and gaze belong to the MouseRegion around it.
-              rive.RiveLoaded() => ExcludeFocus(
-                child: IgnorePointer(
-                  child: rive.RiveWidget(
-                    controller: state.controller,
-                    fit: rive.Fit.contain,
-                    hitTestBehavior: rive.RiveHitTestBehavior.none,
-                  ),
-                ),
-              ),
-              // A runtime that never arrives — a script the CSP refuses, a
-              // request that hangs — leaves the loader in `RiveLoading`
-              // forever rather than failing, so the still stands in for
-              // waiting as well as for failure. An empty slot is never the
-              // better answer: the still is what the animation replaces.
-              _ => Image.asset(
-                'assets/characters/$_characterId.png',
-                fit: fit,
-                excludeFromSemantics: true,
-              ),
-            },
+            // A runtime that never arrives — a script the CSP refuses, a
+            // request that hangs — leaves the file loading forever rather
+            // than failing, so the still stands in for waiting as well as for
+            // failure. An empty slot is never the better answer: the still is
+            // what the animation replaces.
+            still: Image.asset(
+              'assets/characters/$_characterId.png',
+              fit: fit,
+              excludeFromSemantics: true,
+            ),
           ),
   );
 
@@ -714,6 +700,88 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
     _settleTimer?.cancel();
     _restTimer?.cancel();
     super.dispose();
+  }
+}
+
+/// One character's artboard, bound to its view model — `RiveWidgetBuilder`,
+/// except that a file already decoded is bound before the first frame.
+///
+/// The builder awaits its loader even when the file is cached, so every
+/// avatar a new screen mounted drew a frame of the still first: the
+/// character in its catalogue colour, then the Bot's own colour a frame
+/// later. [onLoaded] runs before the artboard is built, so the colour it
+/// writes is the one the first frame draws.
+class _LiveCharacter extends StatefulWidget {
+  final rive.FileLoader loader;
+  final ValueChanged<rive.RiveLoaded> onLoaded;
+  final Widget still;
+  const _LiveCharacter({
+    super.key,
+    required this.loader,
+    required this.onLoaded,
+    required this.still,
+  });
+
+  @override
+  State<_LiveCharacter> createState() => _LiveCharacterState();
+}
+
+class _LiveCharacterState extends State<_LiveCharacter> {
+  rive.RiveLoaded? _loaded;
+
+  @override
+  void initState() {
+    super.initState();
+    final file = widget.loader.fileSync;
+    if (file != null) {
+      _bind(file);
+      return;
+    }
+    widget.loader.file().then((file) {
+      if (mounted) setState(() => _bind(file));
+    }, onError: (Object _) {});
+  }
+
+  void _bind(rive.File file) {
+    rive.RiveWidgetController? controller;
+    try {
+      controller = rive.RiveWidgetController(file);
+      _loaded = rive.RiveLoaded(
+        file: file,
+        controller: controller,
+        viewModelInstance: controller.dataBind(rive.DataBind.auto()),
+      );
+    } on Exception {
+      controller?.dispose();
+      return;
+    }
+    widget.onLoaded(_loaded!);
+  }
+
+  @override
+  void dispose() {
+    // The file stays: it is the loader's, shared by every avatar of this
+    // character.
+    _loaded?.controller.dispose();
+    _loaded?.viewModelInstance?.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final loaded = _loaded;
+    if (loaded == null) return widget.still;
+    // Decoration only: the artboard takes no pointer and holds no focus.
+    // Hover and gaze belong to the MouseRegion around it.
+    return ExcludeFocus(
+      child: IgnorePointer(
+        child: rive.RiveWidget(
+          controller: loaded.controller,
+          fit: rive.Fit.contain,
+          hitTestBehavior: rive.RiveHitTestBehavior.none,
+        ),
+      ),
+    );
   }
 }
 
