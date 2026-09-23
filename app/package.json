@@ -307,13 +307,13 @@
     "@frockbot/core": "workspace:*",
     "@frockbot/providers": "workspace:*",
     "@typesafe-ai/sdk": "0.6.0",
-    "better-auth": "1.7.3",
+    "better-auth": "1.7.5",
     "croner": "10.0.1"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "5.20260907.1",
-    "@types/bun": "1.4.1",
-    "@types/node": "26.4.1",
+    "@cloudflare/workers-types": "5.20260916.1",
+    "@types/bun": "1.4.2",
+    "@types/node": "26.6.1",
     "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2"
   }
 }
