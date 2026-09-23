@@ -1,5 +1,5 @@
 {
-  // The container half: Node 24, the Applets SDK's build pipeline, and the
+  // The container half: Node 24, the Plugin SDK's build pipeline, and the
   // tests that drive it.
   "compilerOptions": {
     "target": "ES2023",
@@ -12,7 +12,5 @@
     "lib": ["ES2023", "DOM"],
     "types": ["bun", "node"]
   },
-  // The SDK's ambient declaration of the one Cloudflare module it names. The
-  // pipeline reaches `src/server/applet.ts`, which is written against it.
-  "include": ["./**/*.ts", "../../../applets/sdk/types/cloudflare-workers.d.ts"]
+  "include": ["./**/*.ts"]
 }

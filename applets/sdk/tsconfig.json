@@ -7,17 +7,8 @@
     "strict": true,
     "noEmit": true,
     "skipLibCheck": true,
-    "jsx": "react-jsx",
     "lib": ["ES2023", "DOM"],
     "types": ["bun", "node"]
   },
-  "include": [
-    "types/**/*.d.ts",
-    "plugin/index.d.ts",
-    "src/**/*.ts",
-    "src/**/*.tsx",
-    "test/**/*.ts",
-    "test/**/*.tsx",
-    "spike/**/*.ts"
-  ]
+  "include": ["plugin/index.d.ts", "src/**/*.ts", "test/**/*.ts"]
 }

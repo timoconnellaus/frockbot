@@ -1,6 +1,6 @@
 /**
  * The Plugin template on disk, filled in, as a directory a build can run
- * against — the Plugin counterpart of `scaffold.ts`.
+ * against.
  */
 
 import { mkdtemp, readdir, readFile, writeFile } from "node:fs/promises";

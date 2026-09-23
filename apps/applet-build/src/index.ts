@@ -1,15 +1,15 @@
 /**
- * The Applet build service Worker.
+ * The Plugin build service Worker.
  *
  * It holds no storage and no credential: source arrives inline, artifacts
  * leave inline, and the app Worker is the only thing that writes R2 and the
  * only thing that hash-verifies what came back. A compromised builder can
  * therefore return bytes and nothing else.
  *
- * The build itself is three native binaries and a workerd — the type checker,
- * ESLint, esbuild and Miniflare — which is why it is a Cloudflare Container
- * rather than a Worker: every wasm substitute would be a second derivation of
- * the artifact that could disagree with the one `applet build` produces.
+ * The build itself is native binaries and a workerd — the type checker,
+ * esbuild and Miniflare — which is why it is a Cloudflare Container rather
+ * than a Worker: every wasm substitute would be a second derivation of the
+ * module that could disagree with the one `runPluginBuildV1` produces.
  */
 
 import { Container, ContainerProxy } from "@cloudflare/containers";
@@ -34,10 +34,9 @@ export interface AppletBuildEnv {
  * cold start costs one caller a few seconds of a build that already takes
  * some.
  *
- * No egress. Every dependency the pipeline needs is in the image, and an
- * Applet's source is never executed anywhere it could reach the network: the
- * `describe` stage boots it inside Miniflare, which is the same shape the
- * kernel gives it in production.
+ * No egress. Every dependency the pipeline needs is in the image, and a
+ * Plugin's source is never executed anywhere it could reach the network: the
+ * `describe` stage boots it inside Miniflare with every fetch refused.
  */
 export class AppletBuildContainer extends Container<AppletBuildEnv> {
   defaultPort = 8080;

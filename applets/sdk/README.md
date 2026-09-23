@@ -68,11 +68,11 @@ the type checker; `build` goes on to the module and its manifest.
    each model provider a `stream`. A Plugin declares at most 64 tools, each
    name once.
 
-Each describe spawns its own workerd, and `boot.ts` bounds the boot. A
-runtime that is not ready within `BOOT_DEADLINE_MS` (30 seconds), or whose
-spawn fails outright, is a `RuntimeDidNotStart`. The build lets that runtime
-go rather than waiting on it and boots once more; if the second boot does not
-come up either, the stage fails with that as its diagnostic.
+Each describe spawns its own workerd, and both ends of its life are bounded
+so a build answers rather than hangs: a runtime not ready within
+`BOOT_DEADLINE_MS` (30 seconds) fails the stage with that as its diagnostic,
+and the teardown, awaited on every path, gets `DISPOSE_DEADLINE_MS`
+(10 seconds).
 
 A build answers the module text and its manifest:
 `{ contract: 1, tools, hooks, services, triggers, views, cards, modelProviders, hashes: { module } }`,

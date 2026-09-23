@@ -3,10 +3,11 @@
  * against (ADR 0026).
  *
  * A Plugin is one ESM module with no imports of its own. It exports `tools`
- * and `execute`, and may export `hooks`, `services` and `triggers`. The
- * kernel's generated index imports the built module, checks these exports
- * against the Plugin's `plugin.json` once at mount, and hands every call a
- * narrow `ctx` naming only what that Plugin declared it may do.
+ * and `execute`, and may export `hooks`, `services`, `triggers`, `views`,
+ * `cards` and `modelProviders` (`PluginModule`). The kernel's generated index
+ * imports the built module, checks these exports against the Plugin's
+ * `plugin.json` once at mount, and hands every call a narrow `ctx` naming
+ * only what that Plugin declared it may do.
  *
  * These declarations are types only. They mirror `core/contracts/isolate.ts`
  * member for member — `BOT_ISOLATE_CONTEXT_KEYS_V1` is the list this file's

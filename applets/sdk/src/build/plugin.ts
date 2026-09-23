@@ -27,7 +27,6 @@ import { build as esbuild } from "esbuild";
 import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import ts from "typescript";
 
-import type { AppletDiagnostic } from "../lint/index.js";
 import { stableModulePaths } from "./module-paths.js";
 import { SDK_PLUGIN_TYPES } from "./paths.js";
 
@@ -67,6 +66,15 @@ async function within<T>(
 export type PluginBuildStage =
   "descriptor" | "typecheck" | "bundle" | "describe";
 
+export interface PluginDiagnostic {
+  /** Path relative to the Plugin's directory. */
+  file: string;
+  line: number;
+  column: number;
+  message: string;
+  severity: "error" | "warning";
+}
+
 /** The Plugin's `plugin.json`, as far as the build reads it. */
 export interface PluginBuildDescriptorV1 {
   id: string;
@@ -100,11 +108,10 @@ export type PluginBuildOutcome =
   | {
       status: "failed";
       stage: PluginBuildStage;
-      diagnostics: AppletDiagnostic[];
+      diagnostics: PluginDiagnostic[];
     };
 
 const PLUGIN_ID = /^[a-z][a-z0-9-]{0,63}$/;
-const TOOL_NAME = /^[a-z][a-z0-9_]{0,63}$/;
 const MAX_TOOLS = 64;
 
 const COMPILER_OPTIONS: ts.CompilerOptions = {
@@ -122,7 +129,7 @@ const COMPILER_OPTIONS: ts.CompilerOptions = {
   types: [],
 };
 
-function thrown(error: unknown, file = "plugin.json"): AppletDiagnostic[] {
+function thrown(error: unknown, file = "plugin.json"): PluginDiagnostic[] {
   return [
     {
       file,
@@ -184,7 +191,7 @@ async function pluginSources(directory: string): Promise<string[]> {
 /** Type-check the Plugin against the SDK's Plugin declarations. */
 export async function typeCheckPlugin(
   directory: string,
-): Promise<AppletDiagnostic[]> {
+): Promise<PluginDiagnostic[]> {
   const root = resolve(directory);
   const files = await pluginSources(root);
   if (!files.some((file) => relative(root, file) === "plugin.ts")) {

@@ -3,37 +3,26 @@
   "version": "0.1.0",
   "private": false,
   "type": "module",
-  "description": "Authoring SDK for FrockBot Applets: schema-first Durable Object server, TanStack DB client, component kit, linter, and the build pipeline.",
+  "description": "Authoring SDK for FrockBot Plugins: the declarations a Plugin is written against, and the build pipeline the cloud build service runs.",
   "license": "UNLICENSED",
   "exports": {
-    "./lint": "./src/lint/index.ts",
     "./build/plugin": "./src/build/plugin.ts",
     "./plugin": "./plugin/index.d.ts",
     "./package.json": "./package.json"
   },
   "files": [
     "src",
-    "types",
-    "template",
     "plugin",
     "README.md"
   ],
   "scripts": {
-    "test": "bun test test spike",
+    "test": "bun test test",
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@tanstack/db": "0.8.7",
-    "@tanstack/react-db": "0.3.7",
-    "@types/react": "19.2.18",
-    "@types/react-dom": "19.2.7",
     "esbuild": "0.28.2",
-    "eslint": "10.10.0",
     "miniflare": "5.20260828.0-alpha",
-    "react": "19.2.8",
-    "react-dom": "19.2.8",
-    "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2",
-    "typescript-eslint": "8.69.0"
+    "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2"
   },
   "devDependencies": {
     "@types/bun": "1.4.1",
