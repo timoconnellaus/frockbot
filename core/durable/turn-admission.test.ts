@@ -269,6 +269,46 @@ describe("the admission record names what produced the Turn", () => {
     ).toThrow(/invalid admission origin fields/);
   });
 
+  test("a group origin round-trips and names members exactly", () => {
+    const withOrigin = (origin: unknown) =>
+      legacyRun({
+        admission: {
+          schemaVersion: 1,
+          turnType: "agent",
+          lane: "agent",
+          origin,
+        },
+      } as never);
+    const group: StoredRunOriginV1 = {
+      kind: "group",
+      groupId: "g-0123456789abcdef0123",
+      groupName: "Trip",
+      members: [
+        { botId: "fox", name: "Fox" },
+        { botId: "dog", name: "Dog" },
+      ],
+      throughSeq: 3,
+      reason: "mention",
+    };
+    const decoded = codec.require(withOrigin(group));
+    expect(decoded.admission?.origin).toEqual(group);
+    expect(codec.require(structuredClone(decoded))).toEqual(decoded);
+    expect(() =>
+      codec.require(withOrigin({ ...group, reason: "because" })),
+    ).toThrow(/invalid admission origin/);
+    expect(() =>
+      codec.require(
+        withOrigin({
+          ...group,
+          members: [{ botId: "fox", name: "Fox", x: 1 }],
+        }),
+      ),
+    ).toThrow(/invalid admission origin fields/);
+    expect(() =>
+      codec.require(withOrigin({ ...group, fromBotId: "fox" })),
+    ).toThrow(/invalid admission origin fields/);
+  });
+
   test("each origin kind has its own exact fields, and cannot borrow another's", () => {
     const withOrigin = (origin: unknown) =>
       legacyRun({

@@ -101,6 +101,8 @@ export default defineConfig({
           },
           // The voice session object, `new_sqlite_classes` v7.
           VOICE_ASSISTANTS: { className: "VoiceAssistant", useSQLite: true },
+          // One object per Group Chat, `new_sqlite_classes` v9.
+          GROUP_CHATS: { className: "GroupChat", useSQLite: true },
         },
         bindings: {
           BETTER_AUTH_URL: "https://bot.frockbot.com",

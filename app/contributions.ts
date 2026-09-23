@@ -38,6 +38,10 @@ import {
   type FlockGatewayHost,
 } from "@frockbot/app/flock/backend";
 import {
+  backendContribution as groupsGatewayContribution,
+  type GroupChatGatewayHost,
+} from "@frockbot/app/groups/backend";
+import {
   backendContribution as routinesGatewayContribution,
   type RoutinesGatewayHost,
 } from "@frockbot/app/routines/backend";
@@ -116,6 +120,7 @@ export {
   computerGatewayContribution,
   connectGatewayContribution,
   flockGatewayContribution,
+  groupsGatewayContribution,
   routinesGatewayContribution,
   searchGatewayContribution,
   settingsGatewayContribution,
@@ -200,6 +205,7 @@ export type FoundationGatewayHost = {
   ComputerGatewayHost &
   ConnectGatewayHost &
   FlockGatewayHost &
+  GroupChatGatewayHost &
   SettingsGatewayHost &
   RoutinesGatewayHost &
   SubagentsGatewayHost &
@@ -273,6 +279,7 @@ export const backendDescriptorsV1: readonly AnyBackendDescriptor[] = [
   computerGatewayContribution,
   connectGatewayContribution,
   flockGatewayContribution,
+  groupsGatewayContribution,
   routinesGatewayContribution,
   searchGatewayContribution,
   settingsGatewayContribution,

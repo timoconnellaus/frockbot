@@ -237,6 +237,24 @@ describe("foundation application", () => {
       updateVoice: () => Promise.reject(new Error("not used while composing")),
       readLook: () => Promise.reject(new Error("not used while composing")),
       updateLook: () => Promise.reject(new Error("not used while composing")),
+      listGroupChats: () =>
+        Promise.resolve({ schemaVersion: 1 as const, revision: 0, groups: [] }),
+      executeGroupChatCommand: () =>
+        Promise.reject(new Error("not used while composing")),
+      readGroupChat: () =>
+        Promise.reject(new Error("not used while composing")),
+      readGroupMessages: () =>
+        Promise.reject(new Error("not used while composing")),
+      postGroupMessage: () =>
+        Promise.reject(new Error("not used while composing")),
+      markGroupRead: () =>
+        Promise.reject(new Error("not used while composing")),
+      stopGroupTurns: () =>
+        Promise.reject(new Error("not used while composing")),
+      retryGroupTurn: () =>
+        Promise.reject(new Error("not used while composing")),
+      openGroupChannel: () =>
+        Promise.reject(new Error("not used while composing")),
       listBotIdentities: () =>
         Promise.resolve({ schemaVersion: 1 as const, identities: [] }),
       readComputerFrame: () => Promise.resolve(undefined),
@@ -321,6 +339,7 @@ describe("foundation application", () => {
       "computer",
       "connect",
       "flock",
+      "groups",
       "routines",
       "search",
       "settings",

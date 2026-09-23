@@ -92,6 +92,29 @@ describe("message-time unread and notification records", () => {
     });
   });
 
+  test("a group Turn's send raises no badge or notification in the one-to-one chat", async () => {
+    const event = send(1, "In the group");
+    const grouped = {
+      ...run([event]),
+      sessionId: "group:g-0123456789abcdef0123",
+      admission: {
+        schemaVersion: 1,
+        turnType: "agent",
+        origin: {
+          kind: "group" as const,
+          groupId: "g-0123456789abcdef0123",
+          groupName: "Trip",
+          members: [{ botId: "scout", name: "Scout" }],
+          throughSeq: 2,
+          reason: "mention" as const,
+        },
+      },
+    } as unknown as Parameters<typeof messageRecords>[0]["run"];
+    expect(
+      await messageRecords({ run: grouped, events: [event], read: reader() }),
+    ).toEqual({});
+  });
+
   test("a muted message remains unread but creates no visible notification", async () => {
     const event = send(1, "Quiet");
     const records = await messageRecords({

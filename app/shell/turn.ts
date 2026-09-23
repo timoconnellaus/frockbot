@@ -5,6 +5,7 @@
 // half: what a Turn runs on, the Composition it mounts, the Stop intent that
 // fences it, and the one alarm that recovers it.
 
+import { groupMessageWaitingV1 } from "@frockbot/app/groups/bot";
 import type { AgentEffectAdmission } from "@frockbot/core/agent-loop/agent";
 import {
   validateToolOccurrenceJournal,
@@ -311,6 +312,16 @@ export async function executeTurn(
     ...(input.command.origin?.kind === "voice"
       ? { inboundAgent: { kind: "voice" as const } }
       : {}),
+    // A Group Chat's return address. The Turn speaks to the group, and the
+    // group reads what it said back off this run.
+    ...(input.command.origin?.kind === "group"
+      ? {
+          groupChat: {
+            origin: input.command.origin,
+            botId: input.identity.botId,
+          },
+        }
+      : {}),
   };
   const runtime = await agentRuntime(
     state,
@@ -426,8 +437,14 @@ export async function executeTurn(
           ),
         remainingEffectAdmissions: () =>
           remainingRunEffectAdmissions(state, input.command.runId),
+        // A group Turn yields to a newer group message rather than to the
+        // person's one-to-one chat, which waits for it like any other work.
         userMessageWaiting: () =>
-          state.authority.userMessageWaiting(input.command.runId),
+          input.command.origin?.kind === "group"
+            ? groupMessageWaitingV1(input.command.origin, (key) =>
+                state.ctx.storage.get(key),
+              )
+            : state.authority.userMessageWaiting(input.command.runId),
         // A model provider Plugin this Bot's selection runs (ADR 0032): the
         // provider contribution registers here, and the credential lease it
         // takes is settled where the loop settles the outcome.

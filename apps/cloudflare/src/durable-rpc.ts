@@ -1,6 +1,7 @@
 import { decodeSkillRefsV1, type SkillRefV1 } from "@frockbot/core/contracts";
 import { decodeBotIdV1, isRpcIdentifier } from "@frockbot/core/configuration";
 import { decodeRunIdV1 } from "@frockbot/app/shell/backend-contracts";
+import type { StoredRunGroupOriginV1 } from "@frockbot/core/durable";
 import {
   VOICE_CALL_TRANSCRIPT_TEXT_MAX_V1,
   VOICE_CALL_TRANSCRIPT_TURNS_MAX_V1,
@@ -545,6 +546,65 @@ export function decodeBotAgentRunRpcV1(
   }
   if (new TextEncoder().encode(command.text).byteLength > 32_000) {
     throw new Error("agent RPC request.command.text is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    userId: request.userId as string,
+    botId: request.botId as string,
+    command,
+  };
+}
+
+export interface DecodedBotGroupTurnRpcV1 {
+  schemaVersion: 1;
+  userId: string;
+  botId: string;
+  command: {
+    runId: string;
+    sessionId: string;
+    acceptedAt: string;
+    text: string;
+    origin: StoredRunGroupOriginV1;
+  };
+}
+
+/**
+ * Internal-only group admission: a Group Chat's object asking one of its
+ * members for a Turn. Its own door, like voice's: the return address is a
+ * group, and the Session is that group's, never the member's one-to-one chat.
+ */
+export function decodeBotGroupTurnRpcV1(
+  input: unknown,
+): DecodedBotGroupTurnRpcV1 {
+  const origin = rpcObject({
+    kind: rpcPattern(/^group$/, 5),
+    groupId: rpcPattern(/^g-[0-9a-f]{20}$/, 22),
+    groupName: rpcText(1_000),
+    members: rpcArray(rpcObject({ botId: rpcBotId, name: rpcText(100) }), 8),
+    throughSeq: rpcInteger({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+    reason: rpcEnum(["mention", "continue", "retry"] as const),
+  });
+  const request = decodeRpcEnvelopeV1(input, {
+    userId: rpcIdentifier,
+    botId: rpcBotId,
+    command: rpcObject({
+      runId: rpcString(128),
+      sessionId: rpcString(257),
+      acceptedAt: rpcString(64),
+      text: rpcString(32_000),
+      origin,
+    }),
+  });
+  const command = request.command as DecodedBotGroupTurnRpcV1["command"];
+  command.runId = decodeRunIdV1(command.runId);
+  if (command.sessionId !== `group:${command.origin.groupId}`) {
+    throw new Error("group RPC request.command.sessionId is invalid");
+  }
+  if (!Number.isFinite(Date.parse(command.acceptedAt))) {
+    throw new Error("group RPC request.command.acceptedAt is invalid");
+  }
+  if (command.origin.members.length === 0) {
+    throw new Error("group RPC request.command.origin.members is invalid");
   }
   return {
     schemaVersion: 1,

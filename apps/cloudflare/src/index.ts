@@ -13,6 +13,21 @@ import {
 } from "@frockbot/core/contracts";
 import { sha256HexV1 as sha256Hex } from "@frockbot/core/crypto";
 import type { ClientSkillCatalogV1 } from "@frockbot/app/shell/skill-protocol";
+import { GroupChat, GROUP_CHANNEL_INTERNAL_PATH } from "./group-chat.js";
+import {
+  groupChatObjectNameV1,
+  unwrapGroupRpcV1,
+  type GroupChatCommandV1,
+  type GroupChatListV1,
+  type GroupChatReceiptV1,
+  type GroupChatViewV1,
+  type GroupMessagePageV1,
+  type GroupMessageV1,
+  type GroupPostCommandV1,
+  type GroupReadCommandV1,
+  type GroupRetryCommandV1,
+  type GroupStopCommandV1,
+} from "@frockbot/app/groups/shared";
 import { createFoundationBackendContributions } from "@frockbot/app/runtime";
 import {
   decodeBotLifecycleDirectoryViewV1,
@@ -209,6 +224,8 @@ import type { ConnectEventV1 } from "@frockbot/app/connect/events";
 export { BotCapabilities } from "./bot-capabilities.js";
 export { PluginEgress } from "./plugin-egress.js";
 export { BotState, DeploymentPolicy, UserConfiguration };
+// One object per Group Chat, `idFromName("<userId>:<groupId>")`.
+export { GroupChat };
 // Administration, reached only by the admin portal over a service binding
 // (ADR 0028). No route in this Worker answers for it.
 export { AdminEntrypoint } from "./admin-entrypoint.js";
@@ -251,6 +268,8 @@ interface Env {
   DEPLOYMENT_POLICY: DurableObjectNamespace<DeploymentPolicy>;
   /** One voice session object per User, `idFromName(userId)` (docs/voice.md). */
   VOICE_ASSISTANTS: DurableObjectNamespace<VoiceAssistant>;
+  /** One object per Group Chat, `idFromName("<userId>:<groupId>")`. */
+  GROUP_CHATS: DurableObjectNamespace<GroupChat>;
   /** The composer's dictation upstream. Absent closes dictation, visibly. */
   OPENAI_API_KEY?: string;
   /** The voice session itself: Gemini Live. Absent closes it, visibly. */
@@ -1689,9 +1708,138 @@ interface RuntimeExports {
   UserBotState(options: { props: UserScopedProps }): RpcBoundary<UserBotState>;
 }
 
+/** The User object's Group Chat doors; each answers a value, never a class. */
+function groupChatUser(env: Env, userId: string) {
+  // SAFETY: Wrangler binds USER_CONFIGURATIONS to UserConfiguration.
+  return env.USER_CONFIGURATIONS.get(
+    env.USER_CONFIGURATIONS.idFromName(userId),
+  ) as unknown as {
+    listGroupChats(input: unknown): Promise<unknown>;
+    executeGroupChatCommand(input: unknown): Promise<unknown>;
+  };
+}
+
+/** A Group Chat's own object, addressed by the User and the group together. */
+function groupChatObject(env: Env, userId: string, groupId: string) {
+  // SAFETY: Wrangler binds GROUP_CHATS to GroupChat; these are its RPC doors.
+  return env.GROUP_CHATS.get(
+    env.GROUP_CHATS.idFromName(groupChatObjectNameV1(userId, groupId)),
+  ) as unknown as {
+    view(input: unknown): Promise<unknown>;
+    page(input: unknown): Promise<unknown>;
+    postFromUser(input: unknown): Promise<unknown>;
+    markRead(input: unknown): Promise<unknown>;
+    stop(input: unknown): Promise<unknown>;
+    retry(input: unknown): Promise<unknown>;
+    fetch(request: Request): Promise<Response>;
+  };
+}
+
 const createGatewayBackendContributions = (env: Env) =>
   createFoundationBackendContributions({
     backendHost: "gateway",
+    listGroupChats: async (userId: string) =>
+      unwrapGroupRpcV1<GroupChatListV1>(
+        await groupChatUser(env, userId).listGroupChats({
+          schemaVersion: 1,
+          userId,
+        }),
+      ),
+    executeGroupChatCommand: async (
+      userId: string,
+      command: GroupChatCommandV1,
+    ) =>
+      unwrapGroupRpcV1<GroupChatReceiptV1>(
+        await groupChatUser(env, userId).executeGroupChatCommand({
+          schemaVersion: 1,
+          userId,
+          command,
+        }),
+      ),
+    readGroupChat: async (userId: string, groupId: string) =>
+      unwrapGroupRpcV1<GroupChatViewV1>(
+        await groupChatObject(env, userId, groupId).view({
+          schemaVersion: 1,
+          userId,
+          groupId,
+        }),
+      ),
+    readGroupMessages: async (
+      userId: string,
+      groupId: string,
+      query: { before?: number; after?: number; limit: number },
+    ) =>
+      unwrapGroupRpcV1<GroupMessagePageV1>(
+        await groupChatObject(env, userId, groupId).page({
+          schemaVersion: 1,
+          userId,
+          groupId,
+          ...query,
+        }),
+      ),
+    postGroupMessage: async (
+      userId: string,
+      groupId: string,
+      command: GroupPostCommandV1,
+    ) =>
+      unwrapGroupRpcV1<{ schemaVersion: 1; message: GroupMessageV1 }>(
+        await groupChatObject(env, userId, groupId).postFromUser({
+          schemaVersion: 1,
+          userId,
+          groupId,
+          command,
+        }),
+      ),
+    markGroupRead: async (
+      userId: string,
+      groupId: string,
+      command: GroupReadCommandV1,
+    ) =>
+      unwrapGroupRpcV1<{ schemaVersion: 1; readThrough: number }>(
+        await groupChatObject(env, userId, groupId).markRead({
+          schemaVersion: 1,
+          userId,
+          groupId,
+          upTo: command.upTo,
+        }),
+      ),
+    stopGroupTurns: async (
+      userId: string,
+      groupId: string,
+      command: GroupStopCommandV1,
+    ) =>
+      unwrapGroupRpcV1<{ schemaVersion: 1; stopped: string[] }>(
+        await groupChatObject(env, userId, groupId).stop({
+          schemaVersion: 1,
+          userId,
+          groupId,
+          command,
+        }),
+      ),
+    retryGroupTurn: async (
+      userId: string,
+      groupId: string,
+      command: GroupRetryCommandV1,
+    ) =>
+      unwrapGroupRpcV1<{ schemaVersion: 1 }>(
+        await groupChatObject(env, userId, groupId).retry({
+          schemaVersion: 1,
+          userId,
+          groupId,
+          command,
+        }),
+      ),
+    openGroupChannel: (userId: string, groupId: string, request: Request) => {
+      const headers = new Headers(request.headers);
+      headers.set("x-frockbot-user-id", userId);
+      headers.set("x-frockbot-group-id", groupId);
+      return groupChatObject(env, userId, groupId).fetch(
+        new Request(
+          new URL(GROUP_CHANNEL_INTERNAL_PATH, "https://group-chat.internal"),
+          { method: "GET", headers },
+        ),
+      );
+    },
     listTemplateShares: async (userId: string) =>
       decodeTemplateShareListViewV1(
         rpcJsonSnapshotV1(

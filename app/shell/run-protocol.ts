@@ -1170,9 +1170,12 @@ function lookupState(
  * An automation run is reachable only through its Routine's run log.
  */
 export function isVisibleRunV1(run: {
-  admission?: { turnType?: string };
+  admission?: { turnType?: string; origin?: { kind: string } };
   events?: readonly { type: string }[];
 }): boolean {
+  // A member's group Turn belongs to the group's thread. Its activity is not
+  // drawn, counted or announced in the member's one-to-one chat.
+  if (run.admission?.origin?.kind === "group") return false;
   const type = run.admission?.turnType ?? "chat";
   return (
     type === "chat" ||

@@ -38,6 +38,37 @@ describe("visiblePublicationsV1", () => {
     });
   });
 
+  test("a group Turn's send is the group's, and publishes nothing here", () => {
+    const send = {
+      type: "send/to-user",
+      seq: 0,
+      timestamp: "2026-09-22T00:00:00.000Z",
+      occurrenceId: "occ-1",
+      payload: { type: "text", text: "Hello group" },
+    } as unknown as SessionEvent;
+    const grouped = {
+      ...run([send]),
+      sessionId: "group:g-0123456789abcdef0123",
+      admission: {
+        schemaVersion: 1,
+        turnType: "agent",
+        origin: {
+          kind: "group" as const,
+          groupId: "g-0123456789abcdef0123",
+          groupName: "Trip",
+          members: [{ botId: "scout", name: "Scout" }],
+          throughSeq: 2,
+          reason: "mention" as const,
+        },
+      },
+    } as unknown as StoredRunV1<BotSettingsViewV1>;
+    for (const cause of ["admission", "events", "terminal"] as const) {
+      expect(
+        visiblePublicationsV1({ cause, run: grouped, events: [send] }),
+      ).toEqual([]);
+    }
+  });
+
   test("a card send also publishes a card-revision for the same surface", () => {
     const send = {
       type: "send/to-user",

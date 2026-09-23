@@ -85,6 +85,10 @@ import {
 } from "@frockbot/app/voice/appearance";
 import { flockDefinitionV1 } from "./definition.js";
 import {
+  groupTurnPromptV1,
+  type GroupTurnOriginV1,
+} from "@frockbot/app/groups/context";
+import {
   createSubagentTool,
   subagentHandoffAdmissionCeilingV1,
   type SubagentHandoffHostV1,
@@ -149,6 +153,11 @@ export interface FlockSelfRuntimeHostV1 {
    */
   inboundAgent?:
     { kind: "bot"; fromBotId: string; fromBotName: string } | { kind: "voice" };
+  /**
+   * The Group Chat this Turn is in, off its own admission record: the Turn
+   * speaks to the group, and is told who is there and how to address them.
+   */
+  groupChat?: { origin: GroupTurnOriginV1; botId: string };
   /**
    * Handing work off to this same Bot. Optional because it is a seam a host
    * may not have bound — a host with no way to admit a Turn on its own agent
@@ -978,6 +987,22 @@ export function createInboundAgentPromptSectionV1(
   };
 }
 
+export const GROUP_CHAT_PROMPT_SECTION_V1 = "flock-group-chat";
+
+/** Where a group Turn is, and how talking there works. */
+export function createGroupChatPromptSectionV1(
+  host: FlockSelfRuntimeHostV1,
+): PromptSection {
+  return {
+    id: GROUP_CHAT_PROMPT_SECTION_V1,
+    order: 93,
+    render: () =>
+      host.groupChat
+        ? groupTurnPromptV1(host.groupChat.origin, host.groupChat.botId)
+        : "",
+  };
+}
+
 /**
  * The runtime Contribution. The two self-management tools remain work tools
  * on every turn type. `bot_message` is separately bounded to chat by the
@@ -997,6 +1022,7 @@ export function createFlockRuntimeFeature(
         createTeammatesPromptSectionV1(host, turnDirectory),
       ),
       runtime.systemPrompt.register(createInboundAgentPromptSectionV1(host)),
+      runtime.systemPrompt.register(createGroupChatPromptSectionV1(host)),
       // Mounted only on a Turn that actually has a caller to answer, and
       // bound to that caller here rather than read from an argument. The
       // Shell owns the delivery; Flock provides the caller identity.

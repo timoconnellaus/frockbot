@@ -184,6 +184,18 @@ import {
   rpcJsonSnapshotV1,
 } from "./durable-rpc.js";
 import { loggedEntryV1 } from "./entry-boundary.js";
+import {
+  GroupChatUserStoreV1,
+  type GroupChatChangeV1,
+  type GroupChatUserStorageV1,
+} from "@frockbot/app/groups/user";
+import {
+  answerGroupRpcV1,
+  decodeGroupChatCommandV1,
+  groupChatObjectNameV1,
+  type GroupActorV1,
+  type GroupChatCommandV1,
+} from "@frockbot/app/groups/shared";
 import type { BotUserConfigurationRpcTargetV1 } from "@frockbot/app/shell/durable-rpc-targets";
 
 /** The durable key holding this User's Project catalogue. */
@@ -213,6 +225,8 @@ interface UserConfigurationEnv extends BillingEnv {
   MACHINE_TOKEN_SECRET?: string;
   /** Bot authority: archive and restore are carried to the Bot Durable Object. */
   BOT_STATES: DurableObjectNamespace;
+  /** Each Group Chat's own object, told about every change to its group. */
+  GROUP_CHATS?: DurableObjectNamespace;
   /**
    * This object's own namespace. Every caller reaches a User Durable Object
    * through `idFromName(userId)`, so the namespace is how the object checks
@@ -2111,6 +2125,105 @@ export class UserConfiguration
     await this.ctx.storage.delete(`${MEMORY_PROJECTS_KEY}:${botId}`);
     await this.ctx.storage.delete(`${MEMORY_PROJECTS_KEY}:${botId}:rev`);
     await contributions.flock.forgetDeletedBot(botId);
+    const userId = await this.provenIdentity();
+    if (userId) {
+      for (const change of await this.groupChats().forgetBot(botId)) {
+        await this.carryGroupChange(userId, change);
+      }
+    }
+  }
+
+  /** Group Chat membership and the User's list of groups. */
+  private groupChats(): GroupChatUserStoreV1 {
+    return new GroupChatUserStoreV1(
+      this.ctx.storage as unknown as GroupChatUserStorageV1,
+      async () =>
+        (await (await this.flockContribution()).listBots()).bots.map((bot) => ({
+          botId: bot.botId,
+          name: bot.currentProfile?.name ?? bot.initialName,
+        })),
+    );
+  }
+
+  /** Tells a group's own object about a change committed here. */
+  private async carryGroupChange(
+    userId: string,
+    change: GroupChatChangeV1,
+  ): Promise<void> {
+    const namespace = this.env.GROUP_CHATS;
+    if (!namespace) return;
+    const groupId =
+      change.kind === "delete" ? change.groupId : change.context.group.groupId;
+    // SAFETY: the binding names GroupChat; these are its reviewed RPC doors.
+    const group = namespace.get(
+      namespace.idFromName(groupChatObjectNameV1(userId, groupId)),
+    ) as unknown as {
+      recordEvent(input: unknown): Promise<unknown>;
+      destroy(input: unknown): Promise<unknown>;
+    };
+    if (change.kind === "delete") {
+      await group.destroy({ schemaVersion: 1, userId, groupId });
+      return;
+    }
+    await group.recordEvent({
+      schemaVersion: 1,
+      userId,
+      groupId,
+      commandId: change.commandId,
+      actor: change.actor,
+      event: change.event,
+      context: change.context,
+      ...(change.initialize ? { initialize: true } : {}),
+    });
+  }
+
+  async listGroupChats(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertFlockIdentity(request.userId as string);
+    return answerGroupRpcV1(() => this.groupChats().list());
+  }
+
+  /**
+   * A command about the User's groups. The line it adds to the group's
+   * thread is carried after the commit; a replay of the same command carries
+   * it again, and the group writes it once.
+   */
+  async executeGroupChatCommand(input: unknown) {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      {
+        userId: rpcIdentifier,
+        command: rpcDecoded(decodeGroupChatCommandV1),
+      },
+      { actorBotId: rpcBotId },
+    );
+    const userId = request.userId as string;
+    await this.assertFlockIdentity(userId);
+    const actor: GroupActorV1 =
+      typeof request.actorBotId === "string"
+        ? { kind: "bot", botId: request.actorBotId }
+        : { kind: "user" };
+    return answerGroupRpcV1(async () => {
+      const result = await this.groupChats().execute(
+        userId,
+        request.command as GroupChatCommandV1,
+        actor,
+      );
+      if (result.change) await this.carryGroupChange(userId, result.change);
+      return result.receipt;
+    });
+  }
+
+  /** What a group's own object needs before it acts: the group and names. */
+  async readGroupChatContext(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      groupId: rpcPattern(/^g-[0-9a-f]{20}$/, 22),
+    });
+    await this.assertFlockIdentity(request.userId as string);
+    return answerGroupRpcV1(() =>
+      this.groupChats().context(request.groupId as string),
+    );
   }
 
   async listBots(input: unknown) {

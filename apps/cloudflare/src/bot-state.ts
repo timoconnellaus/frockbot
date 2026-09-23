@@ -354,6 +354,7 @@ import {
   decodeBotVoiceRunRpcV1,
   decodeVoiceChatResultRpcV1,
   decodeVoiceCallTranscriptRpcV1,
+  decodeBotGroupTurnRpcV1,
   decodeRpcEnvelopeV1,
   rpcBoolean,
   rpcBotId,
@@ -389,6 +390,12 @@ import {
   readFocusedPanelV1,
 } from "@frockbot/app/plugins/panels-bot";
 import { cleanBotAppletsV1 } from "./plugin-panels-cleanup.js";
+import {
+  groupOriginOfRunV1,
+  groupTurnStateOfRunV1,
+  groupWaitingKeyV1,
+} from "@frockbot/app/groups/bot";
+import { groupChatObjectNameV1 } from "@frockbot/app/groups/shared";
 import {
   assembleBotThemeV1,
   themeAssembleDeadlineV1,
@@ -810,12 +817,27 @@ export class BotState
             state: this.ctx,
             env: this.backendEnv,
             outboundFetch: this.outboundFetch,
-            messagesCommitted: () => this.ctx.waitUntil(this.drainPush()),
+            messagesCommitted: () => {
+              this.ctx.waitUntil(this.drainPush());
+              this.ctx.waitUntil(
+                (async () => {
+                  const shell = this.mounted
+                    ? (await this.mounted).shell
+                    : undefined;
+                  this.nudgeGroup(
+                    await shell?.state.authority.readActiveRunId(),
+                  );
+                })().catch(() => undefined),
+              );
+            },
             deliverPublication: (updates) => {
               this.stateChannel.broadcastCommitted(updates);
               return Promise.resolve();
             },
-            runSettled: (runId) => this.projectSettled(requireShell(), runId),
+            runSettled: (runId) => {
+              this.nudgeGroup(runId);
+              return this.projectSettled(requireShell(), runId);
+            },
             // The Durable Object owns the kernel authority; the Shell
             // Package supplies only its configuration and Composition
             // hooks. Chat delivery is a commit contribution, not a
@@ -2068,6 +2090,115 @@ export class BotState
     });
     await this.drainVoiceReplyOutbox(identity.userId);
     return turn;
+  }
+
+  /**
+   * A Group Chat asking this member for a Turn.
+   *
+   * The agent lane, like a Bot's question: it waits behind the person's own
+   * chat and never makes it yield. The admission returns at once; the group
+   * reads the Turn back by id as it runs.
+   */
+  async admitGroupTurn(input: unknown) {
+    const request = decodeBotGroupTurnRpcV1(input);
+    const identity = { userId: request.userId, botId: request.botId };
+    const { shell } = await this.materialized(identity);
+    const receipt = await shell.admit({
+      ...identity,
+      runId: request.command.runId,
+      sessionId: request.command.sessionId,
+      acceptedAt: request.command.acceptedAt,
+      text: request.command.text,
+      turnType: "agent",
+      lane: "agent",
+      origin: request.command.origin,
+    });
+    const work = shell.pendingWork();
+    if (work) this.ctx.waitUntil(work);
+    return receipt;
+  }
+
+  /** One of this member's group Turns, as its group reads it back. */
+  async readGroupTurn(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      runId: rpcString(128),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    const run = await shell.state.authority.readRun(request.runId as string);
+    if (!run || !groupOriginOfRunV1(run)) {
+      return { schemaVersion: 1, found: false } as const;
+    }
+    return {
+      schemaVersion: 1,
+      found: true,
+      state: groupTurnStateOfRunV1(run),
+    } as const;
+  }
+
+  /**
+   * A newer message in a group this member has a Turn open in. Kept as the
+   * highest position heard of, so the Turn yields at its next step boundary.
+   */
+  async signalGroupMessage(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      groupId: rpcPattern(/^g-[0-9a-f]{20}$/, 22),
+      seq: rpcInteger({ minimum: 1, maximum: Number.MAX_SAFE_INTEGER }),
+    });
+    await this.materialized({
+      userId: request.userId as string,
+      botId: request.botId as string,
+    });
+    const key = groupWaitingKeyV1(request.groupId as string);
+    await this.ctx.storage.transaction(async (transaction) => {
+      const current = await transaction.get<number>(key);
+      if (typeof current !== "number" || current < (request.seq as number)) {
+        await transaction.put(key, request.seq as number);
+      }
+    });
+    return { schemaVersion: 1 } as const;
+  }
+
+  /**
+   * Tells a group one of its member Turns here changed: it started, sent
+   * something, or settled. Best effort: the group reads the Turn itself, and
+   * its alarm reads it again if this is lost.
+   */
+  private nudgeGroup(runId: string | undefined): void {
+    const namespace = this.backendEnv.GROUP_CHATS;
+    if (!namespace || !runId) return;
+    this.ctx.waitUntil(
+      (async () => {
+        const stored = await this.ctx.storage.get<{
+          admission?: { origin?: { kind: string; groupId?: string } };
+        }>(`run:${runId}`);
+        const groupId =
+          stored?.admission?.origin?.kind === "group"
+            ? stored.admission.origin.groupId
+            : undefined;
+        if (!groupId) return;
+        const identity = await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
+        if (!identity) return;
+        // SAFETY: the binding names GroupChat; this is its reviewed RPC door.
+        const group = namespace.get(
+          namespace.idFromName(groupChatObjectNameV1(identity.userId, groupId)),
+        ) as unknown as { turnChanged(input: unknown): Promise<unknown> };
+        await group.turnChanged({
+          schemaVersion: 1,
+          userId: identity.userId,
+          groupId,
+          botId: identity.botId,
+          runId,
+        });
+      })().catch(() => undefined),
+    );
   }
 
   /**

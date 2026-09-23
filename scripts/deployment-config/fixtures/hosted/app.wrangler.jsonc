@@ -103,6 +103,11 @@
         "name": "VOICE_ASSISTANTS",
         "class_name": "VoiceAssistant",
       },
+      // One object per Group Chat: its thread, read cursor and member Turns.
+      {
+        "name": "GROUP_CHATS",
+        "class_name": "GroupChat",
+      },
     ],
   },
   "migrations": [
@@ -141,6 +146,10 @@
     {
       "tag": "v8",
       "deleted_classes": ["AppletState"],
+    },
+    {
+      "tag": "v9",
+      "new_sqlite_classes": ["GroupChat"],
     },
   ],
   "vars": {
@@ -247,6 +256,10 @@
           {
             "name": "VOICE_ASSISTANTS",
             "class_name": "VoiceAssistant",
+          },
+          {
+            "name": "GROUP_CHATS",
+            "class_name": "GroupChat",
           },
         ],
       },
@@ -368,6 +381,10 @@
             "name": "VOICE_ASSISTANTS",
             "class_name": "VoiceAssistant",
           },
+          {
+            "name": "GROUP_CHATS",
+            "class_name": "GroupChat",
+          },
         ],
       },
       "vars": {
@@ -482,6 +499,10 @@
           {
             "name": "VOICE_ASSISTANTS",
             "class_name": "VoiceAssistant",
+          },
+          {
+            "name": "GROUP_CHATS",
+            "class_name": "GroupChat",
           },
         ],
       },
