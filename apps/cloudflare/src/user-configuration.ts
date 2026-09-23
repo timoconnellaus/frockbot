@@ -178,6 +178,7 @@ import {
   rpcInteger,
   rpcPattern,
   rpcString,
+  rpcText,
   rpcEnum,
   rpcDecodedValue,
   rpcJsonRecord,
@@ -438,6 +439,38 @@ export class UserConfiguration
       input.update,
       this.env.FCM_SERVICE_ACCOUNT,
     );
+  }
+
+  /**
+   * A member of a Group Chat called the person's attention with `@User`.
+   * The group is what the alert opens; its cursor is the group's own.
+   */
+  async deliverGroupPush(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      groupId: rpcPattern(/^g-[0-9a-f]{20}$/, 22),
+      botId: rpcBotId,
+      seq: rpcInteger({ minimum: 1, maximum: 99_999_999_999 }),
+      title: rpcText(200),
+      body: rpcText(240),
+    });
+    const userId = request.userId as string;
+    await this.assertUserIdentity(userId);
+    await deliverPush(
+      this.ctx.storage,
+      userId,
+      {
+        botId: request.botId as string,
+        groupId: request.groupId as string,
+        cursor: `message-${String(request.seq).padStart(20, "0")}`,
+        kind: "message",
+        title: request.title as string,
+        body: request.body as string,
+        notify: true,
+      },
+      this.env.FCM_SERVICE_ACCOUNT,
+    );
+    return { schemaVersion: 1 } as const;
   }
 
   async nativeSession(input: unknown) {

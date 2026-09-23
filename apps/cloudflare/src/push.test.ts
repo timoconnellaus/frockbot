@@ -255,6 +255,58 @@ describe("push dispatch", () => {
     expect(notified).toEqual([true]);
   });
 
+  test("a Group Chat alert opens the group, defers to it, and keeps its own cursor", async () => {
+    const durable = storage();
+    const now = Date.now();
+    const GROUP = "g-0123456789abcdef0123";
+    await registerPushDevice(
+      durable,
+      { deviceId: "desktop-1", activeBotId: GROUP },
+      now,
+    );
+    await registerPushDevice(
+      durable,
+      { deviceId: "phone-1", token: TOKEN_A },
+      now,
+    );
+    const sends: Array<Record<string, string>> = [];
+    const sender = async (
+      _secret: string,
+      _token: string,
+      data: Record<string, string>,
+    ) => {
+      sends.push(data);
+      return "sent" as const;
+    };
+    const grouped = { ...message(), groupId: GROUP };
+
+    // The group is open on the desktop: the alert waits, as it would for a
+    // Bot's own chat.
+    await expect(
+      deliverPush(durable, "user-1", grouped, SECRET, sender),
+    ).rejects.toBeInstanceOf(RetryablePushError);
+    await durable.put("push:device:desktop-1", {
+      deviceId: "desktop-1",
+      activeBotId: GROUP,
+      updatedAt: now - 15_001,
+    });
+    await deliverPush(durable, "user-1", grouped, SECRET, sender);
+    // The author's own chat has a cursor of its own, which a group alert
+    // never advances.
+    await deliverPush(durable, "user-1", message(), SECRET, sender);
+
+    expect(sends).toEqual([
+      expect.objectContaining({ botId: "primary", groupId: GROUP }),
+      expect.not.objectContaining({ groupId: expect.anything() }),
+    ]);
+    expect([
+      ...(await durable.list({ prefix: "push:delivery:" })).keys(),
+    ]).toEqual([
+      `push:delivery:group:${GROUP}:message:phone-1`,
+      "push:delivery:primary:message:phone-1",
+    ]);
+  });
+
   test("a duplicate dispatch does not send a message/device delivery twice", async () => {
     const durable = storage();
     await registerPushDevice(

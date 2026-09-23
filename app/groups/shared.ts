@@ -165,10 +165,27 @@ export type GroupEventV1 =
   /** A member's Turn was stopped before it said anything. */
   | { type: "turn-stopped"; botId: string; runId: string }
   /** A member's Turn did not finish; Retry runs that member again. */
-  | { type: "turn-failed"; botId: string; runId: string };
+  | { type: "turn-failed"; botId: string; runId: string }
+  /**
+   * A member asked a Bot outside the group, with `bot_message`. The exchange
+   * itself is the member's; the thread shows that it happened.
+   */
+  | {
+      type: "bot-message";
+      botId: string;
+      toBotId: string;
+      runId: string;
+      callId: string;
+    };
 
 export type GroupMessageBodyV1 =
-  | { kind: "text"; text: string; mentions: GroupMentionV1[] }
+  | {
+      kind: "text";
+      text: string;
+      mentions: GroupMentionV1[];
+      /** A member wrote `@User`: the person is notified, not just badged. */
+      mentionsUser?: true;
+    }
   | { kind: "event"; event: GroupEventV1 };
 
 export interface GroupMessageV1 {
@@ -598,6 +615,11 @@ export function resolveMentionsV1(
     index = end - 1;
   }
   return mentions;
+}
+
+/** `@User`, the one way a member calls the person's attention. */
+export function mentionsUserV1(text: string): boolean {
+  return /(^|[^\p{L}\p{N}_@])@user(?![\p{L}\p{N}_])/iu.test(text);
 }
 
 /** Each mentioned member once, in the order first mentioned. */

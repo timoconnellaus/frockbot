@@ -4,10 +4,15 @@
 // the member's one-to-one chat.
 import { env, runDurableObjectAlarm } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
-import { toolCallTriggerPrompt } from "../harness/miniflare.ts";
+import {
+  callsFrockbotTool,
+  frockbotToolCallPrompt,
+  toolCallTriggerPrompt,
+} from "../harness/miniflare.ts";
 import {
   asUser,
   expectJson,
+  expectOkJson,
   flockRevision,
   freshUserId,
   postAsUser,
@@ -199,6 +204,79 @@ describe("a Group Chat", () => {
     );
     expect(deleted.status).toBe(200);
     expect((await asUser(userId, `/api/groups/${groupId}`)).status).toBe(404);
+  });
+
+  it("lets a Bot start a group from its own chat and post into it", async () => {
+    const userId = freshUserId("group-chat-tools");
+    await provisionThroughGateway({ userId, botId: "general" });
+    expect(
+      (
+        await postAsUser(userId, "/api/bots", {
+          schemaVersion: 1,
+          type: "bot/create",
+          commandId: "create-researcher",
+          expectedRevision: await flockRevision(userId),
+          botId: "researcher",
+          name: "Researcher",
+        })
+      ).status,
+    ).toBe(201);
+
+    /** Runs one chat Turn of General's whose model calls `name(input)`. */
+    async function called(commandId: string, name: string, input: unknown) {
+      const turn = (await expectOkJson(
+        await postAsUser(userId, "/api/bots/general/turns", {
+          schemaVersion: 1,
+          commandId,
+          text: frockbotToolCallPrompt(name, input),
+        }),
+      )) as {
+        events: Array<{
+          type: string;
+          call?: { id: string };
+          callId?: string;
+          content?: string;
+          isError?: boolean;
+        }>;
+      };
+      const call = turn.events.find((event) => callsFrockbotTool(event, name));
+      const result = turn.events.find(
+        (event) =>
+          event.type === "tool/result" && event.callId === call?.call?.id,
+      );
+      expect(result?.isError, result?.content).toBe(false);
+      return result!.content!;
+    }
+
+    await called("start-trip", "group_create", {
+      members: ["Researcher"],
+      name: "Trip",
+    });
+    const list = (await expectJson(await asUser(userId, "/api/groups"))) as {
+      groups: Array<{ groupId: string; name?: string; members: string[] }>;
+    };
+    expect(list.groups).toMatchObject([
+      { name: "Trip", members: ["general", "researcher"] },
+    ]);
+    const groupId = list.groups[0]!.groupId;
+
+    expect(await called("list-groups", "group_list", {})).toContain(
+      `Trip (${groupId})`,
+    );
+    await called("post-trip", "group_post", {
+      group_id: groupId,
+      text: "Flights are booked for Friday.",
+    });
+    const posted = (await messages(userId, groupId)).filter(
+      (message) =>
+        message.author.kind === "bot" && message.body.kind === "text",
+    );
+    expect(posted).toMatchObject([
+      {
+        author: { kind: "bot", botId: "general" },
+        body: { kind: "text", text: "Flights are booked for Friday." },
+      },
+    ]);
   });
 
   it("refuses a group of Bots the User does not have", async () => {

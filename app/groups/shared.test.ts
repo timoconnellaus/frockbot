@@ -7,6 +7,7 @@ import {
   decodeGroupPostCommandV1,
   groupDisplayNameV1,
   mentionedBotIdsV1,
+  mentionsUserV1,
   resolveMentionsV1,
   unwrapGroupRpcV1,
   GroupChatNotFoundError,
@@ -39,6 +40,15 @@ describe("reading mentions", () => {
     expect(
       mentionedBotIdsV1(resolveMentionsV1("@Codex @Xero @Codex", members)),
     ).toEqual(["codex", "xero"]);
+  });
+});
+
+describe("calling the person", () => {
+  test("@User, whole and in any case, calls them", () => {
+    expect(mentionsUserV1("@User the invoice is overdue")).toBe(true);
+    expect(mentionsUserV1("Done. @user, have a look.")).toBe(true);
+    expect(mentionsUserV1("mail user@user.com")).toBe(false);
+    expect(mentionsUserV1("@Username is a Bot")).toBe(false);
   });
 });
 

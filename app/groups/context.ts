@@ -54,6 +54,8 @@ function eventLine(
       return `${who} archived this group.`;
     case "restored":
       return `${who} restored this group.`;
+    case "bot-message":
+      return `${who} asked ${nameOf(event.toBotId, members)}, who is not in this group.`;
     case "turn-stopped":
     case "turn-failed":
       // How another member's Turn ended is not conversation.
@@ -161,5 +163,6 @@ export function groupTurnPromptV1(
     "Everything you send with `send_to_user` is posted to this group, where your User and every member read it; nothing you say here reaches your one-to-one chat. Finish with a single `send_to_user` in your own voice.",
     "To ask another member something, write @ and their name in your message. That asks them to answer, but you do not wait for it: your turn ends when you post, and their answer is the next message in the group. Mention a member only when you are asking them for something.",
     "Messages from your User are labelled `User:`. Messages from other members are labelled with their name.",
+    "Write @User only when your User needs to see something now: that sends them a notification. Everything else you post just shows as unread.",
   ].join("\n\n");
 }

@@ -1,4 +1,5 @@
 import { PLUGIN_SERVED_PROVIDER_IDS_V1 } from "@frockbot/providers/catalog/definition";
+import { createGroupChatsRuntimeFeature } from "@frockbot/app/groups/agent";
 import { catalogProvidersV1 } from "@frockbot/providers/catalog/registry";
 import { createCatalogProviderFeatureV1 } from "@frockbot/providers/catalog/runtime";
 import type { CredentialLeaseV1 } from "@frockbot/core/connection";
@@ -497,6 +498,14 @@ export function createFoundationHostedRuntimePackages(
           runtimePackage(
             "routines",
             createRoutinesRuntimeFeature(host.routines),
+          ),
+        ]
+      : []),
+    ...(host.groupChats
+      ? [
+          runtimePackage(
+            "groups",
+            createGroupChatsRuntimeFeature(host.groupChats),
           ),
         ]
       : []),

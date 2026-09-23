@@ -20,6 +20,7 @@ import type { PluginAuthoringRuntimeHostV1 } from "@frockbot/app/plugins/feature
 import type { PanelFocusRuntimeHostV1 } from "@frockbot/app/plugins/panel-focus";
 import type { BotTemplateRuntimeHostV1 } from "@frockbot/app/bot-template/agent";
 import type { FlockSelfRuntimeHostV1 } from "@frockbot/app/flock/agent";
+import type { GroupChatsRuntimeHostV1 } from "@frockbot/app/groups/agent";
 import type { ImageRuntimeHostV1 } from "@frockbot/app/image/agent";
 import type { MachineMessagesRuntimeHostV1 } from "@frockbot/app/machine-messages/agent";
 import type { MachineRuntimeHostV1 } from "@frockbot/app/machine/agent";
@@ -92,6 +93,8 @@ export interface ShellHostedRuntimeHostV1 {
    * its provenance can name.
    */
   routines?: RoutinesRuntimeHostV1;
+  /** The Group Chats this Bot is in, and changing and posting into them. */
+  groupChats?: GroupChatsRuntimeHostV1;
   /**
    * The Subagents seam, supplied by the parent Bot Durable Object
    * for one admitted Turn. Absent outside a Turn, and outside a deployment

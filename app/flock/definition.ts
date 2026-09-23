@@ -18,6 +18,17 @@ export const flockDefinitionV1: PackageDefinitionV1 = {
       },
     },
     {
+      // `bot_message` inside a Group Chat Turn, which runs on the agent lane.
+      // Offered only there, and only for a Bot outside the group: a member is
+      // asked in the thread with an @mention.
+      id: "group-bot-messaging",
+      kind: "tool",
+      connectionTypes: [],
+      admission: {
+        turnTypes: ["agent"],
+      },
+    },
+    {
       id: "subagent-handoff",
       kind: "tool",
       connectionTypes: [],

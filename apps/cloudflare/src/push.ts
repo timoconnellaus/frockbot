@@ -9,6 +9,11 @@ export interface PushDevice {
 }
 export interface PushUpdate {
   botId: string;
+  /**
+   * A Group Chat message: `botId` is its author, and the group is what the
+   * alert opens, what a device reading it defers to, and whose cursor it is.
+   */
+  groupId?: string;
   cursor: string;
   kind: "message" | "read";
   title?: string;
@@ -291,10 +296,10 @@ export async function deliverPush(
   }
   if (![...devices.values()].some((device) => device.token)) return;
   if (!secret) throw new Error("Firebase push is not configured");
+  const target = update.groupId ?? update.botId;
   const beingRead = [...devices.values()].some(
     (device) =>
-      device.activeBotId === update.botId &&
-      now - device.updatedAt < PRESENCE_MS,
+      device.activeBotId === target && now - device.updatedAt < PRESENCE_MS,
   );
   // Presence delays delivery; only a durable read receipt can discard an alert.
   // A stale focus lease must never silently lose a message.
@@ -304,7 +309,9 @@ export async function deliverPush(
     );
   for (const [deviceKey, device] of devices) {
     if (!device.token) continue;
-    const key = `${DELIVERY_PREFIX}${update.botId}:${update.kind}:${device.deviceId}`;
+    const key = update.groupId
+      ? `${DELIVERY_PREFIX}group:${update.groupId}:${update.kind}:${device.deviceId}`
+      : `${DELIVERY_PREFIX}${update.botId}:${update.kind}:${device.deviceId}`;
     const claimed = await storage.transaction(async (tx) => {
       const previous = await tx.get<{
         cursor: string;
@@ -349,6 +356,7 @@ export async function deliverPush(
         {
           userId,
           botId: update.botId,
+          ...(update.groupId ? { groupId: update.groupId } : {}),
           cursor: update.cursor,
           kind: update.kind,
           title: update.title ?? "",
