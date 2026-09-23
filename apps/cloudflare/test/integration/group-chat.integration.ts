@@ -42,6 +42,7 @@ async function replyFrom(
   groupId: string,
   botId: string,
   after: number,
+  text?: string,
 ): Promise<GroupMessage> {
   const deadline = Date.now() + 60_000;
   const group = env.GROUP_CHATS.get(
@@ -52,7 +53,8 @@ async function replyFrom(
       (message) =>
         message.author.kind === "bot" &&
         message.author.botId === botId &&
-        message.body.kind === "text",
+        message.body.kind === "text" &&
+        (text === undefined || message.body.text === text),
     );
     if (found) return found;
     await runDurableObjectAlarm(group);
@@ -102,13 +104,28 @@ describe("a Group Chat", () => {
         commandId: "ask-1",
         text: [
           "@Researcher find the flights",
+          // The Researcher answers and hands the booking to General, whose
+          // own scripted answer rides in that mention. Its `@` is escaped in
+          // the JSON so the person's own message does not mention General.
           toolCallTriggerPrompt([
             "send_to_user",
             {
               disposition: "finish",
-              payload: { type: "text", text: "Found three flights." },
+              payload: {
+                type: "text",
+                text: [
+                  "Found three flights. @Integration Bot please book the first.",
+                  toolCallTriggerPrompt([
+                    "send_to_user",
+                    {
+                      disposition: "finish",
+                      payload: { type: "text", text: "Booked." },
+                    },
+                  ]),
+                ].join("\n"),
+              },
             },
-          ]),
+          ]).replace("@Integration Bot", "\\u0040Integration Bot"),
         ].join("\n"),
       }),
     )) as { message: GroupMessage };
@@ -125,8 +142,20 @@ describe("a Group Chat", () => {
     );
     expect(reply.body).toMatchObject({
       kind: "text",
-      text: "Found three flights.",
+      mentions: [{ botId: "general" }],
     });
+    // Without Jev, a member's mention still runs, under the group's bound.
+    // General reads the whole thread since it last took part, so the fake
+    // model also finds the person's scripted line; its answer is the one
+    // this looks for.
+    const booked = await replyFrom(
+      userId,
+      groupId,
+      "general",
+      reply.seq,
+      "Booked.",
+    );
+    expect(booked.body).toMatchObject({ kind: "text", text: "Booked." });
 
     // The member's one-to-one chat carries none of it.
     const oneToOne = (await expectJson(
@@ -137,7 +166,7 @@ describe("a Group Chat", () => {
     const view = (await expectJson(
       await asUser(userId, `/api/groups/${groupId}`),
     )) as { head: number; unread: number; working: string[] };
-    expect(view.unread).toBe(1);
+    expect(view.unread).toBeGreaterThanOrEqual(2);
     const read = (await expectJson(
       await postAsUser(userId, `/api/groups/${groupId}/read`, {
         schemaVersion: 1,

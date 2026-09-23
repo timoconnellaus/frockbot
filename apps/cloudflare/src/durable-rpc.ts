@@ -582,7 +582,7 @@ export function decodeBotGroupTurnRpcV1(
     groupName: rpcText(1_000),
     members: rpcArray(rpcObject({ botId: rpcBotId, name: rpcText(100) }), 8),
     throughSeq: rpcInteger({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
-    reason: rpcEnum(["mention", "continue", "retry"] as const),
+    reason: rpcEnum(["mention", "continue", "retry", "jev"] as const),
   });
   const request = decodeRpcEnvelopeV1(input, {
     userId: rpcIdentifier,

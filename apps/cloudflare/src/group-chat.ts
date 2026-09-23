@@ -31,6 +31,8 @@ import {
   type GroupTurnStateV1,
 } from "@frockbot/app/groups/log";
 import { sha256HexTextV1 } from "@frockbot/core/crypto";
+import type { GroupReplyJudgeV1 } from "@frockbot/core/contracts";
+import { createHostedGroupReplyJudgeV1 } from "@frockbot/app/supervision";
 import {
   decodeRpcEnvelopeV1,
   rpcBoolean,
@@ -54,7 +56,12 @@ export interface GroupChatEnv {
   BOT_STATES: DurableObjectNamespace;
   USER_CONFIGURATIONS: DurableObjectNamespace;
   GROUP_CHATS: DurableObjectNamespace;
+  /** Jev, who judges who answers each message. Absent, nobody extra is asked. */
+  JEV_API_KEY?: string;
 }
+
+/** How long one judgment may take before the group goes on without it. */
+const JUDGEMENT_TIMEOUT_MS = 45_000;
 
 interface BotGroupRpc {
   admitGroupTurn(input: unknown): Promise<unknown>;
@@ -79,6 +86,16 @@ function errorNamed(error: unknown, name: string): boolean {
 }
 
 export class GroupChat extends DurableObject<GroupChatEnv> {
+  private judgeInstance?: GroupReplyJudgeV1;
+
+  /** Jev when this deployment has it; the unavailable judge otherwise. */
+  private judge(): GroupReplyJudgeV1 {
+    this.judgeInstance ??= createHostedGroupReplyJudgeV1({
+      JEV_API_KEY: this.env.JEV_API_KEY,
+    });
+    return this.judgeInstance;
+  }
+
   private log(kv: GroupKvV1 = this.ctx.storage as unknown as GroupKvV1) {
     return new GroupChatLogV1(kv);
   }
@@ -385,10 +402,14 @@ export class GroupChat extends DurableObject<GroupChatEnv> {
   ): Promise<void> {
     let broadcast = false;
     const identity = await this.log().identity();
+    const judged: number[] = [];
     for (const effect of effects) {
       switch (effect.kind) {
         case "broadcast":
           broadcast = true;
+          break;
+        case "judge":
+          judged.push(effect.seq);
           break;
         case "signal":
           if (!identity) break;
@@ -435,7 +456,37 @@ export class GroupChat extends DurableObject<GroupChatEnv> {
       }
     }
     if (broadcast) this.broadcast();
+    if (identity) {
+      for (const seq of judged) {
+        await this.judgeMessage(userId, identity.groupId, seq);
+      }
+    }
     await this.armAlarm();
+  }
+
+  /**
+   * Asks Jev who answers one message, and applies the answer once. A
+   * judgment that fails is still written down as owed, and the alarm asks
+   * again.
+   */
+  private async judgeMessage(
+    userId: string,
+    groupId: string,
+    seq: number,
+    known?: GroupChatContextV1,
+  ): Promise<void> {
+    const context = known ?? (await this.context(userId, groupId));
+    const evidence = await this.log().judgementEvidence(seq, context);
+    const decision = evidence
+      ? await this.judge()
+          .decide(evidence, AbortSignal.timeout(JUDGEMENT_TIMEOUT_MS))
+          .catch(() => undefined)
+      : { reply: [] };
+    if (!decision) return;
+    const outcome = await this.transaction((log) =>
+      log.applyJudgement({ seq, decision, context }),
+    );
+    await this.carryOut(userId, outcome.effects);
   }
 
   private async stopMember(
@@ -463,7 +514,9 @@ export class GroupChat extends DurableObject<GroupChatEnv> {
   private async armAlarm(): Promise<void> {
     const log = this.log();
     const open = (await log.openTurns()).length > 0;
-    const owed = (await log.owedAdmissions()).length > 0;
+    const owed =
+      (await log.owedAdmissions()).length > 0 ||
+      (await log.pendingJudgements()).length > 0;
     if (!open && !owed) return;
     const due = Date.now() + (owed ? ADMISSION_RETRY_MS : OPEN_TURN_POLL_MS);
     const current = await this.ctx.storage.getAlarm();
@@ -494,6 +547,14 @@ export class GroupChat extends DurableObject<GroupChatEnv> {
         identity.groupId,
         turn.botId,
         turn.runId,
+        context,
+      ).catch(() => undefined);
+    }
+    for (const seq of await this.log().pendingJudgements()) {
+      await this.judgeMessage(
+        identity.userId,
+        identity.groupId,
+        seq,
         context,
       ).catch(() => undefined);
     }

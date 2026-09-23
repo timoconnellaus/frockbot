@@ -243,43 +243,132 @@ describe("a Group Chat's thread", () => {
     expect(view.unread).toBe(1);
   });
 
-  test("a member mentioning another asks it, and a run of Bots asking Bots ends", async () => {
+  /** A member's Turn that says `text`, settled, and the judgment it owes. */
+  async function memberSays(
+    log: GroupChatLogV1,
+    botId: string,
+    runId: string,
+    text: string,
+  ) {
+    await log.admitted(botId, runId);
+    const settled = await log.applyTurnState({
+      botId,
+      runId,
+      state: {
+        status: "completed",
+        started: true,
+        sends: [{ occurrence: 1, text, at: "2026-09-23T10:00:01.000Z" }],
+        yielded: false,
+      },
+      context: context(),
+    });
+    const judge = settled.effects.find(
+      (effect): effect is Extract<GroupEffectV1, { kind: "judge" }> =>
+        effect.kind === "judge",
+    )!;
+    return { settled, seq: judge.seq };
+  }
+
+  test("a member's mentions wait for the judgment, and run only when they carry it on", async () => {
     const { log } = await freshLog();
-    let turn = admits((await userSays(log, "c1", "@Fox start")).effects)[0]!;
-    let botId = "fox";
-    const asked: string[] = [];
-    for (let round = 0; round < GROUP_BOT_CHAIN_MAX_V1 + 3; round++) {
-      await log.admitted(botId, turn.admission.runId);
-      const other = botId === "fox" ? "Dog" : "Fox";
-      const settled = await log.applyTurnState({
-        botId,
-        runId: turn.admission.runId,
-        state: {
-          status: "completed",
-          started: true,
-          sends: [
-            {
-              occurrence: 1,
-              text: `@${other} your go`,
-              at: "2026-09-23T10:00:01.000Z",
-            },
-          ],
-          yielded: false,
-        },
-        context: context(),
-      });
-      const next = admits(settled.effects)[0];
-      if (!next) break;
-      asked.push(next.botId);
-      turn = next;
-      botId = next.botId;
+    const turn = admits((await userSays(log, "c1", "@Fox start")).effects)[0]!;
+    const { settled, seq } = await memberSays(
+      log,
+      "fox",
+      turn.admission.runId,
+      "@Dog your go",
+    );
+    expect(admits(settled.effects)).toEqual([]);
+    const evidence = (await log.judgementEvidence(seq, context()))!;
+    expect(evidence).toMatchObject({
+      botAuthored: true,
+      message: { speaker: "Fox", text: "@Dog your go", mentions: ["dog"] },
+      candidates: ["owl"],
+    });
+    expect(evidence.recent.map((line) => line.speaker)).toEqual(["User"]);
+    const looped = await log.applyJudgement({
+      seq,
+      decision: { reply: [], mentions: "loops" },
+      context: context(),
+    });
+    expect(admits(looped.effects)).toEqual([]);
+    expect(await log.judgement(seq)).toMatchObject({
+      decision: { mentions: "loops" },
+    });
+    // Applied once: a second answer for the same message changes nothing.
+    const again = await log.applyJudgement({
+      seq,
+      decision: { reply: [], mentions: "continues" },
+      context: context(),
+    });
+    expect(again.effects).toEqual([]);
+    expect(await log.pendingJudgements()).not.toContain(seq);
+  });
+
+  test("with Jev, Bots may keep asking Bots; without it, a run of them ends", async () => {
+    for (const unavailable of [false, true]) {
+      const { log } = await freshLog();
+      let turn = admits((await userSays(log, "c1", "@Fox start")).effects)[0]!;
+      let botId = "fox";
+      const asked: string[] = [];
+      for (let round = 0; round < GROUP_BOT_CHAIN_MAX_V1 + 3; round++) {
+        const other = botId === "fox" ? "Dog" : "Fox";
+        const { seq } = await memberSays(
+          log,
+          botId,
+          turn.admission.runId,
+          `@${other} your go`,
+        );
+        const judged = await log.applyJudgement({
+          seq,
+          decision: {
+            reply: [],
+            mentions: "continues",
+            ...(unavailable ? { unavailable: true as const } : {}),
+          },
+          context: context(),
+        });
+        const next = admits(judged.effects)[0];
+        if (!next) break;
+        asked.push(next.botId);
+        turn = next;
+        botId = next.botId;
+      }
+      expect(asked).toHaveLength(
+        unavailable ? GROUP_BOT_CHAIN_MAX_V1 : GROUP_BOT_CHAIN_MAX_V1 + 3,
+      );
     }
-    expect(asked).toHaveLength(GROUP_BOT_CHAIN_MAX_V1);
-    // The person speaking again starts a new run.
-    const fresh = await userSays(log, "c2", "@Dog carry on");
-    expect(admits(fresh.effects).map((effect) => effect.botId)).toEqual([
-      "dog",
-    ]);
+  });
+
+  test("Jev asks a member nobody mentioned", async () => {
+    const { log } = await freshLog();
+    const posted = await userSays(log, "c1", "Has the Acme invoice been paid?");
+    expect(admits(posted.effects)).toEqual([]);
+    const seq = posted.value.seq;
+    const evidence = (await log.judgementEvidence(seq, context()))!;
+    expect(evidence.candidates).toEqual(["fox", "dog", "owl"]);
+    expect(evidence.botAuthored).toBe(false);
+    const judged = await log.applyJudgement({
+      seq,
+      decision: { reply: ["owl"] },
+      context: context(),
+    });
+    const asked = admits(judged.effects);
+    expect(asked.map((effect) => effect.botId)).toEqual(["owl"]);
+    expect(asked[0]!.admission.origin.reason).toBe("jev");
+    expect(asked[0]!.admission.text).toContain("looks like yours to answer");
+  });
+
+  test("a member already working or already mentioned is not a candidate", async () => {
+    const { log } = await freshLog();
+    const turn = admits((await userSays(log, "c1", "@Fox go")).effects)[0]!;
+    await log.admitted("fox", turn.admission.runId);
+    const posted = await userSays(log, "c2", "@Dog you too");
+    const evidence = (await log.judgementEvidence(
+      posted.value.seq,
+      context(),
+    ))!;
+    expect(evidence.candidates).toEqual(["owl"]);
   });
 
   test("a Turn that yielded unanswered is asked again with what arrived", async () => {
