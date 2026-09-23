@@ -23,6 +23,17 @@ export type WhatsNewEntrySourceV1 = {
  */
 export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
+    id: "whats-new-reading",
+    title: "What’s New, easier to read",
+    summary:
+      "Changes share a card under their day, and a wide window keeps the page to a reading width.",
+    kind: "improvement",
+    image: {
+      file: "whats-new-reading.webp",
+      alt: "What’s New with two changes in one card under New, the unread one marked with a pink dot.",
+    },
+  },
+  {
     id: "working-bot",
     title: "A working Bot sits at the end of the thread",
     summary:

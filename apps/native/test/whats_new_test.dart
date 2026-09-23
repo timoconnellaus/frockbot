@@ -251,4 +251,46 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(Dialog), findsOneWidget);
   });
+
+  testWidgets('entries that shipped on one day share its date', (tester) async {
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: WhatsNewPage(
+          api: DirectoryApi(MemoryStore()),
+          origin: 'https://tests.invalid',
+          seenId: 'search',
+          feed: const WhatsNewFeed(
+            entries: [
+              WhatsNewEntry(
+                id: 'search',
+                title: 'Search across every Bot',
+                summary: 'Find a conversation, a file, or a person.',
+                kind: 'feature',
+                publishedAt: '2026-09-14',
+              ),
+              WhatsNewEntry(
+                id: 'chat-scroll',
+                title: 'Earlier messages stay in reach',
+                summary: 'A long conversation scrolls back to them.',
+                kind: 'fix',
+                publishedAt: '2026-09-14',
+              ),
+              WhatsNewEntry(
+                id: 'chat-type',
+                title: 'Easier reading in chat',
+                summary: 'Messages use Inter at 14.',
+                kind: 'improvement',
+                publishedAt: '2026-09-12',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    await tester.pump();
+    expect(find.text('14 SEPTEMBER 2026'), findsOneWidget);
+    expect(find.text('12 SEPTEMBER 2026'), findsOneWidget);
+    expect(find.byType(Card), findsNWidgets(2));
+  });
 }
