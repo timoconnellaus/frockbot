@@ -1,8 +1,8 @@
 // What the voice session tells the model, and what its tools do.
 //
 // Since ADR 0031 a call is one Gemini Live session, so there is no turn loop
-// here any more: the model hears the person, decides, speaks, and calls our
-// functions while it keeps talking. What is left is the two things that are
+// here any more: the model hears the person, decides, calls our functions,
+// and speaks with what they return. What is left is the two things that are
 // still ours — the system instruction the session opens with, and what each
 // function call actually does — and both are pure, injected and tested in bun.
 //
@@ -437,10 +437,11 @@ export function renderVoiceSystemPromptV1(
 /**
  * What the model may call, as Gemini declares functions.
  *
- * Every one is `NON_BLOCKING`: the probe confirmed the API accepts it, and it
- * is the whole reason ADR 0031 could drop the delegation lane — the model
- * keeps talking while the server runs the call, so a tool that takes a second
- * is not a second of silence.
+ * Every one is `NON_BLOCKING`, which the probe confirmed the API accepts.
+ * `gemini-3.8-live` still says nothing until a call's result is back: the
+ * generation that calls ends silent, and the model speaks the result in a
+ * fresh one. So a slow tool is silence, and `subagent` — which answers at once
+ * and leaves the work to a Bot Turn — is what keeps a long job from being one.
  */
 export const VOICE_FUNCTION_DECLARATIONS_V1: readonly GeminiFunctionDeclarationV1[] =
   [
@@ -960,6 +961,20 @@ export function voiceToolResponseV1(
   outcome: VoiceToolOutcomeV1,
 ): Record<string, unknown> {
   return { result: clip(outcome.result, VOICE_TOOL_RESULT_MAX_CHARS_V1) };
+}
+
+/**
+ * A function's result told as a turn, because the session that called it
+ * closed before it could answer. The model speaks after a tool rather than
+ * during it, so without this the result would go unsaid. Only the memory
+ * tools, which reopen the session, come this way, and their results are the
+ * host's own sentences rather than anyone's words, so nothing is fenced.
+ */
+export function renderVoiceToolResultTurnV1(input: {
+  name: string;
+  result: string;
+}): string {
+  return `Your \`${input.name}\` call just finished. Its result: ${clip(input.result, VOICE_TOOL_RESULT_MAX_CHARS_V1)}`;
 }
 
 /** What one subagent result may carry back into the session. */

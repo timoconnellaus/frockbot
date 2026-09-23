@@ -723,6 +723,15 @@ describe("the session the call talks through", () => {
     expect(opened.frames.indexOf(error)).toBeGreaterThan(
       opened.frames.findIndex(status("idle")),
     );
+    const [turn] = await eventually(
+      () => turns(stub),
+      (rows) => rows[0]?.state === "failed",
+      "the silent turn settled",
+    );
+    expect(turn).toMatchObject({
+      transcript: "say something",
+      failure: "no_output",
+    });
   });
 });
 
@@ -751,12 +760,158 @@ describe("what the model asks the object to do", () => {
     expect(answered).toMatchObject({
       callId: "call_status",
       callName: "status",
-      // Non-blocking calling means the model is still talking, so its answer
-      // waits for a pause rather than cutting in.
+      // A result waits for a pause rather than cutting across speech.
       scheduling: "WHEN_IDLE",
     });
     expect(answered!.result).toContain(identity.botId);
     await stub.probeEndsTurn();
+  });
+
+  test("a turn that only calls a function is one turn with what follows the result", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-tool-turn-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    const opened = await open(identity.userId);
+    await startCall(opened, identity.botId);
+    await opened.waitFor(state("awake"), "awake");
+
+    // Gemini 3.8 waits for a tool before speaking: the call, then both
+    // boundaries, and not a word.
+    await stub.probeHears("what's in my email today");
+    await stub.probeCalls(
+      "subagent",
+      { message: "summarise today's email" },
+      "call_mail",
+    );
+    await eventually(
+      async () =>
+        (await stub.probeUpstreamFrames()).some(
+          (frame) => frame.kind === "tool-response",
+        ),
+      (seen) => seen,
+      "the hand-off answered",
+    );
+    await stub.probeEndsTurn();
+    await settle(100);
+    expect(opened.frames.filter((frame) => frame.type === "error")).toEqual([]);
+    expect(await turns(stub)).toMatchObject([
+      { transcript: "what's in my email today", state: "admitted" },
+    ]);
+
+    // The answer is a fresh generation once the result is back.
+    await stub.probeSays("I'm checking your email now.");
+    const answered = await eventually(
+      () => turns(stub),
+      (rows) => rows[0]?.state === "answered",
+      "the held turn answered",
+    );
+    expect(answered).toHaveLength(1);
+    expect(answered[0]).toMatchObject({
+      transcript: "what's in my email today",
+      answer: "I'm checking your email now.",
+      delegations: 1,
+    });
+    const [delegation] = await delegations(stub);
+    expect(delegation!.turnId).toBe(answered[0]!.turnId);
+    const meters = Object.values(
+      await stub.probeStorage("voice:meter:"),
+    ) as VoiceMeterV1[];
+    expect(meters[0]!.turns).toBe(1);
+    expect(opened.frames.filter((frame) => frame.type === "error")).toEqual([]);
+  });
+
+  test("a function's result that is never spoken still tells the person", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-tool-silent-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    const opened = await open(identity.userId);
+    await startCall(opened, identity.botId);
+    await opened.waitFor(state("awake"), "awake");
+
+    await stub.probeHears("what are you working on");
+    await stub.probeCalls("status", {}, "call_status");
+    await eventually(
+      async () =>
+        (await stub.probeUpstreamFrames()).some(
+          (frame) => frame.kind === "tool-response",
+        ),
+      (seen) => seen,
+      "the tool response",
+    );
+    // The calling generation's own silence is not the answer.
+    await stub.probeEndsTurn();
+    await settle(100);
+    expect(opened.frames.filter((frame) => frame.type === "error")).toEqual([]);
+    expect(await turns(stub)).toMatchObject([{ state: "admitted" }]);
+    // The generation that should have answered the result says nothing too,
+    // and its own boundaries end the turn without waiting for the guard.
+    await stub.probeEndsTurn();
+    const error = await opened.waitFor(
+      (frame) => frame.type === "error",
+      "the silent-turn error",
+    );
+    expect(String(error.message)).toContain("out loud");
+    const settled = await eventually(
+      () => turns(stub),
+      (rows) => rows[0]?.state === "failed",
+      "the silent turn settled",
+    );
+    expect(settled).toHaveLength(1);
+    expect(settled[0]).toMatchObject({
+      transcript: "what are you working on",
+      failure: "no_output",
+    });
+  });
+
+  test("a memory change the fresh session was never asked about is told to it", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-tool-memory-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    const opened = await open(identity.userId);
+    await startCall(opened, identity.botId);
+    await opened.waitFor(state("awake"), "awake");
+
+    await stub.probeHears("stop calling me mate");
+    await stub.probeCalls(
+      "memory_forget",
+      { text: "call me mate" },
+      "call_mem",
+    );
+    // Injected memory cannot be withdrawn, so the session that asked is
+    // closed before it could speak the result, and a fresh one is told it.
+    const told = await eventually(
+      async () => (await stub.probeAllUpstreamFrames())[1] ?? [],
+      (frames) => frames.some((frame) => frame.kind === "text"),
+      "the result told to the fresh session",
+    );
+    const relayed = told.find((frame) => frame.kind === "text")!;
+    expect(relayed.text).toContain("`memory_forget` call just finished");
+    await settle(100);
+    expect(opened.frames.filter((frame) => frame.type === "error")).toEqual([]);
+
+    await stub.probeSays("Got it, no more mate.");
+    const answered = await eventually(
+      () => turns(stub),
+      (rows) => rows[0]?.state === "answered",
+      "the held turn answered by the fresh session",
+    );
+    expect(answered).toHaveLength(1);
+    expect(answered[0]).toMatchObject({
+      transcript: "stop calling me mate",
+      answer: "Got it, no more mate.",
+    });
   });
 
   test("a call the model withdraws is never answered", async () => {
@@ -795,7 +950,8 @@ describe("what the model asks the object to do", () => {
     await startCall(opened, identity.botId);
     await opened.waitFor(state("awake"), "awake");
 
-    // The model calls the tool mid-turn and carries on speaking.
+    // Gemini 3.8 says nothing until a tool's result is back: the call, then
+    // both boundaries, and the sign-off after.
     await stub.probeHears("put me through to the other one");
     await stub.probeCalls("switch_bot", { bot_id: sibling.botId }, "call_sw");
     await eventually(
@@ -806,13 +962,11 @@ describe("what the model asks the object to do", () => {
       (seen) => seen,
       "the hand-over answered",
     );
+    await stub.probeEndsTurn();
     // The record moved at once — an eviction now leaves the call on the Bot
     // the person was last told about — but the session has not.
-    await eventually(
-      async () => await stub.probeUpstreamCount(),
-      (count) => count === 1,
-      "the session still on the first Bot",
-    );
+    await settle(100);
+    expect(await stub.probeUpstreamCount()).toBe(1);
     await stub.probeSpeaks();
     await settle(50);
     expect(await stub.probeUpstreamCount()).toBe(1);
@@ -860,15 +1014,50 @@ describe("what the model asks the object to do", () => {
       (seen) => seen,
       "the hang-up answered",
     );
+    // The call's own generation ends in silence; the goodbye is the answer
+    // to its result, and the call stays up for it.
+    await stub.probeEndsTurn();
     await stub.probeSpeaks();
-    await settle(50);
-    expect(await stub.probeUpstreamCount()).toBe(1);
+    const early = await Promise.race([
+      opened.closed.then(() => "closed"),
+      settle(150).then(() => "open"),
+    ]);
+    expect(early).toBe("open");
 
     await stub.probeEndsTurn();
-    await opened.waitFor(status("idle"), "idle after the goodbye");
     const closed = await opened.closed;
     expect(closed.code).toBe(1000);
     expect(closed.reason).toBe("end_call");
+    expect(opened.frames.filter((frame) => frame.type === "error")).toEqual([]);
+  });
+  test("end_call with nothing said after it hangs up without an error", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-end-silent-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    const opened = await open(identity.userId);
+    await startCall(opened, identity.botId);
+    await opened.waitFor(state("awake"), "awake");
+
+    await stub.probeHears("bye");
+    await stub.probeCalls("end_call", {}, "call_end");
+    await eventually(
+      async () =>
+        (await stub.probeUpstreamFrames()).some(
+          (frame) => frame.kind === "tool-response",
+        ),
+      (seen) => seen,
+      "the hang-up answered",
+    );
+    await stub.probeEndsTurn();
+    await stub.probeEndsTurn();
+    const closed = await opened.closed;
+    expect(closed.reason).toBe("end_call");
+    // Hanging up is the answer, even unspoken.
+    expect(opened.frames.filter((frame) => frame.type === "error")).toEqual([]);
   });
 });
 

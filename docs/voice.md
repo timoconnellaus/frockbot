@@ -68,15 +68,16 @@ move it too, without saying anything, by pressing voice on another Bot: a
 session at once because nothing is mid-sentence. A subagent the previous Bot
 still owes is left open on purpose — it belongs to the call, not the target —
 and its result is still told when it lands. `end_call` is the same wait as a
-hand-over: the model says goodbye, the tool runs, and the call hangs up once
-that turn ends. It is the same name as the client's hang-up frame, and it is
-offered even on a call with no Bot.
+hand-over: the tool runs, the model says goodbye with its result, and the call
+hangs up once that turn ends. It is the same name as the client's hang-up
+frame, and it is offered even on a call with no Bot.
 
-What is no longer two layers is the deciding. The model keeps talking while
-the object runs a function call, because every declaration is
+What is no longer two layers is the deciding. Every declaration is
 `NON_BLOCKING`, so nothing has to be classified as short or long in advance:
 `subagent` is the model's own judgement that something will take more than a
-moment, and real work is still a Bot Turn on the `agent` lane.
+moment, and real work is still a Bot Turn on the `agent` lane. `subagent`
+answers the model at once, so the model is speaking again within a moment and
+the Bot's work runs behind the conversation.
 
 ## Each Bot has a voice
 
@@ -458,15 +459,30 @@ session that was already open. The bridges, the acknowledgment delay and the
 `model-first-text` timing went with the cascade.
 
 What the object still does on a turn is bookkeeping, and it does it in order:
-the first sound or word of a model turn admits a ledger turn (which is what
-the day's allowance counts and what memory reads), the turn is settled when
-the session says the turn is over, and the transcript is written again with
-it.
+the first sound, word or function call of a model turn admits a ledger turn
+(which is what the day's allowance counts and what memory reads), the turn is
+settled when the session says the turn is over, and the transcript is written
+again with it.
 
-A function call runs while the model keeps talking. Every declaration is
-`NON_BLOCKING`, the object runs the call and answers it with
-`scheduling: "WHEN_IDLE"`, so the result is spoken at the next pause rather
-than over whatever is being said now. A call the model withdraws
+`gemini-3.8-live` waits for a tool before speaking. A turn that calls a
+function says nothing first: the session sends the `toolCall`, then
+`generationComplete` and `turnComplete` with no audio at all. The object runs
+the call and answers it — with `scheduling: "WHEN_IDLE"`, except the memory
+tools — and what the model says with the result arrives as a fresh generation
+with its own two boundaries. Those two generations are one ledger turn. The
+silent one's boundaries pass over it (`turn-held` in the log), and the next
+generation's settle it, spoken or not, so what the person said stays with what
+answered it. The
+day's allowance counts the question once, a delegation is recorded under the
+turn that asked for it, and the burst cap on `subagent` spans the round trip.
+A turn whose model spoke before calling is settled at its own end, as any
+spoken turn is, and whatever the model later says with the result is a turn
+of its own.
+
+A memory write or forget closes the session that called it, because injected
+memory cannot be withdrawn from a live one, so that session never gets to say
+anything with the result. The fresh session is told it as a turn instead, and
+what it says settles the same ledger turn. A call the model withdraws
 (`toolCallCancellation`) is dropped rather than answered.
 
 The instruction is rendered once, at setup, because a Live session cannot be
@@ -484,7 +500,12 @@ A turn that makes no sound at all reaches the client as
 `{type:"error",message}` and the call goes on — the client shows the sentence
 for four seconds and does **not** hang up. Two things produce it: a turn that
 has said nothing eight seconds after it began, and a turn that reaches its end
-having bridged no audio. Whichever surface the call is on says it: voice mode
+having bridged no audio. The model says nothing until a function call's
+results are back, so the eight seconds start again once they are. A turn whose
+only output was a function call has not reached its end: the generation that
+answers the results ends it, and if that one is silent too the sentence is
+said — unless the call is hanging up or moving to another Bot, which is the
+answer. Whichever surface the call is on says it: voice mode
 carries it in the activity slot where the call's other output goes, and a call
 with another Bot carries it on the account-wide footer, both with the same
 precedence — a failure first, then a call that has ended, then a notice — so
@@ -658,8 +679,10 @@ has forgotten), `upstream-goaway` (the server is about to close it), `listening`
 `turn` (a model turn admitted, and how many characters of the person's words
 had been transcribed by then — never the words), `turn-settled` (its
 milliseconds, the answer's length and the audio bridged for it; an answer of
-zero bytes is a turn that never became sound), `turn-silent` (a turn that had
-said nothing after the guard's window, so the client was told), `tool` (a
+zero bytes is a turn that never became sound), `turn-held` (a generation that
+only called functions ended, and its turn waits for what the model says with
+the results), `turn-silent` (a turn that had said nothing after the guard's
+window, so the client was told), `tool` (a
 function call, by name and id, never its arguments), `tool-cancelled`,
 `interrupted` (with `source`: `model` when the session's own detector heard
 someone, `client` when the phone's speech gate did), `call-switched` (with the
