@@ -1,5 +1,4 @@
 import 'dart:async';
-import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/activity/controller.dart';
@@ -39,7 +38,7 @@ void main() {
           ],
         };
       });
-      final controller = ActivityController(api, store, 'tim');
+      final controller = ActivityController(api);
 
       final first = controller.load();
       await firstStarted.future;
@@ -77,7 +76,7 @@ void main() {
         },
       };
     });
-    final controller = ActivityController(api, store, 'tim');
+    final controller = ActivityController(api);
     controller.unread['alpha'] = wire.UnreadView.fromJson({
       'schemaVersion': 1,
       'botId': 'alpha',
@@ -101,43 +100,33 @@ void main() {
     api.close();
   });
 
-  test('a pending command this build cannot speak is dropped, not retried for ever', () async {
-    // What an install upgraded across the message-cursor change holds: a
-    // read command written offline by the old build, naming a run cursor.
+  test('a refused read holds that Bot until the next directory read, then marks again', () async {
     final store = MemoryStore();
-    store.values['activity-pending.tim'] = jsonEncode({
-      'alpha': {
-        'schemaVersion': 1,
-        'type': 'bot/mark-read',
-        'commandId': 'command-old',
-        'botId': 'alpha',
-        'upToCursor': 'run-index:2026-09-05T00:00:00.000Z:run-1',
-      },
-    });
     final commands = <Map<String, dynamic>>[];
+    var reads = 0;
     final api = NativeSessionApi(store, (path, body) async {
       if (body == null) {
-        return path.endsWith('unread')
-            ? {
-                'schemaVersion': 1,
-                'unread': [
-                  {
-                    'schemaVersion': 1,
-                    'botId': 'alpha',
-                    'count': 1,
-                    'capped': false,
-                    'unread': true,
-                    'manuallyUnread': false,
-                    'notificationsEnabled': true,
-                    'lastActivityCursor': 'message-00000000000000000002',
-                    'lastActivityAt': '2026-09-05T10:00:00.000Z',
-                  },
-                ],
-              }
-            : {'schemaVersion': 1, 'notifications': []};
+        reads += 1;
+        return {
+          'schemaVersion': 1,
+          'unread': [
+            {
+              'schemaVersion': 1,
+              'botId': 'alpha',
+              'count': reads,
+              'capped': false,
+              'unread': true,
+              'manuallyUnread': false,
+              'notificationsEnabled': true,
+              'lastActivityCursor': 'message-0000000000000000000$reads',
+              'lastActivityAt': '2026-09-05T10:00:00.000Z',
+            },
+          ],
+        };
       }
       final command = Map<String, dynamic>.from(body as Map);
       commands.add(command);
+      if (commands.length == 1) throw StateError('lost receipt');
       return {
         'schemaVersion': 1,
         'commandId': command['commandId'],
@@ -153,74 +142,30 @@ void main() {
         },
       };
     });
-    final controller = ActivityController(api, store, 'tim');
-
+    final controller = ActivityController(api);
     await controller.load();
 
-    expect(controller.pending, isFalse);
-    expect(store.values.containsKey('activity-pending.tim'), isFalse);
-
-    // Reading still works on this install: the stale command gated marking,
-    // manual unread and acknowledgement alike while it was held.
     await controller.mark('alpha', read: true);
-    expect(commands.single['upToCursor'], 'message-00000000000000000002');
+    expect(controller.unread['alpha']!.count, 1);
+    expect(controller.error, isNotNull);
+    expect(controller.busy('alpha'), isTrue);
+
+    // The open chat asks again on the next frame; the refusal is not asked
+    // again until the cloud has been heard from.
+    await controller.mark('alpha', read: true);
+    expect(commands, hasLength(1));
+
+    // The Bot kept talking meanwhile. The poll ends the pause, and the next
+    // glance names the newer cursor rather than the refused one.
+    await controller.load();
+    expect(controller.busy('alpha'), isFalse);
+    await controller.mark('alpha', read: true);
+    expect(commands, hasLength(2));
+    expect(commands[1]['upToCursor'], 'message-00000000000000000002');
     expect(controller.unread['alpha']!.unread, isFalse);
     controller.dispose();
     api.close();
   });
-
-  test(
-    'a lost read receipt retries the persisted command after client restart',
-    () async {
-      final store = MemoryStore();
-      final writes = <Map>[];
-      var lost = true;
-      final api = NativeSessionApi(store, (path, body) async {
-        if (body == null) {
-          return path.endsWith('unread')
-              ? {'schemaVersion': 1, 'unread': []}
-              : {'schemaVersion': 1, 'notifications': []};
-        }
-        final command = body as Map;
-        expect(
-          jsonDecode(store.values['activity-pending.tim']!)['alpha'],
-          command,
-        );
-        writes.add(command);
-        if (lost) {
-          lost = false;
-          throw StateError('lost receipt');
-        }
-        return {
-          'schemaVersion': 1,
-          'commandId': command['commandId'],
-          'status': 'applied',
-          'unread': {
-            'schemaVersion': 1,
-            'botId': 'alpha',
-            'count': 0,
-            'capped': false,
-            'unread': true,
-            'manuallyUnread': true,
-            'notificationsEnabled': true,
-          },
-        };
-      });
-      final first = ActivityController(api, store, 'tim');
-      await first.mark('alpha', read: false);
-      expect(first.pending, isTrue);
-      first.dispose();
-      final second = ActivityController(api, store, 'tim');
-      await second.load();
-      expect(second.pending, isTrue);
-      await second.retry();
-      expect(writes[0], writes[1]);
-      expect(second.pending, isFalse);
-      expect(second.unread['alpha']!.manuallyUnread, isTrue);
-      second.dispose();
-      api.close();
-    },
-  );
   group('the badge answers the tap, not the round trip', () {
     Map<String, Object?> view(String botId, {required int count}) => {
       'schemaVersion': 1,
@@ -247,7 +192,7 @@ void main() {
           'unread': view('alpha', count: 0),
         };
       });
-      final controller = ActivityController(api, store, 'tim');
+      final controller = ActivityController(api);
       controller.unread['alpha'] = wire.UnreadView.fromJson(
         view('alpha', count: 2),
       );
@@ -275,7 +220,7 @@ void main() {
         await receipts.future;
         throw StateError('never answered');
       });
-      final controller = ActivityController(api, store, 'tim');
+      final controller = ActivityController(api);
       controller.unread['alpha'] = wire.UnreadView.fromJson(
         view('alpha', count: 0),
       );
@@ -302,7 +247,7 @@ void main() {
       final api = NativeSessionApi(store, (path, body) async {
         throw const FormatException('synthetic backend detail');
       });
-      final controller = ActivityController(api, store, 'tim');
+      final controller = ActivityController(api);
       controller.unread['alpha'] = wire.UnreadView.fromJson(
         view('alpha', count: 2),
       );
@@ -333,7 +278,7 @@ void main() {
           'unread': view(command['botId'] as String, count: 0),
         };
       });
-      final controller = ActivityController(api, store, 'tim');
+      final controller = ActivityController(api);
       controller.unread['alpha'] = wire.UnreadView.fromJson(
         view('alpha', count: 2),
       );
@@ -354,7 +299,7 @@ void main() {
 
       held.complete();
       await marking;
-      expect(controller.pending, isFalse);
+      expect(controller.busy('alpha'), isFalse);
       controller.dispose();
       api.close();
     });

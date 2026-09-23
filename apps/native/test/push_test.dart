@@ -33,7 +33,7 @@ void main() {
       }
       throw StateError(path);
     });
-    final activity = ActivityController(api, store, 'tim');
+    final activity = ActivityController(api);
     activity.unread['alpha'] = wire.UnreadView.fromJson({
       'schemaVersion': 1,
       'botId': 'alpha',
@@ -100,7 +100,7 @@ void main() {
         if (path == '/api/push/device') registrations.add(body);
         return {'ok': true};
       });
-      final activity = ActivityController(api, store, 'tim');
+      final activity = ActivityController(api);
       final push = PushController(
         api,
         store,
@@ -142,7 +142,7 @@ void main() {
         }
         throw StateError(path);
       });
-      final activity = ActivityController(api, store, 'tim');
+      final activity = ActivityController(api);
       final push = PushController(api, store, 'tim', activity);
       var cleanedUp = false;
       addTearDown(() {
@@ -205,7 +205,7 @@ void main() {
           });
       final store = MemoryStore();
       final api = SettingsApi(store, (path, body) async => {'ok': true});
-      final activity = ActivityController(api, store, 'tim');
+      final activity = ActivityController(api);
       void seen(String cursor) {
         activity.unread['alpha'] = wire.UnreadView.fromJson({
           'schemaVersion': 1,
