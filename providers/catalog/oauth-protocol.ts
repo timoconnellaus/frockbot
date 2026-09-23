@@ -79,11 +79,6 @@ async function request(
     deadline.clear();
   }
 }
-function oauthErrorCode(body: Record<string, unknown>): unknown {
-  return body.error && typeof body.error === "object"
-    ? (body.error as Record<string, unknown>).code
-    : body.error;
-}
 function success(result: Awaited<ReturnType<typeof request>>) {
   if (!result.response.ok || result.body.error)
     throw new Error(
@@ -201,8 +196,8 @@ export async function pollOAuthV1(
     client_id: clients[provider],
     device_code: flow.deviceCode!,
   });
-  if (oauthErrorCode(result.body) === "authorization_pending") return "pending";
-  if (oauthErrorCode(result.body) === "slow_down") return "slow-down";
+  if (result.body.error === "authorization_pending") return "pending";
+  if (result.body.error === "slow_down") return "slow-down";
   return token(success(result), now);
 }
 export async function refreshOAuthV1(
