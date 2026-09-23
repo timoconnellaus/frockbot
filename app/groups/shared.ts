@@ -130,6 +130,8 @@ export interface GroupChatListV1 {
 export interface GroupMemberV1 {
   botId: string;
   name: string;
+  /** What the member is for, as its profile says. */
+  description?: string;
 }
 
 /** What a group's object reads from the User object before acting. */

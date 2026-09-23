@@ -17,3 +17,7 @@ export {
   createHostedRoutineEventJudgeV1,
   createJevRoutineEventJudgeV1,
 } from "./routine-event.js";
+export {
+  createHostedGroupReplyJudgeV1,
+  createJevGroupReplyJudgeV1,
+} from "./group-reply.js";

@@ -23,6 +23,10 @@ import {
   type GroupMessagePageV1,
   type GroupMessageV1,
 } from "./shared.js";
+import type {
+  GroupReplyDecisionV1,
+  GroupReplyEvidenceV1,
+} from "@frockbot/core/contracts";
 import {
   groupTurnMessageIdV1,
   renderGroupTurnInputV1,
@@ -53,6 +57,11 @@ const MESSAGE_PREFIX = "group:msg:";
 const MESSAGE_ID_PREFIX = "group:msg-id:";
 const MEMBER_PREFIX = "group:member:";
 const RECEIPT_PREFIX = "group:receipt:";
+const JUDGE_PREFIX = "group:judge:";
+const JUDGEMENT_PREFIX = "group:judgement:";
+
+/** How much of the thread before a message Jev reads. */
+export const GROUP_JUDGEMENT_THREAD_V1 = 20;
 
 export interface GroupIdentityV1 {
   schemaVersion: 1;
@@ -111,6 +120,8 @@ export type GroupEffectV1 =
   | { kind: "admit"; botId: string; admission: GroupTurnAdmissionV1 }
   | { kind: "signal"; botId: string; seq: number }
   | { kind: "stop"; botId: string; runId: string; commandId: string }
+  /** Ask Jev who answers the message at `seq`. */
+  | { kind: "judge"; seq: number }
   | { kind: "broadcast" };
 
 export interface GroupOutcomeV1<T> {
@@ -140,6 +151,14 @@ export const GROUP_ADMISSION_ATTEMPTS_V1 = 5;
 
 function messageKey(seq: number): string {
   return `${MESSAGE_PREFIX}${String(seq).padStart(12, "0")}`;
+}
+
+function judgeKey(seq: number): string {
+  return `${JUDGE_PREFIX}${String(seq).padStart(12, "0")}`;
+}
+
+function judgementKey(seq: number): string {
+  return `${JUDGEMENT_PREFIX}${String(seq).padStart(12, "0")}`;
 }
 
 function memberKey(botId: string): string {
@@ -302,9 +321,13 @@ export class GroupChatLogV1 {
   /**
    * Something the person or a member said.
    *
-   * Mentions are resolved against the members as they are named now, and the
-   * members they name are owed a Turn. Every member already working here is
-   * told a message arrived, so its Turn can yield at its next step boundary.
+   * Mentions are resolved against the members as they are named now. The
+   * members the person @mentions are owed a Turn at once. Every message is
+   * then judged — who else answers, and for a member's message whether its
+   * own mentions carry the conversation on — and the judgment is owed as an
+   * effect, written down first so an eviction does not lose it. Every member
+   * already working here is told a message arrived, so its Turn can yield at
+   * its next step boundary.
    */
   async post(input: {
     messageId: string;
@@ -344,24 +367,157 @@ export class GroupChatLogV1 {
         effects.push({ kind: "signal", botId: member.botId, seq: message.seq });
       }
     }
-    const asked = mentionedBotIdsV1(mentions).filter(
-      (botId) => botId !== authorId,
-    );
-    const head = await this.head();
-    let chain = head.chain;
-    for (const botId of asked) {
-      if (authorId !== undefined) {
-        // Until Jev judges a Bot asking a Bot, a run of them ends here.
-        if (chain >= GROUP_BOT_CHAIN_MAX_V1) break;
-        chain++;
+    if (authorId === undefined) {
+      for (const botId of mentionedBotIdsV1(mentions)) {
+        await this.owe(botId, message.seq, "mention");
       }
-      await this.owe(botId, message.seq, "mention");
     }
-    if (chain !== head.chain) {
-      await this.kv.put(HEAD_KEY, { ...(await this.head()), chain });
-    }
+    await this.kv.put(judgeKey(message.seq), { seq: message.seq });
+    effects.push({ kind: "judge", seq: message.seq });
     effects.push(...(await this.admissionsDue(input.context)));
     return { value: message, effects };
+  }
+
+  /** Messages written down as owed a judgment and not yet judged. */
+  async pendingJudgements(): Promise<number[]> {
+    return [
+      ...(
+        await this.kv.list<{ seq: number }>({ prefix: JUDGE_PREFIX })
+      ).values(),
+    ].map((pending) => pending.seq);
+  }
+
+  /**
+   * What Jev is shown about one message: the group, the thread before it,
+   * the message, and the members it may ask — free, not the author, and not
+   * already named by the message's own mentions.
+   */
+  async judgementEvidence(
+    seq: number,
+    context: GroupChatContextV1,
+  ): Promise<GroupReplyEvidenceV1 | undefined> {
+    const message = await this.message(seq);
+    if (message?.body.kind !== "text") return undefined;
+    const members = context.members.filter((member) =>
+      context.group.members.includes(member.botId),
+    );
+    const speaker = (author: GroupAuthorV1) =>
+      author.kind === "user"
+        ? "User"
+        : (members.find((member) => member.botId === author.botId)?.name ??
+          author.botId);
+    const recent = [
+      ...(
+        await this.kv.list<GroupMessageV1>({
+          start: MESSAGE_PREFIX,
+          end: messageKey(seq),
+          reverse: true,
+          limit: GROUP_JUDGEMENT_THREAD_V1 * 2,
+        })
+      ).values(),
+    ]
+      .filter((line) => line.body.kind === "text")
+      .slice(0, GROUP_JUDGEMENT_THREAD_V1)
+      .reverse()
+      .map((line) => ({
+        speaker: speaker(line.author),
+        text: line.body.kind === "text" ? line.body.text : "",
+      }));
+    const authorId =
+      message.author.kind === "bot" ? message.author.botId : undefined;
+    const mentioned = mentionedBotIdsV1(message.body.mentions);
+    const busy = new Set(
+      (await this.members())
+        .filter((member) => member.turn || member.owed)
+        .map((member) => member.botId),
+    );
+    return {
+      groupName: groupDisplayNameV1(context.group, context.members),
+      members: members.map((member) => ({
+        botId: member.botId,
+        name: member.name,
+        ...(member.description ? { description: member.description } : {}),
+      })),
+      recent,
+      message: {
+        speaker: speaker(message.author),
+        text: message.body.text,
+        mentions: mentioned,
+      },
+      botAuthored: authorId !== undefined,
+      candidates: members
+        .map((member) => member.botId)
+        .filter(
+          (botId) =>
+            botId !== authorId &&
+            !mentioned.includes(botId) &&
+            !busy.has(botId),
+        ),
+    };
+  }
+
+  /**
+   * Jev's judgment of one message, applied once.
+   *
+   * The members it asks are owed a Turn. A member's own mentions are owed
+   * only when asking them carries the conversation on; without Jev they run
+   * under the group's bound on Bots asking Bots.
+   */
+  async applyJudgement(input: {
+    seq: number;
+    decision: GroupReplyDecisionV1;
+    context: GroupChatContextV1;
+  }): Promise<GroupOutcomeV1<void>> {
+    if (!(await this.kv.get(judgeKey(input.seq)))) {
+      return { value: undefined, effects: [] };
+    }
+    await this.kv.delete(judgeKey(input.seq));
+    const message = await this.message(input.seq);
+    if (message?.body.kind !== "text" || input.context.group.archivedAt) {
+      return { value: undefined, effects: [] };
+    }
+    const inGroup = (botId: string) =>
+      input.context.group.members.includes(botId);
+    const authorId =
+      message.author.kind === "bot" ? message.author.botId : undefined;
+    for (const botId of input.decision.reply) {
+      if (botId !== authorId && inGroup(botId)) {
+        await this.owe(botId, input.seq, "jev");
+      }
+    }
+    if (authorId !== undefined && input.decision.mentions === "continues") {
+      const head = await this.head();
+      let chain = head.chain;
+      for (const botId of mentionedBotIdsV1(message.body.mentions)) {
+        if (botId === authorId || !inGroup(botId)) continue;
+        // Without Jev to judge a Bot asking a Bot, a run of them ends here.
+        if (input.decision.unavailable && chain >= GROUP_BOT_CHAIN_MAX_V1) {
+          break;
+        }
+        chain++;
+        await this.owe(botId, input.seq, "mention");
+      }
+      if (chain !== head.chain) {
+        await this.kv.put(HEAD_KEY, { ...(await this.head()), chain });
+      }
+    }
+    await this.kv.put(judgementKey(input.seq), {
+      schemaVersion: 1,
+      seq: input.seq,
+      decision: input.decision,
+      at: this.now().toISOString(),
+    });
+    return {
+      value: undefined,
+      effects: await this.admissionsDue(input.context),
+    };
+  }
+
+  /** How one message was judged, once it has been. */
+  async judgement(
+    seq: number,
+  ): Promise<{ decision: GroupReplyDecisionV1; at: string } | undefined> {
+    return this.kv.get(judgementKey(seq));
   }
 
   private async owe(
@@ -420,9 +576,14 @@ export class GroupChatLogV1 {
           kind: "group",
           groupId: identity.groupId,
           groupName,
-          members: context.members.filter((candidate) =>
-            context.group.members.includes(candidate.botId),
-          ),
+          members: context.members
+            .filter((candidate) =>
+              context.group.members.includes(candidate.botId),
+            )
+            .map((candidate) => ({
+              botId: candidate.botId,
+              name: candidate.name,
+            })),
           throughSeq: member.owed.throughSeq,
           reason: member.owed.reason,
         };

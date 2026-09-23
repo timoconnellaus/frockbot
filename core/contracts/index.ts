@@ -21,6 +21,7 @@ export * from "./prompt-assembly.js";
 export * from "./remote.js";
 export * from "./records.js";
 export * from "./routine-event-judge.js";
+export * from "./group-reply-judge.js";
 export * from "./runtime-feature.js";
 export * from "./send-to-user.js";
 export * from "./session.js";

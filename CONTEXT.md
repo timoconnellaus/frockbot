@@ -43,7 +43,7 @@ _Avoid_: Priority, queue, channel
 _Avoid_: DM, room, channel, thread
 
 **Group Chat**
-: A conversation between the User and two to eight of their Bots. Every message reaches every member, and a member asked to reply — by an @mention, and later by Jev — runs a Turn in its own Bot under the group's Session, whose sends are posted to the group. Replaces Project.
+: A conversation between the User and two to eight of their Bots. Every message reaches every member, and a member asked to reply — by an @mention, or by Jev judging the message is theirs — runs a Turn in its own Bot under the group's Session, whose sends are posted to the group. Replaces Project.
 _Avoid_: Channel, room, project, team
 
 **Hand-off**

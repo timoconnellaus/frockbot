@@ -157,7 +157,11 @@ export interface StoredRunGroupOriginV1 {
   groupName: string;
   members: Array<{ botId: string; name: string }>;
   throughSeq: number;
-  reason: "mention" | "continue" | "retry";
+  /**
+   * Why the member was asked: the person or a member @mentioned it, it yielded
+   * before answering, Retry, or Jev judged the message was for it.
+   */
+  reason: "mention" | "continue" | "retry" | "jev";
 }
 
 /** What produced a Turn, when it was not a person speaking to the Bot. */
@@ -612,7 +616,8 @@ function decodeStoredRunOrigin(
       candidate.throughSeq < 0 ||
       (candidate.reason !== "mention" &&
         candidate.reason !== "continue" &&
-        candidate.reason !== "retry")
+        candidate.reason !== "retry" &&
+        candidate.reason !== "jev")
     ) {
       throw new Error(`run "${runId}" has an invalid admission origin`);
     }

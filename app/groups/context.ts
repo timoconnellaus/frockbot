@@ -99,6 +99,7 @@ const REASON_TEXT: Record<GroupTurnReasonV1, string> = {
   continue:
     "You had not finished your previous turn in this group when these messages arrived. Read them first, then decide whether to carry that work on, and say so when the others would want to know.",
   retry: "Your previous turn in this group did not finish. Try again.",
+  jev: "Nobody mentioned you, but this looks like yours to answer. Reply in the group if you have something to add.",
 };
 
 /** The Turn input: the group, what happened since this member last took part, and why it is asked. */

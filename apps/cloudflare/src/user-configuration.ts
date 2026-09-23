@@ -2138,10 +2138,15 @@ export class UserConfiguration
     return new GroupChatUserStoreV1(
       this.ctx.storage as unknown as GroupChatUserStorageV1,
       async () =>
-        (await (await this.flockContribution()).listBots()).bots.map((bot) => ({
-          botId: bot.botId,
-          name: bot.currentProfile?.name ?? bot.initialName,
-        })),
+        (await (await this.flockContribution()).listBots()).bots.map((bot) => {
+          const description =
+            bot.currentProfile?.description ?? bot.initialDescription;
+          return {
+            botId: bot.botId,
+            name: bot.currentProfile?.name ?? bot.initialName,
+            ...(description ? { description } : {}),
+          };
+        }),
     );
   }
 
