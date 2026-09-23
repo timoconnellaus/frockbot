@@ -744,9 +744,18 @@ export function connectionsFrame(
       });
     }
   }
+  // Connectors lead in the order their Package declares them — the apps
+  // people reach for first, then the rest — and model providers follow by
+  // name. A thousand apps sorted by name would open on ones nobody has heard of.
   if (offerCatalog) {
     providers.sort((left, right) =>
-      left.displayName.localeCompare(right.displayName),
+      left.kind !== right.kind
+        ? left.kind === "connector"
+          ? -1
+          : 1
+        : left.kind === "model"
+          ? left.displayName.localeCompare(right.displayName)
+          : 0,
     );
   }
 

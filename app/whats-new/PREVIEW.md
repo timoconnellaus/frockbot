@@ -2,6 +2,14 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
+## More than 1,400 apps to connect
+
+feature
+
+Shopify, Stripe, Todoist, Dropbox and the rest sit beside Gmail and Slack in the Marketplace, and a Bot can use every tool an app has.
+
+![The Marketplace with Connectors chosen: Gmail, Google Calendar, Google Drive, GitHub, Slack, Notion and more apps, each with a Connect button.](media/connected-apps.webp)
+
 ## Group Chats
 
 feature

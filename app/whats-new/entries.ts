@@ -23,6 +23,17 @@ export type WhatsNewEntrySourceV1 = {
  */
 export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
+    id: "connected-apps-1400",
+    title: "More than 1,400 apps to connect",
+    summary:
+      "Shopify, Stripe, Todoist, Dropbox and the rest sit beside Gmail and Slack in the Marketplace, and a Bot can use every tool an app has.",
+    kind: "feature",
+    image: {
+      file: "connected-apps.webp",
+      alt: "The Marketplace with Connectors chosen: Gmail, Google Calendar, Google Drive, GitHub, Slack, Notion and more apps, each with a Connect button.",
+    },
+  },
+  {
     id: "group-chats",
     title: "Group Chats",
     summary:

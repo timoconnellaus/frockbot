@@ -1,6 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { decodePluginDescriptorV1 } from "../../../core/contracts/plugin-descriptor";
 import { ISOLATE_CONTRACT_VERSION } from "../../../core/contracts/isolate";
+import {
+  CONNECT_APP_COUNT_V1,
+  connectToolkitV1,
+} from "../../../app/connect/catalog";
 import worker, {
   MAC_DOWNLOAD_URL,
   canonicalUrl,
@@ -617,5 +621,46 @@ describe("Mac download button", () => {
     expect(declarations(".hero-actions")["flex-wrap"]).toBe("wrap");
     expect(declarations(".button-mac").background).toBe("var(--ink)");
     expect(declarations(".button-mac svg").fill).toBe("currentColor");
+  });
+
+  test("the connected-apps wall shows real apps and the catalog's own count", async () => {
+    const homepage = await publicFile("index.html");
+    const start = homepage.indexOf('<section class="section apps"');
+    const section = homepage.slice(
+      start,
+      homepage.indexOf("</section>", start),
+    );
+    const slugs = new Set(
+      [...section.matchAll(/src="\/assets\/apps\/([a-z0-9_]+)\.svg"/g)].map(
+        (match) => match[1]!,
+      ),
+    );
+    expect(slugs.size).toBeGreaterThanOrEqual(40);
+    for (const slug of slugs) {
+      // Every mark is an app a person can actually connect.
+      expect(connectToolkitV1(slug)).toBeDefined();
+      const mark = await publicFile(`assets/apps/${slug}.svg`);
+      expect(mark).toStartWith("<svg");
+      expect(mark).not.toMatch(/<script|<foreignObject|href="(?!data:|#)/i);
+    }
+    const shipped = new Bun.Glob("*.svg").scanSync(
+      new URL("../public/assets/apps/", import.meta.url).pathname,
+    );
+    for (const file of shipped) {
+      expect(slugs.has(file.replace(/\.svg$/, ""))).toBe(true);
+    }
+    // The count rounds down to the hundred, so it is never more than is true
+    // and is wrong by a whole hundred before the page has to change.
+    const shown = (Math.floor(CONNECT_APP_COUNT_V1 / 100) * 100).toLocaleString(
+      "en-US",
+    );
+    expect(section).toContain(`<strong>${shown}<em>+</em></strong>`);
+    expect(section).toContain(`more than ${shown}`);
+    expect(homepage.match(/\b\d{1,3},\d{3}\b/g)?.sort()).toEqual([
+      shown,
+      shown,
+    ]);
+    // The service behind connected apps is plumbing, never named here.
+    expect(homepage.toLowerCase()).not.toContain("composio");
   });
 });

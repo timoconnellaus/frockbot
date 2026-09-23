@@ -8,8 +8,8 @@ Decisions here were made by Tim on 2026-09-17; change them here, not in copy.
 FrockBot runs persistent Bots. A Bot holds a conversation, remembers across
 sessions, runs on a schedule, uses a cloud computer of its own (browser,
 files, terminal), writes tools and plugins that extend it, talks and listens,
-and works inside connected apps (Gmail, Calendar, Drive, GitHub, Slack,
-Notion). One web + Mac + phone client (the phone app sideloads from GitHub releases; it is not in a store). Hosted at
+and works inside 1,400+ connected apps (Gmail, Calendar, Drive, Slack,
+Notion, Shopify and the rest). One web + Mac + phone client (the phone app sideloads from GitHub releases; it is not in a store). Hosted at
 frockbot.com for US$20/month (US$15 credit included), or self-hosted into
 your own Cloudflare account with one command. MIT licensed.
 
@@ -74,12 +74,18 @@ sovereignty, with "read the docs" as the CTA and GitHub stars as proof.
   US$2.75/active hour, 100 GB idle storage included, no overage bills.
 - 40 model providers built in; OAuth sign-in where a provider offers it.
 - Voice: composer dictation plus a continuous voice session across all Bots.
-- Connected apps: Gmail, Google Calendar, Google Drive, GitHub, Slack, Notion.
+- Connected apps: 1,400+ (the count is `CONNECT_APP_COUNT_V1` in
+  `app/connect/catalog.ts`; round it down to the hundred). A Bot can use every
+  tool an app has. Some sign in with a key the person pastes on the app's
+  sign-in page rather than a one-tap sign-in.
 - Mac app download at /download/mac. Phone app sideloads as frockbot.apk on GitHub releases.
 - Self-host: `bun run setup`, Workers Paid + a zone + Zero Trust + Fly token.
 
 ## Things not to claim
 
 - Phone app availability in an app store (sideload from GitHub releases only).
-- Named integrations beyond the six above.
+- A named app that is not in `app/connect/catalog.ts` (no Spotify, Xero or
+  X today), or that works only for a business account as if it were the
+  personal one (WhatsApp and Instagram connect Business and Creator accounts).
+- The service behind connected apps, anywhere on the site.
 - Any usage numbers, testimonials or star counts (none yet).
