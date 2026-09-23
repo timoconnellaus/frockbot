@@ -518,6 +518,7 @@ export class ComputerBotBackendContribution {
   ): Promise<
     | { replay: ComputerCommandReceiptV1 }
     | { intent: StoredIntentV1; fingerprint: string }
+    | { joined: string }
   > {
     const fingerprint = computerCommandFingerprintV1(command);
     return this.host.storage.transaction(async (storage) => {
@@ -567,9 +568,9 @@ export class ComputerBotBackendContribution {
           } else {
             pending = decodeStoredPendingConnect(pendingValue);
             if (pending.commandId !== command.commandId) {
-              throw new ComputerProtocolDecodeError(
-                "another Computer connect is already pending",
-              );
+              return {
+                joined: await this.joinPendingConnect(storage, pending),
+              };
             }
             if (pendingConnectDeadline(pending) <= this.now().getTime()) {
               pending = {
@@ -583,6 +584,21 @@ export class ComputerBotBackendContribution {
           }
         }
         return { intent, fingerprint };
+      }
+      const pendingValue =
+        command.type === "connect"
+          ? await storage.get<unknown>(COMPUTER_PENDING_CONNECT_KEY)
+          : undefined;
+      const pendingConnect =
+        pendingValue === undefined
+          ? undefined
+          : decodeStoredPendingConnect(pendingValue);
+      // No intent for a joined connect: an intent without a receipt is a
+      // connect still owed, and this one is owed nothing of its own.
+      if (pendingConnect && pendingConnect.commandId !== command.commandId) {
+        return {
+          joined: await this.joinPendingConnect(storage, pendingConnect),
+        };
       }
       const admittedAt = this.now().toISOString();
       const intent = {
@@ -598,17 +614,9 @@ export class ComputerBotBackendContribution {
       // provider-neutral Computer can be asked to perform an effect.
       await storage.put(intentKey, intent);
       if (command.type === "connect") {
-        const pendingValue = await storage.get<unknown>(
-          COMPUTER_PENDING_CONNECT_KEY,
-        );
         let pending: StoredPendingConnectV1;
-        if (pendingValue !== undefined) {
-          pending = decodeStoredPendingConnect(pendingValue);
-          if (pending.commandId !== command.commandId) {
-            throw new ComputerProtocolDecodeError(
-              "another Computer connect is already pending",
-            );
-          }
+        if (pendingConnect !== undefined) {
+          pending = pendingConnect;
           if (pendingConnectDeadline(pending) <= this.now().getTime()) {
             pending = {
               ...pending,
@@ -639,11 +647,32 @@ export class ComputerBotBackendContribution {
     });
   }
 
+  /**
+   * A connect asked for while another is pending is that one. Pressing Open
+   * again during a slow start must not be refused, and must not start a second
+   * desktop either; an overdue one is only nudged, as its own replay would be.
+   */
+  private async joinPendingConnect(
+    storage: ComputerBotTransaction,
+    pending: StoredPendingConnectV1,
+  ): Promise<string> {
+    if (pendingConnectDeadline(pending) <= this.now().getTime()) {
+      await storage.put(COMPUTER_PENDING_CONNECT_KEY, {
+        ...pending,
+        deferredUntil: new Date(
+          this.now().getTime() + COMPUTER_CONNECT_START_DELAY_MS,
+        ).toISOString(),
+      } satisfies StoredPendingConnectV1);
+    }
+    return pending.admittedAt;
+  }
+
   private async settle(
     command: ComputerCommandV1,
     fingerprint: string,
     status: "applied" | "rejected",
     failure?: string,
+    provider?: StoredProviderAnswerV2,
   ): Promise<ComputerCommandReceiptV1> {
     const key = `${COMPUTER_RECEIPT_PREFIX}${command.commandId}`;
     return this.host.storage.transaction(async (storage) => {
@@ -676,6 +705,10 @@ export class ComputerBotBackendContribution {
         fingerprint,
         receipt,
       } satisfies StoredReceiptV1);
+      // With the receipt, never before it: a failure the card can already see
+      // while its connect is still pending invites a retry that joins a
+      // connect about to settle, and then nothing happens.
+      if (provider) await storage.put(COMPUTER_PROVIDER_RECORD_KEY, provider);
       if (command.type === "connect") {
         const pendingValue = await storage.get<unknown>(
           COMPUTER_PENDING_CONNECT_KEY,
@@ -737,6 +770,15 @@ export class ComputerBotBackendContribution {
     }
     const admitted = await this.admit(userId, command);
     if ("replay" in admitted) return admitted.replay;
+    if ("joined" in admitted) {
+      return {
+        version: 2,
+        commandId: command.commandId,
+        type: "connect",
+        status: "accepted",
+        admittedAt: admitted.joined,
+      };
+    }
     if (command.type === "connect") {
       return {
         version: 2,
@@ -814,7 +856,7 @@ export class ComputerBotBackendContribution {
               recordedAt,
             )
         : undefined;
-      await this.host.storage.put(COMPUTER_PROVIDER_RECORD_KEY, {
+      return this.settle(command, admitted.fingerprint, "rejected", failure, {
         version: 2,
         phase:
           command.type === "refreshViewer"
@@ -830,8 +872,7 @@ export class ComputerBotBackendContribution {
               : failure,
         recordedAt,
         ...(updating && progress ? { progress } : {}),
-      } satisfies StoredProviderAnswerV2);
-      return this.settle(command, admitted.fingerprint, "rejected", failure);
+      });
     }
   }
 

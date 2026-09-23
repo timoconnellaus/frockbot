@@ -402,6 +402,112 @@ describe("Computer Bot Durable Object Contribution", () => {
     );
   });
 
+  test("a connect asked for while another is pending joins it rather than being refused", async () => {
+    const storage = new MemoryStorage();
+    let calls = 0;
+    const contribution = createComputerBotBackendContribution({
+      storage,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () =>
+        Promise.resolve(
+          fakeHandle({
+            presence: () => {
+              calls += 1;
+              return Promise.resolve({
+                id: "viewer-1",
+                url: "https://viewer.invalid/secret",
+                expiresAt: "2026-09-02T00:01:30.000Z",
+              });
+            },
+          }),
+        ),
+      now: () => new Date("2026-09-02T00:00:00.000Z"),
+    });
+
+    await contribution.execute("user-1", "scout", command("connect", "card"));
+    expect(
+      await contribution.execute(
+        "user-1",
+        "scout",
+        command("connect", "card-again"),
+      ),
+    ).toEqual({
+      version: 2,
+      commandId: "card-again",
+      type: "connect",
+      status: "accepted",
+      admittedAt: "2026-09-02T00:00:00.000Z",
+    });
+    expect(storage.values.has(`${COMPUTER_INTENT_PREFIX}card-again`)).toBe(
+      false,
+    );
+
+    await contribution.settleScheduledWork();
+    expect(calls).toBe(1);
+    expect(storage.values.has(COMPUTER_PENDING_CONNECT_KEY)).toBe(false);
+  });
+
+  test("a refused connect shows its failure only once it is no longer pending", async () => {
+    const memory = new MemoryStorage();
+    const committed: Map<string, unknown>[] = [];
+    let depth = 0;
+    const commit = () => {
+      if (depth === 0) committed.push(new Map(memory.values));
+    };
+    const storage: ComputerBotStorage = {
+      get: <T>(key: string) => memory.get<T>(key),
+      put: (async (
+        keyOrEntries: string | Record<string, unknown>,
+        value?: unknown,
+      ) => {
+        if (typeof keyOrEntries === "string") {
+          await memory.put(keyOrEntries, value);
+        } else {
+          await memory.put(keyOrEntries);
+        }
+        commit();
+      }) as ComputerBotStorage["put"],
+      delete: async (key: string) => {
+        const deleted = await memory.delete(key);
+        commit();
+        return deleted;
+      },
+      transaction: async <T>(
+        callback: (transaction: ComputerBotTransaction) => Promise<T>,
+      ) => {
+        depth += 1;
+        try {
+          return await callback(memory);
+        } finally {
+          depth -= 1;
+          commit();
+        }
+      },
+    };
+    const contribution = createComputerBotBackendContribution({
+      storage,
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () =>
+        Promise.reject(new Error("The Computer host answered 503")),
+      now: () => new Date("2026-09-02T00:00:00.000Z"),
+    });
+
+    await contribution.execute("user-1", "scout", command("connect", "down"));
+    await contribution.settleScheduledWork();
+
+    const failed = committed.filter(
+      (state) =>
+        (state.get(COMPUTER_PROVIDER_RECORD_KEY) as { phase?: string })
+          ?.phase === "error",
+    );
+    expect(failed.length).toBeGreaterThan(0);
+    expect(
+      failed.some((state) => state.has(COMPUTER_PENDING_CONNECT_KEY)),
+    ).toBe(false);
+  });
+
   test("contributes a future deadline for a freshly admitted connect", async () => {
     const storage = new MemoryStorage();
     const now = new Date("2026-09-03T00:00:00.000Z");
