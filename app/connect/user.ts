@@ -943,20 +943,23 @@ export class ConnectUserBackendContribution {
     const firstUseMs = input.firstUseMs ?? CONNECT_CATALOG_FIRST_USE_MS_V1;
     let directory = await this.directoryOrUndefined(input.connectionId);
     if (input.toolName === undefined) {
-      const listable = (candidate: ConnectCatalogDirectoryV1 | undefined) =>
-        candidate?.status === "ready" &&
-        candidate.generation === input.generation;
-      if (!listable(directory)) {
+      // Only a Connection with no catalog of its own yet waits on a fetch. One
+      // whose refreshes are failing answers what it has; the alarm retries on
+      // its own backoff rather than on every Turn.
+      if (directory?.generation !== input.generation) {
         directory = await this.discover(connection, metadata, firstUseMs);
       }
       return {
         kind: "directory",
-        tools: listable(directory)
-          ? directory!.tools.map((tool) => ({
-              name: tool.name,
-              description: tool.description,
-            }))
-          : [],
+        tools:
+          directory &&
+          directory.status !== "revoked" &&
+          directory.generation === input.generation
+            ? directory.tools.map((tool) => ({
+                name: tool.name,
+                description: tool.description,
+              }))
+            : [],
       };
     }
     if (

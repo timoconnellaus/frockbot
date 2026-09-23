@@ -142,6 +142,45 @@ describe("account tool catalogs", () => {
     expect(fetches()).toBe(1);
   });
 
+  test("a directory read waits on no fetch once a failed one is on record", async () => {
+    const { storage, settings, now } = harness();
+    const { recordConnectCatalogFailureV1 } =
+      await import("./account-catalog.js");
+    await recordConnectCatalogFailureV1(storage, {
+      job: {
+        schemaVersion: 1,
+        connectionId: "connection-1",
+        generation: "g1",
+        toolkitSlug: "gmail",
+        namespace: "gmail",
+        dueAt: now.value,
+        attempts: 0,
+      },
+      message: "provider down",
+      now: now.value,
+      readConnection: async () => settings.connections[0],
+    });
+    let fetches = 0;
+    const contribution = new ConnectUserBackendContribution({
+      storage: storage as never,
+      settings: settings as never,
+      client: {
+        listTools: async () => {
+          fetches += 1;
+          return [TOOL];
+        },
+      } as never,
+      now: () => now.value,
+    });
+    const listed = await contribution.readToolCatalog({
+      userId: "tim",
+      connectionId: "connection-1",
+      generation: "g1",
+    });
+    expect(listed).toEqual({ kind: "directory", tools: [] });
+    expect(fetches).toBe(0);
+  });
+
   test("a large catalog is stored in chunks and one tool is read from its own", async () => {
     const schema = {
       type: "object",
