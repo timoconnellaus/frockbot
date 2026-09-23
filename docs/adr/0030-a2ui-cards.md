@@ -503,10 +503,10 @@ serve`), the platform model over the remote Workers AI binding. Asked
    > `ApprovalActions`, and `attachments_file.…` as `Column`, `FileAttachment`
    > — and the transcript shows one bubble per send at 412 and 1440
    > (`docs/screenshots/cards/first-party-phone.png`,
-   > `first-party-desktop.png`). The Plugins panel lists all five as
-   > first-party and Always on with no switch, which `bot-plugins.e2e.ts` now
-   > asserts; that spec also scrolls a card into the tree before reading it,
-   > because the panel outgrew one screen when they joined it.
+   > `first-party-desktop.png`). The Plugins panel listed all five as
+   > first-party and Always on with no switch; since 2026-09-23 it leaves them
+   > out, because a row with nothing to switch is not something a person can
+   > use ([ADR 0026](0026-plugins.md)).
 
 8. The rest of the Frock catalog, family by family, each with its reference.
 

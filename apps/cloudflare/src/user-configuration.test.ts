@@ -336,39 +336,24 @@ describe("UserConfiguration Connection routing", () => {
     expect(first.packages.map((pkg) => pkg.packageId)).toContain("web");
   });
 
-  test("Marketplace offers only runnable catalog Plugins", async () => {
+  test("the Marketplace catalog offers a Plugin-served provider only where a Plugin can run", async () => {
     const userId = "marketplace-user";
     const storage = new MemoryStorage();
     const bound = identity(userId);
-    const withoutLoader = new UserConfiguration(bound.ctx(storage), {
-      ...bound.env,
-      CREDENTIAL_KEYRING: credentialKeyring,
-    });
-    await withoutLoader.readConfiguration({
-      schemaVersion: 1,
-      view: 2,
-      userId,
-    });
-    expect(
-      await withoutLoader.readMarketplacePluginsFrame({
-        schemaVersion: 1,
-        userId,
-      }),
-    ).toMatchObject({ plugins: [] });
-
-    const withLoader = new UserConfiguration(bound.ctx(storage), {
-      ...bound.env,
+    const catalog = async (env: Record<string, unknown>) =>
+      (
+        await new UserConfiguration(bound.ctx(storage), {
+          ...bound.env,
+          ...env,
+          CREDENTIAL_KEYRING: credentialKeyring,
+        }).readConnectionsFrame({ schemaVersion: 1, userId, catalog: true })
+      ).providers.map((provider) => provider.packageId);
+    expect(await catalog({})).not.toContain("provider-deepseek");
+    const withLoader = await catalog({
       BOT_PACKAGES: { get: () => ({}) } as never,
-      CREDENTIAL_KEYRING: credentialKeyring,
     });
-    const frame = await withLoader.readMarketplacePluginsFrame({
-      schemaVersion: 1,
-      userId,
-    });
-    expect(frame.plugins.map((plugin) => plugin.packageId)).toEqual([
-      "provider-deepseek",
-    ]);
-    expect(frame.plugins[0]?.state).toBe("not-installed");
+    expect(withLoader).toContain("provider-deepseek");
+    expect(withLoader).toContain("provider-openai");
   });
 
   test("dispatches a Connection command to the Package the User Contribution adjudicates", async () => {

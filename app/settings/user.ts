@@ -2,7 +2,6 @@ import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import {
   applicationSettingsFrame,
   connectionsFrame,
-  pluginsFrame,
   applicationSettingsCommand,
   modelsSettingsFrame,
   modelsSettingsCommand,
@@ -707,14 +706,6 @@ export class UserSettingsBackendContribution {
       !modelBindingFailureV1({ model: accountModel, user: settings, packages })
       ? { ...previous, platformModel: accountModel }
       : previous;
-  }
-
-  async readPluginsFrame(userId: string) {
-    return pluginsFrame(
-      userId,
-      await this.readConfiguration({ schemaVersion: 1, userId }),
-      this.host.availablePackages,
-    );
   }
 
   async readConnectionsFrame(userId: string, catalog = false) {

@@ -1,15 +1,15 @@
-// The gateway → User Durable Object seam for the two surfaces the Flutter
-// client renders through `ViewDocumentView`.
+// The gateway → User Durable Object seam for the settings surfaces the
+// Flutter client renders: Connectors as a frame, Models as a `ViewDocument`.
 //
-// Both routes answer a frame, or the same settings in the renderer's own
-// vocabulary when the request asks for `?as=document`. The projection is pure
-// and unit-tested; what only a real request can prove is that the frame the
-// Durable Object builds is one the projection accepts, and that a credential
-// never appears in the document a client is handed.
+// Models answers a frame, or the same settings in the renderer's own
+// vocabulary when the request asks for `?as=document`. The projections are
+// pure and unit-tested; what only a real request can prove is that the frame
+// the Durable Object builds is one the projection accepts, and that a
+// credential never appears in what a client is handed.
 import { describe, expect, it } from "vitest";
 import {
   asUser,
-  enableCustomModels,
+  accountRevision,
   expectOkJson,
   freshUserId,
   OLLAMA_GOOD_API_KEY,
@@ -43,7 +43,7 @@ function walk(node: Node): Node[] {
 }
 
 async function installProvider(userId: string): Promise<void> {
-  const enabled = await enableCustomModels(userId, "custom-models");
+  const enabled = await accountRevision(userId);
   await expectOkJson(
     await postAsUser(userId, "/api/settings", {
       schemaVersion: 1,
@@ -98,38 +98,7 @@ describe("the Connectors frame", () => {
   });
 });
 
-describe("the Capabilities document", () => {
-  it("names every capability's enablement and the surface that configures it", async () => {
-    const userId = freshUserId("capabilities-doc");
-    await installProvider(userId);
-
-    const document = (await expectOkJson(
-      await asUser(userId, "/api/settings/capabilities?as=document"),
-    )) as Document;
-
-    expect(document.surfaceId).toBe("capabilities");
-    const kinds = new Set(
-      walk(document.root)
-        .filter((node) => node.type === "action")
-        .map((node) => node.input?.kind),
-    );
-    expect(kinds.has("set-package-enabled")).toBe(true);
-    expect(
-      walk(document.root).some((node) => node.title === "Custom models"),
-    ).toBe(true);
-  });
-
-  it("answers the frame itself without the document parameter", async () => {
-    const userId = freshUserId("capabilities-frame");
-    const frame = (await expectOkJson(
-      await asUser(userId, "/api/settings/capabilities"),
-    )) as { schemaVersion: number; plugins: { packageId: string }[] };
-    expect(frame.schemaVersion).toBe(1);
-    expect(frame.plugins.length).toBeGreaterThan(0);
-  });
-});
-
-describe("the Plugins document", () => {
+describe("the Models document", () => {
   /** The account's revision, for the next command to fence itself against. */
   async function revision(userId: string): Promise<number> {
     const settings = (await expectOkJson(
@@ -138,84 +107,52 @@ describe("the Plugins document", () => {
     return settings.revision;
   }
 
-  function pluginRows(document: Document): Node[] {
+  function providerSections(document: Document): Node[] {
     return walk(document.root).filter(
-      (node) => node.type === "group" && node.title?.startsWith("DeepSeek"),
+      (node) => node.type === "group" && node.title === "DeepSeek",
     );
   }
 
-  it("lists an installed provider Plugin, and removes it with its Package", async () => {
-    const userId = freshUserId("plugins-provider-doc");
-    await enableCustomModels(userId, "custom-models");
+  it("lists a provider once it is added, and not once it is removed", async () => {
+    const userId = freshUserId("models-provider-doc");
     const read = async () =>
       (await expectOkJson(
-        await asUser(userId, "/api/settings/plugins?as=document"),
+        await asUser(userId, "/api/settings/models?as=document"),
       )) as Document;
 
-    // Installing the provider Package is what installs the Plugin, and until
-    // that happens there is nothing here to see: adding a provider is Models'
-    // decision, and the disabled row every account starts with is not an
-    // installation of anything.
-    expect(pluginRows(await read())).toHaveLength(0);
+    // The disabled row every account starts with is not an addition.
+    expect(providerSections(await read())).toHaveLength(0);
 
     await expectOkJson(
       await postAsUser(userId, "/api/settings", {
         schemaVersion: 1,
-        type: "user/install-package",
-        commandId: "install-deepseek",
-        // The reads above run the account's own read bootstraps, which may
+        type: "user/choose-model-provider",
+        commandId: "add-deepseek",
+        // The read above runs the account's own read bootstraps, which may
         // write settings of their own, so the revision this command fences
         // itself against is the one read here and not one carried forward.
         expectedRevision: await revision(userId),
         packageId: "provider-deepseek",
-        version: "0.0.1",
       }),
     );
-
-    const document = await read();
-    const rows = pluginRows(document);
-    expect(rows).toHaveLength(1);
-    expect(rows[0]!.title).toBe("DeepSeek · On");
-    // The row describes the Plugin that runs the Turn, not the compiled
-    // Package's capability list.
+    const sections = providerSections(await read());
+    expect(sections).toHaveLength(1);
+    // No key yet, so the one action says what the next step is.
     expect(
-      walk(rows[0]!).some(
-        (node) =>
-          node.type === "text" &&
-          node.text?.startsWith("Run replies on DeepSeek models."),
-      ),
-    ).toBe(true);
-    const controls = walk(rows[0]!).filter((node) => node.type === "action");
-    expect(controls.map((node) => node.input?.kind)).toEqual([
-      "open-home",
-      "set-package-enabled",
-      "uninstall-package",
-    ]);
-    expect(controls.at(-1)!.label).toBe("Remove");
-    expect(
-      document.actions.some((action) => action.id === "uninstall-package"),
-    ).toBe(true);
+      walk(sections[0]!)
+        .filter((node) => node.type === "action")
+        .map((node) => node.label),
+    ).toEqual(["Connect account"]);
 
-    // The same row reaches a client that reads the frame itself.
-    const frame = (await expectOkJson(
-      await asUser(userId, "/api/settings/plugins"),
-    )) as { plugins: { packageId: string; state: string }[] };
-    expect(frame.plugins.map((plugin) => plugin.packageId)).toEqual([
-      "provider-deepseek",
-    ]);
-    expect(frame.plugins[0]!.state).toBe("installed");
-
-    // Uninstalling the Package is what takes the Plugin out of the account,
-    // so the row goes with it rather than redrawing as something to add.
     await expectOkJson(
       await postAsUser(userId, "/api/settings", {
         schemaVersion: 1,
         type: "user/uninstall-package",
-        commandId: "uninstall-deepseek",
+        commandId: "remove-deepseek",
         expectedRevision: await revision(userId),
         packageId: "provider-deepseek",
       }),
     );
-    expect(pluginRows(await read())).toHaveLength(0);
+    expect(providerSections(await read())).toHaveLength(0);
   });
 });

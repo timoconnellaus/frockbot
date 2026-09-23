@@ -2,6 +2,18 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
+## Add a model in one go
+
+improvement
+
+Adding a provider in the Marketplace asks for its key straight away, then leads on to choosing a model.
+
+## Plugins live with each Bot
+
+improvement
+
+Built-in features are switched on a Bot’s own Plugins page, and every Bot can choose its own model. Account features is gone.
+
 ## A refused plugin theme is reported
 
 fix

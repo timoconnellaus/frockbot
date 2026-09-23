@@ -49,11 +49,6 @@ class ViewSurfacePage extends StatefulWidget {
   final String documentId;
   final String refreshId;
   final Map<String, ViewFieldBuilder> fields;
-  final bool cardGroups;
-
-  /// Whether the root's titled groups are drawn as a grid of cards, which is
-  /// the Marketplace on a desktop: the list a phone scrolls, laid out wide.
-  final bool gridGroups;
 
   /// Whether the root's titled groups are drawn as labelled cards of switch
   /// rows, one card per section the document names.
@@ -124,8 +119,6 @@ class ViewSurfacePage extends StatefulWidget {
     required this.documentId,
     required this.refreshId,
     this.fields = const {},
-    this.cardGroups = false,
-    this.gridGroups = false,
     this.switchRows = false,
     this.maxWidth = 680,
     this.onClose,
@@ -394,8 +387,6 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
           document: document,
           controller: view,
           fields: widget.fields,
-          cardGroups: widget.cardGroups,
-          gridGroups: widget.gridGroups,
           switchRows: widget.switchRows,
           rootView: widget.rootView,
         ),

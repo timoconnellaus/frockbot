@@ -1,7 +1,6 @@
 import 'dart:convert';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/rendering.dart';
 
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
@@ -27,149 +26,6 @@ class ViewNodeView extends StatelessWidget {
     'list' => ViewListNode(node: node),
     _ => ViewEmbedNode(node: node),
   };
-}
-
-/// The host can present top-level groups as cards without changing the
-/// document, its action targets, or the shared renderer inside each card.
-class ViewCardGroups extends StatelessWidget {
-  final Map<String, Object?> node;
-  const ViewCardGroups({super.key, required this.node});
-
-  @override
-  Widget build(BuildContext context) {
-    if (node['type'] != 'group') return ViewNodeView(node: node);
-    final sections = <Widget>[];
-    var cards = <Map<String, Object?>>[];
-    void flush() {
-      if (cards.isEmpty) return;
-      final batch = cards;
-      cards = [];
-      sections.add(
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final columns =
-                constraints.maxWidth >= 600 &&
-                    MediaQuery.textScalerOf(context).scale(14) <= 21
-                ? 2
-                : 1;
-            return _EqualHeightCards(
-              columns: columns,
-              children: [
-                for (final card in batch)
-                  Card(
-                    key: ValueKey(card['title']),
-                    margin: EdgeInsets.zero,
-                    child: Padding(
-                      padding: const EdgeInsets.fromLTRB(16, 12, 16, 14),
-                      child: _CapabilityCard(node: card),
-                    ),
-                  ),
-              ],
-            );
-          },
-        ),
-      );
-    }
-
-    for (final raw in (node['children'] as List)) {
-      final child = (raw as Map).cast<String, Object?>();
-      if (child['type'] == 'group' && child['title'] != null) {
-        cards.add(child);
-      } else {
-        flush();
-        sections.add(
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: ViewNodeView(node: child),
-          ),
-        );
-      }
-    }
-    flush();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: sections,
-    );
-  }
-}
-
-/// The host can present top-level titled groups as a grid of cards: each card
-/// is the group drawn by the shared renderer, title and all, so the document,
-/// its identifiers and its action targets are the ones the list draws.
-///
-/// This is the Marketplace on a desktop. The columns follow the width, and
-/// each card keeps its natural height so opening one card cannot clip its
-/// controls or stretch every other card around it.
-class ViewGridGroups extends StatelessWidget {
-  final Map<String, Object?> node;
-  const ViewGridGroups({super.key, required this.node});
-
-  @override
-  Widget build(BuildContext context) {
-    if (node['type'] != 'group') return ViewNodeView(node: node);
-    final sections = <Widget>[];
-    var cards = <Map<String, Object?>>[];
-    void flush() {
-      if (cards.isEmpty) return;
-      final batch = cards;
-      cards = [];
-      sections.add(
-        LayoutBuilder(
-          builder: (context, constraints) {
-            final large = MediaQuery.textScalerOf(context).scale(14) > 21;
-            final columns = large || constraints.maxWidth < 560
-                ? 1
-                : constraints.maxWidth < 860
-                ? 2
-                : 3;
-            const gap = 12.0;
-            final width =
-                (constraints.maxWidth - gap * (columns - 1)) / columns;
-            return Wrap(
-              spacing: gap,
-              runSpacing: gap,
-              children: [
-                for (final card in batch)
-                  SizedBox(
-                    width: width,
-                    child: Card(
-                      key: ValueKey(card['title']),
-                      margin: EdgeInsets.zero,
-                      child: Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 6, 16, 12),
-                        child: ViewNodeView(node: card),
-                      ),
-                    ),
-                  ),
-              ],
-            );
-          },
-        ),
-      );
-    }
-
-    for (final raw in (node['children'] as List)) {
-      final child = (raw as Map).cast<String, Object?>();
-      if (child['type'] == 'group' && child['title'] != null) {
-        cards.add(child);
-      } else {
-        flush();
-        sections.add(
-          Padding(
-            padding: const EdgeInsets.only(bottom: 12),
-            child: ViewNodeView(node: child),
-          ),
-        );
-      }
-    }
-    flush();
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: sections,
-    );
-  }
 }
 
 /// Titled groups as rows on one card, in the grammar the rest of the app uses.
@@ -291,12 +147,7 @@ const _rowOpenIds = {'open-routine', 'open-home', 'open-run'};
 /// Presses the host answers itself. They are not retained: a command
 /// envelope written for one of them would be restored onto the document
 /// the press just opened, and every control on it would refuse to work.
-const _hostAnsweredIds = {
-  'open-routine',
-  'open-run',
-  'open-runs',
-  'open-home',
-};
+const _hostAnsweredIds = {'open-routine', 'open-run', 'open-runs', 'open-home'};
 
 /// The declared actions of [children] that a row draws as its own controls.
 List<Map<String, Object?>> _rowActions(List<Map<String, Object?>> children) => [
@@ -383,11 +234,7 @@ class _ViewSwitchRow extends StatelessWidget {
         subtitle: said.isEmpty ? null : said.join(' · '),
         chevron: open != null || toggle == null,
         onTap: open != null && openSchema != null
-            ? () => scope.controller.submit(
-                open,
-                openSchema,
-                persist: false,
-              )
+            ? () => scope.controller.submit(open, openSchema, persist: false)
             : toggle == null || locked
             ? null
             : flip,
@@ -410,238 +257,6 @@ class _ViewSwitchRow extends StatelessWidget {
     );
     return row;
   }
-}
-
-/// The actions a capability card draws itself — a switch beside the title and
-/// a settings press at the foot — rather than as body content.
-const _cardControlIds = {
-  'set-package-enabled',
-  'install-package',
-  'uninstall-package',
-  'open-home',
-};
-
-/// Whether a card child is the group holding the card's own controls. Any
-/// other group child (a Plugin's settings section, say) is body content and is
-/// drawn in place.
-bool _isCardControls(Map<String, Object?> child) {
-  if (child['type'] != 'group') return false;
-  return (child['children'] as List).every(
-    (raw) =>
-        (raw as Map)['type'] == 'action' &&
-        _cardControlIds.contains(raw['actionId']),
-  );
-}
-
-class _CapabilityCard extends StatelessWidget {
-  final Map<String, Object?> node;
-  const _CapabilityCard({required this.node});
-
-  @override
-  Widget build(BuildContext context) {
-    final children = (node['children'] as List)
-        .map((child) => (child as Map).cast<String, Object?>())
-        .toList();
-    final actions = children
-        .where(_isCardControls)
-        .expand(
-          (group) => (group['children'] as List).map(
-            (action) => (action as Map).cast<String, Object?>(),
-          ),
-        );
-    final toggle = actions
-        .where(
-          (action) =>
-              action['actionId'] == 'set-package-enabled' ||
-              action['actionId'] == 'install-package',
-        )
-        .firstOrNull;
-    final settings = actions
-        .where((action) => action['actionId'] == 'open-home')
-        .firstOrNull;
-    final remove = actions
-        .where((action) => action['actionId'] == 'uninstall-package')
-        .firstOrNull;
-    final scope = ViewScope.of(context);
-    final schema = scope.actions[toggle?['actionId']];
-    final enabled =
-        toggle?['actionId'] == 'set-package-enabled' &&
-        (toggle?['input'] as Map?)?['enabled'] == false;
-    // Enabling is the client's own answer — the switch it just flipped — so it
-    // is drawn at once. Installing is not: the authority resolves a version
-    // and mounts a Composition generation, and only it knows whether that
-    // worked, so that switch waits for the document.
-    final key = toggle != null && toggle['actionId'] == 'set-package-enabled'
-        ? viewPredictionKeyV1(toggle, without: 'enabled')
-        : null;
-    final drawn = key == null ? null : scope.controller.predicted[key] as bool?;
-    return identified(
-      viewGroupIdentifierV1(node['title'] as String),
-      Column(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-        children: [
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              Row(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Expanded(
-                    child: Padding(
-                      padding: const EdgeInsets.only(top: 6),
-                      child: Text(
-                        node['title'] as String,
-                        style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                          fontSize: 14,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  if (toggle != null)
-                    identified(
-                      viewActionIdentifierV1(toggle['actionId'] as String),
-                      Semantics(
-                        label: node['title'] as String,
-                        child: Switch(
-                          value: drawn ?? enabled,
-                          // A standing prediction means the node's own input
-                          // is a revision behind: pressing again would send
-                          // the command that has already been sent.
-                          onChanged:
-                              schema == null ||
-                                  drawn != null ||
-                                  scope.controller.busy ||
-                                  scope.controller.pending != null
-                              ? null
-                              : (_) => scope.controller.submit(
-                                  toggle,
-                                  schema,
-                                  predictKey: key,
-                                  predictValue:
-                                      (toggle['input'] as Map?)?['enabled'] ==
-                                      true,
-                                ),
-                        ),
-                      ),
-                    ),
-                ],
-              ),
-              const SizedBox(height: 6),
-              for (final child in children.where(
-                (child) => !_isCardControls(child),
-              ))
-                Padding(
-                  padding: const EdgeInsets.only(bottom: 6),
-                  child: ViewNodeView(node: child),
-                ),
-            ],
-          ),
-          if (settings != null) ...[
-            const SizedBox(height: 8),
-            ViewActionNode(node: settings),
-          ],
-          if (remove != null) ...[
-            const SizedBox(height: 8),
-            ViewActionNode(node: remove),
-          ],
-        ],
-      ),
-    );
-  }
-}
-
-/// Measure the tallest card at its actual width, including scaled text, so
-/// every row shares a height without clipping longer descriptions.
-class _EqualHeightCards extends MultiChildRenderObjectWidget {
-  final int columns;
-
-  const _EqualHeightCards({required this.columns, required super.children});
-
-  @override
-  RenderObject createRenderObject(BuildContext context) => _CardGrid(columns);
-
-  @override
-  void updateRenderObject(
-    BuildContext context,
-    covariant _CardGrid renderObject,
-  ) {
-    if (renderObject.columns != columns) {
-      renderObject.columns = columns;
-      renderObject.markNeedsLayout();
-    }
-  }
-}
-
-class _CardParentData extends ContainerBoxParentData<RenderBox> {}
-
-class _CardGrid extends RenderBox
-    with
-        ContainerRenderObjectMixin<
-          RenderBox,
-          ContainerBoxParentData<RenderBox>
-        >,
-        RenderBoxContainerDefaultsMixin<
-          RenderBox,
-          ContainerBoxParentData<RenderBox>
-        > {
-  int columns;
-  _CardGrid(this.columns);
-
-  @override
-  void setupParentData(RenderBox child) {
-    child.parentData = _CardParentData();
-  }
-
-  @override
-  void performLayout() {
-    final width = (constraints.maxWidth - 12 * (columns - 1)) / columns;
-    final rows = (childCount / columns).ceil();
-    // Measure first so every card shares the height of the tallest card.
-    final heights = List<double>.filled(rows, 0);
-    var tallest = 0.0;
-    var index = 0;
-    var child = firstChild;
-    while (child != null) {
-      child.layout(BoxConstraints.tightFor(width: width), parentUsesSize: true);
-      final row = index ~/ columns;
-      if (child.size.height > heights[row]) heights[row] = child.size.height;
-      if (child.size.height > tallest) tallest = child.size.height;
-      index++;
-      child = childAfter(child);
-    }
-    heights.fillRange(0, rows, tallest);
-    var top = 0.0;
-    index = 0;
-    child = firstChild;
-    while (child != null) {
-      final row = index ~/ columns;
-      if (index > 0 && index % columns == 0) top += heights[row - 1] + 12;
-      child.layout(BoxConstraints.tightFor(width: width, height: heights[row]));
-      (child.parentData as ContainerBoxParentData<RenderBox>).offset = Offset(
-        (index % columns) * (width + 12),
-        top,
-      );
-      index++;
-      child = childAfter(child);
-    }
-    final total = heights.fold(0.0, (sum, height) => sum + height);
-    size = constraints.constrain(
-      Size(constraints.maxWidth, rows == 0 ? 0 : total + 12 * (rows - 1)),
-    );
-  }
-
-  @override
-  void paint(PaintingContext context, Offset offset) =>
-      defaultPaint(context, offset);
-
-  @override
-  bool hitTestChildren(BoxHitTestResult result, {required Offset position}) =>
-      defaultHitTestChildren(result, position: position);
 }
 
 class ViewTextNode extends StatelessWidget {
@@ -683,11 +298,7 @@ class ViewTextNode extends StatelessWidget {
 /// so the card that drew it is gone. A revoke is not one — the authority keeps
 /// the record and replaces its contents with a notice saying so, and inventing
 /// that notice here would be inventing what the authority said.
-///
-/// Uninstalling a provider Plugin is the same optimistic shape: its current
-/// card disappears while the authoritative reread decides whether the surface
-/// omits it or redraws it as an installable Marketplace offer.
-const _removesGroupIds = {'delete-routine', 'uninstall-package'};
+const _removesGroupIds = {'delete-routine'};
 
 /// Whether pressing this action removes the group around it.
 bool viewRemovesGroupV1(Map<String, Object?> node) =>

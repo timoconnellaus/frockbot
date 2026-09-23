@@ -4,53 +4,53 @@ import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/document_cache.dart';
 import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/plugins/document.dart';
 import 'package:frockbot_native/plugins/page.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
-import 'package:frockbot_native/view/nodes.dart';
 
 import 'settings_test.dart' show SettingsApi;
 import 'widget_test.dart' show MemoryStore;
 
-/// The shape `pluginsDocumentV1` produces for one row, written by hand so the
-/// Flutter side is pinned to the projection's contract.
-Map<String, Object?> pluginsDocument({
-  int revision = 1,
-  String state = 'installed',
-  String surfaceId = 'plugins',
-}) => {
+/// The shape `botPluginsDocumentV1` produces for one switchable row, written
+/// by hand so the Flutter side is pinned to the projection's contract.
+Map<String, Object?> switchDocument({int revision = 1, bool on = true}) => {
   'schemaVersion': 1,
-  'surfaceId': surfaceId,
+  'surfaceId': 'bot-plugins',
   'revision': revision,
   'root': {
     'type': 'group',
     'orientation': 'column',
     'children': [
-      {'type': 'text', 'text': '1 installed', 'style': 'status'},
       {
         'type': 'group',
         'orientation': 'column',
-        'title': 'Ollama Cloud',
+        'title': 'Built in',
         'children': [
-          {'type': 'text', 'text': 'Models', 'style': 'label'},
-          {
-            'type': 'text',
-            'text': state == 'installed' ? 'On' : 'Off',
-            'style': 'status',
-          },
           {
             'type': 'group',
-            'orientation': 'row',
+            'orientation': 'column',
+            'title': 'Web',
             'children': [
               {
-                'type': 'action',
-                'actionId': 'set-package-enabled',
-                'label': state == 'installed' ? 'Turn off' : 'Turn on',
-                'input': {
-                  'kind': 'set-package-enabled',
-                  'packageId': 'provider-ollama-cloud',
-                  'enabled': state != 'installed',
-                },
+                'type': 'text',
+                'text': 'Read public web pages.',
+                'style': 'body',
+              },
+              {
+                'type': 'group',
+                'orientation': 'row',
+                'children': [
+                  {
+                    'type': 'action',
+                    'actionId': 'set-package-enabled',
+                    'label': on ? 'Turn off' : 'Turn on',
+                    'input': {
+                      'kind': 'set-plugin-enabled',
+                      'pluginId': 'web',
+                      'enabled': !on,
+                      'expectedRevision': revision,
+                    },
+                  },
+                ],
               },
             ],
           },
@@ -66,12 +66,17 @@ Map<String, Object?> pluginsDocument({
         'properties': {
           'kind': {
             'type': 'string',
-            'enum': ['set-package-enabled'],
+            'enum': ['set-plugin-enabled'],
           },
-          'packageId': {'type': 'string', 'maxLength': 128},
+          'pluginId': {'type': 'string', 'maxLength': 128},
           'enabled': {'type': 'boolean'},
+          'expectedRevision': {
+            'type': 'number',
+            'minimum': 0,
+            'maximum': 1000000,
+          },
         },
-        'required': ['kind', 'packageId', 'enabled'],
+        'required': ['kind', 'pluginId', 'enabled', 'expectedRevision'],
         'additionalProperties': false,
       },
     },
@@ -126,84 +131,11 @@ Map<String, Object?> botPluginsDocument() => {
 void main() {
   setUp(clearViewDocumentCacheMemory);
 
-  group('the projection read back', () {
-    test('enablement becomes the User command the settings route takes', () {
-      expect(
-        pluginCommandV1({
-          'commandId': 'c1',
-          'revision': 5,
-          'actionId': 'set-package-enabled',
-          'input': {
-            'kind': 'set-package-enabled',
-            'packageId': 'provider-ollama-cloud',
-            'enabled': false,
-          },
-        }),
-        {
-          'schemaVersion': 1,
-          'commandId': 'c1',
-          'expectedRevision': 5,
-          'packageId': 'provider-ollama-cloud',
-          'type': 'user/set-package-enabled',
-          'enabled': false,
-        },
-      );
-    });
-
-    test('an install carries the version the catalog named', () {
-      expect(
-        pluginCommandV1({
-          'commandId': 'c2',
-          'revision': 5,
-          'actionId': 'install-package',
-          'input': {
-            'kind': 'install-package',
-            'packageId': 'provider-ollama-cloud',
-            'version': '1.0.0',
-          },
-        }),
-        containsPair('type', 'user/install-package'),
-      );
-    });
-
-    test('a removal is the uninstall command, and takes its card with it', () {
-      final command = {
-        'commandId': 'c4',
-        'revision': 7,
-        'actionId': 'uninstall-package',
-        'input': {
-          'kind': 'uninstall-package',
-          'packageId': 'provider-deepseek',
-        },
-      };
-      expect(pluginActionKindV1(command), 'uninstall-package');
-      expect(pluginCommandV1(command), {
-        'schemaVersion': 1,
-        'commandId': 'c4',
-        'expectedRevision': 7,
-        'packageId': 'provider-deepseek',
-        'type': 'user/uninstall-package',
-      });
-      // The row only lists what is installed, so the card goes as the
-      // installation does rather than redrawing as "not installed".
-      expect(viewRemovesGroupV1(command), isTrue);
-    });
-
-    test('navigation is a kind, and no command', () {
-      final command = {
-        'commandId': 'c3',
-        'actionId': 'open-home',
-        'input': {'kind': 'open-home', 'home': 'connections'},
-      };
-      expect(pluginActionKindV1(command), 'open-home');
-      expect(pluginHomeV1(command), 'connections');
-    });
-  });
-
   test('search filters visible purposes while preserving authoritative action targets', () async {
     final controller = PluginsController(
-      SettingsApi(MemoryStore(), (_, _) async => pluginsDocument()),
+      SettingsApi(MemoryStore(), (_, _) async => switchDocument()),
       'tim',
+      botId: 'bot-1',
     );
     await controller.load();
     controller.search('no such plugin');
@@ -214,7 +146,7 @@ void main() {
       ),
       isEmpty,
     );
-    controller.search('models');
+    controller.search('web pages');
     root = (controller.document!.toJson() as Map)['root'] as Map;
     expect(
       (root['children'] as List).where(
@@ -229,8 +161,9 @@ void main() {
     'a search does not replace the document a remount would paint',
     () async {
       final controller = PluginsController(
-        SettingsApi(MemoryStore(), (_, _) async => pluginsDocument()),
+        SettingsApi(MemoryStore(), (_, _) async => switchDocument()),
         'tim',
+        botId: 'bot-1',
       );
       await controller.load();
       controller.search('no such plugin');
@@ -247,7 +180,7 @@ void main() {
             .whereType<Map>()
             .where((node) => node['type'] == 'group')
             .map((node) => node['title']),
-        ['Ollama Cloud'],
+        ['Built in'],
       );
       controller.dispose();
     },
@@ -299,85 +232,18 @@ void main() {
     },
   );
 
-  for (final width in [375.0, 900.0]) {
-    for (final scale in [1.0, 2.0]) {
-      testWidgets(
-        'capabilities show readable cards and visible controls at $width / $scale',
-        (tester) async {
-          tester.view.physicalSize = Size(width, 1000);
-          tester.view.devicePixelRatio = 1;
-          addTearDown(tester.view.resetPhysicalSize);
-          addTearDown(tester.view.resetDevicePixelRatio);
-          final store = MemoryStore();
-          final document = pluginsDocument(surfaceId: 'capabilities');
-          final children = ((document['root'] as Map)['children'] as List);
-          children.add(<String, Object>{
-            ...(children.last as Map).cast<String, Object>(),
-            'title':
-                'Another feature with a much longer title that needs more room',
-          });
-          await tester.pumpWidget(
-            MaterialApp(
-              theme: FrockTheme.theme(Brightness.dark),
-              builder: (context, child) => MediaQuery(
-                data: MediaQuery.of(context)
-                    .copyWith(textScaler: TextScaler.linear(scale)),
-                child: child!,
-              ),
-              home: PluginsPage(
-                api: SettingsApi(store, (_, _) async => document),
-                store: store,
-                userId: 'tim',
-                capabilities: true,
-              ),
-            ),
-          );
-          await tester.pumpAndSettle();
-          expect(find.byType(Card), findsNWidgets(2));
-          expect(find.byType(Switch), findsNWidgets(2));
-          expect(
-            tester.getSize(find.byType(Card).first),
-            tester.getSize(find.byType(Card).last),
-          );
-          expect(find.text('Details & controls'), findsNothing);
-          final cards = tester.getTopLeft(find.byType(Card).first);
-          final second = tester.getTopLeft(find.byType(Card).last);
-          if (width >= 900 && scale == 1) {
-            expect(second.dy, cards.dy);
-            expect(second.dx, greaterThan(cards.dx));
-          } else {
-            expect(second.dy, greaterThan(cards.dy));
-          }
-          expect(tester.takeException(), isNull);
-        },
-      );
-    }
-  }
-
-  testWidgets('capability switch sends one command and reads back', (
-    tester,
-  ) async {
+  testWidgets('a Bot switch sends one command and reads back', (tester) async {
     final store = MemoryStore();
     final sent = <Map<String, Object?>>[];
-    var state = 'installed';
+    var on = true;
     var revision = 1;
     final api = SettingsApi(store, (path, body) async {
-      if (body == null) {
-        return pluginsDocument(
-          revision: revision,
-          state: state,
-          surfaceId: 'capabilities',
-        );
-      }
+      if (body == null) return switchDocument(revision: revision, on: on);
+      expect(path, '/api/bots/bot-1/plugins');
       sent.add((body as Map).cast<String, Object?>());
-      state = 'disabled';
+      on = false;
       revision = 2;
-      return {
-        'schemaVersion': 1,
-        'commandId': body['commandId'],
-        'revision': revision,
-        'status': 'applied',
-      };
+      return {'status': 'applied', 'revision': revision};
     });
     await tester.pumpWidget(
       MaterialApp(
@@ -386,15 +252,16 @@ void main() {
           api: api,
           store: store,
           userId: 'tim',
-          capabilities: true,
+          botId: 'bot-1',
         ),
       ),
     );
     await tester.pumpAndSettle();
-    expect(find.text('1 installed'), findsOneWidget);
     await tester.tap(find.byType(Switch));
     await tester.pumpAndSettle();
-    expect(sent.single['type'], 'user/set-package-enabled');
+    expect(sent.single['kind'], 'set-plugin-enabled');
+    expect(sent.single['pluginId'], 'web');
+    expect(sent.single['enabled'], isFalse);
     expect(sent.single['expectedRevision'], 1);
     expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
   });
@@ -404,25 +271,14 @@ void main() {
   ) async {
     final store = MemoryStore();
     final gate = Completer<void>();
-    var state = 'installed';
+    var on = true;
     var revision = 1;
     final api = SettingsApi(store, (path, body) async {
-      if (body == null) {
-        return pluginsDocument(
-          revision: revision,
-          state: state,
-          surfaceId: 'capabilities',
-        );
-      }
+      if (body == null) return switchDocument(revision: revision, on: on);
       await gate.future;
-      state = 'disabled';
+      on = false;
       revision = 2;
-      return {
-        'schemaVersion': 1,
-        'commandId': (body as Map)['commandId'],
-        'revision': revision,
-        'status': 'applied',
-      };
+      return {'status': 'applied', 'revision': revision};
     });
     await tester.pumpWidget(
       MaterialApp(
@@ -431,7 +287,7 @@ void main() {
           api: api,
           store: store,
           userId: 'tim',
-          capabilities: true,
+          botId: 'bot-1',
         ),
       ),
     );
@@ -439,14 +295,12 @@ void main() {
     expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
     await tester.tap(find.byType(Switch));
     await tester.pumpAndSettle();
-    // The command has not been answered and the document still says On: what
-    // the switch shows is what this client sent.
+    // The command has not been answered: what the switch shows is what this
+    // client sent.
     expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
-    expect(find.text('On'), findsOneWidget);
     gate.complete();
     await tester.pumpAndSettle();
     expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
-    expect(find.text('Off'), findsOneWidget);
   });
 
   testWidgets('a section control on a Bot page posts the tool it names', (
@@ -469,7 +323,7 @@ void main() {
               {
                 'type': 'group',
                 'orientation': 'column',
-                'title': 'Made by your Bot',
+                'title': 'Made by your Bots',
                 'children': [
                   {
                     'type': 'group',
@@ -604,12 +458,17 @@ void main() {
     final store = MemoryStore();
     final api = SettingsApi(store, (_, _) async {
       if (offline) throw const RequestFailure('synthetic backend detail');
-      return pluginsDocument();
+      return switchDocument();
     });
     await tester.pumpWidget(
       MaterialApp(
         theme: FrockTheme.theme(Brightness.dark),
-        home: PluginsPage(api: api, store: store, userId: 'tim'),
+        home: PluginsPage(
+          api: api,
+          store: store,
+          userId: 'tim',
+          botId: 'bot-1',
+        ),
       ),
     );
     await tester.pumpAndSettle();
@@ -618,6 +477,6 @@ void main() {
     offline = false;
     await tester.tap(find.text('Try again'));
     await tester.pumpAndSettle();
-    expect(find.text('Ollama Cloud'), findsOneWidget);
+    expect(find.text('Web'), findsOneWidget);
   });
 }

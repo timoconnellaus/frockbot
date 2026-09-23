@@ -383,11 +383,11 @@ describe("a Bot whose model runs through a provider Plugin", () => {
     expect(member!.provenance.kind).toBe("installed");
   });
 
-  test("connecting the provider in Models installs the artifact before a Turn uses it", async () => {
-    // The Models surface's own path: a person presses "Connect provider",
-    // which chooses the Package rather than running the install command by
-    // hand. The Plugin must be in the Composition before the model that needs
-    // it is selected and a Turn runs on it.
+  test("adding the provider in the Marketplace installs the artifact before a Turn uses it", async () => {
+    // The Marketplace's own path: a person presses Add, which chooses the
+    // Package rather than running the install command by hand. The Plugin must
+    // be in the Composition before the model that needs it is selected and a
+    // Turn runs on it.
     const identity = freshIdentity();
     await provisionDeepseekBot(identity, { install: "choose" });
     const composition = await user(identity.userId).readComposition({

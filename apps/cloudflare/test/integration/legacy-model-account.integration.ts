@@ -44,24 +44,14 @@ describe("legacy model account migration through the gateway", () => {
     expect(migrated.packages).not.toContainEqual(
       expect.objectContaining({ packageId: "provider-workers-ai" }),
     );
+    // Custom models is platform-owned, so a migrated account holds it
+    // installed without being asked.
     expect(migrated.packages).toContainEqual({
       packageId: "custom-models",
-      state: "disabled",
+      state: "installed",
       version: "0.0.1",
       provenance: "first-party",
     });
-
-    const enabled = (await expectOkJson(
-      await postAsUser(userId, "/api/settings", {
-        schemaVersion: 1,
-        type: "user/set-package-enabled",
-        commandId: "enable-custom-models-after-migration",
-        expectedRevision: migrated.revision,
-        packageId: "custom-models",
-        enabled: true,
-      }),
-    )) as { status: string };
-    expect(enabled.status).toBe("applied");
 
     const created = await postAsUser(userId, "/api/bots", {
       schemaVersion: 1,

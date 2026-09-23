@@ -14,4 +14,5 @@ export const webDefinitionV1: PackageDefinitionV1 = {
       },
     },
   ],
+  platformOwned: true,
 };

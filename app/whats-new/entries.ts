@@ -23,6 +23,20 @@ export type WhatsNewEntrySourceV1 = {
  */
 export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
+    id: "add-a-model",
+    title: "Add a model in one go",
+    summary:
+      "Adding a provider in the Marketplace asks for its key straight away, then leads on to choosing a model.",
+    kind: "improvement",
+  },
+  {
+    id: "plugins-per-bot",
+    title: "Plugins live with each Bot",
+    summary:
+      "Built-in features are switched on a Bot’s own Plugins page, and every Bot can choose its own model. Account features is gone.",
+    kind: "improvement",
+  },
+  {
     id: "plugin-theme-refused",
     title: "A refused plugin theme is reported",
     summary:

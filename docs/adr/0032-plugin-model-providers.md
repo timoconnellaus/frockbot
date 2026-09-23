@@ -191,22 +191,21 @@ A provider Plugin ships in the deployment catalog with the seed state
 `installable`: in the catalog, seeded on no account. Installing the Package it
 belongs to installs the artifact into that account's Composition, with
 `installed` provenance and the artifact's content hash; uninstalling removes
-it. The account's own command does both — `user/install-package`, or the
-Models surface's `user/choose-model-provider`, which is what "Connect
-provider" sends — and either leaves the Plugin in place before the model that
-needs it can be chosen. Reconciliation runs on the composition read a Bot
+it. The account's own command does both — `user/install-package`, or
+`user/choose-model-provider`, which is what the Marketplace's **Add** sends —
+and either leaves the Plugin in place before the model that needs it can be
+chosen. Reconciliation runs on the composition read a Bot
 makes before admitting a Turn, so a lost race or a transient failure is
 repaired, and a deployment that updates the artifact reaches the next Turn.
 
-An installed provider Plugin is listed on the account's Plugins surface beside
-the seeded ones, described as the Plugin it is rather than as the compiled
-Package's capability, and a row there can uninstall the Package — which takes
-the Plugin out of the Composition and returns a Bot whose model went with it to
-the platform default. The Marketplace's Plugins tab lists only deployment
-catalog entries marked `installable`; its Add Plugin and Remove actions use the
-same account command path and never choose a model or create a credential.
-After installation, Set up in Models remains the path to add a key and choose
-a DeepSeek model.
+To a person a provider Plugin is a model provider, not a Plugin: it appears in
+the Marketplace catalog like every other model, and nowhere as a Plugin — not
+on an account list and not on a Bot's Plugins page, where it would be a row
+with nothing to switch. **Add** installs it, the key form follows, and a
+connected card leads on to choosing a DeepSeek model; **Remove** uninstalls
+the Package, which takes the Plugin out of the Composition and returns a Bot
+whose model went with it to the platform default. Neither chooses a model or
+creates a credential. A deployment with no Worker Loader does not offer it.
 
 ### The trust choice, stated plainly
 

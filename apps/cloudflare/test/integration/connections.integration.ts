@@ -9,7 +9,7 @@
 import { describe, expect, it } from "vitest";
 import {
   asUser,
-  enableCustomModels,
+  accountRevision,
   expectOkJson,
   freshUserId,
   OLLAMA_BAD_API_KEY,
@@ -28,7 +28,7 @@ interface ConnectionView {
 }
 
 async function installProvider(userId: string): Promise<void> {
-  const enabled = await enableCustomModels(userId, "custom-models");
+  const enabled = await accountRevision(userId);
   await expectOkJson(
     await postAsUser(userId, "/api/settings", {
       schemaVersion: 1,

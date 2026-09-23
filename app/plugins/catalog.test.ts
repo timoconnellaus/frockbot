@@ -10,13 +10,12 @@ import {
   marketplacePluginPackageIdsV1,
   maskPlanForBotV1,
   pluginRunsForBotV1,
-  pluginSwitchableV1,
   seededMemberV1,
   seededPluginsForAccountV1,
   type SeededPluginV1,
 } from "./catalog.js";
 import { emptyPluginEnablementV1 } from "./enablement.js";
-import { CAPABILITY_DESCRIPTIONS } from "@frockbot/app/settings/catalog-copy";
+import { FOUNDATION_PACKAGE_CATALOG_V1 } from "@frockbot/app/packages";
 import { servedPluginContractVersionsV1 } from "@frockbot/core/contracts";
 
 test("every deployment Plugin can resolve under a served contract", () => {
@@ -176,9 +175,6 @@ describe("which plugins one Bot runs", () => {
     expect(pluginRunsForBotV1(undefined, "x", none)).toBe(false);
     expect(pluginRunsForBotV1(undefined, "x", off)).toBe(false);
     expect(pluginRunsForBotV1(undefined, "x", on)).toBe(true);
-    expect(pluginSwitchableV1("locked")).toBe(false);
-    expect(pluginSwitchableV1("default-on")).toBe(true);
-    expect(pluginSwitchableV1(undefined)).toBe(true);
   });
 
   test("the enabled list follows the generation's order", () => {
@@ -220,11 +216,15 @@ describe("first-party features a Bot may switch", () => {
       FIRST_PARTY_TOGGLEABLE_PLUGINS_V1.map((plugin) => plugin.packageId),
     ).toEqual(["web", "routines", "image", "subagents", "machine-messages"]);
     expect(isFirstPartyToggleableV1("custom-models")).toBe(false);
-    // The page and Account features describe the same feature in one voice.
+  });
+
+  test("are platform-owned, so the Bot's switch is the only one", () => {
     for (const feature of FIRST_PARTY_TOGGLEABLE_PLUGINS_V1) {
-      expect(feature.description).toBe(
-        CAPABILITY_DESCRIPTIONS[feature.packageId],
-      );
+      expect(
+        FOUNDATION_PACKAGE_CATALOG_V1.get(feature.packageId)?.platformOwned,
+        feature.packageId,
+      ).toBe(true);
+      expect(feature.description.length).toBeGreaterThan(0);
     }
   });
 

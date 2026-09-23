@@ -17,7 +17,8 @@ addresses and provider-specific settings are collapsed under Advanced.
 Image generation is a separate Models destination with readable model names.
 
 The Marketplace is the services a Bot can be given: models and connected
-apps in one searchable catalog. Checkboxes under the search box choose what
+apps in one searchable catalog. Adding a model provider opens its key form,
+and once a key is connected its card offers Choose a model. Checkboxes under the search box choose what
 is listed. Installed is the same catalog limited to what the account has
 already added, where a model is configured or removed and a connected app is
 managed. It is not a Profile entry: its door is on the
@@ -27,35 +28,24 @@ it as a dialog over the shell. Installation never silently chooses a model or
 creates a credential.
 
 A Bot's Plugins are Bot settings, so their door is the Plugins row in that
-Bot's Settings — one level under its page, behind the gear, at every width —
-and never the Profile, which holds only what applies to the whole account: the
-installed list under Plugins, and Account features. The row says what is on
-before it is opened: "5 on · Web, Routines, Image, Subagents, Messages". The Bot's page is one list of what that Bot could run —
-the Plugins its User installed, what the deployment seeded, and the
-first-party features a User may turn off — with one switch per row, and the
-switches are that Bot's own. A locked Plugin is shown without a switch, a
-Plugin whose only contribution is a model provider is shown without one
-because choosing that model is what runs it
-([ADR 0032](adr/0032-plugin-model-providers.md)), and a feature the account has
-not installed says so instead of offering one. A
+Bot's Settings — one level under its page, behind the gear, at every width.
+The Profile has no Plugins list and no Account features: a first-party feature
+is switched per Bot and is always the account's, and a model provider is added
+and removed in the Marketplace. The row says what is on before it is opened:
+"5 on · Web, Routines, Image, Subagents, Messages". The Bot's page is one list
+of what that Bot could switch, under two headings — **Built in**, the
+first-party features and what the deployment ships, and **Made by your Bots**
+— with one switch per row, and the switches are that Bot's own. The locked
+card Plugins run for every Bot and a Plugin whose only contribution is a model
+provider runs when that model is chosen
+([ADR 0032](adr/0032-plugin-model-providers.md)), so neither is listed. A
 Plugin that is on may draw a section of its own on its card, below what it
 does — its own status and its own controls, drawn by the app; pressing a
 control runs that Plugin's tool and the page is read again. A section that
-cannot be shown says so on the card in words, and the switch stays. The
-profile entry names the Bot it will open. With no Bot selected it falls back
-to the account's list of extensions, with visible purpose and status, search,
-and collapsed version/configuration/enablement controls; a new account lists
-nothing there until it installs a provider Plugin
-([ADR 0032](adr/0032-plugin-model-providers.md)), so the list is empty and
-says so rather than presenting deployment infrastructure as installable
-plugins. The account Marketplace lists the deployment's installable catalog
-separately. This page does not remove Bot-authored composition controls.
-Account features is the account-wide switchboard for optional built-in
-features, including per-Bot model overrides, web, routines, image generation,
-Mac Messages, and helper agents; an account-wide switch off there is the
-precondition a Bot's switch cannot override. Its cards use
-visible controls, two columns on wide screens and one column on phones or
-with large text. Core identity, history, search, memory, computer
+cannot be shown says so on the card in words, and the switch stays. This page
+does not remove Bot-authored composition controls. Every Bot may choose its
+own model in its Settings; without a choice it follows the account default
+set in Models. Core identity, history, search, memory, computer
 infrastructure and site administration are not plugin switches.
 
 Activity & history starts with all Bots from Profile. A visible Bot filter
@@ -73,5 +63,3 @@ lists every account with an Applets switch: Applets are off for an account
 until an administrator turns them on there. An account whose setting could
 not be read shows a disabled switch, says so, and offers Try again; it is
 never shown as off, and the other accounts' switches stay usable.
-
-Capability cards share the height of the tallest visible card. Each has an on/off switch in its top-right corner and a Settings button when configuration is available. Text enlargement increases the shared height instead of clipping descriptions.

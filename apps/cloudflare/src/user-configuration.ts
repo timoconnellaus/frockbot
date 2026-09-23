@@ -762,10 +762,20 @@ export class UserConfiguration
       { catalog: rpcBoolean },
     );
     await this.assertUserIdentity(request.userId as string);
-    return (await this.settingsContribution()).readConnectionsFrame(
-      request.userId as string,
-      request.catalog === true,
-    );
+    const frame = await (
+      await this.settingsContribution()
+    ).readConnectionsFrame(request.userId as string, request.catalog === true);
+    if (request.catalog !== true || this.env.BOT_PACKAGES) return frame;
+    // A provider served by a Plugin is not an offer on a deployment with no
+    // worker loader to mount it: adding it would choose a model no Turn can run.
+    const pluginServed = new Set(marketplacePluginPackageIdsV1());
+    return {
+      ...frame,
+      providers: frame.providers.filter(
+        (provider) =>
+          !pluginServed.has(provider.packageId) || provider.connected > 0,
+      ),
+    };
   }
 
   // The User's Composition (ADR 0026): the installed Plugin set, its
@@ -1015,40 +1025,6 @@ export class UserConfiguration
     );
   }
 
-  async readPluginsFrame(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
-    await this.assertUserIdentity(request.userId as string);
-    return (await this.settingsContribution()).readPluginsFrame(
-      request.userId as string,
-    );
-  }
-
-  async readMarketplacePluginsFrame(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
-    await this.assertUserIdentity(request.userId as string);
-    const frame = await (
-      await this.settingsContribution()
-    ).readPluginsFrame(request.userId as string);
-    // A catalog entry is not an offer unless this deployment has the worker
-    // loader that can mount it. The settings frame remains authoritative for
-    // the account's installed Package and revision; this projection only
-    // narrows it to the trusted, actually runnable Marketplace catalog.
-    if (!this.env.BOT_PACKAGES) return { ...frame, plugins: [] };
-    const installable = new Set(marketplacePluginPackageIdsV1());
-    return {
-      ...frame,
-      plugins: frame.plugins
-        .filter((plugin) => installable.has(plugin.packageId))
-        .map((plugin) => ({
-          ...plugin,
-          state:
-            plugin.state === "disabled"
-              ? ("not-installed" as const)
-              : plugin.state,
-        })),
-    };
-  }
-
   async readSettingsFrame(input: unknown) {
     const request = decodeRpcEnvelopeV1(
       input,
@@ -1138,13 +1114,15 @@ export class UserConfiguration
     if (
       receipt.status === "applied" &&
       (request.command.type === "user/install-package" ||
+        request.command.type === "user/choose-model-provider" ||
         request.command.type === "user/uninstall-package" ||
         request.command.type === "user/set-package-enabled")
     ) {
       // A Package an account installs or uninstalls can be one this
       // deployment serves through a Plugin (ADR 0032): the artifact follows
       // the Package into this User's Composition, by the account's own
-      // command and by no default. A failed reconciliation is not a failed
+      // command and by no default. The Marketplace's Add is
+      // `choose-model-provider`, so it is one of these too. A failed reconciliation is not a failed
       // command — the settings write already landed — so it is swallowed
       // here and repaired by the next install, uninstall or read.
       await this.reconcileInstalledPlugins(request.userId).catch(

@@ -1091,7 +1091,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         store: widget.store,
         userId: widget.userId,
         botId: botId,
-        botName: name,
         chrome: false,
       ),
       label: 'Plugins',
@@ -2148,7 +2147,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             store: widget.store,
             userId: widget.userId,
             botId: bot.botId.value,
-            botName: _name(bot),
           ),
         ),
       );
@@ -2739,7 +2737,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           if (computer?.available == true)
             const SearchAction('computer', 'Computer', 'Current chat'),
           const SearchAction('billing', 'Settings: Usage & Billing', 'Account'),
-          const SearchAction('plugins', 'Plugins', 'Account'),
           const SearchAction(
             'marketplace',
             'Marketplace',
@@ -2766,15 +2763,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           unawaited(_openComputerViewer());
         case 'billing':
           unawaited(_openBilling());
-        case 'plugins':
-          _push(
-            PluginsPage(
-              onFeaturesChanged: _featuresChanged,
-              api: widget.api,
-              store: widget.store,
-              userId: widget.userId,
-            ),
-          );
         case 'marketplace':
           _openMarketplace();
         case 'machines':
@@ -3023,35 +3011,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                               api: widget.api,
                               store: widget.store,
                               userId: widget.userId,
-                            ),
-                          ),
-                        ),
-                        // The account's list: what is installed. A Bot's own
-                        // switches are Bot settings, in the panel beside it.
-                        _profileRow(
-                          PluginIds.profileEntry,
-                          Icons.extension_outlined,
-                          'Plugins',
-                          () => _push(
-                            PluginsPage(
-                              onFeaturesChanged: _featuresChanged,
-                              api: widget.api,
-                              store: widget.store,
-                              userId: widget.userId,
-                            ),
-                          ),
-                        ),
-                        _profileRow(
-                          'profile-capabilities',
-                          Icons.tune_outlined,
-                          'Account features',
-                          () => _push(
-                            PluginsPage(
-                              onFeaturesChanged: _featuresChanged,
-                              api: widget.api,
-                              store: widget.store,
-                              userId: widget.userId,
-                              capabilities: true,
                             ),
                           ),
                         ),

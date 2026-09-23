@@ -15,4 +15,5 @@ export const routinesDefinitionV1: PackageDefinitionV1 = {
     },
   ],
   dependencies: ["shell", "ui-theme"],
+  platformOwned: true,
 };

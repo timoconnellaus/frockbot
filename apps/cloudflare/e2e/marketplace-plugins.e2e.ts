@@ -1,11 +1,11 @@
 import type { Page, TestInfo } from "@playwright/test";
 import {
+  answerInputs,
   expect,
   group,
   closeOverlay,
   openApplication,
   openConnectors,
-  openModels,
   press,
   revealSidebar,
   searchMarketplace,
@@ -56,14 +56,26 @@ test("Marketplace installs a model and leaves a fresh Bot usable", async ({
   await expect(deepSeek.getByText("Connect", { exact: true })).toBeVisible({
     timeout: 60_000,
   });
+  // The key is the next thing asked for, so Add leaves its form open.
+  const key = deepSeek.locator('input[aria-label="API key"]');
+  await expect(key).toBeVisible();
   await capture(page, testInfo, "marketplace-deepseek-installed.png");
 
-  await press(sem(page, "right-panel-close"));
-  await expect(sem(page, "shell-conversation")).toBeVisible();
-  await openModels(page);
+  // A saved key is not checked by a paid call, so any key connects; the card
+  // then leads on to the one step left, which is choosing the model.
+  await answerInputs([[key, "sk-e2e-not-a-real-key"]]);
+  await press(deepSeek.getByText("Connect account", { exact: true }));
+  const choose = deepSeek.getByText("Choose a model", { exact: true });
+  await expect(choose).toBeVisible({ timeout: 60_000 });
+  await capture(page, testInfo, "marketplace-deepseek-connected.png");
+  await press(choose);
+  await expect(sem(page, "settings-model-field")).toBeVisible({
+    timeout: 60_000,
+  });
   await expect(group(page, "DeepSeek")).toBeVisible();
   await capture(page, testInfo, "marketplace-deepseek-model-setup.png");
 
+  // Back past Models and the Marketplace to the conversation.
   await closeOverlay(page);
   await sendMessage(page, "Reply once after the model was added.", {
     replies: 1,

@@ -32,7 +32,6 @@ class FirstRunApi extends NativeApi {
   final Completer<Map<String, dynamic>> directory = Completer();
   String? general = generalId;
   Set<String>? features;
-  final accountFeatures = {'web', 'routines'};
   int featuresRevision = 0;
   bool rejectFeatureChange = false;
   final requests = <String>[];
@@ -95,62 +94,6 @@ class FirstRunApi extends NativeApi {
       };
     }
     final plugins = features;
-    if (path == '/api/settings' && body is Map) {
-      if (rejectFeatureChange) {
-        return {'commandId': body['commandId'], 'status': 'rejected'};
-      }
-      final id = body['packageId'] as String;
-      if (body['enabled'] == true) {
-        accountFeatures.add(id);
-      } else {
-        accountFeatures.remove(id);
-      }
-      featuresRevision += 1;
-      return {'commandId': body['commandId'], 'status': 'applied'};
-    }
-    if (path == '/api/settings/capabilities?as=document') {
-      return {
-        'schemaVersion': 1,
-        'surfaceId': 'capabilities',
-        'revision': featuresRevision,
-        'root': {
-          'type': 'group',
-          'orientation': 'column',
-          'children': [
-            for (final id in ['web', 'routines'])
-              {
-                'type': 'action',
-                'actionId': 'set-package-enabled',
-                'label':
-                    '${accountFeatures.contains(id) ? 'Disable' : 'Enable'} $id',
-                'input': {
-                  'kind': 'set-package-enabled',
-                  'packageId': id,
-                  'enabled': !accountFeatures.contains(id),
-                },
-              },
-          ],
-        },
-        'actions': [
-          {
-            'id': 'set-package-enabled',
-            'schema': {
-              'type': 'object',
-              'properties': {
-                'kind': {
-                  'type': 'string',
-                  'enum': ['set-package-enabled'],
-                },
-                'packageId': {'type': 'string', 'maxLength': 128},
-                'enabled': {'type': 'boolean'},
-              },
-              'required': ['kind', 'packageId', 'enabled'],
-              'additionalProperties': false,
-            },
-          },
-        ],
-      };
-    }
     if (path == '/api/bots/$generalId/plugins' && body is Map) {
       if (rejectFeatureChange) return {'status': 'rejected'};
       final id = body['pluginId'] as String;
@@ -238,10 +181,7 @@ class FirstRunApi extends NativeApi {
         'revision': 0,
         'plugins': [
           for (final id in ['web', 'routines', 'image'])
-            {
-              'pluginId': id,
-              'on': plugins.contains(id) && accountFeatures.contains(id),
-            },
+            {'pluginId': id, 'on': plugins.contains(id)},
         ],
       };
     }
@@ -253,8 +193,7 @@ class FirstRunApi extends NativeApi {
     String botId, {
     String? cursor,
     String? epoch,
-  }) async =>
-      throw const FormatException('offline fixture');
+  }) async => throw const FormatException('offline fixture');
 }
 
 /// Records every send, which is the one thing a suggestion must never cause.
@@ -535,101 +474,6 @@ void main() {
       );
       await close(tester, harness);
     });
-
-    for (final route in [
-      'Account features',
-      'Image generation',
-      'Messages on your Mac',
-    ]) {
-      testWidgets('General refreshes starters through $route', (tester) async {
-        final harness = await shell(tester, size: const Size(1600, 1000));
-        harness.api.features = {'web', 'routines'};
-        harness.api.directory.complete(
-          directoryOf([registration(generalId, 'General')]),
-        );
-        await tester.pumpAndSettle();
-        final conversation = tester.state(find.byType(ConversationView));
-
-        Future<void> change(String label) async {
-          if (route == 'Messages on your Mac') {
-            await tester.tap(identifiedBy(ShellIds.sidebarMarketplace));
-            await tester.pumpAndSettle();
-            await tester.tap(find.text(route));
-            await tester.pumpAndSettle();
-          } else {
-            await tester.tap(identifiedBy(ShellIds.sidebarProfile));
-            await tester.pumpAndSettle();
-            await tester.tap(
-              identifiedBy(
-                route == 'Account features'
-                    ? 'profile-capabilities'
-                    : SettingsIds.profileModels,
-              ),
-            );
-            await tester.pumpAndSettle();
-            if (route == 'Image generation') {
-              await tester.tap(find.text(route));
-              await tester.pumpAndSettle();
-            }
-          }
-          if (route != 'Account features') {
-            await tester.tap(
-              find.text('Manage this feature in Account features'),
-            );
-            await tester.pumpAndSettle();
-          }
-          await tester.tap(find.text(label));
-          await tester.pumpAndSettle();
-          for (var i = 0; i < (route == 'Image generation' ? 4 : 2); i++) {
-            await tester.pageBack();
-            await tester.pumpAndSettle();
-          }
-          if (route == 'Messages on your Mac') {
-            await tester.tap(find.byTooltip('Close marketplace'));
-            await tester.pumpAndSettle();
-          }
-        }
-
-        for (final entry in {
-          'web': 'research',
-          'routines': 'recurring',
-        }.entries) {
-          final starter = identifiedBy(StarterIds.suggestion(entry.value));
-          expect(starter, findsOneWidget);
-          await change('Disable ${entry.key}');
-          expect(starter, findsNothing);
-          expect(
-            identifiedBy(StarterIds.suggestion('project')),
-            findsOneWidget,
-          );
-          expect(
-            identifiedBy(StarterIds.suggestion('specialist')),
-            findsOneWidget,
-          );
-          await change('Enable ${entry.key}');
-          expect(starter, findsOneWidget);
-        }
-
-        final reads = harness.api.requests
-            .where((path) => path == '/api/bots/$generalId/plugins')
-            .length;
-        harness.api.rejectFeatureChange = true;
-        await change('Disable web');
-        expect(identifiedBy(StarterIds.suggestion('research')), findsOneWidget);
-        expect(
-          harness.api.requests
-              .where((path) => path == '/api/bots/$generalId/plugins')
-              .length,
-          reads,
-        );
-        expect(tester.state(find.byType(ConversationView)), same(conversation));
-        expect(
-          harness.api.requests.where((path) => path.startsWith('POST ')),
-          everyElement('POST /api/settings'),
-        );
-        await close(tester, harness);
-      });
-    }
 
     for (final size in [const Size(360, 800), const Size(1200, 900)]) {
       for (final pendingAtMount in [true, false]) {

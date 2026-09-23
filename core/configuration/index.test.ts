@@ -1218,7 +1218,7 @@ describe("Bot execution-plan authority", () => {
     expectFailure(
       { ...modelUser(), packages: [] },
       modelPackages,
-      "Turn this model's plugin back on in Plugins to use it.",
+      "Add this model's provider again in the Marketplace to use it.",
     );
     expectFailure(
       {
@@ -1226,12 +1226,12 @@ describe("Bot execution-plan authority", () => {
         packages: [{ ...modelUser().packages[0]!, state: "disabled" }],
       },
       modelPackages,
-      "Turn this model's plugin back on in Plugins to use it.",
+      "Add this model's provider again in the Marketplace to use it.",
     );
     expectFailure(
       modelUser(),
       [],
-      "This model's plugin is unavailable. Pick another model.",
+      "This model's provider is unavailable. Pick another model.",
     );
     expectFailure(
       modelUser(),
@@ -1332,12 +1332,14 @@ describe("Bot execution-plan authority", () => {
     };
     expect(
       modelBindingFailureV1({ model, user, packages: modelPackages }),
-    ).toContain("Turn this model's plugin back on in Plugins to use it.");
+    ).toContain(
+      "Add this model's provider again in the Marketplace to use it.",
+    );
     expect(
       resolveBotModelBindingV1({ model, user, packages: modelPackages }),
     ).toMatchObject({
       state: "unavailable",
-      failure: expect.stringContaining("Turn this model's plugin back on"),
+      failure: expect.stringContaining("Add this model's provider again"),
     });
 
     const revoked = {

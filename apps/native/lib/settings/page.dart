@@ -6,7 +6,6 @@ import 'package:flutter/material.dart';
 import '../client/document_cache.dart';
 import '../client/transport.dart';
 import '../connections/page.dart';
-import '../plugins/page.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/desktop_layout.dart';
 import '../shell/lifecycle.dart';
@@ -184,14 +183,6 @@ class _SettingsPageState extends State<SettingsPage>
       reloadWanted = true;
       saved = 'Saved.';
       widget.onFeaturesChanged?.call();
-      final chosen = chosenProviderPackageIdV1(command);
-      if (viewActionKindV1(command) == 'choose-provider') {
-        await _manageProvider(
-          (command['input'] as Map?)?['sectionId'] as String?,
-        );
-      } else if (chosen != null) {
-        await _manageProvider('provider.$chosen');
-      }
     }
     return receipt;
   }
@@ -332,26 +323,6 @@ class _SettingsPageState extends State<SettingsPage>
                               ),
                             ),
                             if (widget.home == 'models') ..._homeLinks(),
-                            if (widget.section != null)
-                              TextButton(
-                                onPressed: () => Navigator.of(context)
-                                    .push(
-                                      MaterialPageRoute<void>(
-                                        builder: (_) => PluginsPage(
-                                          api: widget.api,
-                                          store: widget.store,
-                                          userId: widget.userId,
-                                          capabilities: true,
-                                          onFeaturesChanged:
-                                              widget.onFeaturesChanged,
-                                        ),
-                                      ),
-                                    )
-                                    .then((_) => state.load()),
-                                child: const Text(
-                                  'Manage this feature in Account features',
-                                ),
-                              ),
                           ],
                         ),
                       ),
@@ -368,9 +339,9 @@ class _SettingsPageState extends State<SettingsPage>
       SettingsIds.connectorsLink,
       ListTile(
         leading: const Icon(Icons.storefront_outlined),
-        title: const Text('Add connectors in the Marketplace'),
+        title: const Text('Add a model provider'),
         subtitle: const Text(
-          'Browse models and connected apps, then come back here to choose one',
+          'Find one in the Marketplace, add it and connect your key',
         ),
         trailing: const Icon(Icons.chevron_right),
         onTap: () => Navigator.of(context).push(

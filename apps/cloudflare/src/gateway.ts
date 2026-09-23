@@ -1,11 +1,6 @@
 import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { settingsDocumentV1 } from "@frockbot/app/settings/document";
 import {
-  capabilityIsOfferedV1,
-  pluginsPageRowV1,
-} from "@frockbot/app/settings/catalog-copy";
-import { pluginsDocumentV1 } from "@frockbot/app/settings/plugins-document";
-import {
   botPluginsDocumentV1,
   decodeBotPluginsCommandV1,
 } from "@frockbot/app/plugins/page";
@@ -780,61 +775,6 @@ export function createGateway(
         });
       } catch {
         return jsonError(503, "Connections are temporarily unavailable.");
-      }
-    }
-
-    if (
-      url.pathname === "/api/settings/plugins" ||
-      url.pathname === "/api/settings/capabilities"
-    ) {
-      if (request.method !== "GET") return jsonError(405, "method not allowed");
-      try {
-        const frame = decodeProtocol(
-          "PluginsFrame",
-          await dependencies
-            .userConfigurationFor(userId)
-            .readPluginsFrame({ schemaVersion: 1, userId }),
-        );
-        const capabilities = url.pathname.endsWith("capabilities");
-        const visible = {
-          ...frame,
-          plugins: frame.plugins.filter((plugin) =>
-            capabilities
-              ? capabilityIsOfferedV1(plugin)
-              : pluginsPageRowV1(plugin),
-          ),
-        };
-        return Response.json(
-          url.searchParams.get("as") === "document"
-            ? pluginsDocumentV1(visible, capabilities)
-            : visible,
-          { headers: { "cache-control": "no-store" } },
-        );
-      } catch {
-        return jsonError(503, "Plugins are temporarily unavailable.");
-      }
-    }
-
-    if (url.pathname === "/api/settings/marketplace/plugins") {
-      if (request.method !== "GET") return jsonError(405, "method not allowed");
-      try {
-        const frame = decodeProtocol(
-          "PluginsFrame",
-          await dependencies
-            .userConfigurationFor(userId)
-            .readMarketplacePluginsFrame({ schemaVersion: 1, userId }),
-        );
-        return Response.json(
-          url.searchParams.get("as") === "document"
-            ? pluginsDocumentV1(frame, false, true)
-            : frame,
-          { headers: { "cache-control": "no-store" } },
-        );
-      } catch {
-        return jsonError(
-          503,
-          "Marketplace Plugins are temporarily unavailable.",
-        );
       }
     }
 

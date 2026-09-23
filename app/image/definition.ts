@@ -39,4 +39,5 @@ export const imageDefinitionV1: PackageDefinitionV1 = {
       scope: "user",
     },
   ],
+  platformOwned: true,
 };

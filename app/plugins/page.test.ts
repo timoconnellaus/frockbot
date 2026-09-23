@@ -24,25 +24,14 @@ const frame: BotPluginsFrameV1 = {
       description: "Read public web pages.",
       kind: "first-party",
       on: true,
-      switchable: true,
     },
     {
-      pluginId: "image",
-      displayName: "Image",
-      description: "Create images.",
-      kind: "first-party",
-      on: false,
-      switchable: true,
-      unavailable: "Turned off for the whole account.",
-    },
-    {
-      pluginId: "audit-log",
-      displayName: "Audit log",
-      description: "Keeps a record.",
+      pluginId: "email",
+      displayName: "Email",
+      description: "Drafts email.",
       kind: "seeded",
-      seed: "locked",
-      on: true,
-      switchable: false,
+      seed: "default-off",
+      on: false,
     },
     {
       pluginId: "weather",
@@ -50,7 +39,6 @@ const frame: BotPluginsFrameV1 = {
       description: "Forecasts.",
       kind: "authored",
       on: false,
-      switchable: true,
       network: { hosts: ["api.weather.example"] },
     },
   ],
@@ -84,17 +72,16 @@ describe("a Bot's Plugins document", () => {
     expect(document.surfaceId).toBe("bot-plugins");
     expect(document.revision).toBe(4);
     // The kind is said once, over the rows it covers, and a Plugin's row is
-    // called what the Plugin is called.
+    // called what the Plugin is called. A first-party feature and a Plugin the
+    // deployment ships share a heading; only what a Bot wrote is set apart.
     expect(sections(document).map((section) => section.title)).toEqual([
       "Built in",
-      "Always on",
-      "Made by your Bot",
+      "Made by your Bots",
     ]);
     const cards = groups(document);
     expect(cards.map((card) => card.title)).toEqual([
       "Web",
-      "Image",
-      "Audit log",
+      "Email",
       "Weather",
     ]);
     expect(toggle(cards[0]!)).toMatchObject({
@@ -107,14 +94,15 @@ describe("a Bot's Plugins document", () => {
         expectedRevision: 4,
       },
     });
-    // Unavailable and locked rows carry no switch.
-    expect(toggle(cards[1]!)).toBeUndefined();
-    expect(toggle(cards[2]!)).toBeUndefined();
-    expect(toggle(cards[3]!)).toMatchObject({
+    expect(toggle(cards[1]!)).toMatchObject({
+      label: "Turn on",
+      input: { pluginId: "email", enabled: true },
+    });
+    expect(toggle(cards[2]!)).toMatchObject({
       label: "Turn on",
       input: { pluginId: "weather", enabled: true },
     });
-    const weatherLines = cards[3]!.children
+    const weatherLines = cards[2]!.children
       .filter((child) => child.type === "text")
       .map((child) => child.text);
     expect(weatherLines).toContain("Reaches api.weather.example.");
@@ -141,7 +129,6 @@ describe("a Bot's Plugins document", () => {
           kind: "seeded",
           seed: "default-off",
           on: false,
-          switchable: true,
           ...(email.network ? { network: email.network } : {}),
           grants: email.grants,
         },

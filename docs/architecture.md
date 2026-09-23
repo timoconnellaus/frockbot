@@ -293,7 +293,7 @@ Trust chrome is bound there: `bindCardApprovalsV1` (`app/shell/cards.ts`) overwr
 
 The first seeded Plugin is `email`, `default-off`: a `draft` card over `{to, cc?, subject, inReplyTo?, body}` drawn from the Frock catalog's `StatusPill`, `KeyValueRows`, `CollapsibleText`, `ApprovalActions` and `Receipt` — the headers are rows and the body collapses in the component whose job that is, so the card declares no action of its own — two tools the Bot spends the decision with — `email_send` and `email_discard`, each naming the card's `surfaceId` — and the Skill that says when to draft. Sending is not the card's: on the Turn after the person approved, the Bot calls `email_send`, which sends through `ctx.email` — the kernel loopback `isolateEmail` (`app/isolates/bot.ts`) over the deployment's own sender (`app/email/sender.ts`, `EMAIL_SENDER`), attributed to the Bot, never a credential the Plugin holds. The request names the card's `surfaceId` as well as the `approvalId`, and the loopback refuses unless the Approval is the one bound to that Plugin and surface _and_ the message digests to the values the binding recorded, so an approved decision about anything else authorizes nothing; an address that is not an address, or is longer than the kernel's own bound, is refused when the card is drawn, and a refused request answers with its own reason rather than the deployment's — and the card settles into a `Receipt` the next time it is drawn. A deployment that has bound no sender answers unavailable, in words the card shows. Because `http` now opens two members rather than one, both are said wherever the reach is: the approval a User activates a Plugin with (`pluginApprovalActionV1`) and the Plugins page row (`pluginNetworkCopyV1`) name the deployment's sender beside the declared hosts, and a Plugin that declares no host of its own reads as reaching none rather than as reaching nothing — the same approval also names each card's tool, so a Plugin whose whole Bot-facing surface is cards does not read as offering nothing.
 
-**The five locked card Plugins (ADR 0030 step 7).** `approvals`, `questions`, `attachments`, `credentials` and `agents` are seeded `locked`: they run on every Bot, a User cannot switch them off, and the Plugins page lists them as Always on with no switch. Each declares one card and no tool, holds no grant, and ships no Skill — `send_to_user` already tells the Bot about the members they draw. They are how the `approval`, `widget`, `attachment`, `secret-request` and `agent-card` payloads reach the screen; see §6, "The first-party cards are Plugins", for the seam that maps a send onto one. `locked` is not a convenience: the conversation cannot lose the ability to ask for a decision, hand over a file or say a credential is missing, so a switch on one of these would be a switch on the Bot's voice — and a locked Plugin's failure is fatal, which is the same sentence read the other way.
+**The five locked card Plugins (ADR 0030 step 7).** `approvals`, `questions`, `attachments`, `credentials` and `agents` are seeded `locked`: they run on every Bot, a User cannot switch them off, and a Bot's Plugins page leaves them out because there is nothing on them to change. Each declares one card and no tool, holds no grant, and ships no Skill — `send_to_user` already tells the Bot about the members they draw. They are how the `approval`, `widget`, `attachment`, `secret-request` and `agent-card` payloads reach the screen; see §6, "The first-party cards are Plugins", for the seam that maps a send onto one. `locked` is not a convenience: the conversation cannot lose the ability to ask for a decision, hand over a file or say a credential is missing, so a switch on one of these would be a switch on the Bot's voice — and a locked Plugin's failure is fatal, which is the same sentence read the other way.
 
 **Failure and quarantine (ADR 0026 step 9).** Every Plugin failure the mount host names — a descriptor refused at `resolve`, a module that does not parse, a health report that disagrees, a hook that throws or overruns — reaches the Bot through the mount options' `onPluginFailure` seam (`app/plugins/health-bot.ts`). The Turn carries on without the Plugin; the User gets a notice in their inbox (one per Turn for a hook, one per generation for a mount phase); and the failure counts toward the per-Bot quarantine (`app/plugins/health.ts`, `plugin:health:<pluginId>`): three failures in a row — Turns, card presses and card draws counted in one total — switch it off in the Bot's enable map with a critical notice, and the Plugins page says so on its card. A Turn the Plugin ran through cleanly resets the count (`settlePluginHealthV1`, after every Turn); once a Plugin is quarantined its later failures neither count again nor raise a notice the User has already answered; switching the Plugin on again clears its history. A locked Plugin's failure is fatal — the mount, or the hook it was raised in, fails the Turn — because a locked Plugin cannot be skipped. A card press and a card draw are charged the same way, but neither is a Turn, so the record carries what the run is made of (`failureKinds`) beside how long it is: a press's notice says the press did not go through rather than that a Turn was lost, and the count and the quarantine notice read a run back as Turns, presses or draws only when the whole run was that one kind — a mixed run says only that the Plugin failed that many times, and a record written before the kinds were carried reads as mixed rather than as Turns. What turns a Plugin off is the total, whatever it is made of. A Plugin on a retired contract version is refused at `resolve` and therefore noticed and, after three Turns, turned off.
 
@@ -580,38 +580,37 @@ host editor the way `ViewScope.frames` maps an `embed` name to a host region.
 The settings surface supplies the model picker for the paged catalog
 (`account-models`).
 
-**Plugins, the same way.** One more projection in that family, reached with
-`?as=document`: `app/settings/plugins-document.ts` over `PluginsFrame`
-(`/api/settings/plugins`), which is enablement and nothing else: a row says
-what a Package offers, whether it is on, which surface configures it, and —
-for a provider Plugin the account installed — the **Remove** that uninstalls
-its Package ([ADR 0032](adr/0032-plugin-model-providers.md)). Every action
-declares a `kind` from a closed vocabulary, because an action id is opaque to
-the renderer and the command a press means is not derivable from its label.
-`lib/plugins/document.dart` reads those back.
-
-A Bot's own Plugins page is the same projection over a different frame:
+**A Bot's Plugins, the same way.** One more projection in that family:
 `app/plugins/page.ts` draws `BotPluginsFrameV1` (`GET /api/bots/:botId/plugins`,
 `?as=document`, surface `bot-plugins`) from `app/plugins/bot.ts`, a row per
-first-party feature, seeded Plugin and Plugin a Bot wrote. A press posts
+first-party feature, seeded Plugin and Plugin a Bot wrote, under two headings:
+**Built in** and **Made by your Bots**. Every row is something the person can
+switch. A locked Plugin runs for every Bot and a Plugin that only serves a
+model runs when that model is chosen, so neither is a row. A press posts
 `set-plugin-enabled` back to the same route carrying the revision the page
 read, so the Bot answers `applied`, `conflict` — the page re-reads — or
-`rejected` with the reason a locked Plugin or an uninstalled feature cannot be
-switched. The Flutter host draws both from one `PluginsController`
-(`lib/plugins/page.dart`): with a Bot it is that Bot's page, without one the
-account's list, and the neighbouring account-wide switchboard is titled
-"Account features".
+`rejected` with the reason. The Flutter host draws it from `PluginsController`
+(`lib/plugins/page.dart`). There is no account-wide Plugins list and no
+account-wide feature switchboard: the first-party features a Bot switches are
+platform-owned Packages, so the account always holds them and the Bot's switch
+is the only one, and a model provider is added and removed in the Marketplace.
 
 **Marketplace is one searchable catalog.** `apps/native/lib/connections/page.dart`
 draws `ConnectionsFrame` (`/api/settings/connections?catalog=1`) as a single
 page: one search box, Models and Connectors checkboxes under it, Catalog and
 Installed halves, and a builder list so cards mount as the person scrolls. The
 catalog includes every non-platform model provider and every connected app,
-whether or not the Package is installed. An uninstalled model row offers **Add**
-(`user/choose-model-provider`); after that, **Connect** is the same key or
-sign-in flow as before. Installed lists added models and connected apps so they
-can be configured or removed (`user/uninstall-package`). Models settings lists
-only providers already added, with a link back to this catalog. The ordinary
+whether or not the Package is installed. A model row says whether its Package
+is `installed` — a key left behind by a provider that was removed does not
+count — and one that is not offers **Add** (`user/choose-model-provider`, which
+also reconciles a provider Plugin into the Composition), which opens the key
+form at once for a keyed provider; **Connect** is the same key or sign-in flow
+as before, and a connected model provider's card offers **Choose a model**,
+which opens Models. Cards are laid out in rows rather than a fixed-height grid
+so an opened card is never clipped. Installed lists added models and connected
+apps so they can be configured or removed (`user/uninstall-package`). Models
+settings lists only providers already added, with a link back to this catalog,
+and each built-in model in the picker says it needs no key. The ordinary
 `/api/settings/connections`
 read stays installed-only, so Manage provider does not grow a storefront.
 Each card carries a bundled icon (`assets/connectors/<icon>.png`, named by

@@ -24,6 +24,6 @@ export const customModelsDefinitionV1: PackageDefinitionV1 = {
       },
     },
   ],
-  defaultEnablement: "disabled",
   dependencies: ["settings", "shell", "ui-theme"],
+  platformOwned: true,
 };

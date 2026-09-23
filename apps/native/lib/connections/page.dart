@@ -317,31 +317,33 @@ class _ConnectionsPageState extends State<ConnectionsPage>
     }).toList();
   }
 
-  bool _isInstalled(Map<String, Object?> provider) {
-    final connected = (provider['connected'] as num?)?.toInt() ?? 0;
-    if (provider['kind'] == 'model') {
-      return provider['mayConnect'] == true || connected > 0;
-    }
-    return connected > 0;
-  }
+  /// A model is added when its Package is, whatever keys it still holds; a
+  /// connected app is added when an account is connected.
+  bool _isInstalled(Map<String, Object?> provider) =>
+      provider['kind'] == 'model'
+      ? provider['installed'] == true
+      : ((provider['connected'] as num?)?.toInt() ?? 0) > 0;
 
   bool _needsAdd(Map<String, Object?> provider) =>
       widget.catalog &&
       !widget.installed &&
       provider['kind'] == 'model' &&
-      (provider['connected'] as int? ?? 0) == 0 &&
-      provider['mayConnect'] != true;
+      provider['installed'] != true;
 
-  Future<void> _addProvider(Map<String, Object?> provider) async {
+  /// Adds a model provider to the account, and says whether it landed: a key
+  /// is what the person is asked for next, and only an added provider takes
+  /// one.
+  Future<bool> _addProvider(Map<String, Object?> provider) async {
     final packageId = provider['packageId'] as String;
     final row = _rowKey(provider);
-    if (pendingRow != null) return;
+    if (pendingRow != null) return false;
     setState(() {
       pendingRow = row;
       notice = null;
     });
+    var added = false;
     try {
-      await widget.api.request(
+      final receipt = await widget.api.request(
         '/api/settings',
         body: {
           'schemaVersion': 1,
@@ -351,7 +353,16 @@ class _ConnectionsPageState extends State<ConnectionsPage>
           'packageId': packageId,
         },
       );
-      widget.onFeaturesChanged?.call();
+      added = receipt is Map && receipt['status'] == 'applied';
+      if (added) {
+        widget.onFeaturesChanged?.call();
+      } else if (mounted) {
+        setState(() {
+          notice = receipt is Map && receipt['failure'] is String
+              ? receipt['failure'] as String
+              : 'Couldn’t add ${provider['displayName']}. Refresh and try again.';
+        });
+      }
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -363,7 +374,22 @@ class _ConnectionsPageState extends State<ConnectionsPage>
       if (mounted) setState(() => pendingRow = null);
       await load();
     }
+    return added;
   }
+
+  /// Where a connected model provider leads: the account's model choice, which
+  /// is the step after the key and the one the Marketplace cannot take itself.
+  void _chooseModel() => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => SettingsPage(
+        onFeaturesChanged: widget.onFeaturesChanged,
+        api: widget.api,
+        store: widget.store,
+        userId: widget.userId,
+        home: 'models',
+      ),
+    ),
+  );
 
   Future<void> _removeProvider(Map<String, Object?> provider) async {
     final packageId = provider['packageId'] as String;
@@ -554,6 +580,12 @@ class _ConnectionsPageState extends State<ConnectionsPage>
       send: (command) => _send(command, _rowKey(provider)),
       commandId: _commandId,
       onAdd: _needsAdd(provider) ? () => _addProvider(provider) : null,
+      onChooseModel:
+          widget.catalog &&
+              provider['kind'] == 'model' &&
+              _isInstalled(provider)
+          ? _chooseModel
+          : null,
       onRemove:
           widget.installed &&
               provider['kind'] == 'model' &&
@@ -687,44 +719,41 @@ class _ConnectionsPageState extends State<ConnectionsPage>
                         horizontal: ((constraints.crossAxisExtent - width) / 2)
                             .clamp(0, double.infinity),
                       ),
-                      sliver: columns == 1
-                          ? SliverList.builder(
-                              itemCount: count,
-                              itemBuilder: (context, index) {
-                                if (showMac && index == 0) {
-                                  return Padding(
-                                    padding: const EdgeInsets.only(bottom: gap),
-                                    child: _MacMessagesRow(page: widget),
-                                  );
-                                }
-                                final row = rows[index - extras];
-                                return Padding(
-                                  padding: const EdgeInsets.only(bottom: gap),
-                                  child: _providerCard(row, index - extras),
-                                );
-                              },
-                            )
-                          : SliverGrid(
-                              gridDelegate:
-                                  SliverGridDelegateWithFixedCrossAxisCount(
-                                    crossAxisCount: columns,
-                                    mainAxisExtent: 92,
-                                    crossAxisSpacing: gap,
-                                    mainAxisSpacing: gap,
-                                  ),
-                              delegate: SliverChildBuilderDelegate((
-                                context,
-                                index,
-                              ) {
-                                if (showMac && index == 0) {
-                                  return _MacMessagesRow(page: widget);
-                                }
-                                return _providerCard(
+                      // Rows of cards rather than a fixed-height grid: a card
+                      // opens in place to take a key or show its accounts,
+                      // and a grid cell would clip what it opened to.
+                      sliver: SliverList.builder(
+                        itemCount: (count / columns).ceil(),
+                        itemBuilder: (context, row) {
+                          Widget card(int index) => showMac && index == 0
+                              ? _MacMessagesRow(page: widget)
+                              : _providerCard(
                                   rows[index - extras],
                                   index - extras,
                                 );
-                              }, childCount: count),
+                          final first = row * columns;
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: gap),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                for (
+                                  var column = 0;
+                                  column < columns;
+                                  column++
+                                ) ...[
+                                  if (column > 0) const SizedBox(width: gap),
+                                  Expanded(
+                                    child: first + column < count
+                                        ? card(first + column)
+                                        : const SizedBox.shrink(),
+                                  ),
+                                ],
+                              ],
                             ),
+                          );
+                        },
+                      ),
                     );
                   },
                 ),
@@ -1073,7 +1102,12 @@ class _ProviderRow extends StatefulWidget {
   final bool busy;
   final Future<void> Function(Map<String, Object?> command) send;
   final String Function() commandId;
-  final VoidCallback? onAdd;
+
+  /// Adds the provider, answering whether it landed; set only while it is not.
+  final Future<bool> Function()? onAdd;
+
+  /// Opens the model choice, once a connected account makes one possible.
+  final VoidCallback? onChooseModel;
   final VoidCallback? onRemove;
   const _ProviderRow({
     super.key,
@@ -1086,6 +1120,7 @@ class _ProviderRow extends StatefulWidget {
     required this.send,
     required this.commandId,
     this.onAdd,
+    this.onChooseModel,
     this.onRemove,
   });
 
@@ -1133,6 +1168,17 @@ class _ProviderRowState extends State<_ProviderRow> {
     }
   }
 
+  /// Adds the provider and, for a keyed one, opens its key form at once: the
+  /// key is the only thing between an added provider and a usable model.
+  Future<void> _add() async {
+    final added = await widget.onAdd!();
+    if (!mounted || !added || authorization != 'api-key') return;
+    setState(() {
+      open = true;
+      adding = true;
+    });
+  }
+
   /// The state of the accounts held, as one pill.
   Widget _state() {
     final ready = widget.accounts.where((a) => a['state'] == 'ready').length;
@@ -1172,11 +1218,25 @@ class _ProviderRowState extends State<_ProviderRow> {
   /// Whether the row opens on a tap to show its accounts and the way to add
   /// another; a keyed provider with nothing yet opens straight to its form.
   bool get opens =>
-      hasAccounts ||
-      (mayConnect && authorization == 'api-key') ||
-      widget.onRemove != null;
+      widget.onAdd == null &&
+      (hasAccounts ||
+          (mayConnect && authorization == 'api-key') ||
+          widget.onRemove != null);
 
   Widget? _trailing(BuildContext context) {
+    // A provider that is not added offers Add even while it still holds a key
+    // from before it was removed: adding it again is what brings that back.
+    if (widget.onAdd != null) {
+      return identified(
+        ConnectorIds.action('add-${provider['packageId']}'),
+        _Pill(
+          label: 'Add',
+          primary: true,
+          busy: widget.busy,
+          onPressed: () => unawaited(_add()),
+        ),
+      );
+    }
     if (hasAccounts) {
       // The state, and beside it the sign that the row opens: the accounts
       // and "Add another account" are one tap away, not hidden.
@@ -1191,17 +1251,6 @@ class _ProviderRowState extends State<_ProviderRow> {
             color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
         ],
-      );
-    }
-    if (widget.onAdd != null) {
-      return identified(
-        ConnectorIds.action('add-${provider['packageId']}'),
-        _Pill(
-          label: 'Add',
-          primary: true,
-          busy: widget.busy,
-          onPressed: widget.onAdd,
-        ),
       );
     }
     if (!mayConnect && widget.onRemove == null) return null;
@@ -1330,6 +1379,22 @@ class _ProviderRowState extends State<_ProviderRow> {
             'Nothing connected yet.',
             style: theme.textTheme.bodySmall?.copyWith(
               color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        if (widget.onChooseModel != null &&
+            widget.accounts.any((account) => account['state'] == 'ready'))
+          Align(
+            alignment: Alignment.centerLeft,
+            child: Padding(
+              padding: const EdgeInsets.only(top: 4),
+              child: identified(
+                ConnectorIds.action('choose-model-${provider['packageId']}'),
+                FilledButton.tonalIcon(
+                  onPressed: widget.onChooseModel,
+                  icon: const Icon(Icons.auto_awesome_rounded, size: 18),
+                  label: const Text('Choose a model'),
+                ),
+              ),
             ),
           ),
         if (widget.onRemove != null)

@@ -1853,6 +1853,7 @@
           "authorization": "api-key",
           "connected": 0,
           "mayConnect": true,
+          "installed": true,
           "settings": [
             {
               "id": "api-base-url",
@@ -1865,25 +1866,6 @@
         }
       ],
       "modelInUse": "Auto · Frock AI"
-    }
-  },
-  {
-    "name": "PluginsFrame valid",
-    "schema": "PluginsFrame",
-    "value": {
-      "schemaVersion": 1,
-      "ownerId": "tim",
-      "revision": 3,
-      "plugins": [
-        {
-          "packageId": "provider-ollama-cloud",
-          "version": "1.0.0",
-          "displayName": "Ollama Cloud",
-          "summary": "Models",
-          "state": "installed",
-          "home": "models"
-        }
-      ]
     }
   },
   {

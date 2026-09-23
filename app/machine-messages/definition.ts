@@ -27,4 +27,5 @@ export const machineMessagesDefinitionV1: PackageDefinitionV1 = {
     },
   ],
   dependencies: ["user-machine"],
+  platformOwned: true,
 };

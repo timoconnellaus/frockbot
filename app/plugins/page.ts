@@ -1,6 +1,6 @@
-// The Plugins page for one Bot: what its User installed, what the deployment
-// seeded, and the first-party features a User may switch — one list, one
-// switch per row, per Bot (ADR 0026).
+// The Plugins page for one Bot: the first-party features, what the deployment
+// seeded, and what this User's Bots wrote — one list, one switch per row, per
+// Bot (ADR 0026).
 //
 // The frame is the Bot's reading; the document is what the host renders. An
 // action keeps the id the card renderer already draws as a switch, and its
@@ -40,8 +40,6 @@ export interface BotPluginRowV1 {
   seed?: PluginSeedStateV1;
   /** Whether this Bot runs it now. */
   on: boolean;
-  /** Whether the User may flip it; a locked Plugin is shown without a switch. */
-  switchable: boolean;
   /** The network the descriptor declares, shown on the card before it is on. */
   network?: PluginNetworkV1;
   /** The grants the descriptor asked for; `http` also opens this deployment's sender. */
@@ -53,8 +51,6 @@ export interface BotPluginRowV1 {
    * names one of them runs it whatever this row's switch says.
    */
   modelProviders?: readonly string[];
-  /** A first-party feature the account has not installed cannot be switched on. */
-  unavailable?: string;
   /** Off after failing Turns in a row; the switch turns it on again (ADR 0026). */
   quarantined?: string;
   /** The sections the Plugin drew on its card, when it is on and declares any. */
@@ -320,15 +316,13 @@ export function isPureModelProviderPluginV1(row: {
   );
 }
 
+/**
+ * A first-party feature and a Plugin the deployment ships read the same to a
+ * person — both came with FrockBot — so they share a heading; only what a Bot
+ * wrote is set apart.
+ */
 function kindLabel(row: BotPluginRowV1): string {
-  switch (row.kind) {
-    case "first-party":
-      return "Built in";
-    case "seeded":
-      return row.seed === "locked" ? "Always on" : "Included";
-    case "authored":
-      return "Made by your Bot";
-  }
+  return row.kind === "authored" ? "Made by your Bots" : "Built in";
 }
 
 function pluginNode(row: BotPluginRowV1, revision: number): ViewNode {
@@ -339,9 +333,6 @@ function pluginNode(row: BotPluginRowV1, revision: number): ViewNode {
   if (reach) lines.push({ type: "text", text: reach, style: "status" });
   const serves = pluginModelProviderCopyV1(row.modelProviders);
   if (serves) lines.push({ type: "text", text: serves, style: "status" });
-  if (row.unavailable) {
-    lines.push({ type: "text", text: row.unavailable, style: "status" });
-  }
   if (row.quarantined) {
     lines.push({ type: "text", text: row.quarantined, style: "status" });
   }
@@ -359,29 +350,31 @@ function pluginNode(row: BotPluginRowV1, revision: number): ViewNode {
       lines.push({ type: "text", text: section.failure, style: "status" });
     }
   }
-  const controls: ViewNode[] = [];
-  if (row.switchable && !row.unavailable) {
-    controls.push({
-      type: "action",
-      // The id the card renderer draws as a switch; the input says which
-      // Plugin and which revision the page read.
-      actionId: "set-package-enabled",
-      label: row.on ? "Turn off" : "Turn on",
-      input: {
-        kind: "set-plugin-enabled",
-        pluginId: row.pluginId,
-        enabled: !row.on,
-        expectedRevision: revision,
-      },
-    });
-  }
   return {
     type: "group",
     orientation: "column",
     title: row.displayName.slice(0, 150),
     children: [
       ...lines,
-      { type: "group", orientation: "row", children: controls },
+      {
+        type: "group",
+        orientation: "row",
+        children: [
+          {
+            type: "action",
+            // The id the card renderer draws as a switch; the input says which
+            // Plugin and which revision the page read.
+            actionId: "set-package-enabled",
+            label: row.on ? "Turn off" : "Turn on",
+            input: {
+              kind: "set-plugin-enabled",
+              pluginId: row.pluginId,
+              enabled: !row.on,
+              expectedRevision: revision,
+            },
+          },
+        ],
+      },
     ],
   };
 }
@@ -405,7 +398,6 @@ export function botPluginsDocumentV1(frame: BotPluginsFrameV1): ViewDocument {
       6 +
       (kinds.has(kind) ? 0 : 1) +
       (row.network ? 1 : 0) +
-      (row.unavailable ? 1 : 0) +
       (row.quarantined ? 1 : 0) +
       (row.omitted ? 1 : 0) +
       (row.sections ?? []).reduce(

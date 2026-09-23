@@ -76,15 +76,12 @@ async function openSettings(page: Page): Promise<void> {
   await openProfileSurface(page, "profile-settings", "settings-document");
 }
 
-test("Models chooses the account default with the Bot override Package disabled", async ({
+test("Models chooses the account default, and every Bot may still choose its own", async ({
   page,
   userId,
   ollamaBaseUrl,
 }) => {
   await openApplication(page, userId);
-  // Custom models — the Package that lets one *Bot* differ from the account —
-  // is a separate switch from the provider's own, and this test is here to say
-  // it stays off.
   await chooseOllamaProvider(page);
   await connectOllama(page, {
     apiKey: E2E_OLLAMA_GOOD_API_KEY,
@@ -98,11 +95,13 @@ test("Models chooses the account default with the Bot override Package disabled"
     await page.request.get("/api/settings?view=2")
   ).json();
   expect(settings.accountModel.providerModelId).toBe("gpt-oss:20b");
+  // Custom models — what lets one Bot differ from the account — is
+  // platform-owned: nobody has to find a switch before a Bot can choose.
   expect(
     settings.packages.find(
       (p: { packageId: string }) => p.packageId === "custom-models",
     ).state,
-  ).toBe("disabled");
+  ).toBe("installed");
 
   // And the surface says so on its own terms, read fresh.
   await openModels(page);

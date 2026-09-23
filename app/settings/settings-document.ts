@@ -162,12 +162,7 @@ function projectSection(
     children.push({
       type: "action",
       actionId: `save-${index}`,
-      label:
-        section.id === "profile"
-          ? "Save profile"
-          : section.id === "add-provider"
-            ? "Connect provider"
-            : "Save changes",
+      label: section.id === "profile" ? "Save profile" : "Save changes",
       style: "primary",
       input: { sectionId: section.id },
     });
@@ -184,7 +179,7 @@ function projectSection(
           sectionId: { type: "string", maxLength: 256 },
           kind: {
             type: "string",
-            enum: ["choose-provider", "manage-provider"],
+            enum: ["manage-provider"],
           },
         },
         required: ["sectionId", "kind"],
@@ -298,11 +293,7 @@ export function settingsDocumentV1(frame: SettingsFrame): ViewDocument {
   }
   if (!complete) children.push(statusNode(OVERFLOW_V1));
   if (frame.sections.length === 0)
-    children.push(
-      statusNode(
-        "This feature is turned off. Enable it in Account features to see its settings.",
-      ),
-    );
+    children.push(statusNode("There is nothing to set here."));
   return decodeProtocol("ViewDocument", {
     schemaVersion: 1,
     surfaceId: `settings-${frame.home}`,
