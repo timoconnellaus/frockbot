@@ -54,7 +54,7 @@ describe("a Plugin failing more than once in one Turn", () => {
       pluginId: "email",
       phase: "hook",
       message: "render threw",
-      card: "draw",
+      kind: "draw",
     });
     expect(notices).toHaveLength(2);
     expect(new Set(notices.map((notice) => notice.notificationId)).size).toBe(
@@ -68,13 +68,41 @@ describe("a Plugin failing more than once in one Turn", () => {
     expect(notices[1]?.title).toBe("A plugin could not draw a card");
   });
 
+  test("a theme that could not be set says so, and not that a Turn was lost", async () => {
+    const { state, notices } = harness();
+    await notePluginFailureV1(state, TURN, {
+      pluginId: "dusk",
+      phase: "hook",
+      message: "theme document text contrast is below 4.5",
+      kind: "theme",
+    });
+    expect(notices[0]?.title).toBe("A plugin could not set this Bot's theme");
+    expect(notices[0]?.body).toBe(
+      "The plugin \"dusk\" could not set this Bot's theme: theme document text contrast is below 4.5. Its change to this Bot's theme was not applied. 1 of 3 failures in a row before it is turned off.",
+    );
+  });
+
+  test("a theme failing hour after hour keeps one notice for the generation", async () => {
+    const { state, notices } = harness();
+    for (const runId of ["theme:1", "theme:2"]) {
+      await notePluginFailureV1(
+        state,
+        { runId, generationId: "gen-1" },
+        { pluginId: "dusk", phase: "hook", message: "refused", kind: "theme" },
+      );
+    }
+    expect(notices[0]?.notificationId).toBe(notices[1]?.notificationId!);
+    // The count still moves: each assembly is its own run.
+    expect(notices[1]?.body).toContain("2 of 3 failures in a row");
+  });
+
   test("a failed press is not titled as a lost Turn", async () => {
     const { state, notices } = harness();
     await notePluginFailureV1(state, TURN, {
       pluginId: "email",
       phase: "hook",
       message: "the handler threw",
-      card: "press",
+      kind: "press",
     });
     expect(notices[0]?.title).toBe("A plugin could not answer a card press");
     expect(notices[0]?.body).toContain("could not answer a card press");
@@ -88,7 +116,7 @@ describe("a Plugin failing more than once in one Turn", () => {
       pluginId: "email",
       phase: "hook",
       message: "the handler threw",
-      card: "press",
+      kind: "press",
     });
     expect(notices[0]?.body).toBe(
       'The plugin "email" could not answer a card press: the handler threw. The card press did not go through, and this Bot carried on. 1 of 3 failures in a row before it is turned off.',
@@ -122,7 +150,7 @@ describe("a Plugin failing more than once in one Turn", () => {
   // it has to describe.
   describe("the threshold notice describes the run that turned it off", () => {
     async function runOf(
-      cards: (undefined | "press" | "draw")[],
+      cards: (undefined | "press" | "draw" | "theme")[],
     ): Promise<string> {
       const { state, notices } = harness();
       for (const [index, card] of cards.entries()) {
@@ -133,7 +161,7 @@ describe("a Plugin failing more than once in one Turn", () => {
             pluginId: "email",
             phase: "hook",
             message: "it threw",
-            ...(card === undefined ? {} : { card }),
+            ...(card === undefined ? {} : { kind: card }),
           },
         );
       }
@@ -145,6 +173,12 @@ describe("a Plugin failing more than once in one Turn", () => {
     test("three presses are read back as presses", async () => {
       expect(await runOf(["press", "press", "press"])).toBe(
         'The plugin "email" failed on 3 card presses in a row and is now off for this Bot. Turn it on again under Plugins to try it once more.',
+      );
+    });
+
+    test("three theme updates are read back as theme updates", async () => {
+      expect(await runOf(["theme", "theme", "theme"])).toBe(
+        'The plugin "email" failed to set this Bot\'s theme 3 times in a row and is now off for this Bot. Turn it on again under Plugins to try it once more.',
       );
     });
 
@@ -168,7 +202,7 @@ describe("a Plugin failing more than once in one Turn", () => {
         pluginId: "email",
         phase: "hook",
         message,
-        card: "draw",
+        kind: "draw",
       });
     }
     expect(notices[0]?.notificationId).toBe(notices[1]?.notificationId!);

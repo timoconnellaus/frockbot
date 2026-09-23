@@ -10,6 +10,7 @@ import {
   pluginFailureRunKindV1,
   readPluginHealthV1,
   recordPluginFailureV1,
+  type PluginFailureKindV1,
   type PluginFailurePhaseV1,
   type PluginHealthRecordV1,
 } from "./health.js";
@@ -21,11 +22,11 @@ export interface PluginFailureNoticeV1 {
   message: string;
   /**
    * What the Plugin was doing, when it was not a Turn's own work: a card the
-   * person pressed, or a card the Bot asked it to draw. A press is not a
-   * Turn, so a notice about one must not say a Turn was lost. It changes the
-   * words the person reads and nothing else: the count is the same.
+   * person pressed, a card the Bot asked it to draw, or this Bot's theme. None
+   * is a Turn, so a notice about one must not say a Turn was lost. It changes
+   * the words the person reads and nothing else: the count is the same.
    */
-  card?: "press" | "draw";
+  kind?: Exclude<PluginFailureKindV1, "turn">;
 }
 
 /** What the mount host does with the failure: carry on without the Plugin, or not. */
@@ -39,11 +40,13 @@ function locked(pluginId: string): boolean {
 
 /** What failed, in the words the notice uses. */
 function failureWords(failure: PluginFailureNoticeV1): string {
-  switch (failure.card) {
+  switch (failure.kind) {
     case "press":
       return "could not answer a card press";
     case "draw":
       return "could not draw a card";
+    case "theme":
+      return "could not set this Bot's theme";
     default:
       return phaseWords(failure.phase);
   }
@@ -51,11 +54,13 @@ function failureWords(failure: PluginFailureNoticeV1): string {
 
 /** What a locked Plugin's failure cost, in the words the notice uses. */
 function lockedCost(failure: PluginFailureNoticeV1): string {
-  switch (failure.card) {
+  switch (failure.kind) {
     case "press":
       return "It is always on for this Bot, and the card was left exactly as it was.";
     case "draw":
       return "It is always on for this Bot, and the card could not be drawn.";
+    case "theme":
+      return "It is always on for this Bot, and its change to this Bot's theme was not applied.";
     default:
       return "It is always on for this Bot, so the Turn could not continue without it.";
   }
@@ -63,11 +68,13 @@ function lockedCost(failure: PluginFailureNoticeV1): string {
 
 /** What the failure cost, in the words the notice uses. */
 function failureCost(failure: PluginFailureNoticeV1): string {
-  switch (failure.card) {
+  switch (failure.kind) {
     case "press":
       return "The card press did not go through, and this Bot carried on.";
     case "draw":
       return "The card could not be drawn, and this Bot carried on.";
+    case "theme":
+      return "Its change to this Bot's theme was not applied.";
     default:
       return "This Bot carried on without it.";
   }
@@ -98,6 +105,8 @@ function quarantineRun(health: PluginHealthRecordV1): string {
       return `failed on ${health.consecutiveFailures} card presses in a row`;
     case "draw":
       return `failed on ${health.consecutiveFailures} card draws in a row`;
+    case "theme":
+      return `failed to set this Bot's theme ${health.consecutiveFailures} times in a row`;
     default:
       return `failed ${health.consecutiveFailures} times in a row`;
   }
@@ -105,11 +114,13 @@ function quarantineRun(health: PluginHealthRecordV1): string {
 
 /** The notice's title, which must not say a Turn was lost when none was. */
 function failureTitle(failure: PluginFailureNoticeV1): string {
-  switch (failure.card) {
+  switch (failure.kind) {
     case "press":
       return "A plugin could not answer a card press";
     case "draw":
       return "A plugin could not draw a card";
+    case "theme":
+      return "A plugin could not set this Bot's theme";
     default:
       return "A plugin was skipped";
   }
@@ -147,7 +158,7 @@ export async function notePluginFailureV1(
         turn.runId,
         failure.pluginId,
         failure.phase,
-        failure.card ?? "turn",
+        failure.kind ?? "turn",
       ),
       runId: turn.runId,
       createdAt: now().toISOString(),
@@ -175,12 +186,13 @@ export async function notePluginFailureV1(
       runId: turn.runId,
       phase: failure.phase,
       message: failure.message,
-      kind: failure.card ?? "turn",
+      kind: failure.kind ?? "turn",
       now: now(),
     },
   );
   // One notice per Turn and phase for a hook; one per generation for a mount
-  // phase, which would otherwise repeat every Turn until the Plugin is off. A
+  // phase, which would otherwise repeat every Turn until the Plugin is off,
+  // and for a theme, which is assembled every hour whether anyone is there. A
   // card draw is charged under the Turn's own runId and the hook phase, so
   // what it was doing is part of the id too: without it a Turn whose hook was
   // skipped and whose card draw also failed would read as one notice, worded
@@ -188,10 +200,12 @@ export async function notePluginFailureV1(
   await state.authority.recordNotification({
     notificationId: notificationIdV1(
       "plugin-failed",
-      failure.phase === "hook" ? turn.runId : turn.generationId,
+      failure.phase === "hook" && failure.kind !== "theme"
+        ? turn.runId
+        : turn.generationId,
       failure.pluginId,
       failure.phase,
-      failure.card ?? "turn",
+      failure.kind ?? "turn",
     ),
     runId: turn.runId,
     createdAt: now().toISOString(),

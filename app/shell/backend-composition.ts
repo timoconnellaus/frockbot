@@ -128,10 +128,10 @@ export interface ShellIsolateMountOptions {
     message: string;
     /**
      * What the Plugin was doing, when it was not a Turn's own work: a card
-     * press or a card draw. It is the wording of the notice the person reads,
-     * never the count, which is the same either way.
+     * press, a card draw or this Bot's theme. It is the wording of the notice
+     * the person reads, never the count, which is the same either way.
      */
-    card?: "press" | "draw";
+    kind?: "press" | "draw" | "theme";
   }): Promise<{ fatal: boolean }>;
 }
 
@@ -518,7 +518,7 @@ export function createShellCompositionHost(
                   pluginId: failure.pluginId,
                   phase: "hook",
                   message: failure.message,
-                  card: "draw",
+                  kind: "draw",
                 });
               },
               recordHookFailure: async (failure) => {

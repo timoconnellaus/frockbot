@@ -23,6 +23,13 @@ export type WhatsNewEntrySourceV1 = {
  */
 export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
+    id: "plugin-theme-refused",
+    title: "A refused plugin theme is reported",
+    summary:
+      "The notice names the plugin and why its theme was refused. The Bot keeps its last theme.",
+    kind: "fix",
+  },
+  {
     id: "voice-opening",
     title: "The first words of a call are kept",
     summary:

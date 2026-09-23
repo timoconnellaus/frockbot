@@ -21,6 +21,7 @@ import {
   enabledSeededPluginIdsV1,
 } from "./catalog.js";
 import { readPluginEnablementV1 } from "./enablement.js";
+import type { PluginFailureKindV1 } from "./health.js";
 
 /** What this Bot would run right now: the generation's members and its switches. */
 export interface BotPluginRosterV1 {
@@ -56,6 +57,18 @@ export type PluginWorkerMountV1 =
     }
   | { status: "unavailable"; reason: string };
 
+/** One standalone call: what it is for, and how long it may take. */
+export interface PluginWorkerCallV1 {
+  runId: string;
+  deadlineMs: number;
+  /**
+   * What a hook failure in this call is charged to its Plugin as. Only a call
+   * that runs a hook names one; the failure then counts toward the Plugin's
+   * quarantine and the person is told, exactly as a Turn's would be.
+   */
+  hookFailuresAs?: Exclude<PluginFailureKindV1, "turn">;
+}
+
 /**
  * Mounts this Bot's enabled Plugins for one standalone call. The caller runs
  * what it came for on `active` and must `dispose` it; `withPluginWorkerV1`
@@ -66,7 +79,7 @@ async function mountPluginWorkerV1(
   state: ShellBotStateV1,
   identity: BotIdentity,
   roster: BotPluginRosterV1,
-  call: { runId: string; deadlineMs: number },
+  call: PluginWorkerCallV1,
 ): Promise<PluginWorkerMountV1> {
   // The identity the call runs under: not a Turn, but shaped like one so
   // every loopback call still names what it is for.
@@ -106,7 +119,18 @@ async function mountPluginWorkerV1(
     turnId: call.runId,
     generationId: roster.generationId,
     turnType: "automation",
-    recordHookFailure: () => Promise.resolve(),
+    recordHookFailure: async (failure) => {
+      const kind = call.hookFailuresAs;
+      if (kind === undefined) return;
+      // The verdict is not acted on: a standalone call has no Turn to fail,
+      // and the host has already kept the value the hook did not replace.
+      await isolate.onPluginFailure?.({
+        pluginId: failure.packageId,
+        phase: "hook",
+        message: failure.message,
+        kind,
+      });
+    },
     deadlineMs: call.deadlineMs,
   });
   let prepared: Awaited<ReturnType<typeof host.mount>>;
@@ -158,7 +182,7 @@ export async function withPluginWorkerV1<T>(
   state: ShellBotStateV1,
   identity: BotIdentity,
   roster: BotPluginRosterV1,
-  call: { runId: string; deadlineMs: number },
+  call: PluginWorkerCallV1,
   work: (
     worker: Extract<PluginWorkerMountV1, { status: "mounted" }>,
   ) => Promise<T>,

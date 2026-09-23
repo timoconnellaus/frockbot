@@ -13,7 +13,8 @@
 | `the build service is unavailable`                         | nothing you did; tell the User rather than retrying in a loop                                                    |
 | a publish reports diagnostics                              | nothing was stored and no approval card was sent                                                                 |
 | the Plugin does not run                                    | it is live from the **next** Turn after the User approves, not this one; sibling Bots still need `plugin_enable` |
-| three failures and it is off                               | a hook, press or draw threw or overran; a person switches it on again                                            |
+| three failures and it is off                               | a hook, press or draw threw, overran or answered with something refused; a person switches it on again           |
+| a notice that a plugin could not set this Bot's theme      | `theme/assemble` threw or returned a document the kernel refused; `hooks.md` lists the rules                     |
 | `ctx.schedule` is unavailable                              | you are outside a Turn (section, control, trigger)                                                               |
 | `fetch` is refused                                         | the host is not in `network.hosts` and `open` is not true                                                        |
 | `email` is unavailable                                     | this deployment has bound no sender, or you named the wrong approval                                             |

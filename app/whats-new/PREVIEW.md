@@ -2,6 +2,12 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
+## A refused plugin theme is reported
+
+fix
+
+The notice names the plugin and why its theme was refused. The Bot keeps its last theme.
+
 ## The first words of a call are kept
 
 improvement

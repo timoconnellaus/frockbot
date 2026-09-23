@@ -36,7 +36,10 @@ live in those two files, not as extra paths.
    declared there.
 4. **`plugin_check`** with the Plugin's id. It type-checks the module against
    the SDK and answers with every problem as `path:line:col message`, or with
-   "builds". Fix every line. Do not publish over a failing check.
+   "builds". Fix every line. Do not publish over a failing check. The SDK's
+   types are not on the Computer: `plugin_check` is what resolves
+   `@frockbot/applet-sdk/plugin`, so never hunt for them there. Every type it
+   declares is in `types.md`.
 5. **`plugin_publish`** with the Plugin's id. It builds the module, runs it
    once to read what it exports, compares that with `plugin.json`, stores the
    artifact, and asks the User to approve it with a card in the conversation
@@ -64,6 +67,7 @@ Load one with `skill_load` — `{"path": "managed/plugins", "reference": "module
 - `module.md` — `plugin.ts`: tools, execute, every optional export.
 - `descriptor.md` — `plugin.json`: id, version, contract, matching exports.
 - `grants.md` — `ctx`: grants, `fetch`, email, settings, capabilities.
+- `types.md` — every SDK type, copied from the file `plugin_check` uses.
 - `hooks.md` — every loop event you may wrap, including `theme/assemble`.
 - `skills.md` — Skills this Plugin ships as `plugin/<pluginId>/<slug>`.
 - `services.md` — `provides` / `consumes` and `export const services`.

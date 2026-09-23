@@ -147,6 +147,7 @@ interface BotRpc {
   listNotifications(
     input: unknown,
   ): Promise<Array<{ notificationId: string; title: string; body: string }>>;
+  assembleTheme(input: unknown): Promise<unknown>;
   executeRoutineCommand(input: unknown): Promise<{
     status: string;
     hook?: { token: string; keyVersion: number };
@@ -1876,6 +1877,80 @@ export async function execute() {
       ).quarantined,
     ).toBeUndefined();
   });
+  test("a theme document the kernel refuses is noticed with its reason and counts toward turning the Plugin off", async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    const identity = { userId, botId: "bot-1" };
+    await provisionBot(identity);
+    await turn(identity, "run-0");
+    const bootstrap = (
+      await user(userId).readComposition({ schemaVersion: 1, userId })
+    ).current;
+    const DUSK_ID = "dusk";
+    // Text the colour of its own window: 1:1, far under the 4.5:1 floor.
+    const DUSK_SOURCE = `
+export const tools = [];
+export const hooks = {
+  "theme/assemble": async function (payload) {
+    const tokens = payload.document.tokens;
+    return {
+      ...payload.document,
+      tokens: { ...tokens, surfaces: { ...tokens.surfaces, text: tokens.surfaces.window } },
+    };
+  },
+};
+export async function execute() {
+  return "ok";
+}
+`;
+    await seedPlugin(
+      identity,
+      bootstrap.generationId,
+      "2026-09-12T05:00:00.000Z",
+      DUSK_ID,
+      DUSK_SOURCE,
+      decodePluginDescriptorV1({
+        id: DUSK_ID,
+        displayName: "Dusk",
+        version: "0.0.1",
+        contractVersion: ISOLATE_CONTRACT_VERSION,
+        tools: [],
+        hooks: ["theme/assemble"],
+        grants: [],
+        contextKeys: ["user", "bot", "session"],
+      }),
+    );
+    await switchPlugin(identity, DUSK_ID, true);
+    const enabled = async () =>
+      (
+        await bot(identity).readPluginEnablement({
+          schemaVersion: 1,
+          ...identity,
+        })
+      ).enabled[DUSK_ID];
+    const notices = async () =>
+      await bot(identity).listNotifications({ schemaVersion: 1, ...identity });
+
+    await bot(identity).assembleTheme({ schemaVersion: 1, ...identity });
+    const refused = (await notices()).find(
+      (notice) => notice.title === "A plugin could not set this Bot's theme",
+    );
+    // The person reads which Plugin and why, not a silent skip.
+    expect(refused?.body).toContain(
+      'The plugin "dusk" could not set this Bot\'s theme',
+    );
+    expect(refused?.body).toContain("contrast");
+
+    // Switching it on assembles in the background too, so the third refusal
+    // may land before the third call; either way it ends off.
+    for (let call = 0; call < 3 && (await enabled()); call += 1) {
+      await bot(identity).assembleTheme({ schemaVersion: 1, ...identity });
+    }
+    expect(await enabled()).toBe(false);
+    expect((await notices()).map((notice) => notice.body)).toContain(
+      'The plugin "dusk" failed to set this Bot\'s theme 3 times in a row and is now off for this Bot. Turn it on again under Plugins to try it once more.',
+    );
+  });
+
   /**
    * Seeds one Plugin as the current pinned generation of `userId`, and
    * answers the generation id so the next proposal can parent itself on it.

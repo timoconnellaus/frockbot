@@ -22,6 +22,7 @@ import type {
   LookIdentityViewV1,
 } from "@frockbot/app/flock/shared";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
+import { settlePluginHealthV1 } from "@frockbot/app/plugins/health";
 import {
   readBotPluginRosterV1,
   withPluginWorkerV1,
@@ -34,14 +35,21 @@ export const THEME_ASSEMBLE_DUE_KEY_V1 = "theme:assemble-due:v1";
 /** How long one assemble may run inside the Plugin worker. */
 export const THEME_ASSEMBLE_DEADLINE_MS_V1 = 10_000;
 
+/** The enabled Plugins that wrap `theme/assemble`, in roster order. */
+function themeAssemblersV1(roster: BotPluginRosterV1): string[] {
+  return roster.members
+    .filter(
+      (member) =>
+        roster.enabled.includes(member.packageId) &&
+        member.descriptor.hooks.includes("theme/assemble"),
+    )
+    .map((member) => member.packageId);
+}
+
 export function rosterDeclaresThemeAssembleV1(
   roster: BotPluginRosterV1,
 ): boolean {
-  return roster.members.some(
-    (member) =>
-      roster.enabled.includes(member.packageId) &&
-      member.descriptor.hooks.includes("theme/assemble"),
-  );
+  return themeAssemblersV1(roster).length > 0;
 }
 
 export async function themeAssembleDeadlineV1(storage: {
@@ -73,9 +81,12 @@ export interface AssembleBotThemeHostV1 {
  * Compiles this Bot's look, optionally wraps it, persists, and mirrors.
  *
  * A Plugin that throws or answers with a document the kernel refuses is
- * skipped; the last good document stays. No Plugin declaring the hook drops
- * a named look's stored document so Inherit + System still follows the OS.
- * Custom keeps its document: that is the Plugin result the person can inspect.
+ * skipped and the last good document stays, but the failure is not silent:
+ * it is charged to that Plugin the way a hook failure in a Turn is, so the
+ * person gets a notice with the reason and a third in a row turns it off. No
+ * Plugin declaring the hook drops a named look's stored document so Inherit +
+ * System still follows the OS. Custom keeps its document: that is the Plugin
+ * result the person can inspect.
  */
 export async function assembleBotThemeV1(
   state: ShellBotStateV1,
@@ -107,17 +118,31 @@ export async function assembleBotThemeV1(
         assembled = original;
       }
     } else {
+      // One run per assembly, so each failure counts once. The identity the
+      // run carries already names the Bot, and a run id is bounded.
+      const runId = `theme:${crypto.randomUUID()}`;
       const outcome = await withPluginWorkerV1(
         state,
         identity,
         roster,
         {
-          runId: `theme-assemble:${identity.botId}`,
+          runId,
           deadlineMs: THEME_ASSEMBLE_DEADLINE_MS_V1,
+          hookFailuresAs: "theme",
         },
         (worker) => worker.active.assembleTheme(payload, original),
       );
       if (outcome !== undefined && !("status" in outcome)) {
+        // A Plugin that assembled cleanly is well again, the way a Turn it
+        // ran through cleanly makes it, so a failure count stays a run.
+        try {
+          await settlePluginHealthV1(state.ctx.storage, {
+            runId,
+            ran: themeAssemblersV1(roster),
+          });
+        } catch {
+          // Health bookkeeping never fails a theme.
+        }
         try {
           assembled = decodeThemeDocumentV1(outcome);
         } catch {

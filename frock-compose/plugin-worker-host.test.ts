@@ -1413,6 +1413,73 @@ describe("hooks", () => {
     await active.dispose();
   });
 
+  test("assembleTheme records a refused document against the plugin that returned it", async () => {
+    const original = {
+      schemaVersion: 1 as const,
+      look: "ink" as const,
+      tokens: {
+        surfaces: {
+          window: "#1f1e24",
+          surface: "#1a191e",
+          raised: "#2c2a33",
+          text: "#f6f2ee",
+          muted: "#a8a3a6",
+          line: "#3a3742",
+          accent: "#db4b6d",
+          onAccent: "#ffffff",
+        },
+        type: "manrope" as const,
+        bubbles: { bot: "raised" as const, me: "tint" as const },
+      },
+    };
+    // Grey text on a grey window: well under the 4.5:1 floor.
+    const unreadable = {
+      ...original,
+      tokens: {
+        ...original.tokens,
+        surfaces: { ...original.tokens.surfaces, text: "#2a2930" },
+      },
+    };
+    const subject = harness({
+      health: (plugins) => ({
+        schemaVersion: 1,
+        contractVersion: ISOLATE_CONTRACT_VERSION,
+        plugins: plugins.map((pluginId) =>
+          healthy(pluginId, { hooks: ["theme/assemble"] }),
+        ),
+      }),
+      hook: () =>
+        Promise.resolve({
+          schemaVersion: 1,
+          status: "replaced",
+          replacement: unreadable,
+          failures: [],
+        }),
+    });
+    const prepared = await subject.host.mount([
+      member("weather", { hooks: ["theme/assemble"] }),
+    ]);
+    const active = await prepared.commit();
+    const assembled = await active.assembleTheme(
+      {
+        document: original,
+        look: "inherit",
+        now: "2026-09-18T12:00:00.000Z",
+        timezone: "UTC",
+      },
+      original,
+    );
+    expect(assembled).toEqual(original);
+    expect(subject.hookFailures).toEqual([
+      expect.objectContaining({
+        packageId: "weather",
+        event: "theme/assemble",
+        message: expect.stringMatching(/contrast/),
+      }),
+    ]);
+    await active.dispose();
+  });
+
   test("a plugin the worker skipped is recorded by name; the chain's value is kept", async () => {
     const subject = harness({
       health: (plugins) => ({

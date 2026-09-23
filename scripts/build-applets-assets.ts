@@ -7,6 +7,9 @@
 // What it writes:
 //
 //   app/plugins/template.generated.ts       the Plugin SDK scaffold (ADR 0026)
+//   app/plugins/skills/plugins/references/types.md
+//                                           the Plugin SDK declarations, as
+//                                           the Plugins Skill's reference
 //   app/skills/managed-plugins.generated.ts the Plugins Skill
 //   app/skills/managed-a2ui.generated.ts    the Cards Skill (ADR 0030), whose
 //                                           references are themselves built by
@@ -22,6 +25,7 @@ import {
   SKILL_MAX_REFERENCES,
   isSkillReferenceNameV1,
 } from "../app/skills/skill-md.ts";
+import { SDK_PLUGIN_TYPES } from "../applets/sdk/src/build/paths.ts";
 
 const root = new URL("../", import.meta.url);
 const at = (path: string): URL => new URL(path, root);
@@ -31,6 +35,9 @@ const PLUGIN_TEMPLATE_FILES = ["plugin.json", "plugin.ts"];
 const PLUGIN_TEMPLATE_OUTPUT = "app/plugins/template.generated.ts";
 /** Where the Plugins Skill is authored. */
 export const PLUGIN_SKILL_SOURCE = at("app/plugins/skills/plugins/");
+/** The Plugins Skill reference built from the SDK's own declarations. */
+export const PLUGIN_TYPES_REFERENCE =
+  "app/plugins/skills/plugins/references/types.md";
 const PLUGIN_SKILL_OUTPUT = "app/skills/managed-plugins.generated.ts";
 /** Where the Cards Skill is authored (ADR 0030). */
 export const A2UI_SKILL_SOURCE = at("app/cards/skills/a2ui/");
@@ -89,6 +96,36 @@ async function pluginTemplateModule(): Promise<string> {
       "",
     ].join("\n"),
   );
+}
+
+/**
+ * The Plugins Skill's `types.md`: the declarations `plugin_check` resolves
+ * `@frockbot/applet-sdk/plugin` to, byte for byte. A Bot can read them nowhere
+ * else — they are not on the Computer — so the Skill carries the very file the
+ * checker uses, rebuilt from it here and proved fresh by `--check`.
+ */
+export async function pluginTypesReference(): Promise<string> {
+  const declarations = await Bun.file(SDK_PLUGIN_TYPES).text();
+  // Longer than any run of backticks inside, so the doc comments' own code
+  // samples cannot close it.
+  const fence = "`".repeat(
+    Math.max(
+      3,
+      ...[...declarations.matchAll(/`+/g)].map((run) => run[0].length + 1),
+    ),
+  );
+  return [
+    "# Types",
+    "",
+    "Every type `@frockbot/applet-sdk/plugin` declares: the exact file `plugin_check` type-checks `plugin.ts` against, copied here whenever FrockBot is built.",
+    "",
+    'These declarations are not on the Computer. Nothing there can import or search for them, and an SDK you find there is not this one. Write `import type { … } from "@frockbot/applet-sdk/plugin"` and let `plugin_check` resolve it.',
+    "",
+    `${fence}ts`,
+    declarations.trimEnd(),
+    fence,
+    "",
+  ].join("\n");
 }
 
 /**
@@ -240,8 +277,10 @@ async function recipeSkillsModule(): Promise<string> {
   );
 }
 
+// `types.md` comes before the Plugins Skill module, which reads it.
 const outputs: Array<[string, () => Promise<string>]> = [
   [PLUGIN_TEMPLATE_OUTPUT, pluginTemplateModule],
+  [PLUGIN_TYPES_REFERENCE, pluginTypesReference],
   [PLUGIN_SKILL_OUTPUT, pluginSkillModule],
   [A2UI_SKILL_OUTPUT, a2uiSkillModule],
   [RECIPE_SKILL_OUTPUT, recipeSkillsModule],
