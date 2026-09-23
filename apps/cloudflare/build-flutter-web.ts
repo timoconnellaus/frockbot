@@ -274,11 +274,9 @@ function flutter(...args: string[]): void {
 flutter("pub", "get");
 const nativeMetadata = await readNativeMetadata(resolve(root, "../.."));
 const riveVersion = await riveWasmVersion();
-// `release.yml` names the tag it builds, which is the version the Profile page
-// shows; see `apps/native/lib/update/app_version.dart`.
-const release = process.env.FROCKBOT_RELEASE;
+// The tag `release.yml` builds is the app's version; any other build has none.
+const release = nativeMetadata.release;
 const defines = [
-  `--dart-define=FROCKBOT_APP_VERSION=${nativeMetadata.app.versionName}`,
   ...(release ? [`--dart-define=FROCKBOT_RELEASE=${release}`] : []),
   `--dart-define=RIVE_NATIVE_WASM_HOST=/rive/${riveVersion}/`,
 ];

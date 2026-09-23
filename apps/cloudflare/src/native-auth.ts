@@ -90,12 +90,13 @@ export function requestOrigin(url: URL): string {
   return `${url.protocol}//${host}${url.port ? `:${url.port}` : ""}`;
 }
 
-// Supported app versions can reuse a session; its protocol and catalogs stay bound.
+// A supported app upgrade reuses a session, whatever version and protocol it
+// moved to: the protocol is compatibility, and the gate refuses one it no longer
+// serves. Catalogs stay bound.
 function sameClient(a: ClientHello, b: ClientHello): boolean {
   const shape = (h: ClientHello) =>
     JSON.stringify({
       schemaVersion: h.schemaVersion,
-      protocolVersion: h.protocolVersion,
       catalogs: h.catalogs.map((c) => `${c.id}:${c.digest}`).sort(),
     });
   return shape(a) === shape(b);

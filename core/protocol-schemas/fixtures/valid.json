@@ -116,7 +116,6 @@
       "schemaVersion": 1,
       "protocolMin": 1,
       "protocolMax": 1,
-      "minimumNativeVersion": "1.2.0",
       "catalogs": []
     }
   },

@@ -1,6 +1,5 @@
 import { env, runInDurableObject, SELF } from "cloudflare:test";
 import { expect, test } from "vitest";
-import { MINIMUM_NATIVE_VERSION } from "@frockbot/core/protocol-schemas";
 import { DEPLOYMENT_POLICY_SINGLETON_NAME } from "../../src/deployment-policy.ts";
 import {
   nativeHeaders,
@@ -13,7 +12,7 @@ useApplicationArtifact();
 const hello = {
   schemaVersion: 1,
   protocolVersion: 1,
-  nativeVersion: MINIMUM_NATIVE_VERSION,
+  nativeVersion: "0.7.163",
   catalogs: [],
 };
 

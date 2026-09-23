@@ -3029,8 +3029,8 @@ test("native compatibility refusal precedes authentication and application routi
       headers: {
         "x-frockbot-client": JSON.stringify({
           schemaVersion: 1,
-          protocolVersion: 1,
-          nativeVersion: "1.0.0",
+          protocolVersion: 0,
+          nativeVersion: "0.7.163",
           catalogs: [],
         }),
       },

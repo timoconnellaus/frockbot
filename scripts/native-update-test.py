@@ -1,5 +1,6 @@
 import base64
 from contextlib import redirect_stdout
+from dataclasses import replace
 import hashlib
 import importlib.util
 import io
@@ -56,6 +57,18 @@ class UpdatesTest(unittest.TestCase):
                     updates.origin_define(),
                     "--dart-define=FROCKBOT_ORIGIN=https://release.example",
                 )
+        finally:
+            updates.source_metadata.cache_clear()
+
+    def test_the_pipeline_names_the_tag_through_the_environment(self):
+        updates.source_metadata.cache_clear()
+        try:
+            with patch.dict(os.environ, {"FROCKBOT_RELEASE": "0.7.164"}):
+                self.assertEqual(updates.build_name(), "0.7.164")
+                self.assertEqual(updates.release_defines(), ["--dart-define=FROCKBOT_RELEASE=0.7.164"])
+            updates.source_metadata.cache_clear()
+            with patch.dict(os.environ, {"FROCKBOT_RELEASE": ""}):
+                self.assertEqual(updates.release_defines(), [])
         finally:
             updates.source_metadata.cache_clear()
 
@@ -350,8 +363,7 @@ class ReleaseTest(ShorebirdHarness):
         self.assertEqual(args, [
             str(self.cli), "release", "android", "--flutter-version=3.47.0", "--artifact=apk",
             "--target-platform=android-arm64", f"--build-name={BUILD_NAME}", f"--build-number={NOW}",
-            f"--public-key-path={self.public}", "--", ORIGIN_DEFINE,
-            f"--dart-define=FROCKBOT_APP_VERSION={BUILD_NAME}+{NOW}"])
+            f"--public-key-path={self.public}", "--", ORIGIN_DEFINE])
         self.assertEqual(kwargs["cwd"], updates.NATIVE)
         self.assertEqual(kwargs["env"]["FROCKBOT_ANDROID_VERSION_FLOOR"], "0")
         self.assertEqual(kwargs["env"]["FROCKBOT_ANDROID_RELEASE_IDENTITY"], "true")
@@ -598,11 +610,11 @@ class ReleaseTest(ShorebirdHarness):
         self.assertFalse((self.state / "baseline.json").exists())
 
     def test_a_tagged_release_names_its_tag(self):
-        with patch.dict(os.environ, {"FROCKBOT_RELEASE": "0.7.162"}):
+        tagged = replace(updates.source_metadata(), release="0.7.163")
+        with patch.object(updates, "source_metadata", return_value=tagged):
             updates.release()
         (args, _), = self.shorebird()
-        self.assertEqual(args[-2:], [f"--dart-define=FROCKBOT_APP_VERSION={BUILD_NAME}+{NOW}",
-                                     "--dart-define=FROCKBOT_RELEASE=0.7.162"])
+        self.assertEqual(args[-2:], [ORIGIN_DEFINE, "--dart-define=FROCKBOT_RELEASE=0.7.163"])
 
     def test_build_is_the_shorebird_release(self):
         updates.main(["build"])
@@ -626,8 +638,7 @@ class PatchTest(ShorebirdHarness):
         self.assertEqual(args, [
             str(self.cli), "patch", "android", f"--release-version={BUILD_NAME}+{NOW}", f"--build-name={BUILD_NAME}",
             f"--build-number={NOW}", "--track=staging", f"--private-key-path={self.key}",
-            f"--public-key-path={self.public}", "--", "--target-platform=android-arm64", ORIGIN_DEFINE,
-            f"--dart-define=FROCKBOT_APP_VERSION={BUILD_NAME}+{NOW}"])
+            f"--public-key-path={self.public}", "--", "--target-platform=android-arm64", ORIGIN_DEFINE])
         self.assertEqual(kwargs["cwd"], updates.NATIVE)
         self.assertEqual(kwargs["env"]["FROCKBOT_ANDROID_VERSION_FLOOR"], str(NOW - 1))
         self.assertEqual(kwargs["env"]["FROCKBOT_ANDROID_RELEASE_IDENTITY"], "true")
@@ -647,12 +658,14 @@ class PatchTest(ShorebirdHarness):
         self.assertTrue((self.state / "pending-release.json").exists())
         self.assertEqual(self.baseline()["patches"], [])
 
-    def test_a_tagged_patch_names_its_own_tag_beside_the_release_identity(self):
-        with patch.dict(os.environ, {"FROCKBOT_RELEASE": "0.7.165"}):
+    def test_a_tagged_patch_names_its_own_tag_and_keeps_the_release_identity(self):
+        tagged = replace(updates.source_metadata(), release="0.7.165", version_name="0.7.165")
+        with patch.object(updates, "source_metadata", return_value=tagged):
             updates.patch()
         (args, _), = self.shorebird()
-        self.assertEqual(args[-2:], [f"--dart-define=FROCKBOT_APP_VERSION={BUILD_NAME}+{NOW}",
-                                     "--dart-define=FROCKBOT_RELEASE=0.7.165"])
+        self.assertIn(f"--release-version={BUILD_NAME}+{NOW}", args)
+        self.assertIn(f"--build-name={BUILD_NAME}", args)
+        self.assertEqual(args[-2:], [ORIGIN_DEFINE, "--dart-define=FROCKBOT_RELEASE=0.7.165"])
 
     def test_patch_never_overrides_native_or_asset_diffs(self):
         updates.patch()
@@ -765,8 +778,7 @@ class PipelinePatchTest(ShorebirdHarness):
         self.assertEqual(args, [
             str(self.cli), "patch", "android", f"--release-version={BUILD_NAME}+{NOW + 9}", f"--build-name={BUILD_NAME}",
             f"--build-number={NOW + 9}", "--track=staging", f"--private-key-path={self.key}",
-            f"--public-key-path={self.public}", "--", "--target-platform=android-arm64", ORIGIN_DEFINE,
-            f"--dart-define=FROCKBOT_APP_VERSION={BUILD_NAME}+{NOW + 9}"])
+            f"--public-key-path={self.public}", "--", "--target-platform=android-arm64", ORIGIN_DEFINE])
         self.assertEqual(kwargs["env"]["FROCKBOT_ANDROID_VERSION_FLOOR"], str(NOW + 8))
         self.assertEqual(kwargs["env"]["FROCKBOT_ANDROID_RELEASE_IDENTITY"], "true")
         self.assertEqual(record["number"], 2)
@@ -781,6 +793,18 @@ class PipelinePatchTest(ShorebirdHarness):
         with self.assertRaisesRegex(RuntimeError, "no active Android release"):
             updates.patch(baseline_source="shorebird")
         self.assertEqual(self.shorebird(), [])
+
+    def test_the_newest_release_is_the_latest_build_whatever_its_version(self):
+        # The tag became the version after 1.6.0 releases already existed, so a
+        # later 0.7.x release must still be the one a patch follows.
+        self.service_releases = [
+            {**self.service_releases[0], "version": f"1.6.0+{NOW + 5}"},
+            {**self.service_releases[1], "version": f"0.7.170+{NOW + 9}"},
+        ]
+        updates.patch(baseline_source="shorebird")
+        (args, _), = self.shorebird()
+        self.assertIn(f"--release-version=0.7.170+{NOW + 9}", args)
+        self.assertIn("--build-name=0.7.170", args)
 
     def test_release_built_with_another_flutter_requires_requalification(self):
         for entry in self.service_releases:

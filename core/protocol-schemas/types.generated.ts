@@ -21,14 +21,13 @@ export type CatalogRef = { id: Identifier; digest: Digest };
 export type ClientHello = {
   schemaVersion: 1;
   protocolVersion: number;
-  nativeVersion: string;
+  nativeVersion?: string;
   catalogs: Array<CatalogRef>;
 };
 export type CompatibilityView = {
   schemaVersion: 1;
   protocolMin: number;
   protocolMax: number;
-  minimumNativeVersion: string;
   catalogs: Array<CatalogRef>;
 };
 export type UpdateRequired = {

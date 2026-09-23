@@ -13,22 +13,20 @@ import native_metadata
 
 DOCUMENT = {
     "schemaVersion": 1,
-    "app": {"versionName": "1.6.0", "buildNumber": 7, "version": "1.6.0+7"},
+    "release": "0.7.163",
+    "app": {"versionName": "0.7.163", "buildNumber": 1, "version": "0.7.163+1"},
     "hostedOrigin": "https://bot.frockbot.test",
     "clientProtocol": 1,
-    "compatibility": {
-        "protocolMin": 1,
-        "protocolMax": 1,
-        "minimumNativeVersion": "1.6.0",
-    },
+    "compatibility": {"protocolMin": 1, "protocolMax": 1},
 }
 
 
 class NativeMetadataTest(unittest.TestCase):
     def test_decodes_the_checked_document(self):
         metadata = native_metadata.decode_native_metadata(json.dumps(DOCUMENT))
-        self.assertEqual(metadata.version_name, "1.6.0")
-        self.assertEqual(metadata.build_number, 7)
+        self.assertEqual(metadata.release, "0.7.163")
+        self.assertEqual(metadata.version_name, "0.7.163")
+        self.assertEqual(metadata.build_number, 1)
         self.assertEqual(metadata.hosted_origin, "https://bot.frockbot.test")
         self.assertEqual(metadata.client_protocol, 1)
 
@@ -37,7 +35,9 @@ class NativeMetadataTest(unittest.TestCase):
             "not json",
             json.dumps({**DOCUMENT, "schemaVersion": 2}),
             json.dumps({**DOCUMENT, "clientProtocol": "1"}),
-            json.dumps({**DOCUMENT, "app": {**DOCUMENT["app"], "version": "1.6.0+8"}}),
+            json.dumps({**DOCUMENT, "app": {**DOCUMENT["app"], "version": "0.7.163+8"}}),
+            json.dumps({**DOCUMENT, "release": ""}),
+            json.dumps({k: v for k, v in DOCUMENT.items() if k != "release"}),
             json.dumps({**DOCUMENT, "hostedOrigin": "http://bot.frockbot.test"}),
         ):
             with self.subTest(document=document), self.assertRaises(RuntimeError):
@@ -57,7 +57,7 @@ class NativeMetadataTest(unittest.TestCase):
             native_metadata.subprocess, "run", return_value=result
         ) as run:
             metadata = native_metadata.read_native_metadata(Path(root))
-        self.assertEqual(metadata.version, "1.6.0+7")
+        self.assertEqual(metadata.version, "0.7.163+1")
         self.assertEqual(run.call_args.args[0][0], "bun")
         self.assertIn("--root", run.call_args.args[0])
 
