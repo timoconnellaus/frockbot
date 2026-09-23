@@ -42,29 +42,13 @@ const _enableAction = {
     'properties': {
       'kind': {
         'type': 'string',
-        'enum': ['set-package-enabled'],
+        'enum': ['set-plugin-enabled'],
       },
-      'packageId': {'type': 'string', 'maxLength': 128},
+      'pluginId': {'type': 'string', 'maxLength': 128},
       'enabled': {'type': 'boolean'},
+      'expectedRevision': {'type': 'number', 'minimum': 0, 'maximum': 1000000},
     },
-    'required': ['kind', 'packageId', 'enabled'],
-    'additionalProperties': false,
-  },
-};
-
-const _installAction = {
-  'id': 'install-package',
-  'schema': {
-    'type': 'object',
-    'properties': {
-      'kind': {
-        'type': 'string',
-        'enum': ['install-package'],
-      },
-      'packageId': {'type': 'string', 'maxLength': 128},
-      'version': {'type': 'string', 'maxLength': 64},
-    },
-    'required': ['kind', 'packageId', 'version'],
+    'required': ['kind', 'pluginId', 'enabled', 'expectedRevision'],
     'additionalProperties': false,
   },
 };
@@ -105,40 +89,40 @@ const _chooseB = {
   },
 };
 
-/// A Plugins card, as `pluginsDocumentV1` draws one: the switch beside the
-/// title is the card's own action read backwards, and the same switch carries
-/// an install on a package that is not there yet.
-Map<String, Object?> _card({required bool on, bool installing = false}) => {
+/// A Bot's Plugins section, as `botPluginsDocumentV1` draws one: a titled
+/// section of rows, each with the switch that is its own action read
+/// backwards.
+Map<String, Object?> _card({required bool on}) => {
   'type': 'group',
   'orientation': 'column',
   'children': [
     {
       'type': 'group',
       'orientation': 'column',
-      'title': 'Ollama Cloud',
+      'title': 'Built in',
       'children': [
-        {'type': 'text', 'text': 'Models', 'style': 'label'},
         {
           'type': 'group',
-          'orientation': 'row',
+          'orientation': 'column',
+          'title': 'Web',
           'children': [
+            {'type': 'text', 'text': 'Read public web pages.'},
             {
-              'type': 'action',
-              'actionId': installing
-                  ? 'install-package'
-                  : 'set-package-enabled',
-              'label': on ? 'Turn off' : 'Turn on',
-              'input': installing
-                  ? {
-                      'kind': 'install-package',
-                      'packageId': 'provider-ollama-cloud',
-                      'version': '1.0.0',
-                    }
-                  : {
-                      'kind': 'set-package-enabled',
-                      'packageId': 'provider-ollama-cloud',
-                      'enabled': !on,
-                    },
+              'type': 'group',
+              'orientation': 'row',
+              'children': [
+                {
+                  'type': 'action',
+                  'actionId': 'set-package-enabled',
+                  'label': on ? 'Turn off' : 'Turn on',
+                  'input': {
+                    'kind': 'set-plugin-enabled',
+                    'pluginId': 'web',
+                    'enabled': !on,
+                    'expectedRevision': 1,
+                  },
+                },
+              ],
             },
           ],
         },
@@ -214,7 +198,6 @@ Future<Harness> pump(
   WidgetTester tester,
   Map<String, Object?> json, {
   Map<String, ViewFrameBuilder>? frames,
-  bool cardGroups = false,
   bool switchRows = false,
 }) async {
   final harness = Harness();
@@ -227,7 +210,6 @@ Future<Harness> pump(
             document: wire.ViewDocument.fromJson(json),
             controller: harness.controller,
             frames: frames,
-            cardGroups: cardGroups,
             switchRows: switchRows,
           ),
         ),
@@ -802,7 +784,7 @@ void main() {
               {
                 'type': 'group',
                 'orientation': 'column',
-                'title': 'Made by your Bot',
+                'title': 'Made by your Bots',
                 'children': [
                   switchRow('Weather', 'set-package-enabled'),
                   {
@@ -828,7 +810,7 @@ void main() {
         ),
         switchRows: true,
       );
-      expect(find.text('MADE BY YOUR BOT'), findsOneWidget);
+      expect(find.text('MADE BY YOUR BOTS'), findsOneWidget);
       expect(find.byType(FrockRowGroup), findsOneWidget);
       expect(find.text('Weather'), findsOneWidget);
       // The form the row shape cannot hold is still drawn, on a card of its
@@ -844,7 +826,7 @@ void main() {
       final harness = await pump(
         tester,
         document(_card(on: true), actions: const [_enableAction]),
-        cardGroups: true,
+        switchRows: true,
       );
       harness.gate = Completer<void>();
       expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
@@ -863,7 +845,7 @@ void main() {
       final harness = await pump(
         tester,
         document(_card(on: true), actions: const [_enableAction]),
-        cardGroups: true,
+        switchRows: true,
       );
       harness.receipt = const {'status': 'rejected'};
       harness.gate = Completer<void>();
@@ -874,28 +856,6 @@ void main() {
       await tester.pumpAndSettle();
       expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
       expect(harness.controller.predicted, isEmpty);
-    });
-
-    testWidgets('an install is not predicted: the version is not ours', (
-      tester,
-    ) async {
-      final harness = await pump(
-        tester,
-        document(
-          _card(on: false, installing: true),
-          actions: const [_installAction],
-        ),
-        cardGroups: true,
-      );
-      harness.gate = Completer<void>();
-      await tester.tap(find.byType(Switch));
-      await tester.pump();
-      expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
-      expect(harness.dispatched.single['actionId'], 'install-package');
-      expect(harness.controller.predicted, isEmpty);
-      harness.gate!.complete();
-      await tester.pumpAndSettle();
-      expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
     });
 
     testWidgets('a tapped row takes the check from its sibling at once', (

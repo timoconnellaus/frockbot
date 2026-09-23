@@ -15,9 +15,7 @@ import {
   createBotCommandV1,
   E2E_API_BASE_URL_SETTING,
   E2E_CONNECTION_TYPE_ID,
-  E2E_CUSTOM_MODELS_PACKAGE_ID,
   E2E_PROVIDER_PACKAGE_ID,
-  enableCustomModelsCommandV1,
   setAccountModelCommandV1,
 } from "./provisioning.ts";
 
@@ -43,7 +41,6 @@ test("a Bot id is a slug of the name, suffixed so two are two", () => {
 
 test("each command carries its own id", () => {
   const ids = [
-    enableCustomModelsCommandV1(0).commandId,
     chooseModelProviderCommandV1(1).commandId,
     connectApiKeyCommandV1({ label: "l", apiKey: "k", apiBaseUrl: "u" })
       .commandId,
@@ -59,13 +56,6 @@ test("each command carries its own id", () => {
 });
 
 test("the User settings commands are the ones the client sends, fenced", () => {
-  expect(enableCustomModelsCommandV1(3)).toMatchObject({
-    schemaVersion: 1,
-    type: "user/set-package-enabled",
-    expectedRevision: 3,
-    packageId: E2E_CUSTOM_MODELS_PACKAGE_ID,
-    enabled: true,
-  });
   // No `version`: `user/choose-model-provider` resolves the Package's version
   // and its dependencies out of the deployment's catalogue, and a pinned one
   // here would go stale the day that catalogue moved.

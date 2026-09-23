@@ -163,32 +163,12 @@ void main() {
         'commandId': 'c3',
         'revision': 4,
         'actionId': 'section-2-0',
-        'input': {'sectionId': 'provider.ollama', 'kind': 'choose-provider'},
+        'input': {'sectionId': 'provider.ollama', 'kind': 'manage-provider'},
       };
-      expect(viewActionKindV1(command), 'choose-provider');
+      expect(viewActionKindV1(command), 'manage-provider');
       expect(
         settingsChangeCommandV1(userId: 'tim', command: command),
         containsPair('values', <String, Object?>{}),
-      );
-    });
-
-    test('a save of the add-provider section names the chosen Package', () {
-      expect(
-        chosenProviderPackageIdV1({
-          'actionId': 'save-3',
-          'input': {
-            'sectionId': 'add-provider',
-            'j3.provider': '"provider-together"',
-          },
-        }),
-        'provider-together',
-      );
-      expect(
-        chosenProviderPackageIdV1({
-          'actionId': 'save-0',
-          'input': {'sectionId': 'profile', 'f0.name': 'Tim'},
-        }),
-        isNull,
       );
     });
 

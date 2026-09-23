@@ -398,34 +398,19 @@ export async function expectOkJson(response: Response): Promise<unknown> {
 
 /**
  * Provision a User and a Bot through the product's own HTTP surface: install
- * Custom models and the provider Package, create the Connection, choose the
+ * the provider Package, create the Connection, choose the
  * account model, then create the Bot. Every step is a request the client makes, so this
  * fixture proves the routes it uses as a side effect of using them.
  */
 /**
- * Switch Custom models on for a User and return the revision that follows.
- * The Package is seeded disabled on a User's first read, so the product path
- * is enablement at whatever revision the seed left, never a fresh install at
- * zero.
+ * The account's current revision, which is where its seed left it on first
+ * read: the next command is fenced against this.
  */
-export async function enableCustomModels(
-  userId: string,
-  commandId: string,
-): Promise<number> {
+export async function accountRevision(userId: string): Promise<number> {
   const seeded = (await expectOkJson(
     await asUser(userId, "/api/settings"),
   )) as { revision: number };
-  await expectOkJson(
-    await postAsUser(userId, "/api/settings", {
-      schemaVersion: 1,
-      type: "user/set-package-enabled",
-      commandId: `enable-${commandId}`,
-      expectedRevision: seeded.revision,
-      packageId: CUSTOM_MODELS_PACKAGE_ID,
-      enabled: true,
-    }),
-  );
-  return seeded.revision + 1;
+  return seeded.revision;
 }
 
 /**
@@ -464,7 +449,7 @@ export async function provisionThroughGateway(options: {
   const { userId, botId } = options;
   const apiKey = options.apiKey ?? OLLAMA_GOOD_API_KEY;
 
-  const enabled = await enableCustomModels(userId, `custom-models-${botId}`);
+  const enabled = await accountRevision(userId);
   await expectOkJson(
     await postAsUser(userId, "/api/settings", {
       schemaVersion: 1,

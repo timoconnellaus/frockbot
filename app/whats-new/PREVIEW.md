@@ -2,6 +2,30 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
+## One card per model provider
+
+improvement
+
+A provider that takes a key or a sign-in is one card in the Marketplace, with both ways to connect.
+
+![The OpenRouter card in the Marketplace, open on two ways to connect: Use an API key and Sign in.](media/one-card-per-provider.webp)
+
+## Add a model in one go
+
+improvement
+
+Adding a provider in the Marketplace asks for its key straight away, then leads on to choosing a model.
+
+![The DeepSeek card in the Marketplace after its key is connected, with the account ready and a Choose a model button.](media/add-a-model.webp)
+
+## Plugins live with each Bot
+
+improvement
+
+Built-in features are switched on a Bot’s own Plugins page, and every Bot can choose its own model. Account features is gone.
+
+![A Bot’s Plugins page on a phone: Web, Routines and Image under Built in, each with its own switch.](media/plugins-per-bot.webp)
+
 ## A refused plugin theme is reported
 
 fix

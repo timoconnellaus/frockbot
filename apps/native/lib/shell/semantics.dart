@@ -316,11 +316,7 @@ String viewGroupIdentifierV1(String title) =>
 /// names exist so a spec can say so.
 abstract final class PluginIds {
   static const document = 'plugins-document';
-  static const marketplaceDocument = 'marketplace-plugins-document';
   static const refresh = 'plugins-refresh';
-
-  /// The Profile's entry: the account's list, what is installed.
-  static const profileEntry = 'profile-plugins';
 }
 
 /// Routines: what a Bot does on its own, and what it left behind.

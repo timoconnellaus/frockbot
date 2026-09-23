@@ -45,7 +45,6 @@ import {
   chooseModelProviderCommandV1,
   connectApiKeyCommandV1,
   createBotCommandV1,
-  enableCustomModelsCommandV1,
   setAccountModelCommandV1,
 } from "./provisioning.ts";
 
@@ -263,7 +262,6 @@ export interface SharedApplication {
 export function shareProvisionedApplication(options: {
   /** The Bot `provisionThroughUi` leaves selected, before any test runs. */
   botName: string;
-  perBotModels?: boolean;
 }): () => SharedApplication {
   let shared: SharedApplication | undefined;
   let context: BrowserContext | undefined;
@@ -312,7 +310,6 @@ export function shareProvisionedApplication(options: {
       apiKey: E2E_OLLAMA_GOOD_API_KEY,
       apiBaseUrl: ollamaBaseUrl,
       botName: options.botName,
-      ...(options.perBotModels ? { perBotModels: true } : {}),
     });
     windowSize = page.viewportSize();
     shared = { page, userId, ollamaBaseUrl, botId: account.botId };
@@ -815,11 +812,6 @@ async function openProfileSurface(
   }).toPass({ timeout: 120_000 });
 }
 
-/** Open Plugins: what this account has, and whether it is on. */
-export async function openPlugins(page: Page): Promise<void> {
-  await openProfileSurface(page, "profile-plugins", "plugins-document");
-}
-
 /** Open Models: the account's default model, and the providers behind it. */
 export async function openModels(page: Page): Promise<void> {
   await openProfileSurface(page, "profile-models", "settings-model-field");
@@ -1065,38 +1057,6 @@ export async function openBotSettings(page: Page): Promise<void> {
 }
 
 /**
- * Turn a Package on from its Plugins row.
- *
- * The search box, not a scroll: a Flutter list publishes semantics only for
- * the rows at or near the viewport, so a row further down the catalogue has no
- * node at all — nothing to locate and nothing for `scrollIntoView` to take
- * hold of. Filtering brings the one row this wants to the top of a short list,
- * which takes the scroll out of the path entirely.
- */
-export async function enablePackage(page: Page, title: string): Promise<void> {
-  if (title === "Ollama Cloud") {
-    await chooseOllamaProvider(page);
-    return;
-  }
-  await openProfileSurface(page, "profile-capabilities", "plugins-document");
-  const search = page.getByRole("textbox").first();
-  await search.fill(title);
-  const toggle = page.getByRole("switch", { name: title, exact: true });
-  if (!(await toggle.isChecked())) await press(toggle);
-  await expect(toggle).toBeChecked({ timeout: 30_000 });
-  await closeOverlay(page);
-}
-
-/**
- * Switch Custom models on. The platform chooses the model, so choosing one at
- * all — and every model provider besides the built-in one — is behind this one
- * Package, which ships disabled.
- */
-export async function enableCustomModels(page: Page): Promise<void> {
-  await enablePackage(page, "Custom models");
-}
-
-/**
  * Type into the Marketplace search and wait until the field holds it.
  *
  * `fill()` sets the DOM input's value. A Flutter field only reads that while
@@ -1122,7 +1082,13 @@ export async function searchMarketplace(
 export async function chooseOllamaProvider(page: Page): Promise<void> {
   await openModels(page);
   const section = group(page, "Ollama Cloud");
-  if (await section.getByText("Manage provider").count()) {
+  // Models lists a provider only once it is added, and its one action reads
+  // "Connect account" or "Manage provider" by whether a key is connected, so
+  // the action being there at all is what says it was added.
+  const added = section
+    .locator('[flt-semantics-identifier^="view-action-section-"]')
+    .first();
+  if (await added.count()) {
     await closeOverlay(page);
     return;
   }
@@ -1138,9 +1104,7 @@ export async function chooseOllamaProvider(page: Page): Promise<void> {
   }
   await closeOverlay(page);
   await openModels(page);
-  await expect(section.getByText("Manage provider")).toBeVisible({
-    timeout: 60_000,
-  });
+  await expect(added).toBeVisible({ timeout: 60_000 });
   await closeOverlay(page);
 }
 
@@ -1245,13 +1209,6 @@ export async function provisionThroughUi(
     apiKey: string;
     apiBaseUrl: string;
     botName: string;
-    /**
-     * Also turn on Custom models, the Package behind a *per-Bot* model
-     * override. Off by default: choosing the account's own default needs none
-     * of it, and a spec that asserts a Bot has no model row of its own would
-     * be undone by provisioning that quietly installed one.
-     */
-    perBotModels?: boolean;
   },
 ): Promise<void> {
   // Provisioned in a window tall enough that the rows this path presses are on
@@ -1269,7 +1226,6 @@ export async function provisionThroughUi(
   const viewport = page.viewportSize();
   await page.setViewportSize({ width: 1280, height: 1800 });
   await openApplication(page, options.userId);
-  if (options.perBotModels) await enablePackage(page, "Custom models");
   await chooseOllamaProvider(page);
   await connectOllama(page, {
     apiKey: options.apiKey,
@@ -1382,19 +1338,9 @@ export async function provisionAccountThroughApi(
     apiKey: string;
     apiBaseUrl: string;
     botName: string;
-    /** As `provisionThroughUi`: the Package behind a per-Bot model override. */
-    perBotModels?: boolean;
   },
 ): Promise<ProvisionedAccount> {
   const { userId } = options;
-  if (options.perBotModels) {
-    await asUser(
-      request,
-      userId,
-      "/api/settings",
-      enableCustomModelsCommandV1(await settingsRevision(request, userId)),
-    );
-  }
   await asUser(
     request,
     userId,
@@ -1472,7 +1418,6 @@ export async function provisionThroughApi(
     apiKey: string;
     apiBaseUrl: string;
     botName: string;
-    perBotModels?: boolean;
   },
 ): Promise<ProvisionedAccount> {
   const account = await provisionAccountThroughApi(page.request, options);

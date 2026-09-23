@@ -49,10 +49,6 @@ class ViewDocumentView extends StatefulWidget {
   final ViewController controller;
   final Map<String, ViewFrameBuilder> frames;
   final Map<String, ViewFieldBuilder> fields;
-  final bool cardGroups;
-
-  /// Whether the root's titled groups are drawn as a grid of cards.
-  final bool gridGroups;
 
   /// Whether the root's titled groups are drawn as labelled cards of switch
   /// rows — one card per section the document itself names — which is what a
@@ -68,8 +64,6 @@ class ViewDocumentView extends StatefulWidget {
     required this.document,
     required this.controller,
     this.fields = const {},
-    this.cardGroups = false,
-    this.gridGroups = false,
     this.switchRows = false,
     this.rootView,
     Map<String, ViewFrameBuilder>? frames,
@@ -141,19 +135,11 @@ class _ViewDocumentViewState extends State<ViewDocumentView> {
           crossAxisAlignment: CrossAxisAlignment.stretch,
           mainAxisSize: MainAxisSize.min,
           children: [
-            if (widget.rootView case final Widget Function(Map<String, Object?>)
-                draw)
+            if (widget.rootView
+                case final Widget Function(Map<String, Object?>) draw)
               draw((json['root']! as Map).cast<String, Object?>())
             else if (widget.switchRows)
               ViewSwitchRows(
-                node: (json['root']! as Map).cast<String, Object?>(),
-              )
-            else if (widget.cardGroups)
-              ViewCardGroups(
-                node: (json['root']! as Map).cast<String, Object?>(),
-              )
-            else if (widget.gridGroups)
-              ViewGridGroups(
                 node: (json['root']! as Map).cast<String, Object?>(),
               )
             else

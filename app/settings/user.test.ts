@@ -1455,19 +1455,21 @@ describe("provider choice is one durable User decision", () => {
         storage,
         availablePackages: [provider, support],
       });
-    const command = {
-      schemaVersion: 1,
-      commandId: "choose-provider",
-      expectedRevision: 4,
-      sectionId: "provider.provider",
-      ownerId: "tim",
-      values: {},
-    };
-    const first = await owner().changeSettings("tim", "models", command);
+    const choose = () =>
+      owner().executeConfiguration({
+        schemaVersion: 1,
+        userId: "tim",
+        command: {
+          schemaVersion: 1,
+          type: "user/choose-model-provider",
+          commandId: "choose-provider",
+          expectedRevision: 4,
+          packageId: "provider",
+        },
+      });
+    const first = await choose();
     expect(first).toMatchObject({ status: "applied", revision: 5 });
-    expect(await owner().changeSettings("tim", "models", command)).toEqual(
-      first,
-    );
+    expect(await choose()).toEqual(first);
     expect((await owner().readSnapshot()).packages).toEqual([
       { packageId: "support", version: "1.0.0", state: "installed" },
       {
@@ -1485,19 +1487,21 @@ describe("provider choice is one durable User decision", () => {
         storage,
         availablePackages: [provider],
       });
-    const command = {
-      schemaVersion: 1,
-      commandId: "choose-broken",
-      expectedRevision: 0,
-      sectionId: "provider.provider",
-      ownerId: "tim",
-      values: {},
-    };
-    const first = await owner().changeSettings("tim", "models", command);
+    const choose = () =>
+      owner().executeConfiguration({
+        schemaVersion: 1,
+        userId: "tim",
+        command: {
+          schemaVersion: 1,
+          type: "user/choose-model-provider",
+          commandId: "choose-broken",
+          expectedRevision: 0,
+          packageId: "provider",
+        },
+      });
+    const first = await choose();
     expect(first).toMatchObject({ status: "rejected", revision: 0 });
-    expect(await owner().changeSettings("tim", "models", command)).toEqual(
-      first,
-    );
+    expect(await choose()).toEqual(first);
     expect((await owner().readSnapshot()).packages).toEqual([]);
   });
 });

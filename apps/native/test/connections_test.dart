@@ -49,6 +49,7 @@ Map<String, Object?> connectionsFrame({
       'authorization': 'api-key',
       'connected': connected,
       'mayConnect': mayConnect,
+      'installed': true,
       'settings': [
         {
           'id': 'api-base-url',
@@ -67,6 +68,7 @@ Map<String, Object?> connectionsFrame({
       'authorization': 'grant',
       'connected': connected,
       'mayConnect': true,
+      'installed': true,
       'description': 'Read, search, label and send email in a Gmail account.',
       'icon': 'gmail',
     },
@@ -79,6 +81,7 @@ Map<String, Object?> connectionsFrame({
         'authorization': 'grant',
         'connected': 0,
         'mayConnect': true,
+        'installed': true,
         'description': 'Read and post messages in Slack.',
         'icon': 'slack',
       },
@@ -88,6 +91,7 @@ Map<String, Object?> connectionsFrame({
 Map<String, Object?> catalogFrame({
   int revision = 1,
   String deepSeekState = 'not-installed',
+  bool deepSeekKey = false,
 }) {
   final installed = deepSeekState == 'installed';
   return {
@@ -95,7 +99,19 @@ Map<String, Object?> catalogFrame({
     'ownerId': 'tim',
     'revision': revision,
     'modelInUse': 'Auto · Frock AI',
-    'accounts': <Map<String, Object?>>[],
+    'accounts': <Map<String, Object?>>[
+      if (deepSeekKey)
+        {
+          'id': 'conn-deepseek',
+          'label': 'DeepSeek',
+          'state': 'ready',
+          'packageId': 'provider-deepseek',
+          'connectionTypeId': 'deepseek-account',
+          'kind': 'model',
+          'authorization': 'api-key',
+          'detail': 'Ready',
+        },
+    ],
     'providers': [
       {
         'packageId': 'provider-deepseek',
@@ -103,8 +119,9 @@ Map<String, Object?> catalogFrame({
         'displayName': 'DeepSeek',
         'kind': 'model',
         'authorization': 'api-key',
-        'connected': 0,
-        'mayConnect': installed,
+        'connected': deepSeekKey ? 1 : 0,
+        'mayConnect': installed && !deepSeekKey,
+        'installed': installed,
         'description': 'Use DeepSeek models with your own key.',
         'icon': 'deepseek',
       },
@@ -116,12 +133,41 @@ Map<String, Object?> catalogFrame({
         'authorization': 'grant',
         'connected': 0,
         'mayConnect': true,
+        'installed': true,
         'description': 'Read, search, label and send email in a Gmail account.',
         'icon': 'gmail',
       },
     ],
   };
 }
+
+/// A model provider that takes a key or a sign-in: two rows, one per
+/// Connection Type, both named for the provider, as the server sends them.
+Map<String, Object?> twoWayFrame({bool installed = true}) => {
+  'schemaVersion': 1,
+  'ownerId': 'tim',
+  'revision': 1,
+  'modelInUse': 'Auto · Frock AI',
+  'accounts': <Map<String, Object?>>[],
+  'providers': [
+    for (final (type, authorization) in [
+      ('openrouter-account', 'api-key'),
+      ('openrouter-oauth', 'grant'),
+    ])
+      {
+        'packageId': 'provider-openrouter',
+        'connectionTypeId': type,
+        'displayName': 'OpenRouter',
+        'kind': 'model',
+        'authorization': authorization,
+        'connected': 0,
+        'mayConnect': installed,
+        'installed': installed,
+        'description': 'Use OpenRouter models with your own key, or sign in.',
+        'icon': 'openrouter',
+      },
+  ],
+};
 
 Widget page(
   SettingsApi api,
@@ -768,7 +814,166 @@ void main() {
     await tester.tap(find.text('Add'));
     await tester.pumpAndSettle();
     expect(sent.single['type'], 'user/choose-model-provider');
+    // The key is the next thing asked for, so its form is already open.
     expect(find.text('Connect'), findsOneWidget);
+    expect(find.text('Connect account'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'a provider with a key and a sign-in is one card in the catalog',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final store = MemoryStore();
+      final api = SettingsApi(
+        store,
+        (_, _) async => twoWayFrame(installed: false),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: MarketplacePage(api: api, store: store, userId: 'tim'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('OpenRouter'), findsOneWidget);
+      expect(find.text('Add'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('its card offers both ways in, each on its own Connection Type', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final opened = <Uri>[];
+    final sent = <Map<String, Object?>>[];
+    final api = SettingsApi(store, (path, body) async {
+      if (body == null) return twoWayFrame();
+      final command = (body as Map).cast<String, Object?>();
+      sent.add({'path': path, ...command});
+      if (command['type'] == 'connection/start') {
+        return {
+          'schemaVersion': 1,
+          'status': 'authorization-required',
+          'connectionId': 'conn-oauth',
+          'redirectUrl': 'https://openrouter.example/authorize',
+          'expiresAt': '2026-09-11T00:10:00.000Z',
+        };
+      }
+      return {
+        'schemaVersion': 1,
+        'commandId': command['commandId'],
+        'connectionId': 'conn-key',
+        'status': 'applied',
+      };
+    });
+    // The Provider accounts page Models opens is the same card.
+    await tester.pumpWidget(
+      page(
+        api,
+        store,
+        models: true,
+        openBrowser: (uri) async {
+          opened.add(uri);
+          return true;
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('OpenRouter'), findsOneWidget);
+    // Connect opens the card on both ways rather than choosing one.
+    await tester.tap(find.text('Connect'));
+    await tester.pumpAndSettle();
+    expect(sent, isEmpty);
+    expect(find.text('Use an API key'), findsOneWidget);
+    expect(find.text('Sign in'), findsOneWidget);
+
+    await tester.tap(find.text('Sign in'));
+    await tester.pumpAndSettle();
+    expect(sent.single['type'], 'connection/start');
+    expect(sent.single['connectionTypeId'], 'openrouter-oauth');
+    expect(opened.single.toString(), 'https://openrouter.example/authorize');
+
+    await tester.tap(find.text('Use an API key'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'API key'),
+      'synthetic-test-key',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Connect account'));
+    await tester.pumpAndSettle();
+    expect(sent.last['type'], 'connection/create-api-key');
+    expect(sent.last['connectionTypeId'], 'openrouter-account');
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('a removed model that kept its key is offered again', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = MemoryStore();
+    final api = SettingsApi(
+      store,
+      (_, _) async => catalogFrame(deepSeekKey: true),
+    );
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: MarketplacePage(api: api, store: store, userId: 'tim'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('Add'), findsOneWidget);
+    expect(find.text('Connected'), findsNothing);
+    await tester.tap(find.text('Installed'));
+    await tester.pumpAndSettle();
+    expect(find.text('DeepSeek'), findsNothing);
+  });
+
+  testWidgets('a connected model leads on to choosing it', (tester) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = MemoryStore();
+    final paths = <String>[];
+    final api = SettingsApi(store, (path, body) async {
+      paths.add(path);
+      if (path.startsWith('/api/settings/models')) {
+        return {
+          'schemaVersion': 1,
+          'surfaceId': 'settings-models',
+          'revision': 1,
+          'root': {
+            'type': 'group',
+            'orientation': 'column',
+            'children': <Object>[],
+          },
+          'actions': <Object>[],
+        };
+      }
+      return catalogFrame(deepSeekState: 'installed', deepSeekKey: true);
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: MarketplacePage(api: api, store: store, userId: 'tim'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('DeepSeek'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Choose a model'));
+    await tester.pumpAndSettle();
+    expect(paths.last, startsWith('/api/settings/models'));
+    expect(find.text('Models'), findsWidgets);
     expect(tester.takeException(), isNull);
   });
 

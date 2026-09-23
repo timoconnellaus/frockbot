@@ -124,7 +124,7 @@ class _ModelPickerState extends State<ModelPicker> {
                       ? FrockEmptyState(
                           icon: Icons.search_off_rounded,
                           title: 'No matching models',
-                          detail: 'Try another name, or connect a provider on Models.',
+                          detail: 'Try another name, or add a provider in the Marketplace.',
                           action: 'Back to Models',
                           onAction: () => Navigator.of(context).pop(),
                         )

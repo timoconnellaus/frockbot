@@ -22,4 +22,5 @@ export const subagentsDefinitionV1: PackageDefinitionV1 = {
     },
   ],
   dependencies: ["shell"],
+  platformOwned: true,
 };

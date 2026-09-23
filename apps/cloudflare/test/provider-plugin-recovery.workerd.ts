@@ -65,11 +65,6 @@ async function provision(identity: Identity): Promise<void> {
     ).revision;
   for (const command of [
     {
-      type: "user/set-package-enabled",
-      packageId: "custom-models",
-      enabled: true,
-    },
-    {
       type: "user/install-package",
       packageId: "provider-deepseek",
       version: "0.0.1",

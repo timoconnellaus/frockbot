@@ -619,14 +619,14 @@ function resolveModelBindingEntitiesV1(input: {
   if (!installation || installation.state !== "installed") {
     return {
       status: "failed",
-      failure: "Turn this model's plugin back on in Plugins to use it.",
+      failure: "Add this model's provider again in the Marketplace to use it.",
     };
   }
   const pkg = catalog.get(connection.packageId, installation.version);
   if (!pkg) {
     return {
       status: "failed",
-      failure: "This model's plugin is unavailable. Pick another model.",
+      failure: "This model's provider is unavailable. Pick another model.",
     };
   }
   const connectionType = pkg.connectionTypes.find(

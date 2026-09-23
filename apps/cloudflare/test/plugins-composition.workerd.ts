@@ -176,8 +176,6 @@ interface BotRpc {
       pluginId: string;
       kind: string;
       on: boolean;
-      switchable: boolean;
-      unavailable?: string;
       sections?: Array<{
         surfaceId: string;
         root?: unknown;
@@ -871,7 +869,7 @@ describe("the User-owned Composition", () => {
     });
     expect(frame.revision).toBe(0);
     const web = frame.plugins.find((row) => row.pluginId === "web");
-    expect(web).toMatchObject({ kind: "first-party", switchable: true });
+    expect(web).toMatchObject({ kind: "first-party", on: true });
     expect(frame.plugins.map((row) => row.pluginId)).not.toContain(
       "custom-models",
     );
@@ -2750,7 +2748,6 @@ export const cards = {
       (candidate) => candidate.pluginId === BROKEN_ID,
     );
     expect(row?.on).toBe(true);
-    expect(row?.switchable).toBe(true);
     expect(row?.sections?.[0]?.failure).toMatch(/could not show its section/);
     // The switch the User needs to turn it off still works.
     await switchPlugin(identity, BROKEN_ID, false);

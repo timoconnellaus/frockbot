@@ -62,12 +62,13 @@ describe("foundation application", () => {
   test("seeds a default-disabled Package and its dependencies", () => {
     const packageIds = foundationDefaultPackageIds();
 
-    expect(packageIds.has("custom-models")).toBe(true);
+    expect(packageIds.has("provider-ollama-cloud")).toBe(true);
     expect(packageIds.has("settings")).toBe(true);
     expect(packageIds.has("shell")).toBe(true);
     expect(packageIds.has("ui-theme")).toBe(true);
     expect(
-      FOUNDATION_PACKAGE_CATALOG_V1.get("custom-models")?.defaultEnablement,
+      FOUNDATION_PACKAGE_CATALOG_V1.get("provider-ollama-cloud")
+        ?.defaultEnablement,
     ).toBe("disabled");
   });
 
@@ -171,7 +172,8 @@ describe("foundation application", () => {
 
   test("names the Packages the platform owns rather than the User", () => {
     // The application root, the Packages with no enablement control to offer,
-    // and the ambient zero-configuration model path.
+    // the ambient zero-configuration model path, and the first-party features
+    // a Bot switches for itself: none has an account-wide switch.
     const platformOwned = FOUNDATION_PACKAGE_CATALOG_V1.entries
       .filter((pkg) => pkg.platformOwned)
       .map((pkg) => pkg.id);
@@ -179,22 +181,26 @@ describe("foundation application", () => {
     expect(platformOwned.toSorted()).toEqual([
       "auth",
       "credentials",
+      "custom-models",
+      "image",
+      "machine-messages",
       "provider-flock-ai",
+      "routines",
       "settings",
       "shell",
+      "subagents",
       "ui-theme",
       "voice",
+      "web",
     ]);
     // Audit has no User control either, but it is not a default installation:
     // it is statically mounted rather than repaired into enablement state.
     expect(
       FOUNDATION_PACKAGE_CATALOG_V1.get("audit")?.platformOwned,
     ).toBeUndefined();
+    // A model provider is the User's to add and remove.
     expect(
-      FOUNDATION_PACKAGE_CATALOG_V1.get("custom-models")?.platformOwned,
-    ).toBeUndefined();
-    expect(
-      FOUNDATION_PACKAGE_CATALOG_V1.get("web")?.platformOwned,
+      FOUNDATION_PACKAGE_CATALOG_V1.get("provider-ollama-cloud")?.platformOwned,
     ).toBeUndefined();
   });
 

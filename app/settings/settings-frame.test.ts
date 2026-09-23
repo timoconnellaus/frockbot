@@ -273,7 +273,7 @@ test("the platform binding has one Auto choice", () => {
   ]);
 });
 
-test("provider knobs have one Models home and disappear while disabled", () => {
+test("provider knobs have one Models home, and a provider that is not added has no section", () => {
   const user = settings(1);
   const declared = {
     ...provider,
@@ -293,10 +293,14 @@ test("provider knobs have one Models home and disappear while disabled", () => {
   expect(
     applicationSettingsFrame("tim", user, [declared]).sections,
   ).toHaveLength(2);
+  // Removed with a key left behind is not added: the Marketplace is the way
+  // back, and the values wait for it.
   user.packages[0]!.state = "disabled";
   expect(
-    modelsSettingsFrame("tim", user, [declared]).sections[1]!.fields,
-  ).toEqual([]);
+    modelsSettingsFrame("tim", user, [declared]).sections.map(
+      (section) => section.id,
+    ),
+  ).toEqual(["model"]);
   expect(user.packages[0]!.values).toEqual({ limit: 4 });
   expect(
     modelsSettingsCommand({
@@ -412,15 +416,110 @@ test("the Marketplace catalog lists uninstalled models and installed connectors"
   expect(catalog.providers[0]).toMatchObject({
     kind: "connector",
     mayConnect: true,
+    installed: true,
     icon: "gmail",
   });
   expect(catalog.providers[2]).toMatchObject({
     kind: "model",
     mayConnect: false,
+    installed: false,
     connected: 0,
     icon: "together",
     description: "Use Together models with your own key.",
   });
+});
+
+test("a model provider that takes a key or a sign-in is named once, for itself", () => {
+  const user = settings();
+  user.packages = [];
+  const openRouter: AvailableUserPackage = {
+    ...provider,
+    packageId: "provider-openrouter",
+    displayName: "OpenRouter",
+    connectionTypes: [
+      {
+        id: "openrouter-account",
+        displayName: "OpenRouter account",
+        icon: "openrouter",
+        allowMultiple: true,
+        authorization: { kind: "api-key" },
+        capabilities: ["models"],
+      },
+      {
+        id: "openrouter-oauth",
+        displayName: "OpenRouter sign-in",
+        icon: "openrouter",
+        allowMultiple: true,
+        authorization: { kind: "grant" },
+        capabilities: ["models"],
+      },
+    ],
+  };
+  const rows = connectionsFrame("tim", user, [openRouter], {
+    catalog: true,
+  }).providers;
+  // One row per way in, so each keeps its own command and accounts, and both
+  // carry the provider's own name and one description: a client draws them
+  // as the one card they are.
+  expect(rows.map((row) => [row.connectionTypeId, row.authorization])).toEqual([
+    ["openrouter-account", "api-key"],
+    ["openrouter-oauth", "grant"],
+  ]);
+  for (const row of rows) {
+    expect(row).toMatchObject({
+      displayName: "OpenRouter",
+      kind: "model",
+      description: "Use OpenRouter models with your own key, or sign in.",
+    });
+  }
+  const signInOnly = connectionsFrame(
+    "tim",
+    user,
+    [{ ...openRouter, connectionTypes: [openRouter.connectionTypes![1]!] }],
+    { catalog: true },
+  ).providers[0]!;
+  expect(signInOnly.description).toBe("Use OpenRouter models by signing in.");
+});
+
+test("a model removed with a key left behind is offered again, not shown as added", () => {
+  const user = settings();
+  user.packages[0]!.state = "disabled";
+  const row = connectionsFrame("tim", user, [provider], { catalog: true })
+    .providers[0]!;
+  // The key is still there, but the provider is not: Add is what brings it
+  // back, so the row says it is not installed rather than connected.
+  expect(row).toMatchObject({ connected: 1, installed: false });
+  expect(row.mayConnect).toBe(false);
+});
+
+test("a provider section's one action names the next step", () => {
+  const user = settings();
+  const actions = () =>
+    modelsSettingsFrame("tim", user, [provider]).sections[1]!.actions;
+  expect(actions()).toEqual([
+    { kind: "manage-provider", label: "Manage provider" },
+  ]);
+  user.connections = [];
+  expect(actions()).toEqual([
+    { kind: "manage-provider", label: "Connect account" },
+  ]);
+});
+
+test("a built-in model says it needs no key, so it never reads as one someone added", () => {
+  const user = settings(2);
+  user.platformModel = undefined;
+  const builtIn = { ...provider, platformOwned: true };
+  const labels = modelSettingsOptions("tim", user, [builtIn], query).items.map(
+    (item) => item.label,
+  );
+  expect(labels).toEqual([
+    "Automatic — recommended",
+    "Model 0 · Work · built in, no key needed",
+    "Model 1 · Work · built in, no key needed",
+  ]);
+  expect(
+    modelSettingsOptions("tim", user, [provider], query).items[1]!.label,
+  ).toBe("Model 0 · Work");
 });
 
 test("resetting an Application setting omits the empty patch at the owner seam", () => {

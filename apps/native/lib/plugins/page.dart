@@ -1,31 +1,21 @@
 import 'package:flutter/material.dart';
 
 import '../client/transport.dart';
-import '../connections/page.dart';
 import '../protocol/client_wire.generated.dart' as wire;
-import '../settings/page.dart';
 import '../shell/semantics.dart';
 import '../theme/caret.dart';
 import '../view/surface.dart';
-import 'document.dart';
 
-/// Reads the Plugins document and carries one action to the settings route.
+/// Reads one Bot's Plugins document and carries its switches to the Bot.
 ///
-/// With a [botId] the page is that Bot's: what it could run and whether it
-/// does, one switch per row, per Bot (ADR 0026). Without one it is the
-/// account's list — what is installed — and the account-wide switches for
-/// built-in features when [capabilities] is set.
+/// What the Bot could run and whether it does, one switch per row, per Bot
+/// (ADR 0026). There is no account-wide list: a built-in feature is always
+/// the account's, and a model provider is chosen in Models.
 class PluginsController extends ViewSurfaceController {
   final NativeApi api;
   final String userId;
-  final bool capabilities;
-  final bool marketplace;
-  final String? botId;
+  final String botId;
   final VoidCallback? onFeaturesChanged;
-
-  /// Where a row's "Set up in …" goes. Navigation is not a command, so the
-  /// host answers it itself rather than sending it anywhere.
-  final void Function(String home, String? packageId)? openHome;
   wire.ViewDocument? _document;
   wire.ViewDocument? _all;
   String _query = '';
@@ -38,9 +28,9 @@ class PluginsController extends ViewSurfaceController {
     ),
   ].join(' ').toLowerCase().contains(_query);
 
-  /// A Bot's Plugins document files its rows under a titled section per kind,
-  /// so a section is filtered by the rows inside it and dropped when none of
-  /// them match; a flat document is matched as the row it is.
+  /// The document files its rows under a titled section per kind, so a
+  /// section is filtered by the rows inside it and dropped when none of them
+  /// match; anything else is matched as the row it is.
   Object? _filtered(Object? node) {
     if (node is! Map || node['type'] != 'group') return node;
     final rows = (node['children'] as List? ?? const [])
@@ -84,10 +74,7 @@ class PluginsController extends ViewSurfaceController {
   PluginsController(
     this.api,
     this.userId, {
-    this.openHome,
-    this.capabilities = false,
-    this.marketplace = false,
-    this.botId,
+    required this.botId,
     this.onFeaturesChanged,
   });
 
@@ -109,19 +96,9 @@ class PluginsController extends ViewSurfaceController {
   @override
   String? get message => _message;
   @override
-  String get surfaceId => botId != null
-      ? 'bot-plugins'
-      : marketplace
-      ? 'marketplace-plugins'
-      : capabilities
-      ? 'capabilities'
-      : 'plugins';
+  String get surfaceId => 'bot-plugins';
 
-  String get _path => botId != null
-      ? '/api/bots/${Uri.encodeComponent(botId!)}/plugins'
-      : marketplace
-      ? '/api/settings/marketplace/plugins'
-      : '/api/settings/${capabilities ? 'capabilities' : 'plugins'}';
+  String get _path => '/api/bots/${Uri.encodeComponent(botId)}/plugins';
 
   void _changed() {
     if (!_closed) notifyListeners();
@@ -153,73 +130,57 @@ class PluginsController extends ViewSurfaceController {
 
   @override
   Future<Map<String, Object?>> dispatch(Map<String, Object?> command) async {
-    if (botId != null) {
-      final input = ((command['input'] as Map?) ?? const {})
-          .cast<String, Object?>();
-      if (input['kind'] == 'plugin-tool') {
-        // A control on a Plugin's section: the Bot runs the tool it names
-        // and the page is read again, so the section shows what changed.
-        final answer = await api.request(
-          _path,
-          body: {
-            'schemaVersion': 1,
-            'kind': 'plugin-tool',
-            'commandId': command['commandId'],
-            'pluginId': input['pluginId'],
-            'tool': input['tool'],
-            'arguments': input['arguments'] ?? '',
-          },
-        );
-        final receipt = ((answer as Map?) ?? const {}).cast<String, Object?>();
-        final ran = receipt['status'] == 'ran' && receipt['isError'] != true;
-        return {
-          'commandId': command['commandId'],
-          'status': ran ? 'applied' : 'rejected',
-          if (!ran)
-            'failure': receipt['failure'] is String
-                ? receipt['failure']
-                : receipt['content'] is String
-                ? receipt['content']
-                : 'This control could not run.',
-        };
-      }
-      // A Bot's switch: the command names the Plugin and the revision the
-      // page read, and the Bot answers applied, conflict or rejected.
+    final input = ((command['input'] as Map?) ?? const {})
+        .cast<String, Object?>();
+    if (input['kind'] == 'plugin-tool') {
+      // A control on a Plugin's section: the Bot runs the tool it names and
+      // the page is read again, so the section shows what changed.
       final answer = await api.request(
         _path,
         body: {
           'schemaVersion': 1,
-          'kind': 'set-plugin-enabled',
+          'kind': 'plugin-tool',
           'commandId': command['commandId'],
           'pluginId': input['pluginId'],
-          'enabled': input['enabled'] == true,
-          'expectedRevision': input['expectedRevision'] ?? command['revision'],
+          'tool': input['tool'],
+          'arguments': input['arguments'] ?? '',
         },
       );
       final receipt = ((answer as Map?) ?? const {}).cast<String, Object?>();
-      if (receipt['status'] == 'applied') onFeaturesChanged?.call();
+      final ran = receipt['status'] == 'ran' && receipt['isError'] != true;
       return {
         'commandId': command['commandId'],
-        'status': receipt['status'] == 'applied' ? 'applied' : 'rejected',
-        if (receipt['failure'] is String) 'failure': receipt['failure'],
-        if (receipt['status'] == 'conflict')
-          'failure': 'This page was out of date. Refreshed — try again.',
+        'status': ran ? 'applied' : 'rejected',
+        if (!ran)
+          'failure': receipt['failure'] is String
+              ? receipt['failure']
+              : receipt['content'] is String
+              ? receipt['content']
+              : 'This control could not run.',
       };
     }
-    if (pluginActionKindV1(command) == 'open-home') {
-      openHome?.call(
-        pluginHomeV1(command) ?? 'none',
-        (command['input'] as Map?)?['packageId'] as String?,
-      );
-      return {'commandId': command['commandId'], 'status': 'applied'};
-    }
+    // A switch: the command names the Plugin and the revision the page read,
+    // and the Bot answers applied, conflict or rejected.
     final answer = await api.request(
-      '/api/settings',
-      body: pluginCommandV1(command),
+      _path,
+      body: {
+        'schemaVersion': 1,
+        'kind': 'set-plugin-enabled',
+        'commandId': command['commandId'],
+        'pluginId': input['pluginId'],
+        'enabled': input['enabled'] == true,
+        'expectedRevision': input['expectedRevision'] ?? command['revision'],
+      },
     );
     final receipt = ((answer as Map?) ?? const {}).cast<String, Object?>();
     if (receipt['status'] == 'applied') onFeaturesChanged?.call();
-    return receipt;
+    return {
+      'commandId': command['commandId'],
+      'status': receipt['status'] == 'applied' ? 'applied' : 'rejected',
+      if (receipt['failure'] is String) 'failure': receipt['failure'],
+      if (receipt['status'] == 'conflict')
+        'failure': 'This page was out of date. Refreshed — try again.',
+    };
   }
 
   @override
@@ -229,22 +190,16 @@ class PluginsController extends ViewSurfaceController {
   }
 }
 
-/// Plugins: what a User has, and whether it is on.
+/// One Bot's Plugins: what it could run, and whether it does.
 ///
-/// Enablement only, as on the web. Nothing a Package declares — its accounts,
-/// its credentials, its settings — is edited here: each lives on the surface
-/// that owns what it configures, and a row offers the way there.
+/// Enablement only. Nothing a Package declares — its accounts, its
+/// credentials, its settings — is edited here.
 class PluginsPage extends StatefulWidget {
   final NativeApi api;
   final LocalStore store;
   final String userId;
-  final bool capabilities;
-  final bool marketplace;
-
-  /// The Bot whose Plugins this page shows; absent, the account's list.
-  final String? botId;
+  final String botId;
   final VoidCallback? onFeaturesChanged;
-  final String? botName;
 
   /// Off inside the panel beside the conversation, which names it already.
   final bool chrome;
@@ -254,11 +209,8 @@ class PluginsPage extends StatefulWidget {
     required this.api,
     required this.store,
     required this.userId,
-    this.capabilities = false,
-    this.marketplace = false,
-    this.botId,
+    required this.botId,
     this.onFeaturesChanged,
-    this.botName,
     this.chrome = true,
   });
 
@@ -268,27 +220,16 @@ class PluginsPage extends StatefulWidget {
 
 class PluginsPageState extends State<PluginsPage>
     with AutomaticKeepAliveClientMixin<PluginsPage> {
-  NativeApi get api => widget.api;
-  LocalStore get store => widget.store;
-  String get userId => widget.userId;
-  bool get capabilities => widget.capabilities;
-  bool get marketplace => widget.marketplace;
-  String? get botId => widget.botId;
-  String? get botName => widget.botName;
-
   @override
   bool get wantKeepAlive => true;
 
   late PluginsController controller;
 
   PluginsController _createController() => PluginsController(
-    api,
-    userId,
-    capabilities: capabilities,
-    marketplace: marketplace,
-    botId: botId,
+    widget.api,
+    widget.userId,
+    botId: widget.botId,
     onFeaturesChanged: () => widget.onFeaturesChanged?.call(),
-    openHome: (home, packageId) => _openHome(context, home, packageId),
   );
 
   @override
@@ -302,8 +243,6 @@ class PluginsPageState extends State<PluginsPage>
     super.didUpdateWidget(oldWidget);
     if (oldWidget.api == widget.api &&
         oldWidget.userId == widget.userId &&
-        oldWidget.capabilities == widget.capabilities &&
-        oldWidget.marketplace == widget.marketplace &&
         oldWidget.botId == widget.botId) {
       return;
     }
@@ -318,74 +257,31 @@ class PluginsPageState extends State<PluginsPage>
     super.dispose();
   }
 
-  void _openHome(BuildContext context, String home, String? packageId) {
-    final page = switch (home) {
-      // A model provider's accounts and a connector Package's are one surface
-      // in this client, so both homes land on Connectors.
-      'models' => SettingsPage(
-        onFeaturesChanged: widget.onFeaturesChanged,
-        api: api,
-        store: store,
-        userId: userId,
-        home: 'models',
-      ),
-      'connections' => ConnectionsPage(
-        api: api,
-        store: store,
-        userId: userId,
-        onFeaturesChanged: widget.onFeaturesChanged,
-      ),
-      'user-settings' => SettingsPage(
-        onFeaturesChanged: widget.onFeaturesChanged,
-        api: api,
-        store: store,
-        userId: userId,
-        section: packageId == null ? null : 'package.$packageId',
-        title: 'Feature settings',
-      ),
-      _ => null,
-    };
-    if (page == null) return;
-    Navigator.of(context).push(MaterialPageRoute<void>(builder: (_) => page));
-  }
-
   @override
   Widget build(BuildContext context) {
     super.build(context);
     return ViewSurfacePage(
-      title: botId != null
-          ? 'Plugins'
-          : marketplace
-          ? 'Plugins'
-          : capabilities
-          ? 'Account features'
-          : 'Plugins',
-      cardGroups: capabilities && botId == null,
-      gridGroups: marketplace && botId == null,
-      switchRows: botId != null,
+      title: 'Plugins',
+      switchRows: true,
       chrome: widget.chrome,
-      store: store,
-      userId: userId,
-      documentId: marketplace
-          ? PluginIds.marketplaceDocument
-          : PluginIds.document,
+      store: widget.store,
+      userId: widget.userId,
+      documentId: PluginIds.document,
       refreshId: PluginIds.refresh,
       controller: controller,
       banner: (_) => Padding(
         padding: const EdgeInsets.only(bottom: 12),
         child: SteadyCaret(
           child: TextField(
-            decoration: InputDecoration(
-              prefixIcon: const Icon(Icons.search),
-              hintText: capabilities && botId == null
-                  ? 'Find a feature'
-                  : 'Find a plugin',
+            decoration: const InputDecoration(
+              prefixIcon: Icon(Icons.search),
+              hintText: 'Find a plugin',
             ),
             onChanged: controller.search,
           ),
         ),
       ),
-      cacheScope: botId ?? 'account',
+      cacheScope: widget.botId,
     );
   }
 }

@@ -1,9 +1,9 @@
 // The Bot's own Plugins page, driven from its Settings (ADR 0026).
 //
 // A Bot's Plugins are Bot settings, so the door is the Plugins row in the Bot's
-// Settings and the page opens in the panel beside the conversation; the Profile
-// keeps only what applies to the whole account. This spec walks the product
-// path — check the Profile names no Bot, open the page, flip Web off
+// Settings and the page opens in the panel beside the conversation; there is
+// no account-wide Plugins list or feature switchboard. This spec walks the
+// product path — check the Profile offers neither, open the page, flip Web off
 // — and then reads the same Bot's page back to prove the switch is what the
 // Bot serves, not what the widget last painted.
 import type { Locator, Page } from "@playwright/test";
@@ -46,11 +46,10 @@ function cardSwitch(page: Page, title: string): Locator {
 // `provisionThroughUi` does: a Flutter list publishes semantics only for the
 // rows at or near the viewport, and the engine drops a row back out as the list
 // moves without reliably putting it back, so scrolling a long list is not
-// something to rest assertions on. The height is what this page holds: eleven
-// cards — the five first-party features, the five locked card Plugins (ADR
-// 0030 step 7) and the deployment's seeded Plugin — under the page's header,
-// all of them in the tree at 3000px. A twelfth card is a taller window here,
-// not a scroll.
+// something to rest assertions on. The height is what this page holds: the
+// five first-party features and the deployment's seeded Plugin under the
+// page's header, all of them in the tree at 3000px. More rows are a taller
+// window here, not a scroll.
 test.use({ viewport: { width: 1280, height: 3000 } });
 
 async function openBotPlugins(page: Page): Promise<void> {
@@ -72,25 +71,13 @@ test("a Bot's Plugins page is its own, and a switch it holds is the Bot's", asyn
   await createBot(page, "Plugged");
   await settle(page);
 
-  // The Profile holds what applies to the whole account — the installed
-  // list and Account features — and never a Bot's own switches.
+  // The Profile holds no second set of switches: a built-in feature is
+  // switched per Bot, and a model provider is added in the Marketplace.
   await openProfileMenu(page);
-  await expect(says(page, "Account features").first()).toBeVisible();
-  await expect(says(page, "Plugins · Plugged")).toHaveCount(0);
+  await expect(tap(page, "profile-models")).toBeVisible();
+  await expect(says(page, "Account features")).toHaveCount(0);
+  await expect(tap(page, "profile-plugins")).toHaveCount(0);
   await testInfo.attach("profile-menu.png", {
-    body: await page.screenshot(),
-    contentType: "image/png",
-  });
-  // And the entry opens that account list: what is installed, with none of
-  // the Bot's own first-party switches on it.
-  await tap(page, "profile-plugins").click();
-  await expect(sem(page, "plugins-document")).toBeVisible({
-    timeout: SHELL_TIMEOUT_MS,
-  });
-  await settle(page);
-  await expect(says(page, "Plugins · Plugged")).toHaveCount(0);
-  await expect(cardSwitch(page, "Web")).toHaveCount(0);
-  await testInfo.attach("profile-plugins-page.png", {
     body: await page.screenshot(),
     contentType: "image/png",
   });
@@ -110,24 +97,12 @@ test("a Bot's Plugins page is its own, and a switch it holds is the Bot's", asyn
   // Choosing a model is a Settings decision, so it is never a card here.
   await expect(sem(page, "view-group-custom-models")).toHaveCount(0);
 
-  // And the five locked card Plugins, which draw what the conversation says
-  // (ADR 0030 step 7). They are listed as first-party and Always on, and the
-  // User is offered no switch: the card that asks for a decision, hands over
-  // a file or says a credential is missing is the Bot's voice, not a feature.
-  for (const title of [
-    "Approval cards",
-    "Question cards",
-    "Attachment cards",
-    "Credential cards",
-    "Agent cards",
-  ]) {
-    await expect(says(page, title).first()).toBeVisible();
-    await expect(cardSwitch(page, title)).toHaveCount(0);
+  // The locked card Plugins that draw what the conversation says (ADR 0030
+  // step 7) run for every Bot and have nothing to switch, so they are not
+  // rows: every row on this page is something the person can change.
+  for (const title of ["Approval cards", "Question cards", "Agent cards"]) {
+    await expect(says(page, title)).toHaveCount(0);
   }
-  await testInfo.attach("bot-plugins-locked-cards.png", {
-    body: await page.screenshot(),
-    contentType: "image/png",
-  });
   await testInfo.attach("bot-plugins-page.png", {
     body: await page.screenshot(),
     contentType: "image/png",

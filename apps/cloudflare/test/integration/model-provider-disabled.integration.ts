@@ -107,29 +107,4 @@ describe("a Bot whose model's provider is switched off", () => {
     ).toContain(FROCK_AUTO_PLATFORM_MODEL);
     expect((await platformModel(userId))?.providerModelId).toBe("@frock/auto");
   });
-
-  it("keeps the account provider and model active with the Bot override Package disabled", async () => {
-    const userId = freshUserId("provider-cascade");
-    const botId = "cascaded-bot";
-    await provisionThroughGateway({ userId, botId });
-
-    // The optional Bot override no longer owns the permanent account choice.
-    await disablePackage(userId, "custom-models");
-    const states = await packageStates(userId);
-    expect(states["custom-models"]).toBe("disabled");
-    expect(states["provider-ollama-cloud"]).toBe("installed");
-
-    const before = (await frockModelCalls()).length;
-    const turn = await postAsUser(userId, `/api/bots/${botId}/turns`, {
-      schemaVersion: 1,
-      commandId: "turn-after-cascade",
-      text: "hello",
-    });
-    expect(turn.status).toBe(200);
-    expect(JSON.stringify(await turn.json())).toContain("Ollama reply");
-    expect(
-      (await frockModelCalls()).slice(before).map((call) => call.model),
-    ).not.toContain(FROCK_AUTO_PLATFORM_MODEL);
-    expect((await platformModel(userId))?.providerModelId).toBe("@frock/auto");
-  });
 });

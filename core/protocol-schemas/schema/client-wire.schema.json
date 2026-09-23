@@ -3771,7 +3771,7 @@
                   "type": "object",
                   "properties": {
                     "kind": {
-                      "enum": ["choose-provider", "manage-provider"]
+                      "enum": ["manage-provider"]
                     },
                     "label": {
                       "type": "string",
@@ -4787,6 +4787,9 @@
               "mayConnect": {
                 "type": "boolean"
               },
+              "installed": {
+                "type": "boolean"
+              },
               "settings": {
                 "type": "array",
                 "minItems": 0,
@@ -4811,7 +4814,8 @@
               "kind",
               "authorization",
               "connected",
-              "mayConnect"
+              "mayConnect",
+              "installed"
             ],
             "additionalProperties": false
           }
@@ -4829,71 +4833,6 @@
         "accounts",
         "providers"
       ],
-      "additionalProperties": false
-    },
-    "PluginsFrame": {
-      "type": "object",
-      "properties": {
-        "schemaVersion": {
-          "const": 1
-        },
-        "ownerId": {
-          "$ref": "#/$defs/Identifier"
-        },
-        "revision": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 9007199254740991
-        },
-        "plugins": {
-          "type": "array",
-          "maxItems": 200,
-          "items": {
-            "type": "object",
-            "properties": {
-              "packageId": {
-                "$ref": "#/$defs/Identifier"
-              },
-              "version": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 64
-              },
-              "displayName": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 200
-              },
-              "summary": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 200
-              },
-              "state": {
-                "enum": ["not-installed", "installed", "disabled", "failed"]
-              },
-              "home": {
-                "enum": ["models", "connections", "user-settings", "none"]
-              },
-              "failure": {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 2000
-              }
-            },
-            "required": [
-              "packageId",
-              "version",
-              "displayName",
-              "summary",
-              "state",
-              "home"
-            ],
-            "additionalProperties": false
-          }
-        }
-      },
-      "required": ["schemaVersion", "ownerId", "revision", "plugins"],
       "additionalProperties": false
     },
     "NotificationDirectory": {

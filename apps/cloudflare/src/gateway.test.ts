@@ -1,7 +1,4 @@
-import type {
-  PluginsFrame,
-  SettingsFrame,
-} from "@frockbot/core/protocol-schemas";
+import type { SettingsFrame } from "@frockbot/core/protocol-schemas";
 import type {
   ApprovalDecisionReceiptV1,
   ApprovalListViewV1,
@@ -496,12 +493,6 @@ class MemoryConfiguration
   }
   async readConnectionsFrame(): Promise<never> {
     throw new Error("Connections frame not configured in this fixture");
-  }
-  async readPluginsFrame(): Promise<PluginsFrame> {
-    throw new Error("Plugins frame not configured in this fixture");
-  }
-  async readMarketplacePluginsFrame(): Promise<PluginsFrame> {
-    throw new Error("Marketplace Plugins frame not configured in this fixture");
   }
   async readBotPluginsFrame(): Promise<never> {
     throw new Error("Bot plugins frame not configured in this fixture");
@@ -3039,7 +3030,7 @@ test("native compatibility refusal precedes authentication and application routi
   );
 });
 
-test("Profile settings separate personal details, optional capabilities, and genuine extensions", async () => {
+test("Profile settings hold personal details, and no account-wide Plugins list remains", async () => {
   const { gateway, configurations } = createTestGateway();
   const owner = new MemoryConfiguration();
   owner.readSettingsFrame = async () => ({
@@ -3051,22 +3042,6 @@ test("Profile settings separate personal details, optional capabilities, and gen
       { id: "profile", label: "Your profile", fields: [] },
       { id: "package.image", label: "Image generation", fields: [] },
     ],
-  });
-  owner.readPluginsFrame = async () => ({
-    schemaVersion: 1,
-    ownerId: "alice",
-    revision: 1,
-    plugins: [
-      { packageId: "admin", displayName: "Deployment administration" },
-      { packageId: "image", displayName: "Image generation" },
-      { packageId: "third-party", displayName: "An extension" },
-    ].map((item) => ({
-      ...item,
-      version: "1",
-      summary: "A feature",
-      state: "installed" as const,
-      home: "none" as const,
-    })),
   });
   configurations.set("alice", owner);
   const read = async (path: string) => {
@@ -3080,236 +3055,15 @@ test("Profile settings separate personal details, optional capabilities, and gen
   expect(
     await read("/api/settings/application?as=document&section=package.image"),
   ).toMatchObject({ root: { children: [{ title: "Image generation" }] } });
-  expect(await read("/api/settings/plugins")).toMatchObject({
-    plugins: [{ packageId: "third-party" }],
-  });
-  expect(await read("/api/settings/capabilities")).toMatchObject({
-    plugins: [{ packageId: "image" }],
-  });
-});
-
-test("an installed provider Plugin is listed as a Plugin, and offered in Models until then", async () => {
-  const { gateway, configurations } = createTestGateway();
-  const owner = new MemoryConfiguration();
-  owner.readPluginsFrame = async () => ({
-    schemaVersion: 1,
-    ownerId: "alice",
-    revision: 1,
-    plugins: [
-      {
-        packageId: "provider-deepseek",
-        displayName: "DeepSeek",
-        state: "installed" as const,
-        home: "models" as const,
-      },
-      {
-        packageId: "provider-anthropic",
-        displayName: "Anthropic",
-        state: "not-installed" as const,
-        home: "models" as const,
-      },
-      {
-        packageId: "shell",
-        displayName: "The shell",
-        state: "installed" as const,
-        home: "none" as const,
-      },
-    ].map((item) => ({ ...item, version: "0.0.1", summary: "Models" })),
-  });
-  configurations.set("alice", owner);
-  // The built-in Package a provider Plugin rides on is invisible while it is
-  // not installed, and every other built-in stays off this surface; once the
-  // account has it, the Plugin is one of the Plugins it lists.
-  const listed = (await (
-    await gateway(request("/api/settings/plugins", "alice"))
-  ).json()) as PluginsFrame;
-  expect(listed.plugins.map((plugin) => plugin.packageId)).toEqual([
-    "provider-deepseek",
-  ]);
-});
-
-test("a provider Package the account has not installed is not one of its Plugins", async () => {
-  // Every account starts holding a disabled row for each Package the
-  // deployment turns on by default, and a provider is one of those. The row
-  // is not an installation: nothing is in the account's Composition, so the
-  // Plugins page has nothing to list until the account installs the provider
-  // in Models.
-  const { gateway, configurations } = createTestGateway();
-  const owner = new MemoryConfiguration();
-  owner.readPluginsFrame = async () => ({
-    schemaVersion: 1,
-    ownerId: "alice",
-    revision: 1,
-    plugins: [
-      {
-        packageId: "provider-deepseek",
-        displayName: "DeepSeek",
-        state: "disabled" as const,
-        home: "models" as const,
-      },
-    ].map((item) => ({ ...item, version: "0.0.1", summary: "Models" })),
-  });
-  configurations.set("alice", owner);
-  const listed = (await (
-    await gateway(request("/api/settings/plugins", "alice"))
-  ).json()) as PluginsFrame;
-  expect(listed.plugins).toEqual([]);
-});
-
-test("the Marketplace offers the real installable catalog and projects account state", async () => {
-  const { gateway, configurations } = createTestGateway();
-  const owner = new MemoryConfiguration();
-  owner.readMarketplacePluginsFrame = async () => ({
-    schemaVersion: 1,
-    ownerId: "alice",
-    revision: 8,
-    plugins: [
-      {
-        packageId: "provider-deepseek",
-        displayName: "DeepSeek",
-        state: "not-installed" as const,
-        home: "models" as const,
-      },
-    ].map((item) => ({ ...item, version: "0.0.1", summary: "Models" })),
-  });
-  configurations.set("alice", owner);
-
-  const response = await gateway(
-    request("/api/settings/marketplace/plugins", "alice"),
-  );
-  expect(response.status).toBe(200);
-  expect(response.headers.get("cache-control")).toBe("no-store");
-  expect(await response.json()).toMatchObject({
-    revision: 8,
-    plugins: [
-      {
-        packageId: "provider-deepseek",
-        state: "not-installed",
-      },
-    ],
-  });
-
-  const documentResponse = await gateway(
-    request("/api/settings/marketplace/plugins?as=document", "alice"),
-  );
-  expect(documentResponse.status).toBe(200);
-  const document = (await documentResponse.json()) as {
-    surfaceId: string;
-    root: {
-      children: Array<{ type?: string; text?: string; children?: unknown[] }>;
-    };
-  };
-  expect(document.surfaceId).toBe("marketplace-plugins");
-  const text = JSON.stringify(document.root);
-  expect(text).toContain("Add Plugin");
-
-  const rejected = await gateway(
-    request("/api/settings/marketplace/plugins", "alice", { method: "POST" }),
-  );
-  expect(rejected.status).toBe(405);
-});
-
-test("the Marketplace does not promise Plugins when the deployment cannot mount them", async () => {
-  const { gateway, configurations } = createTestGateway();
-  const owner = new MemoryConfiguration();
-  owner.readMarketplacePluginsFrame = async () => ({
-    schemaVersion: 1,
-    ownerId: "alice",
-    revision: 1,
-    plugins: [],
-  });
-  configurations.set("alice", owner);
-  const response = await gateway(
-    request("/api/settings/marketplace/plugins", "alice"),
-  );
-  expect(response.status).toBe(200);
-  expect((await response.json()) as PluginsFrame).toMatchObject({
-    plugins: [],
-  });
-});
-
-test("Custom models is offered as a capability while providers stay in Models", async () => {
-  // Both route their configuration to Models, and only one of them answers a
-  // model call: the provider is connected and turned on there, while Custom
-  // models is the choice itself and is offered here like any other capability.
-  const { gateway, configurations } = createTestGateway();
-  const owner = new MemoryConfiguration();
-  owner.readPluginsFrame = async () => ({
-    schemaVersion: 1,
-    ownerId: "alice",
-    revision: 1,
-    plugins: [
-      {
-        packageId: "custom-models",
-        displayName: "Custom models",
-        state: "installed" as const,
-        home: "models" as const,
-      },
-      {
-        packageId: "provider-ollama-cloud",
-        displayName: "Ollama Cloud",
-        state: "installed" as const,
-        home: "models" as const,
-      },
-    ].map((item) => ({ ...item, version: "0.0.1", summary: "Models" })),
-  });
-  configurations.set("alice", owner);
-  const document = (await (
-    await gateway(request("/api/settings/capabilities?as=document", "alice"))
-  ).json()) as {
-    root: { children: Array<{ title?: string; children?: unknown[] }> };
-  };
-  const titles: string[] = [];
-  const walk = (node: { title?: string; children?: unknown[] }): void => {
-    if (typeof node.title === "string") titles.push(node.title);
-    for (const child of node.children ?? []) {
-      walk(child as { title?: string; children?: unknown[] });
-    }
-  };
-  walk(document.root);
-  expect(titles).toContain("Custom models");
-  expect(titles).not.toContain("Ollama Cloud");
-});
-
-test("a built-in turned off before Plugins stopped listing it can still be turned back on", async () => {
-  const { gateway, configurations } = createTestGateway();
-  const owner = new MemoryConfiguration();
-  owner.readPluginsFrame = async () => ({
-    schemaVersion: 1,
-    ownerId: "alice",
-    revision: 1,
-    plugins: [
-      {
-        packageId: "user-machine",
-        displayName: "Your Mac",
-        state: "disabled" as const,
-        home: "none" as const,
-      },
-      {
-        packageId: "provider-anthropic",
-        displayName: "Anthropic",
-        state: "disabled" as const,
-        home: "models" as const,
-      },
-      {
-        packageId: "search",
-        displayName: "Search",
-        state: "installed" as const,
-        home: "none" as const,
-      },
-    ].map((item) => ({ ...item, version: "1", summary: "A feature" })),
-  });
-  configurations.set("alice", owner);
-  const response = await gateway(
-    request("/api/settings/capabilities", "alice"),
-  );
-  expect(response.status).toBe(200);
-  const frame = (await response.json()) as PluginsFrame;
-  // The Package the User turned off, and only that one: an enabled built-in is
-  // not an optional capability, and a provider is connected in Models.
-  expect(frame.plugins.map((plugin) => plugin.packageId)).toEqual([
-    "user-machine",
-  ]);
+  // Built-in features are switched per Bot and model providers are added in
+  // the Marketplace, so the account-wide lists are gone.
+  for (const path of [
+    "/api/settings/plugins",
+    "/api/settings/capabilities",
+    "/api/settings/marketplace/plugins",
+  ]) {
+    expect((await gateway(request(path, "alice"))).status).toBe(404);
+  }
 });
 
 describe("voice gateway routes", () => {

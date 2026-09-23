@@ -317,31 +317,33 @@ class _ConnectionsPageState extends State<ConnectionsPage>
     }).toList();
   }
 
-  bool _isInstalled(Map<String, Object?> provider) {
-    final connected = (provider['connected'] as num?)?.toInt() ?? 0;
-    if (provider['kind'] == 'model') {
-      return provider['mayConnect'] == true || connected > 0;
-    }
-    return connected > 0;
-  }
+  /// A model is added when its Package is, whatever keys it still holds; a
+  /// connected app is added when an account is connected.
+  bool _isInstalled(Map<String, Object?> provider) =>
+      provider['kind'] == 'model'
+      ? provider['installed'] == true
+      : ((provider['connected'] as num?)?.toInt() ?? 0) > 0;
 
   bool _needsAdd(Map<String, Object?> provider) =>
       widget.catalog &&
       !widget.installed &&
       provider['kind'] == 'model' &&
-      (provider['connected'] as int? ?? 0) == 0 &&
-      provider['mayConnect'] != true;
+      provider['installed'] != true;
 
-  Future<void> _addProvider(Map<String, Object?> provider) async {
+  /// Adds a model provider to the account, and says whether it landed: a key
+  /// is what the person is asked for next, and only an added provider takes
+  /// one.
+  Future<bool> _addProvider(Map<String, Object?> provider) async {
     final packageId = provider['packageId'] as String;
     final row = _rowKey(provider);
-    if (pendingRow != null) return;
+    if (pendingRow != null) return false;
     setState(() {
       pendingRow = row;
       notice = null;
     });
+    var added = false;
     try {
-      await widget.api.request(
+      final receipt = await widget.api.request(
         '/api/settings',
         body: {
           'schemaVersion': 1,
@@ -351,7 +353,16 @@ class _ConnectionsPageState extends State<ConnectionsPage>
           'packageId': packageId,
         },
       );
-      widget.onFeaturesChanged?.call();
+      added = receipt is Map && receipt['status'] == 'applied';
+      if (added) {
+        widget.onFeaturesChanged?.call();
+      } else if (mounted) {
+        setState(() {
+          notice = receipt is Map && receipt['failure'] is String
+              ? receipt['failure'] as String
+              : 'Couldn’t add ${provider['displayName']}. Refresh and try again.';
+        });
+      }
     } catch (_) {
       if (mounted) {
         setState(() {
@@ -363,7 +374,22 @@ class _ConnectionsPageState extends State<ConnectionsPage>
       if (mounted) setState(() => pendingRow = null);
       await load();
     }
+    return added;
   }
+
+  /// Where a connected model provider leads: the account's model choice, which
+  /// is the step after the key and the one the Marketplace cannot take itself.
+  void _chooseModel() => Navigator.of(context).push(
+    MaterialPageRoute<void>(
+      builder: (_) => SettingsPage(
+        onFeaturesChanged: widget.onFeaturesChanged,
+        api: widget.api,
+        store: widget.store,
+        userId: widget.userId,
+        home: 'models',
+      ),
+    ),
+  );
 
   Future<void> _removeProvider(Map<String, Object?> provider) async {
     final packageId = provider['packageId'] as String;
@@ -419,8 +445,21 @@ class _ConnectionsPageState extends State<ConnectionsPage>
     }
   }
 
-  String _rowKey(Map<String, Object?> provider) =>
-      '${provider['packageId']}/${provider['connectionTypeId']}';
+  /// The card a row is drawn on. A model provider is one card however many
+  /// ways it connects — a key, a sign-in — and a connector app is one card of
+  /// its own, so a model row is keyed by its Package alone.
+  String _rowKey(Map<String, Object?> provider) => provider['kind'] == 'model'
+      ? '${provider['packageId']}'
+      : '${provider['packageId']}/${provider['connectionTypeId']}';
+
+  /// The listed rows as cards, in the order the first of each was listed.
+  List<List<Map<String, Object?>>> get cards {
+    final grouped = <String, List<Map<String, Object?>>>{};
+    for (final row in providers) {
+      (grouped[_rowKey(row)] ??= []).add(row);
+    }
+    return grouped.values.toList();
+  }
 
   List<Map<String, Object?>> accountsOf(Map<String, Object?> provider) {
     final packageId = provider['packageId'] as String;
@@ -457,7 +496,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
               onAction: load,
             );
     } else {
-      final rows = providers;
+      final rows = cards;
       body = RefreshIndicator(
         onRefresh: load,
         child: widget.catalog && !widget.installed
@@ -538,7 +577,8 @@ class _ConnectionsPageState extends State<ConnectionsPage>
     );
   }
 
-  Widget _providerCard(Map<String, Object?> provider, int index) {
+  Widget _providerCard(List<Map<String, Object?>> ways, int index) {
+    final provider = ways.first;
     // The semantics identifier is the provider's name. A filter that swaps
     // the card in this slot has to build a new element: Flutter keeps the
     // previous identifier on a reused one, so the visible Ollama card was
@@ -547,13 +587,20 @@ class _ConnectionsPageState extends State<ConnectionsPage>
       key: ValueKey(_rowKey(provider)),
       index: index,
       provider: provider,
-      accounts: accountsOf(provider),
+      ways: ways,
+      accounts: [for (final way in ways) ...accountsOf(way)],
       models: widget.catalog || widget.models,
       catalog: widget.catalog,
       busy: pendingRow == _rowKey(provider),
       send: (command) => _send(command, _rowKey(provider)),
       commandId: _commandId,
       onAdd: _needsAdd(provider) ? () => _addProvider(provider) : null,
+      onChooseModel:
+          widget.catalog &&
+              provider['kind'] == 'model' &&
+              _isInstalled(provider)
+          ? _chooseModel
+          : null,
       onRemove:
           widget.installed &&
               provider['kind'] == 'model' &&
@@ -566,7 +613,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   Widget _installedScroll(
     ThemeData theme,
     wire.ConnectionsFrame frame,
-    List<Map<String, Object?>> rows,
+    List<List<Map<String, Object?>>> rows,
     String? banner,
   ) {
     return ListView(
@@ -628,7 +675,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   Widget _catalogScroll(
     ThemeData theme,
     wire.ConnectionsFrame frame,
-    List<Map<String, Object?>> rows,
+    List<List<Map<String, Object?>>> rows,
     String? banner,
   ) {
     final showMac =
@@ -687,44 +734,41 @@ class _ConnectionsPageState extends State<ConnectionsPage>
                         horizontal: ((constraints.crossAxisExtent - width) / 2)
                             .clamp(0, double.infinity),
                       ),
-                      sliver: columns == 1
-                          ? SliverList.builder(
-                              itemCount: count,
-                              itemBuilder: (context, index) {
-                                if (showMac && index == 0) {
-                                  return Padding(
-                                    padding: const EdgeInsets.only(bottom: gap),
-                                    child: _MacMessagesRow(page: widget),
-                                  );
-                                }
-                                final row = rows[index - extras];
-                                return Padding(
-                                  padding: const EdgeInsets.only(bottom: gap),
-                                  child: _providerCard(row, index - extras),
-                                );
-                              },
-                            )
-                          : SliverGrid(
-                              gridDelegate:
-                                  SliverGridDelegateWithFixedCrossAxisCount(
-                                    crossAxisCount: columns,
-                                    mainAxisExtent: 92,
-                                    crossAxisSpacing: gap,
-                                    mainAxisSpacing: gap,
-                                  ),
-                              delegate: SliverChildBuilderDelegate((
-                                context,
-                                index,
-                              ) {
-                                if (showMac && index == 0) {
-                                  return _MacMessagesRow(page: widget);
-                                }
-                                return _providerCard(
+                      // Rows of cards rather than a fixed-height grid: a card
+                      // opens in place to take a key or show its accounts,
+                      // and a grid cell would clip what it opened to.
+                      sliver: SliverList.builder(
+                        itemCount: (count / columns).ceil(),
+                        itemBuilder: (context, row) {
+                          Widget card(int index) => showMac && index == 0
+                              ? _MacMessagesRow(page: widget)
+                              : _providerCard(
                                   rows[index - extras],
                                   index - extras,
                                 );
-                              }, childCount: count),
+                          final first = row * columns;
+                          return Padding(
+                            padding: const EdgeInsets.only(bottom: gap),
+                            child: Row(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                for (
+                                  var column = 0;
+                                  column < columns;
+                                  column++
+                                ) ...[
+                                  if (column > 0) const SizedBox(width: gap),
+                                  Expanded(
+                                    child: first + column < count
+                                        ? card(first + column)
+                                        : const SizedBox.shrink(),
+                                  ),
+                                ],
+                              ],
                             ),
+                          );
+                        },
+                      ),
                     );
                   },
                 ),
@@ -1066,19 +1110,31 @@ class _Pill extends StatelessWidget {
 
 class _ProviderRow extends StatefulWidget {
   final int index;
+
+  /// The row the card is named and described by: the first of [ways].
   final Map<String, Object?> provider;
+
+  /// Every row this card draws, one per Connection Type: a model provider that
+  /// takes a key and a sign-in has two, and everything else has one.
+  final List<Map<String, Object?>> ways;
   final List<Map<String, Object?>> accounts;
   final bool models;
   final bool catalog;
   final bool busy;
   final Future<void> Function(Map<String, Object?> command) send;
   final String Function() commandId;
-  final VoidCallback? onAdd;
+
+  /// Adds the provider, answering whether it landed; set only while it is not.
+  final Future<bool> Function()? onAdd;
+
+  /// Opens the model choice, once a connected account makes one possible.
+  final VoidCallback? onChooseModel;
   final VoidCallback? onRemove;
   const _ProviderRow({
     super.key,
     required this.index,
     required this.provider,
+    required this.ways,
     required this.accounts,
     required this.models,
     this.catalog = false,
@@ -1086,6 +1142,7 @@ class _ProviderRow extends StatefulWidget {
     required this.send,
     required this.commandId,
     this.onAdd,
+    this.onChooseModel,
     this.onRemove,
   });
 
@@ -1095,41 +1152,88 @@ class _ProviderRow extends StatefulWidget {
 
 class _ProviderRowState extends State<_ProviderRow> {
   bool open = false;
-  bool adding = false;
+
+  /// The Connection Type whose key form is open, if one is.
+  String? adding;
 
   Map<String, Object?> get provider => widget.provider;
   String get displayName => provider['displayName'] as String;
-  String get authorization => provider['authorization'] as String;
-  bool get mayConnect => provider['mayConnect'] == true;
-  int get connected => (provider['connected'] as num?)?.toInt() ?? 0;
-  bool get hasAccounts => widget.accounts.isNotEmpty;
 
-  Map<String, Object?> _command(String kind, Map<String, Object?> input) => {
+  /// The ways in this card still offers, one per Connection Type.
+  List<Map<String, Object?>> get ways =>
+      widget.ways.where((way) => way['mayConnect'] == true).toList();
+  bool get mayConnect => ways.isNotEmpty;
+  bool get hasAccounts => widget.accounts.isNotEmpty;
+  int get connected => widget.ways.fold(
+    0,
+    (sum, way) => sum + ((way['connected'] as num?)?.toInt() ?? 0),
+  );
+
+  /// More than one way in, so the card opens on all of them rather than
+  /// choosing one for the person.
+  bool get choices => ways.length > 1;
+
+  String _authorization(Map<String, Object?> way) =>
+      way['authorization'] as String;
+
+  Map<String, Object?> _command(
+    String kind,
+    Map<String, Object?> input,
+    Map<String, Object?> way,
+  ) => {
     'commandId': widget.commandId(),
     'input': {
       'kind': kind,
-      'packageId': provider['packageId'],
-      'connectionTypeId': provider['connectionTypeId'],
+      'packageId': way['packageId'],
+      'connectionTypeId': way['connectionTypeId'],
       ...input,
     },
   };
 
-  /// The way in, when the row is not yet connected: a hosted grant opens the
-  /// app's sign-in at once, a keyed provider opens its form, and one that
-  /// needs nothing is simply turned on.
-  void _begin() {
-    switch (authorization) {
+  /// One way in, taken: a hosted grant opens the app's sign-in at once, a
+  /// keyed provider opens its form, and one that needs nothing is simply
+  /// turned on.
+  void _take(Map<String, Object?> way) {
+    switch (_authorization(way)) {
       case 'grant':
-        unawaited(widget.send(_command('authorize', const {})));
+        unawaited(widget.send(_command('authorize', const {}, way)));
       case 'api-key':
         setState(() {
           open = true;
-          adding = true;
+          adding = way['connectionTypeId'] as String;
         });
       case 'none':
         unawaited(
-          widget.send(_command('enable-connection', {'label': displayName})),
+          widget.send(
+            _command('enable-connection', {'label': displayName}, way),
+          ),
         );
+    }
+  }
+
+  /// The way in, when the card is not yet connected: the one there is, or the
+  /// card opened on each of them.
+  void _begin() {
+    if (choices) {
+      setState(() => open = true);
+    } else if (mayConnect) {
+      _take(ways.single);
+    }
+  }
+
+  /// Adds the provider and opens what comes next: its key form when a key is
+  /// the only way in, or the card itself when there is a choice to make. A
+  /// sign-in alone waits for its Connect, which is what leaves the app.
+  Future<void> _add() async {
+    final added = await widget.onAdd!();
+    if (!mounted || !added) return;
+    if (widget.ways.length > 1) {
+      setState(() => open = true);
+    } else if (_authorization(widget.ways.single) == 'api-key') {
+      setState(() {
+        open = true;
+        adding = widget.ways.single['connectionTypeId'] as String;
+      });
     }
   }
 
@@ -1172,11 +1276,26 @@ class _ProviderRowState extends State<_ProviderRow> {
   /// Whether the row opens on a tap to show its accounts and the way to add
   /// another; a keyed provider with nothing yet opens straight to its form.
   bool get opens =>
-      hasAccounts ||
-      (mayConnect && authorization == 'api-key') ||
-      widget.onRemove != null;
+      widget.onAdd == null &&
+      (hasAccounts ||
+          choices ||
+          ways.any((way) => _authorization(way) == 'api-key') ||
+          widget.onRemove != null);
 
   Widget? _trailing(BuildContext context) {
+    // A provider that is not added offers Add even while it still holds a key
+    // from before it was removed: adding it again is what brings that back.
+    if (widget.onAdd != null) {
+      return identified(
+        ConnectorIds.action('add-${provider['packageId']}'),
+        _Pill(
+          label: 'Add',
+          primary: true,
+          busy: widget.busy,
+          onPressed: () => unawaited(_add()),
+        ),
+      );
+    }
     if (hasAccounts) {
       // The state, and beside it the sign that the row opens: the accounts
       // and "Add another account" are one tap away, not hidden.
@@ -1191,17 +1310,6 @@ class _ProviderRowState extends State<_ProviderRow> {
             color: Theme.of(context).colorScheme.onSurfaceVariant,
           ),
         ],
-      );
-    }
-    if (widget.onAdd != null) {
-      return identified(
-        ConnectorIds.action('add-${provider['packageId']}'),
-        _Pill(
-          label: 'Add',
-          primary: true,
-          busy: widget.busy,
-          onPressed: widget.onAdd,
-        ),
       );
     }
     if (!mayConnect && widget.onRemove == null) return null;
@@ -1220,7 +1328,10 @@ class _ProviderRowState extends State<_ProviderRow> {
         _Pill(
           label: 'Connect',
           primary: true,
-          busy: widget.busy && authorization != 'api-key',
+          busy:
+              widget.busy &&
+              !choices &&
+              _authorization(ways.single) != 'api-key',
           onPressed: _begin,
         ),
         if (widget.onRemove != null) ...[
@@ -1267,6 +1378,78 @@ class _ProviderRowState extends State<_ProviderRow> {
     );
   }
 
+  /// What one way in draws inside the open card. On its own it is the
+  /// existing account's "Add another account"; beside another way it is named
+  /// for what it is — a key, a sign-in — so the person picks between them.
+  List<Widget> _wayIn(Map<String, Object?> way) {
+    final id = way['connectionTypeId'] as String;
+    Widget press(String action, IconData icon, String label, VoidCallback go) =>
+        Align(
+          alignment: Alignment.centerLeft,
+          child: Padding(
+            padding: const EdgeInsets.only(top: 4),
+            child: identified(
+              ConnectorIds.action(action),
+              TextButton.icon(
+                onPressed: widget.busy ? null : go,
+                icon: Icon(icon, size: 18),
+                label: Text(label),
+              ),
+            ),
+          ),
+        );
+    switch (_authorization(way)) {
+      case 'api-key':
+        if (adding == id) {
+          final connected = (way['connected'] as num?)?.toInt() ?? 0;
+          return [
+            _ApiKeyForm(
+              index: widget.index,
+              provider: way,
+              submitLabel: connected == 0
+                  ? 'Connect account'
+                  : 'Add another account',
+              busy: widget.busy,
+              onCancel: () => setState(() => adding = null),
+              onSubmit: (values) async {
+                await widget.send(_command('connect-api-key', values, way));
+                if (mounted) setState(() => adding = null);
+              },
+            ),
+          ];
+        }
+        if (!hasAccounts && !choices) return const [];
+        return [
+          press(
+            'api-key-${widget.index}',
+            choices ? Icons.key_rounded : Icons.add_rounded,
+            choices ? 'Use an API key' : 'Add another account',
+            () => setState(() => adding = id),
+          ),
+        ];
+      case 'grant':
+        if (!hasAccounts && !choices) return const [];
+        return [
+          press(
+            'authorize-${widget.index}',
+            choices ? Icons.login_rounded : Icons.add_rounded,
+            choices ? 'Sign in' : 'Add another account',
+            () => widget.send(_command('authorize', const {}, way)),
+          ),
+        ];
+      default:
+        if (!choices) return const [];
+        return [
+          press(
+            'enable-${widget.index}',
+            Icons.power_settings_new_rounded,
+            'Turn on',
+            () => _take(way),
+          ),
+        ];
+    }
+  }
+
   Widget _details(BuildContext context) {
     final theme = Theme.of(context);
     return Column(
@@ -1282,54 +1465,28 @@ class _ProviderRowState extends State<_ProviderRow> {
               'input': {'kind': kind, ...input},
             }),
           ),
-        if (mayConnect && authorization == 'grant' && hasAccounts)
+        for (final way in ways) ..._wayIn(way),
+        if (widget.accounts.isEmpty && adding == null)
+          Text(
+            'Nothing connected yet.',
+            style: theme.textTheme.bodySmall?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        if (widget.onChooseModel != null &&
+            widget.accounts.any((account) => account['state'] == 'ready'))
           Align(
             alignment: Alignment.centerLeft,
             child: Padding(
               padding: const EdgeInsets.only(top: 4),
               child: identified(
-                ConnectorIds.action('authorize-${widget.index}'),
-                TextButton.icon(
-                  onPressed: widget.busy
-                      ? null
-                      : () => widget.send(_command('authorize', const {})),
-                  icon: const Icon(Icons.add_rounded, size: 18),
-                  label: const Text('Add another account'),
+                ConnectorIds.action('choose-model-${provider['packageId']}'),
+                FilledButton.tonalIcon(
+                  onPressed: widget.onChooseModel,
+                  icon: const Icon(Icons.auto_awesome_rounded, size: 18),
+                  label: const Text('Choose a model'),
                 ),
               ),
-            ),
-          ),
-        if (mayConnect && authorization == 'api-key')
-          if (adding)
-            _ApiKeyForm(
-              index: widget.index,
-              provider: provider,
-              submitLabel: connected == 0
-                  ? 'Connect account'
-                  : 'Add another account',
-              busy: widget.busy,
-              onCancel: () => setState(() => adding = false),
-              onSubmit: (values) async {
-                await widget.send(_command('connect-api-key', values));
-                if (mounted) setState(() => adding = false);
-              },
-            )
-          else if (hasAccounts)
-            Align(
-              alignment: Alignment.centerLeft,
-              child: TextButton.icon(
-                onPressed: widget.busy
-                    ? null
-                    : () => setState(() => adding = true),
-                icon: const Icon(Icons.add_rounded, size: 18),
-                label: const Text('Add another account'),
-              ),
-            ),
-        if (widget.accounts.isEmpty && !adding)
-          Text(
-            'Nothing connected yet.',
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
             ),
           ),
         if (widget.onRemove != null)

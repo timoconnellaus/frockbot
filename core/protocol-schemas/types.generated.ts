@@ -641,10 +641,7 @@ export type SettingsFrame = {
     fields: Array<SettingField>;
     credentialStatus?: "not-required" | "missing" | "connected" | "revoked";
     failure?: string;
-    actions?: Array<{
-      kind: "choose-provider" | "manage-provider";
-      label: string;
-    }>;
+    actions?: Array<{ kind: "manage-provider"; label: string }>;
   }>;
 };
 export type ImmutableArtifact = {
@@ -858,25 +855,12 @@ export type ConnectionsFrame = {
     authorization: "none" | "api-key" | "ambient-native" | "grant";
     connected: number;
     mayConnect: boolean;
+    installed: boolean;
     settings?: Array<SettingField>;
     description?: string;
     icon?: Identifier;
   }>;
   modelInUse?: string;
-};
-export type PluginsFrame = {
-  schemaVersion: 1;
-  ownerId: Identifier;
-  revision: number;
-  plugins: Array<{
-    packageId: Identifier;
-    version: string;
-    displayName: string;
-    summary: string;
-    state: "not-installed" | "installed" | "disabled" | "failed";
-    home: "models" | "connections" | "user-settings" | "none";
-    failure?: string;
-  }>;
 };
 export type NotificationDirectory = {
   schemaVersion: 1;
@@ -1079,7 +1063,6 @@ export interface ProtocolTypes {
   SettingsOptionsQuery: SettingsOptionsQuery;
   SettingsOptionsPage: SettingsOptionsPage;
   ConnectionsFrame: ConnectionsFrame;
-  PluginsFrame: PluginsFrame;
   NotificationDirectory: NotificationDirectory;
   MarkReadReceipt: MarkReadReceipt;
   BotLifecycleDirectory: BotLifecycleDirectory;

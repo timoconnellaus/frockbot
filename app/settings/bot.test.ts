@@ -769,7 +769,7 @@ describe("generic per-Turn model resolution", () => {
       expect(await bot.storage.get(`run:${runId}`)).toMatchObject({
         status: "failed",
         failure: expect.stringContaining(
-          "Turn this model's plugin back on in Plugins",
+          "Add this model's provider again in the Marketplace",
         ),
       });
     }

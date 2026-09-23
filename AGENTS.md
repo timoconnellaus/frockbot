@@ -22,7 +22,7 @@ Most of this codebase's past complexity came from calling all three of these a "
 
 **Plugin** — separately packaged code installed and mounted at runtime: Plugins the deployment seeds, provider Plugins an account installs, and Plugins a Bot writes. A deployment may build and embed an artifact in its catalog; that artifact still runs through the Plugin boundary. Only Plugins get descriptors, content-addressed artifacts, generations and isolates. Every Plugin a User has installed lives in one Dynamic Worker per User, whose identity is the hash of its artifacts and the hook contract version ([ADR 0026](docs/adr/0026-plugins.md)).
 
-Plugin machinery belongs to deliberate runtime extensions, including the seeded card Plugins and optional model providers. Ordinary first-party features remain app code behind a per-Bot flag, listed on the Plugins page beside installed Plugins; a switch alone does not make an app feature an artifact.
+Plugin machinery belongs to deliberate runtime extensions, including the seeded card Plugins and optional model providers. Ordinary first-party features remain app code behind a per-Bot flag, listed on a Bot's Plugins page beside installed Plugins; a switch alone does not make an app feature an artifact. Such a feature is a platform-owned Package, so the Bot's switch is the only one.
 
 ## Extension points
 

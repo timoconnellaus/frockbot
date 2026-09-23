@@ -23,10 +23,6 @@ import type {
 } from "@frockbot/core/durable";
 import type { PluginServedProviderClaimV1 } from "@frockbot/frock-compose";
 import { PLUGIN_SERVED_PROVIDERS_V1 } from "@frockbot/providers/catalog/definition";
-import {
-  CAPABILITY_DESCRIPTIONS,
-  PROVIDER_PLUGIN_DESCRIPTIONS_V1,
-} from "@frockbot/app/settings/catalog-copy";
 import type { PluginEnablementV1 } from "./enablement.js";
 import { SEEDED_PLUGIN_ARTIFACTS_V1 } from "./seeded/artifacts.generated.js";
 
@@ -58,25 +54,44 @@ export interface SeededPluginV1 {
 
 /**
  * The first-party features a User may switch per Bot, in the order the page
- * shows them. Ids are Package ids; the runtime masks a Package's Capabilities
- * out of a Bot's plan, and leaves its hosted seam unmounted, when the Bot's
- * map says it is off. The words each card shows are the Account features
- * surface's own, so the two cannot drift.
+ * shows them. Ids are Package ids, and each Package is platform-owned, so the
+ * account always holds it and this Bot's switch is the only one; the runtime
+ * masks a Package's Capabilities out of a Bot's plan, and leaves its hosted
+ * seam unmounted, when the Bot's map says it is off.
  */
 export const FIRST_PARTY_TOGGLEABLE_PLUGINS_V1: readonly {
   packageId: string;
   displayName: string;
   description: string;
 }[] = [
-  { packageId: "web", displayName: "Web" },
-  { packageId: "routines", displayName: "Routines" },
-  { packageId: "image", displayName: "Image" },
-  { packageId: "subagents", displayName: "Subagents" },
-  { packageId: "machine-messages", displayName: "Messages" },
-].map((feature) => ({
-  ...feature,
-  description: CAPABILITY_DESCRIPTIONS[feature.packageId] ?? "",
-}));
+  {
+    packageId: "web",
+    displayName: "Web",
+    description: "Read public web pages to help answer your questions.",
+  },
+  {
+    packageId: "routines",
+    displayName: "Routines",
+    description: "Run this Bot’s instructions at scheduled times.",
+  },
+  {
+    packageId: "image",
+    displayName: "Image",
+    description: "Create images from a description.",
+  },
+  {
+    packageId: "subagents",
+    displayName: "Subagents",
+    description:
+      "Delegate parts of a task to helper agents. May use additional model calls.",
+  },
+  {
+    packageId: "machine-messages",
+    displayName: "Messages",
+    description:
+      "Read and send Messages through your Mac. Setup and your approval are required.",
+  },
+];
 
 export function isFirstPartyToggleableV1(packageId: string): boolean {
   return FIRST_PARTY_TOGGLEABLE_PLUGINS_V1.some(
@@ -250,9 +265,8 @@ const SEEDED_PLUGIN_WORDS_V1: Record<string, SeededPluginWordsV1> = {
    */
   deepseek: {
     displayName: "DeepSeek",
-    // The account Plugins row describes the same Plugin when the account
-    // installs its Package, so the words come from one place (catalog-copy).
-    description: PROVIDER_PLUGIN_DESCRIPTIONS_V1["provider-deepseek"],
+    description:
+      "Run replies on DeepSeek models with your own DeepSeek API key. The key is held by the deployment and never reaches the Plugin.",
     seed: "installable",
   },
   email: {
@@ -444,13 +458,6 @@ export function pluginRunsForBotV1(
     return flag === true;
   }
   return flag !== false;
-}
-
-/** Whether a User may flip this Plugin's switch on the page. */
-export function pluginSwitchableV1(
-  seed: PluginSeedStateV1 | undefined,
-): boolean {
-  return seed !== "locked";
 }
 
 /** The Plugins one Bot runs out of the ones its User's generation lists, in order. */

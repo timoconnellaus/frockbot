@@ -1,19 +1,21 @@
 // The Bot's Plugins page, read and switched (ADR 0026).
 //
-// One list for one Bot: the first-party features a User may switch, the
-// Plugins the deployment seeded, and the Plugins this User's Bots wrote, each
-// with whether this Bot runs it now. The User's installation is the
-// precondition; the Bot's enable map is the switch.
+// One list for one Bot: the first-party features, the Plugins the deployment
+// seeded, and the Plugins this User's Bots wrote, each with whether this Bot
+// runs it now. The Bot's enable map is the only switch: first-party features
+// are platform-owned, so the account always holds them.
+//
+// A row is something this Bot could be switched to run. A locked Plugin runs
+// for every Bot and a Plugin that only serves a model runs when that model is
+// chosen, so neither is listed: there is nothing here a person could change.
 import type { BotIdentity } from "@frockbot/core/durable";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import { currentUserCompositionV1 } from "@frockbot/app/composition/bot";
-import { userConfigurationV1 } from "@frockbot/app/settings/bot";
 import {
   DEPLOYMENT_PLUGIN_CATALOG_V1,
   FIRST_PARTY_TOGGLEABLE_PLUGINS_V1,
   firstPartyFeatureOnForBotV1,
   pluginRunsForBotV1,
-  pluginSwitchableV1,
   type SeededPluginV1,
 } from "./catalog.js";
 import {
@@ -54,32 +56,15 @@ export async function readBotPluginsFrameV1(
   options: { sections?: boolean } = {},
 ): Promise<BotPluginsFrameV1> {
   const enablement = await readPluginEnablementV1(state.ctx.storage);
-  const user = await userConfigurationV1(state, identity).readConfiguration({
-    schemaVersion: 1,
-    userId: identity.userId,
-  });
-  const rows: BotPluginRowV1[] = [];
-  for (const feature of FIRST_PARTY_TOGGLEABLE_PLUGINS_V1) {
-    const installation = user.packages.find(
-      (candidate) => candidate.packageId === feature.packageId,
-    );
-    const installed = installation?.state === "installed";
-    rows.push({
+  const rows: BotPluginRowV1[] = FIRST_PARTY_TOGGLEABLE_PLUGINS_V1.map(
+    (feature) => ({
       pluginId: feature.packageId,
       displayName: feature.displayName,
       description: feature.description,
       kind: "first-party",
-      on:
-        installed && firstPartyFeatureOnForBotV1(feature.packageId, enablement),
-      switchable: true,
-      ...(installed
-        ? {}
-        : {
-            unavailable:
-              "Turned off for the whole account. Turn it on in Account features first.",
-          }),
-    });
-  }
+      on: firstPartyFeatureOnForBotV1(feature.packageId, enablement),
+    }),
+  );
   const composition = await currentUserCompositionV1(state, identity);
   const health = await readPluginHealthMapV1(state.ctx.storage);
   for (const member of composition.members) {
@@ -97,6 +82,16 @@ export async function readBotPluginsFrameV1(
         (provider) => provider.id,
       ),
     });
+    if (
+      seeded?.seed === "locked" ||
+      isPureModelProviderPluginV1({
+        modelProviders: servedProviders,
+        tools: member.descriptor.tools,
+        hooks: member.descriptor.hooks,
+      })
+    ) {
+      continue;
+    }
     rows.push({
       ...(quarantine?.quarantinedAt !== undefined
         ? { quarantined: pluginQuarantineCopyV1(quarantine) }
@@ -109,16 +104,6 @@ export async function readBotPluginsFrameV1(
       kind: seeded ? "seeded" : "authored",
       ...(seeded ? { seed: seeded.seed } : {}),
       on: pluginRunsForBotV1(seeded?.seed, member.packageId, enablement),
-      // A Plugin that contributes only a model provider has nothing for this
-      // switch to turn on: choosing the model is what runs it, so it reads as
-      // a provider row and offers no control that would do nothing.
-      switchable:
-        pluginSwitchableV1(seeded?.seed) &&
-        !isPureModelProviderPluginV1({
-          modelProviders: servedProviders,
-          tools: member.descriptor.tools,
-          hooks: member.descriptor.hooks,
-        }),
       ...(member.descriptor.network
         ? { network: member.descriptor.network }
         : {}),
@@ -153,8 +138,7 @@ export async function readBotPluginsFrameV1(
 }
 
 /**
- * Flips one switch for this Bot. A locked Plugin, a first-party feature the
- * account has not installed, or a Plugin the page does not list is refused
+ * Flips one switch for this Bot. A Plugin the page does not list is refused
  * with the reason; a stale revision is a conflict the page re-reads from.
  */
 export async function setBotPluginEnabledV1(
@@ -170,14 +154,8 @@ export async function setBotPluginEnabledV1(
   if (!row) {
     return {
       status: "rejected",
-      failure: `"${command.pluginId}" is not a plugin this Bot could run`,
+      failure: `"${command.pluginId}" is not a plugin this Bot can switch`,
     };
-  }
-  if (!row.switchable) {
-    return { status: "rejected", failure: `"${row.displayName}" is always on` };
-  }
-  if (row.unavailable && command.enabled) {
-    return { status: "rejected", failure: row.unavailable };
   }
   try {
     const next = await setPluginEnabledV1(state.ctx.storage, {

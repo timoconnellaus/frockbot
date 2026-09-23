@@ -256,6 +256,14 @@ the term for what a Package or Plugin makes available.
 > that Bot's own — and the account-wide page that installs and uninstalls the
 > built-in features stayed, retitled **Account features**. `docs/profile-settings.md`
 > owns what each of the two surfaces is for.
+>
+> Amended 2026-09-23. Two switches for one feature was one too many.
+> Account features is gone: the first-party features a Bot switches, and
+> Custom models, are platform-owned Packages, so the account always holds
+> them and the Bot's switch is the only one. The account's Plugins list went
+> with it — it could only ever list an installed provider Plugin, which is
+> added and removed in the Marketplace. A Bot's page lists only what that Bot
+> could switch.
 
 ## Amendments to the constitution
 

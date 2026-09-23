@@ -29,10 +29,7 @@ import {
   sendMessage,
 } from "./fixtures.ts";
 import { E2E_MODEL_ID, E2E_OLLAMA_GOOD_API_KEY } from "./harness.ts";
-import {
-  E2E_CUSTOM_MODELS_PACKAGE_ID,
-  E2E_PROVIDER_PACKAGE_ID,
-} from "./provisioning.ts";
+import { E2E_PROVIDER_PACKAGE_ID } from "./provisioning.ts";
 
 interface SettingsView {
   packages: { packageId: string; state: string }[];
@@ -59,18 +56,12 @@ async function expectProvisionedAccount(
     await page.request.get("/api/settings?view=2", { headers })
   ).json()) as SettingsView;
 
-  // The provider Package is installed, and Custom models — a separate switch,
-  // for a per-Bot override neither path asked for — is not.
+  // The provider Package is installed.
   expect(
     settings.packages.find(
       (installed) => installed.packageId === E2E_PROVIDER_PACKAGE_ID,
     ),
   ).toMatchObject({ state: "installed" });
-  expect(
-    settings.packages.find(
-      (installed) => installed.packageId === E2E_CUSTOM_MODELS_PACKAGE_ID,
-    )?.state,
-  ).not.toBe("installed");
 
   // The account's model is bound to a Connection that is ready. Bound to
   // something else — or bound to a Connection still authorizing — is a Bot

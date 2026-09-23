@@ -18,7 +18,6 @@ import {
   type SettingField,
   type SettingsFrame,
   type ConnectionsFrame,
-  type PluginsFrame,
   type SettingChoice,
   type SettingsOptionsPage,
 } from "@frockbot/core/protocol-schemas";
@@ -327,6 +326,13 @@ function* modelChoices(
   }));
   for (const connection of settings.connections) {
     if (!connection.providerType) continue;
+    // A platform model needs no key and was never added from the Marketplace,
+    // so it says so rather than reading as a provider someone connected.
+    const source = packages.find(
+      (pkg) => pkg.packageId === connection.packageId,
+    )?.platformOwned
+      ? `${connection.displayName} · built in, no key needed`
+      : connection.displayName;
     for (const model of connection.modelCatalog?.models ?? []) {
       // The platform's current binding is already represented by Auto.
       if (
@@ -341,7 +347,7 @@ function* modelChoices(
       if (modelBindingFailureV1({ model: value, user: settings, packages }))
         continue;
       yield {
-        label: `${model.displayName} · ${connection.displayName}`.slice(0, 200),
+        label: `${model.displayName} · ${source}`.slice(0, 200),
         value,
       };
     }
@@ -397,21 +403,16 @@ export function modelsSettingsFrame(
       pkg.capabilities?.some((capability) => capability.kind === "model"),
   );
   // A provider earns its own section once a person has added it from the
-  // Marketplace, or connected an account. Catalog providers are installed
-  // disabled for everyone, so a disabled record alone is not that. The
-  // Marketplace is the catalog; this page is only what is already set up.
-  const providers = modelProviders.filter(
-    (pkg) =>
-      settings.packages.some(
-        (installation) =>
-          installation.packageId === pkg.packageId &&
-          installation.state !== "disabled",
-      ) ||
-      settings.connections.some(
-        (connection) =>
-          connection.packageId === pkg.packageId &&
-          connection.state !== "revoked",
-      ),
+  // Marketplace. Catalog providers are seeded disabled for everyone, and a
+  // key left behind by a provider that was removed is not an addition, so
+  // neither shows here: the Marketplace is the catalog and the way back, and
+  // this page is only what is set up now.
+  const providers = modelProviders.filter((pkg) =>
+    settings.packages.some(
+      (installation) =>
+        installation.packageId === pkg.packageId &&
+        installation.state !== "disabled",
+    ),
   );
   const selected = settings.accountModel ? { ...settings.accountModel } : null;
   const choices: SettingChoice[] = [];
@@ -482,29 +483,22 @@ export function modelsSettingsFrame(
           "These provider settings need a newer app. Account setup is still available.";
       }
     }
+    const connected = connections.some(
+      (connection) => connection.state === "ready",
+    );
     sections.push({
       id: `provider.${provider.packageId}`,
       label: provider.displayName ?? provider.packageId,
       fields: providerFields,
       ...(fieldFailure ? { failure: fieldFailure } : {}),
-      credentialStatus: connections.some(
-        (connection) => connection.state === "ready",
-      )
-        ? "connected"
-        : "missing",
+      credentialStatus: connected ? "connected" : "missing",
       ...(installed?.state === "failed"
         ? { failure: "This provider needs recovery before it can be chosen." }
         : {
             actions: [
               {
-                kind:
-                  installed?.state === "installed"
-                    ? "manage-provider"
-                    : "choose-provider",
-                label:
-                  installed?.state === "installed"
-                    ? "Manage provider"
-                    : "Connect provider",
+                kind: "manage-provider",
+                label: connected ? "Manage provider" : "Connect account",
               },
             ],
           }),
@@ -538,20 +532,14 @@ export function modelsSettingsCommand(
       type: "user/set-account-model",
       model: command.values["account-model"],
     });
-  if (command.sectionId.startsWith("provider.")) {
-    const packageId = command.sectionId.slice(9);
-    return Object.keys(command.values).length === 0 && !command.unset?.length
-      ? userCommand({ ...meta, type: "user/choose-model-provider", packageId })
-      : userCommand({
-          ...meta,
-          type: "user/set-package-settings",
-          packageId,
-          ...(Object.keys(command.values).length
-            ? { values: command.values }
-            : {}),
-          ...(command.unset ? { unset: command.unset } : {}),
-        });
-  }
+  if (command.sectionId.startsWith("provider."))
+    return userCommand({
+      ...meta,
+      type: "user/set-package-settings",
+      packageId: command.sectionId.slice(9),
+      ...(Object.keys(command.values).length ? { values: command.values } : {}),
+      ...(command.unset ? { unset: command.unset } : {}),
+    });
   throw new ConfigurationDecodeError("Unknown model section");
 }
 
@@ -628,6 +616,22 @@ function modelInUseLineV1(
   }).slice(0, 300);
 }
 
+/** How one model provider is connected, in the words its card uses. */
+function modelProviderDescriptionV1(
+  name: string,
+  types: readonly { description?: string; authorization: { kind: string } }[],
+): string {
+  const described = types.find((type) => type.description)?.description;
+  if (described) return described;
+  const key = types.some((type) => type.authorization.kind === "api-key");
+  const signIn = types.some((type) => type.authorization.kind === "grant");
+  return key && signIn
+    ? `Use ${name} models with your own key, or sign in.`
+    : signIn
+      ? `Use ${name} models by signing in.`
+      : `Use ${name} models with your own key.`;
+}
+
 /**
  * Connectors: every account a User holds, and every Package they could hold
  * one against.
@@ -691,16 +695,19 @@ export function connectionsFrame(
           }
         }
       }
+      // A model provider is one thing however it is connected, so every row
+      // of it carries the provider's name and one description, and a client
+      // draws them as one card offering each way in. A connector Package's
+      // types are the apps themselves, so each is named for itself.
       const displayName = (
-        (item.connectionTypes?.length ?? 0) > 1
-          ? type.displayName
-          : (item.displayName ?? type.displayName)
+        kind === "model" || (item.connectionTypes?.length ?? 0) <= 1
+          ? (item.displayName ?? type.displayName)
+          : type.displayName
       ).slice(0, 200);
       const description = (
-        type.description ??
-        (kind === "model"
-          ? `Use ${displayName} models with your own key.`
-          : undefined)
+        kind === "model"
+          ? modelProviderDescriptionV1(displayName, item.connectionTypes ?? [])
+          : type.description
       )?.slice(0, 300);
       providers.push({
         packageId: item.packageId,
@@ -714,6 +721,9 @@ export function connectionsFrame(
         connected,
         mayConnect:
           Boolean(installed) && (connected === 0 || type.allowMultiple),
+        // Added is a fact about the Package, not about its keys: a provider
+        // removed with a key left behind is one the Marketplace offers again.
+        installed: Boolean(installed),
         ...(fields.length ? { settings: fields } : {}),
         ...(description ? { description } : {}),
         ...(type.icon ? { icon: type.icon } : {}),
@@ -760,70 +770,5 @@ export function connectionsFrame(
     accounts,
     providers: providers.slice(0, 100),
     modelInUse: modelInUseLineV1(settings, catalog),
-  });
-}
-
-const CAPABILITY_NOUNS_V1: Record<string, string> = {
-  tool: "Tools",
-  model: "Models",
-  memory: "Memory",
-  notification: "Notifications",
-  computer: "Computer",
-  ui: "Pages",
-  storage: "Storage",
-};
-
-/**
- * Plugins: what a User has, and whether it is on.
- *
- * Enablement only. What a Package declares \u2014 its accounts, its credentials,
- * its settings \u2014 is edited on the surface that owns it, and `home` names that
- * surface so a row can offer the way there.
- */
-export function pluginsFrame(
-  userId: string,
-  settings: UserSettingsViewV1,
-  catalog: readonly AvailableUserPackage[],
-): PluginsFrame {
-  return decodeProtocol("PluginsFrame", {
-    schemaVersion: 1,
-    ownerId: userId,
-    revision: settings.revision,
-    plugins: catalog
-      .filter((item) => !item.platformOwned)
-      .slice(0, 200)
-      .map((item) => {
-        const installation = settings.packages.find(
-          (candidate) => candidate.packageId === item.packageId,
-        );
-        const kinds = [
-          ...new Set((item.capabilities ?? []).map((entry) => entry.kind)),
-        ];
-        return {
-          packageId: item.packageId,
-          version: item.version,
-          displayName: (item.displayName ?? item.packageId).slice(0, 200),
-          // A Package can be worth turning on without contributing a
-          // Capability of its own \u2014 Custom models is exactly that \u2014 so
-          // "no features" would be a lie about the one plugin a User must
-          // enable to choose a model.
-          summary: (kinds.length
-            ? kinds.map((kind) => CAPABILITY_NOUNS_V1[kind] ?? kind).join(", ")
-            : "Adds settings"
-          ).slice(0, 200),
-          state:
-            installation === undefined
-              ? "not-installed"
-              : installation.state === "installed"
-                ? "installed"
-                : installation.state === "failed"
-                  ? "failed"
-                  : "disabled",
-          home: packageConfigurationHomeV1(item),
-          ...(installation?.failure
-            ? { failure: installation.failure.slice(0, 2000) }
-            : {}),
-        };
-      }),
   });
 }

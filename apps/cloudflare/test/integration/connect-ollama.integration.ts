@@ -21,7 +21,7 @@ import { describe, expect, it } from "vitest";
 import type { ConnectionView } from "@frockbot/core/configuration";
 import {
   asUser,
-  enableCustomModels,
+  accountRevision,
   expectOkJson,
   freshUserId,
   OLLAMA_BAD_API_KEY,
@@ -40,7 +40,7 @@ const CONNECTION_LABEL = "Local Ollama";
 const ENDPOINT_MODEL_ID = "glm-5.3-flash:cloud";
 
 async function installProvider(userId: string): Promise<void> {
-  const enabled = await enableCustomModels(userId, "custom-models");
+  const enabled = await accountRevision(userId);
   await expectOkJson(
     await postAsUser(userId, "/api/settings", {
       schemaVersion: 1,

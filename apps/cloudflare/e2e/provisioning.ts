@@ -24,7 +24,6 @@ export const E2E_PROVIDER_PACKAGE_ID = "provider-ollama-cloud";
 /** The Connection type that Package declares for an API key. */
 export const E2E_CONNECTION_TYPE_ID = "ollama-cloud-account";
 /** The Package behind a per-Bot model override, seeded disabled. */
-export const E2E_CUSTOM_MODELS_PACKAGE_ID = "custom-models";
 /** The Connection setting the provider declares for a custom endpoint. */
 export const E2E_API_BASE_URL_SETTING = "api-base-url";
 
@@ -49,18 +48,6 @@ export function botIdFromName(name: string): string {
 /** A command id of this suite's own, distinct per command as the client's is. */
 function commandId(): string {
   return `e2e-${crypto.randomUUID()}`;
-}
-
-/** Turn Custom models on. The seed owns the revision this is fenced against. */
-export function enableCustomModelsCommandV1(expectedRevision: number) {
-  return {
-    schemaVersion: 1,
-    type: "user/set-package-enabled",
-    commandId: commandId(),
-    expectedRevision,
-    packageId: E2E_CUSTOM_MODELS_PACKAGE_ID,
-    enabled: true,
-  } as const;
 }
 
 /** Choose the Ollama Cloud provider, as the Models page's picker does. */
