@@ -247,7 +247,8 @@ void main() {
               onReconnect: () async {},
               background: 'fox',
               primary: '#ff6b57',
-              overlay: (companion) => ChatHeader(
+              overlay: (companion, notices) => ChatHeader(
+                below: notices,
                 name: 'Bot',
                 companion: companion,
                 onOpenBot: () {},

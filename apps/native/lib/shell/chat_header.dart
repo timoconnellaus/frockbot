@@ -88,6 +88,11 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   /// pills. Null in chrome-only tests.
   final Widget? companion;
 
+  /// What sits under the row, in order: the conversation's notices, then a
+  /// live call. Laid out under the row itself, so it follows the row's real
+  /// height, and drawn over the fade, which would otherwise wash it out.
+  final List<Widget> below;
+
   const ChatHeader({
     super.key,
     required this.name,
@@ -102,6 +107,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     this.panelShown = false,
     this.voiceMode = false,
     this.companion,
+    this.below = const [],
   });
 
   double get _toolbarHeight => 52 * textScale.clamp(1, 3);
@@ -172,81 +178,96 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
           top: 0,
           left: 0,
           right: 0,
-          child: DesktopWindowDragRegion(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(
-                chatHeaderChromeSide,
-                _overlayTop,
-                chatHeaderChromeSide,
-                0,
-              ),
-              child: Row(
-                crossAxisAlignment: _centerPhoneChrome
-                    ? CrossAxisAlignment.center
-                    : CrossAxisAlignment.start,
-                children: [
-                  if (onBack != null) ...[
-                    _chromeInset(
-                      identified(
-                        ShellIds.sidebarToggle,
-                        _iconButton(
-                          'Your Bots',
-                          Icon(Icons.arrow_back_rounded, size: chatIconSize),
-                          onBack,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(width: 8),
-                  ],
-                  if (companion != null) ...[
-                    _centerPhoneChrome
-                        ? IgnorePointer(child: companion!)
-                        : Transform.translate(
-                            offset: const Offset(0, -chatHeaderCompanionLift),
-                            child: IgnorePointer(child: companion!),
-                          ),
-                    const SizedBox(width: 10),
-                  ],
-                  Expanded(
-                    child: _chromeInset(
-                      Align(
-                        alignment: _centerPhoneChrome
-                            ? Alignment.centerLeft
-                            : Alignment.topLeft,
-                        child: _overlayName(context),
-                      ),
-                    ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              DesktopWindowDragRegion(
+                child: Padding(
+                  padding: EdgeInsets.fromLTRB(
+                    chatHeaderChromeSide,
+                    _overlayTop,
+                    chatHeaderChromeSide,
+                    0,
                   ),
-                  if (onComputer != null) ...[
-                    const SizedBox(width: 8),
-                    _chromeInset(
-                      identified(
-                        ShellIds.computerDestination,
-                        _glyphPill(
-                          'Computer',
-                          ChatIconKind.computer,
-                          onComputer,
-                          color: computerRunning ? computerRunningColor : null,
+                  child: Row(
+                    crossAxisAlignment: _centerPhoneChrome
+                        ? CrossAxisAlignment.center
+                        : CrossAxisAlignment.start,
+                    children: [
+                      if (onBack != null) ...[
+                        _chromeInset(
+                          identified(
+                            ShellIds.sidebarToggle,
+                            _iconButton(
+                              'Your Bots',
+                              Icon(
+                                Icons.arrow_back_rounded,
+                                size: chatIconSize,
+                              ),
+                              onBack,
+                            ),
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                      ],
+                      if (companion != null) ...[
+                        _centerPhoneChrome
+                            ? IgnorePointer(child: companion!)
+                            : Transform.translate(
+                                offset: const Offset(
+                                  0,
+                                  -chatHeaderCompanionLift,
+                                ),
+                                child: IgnorePointer(child: companion!),
+                              ),
+                        const SizedBox(width: 10),
+                      ],
+                      Expanded(
+                        child: _chromeInset(
+                          Align(
+                            alignment: _centerPhoneChrome
+                                ? Alignment.centerLeft
+                                : Alignment.topLeft,
+                            child: _overlayName(context),
+                          ),
                         ),
                       ),
-                    ),
-                  ],
-                  if (onTogglePanel != null) ...[
-                    const SizedBox(width: 8),
-                    _chromeInset(
-                      identified(
-                        ShellIds.rightPanelToggle,
-                        _glyphButton(
-                          panelShown ? 'Hide the panel' : 'Show the panel',
-                          ChatIconKind.panel,
-                          onTogglePanel,
+                      if (onComputer != null) ...[
+                        const SizedBox(width: 8),
+                        _chromeInset(
+                          identified(
+                            ShellIds.computerDestination,
+                            _glyphPill(
+                              'Computer',
+                              ChatIconKind.computer,
+                              onComputer,
+                              color: computerRunning
+                                  ? computerRunningColor
+                                  : null,
+                            ),
+                          ),
                         ),
-                      ),
-                    ),
-                  ],
-                ],
+                      ],
+                      if (onTogglePanel != null) ...[
+                        const SizedBox(width: 8),
+                        _chromeInset(
+                          identified(
+                            ShellIds.rightPanelToggle,
+                            _glyphButton(
+                              panelShown ? 'Hide the panel' : 'Show the panel',
+                              ChatIconKind.panel,
+                              onTogglePanel,
+                            ),
+                          ),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
               ),
-            ),
+              ...below,
+            ],
           ),
         ),
       ],

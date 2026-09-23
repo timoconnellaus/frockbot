@@ -23,6 +23,17 @@ export type WhatsNewEntrySourceV1 = {
  */
 export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
+    id: "notices-under-header",
+    title: "Chat notices sit under the header",
+    summary:
+      "Offline, paused and out-of-credit notices are no longer hidden behind it, and Reconnect and Open Billing can be pressed.",
+    kind: "fix",
+    image: {
+      file: "notices-under-header.webp",
+      alt: "A phone chat with Fox: under the header, the notice “You’re offline. Your Bot can keep working.” with Reconnect beside it.",
+    },
+  },
+  {
     id: "whats-new-reading",
     title: "What’s New, easier to read",
     summary:
