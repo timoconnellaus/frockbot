@@ -2,6 +2,12 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
+## Avatars open in their own colour
+
+fix
+
+A Bot’s character no longer flashes its original colour when a screen opens.
+
 ## Colours from the characters
 
 improvement
