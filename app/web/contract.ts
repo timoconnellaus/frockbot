@@ -10,7 +10,12 @@
 // This module holds no transport. `providers/ollama-cloud` implements
 // {@link WebSearchV1} over `POST {apiBaseUrl}/api/web_search`; this Package
 // never imports it.
-import type { ToolDefinition, ToolSchema } from "@frockbot/core/contracts";
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
+import type {
+  ToolDefinition,
+  ToolExecutionContext,
+  ToolSchema,
+} from "@frockbot/core/contracts";
 
 export const WEB_SEARCH_TOOL_NAME_V1 = "web_search";
 
@@ -47,11 +52,28 @@ export interface WebSearchRequestV1 {
  * What one search runs under: the durable effect identity of the tool call and
  * its cancellation signal. Both are kernel vocabulary, not provider
  * vocabulary — a provider that needs a per-call credential lease keys it on
- * `effectId`, and one that needs neither ignores both.
+ * `effectId`, and one that needs neither ignores both. The `effectId` is
+ * unique across the User's account: see {@link webSearchEffectIdV1}.
  */
 export interface WebSearchExecutionV1 {
   effectId: string;
   signal: AbortSignal;
+}
+
+/**
+ * The effect identity one search runs under. A tool call's own `effectId`
+ * restarts in every Session and repeats across Bots, while a credential lease
+ * is keyed across the whole account, so the Bot and the Session are part of
+ * it. A Session's turn counter never restarts, so this is still one identity
+ * per durable call, and a re-dispatched call runs under the same one.
+ */
+export async function webSearchEffectIdV1(
+  context: Pick<ToolExecutionContext, "botId" | "sessionId" | "effectId">,
+): Promise<string> {
+  const digest = await sha256HexTextV1(
+    `${context.botId}\u0000${context.sessionId}\u0000${context.effectId}`,
+  );
+  return `web-search-${digest.slice(0, 32)}`;
 }
 
 /** The narrow interface a search provider Package implements. */
@@ -197,7 +219,7 @@ export function createWebSearchToolDefinitionV1(
       }
       try {
         const response = await provider.search(request, {
-          effectId: context.effectId,
+          effectId: await webSearchEffectIdV1(context),
           signal: context.signal,
         });
         return { content: encodeWebSearchResultV1(response), isError: false };

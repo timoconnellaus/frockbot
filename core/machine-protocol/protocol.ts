@@ -178,10 +178,9 @@ function boolean(input: unknown, label: string): boolean {
 const MACHINE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 /**
- * Every other identifier the protocol carries. Colons are legal because a
- * `commandId` *is* the Bot Durable Object's `effectId`
- * (`tool:<turn>:<step>:<ordinal>`) — that identity is what makes a retried
- * dispatch idempotent.
+ * Every other identifier the protocol carries. A `commandId` is derived from
+ * the Bot Durable Object's durable tool-call occurrence — that identity is
+ * what makes a retried dispatch idempotent.
  */
 const IDENTIFIER = /^[A-Za-z0-9][A-Za-z0-9._:@-]*$/;
 
@@ -1083,10 +1082,11 @@ export function machineConnectedV1(
 /**
  * One queued command.
  *
- * `commandId` is the Bot Durable Object's `effectId`, which is what makes the
- * whole path idempotent: a dispatch replayed after an eviction addresses the
- * same queue key, a second claim answers `already-claimed`, and a result for a
- * command already terminal answers `replayed` and changes nothing.
+ * `commandId` is derived from the Bot Durable Object's durable tool-call
+ * occurrence, which is what makes the whole path idempotent: a dispatch
+ * replayed after an eviction addresses the same queue key, a second claim
+ * answers `already-claimed`, and a result for a command already terminal
+ * answers `replayed` and changes nothing.
  */
 export interface MachineCommandV1 {
   schemaVersion: 1;

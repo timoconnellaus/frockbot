@@ -273,7 +273,7 @@ async function dispatchSubagentTask(
         "this deployment cannot address a Subagent Durable Object, so no subagent can be dispatched",
     };
   }
-  const taskId = subagentTaskIdV1(request.effectId);
+  const taskId = await subagentTaskIdV1(turn.runId, request.effectId);
   const admission = await state.tasks.admit({
     taskId,
     type: request.type,

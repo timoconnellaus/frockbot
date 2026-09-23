@@ -47,9 +47,9 @@ export function generatedImageRootV1(userId: string): WorkspaceRootV1 {
 
 /**
  * One path segment made safe. An `effectId` is minted by the Agent loop as
- * `tool:<turn>:<step>:<index>`; a Bot id is arbitrary durable text. Neither is
- * a filename, so both are folded to a conservative alphabet rather than
- * trusted — the Workspace would accept a colon, but a Computer's filesystem is
+ * `tool:<turn>:<step>:<index>`; a Bot id and a run id are arbitrary durable
+ * text. None is a filename, so each is folded to a conservative alphabet
+ * rather than trusted — the Workspace would accept a colon, but a Computer's filesystem is
  * where these land and there is no reason to find out which ones it dislikes.
  */
 export function imagePathSegmentV1(value: string): string {
@@ -62,17 +62,20 @@ export function imagePathSegmentV1(value: string): string {
 
 /**
  * The object one effect writes. Effect-keyed, so reconciliation reads exactly
- * the object the interrupted attempt would have written.
+ * the object the interrupted attempt would have written. The run is part of
+ * the key because effect ids restart in every Session: without it, a Routine
+ * Turn's first image would be read back as the conversation's first image.
  */
 export function generatedImagePathV1(
   owner: ImageOwnerV1,
+  runId: string,
   effectId: string,
   extension: string,
 ): WorkspacePathV1 {
   return {
     root: generatedImageRootV1(owner.userId),
     path: normalizeWorkspaceRelativePathV1(
-      `${imagePathSegmentV1(owner.botId)}/${imagePathSegmentV1(effectId)}.${imagePathSegmentV1(extension)}`,
+      `${imagePathSegmentV1(owner.botId)}/${imagePathSegmentV1(runId)}/${imagePathSegmentV1(effectId)}.${imagePathSegmentV1(extension)}`,
       "generated image path",
     ),
   };

@@ -542,6 +542,7 @@ export async function agentRuntime(
                 userId: identity.userId,
                 botId: identity.botId,
               },
+              runId: turn.runId,
               stageTemplate: (input: { commandId: string; botId: string }) =>
                 userConfigurationV1(state, identity).executeTemplateCommand(
                   identity.userId,

@@ -10,8 +10,8 @@
 //
 // Three properties, the same three the machine command's intent rests on:
 //
-//  1. **`approvalId` is the Turn's `effectId`, mapped.** One identity for the
-//     decision and the Turn's durable occurrence, so a replayed settlement
+//  1. **`approvalId` is derived from the Turn's durable occurrence.** One
+//     identity for the decision and the occurrence, so a replayed settlement
 //     addresses the same intent and never applies it twice.
 //  2. **Written before the send.** The record is durable before the card the
 //     User sees exists, so there is no window in which somebody could approve
@@ -20,6 +20,7 @@
 //     recorded in the transaction that records the approval; the generation
 //     proposal — a cross-object call — runs after the commit, and is
 //     idempotent on what the Composition already holds.
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import {
   SEND_TO_USER_LIMITS_V1,
   pluginCardToolNameV1,
@@ -39,14 +40,18 @@ export function pluginIntentKeyV1(approvalId: string): string {
 }
 
 /**
- * The approval id one Turn's `effectId` maps to. `effectId` is
- * `tool:<turn>:<step>:<ordinal>`, and an approval id may not carry a colon:
- * it becomes a URL path segment and a durable storage key. The mapping is
- * total, deterministic and injective over that format.
+ * The approval id one durable occurrence maps to: the run and the Turn's
+ * `effectId`. The run is there because effect ids restart in every Session and
+ * the intent is keyed across all of this Bot's Sessions. A digest, because an
+ * approval id may carry only letters, digits, dot, underscore and dash: it
+ * becomes a URL path segment and a durable storage key.
  */
-export function pluginApprovalIdV1(effectId: string): string {
-  const mapped = effectId.replace(/[^a-zA-Z0-9._-]/g, ".");
-  return /^[a-zA-Z0-9]/.test(mapped) ? mapped : `p${mapped}`;
+export async function pluginApprovalIdV1(
+  runId: string,
+  effectId: string,
+): Promise<string> {
+  const digest = await sha256HexTextV1(`${runId}\u0000${effectId}`);
+  return `plugin-${digest.slice(0, 32)}`;
 }
 
 export type PluginIntentDecisionV1 = "approved" | "denied" | "expired";

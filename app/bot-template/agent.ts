@@ -19,6 +19,7 @@
 // carries the same `commandId`, meets the receipt the User Durable Object
 // already wrote, and reports the share it already made instead of staging a
 // second one.
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import { packageAdmissionCeilingV1 } from "@frockbot/core/contracts";
 import {
   decodeTurnTypeV1,
@@ -55,6 +56,8 @@ export interface BotTemplateOwnerV1 {
  */
 export interface BotTemplateRuntimeHostV1 {
   owner: BotTemplateOwnerV1;
+  /** The durable run this Turn is, which the staging command id names. */
+  runId: string;
   stageTemplate(input: {
     commandId: string;
     botId: string;
@@ -84,12 +87,20 @@ function openStepPositionV1(
   return position;
 }
 
-/** A `commandId` derived from the occurrence, so a retry reuses one receipt. */
-export function stageCommandIdV1(effectId: string): string {
-  return `template-stage-${effectId.replace(/[^a-zA-Z0-9._-]/g, "-")}`.slice(
-    0,
-    120,
+/**
+ * A `commandId` derived from the occurrence, so a retry reuses one receipt.
+ * The User Durable Object keys receipts across all its Bots, and effect ids
+ * restart in every Session, so the Bot and the run are part of it too.
+ */
+export async function stageCommandIdV1(
+  owner: BotTemplateOwnerV1,
+  runId: string,
+  effectId: string,
+): Promise<string> {
+  const digest = await sha256HexTextV1(
+    `${owner.userId}\u0000${owner.botId}\u0000${runId}\u0000${effectId}`,
   );
+  return `template-stage-${digest.slice(0, 32)}`;
 }
 
 const DESCRIPTION = [
@@ -141,7 +152,11 @@ export function createBotExportTemplateTool(
       let receipt: TemplateShareReceiptV1;
       try {
         receipt = await host.stageTemplate({
-          commandId: stageCommandIdV1(context.effectId),
+          commandId: await stageCommandIdV1(
+            host.owner,
+            host.runId,
+            context.effectId,
+          ),
           botId: host.owner.botId,
         });
       } catch (error) {

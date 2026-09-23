@@ -443,7 +443,7 @@ export function createPluginAuthoringHostV1(
     member: Pick<CompositionMemberV1, "descriptor">,
     verb: "Run" | "Turn on",
   ): Promise<PluginApprovalAskV1> {
-    const approvalId = pluginApprovalIdV1(effectId);
+    const approvalId = await pluginApprovalIdV1(seams.turn.runId, effectId);
     const key = pluginIntentKeyV1(approvalId);
     const existing = await seams.storage.get<unknown>(key);
     const rationale =

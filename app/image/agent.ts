@@ -292,10 +292,11 @@ async function withTimeout<T>(
 /** The two containers an effect could have landed as, newest naming first. */
 function candidatePathsV1(
   owner: ImageOwnerV1,
+  runId: string,
   effectId: string,
 ): WorkspacePathV1[] {
   return ["png", "jpg"].map((extension) =>
-    generatedImagePathV1(owner, effectId, extension),
+    generatedImagePathV1(owner, runId, effectId, extension),
   );
 }
 
@@ -465,6 +466,7 @@ export function createGenerateImageTool(
       const contentHash = await sha256HexV1(bytes);
       const path = generatedImagePathV1(
         host.owner,
+        host.writer.runId,
         effectId,
         imageExtensionV1(dimensions.mimeType),
       );
@@ -526,7 +528,11 @@ async function readRecordedImage(
 ): Promise<RecordedImageV1 | undefined> {
   const files = host.files;
   if (!files) return undefined;
-  for (const path of candidatePathsV1(host.owner, effectId)) {
+  for (const path of candidatePathsV1(
+    host.owner,
+    host.writer.runId,
+    effectId,
+  )) {
     const outcome = await files.read(path);
     if (outcome.status !== "ok") continue;
     const dimensions = decodeImageDimensionsV1(outcome.file.bytes);

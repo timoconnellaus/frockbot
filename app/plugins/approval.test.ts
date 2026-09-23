@@ -74,9 +74,13 @@ function storage(seed: Record<string, unknown> = {}) {
 }
 
 describe("a Plugin intent", () => {
-  test("its approval id is the Turn's effect id, mapped into the card's alphabet", () => {
-    expect(pluginApprovalIdV1("tool:1:2:0")).toBe("tool.1.2.0");
-    expect(pluginApprovalIdV1(":x")).toBe("p.x");
+  test("its approval id is one identity per occurrence, in the card's alphabet", async () => {
+    const id = await pluginApprovalIdV1("run-9", "tool:1:2:0");
+    expect(id).toMatch(/^plugin-[0-9a-f]{32}$/);
+    expect(await pluginApprovalIdV1("run-9", "tool:1:2:0")).toBe(id);
+    // Effect ids restart in every Session, so another run's same effect is
+    // another intent.
+    expect(await pluginApprovalIdV1("run-10", "tool:1:2:0")).not.toBe(id);
   });
 
   test("decodes exactly, and refuses a member a User wrote", () => {

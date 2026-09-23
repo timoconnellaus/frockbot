@@ -19,7 +19,11 @@ import {
   pluginScaffoldV1,
   type PluginAuthoringSeamsV1,
 } from "./authoring.js";
-import { decodePluginIntentRecordV1, pluginIntentKeyV1 } from "./approval.js";
+import {
+  decodePluginIntentRecordV1,
+  pluginApprovalIdV1,
+  pluginIntentKeyV1,
+} from "./approval.js";
 import { PLUGIN_ENABLEMENT_KEY_V1 } from "./enablement.js";
 import { pluginsSourceRootV1 } from "./root.js";
 
@@ -329,13 +333,14 @@ describe("checking and publishing", () => {
     const result = await host.publish({ pluginId: "notes" }, "tool:1:2:0");
     expect(result.status).toBe("pending-approval");
     if (result.status !== "pending-approval") return;
-    expect(result.ask.approvalId).toBe("tool.1.2.0");
+    const approvalId = await pluginApprovalIdV1(TURN.runId, "tool:1:2:0");
+    expect(result.ask.approvalId).toBe(approvalId);
     expect(result.ask.replayed).toBe(false);
     expect(result.ask.risk).toBe("low");
     expect(result.ask.action).toContain('Run the Plugin "Notes"');
     expect([...artifacts.keys()]).toEqual([await sha256Hex(MODULE)]);
     const intent = decodePluginIntentRecordV1(
-      storage.get(pluginIntentKeyV1("tool.1.2.0")),
+      storage.get(pluginIntentKeyV1(approvalId)),
     );
     expect(intent.action.kind).toBe("publish");
     if (intent.action.kind !== "publish") return;
@@ -571,12 +576,13 @@ describe("enabling, disabling and settings", () => {
       },
     ]);
     const asked = await host.enable({ pluginId: "notes" }, "tool:2:1:0");
+    const approvalId = await pluginApprovalIdV1(TURN.runId, "tool:2:1:0");
     expect(asked).toMatchObject({
       status: "pending-approval",
-      ask: { approvalId: "tool.2.1.0", replayed: false },
+      ask: { approvalId, replayed: false },
     });
     expect(
-      decodePluginIntentRecordV1(storage.get(pluginIntentKeyV1("tool.2.1.0")))
+      decodePluginIntentRecordV1(storage.get(pluginIntentKeyV1(approvalId)))
         .action,
     ).toEqual({ kind: "enable", pluginId: "notes" });
     expect(

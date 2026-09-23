@@ -323,11 +323,15 @@ export function createMachineApprovalToolV1(config: {
         );
       }
 
-      // `approvalId === commandId`, and both are this Turn's `effectId` mapped
-      // into the character set an approval id may take. One identity for the
-      // pending decision, the queue key and this Turn's durable occurrence, so
-      // a replayed settlement addresses the same command and never a second.
-      const approvalId = machineApprovalIdV1(context.effectId);
+      // `approvalId === commandId`, and both are derived from this Turn's
+      // durable occurrence. One identity for the pending decision, the queue
+      // key and the occurrence, so a replayed settlement addresses the same
+      // command and never a second.
+      const approvalId = await machineApprovalIdV1(
+        host.botId,
+        host.writer.runId,
+        context.effectId,
+      );
       const intent: MachineIntentRecordV1 = {
         schemaVersion: 1,
         approvalId,

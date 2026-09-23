@@ -342,7 +342,7 @@ async function readUsageV1(
 /**
  * Put one approved command on a machine's queue.
  *
- * Idempotent on `commandId`: a re-dispatch of the same `effectId` — a retried
+ * Idempotent on `commandId`: a re-dispatch of the same occurrence — a retried
  * settlement, a replayed decision — finds the command already queued and
  * answers `duplicate` rather than queueing a second copy of somebody's laptop
  * running `rm`.
