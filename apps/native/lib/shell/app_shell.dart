@@ -1646,86 +1646,88 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           routinesEditorOpen:
               key == 'routines' && routinesPanel?.tryLeaveEditor != null,
         );
-        return SizedBox(
-          height: 52,
-          child: Padding(
-            padding: EdgeInsets.fromLTRB(key == null ? 16 : 8, 0, 8, 0),
-            child: Row(
-              children: [
-                if (key == null) ...[
-                  CharacterAvatar(
-                    size: 28,
-                    characterId: _background(botId),
-                    primary: _primary(botId),
-                    motion: CharacterMotion.quiet,
-                  ),
-                  const SizedBox(width: 10),
-                ] else
-                  KeyedSubtree(
-                    // Flutter Web keeps the first identifier a Semantics
-                    // node published. Remount when the press changes meaning
-                    // so the editor's id is what a spec actually sees.
-                    key: ValueKey(backId),
-                    child: identified(
-                      backId,
-                      IconButton(
-                        tooltip: 'Back',
-                        onPressed: () => unawaited(_popPanel()),
-                        style: _panelControl(theme),
-                        icon: const Icon(Icons.chevron_left_rounded),
-                      ),
+        return DesktopWindowDragRegion(
+          child: SizedBox(
+            height: 52,
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(key == null ? 16 : 8, 0, 8, 0),
+              child: Row(
+                children: [
+                  if (key == null) ...[
+                    CharacterAvatar(
+                      size: 28,
+                      characterId: _background(botId),
+                      primary: _primary(botId),
+                      motion: CharacterMotion.quiet,
                     ),
-                  ),
-                Expanded(
-                  child: Column(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // A heading of its own, rather than a leaf the engine merges
-                      // into the row beside it: what the panel is showing is the
-                      // one thing a reader needs read out first.
-                      Semantics(
-                        header: true,
-                        child: Text(
-                          key == null
-                              ? _name(bot)
-                              : _panelTitle(key) ?? _name(bot),
-                          style: theme.textTheme.titleSmall?.copyWith(
-                            fontSize: 14,
-                            fontWeight: FontWeight.w600,
-                          ),
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
+                    const SizedBox(width: 10),
+                  ] else
+                    KeyedSubtree(
+                      // Flutter Web keeps the first identifier a Semantics
+                      // node published. Remount when the press changes meaning
+                      // so the editor's id is what a spec actually sees.
+                      key: ValueKey(backId),
+                      child: identified(
+                        backId,
+                        IconButton(
+                          tooltip: 'Back',
+                          onPressed: () => unawaited(_popPanel()),
+                          style: _panelControl(theme),
+                          icon: const Icon(Icons.chevron_left_rounded),
                         ),
                       ),
-                    ],
-                  ),
-                ),
-                if (key == null)
-                  identified(
-                    SettingsIds.botPageSettings,
-                    IconButton(
-                      tooltip: 'Bot settings',
-                      onPressed: () => _openPanel('bot-settings', push: true),
-                      style: _panelControl(theme),
-                      icon: const Icon(Icons.settings_outlined),
+                    ),
+                  Expanded(
+                    child: Column(
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // A heading of its own, rather than a leaf the engine merges
+                        // into the row beside it: what the panel is showing is the
+                        // one thing a reader needs read out first.
+                        Semantics(
+                          header: true,
+                          child: Text(
+                            key == null
+                                ? _name(bot)
+                                : _panelTitle(key) ?? _name(bot),
+                            style: theme.textTheme.titleSmall?.copyWith(
+                              fontSize: 14,
+                              fontWeight: FontWeight.w600,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                identified(
-                  ShellIds.rightPanelClose,
-                  IconButton(
-                    tooltip: 'Close the panel',
-                    onPressed: () => setState(() {
-                      panelOpen = false;
-                      panelCollapsed = true;
-                      panelStack.clear();
-                      panelPackage = null;
-                    }),
-                    style: _panelControl(theme),
-                    icon: const Icon(Icons.close_rounded),
+                  if (key == null)
+                    identified(
+                      SettingsIds.botPageSettings,
+                      IconButton(
+                        tooltip: 'Bot settings',
+                        onPressed: () => _openPanel('bot-settings', push: true),
+                        style: _panelControl(theme),
+                        icon: const Icon(Icons.settings_outlined),
+                      ),
+                    ),
+                  identified(
+                    ShellIds.rightPanelClose,
+                    IconButton(
+                      tooltip: 'Close the panel',
+                      onPressed: () => setState(() {
+                        panelOpen = false;
+                        panelCollapsed = true;
+                        panelStack.clear();
+                        panelPackage = null;
+                      }),
+                      style: _panelControl(theme),
+                      icon: const Icon(Icons.close_rounded),
+                    ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
           ),
         );
@@ -2171,7 +2173,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (key == 'canvas' && panelCanvas != null) {
       _push(
         Scaffold(
-          appBar: AppBar(title: const Text('Panel')),
+          appBar: DesktopHeader(child: AppBar(title: const Text('Panel'))),
           body: SafeArea(
             top: false,
             child: PanelCanvas(

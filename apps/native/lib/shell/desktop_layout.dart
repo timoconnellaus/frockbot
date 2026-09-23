@@ -58,12 +58,20 @@ double desktopChromeHeight(DesktopChrome chrome) =>
     ? desktopTitleBarBand
     : 0;
 
-/// The window's own drag gesture, which Flutter cannot perform itself.
+/// The window's own title-bar gestures, which Flutter cannot perform itself.
 abstract final class DesktopWindow {
   static const _channel = MethodChannel('com.frockbot/window');
-  static Future<void> startDrag() async {
+  static Future<void> startDrag() => _invoke('startDrag');
+
+  /// A click on a header's own surface, never on a control in it. The window
+  /// counts clicks the way the system does, so the second of a double-click
+  /// does what Desktop & Dock says a title bar does: zoom, unless the person
+  /// chose minimize or nothing.
+  static Future<void> titleBarClick() => _invoke('titleBarClick');
+
+  static Future<void> _invoke(String method) async {
     try {
-      await _channel.invokeMethod<void>('startDrag');
+      await _channel.invokeMethod<void>(method);
     } on MissingPluginException {
       // A host without the channel — a test, the web — has no window to move.
     }
@@ -71,8 +79,9 @@ abstract final class DesktopWindow {
 }
 
 /// Makes an existing Mac header act as a title bar without reserving a second
-/// row above it. Taps remain available to controls in the header; a drag gives
-/// the native window the gesture.
+/// row above it. Controls in the header keep their clicks, because the deepest
+/// recognizer wins a tap; a click on the header's own surface, and a drag from
+/// anywhere in it, go to the native window.
 class DesktopWindowDragRegion extends StatelessWidget {
   final Widget child;
   const DesktopWindowDragRegion({super.key, required this.child});
@@ -82,6 +91,10 @@ class DesktopWindowDragRegion extends StatelessWidget {
     if (!desktopTitleBarless) return child;
     return GestureDetector(
       behavior: HitTestBehavior.translucent,
+      // The Window menu is how assistive technology zooms and moves a window;
+      // the header is not a button.
+      excludeFromSemantics: true,
+      onTap: DesktopWindow.titleBarClick,
       onPanStart: (_) => DesktopWindow.startDrag(),
       child: child,
     );

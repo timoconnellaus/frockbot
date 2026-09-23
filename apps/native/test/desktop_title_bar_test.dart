@@ -108,6 +108,46 @@ void main() {
     },
   );
 
+  testWidgets(
+    'on a Mac a click on the header itself goes to the window, and a click on a control does not',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      try {
+        final calls = listen(tester);
+        var refreshed = 0;
+        await tester.pumpWidget(page(() => refreshed++));
+        await tester.pumpAndSettle();
+
+        // The window counts the clicks; the header reports each one, at once,
+        // so a double-click is the system's own speed and distance.
+        for (final at in [
+          const Offset(400, desktopTitleBarBand + kToolbarHeight / 2),
+          tester.getCenter(find.text('Personal details')),
+          const Offset(400, 4),
+        ]) {
+          calls.clear();
+          await tester.tapAt(at, kind: PointerDeviceKind.mouse);
+          await tester.pump(const Duration(milliseconds: 50));
+          await tester.tapAt(at, kind: PointerDeviceKind.mouse);
+          await tester.pump();
+          expect(calls, ['titleBarClick', 'titleBarClick'], reason: '$at');
+        }
+
+        // Pressing a control twice is two presses of that control.
+        calls.clear();
+        final refresh = tester.getCenter(find.byTooltip('Refresh settings'));
+        await tester.tapAt(refresh, kind: PointerDeviceKind.mouse);
+        await tester.pump(const Duration(milliseconds: 50));
+        await tester.tapAt(refresh, kind: PointerDeviceKind.mouse);
+        await tester.pumpAndSettle();
+        expect(refreshed, 2);
+        expect(calls, isEmpty);
+      } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    },
+  );
+
   testWidgets('a phone leaves its header untouched', (tester) async {
     debugDefaultTargetPlatformOverride = TargetPlatform.android;
     final calls = listen(tester);
@@ -123,6 +163,8 @@ void main() {
       const Offset(80, 0),
       kind: PointerDeviceKind.mouse,
     );
+    await tester.pumpAndSettle();
+    await tester.tapAt(const Offset(400, kToolbarHeight / 2));
     await tester.pumpAndSettle();
     expect(calls, isEmpty);
     await tester.tap(find.byTooltip('Refresh settings'));

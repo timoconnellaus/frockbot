@@ -4,6 +4,10 @@ import FlutterMacOS
 
 class MainFlutterWindow: NSWindow {
   private var speaker: PcmSpeaker?
+  /// The system's count for the latest press, so a header click Flutter
+  /// reports is judged by the person's own double-click speed.
+  private var clickCount = 0
+
   override func awakeFromNib() {
     let flutterViewController = FlutterViewController()
     let windowFrame = self.frame
@@ -18,6 +22,10 @@ class MainFlutterWindow: NSWindow {
     self.styleMask.insert(.fullSizeContentView)
     self.isMovableByWindowBackground = false
 
+    // The frame lives in the app's defaults, which a quit, a relaunch and an
+    // update all leave in place; setting the name restores the saved frame.
+    self.setFrameAutosaveName("MainWindow")
+
     let window = FlutterMethodChannel(
       name: "com.frockbot/window", binaryMessenger: flutterViewController.engine.binaryMessenger)
     window.setMethodCallHandler { [weak self] call, result in
@@ -25,6 +33,9 @@ class MainFlutterWindow: NSWindow {
       switch call.method {
       case "startDrag":
         if let event = NSApp.currentEvent { self.performDrag(with: event) }
+        result(nil)
+      case "titleBarClick":
+        if self.clickCount == 2 { self.titleBarDoubleClick() }
         result(nil)
       default:
         result(FlutterMethodNotImplemented)
@@ -51,6 +62,21 @@ class MainFlutterWindow: NSWindow {
     DesktopUpdater.shared.bind(flutterViewController.engine.binaryMessenger)
 
     super.awakeFromNib()
+  }
+
+  override func sendEvent(_ event: NSEvent) {
+    if event.type == .leftMouseDown { clickCount = event.clickCount }
+    super.sendEvent(event)
+  }
+
+  /// Desktop & Dock's "Double-click a window's title bar to". Zoom is the
+  /// default, and stands in for Fill, which has no public call.
+  private func titleBarDoubleClick() {
+    switch UserDefaults.standard.string(forKey: "AppleActionOnDoubleClick") {
+    case "Minimize": miniaturize(nil)
+    case "None": break
+    default: zoom(nil)
+    }
   }
 }
 

@@ -8,11 +8,16 @@ describe("What’s New feed", () => {
     const feed = whatsNewFeedV1();
     expect(feed.schemaVersion).toBe(1);
     expect(feed.entries[0]).toMatchObject({
+      id: "mac-window-place",
+      title: "The Mac window keeps its place",
+      kind: "fix",
+    });
+    expect(feed.entries[1]).toMatchObject({
       id: "avatar-colour-flash",
       title: "Avatars open in their own colour",
       kind: "fix",
     });
-    expect(feed.entries[1]).toMatchObject({
+    expect(feed.entries[2]).toMatchObject({
       id: "flock-palette",
       title: "Colours from the characters",
       kind: "improvement",
@@ -21,37 +26,37 @@ describe("What’s New feed", () => {
         alt: "A dark chat with Pixel: warm cream text, your messages in a pink tint, and a bright pink send button.",
       },
     });
-    expect(feed.entries[2]).toMatchObject({
+    expect(feed.entries[3]).toMatchObject({
       id: "one-card-per-provider",
       title: "One card per model provider",
       kind: "improvement",
     });
-    expect(feed.entries[3]).toMatchObject({
+    expect(feed.entries[4]).toMatchObject({
       id: "add-a-model",
       title: "Add a model in one go",
       kind: "improvement",
     });
-    expect(feed.entries[4]).toMatchObject({
+    expect(feed.entries[5]).toMatchObject({
       id: "plugins-per-bot",
       title: "Plugins live with each Bot",
       kind: "improvement",
     });
-    expect(feed.entries[5]).toMatchObject({
+    expect(feed.entries[6]).toMatchObject({
       id: "plugin-theme-refused",
       title: "A refused plugin theme is reported",
       kind: "fix",
     });
-    expect(feed.entries[6]).toMatchObject({
+    expect(feed.entries[7]).toMatchObject({
       id: "voice-opening",
       title: "The first words of a call are kept",
       kind: "improvement",
     });
-    expect(feed.entries[7]).toMatchObject({
+    expect(feed.entries[8]).toMatchObject({
       id: "committed-chat",
       title: "Replies land as they are sent",
       kind: "improvement",
     });
-    expect(feed.entries[8]).toMatchObject({
+    expect(feed.entries[9]).toMatchObject({
       id: "voice-call-card",
       title: "A live call is a card",
       kind: "improvement",
@@ -60,29 +65,29 @@ describe("What’s New feed", () => {
         alt: "A phone chat with the live call in a card under the header: the Bot, the wave, and you, with mute and hang-up on the row below.",
       },
     });
-    expect(feed.entries[9]).toMatchObject({
+    expect(feed.entries[10]).toMatchObject({
       id: "header-align",
       title: "Chat header lines up",
       kind: "fix",
     });
-    expect(feed.entries[10]).toMatchObject({
+    expect(feed.entries[11]).toMatchObject({
       id: "quiet-delivery",
       title: "Sends acknowledge immediately",
       kind: "fix",
       summary:
         "A message is accepted as soon as it is saved. A long reply no longer looks like the send failed.",
     });
-    expect(feed.entries[11]).toMatchObject({
+    expect(feed.entries[12]).toMatchObject({
       id: "chat-scroll",
       title: "Earlier messages stay in reach",
       kind: "fix",
     });
-    expect(feed.entries[12]).toMatchObject({
+    expect(feed.entries[13]).toMatchObject({
       id: "marketplace-installed",
       title: "Installed in the Marketplace",
       kind: "improvement",
     });
-    expect(feed.entries[13]).toMatchObject({
+    expect(feed.entries[14]).toMatchObject({
       id: "chat-type",
       title: "Easier reading in chat",
       kind: "improvement",
@@ -98,7 +103,7 @@ describe("What’s New feed", () => {
       kind: "feature",
       summary: "What landed in each release.",
     });
-    expect(feed.entries[1]?.publishedAt).toBeUndefined();
+    expect(feed.entries[2]?.publishedAt).toBeUndefined();
   });
 
   test("a known production day is attached without inventing one", () => {
