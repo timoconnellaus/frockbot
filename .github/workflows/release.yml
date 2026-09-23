@@ -220,6 +220,8 @@ jobs:
           channel: stable
 
       - name: Build the web client and the application artifact
+        env:
+          FROCKBOT_RELEASE: ${{ needs.verify.outputs.version }}
         shell: bash
         run: |
           set -euo pipefail
@@ -392,6 +394,7 @@ jobs:
         if: steps.change.outputs.changed == 'true'
         id: patch
         env:
+          FROCKBOT_RELEASE: ${{ needs.verify.outputs.version }}
           SHOREBIRD_TOKEN: ${{ secrets.SHOREBIRD_TOKEN }}
           SHOREBIRD_PATCH_PRIVATE_KEY: ${{ secrets.SHOREBIRD_PATCH_PRIVATE_KEY }}
           ANDROID_DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
@@ -438,6 +441,7 @@ jobs:
         if: steps.patch.outputs.needs_release == 'true'
         id: full
         env:
+          FROCKBOT_RELEASE: ${{ needs.verify.outputs.version }}
           SHOREBIRD_TOKEN: ${{ secrets.SHOREBIRD_TOKEN }}
           ANDROID_DEBUG_KEYSTORE_BASE64: ${{ secrets.ANDROID_DEBUG_KEYSTORE_BASE64 }}
         shell: bash
@@ -969,7 +973,8 @@ jobs:
             --no-pub \
             --build-name="${VERSION%%-*}" \
             --build-number="$GITHUB_RUN_NUMBER" \
-            --dart-define=FROCKBOT_ORIGIN="$origin"
+            --dart-define=FROCKBOT_ORIGIN="$origin" \
+            --dart-define=FROCKBOT_RELEASE="$VERSION"
           xcodebuild archive \
             -workspace macos/Runner.xcworkspace \
             -scheme Runner \
@@ -1767,6 +1772,8 @@ jobs:
 
       - name: Build application artifact
         working-directory: apps/cloudflare
+        env:
+          FROCKBOT_RELEASE: ${{ needs.verify.outputs.version }}
         run: bun run artifact:build
 
       - name: Configure application artifact

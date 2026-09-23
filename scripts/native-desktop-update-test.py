@@ -88,7 +88,8 @@ class DesktopUpdateTest(unittest.TestCase):
         flutter, xcodebuild = desktop.build_commands("1.4.0", "2")
         self.assertIn("--config-only", flutter)
         self.assertIn("--dart-define=FROCKBOT_DESKTOP_DEV=true", flutter)
-        self.assertIn("--dart-define=FROCKBOT_APP_VERSION=1.4.0+2", flutter)
+        # A development build names no release, so the app says so.
+        self.assertFalse(any("FROCKBOT_RELEASE" in str(arg) for arg in flutter))
         self.assertEqual(xcodebuild[0], "xcodebuild")
         self.assertIn("FROCKBOT_DESKTOP_DEV=YES", xcodebuild)
         self.assertIn("-allowProvisioningUpdates", xcodebuild)

@@ -1,7 +1,4 @@
-import {
-  decodeProtocol,
-  MINIMUM_NATIVE_VERSION,
-} from "@frockbot/core/protocol-schemas";
+import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { describe, expect, test } from "bun:test";
 import {
   createNativeAuth,
@@ -29,7 +26,7 @@ import {
 const hello = {
   schemaVersion: 1,
   protocolVersion: 1,
-  nativeVersion: MINIMUM_NATIVE_VERSION,
+  nativeVersion: "0.7.163",
   catalogs: [],
 };
 const verifier = "a".repeat(64);
@@ -351,7 +348,7 @@ describe("native system browser exchange", () => {
     const session = decodeProtocol("AuthSessionView", await response!.json());
     for (const value of [
       "",
-      JSON.stringify({ ...hello, nativeVersion: "1.0.0" }),
+      JSON.stringify({ ...hello, protocolVersion: 0 }),
       JSON.stringify({ ...hello, protocolVersion: 2 }),
     ]) {
       const result = await g.auth.authenticate(
@@ -366,9 +363,10 @@ describe("native system browser exchange", () => {
 
   test("a session issued to an app this deployment no longer accepts survives the update that made it supported", async () => {
     const f = fixture();
-    // The phone's real case: the sign-in was issued to 1.1.0, the deployment
-    // has since raised its minimum, and the app has updated itself.
-    const historical = { ...hello, nativeVersion: "1.1.0" };
+    // The phone's real case: the sign-in was issued to an app on a protocol
+    // this deployment no longer serves, numbered before the release tag was
+    // the version, and the app has since updated itself.
+    const historical = { ...hello, protocolVersion: 2, nativeVersion: "1.1.0" };
     const expires = f.now() + 7 * 86400_000;
     const token = await mintSessionToken({
       userId: "user-1",
@@ -413,7 +411,7 @@ describe("native system browser exchange", () => {
             ...headers,
             "x-frockbot-client": JSON.stringify({
               ...hello,
-              nativeVersion: "1.0.0",
+              protocolVersion: 0,
             }),
           }),
         )
@@ -459,7 +457,7 @@ describe("native system browser exchange", () => {
     ).toBeNull();
   });
 
-  test("only the version may change under a session; protocol and catalogs gain no authority", async () => {
+  test("the version and protocol may change under a session; catalogs gain no authority", async () => {
     const f = fixture();
     const session = decodeProtocol(
       "AuthSessionView",
@@ -1038,7 +1036,7 @@ describe("beta access on the native door", () => {
       "x-frockbot-client": JSON.stringify({
         schemaVersion: 1,
         protocolVersion: 1,
-        nativeVersion: MINIMUM_NATIVE_VERSION,
+        nativeVersion: "0.7.163",
         catalogs: [],
       }),
     };
@@ -1177,6 +1175,11 @@ test("verified return associations name the existing Android signer and exact ma
   expect(await apple!.text()).toContain("Q444L76529.com.frockbot.mobile");
 });
 
+function tamper(value: string, at: number): string {
+  const index = value.length + at;
+  return `${value.slice(0, index)}${value[index] === "A" ? "B" : "A"}${value.slice(index + 1)}`;
+}
+
 describe("native provider setup navigation", () => {
   async function handoff(f: ReturnType<typeof fixture>, home = "models") {
     const exchange = await f.authorize();
@@ -1217,7 +1220,9 @@ describe("native provider setup navigation", () => {
       for (const url of [
         view.authorizationUrl + "&next=https://evil.test",
         view.authorizationUrl + "&request=duplicate",
-        view.authorizationUrl.replace(/.$/, "x"),
+        // Inside the signature, where every bit is signed: base64's last
+        // character carries padding bits a decoder may ignore.
+        tamper(view.authorizationUrl, -8),
       ]) {
         expect(
           (
@@ -1373,7 +1378,7 @@ test("a device that signed out gives its slot back", () => {
   const hello = {
     schemaVersion: 1 as const,
     protocolVersion: 1 as const,
-    nativeVersion: MINIMUM_NATIVE_VERSION,
+    nativeVersion: "0.7.163",
     catalogs: [],
   };
   const sign = (sessionId: string, action: "issue" | "revoke") =>

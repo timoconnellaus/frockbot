@@ -2,13 +2,22 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import {
   CLIENT_PROTOCOL_VERSION,
-  MINIMUM_NATIVE_VERSION,
   SUPPORTED_PROTOCOL_MAX,
   SUPPORTED_PROTOCOL_MIN,
 } from "../core/protocol-schemas/compatibility.generated.js";
 
 export interface NativeBuildMetadata {
   schemaVersion: 1;
+  /**
+   * The version tag `release.yml` builds, without its `v`, from
+   * `FROCKBOT_RELEASE`; null for any other build. It is the app's one version:
+   * the Profile page shows it and the client's hello names it.
+   */
+  release: string | null;
+  /**
+   * What Flutter stamps into the native build: the release's
+   * `major.minor.patch`, or `pubspec.yaml`'s placeholder outside a release.
+   */
   app: {
     versionName: string;
     buildNumber: number;
@@ -19,7 +28,6 @@ export interface NativeBuildMetadata {
   compatibility: {
     protocolMin: number;
     protocolMax: number;
-    minimumNativeVersion: string;
   };
 }
 
@@ -27,36 +35,13 @@ interface CompatibilitySource {
   clientProtocol: unknown;
   protocolMin: unknown;
   protocolMax: unknown;
-  minimumNativeVersion: unknown;
 }
 
 const defaultCompatibility: CompatibilitySource = {
   clientProtocol: CLIENT_PROTOCOL_VERSION,
   protocolMin: SUPPORTED_PROTOCOL_MIN,
   protocolMax: SUPPORTED_PROTOCOL_MAX,
-  minimumNativeVersion: MINIMUM_NATIVE_VERSION,
 };
-
-function semanticVersion(
-  value: unknown,
-  label: string,
-): [number, number, number] {
-  if (typeof value !== "string") throw new Error(`${label} must be a string.`);
-  const match = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)$/u.exec(value);
-  if (!match) throw new Error(`${label} must be a semantic version.`);
-  return [Number(match[1]), Number(match[2]), Number(match[3])];
-}
-
-function compareVersion(
-  left: [number, number, number],
-  right: [number, number, number],
-): number {
-  for (let index = 0; index < left.length; index += 1) {
-    const difference = left[index]! - right[index]!;
-    if (difference !== 0) return difference;
-  }
-  return 0;
-}
 
 function positiveProtocol(value: unknown, label: string): number {
   if (
@@ -76,8 +61,6 @@ function compatibilityMetadata(source: CompatibilitySource) {
     source.clientProtocol,
     "clientProtocol",
   );
-  const minimumNativeVersion = source.minimumNativeVersion;
-  semanticVersion(minimumNativeVersion, "minimumNativeVersion");
   if (protocolMin > protocolMax) {
     throw new Error("protocolMin must not exceed protocolMax.");
   }
@@ -86,12 +69,22 @@ function compatibilityMetadata(source: CompatibilitySource) {
       `Client protocol ${clientProtocol} is outside the supported ${protocolMin}..${protocolMax} range.`,
     );
   }
-  return {
-    clientProtocol,
-    protocolMin,
-    protocolMax,
-    minimumNativeVersion: minimumNativeVersion as string,
-  };
+  return { clientProtocol, protocolMin, protocolMax };
+}
+
+/** The pattern `ClientHello.nativeVersion` accepts, so a release can always say its name. */
+const RELEASE =
+  /^(0|[1-9]\d{0,5})\.(0|[1-9]\d{0,5})\.(0|[1-9]\d{0,5})(-[0-9A-Za-z.-]{1,20})?$/u;
+
+function releaseVersion(value: string | undefined) {
+  if (value === undefined || value === "") return null;
+  const match = RELEASE.exec(value);
+  if (!match || value.length > 32) {
+    throw new Error(
+      `FROCKBOT_RELEASE must be a version tag without its \`v\`, such as 0.7.163 or 0.8.0-rc.1, not ${JSON.stringify(value)}.`,
+    );
+  }
+  return { release: value, versionName: `${match[1]}.${match[2]}.${match[3]}` };
 }
 
 function appIdentity(document: unknown) {
@@ -149,35 +142,29 @@ function hostedOrigin(document: unknown): string {
 export async function readNativeMetadata(
   repositoryRoot = resolve(import.meta.dirname, ".."),
   compatibilitySource: CompatibilitySource = defaultCompatibility,
+  releaseSource = process.env.FROCKBOT_RELEASE,
 ): Promise<NativeBuildMetadata> {
   const [pubspecSource, hostedSource] = await Promise.all([
     readFile(resolve(repositoryRoot, "apps/native/pubspec.yaml"), "utf8"),
     readFile(resolve(repositoryRoot, "deployments/hosted.json"), "utf8"),
   ]);
-  const app = appIdentity(Bun.YAML.parse(pubspecSource));
+  const placeholder = appIdentity(Bun.YAML.parse(pubspecSource));
   const compatibility = compatibilityMetadata(compatibilitySource);
-  if (
-    compareVersion(
-      semanticVersion(app.versionName, "native version"),
-      semanticVersion(
-        compatibility.minimumNativeVersion,
-        "minimumNativeVersion",
-      ),
-    ) < 0
-  ) {
-    throw new Error(
-      `Native version ${app.versionName} is below the minimum ${compatibility.minimumNativeVersion}.`,
-    );
-  }
+  const tagged = releaseVersion(releaseSource);
+  const versionName = tagged?.versionName ?? placeholder.versionName;
   return {
     schemaVersion: 1,
-    app,
+    release: tagged?.release ?? null,
+    app: {
+      versionName,
+      buildNumber: placeholder.buildNumber,
+      version: `${versionName}+${placeholder.buildNumber}`,
+    },
     hostedOrigin: hostedOrigin(JSON.parse(hostedSource) as unknown),
     clientProtocol: compatibility.clientProtocol,
     compatibility: {
       protocolMin: compatibility.protocolMin,
       protocolMax: compatibility.protocolMax,
-      minimumNativeVersion: compatibility.minimumNativeVersion,
     },
   };
 }

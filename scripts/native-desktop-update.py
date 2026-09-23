@@ -202,7 +202,6 @@ def build_commands(name, number, *, voice_diagnostics=False):
     return [
         [FLUTTER, "build", "macos", "--release", "--config-only", f"--build-name={name}",
          f"--build-number={number}", f"--dart-define=FROCKBOT_ORIGIN={hosted_origin()}",
-         f"--dart-define=FROCKBOT_APP_VERSION={name}+{number}",
          "--dart-define=FROCKBOT_DESKTOP_DEV=true",
          *(["--dart-define=FROCKBOT_VOICE_DIAGNOSTICS=true"] if voice_diagnostics else [])],
         ["xcodebuild", "build", "-workspace", "macos/Runner.xcworkspace", "-scheme", "Runner",

@@ -67,7 +67,7 @@ def source_metadata():
 
 
 def build_name():
-    """The release's version name, from the checked native metadata."""
+    """The Android versionName: the version tag's `major.minor.patch`, or the placeholder outside a tag."""
     return source_metadata().version_name
 
 
@@ -81,13 +81,15 @@ def origin_define():
     return f"--dart-define=FROCKBOT_ORIGIN={source_metadata().hosted_origin}"
 
 
-def app_version_define(release_version):
-    """The flag that tells the Dart program which release it is, shown at the foot of the Profile page.
+def release_defines():
+    """The version tag `release.yml` builds, which the app shows and names in its hello.
 
-    A patch carries its release's identity, never a version of its own: the patch number is read from
-    the Shorebird updater at run time.
+    A patch is new Dart, so it names its own tag, while the release it patches keeps the versionName
+    it was cut with: the running tag says which code booted. Gradle never reads the define, so it is
+    no native change. A build cut by hand has no tag and passes none.
     """
-    return f"--dart-define=FROCKBOT_APP_VERSION={release_version}"
+    release = source_metadata().release
+    return [f"--dart-define=FROCKBOT_RELEASE={release}"] if release else []
 
 
 class FullReleaseRequired(RuntimeError):
@@ -450,8 +452,7 @@ def release(floor=0, build_number=None):
         raise RuntimeError("Android versionCode limit reached.")
     args = [cli, "release", "android", f"--flutter-version={FLUTTER_VERSION}", "--artifact=apk",
             f"--target-platform={TARGET_PLATFORM}", f"--build-name={build_name()}", f"--build-number={version}",
-            f"--public-key-path={PUBLIC_KEY}", "--", origin_define(),
-            app_version_define(f"{build_name()}+{version}")]
+            f"--public-key-path={PUBLIC_KEY}", "--", origin_define(), *release_defines()]
     if not intent:
         intent = {
             "versionCode": version, "package": PACKAGE, "appId": app_id(), "buildName": build_name(),
@@ -517,8 +518,7 @@ def patch(track="staging", baseline_source="local", result=None):
     args = [cli, "patch", "android", f"--release-version={base['releaseVersion']}",
             f"--build-name={base['buildName']}", f"--build-number={base['buildNumber']}", f"--track={track}",
             f"--private-key-path={key}", f"--public-key-path={PUBLIC_KEY}",
-            "--", f"--target-platform={base['targetPlatform']}", origin_define(),
-            app_version_define(base["releaseVersion"])]
+            "--", f"--target-platform={base['targetPlatform']}", origin_define(), *release_defines()]
     if any(flag in arg for arg in args for flag in FORBIDDEN_PATCH_FLAGS):
         raise RuntimeError("A patch never overrides native or asset diffs; ship a full release instead.")
     # The release was built one above its floor; the same floor makes Gradle emit the same versionCode.

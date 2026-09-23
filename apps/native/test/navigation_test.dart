@@ -254,7 +254,7 @@ void main() {
           userId: 'test-user',
           botLinks: links,
           onSignOut: () async {},
-          version: () async => const AppVersion(build: '1.2.0+17', patch: 3),
+          version: () async => const AppVersion(release: '0.7.163', patch: 3),
         ),
       ),
     );
@@ -266,7 +266,7 @@ void main() {
     expect(
       find.descendant(
         of: version,
-        matching: find.text('Version 1.2.0+17 · patch 3'),
+        matching: find.text('Version 0.7.163 · patch 3'),
       ),
       findsOneWidget,
     );

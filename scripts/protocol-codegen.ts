@@ -26,7 +26,6 @@ export const source = JSON.parse(
   "x-frockbot-compatibility": {
     protocolMin: number;
     protocolMax: number;
-    minimumNativeVersion: string;
     catalogs: { id: string; digest: string }[];
   };
   "x-frockbot-state-channel": {

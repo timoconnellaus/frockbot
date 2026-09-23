@@ -9,10 +9,12 @@ from dataclasses import dataclass
 import json
 from pathlib import Path
 import subprocess
+from typing import Optional
 
 
 @dataclass(frozen=True)
 class NativeMetadata:
+    release: Optional[str]
     version_name: str
     build_number: int
     version: str
@@ -20,7 +22,6 @@ class NativeMetadata:
     client_protocol: int
     protocol_min: int
     protocol_max: int
-    minimum_native_version: str
 
 
 def _integer(value, label):
@@ -35,6 +36,7 @@ def decode_native_metadata(source):
         app = document["app"]
         compatibility = document["compatibility"]
         metadata = NativeMetadata(
+            release=document["release"],
             version_name=app["versionName"],
             build_number=_integer(app["buildNumber"], "app.buildNumber"),
             version=app["version"],
@@ -42,7 +44,6 @@ def decode_native_metadata(source):
             client_protocol=_integer(document["clientProtocol"], "clientProtocol"),
             protocol_min=_integer(compatibility["protocolMin"], "compatibility.protocolMin"),
             protocol_max=_integer(compatibility["protocolMax"], "compatibility.protocolMax"),
-            minimum_native_version=compatibility["minimumNativeVersion"],
         )
     except (json.JSONDecodeError, KeyError, TypeError) as failure:
         raise RuntimeError("Native metadata command returned an invalid document.") from failure
@@ -52,10 +53,11 @@ def decode_native_metadata(source):
         ("app.versionName", metadata.version_name),
         ("app.version", metadata.version),
         ("hostedOrigin", metadata.hosted_origin),
-        ("compatibility.minimumNativeVersion", metadata.minimum_native_version),
     ):
         if not isinstance(value, str) or not value:
             raise RuntimeError(f"Native metadata {label} must be a non-empty string.")
+    if metadata.release is not None and (not isinstance(metadata.release, str) or not metadata.release):
+        raise RuntimeError("Native metadata release must be a non-empty string or null.")
     if metadata.version != f"{metadata.version_name}+{metadata.build_number}":
         raise RuntimeError("Native metadata app version does not match its name and build number.")
     if not metadata.hosted_origin.startswith("https://"):

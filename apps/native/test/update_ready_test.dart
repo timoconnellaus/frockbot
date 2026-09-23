@@ -398,21 +398,25 @@ void main() {
       addTearDown(controller.dispose);
       final version = await controller.version();
       expect(version.patch, 3);
-      expect(version.build, compiledAppVersion);
+      expect(version.release, compiledRelease);
       expect(
-        const AppVersion(build: '1.2.0+17', patch: 3).label,
-        'Version 1.2.0+17 · patch 3',
+        const AppVersion(release: '0.7.163', patch: 3).label,
+        'Version 0.7.163 · patch 3',
       );
     });
 
     test('is the release alone when no patch is running', () {
-      expect(const AppVersion(build: '1.2.0+17').label, 'Version 1.2.0+17');
+      expect(const AppVersion(release: '0.7.163').label, 'Version 0.7.163');
+      expect(
+        const AppVersion(release: '0.8.0-rc.1').label,
+        'Version 0.8.0-rc.1',
+      );
     });
 
     test('says so when the build was given no version', () {
-      expect(const AppVersion(build: '').label, 'Development build');
+      expect(const AppVersion(release: '').label, 'Development build');
       expect(
-        const AppVersion(build: '', patch: 2).label,
+        const AppVersion(release: '', patch: 2).label,
         'Development build · patch 2',
       );
     });

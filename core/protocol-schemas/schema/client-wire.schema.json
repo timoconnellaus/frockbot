@@ -150,7 +150,7 @@
           "type": "string",
           "minLength": 5,
           "maxLength": 32,
-          "pattern": "^(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})(?![\\s\\S])"
+          "pattern": "^(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})\\.(0|[1-9][0-9]{0,5})(-[0-9A-Za-z.-]{1,20})?(?![\\s\\S])"
         },
         "catalogs": {
           "type": "array",
@@ -161,12 +161,7 @@
           "maxItems": 8
         }
       },
-      "required": [
-        "schemaVersion",
-        "protocolVersion",
-        "nativeVersion",
-        "catalogs"
-      ],
+      "required": ["schemaVersion", "protocolVersion", "catalogs"],
       "additionalProperties": false
     },
     "CompatibilityView": {
@@ -185,11 +180,6 @@
           "minimum": 1,
           "maximum": 65535
         },
-        "minimumNativeVersion": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 32
-        },
         "catalogs": {
           "type": "array",
           "items": {
@@ -199,13 +189,7 @@
           "maxItems": 8
         }
       },
-      "required": [
-        "schemaVersion",
-        "protocolMin",
-        "protocolMax",
-        "minimumNativeVersion",
-        "catalogs"
-      ],
+      "required": ["schemaVersion", "protocolMin", "protocolMax", "catalogs"],
       "additionalProperties": false
     },
     "UpdateRequired": {
@@ -5406,7 +5390,6 @@
   "x-frockbot-compatibility": {
     "protocolMin": 1,
     "protocolMax": 1,
-    "minimumNativeVersion": "1.6.0",
     "catalogs": []
   },
   "x-frockbot-state-channel": {

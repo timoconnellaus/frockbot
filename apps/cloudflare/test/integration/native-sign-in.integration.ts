@@ -1,9 +1,6 @@
 import { env, SELF } from "cloudflare:test";
 import { expect, test } from "vitest";
-import {
-  decodeProtocol,
-  MINIMUM_NATIVE_VERSION,
-} from "@frockbot/core/protocol-schemas";
+import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { createAuth } from "@frockbot/app/auth/better-auth";
 import { DEPLOYMENT_POLICY_SINGLETON_NAME } from "../../src/deployment-policy.ts";
 import { nativeReturnUriV1 } from "../../src/native-auth.ts";
@@ -71,7 +68,7 @@ test("a browser session completes native start, authorization and exchange", asy
   const hello = {
     schemaVersion: 1,
     protocolVersion: 1,
-    nativeVersion: MINIMUM_NATIVE_VERSION,
+    nativeVersion: "0.7.163",
     catalogs: [],
   };
   const verifier = "v".repeat(64);

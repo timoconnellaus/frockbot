@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../protocol/client_wire.generated.dart' as wire;
+import '../update/app_version.dart';
 import 'credential.dart';
 import 'store.dart';
 import 'transport_io.dart' if (dart.library.js_interop) 'transport_web.dart';
@@ -30,15 +31,17 @@ extension on String {
   String ifEmpty(String Function() fallback) => isEmpty ? fallback() : this;
 }
 
-Map<String, Object> clientHelloForVersion(String nativeVersion) =>
+/// The protocol is what the deployment gates on. The release tag only says
+/// which build is talking, and a build made outside a release has none.
+Map<String, Object> clientHelloForRelease(String release) =>
     Map<String, Object>.unmodifiable(<String, Object>{
       'schemaVersion': 1,
       'protocolVersion': wire.clientProtocolVersion,
-      'nativeVersion': nativeVersion,
+      if (release.isNotEmpty) 'nativeVersion': release,
       'catalogs': const <Object>[],
     });
 
-final clientHello = clientHelloForVersion(wire.nativeAppVersion);
+final clientHello = clientHelloForRelease(compiledRelease);
 
 String randomId() {
   final bytes = List<int>.generate(24, (_) => Random.secure().nextInt(256));

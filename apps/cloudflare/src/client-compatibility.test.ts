@@ -9,7 +9,7 @@ import {
 const hello = {
   schemaVersion: 1,
   protocolVersion: 1,
-  nativeVersion: CLIENT_COMPATIBILITY.minimumNativeVersion,
+  nativeVersion: "0.7.163",
   catalogs: [],
 };
 function check(value: unknown, path = "/api/bots/default/turns") {
@@ -22,25 +22,22 @@ function check(value: unknown, path = "/api/bots/default/turns") {
   return clientCompatibilityResponse(request, new URL(request.url));
 }
 test("compatible clients continue and catalogs do not confer authority", () => {
-  for (const version of [
-    CLIENT_COMPATIBILITY.minimumNativeVersion,
-    "2.0.0",
-    "1.10.0",
-  ])
+  // The version names the release a client was built from and gates nothing:
+  // an installed build from before the tag became the version, a prerelease,
+  // and a development build that knows none all speak the same protocol.
+  for (const version of ["0.7.163", "1.6.0", "1.1.0", "0.8.0-rc.1", "0.7.162"])
     expect(check({ ...hello, nativeVersion: version })).toBeUndefined();
+  const { nativeVersion: _, ...development } = hello;
+  expect(check(development)).toBeUndefined();
   expect(
     check({ ...hello, catalogs: [{ id: "unknown", digest: "a".repeat(64) }] }),
   ).toBeUndefined();
 });
 test("unsupported or malformed clients get plain update copy before routing", async () => {
   for (const value of [
-    { ...hello, nativeVersion: "1.5.0" },
-    { ...hello, nativeVersion: "1.4.0" },
-    { ...hello, nativeVersion: "1.3.0" },
-    { ...hello, nativeVersion: "1.2.0" },
-    { ...hello, nativeVersion: "1.1.0" },
-    { ...hello, nativeVersion: "1.0.9" },
     { ...hello, nativeVersion: "1.2" },
+    { ...hello, nativeVersion: "0.7.163\n" },
+    { ...hello, nativeVersion: "0.7.163-" },
     { ...hello, protocolVersion: 2 },
     { ...hello, protocolVersion: 0 },
     { ...hello, nativeVersion: "99999999999999999.0.0" },

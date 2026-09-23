@@ -1,6 +1,5 @@
 import {
   CLIENT_COMPATIBILITY,
-  MINIMUM_NATIVE_VERSION,
   SUPPORTED_PROTOCOL_MAX,
   SUPPORTED_PROTOCOL_MIN,
   isProtocolValue,
@@ -8,15 +7,6 @@ import {
 
 export const CLIENT_HELLO_HEADER = "x-frockbot-client";
 export const UPDATE_APP_MESSAGE = "Update the app to continue using FrockBot.";
-
-function versionAtLeast(actual: string, minimum: string): boolean {
-  const a = actual.split(".").map(Number);
-  const b = minimum.split(".").map(Number);
-  for (let i = 0; i < 3; i++) {
-    if (a[i] !== b[i]) return a[i]! > b[i]!;
-  }
-  return true;
-}
 
 /** Version selection is compatibility, never authentication or a capability grant. */
 export function clientCompatibilityResponse(
@@ -37,8 +27,7 @@ export function clientCompatibilityResponse(
     if (
       !isProtocolValue("ClientHello", hello) ||
       hello.protocolVersion < SUPPORTED_PROTOCOL_MIN ||
-      hello.protocolVersion > SUPPORTED_PROTOCOL_MAX ||
-      !versionAtLeast(hello.nativeVersion, MINIMUM_NATIVE_VERSION)
+      hello.protocolVersion > SUPPORTED_PROTOCOL_MAX
     ) {
       return new Response(UPDATE_APP_MESSAGE, {
         status: 426,

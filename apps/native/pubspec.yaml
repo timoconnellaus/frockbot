@@ -1,7 +1,9 @@
 name: frockbot_native
 description: FrockBot native qualification prototype.
 publish_to: none
-version: 1.6.0+1
+# The release tag is the version: `release.yml` stamps it with `--build-name`
+# (`scripts/native-metadata.ts`). This placeholder names any other build.
+version: 0.0.0+1
 
 environment:
   sdk: ">=3.13.0 <3.14.0"

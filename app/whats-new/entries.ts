@@ -23,6 +23,13 @@ export type WhatsNewEntrySourceV1 = {
  */
 export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
+    id: "release-version",
+    title: "Profile names the release",
+    summary:
+      "The version at the foot of the page is the release that is running. The Mac app no longer calls itself a development build.",
+    kind: "fix",
+  },
+  {
     id: "notices-under-header",
     title: "Chat notices sit under the header",
     summary:
