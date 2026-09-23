@@ -4,6 +4,7 @@ import {
   type ComputerScreenshotV1,
 } from "@frockbot/computer/core/host";
 import type {
+  ComputerCaptureTimingV1,
   WorkspaceFilesV1,
   WorkspaceGenerationV1,
   WorkspacePathV1,
@@ -86,12 +87,15 @@ async function pruneComputerScreenshotsV1(
   root: WorkspaceRootV1,
   botKey: string,
   writer: WorkspaceWriterV1,
+  step: ComputerCaptureStepTimerV1,
 ): Promise<void> {
-  const listed = await workspace.list({
-    root,
-    prefix: botKey,
-    limit: COMPUTER_SCREENSHOT_RETENTION * 4,
-  });
+  const listed = await step("list", () =>
+    workspace.list({
+      root,
+      prefix: botKey,
+      limit: COMPUTER_SCREENSHOT_RETENTION * 4,
+    }),
+  );
   if (listed.status !== "ok") return;
   const sorted = [...listed.entries].sort((left, right) => {
     const order = left.generation.writtenAt.localeCompare(
@@ -100,14 +104,57 @@ async function pruneComputerScreenshotsV1(
     return order !== 0 ? order : left.path.path.localeCompare(right.path.path);
   });
   const excess = sorted.length - COMPUTER_SCREENSHOT_RETENTION;
-  for (let index = 0; index < excess; index += 1) {
-    const entry = sorted[index]!;
-    await workspace.delete({
-      path: entry.path,
-      writer,
-      expectedGenerationId: entry.generation.generationId,
-    });
+  if (excess <= 0) return;
+  await step("prune", async () => {
+    for (let index = 0; index < excess; index += 1) {
+      const entry = sorted[index]!;
+      await workspace.delete({
+        path: entry.path,
+        writer,
+        expectedGenerationId: entry.generation.generationId,
+      });
+    }
+  });
+}
+
+type ComputerCaptureStepTimerV1 = <T>(
+  step: Exclude<keyof ComputerCaptureTimingV1, "total">,
+  run: () => Promise<T>,
+) => Promise<T>;
+
+/** Whole milliseconds since `started`, never negative. */
+export function elapsedMsV1(now: () => number, started: number): number {
+  return Math.max(0, Math.round(now() - started));
+}
+
+/**
+ * Runs `run` and hands its duration to `record` whether it settled or threw,
+ * so a step that failed part-way still says how long it took.
+ */
+export async function timeComputerStepV1<T>(
+  now: () => number,
+  run: () => Promise<T>,
+  record: (ms: number) => void,
+): Promise<T> {
+  const started = now();
+  try {
+    return await run();
+  } finally {
+    record(elapsedMsV1(now, started));
   }
+}
+
+/** Records into `timing` how long each step of one filing took, as it runs. */
+function captureStepTimerV1(
+  timing: ComputerCaptureTimingV1 | undefined,
+  now: () => number,
+): ComputerCaptureStepTimerV1 {
+  return (step, run) =>
+    timing
+      ? timeComputerStepV1(now, run, (ms) => {
+          timing[step] = ms;
+        })
+      : run();
 }
 
 /**
@@ -124,24 +171,33 @@ export async function fileComputerScreenshotV1(input: {
   botKey: string;
   effectId: string;
   signal?: AbortSignal;
+  /** Filled with each step's duration as it runs; `total` is the caller's. */
+  timing?: ComputerCaptureTimingV1;
+  now?: () => number;
 }): Promise<FiledComputerScreenshotV1> {
-  if (!input.computer.screenshot) {
+  const screenshot = input.computer.screenshot;
+  if (!screenshot) {
     throw new ComputerError(
       "capability-unavailable",
       "The selected Computer does not support screenshots",
     );
   }
-  const captured = await input.computer.screenshot.capture({
-    effectId: input.effectId,
-    ...(input.signal ? { signal: input.signal } : {}),
-  });
-  const written = await input.workspace.write({
-    path: input.path,
-    bytes: captured.bytes,
-    writer: input.writer,
-    expectedGenerationId: null,
-    mediaType: captured.mediaType,
-  });
+  const step = captureStepTimerV1(input.timing, input.now ?? Date.now);
+  const captured = await step("screenshot", () =>
+    screenshot.capture({
+      effectId: input.effectId,
+      ...(input.signal ? { signal: input.signal } : {}),
+    }),
+  );
+  const written = await step("write", () =>
+    input.workspace.write({
+      path: input.path,
+      bytes: captured.bytes,
+      writer: input.writer,
+      expectedGenerationId: null,
+      mediaType: captured.mediaType,
+    }),
+  );
   if (written.status !== "ok") {
     throw new Error(
       `The screenshot could not be filed: ${written.status}: ${written.reason}`,
@@ -152,6 +208,7 @@ export async function fileComputerScreenshotV1(input: {
     input.path.root,
     input.botKey,
     input.writer,
+    step,
   );
   return { captured, path: input.path, generation: written.generation };
 }

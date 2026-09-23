@@ -29,15 +29,16 @@
 // what it moved, and nothing on this path can fail a Turn.
 import {
   type AgentRuntimeV1,
+  type ComputerCaptureTimingV1,
+  type ComputerTimingV1,
   type RuntimeFeatureV1,
   type Session,
   type SessionStore,
   type ToolAttachmentV1,
   type ToolDefinition,
   type ToolExecutionContext,
-  type WorkspacePathV1,
+  type WorkspaceFilesV1,
   type WorkspaceRootV1,
-  type WorkspaceWriterV1,
 } from "@frockbot/core/contracts";
 import { shellQuote } from "./fly/shell.js";
 import { computerBotPathKeyV1, ComputerError } from "@frockbot/computer/core";
@@ -69,7 +70,9 @@ import {
 } from "./roots.js";
 import {
   createComputerCaptureCadenceV1,
+  elapsedMsV1,
   fileComputerScreenshotV1,
+  timeComputerStepV1,
   type ComputerProjectionFileInvalidationV1,
   type ComputerProjectionFileKindV1,
 } from "./capture.js";
@@ -143,6 +146,8 @@ export interface ComputerAgentPluginConfig {
    * production takes `COMPUTER_PROGRESS_CAPTURE_INTERVAL_MS`.
    */
   progressCaptureIntervalMs?: number;
+  /** The Package's clock. Tests set it; production takes `Date.now`. */
+  now?: () => number;
 }
 
 export const HUMAN_CONTROL_PROMPT_LINE =
@@ -483,6 +488,50 @@ export async function recordComputerSyncV1(
   await session.flush();
 }
 
+type ComputerTimedPhaseV1 = "attach" | "sync" | "selfCheck" | "operation";
+
+/**
+ * The phases of one Computer tool call or Turn end, as `computer/timing`
+ * records them. A phase is recorded once it has run, so a call that failed
+ * part-way still says where its time went, and one that never ran is absent.
+ */
+class ComputerCallTiming {
+  readonly #started: number;
+  readonly #ms: Omit<ComputerTimingV1, "total"> = {};
+
+  constructor(private readonly now: () => number) {
+    this.#started = now();
+  }
+
+  /** Whether any phase ran; a call refused before it reached the Computer has none. */
+  get ran(): boolean {
+    return Object.keys(this.#ms).length > 0;
+  }
+
+  /** Times `run` into `name`, adding to what that phase already holds. */
+  phase<T>(name: ComputerTimedPhaseV1, run: () => Promise<T>): Promise<T> {
+    return timeComputerStepV1(this.now, run, (ms) => {
+      this.#ms[name] = (this.#ms[name] ?? 0) + ms;
+    });
+  }
+
+  /** Times one screenshot filing, which fills in its own steps. */
+  capture<T>(run: (steps: ComputerCaptureTimingV1) => Promise<T>): Promise<T> {
+    const steps: ComputerCaptureTimingV1 = { total: 0 };
+    return timeComputerStepV1(
+      this.now,
+      () => run(steps),
+      (ms) => {
+        this.#ms.capture = { ...steps, total: ms };
+      },
+    );
+  }
+
+  finish(): ComputerTimingV1 {
+    return { ...this.#ms, total: elapsedMsV1(this.now, this.#started) };
+  }
+}
+
 /**
  * The Turn's sync state, and the only place this Package decides to sync.
  *
@@ -520,10 +569,19 @@ class ComputerTurnSync {
     computer: ComputerHostSessionV1,
     sessionId: string,
     signal: AbortSignal,
+    timing: ComputerCallTiming,
   ): Promise<void> {
     this.#used = true;
     const sync = computer.sync;
     if (!sync) return;
+    await timing.phase("sync", () => this.#beforeUse(sync, sessionId, signal));
+  }
+
+  async #beforeUse(
+    sync: NonNullable<ComputerHostSessionV1["sync"]>,
+    sessionId: string,
+    signal: AbortSignal,
+  ): Promise<void> {
     try {
       if (!this.#pulled) {
         this.#pulled = true;
@@ -560,11 +618,14 @@ class ComputerTurnSync {
   async afterTurn(
     computer: ComputerHostSessionV1,
     sessionId: string,
+    timing: ComputerCallTiming,
   ): Promise<void> {
     this.#used = false;
     const sync = computer.sync;
     if (!sync) return;
-    await this.record(sessionId, "turn-end", await sync.reconcile("turn-end"));
+    await timing.phase("sync", async () =>
+      this.record(sessionId, "turn-end", await sync.reconcile("turn-end")),
+    );
   }
 
   /** The Turn could not be given a Computer at all; that is also an outcome. */
@@ -659,6 +720,60 @@ export function createComputerAgentFeature(
       projectionWrites.clear();
     };
     const turnOf = (_context: ToolExecutionContext): number => currentTurn;
+    const now = config.now ?? Date.now;
+    /** The timing of each Computer tool call in flight, keyed by its context. */
+    const callTimings = new WeakMap<ToolExecutionContext, ComputerCallTiming>();
+    const timingOf = (context: ToolExecutionContext): ComputerCallTiming =>
+      callTimings.get(context) ?? new ComputerCallTiming(now);
+    /** Times one Computer call itself, apart from what this Package does around it. */
+    const operation = <T>(
+      context: ToolExecutionContext,
+      run: () => Promise<T>,
+    ): Promise<T> => timingOf(context).phase("operation", run);
+    /**
+     * Appends one `computer/timing` line. The append starts its write and
+     * nothing waits for it: a tool call's line is settled by the flush that
+     * records the call's result, and a diagnostic is never worth a Turn's
+     * latency.
+     */
+    const noteTiming = (
+      sessionId: string,
+      turn: number,
+      timing: ComputerCallTiming,
+      tool?: string,
+    ): void => {
+      const session = runtime.sessions.get(sessionId);
+      if (!session || session.disposed) return;
+      session.append({
+        type: "computer/timing",
+        turn: Math.max(1, turn),
+        ...(tool === undefined
+          ? { scope: "turn-end" as const }
+          : { scope: "tool" as const, tool }),
+        ms: timing.finish(),
+      });
+    };
+    /**
+     * A Computer tool that records where each of its calls spent its time.
+     * Wrapped at registration, so no Computer tool can be added without it.
+     */
+    const timed = (definition: ToolDefinition): ToolDefinition => ({
+      ...definition,
+      execute: async (input, context) => {
+        // Read now: a call a Stop cut short can end after the next Turn began.
+        const turn = turnOf(context);
+        const timing = new ComputerCallTiming(now);
+        callTimings.set(context, timing);
+        try {
+          return await definition.execute(input, context);
+        } finally {
+          callTimings.delete(context);
+          if (timing.ran) {
+            noteTiming(context.sessionId, turn, timing, definition.name);
+          }
+        }
+      },
+    });
     const attach = async (botId: string, signal: AbortSignal) => {
       if (!runtime.computers.assignment(identity)) {
         runtime.computers.assign(identity, defaultProviderId);
@@ -670,14 +785,18 @@ export function createComputerAgentFeature(
      * before the Bot looks at them. The sync is inside `open` rather than
      * beside each tool so no Computer tool can be added that skips it.
      */
-    const open = async (
-      botId: string,
-      sessionId: string,
-      signal: AbortSignal,
-    ) => {
-      const computer = await attach(botId, signal);
-      await turnSync.beforeUse(computer, sessionId, signal);
-      await selfCheck(computer, botId, signal);
+    const open = async (context: ToolExecutionContext) => {
+      const timing = timingOf(context);
+      const computer = await timing.phase("attach", () =>
+        attach(context.botId, context.signal),
+      );
+      await turnSync.beforeUse(
+        computer,
+        context.sessionId,
+        context.signal,
+        timing,
+      );
+      await selfCheck(computer, context.botId, context.signal, timing);
       return computer;
     };
     const closePreviewTabs = async (
@@ -775,16 +894,16 @@ export function createComputerAgentFeature(
               };
         }
         try {
-          return await useComputer(
-            await open(context.botId, context.sessionId, context.signal),
-            async (computer) => {
-              if (!computer.exec) {
-                throw new ComputerError(
-                  "capability-unavailable",
-                  "The selected Computer does not support command execution",
-                );
-              }
-              const result = await computer.exec.execute(
+          return await useComputer(await open(context), async (computer) => {
+            const exec = computer.exec;
+            if (!exec) {
+              throw new ComputerError(
+                "capability-unavailable",
+                "The selected Computer does not support command execution",
+              );
+            }
+            const result = await operation(context, () =>
+              exec.execute(
                 {
                   executable: "/bin/bash",
                   args: ["-lc", decoded.command],
@@ -793,16 +912,16 @@ export function createComputerAgentFeature(
                   maxOutputBytes: 30_000,
                 },
                 { signal: context.signal, effectId: context.effectId },
-              );
-              await fileProgressCapture(computer, context.botId, context);
-              return {
-                content: [text(result.stdout), text(result.stderr)]
-                  .filter(Boolean)
-                  .join("\n"),
-                isError: result.exitCode !== 0,
-              };
-            },
-          );
+              ),
+            );
+            await fileProgressCapture(computer, context);
+            return {
+              content: [text(result.stdout), text(result.stderr)]
+                .filter(Boolean)
+                .join("\n"),
+              isError: result.exitCode !== 0,
+            };
+          });
         } catch (error) {
           return failure(error);
         }
@@ -927,68 +1046,68 @@ export function createComputerAgentFeature(
       // spend the Bot's whole 100-record budget having run nothing at all.
       let unsettled: ComputerProcessRecordV1 | undefined;
       try {
-        return await useComputer(
-          await open(context.botId, context.sessionId, context.signal),
-          async (computer) => {
-            if (!computer.processes) {
-              throw new ComputerError(
-                "capability-unavailable",
-                "The selected Computer does not support background processes",
-              );
-            }
-            const processId = `p-${context.effectId.replaceAll(/[^a-zA-Z0-9._-]/g, "-")}`;
-            const generation = await computer.processes.generation({
-              signal: context.signal,
-            });
-            const intent: ComputerProcessRecordV1 = {
-              schemaVersion: 1,
-              processId,
-              botId: context.botId,
-              sessionId: context.sessionId,
-              turnId: writer.turnId,
-              command,
-              cwd: "",
-              startedAt: new Date().toISOString(),
-              status: "starting",
-              generation,
-              effectId: context.effectId,
-              logPath: "",
-            };
-            await store.record({ ...intent, cwd: "/", logPath: "/" });
-            unsettled = { ...intent, cwd: "/", logPath: "/" };
-            const launched = await computer.processes.launch(
+        return await useComputer(await open(context), async (computer) => {
+          if (!computer.processes) {
+            throw new ComputerError(
+              "capability-unavailable",
+              "The selected Computer does not support background processes",
+            );
+          }
+          const processes = computer.processes;
+          const processId = `p-${context.effectId.replaceAll(/[^a-zA-Z0-9._-]/g, "-")}`;
+          const generation = await operation(context, () =>
+            processes.generation({ signal: context.signal }),
+          );
+          const intent: ComputerProcessRecordV1 = {
+            schemaVersion: 1,
+            processId,
+            botId: context.botId,
+            sessionId: context.sessionId,
+            turnId: writer.turnId,
+            command,
+            cwd: "",
+            startedAt: new Date().toISOString(),
+            status: "starting",
+            generation,
+            effectId: context.effectId,
+            logPath: "",
+          };
+          await store.record({ ...intent, cwd: "/", logPath: "/" });
+          unsettled = { ...intent, cwd: "/", logPath: "/" };
+          const launched = await operation(context, () =>
+            processes.launch(
               { processId, command },
               { signal: context.signal, effectId: context.effectId },
-            );
-            const running: ComputerProcessRecordV1 = {
-              ...intent,
-              status: "running",
-              generation: launched.generation || generation,
-              cwd: launched.cwd,
-              logPath: launched.logPath,
-              pid: launched.pid,
-            };
-            await store.update(running);
-            unsettled = undefined;
-            await noteProcess(context.sessionId, turnOf(context), {
+            ),
+          );
+          const running: ComputerProcessRecordV1 = {
+            ...intent,
+            status: "running",
+            generation: launched.generation || generation,
+            cwd: launched.cwd,
+            logPath: launched.logPath,
+            pid: launched.pid,
+          };
+          await store.update(running);
+          unsettled = undefined;
+          await noteProcess(context.sessionId, turnOf(context), {
+            processId,
+            action: "launch",
+            status: "running",
+          });
+          return {
+            content: JSON.stringify({
               processId,
-              action: "launch",
+              pid: launched.pid,
               status: "running",
-            });
-            return {
-              content: JSON.stringify({
-                processId,
-                pid: launched.pid,
-                status: "running",
-                command,
-                cwd: launched.cwd,
-                startedAt: running.startedAt,
-                note: "This process runs while the Computer is awake and outlives this Turn. Nothing keeps the Computer awake for it; if it hibernates first, computer_process_check answers unknown.",
-              }),
-              isError: false,
-            };
-          },
-        );
+              command,
+              cwd: launched.cwd,
+              startedAt: running.startedAt,
+              note: "This process runs while the Computer is awake and outlives this Turn. Nothing keeps the Computer awake for it; if it hibernates first, computer_process_check answers unknown.",
+            }),
+            isError: false,
+          };
+        });
       } catch (error) {
         if (unsettled) {
           // `unknown`, not deleted: the launch may have started something
@@ -1035,97 +1154,139 @@ export function createComputerAgentFeature(
         };
       }
       try {
-        return await useComputer(
-          await open(context.botId, context.sessionId, context.signal),
-          async (computer) => {
-            if (!computer.processes) {
-              throw new ComputerError(
-                "capability-unavailable",
-                "The selected Computer does not support background processes",
-              );
-            }
-            const currentGeneration = await computer.processes.generation({
-              signal: context.signal,
-            });
-            let observed: ComputerBackgroundStateV1;
-            if (action === "stop") {
-              observed = await computer.processes.stop(processId, {
-                signal: context.signal,
-                effectId: context.effectId,
-              });
-            } else {
-              observed = await computer.processes.inspect(processId, {
-                signal: context.signal,
-                ...(tailBytes === undefined ? {} : { tailBytes }),
-              });
-            }
-            const settled = computerProcessStatusV1({
-              recorded: held,
-              currentGeneration,
-              observed,
-            });
-            const next: ComputerProcessRecordV1 = {
-              ...held,
-              status: settled.status,
-              ...(settled.exitCode === undefined
-                ? {}
-                : { exitCode: settled.exitCode }),
-            };
-            await store.update(next);
-            await noteProcess(context.sessionId, turnOf(context), {
-              processId,
-              action,
-              status: settled.status,
-              ...(settled.exitCode === undefined
-                ? {}
-                : { exitCode: settled.exitCode }),
-            });
-            // The evidence outlives the Computer only if it leaves it.
-            try {
-              await mirrorLog(
-                computer,
-                context,
-                next,
-                settled.status,
-                observed.logTail,
-              );
-            } catch {
-              // A mirror that could not be written never withholds an outcome
-              // that was read.
-            }
-            if (action === "logs") {
-              return {
-                content: observed.logTail || "(no output yet)",
-                isError: false,
-              };
-            }
+        return await useComputer(await open(context), async (computer) => {
+          if (!computer.processes) {
+            throw new ComputerError(
+              "capability-unavailable",
+              "The selected Computer does not support background processes",
+            );
+          }
+          const processes = computer.processes;
+          const currentGeneration = await operation(context, () =>
+            processes.generation({ signal: context.signal }),
+          );
+          const observed: ComputerBackgroundStateV1 = await operation(
+            context,
+            () =>
+              action === "stop"
+                ? processes.stop(processId, {
+                    signal: context.signal,
+                    effectId: context.effectId,
+                  })
+                : processes.inspect(processId, {
+                    signal: context.signal,
+                    ...(tailBytes === undefined ? {} : { tailBytes }),
+                  }),
+          );
+          const settled = computerProcessStatusV1({
+            recorded: held,
+            currentGeneration,
+            observed,
+          });
+          const next: ComputerProcessRecordV1 = {
+            ...held,
+            status: settled.status,
+            ...(settled.exitCode === undefined
+              ? {}
+              : { exitCode: settled.exitCode }),
+          };
+          await store.update(next);
+          await noteProcess(context.sessionId, turnOf(context), {
+            processId,
+            action,
+            status: settled.status,
+            ...(settled.exitCode === undefined
+              ? {}
+              : { exitCode: settled.exitCode }),
+          });
+          // The evidence outlives the Computer only if it leaves it.
+          try {
+            await mirrorLog(
+              computer,
+              context,
+              next,
+              settled.status,
+              observed.logTail,
+            );
+          } catch {
+            // A mirror that could not be written never withholds an outcome
+            // that was read.
+          }
+          if (action === "logs") {
             return {
-              content: JSON.stringify({
-                processId,
-                status: settled.status,
-                ...(settled.exitCode === undefined
-                  ? {}
-                  : { exitCode: settled.exitCode }),
-                command: held.command,
-                startedAt: held.startedAt,
-                ...(held.pid === undefined ? {} : { pid: held.pid }),
-                logTail: observed.logTail.slice(-4_000),
-                ...(settled.status === "unknown"
-                  ? {
-                      note: "The Computer this process was launched on is not the one answering now, or its process is gone with no recorded exit. It is not running; treat its outcome as unknown.",
-                    }
-                  : {}),
-              }),
+              content: observed.logTail || "(no output yet)",
               isError: false,
             };
-          },
-        );
+          }
+          return {
+            content: JSON.stringify({
+              processId,
+              status: settled.status,
+              ...(settled.exitCode === undefined
+                ? {}
+                : { exitCode: settled.exitCode }),
+              command: held.command,
+              startedAt: held.startedAt,
+              ...(held.pid === undefined ? {} : { pid: held.pid }),
+              logTail: observed.logTail.slice(-4_000),
+              ...(settled.status === "unknown"
+                ? {
+                    note: "The Computer this process was launched on is not the one answering now, or its process is gone with no recorded exit. It is not running; treat its outcome as unknown.",
+                  }
+                : {}),
+            }),
+            isError: false,
+          };
+        });
       } catch (error) {
         return failure(error);
       }
     };
 
     let captureSequence = 0;
+
+    /**
+     * Files one capture of this Bot's own desktop in the `screenshots` root,
+     * under this Turn: the one path the progress, explicit and Turn-end
+     * captures share.
+     */
+    const fileBotScreenshot = (input: {
+      computer: ComputerHostSessionV1;
+      workspace: WorkspaceFilesV1;
+      writer: ComputerWriterIdentityV1;
+      botId: string;
+      effectId: string;
+      steps: ComputerCaptureTimingV1;
+      signal?: AbortSignal;
+    }) => {
+      const botKey = computerBotPathKeyV1(input.botId);
+      captureSequence += 1;
+      return fileComputerScreenshotV1({
+        computer: input.computer,
+        workspace: input.workspace,
+        path: {
+          root: {
+            kind: "package-declared",
+            userId,
+            packageId: "computer",
+            rootId: COMPUTER_SCREENSHOTS_ROOT_ID,
+          },
+          path: `${botKey}/${input.writer.turnId}-${captureSequence}.png`,
+        },
+        writer: {
+          kind: "bot",
+          botId: input.botId,
+          sessionId: input.writer.sessionId,
+          turnId: input.writer.turnId,
+          runId: input.writer.runId,
+        },
+        botKey,
+        effectId: input.effectId,
+        ...(input.signal ? { signal: input.signal } : {}),
+        timing: input.steps,
+        now,
+      });
+    };
 
     /**
      * Files one capture of the desktop the Bot has just acted on, and tells
@@ -1140,36 +1301,22 @@ export function createComputerAgentFeature(
      */
     const fileProgressCapture = async (
       computer: ComputerHostSessionV1,
-      botId: string,
       context: ToolExecutionContext,
     ): Promise<void> => {
-      if (!writer || !computer.workspace || !computer.screenshot) return;
-      if (!progressCadence.admit(Date.now())) return;
-      const botKey = computerBotPathKeyV1(botId);
-      captureSequence += 1;
+      const workspace = computer.workspace;
+      if (!writer || !workspace || !computer.screenshot) return;
+      if (!progressCadence.admit(now())) return;
       try {
-        await fileComputerScreenshotV1({
-          computer,
-          workspace: computer.workspace,
-          path: {
-            root: {
-              kind: "package-declared",
-              userId,
-              packageId: "computer",
-              rootId: COMPUTER_SCREENSHOTS_ROOT_ID,
-            },
-            path: `${botKey}/${writer.turnId}-${captureSequence}.png`,
-          },
-          writer: {
-            kind: "bot",
-            botId,
-            sessionId: writer.sessionId,
-            turnId: writer.turnId,
-            runId: writer.runId,
-          },
-          botKey,
-          effectId: `${context.effectId}:progress-screenshot`,
-        });
+        await timingOf(context).capture((steps) =>
+          fileBotScreenshot({
+            computer,
+            workspace,
+            writer,
+            botId: context.botId,
+            effectId: `${context.effectId}:progress-screenshot`,
+            steps,
+          }),
+        );
       } catch {
         // A desktop that refused a capture — human control, a Computer that
         // paused, a Computer with no screen — changes nothing the Bot did.
@@ -1178,7 +1325,7 @@ export function createComputerAgentFeature(
       noteProjectionWrite("screenshots");
       // Flushed now rather than at Turn end: a capture nobody is told about
       // is the delay this exists to remove.
-      invalidateProjectionWrites(botId);
+      invalidateProjectionWrites(context.botId);
     };
 
     /**
@@ -1231,83 +1378,64 @@ export function createComputerAgentFeature(
           };
         }
         try {
-          return await useComputer(
-            await open(context.botId, context.sessionId, context.signal),
-            async (computer) => {
-              const workspace = computer.workspace;
-              if (!workspace) {
-                throw new ComputerError(
-                  "capability-unavailable",
-                  "The selected Computer exposes no Workspace to file a screenshot in",
-                );
-              }
-              const root: WorkspaceRootV1 = {
-                kind: "package-declared",
-                userId,
-                packageId: "computer",
-                rootId: COMPUTER_SCREENSHOTS_ROOT_ID,
-              };
-              const botKey = computerBotPathKeyV1(context.botId);
-              captureSequence += 1;
-              const path: WorkspacePathV1 = {
-                root,
-                path: `${botKey}/${writer.turnId}-${captureSequence}.png`,
-              };
-              const botWriter: WorkspaceWriterV1 = {
-                kind: "bot",
-                botId: context.botId,
-                sessionId: writer.sessionId,
-                turnId: writer.turnId,
-                runId: writer.runId,
-              };
-              const filed = await fileComputerScreenshotV1({
+          return await useComputer(await open(context), async (computer) => {
+            const workspace = computer.workspace;
+            if (!workspace) {
+              throw new ComputerError(
+                "capability-unavailable",
+                "The selected Computer exposes no Workspace to file a screenshot in",
+              );
+            }
+            const filed = await timingOf(context).capture((steps) =>
+              fileBotScreenshot({
                 computer,
                 workspace,
-                path,
-                writer: botWriter,
-                botKey,
-                signal: context.signal,
+                writer,
+                botId: context.botId,
                 effectId: context.effectId,
-              });
-              noteProjectionWrite("screenshots");
-              // The Bot just looked at its own screen; so should the person
-              // watching the card. Recording the admission keeps the very
-              // next Computer action from filing a near-identical capture.
-              progressCadence.admit(Date.now());
-              invalidateProjectionWrites(context.botId);
-              const dimensions = pngDimensionsV1(filed.captured.bytes);
-              const attachment: ToolAttachmentV1 = {
-                kind: "image",
-                mediaType: filed.captured.mediaType,
-                workspacePath: path,
-                contentHash: filed.generation.contentHash,
-                bytes: filed.generation.size,
-              };
-              // The bytes are offered to the resident Session so this Turn's
-              // next model request can show them. They are never recorded:
-              // the event log holds the reference, the Workspace holds the
-              // image.
-              runtime.sessions
-                .get(context.sessionId)
-                ?.offerAttachmentBytes(
-                  attachment.contentHash,
-                  base64Of(filed.captured.bytes),
-                );
-              return {
-                content: JSON.stringify({
-                  path: path.path,
-                  rootId: COMPUTER_SCREENSHOTS_ROOT_ID,
-                  contentHash: attachment.contentHash,
-                  bytes: attachment.bytes,
-                  ...(dimensions ?? {}),
-                  display: filed.captured.display,
-                  capturedAt: filed.captured.capturedAt,
-                }),
-                isError: false,
-                attachments: [attachment],
-              };
-            },
-          );
+                steps,
+                signal: context.signal,
+              }),
+            );
+            const path = filed.path;
+            noteProjectionWrite("screenshots");
+            // The Bot just looked at its own screen; so should the person
+            // watching the card. Recording the admission keeps the very
+            // next Computer action from filing a near-identical capture.
+            progressCadence.admit(now());
+            invalidateProjectionWrites(context.botId);
+            const dimensions = pngDimensionsV1(filed.captured.bytes);
+            const attachment: ToolAttachmentV1 = {
+              kind: "image",
+              mediaType: filed.captured.mediaType,
+              workspacePath: path,
+              contentHash: filed.generation.contentHash,
+              bytes: filed.generation.size,
+            };
+            // The bytes are offered to the resident Session so this Turn's
+            // next model request can show them. They are never recorded:
+            // the event log holds the reference, the Workspace holds the
+            // image.
+            runtime.sessions
+              .get(context.sessionId)
+              ?.offerAttachmentBytes(
+                attachment.contentHash,
+                base64Of(filed.captured.bytes),
+              );
+            return {
+              content: JSON.stringify({
+                path: path.path,
+                rootId: COMPUTER_SCREENSHOTS_ROOT_ID,
+                contentHash: attachment.contentHash,
+                bytes: attachment.bytes,
+                ...(dimensions ?? {}),
+                display: filed.captured.display,
+                capturedAt: filed.captured.capturedAt,
+              }),
+              isError: false,
+              attachments: [attachment],
+            };
+          });
         } catch (error) {
           return failure(error);
         }
@@ -1375,12 +1503,16 @@ export function createComputerAgentFeature(
       computer: ComputerHostSessionV1,
       botId: string,
       signal: AbortSignal,
+      timing: ComputerCallTiming,
     ): Promise<void> => {
-      if (selfChecked || !computer.doctor || !writer) return;
+      const doctor = computer.doctor;
+      if (selfChecked || !doctor || !writer) return;
       selfChecked = true;
       try {
-        const report = await computer.doctor.run({ signal });
-        await fileDoctorReport(computer, botId, report);
+        await timing.phase("selfCheck", async () => {
+          const report = await doctor.run({ signal });
+          await fileDoctorReport(computer, botId, report);
+        });
       } catch {
         // An unreadable self-check is not a reason to refuse the tool call the
         // Bot actually made.
@@ -1423,35 +1555,33 @@ export function createComputerAgentFeature(
         (typeof input === "object" && Object.keys(input).length === 0),
       execute: async (_input, context) => {
         try {
-          return await useComputer(
-            await open(context.botId, context.sessionId, context.signal),
-            async (computer) => {
-              if (!computer.doctor) {
-                throw new ComputerError(
-                  "capability-unavailable",
-                  "The selected Computer does not support a self-check",
-                );
-              }
-              const report = await computer.doctor.run({
-                signal: context.signal,
-              });
-              let path: string | undefined;
-              try {
-                path = await fileDoctorReport(computer, context.botId, report);
-              } catch {
-                // A report that could not be filed is still a report that was
-                // read, and withholding it would hide the very failure it
-                // describes.
-              }
-              return {
-                content: JSON.stringify({
-                  ...report,
-                  ...(path ? { rootId: COMPUTER_DOCTOR_ROOT_ID, path } : {}),
-                }),
-                isError: false,
-              };
-            },
-          );
+          return await useComputer(await open(context), async (computer) => {
+            const doctor = computer.doctor;
+            if (!doctor) {
+              throw new ComputerError(
+                "capability-unavailable",
+                "The selected Computer does not support a self-check",
+              );
+            }
+            const report = await operation(context, () =>
+              doctor.run({ signal: context.signal }),
+            );
+            let path: string | undefined;
+            try {
+              path = await fileDoctorReport(computer, context.botId, report);
+            } catch {
+              // A report that could not be filed is still a report that was
+              // read, and withholding it would hide the very failure it
+              // describes.
+            }
+            return {
+              content: JSON.stringify({
+                ...report,
+                ...(path ? { rootId: COMPUTER_DOCTOR_ROOT_ID, path } : {}),
+              }),
+              isError: false,
+            };
+          });
         } catch (error) {
           return failure(error);
         }
@@ -1622,48 +1752,111 @@ export function createComputerAgentFeature(
         if (!action)
           return { content: browserInputRefusalV1(input), isError: true };
         try {
-          return await useComputer(
-            await open(context.botId, context.sessionId, context.signal),
-            async (computer) => {
-              if (!computer.browser) {
-                throw new ComputerError(
-                  "capability-unavailable",
-                  "The selected Computer does not support browser automation",
-                );
-              }
-              const result = await computer.browser.perform(action, {
+          return await useComputer(await open(context), async (computer) => {
+            const browser = computer.browser;
+            if (!browser) {
+              throw new ComputerError(
+                "capability-unavailable",
+                "The selected Computer does not support browser automation",
+              );
+            }
+            const result = await operation(context, () =>
+              browser.perform(action, {
                 signal: context.signal,
                 effectId: context.effectId,
-              });
-              if (action.type === "navigate") {
-                const origin = localPreviewOriginV1(action.url);
-                if (origin) previewOrigins.add(origin);
-              }
-              await fileProgressCapture(computer, context.botId, context);
-              return {
-                content: result.accessibilitySnapshot,
-                isError: false,
-              };
-            },
-          );
+              }),
+            );
+            if (action.type === "navigate") {
+              const origin = localPreviewOriginV1(action.url);
+              if (origin) previewOrigins.add(origin);
+            }
+            await fileProgressCapture(computer, context);
+            return {
+              content: result.accessibilitySnapshot,
+              isError: false,
+            };
+          });
         } catch (error) {
           return failure(error);
         }
       },
     };
 
+    /**
+     * The work after a Turn that used the Computer: close the preview tabs it
+     * opened, file the frame the card shows while the Bot is idle, and push.
+     * The Computer is already awake for this Bot, so the push costs no wake,
+     * and a Computer that paused mid-Turn answers `unavailable` and the next
+     * run finishes the work.
+     */
+    const closeTurn = async (
+      botId: string,
+      sessionId: string,
+      turn: number,
+      timing: ComputerCallTiming,
+    ): Promise<void> => {
+      let computer: ComputerHostSessionV1;
+      try {
+        computer = await timing.phase("attach", () =>
+          attach(botId, new AbortController().signal),
+        );
+      } catch (error) {
+        await turnSync.unavailable(sessionId, error);
+        invalidateProjectionWrites(botId);
+        return;
+      }
+      try {
+        if (computer.browser && previewOrigins.size > 0) {
+          const origins = [...previewOrigins];
+          await timing.phase("operation", () =>
+            closePreviewTabs(
+              computer,
+              origins,
+              `computer:${writer?.runId ?? sessionId}:${turn}:close-preview-tabs`,
+            ),
+          );
+          previewOrigins.clear();
+        }
+        const workspace = computer.workspace;
+        if (writer && workspace && computer.screenshot) {
+          try {
+            await timing.capture((steps) =>
+              fileBotScreenshot({
+                computer,
+                workspace,
+                writer,
+                botId,
+                effectId: `computer:${writer.runId}:turn-end-screenshot`,
+                steps,
+              }),
+            );
+            noteProjectionWrite("screenshots");
+          } catch {
+            // Opportunistic capture never changes the Turn outcome. The
+            // provider's human-control refusal is deliberately preserved.
+          }
+        }
+        await turnSync.afterTurn(computer, sessionId, timing);
+      } catch (error) {
+        await turnSync.unavailable(sessionId, error);
+      } finally {
+        invalidateProjectionWrites(botId);
+        await computer.close();
+      }
+    };
+
     return [
-      runtime.tools.register(execTool),
-      ...(writer ? [runtime.tools.register(screenshotTool)] : []),
-      runtime.tools.register(doctorTool),
+      runtime.tools.register(timed(execTool)),
+      ...(writer ? [runtime.tools.register(timed(screenshotTool))] : []),
+      runtime.tools.register(timed(doctorTool)),
       ...(processes && writer
         ? [
-            runtime.tools.register(processCheckTool),
-            runtime.tools.register(processLogsTool),
-            runtime.tools.register(processStopTool),
+            runtime.tools.register(timed(processCheckTool)),
+            runtime.tools.register(timed(processLogsTool)),
+            runtime.tools.register(timed(processStopTool)),
           ]
         : []),
-      runtime.tools.register(browserTool),
+      runtime.tools.register(timed(browserTool)),
       runtime.hooks.add({
         // A Turn's first step is where the Turn's sync state begins; a Turn that
         // never touches the Computer never syncs and never wakes one.
@@ -1682,68 +1875,13 @@ export function createComputerAgentFeature(
           }
           return next();
         },
-        // "after a Turn that used the Computer": the Computer is already awake
-        // for this Bot, so the push costs no wake, and a Computer that paused
-        // mid-Turn answers `unavailable` and the next run finishes the work.
         turnStopping: async (agent, turn) => {
           if (!turnSync.turnUsedTheComputer(turn)) return;
-          let computer;
+          const timing = new ComputerCallTiming(now);
           try {
-            computer = await attach(agent.botId, new AbortController().signal);
-          } catch (error) {
-            await turnSync.unavailable(agent.session.id, error);
-            invalidateProjectionWrites(agent.botId);
-            return;
-          }
-          try {
-            if (computer.browser && previewOrigins.size > 0) {
-              const origins = [...previewOrigins];
-              await closePreviewTabs(
-                computer,
-                origins,
-                `computer:${writer?.runId ?? agent.session.id}:${turn}:close-preview-tabs`,
-              );
-              previewOrigins.clear();
-            }
-            if (writer && computer.workspace) {
-              const root: WorkspaceRootV1 = {
-                kind: "package-declared",
-                userId,
-                packageId: "computer",
-                rootId: COMPUTER_SCREENSHOTS_ROOT_ID,
-              };
-              const botKey = computerBotPathKeyV1(agent.botId);
-              captureSequence += 1;
-              try {
-                await fileComputerScreenshotV1({
-                  computer,
-                  workspace: computer.workspace,
-                  path: {
-                    root,
-                    path: `${botKey}/${writer.turnId}-${captureSequence}.png`,
-                  },
-                  writer: {
-                    kind: "bot",
-                    botId: agent.botId,
-                    sessionId: writer.sessionId,
-                    turnId: writer.turnId,
-                    runId: writer.runId,
-                  },
-                  botKey,
-                  effectId: `computer:${writer.runId}:turn-end-screenshot`,
-                });
-                noteProjectionWrite("screenshots");
-              } catch {
-                // Opportunistic capture never changes the Turn outcome. The
-                // provider's human-control refusal is deliberately preserved.
-              }
-            }
-            await turnSync.afterTurn(computer, agent.session.id);
-          } catch (error) {
-            await turnSync.unavailable(agent.session.id, error);
+            await closeTurn(agent.botId, agent.session.id, turn, timing);
           } finally {
-            invalidateProjectionWrites(agent.botId);
-            await computer.close();
+            noteTiming(agent.session.id, turn, timing);
           }
         },
       }),

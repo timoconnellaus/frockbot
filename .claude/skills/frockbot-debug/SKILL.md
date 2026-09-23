@@ -101,6 +101,13 @@ curl -s -H "authorization: Bearer $DEBUG_TOKEN" \
   `assistant/message`, `tool/call` **with its input**, `tool/result`,
   `model/effect-not-started`, `model/reconciliation-required`. The in-app run
   view drops every one of those; this is the only place they are readable.
+  `computer/timing` says where a Computer call's time went: one per Computer
+  tool call that reached the Computer (a call refused before it did has
+  none), normally just before its `tool/result` (a call cut short by a Stop
+  can land after the Turn's end), and one `turn-end` after the push. Each
+  phase is whole milliseconds: `attach`, `sync`, `selfCheck`, `operation`,
+  `capture` split into `screenshot`/`write`/`list`/`prune`, and `total`. A
+  phase that did not run is absent.
 - `composition` — `currentGenerationId`, its `status`,
   `lastKnownGoodGenerationId`, and the last few generations each with their
   recorded `failures[]` (message + diagnostics) and `quarantined` flag.
