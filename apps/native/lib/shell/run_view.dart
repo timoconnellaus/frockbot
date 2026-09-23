@@ -17,6 +17,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 
+import 'desktop_layout.dart';
 import 'semantics.dart';
 import 'transcript_model.dart';
 
@@ -315,23 +316,25 @@ class RunView extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (header) ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: Text('Work', style: theme.textTheme.titleMedium),
-                  ),
-                  if (onClose != null)
-                    identified(
-                      ShellIds.runViewClose,
-                      IconButton(
-                        tooltip: 'Close',
-                        onPressed: onClose,
-                        icon: const Icon(Icons.close),
-                      ),
+            DesktopWindowDragRegion(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text('Work', style: theme.textTheme.titleMedium),
                     ),
-                ],
+                    if (onClose != null)
+                      identified(
+                        ShellIds.runViewClose,
+                        IconButton(
+                          tooltip: 'Close',
+                          onPressed: onClose,
+                          icon: const Icon(Icons.close),
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
             const Divider(height: 1),

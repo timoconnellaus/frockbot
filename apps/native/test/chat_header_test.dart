@@ -1,6 +1,8 @@
 import 'package:flutter/foundation.dart'
     show debugDefaultTargetPlatformOverride;
+import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart' hide ConnectionState;
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/chat_controller.dart';
 import 'package:frockbot_native/flock/avatar.dart';
@@ -577,6 +579,91 @@ void main() {
           lessThan(desktopTrafficLightLeading),
         );
       } finally {
+        debugDefaultTargetPlatformOverride = null;
+      }
+    },
+  );
+
+  testWidgets(
+    'on a Mac the whole top of the conversation moves the window, over the thread',
+    (tester) async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+      final calls = <String>[];
+      const window = MethodChannel('com.frockbot/window');
+      tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(window, (
+        call,
+      ) async {
+        calls.add(call.method);
+        return null;
+      });
+      try {
+        var toggled = 0;
+        await tester.pumpWidget(
+          MaterialApp(
+            home: Scaffold(
+              body: Stack(
+                fit: StackFit.expand,
+                children: [
+                  // A thread scrolled up under the header: selectable text is
+                  // what a drag would otherwise start selecting.
+                  SelectionArea(
+                    child: ListView(
+                      children: [
+                        for (var i = 0; i < 40; i++) Text('Message $i'),
+                      ],
+                    ),
+                  ),
+                  ChatHeader(
+                    name: 'Bob',
+                    onTogglePanel: () => toggled++,
+                    companion: const SizedBox.square(
+                      dimension: chatCompanionSize,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        );
+        await tester.pump();
+
+        final bottom = chatHeaderChromeTop + chatCompanionSize;
+        for (final at in [
+          // Above the name, in the gutters beside the row, and over the
+          // companion.
+          const Offset(600, 4),
+          Offset(4, bottom / 2),
+          Offset(796, bottom / 2),
+          Offset(chatHeaderChromeSide + 20, bottom - 4),
+        ]) {
+          calls.clear();
+          await tester.dragFrom(
+            at,
+            const Offset(60, 20),
+            kind: PointerDeviceKind.mouse,
+          );
+          await tester.pump();
+          expect(calls, ['startDrag'], reason: '$at');
+          calls.clear();
+          await tester.tapAt(at, kind: PointerDeviceKind.mouse);
+          await tester.pump();
+          expect(calls, ['titleBarClick'], reason: '$at');
+        }
+
+        // The panel switch is still a control, and the thread below the
+        // header is still the thread.
+        calls.clear();
+        await tester.tap(find.byTooltip('Show the panel'));
+        await tester.pump();
+        expect(toggled, 1);
+        await tester.tapAt(Offset(400, bottom + 40));
+        await tester.pump();
+        expect(calls, isEmpty);
+      } finally {
+        tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
+          window,
+          null,
+        );
         debugDefaultTargetPlatformOverride = null;
       }
     },

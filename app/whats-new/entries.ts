@@ -23,6 +23,13 @@ export type WhatsNewEntrySourceV1 = {
  */
 export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
+    id: "mac-window-place",
+    title: "The Mac window keeps its place",
+    summary:
+      "It reopens where you left it and at the same size, including after an update. A double-click on the header zooms it, and the whole header moves it.",
+    kind: "fix",
+  },
+  {
     id: "avatar-colour-flash",
     title: "Avatars open in their own colour",
     summary:

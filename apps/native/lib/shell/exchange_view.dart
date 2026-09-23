@@ -12,6 +12,7 @@ import 'package:flutter/material.dart';
 import '../flock/avatar.dart';
 import '../theme/frock_theme.dart';
 import '../theme/states.dart';
+import 'desktop_layout.dart';
 import 'markdown.dart';
 import 'semantics.dart';
 import 'transcript.dart';
@@ -77,28 +78,30 @@ class ExchangeView extends StatelessWidget {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           if (header) ...[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
-              child: Row(
-                children: [
-                  Expanded(
-                    child: ExchangeTitle(
-                      self: self,
-                      counterpart: counterpart,
-                      counterpartBackground: counterpartBackground,
-                      counterpartPrimary: counterpartPrimary,
-                    ),
-                  ),
-                  if (onClose != null)
-                    identified(
-                      ShellIds.exchangeViewClose,
-                      IconButton(
-                        tooltip: 'Close',
-                        onPressed: onClose,
-                        icon: const Icon(Icons.close),
+            DesktopWindowDragRegion(
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: ExchangeTitle(
+                        self: self,
+                        counterpart: counterpart,
+                        counterpartBackground: counterpartBackground,
+                        counterpartPrimary: counterpartPrimary,
                       ),
                     ),
-                ],
+                    if (onClose != null)
+                      identified(
+                        ShellIds.exchangeViewClose,
+                        IconButton(
+                          tooltip: 'Close',
+                          onPressed: onClose,
+                          icon: const Icon(Icons.close),
+                        ),
+                      ),
+                  ],
+                ),
               ),
             ),
             const Divider(height: 1),

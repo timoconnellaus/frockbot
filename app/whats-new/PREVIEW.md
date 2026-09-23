@@ -2,6 +2,12 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
+## The Mac window keeps its place
+
+fix
+
+It reopens where you left it and at the same size, including after an update. A double-click on the header zooms it, and the whole header moves it.
+
 ## Avatars open in their own colour
 
 fix
