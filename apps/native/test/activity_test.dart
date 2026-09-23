@@ -166,6 +166,35 @@ void main() {
     controller.dispose();
     api.close();
   });
+
+  test('a directory read that fails still ends the pause', () async {
+    final store = MemoryStore();
+    final api = NativeSessionApi(store, (path, body) async {
+      throw StateError('offline');
+    });
+    final controller = ActivityController(api);
+    controller.unread['alpha'] = wire.UnreadView.fromJson({
+      'schemaVersion': 1,
+      'botId': 'alpha',
+      'count': 1,
+      'capped': false,
+      'unread': true,
+      'manuallyUnread': false,
+      'notificationsEnabled': true,
+      'lastActivityCursor': 'message-00000000000000000001',
+      'lastActivityAt': '2026-09-05T10:00:00.000Z',
+    });
+
+    await controller.mark('alpha', read: true);
+    expect(controller.busy('alpha'), isTrue);
+
+    // A failing directory would otherwise keep the Bot's Mark as read and
+    // Mark as unread disabled for as long as the session lasted.
+    await controller.load();
+    expect(controller.busy('alpha'), isFalse);
+    controller.dispose();
+    api.close();
+  });
   group('the badge answers the tap, not the round trip', () {
     Map<String, Object?> view(String botId, {required int count}) => {
       'schemaVersion': 1,

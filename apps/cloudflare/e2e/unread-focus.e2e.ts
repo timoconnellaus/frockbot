@@ -13,10 +13,11 @@
 // for the beat between the fan-out returning and the read receipt landing,
 // which is the flicker that made the old behaviour wrong.
 //
-// The receipt these tests are watching for is `_markWhatIsBeingRead` in
-// `apps/native/lib/shell/app_shell.dart`: `_select` sends it when a chat is
-// opened, and it is an `ActivityController` listener as well, so it sends
-// again as each reply lands in the chat that is already on screen. Both halves
+// The receipt these tests are watching for is sent by `_readLatest` in
+// `apps/native/lib/shell/app_shell.dart`. The open chat's transcript calls it
+// after every frame it draws and on every scroll, so it runs when a chat is
+// opened and again as each reply lands in the chat already on screen: the
+// unread fan-out repaints the shell, and the transcript with it. Both halves
 // of the rule are that one call, which is why a spec that only opened a chat
 // would still pass with the second half missing.
 import {

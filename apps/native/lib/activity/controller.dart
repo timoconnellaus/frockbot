@@ -39,7 +39,9 @@ class ActivityController extends ChangeNotifier {
   /// and a later glance names a newer cursor, so the one thing a refusal owes
   /// is a pause: the open chat asks to be marked on every frame, and without
   /// one a Bot the cloud keeps refusing would be asked again as fast as the
-  /// refusals came back. The next directory read ends the pause.
+  /// refusals came back. The next directory read ends the pause whether or not
+  /// it succeeds, so a directory that keeps failing cannot leave a Bot's
+  /// controls disabled for the session.
   final Set<String> _sending = {};
   final Set<String> _refused = {};
 
@@ -73,7 +75,6 @@ class ActivityController extends ChangeNotifier {
         );
         if (_disposed) return;
         unread = {for (final view in views.unread) view.botId.value: view};
-        _refused.clear();
         loaded = true;
         error = null;
       } catch (_) {
@@ -82,6 +83,7 @@ class ActivityController extends ChangeNotifier {
               'Couldn’t reach FrockBot. Check your connection and try again.';
         }
       } finally {
+        _refused.clear();
         loading = false;
         _notify();
       }
@@ -105,9 +107,8 @@ class ActivityController extends ChangeNotifier {
       if (read) 'upToCursor': cursor,
       if (!read && fromMessageId != null) 'fromMessageId': fromMessageId,
     });
-    _predict(botId, read: read, fromMessageId: fromMessageId);
     _sending.add(botId);
-    _notify();
+    _predict(botId, read: read, fromMessageId: fromMessageId);
     try {
       final receipt = wire.MarkReadReceipt.fromJson(
         await api.request(
