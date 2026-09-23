@@ -4,7 +4,7 @@ import { join, resolve } from "node:path";
 
 // Runs every workspace package's `typecheck` script through a bounded pool.
 //
-// `bun run --filter '*' typecheck` starts all ~74 packages at once and bun 1.3
+// `bun run --filter '*' typecheck` starts all ~74 packages at once and bun
 // offers no way to cap that. Each one loads its own TypeScript program, so the
 // machine pages instead of checking. It gets worse under TypeScript 7, whose
 // native compiler is itself multithreaded: N native processes each claim the

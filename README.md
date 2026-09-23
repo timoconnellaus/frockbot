@@ -16,7 +16,7 @@ FrockBot installs into your own Cloudflare account with one command. That is the
 - **One domain on that account**, its zone active. The app answers on a hostname you choose (`bot.example.com`), and an Applet's page is served from `ui.` in front of it. That pairing is derived from the prefix, and a `workers.dev` name cannot contain a dot, so the artifact origin needs a zone; [`scripts/deployment-config/README.md`](scripts/deployment-config/README.md#the-artifact-origin-needs-a-zone) explains why in full.
 - A **Cloudflare Zero Trust team** (free). Its Access policy is this deployment's allowlist.
 - A **Fly Sprites token** for the Computer, from [fly.io](https://fly.io/dashboard). Fly is the one non-Cloudflare account a deployment needs.
-- [**Bun**](https://bun.sh) 1.3 or newer, and `git`, `curl` and `unzip` on `PATH`. No Docker and no Flutter: the container images and the web client are published with each release and pulled. `gh` is used to fetch the release assets when it is installed; without it the same public URLs are fetched with `curl`.
+- [**Bun**](https://bun.sh) 1.4 or newer, and `git`, `curl` and `unzip` on `PATH`. No Docker and no Flutter: the container images and the web client are published with each release and pulled. `gh` is used to fetch the release assets when it is installed; without it the same public URLs are fetched with `curl`.
 
 Optional keys. Each is asked for once and each can be skipped with Enter; a skipped key leaves that one thing shut and repairs nothing else.
 
@@ -122,7 +122,7 @@ General's empty conversation offers suggestions to research a topic and recommen
 
 ## Requirements
 
-- [Bun](https://bun.sh) 1.3 or newer
+- [Bun](https://bun.sh) 1.4 or newer. Bun 1.3 closes a child process's extra stdio pipe twice, which breaks the Plugin build's workerd boot.
 
 ## Development
 
