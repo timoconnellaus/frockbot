@@ -101,12 +101,10 @@ export async function appendAnnouncement(
 /**
  * Whether the Bot's newest admitted run is still going.
  *
- * The sidebar draws this as an activity ring, so somebody in another
- * conversation can see a Bot working rather than reading a quiet row as a
- * stalled one. It is the newest run only: a Bot admits one Turn at a time,
- * so an older run that is somehow still marked running is a reconciliation
- * problem and not something a ring should report. A read that fails is no
- * ring — liveness is never worth failing a sidebar poll for.
+ * It is the newest run only: a Bot admits one Turn at a time, so an older run
+ * that is somehow still marked running is a reconciliation problem and not
+ * something a ring should report. A read that fails is no ring — liveness is
+ * never worth failing a sidebar poll for.
  *
  * The record's `status` is not the test and never was. `resolveRunWorking`
  * holds the rule — running, inside the Turn deadline, and a Turn the log has
@@ -122,6 +120,56 @@ export async function runWorkingV1(
   } catch {
     return false;
   }
+}
+
+/**
+ * Whether the Bot is working in its own chat: the typing dots on its sidebar
+ * row, so somebody in another conversation can see a reply coming rather than
+ * reading a quiet row as a stalled one.
+ *
+ * The open chat draws its dots from the Turn its transcript shows running, so
+ * the row answers by the transcript's rule or the two disagree about one Bot.
+ * They did: a Routine firing in its own Session lit the row the moment the
+ * person switched to another Bot, over a chat where nothing was happening. A
+ * Turn the chat does not show — a silent firing, a member's group Turn — is
+ * the Bot's work but not the chat's.
+ */
+export async function chatWorkingV1(
+  state: ShellBotStateV1,
+  runId: string | undefined,
+): Promise<boolean> {
+  if (runId === undefined || !(await runWorkingV1(state, runId))) return false;
+  const header = await state.authority.readRunHeaderForDisplay(runId);
+  if (!header) return false;
+  const conversationId = await state.authority.readConversationSessionId();
+  if (!inConversationV1(header.run, conversationId)) return false;
+  // An automation Turn is in the chat only once it has spoken, and the marker
+  // written beside its message is that fact.
+  if (header.run.admission?.turnType === "automation") {
+    return (
+      (await state.ctx.storage.get(sentAutomationRunKeyV1(runId))) !== undefined
+    );
+  }
+  return isVisibleRunV1(header.run);
+}
+
+/**
+ * Whether a run belongs to the Bot's continuous chat rather than to a
+ * Routine's or a child's Session. A record nobody can decode has no
+ * trustworthy session id, and a transcript that hid it would be back to
+ * silently losing the Turn: an unknown session belongs to the conversation
+ * being read.
+ */
+function inConversationV1(
+  run: { sessionId?: string; admission?: { turnType?: string } },
+  conversationId: string | undefined,
+): boolean {
+  return (
+    run.admission?.turnType === "automation" ||
+    conversationId === undefined ||
+    run.sessionId === undefined ||
+    run.sessionId === conversationId
+  );
 }
 
 /**
@@ -200,17 +248,10 @@ export async function listRuns(
   // Only the Bot’s continuous chat belongs in the transcript. Routine and
   // child sessions remain in the durable log and their own projections.
   const conversationId = await state.authority.readConversationSessionId();
-  // A record nobody can decode has no trustworthy session id, and a
-  // transcript that hid it would be back to silently losing the Turn. An
-  // unknown session belongs to the conversation being read.
   const inConversation = (run: {
     sessionId?: string;
     admission?: { turnType?: string };
-  }) =>
-    run.admission?.turnType === "automation" ||
-    conversationId === undefined ||
-    run.sessionId === undefined ||
-    run.sessionId === conversationId;
+  }) => inConversationV1(run, conversationId);
   // The exchange view's read: only the Turns that crossed to or from one
   // counterpart. Inbound is on the admission; outbound is a `bot_message`
   // call in the journal, so a filtered scan hydrates what it inspects. The

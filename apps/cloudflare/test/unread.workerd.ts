@@ -15,9 +15,17 @@
 // case below turns it off through the settings command and reads the view back
 // — the intent is suppressed, the unread cursor still advances.
 import { env } from "cloudflare:workers";
-import { evictDurableObject, runInDurableObject } from "cloudflare:test";
+import {
+  evictDurableObject,
+  runDurableObjectAlarm,
+  runInDurableObject,
+} from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 import { provisionBot } from "./provision-bot.ts";
+import {
+  hydrateStoredRunEventsV1,
+  rewindStoredRunEventsV1,
+} from "./session-log-probe.ts";
 
 interface UnreadRpc {
   readUnread(input: unknown): Promise<{
@@ -29,6 +37,7 @@ interface UnreadRpc {
     notificationsEnabled: boolean;
     lastActivityCursor?: string;
     lastMessage?: { text: string; at: string; role: "assistant" | "user" };
+    working?: boolean;
   }>;
   executeUnreadCommand(input: unknown): Promise<{
     status: string;
@@ -43,6 +52,7 @@ interface UnreadRpc {
   listRuns(input: unknown): Promise<{ runs: unknown[] }>;
   readConfiguration(input: unknown): Promise<{ revision: number }>;
   executeConfiguration(input: unknown): Promise<unknown>;
+  executeRoutineCommand(input: unknown): Promise<{ status: string }>;
 }
 
 function bot(name: string) {
@@ -53,6 +63,40 @@ function unreadRpc(name: string): UnreadRpc {
   // SAFETY: the generated stub type for the Bot RPCs is too deep for the
   // compiler to instantiate here; this names only the methods this test calls.
   return bot(name) as unknown as UnreadRpc;
+}
+
+/**
+ * Puts a settled run back where a Turn still in flight holds it: `running`,
+ * with its Turn not yet ended in its Session's log, so the liveness rule reads
+ * it as working.
+ */
+async function reopen(name: string, runId: string): Promise<void> {
+  await runInDurableObject(bot(name), async (_instance, state) => {
+    const key = `run:${runId}`;
+    const stored = (await state.storage.get(key)) as Parameters<
+      typeof rewindStoredRunEventsV1
+    >[2];
+    const run = await hydrateStoredRunEventsV1(state.storage, stored);
+    await rewindStoredRunEventsV1(
+      state.storage,
+      key,
+      stored,
+      run.events.filter((event) => event.type !== "turn/end"),
+      { status: "running", phase: "executing" },
+    );
+  });
+}
+
+/** The run the sidebar judges: the newest in the Bot's run index. */
+async function newestRunId(name: string): Promise<string | undefined> {
+  return runInDurableObject(bot(name), async (_instance, state) => {
+    const newest = await state.storage.list<string>({
+      prefix: "run-index:",
+      reverse: true,
+      limit: 1,
+    });
+    return [...newest.values()][0];
+  });
 }
 
 describe("per-Bot unread in Workerd", () => {
@@ -472,5 +516,80 @@ describe("per-Bot unread in Workerd", () => {
     expect(after).toMatchObject({ count: 1 });
     expect(after.lastActivityCursor).toBe(before.lastActivityCursor);
     expect(after.lastMessage).toEqual(before.lastMessage);
+  });
+
+  // The dots on a row are the chat's, and the open chat draws them only for a
+  // Turn its transcript shows. A Routine firing runs in its own Session and
+  // shows nothing, so the row that counted it lit up the moment the person
+  // switched to another Bot, over a chat where nothing was happening.
+  test("a Routine firing in flight puts no dots on the row; a chat Turn does", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      schemaVersion: 1 as const,
+      userId: `unread-working-user-${suffix}`,
+      botId: `unread-working-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const name = `${identity.userId}:${identity.botId}`;
+
+    await bot(name).run({
+      ...identity,
+      command: {
+        runId: "run-1",
+        sessionId: name,
+        acceptedAt: new Date().toISOString(),
+        text: "hello",
+      },
+    });
+    expect(
+      await unreadRpc(name).executeRoutineCommand({
+        ...identity,
+        command: {
+          schemaVersion: 1,
+          botId: identity.botId,
+          type: "routine/create",
+          commandId: `create-${suffix}`,
+          routineId: "triage",
+          name: "Inbox triage",
+          prompt: "Check the inbox.",
+          trigger: { kind: "webhook" },
+        },
+      }),
+    ).toMatchObject({ status: "applied" });
+    expect(
+      await unreadRpc(name).executeRoutineCommand({
+        ...identity,
+        command: {
+          schemaVersion: 1,
+          botId: identity.botId,
+          type: "routine/run",
+          commandId: `run-${suffix}`,
+          routineId: "triage",
+        },
+      }),
+    ).toMatchObject({ status: "fired" });
+    // The firing is a durable record the alarm drains, not a timer.
+    await evictDurableObject(bot(name));
+    await runDurableObjectAlarm(bot(name));
+
+    const firing = await newestRunId(name);
+    expect(firing).toBeDefined();
+    expect(firing).not.toBe("run-1");
+    await reopen(name, firing!);
+    expect((await unreadRpc(name).readUnread(identity)).working).toBeFalsy();
+
+    // The same rewind on a chat Turn is what the row does draw.
+    await bot(name).run({
+      ...identity,
+      command: {
+        runId: "run-2",
+        sessionId: name,
+        acceptedAt: new Date().toISOString(),
+        text: "still there?",
+      },
+    });
+    expect(await newestRunId(name)).toBe("run-2");
+    await reopen(name, "run-2");
+    expect((await unreadRpc(name).readUnread(identity)).working).toBe(true);
   });
 });
