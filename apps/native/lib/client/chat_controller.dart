@@ -453,8 +453,13 @@ class ChatController extends ChangeNotifier {
 
   /// A running Turn's row read before a send was delivered, kept with the
   /// sends the live channel has drawn since. Sends only ever append, so the
-  /// older row is a prefix of them; putting it back as it was would take a
-  /// message off the screen until the Turn settled.
+  /// sends newer than the row's last are what it missed; putting it back as
+  /// it was would take a message off the screen until the Turn settled.
+  ///
+  /// Only newer ones: a long Turn's row drops its oldest events, sends
+  /// included, and one kept from before that cut would be drawn below the
+  /// sends that followed it. A cut row with no send left in it could have
+  /// lost any of them, so it keeps none.
   Map<String, dynamic> _keepingLaterSends(
     Map<String, dynamic> row,
     Map<String, dynamic> existing,
@@ -463,15 +468,20 @@ class ChatController extends ChangeNotifier {
       for (final item in (row['events'] as List?) ?? const [])
         Map<String, dynamic>.from(item as Map),
     ];
-    final drawn = {
+    final ordinals = [
       for (final event in events)
-        if (event['type'] == 'send/to-user') event['ordinal'],
-    };
+        if (event['type'] == 'send/to-user') event['ordinal'] as int,
+    ];
+    if (ordinals.isEmpty &&
+        events.any((event) => event['type'] == 'run/events-truncated')) {
+      return row;
+    }
+    final newest = ordinals.fold(-1, (a, b) => a > b ? a : b);
     final later = [
       for (final item in (existing['events'] as List?) ?? const [])
         if (item is Map &&
             item['type'] == 'send/to-user' &&
-            !drawn.contains(item['ordinal']))
+            (item['ordinal'] as int) > newest)
           Map<String, dynamic>.from(item),
     ];
     if (later.isEmpty) return row;
