@@ -177,7 +177,9 @@ export function surfaceDocumentV1(
   drawn: BotPluginSectionV1,
   revision: number,
 ): { document?: ViewDocument; failure?: string } {
-  if (!drawn.root) return { failure: drawn.failure };
+  // The sentence wraps a reason already cut to 500, so it can run past the
+  // wire's own 500.
+  if (!drawn.root) return { failure: drawn.failure?.slice(0, 500) };
   try {
     return {
       document: decodeProtocol("ViewDocument", {
@@ -188,8 +190,11 @@ export function surfaceDocumentV1(
         actions: [pluginToolAction()],
       }),
     };
-  } catch {
-    return { failure: "This plugin's page could not be shown." };
+  } catch (error) {
+    // The walk already vetted the tree, so this is a host bug, not the
+    // Plugin's: say it where the next one will be seen.
+    console.error("Plugin panel document refused", surfaceId, error);
+    return { failure: "This plugin's view could not be shown." };
   }
 }
 

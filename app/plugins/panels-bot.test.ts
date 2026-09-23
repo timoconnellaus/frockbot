@@ -1,4 +1,5 @@
-import { describe, expect, test } from "bun:test";
+import { describe, expect, spyOn, test } from "bun:test";
+import { isProtocolValue } from "@frockbot/core/protocol-schemas";
 import { panelDocumentIdV1, surfaceDocumentV1 } from "./panels-bot.js";
 import { pluginPageV1 } from "./views.js";
 
@@ -71,13 +72,39 @@ describe("a conversation panel's document", () => {
     expect(document?.surfaceId).toBe(id);
   });
 
-  test("is that surface's failure when the wire refuses it", () => {
-    const { document, failure } = surfaceDocumentV1(
-      "panel.hello-panel.hello",
-      { surfaceId: "hello", nodes: 1, root: { type: "text", text: "" } },
+  test("is that surface's failure, and logged, when the wire refuses it", () => {
+    const logged = spyOn(console, "error").mockImplementation(() => {});
+    try {
+      const { document, failure } = surfaceDocumentV1(
+        "panel.hello-panel.hello",
+        { surfaceId: "hello", nodes: 1, root: { type: "text", text: "" } },
+        1,
+      );
+      expect(document).toBeUndefined();
+      expect(failure).toBe("This plugin's view could not be shown.");
+      expect(logged).toHaveBeenCalledTimes(1);
+    } finally {
+      logged.mockRestore();
+    }
+  });
+
+  test("carries a dropped Plugin's longest reason within the wire's cap", () => {
+    const dropped = pluginPageV1(
+      { pluginId: "hello-panel", surfaceId: "hello", tools: [] },
+      { schemaVersion: 1, status: "drop", reason: "x".repeat(500) },
+    );
+    const { failure } = surfaceDocumentV1(
+      panelDocumentIdV1("panel", "hello-panel", "hello"),
+      dropped,
       1,
     );
-    expect(document).toBeUndefined();
-    expect(failure).toBe("This plugin's page could not be shown.");
+    expect(dropped.failure!.length).toBeGreaterThan(500);
+    expect(
+      isProtocolValue("PanelDoor", {
+        pluginId: "hello-panel",
+        label: "Hello",
+        failure,
+      }),
+    ).toBe(true);
   });
 });

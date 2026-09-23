@@ -6,6 +6,24 @@ import '../shell/semantics.dart';
 import '../theme/caret.dart';
 import '../view/surface.dart';
 
+/// The receipt a view surface needs for a Plugin control's press, from the
+/// Bot's answer to running the tool. The answer carries no command id, and a
+/// press whose receipt does not name it is never settled.
+Map<String, Object?> pluginToolReceiptV1(Object? commandId, Object? answer) {
+  final receipt = ((answer as Map?) ?? const {}).cast<String, Object?>();
+  final ran = receipt['status'] == 'ran' && receipt['isError'] != true;
+  return {
+    'commandId': commandId,
+    'status': ran ? 'applied' : 'rejected',
+    if (!ran)
+      'failure': receipt['failure'] is String
+          ? receipt['failure']
+          : receipt['content'] is String
+          ? receipt['content']
+          : 'This control could not run.',
+  };
+}
+
 /// Reads one Bot's Plugins document and carries its switches to the Bot.
 ///
 /// What the Bot could run and whether it does, one switch per row, per Bot
@@ -146,18 +164,7 @@ class PluginsController extends ViewSurfaceController {
           'arguments': input['arguments'] ?? '',
         },
       );
-      final receipt = ((answer as Map?) ?? const {}).cast<String, Object?>();
-      final ran = receipt['status'] == 'ran' && receipt['isError'] != true;
-      return {
-        'commandId': command['commandId'],
-        'status': ran ? 'applied' : 'rejected',
-        if (!ran)
-          'failure': receipt['failure'] is String
-              ? receipt['failure']
-              : receipt['content'] is String
-              ? receipt['content']
-              : 'This control could not run.',
-      };
+      return pluginToolReceiptV1(command['commandId'], answer);
     }
     // A switch: the command names the Plugin and the revision the page read,
     // and the Bot answers applied, conflict or rejected.

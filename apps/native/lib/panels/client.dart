@@ -2,6 +2,7 @@
 library;
 
 import '../client/transport.dart';
+import '../plugins/page.dart' show pluginToolReceiptV1;
 import '../protocol/client_wire.generated.dart' as wire;
 
 class PanelsApi {
@@ -10,9 +11,7 @@ class PanelsApi {
 
   Future<wire.PanelOpenView> open(String botId) async {
     return wire.PanelOpenView.fromJson(
-      await api.request(
-        '/api/bots/${Uri.encodeComponent(botId)}/panels/open',
-      ),
+      await api.request('/api/bots/${Uri.encodeComponent(botId)}/panels/open'),
     );
   }
 
@@ -23,11 +22,7 @@ class PanelsApi {
   }) async {
     await api.request(
       '/api/bots/${Uri.encodeComponent(botId)}/panels/focus',
-      body: {
-        'schemaVersion': 1,
-        'pluginId': pluginId,
-        'surfaceId': ?surfaceId,
-      },
+      body: {'schemaVersion': 1, 'pluginId': pluginId, 'surfaceId': ?surfaceId},
     );
   }
 
@@ -39,6 +34,6 @@ class PanelsApi {
       '/api/bots/${Uri.encodeComponent(botId)}/plugins',
       body: command,
     );
-    return (answer as Map).cast<String, Object?>();
+    return pluginToolReceiptV1(command['commandId'], answer);
   }
 }

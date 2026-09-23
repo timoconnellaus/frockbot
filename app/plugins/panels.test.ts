@@ -7,6 +7,7 @@ import {
   type PluginPanelSourceV1,
 } from "./panels.js";
 import { MAX_PLUGIN_PANEL_BAG_V1 } from "@frockbot/core/durable";
+import { isProtocolValue } from "@frockbot/core/protocol-schemas";
 
 function plugin(
   pluginId: string,
@@ -80,6 +81,26 @@ describe("the conversation.panel bag", () => {
       ),
     ]);
     expect(tabs[0]?.label).toBe("Notes");
+  });
+
+  test("a display name past a label's cap still makes a tab and door the wire accepts", () => {
+    const plugins = [
+      plugin(
+        "notes",
+        [{ slot: "conversation.panel", surfaceId: "board" }],
+        "N".repeat(128),
+      ),
+    ];
+    const { tabs } = conversationPanelBagV1(plugins);
+    const [door] = botNavDoorsV1(plugins, tabs);
+    expect(isProtocolValue("PanelBagEntry", tabs[0])).toBe(true);
+    expect(
+      isProtocolValue("PanelDoor", {
+        pluginId: door!.pluginId,
+        label: door!.label,
+        opens: door!.opens,
+      }),
+    ).toBe(true);
   });
 });
 
