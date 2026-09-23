@@ -352,11 +352,11 @@ conversation or policy content is not needed for diagnosis.
 ## Evaluation
 
 Build on `app/evals/tool-approval.ts` and keep live evaluation separate from unit
-tests. Pin the calibrated Jev version. Run the labeled suite with
-`bun run eval:tool-approval`; it reads `JEV_API_KEY` from the main
-checkout's `.dev.vars` (the runner still accepts `TYPESAFE_API_KEY` as a
-local alias) and writes traces to `.eval-results/`. It is never part of
-ordinary tests or the pre-push gate.
+tests. Pin the calibrated Jev version. Run the labeled suites with
+`bun run eval:tool-approval` and `bun run eval:turn-start`; each reads
+`JEV_API_KEY` from the main checkout's `.dev.vars` (the runners still accept
+`TYPESAFE_API_KEY` as a local alias) and writes traces to `.eval-results/`.
+Neither is part of ordinary tests or the pre-push gate.
 
 Evaluation suites cover:
 
@@ -391,7 +391,7 @@ still reply.
 - _Done._ `TurnSupervisor`, its domain types, a fake adapter, a hard-unavailable
   adapter and the hosted Jev adapter (`core/contracts/turn-supervisor.ts`,
   `app/supervision/`). `startTurn` returns the conservative typed default until
-  a labeled start-of-Turn suite exists. `reviewStep` reuses the tool-approval
+  the start-of-Turn questions pass their labeled suite. `reviewStep` reuses the tool-approval
   questions for each mutating call and allows reads without a judgment.
 - _Done._ The labeled tool-approval eval and adapter contract tests. The Node
   report runner lives in `app/evals/tool-approval-run.ts` so the Worker does
@@ -424,6 +424,14 @@ This is the first production enforcement milestone.
 
 ### 4. Whole-response shadowing and acknowledgement
 
+- _In progress._ The start-of-Turn questions and their thresholds
+  (`app/supervision/turn-start.ts`) and a labeled suite of 28 cases
+  (`app/evals/turn-start.fixtures.ts`, `bun run eval:turn-start`), including
+  the 2026-09-23 incident's mid-work messages and negative controls for them.
+  `composeTurnDirectiveV1` maps the answers onto a `TurnDirective`. The first
+  run on `jev-1.13.0` passed 21 of 28: telling a short message about open
+  work from one that asks for nothing is the judgment still missing. The
+  adapter returns the default and the loop does not call it.
 - Record response alignment, text dependency and communication judgments without
   changing outcomes.
 - Inject start-of-Turn acknowledgement steering.
