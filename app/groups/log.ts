@@ -15,6 +15,7 @@ import {
   groupSessionIdV1,
   groupTurnRunIdV1,
   mentionedBotIdsV1,
+  mentionsUserV1,
   resolveMentionsV1,
   type GroupAuthorV1,
   type GroupChatContextV1,
@@ -59,6 +60,7 @@ const MEMBER_PREFIX = "group:member:";
 const RECEIPT_PREFIX = "group:receipt:";
 const JUDGE_PREFIX = "group:judge:";
 const JUDGEMENT_PREFIX = "group:judgement:";
+const PUSH_PREFIX = "group:push:";
 
 /** How much of the thread before a message Jev reads. */
 export const GROUP_JUDGEMENT_THREAD_V1 = 20;
@@ -122,6 +124,8 @@ export type GroupEffectV1 =
   | { kind: "stop"; botId: string; runId: string; commandId: string }
   /** Ask Jev who answers the message at `seq`. */
   | { kind: "judge"; seq: number }
+  /** Notify the person of the message at `seq`, which calls them. */
+  | { kind: "push"; seq: number }
   | { kind: "broadcast" };
 
 export interface GroupOutcomeV1<T> {
@@ -144,6 +148,8 @@ export interface GroupTurnStateV1 {
   sends: Array<{ occurrence: number; text: string; at: string }>;
   /** Completed without answering because a newer group message was waiting. */
   yielded: boolean;
+  /** Bots outside the group the Turn asked with `bot_message`. */
+  exchanges?: Array<{ callId: string; botId: string }>;
 }
 
 /** Tries at admitting one member Turn before the group gives up on it. */
@@ -155,6 +161,10 @@ function messageKey(seq: number): string {
 
 function judgeKey(seq: number): string {
   return `${JUDGE_PREFIX}${String(seq).padStart(12, "0")}`;
+}
+
+function pushKey(seq: number): string {
+  return `${PUSH_PREFIX}${String(seq).padStart(12, "0")}`;
 }
 
 function judgementKey(seq: number): string {
@@ -352,14 +362,25 @@ export class GroupChatLogV1 {
       input.text,
       members.filter((member) => group.members.includes(member.botId)),
     );
+    const callsUser = input.author.kind === "bot" && mentionsUserV1(input.text);
     const { message, appended } = await this.append({
       messageId: input.messageId,
       author: input.author,
-      body: { kind: "text", text: input.text, mentions },
+      body: {
+        kind: "text",
+        text: input.text,
+        mentions,
+        ...(callsUser ? { mentionsUser: true as const } : {}),
+      },
       ...(input.at ? { at: input.at } : {}),
     });
     if (!appended) return { value: message, effects: [] };
     const effects: GroupEffectV1[] = [{ kind: "broadcast" }];
+    if (callsUser) {
+      // Written with the message, so the alert survives an eviction.
+      await this.kv.put(pushKey(message.seq), { seq: message.seq });
+      effects.push({ kind: "push", seq: message.seq });
+    }
     const authorId =
       input.author.kind === "bot" ? input.author.botId : undefined;
     for (const member of await this.members()) {
@@ -376,6 +397,19 @@ export class GroupChatLogV1 {
     effects.push({ kind: "judge", seq: message.seq });
     effects.push(...(await this.admissionsDue(input.context)));
     return { value: message, effects };
+  }
+
+  /** Messages that call the person, not yet delivered to their devices. */
+  async pendingPushes(): Promise<number[]> {
+    return [
+      ...(
+        await this.kv.list<{ seq: number }>({ prefix: PUSH_PREFIX })
+      ).values(),
+    ].map((pending) => pending.seq);
+  }
+
+  async pushDelivered(seq: number): Promise<void> {
+    await this.kv.delete(pushKey(seq));
   }
 
   /** Messages written down as owed a judgment and not yet judged. */
@@ -728,6 +762,24 @@ export class GroupChatLogV1 {
         at: send.at,
       });
       effects.push(...posted.effects);
+    }
+    for (const exchange of state.exchanges ?? []) {
+      if (!speaking) break;
+      const { appended } = await this.append({
+        messageId: `x-${input.runId}-${exchange.callId}`,
+        author: { kind: "bot", botId: input.botId },
+        body: {
+          kind: "event",
+          event: {
+            type: "bot-message",
+            botId: input.botId,
+            toBotId: exchange.botId,
+            runId: input.runId,
+            callId: exchange.callId,
+          },
+        },
+      });
+      if (appended) effects.push({ kind: "broadcast" });
     }
     if (current && state.sends.length > 0 && !current.posted) {
       const updated = await this.member(input.botId);

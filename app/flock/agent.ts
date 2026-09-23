@@ -157,7 +157,7 @@ export interface FlockSelfRuntimeHostV1 {
    * The Group Chat this Turn is in, off its own admission record: the Turn
    * speaks to the group, and is told who is there and how to address them.
    */
-  groupChat?: { origin: GroupTurnOriginV1; botId: string };
+  groupChat?: { origin: GroupTurnOriginV1; botId: string; runId: string };
   /**
    * Handing work off to this same Bot. Optional because it is a seam a host
    * may not have bound — a host with no way to admit a Turn on its own agent
@@ -180,6 +180,7 @@ export interface BotMessageOutcomeV1 {
 }
 
 export const BOT_MESSAGING_CAPABILITY_V1 = "bot-messaging";
+export const GROUP_BOT_MESSAGING_CAPABILITY_V1 = "group-bot-messaging";
 export const TEAMMATES_PROMPT_SECTION_V1 = "teammates";
 export const INBOUND_AGENT_PROMPT_SECTION_V1 = "agent-message";
 
@@ -894,6 +895,39 @@ export function createBotMessageTool(
   };
 }
 
+/**
+ * `bot_message` inside a Group Chat Turn: for a Bot outside the group only.
+ * Its run id folds in this Turn's run, because the occurrence id is numbered
+ * within the group's Session and would otherwise repeat one from the Bot's
+ * own chat.
+ */
+export function createGroupBotMessageTool(
+  host: FlockSelfRuntimeHostV1 & {
+    groupChat: NonNullable<FlockSelfRuntimeHostV1["groupChat"]>;
+  },
+): ToolDefinition {
+  const base = createBotMessageTool(host);
+  return {
+    ...base,
+    description:
+      "Ask one of your User's Bots who is not in this group chat a question. Use a target_id from <teammates>. Its reply is returned here as this tool result, and the group sees that you asked. Ask a member of this group in the thread with an @mention instead.",
+    execute: async (input: unknown, context: ToolExecutionContext) => {
+      const target = (input as { target_id?: unknown } | null)?.target_id;
+      if (
+        host.groupChat.origin.members.some((member) => member.botId === target)
+      ) {
+        return refusal(
+          "bot_message was refused: that Bot is in this group. Ask it in the thread with an @mention.",
+        );
+      }
+      return base.execute(input, {
+        ...context,
+        effectId: `${host.groupChat.runId}:${context.effectId}`,
+      });
+    },
+  };
+}
+
 function promptText(value: string): string {
   return value.replace(/[<>]/g, (character) =>
     character === "<" ? "&lt;" : "&gt;",
@@ -944,10 +978,14 @@ export function createTeammatesPromptSectionV1(
     id: TEAMMATES_PROMPT_SECTION_V1,
     order: 92,
     render: async (context) => {
-      if (context.turnType !== "chat") return "";
+      const group = host.groupChat;
+      if (context.turnType !== "chat" && !group) return "";
       const view = await directory.read();
+      // In a group, only the Bots outside it: a member is asked in the thread.
       const teammates = view.bots.filter(
-        (bot) => bot.botId !== host.owner.botId,
+        (bot) =>
+          bot.botId !== host.owner.botId &&
+          !group?.origin.members.some((member) => member.botId === bot.botId),
       );
       if (teammates.length === 0) return "";
       const lines = teammates.map((bot) => {
@@ -1015,6 +1053,9 @@ export function createFlockRuntimeFeature(
     const messagingCeiling = flockAdmissionCeilingV1(
       BOT_MESSAGING_CAPABILITY_V1,
     );
+    const groupMessagingCeiling = flockAdmissionCeilingV1(
+      GROUP_BOT_MESSAGING_CAPABILITY_V1,
+    );
     const handoffCeiling = subagentHandoffAdmissionCeilingV1();
     const turnDirectory = createTurnBotDirectoryV1(host);
     const disposers = [
@@ -1038,10 +1079,23 @@ export function createFlockRuntimeFeature(
         : []),
       runtime.tools.register(createBotUpdateTool(host)),
       runtime.tools.register(createBotCreateTool(host, turnDirectory)),
-      runtime.tools.register(
-        createBotMessageTool(host),
-        messagingCeiling ? { admissionCeiling: messagingCeiling } : undefined,
-      ),
+      ...(host.groupChat
+        ? [
+            runtime.tools.register(
+              createGroupBotMessageTool({ ...host, groupChat: host.groupChat }),
+              groupMessagingCeiling
+                ? { admissionCeiling: groupMessagingCeiling }
+                : undefined,
+            ),
+          ]
+        : [
+            runtime.tools.register(
+              createBotMessageTool(host),
+              messagingCeiling
+                ? { admissionCeiling: messagingCeiling }
+                : undefined,
+            ),
+          ]),
       // Offered wherever the host bound the seam, and bounded by the manifest
       // to the conversation: a hand-off runs on the agent lane and must not be
       // handed the tool that put it there.

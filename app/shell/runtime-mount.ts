@@ -5,6 +5,7 @@
 // into a mounted runtime, so both an admitted Turn (`app/shell/turn.ts`) and an
 // isolate's `ai` grant (`app/isolates/bot.ts`) resolve the same way.
 
+import { createBotGroupChatsHost } from "./backend-groups.js";
 import {
   PLUGIN_MODEL_PROVIDER_UNAVAILABLE_REASON_V1,
   type NormalizedModelRequest,
@@ -554,6 +555,13 @@ export async function agentRuntime(
                 ),
             },
           }
+        : {}),
+      // Command ids fold in the run, so the seam exists only inside a Turn.
+      ...(turn
+        ? (() => {
+            const groupChats = createBotGroupChatsHost(state, identity, turn);
+            return groupChats ? { groupChats } : {};
+          })()
         : {}),
       // A Bot writes a Routine only inside a Turn, so the record's writer can
       // name the Session and Turn that produced it.

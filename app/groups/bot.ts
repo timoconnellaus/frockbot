@@ -8,6 +8,7 @@
 
 import type { SessionEvent } from "@frockbot/core/contracts";
 import { endedOwingReplyV1 } from "../shell/delivery.js";
+import { botMessageCallV1 } from "../shell/run-protocol.js";
 import type { GroupTurnOriginV1 } from "./context.js";
 import type { GroupTurnStateV1 } from "./log.js";
 import { isGroupSessionIdV1 } from "./shared.js";
@@ -78,8 +79,16 @@ export function groupTurnStateOfRunV1(run: RunLike): GroupTurnStateV1 {
     if (!text) continue;
     sends.push({ occurrence: event.seq, text, at: event.timestamp });
   }
+  const exchanges: NonNullable<GroupTurnStateV1["exchanges"]> = [];
+  for (const event of run.events) {
+    if (event.type !== "tool/call") continue;
+    const asked = botMessageCallV1(event);
+    if (asked)
+      exchanges.push({ callId: event.occurrenceId, botId: asked.botId });
+  }
   return {
     status,
+    ...(exchanges.length > 0 ? { exchanges } : {}),
     started:
       status !== "queued" ||
       run.events.some((event) => event.type === "turn/start"),

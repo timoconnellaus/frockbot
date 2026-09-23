@@ -319,6 +319,7 @@ export async function executeTurn(
           groupChat: {
             origin: input.command.origin,
             botId: input.identity.botId,
+            runId: input.command.runId,
           },
         }
       : {}),

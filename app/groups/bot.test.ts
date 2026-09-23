@@ -71,6 +71,35 @@ describe("a member's group Turn, read back by its group", () => {
     });
   });
 
+  test("a bot_message call is read back as an exchange with a Bot outside", () => {
+    const state = groupTurnStateOfRunV1({
+      sessionId: "group:g-0123456789abcdef0123",
+      status: "running",
+      events: [
+        event({ seq: 1, type: "turn/start", turn: 1 }),
+        event({
+          seq: 2,
+          type: "tool/call",
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0",
+          name: "call_dynamic_tool",
+          input: {
+            namespace: "frockbot",
+            toolName: "bot_message",
+            arguments: {
+              target_id: "researcher",
+              message: "What did Q2 cost?",
+            },
+          },
+        }),
+      ],
+    });
+    expect(state.exchanges).toEqual([
+      { callId: "tool:1:1:0", botId: "researcher" },
+    ]);
+  });
+
   test("a queued Turn has not started", () => {
     expect(
       groupTurnStateOfRunV1({

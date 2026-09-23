@@ -18,6 +18,7 @@ import type { SessionEvent } from "@frockbot/core/contracts";
 import {
   createBotCreateTool,
   createBotMessageTool,
+  createGroupBotMessageTool,
   createTeammatesPromptSectionV1,
   createTurnBotDirectoryV1,
   createBotUpdateTool,
@@ -577,6 +578,104 @@ describe("bot_message", () => {
     await expect(flock.read()).rejects.toThrow("User object is busy");
     await expect(flock.read()).resolves.toMatchObject({ schemaVersion: 1 });
     expect(calls).toBe(2);
+  });
+});
+
+describe("bot_message in a Group Chat Turn", () => {
+  const groupChat = {
+    runId: "grp-0123",
+    botId: "bot-1",
+    origin: {
+      kind: "group" as const,
+      groupId: "g-0123456789abcdef0123",
+      groupName: "Books",
+      members: [
+        { botId: "bot-1", name: "General" },
+        { botId: "xero", name: "Xero Books" },
+      ],
+      throughSeq: 4,
+      reason: "mention" as const,
+    },
+  };
+
+  test("asks a Bot outside the group under an id scoped to this Turn's run", async () => {
+    const asked: string[] = [];
+    const test1 = harness();
+    const host = {
+      ...test1.host,
+      groupChat,
+      messageBot: async (
+        request: Parameters<FlockSelfRuntimeHostV1["messageBot"]>[0],
+      ) => {
+        asked.push(request.effectId);
+        return test1.host.messageBot(request);
+      },
+    };
+    const result = await createGroupBotMessageTool(host).execute(
+      { target_id: "researcher", message: "What did Q2 cost?" },
+      {
+        ...CONTEXT,
+        turnType: "agent",
+        sessionId: "group:g-0123456789abcdef0123",
+      },
+    );
+
+    expect(result).toEqual({ content: "Teammate answer", isError: false });
+    // The occurrence id is numbered within the group's Session, so on its own
+    // it would repeat one from the Bot's own chat.
+    expect(asked).toEqual(["grp-0123:tool:1:1:0"]);
+  });
+
+  test("refuses a member, who is asked in the thread instead", async () => {
+    const test1 = harness();
+    const result = await createGroupBotMessageTool({
+      ...test1.host,
+      groupChat,
+    }).execute({ target_id: "xero", message: "Numbers?" }, CONTEXT);
+
+    expect(result).toMatchObject({ isError: true });
+    expect(result.content).toContain("@mention");
+  });
+
+  test("the teammates section in a group names only the Bots outside it", async () => {
+    const test1 = harness();
+    const directory = createTurnBotDirectoryV1(test1.host);
+    await createBotCreateTool(test1.host, directory).execute(
+      { name: "Researcher", description: "Finds primary sources." },
+      CONTEXT,
+    );
+    await createBotCreateTool(test1.host, directory).execute(
+      { name: "Xero Books", description: "Bookkeeping." },
+      { ...CONTEXT, effectId: "tool:1:2:0" },
+    );
+    const xero = (await test1.host.listBots()).bots.find(
+      (bot) => bot.initialName === "Xero Books",
+    )!;
+    const inGroup = {
+      ...test1.host,
+      groupChat: {
+        ...groupChat,
+        origin: {
+          ...groupChat.origin,
+          members: [
+            { botId: "bot-1", name: "General" },
+            { botId: xero.botId, name: "Xero Books" },
+          ],
+        },
+      },
+    };
+    const prompt = await createTeammatesPromptSectionV1(
+      inGroup,
+      createTurnBotDirectoryV1(inGroup),
+    ).render({
+      sessionId: "group:g-0123456789abcdef0123",
+      provider: "test",
+      model: "test",
+      turnType: "agent",
+    });
+
+    expect(prompt).toContain("Researcher");
+    expect(prompt).not.toContain("Xero Books");
   });
 });
 

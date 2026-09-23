@@ -520,6 +520,65 @@ describe("a Group Chat's thread", () => {
     expect(await log.openTurns()).toEqual([]);
   });
 
+  test("a member calling @User owes the person an alert, written with the message", async () => {
+    const { log } = await freshLog();
+    const turn = admits((await userSays(log, "c1", "@Fox check")).effects)[0]!;
+    const { settled, seq } = await memberSays(
+      log,
+      "fox",
+      turn.admission.runId,
+      "@User the invoice is overdue",
+    );
+    expect(settled.effects).toContainEqual({ kind: "push", seq });
+    expect(await log.pendingPushes()).toEqual([seq]);
+    expect((await log.message(seq))?.body).toMatchObject({
+      mentionsUser: true,
+    });
+    await log.pushDelivered(seq);
+    expect(await log.pendingPushes()).toEqual([]);
+    // The person writing @User calls nobody.
+    const own = await userSays(log, "c2", "@User note to self");
+    expect(own.effects.some((effect) => effect.kind === "push")).toBe(false);
+  });
+
+  test("a member asking a Bot outside the group leaves one line in the thread", async () => {
+    const { log } = await freshLog();
+    const turn = admits((await userSays(log, "c1", "@Fox check")).effects)[0]!;
+    await log.admitted("fox", turn.admission.runId);
+    const state = {
+      status: "running" as const,
+      started: true,
+      sends: [],
+      yielded: false,
+      exchanges: [{ callId: "tool:1:1:0", botId: "researcher" }],
+    };
+    for (let round = 0; round < 2; round++) {
+      await log.applyTurnState({
+        botId: "fox",
+        runId: turn.admission.runId,
+        state,
+        context: context(),
+      });
+    }
+    const lines = (await log.page({ limit: 10 })).messages.filter(
+      (message) =>
+        message.body.kind === "event" &&
+        message.body.event.type === "bot-message",
+    );
+    expect(lines.map((message) => message.body)).toEqual([
+      {
+        kind: "event",
+        event: {
+          type: "bot-message",
+          botId: "fox",
+          toBotId: "researcher",
+          runId: turn.admission.runId,
+          callId: "tool:1:1:0",
+        },
+      },
+    ]);
+  });
+
   test("an archived group takes no posts", async () => {
     const { log } = await freshLog();
     await expect(

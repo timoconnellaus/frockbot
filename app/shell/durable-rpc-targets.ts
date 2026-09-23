@@ -1,6 +1,7 @@
 import type { ConfigurationCommandV1 } from "@frockbot/core/configuration";
 import type { MachineCommandV1 } from "@frockbot/core/machine-protocol";
 import type { TemplateCommandV1 } from "@frockbot/app/bot-template/shared";
+import type { GroupChatCommandV1 } from "@frockbot/app/groups/shared";
 import type {
   BotDirectoryProfileV1,
   BotLookV1,
@@ -101,6 +102,13 @@ export interface BotUserConfigurationRpcTargetV1
     input: UserRpcEnvelopeV1<{ connectionId: string; effectId: string }>,
   ): Promise<void>;
   listBots(input: UserRpcEnvelopeV1): Promise<object>;
+  listGroupChats(input: UserRpcEnvelopeV1): Promise<object>;
+  executeGroupChatCommand(
+    input: UserRpcEnvelopeV1<{
+      command: GroupChatCommandV1;
+      actorBotId?: string;
+    }>,
+  ): Promise<object>;
   createBot(
     input: UserRpcEnvelopeV1<{ command: CreateBotCommandV1 }>,
   ): Promise<object>;

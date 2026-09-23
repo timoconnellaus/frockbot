@@ -17,6 +17,7 @@ import {
   decodeGroupRetryCommandV1,
   decodeGroupStopCommandV1,
   groupChatObjectNameV1,
+  groupDisplayNameV1,
   type GroupActorV1,
   type GroupChatContextV1,
   type GroupEventV1,
@@ -72,6 +73,7 @@ interface BotGroupRpc {
 
 interface UserGroupRpc {
   readGroupChatContext(input: unknown): Promise<unknown>;
+  deliverGroupPush(input: unknown): Promise<unknown>;
 }
 
 const groupIdDecoder = rpcPattern(/^g-[0-9a-f]{20}$/, 22);
@@ -284,6 +286,44 @@ export class GroupChat extends DurableObject<GroupChatEnv> {
     });
   }
 
+  /**
+   * A member posting into the group from outside it — its own chat, or a
+   * Routine. The message id is the Bot's, derived from the call that posted,
+   * so a replayed call posts once.
+   */
+  async postFromBot(input: unknown) {
+    return answerGroupRpcV1(async () => {
+      const request = decodeRpcEnvelopeV1(input, {
+        userId: rpcIdentifier,
+        groupId: groupIdDecoder,
+        botId: rpcBotId,
+        messageId: rpcPattern(/^o-[0-9a-f]{40}$/, 42),
+        text: rpcDecoded(
+          (value) =>
+            decodeGroupPostCommandV1({
+              schemaVersion: 1,
+              commandId: "outside",
+              text: value,
+            }).text,
+        ),
+      });
+      const userId = request.userId as string;
+      const groupId = request.groupId as string;
+      await this.assertIdentity(userId, groupId);
+      const context = await this.context(userId, groupId);
+      const outcome = await this.transaction((log) =>
+        log.post({
+          messageId: request.messageId as string,
+          author: { kind: "bot", botId: request.botId as string },
+          text: request.text as string,
+          context,
+        }),
+      );
+      await this.carryOut(userId, outcome.effects);
+      return { schemaVersion: 1, message: outcome.value } as const;
+    });
+  }
+
   async markRead(input: unknown) {
     return answerGroupRpcV1(async () => {
       const request = decodeRpcEnvelopeV1(input, {
@@ -403,6 +443,7 @@ export class GroupChat extends DurableObject<GroupChatEnv> {
     let broadcast = false;
     const identity = await this.log().identity();
     const judged: number[] = [];
+    let pushed = false;
     for (const effect of effects) {
       switch (effect.kind) {
         case "broadcast":
@@ -410,6 +451,9 @@ export class GroupChat extends DurableObject<GroupChatEnv> {
           break;
         case "judge":
           judged.push(effect.seq);
+          break;
+        case "push":
+          pushed = true;
           break;
         case "signal":
           if (!identity) break;
@@ -456,12 +500,64 @@ export class GroupChat extends DurableObject<GroupChatEnv> {
       }
     }
     if (broadcast) this.broadcast();
+    if (identity && pushed) {
+      await this.deliverPushes(userId, identity.groupId);
+    }
     if (identity) {
       for (const seq of judged) {
         await this.judgeMessage(userId, identity.groupId, seq);
       }
     }
     await this.armAlarm();
+  }
+
+  /**
+   * Notifies the person of every member message that calls them. A device
+   * reading this group defers the alert, and a failure keeps it: the alarm
+   * tries again until it is delivered.
+   */
+  private async deliverPushes(userId: string, groupId: string): Promise<void> {
+    const log = this.log();
+    const pending = await log.pendingPushes();
+    if (pending.length === 0) return;
+    const context = await this.context(userId, groupId).catch(() => undefined);
+    if (!context) return;
+    const user = this.env.USER_CONFIGURATIONS.get(
+      this.env.USER_CONFIGURATIONS.idFromName(userId),
+    ) as unknown as UserGroupRpc;
+    const title = groupDisplayNameV1(context.group, context.members);
+    for (const seq of pending) {
+      const message = await log.message(seq);
+      // Read per entry: the person may read the group during a delivery.
+      const { readThrough } = await log.channelState();
+      if (
+        seq <= readThrough ||
+        message?.body.kind !== "text" ||
+        message.author.kind !== "bot"
+      ) {
+        await this.transaction((next) => next.pushDelivered(seq));
+        continue;
+      }
+      const authorId = message.author.botId;
+      const author =
+        context.members.find((member) => member.botId === authorId)?.name ??
+        authorId;
+      try {
+        await user.deliverGroupPush({
+          schemaVersion: 1,
+          userId,
+          groupId,
+          botId: authorId,
+          seq,
+          title: title.slice(0, 200),
+          body: `${author}: ${message.body.text}`.slice(0, 240),
+        });
+      } catch {
+        // Still owed; the alarm tries again.
+        return;
+      }
+      await this.transaction((next) => next.pushDelivered(seq));
+    }
   }
 
   /**
@@ -516,7 +612,8 @@ export class GroupChat extends DurableObject<GroupChatEnv> {
     const open = (await log.openTurns()).length > 0;
     const owed =
       (await log.owedAdmissions()).length > 0 ||
-      (await log.pendingJudgements()).length > 0;
+      (await log.pendingJudgements()).length > 0 ||
+      (await log.pendingPushes()).length > 0;
     if (!open && !owed) return;
     const due = Date.now() + (owed ? ADMISSION_RETRY_MS : OPEN_TURN_POLL_MS);
     const current = await this.ctx.storage.getAlarm();
@@ -550,6 +647,9 @@ export class GroupChat extends DurableObject<GroupChatEnv> {
         context,
       ).catch(() => undefined);
     }
+    await this.deliverPushes(identity.userId, identity.groupId).catch(
+      () => undefined,
+    );
     for (const seq of await this.log().pendingJudgements()) {
       await this.judgeMessage(
         identity.userId,
