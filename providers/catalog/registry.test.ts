@@ -33,15 +33,11 @@ describe("catalog provider registry", () => {
     ]);
 
     expect(catalogProviderV1("amazon-bedrock").runtimeAdapter).toBe("bedrock");
-    expect(catalogProviderV1("kimi-coding")).toMatchObject({
-      oauthProviderId: "kimi-coding",
-      oauthRequestAuth: "bearer-header",
-    });
+    expect(catalogProviderV1("xai").oauthProviderId).toBe("xai");
     expect(catalogProviderV1("radius").modelSource).toBe("radius-gateway");
     expect(catalogProviderV1("google")).toMatchObject({
       runtimeAdapter: "pi-ai",
       oauthProviderId: undefined,
-      oauthRequestAuth: "api-key",
       modelSource: "builtin",
     });
   });

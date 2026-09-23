@@ -14,8 +14,8 @@ import { encodeOAuthTokenV1 } from "./oauth-protocol.js";
 import { createCatalogProviderFeatureV1 } from "./runtime.js";
 import { catalogProviderV1 } from "./registry.js";
 
-test("Kimi subscription transport sends OAuth only as its required header", async () => {
-  const catalogProvider = catalogProviderV1("kimi-coding");
+test("sign-in transport sends the access token and never the refresh token", async () => {
+  const catalogProvider = catalogProviderV1("xai");
   const model = providerModelsV1(catalogProvider)[0]!;
   let options: StreamOptions | undefined;
   const provider = {
@@ -84,15 +84,15 @@ test("Kimi subscription transport sends OAuth only as its required header", asyn
     credentials: {
       open: async () =>
         encodeOAuthTokenV1({
-          access: "kimi-access-secret",
-          refresh: "kimi-refresh-secret",
+          access: "xai-access-secret",
+          refresh: "xai-refresh-secret",
           expires: Date.now() + 300_000,
         }),
     },
   } as never);
   const request: NormalizedModelRequest = {
     requestId: "request-1",
-    provider: "kimi-coding",
+    provider: "xai",
     model: model.id,
     system: "",
     messages: [{ role: "user", content: "hello" }],
@@ -109,11 +109,8 @@ test("Kimi subscription transport sends OAuth only as its required header", asyn
   ))
     events.push(event);
 
-  expect(options?.apiKey).toBeUndefined();
-  expect(options?.headers).toMatchObject({
-    Authorization: "Bearer kimi-access-secret",
-    "Idempotency-Key": "request-1",
-  });
-  expect(JSON.stringify(options)).not.toContain("kimi-refresh-secret");
+  expect(options?.apiKey).toBe("xai-access-secret");
+  expect(options?.headers).toEqual({ "Idempotency-Key": "request-1" });
+  expect(JSON.stringify(options)).not.toContain("xai-refresh-secret");
   expect(events.at(-1)).toEqual({ type: "finish", reason: "completed" });
 });

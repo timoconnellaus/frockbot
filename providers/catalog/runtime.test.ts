@@ -73,25 +73,25 @@ async function collect(stream: AsyncIterable<LlmStreamEvent>) {
 
 describe("catalog provider bridge", () => {
   test("ships every provider from the pinned Harness catalog with unique connection identities", () => {
-    expect(catalogProviderDefinitionsV1).toHaveLength(40);
+    expect(catalogProviderDefinitionsV1).toHaveLength(28);
     expect(
       new Set(catalogProviderDefinitionsV1.map((definition) => definition.id))
         .size,
-    ).toBe(40);
+    ).toBe(28);
     expect(
-      catalogProviderDefinitionsV1.filter(
+      catalogProviderDefinitionsV1.every(
         (definition) =>
           definition.connectionTypes?.[0]?.authorization?.kind === "api-key",
       ),
-    ).toHaveLength(39);
+    ).toBe(true);
     expect(
       catalogProviderDefinitionsV1
         .filter(
           (definition) =>
-            definition.connectionTypes?.[0]?.authorization?.kind === "grant",
+            definition.connectionTypes?.[1]?.authorization?.kind === "grant",
         )
         .map((definition) => definition.id),
-    ).toEqual(["provider-openai-codex"]);
+    ).toEqual(["provider-openrouter", "provider-radius", "provider-xai"]);
   });
 
   test("holds tool calls until completion and counts cached input in the total", async () => {

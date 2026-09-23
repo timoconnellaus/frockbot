@@ -34,7 +34,7 @@ strip).** People who know the category and want to own and modify the thing.
 `/how-it-works/` is titled **Inside FrockBot** (nav label **How it works**) and
 carries the architecture and the capability reference.
 
-- Angles: MIT open source; bring your own model (40 providers); everything
+- Angles: MIT open source; bring your own model (28 providers); everything
   is a plugin (hooks on the loop, tools, storage, declared egress, Bots can
   author plugins behind approval); one-command self-host on Cloudflare;
   same code as the hosted deployment; US$20 or free vs the US$200 category.

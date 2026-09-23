@@ -200,7 +200,6 @@ export function createCatalogConnectionOwnerV1(
         command.type === "connection/create"
       ) {
         if (
-          !provider.apiKey ||
           command.connectionTypeId !== `${provider.id}-account` ||
           (command.type === "connection/create-api-key" &&
             command.apiKey.startsWith(OAUTH_SECRET_PREFIX))
