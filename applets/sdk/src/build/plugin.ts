@@ -1,6 +1,5 @@
 /**
- * The Plugin build (ADR 0026): four named stages over one directory, sharing
- * the Applet build's type checker, bundler and Miniflare boot.
+ * The Plugin build (ADR 0026): four named stages over one directory.
  *
  *  1. `descriptor` — `plugin.json` parses and names the Plugin the caller
  *     asked for. Nothing more is decided here: the app Worker holds the full

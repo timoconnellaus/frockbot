@@ -1,113 +1,97 @@
 # @frockbot/applet-sdk
 
-The SDK a FrockBot Applet is written against: a schema-first Durable Object
-server, a TanStack DB client over one real-time socket, a precompiled component
-kit on the theme tokens, a linter, and the build pipeline the cloud build
-service runs.
-
-An Applet is authored with the `applet_*` tools, built by `apps/applet-build`,
-and mounted as a Durable Object facet from an immutable artifact. There is no
-CLI: nothing outside the service builds an Applet, and no Computer is involved
-at any point.
+What a FrockBot Plugin is written against, and the build that turns a
+Plugin's source into the module and manifest a publish stores (ADR 0026).
 
 ## Entry points
 
-| Import                              | For                                                                  |
-| ----------------------------------- | -------------------------------------------------------------------- |
-| `@frockbot/applet-sdk/server`       | `Applet`, `table`, `t` — the Applet's `server.ts`                    |
-| `@frockbot/applet-sdk/client`       | `createApplet`, `mount`, `newId` — the Applet's `ui.tsx`             |
-| `@frockbot/applet-sdk/kit`          | the fourteen components (`src/kit/README.md`)                        |
-| `@frockbot/applet-sdk/lint`         | the flat ESLint config and the five custom rules                     |
-| `@frockbot/applet-sdk/protocol`     | wire protocol v1, for the kernel and for tests                       |
-| `@frockbot/applet-sdk/build`        | `runAppletBuildV1` — the five stages, for the service                |
-| `@frockbot/applet-sdk/plugin`       | types only: `PluginModule`, `PluginContext` — a Plugin's `plugin.ts` |
-| `@frockbot/applet-sdk/build/plugin` | `runPluginBuildV1` — the four Plugin stages, for the service         |
+| Import                              | For                                                                                        |
+| ----------------------------------- | ------------------------------------------------------------------------------------------ |
+| `@frockbot/applet-sdk/plugin`       | types only: `PluginModule`, `PluginContext` and the rest — a Plugin's `plugin.ts`          |
+| `@frockbot/applet-sdk/build/plugin` | `runPluginBuildV1` — the four stages, for the build service and the seeded Plugins' script |
+
+## A Plugin
+
+A Plugin is a directory: a `plugin.json` descriptor, a `plugin.ts` module,
+and any `.ts` files beside it that the module imports. `plugin.ts` has no
+default export. It exports `tools` and `execute` by name, and may export
+`hooks`, `services`, `triggers`, `views`, `cards` and `modelProviders`
+(`PluginModule`). `tools` may be empty: a Plugin that only serves hooks
+builds.
+
+`@frockbot/applet-sdk/plugin` is declarations only, so it is imported with
+`import type`; a value import of it fails the bundle stage.
+`app/plugins/sdk-types.test.ts` pins its `PluginContext`, hook events, grants
+and hook payloads to the kernel's own types, so a Plugin that type-checks
+here sees the `ctx` the kernel builds.
+
+A model provider (`PluginModelProvider`, ADR 0032) answers a normalized model
+request with normalized stream events, and makes its one upstream call
+through `ctx.modelTransport`. The deployment serves a provider only from the
+artifact its own provider catalog names, so this is not a way for a
+Bot-written Plugin to reach a provider.
+
+`plugin/template/` is the scaffold a new Plugin starts as, with
+`__PLUGIN_ID__` and `__PLUGIN_NAME__` for `plugin_create` to fill in.
+`scripts/build-applets-assets.ts` carries it into the Worker as
+`app/plugins/template.generated.ts`, and carries `plugin/index.d.ts` into the
+Plugins Skill as `app/plugins/skills/plugins/references/types.md`.
 
 ## The build
 
-`runAppletBuildV1(directory, { mode })` is five named stages over one
-directory: `descriptor`, `typecheck`, `lint`, `bundle`, `describe`. `check`
-stops after the linter; `build` goes on to the artifacts. A stage that fails
-stops the run and names itself, and every failure is a list of
-`{file, line, column, message, severity}`.
+`runPluginBuildV1(directory, { mode, id })` is four named stages over one
+directory. A stage that fails stops the run and names itself, with a list of
+`{file, line, column, message, severity}` diagnostics. `check` stops after
+the type checker; `build` goes on to the module and its manifest.
 
-`manifest.json`'s tool declarations are derived by mounting the built
-`server.js` in Miniflare and calling `health()` — the same question the kernel
-asks the facet before it admits a generation, so the manifest cannot disagree
-with the code.
+1. `descriptor`: `plugin.json` is a JSON object whose `id` matches
+   `/^[a-z][a-z0-9-]{0,63}$/` and, when the caller passes `id`, is that id.
+   The build reads nothing else from it. The app Worker decodes the full
+   descriptor and refuses a publish whose descriptor and manifest disagree
+   (`pluginManifestDisagreementV1` in `app/plugins/authoring.ts`).
+2. `typecheck`: every `.ts` file in the directory, strict, against ES2022
+   and the DOM lib for `fetch`, `Request` and `Response`, with
+   `@frockbot/applet-sdk/plugin` resolved to `plugin/index.d.ts`. The
+   directory must hold a `plugin.ts`. Only errors fail the stage.
+3. `bundle`: esbuild makes one unminified ESM module with every import
+   inlined. Nothing is external, so a specifier the bundler cannot inline
+   fails here, not at mount. `module-paths.ts` rewrites esbuild's module-path
+   comments relative to the Plugin's directory, so the same source builds to
+   the same bytes wherever it is built.
+4. `describe`: the bundle runs in Miniflare beside a describing Worker, with
+   no bindings and no outbound network: every `fetch` is answered with a 403.
+   Import-time code runs inside workerd, never in the build's own process.
+   What the module exports is the manifest. `tools` must be an array and
+   `execute` a function; each tool needs a name matching
+   `/^[a-z][a-z0-9_]{0,63}$/` and a description; `hooks`, `triggers` and
+   `views` hold functions, `services` any values, each card a `render` and
+   each model provider a `stream`. A Plugin declares at most 64 tools, each
+   name once.
 
-`template/` is the scaffold a new Applet starts as.
-`scripts/build-applets-assets.ts` turns it into `applets/template.generated.ts`,
-which `applet_create` writes through the Workspace.
+Each describe spawns its own workerd, and `boot.ts` bounds the boot. A
+runtime that is not ready within `BOOT_DEADLINE_MS` (30 seconds), or whose
+spawn fails outright, is a `RuntimeDidNotStart`. The build lets that runtime
+go rather than waiting on it and boots once more; if the second boot does not
+come up either, the stage fails with that as its diagnostic.
 
-## Plugins
+A build answers the module text and its manifest:
+`{ contract: 1, tools, hooks, services, triggers, views, cards, modelProviders, hashes: { module } }`,
+where `hashes.module` is the SHA-256 of the module.
 
-A Plugin (ADR 0026) is written against `@frockbot/applet-sdk/plugin`, which
-is declarations only: `plugin.ts` exports `tools` and `execute`, and may
-export `hooks`, `services`, `triggers`, `views` and `modelProviders`, beside a `plugin.json` descriptor.
-`tools` may be empty — a Plugin that only serves hooks is admissible, because
-the kernel's own descriptor contract admits one. A model provider
-(`PluginModelProvider`, ADR 0032) answers a normalized model request with
-normalized stream events and makes its one upstream call through
-`ctx.modelTransport`; the deployment serves it only from the artifact its own
-provider catalog names, so this is not a way for a Bot-written Plugin to reach
-a provider.
-`runPluginBuildV1(directory, { mode, id })` is four stages — `descriptor`,
-`typecheck`, `bundle`, `describe` — with no lint stage, because a Plugin's
-reach is a grant the descriptor declares and the kernel enforces. The bundle
-is one ESM module with every import inlined, and the manifest is read by
-running that module in Miniflare with no outbound network. `plugin/template/`
-is the scaffold a new Plugin starts as. `PluginContext` is held to the
-kernel's own `ctx` keys by `app/plugins/sdk-types.test.ts`.
-
-## What runs where
-
-`server.ts` becomes a single ESM file whose only import is `cloudflare:workers`,
-loaded by the kernel's `APPLETS` Worker Loader with no outbound network, and
-mounted as a facet under `AppletState`. `ui.tsx` becomes one self-contained HTML
-page served from the anonymous artifact origin into a sandboxed iframe, which
-receives its theme tokens and a short-lived viewer token through the host's
-`init` message and opens exactly one WebSocket back to the facet.
-
-The Cloudflare programming model is not hidden: an Applet is a Durable Object
-with SQLite and hibernating sockets. What the SDK does hide is every binding
-name — an author sees `tables`, `tools`, and `this.db`.
-
-## Wire protocol
-
-JSON frames, at most 64 KB each, decoded by `src/protocol/` at both ends;
-an unknown type, field, or table fails closed. Two versions are spoken on the
-same server, told apart by the socket URL: a page built against v2 opens with
-`v=2`, and a page built before it opens with nothing and is spoken to in v1.
-
-| Direction       | Frame      | Carries                                                                                     |
-| --------------- | ---------- | ------------------------------------------------------------------------------------------- |
-| server → client | `hello`    | contract, generationId, viewer, tables, revision, cursor — and in v2, the `snapshot` itself |
-| client → server | `hello`    | contract, optional `since` cursor for catch-up; in v2 only on a resume or when asked        |
-| server → client | `snapshot` | every row of every table, plus the cursor                                                   |
-| server → client | `changes`  | ordered row changes, optionally tagged with a client txn id                                 |
-| client → server | `mutate`   | one client transaction: insert/update/delete                                                |
-| server → client | `ack`      | the resulting rows for that txn                                                             |
-| server → client | `reject`   | why the txn was refused (the client rolls back)                                             |
-
-The host hands the page its credential in an `init` postMessage, and a fresh
-credential later in a `refresh` of the same shape; the page reconnects in
-place rather than being reloaded, and with its cursor on the URL that is the
-`changes` path.
-
-A v2 page's first render waits on one frame: the server's `hello` carries the
-snapshot when the URL named no `since` cursor, and the page marks its
-collections ready on it. A reconnect puts `since` on the URL, gets a plain
-`hello`, and asks for `changes` as v1 does. A snapshot that would not fit the
-frame is left out of the hello and the v1 exchange follows.
+Two callers run it. The build service in `apps/applet-build` runs `check`
+for `plugin_check` and `build` for `plugin_publish`.
+`scripts/build-seeded-plugins.ts` builds each Plugin under
+`app/plugins/seeded/` into the Worker bundle through the same stages.
 
 ## Tests
 
 ```sh
-bun test test spike
+bun run test
 ```
 
-Pure modules and the client are tested in `bun test`: the store runs against
-`bun:sqlite`, and `test/loopback.ts` joins the real protocol server to the real
-client transport through a pair of fake sockets. `test/build.test.ts` and
-`spike/` run the real pipeline and the built Applet in Miniflare.
+`test/plugin-build.test.ts` runs `runPluginBuildV1` over the real template,
+which `test/plugin-scaffold.ts` fills in and writes to a temporary directory.
+It covers each stage's failure and diagnostics, identical module bytes from
+different and symlinked roots, and the manifest read off each kind of export.
+Every build test boots workerd through Miniflare, so a run needs to bind a
+local port. The root `bun test` runs this file too.
