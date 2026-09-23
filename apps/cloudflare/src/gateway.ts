@@ -40,7 +40,11 @@ import {
   VOICE_DICTATION_PATH_V1,
   type VoiceCapabilitiesV1,
 } from "@frockbot/app/voice/shared";
-import { whatsNewFeedV1, whatsNewImageNameV1 } from "@frockbot/app/whats-new";
+import {
+  whatsNewFeedV1,
+  whatsNewImageNameV1,
+  whatsNewPublishedAtV1,
+} from "@frockbot/app/whats-new";
 import {
   voiceAssistantEdgeTimingV1,
   type VoiceTimingV1,
@@ -605,7 +609,7 @@ export function createGateway(
     }
     if (url.pathname === "/api/whats-new") {
       if (request.method !== "GET") return jsonError(405, "method not allowed");
-      return Response.json(whatsNewFeedV1(), {
+      return Response.json(whatsNewFeedV1(whatsNewPublishedAtV1), {
         headers: { "cache-control": "no-store" },
       });
     }

@@ -1668,6 +1668,10 @@ jobs:
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+          # What’s New dates an entry by the first production tag that
+          # declares it, so this job reads every tag and the history under it.
+          fetch-depth: 0
+          fetch-tags: true
 
       - name: Set up Bun # zizmor: ignore[cache-poisoning] tag-only release job
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
@@ -1676,6 +1680,13 @@ jobs:
 
       - name: Install dependencies
         run: bun install --frozen-lockfile
+
+      # Writes the day each entry first shipped into the Worker bundle that
+      # "Deploy Worker" builds. A date is not worth a production deploy: if
+      # this fails, the feed says "New" as it does in every other build.
+      - name: Date What’s New entries
+        continue-on-error: true
+        run: bun app/whats-new/published.ts
 
       - name: Validate deployment configuration
         env:

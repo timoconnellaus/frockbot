@@ -5,6 +5,7 @@ import {
   type WhatsNewKindV1,
 } from "./entries.js";
 import { whatsNewMediaFileV1 } from "./media.js";
+import { WHATS_NEW_PUBLISHED_V1 } from "./published.generated.js";
 
 export type WhatsNewPublishedAtLookupV1 = (id: string) => string | undefined;
 
@@ -75,6 +76,13 @@ export function projectWhatsNewEntryV1(
     kind: entry.kind,
     ...(publishedAt ? { publishedAt } : {}),
   };
+}
+
+/** The day the tag deploy recorded for [id], or undefined before it ships. */
+export function whatsNewPublishedAtV1(id: string): string | undefined {
+  return Object.hasOwn(WHATS_NEW_PUBLISHED_V1, id)
+    ? WHATS_NEW_PUBLISHED_V1[id]
+    : undefined;
 }
 
 export function whatsNewFeedV1(

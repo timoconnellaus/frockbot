@@ -2,6 +2,14 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
+## What’s New, easier to read
+
+improvement
+
+Changes share a card under their day, and a wide window keeps the page to a reading width.
+
+![What’s New with two changes in one card under New, the unread one marked with a pink dot.](media/whats-new-reading.webp)
+
 ## A working Bot sits at the end of the thread
 
 improvement
