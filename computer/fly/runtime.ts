@@ -1377,7 +1377,7 @@ export const CLOCK_FLOOR_EPOCH = 1_756_684_800;
  * corrected. The version is compared on every adoption instead, and the whole
  * set is rewritten when it moves. Bump it whenever a document below changes.
  */
-export const REFERENCE_DOCS_VERSION = "2026-09-23.1";
+export const REFERENCE_DOCS_VERSION = "2026-09-23.2";
 
 /**
  * What a Bot reads to debug its own Computer.
@@ -1425,7 +1425,11 @@ hibernation, cold start, host migration, and an image rebuild.
 | \`${DATA_ROOT}/agents/<botKey>/skills\` | your instruction root, writable by you |
 | \`${DATA_ROOT}/agents/<botKey>/memory\` | your Memory, read-only here — change it through the Memory tools |
 | \`${DATA_ROOT}/user-memory\` | your User's Memory, read-only here |
-| \`${DATA_ROOT}/user-packages/<package>/<root>\` | roots a Package declared, e.g. screenshots and self-check reports |
+| \`${DATA_ROOT}/user-packages/<package>/<root>\` | roots a Package declared, e.g. \`image/generated\` |
+
+\`${DATA_ROOT}/user-packages/computer\` is the exception: your
+\`computer_screenshot\` captures and \`computer_doctor\` reports are filed
+there with their writer recorded, but they stay on this Computer.
 
 Every write to a durable root records its writer. A file you leave here with a
 shell command still reaches object storage, but as \`unattributed\` — it is
@@ -2138,6 +2142,28 @@ printf '%s\\n' "$PREVIOUS" | while IFS= read -r OWNED; do
 done
 mv "$MANIFEST.tmp" "$MANIFEST"`;
 
+/**
+ * Set once the screenshots earlier releases filed are gone.
+ *
+ * Until 2026-09-23 every Computer action filed a capture of the desktop under
+ * \`user-packages/computer/screenshots\`, and pruning them cost each call about
+ * fourteen seconds without keeping up. The card's picture is a frame in the
+ * Bot's own storage now, and only \`computer_screenshot\` files here, so the
+ * backlog goes once: the marker keeps a later update from taking the captures
+ * a Bot has filed since.
+ */
+export const RETIRED_SCREENSHOTS_MARKER = `${PROVISION_ROOT}/screenshots-retired-2026-09-23`;
+
+// A backlog that will not go never fails the update: the marker is left
+// unwritten, and the next update tries again.
+const retiredScreenshotsScript = `if [ ! -e ${shellQuote(RETIRED_SCREENSHOTS_MARKER)} ]; then
+  if rm -rf -- ${shellQuote(`${DATA_ROOT}/user-packages/computer/screenshots`)}; then
+    touch ${shellQuote(RETIRED_SCREENSHOTS_MARKER)}
+  else
+    printf '%s\\n' "the screenshot backlog could not be removed; the next update retries" >&2
+  fi
+fi`;
+
 function installDeclaredFiles(
   files: readonly {
     readonly path: string;
@@ -2211,7 +2237,8 @@ ${installDeclaredFiles(COMPUTER_RUNTIME_FILES)}
 # keep that package-owned graph intact while FrockBot owns every rendered element.
 ln -sfn /usr/share/novnc/core ${VIEWER_ROOT}/core
 ln -sfn /usr/share/novnc/vendor ${VIEWER_ROOT}/vendor
-${installManifestScript}`,
+${installManifestScript}
+${retiredScreenshotsScript}`,
   },
   {
     name: "browser",

@@ -69,6 +69,7 @@ import {
   INSTALL_MANIFEST,
   INSTALL_MANIFEST_PATHS,
   INSTALL_MANIFEST_SEED,
+  RETIRED_SCREENSHOTS_MARKER,
   PROVISION_LOCK,
   PROVISION_DIGEST,
   PROVISION_PHASES,
@@ -571,6 +572,38 @@ describe("the install manifest", () => {
       );
       expect(computer.exists(`${SHIMS_ROOT}/xdotool`)).toBe(true);
       expect(await computer.manifest()).toEqual([...INSTALL_MANIFEST_PATHS]);
+    } finally {
+      await computer.cleanup();
+    }
+  });
+
+  test("the screenshots earlier releases filed go once, and a capture filed since stays", async () => {
+    const screenshots = `${DATA_ROOT}/user-packages/computer/screenshots`;
+    const backlog = `${screenshots}/bob-1/run-1-1.png`;
+    const sidecar = `${screenshots}/.frockbot-generations/bob-1/run-1-1.png`;
+    const generated = `${DATA_ROOT}/user-packages/image/generated/cat.png`;
+    const computer = await computerHome({
+      ...LIVE,
+      [backlog]: "PNG",
+      [sidecar]: "{}",
+      [generated]: "PNG",
+    });
+    try {
+      await computer.update();
+      expect(computer.exists(backlog)).toBe(false);
+      expect(computer.exists(sidecar)).toBe(false);
+      // Another Package's root is its own.
+      expect(computer.exists(generated)).toBe(true);
+      for (const path of Object.keys(LIVE)) {
+        expect(computer.exists(path)).toBe(true);
+      }
+      expect(computer.exists(RETIRED_SCREENSHOTS_MARKER)).toBe(true);
+
+      const since = `${screenshots}/bob-1/run-2-1.png`;
+      await mkdir(dirname(computer.at(since)), { recursive: true });
+      await writeFile(computer.at(since), "PNG");
+      await computer.update();
+      expect(computer.exists(since)).toBe(true);
     } finally {
       await computer.cleanup();
     }

@@ -879,11 +879,11 @@ deployment that cannot sign a viewer token is not retried at all.
 projection, one versioned command per action, and the two rules the card needs —
 whether the desktop or its last photograph is on screen, and what to call that.
 The card streams only a desktop that exists, to a card someone is looking at,
-while the Bot is working or has just stopped; every other answer is the stored
-capture, which costs nothing to hold — read through the authenticated
-Workspace route by the client that holds the session, because the path the
-projection carries is on this account's own origin and an anonymous image
-request there is answered 401. There is one destination: the card, the bar's
+while the Bot is working or has just stopped; every other answer is the Bot's
+frame, which costs nothing to hold — read through the authenticated frame
+route by the client that holds the session, because the URL the projection
+carries is on this account's own origin and an anonymous image request there
+is answered 401. There is one destination: the card, the bar's
 Computer icon and the search hit all open the same full window on the same
 session, with Take control in it. Taking control is two gestures, and only the
 second reaches the Bot.
@@ -1079,7 +1079,7 @@ The container sets `sleepAfter: "30m"` with `max_instances: 3`, and its entrypoi
 
 ### Screenshots and live view
 
-A screenshot is one operation on the session — `screenshot.capture()` — which the Fly host implements as one guarded `exec` running `scrot`, clipped to the Bot's slot of the shared screen, that answers with the PNG inline; only a capture past `SCREENSHOT_INLINE_MAX_BYTES` is followed by a `file/read` (`computer/fly/computer.ts`); the bytes are filed into the durable `screenshots` root and attached to the model turn. The live view is the URL a viewer session answers with, iframed directly and with no Worker proxy; the app's `frame-src` is built from the registered host's `viewerFrameOrigins` (`apps/cloudflare/src/user-application.ts`), which is `https://*.sprites.app` for Fly. FrockBot ships its own viewer page because stock noVNC fixes `view_only` at construction.
+A screenshot is one operation on the session — `screenshot.capture()` — which the Fly host implements as one guarded `exec` running `scrot`, clipped to the Bot's slot of the shared screen, that answers with the PNG inline; only a capture past `SCREENSHOT_INLINE_MAX_BYTES` is followed by a `file/read` (`computer/fly/computer.ts`). `computer_screenshot` files its capture through the Computer's Workspace into the `screenshots` root, with the Bot as writer, and attaches it to the model turn; retention runs at the Turn end, never in the call. The card's picture is a different thing: one frame per Bot in the Bot Durable Object's own storage (`computer/frame.ts`), not a Workspace file — replaced by the Turn end of any Turn that used the Computer, by `computer_screenshot`, and by closing a live viewer — and served by its hash at `GET /api/bots/:botId/computer/frame/:sha256` without waking a Computer. A Computer action photographs nothing mid-Turn: filing a capture after every action cost each call about fourteen seconds of listing and pruning. Writing the frame raises the `computer` state notice, and the card reads its projection again on it. The live view is the URL a viewer session answers with, iframed directly and with no Worker proxy; the app's `frame-src` is built from the registered host's `viewerFrameOrigins` (`apps/cloudflare/src/user-application.ts`), which is `https://*.sprites.app` for Fly. FrockBot ships its own viewer page because stock noVNC fixes `view_only` at construction.
 
 A `connect` first asks the host for a viewer on the existing desktop (`computer/bot.ts`). A fresh stored session is renewed; otherwise a viewer is opened. The host checks the Bot's credentials and the viewer and gateway ports in one remote command, without adoption, provisioning or desktop setup. A confirmed missing viewer and an update already in flight both fall through to `presence.connect()`, which waits that update out; transport, permission and billing failures are reported. Only the session id and expiry are durable, so this path also reconstructs the in-memory bearer URL after eviction. Recovery stays on an authenticated command with a durable effect key: projection reads never renew paid viewing. A refused viewer probe is billed for its active duration rather than a viewing window.
 

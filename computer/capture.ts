@@ -11,59 +11,14 @@ import type {
   WorkspaceRootV1,
   WorkspaceWriterV1,
 } from "@frockbot/core/contracts";
+import {
+  computerFrameFromCaptureV1,
+  type ComputerFrameSinkV1,
+  type StoredComputerFrameV1,
+} from "./frame.js";
 import { COMPUTER_SCREENSHOT_RETENTION } from "./roots.js";
 
-export type ComputerProjectionFileKindV1 = "screenshots" | "doctor";
-
-/**
- * The shortest gap between two progress captures of the same desktop.
- *
- * A Turn can run a dozen Computer actions a second, and each capture crosses
- * a service binding to the Computer host and writes durable bytes. Two seconds is
- * fast enough that the card looks like it is following the Bot and slow
- * enough that a busy Turn does not spend itself photographing a screen.
- */
-export const COMPUTER_PROGRESS_CAPTURE_INTERVAL_MS = 2_000;
-
-/**
- * Decides whether the next Computer action gets a fresh capture filed for it.
- *
- * Turn-end captures do not ask: the last frame of a Turn is the one the card
- * will show for as long as the Bot is idle, so it is always filed. Everything
- * inside the Turn is progress, and progress is debounced.
- */
-export interface ComputerCaptureCadenceV1 {
-  /** True at most once per interval; records the admission when it grants. */
-  admit(now: number): boolean;
-  /** Forgets the last admission, so the next call grants immediately. */
-  reset(): void;
-}
-
-export function createComputerCaptureCadenceV1(options?: {
-  intervalMs?: number;
-}): ComputerCaptureCadenceV1 {
-  const intervalMs =
-    options?.intervalMs ?? COMPUTER_PROGRESS_CAPTURE_INTERVAL_MS;
-  let lastAdmittedAt: number | undefined;
-  return {
-    admit(now: number): boolean {
-      // A clock that went backwards is not a licence to stop capturing; the
-      // gap is measured forwards only.
-      if (
-        lastAdmittedAt !== undefined &&
-        now >= lastAdmittedAt &&
-        now - lastAdmittedAt < intervalMs
-      ) {
-        return false;
-      }
-      lastAdmittedAt = now;
-      return true;
-    },
-    reset(): void {
-      lastAdmittedAt = undefined;
-    },
-  };
-}
+export type ComputerProjectionFileKindV1 = "frame" | "doctor";
 
 /** Invalidates files projected by one resident Bot Durable Object. */
 export interface ComputerProjectionFileInvalidationV1 {
@@ -77,22 +32,26 @@ export interface FiledComputerScreenshotV1 {
 }
 
 /**
- * Keeps the newest captures for one Bot.
+ * Keeps the newest explicit captures for one Bot, off the tool call: the Turn
+ * end runs it once for every capture the Turn filed.
  *
- * Pruning is best effort: a capture that was recorded is never failed because
- * an older one could not be removed.
+ * Best effort, and it stops at the first removal that does not go through:
+ * a delete refused once is refused again, and retrying it would only spend
+ * the Turn's closing seconds on the same file.
  */
-async function pruneComputerScreenshotsV1(
-  workspace: WorkspaceFilesV1,
-  root: WorkspaceRootV1,
-  botKey: string,
-  writer: WorkspaceWriterV1,
-  step: ComputerCaptureStepTimerV1,
-): Promise<void> {
+export async function pruneComputerScreenshotsV1(input: {
+  workspace: WorkspaceFilesV1;
+  root: WorkspaceRootV1;
+  botKey: string;
+  writer: WorkspaceWriterV1;
+  timing?: ComputerCaptureTimingV1;
+  now?: () => number;
+}): Promise<void> {
+  const step = captureStepTimerV1(input.timing, input.now ?? Date.now);
   const listed = await step("list", () =>
-    workspace.list({
-      root,
-      prefix: botKey,
+    input.workspace.list({
+      root: input.root,
+      prefix: input.botKey,
       limit: COMPUTER_SCREENSHOT_RETENTION * 4,
     }),
   );
@@ -106,13 +65,13 @@ async function pruneComputerScreenshotsV1(
   const excess = sorted.length - COMPUTER_SCREENSHOT_RETENTION;
   if (excess <= 0) return;
   await step("prune", async () => {
-    for (let index = 0; index < excess; index += 1) {
-      const entry = sorted[index]!;
-      await workspace.delete({
+    for (const entry of sorted.slice(0, excess)) {
+      const removed = await input.workspace.delete({
         path: entry.path,
-        writer,
+        writer: input.writer,
         expectedGenerationId: entry.generation.generationId,
       });
+      if (removed.status !== "ok") return;
     }
   });
 }
@@ -157,38 +116,46 @@ function captureStepTimerV1(
       : run();
 }
 
-/**
- * The one capture-and-file path used by explicit, viewer-close, and Turn-end
- * screenshots. The caller supplies the honest actor and an actor-shaped path;
- * this function owns capability checks, capture, the durable write, and
- * retention.
- */
-export async function fileComputerScreenshotV1(input: {
-  computer: ComputerHostSessionV1;
-  workspace: WorkspaceFilesV1;
-  path: WorkspacePathV1;
-  writer: WorkspaceWriterV1;
-  botKey: string;
-  effectId: string;
-  signal?: AbortSignal;
-  /** Filled with each step's duration as it runs; `total` is the caller's. */
-  timing?: ComputerCaptureTimingV1;
-  now?: () => number;
-}): Promise<FiledComputerScreenshotV1> {
-  const screenshot = input.computer.screenshot;
+/** One capture of the Bot's own desktop, refused where there is no screen. */
+function captureDesktopV1(
+  computer: ComputerHostSessionV1,
+  input: { effectId: string; signal?: AbortSignal },
+  step: ComputerCaptureStepTimerV1,
+): Promise<ComputerScreenshotV1> {
+  const screenshot = computer.screenshot;
   if (!screenshot) {
     throw new ComputerError(
       "capability-unavailable",
       "The selected Computer does not support screenshots",
     );
   }
-  const step = captureStepTimerV1(input.timing, input.now ?? Date.now);
-  const captured = await step("screenshot", () =>
+  return step("screenshot", () =>
     screenshot.capture({
       effectId: input.effectId,
       ...(input.signal ? { signal: input.signal } : {}),
     }),
   );
+}
+
+/**
+ * Captures the desktop and files it as a durable Workspace file: what
+ * `computer_screenshot` does, because the Bot asked to see its screen and the
+ * picture is part of what it did. Retention is the Turn end's, never the
+ * call's: see `pruneComputerScreenshotsV1`.
+ */
+export async function fileComputerScreenshotV1(input: {
+  computer: ComputerHostSessionV1;
+  workspace: WorkspaceFilesV1;
+  path: WorkspacePathV1;
+  writer: WorkspaceWriterV1;
+  effectId: string;
+  signal?: AbortSignal;
+  /** Filled with each step's duration as it runs; `total` is the caller's. */
+  timing?: ComputerCaptureTimingV1;
+  now?: () => number;
+}): Promise<FiledComputerScreenshotV1> {
+  const step = captureStepTimerV1(input.timing, input.now ?? Date.now);
+  const captured = await captureDesktopV1(input.computer, input, step);
   const written = await step("write", () =>
     input.workspace.write({
       path: input.path,
@@ -203,12 +170,27 @@ export async function fileComputerScreenshotV1(input: {
       `The screenshot could not be filed: ${written.status}: ${written.reason}`,
     );
   }
-  await pruneComputerScreenshotsV1(
-    input.workspace,
-    input.path.root,
-    input.botKey,
-    input.writer,
-    step,
-  );
   return { captured, path: input.path, generation: written.generation };
+}
+
+/**
+ * Captures the desktop into the Bot's one frame: the picture the card shows
+ * when it is not streaming. One capture and one Durable Object write — nothing
+ * listed, versioned, synced or pruned. Answers the frame it kept, or undefined
+ * when the capture was too large to keep and the previous frame stays.
+ */
+export async function captureComputerFrameV1(input: {
+  computer: ComputerHostSessionV1;
+  frames: ComputerFrameSinkV1;
+  effectId: string;
+  signal?: AbortSignal;
+  timing?: ComputerCaptureTimingV1;
+  now?: () => number;
+}): Promise<StoredComputerFrameV1 | undefined> {
+  const step = captureStepTimerV1(input.timing, input.now ?? Date.now);
+  const captured = await captureDesktopV1(input.computer, input, step);
+  const frame = await computerFrameFromCaptureV1(captured);
+  if (!frame) return undefined;
+  await step("write", () => input.frames.put(frame));
+  return frame;
 }

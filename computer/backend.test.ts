@@ -26,9 +26,57 @@ function request(body: unknown): Request {
 }
 
 describe("Computer gateway Contribution", () => {
+  test("serves the frame its projection named, immutable, and 404s a replaced one", async () => {
+    const hash = "a".repeat(64);
+    const asked: string[] = [];
+    const contribution = createComputerBackendContribution({
+      readComputer: () => Promise.resolve(projection),
+      readComputerFrame: (_userId, _botId, contentHash) => {
+        asked.push(contentHash);
+        return Promise.resolve(
+          contentHash === hash ? new Uint8Array([137, 80, 78, 71]) : undefined,
+        );
+      },
+      executeComputerCommand: () => {
+        throw new Error("must not execute");
+      },
+    });
+    const url = (value: string) =>
+      new URL(`https://app.test/api/bots/scout/computer/frame/${value}`);
+
+    const served = await contribution.route(new Request(url(hash)), url(hash), {
+      userId: "user-1",
+      client: "desktop",
+    });
+    expect(served?.status).toBe(200);
+    expect(served?.headers.get("content-type")).toBe("image/png");
+    expect(served?.headers.get("cache-control")).toContain("immutable");
+    expect(new Uint8Array(await served!.arrayBuffer())).toEqual(
+      new Uint8Array([137, 80, 78, 71]),
+    );
+
+    const stale = await contribution.route(
+      new Request(url("b".repeat(64))),
+      url("b".repeat(64)),
+      { userId: "user-1", client: "desktop" },
+    );
+    expect(stale?.status).toBe(404);
+
+    // Anything but a SHA-256 is not a frame route at all.
+    expect(
+      await contribution.route(
+        new Request(url("not-a-hash")),
+        url("not-a-hash"),
+        { userId: "user-1", client: "desktop" },
+      ),
+    ).toBeUndefined();
+    expect(asked).toEqual([hash, "b".repeat(64)]);
+  });
+
   test("rejects malformed exact DTOs before the host or storage is touched", async () => {
     let calls = 0;
     const contribution = createComputerBackendContribution({
+      readComputerFrame: () => Promise.resolve(undefined),
       readComputer: () => Promise.resolve(projection),
       executeComputerCommand: () => {
         calls += 1;
@@ -53,6 +101,7 @@ describe("Computer gateway Contribution", () => {
   test("answers 404 for a foreign Bot without writing its storage", async () => {
     let writes = 0;
     const contribution = createComputerBackendContribution({
+      readComputerFrame: () => Promise.resolve(undefined),
       readComputer: () => {
         throw new ComputerBotNotFoundError("scout");
       },
@@ -81,6 +130,7 @@ describe("Computer gateway Contribution", () => {
     const receipts = new Map<string, ComputerCommandReceiptV1>();
     let effects = 0;
     const contribution = createComputerBackendContribution({
+      readComputerFrame: () => Promise.resolve(undefined),
       readComputer: () => Promise.resolve(projection),
       executeComputerCommand: (_userId, _botId, command) => {
         const stored = receipts.get(command.commandId);
@@ -112,6 +162,7 @@ describe("Computer gateway Contribution", () => {
     let effects = 0;
     const receipts = new Map<string, ComputerCommandReceiptV1>();
     const contribution = createComputerBackendContribution({
+      readComputerFrame: () => Promise.resolve(undefined),
       readComputer: () => Promise.resolve(projection),
       executeComputerCommand: (_userId, _botId, decoded) => {
         const replay = receipts.get(decoded.commandId);

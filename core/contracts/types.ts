@@ -359,8 +359,9 @@ export interface ComputerTimingV1 {
    */
   operation?: number;
   /**
-   * The screenshot the call filed: the progress capture after an action,
-   * `computer_screenshot`'s own capture, or the Turn-end capture.
+   * The screenshot the call took: `computer_screenshot`'s own capture, or at
+   * Turn end the card's frame, with the durable captures' retention when the
+   * Turn filed one.
    */
   capture?: ComputerCaptureTimingV1;
   total: number;

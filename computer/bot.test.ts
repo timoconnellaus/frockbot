@@ -6,7 +6,6 @@ import type {
   ComputerHostSessionV1,
 } from "@frockbot/computer/core/host";
 import {
-  computerBotPathKeyV1,
   COMPUTER_UNCONFIGURED_MESSAGE_V1,
   ComputerError,
 } from "@frockbot/computer/core";
@@ -28,6 +27,7 @@ import {
   type ComputerCommandV1,
 } from "./protocol.js";
 import { FakeWorkspace } from "@frockbot/computer/fake";
+import { computerFrameFromCaptureV1, computerFrameSinkV1 } from "./frame.js";
 
 /** A host that offers nothing beyond the operations under test. */
 const TEST_HOST_CAPABILITIES: ComputerHostCapabilitiesV1 = {
@@ -859,7 +859,7 @@ describe("Computer Bot Durable Object Contribution", () => {
     expect(acquired).toEqual(["human:owner-1", "human:owner-2"]);
   });
 
-  test("captures the current desktop when a live viewer closes, attributed to the User", async () => {
+  test("keeps the current desktop as the card's frame when a live viewer closes", async () => {
     const storage = new MemoryStorage();
     const workspace = new FakeWorkspace();
     let opens = 0;
@@ -911,16 +911,21 @@ describe("Computer Bot Durable Object Contribution", () => {
     expect(receipt.status).toBe("applied");
     expect(replay).toEqual(receipt);
     expect(opens).toBe(3);
-    expect(workspace.writes).toHaveLength(1);
-    expect(workspace.writes[0]?.writer).toEqual({
-      kind: "user",
-      userId: "user-1",
+    // The frame is Bot state, not a Workspace file.
+    expect(workspace.writes).toHaveLength(0);
+    const [frame] = (await contribution.read("user-1", "scout")).screenshots;
+    expect(frame).toEqual({
+      version: 1,
+      capturedAt: "2026-09-03T00:00:10.000Z",
+      contentHash: expect.stringMatching(/^[0-9a-f]{64}$/),
+      url: `/api/bots/scout/computer/frame/${frame?.contentHash}`,
     });
-    expect((await contribution.read("user-1", "scout")).screenshots).toEqual([
-      expect.objectContaining({
-        path: expect.stringContaining("close-viewer"),
-      }),
-    ]);
+    expect(await contribution.readFrame(frame!.contentHash)).toEqual({
+      bytes: png(),
+      mediaType: "image/png",
+    });
+    // A frame the card no longer names is gone, not served.
+    expect(await contribution.readFrame("0".repeat(64))).toBeUndefined();
   });
 
   test("does not capture a viewer close while the User's control lease is active", async () => {
@@ -1041,7 +1046,9 @@ describe("Computer Bot Durable Object Contribution", () => {
     await contribution.read("user-1", "scout");
     await contribution.read("user-1", "scout");
 
-    expect(workspace.lists).toHaveLength(1);
+    // The frame is read from the Bot's own storage; the Workspace is never
+    // listed. Only the doctor report is a file, and it is cached.
+    expect(workspace.lists).toHaveLength(0);
     expect(workspace.reads).toHaveLength(1);
   });
 
@@ -1103,7 +1110,7 @@ describe("Computer Bot Durable Object Contribution", () => {
 
     await contribution.read("user-1", "scout");
 
-    expect(workspace.lists).toHaveLength(2);
+    expect(workspace.lists).toHaveLength(0);
     expect(workspace.reads).toHaveLength(2);
   });
 
@@ -1124,26 +1131,48 @@ describe("Computer Bot Durable Object Contribution", () => {
     await contribution.read("user-2", "scout");
     await contribution.read("user-1", "scout");
 
-    expect(workspace.lists).toHaveLength(3);
+    expect(workspace.lists).toHaveLength(0);
     expect(workspace.reads).toHaveLength(3);
   });
 
-  test("a cold instance projects the same files as a warm instance", async () => {
+  test("a frame a subagent's Turn hands the Bot becomes the card's", async () => {
+    const storage = new MemoryStorage();
+    const contribution = createComputerBotBackendContribution({
+      storage,
+      workspace: new FakeWorkspace(),
+      configured: true,
+      providerLabel: "Fake Computer",
+      openComputer: () => Promise.reject(new Error("must stay wake-free")),
+      now: () => new Date("2026-09-03T00:00:00.000Z"),
+    });
+    const frame = await computerFrameFromCaptureV1({
+      bytes: png(),
+      mediaType: "image/png",
+      display: ":100",
+      capturedAt: "2026-09-03T00:00:05.000Z",
+    });
+
+    await contribution.putFrame(frame!);
+
+    expect((await contribution.read("user-1", "scout")).screenshots).toEqual([
+      expect.objectContaining({ contentHash: frame!.contentHash }),
+    ]);
+    expect(await contribution.readFrame(frame!.contentHash)).toEqual({
+      bytes: png(),
+      mediaType: "image/png",
+    });
+  });
+
+  test("a cold instance projects the same frame as a warm instance", async () => {
     const storage = new MemoryStorage();
     const workspace = new FakeWorkspace();
-    await workspace.write({
-      path: {
-        root: {
-          kind: "package-declared",
-          userId: "user-1",
-          packageId: "computer",
-          rootId: "screenshots",
-        },
-        path: `${computerBotPathKeyV1("scout")}/capture.png`,
-      },
+    const frame = await computerFrameFromCaptureV1({
       bytes: png(),
-      writer: { kind: "user", userId: "user-1" },
+      mediaType: "image/png",
+      display: ":100",
+      capturedAt: "2026-09-03T00:00:00.000Z",
     });
+    await computerFrameSinkV1(storage).put(frame!);
     const host = {
       storage,
       workspace,
@@ -1158,7 +1187,15 @@ describe("Computer Bot Durable Object Contribution", () => {
 
     const cold = createComputerBotBackendContribution(host);
     expect(await cold.read("user-1", "scout")).toEqual(expected);
-    expect(workspace.lists).toHaveLength(2);
+    expect(expected.screenshots).toEqual([
+      {
+        version: 1,
+        capturedAt: "2026-09-03T00:00:00.000Z",
+        contentHash: frame!.contentHash,
+        url: `/api/bots/scout/computer/frame/${frame!.contentHash}`,
+      },
+    ]);
+    expect(workspace.lists).toHaveLength(0);
   });
 
   test("projects reconstructed durable state without opening the Computer", async () => {

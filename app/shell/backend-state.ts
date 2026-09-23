@@ -148,7 +148,7 @@ export interface ShellBotBackendHost extends ShellApplicationV1 {
   invalidateComputerProjectionFile?(
     userId: string,
     botId: string,
-    kind: "screenshots" | "doctor",
+    kind: "frame" | "doctor",
   ): void;
   /**
    * This deployment's Computer host. The Durable Object's own shell chooses

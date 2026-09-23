@@ -40,9 +40,9 @@ export interface ComputerControlLeaseViewV1 {
   expiresAt: string;
 }
 
+/** The Bot's one frame of its desktop; the card shows the newest entry. */
 export interface ComputerScreenshotViewV1 {
   version: 1;
-  path: string;
   capturedAt: string;
   contentHash: string;
   url: string;
@@ -448,7 +448,7 @@ function decodeScreenshotV1(value: unknown): ComputerScreenshotViewV1 {
   const candidate = record(value, "Computer screenshot");
   exactKeys(
     candidate,
-    ["version", "path", "capturedAt", "contentHash", "url"],
+    ["version", "capturedAt", "contentHash", "url"],
     [],
     "Computer screenshot",
   );
@@ -459,7 +459,6 @@ function decodeScreenshotV1(value: unknown): ComputerScreenshotViewV1 {
   }
   return {
     version: 1,
-    path: text(candidate.path, "Computer screenshot path"),
     capturedAt: timestamp(
       candidate.capturedAt,
       "Computer screenshot capturedAt",

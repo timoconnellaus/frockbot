@@ -93,6 +93,10 @@ import { createBotImageHost } from "./backend-image.js";
 import { createBotMemoryHost } from "./backend-memory.js";
 import { executionPackagesV1, type ShellBotStateV1 } from "./backend-state.js";
 import { decodeClientTurnV1 } from "./run-protocol.js";
+import {
+  computerFrameSinkV1,
+  type StoredComputerFrameV1,
+} from "@frockbot/computer/frame";
 import { turnToolCatalogPin } from "./tool-catalog-pin.js";
 
 /**
@@ -157,6 +161,24 @@ async function pluginModelHostV1(
       served.maxOutputTokens,
       input.modelMaxOutputTokens,
     ),
+  });
+}
+
+/** Hands a subagent Turn's frame to the Bot object the card reads. */
+async function putBotComputerFrameV1(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+  frame: StoredComputerFrameV1,
+): Promise<void> {
+  if (!state.env.BOT_STATES) return;
+  const rpc = state.env.BOT_STATES.get(
+    state.env.BOT_STATES.idFromName(`${identity.userId}:${identity.botId}`),
+  );
+  await rpc.putComputerFrame({
+    schemaVersion: 1,
+    userId: identity.userId,
+    botId: identity.botId,
+    frame,
   });
 }
 
@@ -630,13 +652,18 @@ export async function agentRuntime(
             // Prompt assembly reads the Bot DO's Step 1 lease record
             // directly; passing storage wakes no Computer.
             computerControlRecords: state.ctx.storage,
+            // The card's newest frame is Bot state, not a Workspace file. A
+            // subagent's Turn runs in its task's own object, and the card
+            // reads the Bot's, so its frame goes there.
+            computerFrames: turn.subagentRole
+              ? {
+                  put: (frame) => putBotComputerFrameV1(state, identity, frame),
+                }
+              : computerFrameSinkV1(state.ctx.storage),
             ...(state.invalidateComputerProjectionFile
               ? {
                   computerProjectionFiles: {
-                    invalidate: (
-                      botId: string,
-                      kind: "screenshots" | "doctor",
-                    ) =>
+                    invalidate: (botId: string, kind: "frame" | "doctor") =>
                       state.invalidateComputerProjectionFile?.(
                         identity.userId,
                         botId,

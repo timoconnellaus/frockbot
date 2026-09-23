@@ -168,6 +168,8 @@ export interface BotUserConfigurationRpcTargetV1
 }
 
 export interface BotStateRpcTargetV1 extends SubagentDurableObjectRpcTargetV1 {
+  /** Keeps the frame a subagent's Turn left on the desktop as the card's. */
+  putComputerFrame(input: BotRpcEnvelopeV1<{ frame: object }>): Promise<void>;
   runAgent(input: {
     schemaVersion: 1;
     userId: string;

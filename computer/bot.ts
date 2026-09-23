@@ -20,15 +20,17 @@ import type {
   WorkspaceFilesV1,
   WorkspaceRootV1,
 } from "@frockbot/core/contracts";
+import { COMPUTER_DOCTOR_ROOT_ID } from "./roots.js";
 import {
-  COMPUTER_DOCTOR_ROOT_ID,
-  COMPUTER_SCREENSHOTS_ROOT_ID,
-  COMPUTER_SCREENSHOT_RETENTION,
-} from "./roots.js";
-import {
-  fileComputerScreenshotV1,
+  captureComputerFrameV1,
   type ComputerProjectionFileKindV1,
 } from "./capture.js";
+import {
+  COMPUTER_FRAME_RECORD_KEY,
+  computerFrameSinkV1,
+  decodeStoredComputerFrameV1,
+  type StoredComputerFrameV1,
+} from "./frame.js";
 import {
   ComputerProtocolDecodeError,
   computerCommandFingerprintV1,
@@ -439,13 +441,22 @@ function isFresh(expiresAt: string, now: Date): boolean {
   return Date.parse(expiresAt) > now.getTime();
 }
 
+/** The card's view of the Bot's frame: immutable, addressed by its hash. */
+function computerFrameViewV1(
+  botId: string,
+  frame: StoredComputerFrameV1,
+): ComputerScreenshotViewV1 {
+  return {
+    version: 1,
+    capturedAt: frame.capturedAt,
+    contentHash: frame.contentHash,
+    url: `/api/bots/${encodeURIComponent(botId)}/computer/frame/${frame.contentHash}`,
+  };
+}
+
 export class ComputerBotBackendContribution {
   #liveViewer?: LiveViewer;
   #scheduledConnect?: Promise<void>;
-  readonly #screenshotsCache = new Map<
-    string,
-    ProjectionFileCacheEntry<ComputerScreenshotViewV1[]>
-  >();
   readonly #doctorCache = new Map<
     string,
     ProjectionFileCacheEntry<ComputerDoctorViewV1 | undefined>
@@ -494,9 +505,11 @@ export class ComputerBotBackendContribution {
     botId: string,
     kind: ComputerProjectionFileKindV1,
   ): void {
-    const key = this.projectionKey(userId, botId);
-    if (kind === "screenshots") this.#screenshotsCache.delete(key);
-    else this.#doctorCache.delete(key);
+    // The frame is read from this object's own storage on every projection,
+    // so there is nothing resident to drop for it.
+    if (kind === "doctor") {
+      this.#doctorCache.delete(this.projectionKey(userId, botId));
+    }
   }
 
   private async admit(
@@ -1205,10 +1218,10 @@ export class ComputerBotBackendContribution {
   }
 
   /**
-   * Files the frame the User just stopped watching without making close
-   * depend on a best-effort capture. A resident, fresh viewer is the proof
-   * that this command is attaching to an already-watched desktop rather than
-   * waking a hibernated Computer.
+   * Keeps the frame the User just stopped watching as the card's, without
+   * making close depend on a best-effort capture. A resident, fresh viewer is
+   * the proof that this command is attaching to an already-watched desktop
+   * rather than waking a hibernated Computer.
    */
   private async closeViewer(
     userId: string,
@@ -1217,7 +1230,7 @@ export class ComputerBotBackendContribution {
     const viewerValue = await this.host.storage.get<unknown>(
       COMPUTER_VIEWER_RECORD_KEY,
     );
-    if (viewerValue === undefined || !this.host.workspace) return;
+    if (viewerValue === undefined) return;
     const viewer = decodeStoredViewer(viewerValue);
     if (
       this.#liveViewer?.id !== viewer.id ||
@@ -1233,19 +1246,13 @@ export class ComputerBotBackendContribution {
       if (isStoredComputerControlFreshV1(control, this.now())) return;
     }
     try {
-      await this.withComputer(userId, command, async (computer) => {
-        const root = this.root(userId, COMPUTER_SCREENSHOTS_ROOT_ID);
-        const botKey = computerBotPathKeyV1(command.botId);
-        await fileComputerScreenshotV1({
+      await this.withComputer(userId, command, (computer) =>
+        captureComputerFrameV1({
           computer,
-          workspace: this.host.workspace!,
-          path: { root, path: `${botKey}/user-${command.commandId}.png` },
-          writer: { kind: "user", userId },
-          botKey,
-          effectId: `computer:${command.commandId}:close-viewer-screenshot`,
-        });
-      });
-      this.invalidateProjectionFile(userId, command.botId, "screenshots");
+          frames: computerFrameSinkV1(this.host.storage),
+          effectId: `computer:${command.commandId}:close-viewer-frame`,
+        }),
+      );
     } catch {
       // Closing the viewer is never held open by an opportunistic capture.
       // In particular, the provider's human-control refusal stays a refusal.
@@ -1301,48 +1308,6 @@ export class ComputerBotBackendContribution {
     };
   }
 
-  private async screenshots(
-    userId: string,
-    botId: string,
-  ): Promise<ComputerScreenshotViewV1[]> {
-    return this.cachedProjectionFile(
-      this.#screenshotsCache,
-      userId,
-      botId,
-      () => this.loadScreenshots(userId, botId),
-    );
-  }
-
-  private async loadScreenshots(
-    userId: string,
-    botId: string,
-  ): Promise<ComputerScreenshotViewV1[]> {
-    if (!this.host.workspace) return [];
-    const root = this.root(userId, COMPUTER_SCREENSHOTS_ROOT_ID);
-    const listed = await this.host.workspace.list({
-      root,
-      prefix: computerBotPathKeyV1(botId),
-      limit: COMPUTER_SCREENSHOT_RETENTION,
-    });
-    if (listed.status !== "ok") return [];
-    return listed.entries
-      .toSorted((left, right) =>
-        right.generation.writtenAt.localeCompare(left.generation.writtenAt),
-      )
-      .map((entry) => {
-        const path = entry.path.path;
-        return {
-          version: 1,
-          path,
-          capturedAt: entry.generation.writtenAt,
-          contentHash: entry.generation.contentHash,
-          url: `/api/bots/${encodeURIComponent(botId)}/workspace/file?path=${encodeURIComponent(
-            JSON.stringify({ root, path }),
-          )}`,
-        };
-      });
-  }
-
   private async doctor(
     userId: string,
     botId: string,
@@ -1379,14 +1344,35 @@ export class ComputerBotBackendContribution {
     }
   }
 
+  /** Keeps `frame` as the card's: what a subagent's Turn left on screen. */
+  async putFrame(frame: StoredComputerFrameV1): Promise<void> {
+    await computerFrameSinkV1(this.host.storage).put(frame);
+  }
+
+  /**
+   * The frame the card asked for, by the hash its projection named. A frame
+   * that has since been replaced is gone: the card reads the projection again
+   * and asks for the new one.
+   */
+  async readFrame(
+    contentHash: string,
+  ): Promise<{ bytes: Uint8Array; mediaType: "image/png" } | undefined> {
+    const frame = decoded(
+      await this.host.storage.get<unknown>(COMPUTER_FRAME_RECORD_KEY),
+      decodeStoredComputerFrameV1,
+    );
+    if (!frame || frame.contentHash !== contentHash) return undefined;
+    return { bytes: frame.bytes, mediaType: frame.mediaType };
+  }
+
   async read(userId: string, botId: string): Promise<ComputerProjectionV1> {
     const now = this.now();
-    const [viewerValue, controlValue, providerValue, screenshots, doctor] =
+    const [viewerValue, controlValue, providerValue, frameValue, doctor] =
       await Promise.all([
         this.host.storage.get<unknown>(COMPUTER_VIEWER_RECORD_KEY),
         this.host.storage.get<unknown>(COMPUTER_CONTROL_RECORD_KEY),
         this.host.storage.get<unknown>(COMPUTER_PROVIDER_RECORD_KEY),
-        this.screenshots(userId, botId),
+        this.host.storage.get<unknown>(COMPUTER_FRAME_RECORD_KEY),
         this.doctor(userId, botId),
       ]);
     // A record the codec refuses is treated as absent, the way `doctor()`
@@ -1398,6 +1384,7 @@ export class ComputerBotBackendContribution {
     const viewer = decoded(viewerValue, decodeStoredViewer);
     const control = decoded(controlValue, decodeStoredComputerControlV1);
     const provider = decoded(providerValue, decodeStoredProvider);
+    const frame = decoded(frameValue, decodeStoredComputerFrameV1);
     const liveViewer =
       viewer &&
       this.#liveViewer?.id === viewer.id &&
@@ -1466,7 +1453,7 @@ export class ComputerBotBackendContribution {
             },
           }
         : {}),
-      screenshots,
+      screenshots: frame ? [computerFrameViewV1(botId, frame)] : [],
       ...(doctor ? { doctor } : {}),
     };
   }

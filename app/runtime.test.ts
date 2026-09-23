@@ -239,6 +239,7 @@ describe("foundation application", () => {
       updateLook: () => Promise.reject(new Error("not used while composing")),
       listBotIdentities: () =>
         Promise.resolve({ schemaVersion: 1 as const, identities: [] }),
+      readComputerFrame: () => Promise.resolve(undefined),
       readComputer: () =>
         Promise.resolve({
           version: 1 as const,
