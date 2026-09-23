@@ -1547,23 +1547,34 @@ export async function execute() {
     const inbound = await routine("storms", "inbound");
     const fired = await deliver(inbound, '{"city":"Wollongong"}', "evt-1");
     expect(fired).toMatchObject({ status: "accepted" });
-    // The queued firing carries what the Plugin said, never the raw body.
-    const deliveries = await runInDurableObject(
-      env.BOT_STATES.getByName(`${userId}:bot-1`),
-      async (_instance, state) =>
-        [
-          ...(
-            await state.storage.list<{ delivery?: string }>({
-              prefix: "routine-queue:",
-            })
-          ).values(),
-        ].map((queued) => queued.delivery ?? ""),
-    );
-    expect(deliveries).toHaveLength(1);
-    expect(deliveries[0]).toContain(
+    // The firing carries what the Plugin said, never the raw body. It is read
+    // from the run it admits: the Bot may take a firing off its queue the
+    // moment it is accepted, so a read of the queue raced the Bot for it.
+    const cues = async () =>
+      [
+        ...(
+          await runInDurableObject(
+            env.BOT_STATES.getByName(`${userId}:bot-1`),
+            (_instance, state) =>
+              state.storage.list<{
+                input: string;
+                admission?: { origin?: { routineId?: string } };
+              }>({ prefix: "run:" }),
+          )
+        ).values(),
+      ]
+        .filter((run) => run.admission?.origin?.routineId === "storms")
+        .map((run) => run.input);
+    await runDurableObjectAlarm(env.BOT_STATES.getByName(`${userId}:bot-1`));
+    await vi.waitFor(async () => expect(await cues()).toHaveLength(1), {
+      timeout: 5_000,
+      interval: 25,
+    });
+    const [cue] = await cues();
+    expect(cue).toContain(
       "Storm warning for Wollongong (signed sig-1) for bot-1",
     );
-    expect(deliveries[0]).not.toContain('{"city":"Wollongong"}');
+    expect(cue).not.toContain('{"city":"Wollongong"}');
     // A replay answers with the firing, and asks the Plugin nothing twice.
     expect(await deliver(inbound, '{"city":"Wollongong"}', "evt-1")).toEqual({
       status: "duplicate",
