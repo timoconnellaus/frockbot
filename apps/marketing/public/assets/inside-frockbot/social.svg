@@ -2,13 +2,13 @@
   <title id="title">Inside FrockBot</title>
   <desc id="description">A FrockBot character beside a cloud Bot connected to plugins, a phone and a desktop.</desc>
   <rect width="1200" height="630" fill="#1e1d27"/>
-  <circle cx="1050" cy="70" r="210" fill="#db4b6d" opacity=".2"/>
+  <circle cx="1050" cy="70" r="210" fill="#d3266d" opacity=".2"/>
   <circle cx="120" cy="600" r="260" fill="#fce2ea" opacity=".08"/>
-  <text x="80" y="98" fill="#db4b6d" font-family="Arial, sans-serif" font-size="24" font-weight="700" letter-spacing="4">INSIDE FROCKBOT</text>
+  <text x="80" y="98" fill="#d3266d" font-family="Arial, sans-serif" font-size="24" font-weight="700" letter-spacing="4">INSIDE FROCKBOT</text>
   <text x="80" y="170" fill="#fff" font-family="Arial, sans-serif" font-size="54" font-weight="800">Dress your Bot</text>
   <text x="80" y="232" fill="#fff" font-family="Arial, sans-serif" font-size="54" font-weight="800">however you want.</text>
   <text x="80" y="286" fill="#d8cfd9" font-family="Arial, sans-serif" font-size="23">Persistent cloud Bots · Native apps · Plugins</text>
-  <g stroke="#db4b6d" stroke-width="5" fill="none" stroke-linecap="round">
+  <g stroke="#d3266d" stroke-width="5" fill="none" stroke-linecap="round">
     <path d="M620 320H760"/>
     <path d="M870 385V465"/>
     <path d="M870 465H720"/>

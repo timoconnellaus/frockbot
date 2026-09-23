@@ -69,22 +69,22 @@
 @layer base {
   :root {
     --ink: #1e1d27;
-    --pink: #db4b6d;
-    --pink-dark: #c93a5f;
+    --pink: #d3266d;
+    --pink-dark: #b9205e;
     --blush: #fce2ea;
     --cream: #faf7f2;
     --paper: #fff;
     --muted: #6d6974;
     --line: #e7e0d9;
-    --product-window: #121214;
-    --product-thread: #121214;
-    --product-sidebar: #0c0c0e;
-    --product-raised: #1e1e22;
-    --product-text: #f6f2ee;
-    --product-muted: #a8a3a6;
-    --product-subtle: #8d8896;
-    --product-border: #2c2c32;
-    --product-border-strong: #6c6874;
+    --product-window: #18161a;
+    --product-thread: #18161a;
+    --product-sidebar: #111013;
+    --product-raised: #242127;
+    --product-text: #f9f3e7;
+    --product-muted: #aba49c;
+    --product-subtle: #8f887f;
+    --product-border: #35313a;
+    --product-border-strong: #6f6962;
     --container: 1280px;
   }
 
