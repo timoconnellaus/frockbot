@@ -46,7 +46,6 @@ import {
   memoryFileKindV1,
   memoryFilePathV1,
   memoryLogPathV1,
-  memoryProjectIdOfRootV1,
   memoryScopeOfRootV1,
   memoryShardOfV1,
   MEMORY_MAX_LOG_PARTS_V1,
@@ -256,7 +255,6 @@ export class MemoryStore {
       logTotal: 0,
     };
     const scope = memoryScopeOfRootV1(root);
-    const projectId = memoryProjectIdOfRootV1(root);
     const inFlight = options.inFlight ?? createConcurrencyLimiterV1();
     const entries: WorkspaceEntryV1[] = [];
     let cursor: string | undefined;
@@ -365,7 +363,6 @@ export class MemoryStore {
       const text = decoder.decode(read.file.bytes);
       result.documents.push({
         scope,
-        projectId,
         path: entry.path.path,
         botId: classified.shard,
         kind: classified.kind,
@@ -623,41 +620,6 @@ export class MemoryStore {
       };
     }
     return { ...last, retracted: true, written };
-  }
-
-  /**
-   * Writes one arbitrary Memory file this Bot owns — the Project descriptor,
-   * and nothing else today. It goes through the same shard guard and the same
-   * conditional write as a fact, because the constitution's rule is about the
-   * root, not about what the bytes mean.
-   */
-  async writeFile(request: {
-    path: WorkspacePathV1;
-    text: string;
-    writer: WorkspaceWriterV1;
-  }): Promise<MemoryWriteOutcomeV1> {
-    const bytes = encoder.encode(request.text);
-    if (bytes.byteLength > MEMORY_MAX_FILE_BYTES) {
-      return { status: "refused", reason: "the Memory file is too large" };
-    }
-    const secret = refuseMemorySecretV1(request.text);
-    if (secret) return { status: "refused", reason: secret.reason };
-    if (!writerOwnsMemoryPathV1(request.path, request.writer)) {
-      return {
-        status: "refused",
-        reason: `this writer may not write "${request.path.path}" in this Memory root`,
-      };
-    }
-    const existing = await this.#files.stat(request.path);
-    if (existing.status !== "ok" && existing.status !== "not-found") {
-      return { status: existing.status, reason: existing.reason };
-    }
-    return this.commit(
-      request.path,
-      bytes,
-      request.writer,
-      existing.status === "ok" ? existing.entry.generation : undefined,
-    );
   }
 
   private refuseForeignShard(

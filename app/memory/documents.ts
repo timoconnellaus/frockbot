@@ -17,17 +17,12 @@ import type {
   WorkspacePathV1,
   WorkspaceReadsV1,
 } from "@frockbot/core/contracts";
-import {
-  memoryFileKindV1,
-  memoryProjectIdOfRootV1,
-  memoryScopeOfRootV1,
-} from "./roots.js";
+import { memoryFileKindV1, memoryScopeOfRootV1 } from "./roots.js";
 import { MEMORY_MAX_LIST_PAGES, selectNewestMemoryFilesV1 } from "./store.js";
 
 /** One Memory file, addressed by its content and its generation. */
 export interface MemoryDocumentV1 {
   scope: MemoryScopeNameV1;
-  projectId: string;
   /** Relative to its root, shard prefix included. */
   path: string;
   /** The Bot whose shard holds it. */
@@ -41,10 +36,9 @@ export interface MemoryDocumentV1 {
 /** A stable key for one document across every tier. */
 export function memoryDocumentKeyV1(document: {
   scope: MemoryScopeNameV1;
-  projectId: string;
   path: string;
 }): string {
-  return `${document.scope}:${document.projectId}:${document.path}`;
+  return `${document.scope}:${document.path}`;
 }
 
 /**
@@ -77,7 +71,6 @@ export async function readMemoryDocumentsV1(
 ): Promise<MemoryDocumentListingV1> {
   const inFlight = options.inFlight ?? createConcurrencyLimiterV1();
   const scope = memoryScopeOfRootV1(root);
-  const projectId = memoryProjectIdOfRootV1(root);
   const candidates: Array<{
     path: WorkspacePathV1;
     kind: "profile" | "log";
@@ -127,7 +120,6 @@ export async function readMemoryDocumentsV1(
     }
     documents.push({
       scope,
-      projectId,
       path: candidate.path.path,
       botId: candidate.shard,
       kind: candidate.kind,

@@ -2,7 +2,7 @@
 
 Read the [common rules](README.md). M1–M3 implement the agreed Hindsight-inspired engine on FrockBot's architecture. They do not port Hindsight's entire server or change conversation compaction. [The comparison](../research/hermes-memory-alternatives.md) explains the reference design; this packet defines our implementation direction. Numerical defaults below are initial engineering limits, not measured latency promises.
 
-**Entry points:** [Memory tools and injection](../../app/memory/agent.ts), [store](../../app/memory/store.ts), [facts](../../app/memory/facts.ts), [indexer](../../app/memory/indexer.ts), [searcher](../../app/memory/searcher.ts), [secret refusal](../../app/memory/secrets.ts), [membership seam](../../app/memory/projects.ts), [backend adapter](../../app/shell/backend-memory.ts), [voice memory](../../app/voice/memory.ts), [voice tools](../../app/voice/assistant.ts), [Gemini protocol](../../app/voice/gemini-live.ts), [User FTS pattern](../../app/search/index-store.ts), and the three Cloudflare DO adapters named in the other packets.
+**Entry points:** [Memory tools and injection](../../app/memory/agent.ts), [store](../../app/memory/store.ts), [facts](../../app/memory/facts.ts), [indexer](../../app/memory/indexer.ts), [searcher](../../app/memory/searcher.ts), [secret refusal](../../app/memory/secrets.ts), [membership seam](../../app/memory/groups.ts), [backend adapter](../../app/shell/backend-memory.ts), [voice memory](../../app/voice/memory.ts), [voice tools](../../app/voice/assistant.ts), [Gemini protocol](../../app/voice/gemini-live.ts), [User FTS pattern](../../app/search/index-store.ts), and the three Cloudflare DO adapters named in the other packets.
 
 ## M1: Records and explicit operations
 
@@ -10,7 +10,7 @@ Read the [common rules](README.md). M1–M3 implement the agreed Hindsight-inspi
 
 Use the **existing Bot DO for Bot scope and existing User DO for User and shared Group Chat scopes**. Add no Memory DO. Chat reads Bot-local state and makes one bounded User RPC covering User and authorized shared scopes. Voice uses the same owner APIs for its selected Bot; its call ledger is continuity/evidence, not another long-term fact store.
 
-Implement shared scope now using the existing User-owned Project membership authority. Map its opaque ID to the engine's typed `groupChat` scope in one adapter. Keep the currently exposed Project membership API until the separately assigned product rename; do not create competing membership records or begin Group Chat UI/participation work. Every read/write checks the authenticated User, selected Bot and current membership on the server. Never trust caller-supplied scope IDs alone.
+Shared scope is a Group Chat's: the engine's typed `groupChat` scope, keyed by the group's id and authorized by Group Chat membership, which the User object keeps with the User's list of groups. Every read/write checks the authenticated User, selected Bot and current membership on the server. Never trust caller-supplied scope IDs alone.
 
 Keep ordinary app modules for canonical operations, retrieval and projections, with a Cloudflare storage/provider adapter. Freeze these logical operations before splitting assignments:
 

@@ -3,16 +3,16 @@
 // Four responsibilities, and no authority of its own:
 //
 //  1. Render the Memory block into the system prompt once per admitted Turn,
-//     in GrokBot's shape and order (user → project → own).
+//     in GrokBot's shape and order (user → own), with the canonical core —
+//     a Group Chat's shared Memory among it, in that group's Turns — ahead.
 //  2. Record what it injected. "the session event log records exactly what was
 //     injected, so an injection gap is visible in durable state rather than
 //     silently changing the Bot's behavior" — `memory/injected` names every
 //     Memory file generation the render read, every fact that reached the
 //     prompt, and every tier a cap or a failure cut short.
 //  3. Offer the mutation surface GrokBot exposes as `update_state target
-//     memory`: `memory_write`, `memory_forget`, and the Project membership
-//     trio `project_create` / `project_join` / `project_leave`. Each records
-//     intent with an effect identifier *before* the effect runs.
+//     memory`: `memory_write` and `memory_forget`. Each records intent with an
+//     effect identifier *before* the effect runs.
 //  4. Keep the derived index in step with the files, and offer
 //     `memory_rebuild_index` so the derived half can always be thrown away.
 //
@@ -46,31 +46,17 @@ import {
   type MemoryIndexV1,
 } from "./indexer.js";
 import type { MemoryChunkIndexWriterV1 } from "./chunk-index.js";
-import {
-  parseProjectDocumentV1,
-  projectDocumentPathV1,
-  renderProjectDocumentV1,
-  type MemoryProjectsOutcomeV1,
-  type MemoryProjectsV1,
-} from "./projects.js";
-export type {
-  MemoryProjectsV1,
-  MemoryProjectsOutcomeV1,
-  MemoryProjectV1,
-} from "./projects.js";
+import type { MemoryGroupsV1 } from "./groups.js";
+import { isGroupIdV1 } from "@frockbot/app/groups/shared";
 import { renderMemoryMarkerV1 } from "./facts.js";
 import {
   MEMORY_NOTE_TTL_DAYS,
   renderMemoryInjectionV1,
   type MemoryInjectionV1,
-  type MemoryProjectTierV1,
-  type MemoryProjectV1,
 } from "./render.js";
 import {
   botMemoryRootV1,
-  isMemoryProjectIdV1,
   memoryScopeRootV1,
-  projectMemoryRootV1,
   userMemoryRootV1,
   type MemoryOwnerV1,
   type MemoryTierV1,
@@ -91,7 +77,11 @@ import { authorityOf } from "./engine-tools.js";
 import { explicitDatesInQueryV1 } from "./hybrid.js";
 import { isControlOnlyMemoryInputV1 } from "./policy.js";
 import { memoryDayV1 } from "./facts.js";
-import { productScopeToEngineV1, type MemoryScopeRefV1 } from "./records.js";
+import {
+  productScopeToEngineV1,
+  type MemoryAuthorityV1,
+  type MemoryScopeRefV1,
+} from "./records.js";
 import type {
   EmbedMemory,
   MemoryAiBinding,
@@ -123,7 +113,13 @@ export interface MemoryRuntimeHostV1 {
   owner: MemoryOwnerV1;
   store: MemoryStore;
   writer?: MemoryWriterIdentityV1;
-  projects?: MemoryProjectsV1;
+  /** The Group Chats this Bot is a member of: the group scopes it may use. */
+  groups?: MemoryGroupsV1;
+  /**
+   * The Group Chat this Turn speaks in, when it is a group's. Its shared
+   * Memory joins the Bot's own and its User's in the prompt and in recall.
+   */
+  group?: string;
   /** Optional derived-index bindings; Memory is complete without them. */
   vectorize?: MemoryVectorIndex;
   /** Durable ledger for vectors derived from this Bot's own Memory root. */
@@ -206,16 +202,6 @@ export class MemoryProjection {
    * render saw.
    */
   #rendered: MemoryDocumentListingV1 | undefined;
-  /** This Turn's one Project-membership read, shared by injection and index. */
-  #roots:
-    | Promise<{
-        own: WorkspaceMemoryRootV1;
-        user: WorkspaceMemoryRootV1;
-        projects: MemoryProjectV1[];
-        unavailable?: string;
-      }>
-    | undefined;
-
   constructor(host: MemoryRuntimeHostV1) {
     this.#host = host;
   }
@@ -232,55 +218,6 @@ export class MemoryProjection {
     return this.#turn;
   }
 
-  /**
-   * Every Memory root this Bot can see this Turn, in tier order.
-   *
-   * A Project authority that cannot be reached yields no Projects and says so
-   * — `unavailable` is an ordinary answer across a Durable Object seam, and a
-   * Turn must not fail because membership was briefly unreadable. The gap is
-   * carried into `memory/injected` as an omission rather than passing for "no
-   * Projects joined".
-   */
-  async roots(): Promise<{
-    own: WorkspaceMemoryRootV1;
-    user: WorkspaceMemoryRootV1;
-    projects: MemoryProjectV1[];
-    unavailable?: string;
-  }> {
-    // One membership read per Turn, shared by the injection and the index.
-    // Two calls meant two cross-Durable-Object round trips, and worse: if the
-    // second failed, `roots()` answered "no Projects" and the index silently
-    // omitted every Project document the injection had just included, with
-    // nothing recording that they disagreed.
-    this.#roots ??= this.readRoots();
-    return this.#roots;
-  }
-
-  private async readRoots(): Promise<{
-    own: WorkspaceMemoryRootV1;
-    user: WorkspaceMemoryRootV1;
-    projects: MemoryProjectV1[];
-    unavailable?: string;
-  }> {
-    const owner = this.#host.owner;
-    const roots = {
-      own: botMemoryRootV1(owner),
-      user: userMemoryRootV1(owner),
-    };
-    if (!this.#host.projects) return { ...roots, projects: [] };
-    try {
-      return { ...roots, projects: await this.#host.projects.joined() };
-    } catch (error) {
-      return {
-        ...roots,
-        projects: [],
-        unavailable: `Project membership could not be read: ${
-          error instanceof Error ? error.message : String(error)
-        }`,
-      };
-    }
-  }
-
   /** Reads every tier, renders the block, and records the injection. */
   async refresh(turn: number, session: Session): Promise<MemoryInjectionV1> {
     // Canonical Memory is what `memory_write` records now. The file tiers
@@ -289,32 +226,15 @@ export class MemoryProjection {
     // repeated from the core.
     const store = this.#host.store;
     const owner = this.#host.owner;
-    // A new Turn reads membership again; within one Turn the read is shared.
-    this.#roots = undefined;
     this.#rendered = undefined;
-    const { own, user, projects, unavailable } = await this.roots();
-    // The tiers are independent roots; reading them one after another turned
-    // N round trips to object storage into N × RTT on the turn-start critical
-    // path for no reason. The results are still assembled in tier order, and
-    // a Bot in many Projects still starts a bounded number of reads at once.
-    // One limiter covers the whole read: the tiers are not themselves reads,
-    // so the budget is spent where the round trips are — on each tier's files
-    // — and the ceiling stays what the helper says it is rather than squaring.
+    // The tiers are independent roots, so they are read side by side under
+    // one limiter: the budget is spent where the round trips are — on each
+    // tier's files — and the ceiling stays what the helper says it is.
     const inFlight = createConcurrencyLimiterV1();
-    const [ownTier, userTier, ...projectReads] = await Promise.all([
-      readLongTermMemoryV1(store, own, { inFlight }),
-      readLongTermMemoryV1(store, user, { inFlight }),
-      ...projects.map((project) =>
-        readLongTermMemoryV1(
-          store,
-          projectMemoryRootV1(owner, project.projectId),
-          { inFlight },
-        ),
-      ),
+    const [ownTier, userTier] = await Promise.all([
+      readLongTermMemoryV1(store, botMemoryRootV1(owner), { inFlight }),
+      readLongTermMemoryV1(store, userMemoryRootV1(owner), { inFlight }),
     ]);
-    const projectTiers: MemoryProjectTierV1[] = projects.map(
-      (project, index) => ({ project, tier: projectReads[index]! }),
-    );
     // The fade's cutoff is computed once, here, and recorded below. A render
     // that decided "today" for itself would not replay: "The durable session
     // event log reconstructs … every exact normalized model request, given the
@@ -324,16 +244,13 @@ export class MemoryProjection {
       new Date(now.getTime() - MEMORY_NOTE_TTL_DAYS * 24 * 60 * 60 * 1_000),
     );
     this.#injection = renderMemoryInjectionV1({
-      botId: owner.botId,
       own: ownTier,
       user: userTier,
-      projects: projectTiers,
-      joined: projects,
       noteCutoff,
     });
     const canonicalSources: Array<{
-      scope: "user" | "bot" | "project";
-      projectId: string;
+      scope: MemoryScopeNameV1;
+      groupId: string;
       path: string;
       generationId: string;
       contentHash: string;
@@ -347,7 +264,7 @@ export class MemoryProjection {
       );
       if (extra.length > 0) {
         const rank = (scope: string) =>
-          scope === "user" ? 0 : scope === "project" ? 1 : 2;
+          scope === "user" ? 0 : scope === "group" ? 1 : 2;
         extra.sort((left, right) => rank(left.scope) - rank(right.scope));
         // Ahead of the file block, in the same scope order that block uses,
         // so a fact recorded only in canonical Memory is where a reader of
@@ -366,37 +283,19 @@ export class MemoryProjection {
         };
       }
     }
-    if (unavailable) {
-      this.#injection.omissions.push({ scope: "project", reason: unavailable });
-    }
     this.#turn = turn;
 
     const sources = [
-      ...ownTier.sources.map((source) => ({
-        source,
-        scope: "bot" as const,
-        projectId: "",
-      })),
-      ...userTier.sources.map((source) => ({
-        source,
-        scope: "user" as const,
-        projectId: "",
-      })),
-      ...projectTiers.flatMap((entry) =>
-        entry.tier.sources.map((source) => ({
-          source,
-          scope: "project" as const,
-          projectId: entry.project.projectId,
-        })),
-      ),
+      ...ownTier.sources.map((source) => ({ source, scope: "bot" as const })),
+      ...userTier.sources.map((source) => ({ source, scope: "user" as const })),
     ];
     session.append({
       type: "memory/injected",
       turn,
       sources: [
-        ...sources.map(({ source, scope, projectId }) => ({
+        ...sources.map(({ source, scope }) => ({
           scope,
-          projectId,
+          groupId: "",
           path: source.path,
           generationId: source.generationId,
           contentHash: source.contentHash,
@@ -415,7 +314,7 @@ export class MemoryProjection {
     // that exact snapshot for `memory_search`, but do not spend embedding or
     // vector-store work on a Turn that never searches: `ensureIndex` builds the
     // index on first use.
-    const tiers = [ownTier, userTier, ...projectTiers.map((it) => it.tier)];
+    const tiers = [ownTier, userTier];
     this.#rendered = {
       documents: tiers.flatMap((tier) => tier.documents),
       complete: tiers.every((tier) => !tier.unavailable && !tier.omitted),
@@ -431,8 +330,8 @@ export class MemoryProjection {
   private async loadCanonical(): Promise<{
     facts: MemoryInjectionV1["facts"];
     sources: Array<{
-      scope: "user" | "bot" | "project";
-      projectId: string;
+      scope: MemoryScopeNameV1;
+      groupId: string;
       path: string;
       generationId: string;
       contentHash: string;
@@ -442,15 +341,8 @@ export class MemoryProjection {
     if (!records) return { facts: [], sources: [] };
     this.#recall = emptyMemoryTurnRecallV1();
     this.#recallStatus = "empty";
-    const authority = await authorityOf({
-      owner: this.#host.owner,
-      records,
-      ...(this.#host.projects ? { projects: this.#host.projects } : {}),
-    });
-    const scopes = memoryScopesForHostV1(
-      this.#host.owner,
-      authority.joinedGroupChatIds,
-    );
+    const authority = await turnAuthorityV1(this.#host);
+    const scopes = memoryScopesForHostV1(this.#host, authority);
     const core = await records.preparedCore({
       authority,
       scopes,
@@ -467,7 +359,7 @@ export class MemoryProjection {
       sources: core.blocks.flatMap((block) =>
         block.manifest.map((leaf) => ({
           scope: engineScopeName(block.scope.kind),
-          projectId:
+          groupId:
             block.scope.kind === "groupChat"
               ? (block.scope.groupChatId ?? "")
               : "",
@@ -482,19 +374,12 @@ export class MemoryProjection {
   async recallForTurn(query: string, signature: string): Promise<void> {
     const records = this.#host.records;
     if (!records) return;
-    const authority = await authorityOf({
-      owner: this.#host.owner,
-      records,
-      ...(this.#host.projects ? { projects: this.#host.projects } : {}),
-    });
+    const authority = await turnAuthorityV1(this.#host);
     const dates = explicitDatesInQueryV1(query);
     const recalled = await records.recall({
       authority,
       query,
-      scopes: memoryScopesForHostV1(
-        this.#host.owner,
-        authority.joinedGroupChatIds,
-      ),
+      scopes: memoryScopesForHostV1(this.#host, authority),
       effort: "automatic",
       ...(dates.occurredFrom ? { filters: dates } : {}),
     });
@@ -567,9 +452,9 @@ export class MemoryProjection {
         if (epoch === this.#indexEpoch) {
           this.#indexReady = !result.deferred;
         } else {
-          // A Project membership mutation invalidated this snapshot while its
-          // embeddings were still being built. It must never republish the
-          // pre-mutation index after invalidation won the race.
+          // An invalidation won the race while this snapshot's embeddings
+          // were still being built. It must never republish the
+          // pre-invalidation index.
           this.#index = emptyMemoryIndexV1();
           this.#indexReady = false;
         }
@@ -700,13 +585,9 @@ export class MemoryProjection {
     const rendered = this.#rendered;
     this.#rendered = undefined;
     if (rendered) return rendered;
-    const { own, user, projects } = await this.roots();
     return readAllMemoryDocumentsV1(this.#host.store.reads, [
-      own,
-      user,
-      ...projects.map((project) =>
-        projectMemoryRootV1(this.#host.owner, project.projectId),
-      ),
+      botMemoryRootV1(this.#host.owner),
+      userMemoryRootV1(this.#host.owner),
     ]);
   }
 
@@ -761,9 +642,6 @@ export class MemoryProjection {
     this.#indexReady = false;
     this.#turn = undefined;
     this.#rendered = undefined;
-    // Membership is exactly the thing a `project_*` tool just changed, so the
-    // memoized read goes with the rest of the projection.
-    this.#roots = undefined;
   }
 }
 
@@ -773,7 +651,7 @@ function memoryEmbedderV1(host: MemoryRuntimeHostV1): EmbedMemory | undefined {
   return undefined;
 }
 
-const SCOPE_ENUM = ["bot", "user", "project"] as const;
+const SCOPE_ENUM = ["bot", "user", "group"] as const;
 const TIER_ENUM = ["profile", "log", "note"] as const;
 
 const MEMORY_WRITE_SCHEMA = {
@@ -783,11 +661,12 @@ const MEMORY_WRITE_SCHEMA = {
       type: "string",
       enum: [...SCOPE_ENUM],
       description:
-        "bot = your own memory (the default and the most specific); user = shared with every Bot of this User; project = shared with the Bots in one Project you have joined.",
+        "bot = your own memory (the default and the most specific); user = shared with every Bot of this User; group = shared with the members of one group chat you are in.",
     },
-    project: {
+    group_id: {
       type: "string",
-      description: "The Project slug. Required when scope is project.",
+      description:
+        "The group chat's id. With scope group; in a group chat it defaults to that group.",
     },
     tier: {
       type: "string",
@@ -808,7 +687,7 @@ const MEMORY_FORGET_SCHEMA = {
   type: "object",
   properties: {
     scope: { type: "string", enum: [...SCOPE_ENUM] },
-    project: { type: "string" },
+    group_id: { type: "string" },
     fact: {
       type: "string",
       description: "The exact recorded text of the fact to forget.",
@@ -820,7 +699,7 @@ const MEMORY_FORGET_SCHEMA = {
 
 interface MemoryToolInputV1 {
   scope: MemoryScopeNameV1;
-  project?: string;
+  groupId?: string;
   tier: MemoryTierV1;
   fact: string;
 }
@@ -828,14 +707,15 @@ interface MemoryToolInputV1 {
 function decodeMemoryToolInputV1(
   input: unknown,
   allowTier: boolean,
+  group?: string,
 ): MemoryToolInputV1 {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new Error("input must be an object");
   }
   const value = input as Record<string, unknown>;
   const allowed = allowTier
-    ? ["scope", "project", "tier", "fact"]
-    : ["scope", "project", "fact"];
+    ? ["scope", "group_id", "tier", "fact"]
+    : ["scope", "group_id", "fact"];
   if (!Object.keys(value).every((key) => allowed.includes(key))) {
     throw new Error("input has unknown fields");
   }
@@ -860,13 +740,14 @@ function decodeMemoryToolInputV1(
     tier: tier as MemoryTierV1,
     fact: fact.trim(),
   };
-  if (scope === "project") {
-    if (!isMemoryProjectIdV1(value.project)) {
-      throw new Error("the project scope requires a valid Project slug");
+  if (scope === "group") {
+    const groupId = value.group_id ?? group;
+    if (!isGroupIdV1(groupId)) {
+      throw new Error("the group scope requires the group chat's group_id");
     }
-    decoded.project = value.project;
-  } else if (value.project !== undefined) {
-    throw new Error("project is only valid with the project scope");
+    decoded.groupId = groupId;
+  } else if (value.group_id !== undefined) {
+    throw new Error("group_id is only valid with the group scope");
   }
   return decoded;
 }
@@ -875,45 +756,7 @@ function refusal(reason: string): ToolExecutionResult {
   return { content: reason, isError: true };
 }
 
-/**
- * Refuses a `project`-scope change to a Project this Bot has not joined.
- *
- * "only the Projects a Bot has joined are injected into its prompts", and a
- * Bot that may not read a Project's Memory may not write it either. Membership
- * is durable User-scoped state, so the answer comes from the Project authority
- * through the existing seam, never from anything this Package holds. A
- * membership that cannot be read is a refusal, not an assumption: an
- * unreachable authority must not become an open door.
- */
-async function refuseUnjoinedProjectV1(
-  host: MemoryRuntimeHostV1,
-  scope: MemoryScopeNameV1,
-  projectId: string | undefined,
-): Promise<string | undefined> {
-  if (scope !== "project" || projectId === undefined) return undefined;
-  if (!host.projects) {
-    return `Project membership is unavailable, so writing Project "${projectId}" memory cannot be authorised`;
-  }
-  let joined: MemoryProjectV1[];
-  try {
-    joined = await host.projects.joined();
-  } catch (error) {
-    return `Project membership could not be read: ${
-      error instanceof Error ? error.message : String(error)
-    }`;
-  }
-  if (joined.some((project) => project.projectId === projectId)) {
-    return undefined;
-  }
-  return `you have not joined Project "${projectId}"; join it before changing its memory`;
-}
-
-/**
- * The provenance one Memory write records. A Bot writes its own shard as
- * itself; the Project descriptor is a User-scoped file the Bot writes with its
- * User's authority, which is the only writer `writerOwnsMemoryPathV1` allows
- * outside a shard and the honest description of creating a Project.
- */
+/** The provenance one Memory write records: the Bot, writing its own shard. */
 function botWriterV1(
   owner: MemoryOwnerV1,
   writer: MemoryWriterIdentityV1,
@@ -940,12 +783,12 @@ export function createMemoryWriteTool(
     // video roles. See `@frockbot/app/subagents` `SUBAGENT_TOOL_REACH_V1`.
     admission: { subagentRoles: ["executor"] },
     description:
-      "Record one fact in memory. Choose the scope deliberately: bot memory is yours, user memory is shared with every Bot of this User, project memory is shared inside one Project. You always write into your own shard; never try to edit another Bot's.",
+      "Record one fact in memory. Choose the scope deliberately: bot memory is yours, user memory is shared with every Bot of this User, group memory is shared by the members of one group chat. You always write into your own shard; never try to edit another Bot's.",
     inputSchema: MEMORY_WRITE_SCHEMA as unknown as Record<string, unknown>,
     idempotent: false,
     validate: (input) => {
       try {
-        decodeMemoryToolInputV1(input, true);
+        decodeMemoryToolInputV1(input, true, host.group);
         return true;
       } catch {
         return false;
@@ -954,7 +797,7 @@ export function createMemoryWriteTool(
     execute: async (input: unknown, context: ToolExecutionContext) => {
       let decoded: MemoryToolInputV1;
       try {
-        decoded = decodeMemoryToolInputV1(input, true);
+        decoded = decodeMemoryToolInputV1(input, true, host.group);
       } catch (error) {
         return refusal(
           `memory_write was refused: ${error instanceof Error ? error.message : String(error)}`,
@@ -966,20 +809,12 @@ export function createMemoryWriteTool(
           `memory_write was refused: session "${context.sessionId}" is unavailable, so the intent cannot be recorded`,
         );
       }
-      let root: WorkspaceMemoryRootV1;
-      try {
-        root = memoryScopeRootV1(decoded.scope, host.owner, decoded.project);
-      } catch (error) {
+      // A group's Memory is canonical only; it has no file root.
+      if (decoded.scope === "group" && !host.records) {
         return refusal(
-          `memory_write was refused: ${error instanceof Error ? error.message : String(error)}`,
+          `memory_write was refused: group memory is not available here`,
         );
       }
-      const unjoined = await refuseUnjoinedProjectV1(
-        host,
-        decoded.scope,
-        decoded.project,
-      );
-      if (unjoined) return refusal(`memory_write was refused: ${unjoined}`);
       // One vocabulary: the `note` tier writes the `[note] ` marker through
       // the same renderer the parser is the inverse of, so the tier enum and
       // the on-disk prefix can never drift apart.
@@ -988,7 +823,7 @@ export function createMemoryWriteTool(
         decoded.fact,
       );
       const contentHash = await sha256HexV1(text);
-      const effectId = `memory:write:${decoded.scope}:${decoded.project ?? ""}:${decoded.tier}:${contentHash}`;
+      const effectId = `memory:write:${decoded.scope}:${decoded.groupId ?? ""}:${decoded.tier}:${contentHash}`;
       const position = openMemoryTurnPositionV1(session);
       const path = `${decoded.scope}/${decoded.tier}`;
       // Intent before effect.
@@ -998,7 +833,7 @@ export function createMemoryWriteTool(
         effectId,
         action: "write",
         scope: decoded.scope,
-        projectId: decoded.project ?? "",
+        groupId: decoded.groupId ?? "",
         tier: decoded.tier,
         path,
         contentHash,
@@ -1018,7 +853,7 @@ export function createMemoryWriteTool(
             effectId,
             action: "write",
             scope: decoded.scope,
-            projectId: decoded.project ?? "",
+            groupId: decoded.groupId ?? "",
             tier: decoded.tier,
             path: `${decoded.scope}/${decoded.tier}`,
             generationId: "records",
@@ -1030,7 +865,7 @@ export function createMemoryWriteTool(
       }
 
       const outcome = await host.store.write({
-        root,
+        root: memoryScopeRootV1(decoded.scope as "bot" | "user", host.owner),
         tier: decoded.tier,
         fact: text,
         writer: botWriterV1(host.owner, host.writer),
@@ -1044,7 +879,7 @@ export function createMemoryWriteTool(
         effectId,
         action: "write",
         scope: decoded.scope,
-        projectId: decoded.project ?? "",
+        groupId: decoded.groupId ?? "",
         tier: decoded.tier,
         path: outcome.path,
         generationId: outcome.generationId || "duplicate",
@@ -1085,7 +920,7 @@ export function createMemoryForgetTool(
     idempotent: false,
     validate: (input) => {
       try {
-        decodeMemoryToolInputV1(input, false);
+        decodeMemoryToolInputV1(input, false, host.group);
         return true;
       } catch {
         return false;
@@ -1094,7 +929,7 @@ export function createMemoryForgetTool(
     execute: async (input: unknown, context: ToolExecutionContext) => {
       let decoded: MemoryToolInputV1;
       try {
-        decoded = decodeMemoryToolInputV1(input, false);
+        decoded = decodeMemoryToolInputV1(input, false, host.group);
       } catch (error) {
         return refusal(
           `memory_forget was refused: ${error instanceof Error ? error.message : String(error)}`,
@@ -1106,22 +941,14 @@ export function createMemoryForgetTool(
           `memory_forget was refused: session "${context.sessionId}" is unavailable, so the intent cannot be recorded`,
         );
       }
-      let root: WorkspaceMemoryRootV1;
-      try {
-        root = memoryScopeRootV1(decoded.scope, host.owner, decoded.project);
-      } catch (error) {
+      // A group's Memory is canonical only; it has no file root.
+      if (decoded.scope === "group" && !host.records) {
         return refusal(
-          `memory_forget was refused: ${error instanceof Error ? error.message : String(error)}`,
+          `memory_forget was refused: group memory is not available here`,
         );
       }
-      const unjoined = await refuseUnjoinedProjectV1(
-        host,
-        decoded.scope,
-        decoded.project,
-      );
-      if (unjoined) return refusal(`memory_forget was refused: ${unjoined}`);
       const contentHash = await sha256HexV1(decoded.fact);
-      const effectId = `memory:forget:${decoded.scope}:${decoded.project ?? ""}:${contentHash}`;
+      const effectId = `memory:forget:${decoded.scope}:${decoded.groupId ?? ""}:${contentHash}`;
       const position = openMemoryTurnPositionV1(session);
       session.append({
         type: "memory/write-intent",
@@ -1129,7 +956,7 @@ export function createMemoryForgetTool(
         effectId,
         action: "forget",
         scope: decoded.scope,
-        projectId: decoded.project ?? "",
+        groupId: decoded.groupId ?? "",
         // A forget is not a tier and has no path until it has run: it may
         // rewrite the profile file, one or more log files, or write a
         // retraction. Naming `log` and `<scope>/forget` here made the intent
@@ -1155,7 +982,7 @@ export function createMemoryForgetTool(
             effectId,
             action: "forget",
             scope: decoded.scope,
-            projectId: decoded.project ?? "",
+            groupId: decoded.groupId ?? "",
             tier: "log",
             path: "",
             generationId: "records",
@@ -1167,7 +994,7 @@ export function createMemoryForgetTool(
       }
 
       const outcome = await host.store.forget({
-        root,
+        root: memoryScopeRootV1(decoded.scope as "bot" | "user", host.owner),
         fact: decoded.fact,
         writer: botWriterV1(host.owner, host.writer),
       });
@@ -1194,7 +1021,7 @@ export function createMemoryForgetTool(
           effectId,
           action: "forget",
           scope: decoded.scope,
-          projectId: decoded.project ?? "",
+          groupId: decoded.groupId ?? "",
           tier: "log",
           path: file.path,
           generationId: file.generationId || "unchanged",
@@ -1370,224 +1197,6 @@ export function createMemoryRebuildIndexTool(
   };
 }
 
-const PROJECT_SCHEMA = {
-  type: "object",
-  properties: {
-    project: {
-      type: "string",
-      description: "The Project slug: lowercase letters, digits and hyphens.",
-    },
-    name: { type: "string", description: "The Project's display name." },
-    description: { type: "string" },
-  },
-  required: ["project"],
-  additionalProperties: false,
-} as const;
-
-function decodeProjectInputV1(input: unknown): {
-  project: string;
-  name?: string;
-  description?: string;
-} {
-  if (!input || typeof input !== "object" || Array.isArray(input)) {
-    throw new Error("input must be an object");
-  }
-  const value = input as Record<string, unknown>;
-  if (
-    !Object.keys(value).every((key) =>
-      ["project", "name", "description"].includes(key),
-    )
-  ) {
-    throw new Error("input has unknown fields");
-  }
-  if (!isMemoryProjectIdV1(value.project)) {
-    throw new Error("project must be a valid slug");
-  }
-  const decoded: { project: string; name?: string; description?: string } = {
-    project: value.project,
-  };
-  for (const key of ["name", "description"] as const) {
-    const candidate = value[key];
-    if (candidate === undefined) continue;
-    if (typeof candidate !== "string" || candidate.length > 512) {
-      throw new Error(`${key} must be a bounded string`);
-    }
-    decoded[key] = candidate.trim();
-  }
-  return decoded;
-}
-
-export function createProjectTools(
-  host: MemoryRuntimeHostV1 & {
-    writer: MemoryWriterIdentityV1;
-    projects: MemoryProjectsV1;
-  },
-  sessions: { get(sessionId: string): Session | undefined },
-  projection: MemoryProjection,
-): ToolDefinition[] {
-  const act = (
-    action: "create" | "join" | "leave",
-    name: string,
-    description: string,
-  ): ToolDefinition => ({
-    name,
-    namespace: "frockbot",
-    description,
-    inputSchema: PROJECT_SCHEMA as unknown as Record<string, unknown>,
-    idempotent: false,
-    validate: (input) => {
-      try {
-        decodeProjectInputV1(input);
-        return true;
-      } catch {
-        return false;
-      }
-    },
-    execute: async (input: unknown, context: ToolExecutionContext) => {
-      let decoded: ReturnType<typeof decodeProjectInputV1>;
-      try {
-        decoded = decodeProjectInputV1(input);
-      } catch (error) {
-        return refusal(
-          `${name} was refused: ${error instanceof Error ? error.message : String(error)}`,
-        );
-      }
-      const session = sessions.get(context.sessionId);
-      if (!session) {
-        return refusal(
-          `${name} was refused: session "${context.sessionId}" is unavailable, so the intent cannot be recorded`,
-        );
-      }
-      const effectId = `memory:project:${action}:${decoded.project}`;
-      const position = openMemoryTurnPositionV1(session);
-      session.append({
-        type: "memory/project-intent",
-        ...position,
-        effectId,
-        action,
-        projectId: decoded.project,
-      });
-      await session.flush();
-
-      if (action === "create") {
-        // The descriptor is a Memory file like any other, so it goes through
-        // the same store and the same conditional write. It sits outside any
-        // shard, so its writer is the User whose Project it is.
-        const project: MemoryProjectV1 = {
-          projectId: decoded.project,
-          name: decoded.name || decoded.project,
-          description: decoded.description ?? "",
-        };
-        const written = await host.store.writeFile({
-          path: {
-            root: projectMemoryRootV1(host.owner, decoded.project),
-            path: projectDocumentPathV1(decoded.project),
-          },
-          text: renderProjectDocumentV1(project),
-          writer: { kind: "user", userId: host.owner.userId },
-        });
-        if (written.status !== "ok") {
-          // A conflict is not a success. Another writer holds a generation this
-          // call never saw, so the descriptor on disk is not the one this Bot
-          // asked for; membership is left unchanged and nothing is recorded as
-          // changed, rather than logging a Project change that did not happen.
-          return refusal(`${name} was ${written.status}: ${written.reason}`);
-        }
-      }
-
-      // The descriptor above is already durable in object storage. If the
-      // membership authority now refuses or throws, the file is real, the
-      // membership is unchanged, and — before this — nothing was recorded at
-      // all, so the durable log said no Project change happened while a
-      // descriptor for it sat in R2. Whatever the answer, it is recorded.
-      let outcome: MemoryProjectsOutcomeV1;
-      try {
-        outcome =
-          action === "create"
-            ? await host.projects.create({
-                projectId: decoded.project,
-                name: decoded.name || decoded.project,
-                description: decoded.description ?? "",
-              })
-            : action === "join"
-              ? await host.projects.join(decoded.project)
-              : await host.projects.leave(decoded.project);
-      } catch (error) {
-        outcome = {
-          status: "refused",
-          reason:
-            error instanceof Error
-              ? error.message
-              : "the Project membership authority is unavailable",
-        };
-      }
-      if (outcome.status !== "ok") {
-        session.append({
-          type: "memory/project-changed",
-          ...position,
-          effectId,
-          action,
-          projectId: decoded.project,
-          // Membership did not change, and the event says so by carrying the
-          // membership as it stands rather than the one that was asked for.
-          projects: (await host.projects.joined().catch(() => [])).map(
-            (project) => project.projectId,
-          ),
-        });
-        await session.flush();
-        return refusal(`${name} was refused: ${outcome.reason}`);
-      }
-      session.append({
-        type: "memory/project-changed",
-        ...position,
-        effectId,
-        action,
-        projectId: decoded.project,
-        projects: outcome.joined.map((project) => project.projectId),
-      });
-      await session.flush();
-      projection.invalidate();
-      return {
-        content: `Projects you have joined: ${
-          outcome.joined.map((project) => project.projectId).join(", ") ||
-          "none"
-        }.`,
-        isError: false,
-      };
-    },
-  });
-  return [
-    act(
-      "create",
-      "project_create",
-      "Create a Project and join it. If the slug already exists this joins it instead, exactly as create-is-join.",
-    ),
-    act("join", "project_join", "Join an existing Project."),
-    act(
-      "leave",
-      "project_leave",
-      "Leave a Project. Its shared memory stays on disk; it simply stops loading into your prompt.",
-    ),
-  ];
-}
-
-/** Reads a Project descriptor back out of its Memory root, when one exists. */
-export async function readProjectDocumentV1(
-  store: MemoryStore,
-  owner: MemoryOwnerV1,
-  projectId: string,
-): Promise<MemoryProjectV1 | undefined> {
-  const outcome = await store.reads.read({
-    root: projectMemoryRootV1(owner, projectId),
-    path: projectDocumentPathV1(projectId),
-  });
-  if (outcome.status !== "ok") return undefined;
-  return parseProjectDocumentV1(
-    projectId,
-    new TextDecoder().decode(outcome.file.bytes),
-  );
-}
-
 /**
  * The runtime Contribution. Registers the Memory prompt section, the read
  * tools, and — only when the host supplies Bot provenance — the write tools.
@@ -1636,15 +1245,6 @@ export function createMemoryRuntimeFeature(
           createMemoryForgetTool(writing, runtime.sessions, projection),
         ),
       );
-      if (host.projects) {
-        for (const tool of createProjectTools(
-          { ...writing, projects: host.projects },
-          runtime.sessions,
-          projection,
-        )) {
-          disposers.push(runtime.tools.register(tool));
-        }
-      }
     }
     disposers.push(
       runtime.hooks.add({
@@ -1752,14 +1352,17 @@ export function createMemoryRuntimeFeature(
               .slice(0, 8_000);
             if (!text || isControlOnlyMemoryInputV1(text)) return;
             try {
-              const authority = await authorityOf({
-                owner: host.owner,
-                records,
-                ...(host.projects ? { projects: host.projects } : {}),
-              });
+              const authority = await turnAuthorityV1(host);
+              // A group's thread is the group's to remember: what its Turns
+              // read is extracted into the group's shared Memory.
+              const destination =
+                host.group && authority.joinedGroupChatIds.includes(host.group)
+                  ? productScopeToEngineV1("group", host.owner, host.group)
+                  : undefined;
               records.captureExtraction({
                 authority,
                 scope: productScopeToEngineV1("bot", host.owner),
+                ...(destination ? { destinationScope: destination } : {}),
                 principal: {
                   userId: host.owner.userId,
                   botId: host.owner.botId,
@@ -1799,20 +1402,42 @@ export function createMemoryRuntimeFeature(
   };
 }
 
-function engineScopeName(kind: string): "bot" | "user" | "project" {
+/**
+ * The authority a Turn's own reads and capture run under. Only a group's Turn
+ * draws on a group's Memory, so only it reads the membership; a Bot's own
+ * chat spends no round trip on it. The tools read it whenever they run.
+ */
+function turnAuthorityV1(
+  host: Pick<MemoryRuntimeHostV1, "owner" | "groups" | "group">,
+): Promise<MemoryAuthorityV1> {
+  return authorityOf(
+    host.group && host.groups
+      ? { owner: host.owner, groups: host.groups }
+      : { owner: host.owner },
+  );
+}
+
+function engineScopeName(kind: string): MemoryScopeNameV1 {
   if (kind === "user") return "user";
-  if (kind === "groupChat") return "project";
+  if (kind === "groupChat") return "group";
   return "bot";
 }
 
+/**
+ * The scopes a Turn's prompt and automatic recall draw on: the Bot's own, its
+ * User's, and — in a group's Turn, while the Bot is still a member — that
+ * group's. Other groups the Bot is in are reached with the tools.
+ */
 function memoryScopesForHostV1(
-  owner: MemoryOwnerV1,
-  joined: readonly string[],
+  host: Pick<MemoryRuntimeHostV1, "owner" | "group">,
+  authority: Pick<MemoryAuthorityV1, "joinedGroupChatIds">,
 ): MemoryScopeRefV1[] {
   return [
-    productScopeToEngineV1("bot", owner),
-    productScopeToEngineV1("user", owner),
-    ...joined.map((id) => productScopeToEngineV1("project", owner, id)),
+    productScopeToEngineV1("bot", host.owner),
+    productScopeToEngineV1("user", host.owner),
+    ...(host.group && authority.joinedGroupChatIds.includes(host.group)
+      ? [productScopeToEngineV1("group", host.owner, host.group)]
+      : []),
   ];
 }
 

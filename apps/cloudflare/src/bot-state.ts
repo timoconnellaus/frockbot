@@ -10,6 +10,7 @@ import { cleanHiddenBotNotifications } from "./hidden-bot-notifications-cleanup.
 import { cleanRetiredRoutineStateV1 } from "./routine-state-cleanup.js";
 import { cleanUnpreparedRunsV1 } from "./prepared-input-cleanup.js";
 import { cleanSupersedeStateV1 } from "./supersede-cleanup.js";
+import { cleanProjectEventsV1 } from "./project-events-cleanup.js";
 import { cleanUndecodableSkillIndexesV1 } from "./skill-index-cleanup.js";
 import {
   messageIdV1,
@@ -298,7 +299,8 @@ import {
   DurableWorkspaceGenerations,
   DurableWorkspaceSyncEffects,
 } from "@frockbot/core/durable";
-import type { MemoryProjectsV1 } from "@frockbot/app/memory/agent";
+import type { MemoryGroupsV1 } from "@frockbot/app/memory/groups";
+import { memoryMembershipRevisionV1 } from "@frockbot/app/memory/engine-tools";
 import {
   decodeMemoryChunkIndexEntryV1,
   memoryChunkIndexEntriesV1,
@@ -326,7 +328,7 @@ import {
 } from "./audit.js";
 import {
   createRoutedWorkspaceGenerationsV1,
-  createUserMemoryProjectsV1,
+  createUserMemoryGroupsV1,
   createUserWorkspaceGenerationsV1,
   type UserMemoryRpc,
 } from "./memory.js";
@@ -546,7 +548,7 @@ export class BotState
     FROCK_AI?: FrockAiGatewayHostV1;
     WORKSPACE_FILES?: WorkspaceFilesV1;
     MEMORY_WORKSPACE_FILES?: WorkspaceFilesV1;
-    MEMORY_PROJECTS?: MemoryProjectsV1;
+    MEMORY_GROUPS?: MemoryGroupsV1;
     MEMORY_RECORDS?: MemoryRecordsV1;
     MEMORY_CHUNK_INDEX?: MemoryChunkIndexWriterV1;
     WORKSPACE_SYNC_FILES?: WorkspaceFilesV1;
@@ -631,6 +633,7 @@ export class BotState
       await cleanBotAppletsV1(this.ctx.storage);
       // Before anything decodes a run: a `superseded` record no longer parses.
       await cleanSupersedeStateV1(this.ctx.storage);
+      await cleanProjectEventsV1(this.ctx.storage);
       await cleanUnpreparedRunsV1(this.ctx.storage);
       await cleanUndecodableSkillIndexesV1(this.ctx.storage);
       await cleanRetiredPublicationStateV1(this.ctx.storage);
@@ -1038,9 +1041,8 @@ export class BotState
    * the only surface that reads every root and the only one that accepts an
    * `unattributed` writer — a shell wrote the file and nothing recorded who.
    * The Memory surface routes a shared root's generations to the User Durable
-   * Object, because "The User's Durable Object is the authority for ... the
-   * generation records of User and Project Memory roots", while the Bot's own
-   * Memory root stays in this object.
+   * Object, which is the authority for the generation records of the User
+   * Memory root, while the Bot's own Memory root stays in this object.
    *
    * The sync's effect records stay here too: a push records its intent in the
    * Bot's Durable Object before it runs (§ Computer and Workspace), so an
@@ -1140,10 +1142,7 @@ export class BotState
     }
     if (memory) {
       this.backendEnv.MEMORY_WORKSPACE_FILES = memory;
-      this.backendEnv.MEMORY_PROJECTS = createUserMemoryProjectsV1(
-        rpc,
-        identity,
-      );
+      this.backendEnv.MEMORY_GROUPS = createUserMemoryGroupsV1(rpc, identity);
     }
     if (durableObjectHasSqlV1(this.ctx.storage)) {
       const vectors = this.env.MEMORY_INDEX as MemoryVectorIndex | undefined;
@@ -1164,7 +1163,7 @@ export class BotState
     }
     // The transcript index is User-scoped state, so its authority is the User
     // Durable Object and this object reaches it through a narrow binding —
-    // the same shape as `MEMORY_PROJECTS` above. It is a projection, never an
+    // the same shape as `MEMORY_GROUPS` above. It is a projection, never an
     // authority, so nothing here waits on it and nothing here reads from it.
     this.backendEnv.SEARCH_SINK = createUserSearchSinkV1(
       rpc as unknown as UserSearchRpc,
@@ -3342,8 +3341,8 @@ export class BotState
     const records = this.backendEnv.MEMORY_RECORDS;
     if (!records) throw new Error("Memory is unavailable");
     const body = { ...((request.request ?? {}) as Record<string, unknown>) };
-    const projects = this.backendEnv.MEMORY_PROJECTS;
-    const joined = projects ? await projects.joined() : [];
+    const groups = this.backendEnv.MEMORY_GROUPS;
+    const joined = groups ? await groups.memberOf() : [];
     const claimed = body.authority;
     if (claimed && typeof claimed === "object" && !Array.isArray(claimed)) {
       body.authority = {
@@ -3352,12 +3351,8 @@ export class BotState
         botId: identity.botId,
         actor:
           (claimed as { actor?: unknown }).actor === "user" ? "user" : "bot",
-        joinedGroupChatIds: joined.map((project) => project.projectId),
-        membershipRevision:
-          joined
-            .map((project) => project.projectId)
-            .sort()
-            .join(",") || "0",
+        joinedGroupChatIds: joined,
+        membershipRevision: memoryMembershipRevisionV1(joined),
       };
     }
     switch (request.action) {

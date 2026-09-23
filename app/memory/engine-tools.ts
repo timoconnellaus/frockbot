@@ -20,30 +20,33 @@ import {
   type MemoryScopeRefV1,
 } from "./records.js";
 import { explicitDatesInQueryV1 } from "./hybrid.js";
-import { isMemoryProjectIdV1, type MemoryOwnerV1 } from "./roots.js";
-import type { MemoryProjectsV1 } from "./projects.js";
+import { isGroupIdV1 } from "@frockbot/app/groups/shared";
+import type { MemoryOwnerV1 } from "./roots.js";
+import type { MemoryGroupsV1 } from "./groups.js";
 import { MEMORY_MAX_FACT_LENGTH } from "./store.js";
 
 export interface MemoryRecordsHostV1 {
   owner: MemoryOwnerV1;
   records: MemoryRecordsV1;
   writer?: { sessionId: string; turnId: string; runId: string };
-  projects?: MemoryProjectsV1;
+  groups?: MemoryGroupsV1;
+  /** The Group Chat this Turn speaks in, the default `group_id`. */
+  group?: string;
 }
 
+/**
+ * The authority one call carries. Group Chat membership is read for it; one
+ * that cannot be read opens no group, and says so in its revision.
+ */
 export async function authorityOf(
-  host: MemoryRecordsHostV1,
+  host: Pick<MemoryRecordsHostV1, "owner" | "groups">,
 ): Promise<MemoryAuthorityV1> {
   let joinedGroupChatIds: string[] = [];
   let membershipRevision = "0";
-  if (host.projects) {
+  if (host.groups) {
     try {
-      const joined = await host.projects.joined();
-      joinedGroupChatIds = joined.map((project) => project.projectId);
-      membershipRevision = joined
-        .map((project) => project.projectId)
-        .sort()
-        .join(",");
+      joinedGroupChatIds = await host.groups.memberOf();
+      membershipRevision = memoryMembershipRevisionV1(joinedGroupChatIds);
     } catch {
       membershipRevision = "unavailable";
     }
@@ -57,6 +60,32 @@ export async function authorityOf(
   };
 }
 
+/** A membership's revision is the set itself, so both owners agree on it. */
+export function memoryMembershipRevisionV1(
+  groupIds: readonly string[],
+): string {
+  return [...groupIds].sort().join(",") || "0";
+}
+
+/** The `group_id` a group-scope call names, defaulting to this Turn's group. */
+function decodeGroupIdFieldV1(
+  scope: MemoryProductScopeV1,
+  value: unknown,
+  group: string | undefined,
+): string | undefined {
+  if (scope !== "group") {
+    if (value !== undefined) {
+      throw new Error("group_id is only valid with the group scope");
+    }
+    return undefined;
+  }
+  const groupId = value ?? group;
+  if (!isGroupIdV1(groupId)) {
+    throw new Error("the group scope requires the group chat's group_id");
+  }
+  return groupId;
+}
+
 function refusal(reason: string): ToolExecutionResult {
   return { content: reason, isError: true };
 }
@@ -65,7 +94,7 @@ export async function executeRecordsWriteV1(
   host: MemoryRecordsHostV1,
   input: {
     scope: MemoryScopeNameV1;
-    project?: string;
+    groupId?: string;
     tier: "profile" | "log" | "note";
     fact: string;
   },
@@ -74,7 +103,7 @@ export async function executeRecordsWriteV1(
   const authority = await authorityOf(host);
   let scope: MemoryScopeRefV1;
   try {
-    scope = productScopeToEngineV1(input.scope, host.owner, input.project);
+    scope = productScopeToEngineV1(input.scope, host.owner, input.groupId);
   } catch (error) {
     return refusal(
       `memory_write was refused: ${error instanceof Error ? error.message : String(error)}`,
@@ -116,7 +145,7 @@ export async function executeRecordsForgetV1(
   host: MemoryRecordsHostV1,
   input: {
     scope: MemoryScopeNameV1;
-    project?: string;
+    groupId?: string;
     fact: string;
   },
   operationKey: string,
@@ -124,7 +153,7 @@ export async function executeRecordsForgetV1(
   const authority = await authorityOf(host);
   let scope: MemoryScopeRefV1;
   try {
-    scope = productScopeToEngineV1(input.scope, host.owner, input.project);
+    scope = productScopeToEngineV1(input.scope, host.owner, input.groupId);
   } catch (error) {
     return refusal(
       `memory_forget was refused: ${error instanceof Error ? error.message : String(error)}`,
@@ -147,18 +176,21 @@ export async function executeRecordsSearchV1(
   input: { query: string; scope?: MemoryScopeNameV1; maxResults?: number },
 ): Promise<ToolExecutionResult> {
   const authority = await authorityOf(host);
+  const groups = authority.joinedGroupChatIds.map((id) =>
+    productScopeToEngineV1("group", host.owner, id),
+  );
+  // In a group's Turn, "group" means that group; elsewhere, every group the
+  // Bot is in.
   const scopes: MemoryScopeRefV1[] = input.scope
-    ? input.scope === "project"
-      ? authority.joinedGroupChatIds.map((id) =>
-          productScopeToEngineV1("project", host.owner, id),
-        )
+    ? input.scope === "group"
+      ? host.group && authority.joinedGroupChatIds.includes(host.group)
+        ? [productScopeToEngineV1("group", host.owner, host.group)]
+        : groups
       : [productScopeToEngineV1(input.scope, host.owner)]
     : [
         productScopeToEngineV1("bot", host.owner),
         productScopeToEngineV1("user", host.owner),
-        ...authority.joinedGroupChatIds.map((id) =>
-          productScopeToEngineV1("project", host.owner, id),
-        ),
+        ...groups,
       ];
   const dates = explicitDatesInQueryV1(input.query);
   const recalled = await host.records.recall({
@@ -183,7 +215,7 @@ export async function executeRecordsSearchV1(
       header,
       ...recalled.hits.map((hit, index) => {
         const where = engineScopeToProductV1(hit.item.scope);
-        const project =
+        const group =
           hit.item.scope.kind === "groupChat"
             ? `/${hit.item.scope.groupChatId}`
             : "";
@@ -193,7 +225,7 @@ export async function executeRecordsSearchV1(
             : hit.item.scope.kind === "user"
               ? `user:${hit.item.scope.userId}`
               : `groupChat:${hit.item.scope.userId}:${hit.item.scope.groupChatId}`;
-        return `[${index + 1}] ${where}${project}:${hit.item.id}\nmemory-item ${scopeKey} ${hit.item.id} ${hit.item.generation}\n${hit.item.text}`;
+        return `[${index + 1}] ${where}${group}:${hit.item.id}\nmemory-item ${scopeKey} ${hit.item.id} ${hit.item.generation}\n${hit.item.text}`;
       }),
     ].join("\n\n---\n\n"),
     isError: false,
@@ -213,9 +245,9 @@ const EXPAND_SCHEMA = {
     },
     scope: {
       type: "string",
-      enum: ["bot", "user", "project"],
+      enum: ["bot", "user", "group"],
     },
-    project: { type: "string" },
+    group_id: { type: "string" },
   },
   additionalProperties: false,
 } as const;
@@ -225,10 +257,10 @@ const BROWSE_SCHEMA = {
   properties: {
     scope: {
       type: "string",
-      enum: ["bot", "user", "project"],
+      enum: ["bot", "user", "group"],
       description: "Which Memory to page through. Defaults to bot.",
     },
-    project: { type: "string" },
+    group_id: { type: "string" },
     topic: {
       type: "string",
       description: "Optional subject to filter the page.",
@@ -238,11 +270,14 @@ const BROWSE_SCHEMA = {
   additionalProperties: false,
 } as const;
 
-function decodeExpandInputV1(input: unknown): {
+function decodeExpandInputV1(
+  input: unknown,
+  group?: string,
+): {
   itemId?: string;
   sourceId?: string;
   scope: MemoryProductScopeV1;
-  project?: string;
+  groupId?: string;
 } {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
     throw new Error("input must be an object");
@@ -250,7 +285,7 @@ function decodeExpandInputV1(input: unknown): {
   const value = input as Record<string, unknown>;
   if (
     !Object.keys(value).every((key) =>
-      ["itemId", "sourceId", "scope", "project"].includes(key),
+      ["itemId", "sourceId", "scope", "group_id"].includes(key),
     )
   ) {
     throw new Error("input has unknown fields");
@@ -259,31 +294,28 @@ function decodeExpandInputV1(input: unknown): {
     throw new Error("itemId or sourceId is required");
   }
   const scope = (value.scope ?? "bot") as MemoryProductScopeV1;
-  if (!["bot", "user", "project"].includes(scope)) {
+  if (!["bot", "user", "group"].includes(scope)) {
     throw new Error("scope is invalid");
   }
   const decoded: {
     itemId?: string;
     sourceId?: string;
     scope: MemoryProductScopeV1;
-    project?: string;
+    groupId?: string;
   } = { scope };
   if (typeof value.itemId === "string") decoded.itemId = value.itemId;
   if (typeof value.sourceId === "string") decoded.sourceId = value.sourceId;
-  if (scope === "project") {
-    if (!isMemoryProjectIdV1(value.project)) {
-      throw new Error("the project scope requires a valid Project slug");
-    }
-    decoded.project = value.project;
-  } else if (value.project !== undefined) {
-    throw new Error("project is only valid with the project scope");
-  }
+  const groupId = decodeGroupIdFieldV1(scope, value.group_id, group);
+  if (groupId) decoded.groupId = groupId;
   return decoded;
 }
 
-function decodeBrowseInputV1(input: unknown): {
+function decodeBrowseInputV1(
+  input: unknown,
+  group?: string,
+): {
   scope: MemoryProductScopeV1;
-  project?: string;
+  groupId?: string;
   topic?: string;
   cursor?: string;
 } {
@@ -293,29 +325,23 @@ function decodeBrowseInputV1(input: unknown): {
   const value = input as Record<string, unknown>;
   if (
     !Object.keys(value).every((key) =>
-      ["scope", "project", "topic", "cursor"].includes(key),
+      ["scope", "group_id", "topic", "cursor"].includes(key),
     )
   ) {
     throw new Error("input has unknown fields");
   }
   const scope = (value.scope ?? "bot") as MemoryProductScopeV1;
-  if (!["bot", "user", "project"].includes(scope)) {
+  if (!["bot", "user", "group"].includes(scope)) {
     throw new Error("scope is invalid");
   }
   const decoded: {
     scope: MemoryProductScopeV1;
-    project?: string;
+    groupId?: string;
     topic?: string;
     cursor?: string;
   } = { scope };
-  if (scope === "project") {
-    if (!isMemoryProjectIdV1(value.project)) {
-      throw new Error("the project scope requires a valid Project slug");
-    }
-    decoded.project = value.project;
-  } else if (value.project !== undefined) {
-    throw new Error("project is only valid with the project scope");
-  }
+  const groupId = decodeGroupIdFieldV1(scope, value.group_id, group);
+  if (groupId) decoded.groupId = groupId;
   if (value.topic !== undefined) {
     if (
       typeof value.topic !== "string" ||
@@ -347,7 +373,7 @@ export function createMemoryExpandTool(
     idempotent: true,
     validate: (input) => {
       try {
-        decodeExpandInputV1(input);
+        decodeExpandInputV1(input, host.group);
         return true;
       } catch {
         return false;
@@ -356,7 +382,7 @@ export function createMemoryExpandTool(
     execute: async (input: unknown) => {
       let decoded: ReturnType<typeof decodeExpandInputV1>;
       try {
-        decoded = decodeExpandInputV1(input);
+        decoded = decodeExpandInputV1(input, host.group);
       } catch (error) {
         return refusal(
           `memory_expand was refused: ${error instanceof Error ? error.message : String(error)}`,
@@ -368,7 +394,7 @@ export function createMemoryExpandTool(
         scope = productScopeToEngineV1(
           decoded.scope,
           host.owner,
-          decoded.project,
+          decoded.groupId,
         );
       } catch (error) {
         return refusal(
@@ -424,7 +450,7 @@ export function createMemoryBrowseTool(
     idempotent: true,
     validate: (input) => {
       try {
-        decodeBrowseInputV1(input);
+        decodeBrowseInputV1(input, host.group);
         return true;
       } catch {
         return false;
@@ -433,7 +459,7 @@ export function createMemoryBrowseTool(
     execute: async (input: unknown) => {
       let decoded: ReturnType<typeof decodeBrowseInputV1>;
       try {
-        decoded = decodeBrowseInputV1(input);
+        decoded = decodeBrowseInputV1(input, host.group);
       } catch (error) {
         return refusal(
           `memory_browse was refused: ${error instanceof Error ? error.message : String(error)}`,
@@ -445,7 +471,7 @@ export function createMemoryBrowseTool(
         scope = productScopeToEngineV1(
           decoded.scope,
           host.owner,
-          decoded.project,
+          decoded.groupId,
         );
       } catch (error) {
         return refusal(

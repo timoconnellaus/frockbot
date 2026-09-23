@@ -23,7 +23,7 @@ The following remain outside these assignments:
 - Changing complete-model-step execution into incremental tool execution; showing private assistant output; changing model selection or provider billing policy.
 - Replacing the Bot with `AIChatAgent`, adding a second scheduler to an object, or introducing a global Memory DO.
 - Actual MCP Plugin implementation. Keep the prepared-catalog interface suitable for it, but implement the existing Composio REST path first. [SDK ownership constraints](../research/sdk-reuse-decision-review.md#mcp-the-managers-owner-is-the-important-constraint) apply when MCP is separately assigned.
-- Group Chats and the removal of Projects. The text design is agreed in the [Group Chat plan](../plan.md#planned-group-chats-replace-projects) and assigned separately; voice is still undesigned. Memory must use the existing membership authority and keep its internal scope mapping isolated.
+- Group Chats, which replaced Projects: see the [Group Chat plan](../plan.md#planned-group-chats-replace-projects). Voice is still undesigned. Memory's shared scope is a Group Chat's, authorized by its membership.
 - A new Jev recall gate or broad supervision rollout. Retain an interface for a later gate; a Memory task cannot silently turn on the separate supervision plan.
 
 ## Task order

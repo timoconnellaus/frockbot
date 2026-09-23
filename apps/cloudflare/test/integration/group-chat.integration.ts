@@ -2,7 +2,11 @@
 // Bots, mentions one, and that member's Turn runs in its own Bot object under
 // the group's Session and its reply is posted to the group — and nowhere in
 // the member's one-to-one chat.
-import { env, runDurableObjectAlarm } from "cloudflare:test";
+import {
+  env,
+  runDurableObjectAlarm,
+  runInDurableObject,
+} from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import {
   callsFrockbotTool,
@@ -193,6 +197,43 @@ describe("a Group Chat", () => {
     );
     expect(refused.status).toBe(409);
 
+    // A member writes into the group's Memory, which the User object keeps
+    // and authorises by membership.
+    const user = env.USER_CONFIGURATIONS.get(
+      env.USER_CONFIGURATIONS.idFromName(userId),
+    );
+    const groupMemories = () =>
+      runInDurableObject(
+        user,
+        (_instance, state) =>
+          state.storage.sql
+            .exec<{ n: number }>(
+              "SELECT count(*) AS n FROM memory_item WHERE scope_key = ?",
+              `groupChat:${userId}:${groupId}`,
+            )
+            .toArray()[0]!.n,
+      );
+    const remembered = (await runInDurableObject(user, (instance) =>
+      (
+        instance as unknown as {
+          operateMemory(input: unknown): Promise<{ status: string }>;
+        }
+      ).operateMemory({
+        schemaVersion: 1,
+        userId,
+        botId: "general",
+        action: "write",
+        request: {
+          authority: {},
+          scope: { kind: "groupChat", userId, groupChatId: groupId },
+          content: "The trip is in October.",
+          operationKey: "trip-1",
+        },
+      }),
+    )) as { status: string };
+    expect(remembered.status).toBe("ok");
+    expect(await groupMemories()).toBe(1);
+
     const deleted = await postAsUser(
       userId,
       `/api/groups/${groupId}/commands`,
@@ -203,6 +244,8 @@ describe("a Group Chat", () => {
       },
     );
     expect(deleted.status).toBe(200);
+    // Deleting the group deletes what was remembered in it.
+    expect(await groupMemories()).toBe(0);
     expect((await asUser(userId, `/api/groups/${groupId}`)).status).toBe(404);
   });
 

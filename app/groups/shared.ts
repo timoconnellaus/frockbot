@@ -69,6 +69,13 @@ export function isGroupSessionIdV1(sessionId: string): boolean {
   return sessionId.startsWith(GROUP_SESSION_PREFIX);
 }
 
+/** The group a Session belongs to, when it is a group's. */
+export function groupIdOfSessionV1(sessionId: string): string | undefined {
+  if (!isGroupSessionIdV1(sessionId)) return undefined;
+  const groupId = sessionId.slice(GROUP_SESSION_PREFIX.length);
+  return isGroupIdV1(groupId) ? groupId : undefined;
+}
+
 /** The name a group's own Durable Object is addressed by. */
 export function groupChatObjectNameV1(userId: string, groupId: string): string {
   return `${userId}:${groupId}`;

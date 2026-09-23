@@ -46,7 +46,7 @@ it("a greeting exposes four schemas, sends once, and finishes after one provider
     "call_dynamic_tool",
   ]);
   expect(requests[0]?.request.system).toContain("computer_exec");
-  expect(requests[0]?.request.system).toContain("project_create");
+  expect(requests[0]?.request.system).toContain("memory_write");
   expect(events.filter((e) => e.type === "send/to-user")).toHaveLength(1);
   expect(events.at(-1)).toMatchObject({
     type: "turn/end",

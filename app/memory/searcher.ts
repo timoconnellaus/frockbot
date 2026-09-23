@@ -6,7 +6,7 @@
 // the rest of the Package follows — the files are the Memory, everything else
 // is a way of finding a part of them.
 //
-// Precedence here is the Memory precedence: own (`bot`) before `project`
+// Precedence here is the Memory precedence: own (`bot`) before `group`
 // before `user`, "the most specific wins", applied after scoring so a strong
 // shared hit still ranks above a weak own one within the same document.
 import { remoteCallV1, type MemoryScopeNameV1 } from "@frockbot/core/contracts";
@@ -25,7 +25,7 @@ const SNIPPET_MAX_CHARS = 700;
 
 const SCOPE_ORDER: Record<MemoryScopeNameV1, number> = {
   bot: 0,
-  project: 1,
+  group: 1,
   user: 2,
 };
 
@@ -42,7 +42,6 @@ function resultOf(
 ): MemorySearchResult {
   return {
     scope: chunk.scope,
-    projectId: chunk.projectId,
     path: chunk.path,
     startLine: chunk.startLine,
     endLine: chunk.endLine,
@@ -111,14 +110,12 @@ export async function searchMemoryV1(
             // The document key is rebuilt from the metadata the upsert wrote,
             // so a chunk is matched to the document it actually came from.
             const scope = match.metadata?.scope;
-            const projectId = match.metadata?.projectId;
             const path = match.metadata?.path;
             const chunk =
               typeof hash === "string" &&
               typeof scope === "string" &&
-              typeof projectId === "string" &&
               typeof path === "string"
-                ? byHash.get(`${scope}:${projectId}:${path} ${hash}`)
+                ? byHash.get(`${scope}:${path} ${hash}`)
                 : undefined;
             if (!chunk) continue;
             scored.set(
@@ -164,9 +161,7 @@ export function formatMemoryResultsV1(results: MemorySearchResult[]): string {
   if (results.length === 0) return "No memory matches.";
   return results
     .map((result, index) => {
-      const where = result.projectId
-        ? `${result.scope}/${result.projectId}`
-        : result.scope;
+      const where = result.scope;
       const score =
         result.score === undefined
           ? ""

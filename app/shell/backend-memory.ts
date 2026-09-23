@@ -2,8 +2,9 @@
 //
 // The Memory Package reads and writes Memory roots through a `MemoryStore`
 // over `WorkspaceFilesV1`. This module decides, for one admitted Turn, whether
-// such a surface exists, what provenance a write records, and where Project
-// membership is kept. It implements none of those.
+// such a surface exists, what provenance a write records, where Group Chat
+// membership is read, and which group, if any, the Turn speaks in. It
+// implements none of those.
 //
 // HIBERNATION. "The Agent loop, Memory, Skills, Package composition, and
 // Routines function correctly while the Computer is hibernated and do not wake
@@ -20,10 +21,9 @@
 // Package is then not mounted at all: a Turn with no readable Memory root
 // injects no Memory, visibly, rather than inventing a second store.
 import type { WorkspaceFilesV1 } from "@frockbot/core/contracts";
-import type {
-  MemoryProjectsV1,
-  MemoryRuntimeHostV1,
-} from "@frockbot/app/memory/agent";
+import type { MemoryRuntimeHostV1 } from "@frockbot/app/memory/agent";
+import type { MemoryGroupsV1 } from "@frockbot/app/memory/groups";
+import { groupIdOfSessionV1 } from "@frockbot/app/groups/shared";
 import { MemoryStore } from "@frockbot/app/memory/store";
 import type { MemoryChunkIndexWriterV1 } from "@frockbot/app/memory/chunk-index";
 import type { MemoryRecordsV1 } from "@frockbot/app/memory/owner";
@@ -48,8 +48,8 @@ export interface BotMemoryTurn {
 export interface BotMemoryEnv {
   /** `WorkspaceFilesV1` with the Memory surface. Absent in a host with no bucket. */
   MEMORY_WORKSPACE_FILES?: WorkspaceFilesV1;
-  /** The durable Project authority, in the User Durable Object. */
-  MEMORY_PROJECTS?: MemoryProjectsV1;
+  /** The Bot's Group Chat membership, in the User Durable Object. */
+  MEMORY_GROUPS?: MemoryGroupsV1;
   /** Display names per Bot id, for the `[via …]` tag on a shared fact. */
   MEMORY_BOT_NAMES?: Readonly<Record<string, string>>;
   /** Bot-scoped vector-id ledger supplied by the Durable Object host. */
@@ -74,6 +74,7 @@ export function createBotMemoryHost(
   const files = bindings.MEMORY_WORKSPACE_FILES;
   if (!files) return undefined;
   const owner = { userId: identity.userId, botId: identity.botId };
+  const group = groupIdOfSessionV1(turn.sessionId);
   return {
     owner,
     store: new MemoryStore({
@@ -90,7 +91,8 @@ export function createBotMemoryHost(
       turnId: turn.turnId,
       runId: turn.runId,
     },
-    ...(bindings.MEMORY_PROJECTS ? { projects: bindings.MEMORY_PROJECTS } : {}),
+    ...(bindings.MEMORY_GROUPS ? { groups: bindings.MEMORY_GROUPS } : {}),
+    ...(group ? { group } : {}),
     ...(bindings.MEMORY_CHUNK_INDEX
       ? { chunkIndex: bindings.MEMORY_CHUNK_INDEX }
       : {}),

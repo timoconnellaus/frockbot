@@ -187,9 +187,9 @@ export async function deleteAppletSourceV1(
  *
  * A Bot owns exactly two roots — `bot-instructions` and `bot-memory` — and
  * both are keyed by `<kind>:<userId>:<botId>`, so a prefix listing names this
- * Bot's objects and nobody else's. The User's own Skills root, User and
- * Project Memory, and every `package-declared` root are User-scoped and are
- * deliberately left alone: another Bot of the same User still reads them.
+ * Bot's objects and nobody else's. The User's own Skills root, User Memory,
+ * and every `package-declared` root are User-scoped and are deliberately left
+ * alone: another Bot of the same User still reads them.
  *
  * This is a bulk removal rather than `WorkspaceStore.delete`, which is
  * generation-fenced per file and leaves a tombstone marker. A deleted Bot has

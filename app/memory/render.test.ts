@@ -1,17 +1,8 @@
 // The injected Memory block: GrokBot's shape, order, labels, and caps.
 import { describe, expect, test } from "bun:test";
 import type { SourcedMemoryFactV1 } from "./facts.ts";
-import {
-  MEMORY_NOTE_TTL_DAYS,
-  MEMORY_PROJECT_INJECTED_CAP,
-  renderMemoryInjectionV1,
-  type MemoryProjectV1,
-} from "./render.ts";
-import {
-  botMemoryRootV1,
-  projectMemoryRootV1,
-  userMemoryRootV1,
-} from "./roots.ts";
+import { MEMORY_NOTE_TTL_DAYS, renderMemoryInjectionV1 } from "./render.ts";
+import { botMemoryRootV1, userMemoryRootV1 } from "./roots.ts";
 import type { MemoryTierReadV1 } from "./store.ts";
 
 const OWNER = { userId: "user-1", botId: "bot-1" };
@@ -49,27 +40,11 @@ function tier(
   };
 }
 
-const PROJECT: MemoryProjectV1 = {
-  projectId: "ghetto-movement",
-  name: "Ghetto Movement",
-  description: "The gym build.",
-};
-
 describe("the injected Memory block", () => {
-  test("renders user, then project, then own, as labelled paragraphs", () => {
+  test("renders user, then own, as labelled paragraphs", () => {
     const injection = renderMemoryInjectionV1({
-      botId: "bot-1",
       noteCutoff: CUTOFF,
       user: tier(userMemoryRootV1(OWNER), [fact("Tim lives in Wollongong.")]),
-      projects: [
-        {
-          project: PROJECT,
-          tier: tier(projectMemoryRootV1(OWNER, PROJECT.projectId), [
-            fact("The floor is rubber.", { via: "General", botId: "bot-1" }),
-          ]),
-        },
-      ],
-      joined: [PROJECT],
       own: tier(
         botMemoryRootV1(OWNER),
         [fact("Tim prefers blunt answers.", { via: "", botId: "bot-1" })],
@@ -77,7 +52,6 @@ describe("the injected Memory block", () => {
           fact("Term ends on the 12th.", {
             kind: "log",
             via: "",
-            botId: "bot-1",
             date: "2026-08-31",
           }),
         ],
@@ -85,27 +59,20 @@ describe("the injected Memory block", () => {
     });
 
     const blocks = injection.text.split("\n\n");
+    expect(blocks).toHaveLength(2);
     expect(blocks[0]?.startsWith("User memory:")).toBe(true);
-    expect(
-      blocks[1]?.startsWith('Project "Ghetto Movement" (ghetto-movement)'),
-    ).toBe(true);
-    expect(blocks[2]?.startsWith("Memory:")).toBe(true);
+    expect(blocks[1]?.startsWith("Memory:")).toBe(true);
     // Labelled paragraphs, not headings.
     expect(injection.text).not.toContain("## ");
     expect(injection.text).toContain("About the user (shared):");
-    expect(injection.text).toContain("About this project (shared):");
     expect(injection.text).toContain("About the user:");
     expect(injection.text).toContain("Recently:");
-    expect(injection.text).toContain("your shard: by-agent/bot-1/");
   });
 
   test("tags a shared fact with the Bot that learned it and omits [via] on own facts", () => {
     const injection = renderMemoryInjectionV1({
-      botId: "bot-1",
       noteCutoff: CUTOFF,
       user: tier(userMemoryRootV1(OWNER), [fact("Tim lives in Wollongong.")]),
-      projects: [],
-      joined: [],
       own: tier(botMemoryRootV1(OWNER), [
         fact("Tim prefers blunt answers.", { via: "", botId: "bot-1" }),
       ]),
@@ -119,21 +86,11 @@ describe("the injected Memory block", () => {
     );
   });
 
-  test("own memory wins over project, and project over user, on the same fact", () => {
+  test("own memory wins over user memory on the same fact", () => {
     const shared = "Tim lives in Wollongong.";
     const injection = renderMemoryInjectionV1({
-      botId: "bot-1",
       noteCutoff: CUTOFF,
       user: tier(userMemoryRootV1(OWNER), [fact(shared)]),
-      projects: [
-        {
-          project: PROJECT,
-          tier: tier(projectMemoryRootV1(OWNER, PROJECT.projectId), [
-            fact(shared),
-          ]),
-        },
-      ],
-      joined: [PROJECT],
       own: tier(botMemoryRootV1(OWNER), [
         fact(shared, { via: "", botId: "bot-1" }),
       ]),
@@ -144,7 +101,7 @@ describe("the injected Memory block", () => {
     expect(injection.facts.filter((entry) => entry.text === shared)).toEqual([
       {
         scope: "bot",
-        projectId: "",
+        groupId: "",
         tier: "profile",
         via: "",
         learnedAt: "2026-08-30",
@@ -152,12 +109,9 @@ describe("the injected Memory block", () => {
       },
     ]);
     expect(injection.text).toContain("No shared facts recorded yet.");
-    expect(injection.text).toContain(
-      "No shared facts recorded yet for this project.",
-    );
   });
 
-  test("applies GrokBot's caps: 3 projects, 50/15 user, 25/10 project, 30 own recent", () => {
+  test("applies GrokBot's caps: 50/15 user, 30 own recent", () => {
     const many = (count: number, prefix: string) =>
       Array.from({ length: count }, (_, index) =>
         fact(`${prefix} ${index}`, {
@@ -166,21 +120,7 @@ describe("the injected Memory block", () => {
           generationId: `000000000000001-${String(index).padStart(6, "0")}`,
         }),
       );
-    const projects = Array.from({ length: 5 }, (_, index) => ({
-      project: {
-        projectId: `project-${index}`,
-        name: `Project ${index}`,
-        description: "",
-      },
-      tier: tier(
-        projectMemoryRootV1(OWNER, `project-${index}`),
-        [],
-        many(20, `p${index}`),
-      ),
-    }));
-
     const injection = renderMemoryInjectionV1({
-      botId: "bot-1",
       noteCutoff: CUTOFF,
       user: tier(
         userMemoryRootV1(OWNER),
@@ -190,34 +130,21 @@ describe("the injected Memory block", () => {
         })),
         many(40, "ur"),
       ),
-      projects,
-      joined: projects.map((entry) => entry.project),
       own: tier(botMemoryRootV1(OWNER), [], many(60, "o")),
     });
 
-    const count = (scope: string, kind: string, projectId?: string) =>
+    const count = (scope: string, kind: string) =>
       injection.facts.filter(
-        (entry) =>
-          entry.scope === scope &&
-          entry.tier === kind &&
-          (projectId === undefined || entry.projectId === projectId),
+        (entry) => entry.scope === scope && entry.tier === kind,
       ).length;
 
     expect(count("user", "profile")).toBe(50);
     expect(count("user", "log")).toBe(15);
     expect(count("bot", "log")).toBe(30);
-    expect(count("project", "log", "project-0")).toBe(10);
-    expect(
-      new Set(
-        injection.facts
-          .filter((entry) => entry.scope === "project")
-          .map((entry) => entry.projectId),
-      ).size,
-    ).toBe(MEMORY_PROJECT_INJECTED_CAP);
     // The cut is visible in durable state, not silent.
     expect(
       injection.omissions.some((omission) =>
-        omission.reason.includes("at most 3 joined Projects"),
+        omission.reason.includes("beyond the injection cap"),
       ),
     ).toBe(true);
     expect(injection.text).toContain("more log facts on disk");
@@ -226,11 +153,8 @@ describe("the injected Memory block", () => {
   test("clamps a single fact at 500 characters", () => {
     const long = "x".repeat(900);
     const injection = renderMemoryInjectionV1({
-      botId: "bot-1",
       noteCutoff: CUTOFF,
       user: tier(userMemoryRootV1(OWNER)),
-      projects: [],
-      joined: [],
       own: tier(botMemoryRootV1(OWNER), [
         fact(long, { via: "", botId: "bot-1" }),
       ]),
@@ -251,11 +175,8 @@ describe("the injected Memory block", () => {
       unavailable: "the bucket is unreachable",
     };
     const injection = renderMemoryInjectionV1({
-      botId: "bot-1",
       noteCutoff: CUTOFF,
       user: unreadable,
-      projects: [],
-      joined: [],
       own: tier(botMemoryRootV1(OWNER)),
     });
     expect(injection.omissions).toContainEqual({
@@ -280,11 +201,8 @@ describe("the note fade", () => {
   test("14 days, and the boundary is exact in both directions", () => {
     expect(MEMORY_NOTE_TTL_DAYS).toBe(14);
     const injection = renderMemoryInjectionV1({
-      botId: "bot-1",
       noteCutoff: CUT,
       user: tier(userMemoryRootV1(OWNER)),
-      projects: [],
-      joined: [],
       own: tier(
         botMemoryRootV1(OWNER),
         [],
@@ -300,20 +218,15 @@ describe("the note fade", () => {
     expect(injection.text).not.toContain("the day before");
     // An unmarked log fact never fades, however old.
     expect(injection.text).toContain("an old log fact");
-    expect(injection.faded).toEqual([
-      { scope: "bot", projectId: "", count: 1 },
-    ]);
+    expect(injection.faded).toEqual([{ scope: "bot", groupId: "", count: 1 }]);
     // A fade is the feature working, not a gap to repair.
     expect(injection.omissions).toEqual([]);
   });
 
   test("`[episode]` fades on the same rule as `[note]`", () => {
     const injection = renderMemoryInjectionV1({
-      botId: "bot-1",
       noteCutoff: CUT,
       user: tier(userMemoryRootV1(OWNER)),
-      projects: [],
-      joined: [],
       own: tier(
         botMemoryRootV1(OWNER),
         [own("[episode] last spring", "2026-08-17", "profile")],
@@ -321,9 +234,7 @@ describe("the note fade", () => {
       ),
     });
     expect(injection.text).not.toContain("last spring");
-    expect(injection.faded).toEqual([
-      { scope: "bot", projectId: "", count: 1 },
-    ]);
+    expect(injection.faded).toEqual([{ scope: "bot", groupId: "", count: 1 }]);
   });
 
   test("a faded note does not consume a cap slot a live fact could use", () => {
@@ -334,11 +245,8 @@ describe("the note fade", () => {
       own(`live ${index}`, "2026-08-30"),
     );
     const injection = renderMemoryInjectionV1({
-      botId: "bot-1",
       noteCutoff: CUT,
       user: tier(userMemoryRootV1(OWNER)),
-      projects: [],
-      joined: [],
       // The stale notes come first, so a fade applied *after* the cap would
       // have eaten every one of the 30 own-recent slots.
       own: tier(botMemoryRootV1(OWNER), [], [...stale, ...live]),
@@ -356,54 +264,37 @@ describe("the note fade", () => {
     );
     // …and they are not reported as a cap omission, because no cap bit.
     expect(injection.omissions).toEqual([]);
-    expect(injection.faded).toEqual([
-      { scope: "bot", projectId: "", count: 20 },
-    ]);
+    expect(injection.faded).toEqual([{ scope: "bot", groupId: "", count: 20 }]);
   });
 
-  test("counts fades per scope and per project", () => {
+  test("counts fades per scope", () => {
     const stale = (text: string) =>
       fact(text, { text, date: "2026-08-17", kind: "log" });
     const injection = renderMemoryInjectionV1({
-      botId: "bot-1",
       noteCutoff: CUT,
       user: tier(
         userMemoryRootV1(OWNER),
         [],
         [stale("[note] user one"), stale("[note] user two")],
       ),
-      projects: [
-        {
-          project: PROJECT,
-          tier: tier(
-            projectMemoryRootV1(OWNER, PROJECT.projectId),
-            [],
-            [stale("[note] project one")],
-          ),
-        },
-      ],
-      joined: [PROJECT],
-      own: tier(botMemoryRootV1(OWNER)),
+      own: tier(botMemoryRootV1(OWNER), [], [stale("[note] own one")]),
     });
 
     expect(injection.faded).toEqual([
-      { scope: "user", projectId: "", count: 2 },
-      { scope: "project", projectId: PROJECT.projectId, count: 1 },
+      { scope: "bot", groupId: "", count: 1 },
+      { scope: "user", groupId: "", count: 2 },
     ]);
     expect(injection.facts).toEqual([]);
   });
 
   test("a whole tier of faded notes renders the empty-tier text, not a blank block", () => {
     const injection = renderMemoryInjectionV1({
-      botId: "bot-1",
       noteCutoff: CUT,
       user: tier(
         userMemoryRootV1(OWNER),
         [],
         [fact("[note] gone", { text: "[note] gone", date: "2026-08-17" })],
       ),
-      projects: [],
-      joined: [],
       own: tier(
         botMemoryRootV1(OWNER),
         [],
@@ -418,11 +309,8 @@ describe("the note fade", () => {
   test("precedence runs on the survivors: a faded own note frees the shared one", () => {
     const shared = "we ship on Friday";
     const injection = renderMemoryInjectionV1({
-      botId: "bot-1",
       noteCutoff: CUT,
       user: tier(userMemoryRootV1(OWNER), [fact(shared)]),
-      projects: [],
-      joined: [],
       own: tier(
         botMemoryRootV1(OWNER),
         [],
@@ -432,8 +320,6 @@ describe("the note fade", () => {
     // The own note faded, so it does not claim the text away from the User
     // block — the User's durable fact is injected instead of nothing at all.
     expect(injection.text).toContain(`[via School] ${shared}`);
-    expect(injection.faded).toEqual([
-      { scope: "bot", projectId: "", count: 1 },
-    ]);
+    expect(injection.faded).toEqual([{ scope: "bot", groupId: "", count: 1 }]);
   });
 });

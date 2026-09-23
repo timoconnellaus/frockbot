@@ -48,7 +48,7 @@ const PREVIEW_FIELDS: Record<AuditKindV1, readonly string[]> = {
   // `skill_write` body into a durable table a person reads later. What was
   // written is the Workspace's business and the digest's; the audit row says
   // where it was written, which is the question an audit answers.
-  file: ["path", "root", "project", "packageId", "skill"],
+  file: ["path", "root", "group_id", "packageId", "skill"],
   mcp: [],
 };
 

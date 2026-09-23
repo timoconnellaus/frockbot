@@ -4,7 +4,7 @@ import { MemoryEngineV1 } from "./engine.ts";
 import { drainMemoryProcessingV1 } from "./processing.ts";
 import type { MemoryProcessingAdaptersV1 } from "./processing.ts";
 import {
-  groupChatScopeFromProjectV1,
+  groupChatScopeV1,
   MEMORY_JOB_WAKEUP_MS_V1,
   type MemoryAuthorityV1,
   type MemoryJobPrincipalV1,
@@ -81,7 +81,8 @@ const BOT: MemoryScopeRefV1 = {
   botId: "bot-1",
 };
 const USER: MemoryScopeRefV1 = { kind: "user", userId: "user-1" };
-const GROUP = groupChatScopeFromProjectV1("user-1", "school");
+const SCHOOL = "g-5c0015c0015c0015c001";
+const GROUP = groupChatScopeV1("user-1", SCHOOL);
 const PRINCIPAL: MemoryJobPrincipalV1 = {
   userId: "user-1",
   botId: "bot-1",
@@ -449,6 +450,48 @@ describe("indexing and degraded semantic status", () => {
     expect(recalled.semanticCoverage).toBe("unconfirmed");
   });
 
+  test("purging a deleted group's scope removes its Memory and its vectors", async () => {
+    const { engine, time } = engineOf(["user", "groupChat"]);
+    const member = auth({ joinedGroupChatIds: [SCHOOL] });
+    engine.write({
+      authority: member,
+      scope: GROUP,
+      content: "Assembly is on Friday.",
+      operationKey: "g1",
+    });
+    engine.write({
+      authority: member,
+      scope: USER,
+      content: "Tim drinks his tea black.",
+      operationKey: "u1",
+    });
+    const vectors = fakeVectors();
+    const index = () =>
+      drainDue(engine, time, {
+        embed: async (texts) => texts.map(() => [1, 0]),
+        vectors,
+      });
+    for (let step = 0; step < 6; step += 1) await index();
+    expect(vectors.upserts).toHaveLength(2);
+    const key = `groupChat:user-1:${SCHOOL}`;
+    expect(engine.scopeKeysOfKind("groupChat")).toEqual([key]);
+
+    expect(engine.purgeScope(key)).toEqual({ items: 1 });
+    expect(engine.scopeKeysOfKind("groupChat")).toEqual([]);
+    expect(
+      engine.recall({ authority: member, query: "Assembly", scopes: [GROUP] })
+        .hits,
+    ).toEqual([]);
+    expect(
+      engine.recall({ authority: member, query: "tea", scopes: [USER] }).hits,
+    ).toHaveLength(1);
+    for (let step = 0; step < 6; step += 1) await index();
+    expect(vectors.deletes).toHaveLength(1);
+    expect(vectors.upserts).toContain(vectors.deletes[0]);
+    // Purging again finds nothing.
+    expect(engine.purgeScope(key)).toEqual({ items: 0 });
+  });
+
   test("a delayed vector delete cannot resurrect a forgotten fact", async () => {
     const { engine, time } = engineOf();
     const authority = auth();
@@ -529,7 +572,7 @@ describe("wakeup, eviction and isolation", () => {
   test("Bot and User scopes stay isolated across owners", async () => {
     const bot = engineOf(["bot"]);
     const user = engineOf(["user", "groupChat"]);
-    const member = auth({ joinedGroupChatIds: ["school"] });
+    const member = auth({ joinedGroupChatIds: [SCHOOL] });
     bot.engine.captureExtraction({
       authority: member,
       scope: BOT,

@@ -416,8 +416,7 @@ export class WorkerdBotState extends BotState {
   async memoryWrite(input: {
     userId: string;
     botId: string;
-    scope: "bot" | "user" | "project";
-    project?: string;
+    scope: "bot" | "user";
     tier: "profile" | "log" | "note";
     fact: string;
   }): Promise<{ content: string; isError: boolean; events: SessionEvent[] }> {
@@ -447,7 +446,6 @@ export class WorkerdBotState extends BotState {
     const result = await tool.execute(
       {
         scope: input.scope,
-        ...(input.project ? { project: input.project } : {}),
         tier: input.tier,
         fact: input.fact,
       },

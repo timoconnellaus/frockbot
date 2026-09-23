@@ -7,10 +7,10 @@
 
 import { MEMORY_MAX_FACT_LENGTH } from "./store.js";
 import { memoryFactKeyV1 } from "./facts.js";
-import { isMemoryProjectIdV1 } from "./roots.js";
+import { isGroupIdV1 } from "@frockbot/app/groups/shared";
 
-/** Product-facing scope names. `project` maps to engine `groupChat`. */
-export type MemoryProductScopeV1 = "bot" | "user" | "project";
+/** Product-facing scope names. `group` maps to engine `groupChat`. */
+export type MemoryProductScopeV1 = "bot" | "user" | "group";
 
 /** Engine scope kinds. `groupChat` is the typed shared scope. */
 export type MemoryEngineScopeKindV1 = "bot" | "user" | "groupChat";
@@ -111,7 +111,7 @@ export interface MemoryAuthorityV1 {
   botId: string;
   /** `user` is the authenticated User command path; `bot` is a Bot Turn. */
   actor: "bot" | "user";
-  /** Current Project membership, filled by the owner — never trusted from a caller. */
+  /** Current Group Chat membership, filled by the owner — never trusted from a caller. */
   joinedGroupChatIds: readonly string[];
   membershipRevision: string;
 }
@@ -482,32 +482,28 @@ export function decodeMemoryScopeKeyV1(scopeKey: string): MemoryScopeRefV1 {
   throw new Error(`Memory scope key "${scopeKey}" is invalid`);
 }
 
-/**
- * Maps the still-exposed Project membership id onto the engine's `groupChat`
- * scope. One adapter, so membership records stay where they are until the
- * separately assigned rename.
- */
-export function groupChatScopeFromProjectV1(
+/** A Group Chat's shared Memory scope. */
+export function groupChatScopeV1(
   userId: string,
-  projectId: string,
+  groupId: string,
 ): MemoryScopeRefV1 {
-  if (!isMemoryProjectIdV1(projectId)) {
-    throw new Error(`Project slug "${projectId}" is invalid`);
+  if (!isGroupIdV1(groupId)) {
+    throw new Error(`Group Chat id "${groupId}" is invalid`);
   }
-  return { kind: "groupChat", userId, groupChatId: projectId };
+  return { kind: "groupChat", userId, groupChatId: groupId };
 }
 
 export function productScopeToEngineV1(
   scope: MemoryProductScopeV1,
   owner: { userId: string; botId: string },
-  projectId?: string,
+  groupId?: string,
 ): MemoryScopeRefV1 {
   if (scope === "bot") {
     return { kind: "bot", userId: owner.userId, botId: owner.botId };
   }
   if (scope === "user") return { kind: "user", userId: owner.userId };
-  if (!projectId) throw new Error("the project scope requires a Project slug");
-  return groupChatScopeFromProjectV1(owner.userId, projectId);
+  if (!groupId) throw new Error("the group scope requires a group_id");
+  return groupChatScopeV1(owner.userId, groupId);
 }
 
 export function engineScopeToProductV1(
@@ -515,7 +511,7 @@ export function engineScopeToProductV1(
 ): MemoryProductScopeV1 {
   if (scope.kind === "bot") return "bot";
   if (scope.kind === "user") return "user";
-  return "project";
+  return "group";
 }
 
 export function createdByPrincipalV1(authority: MemoryAuthorityV1): string {
@@ -546,7 +542,7 @@ export function authorizeMemoryScopeV1(
   const groupChatId = scope.groupChatId;
   if (!groupChatId) return "groupChat scope requires a Group Chat id";
   if (!authority.joinedGroupChatIds.includes(groupChatId)) {
-    return `you have not joined Project "${groupChatId}"; join it before changing its memory`;
+    return `you are not a member of Group Chat "${groupChatId}"`;
   }
   return undefined;
 }

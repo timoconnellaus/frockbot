@@ -1,16 +1,16 @@
 // The injected Memory block: GrokBot's shape, order, labels and caps.
 //
-// GrokBot is the parity target. Three scopes, injected
-// **user → project → own**, as *labelled paragraphs* rather than
-// headings, blank-line separated. Precedence runs the other way — own >
-// project > user, "the most specific wins" — so a fact a Bot holds itself is
-// not repeated in a shared block below it.
+// GrokBot is the parity target. The two file-backed scopes are injected
+// **user → own**, as *labelled paragraphs* rather than headings, blank-line
+// separated. Precedence runs the other way — own > user, "the most specific
+// wins" — so a fact a Bot holds itself is not repeated in the shared block
+// below it. A Group Chat's shared Memory is canonical only, and reaches the
+// prompt from the prepared core rather than from this render.
 //
 // The caps are GrokBot's constants, not ours:
 //
 //   own      30 recent facts, 4000-char recent budget, 500-char clamp per fact
 //   user     50 profile / 15 recent, 4000 / 2000 char budgets
-//   project  at most 3 Projects; 25 profile / 10 recent, 2500 / 1500 budgets
 //
 // DELIBERATELY NOT IMPLEMENTED: `resolveFrozenMemoryPrompt`. GrokBot freezes
 // the rendered block per compaction epoch and reuses it, and that freeze is
@@ -26,7 +26,6 @@ import {
   renderInjectedFactLineV1,
   type SourcedMemoryFactV1,
 } from "./facts.js";
-import { memoryShardOfV1 } from "./roots.js";
 import type { MemoryTierReadV1 } from "./store.js";
 
 /** One tier's render bounds, in GrokBot's own units. */
@@ -59,20 +58,10 @@ export const MEMORY_USER_CAPS_V1: MemoryRenderCapsV1 = {
 /**
  * The whole injected Memory block's ceiling, over and above the per-tier caps.
  *
- * The per-tier caps bound each section but not their sum, so a Bot in three
- * Projects injected the sum of every cap on every Turn. This is the one number
- * that bounds what Memory costs a request, whatever a Bot has joined.
+ * The per-tier caps bound each section but not their sum. This is the one
+ * number that bounds what Memory costs a request.
  */
 export const MEMORY_INJECTION_BUDGET_V1 = 12_000;
-
-/** profileLimit 25 / recentLimit 10, char budgets 2500 / 1500. */
-export const MEMORY_PROJECT_CAPS_V1: MemoryRenderCapsV1 = {
-  profileLimit: 25,
-  recentLimit: 10,
-  profileBudget: 2_500,
-  recentBudget: 1_500,
-  factClamp: 500,
-};
 
 /**
  * How many days a `[note] ` (or `[episode] `) fact keeps being injected.
@@ -93,29 +82,9 @@ export const MEMORY_PROJECT_CAPS_V1: MemoryRenderCapsV1 = {
  */
 export const MEMORY_NOTE_TTL_DAYS = 14;
 
-/** `MEMORY_PROJECT_INJECTED_CAP`: at most three joined Projects are injected. */
-export const MEMORY_PROJECT_INJECTED_CAP = 3;
-
-/** One Project the Bot has joined, as the render needs it. */
-export interface MemoryProjectV1 {
-  projectId: string;
-  name: string;
-  description: string;
-}
-
-/** A Project's tier read together with the Project it belongs to. */
-export interface MemoryProjectTierV1 {
-  project: MemoryProjectV1;
-  tier: MemoryTierReadV1;
-}
-
 /** Everything one Turn renders from. */
 export interface MemoryInjectionInputV1 {
-  botId: string;
   user: MemoryTierReadV1;
-  projects: MemoryProjectTierV1[];
-  /** Every joined Project, including the ones the cap left out. */
-  joined: MemoryProjectV1[];
   own: MemoryTierReadV1;
   /**
    * `YYYY-MM-DD`: the oldest day a marked fact is still injected on.
@@ -132,7 +101,7 @@ export interface MemoryInjectionInputV1 {
 /** One fact that reached the prompt, as `memory/injected` records it. */
 export interface InjectedMemoryFactV1 {
   scope: MemoryScopeNameV1;
-  projectId: string;
+  groupId: string;
   /**
    * The tier the fact was written as, not the file it happens to sit in. A
    * note lives in the log file; recording it as `log` left a reader of the
@@ -154,7 +123,7 @@ export interface InjectedMemoryFactV1 {
  */
 export interface MemoryFadedV1 {
   scope: MemoryScopeNameV1;
-  projectId: string;
+  groupId: string;
   count: number;
 }
 
@@ -176,7 +145,7 @@ export interface MemoryInjectionV1 {
 const USER_PARAGRAPH =
   "User memory: facts shared by every Bot of this User. It is split into one shard folder per Bot so every file has a single writer. Never edit another Bot's shard — correct a shared fact by writing the correction into your own shard with memory_write, and newest wins.";
 const OWN_PARAGRAPH =
-  "Memory: your own memory. On conflict prefer your OWN memory first, then project memory, then user memory — the most specific wins; within a shared tier, newest wins.";
+  "Memory: your own memory. On conflict prefer your OWN memory first, then the group chat's memory, then user memory — the most specific wins; within a shared tier, newest wins.";
 
 interface TakenFacts {
   lines: string[];
@@ -212,13 +181,12 @@ function take(
 function injected(
   facts: SourcedMemoryFactV1[],
   scope: MemoryScopeNameV1,
-  projectId: string,
   tier: "profile" | "log",
   withVia: boolean,
 ): InjectedMemoryFactV1[] {
   return facts.map((fact) => ({
     scope,
-    projectId,
+    groupId: "",
     // A note lives in the log file, and the event used to say `log` while the
     // write that produced it said `note` — so a reader of the durable record
     // could not tell the two tiers apart, and the only sign was a `[note] `
@@ -277,44 +245,29 @@ export function renderMemoryInjectionV1(
   const blocks: string[] = [];
 
   // Precedence is applied before rendering: the own tier claims a fact text,
-  // then the Projects, and only the remainder reaches the User block. The
-  // ordering of the *paragraphs* is the opposite — user, project, own — which
-  // is GrokBot's injected order exactly.
+  // and only the remainder reaches the User block. The ordering of the
+  // *paragraphs* is the opposite — user, then own — which is GrokBot's
+  // injected order exactly.
   //
   // The fade runs first of all, so precedence, caps and budgets all see only
   // the surviving set.
   const faded: MemoryFadedV1[] = [];
-  const fade = (
-    tier: MemoryTierReadV1,
-    scope: MemoryScopeNameV1,
-    projectId: string,
-  ) => {
+  const fade = (tier: MemoryTierReadV1, scope: MemoryScopeNameV1) => {
     const profile = live(tier.profile, input.noteCutoff);
     const recent = live(tier.recent, input.noteCutoff);
     const count = profile.faded + recent.faded;
-    if (count > 0) faded.push({ scope, projectId, count });
+    if (count > 0) faded.push({ scope, groupId: "", count });
     return {
       profile: profile.kept,
       recent: recent.kept,
       recentFaded: recent.faded,
     };
   };
-  const ownLive = fade(input.own, "bot", "");
-  const userLive = fade(input.user, "user", "");
+  const ownLive = fade(input.own, "bot");
+  const userLive = fade(input.user, "user");
 
   const claimed = new Set<string>();
   remember([...ownLive.profile, ...ownLive.recent], claimed);
-
-  const shown = input.projects.slice(0, MEMORY_PROJECT_INJECTED_CAP);
-  const projectFacts = shown.map((entry) => {
-    const tier = fade(entry.tier, "project", entry.project.projectId);
-    const profile = without(tier.profile, claimed);
-    const recent = without(tier.recent, claimed);
-    return { entry, profile, recent };
-  });
-  for (const entry of projectFacts) {
-    remember([...entry.profile, ...entry.recent], claimed);
-  }
 
   // User memory.
   const userProfile = take(
@@ -343,8 +296,8 @@ export function renderMemoryInjectionV1(
   }
   blocks.push(userLines.join("\n"));
   facts.push(
-    ...injected(userProfile.taken, "user", "", "profile", true),
-    ...injected(userRecent.taken, "user", "", "log", true),
+    ...injected(userProfile.taken, "user", "profile", true),
+    ...injected(userRecent.taken, "user", "log", true),
   );
   if (input.user.unavailable) {
     omissions.push({ scope: "user", reason: input.user.unavailable });
@@ -357,88 +310,6 @@ export function renderMemoryInjectionV1(
     omissions.push({
       scope: "user",
       reason: `${userDropped} shared fact(s) beyond the injection cap were not injected`,
-    });
-  }
-
-  // Project memory, at most three.
-  for (const { entry, profile, recent } of projectFacts) {
-    const shard = memoryShardOfV1(entry.tier.root, input.botId);
-    const lines = [
-      `Project "${entry.project.name}" (${entry.project.projectId}) — your shard: ${shard}:`,
-    ];
-    if (entry.project.description) {
-      lines.push(entry.project.description);
-    }
-    const profileTaken = take(
-      profile,
-      MEMORY_PROJECT_CAPS_V1.profileLimit,
-      MEMORY_PROJECT_CAPS_V1.profileBudget,
-      MEMORY_PROJECT_CAPS_V1.factClamp,
-      true,
-    );
-    const recentTaken = take(
-      recent,
-      MEMORY_PROJECT_CAPS_V1.recentLimit,
-      MEMORY_PROJECT_CAPS_V1.recentBudget,
-      MEMORY_PROJECT_CAPS_V1.factClamp,
-      true,
-    );
-    if (profileTaken.lines.length > 0) {
-      lines.push("About this project (shared):", ...profileTaken.lines);
-    }
-    if (recentTaken.lines.length > 0) {
-      lines.push("Recently (shared):", ...recentTaken.lines);
-    }
-    if (profileTaken.lines.length === 0 && recentTaken.lines.length === 0) {
-      lines.push("No shared facts recorded yet for this project.");
-    }
-    const others = input.joined
-      .filter((project) => project.projectId !== entry.project.projectId)
-      .map((project) => project.projectId);
-    if (others.length > 0) lines.push(`Also a member of: ${others.join(", ")}`);
-    blocks.push(lines.join("\n"));
-    facts.push(
-      ...injected(
-        profileTaken.taken,
-        "project",
-        entry.project.projectId,
-        "profile",
-        true,
-      ),
-      ...injected(
-        recentTaken.taken,
-        "project",
-        entry.project.projectId,
-        "log",
-        true,
-      ),
-    );
-    if (entry.tier.unavailable) {
-      omissions.push({
-        scope: "project",
-        reason: `${entry.project.projectId}: ${entry.tier.unavailable}`,
-      });
-    }
-    if (entry.tier.omitted) {
-      omissions.push({
-        scope: "project",
-        reason: `${entry.project.projectId}: ${entry.tier.omitted}`,
-      });
-    }
-    const dropped = profileTaken.dropped + recentTaken.dropped;
-    if (dropped > 0) {
-      omissions.push({
-        scope: "project",
-        reason: `${entry.project.projectId}: ${dropped} shared fact(s) beyond the injection cap were not injected`,
-      });
-    }
-  }
-  if (input.projects.length > MEMORY_PROJECT_INJECTED_CAP) {
-    omissions.push({
-      scope: "project",
-      reason: `at most ${MEMORY_PROJECT_INJECTED_CAP} joined Projects are injected; ${
-        input.projects.length - MEMORY_PROJECT_INJECTED_CAP
-      } were not`,
     });
   }
 
@@ -478,8 +349,8 @@ export function renderMemoryInjectionV1(
   }
   blocks.push(ownLines.join("\n"));
   facts.push(
-    ...injected(ownProfile.taken, "bot", "", "profile", false),
-    ...injected(ownRecent.taken, "bot", "", "log", false),
+    ...injected(ownProfile.taken, "bot", "profile", false),
+    ...injected(ownRecent.taken, "bot", "log", false),
   );
   if (input.own.unavailable) {
     omissions.push({ scope: "bot", reason: input.own.unavailable });
@@ -495,12 +366,10 @@ export function renderMemoryInjectionV1(
     });
   }
 
-  // A global bound over the per-tier ones. Each tier is capped on its own, so
-  // a Bot in three Projects could inject the sum of every cap — about 26 000
-  // characters — on every Turn, growing with membership rather than with
-  // anything the User did. The block is assembled most-general first and the
-  // Bot's own memory last, so the trim drops from the front: the most
-  // specific tier, which wins on conflict anyway, is the one kept.
+  // A global bound over the per-tier ones. The block is assembled
+  // most-general first and the Bot's own memory last, so the trim drops from
+  // the front: the most specific tier, which wins on conflict anyway, is the
+  // one kept.
   const text = blocks.join("\n\n");
   if (text.length <= MEMORY_INJECTION_BUDGET_V1) {
     return { text, facts, omissions, faded };

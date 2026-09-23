@@ -672,33 +672,23 @@ export async function isolateMemoryRead(
   input: IsolateCallScopeV1,
 ): Promise<IsolateMemoryOutcomeV1> {
   const request = decodeIsolateMemoryReadRequestV1(input.request);
-  const memory = await isolateMemoryHost(state, input, request);
+  const memory = await isolateMemoryHost(state, input);
   if (!memory)
     return { status: "unavailable", reason: "Memory is unavailable" };
   if (memory.records) {
-    const authority = await authorityOf({
-      owner: memory.owner,
-      records: memory.records,
-      ...(memory.projects ? { projects: memory.projects } : {}),
-    });
+    const authority = await authorityOf(memory);
     return {
       status: "available",
       value: await memory.records.preparedCore({
         authority,
-        scopes: [
-          productScopeToEngineV1(
-            request.scope,
-            memory.owner,
-            request.projectId,
-          ),
-        ],
+        scopes: [productScopeToEngineV1(request.scope, memory.owner)],
       }),
     };
   }
   return {
     status: "available",
     value: await memory.store.read(
-      memoryScopeRootV1(request.scope, memory.owner, request.projectId),
+      memoryScopeRootV1(request.scope, memory.owner),
     ),
   };
 }
@@ -708,7 +698,7 @@ export async function isolateMemoryWrite(
   input: IsolateCallScopeV1,
 ): Promise<IsolateMemoryOutcomeV1> {
   const request = decodeIsolateMemoryWriteRequestV1(input.request);
-  const memory = await isolateMemoryHost(state, input, request);
+  const memory = await isolateMemoryHost(state, input);
   if (!memory?.writer) {
     return { status: "unavailable", reason: "Memory is unavailable" };
   }
@@ -718,11 +708,9 @@ export async function isolateMemoryWrite(
         owner: memory.owner,
         records: memory.records,
         writer: memory.writer,
-        ...(memory.projects ? { projects: memory.projects } : {}),
       },
       {
         scope: request.scope,
-        ...(request.projectId ? { project: request.projectId } : {}),
         tier: request.tier ?? "log",
         fact: request.fact,
       },
@@ -736,7 +724,7 @@ export async function isolateMemoryWrite(
   return {
     status: "available",
     value: await memory.store.write({
-      root: memoryScopeRootV1(request.scope, memory.owner, request.projectId),
+      root: memoryScopeRootV1(request.scope, memory.owner),
       tier: request.tier ?? "log",
       fact: request.fact,
       writer: {
@@ -753,7 +741,7 @@ export async function isolateMemoryForget(
   input: IsolateCallScopeV1,
 ): Promise<IsolateMemoryOutcomeV1> {
   const request = decodeIsolateMemoryWriteRequestV1(input.request);
-  const memory = await isolateMemoryHost(state, input, request);
+  const memory = await isolateMemoryHost(state, input);
   if (!memory?.writer) {
     return { status: "unavailable", reason: "Memory is unavailable" };
   }
@@ -763,11 +751,9 @@ export async function isolateMemoryForget(
         owner: memory.owner,
         records: memory.records,
         writer: memory.writer,
-        ...(memory.projects ? { projects: memory.projects } : {}),
       },
       {
         scope: request.scope,
-        ...(request.projectId ? { project: request.projectId } : {}),
         fact: request.fact,
       },
       `plugin-forget:${input.packageId}:${input.turnId}:${request.fact}`,
@@ -777,7 +763,7 @@ export async function isolateMemoryForget(
   return {
     status: "available",
     value: await memory.store.forget({
-      root: memoryScopeRootV1(request.scope, memory.owner, request.projectId),
+      root: memoryScopeRootV1(request.scope, memory.owner),
       fact: request.fact,
       writer: {
         kind: "bot",
@@ -1079,7 +1065,6 @@ export async function isolateSchedule(
 async function isolateMemoryHost(
   state: ShellBotStateV1,
   input: IsolateCallScopeV1,
-  request: { scope: "bot" | "user" | "project"; projectId?: string },
 ) {
   if (!isolateCallAdmittedV1(state, input)) return undefined;
   const host = createBotMemoryHost(
@@ -1091,16 +1076,6 @@ async function isolateMemoryHost(
     },
     state.env,
   );
-  if (!host) return undefined;
-  if (request.scope === "project") {
-    const projects = await host.projects?.joined();
-    if (
-      !request.projectId ||
-      !projects?.some((project) => project.projectId === request.projectId)
-    ) {
-      return undefined;
-    }
-  }
   return host;
 }
 

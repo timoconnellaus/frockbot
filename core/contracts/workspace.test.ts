@@ -630,7 +630,7 @@ describe("Skill sources", () => {
   });
 });
 
-describe("the three Memory tiers", () => {
+describe("the Memory roots", () => {
   const botRoot: WorkspaceMemoryRootV1 = {
     kind: "bot-memory",
     userId: "user-1",
@@ -640,50 +640,38 @@ describe("the three Memory tiers", () => {
     kind: "user-memory",
     userId: "user-1",
   };
-  const projectRoot: WorkspaceMemoryRootV1 = {
-    kind: "project-memory",
-    userId: "user-1",
-    projectId: "school-run",
-  };
 
-  test("decodes a Project Memory root and bounds its Project id", () => {
-    expect(decodeWorkspaceRootV1(projectRoot)).toEqual(projectRoot);
+  test("a Project Memory root is not a root", () => {
     expect(() =>
-      decodeWorkspaceRootV1({ kind: "project-memory", userId: "user-1" }),
-    ).toThrow();
-    expect(() =>
-      decodeWorkspaceRootV1({ ...projectRoot, projectId: "Not A Slug" }),
-    ).toThrow();
-    expect(() =>
-      decodeWorkspaceRootV1({ ...projectRoot, projectId: "a".repeat(129) }),
-    ).toThrow();
-    expect(() =>
-      decodeWorkspaceRootV1({ ...projectRoot, botId: "bot-1" }),
+      decodeWorkspaceRootV1({
+        kind: "project-memory",
+        userId: "user-1",
+        projectId: "school-run",
+      }),
     ).toThrow();
   });
 
-  test("all three kinds are Memory roots, and only two are shared", () => {
-    expect(
-      [botRoot, userRoot, projectRoot].map(isWorkspaceMemoryRootV1),
-    ).toEqual([true, true, true]);
+  test("both kinds are Memory roots, and only the User's is shared", () => {
+    expect([botRoot, userRoot].map(isWorkspaceMemoryRootV1)).toEqual([
+      true,
+      true,
+    ]);
     expect(isWorkspaceMemoryRootV1(instructionRoot())).toBe(false);
-    expect(
-      [botRoot, userRoot, projectRoot].map(isWorkspaceSharedMemoryRootV1),
-    ).toEqual([false, true, true]);
+    expect([botRoot, userRoot].map(isWorkspaceSharedMemoryRootV1)).toEqual([
+      false,
+      true,
+    ]);
   });
 
-  test("no Memory root accepts a kernel write, Project Memory included", () => {
-    expect(workspaceRootAcceptsKernelWriteV1(projectRoot)).toBe(false);
+  test("no Memory root accepts a kernel write", () => {
+    expect(workspaceRootAcceptsKernelWriteV1(userRoot)).toBe(false);
+    expect(workspaceRootAcceptsKernelWriteV1(botRoot)).toBe(false);
   });
 
-  test("a Project Memory root key never collides with another root", () => {
-    expect(workspaceRootKeyV1(projectRoot)).toBe(
-      "project-memory:user-1:school-run",
-    );
+  test("a Memory root key never collides with another root", () => {
     const keys = [
       workspaceRootKeyV1(botRoot),
       workspaceRootKeyV1(userRoot),
-      workspaceRootKeyV1(projectRoot),
       workspaceRootKeyV1(instructionRoot()),
     ];
     expect(new Set(keys).size).toBe(keys.length);
@@ -694,11 +682,6 @@ describe("shared Memory tiers are sharded per writing Bot", () => {
   const userRoot: WorkspaceMemoryRootV1 = {
     kind: "user-memory",
     userId: "user-1",
-  };
-  const projectRoot: WorkspaceMemoryRootV1 = {
-    kind: "project-memory",
-    userId: "user-1",
-    projectId: "school-run",
   };
   const botRoot: WorkspaceMemoryRootV1 = {
     kind: "bot-memory",
@@ -714,12 +697,12 @@ describe("shared Memory tiers are sharded per writing Bot", () => {
       root: userRoot,
       path: "by-agent/bot-1/profile.md",
     });
-    expect(memoryShardPathV1(projectRoot, "bot-2", "log/2026-08.md")).toEqual({
-      root: projectRoot,
+    expect(memoryShardPathV1(userRoot, "bot-2", "log/2026-08.md")).toEqual({
+      root: userRoot,
       path: "by-agent/bot-2/log/2026-08.md",
     });
-    expect(workspaceMemoryShardV1(projectRoot, "bot-2")).toEqual({
-      root: projectRoot,
+    expect(workspaceMemoryShardV1(userRoot, "bot-2")).toEqual({
+      root: userRoot,
       botId: "bot-2",
       prefix: "by-agent/bot-2/",
     });
@@ -799,13 +782,13 @@ describe("shared Memory tiers are sharded per writing Bot", () => {
     const other: WorkspaceWriterV1 = { kind: "user", userId: "user-2" };
     expect(
       writerOwnsMemoryPathV1(
-        memoryShardPathV1(projectRoot, "bot-7", "profile.md"),
+        memoryShardPathV1(userRoot, "bot-7", "profile.md"),
         user,
       ),
     ).toBe(true);
     expect(
       writerOwnsMemoryPathV1(
-        memoryShardPathV1(projectRoot, "bot-7", "profile.md"),
+        memoryShardPathV1(userRoot, "bot-7", "profile.md"),
         other,
       ),
     ).toBe(false);

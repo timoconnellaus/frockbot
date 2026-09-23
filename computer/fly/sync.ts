@@ -1609,7 +1609,6 @@ export function declaredWorkspaceRootsV1(
   owner: {
     userId: string;
     botIds: readonly string[];
-    projectIds?: readonly string[];
     packageRoots?: readonly { packageId: string; rootId: string }[];
   },
 ): WorkspaceRootV1[] {
@@ -1629,11 +1628,6 @@ export function declaredWorkspaceRootsV1(
   }
   if (declares("user-memory")) {
     roots.push({ kind: "user-memory", userId: owner.userId });
-  }
-  if (declares("project-memory")) {
-    for (const projectId of owner.projectIds ?? []) {
-      roots.push({ kind: "project-memory", userId: owner.userId, projectId });
-    }
   }
   if (declares("package-declared")) {
     for (const declared of owner.packageRoots ?? []) {
@@ -1659,7 +1653,6 @@ export interface FlySpriteSyncOptionsV1 extends Omit<
   /** Every root this Computer syncs; the layout's own roots when absent. */
   roots?: WorkspaceRootV1[];
   botIds?: readonly string[];
-  projectIds?: readonly string[];
   packageRoots?: readonly { packageId: string; rootId: string }[];
 }
 
@@ -1674,7 +1667,6 @@ export function createFlySpriteSyncV1(
     botDirectoryKey,
     roots,
     botIds,
-    projectIds,
     packageRoots,
     ...rest
   } = options;
@@ -1691,7 +1683,6 @@ export function createFlySpriteSyncV1(
       declaredWorkspaceRootsV1(layout, {
         userId,
         botIds: botIds ?? [computer.botId],
-        ...(projectIds ? { projectIds } : {}),
         ...(packageRoots ? { packageRoots } : {}),
       }),
   });

@@ -48,12 +48,12 @@ export function renderCanonicalMemoryInjectionV1(input: {
     lines.push("<memory>");
     for (const block of clipped.kept) {
       const scope = engineScopeToProductV1(block.scope);
-      const projectId =
+      const groupId =
         block.scope.kind === "groupChat" ? (block.scope.groupChatId ?? "") : "";
       lines.push(block.text);
       facts.push({
         scope,
-        projectId,
+        groupId,
         tier: "profile",
         via: "",
         learnedAt: input.learnedAt,
@@ -74,7 +74,7 @@ export function renderCanonicalMemoryInjectionV1(input: {
       ...input.omissions.map((omission) => ({
         scope:
           omission.scope?.kind === "groupChat"
-            ? ("project" as const)
+            ? ("group" as const)
             : omission.scope?.kind === "user"
               ? ("user" as const)
               : ("bot" as const),

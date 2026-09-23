@@ -126,7 +126,7 @@ describe("Memory in Workerd", () => {
     if (injected?.type !== "memory/injected") throw new Error("unreachable");
     expect(injected.facts).toContainEqual({
       scope: "user",
-      projectId: "",
+      groupId: "",
       tier: "profile",
       // Empty, not the learner's id: the durable record credits a name or
       // nobody, exactly as the prompt does.
@@ -137,7 +137,7 @@ describe("Memory in Workerd", () => {
     expect(injected.sources).toContainEqual(
       expect.objectContaining({
         scope: "user",
-        projectId: "",
+        groupId: "",
         path: expect.stringMatching(/^item:/),
       }),
     );
@@ -314,7 +314,7 @@ describe("Memory in Workerd", () => {
     expect(injected.noteCutoff).toBe(day(-14));
     expect(injected.faded).toContainEqual({
       scope: "bot",
-      projectId: "",
+      groupId: "",
       count: 1,
     });
     // A fade is policy working, never an omission.

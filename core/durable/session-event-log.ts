@@ -742,6 +742,98 @@ export class SessionEventLog {
     await projectSessionReplaceV1(this.storage, sessionId, decoded);
   }
 
+  /**
+   * Rewrites stored events in place, for the cleanup of a retired stored
+   * shape. `repair` is shown each event as stored, before any decoder has
+   * seen it, and answers its replacement or `undefined` to keep it. Every
+   * replacement must decode, and keeps its sequence number, so nothing that
+   * points into the log moves. Answers how many events were replaced.
+   */
+  async repairStoredEvents(
+    sessionId: string,
+    repair: (event: Record<string, unknown>) => unknown,
+  ): Promise<number> {
+    const index = requireIndex(
+      await this.storage.get<SessionEventLogIndexV1>(
+        sessionEventLogIndexKeyV1(sessionId),
+      ),
+      sessionId,
+    );
+    if (!index) return 0;
+    let repaired = 0;
+    for (let page = 0; page < index.pageCount; page += 1) {
+      const key = sessionEventLogPageKey(sessionId, page);
+      const stored = requirePage(
+        await this.storage.get<StoredSessionEventPageV1>(key),
+        sessionId,
+        page,
+      );
+      let changed = false;
+      const entries: StoredSessionEventV1[] = [];
+      for (const entry of stored.entries) {
+        const raw =
+          entry.storage === "inline"
+            ? (entry.event as unknown as Record<string, unknown>)
+            : (JSON.parse(await this.payloadText(sessionId, entry)) as Record<
+                string,
+                unknown
+              >);
+        const replacement = repair(raw);
+        if (replacement === undefined) {
+          entries.push(entry);
+          continue;
+        }
+        const event = decodeSessionEvent(replacement);
+        if (event.seq !== storedEventSeq(entry)) {
+          throw new Error("a repaired Session event must keep its sequence");
+        }
+        const next = await this.storedEvent(sessionId, event);
+        // A replacement stored in fewer chunks, or inline, leaves the old
+        // tail behind; nothing reads it, so it goes.
+        const kept = next.storage === "cut" ? next.payload.chunks : 0;
+        const had = entry.storage === "cut" ? entry.payload.chunks : 0;
+        for (let chunk = kept; chunk < had; chunk += 1) {
+          await this.storage.delete(
+            sessionEventPayloadKey(sessionId, event.seq, chunk),
+          );
+        }
+        entries.push(next);
+        changed = true;
+        repaired += 1;
+      }
+      if (changed) await this.storage.put(key, { ...stored, entries });
+    }
+    return repaired;
+  }
+
+  private async payloadText(
+    sessionId: string,
+    entry: StoredSessionEventCutV1,
+  ): Promise<string> {
+    const parts: string[] = [];
+    for (let chunk = 0; chunk < entry.payload.chunks; chunk += 1) {
+      const part = await this.storage.get<string>(
+        sessionEventPayloadKey(sessionId, entry.projection.seq, chunk),
+      );
+      if (typeof part !== "string") {
+        throw new Error(
+          `Session event payload ${entry.projection.seq}:${chunk} is missing`,
+        );
+      }
+      parts.push(part);
+    }
+    const serialized = parts.join("");
+    if (
+      encoder.encode(serialized).byteLength !== entry.payload.bytes ||
+      (await sha256HexTextV1(serialized)) !== entry.payload.sha256
+    ) {
+      throw new Error(
+        `Session event payload ${entry.projection.seq} is corrupt`,
+      );
+    }
+    return serialized;
+  }
+
   private async storedEvent(
     sessionId: string,
     event: SessionEvent,
@@ -796,28 +888,9 @@ export class SessionEventLog {
     entry: StoredSessionEventV1,
   ): Promise<SessionEvent> {
     if (entry.storage === "inline") return decodeSessionEvent(entry.event);
-    const parts: string[] = [];
-    for (let chunk = 0; chunk < entry.payload.chunks; chunk += 1) {
-      const part = await this.storage.get<string>(
-        sessionEventPayloadKey(sessionId, entry.projection.seq, chunk),
-      );
-      if (typeof part !== "string") {
-        throw new Error(
-          `Session event payload ${entry.projection.seq}:${chunk} is missing`,
-        );
-      }
-      parts.push(part);
-    }
-    const serialized = parts.join("");
-    if (
-      encoder.encode(serialized).byteLength !== entry.payload.bytes ||
-      (await sha256HexTextV1(serialized)) !== entry.payload.sha256
-    ) {
-      throw new Error(
-        `Session event payload ${entry.projection.seq} is corrupt`,
-      );
-    }
-    return decodeSessionEvent(JSON.parse(serialized));
+    return decodeSessionEvent(
+      JSON.parse(await this.payloadText(sessionId, entry)),
+    );
   }
 
   private async appendStored(

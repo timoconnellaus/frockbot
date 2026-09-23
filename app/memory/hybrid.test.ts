@@ -17,10 +17,7 @@ import {
 import { MEMORY_POLICY_V1, suballocateMemoryScopesV1 } from "./policy.ts";
 import type { MemorySqlStorageV1, MemorySqlValueV1 } from "./sql.ts";
 import { createTestMemoryAuthorityV1 } from "./testing.ts";
-import {
-  groupChatScopeFromProjectV1,
-  type MemoryScopeRefV1,
-} from "./records.ts";
+import { groupChatScopeV1, type MemoryScopeRefV1 } from "./records.ts";
 
 describe("reciprocal rank fusion", () => {
   test("sums 1/(60+rank) and deduplicates by item", () => {
@@ -364,15 +361,14 @@ describe("engine hybrid recall", () => {
 
   test("more scopes than the page are omitted with a cursor", () => {
     const engine = open();
+    const groups = ["a", "b", "c", "d", "e"].map((id) => `g-${id.repeat(20)}`);
     const authority = createTestMemoryAuthorityV1({
-      joinedGroupChatIds: ["a", "b", "c", "d", "e"],
+      joinedGroupChatIds: groups,
     });
     const scopes = [
       BOT,
       USER,
-      ...["a", "b", "c", "d", "e"].map((id) =>
-        groupChatScopeFromProjectV1("user-1", id),
-      ),
+      ...groups.map((id) => groupChatScopeV1("user-1", id)),
     ];
     const recalled = engine.recall({
       authority,

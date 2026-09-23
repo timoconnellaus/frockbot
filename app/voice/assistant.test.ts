@@ -161,7 +161,6 @@ function host(
         message: `You are now ${bot}.`,
       };
     },
-    recallProject: async (projectId) => `Project ${projectId}: nothing yet.`,
     remember: async ({ text, kind }) => `Kept ${kind}: ${text}`,
     forget: async (text) => `Dropped ${text}`,
     ...overrides,

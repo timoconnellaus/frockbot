@@ -3,7 +3,7 @@ import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { MemoryEngineV1 } from "./engine.ts";
 import { MemoryRecordsV1, inProcessMemoryRemoteV1 } from "./owner.ts";
 import {
-  groupChatScopeFromProjectV1,
+  groupChatScopeV1,
   productScopeToEngineV1,
   type MemoryAuthorityV1,
   type MemoryScopeRefV1,
@@ -73,7 +73,8 @@ const BOT: MemoryScopeRefV1 = {
   botId: "bot-1",
 };
 const USER: MemoryScopeRefV1 = { kind: "user", userId: "user-1" };
-const GROUP = groupChatScopeFromProjectV1("user-1", "school");
+const SCHOOL = "g-5c0015c0015c0015c001";
+const GROUP = groupChatScopeV1("user-1", SCHOOL);
 
 function auth(overrides: Partial<MemoryAuthorityV1> = {}): MemoryAuthorityV1 {
   return createTestMemoryAuthorityV1(overrides);
@@ -231,7 +232,7 @@ describe("scope and membership isolation", () => {
 
   test("unjoined Group Chat membership cannot read or write", () => {
     const { engine: store } = engine();
-    const member = auth({ joinedGroupChatIds: ["school"] });
+    const member = auth({ joinedGroupChatIds: [SCHOOL] });
     const outsider = auth({ botId: "bot-2", joinedGroupChatIds: [] });
     const written = store.write({
       authority: member,
@@ -257,15 +258,22 @@ describe("scope and membership isolation", () => {
     expect(leaked.hits).toEqual([]);
   });
 
-  test("project ids map to groupChat in one adapter", () => {
+  test("the group scope is a Group Chat's, named by its id", () => {
     expect(
       productScopeToEngineV1(
-        "project",
+        "group",
         { userId: "user-1", botId: "bot-1" },
-        "school",
+        SCHOOL,
       ),
     ).toEqual(GROUP);
     expect(GROUP.kind).toBe("groupChat");
+    expect(() =>
+      productScopeToEngineV1(
+        "group",
+        { userId: "user-1", botId: "bot-1" },
+        "school",
+      ),
+    ).toThrow("invalid");
   });
 });
 
@@ -577,7 +585,7 @@ describe("Bot plus User owner facade", () => {
       engine: botEngine,
       remote: inProcessMemoryRemoteV1(userEngine),
     });
-    const member = auth({ joinedGroupChatIds: ["school"] });
+    const member = auth({ joinedGroupChatIds: [SCHOOL] });
     await records.write({
       authority: member,
       scope: BOT,

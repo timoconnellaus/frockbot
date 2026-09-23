@@ -24,10 +24,9 @@ import type { EmbedMemory, MemoryVectorIndex } from "./types.js";
 
 /** One indexed chunk, addressed by the document generation it came from. */
 export interface MemoryIndexChunkV1 {
-  /** `<scope>:<projectId>:<path>`. */
+  /** `<scope>:<path>`. */
   documentKey: string;
   scope: MemoryDocumentV1["scope"];
-  projectId: string;
   path: string;
   botId: string;
   startLine: number;
@@ -67,7 +66,6 @@ async function chunksOf(
   return chunks.map((chunk) => ({
     documentKey: key,
     scope: document.scope,
-    projectId: document.projectId,
     path: document.path,
     botId: document.botId,
     startLine: chunk.startLine,
@@ -154,9 +152,7 @@ export async function memoryChunkVectorIdV1(
 
 /** The namespace one tier's vectors live in. */
 export function memoryVectorNamespaceV1(chunk: MemoryIndexChunkV1): string {
-  return chunk.projectId
-    ? `${chunk.scope}:${chunk.projectId}`
-    : `${chunk.scope}`;
+  return chunk.scope;
 }
 
 /**
@@ -198,7 +194,6 @@ export async function embedMemoryIndexV1(
       metadata: {
         path: chunk.path,
         scope: chunk.scope,
-        projectId: chunk.projectId,
         startLine: chunk.startLine,
         endLine: chunk.endLine,
         hash: chunk.hash,
