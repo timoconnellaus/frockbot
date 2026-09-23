@@ -136,6 +136,10 @@ abstract interface class AppBadgePresenter {
 
   /// Takes this account's badge away: sign-out, or the shell torn down.
   Future<void> clear();
+
+  /// Whether the badge moves only when this process redraws it, so unread
+  /// has to keep being read while the window is away.
+  bool get needsRefreshWhileAway;
 }
 
 /// The macOS dock tile. The label is decided here, so the dock and the
@@ -152,6 +156,11 @@ class DockBadgePresenter implements AppBadgePresenter {
 
   @override
   Future<void> clear() => channel.invokeMethod<void>('set', {'label': null});
+
+  /// The dock is the Mac's only alert, and a minimised window is exactly when
+  /// it is the one telling anyone a Bot spoke.
+  @override
+  bool get needsRefreshWhileAway => true;
 }
 
 /// Android launchers badge from active notifications, which the platform owns.
@@ -180,6 +189,11 @@ class LauncherBadgePresenter implements AppBadgePresenter {
   /// still registered, and they are still true.
   @override
   Future<void> clear() async {}
+
+  /// Push keeps the notifications it badges from current while the app is
+  /// away.
+  @override
+  bool get needsRefreshWhileAway => false;
 }
 
 /// The presenter for this platform, or none.
@@ -204,6 +218,8 @@ class AppBadgeSync {
   AppBadge? _sent;
   bool _cleared = false;
   Future<void> _queue = Future.value();
+
+  bool get needsRefreshWhileAway => presenter?.needsRefreshWhileAway ?? false;
 
   /// Makes the next [update] cross the channel even when its value is equal.
   /// Push setup or notification changes can leave the native presentation
