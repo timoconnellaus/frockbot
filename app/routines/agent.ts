@@ -14,6 +14,7 @@
 // tool is called from inside an admitted Turn, and a Bot Durable Object holds
 // exactly one run at a time, so the firing is durable immediately and lands the
 // moment the calling Turn settles. "Queue, never drop, never parallel."
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import type {
   AgentRuntimeV1,
   RuntimeFeatureV1,
@@ -315,16 +316,19 @@ function decodeRoutineManageInputV1(input: unknown): RoutineManageInputV1 {
   };
 }
 
-const COMMAND_ID_CHARACTER = /[^a-zA-Z0-9._-]/g;
-
 /**
- * The command id one tool call uses. It is derived from the Turn's effect
- * identifier, so a reconciled or retried call replays the recorded receipt
- * instead of writing a second Routine.
+ * The command id one tool call uses. It is derived from the Turn's run and
+ * effect identifier, so a reconciled or retried call replays the recorded
+ * receipt instead of writing a second Routine. The run is there because effect
+ * ids restart in every Session, and run ids are unique within the Bot whose
+ * Routines these are.
  */
-export function routineToolCommandIdV1(effectId: string): string {
-  const sanitized = effectId.replace(COMMAND_ID_CHARACTER, "-").slice(0, 120);
-  return `rt-${sanitized || "call"}`;
+export async function routineToolCommandIdV1(
+  runId: string,
+  effectId: string,
+): Promise<string> {
+  const digest = await sha256HexTextV1(`${runId}\u0000${effectId}`);
+  return `rt-${digest.slice(0, 32)}`;
 }
 
 /**
@@ -499,7 +503,10 @@ export function createRoutineManageTool(
         }
         command = routineManageCommandV1(decoded, {
           botId: host.botId,
-          commandId: routineToolCommandIdV1(context.effectId),
+          commandId: await routineToolCommandIdV1(
+            host.writer.runId,
+            context.effectId,
+          ),
         });
       } catch (error) {
         return refusal(error instanceof Error ? error.message : String(error));

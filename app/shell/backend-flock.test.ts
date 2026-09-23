@@ -19,7 +19,10 @@ function unreachable(name: string): never {
   throw new Error(`a hand-off must not reach ${name}`);
 }
 
-function seam(handoffDepth?: number): {
+function seam(
+  handoffDepth?: number,
+  runId = "run-parent",
+): {
   spawn: NonNullable<
     ReturnType<typeof createBotSelfManagementHost>["subagent"]
   >["spawn"];
@@ -44,8 +47,8 @@ function seam(handoffDepth?: number): {
   const host = createBotSelfManagementHost(
     IDENTITY,
     {
-      runId: "run-parent",
-      turnId: "run-parent",
+      runId,
+      turnId: runId,
       sessionId: "user-1:bot-1",
       fromBotName: "Bot One",
       ...(handoffDepth === undefined ? {} : { handoffDepth }),
@@ -81,7 +84,7 @@ describe("a spawned hand-off", () => {
     });
     expect(request.command.runId).toBe(outcome.runId);
     expect(request.command.runId).toBe(
-      await handoffRunIdV1(IDENTITY, "tool:1:1:0"),
+      await handoffRunIdV1(IDENTITY, "run-parent", "tool:1:1:0"),
     );
   });
 
@@ -106,6 +109,18 @@ describe("a spawned hand-off", () => {
     await other.spawn({ task: "go", effectId: "tool:1:1:1" });
     expect(other.admitted[0].command.runId).not.toBe(
       first.admitted[0].command.runId,
+    );
+  });
+
+  test("asks for another run id from another run with the same effect id", async () => {
+    // Effect ids restart in every Session: a Routine Turn's first call is
+    // `tool:1:1:0` exactly as the conversation's first call was.
+    const chat = seam(undefined, "run-chat");
+    const routine = seam(undefined, "run-routine");
+    await chat.spawn({ task: "go", effectId: "tool:1:1:0" });
+    await routine.spawn({ task: "go", effectId: "tool:1:1:0" });
+    expect(chat.admitted[0].command.runId).not.toBe(
+      routine.admitted[0].command.runId,
     );
   });
 
@@ -135,7 +150,10 @@ describe("a spawned hand-off", () => {
 });
 
 describe("a question to another Bot", () => {
-  test("runs as the Turn the asking Bot's reads name", async () => {
+  function asker(runId: string): {
+    host: ReturnType<typeof createBotSelfManagementHost>;
+    ran: string[];
+  } {
     const ran: string[] = [];
     const authorities: BotSelfManagementAuthorities = {
       readSettings: () => unreachable("readSettings"),
@@ -158,13 +176,18 @@ describe("a question to another Bot", () => {
     const host = createBotSelfManagementHost(
       IDENTITY,
       {
-        runId: "run-parent",
-        turnId: "run-parent",
+        runId,
+        turnId: runId,
         sessionId: "user-1:bot-1",
         fromBotName: "Bot One",
       },
       authorities,
     );
+    return { host, ran };
+  }
+
+  test("runs as the Turn the asking Bot's reads name", async () => {
+    const { host, ran } = asker("run-parent");
     const outcome = await host.messageBot({
       targetBotId: "bot-dog",
       message: "When is the Series B expected to close?",
@@ -172,8 +195,29 @@ describe("a question to another Bot", () => {
     });
     // The client finds the answering Turn by this id, so it is the one
     // actually run, derived from the question's own effect.
-    const expected = await agentRunIdV1(IDENTITY, "bot-dog", "tool:1:2:0");
+    const expected = await agentRunIdV1(
+      IDENTITY,
+      "run-parent",
+      "bot-dog",
+      "tool:1:2:0",
+    );
     expect(ran).toEqual([expected]);
     expect(outcome.runId).toBe(expected);
+  });
+
+  test("asks as the same Turn on a replay, and another from another run", async () => {
+    const question = {
+      targetBotId: "bot-dog",
+      message: "When is the Series B expected to close?",
+      effectId: "tool:1:1:0",
+    };
+    const chat = asker("run-chat");
+    const replay = asker("run-chat");
+    const routine = asker("run-routine");
+    await chat.host.messageBot(question);
+    await replay.host.messageBot(question);
+    await routine.host.messageBot(question);
+    expect(replay.ran).toEqual(chat.ran);
+    expect(routine.ran[0]).not.toBe(chat.ran[0]);
   });
 });

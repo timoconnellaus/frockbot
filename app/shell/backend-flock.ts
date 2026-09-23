@@ -137,32 +137,36 @@ export interface BotSelfManagementAuthorities {
 /**
  * The run id one `subagent` occurrence asks for.
  *
- * Derived from the Bot and the durable tool-call occurrence, exactly as
- * `bot_message`'s is, so a replay after eviction asks for the Turn it already
- * admitted instead of handing the same work off twice.
+ * Derived from the Bot, the run that asked and the durable tool-call
+ * occurrence, exactly as `bot_message`'s is, so a replay after eviction asks
+ * for the Turn it already admitted instead of handing the same work off twice.
+ * The run is there because effect ids restart in every Session.
  */
 export async function handoffRunIdV1(
   identity: BotSelfManagementIdentity,
+  runId: string,
   effectId: string,
 ): Promise<string> {
   const hex = await sha256HexTextV1(
-    `${identity.userId}\u0000${identity.botId}\u0000handoff\u0000${effectId}`,
+    `${identity.userId}\u0000${identity.botId}\u0000handoff\u0000${runId}\u0000${effectId}`,
   );
   return `handoff-${hex.slice(0, 32)}`;
 }
 
 /**
  * The Turn a Bot's question to another Bot runs as, on that other Bot. Derived
- * from the question's own effect, so a re-issued call lands on the same Turn,
- * and so the asking Bot's reads can name the Turn answering it.
+ * from the asking run and the question's own effect, so a re-issued call lands
+ * on the same Turn, and so the asking Bot's reads can name the Turn answering
+ * it. The run is there because effect ids restart in every Session.
  */
 export async function agentRunIdV1(
   identity: BotSelfManagementIdentity,
+  runId: string,
   targetBotId: string,
   effectId: string,
 ): Promise<string> {
   const hex = await sha256HexTextV1(
-    `${identity.userId}\u0000${identity.botId}\u0000${targetBotId}\u0000${effectId}`,
+    `${identity.userId}\u0000${identity.botId}\u0000${runId}\u0000${targetBotId}\u0000${effectId}`,
   );
   return `agent-${hex.slice(0, 32)}`;
 }
@@ -180,6 +184,7 @@ export function createBotSelfManagementHost(
   const owner = { userId: identity.userId, botId: identity.botId };
   return {
     owner,
+    runId: turn.runId,
     // A Bot changes itself only inside a Turn whose Session and Turn its
     // provenance names — the same rule Memory, Skills and Package authoring
     // follow.
@@ -234,7 +239,11 @@ export function createBotSelfManagementHost(
           subagent: {
             handoffDepth: turn.handoffDepth ?? 0,
             spawn: async (request) => {
-              const runId = await handoffRunIdV1(identity, request.effectId);
+              const runId = await handoffRunIdV1(
+                identity,
+                turn.runId,
+                request.effectId,
+              );
               // The depth the hand-off records is this Turn's plus one. The
               // tool refuses above zero, so the only value ever written is 1 —
               // but the arithmetic, not the constant, is what says why.
@@ -278,6 +287,7 @@ export function createBotSelfManagementHost(
         throw new Error("the target Bot is not in this User's flock");
       const runId = await agentRunIdV1(
         identity,
+        turn.runId,
         request.targetBotId,
         request.effectId,
       );
