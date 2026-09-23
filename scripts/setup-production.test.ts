@@ -420,5 +420,10 @@ exit 1
     expect(forwarded.APPLET_BUILD_TOKEN).toBe(
       productionEnvironment.APPLET_BUILD_TOKEN,
     );
-  });
+    // Nine of the steps' runs start `check-production-secrets.ts`, and each
+    // start loads the auth package behind the manifest: about 250 ms apiece,
+    // 2.7 s in all on an idle machine. Alongside the rest of the pre-push
+    // checks that passed Bun's 5 s default and the deploy step was killed
+    // mid-run.
+  }, 30_000);
 });
