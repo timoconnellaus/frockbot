@@ -197,7 +197,7 @@ const PLUGIN_SURFACE_ID = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
 const MAX_PLUGIN_TOOLS_V1 = 64;
 const MAX_PLUGIN_VIEWS_V1 = 16;
 /** Tab and door copy; matches a settings-section title. */
-const MAX_PLUGIN_VIEW_LABEL_V1 = 80;
+export const MAX_PLUGIN_VIEW_LABEL_V1 = 80;
 const MAX_PLUGIN_HOSTS_V1 = 32;
 const MAX_PLUGIN_SERVICES_V1 = 32;
 const MAX_PLUGIN_TRIGGERS_V1 = 16;

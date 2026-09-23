@@ -155,21 +155,47 @@ function pluginToolAction(): ViewDocument["actions"][number] {
   };
 }
 
-function surfaceDocumentV1(
+/**
+ * The document id the client scopes a surface's local state by. The wire
+ * `Identifier` admits no colon and at most 128 characters; a cut id could only
+ * collide for two surfaces of one Plugin sharing a long prefix.
+ */
+export function panelDocumentIdV1(
+  kind: "panel" | "nav",
+  pluginId: string,
+  surfaceId: string,
+): string {
+  return `${kind}.${pluginId}.${surfaceId}`.slice(0, 128);
+}
+
+/**
+ * A page the wire refuses is that surface's failure, said in words, not a
+ * failed read that takes every tab and door down with it.
+ */
+export function surfaceDocumentV1(
   surfaceId: string,
   drawn: BotPluginSectionV1,
   revision: number,
 ): { document?: ViewDocument; failure?: string } {
-  if (!drawn.root) return { failure: drawn.failure };
-  return {
-    document: decodeProtocol("ViewDocument", {
-      schemaVersion: 1,
-      surfaceId,
-      revision,
-      root: drawn.root,
-      actions: [pluginToolAction()],
-    }),
-  };
+  // The sentence wraps a reason already cut to 500, so it can run past the
+  // wire's own 500.
+  if (!drawn.root) return { failure: drawn.failure?.slice(0, 500) };
+  try {
+    return {
+      document: decodeProtocol("ViewDocument", {
+        schemaVersion: 1,
+        surfaceId,
+        revision,
+        root: drawn.root,
+        actions: [pluginToolAction()],
+      }),
+    };
+  } catch (error) {
+    // The walk already vetted the tree, so this is a host bug, not the
+    // Plugin's: say it where the next one will be seen.
+    console.error("Plugin panel document refused", surfaceId, error);
+    return { failure: "This plugin's view could not be shown." };
+  }
 }
 
 async function renderSurfacesV1(
@@ -267,7 +293,7 @@ function doorViewV1(
   const rendered = drawn.get(`${door.pluginId}:${door.surfaceId}`);
   if (!rendered) return view;
   const document = surfaceDocumentV1(
-    `nav:${door.pluginId}:${door.surfaceId}`,
+    panelDocumentIdV1("nav", door.pluginId, door.surfaceId),
     rendered,
     revision,
   );
@@ -336,7 +362,7 @@ export async function openFocusedPanelV1(
     const rendered = drawn.get(`${stored.pluginId}:${stored.surfaceId}`);
     if (rendered) {
       const document = surfaceDocumentV1(
-        `panel:${stored.pluginId}:${stored.surfaceId}`,
+        panelDocumentIdV1("panel", stored.pluginId, stored.surfaceId),
         rendered,
         revision,
       );

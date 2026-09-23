@@ -9,7 +9,10 @@
 // nav still gets a host-drawn door so the page is reachable when the region
 // is closed.
 import { MAX_PLUGIN_PANEL_BAG_V1 } from "@frockbot/core/durable";
-import type { PluginViewV1 } from "@frockbot/core/contracts";
+import {
+  MAX_PLUGIN_VIEW_LABEL_V1,
+  type PluginViewV1,
+} from "@frockbot/core/contracts";
 
 export { MAX_PLUGIN_PANEL_BAG_V1 };
 
@@ -54,8 +57,9 @@ function navViews(plugin: PluginPanelSourceV1): PluginViewV1[] {
   return (plugin.views ?? []).filter((view) => view.slot === "bot.nav");
 }
 
+/** A display name may run past a label's cap, and the wire refuses the read. */
 function tabLabel(plugin: PluginPanelSourceV1, view: PluginViewV1): string {
-  return view.label ?? plugin.displayName;
+  return (view.label ?? plugin.displayName).slice(0, MAX_PLUGIN_VIEW_LABEL_V1);
 }
 
 /**
