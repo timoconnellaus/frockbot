@@ -108,6 +108,77 @@ test("a degraded Computer sync records bounded exclusions and decodes legacy row
   );
 });
 
+test("a Computer call's timing is an exact durable session event", () => {
+  const call = {
+    type: "computer/timing",
+    turn: 2,
+    scope: "tool",
+    tool: "computer_exec",
+    ms: {
+      attach: 40,
+      sync: 3_300,
+      selfCheck: 900,
+      operation: 1_200,
+      capture: {
+        screenshot: 700,
+        write: 1_500,
+        list: 90,
+        prune: 60,
+        total: 2_400,
+      },
+      total: 7_900,
+    },
+    seq: 0,
+    timestamp,
+  } as const;
+  expect(decodeSessionEvent(call)).toEqual(call);
+  // A phase that did not run is absent; only the totals are required.
+  const turnEnd = {
+    type: "computer/timing",
+    turn: 2,
+    scope: "turn-end",
+    ms: { attach: 30, capture: { total: 0 }, total: 30 },
+    seq: 1,
+    timestamp,
+  } as const;
+  expect(decodeSessionEvent(turnEnd)).toEqual(turnEnd);
+
+  // A tool call names its tool, and a Turn end names none.
+  const { tool: _tool, ...untooled } = call;
+  expect(() => decodeSessionEvent(untooled)).toThrow(/invalid fields/);
+  expect(() =>
+    decodeSessionEvent({ ...turnEnd, tool: "computer_exec" }),
+  ).toThrow(/invalid fields/);
+  expect(() => decodeSessionEvent({ ...turnEnd, scope: "turn" })).toThrow(
+    /invalid fields|scope is invalid/,
+  );
+  expect(() => decodeSessionEvent({ ...call, tool: "" })).toThrow(/tool/);
+  expect(() =>
+    decodeSessionEvent({ ...call, ms: { ...call.ms, operation: 1.5 } }),
+  ).toThrow(/ms\.operation must be an integer/);
+  expect(() =>
+    decodeSessionEvent({ ...call, ms: { ...call.ms, attach: -1 } }),
+  ).toThrow(/ms\.attach must be an integer/);
+  expect(() =>
+    decodeSessionEvent({ ...call, ms: { ...call.ms, close: 5 } }),
+  ).toThrow(/ms has invalid fields/);
+  expect(() => decodeSessionEvent({ ...call, ms: { attach: 40 } })).toThrow(
+    /ms has invalid fields/,
+  );
+  expect(() =>
+    decodeSessionEvent({
+      ...call,
+      ms: { ...call.ms, capture: { screenshot: 700 } },
+    }),
+  ).toThrow(/ms\.capture has invalid fields/);
+  expect(() =>
+    decodeSessionEvent({
+      ...call,
+      ms: { ...call.ms, capture: { ...call.ms.capture, encode: 1 } },
+    }),
+  ).toThrow(/ms\.capture has invalid fields/);
+});
+
 test("a Plugin's model call is an exact durable session event", () => {
   const usage = {
     type: "package/model-usage",

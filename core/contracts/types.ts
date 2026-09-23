@@ -329,6 +329,43 @@ export interface CompositionPinV1 {
  */
 export type MemoryScopeNameV1 = "bot" | "user" | "project";
 
+/**
+ * Whole milliseconds one filed screenshot spent in each step. A step that did
+ * not run is absent, so a capture that failed part-way still says where.
+ */
+export interface ComputerCaptureTimingV1 {
+  screenshot?: number;
+  write?: number;
+  list?: number;
+  prune?: number;
+  total: number;
+}
+
+/**
+ * Whole milliseconds one Computer call spent in each phase. A phase that did
+ * not run is absent rather than zero. `total` also covers what no phase names,
+ * such as closing the connection, so it can exceed the phases' sum.
+ */
+export interface ComputerTimingV1 {
+  /** Opening the Computer for this Bot. */
+  attach?: number;
+  /** The durable-root sync: the pre-call pull or signal check, or the Turn-end push. */
+  sync?: number;
+  /** The Computer's self-check, which runs once per loaded Package. */
+  selfCheck?: number;
+  /**
+   * The Computer calls the action itself made, without the records this
+   * Package keeps around them; at Turn end, closing the Turn's preview tabs.
+   */
+  operation?: number;
+  /**
+   * The screenshot the call filed: the progress capture after an action,
+   * `computer_screenshot`'s own capture, or the Turn-end capture.
+   */
+  capture?: ComputerCaptureTimingV1;
+  total: number;
+}
+
 export interface SessionEventMap {
   "session/created": { createdAt: string };
   /**
@@ -827,6 +864,18 @@ export interface SessionEventMap {
     exitCode?: number;
   };
   /**
+   * Where one Computer call spent its time: `tool` for a Computer tool call,
+   * named by `tool`, and `turn-end` for the capture and push after a Turn that
+   * used the Computer. Diagnostic only; nothing reads it back.
+   */
+  "computer/timing": {
+    turn: number;
+    scope: "tool" | "turn-end";
+    /** Present exactly when `scope` is `tool`. */
+    tool?: string;
+    ms: ComputerTimingV1;
+  };
+  /**
    * The dynamic Computer line this Turn added to its system prompt. An empty
    * `text` is an explicit wake-free read that found no fresh human lease; a
    * non-empty value records the exact line plus the durable lease generation
@@ -1064,6 +1113,41 @@ function memoryAction(value: unknown, label: string): void {
 function memoryProjectAction(value: unknown, label: string): void {
   if (value !== "create" && value !== "join" && value !== "leave") {
     throw new Error(`${label} is invalid`);
+  }
+}
+
+/** Exact keys, each a whole number of milliseconds; `total` is required. */
+function requireTimingPhases(
+  value: unknown,
+  phases: readonly string[],
+  label: string,
+): Record<string, unknown> {
+  const record = eventRecord(value, label);
+  requireEventKeys(
+    record,
+    ["total", ...phases.filter((phase) => Object.hasOwn(record, phase))],
+    label,
+  );
+  for (const [phase, ms] of Object.entries(record)) {
+    // `capture` holds its own steps, which the caller decodes.
+    if (phase !== "capture") eventInteger(ms, `${label}.${phase}`, 0);
+  }
+  return record;
+}
+
+function requireComputerTiming(value: unknown): void {
+  const label = "session event.ms";
+  const timing = requireTimingPhases(
+    value,
+    ["attach", "sync", "selfCheck", "operation", "capture"],
+    label,
+  );
+  if (timing.capture !== undefined) {
+    requireTimingPhases(
+      timing.capture,
+      ["screenshot", "write", "list", "prune"],
+      `${label}.capture`,
+    );
   }
 }
 
@@ -2554,6 +2638,21 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       ) {
         throw new Error("session event.exitCode must be an integer");
       }
+      break;
+    }
+    case "computer/timing": {
+      const tool = event.scope === "tool";
+      requireEventKeys(
+        event,
+        keys("turn", "scope", ...(tool ? ["tool"] : []), "ms"),
+        "session event",
+      );
+      turn();
+      if (!tool && event.scope !== "turn-end") {
+        throw new Error("session event.scope is invalid");
+      }
+      if (tool) eventString(event.tool, "session event.tool");
+      requireComputerTiming(event.ms);
       break;
     }
     case "computer/injected": {
