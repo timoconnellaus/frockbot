@@ -63,7 +63,12 @@ void main() {
             ? chatHeaderChromeTop
             : chatHeaderChromeTop - chatHeaderCompanionLift,
       );
-      expect(tester.getSize(companion).height, chatCompanionSize);
+      // A phone's companion is smaller: the header shares a thumb-wide
+      // screen with the thread.
+      expect(
+        tester.getSize(companion).height,
+        chatCompanionSizeFor(phone: width == 390),
+      );
       final field = find.byKey(const ValueKey('composer'));
       expect(
         tester.getBottomLeft(companion).dy,

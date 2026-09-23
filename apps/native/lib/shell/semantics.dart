@@ -35,7 +35,6 @@ abstract final class ShellIds {
   static const transcriptEarlier = 'transcript-earlier';
   static const composer = 'chat-composer';
   static const sendButton = 'send-button';
-  static const stopButton = 'stop-button';
   static const composerCounter = 'composer-counter';
   static const skillMenu = 'skill-menu';
   static const skillChips = 'skill-chips';

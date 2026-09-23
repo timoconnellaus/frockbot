@@ -94,7 +94,6 @@ void main() {
           focus: focus,
           ready: true,
           stoppable: false,
-          stopping: false,
           onSend: () async {},
           onStop: () async {},
           onChanged: (_) {},

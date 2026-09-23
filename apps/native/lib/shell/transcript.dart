@@ -12,6 +12,7 @@ import '../flock/avatar.dart';
 import '../theme/frock_theme.dart';
 import '../theme/states.dart';
 import 'chat_header.dart';
+import 'desktop_layout.dart';
 import 'markdown.dart';
 import 'run_view.dart';
 import 'semantics.dart';
@@ -56,8 +57,11 @@ class TranscriptView extends StatefulWidget {
   final void Function(String?)? onReadLatest;
   final String storageKey;
 
-  /// Scrollable space for a control outside the list that has disappeared.
-  final Widget? bottomSpace;
+  /// The Bot itself at the end of the thread, where its next words will land,
+  /// while it works: the pane hands it over already moving, and null once the
+  /// Turn settles. It grows in and out rather than appearing, so the thread
+  /// eases up and down instead of jumping at each end of a Turn.
+  final Widget? tail;
 
   /// A Turn the reader asked to be taken to — a search hit. It is brought into
   /// view and marked, once. A Turn further back than the loaded page is simply
@@ -78,7 +82,7 @@ class TranscriptView extends StatefulWidget {
     required this.onRefresh,
     required this.onOpenRun,
     required this.storageKey,
-    this.bottomSpace,
+    this.tail,
     this.pendingText,
     this.onOpenExchange,
     this.backgroundOf,
@@ -357,9 +361,7 @@ class _TranscriptViewState extends State<TranscriptView> {
     // reverse: true lays index 0 at the visual bottom, so the slot list is
     // newest first.
     final slots = <_ThreadSlot>[];
-    if (widget.bottomSpace != null) {
-      slots.add(const _ThreadSlot('bottom', _SlotKind.bottom));
-    }
+    slots.add(const _ThreadSlot('tail', _SlotKind.tail));
     if (pendingText != null) {
       slots.add(const _ThreadSlot('row:pending', _SlotKind.pending));
     }
@@ -387,10 +389,7 @@ class _TranscriptViewState extends State<TranscriptView> {
       _rowHeights.clear();
       return loading
           ? const FrockLoading(label: 'Loading your conversation')
-          : _EmptyThread(
-              background: widget.background,
-              starters: widget.starters,
-            );
+          : _EmptyThread(starters: widget.starters);
     }
     if (hasEarlier) {
       slots.add(const _ThreadSlot('row:earlier', _SlotKind.earlier));
@@ -464,8 +463,21 @@ class _TranscriptViewState extends State<TranscriptView> {
     SupersedeDrainState drain,
   ) {
     switch (slot.kind) {
-      case _SlotKind.bottom:
-        return widget.bottomSpace!;
+      case _SlotKind.tail:
+        return AnimatedSize(
+          duration: FrockTheme.motion(context),
+          curve: Curves.easeOutCubic,
+          alignment: Alignment.topLeft,
+          child: widget.tail == null
+              ? const SizedBox(width: double.infinity)
+              : Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 10, 16, 4),
+                  child: Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: IgnorePointer(child: widget.tail),
+                  ),
+                ),
+        );
       case _SlotKind.pending:
         return _Bubble(
           id: 'pending',
@@ -575,24 +587,26 @@ class _TranscriptViewState extends State<TranscriptView> {
       return _Announcement(text: line.text);
     }
     if (line.role == LineRole.user) {
-      return _Bubble(
+      final bubble = _Bubble(
         id: line.id,
         mine: true,
         pending: line.pending,
-        failed: line.status == LineStatus.error,
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Text(line.text),
-            if (line.notice != null)
-              _Notice(
-                line: line,
-                onRetry: onRetryTurn,
-                onOpenBilling: onOpenBilling,
-              ),
-          ],
-        ),
+        child: Text(line.text),
+      );
+      if (line.notice == null) return bubble;
+      // The person's message arrived; it is the reply that did not. So the
+      // way out sits where the reply would have been, not on their words.
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          bubble,
+          _Notice(
+            line: line,
+            onRetry: onRetryTurn,
+            onOpenBilling: onOpenBilling,
+          ),
+        ],
       );
     }
     if (line.status == LineStatus.streaming && line.empty) {
@@ -624,12 +638,23 @@ class _TranscriptViewState extends State<TranscriptView> {
     if (children.isEmpty && line.notice == null) {
       return null;
     }
-    return _Bubble(
+    // An ending with nothing said is not a message from the Bot, so it gets
+    // no bubble: a stop is a marker in the thread, a failure its one line.
+    final notice = line.notice == null
+        ? null
+        : line.status == LineStatus.aborted && line.retry == null
+        ? _Announcement(text: line.notice!)
+        : _Notice(
+            line: line,
+            onRetry: onRetryTurn,
+            onOpenBilling: onOpenBilling,
+          );
+    if (children.isEmpty) return notice;
+    final bubble = _Bubble(
       id: line.id,
       mine: false,
       background: widget.background,
       pending: line.pending,
-      failed: line.status == LineStatus.error,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -638,19 +663,19 @@ class _TranscriptViewState extends State<TranscriptView> {
             child,
             if (child != children.last) const SizedBox(height: 8),
           ],
-          if (line.notice != null)
-            _Notice(
-              line: line,
-              onRetry: onRetryTurn,
-              onOpenBilling: onOpenBilling,
-            ),
         ],
       ),
+    );
+    if (notice == null) return bubble;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [bubble, notice],
     );
   }
 }
 
-enum _SlotKind { bottom, pending, line, unread, earlier }
+enum _SlotKind { tail, pending, line, unread, earlier }
 
 class _ThreadSlot {
   final String id;
@@ -759,7 +784,6 @@ class _Bubble extends StatelessWidget {
   final String id;
   final bool mine;
   final bool pending;
-  final bool failed;
   final String? background;
   final Widget child;
   const _Bubble({
@@ -767,7 +791,6 @@ class _Bubble extends StatelessWidget {
     required this.mine,
     required this.child,
     this.pending = false,
-    this.failed = false,
     this.background,
   });
 
@@ -818,9 +841,6 @@ class _Bubble extends StatelessWidget {
                               theme.colorScheme.surfaceContainerHighest,
                             )
                           : theme.colorScheme.surfaceContainerHighest),
-                  border: failed
-                      ? Border.all(color: theme.colorScheme.error)
-                      : null,
                   borderRadius: BorderRadius.only(
                     topLeft: const Radius.circular(18),
                     topRight: const Radius.circular(18),
@@ -845,8 +865,9 @@ class _Bubble extends StatelessWidget {
   }
 }
 
-/// Why a Turn ended where it did, and the way out of it. The invitation is the
-/// action beside the sentence, not words in it with nothing to press.
+/// Why a Turn ended where it did, and the way out of it, on the Bot's side of
+/// the thread: said once, quietly, with the action beside it. A reply that
+/// did not come is not an alarm, and it is not the person's doing.
 class _Notice extends StatelessWidget {
   final TranscriptLine line;
   final void Function(TranscriptLine line)? onRetry;
@@ -856,38 +877,56 @@ class _Notice extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final muted = theme.colorScheme.onSurfaceVariant;
+    final action = theme.textTheme.labelMedium?.copyWith(
+      color: theme.colorScheme.primary,
+      fontWeight: FontWeight.w600,
+    );
+    Widget link(String id, String label, IconData icon, VoidCallback onTap) =>
+        identified(
+          id,
+          InkWell(
+            borderRadius: BorderRadius.circular(8),
+            onTap: onTap,
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
+              child: Row(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Icon(icon, size: 15, color: theme.colorScheme.primary),
+                  const SizedBox(width: 4),
+                  Text(label, style: action),
+                ],
+              ),
+            ),
+          ),
+        );
     return Padding(
-      padding: const EdgeInsets.only(top: 8),
+      padding: const EdgeInsets.fromLTRB(20, 2, 16, 4),
       // Wrapped, not a row: at large text the sentence and its action do not
       // fit side by side on a phone, and clipping either is not an option.
       child: Wrap(
-        spacing: 8,
-        runSpacing: 4,
+        spacing: 6,
+        runSpacing: 2,
         crossAxisAlignment: WrapCrossAlignment.center,
         children: [
           Text(
             line.notice!,
-            style: theme.textTheme.bodySmall?.copyWith(
-              color: line.status == LineStatus.error
-                  ? theme.colorScheme.error
-                  : theme.colorScheme.onSurfaceVariant,
-            ),
+            style: theme.textTheme.bodySmall?.copyWith(color: muted),
           ),
           if (line.retry == LineRetry.resendTurn && onRetry != null)
-            identified(
+            link(
               ShellIds.retryTurn(line.runId),
-              TextButton(
-                onPressed: () => onRetry!(line),
-                child: const Text('Try again'),
-              ),
+              'Retry',
+              Icons.refresh_rounded,
+              () => onRetry!(line),
             ),
           if (line.retry == LineRetry.openBilling && onOpenBilling != null)
-            identified(
+            link(
               ShellIds.openBilling(line.runId),
-              TextButton(
-                onPressed: onOpenBilling,
-                child: const Text('Open Billing'),
-              ),
+              'Open Billing',
+              Icons.open_in_new_rounded,
+              onOpenBilling!,
             ),
         ],
       ),
@@ -929,84 +968,172 @@ class _VoiceCallAccordionState extends State<_VoiceCallAccordion> {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    final muted = theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.8);
-    final style = theme.textTheme.bodySmall?.copyWith(color: muted);
+    final scheme = theme.colorScheme;
+    final call = widget.call;
+    final muted = scheme.onSurfaceVariant;
+    final spoken = call.turns.where((turn) => turn.transcript.isNotEmpty);
+    final duration = voiceCallDurationLabel(call.startedAt, call.endedAt);
+    final exchanges = call.turns.length;
+    final detail = [
+      if (duration.isNotEmpty) duration,
+      if (exchanges > 0) exchanges == 1 ? '1 exchange' : '$exchanges exchanges',
+    ].join(' · ');
     return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 8),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.stretch,
-        children: [
-          Semantics(
-            identifier: VoiceIds.callTranscript,
-            button: true,
-            child: InkWell(
-              onTap: () => setState(() => expanded = !expanded),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Flexible(
-                    child: Text(
-                      voiceCallTitle(widget.call),
-                      textAlign: TextAlign.center,
-                      style: style,
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      child: Center(
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 560),
+          child: Material(
+            color: Color.alphaBlend(
+              scheme.primary.withValues(alpha: 0.07),
+              scheme.surfaceContainerHighest,
+            ),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(18),
+              side: BorderSide(color: scheme.primary.withValues(alpha: 0.28)),
+            ),
+            clipBehavior: Clip.antiAlias,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Semantics(
+                  identifier: VoiceIds.callTranscript,
+                  button: true,
+                  label: voiceCallTitle(call),
+                  child: InkWell(
+                    onTap: () => setState(() => expanded = !expanded),
+                    child: Padding(
+                      padding: const EdgeInsets.fromLTRB(12, 12, 14, 12),
+                      child: Row(
+                        children: [
+                          Container(
+                            width: 40,
+                            height: 40,
+                            decoration: BoxDecoration(
+                              color: scheme.primary.withValues(alpha: 0.18),
+                              shape: BoxShape.circle,
+                            ),
+                            child: Icon(
+                              Icons.graphic_eq_rounded,
+                              size: 22,
+                              color: scheme.primary,
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'Voice chat',
+                                  style: theme.textTheme.titleSmall?.copyWith(
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                                if (detail.isNotEmpty)
+                                  Text(
+                                    detail,
+                                    style: theme.textTheme.bodySmall?.copyWith(
+                                      color: muted,
+                                    ),
+                                  ),
+                              ],
+                            ),
+                          ),
+                          Icon(
+                            expanded
+                                ? Icons.expand_less_rounded
+                                : Icons.expand_more_rounded,
+                            size: 22,
+                            color: muted,
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                  Icon(
-                    expanded ? Icons.expand_less : Icons.expand_more,
-                    size: 16,
-                    color: muted,
+                ),
+                if (!expanded && spoken.isNotEmpty)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(64, 0, 16, 14),
+                    child: Text(
+                      '“${spoken.first.transcript}”',
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: theme.textTheme.bodySmall?.copyWith(
+                        color: muted,
+                        fontStyle: FontStyle.italic,
+                      ),
+                    ),
                   ),
-                ],
-              ),
+                if (expanded)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        for (final turn in call.turns) ...[
+                          if (turn.transcript.isNotEmpty)
+                            _SpokenLine(text: turn.transcript, mine: true),
+                          if (turn.answer != null && turn.answer!.isNotEmpty)
+                            _SpokenLine(text: turn.answer!, mine: false),
+                        ],
+                      ],
+                    ),
+                  ),
+              ],
             ),
           ),
-          if (expanded)
-            Padding(
-              padding: const EdgeInsets.only(top: 12),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.stretch,
-                children: [
-                  for (final turn in widget.call.turns) ...[
-                    if (turn.transcript.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8, left: 24),
-                        child: Text(
-                          turn.transcript,
-                          textAlign: TextAlign.right,
-                          style: theme.textTheme.bodySmall,
-                        ),
-                      ),
-                    if (turn.answer != null && turn.answer!.isNotEmpty)
-                      Padding(
-                        padding: const EdgeInsets.only(bottom: 8, right: 24),
-                        child: Text(
-                          turn.answer!,
-                          style: theme.textTheme.bodySmall,
-                        ),
-                      ),
-                  ],
-                ],
-              ),
-            ),
-        ],
+        ),
+      ),
+    );
+  }
+}
+
+/// One thing said on a call, drawn as a small bubble on its speaker's side.
+class _SpokenLine extends StatelessWidget {
+  final String text;
+  final bool mine;
+  const _SpokenLine({required this.text, required this.mine});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    return Align(
+      alignment: mine ? Alignment.centerRight : Alignment.centerLeft,
+      child: Container(
+        margin: EdgeInsets.fromLTRB(mine ? 40 : 0, 4, mine ? 0 : 40, 4),
+        padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
+        decoration: BoxDecoration(
+          color: mine
+              ? scheme.primary.withValues(alpha: 0.18)
+              : scheme.surface.withValues(alpha: 0.6),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Text(text, style: theme.textTheme.bodyMedium),
       ),
     );
   }
 }
 
 class _EmptyThread extends StatelessWidget {
-  final String? background;
   final Widget? starters;
-  const _EmptyThread({this.background, this.starters});
+  const _EmptyThread({this.starters});
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     return SingleChildScrollView(
       child: Padding(
-        padding: const EdgeInsets.fromLTRB(
+        padding: EdgeInsets.fromLTRB(
           32,
-          chatHeaderChromeTop + chatCompanionSize,
+          chatHeaderChromeTop +
+              chatCompanionSizeFor(
+                phone:
+                    shellTierForWidth(MediaQuery.sizeOf(context).width) ==
+                    ShellTier.single,
+              ),
           32,
           32,
         ),

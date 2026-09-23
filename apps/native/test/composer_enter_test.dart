@@ -65,7 +65,6 @@ Future<({TextEditingController editor, List<String> sent})> pumpComposer(
             focus: focus,
             ready: ready,
             stoppable: false,
-            stopping: false,
             onSend: () async => sent.add(editor.text),
             onStop: () async {},
             onChanged: (_) {},

@@ -10,6 +10,8 @@
 /// any widget, so they are testable without a frame.
 library;
 
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 
 import '../client/transport.dart';
@@ -17,6 +19,24 @@ import 'semantics.dart';
 
 /// The most Skills one Turn may carry, matching the send route's decoder.
 const int maxInvokedSkills = 3;
+
+/// `/stop`: the running reply, stopped from the composer.
+const stopCommandName = 'stop';
+
+/// Something the composer does itself. Its name is typed after `/` like a
+/// Skill's, but it is never attached and never reaches the Bot.
+class ComposerCommand {
+  final String name;
+  final String description;
+  final IconData icon;
+  const ComposerCommand(this.name, this.description, this.icon);
+}
+
+const stopComposerCommand = ComposerCommand(
+  stopCommandName,
+  'Stop the current reply',
+  Icons.stop_circle_outlined,
+);
 
 /// One invocable Skill, as a client sees it. It carries a name, a description
 /// and a ref — never a body.
@@ -228,11 +248,50 @@ class SkillMenuController extends ChangeNotifier {
   List<SkillCatalogEntry> catalog = const [];
   SkillPopover? popover;
   List<SkillCandidate> candidates = const [];
+
+  /// The commands the composer can run right now, and the ones the open
+  /// popover offers. They are listed ahead of the Skills.
+  List<ComposerCommand> commands = const [];
+  List<ComposerCommand> commandCandidates = const [];
+
+  /// Across the commands and then the Skills, in the order they are drawn.
   int highlighted = 0;
   bool _disposed = false;
   SkillMenuController({required this.api, required this.botId});
 
-  bool get open => popover != null && candidates.isNotEmpty;
+  bool get open =>
+      popover != null &&
+      (candidates.isNotEmpty || commandCandidates.isNotEmpty);
+
+  int get optionCount => commandCandidates.length + candidates.length;
+
+  ComposerCommand? get highlightedCommand =>
+      highlighted < commandCandidates.length
+      ? commandCandidates[highlighted]
+      : null;
+
+  SkillCandidate? get highlightedSkill {
+    final index = highlighted - commandCandidates.length;
+    return index >= 0 && index < candidates.length ? candidates[index] : null;
+  }
+
+  List<ComposerCommand> _commandsFor(SkillPopover? popover) {
+    if (popover == null || popover.trigger != '/') return const [];
+    final query = popover.query.toLowerCase();
+    return [
+      for (final command in commands)
+        if (command.name.startsWith(query)) command,
+    ];
+  }
+
+  /// What the composer can run now. Set as it builds, so it never notifies:
+  /// the composer is already drawing the answer.
+  void offerCommands(List<ComposerCommand> next) {
+    commands = next;
+    commandCandidates = _commandsFor(popover);
+    if (highlighted >= optionCount) highlighted = 0;
+  }
+
   List<SkillCatalogEntry> get attached => attachments.attached;
 
   void _changed() {
@@ -265,33 +324,49 @@ class SkillMenuController extends ChangeNotifier {
   /// Skill — which is most of them.
   void readFrom(String text, int caret) {
     final next = skillPopoverFor(text, caret < 0 ? text.length : caret);
+    final previous = highlightedSkill?.entry.ref;
     popover = next;
+    commandCandidates = _commandsFor(next);
     if (next == null) {
       candidates = const [];
       _changed();
       return;
     }
-    final previous = highlighted < candidates.length
-        ? candidates[highlighted].entry.ref
-        : null;
     candidates = rankSkillCandidates(
       catalog,
       next.query,
       exclude: [for (final entry in attached) entry.ref],
     );
-    highlighted = keptSkillHighlight(previous, candidates);
+    highlighted = commandCandidates.isNotEmpty
+        ? 0
+        : keptSkillHighlight(previous, candidates);
     _changed();
   }
 
   void move(int direction) {
-    highlighted = nextSkillHighlight(highlighted, candidates.length, direction);
+    highlighted = nextSkillHighlight(highlighted, optionCount, direction);
     _changed();
   }
 
   void close() {
     popover = null;
     candidates = const [];
+    commandCandidates = const [];
     _changed();
+  }
+
+  /// Takes the typed `/command` back out of the composer's text, and answers
+  /// with what is left, or null when the popover has already closed.
+  ({String text, int caret})? takeTrigger(String text, int caret) {
+    final current = popover;
+    if (current == null) return null;
+    final replaced = textWithoutSkillTrigger(
+      text,
+      current,
+      caret < 0 ? text.length : caret,
+    );
+    close();
+    return replaced;
   }
 
   /// Attaches [entry] and answers with the composer text the trigger left
@@ -328,11 +403,32 @@ class SkillMenuController extends ChangeNotifier {
 class SkillMenu extends StatelessWidget {
   final SkillMenuController controller;
   final void Function(SkillCandidate candidate) onChoose;
+  final void Function(ComposerCommand command)? onCommand;
   const SkillMenu({
     super.key,
     required this.controller,
     required this.onChoose,
+    this.onCommand,
   });
+
+  static double _maxHeight(BuildContext context) {
+    final room =
+        MediaQuery.sizeOf(context).height -
+        MediaQuery.viewInsetsOf(context).bottom -
+        MediaQuery.paddingOf(context).vertical;
+    return math.min(240, math.max(96, room * 0.3));
+  }
+
+  Widget _section(ThemeData theme, String label) => Padding(
+    padding: const EdgeInsets.fromLTRB(16, 8, 16, 2),
+    child: Text(
+      label,
+      style: theme.textTheme.labelSmall?.copyWith(
+        color: theme.colorScheme.onSurfaceVariant,
+        letterSpacing: 0.3,
+      ),
+    ),
+  );
 
   @override
   Widget build(BuildContext context) {
@@ -341,7 +437,10 @@ class SkillMenu extends StatelessWidget {
       ShellIds.skillMenu,
       Container(
         margin: const EdgeInsets.fromLTRB(12, 0, 12, 4),
-        constraints: const BoxConstraints(maxHeight: 240),
+        // A share of the room above the keyboard, never more than a short
+        // list: at large text on a phone a fixed height pushed the draft
+        // and the `/stop` row it is about off the screen.
+        constraints: BoxConstraints(maxHeight: _maxHeight(context)),
         decoration: BoxDecoration(
           color: theme.colorScheme.surfaceContainerHighest,
           border: Border.all(color: theme.colorScheme.outlineVariant),
@@ -352,36 +451,53 @@ class SkillMenu extends StatelessWidget {
         // surface behind the popover, and the box's own colour hides both.
         child: Material(
           type: MaterialType.transparency,
-          child: ListView.builder(
+          child: ListView(
             shrinkWrap: true,
             padding: const EdgeInsets.symmetric(vertical: 4),
-            itemCount: controller.candidates.length,
-            itemBuilder: (context, index) {
-              final candidate = controller.candidates[index];
-              return identified(
-                ShellIds.skillOption(candidate.entry.ref),
-                ListTile(
-                  dense: true,
-                  selected: index == controller.highlighted,
-                  title: Text(candidate.entry.name),
-                  subtitle: candidate.entry.description.isEmpty
-                      ? null
-                      : Text(
-                          candidate.entry.description,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                  trailing: Text(
-                    candidate.entry.ref,
-                    style: theme.textTheme.bodySmall,
+            children: [
+              if (controller.commandCandidates.isNotEmpty) ...[
+                _section(theme, 'Commands'),
+                for (final (index, command)
+                    in controller.commandCandidates.indexed)
+                  ListTile(
+                    key: ValueKey('command:${command.name}'),
+                    dense: true,
+                    selected: index == controller.highlighted,
+                    leading: Icon(command.icon, size: 20),
+                    minLeadingWidth: 20,
+                    title: Text('/${command.name}'),
+                    subtitle: Text(command.description),
+                    onTap: () => onCommand?.call(command),
                   ),
-                  onTap: () => onChoose(candidate),
-                ),
-              );
-            },
+                if (controller.candidates.isNotEmpty) _section(theme, 'Skills'),
+              ],
+              for (final (index, candidate) in controller.candidates.indexed)
+                _skillRow(theme, candidate, index),
+            ],
           ),
         ),
       ),
     );
   }
+
+  Widget _skillRow(ThemeData theme, SkillCandidate candidate, int index) =>
+      identified(
+        ShellIds.skillOption(candidate.entry.ref),
+        ListTile(
+          dense: true,
+          selected:
+              index + controller.commandCandidates.length ==
+              controller.highlighted,
+          title: Text(candidate.entry.name),
+          subtitle: candidate.entry.description.isEmpty
+              ? null
+              : Text(
+                  candidate.entry.description,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                ),
+          trailing: Text(candidate.entry.ref, style: theme.textTheme.bodySmall),
+          onTap: () => onChoose(candidate),
+        ),
+      );
 }

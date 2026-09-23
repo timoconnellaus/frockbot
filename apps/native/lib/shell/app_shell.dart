@@ -2577,6 +2577,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                 '${widget.userId}:${bot.botId.value}',
                               ),
                               session: _selectedSession!,
+                              botName: _name(bot),
                               store: widget.store,
                               general: bot.botId.value == generalBotId,
                               featuresRevision: featuresRevision,
@@ -2605,7 +2606,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                     Positioned(
                                       top:
                                           chatHeaderChromeTop +
-                                          chatCompanionSize +
+                                          chatCompanionSizeFor(phone: single) +
                                           12,
                                       left: 0,
                                       right: 0,

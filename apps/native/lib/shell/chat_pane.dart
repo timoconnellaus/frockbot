@@ -36,8 +36,112 @@ import 'skill_menu.dart';
 import 'starters.dart';
 import 'transcript.dart';
 
+/// Silhouette height of the companion at the end of the thread: a little
+/// taller than a line of the Bot's words, so it reads as the Bot, not a glyph.
+const double threadCompanionSize = 52;
+
+/// The companion's working motion: a small side-to-side hop on its feet,
+/// paced by the Turn. It moves the drawing itself, so the still a runtime
+/// falls back to thinks as visibly as the live artboard does. A person who
+/// asked for less motion is told in a word instead.
+class ThinkingMotion extends StatefulWidget {
+  final Duration tempo;
+  final Widget child;
+  const ThinkingMotion({super.key, required this.tempo, required this.child});
+
+  @override
+  State<ThinkingMotion> createState() => _ThinkingMotionState();
+}
+
+class _ThinkingMotionState extends State<ThinkingMotion>
+    with SingleTickerProviderStateMixin {
+  /// One cycle is two hops, one leaning each way.
+  late final AnimationController _beat = AnimationController(
+    vsync: this,
+    duration: widget.tempo * 2,
+  );
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    _run();
+  }
+
+  @override
+  void didUpdateWidget(ThinkingMotion old) {
+    super.didUpdateWidget(old);
+    if (old.tempo != widget.tempo) {
+      _beat.duration = widget.tempo * 2;
+      _run();
+    }
+  }
+
+  void _run() {
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _beat
+        ..stop()
+        ..value = 0;
+    } else {
+      _beat.repeat();
+    }
+  }
+
+  @override
+  void dispose() {
+    _beat.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (MediaQuery.disableAnimationsOf(context)) {
+      final theme = Theme.of(context);
+      return Row(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.end,
+        children: [
+          widget.child,
+          const SizedBox(width: 10),
+          Text(
+            'Working…',
+            style: theme.textTheme.labelMedium?.copyWith(
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      );
+    }
+    return AnimatedBuilder(
+      animation: _beat,
+      child: widget.child,
+      builder: (context, child) {
+        final turn = _beat.value * 2 * math.pi;
+        // Two hops a cycle: 0 on the ground, 1 at the top of each.
+        final lift = (1 - math.cos(2 * turn)) / 2;
+        final land = 1 - lift;
+        return Transform.translate(
+          offset: Offset(0, -6 * lift),
+          child: Transform.rotate(
+            angle: 0.07 * math.sin(turn),
+            alignment: Alignment.bottomCenter,
+            child: Transform.scale(
+              scaleX: 1 + 0.035 * land - 0.02 * lift,
+              scaleY: 1 - 0.045 * land + 0.03 * lift,
+              alignment: Alignment.bottomCenter,
+              child: child,
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 class ChatPane extends StatefulWidget {
   final ChatController controller;
+
+  /// The Bot's current name, which the empty composer is addressed to.
+  final String? botName;
   final Future<void> Function() onReconnect;
   final SkillMenuController? skills;
 
@@ -96,8 +200,9 @@ class ChatPane extends StatefulWidget {
   final String? primary;
 
   /// Conversation chrome laid over the thread: the fade, the companion, the
-  /// name and the doors. The pane builds the companion so gaze and the
-  /// working pose stay with the Turn; the shell wraps it in [ChatHeader].
+  /// name and the doors. The pane builds the companion so gaze stays with the
+  /// pane; the shell wraps it in [ChatHeader]. The companion there is at
+  /// rest: a Turn is worn at the end of the thread instead.
   final Widget Function(Widget companion)? overlay;
 
   /// What the empty thread offers to write into the composer.
@@ -105,6 +210,7 @@ class ChatPane extends StatefulWidget {
   const ChatPane({
     super.key,
     required this.controller,
+    this.botName,
     required this.onReconnect,
     this.skills,
     this.onOpenRun,
@@ -212,6 +318,11 @@ class _ChatPaneState extends State<ChatPane> {
   Future<void> _send() async {
     if (!controller.canSend || editor.text.trim().isEmpty) return;
     final text = editor.text;
+    if (text.trim() == '/$stopCommandName') {
+      _clearCommand();
+      await _stop();
+      return;
+    }
     unawaited(HapticFeedback.lightImpact());
     // The person's explicit intent goes into the controller first, and the
     // composer is emptied in the same synchronous step. Android IMEs keep a
@@ -233,6 +344,37 @@ class _ChatPaneState extends State<ChatPane> {
     editor.clear();
     await sending;
     if (mounted) focus.requestFocus();
+  }
+
+  /// A command is the composer's own business: its words never reach the Bot.
+  void _clearCommand() {
+    editor.clear();
+    unawaited(controller.saveDraft(''));
+    skills?.close();
+  }
+
+  /// A word from the composer about a command it ran, said once above the
+  /// field and gone again: nothing to act on, so nothing to dismiss.
+  String? _commandNote;
+  Timer? _commandNoteTimer;
+
+  Future<void> _stop() async {
+    if (!controller.stoppable) {
+      _commandNoteTimer?.cancel();
+      // A message still being delivered has no Turn to stop yet, though the
+      // Bot already looks busy: that is not "nothing".
+      setState(
+        () => _commandNote = controller.activeRunId != null
+            ? 'Your message is still on its way. Try /stop again in a moment.'
+            : 'Nothing to stop.',
+      );
+      _commandNoteTimer = Timer(const Duration(seconds: 3), () {
+        if (mounted) setState(() => _commandNote = null);
+      });
+      return;
+    }
+    unawaited(HapticFeedback.mediumImpact().catchError((Object _) {}));
+    await controller.stop();
   }
 
   /// Writes a suggestion into the composer and stops there. The draft is the
@@ -317,16 +459,7 @@ class _ChatPaneState extends State<ChatPane> {
       loading: c.loading,
       hasEarlier: c.before != null,
       storageKey: 'history-${c.botId}',
-      bottomSpace: c.stoppable
-          ? null
-          : const Visibility(
-              key: ValueKey('row:stop-space'),
-              visible: false,
-              maintainSize: true,
-              maintainAnimation: true,
-              maintainState: true,
-              child: ComposerStopButton(),
-            ),
+      tail: working ? _typing(runningLine) : null,
       focusRunId: c.focusRunId,
       onRefresh: _refresh,
       onOpenRun: widget.onOpenRun ?? (_) {},
@@ -404,6 +537,23 @@ class _ChatPaneState extends State<ChatPane> {
                         ),
                       ),
                     ),
+                  if (_commandNote != null)
+                    Padding(
+                      padding: const EdgeInsets.fromLTRB(20, 4, 20, 2),
+                      child: Align(
+                        alignment: AlignmentDirectional.centerStart,
+                        child: Text(
+                          _commandNote!,
+                          key: const ValueKey('command-note'),
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                              ),
+                        ),
+                      ),
+                    ),
                   if (c.pending.isNotEmpty && !c.sending)
                     identified(
                       ShellIds.checkDelivery,
@@ -415,9 +565,7 @@ class _ChatPaneState extends State<ChatPane> {
                     ),
                 ],
               ),
-              Positioned.fill(
-                child: _chrome(_companion(working: working, line: runningLine)),
-              ),
+              Positioned.fill(child: _chrome(_companion())),
             ],
           ),
         ),
@@ -447,49 +595,54 @@ class _ChatPaneState extends State<ChatPane> {
     );
   }
 
-  Widget _companion({required bool working, required TranscriptLine? line}) {
-    final avatar = working
-        ? identified(
-            ShellIds.workingIndicator,
-            Semantics(
-              container: true,
-              liveRegion: true,
-              label: 'Working',
-              child: WorkingPace(
-                line: line,
-                builder: (context, tempo) => CharacterAvatar(
-                  size: chatCompanionSize,
-                  characterId: widget.background,
-                  primary: widget.primary,
-                  gaze: gaze,
-                  hold: hold,
-                  cropToInk: true,
-                  motion: CharacterMotion.active,
-                  activity: CharacterActivity.working,
-                  working: true,
-                  tempo: tempo,
-                ),
-              ),
-            ),
-          )
-        : CharacterAvatar(
-            size: chatCompanionSize,
+  /// The Bot at the end of its own thread while a Turn runs, where its next
+  /// words will land: the typing indicator is the character itself moving,
+  /// with nothing hung over it. Gone again when the Turn settles.
+  Widget _typing(TranscriptLine? line) => identified(
+    ShellIds.workingIndicator,
+    Semantics(
+      container: true,
+      liveRegion: true,
+      label: 'Working',
+      child: WorkingPace(
+        line: line,
+        builder: (context, tempo) => ThinkingMotion(
+          tempo: tempo,
+          child: CharacterAvatar(
+            size: threadCompanionSize,
             characterId: widget.background,
             primary: widget.primary,
-            gaze: gaze,
-            hold: hold,
             cropToInk: true,
-            // A live artboard at rest, so the eyes can follow the pointer
-            // and the character can twitch between Turns. Quiet, not
-            // active: the ticker runs only for a moment after a change and
-            // stops again, which is what keeps an open chat from redrawing
-            // the window sixty times a second. The artboard takes no
-            // pointer and no focus, so the field below it keeps its
-            // keystrokes (errors.e2e, skill-menu.e2e).
-            motion: CharacterMotion.quiet,
-            activity: CharacterActivity.idle,
-            semanticsLabel: 'Bot is ready',
-          );
+            motion: CharacterMotion.active,
+            activity: CharacterActivity.working,
+          ),
+        ),
+      ),
+    ),
+  );
+
+  /// The companion in the header, at rest.
+  Widget _companion() {
+    final phone =
+        shellTierForWidth(MediaQuery.sizeOf(context).width) == ShellTier.single;
+    final avatar = CharacterAvatar(
+      size: chatCompanionSizeFor(phone: phone),
+      characterId: widget.background,
+      primary: widget.primary,
+      gaze: gaze,
+      hold: hold,
+      cropToInk: true,
+      // A live artboard at rest, so the eyes can follow the pointer
+      // and the character can twitch between Turns. Quiet, not
+      // active: the ticker runs only for a moment after a change and
+      // stops again, which is what keeps an open chat from redrawing
+      // the window sixty times a second. The artboard takes no
+      // pointer and no focus, so the field below it keeps its
+      // keystrokes (errors.e2e, skill-menu.e2e).
+      motion: CharacterMotion.quiet,
+      activity: CharacterActivity.idle,
+      semanticsLabel: 'Bot is ready',
+    );
     return KeyedSubtree(key: _companionKey, child: avatar);
   }
 
@@ -499,10 +652,10 @@ class _ChatPaneState extends State<ChatPane> {
     // Readiness is about the transport, the Bot and the model; whether there
     // is something worth sending is the Composer's own question.
     ready: c.canSend,
+    botName: widget.botName,
     stoppable: c.stoppable,
-    stopping: c.stopping,
     onSend: _send,
-    onStop: c.stop,
+    onStop: _stop,
     onChanged: (value) {
       unawaited(c.saveDraft(value));
     },
@@ -527,6 +680,7 @@ class _ChatPaneState extends State<ChatPane> {
     focus.dispose();
     gaze.dispose();
     _holdTimer?.cancel();
+    _commandNoteTimer?.cancel();
     hold.dispose();
     super.dispose();
   }
@@ -536,6 +690,9 @@ class _ChatPaneState extends State<ChatPane> {
 class ConversationView extends StatefulWidget {
   final BotSession session;
   final LocalStore store;
+
+  /// The Bot's current name. See [ChatPane.botName].
+  final String? botName;
   final void Function(TranscriptLine line) onOpenRun;
   final void Function(TranscriptLine line)? onOpenExchange;
   final String? Function(String botId)? backgroundOf;
@@ -585,6 +742,7 @@ class ConversationView extends StatefulWidget {
     super.key,
     required this.session,
     required this.store,
+    this.botName,
     required this.onOpenRun,
     this.onOpenExchange,
     this.backgroundOf,
@@ -687,6 +845,7 @@ class _ConversationViewState extends State<ConversationView> {
         overlay: widget.overlay,
         starters: starters,
         controller: session.controller,
+        botName: widget.botName,
         onReconnect: session.channel.connect,
         skills: skills,
         onOpenRun: widget.onOpenRun,

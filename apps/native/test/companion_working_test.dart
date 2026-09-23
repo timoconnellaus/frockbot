@@ -124,7 +124,7 @@ void main() {
   });
 
   for (final width in [390.0, 1280.0]) {
-    testWidgets('a running Turn is worn by the companion, not the thread, at '
+    testWidgets('a running Turn is the Bot at the end of the thread, at '
         '$width', (tester) async {
       tester.view.physicalSize = Size(width, 800);
       tester.view.devicePixelRatio = 1;
@@ -161,29 +161,41 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
 
       expect(c.activeRunId, 'send-1');
-      // The companion is the working indicator and wears the badge.
+      // The Bot is the working indicator, at the end of its own thread where
+      // the reply will land, and it is the character that moves: nothing is
+      // hung over it.
       final indicator = byIdentifier(ShellIds.workingIndicator);
+      final transcript = find.byType(TranscriptView);
       expect(indicator, findsOneWidget);
+      expect(find.descendant(of: transcript, matching: indicator), findsOne);
       expect(
-        find.descendant(of: indicator, matching: find.byType(ThinkingBadge)),
+        find.descendant(of: indicator, matching: find.byType(ThinkingMotion)),
         findsOneWidget,
       );
-      // Over the shoulder, not under the feet.
+      expect(find.byType(ThinkingBadge), findsNothing);
+      expect(byIdentifier(ShellIds.workingNotice), findsNothing);
+      // Below the person's message and above the field.
       final avatar = tester.getRect(
         find.descendant(of: indicator, matching: find.byType(CharacterAvatar)),
       );
-      final badge = tester.getRect(find.byType(ThinkingBadge));
-      expect(badge.top, lessThan(avatar.top + 2));
-      expect(badge.right, greaterThan(avatar.right - 8));
-      expect(badge.bottom, lessThan(avatar.center.dy));
-      // The thread draws no working row and no badge of its own.
-      final transcript = find.byType(TranscriptView);
+      final message = tester.getRect(find.text('Hello'));
+      final field = tester.getRect(find.byKey(const ValueKey('composer')));
+      expect(avatar.top, greaterThan(message.bottom));
+      expect(avatar.bottom, lessThan(field.top));
+      // Laid out at its size; the motion only draws it hopping.
       expect(
-        find.descendant(of: transcript, matching: find.byType(ThinkingBadge)),
-        findsNothing,
+        tester
+            .getSize(
+              find.descendant(
+                of: indicator,
+                matching: find.byType(CharacterAvatar),
+              ),
+            )
+            .height,
+        threadCompanionSize,
       );
-      expect(byIdentifier(ShellIds.workingNotice), findsNothing);
-      expect(find.byKey(const ValueKey('row:working-space')), findsNothing);
+      // The header keeps its companion, at rest.
+      expect(find.bySemanticsLabel('Bot is ready'), findsOneWidget);
 
       await capture(tester, 'companion-working-${width.toInt()}');
       await tester.pumpWidget(const SizedBox());
@@ -192,7 +204,7 @@ void main() {
   }
 
   testWidgets(
-    'the working companion stays in the header with the desk panel open',
+    'the working Bot sits under the running reply and eases away after it',
     (tester) async {
       tester.view.physicalSize = const Size(1351, 831);
       tester.view.devicePixelRatio = 1;
@@ -256,18 +268,14 @@ void main() {
       expect(bubble, findsOneWidget);
       expect(
         find.descendant(of: find.byType(ChatHeader), matching: indicator),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(of: transcript, matching: indicator),
         findsNothing,
       );
+      expect(find.descendant(of: transcript, matching: indicator), findsOne);
       final runningBubble = tester.getRect(bubble);
       expect(
         tester.getTopLeft(indicator).dy,
-        chatHeaderChromeTop - chatHeaderCompanionLift,
+        greaterThan(runningBubble.bottom),
       );
-      expect(tester.getBottomLeft(indicator).dy, lessThan(runningBubble.top));
 
       transport.observed = {
         ...active,
@@ -275,7 +283,7 @@ void main() {
         'outcome': {'type': 'completed', 'text': ''},
       };
       await controller.refresh();
-      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump();
 
       expect(indicator, findsNothing);
       expect(
@@ -285,7 +293,14 @@ void main() {
         ),
         findsOneWidget,
       );
-      expect(tester.getRect(bubble), runningBubble);
+      // The space it held closes over the motion, not in one frame: part
+      // way through, the reply has only part way to go.
+      await tester.pump(FrockTheme.enter ~/ 2);
+      final settling = tester.getRect(bubble).top;
+      await tester.pump(FrockTheme.enter);
+      final settled = tester.getRect(bubble).top;
+      expect(settling, greaterThan(runningBubble.top));
+      expect(settled, greaterThan(settling));
       await tester.pumpWidget(const SizedBox());
       controller.dispose();
     },

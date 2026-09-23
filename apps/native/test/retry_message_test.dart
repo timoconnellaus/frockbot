@@ -367,7 +367,7 @@ void main() {
   );
 
   testWidgets(
-    'failure is on the user bubble and clears with an admitted retry',
+    'failure sits under the message, not on it, and clears with a retry',
     (tester) async {
       Future<void> draw(List<Map<String, dynamic>> rows) async {
         await tester.pumpWidget(
@@ -391,12 +391,26 @@ void main() {
 
       await draw([attempt('original')]);
       expect(find.text('Please help'), findsOneWidget);
-      expect(find.text('Try again'), findsOneWidget);
+      expect(find.text('Retry'), findsOneWidget);
       expect(find.byKey(const ValueKey('original:failed')), findsNothing);
+      // The person's message arrived; the reply is what did not. So their
+      // bubble is left as they wrote it, and the way out is under it on the
+      // Bot's side.
       final bubble = find.byKey(const ValueKey('original:user'));
+      final notice = find.text("This Bot couldn't finish its reply.");
+      expect(find.descendant(of: bubble, matching: notice), findsNothing);
       expect(
-        find.descendant(of: bubble, matching: find.text('Try again')),
-        findsOneWidget,
+        find.descendant(of: bubble, matching: find.text('Retry')),
+        findsNothing,
+      );
+      expect(
+        tester.getTopLeft(notice).dy,
+        greaterThan(tester.getRect(bubble).bottom),
+      );
+      // On the Bot's side of the thread, not under the person's words.
+      expect(
+        tester.getTopLeft(notice).dx,
+        lessThan(tester.getTopLeft(find.text('Please help')).dx),
       );
       await draw([
         attempt('original', retriedBy: 'retry-1'),
@@ -408,7 +422,7 @@ void main() {
         ),
       ]);
       expect(find.text('Please help'), findsOneWidget);
-      expect(find.text('Try again'), findsNothing);
+      expect(find.text('Retry'), findsNothing);
       await draw([
         attempt('original', retriedBy: 'retry-1'),
         attempt(

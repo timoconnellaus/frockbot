@@ -303,7 +303,9 @@ void main() {
           expect(find.byKey(const ValueKey('check-delivery')), findsOneWidget);
         }
         if (state == 'running') {
-          expect(find.byKey(const ValueKey('stop')), findsOneWidget);
+          // With motion off, the working Bot says so in a word instead.
+          expect(find.byKey(const ValueKey('stop')), findsNothing);
+          expect(find.text('Working…'), findsOneWidget);
         }
         await tester.pumpWidget(const SizedBox());
         controller.dispose();
@@ -312,7 +314,7 @@ void main() {
   );
 
   testWidgets(
-    'send persists identity; Stop is explicit and remains until terminal',
+    'send persists identity; /stop is explicit and works until terminal',
     (tester) async {
       final store = MemoryStore();
       final t = FakeTransport(store);
@@ -338,26 +340,48 @@ void main() {
       await tester.tap(find.byKey(const ValueKey('send')));
       await tester.pump();
       expect(t.calls, ['send:send-1']);
+      Future<void> command() async {
+        await tester.enterText(find.byKey(const ValueKey('composer')), '/stop');
+        await tester.pump();
+        await tester.tap(find.byKey(const ValueKey('send')));
+        await tester.pump();
+      }
+
       // The POST is still open and no Turn exists yet, so there is nothing
-      // to stop. The receipt is what makes the Turn real.
+      // to stop. The receipt is what makes the Turn real — and the command
+      // is never sent as a message either way.
+      await command();
       expect(find.byKey(const ValueKey('stop')), findsNothing);
+      expect(find.textContaining('still on its way'), findsOneWidget);
+      expect(t.calls, ['send:send-1']);
       t.observed = running();
       t.completion.complete();
       await tester.pump();
       await tester.pump();
-      await tester.tap(find.byKey(const ValueKey('stop')));
-      await tester.pump();
+      await command();
       expect(find.text('Stopping…'), findsOneWidget);
-      await tester.tap(find.byKey(const ValueKey('stop')));
-      await tester.pump();
+      await command();
       expect(t.calls.where((x) => x.startsWith('stop:')), [
         'stop:stop-1',
         'stop:stop-1',
       ]);
+      expect(t.sentTexts, ['Hello']);
+      expect(find.byKey(const ValueKey('composer')), findsOneWidget);
+      expect(
+        tester
+            .widget<TextField>(find.byKey(const ValueKey('composer')))
+            .controller!
+            .text,
+        isEmpty,
+      );
       t.observed = {...running(), 'status': 'cancelled'};
       await c.invalidate();
       await tester.pump();
-      expect(find.byKey(const ValueKey('stop')), findsNothing);
+      await command();
+      expect(find.text('Nothing to stop.'), findsOneWidget);
+      expect(t.calls.where((x) => x.startsWith('stop:')), hasLength(2));
+      await tester.pump(const Duration(seconds: 4));
+      expect(find.text('Nothing to stop.'), findsNothing);
       await tester.pumpWidget(const SizedBox());
       c.dispose();
     },
