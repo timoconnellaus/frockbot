@@ -23,20 +23,6 @@ export type WhatsNewEntrySourceV1 = {
  */
 export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
-    id: "computer-steps-faster",
-    title: "Faster Computer steps",
-    summary:
-      "A Bot’s commands on its Computer no longer each wait for a screenshot.",
-    kind: "improvement",
-  },
-  {
-    id: "computer-card-current",
-    title: "The Computer card is current",
-    summary:
-      "It shows the desktop as the Bot last left it, updated when a Turn ends.",
-    kind: "fix",
-  },
-  {
     id: "voice-answers-after-tools",
     title: "Calls answer without a false error",
     summary:

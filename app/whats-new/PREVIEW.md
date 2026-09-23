@@ -2,18 +2,6 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
-## Faster Computer steps
-
-improvement
-
-A Bot’s commands on its Computer no longer each wait for a screenshot.
-
-## The Computer card is current
-
-fix
-
-It shows the desktop as the Bot last left it, updated when a Turn ends.
-
 ## Calls answer without a false error
 
 fix
