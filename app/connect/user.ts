@@ -46,7 +46,7 @@ import {
   dueConnectCatalogJobsV1,
   invalidateConnectCatalogV1,
   publishConnectCatalogV1,
-  readConnectCatalogBodyV1,
+  readConnectCatalogToolV1,
   readConnectCatalogDirectoryV1,
   recordConnectCatalogFailureV1,
   CONNECT_CATALOG_UNAVAILABLE_MESSAGE_V1,
@@ -67,6 +67,7 @@ import {
   ComposioRequestError,
   type ComposioFetch,
   type ConnectedAccountSummaryV1,
+  type ConnectLinkV1,
   type ConnectToolV1,
 } from "./composio.js";
 import {
@@ -232,7 +233,7 @@ export class ConnectUserBackendContribution {
   /** One provider listing per Connection generation, shared by concurrent Turns. */
   private readonly catalogDiscovery = new Map<
     string,
-    Promise<ConnectAccountCatalogAnswerV1>
+    Promise<ConnectCatalogDirectoryV1 | undefined>
   >();
 
   constructor(private readonly host: ConnectUserBackendHost) {
@@ -594,16 +595,29 @@ export class ConnectUserBackendContribution {
       return failed();
     }
     const authConfigId = await this.authConfigId(toolkit);
-    // The gateway names which return page the client can come back through;
-    // the origin is this deployment's own, whatever the command carried.
-    const requested = command.callbackUrl
-      ? connectReturnClientV1(URL.parse(command.callbackUrl)?.pathname ?? "")
-      : undefined;
-    const link = await this.client.createConnectLink({
-      userId: accountId,
-      authConfigId,
-      callbackUrl: `${this.host.callbackBaseUrl.replace(/\/$/, "")}${connectCallbackPathV1(requested ?? undefined)}`,
-    });
+    // An app with nothing to sign in to has no page to send anyone to: its
+    // account is live the moment it exists.
+    const open = toolkit.auth === "NO_AUTH";
+    let link: ConnectLinkV1 | undefined;
+    if (!open) {
+      // The gateway names which return page the client can come back
+      // through; the origin is this deployment's own, whatever the command
+      // carried.
+      const requested = command.callbackUrl
+        ? connectReturnClientV1(URL.parse(command.callbackUrl)?.pathname ?? "")
+        : undefined;
+      link = await this.client.createConnectLink({
+        userId: accountId,
+        authConfigId,
+        callbackUrl: `${this.host.callbackBaseUrl.replace(/\/$/, "")}${connectCallbackPathV1(requested ?? undefined)}`,
+      });
+    }
+    const connectedAccountId =
+      link?.connectedAccountId ??
+      (await this.client.createOpenAccount({
+        userId: accountId,
+        authConfigId,
+      }));
     const snapshot = await this.host.settings.readSnapshot();
     const siblings = snapshot.connections.filter(
       (connection) =>
@@ -630,7 +644,7 @@ export class ConnectUserBackendContribution {
     const metadata: ConnectSafeMetadataV1 = {
       toolkitSlug: toolkit.slug,
       toolkitName: toolkit.name,
-      connectedAccountId: link.connectedAccountId,
+      connectedAccountId,
       namespace: ordinal === 1 ? toolkit.slug : `${toolkit.slug}-${ordinal}`,
       startedAt: new Date(this.now()).toISOString(),
     };
@@ -643,6 +657,24 @@ export class ConnectUserBackendContribution {
       safeMetadata: { ...metadata },
     });
     for (const sibling of dead) await this.retire(accountId, sibling);
+    if (!link) {
+      const created = await this.host.settings.getConnection(
+        accountId,
+        connectionId,
+      );
+      const outcome =
+        created && (await this.poll(created).catch(() => undefined));
+      if (created && outcome) {
+        await this.settle(accountId, created, outcome.state, outcome.extra);
+      }
+      return {
+        schemaVersion: 1,
+        commandId: command.commandId,
+        connectionId,
+        status: "applied",
+        oauth: { attemptId: command.attemptId, status: "ready" },
+      };
+    }
     return {
       schemaVersion: 1,
       commandId: command.commandId,
@@ -693,7 +725,7 @@ export class ConnectUserBackendContribution {
   }
 
   /**
-   * One provider-managed OAuth app per toolkit, per project. The provider has
+   * One auth config per app, per project. The provider has
    * no idempotency key for creating one, so the durable record is written
    * only once an id exists; a creation that raced another simply reads the
    * survivor from the provider's own list next time.
@@ -703,14 +735,13 @@ export class ConnectUserBackendContribution {
     const stored = await this.host.storage.get<StoredAuthConfig>(key);
     if (stored?.id) return stored.id;
     const client = this.client!;
-    const existing = (await client.listAuthConfigs()).find(
-      (config) => config.toolkitSlug === toolkit.slug,
-    );
+    const existing = (await client.listAuthConfigs(toolkit.slug))[0];
     const config =
       existing ??
-      (await client.createManagedAuthConfig(
+      (await client.createAuthConfig(
         toolkit.slug,
         `FrockBot ${toolkit.name}`,
+        toolkit.auth,
       ));
     await this.host.storage.put<StoredAuthConfig>(key, { id: config.id });
     return config.id;
@@ -877,32 +908,21 @@ export class ConnectUserBackendContribution {
   }
 
   /**
-   * The account catalog a Turn may list or disclose.
+   * The account catalog a Turn lists, or one tool's schema from it.
    *
-   * `disclose: false` reads the directory only. Schemas are fetched only when
-   * a Turn asks to disclose them and the stored catalog is missing or older
-   * than the disclosure window.
+   * With no `toolName` it answers the directory — every tool's name and
+   * description — fetching the catalog first, within the first-use bound, for
+   * a Connection that has none yet. With a `toolName` it answers that one
+   * tool's schema, refreshing first a catalog older than the disclosure
+   * window.
    */
   async readToolCatalog(input: {
     userId: string;
     connectionId: string;
     generation: string;
-    disclose: boolean;
+    toolName?: string;
     /** Tests shorten the first-use bound. Production uses the policy constant. */
     firstUseMs?: number;
-  }): Promise<ConnectAccountCatalogAnswerV1> {
-    if (!input.disclose) return this.readDirectoryAnswer(input);
-    return coalesceConnectCatalogDiscoveryV1(
-      this.catalogDiscovery,
-      `${input.connectionId}:${input.generation}`,
-      () => this.discloseCatalog(input),
-    );
-  }
-
-  private async readDirectoryAnswer(input: {
-    userId: string;
-    connectionId: string;
-    generation: string;
   }): Promise<ConnectAccountCatalogAnswerV1> {
     const connection = await this.host.settings.getConnection(
       input.userId,
@@ -920,44 +940,25 @@ export class ConnectUserBackendContribution {
         message: CONNECT_STALE_CONTRACT_MESSAGE_V1,
       };
     }
-    const directory = await this.directoryOrUndefined(input.connectionId);
-    return {
-      kind: "directory",
-      tools:
-        directory &&
-        directory.status !== "revoked" &&
-        directory.generation === input.generation
-          ? directory.tools.map((tool) => ({
+    const firstUseMs = input.firstUseMs ?? CONNECT_CATALOG_FIRST_USE_MS_V1;
+    let directory = await this.directoryOrUndefined(input.connectionId);
+    if (input.toolName === undefined) {
+      const listable = (candidate: ConnectCatalogDirectoryV1 | undefined) =>
+        candidate?.status === "ready" &&
+        candidate.generation === input.generation;
+      if (!listable(directory)) {
+        directory = await this.discover(connection, metadata, firstUseMs);
+      }
+      return {
+        kind: "directory",
+        tools: listable(directory)
+          ? directory!.tools.map((tool) => ({
               name: tool.name,
               description: tool.description,
             }))
           : [],
-    };
-  }
-
-  private async discloseCatalog(input: {
-    userId: string;
-    connectionId: string;
-    generation: string;
-    firstUseMs?: number;
-  }): Promise<ConnectAccountCatalogAnswerV1> {
-    const connection = await this.host.settings.getConnection(
-      input.userId,
-      input.connectionId,
-    );
-    const metadata = connection && connectSafeMetadataV1(connection);
-    if (
-      !connection ||
-      !metadata ||
-      connection.state !== "ready" ||
-      connection.generation !== input.generation
-    ) {
-      return {
-        kind: "stale-contract",
-        message: CONNECT_STALE_CONTRACT_MESSAGE_V1,
       };
     }
-    const directory = await this.directoryOrUndefined(input.connectionId);
     if (
       directory &&
       connectCatalogDisclosableV1(directory, input.generation, this.now())
@@ -965,10 +966,19 @@ export class ConnectUserBackendContribution {
       if (connectCatalogRefreshDueV1(directory, this.now())) {
         await this.scheduleCatalogRefresh(connection);
       }
-      return this.catalogAnswer(input.connectionId, directory);
+    } else {
+      directory = await this.discover(connection, metadata, firstUseMs);
+      if (
+        !directory ||
+        !connectCatalogDisclosableV1(directory, input.generation, this.now())
+      ) {
+        return {
+          kind: "unavailable",
+          message: CONNECT_CATALOG_UNAVAILABLE_MESSAGE_V1,
+        };
+      }
     }
-    const firstUseMs = input.firstUseMs ?? CONNECT_CATALOG_FIRST_USE_MS_V1;
-    return this.discoverCatalog(connection, metadata, firstUseMs);
+    return this.toolAnswer(directory, input.toolName);
   }
 
   /** Drains due catalog refreshes. One provider fetch per firing. */
@@ -1064,45 +1074,33 @@ export class ConnectUserBackendContribution {
     });
   }
 
-  private async discoverCatalog(
+  /**
+   * Fetches a Connection's catalog now, sharing one fetch between concurrent
+   * callers, and answers the directory it published — or nothing when the
+   * provider did not answer within the first-use bound. A fetch that outlasts
+   * the bound still publishes for the next caller.
+   */
+  private async discover(
     connection: ConnectionView,
     metadata: ConnectSafeMetadataV1,
     firstUseMs: number,
-  ): Promise<ConnectAccountCatalogAnswerV1> {
-    await this.scheduleCatalogRefresh(connection);
-    const finished = this.refreshConnection(connection, metadata).then(
+  ): Promise<ConnectCatalogDirectoryV1 | undefined> {
+    const finished = coalesceConnectCatalogDiscoveryV1(
+      this.catalogDiscovery,
+      `${connection.connectionId}:${connection.generation}`,
       async () => {
-        const directory = await this.directoryOrUndefined(
-          connection.connectionId,
-        );
-        if (
-          !directory ||
-          !connectCatalogDisclosableV1(
-            directory,
-            connection.generation ?? "",
-            this.now(),
-          )
-        ) {
-          return {
-            kind: "unavailable" as const,
-            message: CONNECT_CATALOG_UNAVAILABLE_MESSAGE_V1,
-          };
-        }
-        return this.catalogAnswer(connection.connectionId, directory);
+        await this.scheduleCatalogRefresh(connection);
+        await this.refreshConnection(connection, metadata);
+        return this.directoryOrUndefined(connection.connectionId);
       },
     );
     let timer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = new Promise<ConnectAccountCatalogAnswerV1>((resolve) => {
-      timer = setTimeout(() => {
-        resolve({
-          kind: "unavailable",
-          message: CONNECT_CATALOG_UNAVAILABLE_MESSAGE_V1,
-        });
-      }, firstUseMs);
+    const timeout = new Promise<undefined>((resolve) => {
+      timer = setTimeout(() => resolve(undefined), firstUseMs);
     });
-    const answer = await Promise.race([finished, timeout]);
+    const directory = await Promise.race([finished, timeout]);
     if (timer) clearTimeout(timer);
-    return answer;
+    return directory;
   }
 
   private async refreshConnection(
@@ -1128,7 +1126,7 @@ export class ConnectUserBackendContribution {
     if (!userId) return;
     let tools: ConnectToolV1[];
     try {
-      tools = await this.client.listImportantTools(job.toolkitSlug);
+      tools = await this.client.listTools(job.toolkitSlug);
     } catch (error) {
       await recordConnectCatalogFailureV1(this.catalogStorage(), {
         job,
@@ -1172,22 +1170,28 @@ export class ConnectUserBackendContribution {
     return typeof stored === "string" ? stored : undefined;
   }
 
-  private async catalogAnswer(
-    connectionId: string,
+  private async toolAnswer(
     directory: ConnectCatalogDirectoryV1,
+    toolName: string,
   ): Promise<ConnectAccountCatalogAnswerV1> {
     try {
-      const body = await readConnectCatalogBodyV1(
+      const tool = await readConnectCatalogToolV1(
         this.catalogStorage(),
-        connectionId,
-        directory.contentHash,
+        directory,
+        toolName,
       );
+      if (!tool) {
+        return {
+          kind: "unavailable",
+          message: `This app has no tool named "${toolName}". Search its tools with get_dynamic_tools({ "namespace": "${directory.namespace}", "pattern": "<words in a tool name>" }).`,
+        };
+      }
       return {
         kind: "catalog",
         catalog: {
           schemaVersion: 1,
           toolkitSlug: directory.toolkitSlug,
-          tools: body.tools,
+          tools: [tool],
         },
       };
     } catch {

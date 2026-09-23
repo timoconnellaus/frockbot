@@ -158,7 +158,7 @@ describe("a connected app in a Bot's Turn", () => {
     await root.dispose();
   });
 
-  test("registers the app's namespace with its important tools, and executes one", async () => {
+  test("registers the app's namespace with its tools, and executes one", async () => {
     const { root, requests } = await mount({
       respond: (url) =>
         url.pathname.endsWith("/tools")
@@ -242,19 +242,21 @@ describe("a connected app in a Bot's Turn", () => {
     await root.dispose();
   });
 
-  test("reads the catalog through the Turn's pin so a remount keeps its schemas", async () => {
+  test("pins each tool's schema for the Turn so a remount keeps it", async () => {
     const pinned = new Map<string, unknown>();
     const first = await mount({
       respond: () => Response.json(TOOL_LIST),
       pinned,
     });
     expect(first.requests).toHaveLength(0);
-    await run(first.root, {
+    const read = await run(first.root, {
       id: "disclose",
       name: "get_dynamic_tools",
-      input: { namespace: "gmail" },
+      input: { namespace: "gmail", toolName: "send_email" },
     });
+    expect(read.isError).toBe(false);
     expect(first.requests).toHaveLength(1);
+    expect([...pinned.keys()]).toEqual(["connection-1/send_email"]);
     const second = await mount({
       respond: () => {
         throw new Error("provider must not be asked again");
@@ -264,12 +266,76 @@ describe("a connected app in a Bot's Turn", () => {
     const disclosed = await run(second.root, {
       id: "disclose-again",
       name: "get_dynamic_tools",
-      input: { namespace: "gmail" },
+      input: { namespace: "gmail", toolName: "send_email" },
     });
     expect(second.requests).toHaveLength(0);
     expect(disclosed.isError).toBe(false);
     expect(disclosed.content).toContain("send_email");
     expect(second.root.tools.registeredNames?.()).toContain("gmail/send_email");
+  });
+
+  test("reads one tool from the account catalog, never the whole app", async () => {
+    const asked: (string | undefined)[] = [];
+    const root = createAgentRuntimeHarness();
+    const feature = createConfiguredConnectRuntimeContribution({
+      capability: CAPABILITY,
+      userId: "tim",
+      connection: CONNECTION,
+      apiKey: "project-key",
+      fetch: () => Promise.reject(new Error("provider must not be asked")),
+      readAccountCatalog: (toolName) => {
+        asked.push(toolName);
+        return Promise.resolve(
+          toolName === undefined
+            ? {
+                kind: "directory",
+                tools: [
+                  { name: "send_email", description: "Sends an email." },
+                  { name: "list_labels", description: "Lists labels." },
+                ],
+              }
+            : toolName === "send_email"
+              ? {
+                  kind: "catalog",
+                  catalog: {
+                    schemaVersion: 1,
+                    toolkitSlug: "gmail",
+                    tools: [
+                      {
+                        slug: "GMAIL_SEND_EMAIL",
+                        name: "send_email",
+                        description: "Sends an email.",
+                        inputSchema: { type: "object", properties: {} },
+                        version: "v1",
+                      },
+                    ],
+                  },
+                }
+              : { kind: "unavailable", message: "No such tool here." },
+        );
+      },
+    });
+    await root.mount(feature!);
+    const listed = await run(root, {
+      id: "list",
+      name: "get_dynamic_tools",
+      input: { namespace: "gmail" },
+    });
+    expect(listed.content).toContain("list_labels");
+    const read = await run(root, {
+      id: "read",
+      name: "get_dynamic_tools",
+      input: { namespace: "gmail", toolName: "send_email" },
+    });
+    expect(read.content).toContain("inputSchema");
+    const missing = await run(root, {
+      id: "missing",
+      name: "get_dynamic_tools",
+      input: { namespace: "gmail", toolName: "fly" },
+    });
+    expect(missing).toEqual({ content: "No such tool here.", isError: true });
+    expect(asked).toEqual([undefined, "send_email", "fly"]);
+    await root.dispose();
   });
 
   test("a refusal from the app is an error the model can act on", async () => {

@@ -190,9 +190,10 @@ export interface ShellEnabledRuntimeHostV1 {
     connectionId: string,
     read: () => Promise<unknown>,
   ): Promise<unknown>;
+  /** The account catalog's directory, or one tool's schema when named. */
   readConnectToolCatalog?(
     connection: { connectionId: string; generation?: string },
-    disclose: boolean,
+    toolName?: string,
   ): Promise<unknown>;
   authorizeConnection(capability: EnabledCapabilityV1): Promise<ConnectionView>;
   /**

@@ -405,6 +405,10 @@ test("the Marketplace catalog lists uninstalled models and installed connectors"
     version: "1.0.0",
     state: "installed",
   });
+  // The ordinary read carries an app only once it has an account.
+  expect(connectionsFrame("tim", user, [together, gmail]).providers).toEqual(
+    [],
+  );
   const catalog = connectionsFrame("tim", user, [together, gmail], {
     catalog: true,
   });

@@ -463,6 +463,38 @@ async function composioStub(request: Request, url: URL): Promise<Response> {
       { status: 201 },
     );
   }
+  // An app with nothing to sign in to: its account is created live.
+  if (path === "/connected_accounts" && request.method === "POST") {
+    const body = (await request.clone().json()) as {
+      auth_config?: { id?: string };
+      connection?: {
+        user_id?: string;
+        state?: { authScheme?: string; val?: { status?: string } };
+      };
+    };
+    const toolkit = [...composioAuthConfigs].find(
+      ([, id]) => id === body.auth_config?.id,
+    )?.[0];
+    if (
+      !toolkit ||
+      !body.connection?.user_id ||
+      body.connection.state?.authScheme !== "NO_AUTH"
+    ) {
+      return Response.json({ error: "bad request" }, { status: 400 });
+    }
+    const id = `ca_${++composioAccountCounter}`;
+    composioAccounts.set(id, { toolkit, status: "ACTIVE" });
+    return Response.json(
+      {
+        id,
+        connectionData: {},
+        status: "ACTIVE",
+        redirect_url: null,
+        redirect_uri: null,
+      },
+      { status: 201 },
+    );
+  }
   const account = /^\/connected_accounts\/([^/]+)$/.exec(path);
   if (account) {
     const id = decodeURIComponent(account[1]!);

@@ -106,7 +106,7 @@ function harness(options?: {
   };
   let fetches = 0;
   const client = {
-    listImportantTools: async () => {
+    listTools: async () => {
       fetches += 1;
       if (options?.delayMs) {
         await new Promise((resolve) => setTimeout(resolve, options.delayMs));
@@ -125,16 +125,61 @@ function harness(options?: {
 }
 
 describe("account tool catalogs", () => {
-  test("a directory read does not fetch schemas", async () => {
+  test("the first directory read fetches the catalog once; later reads do not", async () => {
     const { contribution, fetches } = harness();
-    const listed = await contribution.readToolCatalog({
+    const read = () =>
+      contribution.readToolCatalog({
+        userId: "tim",
+        connectionId: "connection-1",
+        generation: "g1",
+      });
+    const listed = await read();
+    expect(listed).toEqual({
+      kind: "directory",
+      tools: [{ name: "send_email", description: "Sends an email." }],
+    });
+    await read();
+    expect(fetches()).toBe(1);
+  });
+
+  test("a large catalog is stored in chunks and one tool is read from its own", async () => {
+    const schema = {
+      type: "object",
+      properties: { body: { type: "string", description: "x".repeat(20_000) } },
+    };
+    const tools = Array.from({ length: 120 }, (_, index) => ({
+      ...TOOL,
+      slug: `GMAIL_TOOL_${index}`,
+      name: `tool_${index}`,
+      inputSchema: schema,
+    }));
+    const { contribution, storage } = harness({ tools });
+    const answer = await contribution.readToolCatalog({
       userId: "tim",
       connectionId: "connection-1",
       generation: "g1",
-      disclose: false,
+      toolName: "tool_119",
     });
-    expect(listed).toEqual({ kind: "directory", tools: [] });
-    expect(fetches()).toBe(0);
+    expect(answer.kind).toBe("catalog");
+    if (answer.kind === "catalog") {
+      expect(answer.catalog.tools.map((tool) => tool.name)).toEqual([
+        "tool_119",
+      ]);
+    }
+    const chunks = [...storage.values.keys()].filter((key) =>
+      key.startsWith("connect:tool-catalog:v1:body:connection-1:"),
+    );
+    expect(chunks.length).toBeGreaterThan(1);
+    const missing = await contribution.readToolCatalog({
+      userId: "tim",
+      connectionId: "connection-1",
+      generation: "g1",
+      toolName: "fly",
+    });
+    expect(missing.kind).toBe("unavailable");
+    if (missing.kind === "unavailable") {
+      expect(missing.message).toContain('no tool named "fly"');
+    }
   });
 
   test("two first disclosures share one fetch and a later Turn keeps its pin", async () => {
@@ -144,14 +189,14 @@ describe("account tool catalogs", () => {
         userId: "tim",
         connectionId: "connection-1",
         generation: "g1",
-        disclose: true,
+        toolName: "send_email",
         firstUseMs: 5_000,
       }),
       contribution.readToolCatalog({
         userId: "tim",
         connectionId: "connection-1",
         generation: "g1",
-        disclose: true,
+        toolName: "send_email",
         firstUseMs: 5_000,
       }),
     ]);
@@ -163,7 +208,7 @@ describe("account tool catalogs", () => {
       userId: "tim",
       connectionId: "connection-1",
       generation: "g1",
-      disclose: true,
+      toolName: "send_email",
     });
     expect(fetches()).toBe(1);
     expect(again).toEqual(pinned);
@@ -187,7 +232,7 @@ describe("account tool catalogs", () => {
       storage: storage as never,
       settings: settings as never,
       client: {
-        listImportantTools: async () => {
+        listTools: async () => {
           await gate;
           return [TOOL];
         },
@@ -198,7 +243,7 @@ describe("account tool catalogs", () => {
       userId: "tim",
       connectionId: "connection-1",
       generation: "g1",
-      disclose: true,
+      toolName: "send_email",
       firstUseMs: 5_000,
     });
     settings.connections[0] = connection("g2");
@@ -216,7 +261,7 @@ describe("account tool catalogs", () => {
       userId: "tim",
       connectionId: "connection-1",
       generation: "g1",
-      disclose: true,
+      toolName: "send_email",
     });
     const published = storage.values.get(
       connectCatalogDirectoryKeyV1("connection-1"),
@@ -229,7 +274,7 @@ describe("account tool catalogs", () => {
       storage: storage as never,
       settings: settings as never,
       client: {
-        listImportantTools: async () => {
+        listTools: async () => {
           throw new Error("provider down");
         },
       } as never,
@@ -247,7 +292,7 @@ describe("account tool catalogs", () => {
       userId: "tim",
       connectionId: "connection-1",
       generation: "g1",
-      disclose: true,
+      toolName: "send_email",
     });
     expect(revoked.kind).toBe("stale-contract");
     expect(
@@ -255,6 +300,7 @@ describe("account tool catalogs", () => {
         connectCatalogBodyKeyV1(
           "connection-1",
           connectCatalogContentHashV1([TOOL]),
+          0,
         ),
       ),
     ).toBe(true);
@@ -277,7 +323,7 @@ describe("account tool catalogs", () => {
       storage: storage as never,
       settings: settings as never,
       client: {
-        listImportantTools: async () => {
+        listTools: async () => {
           fetches += 1;
           return [{ ...TOOL, version: "next" }];
         },
@@ -288,7 +334,7 @@ describe("account tool catalogs", () => {
       userId: "tim",
       connectionId: "connection-1",
       generation: "g1",
-      disclose: true,
+      toolName: "send_email",
       firstUseMs: 5_000,
     });
     expect(fetches).toBe(1);

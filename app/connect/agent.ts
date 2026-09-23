@@ -1,17 +1,18 @@
 // What a connected app is to a Bot: one Tool Namespace named for the app,
-// carrying the app's important tools, mounted for each ready Connection the
-// User holds. Nothing is in the prompt for an app nobody connected.
+// carrying every tool the app has, mounted for each ready Connection the User
+// holds. Nothing is in the prompt for an app nobody connected.
 //
 // AUTHORITY. A namespace exists only through an enabled `connect-<app>-tools`
 // Capability bound to a `ready` Connection, which the runtime host has already
 // authorized before this factory is asked. The account id comes off that
 // Connection's safe metadata; the provider key is the deployment's.
 //
-// SCHEMAS. The app's tool list is read once per Turn and pinned by the Turn,
-// so a Turn keeps the exact schemas it was admitted under across eviction. A
-// provider that cannot be reached leaves the namespace registered in `error`
-// with no tools: the model is told the app is unusable rather than shown a
-// catalog that is not there.
+// SCHEMAS. An app can carry hundreds of tools, so the namespace lists them
+// from the account catalog's directory and loads one tool's schema only when
+// that tool is read or called. Each loaded schema is pinned by the Turn, so a
+// Turn keeps the exact schema it first used across eviction. A catalog that
+// cannot be read refuses that one tool with a line saying so; the model is
+// never shown a schema that is not there.
 //
 // EFFECTS. A tool call here is an external effect the provider offers no
 // idempotency key for. It is dispatched once per occurrence; a transport
@@ -48,16 +49,17 @@ export interface ConnectRuntimeConfig {
   apiBaseUrl?: string;
   fetch?: ComposioFetch;
   client?: ComposioClient;
+  /** Pins what `read` answers for this Turn under `pinId`: one tool of one Connection. */
   pinToolCatalog?(
-    connectionId: string,
+    pinId: string,
     read: () => Promise<unknown>,
   ): Promise<unknown>;
   /**
-   * The User's account catalog. `disclose: false` is the directory only and
-   * must not fetch schemas. Absent, the Turn asks the provider when a schema
-   * is first required and pins that answer.
+   * The User's account catalog: its directory with no `toolName`, or that one
+   * tool's schema. Absent, the Turn asks the provider when a schema is first
+   * required and pins that answer.
    */
-  readAccountCatalog?(disclose: boolean): Promise<unknown>;
+  readAccountCatalog?(toolName?: string): Promise<unknown>;
   /** Live permission for this Connection. Absent keeps the admitted snapshot. */
   permitConnection?(): Promise<boolean>;
 }
@@ -125,8 +127,9 @@ export function createConnectFeature(
         description: `${labelOf(config, metadata)}: the User's connected account.`,
         status: "ready",
         directory,
-        useInstructions: `Tools for the User's ${labelOf(config, metadata)} account. Read a tool's schema with get_dynamic_tools before calling it. Each call acts on the real account, so confirm anything that sends, posts or deletes.`,
-        resolve: () => resolveConnectNamespace(config, client, metadata),
+        useInstructions: `Tools for the User's ${labelOf(config, metadata)} account. Find a tool with get_dynamic_tools({ "namespace": "${metadata.namespace}", "pattern": "<words in its name>" }) and read its schema with get_dynamic_tools({ "namespace": "${metadata.namespace}", "toolName": "<tool>" }) before calling it. Each call acts on the real account, so confirm anything that sends, posts or deletes.`,
+        resolveTool: (toolName) =>
+          resolveConnectTool(config, client, metadata, toolName),
       }),
     ];
     return cleanups;
@@ -147,7 +150,7 @@ async function readDirectory(
 ): Promise<{ name: string; description: string }[]> {
   if (!config.readAccountCatalog) return [];
   try {
-    const answer = await config.readAccountCatalog(false);
+    const answer = await config.readAccountCatalog();
     if (
       !answer ||
       typeof answer !== "object" ||
@@ -168,10 +171,11 @@ async function readDirectory(
   }
 }
 
-async function resolveConnectNamespace(
+async function resolveConnectTool(
   config: ConnectRuntimeConfig,
   client: ComposioClient,
   metadata: NonNullable<ReturnType<typeof connectSafeMetadataV1>>,
+  toolName: string,
 ): Promise<
   | {
       status: "ready";
@@ -196,9 +200,9 @@ async function resolveConnectNamespace(
       message: CONNECT_STALE_CONTRACT_MESSAGE_V1,
     };
   }
-  let catalog: ConnectToolCatalogV1;
+  let tool: ConnectToolV1;
   try {
-    catalog = await loadPinnedCatalog(config, client, metadata);
+    tool = await loadPinnedTool(config, client, metadata, toolName);
   } catch (error) {
     if (error instanceof ConnectCatalogRefusal) {
       return { status: error.status, message: error.message };
@@ -214,27 +218,29 @@ async function resolveConnectNamespace(
       admissionCeiling: ["chat", "agent", "automation", "subagent"],
       subagentRoleCeiling: ["executor"],
     },
-    tools: catalog.tools.map((tool) => ({
-      namespace: metadata.namespace,
-      name: tool.name,
-      description: tool.description,
-      inputSchema: tool.inputSchema,
-      idempotent: false,
-      execute: async (input) => {
-        if (config.permitConnection && !(await config.permitConnection())) {
-          return {
-            content: CONNECT_STALE_CONTRACT_MESSAGE_V1,
-            isError: true,
-          };
-        }
-        return executeConnectTool(client, {
-          userId: config.userId,
-          connectedAccountId: metadata.connectedAccountId,
-          tool,
-          input,
-        });
+    tools: [
+      {
+        namespace: metadata.namespace,
+        name: tool.name,
+        description: tool.description,
+        inputSchema: tool.inputSchema,
+        idempotent: false,
+        execute: async (input) => {
+          if (config.permitConnection && !(await config.permitConnection())) {
+            return {
+              content: CONNECT_STALE_CONTRACT_MESSAGE_V1,
+              isError: true,
+            };
+          }
+          return executeConnectTool(client, {
+            userId: config.userId,
+            connectedAccountId: metadata.connectedAccountId,
+            tool,
+            input,
+          });
+        },
       },
-    })),
+    ],
   };
 }
 
@@ -248,14 +254,29 @@ class ConnectCatalogRefusal extends Error {
   }
 }
 
-async function loadPinnedCatalog(
+function noSuchTool(
+  namespace: string,
+  toolName: string,
+): ConnectCatalogRefusal {
+  return new ConnectCatalogRefusal(
+    "unavailable",
+    `This app has no tool named "${toolName}". Search its tools with get_dynamic_tools({ "namespace": "${namespace}", "pattern": "<words in a tool name>" }).`,
+  );
+}
+
+/**
+ * One tool's schema, pinned by the Turn under the Connection and the tool's
+ * name, so a remount of the same Turn reads back exactly what it used.
+ */
+async function loadPinnedTool(
   config: ConnectRuntimeConfig,
   client: ComposioClient,
   metadata: NonNullable<ReturnType<typeof connectSafeMetadataV1>>,
-): Promise<ConnectToolCatalogV1> {
+  toolName: string,
+): Promise<ConnectToolV1> {
   const read = async (): Promise<ConnectToolCatalogV1> => {
     if (config.readAccountCatalog) {
-      const answer = await config.readAccountCatalog(true);
+      const answer = await config.readAccountCatalog(toolName);
       if (
         answer &&
         typeof answer === "object" &&
@@ -286,16 +307,27 @@ async function loadPinnedCatalog(
           : CONNECT_CATALOG_UNAVAILABLE_MESSAGE_V1,
       );
     }
+    const tool = (await client.listTools(metadata.toolkitSlug)).find(
+      (candidate) => candidate.name === toolName,
+    );
+    if (!tool) throw noSuchTool(metadata.namespace, toolName);
     return {
       schemaVersion: 1,
       toolkitSlug: metadata.toolkitSlug,
-      tools: await client.listImportantTools(metadata.toolkitSlug),
+      tools: [tool],
     };
   };
   const loaded = config.pinToolCatalog
-    ? await config.pinToolCatalog(config.connection.connectionId, read)
+    ? await config.pinToolCatalog(
+        `${config.connection.connectionId}/${toolName}`,
+        read,
+      )
     : await read();
-  return decodeConnectToolCatalogV1(loaded);
+  const tool = decodeConnectToolCatalogV1(loaded).tools.find(
+    (candidate) => candidate.name === toolName,
+  );
+  if (!tool) throw noSuchTool(metadata.namespace, toolName);
+  return tool;
 }
 
 export async function executeConnectTool(

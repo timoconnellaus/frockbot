@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import io
 import json
+import re
 import sys
 import tarfile
 import urllib.request
@@ -64,14 +65,17 @@ LOBE_FILES: dict[str, str] = {
 # No honest mark in the pack. The host draws a letter tile.
 LETTER_TILE = frozenset({"radius"})
 
-CONNECT_ICONS = (
-    "gmail",
-    "slack",
-    "github",
-    "notion",
-    "googlecalendar",
-    "googledrive",
-)
+# Every connected app in app/connect/apps.generated.ts ships its own mark,
+# rasterised from the app's logo. They are not in the Lobe pack; they are
+# checked here, not synced.
+CONNECT_CATALOG = ROOT / "app/connect/apps.generated.ts"
+
+# Connected apps whose published logo is empty. The host draws a letter tile.
+CONNECT_LETTER_TILE = frozenset({"cloudlayer"})
+
+
+def connect_icons() -> list[str]:
+    return re.findall(r'\[\s*"([a-z][a-z0-9_]*)",\s*"', CONNECT_CATALOG.read_text())
 
 
 def catalog_ids() -> list[str]:
@@ -120,9 +124,16 @@ def check() -> None:
     absent = [
         name for name in LOBE_FILES if not (DEST / f"{name}.png").exists()
     ]
+    connect = connect_icons()
     connect_absent = [
-        name for name in CONNECT_ICONS if not (DEST / f"{name}.png").exists()
+        name
+        for name in connect
+        if name not in CONNECT_LETTER_TILE and not (DEST / f"{name}.png").exists()
     ]
+    known = set(ids) | set(connect)
+    strays = sorted(
+        path.stem for path in DEST.glob("*.png") if path.stem not in known
+    )
     errors = []
     if missing:
         errors.append(f"catalog ids with no mapping: {missing}")
@@ -132,11 +143,13 @@ def check() -> None:
         errors.append(f"mapped files missing: {absent}")
     if connect_absent:
         errors.append(f"connect marks missing: {connect_absent}")
+    if strays:
+        errors.append(f"marks for no catalog entry: {strays}")
     if errors:
         raise SystemExit("\n".join(errors))
     print(
         f"ok: {len(LOBE_FILES)} catalog marks, "
-        f"{len(LETTER_TILE)} letter-tile, {len(CONNECT_ICONS)} connect marks",
+        f"{len(LETTER_TILE)} letter-tile, {len(connect)} connect apps",
     )
 
 

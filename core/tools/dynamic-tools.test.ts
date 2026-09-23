@@ -869,3 +869,125 @@ describe("lazy namespace resolution", () => {
     expect(resolved).toBe(1);
   });
 });
+
+describe("namespaces resolved one tool at a time", () => {
+  function large(count: number) {
+    return Array.from({ length: count }, (_, index) => ({
+      name: `tool_${String(index).padStart(3, "0")}`,
+      description: `Tool number ${index}.`,
+    }));
+  }
+
+  test("loads only the tool asked for, once, and dispatches it", async () => {
+    const { tools } = toolsFixture();
+    const asked: string[] = [];
+    tools.registerNamespace({
+      name: "github",
+      directory: [
+        { name: "create_issue", description: "Creates an issue." },
+        { name: "list_repos", description: "Lists repositories." },
+      ],
+      resolveTool: (toolName) => {
+        asked.push(toolName);
+        return Promise.resolve({
+          status: "ready",
+          tools: [dynamicTool("github", toolName)],
+        });
+      },
+    });
+    const schema = await invoke(tools, GET_DYNAMIC_TOOLS_NAME, {
+      namespace: "github",
+      toolName: "create_issue",
+    });
+    expect(schema.content).toContain("inputSchema");
+    const called = await invoke(tools, CALL_DYNAMIC_TOOL_NAME, {
+      namespace: "github",
+      toolName: "create_issue",
+      arguments: { value: "hi" },
+    });
+    expect(called.isError).toBe(false);
+    const other = await invoke(tools, CALL_DYNAMIC_TOOL_NAME, {
+      namespace: "github",
+      toolName: "list_repos",
+      arguments: {},
+    });
+    expect(other.isError).toBe(false);
+    expect(asked).toEqual(["create_issue", "list_repos"]);
+    // The catalog still lists the tools not yet loaded beside the loaded one.
+    const listed = await invoke(tools, GET_DYNAMIC_TOOLS_NAME, {
+      namespace: "github",
+    });
+    expect(listed.content).toContain("create_issue");
+    expect(listed.content).toContain("list_repos");
+    expect(listed.content).not.toContain("inputSchema");
+  });
+
+  test("a tool the app does not have is refused with the resolver's words", async () => {
+    const { tools } = toolsFixture();
+    tools.registerNamespace({
+      name: "github",
+      directory: [{ name: "create_issue", description: "Creates an issue." }],
+      resolveTool: () =>
+        Promise.resolve({
+          status: "unavailable",
+          message: "This app has no tool named that.",
+        }),
+    });
+    const called = await invoke(tools, CALL_DYNAMIC_TOOL_NAME, {
+      namespace: "github",
+      toolName: "fly",
+      arguments: {},
+    });
+    expect(called.isError).toBe(true);
+    expect(called.content).toBe("This app has no tool named that.");
+  });
+
+  test("a large namespace is counted, not named, and searched by pattern", async () => {
+    const { tools, systemPrompt } = toolsFixture();
+    tools.registerNamespace({
+      name: "github",
+      directory: large(300),
+      resolveTool: () => Promise.reject(new Error("must not load")),
+    });
+    const assembly = await systemPrompt.assemble({
+      sessionId: "session",
+      provider: "provider",
+      model: "model",
+      turnType: "chat",
+    });
+    expect(assembly.text).toContain('<namespace name="github" toolCount="300"');
+    expect(assembly.text).not.toContain("tool_000");
+    const bare = JSON.parse(
+      (await invoke(tools, GET_DYNAMIC_TOOLS_NAME, {})).content as string,
+    ) as { namespaces: { namespace: string; toolCount?: number }[] };
+    expect(
+      bare.namespaces.find(({ namespace }) => namespace === "github"),
+    ).toMatchObject({ toolCount: 300, tools: [] });
+    const searched = JSON.parse(
+      (
+        await invoke(tools, GET_DYNAMIC_TOOLS_NAME, {
+          namespace: "github",
+          pattern: "tool_",
+        })
+      ).content as string,
+    ) as { namespaces: { tools: unknown[]; moreMatches?: string }[] };
+    expect(searched.namespaces[0]!.tools).toHaveLength(100);
+    expect(searched.namespaces[0]!.moreMatches).toContain("200 more");
+    const narrow = await invoke(tools, GET_DYNAMIC_TOOLS_NAME, {
+      namespace: "github",
+      pattern: "tool_29",
+    });
+    expect(narrow.content).toContain("tool_299");
+  });
+
+  test("a bare name from the directory is pointed at its namespace", async () => {
+    const { tools } = toolsFixture();
+    tools.registerNamespace({
+      name: "github",
+      directory: [{ name: "create_issue", description: "Creates an issue." }],
+      resolveTool: () => Promise.reject(new Error("must not load")),
+    });
+    const result = await invoke(tools, "create_issue", {});
+    expect(result.content).toContain('"namespace":"github"');
+  });
+});

@@ -632,6 +632,9 @@ function modelProviderDescriptionV1(
       : `Use ${name} models with your own key.`;
 }
 
+/** Every model provider and every connectable app, with room to grow. */
+const CONNECTIONS_FRAME_PROVIDERS_MAX = 2_000;
+
 /**
  * Connectors: every account a User holds, and every Package they could hold
  * one against.
@@ -682,6 +685,17 @@ export function connectionsFrame(
           connection.connectionTypeId === type.id &&
           connection.state !== "revoked",
       ).length;
+      // A Package with a Connection Type per app offers well over a thousand
+      // of them. The ordinary read carries the ones with an account; the
+      // Marketplace is where the rest are found.
+      if (
+        !offerCatalog &&
+        kind === "connector" &&
+        (item.connectionTypes?.length ?? 0) > 1 &&
+        connected === 0
+      ) {
+        continue;
+      }
       // A Connection setting whose schema this projection has no field for
       // leaves the row rather than taking the whole surface down with it: the
       // account can still be connected, on the Connection Type's own defaults.
@@ -768,7 +782,7 @@ export function connectionsFrame(
     ownerId: userId,
     revision: settings.revision,
     accounts,
-    providers: providers.slice(0, 100),
+    providers: providers.slice(0, CONNECTIONS_FRAME_PROVIDERS_MAX),
     modelInUse: modelInUseLineV1(settings, catalog),
   });
 }

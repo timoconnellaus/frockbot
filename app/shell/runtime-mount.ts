@@ -707,12 +707,12 @@ export async function agentRuntime(
       ...(turn
         ? {
             pinToolCatalog: turnToolCatalogPin(state.ctx.storage, turn.turnId),
-            readConnectToolCatalog: (connection, disclose) =>
+            readConnectToolCatalog: (connection, toolName) =>
               userConfigurationReadConnectToolCatalogV1(
                 state,
                 identity.userId,
                 connection,
-                disclose,
+                toolName,
               ),
           }
         : {}),
@@ -918,7 +918,7 @@ async function userConfigurationReadConnectToolCatalogV1(
   state: ShellBotStateV1,
   userId: string,
   connection: { connectionId: string; generation?: string },
-  disclose: boolean,
+  toolName: string | undefined,
 ): Promise<unknown> {
   if (!connection.generation) {
     return {
@@ -935,6 +935,6 @@ async function userConfigurationReadConnectToolCatalogV1(
     userId,
     connectionId: connection.connectionId,
     generation: connection.generation ?? "",
-    disclose,
+    ...(toolName === undefined ? {} : { toolName }),
   });
 }

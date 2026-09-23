@@ -60,7 +60,7 @@ describe("Connected apps", () => {
     const userId = freshUserId("connect-rows");
     await provisionThroughGateway({ userId, botId: "rows" });
     const frame = (await expectOkJson(
-      await asUser(userId, "/api/settings/connections"),
+      await asUser(userId, "/api/settings/connections?catalog=1"),
     )) as {
       providers: Array<{
         displayName: string;
@@ -81,6 +81,18 @@ describe("Connected apps", () => {
     }
     // The provider is plumbing: it is named nowhere a person reads.
     expect(JSON.stringify(frame).toLowerCase()).not.toContain("composio");
+    // Every app is in the Marketplace, and the model providers still are too.
+    expect(
+      frame.providers.filter((p) => p.kind === "connector").length,
+    ).toBeGreaterThan(1_000);
+    expect(frame.providers.some((p) => p.kind === "model")).toBe(true);
+    // The ordinary read carries only the apps with an account.
+    const ordinary = (await expectOkJson(
+      await asUser(userId, "/api/settings/connections"),
+    )) as { providers: Array<{ packageId: string }> };
+    expect(ordinary.providers.some((p) => p.packageId === "connect")).toBe(
+      false,
+    );
   });
 
   it("hands the person to the app's sign-in and settles the account on the next read", async () => {
@@ -227,6 +239,36 @@ describe("Connected apps", () => {
       state: "failed",
       failure: "Sign-in didn't finish. Connect it again.",
     });
+  });
+
+  it("connects an app with nothing to sign in to at once, and runs its tool", async () => {
+    const userId = freshUserId("connect-open");
+    const botId = "open-bot";
+    await provisionThroughGateway({ userId, botId });
+    const started = (await expectOkJson(
+      await startApp(userId, "start-hn", "hackernews"),
+    )) as { status: string; redirectUrl?: string };
+    expect(started.status).toBe("ready");
+    expect(started.redirectUrl).toBeUndefined();
+    expect((await connections(userId))[0]?.state).toBe("ready");
+
+    const turn = (await expectOkJson(
+      await postAsUser(userId, `/api/bots/${botId}/turns`, {
+        schemaVersion: 1,
+        commandId: "hn-one",
+        text: toolCallTriggerPrompt([
+          "call_dynamic_tool",
+          {
+            namespace: "hackernews",
+            toolName: "send_email",
+            arguments: { to: "a@example.com", body: "hello" },
+          },
+        ]),
+      }),
+    )) as { events: Array<{ type: string; isError?: boolean }> };
+    expect(
+      turn.events.find((event) => event.type === "tool/result"),
+    ).toMatchObject({ isError: false });
   });
 
   it("gives every Bot the app's tools under its namespace, and runs one", async () => {

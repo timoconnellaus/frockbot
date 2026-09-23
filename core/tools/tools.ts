@@ -28,6 +28,15 @@ export const FROCKBOT_TOOL_NAMESPACE = "frockbot";
 
 const CATALOG_DESCRIPTION_MAX_CHARS = 200;
 const TRUNCATION_SUFFIX = "... [truncated]";
+/**
+ * Most tools a namespace loaded tool by tool lists by name in a catalog
+ * before it is summarised as a count to search: a connected app can carry
+ * hundreds, and naming every one on every Turn would spend the prompt on
+ * tools nobody asked about.
+ */
+const NAMESPACE_LISTED_TOOLS_MAX = 50;
+/** Most tools one search of such a namespace returns before it asks to be narrowed. */
+const PATTERN_MATCHES_MAX = 100;
 
 export const FROCKBOT_NAMESPACE_USE_INSTRUCTIONS =
   "Native FrockBot tools for this session. You MUST read the tool schemas before calling them.";
@@ -423,6 +432,29 @@ function namespaceOfCall(call: ToolCall): string | undefined {
     : undefined;
 }
 
+/**
+ * Whether a catalog names a namespace's tools or only counts them. Only a
+ * namespace loaded tool by tool can be large enough to need it.
+ */
+function summarised(namespace: AvailableNamespace): boolean {
+  return (
+    namespace.metadata?.resolveTool !== undefined &&
+    namespace.tools.length > NAMESPACE_LISTED_TOOLS_MAX
+  );
+}
+
+function toolNameOfCall(call: ToolCall): string | undefined {
+  if (
+    !call.input ||
+    typeof call.input !== "object" ||
+    Array.isArray(call.input)
+  ) {
+    return undefined;
+  }
+  const toolName = (call.input as { toolName?: unknown }).toolName;
+  return typeof toolName === "string" && toolName.trim() ? toolName : undefined;
+}
+
 export class ToolRegistry implements ToolExecution {
   private nativeDefinitions = new Map<string, RegisteredTool>();
   private dynamicDefinitions = new Map<string, Map<string, RegisteredTool>>();
@@ -430,6 +462,7 @@ export class ToolRegistry implements ToolExecution {
   private guards: ToolGuard[] = [];
   private preparedDefinitions = new WeakMap<object, RegisteredTool>();
   private pendingResolve = new Map<string, Promise<void>>();
+  private pendingToolResolve = new Map<string, Promise<void>>();
   private resolvedCleanups = new Map<string, Array<() => void>>();
 
   constructor(
@@ -526,6 +559,11 @@ export class ToolRegistry implements ToolExecution {
         undo();
       this.resolvedCleanups.delete(namespace.name);
       this.pendingResolve.delete(namespace.name);
+      for (const key of this.pendingToolResolve.keys()) {
+        if (key.startsWith(`${namespace.name}\u0000`)) {
+          this.pendingToolResolve.delete(key);
+        }
+      }
     };
   }
 
@@ -616,7 +654,10 @@ export class ToolRegistry implements ToolExecution {
     if (call.name === CALL_DYNAMIC_TOOL_NAME) {
       const namespace = namespaceOfCall(call);
       if (namespace) {
-        const refusal = await this.ensureResolved(namespace);
+        const toolName = toolNameOfCall(call);
+        const refusal = toolName
+          ? await this.ensureToolResolved(namespace, toolName)
+          : await this.ensureResolved(namespace);
         if (refusal) return this.denied(call, refusal);
       }
       const resolved = this.resolveDynamicCall(call);
@@ -680,10 +721,20 @@ export class ToolRegistry implements ToolExecution {
    * hands back the exact envelope for the namespace the name is actually in.
    */
   private unknownToolRefusal(name: string): string {
-    const namespaces = [...this.dynamicDefinitions]
-      .filter(([, definitions]) => definitions.has(name))
-      .map(([namespace]) => namespace)
-      .sort();
+    const namespaces = [
+      ...new Set([
+        ...[...this.dynamicDefinitions]
+          .filter(([, definitions]) => definitions.has(name))
+          .map(([namespace]) => namespace),
+        ...[...this.namespaces.values()]
+          .filter(
+            (metadata) =>
+              metadata.resolveTool !== undefined &&
+              metadata.directory?.some((entry) => entry.name === name),
+          )
+          .map((metadata) => metadata.name),
+      ]),
+    ].sort();
     const first = namespaces[0];
     if (first === undefined) return `Unknown tool: ${name}`;
     const where =
@@ -895,7 +946,9 @@ export class ToolRegistry implements ToolExecution {
       ...[...this.namespaces.entries()]
         .filter(
           ([, metadata]) =>
-            metadata.resolve !== undefined || metadata.directory !== undefined,
+            metadata.resolve !== undefined ||
+            metadata.resolveTool !== undefined ||
+            metadata.directory !== undefined,
         )
         .map(([name]) => name),
     ]);
@@ -908,16 +961,28 @@ export class ToolRegistry implements ToolExecution {
               this.admitted(tool, admission),
             )
           : [];
-        const tools = (
-          registered.length > 0 ? registered : this.directoryListings(metadata)
-        ).toSorted((left, right) =>
+        // A namespace resolved one tool at a time lists its directory with
+        // whatever it has loaded so far; a whole-namespace resolve replaces it.
+        const listed = metadata?.resolveTool
+          ? [
+              ...registered,
+              ...this.directoryListings(metadata).filter(
+                ({ definition }) => !definitions?.has(definition.name),
+              ),
+            ]
+          : registered.length > 0
+            ? registered
+            : this.directoryListings(metadata);
+        const tools = listed.toSorted((left, right) =>
           left.definition.name.localeCompare(right.definition.name),
         );
         return { name, ...(metadata ? { metadata } : {}), tools };
       })
       .filter(
         ({ tools, metadata }) =>
-          tools.length > 0 || metadata?.resolve !== undefined,
+          tools.length > 0 ||
+          metadata?.resolve !== undefined ||
+          metadata?.resolveTool !== undefined,
       )
       .toSorted((left, right) => left.name.localeCompare(right.name));
   }
@@ -985,6 +1050,76 @@ export class ToolRegistry implements ToolExecution {
         ? error.message
         : "The tool catalog is unavailable";
     }
+  }
+
+  /**
+   * Loads one tool of a namespace that resolves tool by tool, once per Turn.
+   * A namespace that resolves whole is loaded whole instead.
+   */
+  private async ensureToolResolved(
+    name: string,
+    toolName: string,
+  ): Promise<string | undefined> {
+    const metadata = this.namespaces.get(name);
+    if (!metadata?.resolveTool) return this.ensureResolved(name);
+    if (this.dynamicDefinitions.get(name)?.has(toolName)) return undefined;
+    const key = `${name}\u0000${toolName}`;
+    let pending = this.pendingToolResolve.get(key);
+    if (!pending) {
+      pending = metadata
+        .resolveTool(toolName)
+        .then((result) => {
+          if (result.status !== "ready") {
+            throw new Error(result.message);
+          }
+          const cleanups = this.resolvedCleanups.get(name) ?? [];
+          for (const tool of result.tools) {
+            if (tool.namespace !== name || tool.name !== toolName) continue;
+            if (this.dynamicDefinitions.get(name)?.has(tool.name)) continue;
+            cleanups.push(this.register(tool, result.registration));
+          }
+          this.resolvedCleanups.set(name, cleanups);
+        })
+        .finally(() => {
+          if (this.pendingToolResolve.get(key) === pending) {
+            this.pendingToolResolve.delete(key);
+          }
+        });
+      this.pendingToolResolve.set(key, pending);
+    }
+    try {
+      await pending;
+      return undefined;
+    } catch (error) {
+      return error instanceof Error
+        ? error.message
+        : "The tool's schema is unavailable";
+    }
+  }
+
+  /**
+   * A namespace too large to name every tool in a catalog, said as a count
+   * and how to search it.
+   */
+  private summarisedNamespace(
+    namespace: AvailableNamespace,
+  ): Record<string, unknown> {
+    return {
+      namespace: namespace.name,
+      ...(namespace.metadata?.description
+        ? {
+            namespaceDescription: truncateCatalogText(
+              namespace.metadata.description,
+            ),
+          }
+        : {}),
+      ...(namespace.metadata?.status
+        ? { namespaceStatus: namespace.metadata.status }
+        : {}),
+      toolCount: namespace.tools.length,
+      tools: [],
+      toolSearch: `${namespace.tools.length} tools. Search them with ${GET_DYNAMIC_TOOLS_NAME}({ "namespace": "${namespace.name}", "pattern": "<words in a tool name>" }), then read one with ${GET_DYNAMIC_TOOLS_NAME}({ "namespace": "${namespace.name}", "toolName": "<tool>" }).`,
+    };
   }
 
   private catalogNamespace(
@@ -1067,11 +1202,18 @@ export class ToolRegistry implements ToolExecution {
     if (namespaceName && selected.length === 0) {
       return { content: "Namespace not found", isError: true };
     }
+    const toolByTool =
+      namespaceName !== undefined &&
+      this.namespaces.get(namespaceName)?.resolveTool !== undefined &&
+      this.namespaces.get(namespaceName)?.resolve === undefined;
     const completeSchema =
       toolName !== undefined ||
-      (namespaceName !== undefined && pattern === undefined);
+      (namespaceName !== undefined && pattern === undefined && !toolByTool);
     if (completeSchema && namespaceName) {
-      const refusal = await this.ensureResolved(namespaceName);
+      const refusal =
+        toolName !== undefined
+          ? await this.ensureToolResolved(namespaceName, toolName)
+          : await this.ensureResolved(namespaceName);
       if (refusal) return { content: refusal, isError: true };
     }
     const resolvedNamespaces = completeSchema
@@ -1137,6 +1279,21 @@ export class ToolRegistry implements ToolExecution {
     if (pattern === undefined && namespaceName !== undefined) {
       const namespace = resolvedSelected[0];
       if (!namespace) return { content: "Namespace not found", isError: true };
+      // Loaded one tool at a time: the namespace is listed, and each schema
+      // is read by name.
+      if (toolByTool) {
+        return {
+          content: JSON.stringify(
+            summarised(namespace)
+              ? this.summarisedNamespace(namespace)
+              : {
+                  ...this.catalogNamespace(namespace),
+                  toolSchemas: `Read one tool's complete schema with ${GET_DYNAMIC_TOOLS_NAME}({ "namespace": "${namespace.name}", "toolName": "<tool>" }).`,
+                },
+          ),
+          isError: false,
+        };
+      }
       return {
         content: JSON.stringify(this.fullNamespace(namespace)),
         isError: false,
@@ -1151,13 +1308,34 @@ export class ToolRegistry implements ToolExecution {
       regex = compiled.regex;
     }
     const catalog = selected.flatMap((namespace) => {
-      if (!regex) return [this.catalogNamespace(namespace)];
+      if (!regex) {
+        return [
+          summarised(namespace)
+            ? this.summarisedNamespace(namespace)
+            : this.catalogNamespace(namespace),
+        ];
+      }
       const tools = regex.test(namespace.name)
         ? namespace.tools
         : namespace.tools.filter(({ definition }) =>
             regex!.test(definition.name),
           );
-      return tools.length > 0 ? [this.catalogNamespace(namespace, tools)] : [];
+      if (tools.length === 0) return [];
+      if (
+        namespace.metadata?.resolveTool !== undefined &&
+        tools.length > PATTERN_MATCHES_MAX
+      ) {
+        return [
+          {
+            ...this.catalogNamespace(
+              namespace,
+              tools.slice(0, PATTERN_MATCHES_MAX),
+            ),
+            moreMatches: `${tools.length - PATTERN_MATCHES_MAX} more tools match; narrow the pattern.`,
+          },
+        ];
+      }
+      return [this.catalogNamespace(namespace, tools)];
     });
     return {
       content: JSON.stringify({ mode: "catalog", namespaces: catalog }),
@@ -1174,9 +1352,13 @@ export class ToolRegistry implements ToolExecution {
     const entries = namespaces.map((namespace) => {
       const attributes = [
         `name="${xmlAttribute(namespace.name)}"`,
-        `tools="${xmlAttribute(
-          namespace.tools.map(({ definition }) => definition.name).join(", "),
-        )}"`,
+        summarised(namespace)
+          ? `toolCount="${namespace.tools.length}"`
+          : `tools="${xmlAttribute(
+              namespace.tools
+                .map(({ definition }) => definition.name)
+                .join(", "),
+            )}"`,
         ...(namespace.metadata?.useInstructions
           ? [
               `namespaceUseInstructions="${xmlAttribute(
