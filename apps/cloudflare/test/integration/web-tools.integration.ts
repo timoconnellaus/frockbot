@@ -89,26 +89,6 @@ async function grantWebTools(userId: string, botId: string): Promise<void> {
   );
 }
 
-/** Disable one Package account-wide through its single enablement surface. */
-async function disablePackage(
-  userId: string,
-  packageId: string,
-): Promise<void> {
-  const settings = (await expectOkJson(
-    await asUser(userId, "/api/settings"),
-  )) as { revision: number };
-  await expectOkJson(
-    await postAsUser(userId, "/api/settings", {
-      schemaVersion: 1,
-      type: "user/set-package-enabled",
-      commandId: `disable-${packageId}`,
-      expectedRevision: settings.revision,
-      packageId,
-      enabled: false,
-    }),
-  );
-}
-
 describe("web_search through the gateway, the artifact and the Bot", () => {
   it("records the provider's results as durable JSON on the Turn", async () => {
     const userId = freshUserId("web-search");
@@ -250,36 +230,36 @@ describe("web_fetch through the gateway, the artifact and the Bot", () => {
   });
 });
 
-describe("a disabled Web Package", () => {
-  // What used to be asserted here — `web_fetch` gone, `web_search` still
-  // there — is no longer a reachable account. `provider-ollama-cloud` declares
-  // a dependency on `web`, so disabling Web carries the provider off with it,
-  // and the provider owns both `web_search` and the only Connection-backed
-  // model in this harness. The reachable question is the one below: does the
-  // Bot survive losing the Package its model was bound to.
-  it("carries the Packages that depend on it, and the Bot keeps answering", async () => {
-    const userId = freshUserId("web-unassigned");
-    const botId = "cascade-bot";
+describe("the Web Package", () => {
+  // Web is a first-party feature a Bot switches for itself, so it is
+  // platform-owned: there is no account-wide switch to turn it off, and the
+  // Packages that depend on it are never carried off with it.
+  it("cannot be turned off for the whole account", async () => {
+    const userId = freshUserId("web-platform-owned");
+    const botId = "web-owned-bot";
     await provisionThroughGateway({ userId, botId });
 
-    await disablePackage(userId, "web");
+    const before = (await expectOkJson(
+      await asUser(userId, "/api/settings"),
+    )) as { revision: number };
+    const receipt = (await expectOkJson(
+      await postAsUser(userId, "/api/settings", {
+        schemaVersion: 1,
+        type: "user/set-package-enabled",
+        commandId: "disable-web",
+        expectedRevision: before.revision,
+        packageId: "web",
+        enabled: false,
+      }),
+    )) as { status: string };
+    expect(receipt.status).toBe("rejected");
     const settings = (await expectOkJson(
       await asUser(userId, "/api/settings"),
     )) as { packages: Array<{ packageId: string; state: string }> };
     const states = Object.fromEntries(
       settings.packages.map((pkg) => [pkg.packageId, pkg.state]),
     );
-    expect(states["web"]).toBe("disabled");
-    expect(states["provider-ollama-cloud"]).toBe("disabled");
-
-    // The account model was bound to the cascaded provider. The platform
-    // bootstrap stands in, so this Turn answers rather than failing.
-    const turn = await postAsUser(userId, `/api/bots/${botId}/turns`, {
-      schemaVersion: 1,
-      commandId: "web-unassigned-turn",
-      text: "hello",
-    });
-    expect(turn.status).toBe(200);
-    expect(JSON.stringify(await turn.json())).toContain("Frock AI reply");
+    expect(states["web"]).toBe("installed");
+    expect(states["provider-ollama-cloud"]).toBe("installed");
   });
 });

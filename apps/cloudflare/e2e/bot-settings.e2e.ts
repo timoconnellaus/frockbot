@@ -86,11 +86,11 @@ test("Settings is one level under the Bot page, in one card grammar", async ({
   await expect(sem(page, "bot-settings-save")).toHaveCount(0);
   await expect(sem(page, "bot-settings-status")).toHaveCount(1);
 
-  // Capabilities is a door rather than a switchboard, and the account owns the
-  // model unless the Package that lets a Bot differ is installed — which ships
-  // disabled, so there is no model row to press here.
+  // Capabilities is a door rather than a switchboard, and every Bot may choose
+  // its own model: the Package that lets a Bot differ is platform-owned, so
+  // the model row is always there.
   await expect(sem(page, "bot-settings-plugins")).toBeVisible();
-  await expect(sem(page, "bot-model")).toHaveCount(0);
+  await expect(sem(page, "bot-model")).toBeVisible();
   // Two rows rather than a tinted panel of two different button shapes.
   await expect(sem(page, "flock-danger-zone")).toBeVisible();
   await expect(sem(page, "flock-archive-bot")).toBeVisible();
