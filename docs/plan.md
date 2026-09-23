@@ -146,12 +146,12 @@ A Group Chat is a conversation between the User and several of their Bots. It re
 - **Bots outside the group** are reached with `bot_message`, which from a Group Chat accepts only non-members. The Exchange marker and its view-only Exchange are drawn in the group thread. `bot_message` in one-to-one chats is unchanged.
 - **A Bot may @mention the User**, which sends a push notification. Every other message only counts as unread.
 
-**Steering replaces Supersede, everywhere.** A message sent while a Bot is working enters that Bot's context at its next step boundary: after the current model response and its tool calls settle, before the next model call. Nothing already sent to the model is re-issued. The message does not redirect the Turn by itself; the Bot decides what to do with it. A message that arrives while the Turn is producing its final answer is taken up by the next Turn. Stop is the only cancel. This applies to one-to-one chats too: Supersede, its drain state and the `superseded` terminal state are removed.
+**Steering replaces Supersede, everywhere.** A message sent while a Bot is working enters that Bot's context at its next step boundary: after the current model response and its tool calls settle, before the next model call. Nothing already sent to the model is re-issued. The message does not redirect the Turn by itself; the Bot decides what to do with it. A message that arrives while the Turn is producing its final answer is taken up by the next Turn. `/stop` is the only cancel. This applies to one-to-one chats too: Supersede, its drain state and the `superseded` terminal state are removed.
 
 **A Bot in a Group Chat.**
 
 - It brings its whole self: its tools, Computer and connected apps, and its Bot, User and Group Chat memory. It sees the group's thread, not its one-to-one history, which it can search on demand.
-- It does one thing at a time. A group Turn waits behind the Bot's other work, and the group shows that the Bot is busy elsewhere.
+- It does one thing at a time. A group Turn waits behind the Bot's other work, and the Bot is not drawn as working in the group until its group Turn starts.
 - A member Bot may post into a Group Chat from outside it — from its one-to-one chat or a Routine. The post goes through Jev like any other message.
 - Its group activity is not marked in its one-to-one thread.
 
@@ -165,7 +165,10 @@ A Group Chat is a conversation between the User and several of their Bots. It re
 **Interface.**
 
 - Every Bot message starts with a badge: a pill filled with the Bot's avatar colour (`avatarCatalog` in `app/flock/shared.ts`) and its name, with black or white text chosen for contrast and a hairline outline on the near-white and near-black colours. Cards a Bot posts carry the same badge. Two Bots of the same character share a colour and are told apart by name.
-- A mention is drawn as a chip in the mentioned Bot's colour. The composer's `@` opens a member picker. The User's messages are drawn as today.
+- A mention is drawn as a chip in the mentioned Bot's colour. The composer's `@` opens a member picker, and the empty composer is addressed to the group by name. The User's messages are drawn as today.
+- The working indicator is the one-to-one chat's: each member whose group Turn is running stands at the end of the thread under the sheen, side by side, and leaves when its Turn ends. A queued Bot is not drawn. A Bot a member asked with `bot_message` stands beside that member, smaller, as it does in a one-to-one chat.
+- `/stop` stops every member Turn running for this group, and `/stop @Name` stops one. A Bot's work in other chats is untouched. A stop that produced nothing is a marker naming the Bot.
+- A member Turn that did not finish is the one-to-one chat's muted line with Retry, on that Bot's side and under its badge. Retry runs that Bot again.
 - Group Chats sit in the sidebar among the Bot rows, and are labelled, pinned, ordered and hidden the same way.
 - The multiple-avatar component is a row of up to three overlapping avatar stills followed by `+N`. It serves the sidebar row, the pinned tile and the thread header.
 
