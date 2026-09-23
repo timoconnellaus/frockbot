@@ -270,5 +270,6 @@ not wait one out, so `VOICE_ASSISTANT_REJOIN_WINDOW_MS_V1` stays where it is
 as our own policy, and the 1008 close is the real fallback trigger.
 
 `goAway` was not observed: no probe session ran near the connection limit. The
-adapter decodes `{"goAway":{"timeLeft":"…"}}` and treats it as "reconnect with
-the handle now", untested against the live server.
+adapter decodes `{"goAway":{"timeLeft":"…"}}` and treats it as "reconnect now",
+untested against the live server: with the handle when it may be offered, and
+otherwise fresh with the call's tail, as after a 1008.

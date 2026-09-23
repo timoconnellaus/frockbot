@@ -4,6 +4,7 @@ import {
   renderVoiceChatResultV1,
   renderVoiceSubagentResultV1,
   renderVoiceSystemPromptV1,
+  renderVoiceToolResultTurnV1,
   runVoiceToolV1,
   voiceToolResponseV1,
   VOICE_ACCOUNT_FUNCTION_DECLARATIONS_V1,
@@ -329,6 +330,22 @@ describe("one function call", () => {
     });
     expect(long.length).toBeLessThan(2_300);
     expect(long).toContain("quoted as data");
+  });
+
+  test("results a replaced session cannot take are one turn, each with what was called", () => {
+    const turn = renderVoiceToolResultTurnV1([
+      {
+        name: "memory_write",
+        args: { text: "Drinks tea." },
+        result: "Kept. Acknowledge it plainly and follow it from here.",
+      },
+      { name: "status", args: {}, result: "x".repeat(20_000) },
+    ]);
+    expect(turn).toContain('- memory_write {"text":"Drinks tea."}: "Kept.');
+    expect(turn).toContain("- status {}:");
+    expect(turn).toContain("not something the person said");
+    // Each result is bounded as a function response is.
+    expect(turn.length).toBeLessThan(VOICE_TOOL_RESULT_MAX_CHARS_V1 + 600);
   });
 
   test("a hang-up result is a chat message, not a prompt for the live model", () => {

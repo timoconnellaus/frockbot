@@ -233,7 +233,18 @@ export class GeminiFakeV1 {
   }
 
   calls(name: string, args: Record<string, unknown>, id: string): void {
-    this.send({ toolCall: { functionCalls: [{ name, args, id }] } });
+    this.callsAll([{ name, args, id }]);
+  }
+
+  /** Several function calls in one `toolCall`, the way the model batches them. */
+  callsAll(
+    functionCalls: {
+      name: string;
+      args: Record<string, unknown>;
+      id: string;
+    }[],
+  ): void {
+    this.send({ toolCall: { functionCalls } });
   }
 
   cancels(ids: string[]): void {
