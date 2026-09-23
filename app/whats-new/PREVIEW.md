@@ -2,6 +2,12 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
+## A paused call keeps the Bot’s colour
+
+fix
+
+A Bot’s character no longer turns back to its original colour while a call is paused.
+
 ## Profile names the release
 
 fix

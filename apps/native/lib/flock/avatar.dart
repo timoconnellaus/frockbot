@@ -494,6 +494,9 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
     final loaded = _loaded;
     if (loaded == null) return;
     final inheritedHover = CharacterHoverScope.of(context);
+    final hovered =
+        widget.motion != CharacterMotion.still &&
+        (_localHovered || inheritedHover || _twitching);
     final reduce =
         MediaQuery.disableAnimationsOf(context) ||
         widget.motion == CharacterMotion.still ||
@@ -515,8 +518,7 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
     // and a wake per rebuild kept the companion animating for as long as
     // anyone typed.
     final signature =
-        '$run:$_held:${widget.activity}:${widget.emotion}:$primary:'
-        '${_localHovered || inheritedHover || _twitching}';
+        '$run:$_held:${widget.activity}:${widget.emotion}:$primary:$hovered';
     if (signature != _synced) {
       _synced = signature;
       _running = run;
@@ -541,27 +543,25 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
         .toColor();
     model.number('activity')?.value = widget.activity.index.toDouble();
     model.number('emotion')?.value = widget.emotion.index.toDouble();
-    model.boolean('hovered')?.value =
-        _localHovered || inheritedHover || _twitching;
+    model.boolean('hovered')?.value = hovered;
     model.boolean('reducedMotion')?.value = reduce;
     model.color('primary')?.value = primary;
     model.color('shade')?.value = shade;
     model.color('eyeColor')?.value = definition.eyes;
   }
 
-  /// The still or the live artboard, filling [size].
+  /// The live artboard, filling [size], or the checked-in still until the
+  /// runtime is ready.
   ///
-  /// `still` is the checked-in picture, not a paused artboard: a live
-  /// artboard while the composer is attaching its field — even one holding
-  /// its rest pose — cost keystrokes typed right after a tap, and the
-  /// picture is what the design shows at rest anyway.
+  /// [CharacterMotion.still] is the artboard held at rest, not the still:
+  /// the picture only comes in the character's catalogue colour, so a paused
+  /// call swapped the Bot's own colour for it. A resting artboard is not
+  /// advanced, and a composer beside one guards its field with
+  /// [CharacterAvatar.hold].
   Widget _figure(Size size, {required BoxFit fit}) => SizedBox(
     width: size.width,
     height: size.height,
-    child:
-        _isFlutterTest ||
-            !riveRuntimeReady.value ||
-            widget.motion == CharacterMotion.still
+    child: _isFlutterTest || !riveRuntimeReady.value
         ? Image.asset(
             'assets/characters/$_characterId.png',
             fit: fit,

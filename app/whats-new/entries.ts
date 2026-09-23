@@ -23,6 +23,13 @@ export type WhatsNewEntrySourceV1 = {
  */
 export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
+    id: "paused-call-colour",
+    title: "A paused call keeps the Bot’s colour",
+    summary:
+      "A Bot’s character no longer turns back to its original colour while a call is paused.",
+    kind: "fix",
+  },
+  {
     id: "release-version",
     title: "Profile names the release",
     summary:
