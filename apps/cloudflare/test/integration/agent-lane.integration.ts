@@ -130,4 +130,74 @@ describe("the agent lane through the gateway", () => {
     )) as { runs: Array<{ input: string }> };
     expect(mirrored.runs.map((run) => run.input)).toEqual([targetQuestion]);
   });
+
+  it("returns B's reply, not a note B sent its own User first", async () => {
+    const userId = freshUserId("agent-lane-note");
+    const askingBotId = "general";
+    const targetBotId = "researcher";
+    await provisionThroughGateway({ userId, botId: askingBotId });
+    const created = await postAsUser(userId, "/api/bots", {
+      schemaVersion: 1,
+      type: "bot/create",
+      commandId: "create-researcher",
+      expectedRevision: await flockRevision(userId),
+      botId: targetBotId,
+      name: "Researcher",
+      description: "Finds primary sources.",
+    });
+    expect(created.status).toBe(201);
+
+    const note = "General asked me about primary sources.";
+    const answer = "The specialist answer.";
+    const targetQuestion = toolCallTriggerPrompt(
+      [
+        "send_to_user",
+        { disposition: "continue", payload: { type: "text", text: note } },
+      ],
+      ["reply_to_request", { answer }],
+    );
+    const turn = (await expectOkJson(
+      await postAsUser(userId, `/api/bots/${askingBotId}/turns`, {
+        schemaVersion: 1,
+        commandId: "ask-researcher",
+        text: frockbotToolCallPrompt("bot_message", {
+          target_id: targetBotId,
+          message: targetQuestion,
+        }),
+      }),
+    )) as {
+      events: Array<{
+        type: string;
+        callId?: string;
+        botId?: string;
+        content?: string;
+        isError?: boolean;
+      }>;
+    };
+    const call = turn.events.find(
+      (event) => event.type === "message/to-bot" && event.botId === targetBotId,
+    );
+    expect(
+      turn.events.find(
+        (event) =>
+          event.type === "tool/result" && event.callId === call?.callId,
+      ),
+    ).toMatchObject({ content: answer, isError: false });
+
+    // The note still reached B's User; it just is not what A was handed.
+    const transcript = (await expectOkJson(
+      await asUser(userId, `/api/bots/${targetBotId}/turns`),
+    )) as {
+      runs: Array<{
+        input: string;
+        events: Array<{ type: string; payload?: { text?: string } }>;
+      }>;
+    };
+    const answered = transcript.runs.find(
+      (run) => run.input === targetQuestion,
+    );
+    expect(
+      answered?.events.find((event) => event.type === "send/to-user")?.payload,
+    ).toMatchObject({ text: note });
+  });
 });
