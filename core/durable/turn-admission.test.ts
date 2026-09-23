@@ -15,6 +15,8 @@ import {
   botTurnCommandFingerprintV1,
   createStoredRunCodecV1,
   storedRunAdmissionV1,
+  storedRunIsDeliveryV1,
+  storedRunLaneV1,
   storedRunTurnTypeV1,
   type StoredRunOriginV1,
   type StoredRunV1,
@@ -247,6 +249,36 @@ describe("the admission record names what produced the Turn", () => {
     expect(() =>
       codec.require(withOrigin({ kind: "handoff", parentRunId: "run-parent" })),
     ).toThrow(/invalid admission origin fields/);
+  });
+
+  test("round-trips the chat Turn a landed input opens, on the agent lane", () => {
+    const withOrigin = (origin: unknown) =>
+      legacyRun({
+        admission: {
+          schemaVersion: 1,
+          turnType: "chat",
+          lane: "agent",
+          origin,
+        },
+      } as never);
+    const origin: StoredRunOriginV1 = {
+      kind: "input-delivery",
+      inputId: "card-action:press-1",
+    };
+    const decoded = codec.require(withOrigin(origin));
+
+    expect(decoded.admission?.origin).toEqual(origin);
+    expect(storedRunTurnTypeV1(decoded)).toBe("chat");
+    expect(storedRunLaneV1(decoded)).toBe("agent");
+    expect(storedRunIsDeliveryV1(decoded)).toBe(true);
+    expect(codec.require(structuredClone(decoded))).toEqual(decoded);
+
+    expect(() => codec.require(withOrigin({ kind: "input-delivery" }))).toThrow(
+      /invalid admission origin fields/,
+    );
+    expect(() => codec.require(withOrigin({ ...origin, inputId: "" }))).toThrow(
+      /invalid admission origin id/,
+    );
   });
 
   test("a voice origin cannot borrow another origin's fields", () => {
@@ -661,6 +693,57 @@ describe("admission does not wait for the previous Turn", () => {
     expect(
       (storage.values.get("run:run-2") as StoredRunV1<undefined>).status,
     ).toBe("completed");
+  });
+
+  test("a chat Turn on the agent lane waits behind the running Turn and never displaces it", async () => {
+    const storage = new MemoryStorage();
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const seen: BotTurnExecutionInput<undefined>["command"][] = [];
+    const authority = new BotDurableAuthority<undefined>({
+      state: { storage } as unknown as DurableObjectState,
+      codec,
+      hooks: {
+        resolveAdmissionSnapshot: () => Promise.resolve(undefined),
+        bootstrapComposition: () => bootstrap(),
+        admittedSnapshot: () => Promise.resolve(undefined),
+        executeTurn: async (input) => {
+          seen.push(input.command);
+          if (input.command.runId === "run-1") await gate;
+          return { runId: input.command.runId, text: "ok", events: [] };
+        },
+        notification: () => undefined,
+        scheduledDeadlines: () => Promise.resolve([]),
+        scheduledWorkInFlight: () => false,
+        deferScheduledWork: () => Promise.resolve(),
+        settleScheduledWork: () => Promise.resolve(),
+      },
+    });
+    const first = authority.run(command("run-1"));
+    for (let attempt = 0; attempt < 20 && seen.length === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    const origin = { kind: "input-delivery" as const, inputId: "ap-1" };
+    const receipt = await authority.admit({
+      ...command("ad-1"),
+      text: "[Decision]",
+      turnType: "chat",
+      lane: "agent",
+      origin,
+    });
+    expect(receipt).toMatchObject({ runId: "ad-1", disposition: "queued" });
+    release?.();
+    await first;
+    await authority.whenDriverSettled();
+
+    const status = (runId: string) =>
+      (storage.values.get(`run:${runId}`) as StoredRunV1<undefined>).status;
+    expect(status("run-1")).toBe("completed");
+    expect(status("ad-1")).toBe("completed");
+    expect(seen.map((ran) => ran.runId)).toEqual(["run-1", "ad-1"]);
+    expect(seen[1]).toMatchObject({ turnType: "chat", lane: "agent", origin });
   });
 
   test("eviction after admission and before the kick still runs on the alarm", async () => {

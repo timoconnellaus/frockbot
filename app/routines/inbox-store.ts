@@ -228,7 +228,7 @@ export async function enqueuePendingBotInputV1(
  * opening a delivery Turn with nobody present. The drain receipt is the durable
  * record of exactly what that Turn took, so a delivery Turn that settles
  * anything other than `completed` gives it back. Every caller is guarded on
- * `storedRunIsRoutineDeliveryV1`; a Turn the person started re-queues nothing.
+ * `storedRunIsDeliveryV1`; a Turn the person started re-queues nothing.
  *
  * Composed into the transaction that settles the Turn, never after it: between
  * "this Turn will not deliver" and "the queue owes it again" there must be no

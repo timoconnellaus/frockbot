@@ -24,7 +24,12 @@ import {
 } from "@frockbot/core/contracts";
 import { decideApproval } from "@frockbot/app/approvals/bot";
 import { enqueuePendingBotInputV1 } from "@frockbot/app/routines/inbox-store";
-import { CARD_ACTION_CONTEXT_MAX_V1 } from "@frockbot/app/routines/inbox";
+import {
+  CARD_ACTION_CONTEXT_MAX_V1,
+  pendingBotInputIdV1,
+  type PendingBotInputV1,
+} from "@frockbot/app/routines/inbox";
+import { openInputDeliveryTurnV1 } from "../shell/input-delivery.js";
 import {
   readBotPluginRosterV1,
   withPluginWorkerV1,
@@ -470,18 +475,29 @@ export async function cardAction(
       `a card action context is at most ${CARD_ACTION_CONTEXT_MAX_V1} characters once serialized`,
     );
   }
-  await state.ctx.storage.transaction(async (transaction) => {
-    await enqueuePendingBotInputV1(transaction, {
-      schemaVersion: 1,
-      kind: "card-action",
-      // The client's own id makes a retried post the same press; without one
-      // every post is a press of its own.
-      pressId: command.commandId ?? crypto.randomUUID(),
-      surfaceId: command.surfaceId,
-      name: command.event.name,
-      ...(context === undefined ? {} : { context }),
-      createdAt,
-    });
+  const pressed = {
+    schemaVersion: 1,
+    kind: "card-action",
+    // The client's own id makes a retried post the same press; without one
+    // every post is a press of its own.
+    pressId: command.commandId ?? crypto.randomUUID(),
+    surfaceId: command.surfaceId,
+    name: command.event.name,
+    ...(context === undefined ? {} : { context }),
+    createdAt,
+  } satisfies PendingBotInputV1;
+  await state.ctx.storage.transaction((transaction) =>
+    enqueuePendingBotInputV1(transaction, pressed),
+  );
+  // Nothing else answers this press — no handler redrew the card — so it
+  // opens the Turn that does, rather than waiting for the person to speak. A
+  // press repeated while that Turn has not started rides it: the Turn drains
+  // the whole queue, so the person changing their answer costs no second one.
+  // A handler's `input` above opens nothing: that press was answered on the
+  // card and "costs no Turn", and a control pressed over and over must not
+  // spend one per press.
+  await openInputDeliveryTurnV1(state, identity, {
+    inputId: pendingBotInputIdV1(pressed),
   });
   return {
     schemaVersion: 1,

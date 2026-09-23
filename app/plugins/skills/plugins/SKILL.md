@@ -45,9 +45,9 @@ live in those two files, not as extra paths.
    artifact, and asks the User to approve it with a card in the conversation
    that lists its tools, hooks, grants, hosts and model providers. Say in
    your own words what the Plugin does and why you built it, then end your
-   Turn: the decision arrives as durable input on a later Turn, and the
-   Plugin is live on this Bot from the Turn after the User approves it —
-   never the one in flight.
+   Turn. Their answer opens a Turn of yours that carries the decision;
+   approved, the Plugin is already live on this Bot in that Turn — never the
+   one in flight — so tell them it is ready.
 
 `plugin_enable` asks the same approval for a Plugin that exists but does not
 run on this Bot. `plugin_disable` turns one off for this Bot at once, no

@@ -22,6 +22,10 @@ import type {
 } from "@frockbot/core/machine-protocol";
 import { enqueuePendingBotInputV1 } from "@frockbot/app/routines/inbox-store";
 import {
+  pendingBotInputIdV1,
+  type PendingBotInputV1,
+} from "@frockbot/app/routines/inbox";
+import {
   readBotSettingsV1,
   userConfigurationV1,
 } from "@frockbot/app/settings/bot";
@@ -44,6 +48,7 @@ import {
 import type { MachineIntentRecordV1 } from "@frockbot/app/machine/intent";
 import type { MachineResultDeliveryV1 } from "@frockbot/app/machine/delivery";
 import type { MachineTargetViewV1 } from "@frockbot/app/machine/target";
+import { openInputDeliveryTurnV1 } from "../shell/input-delivery.js";
 
 /** The User Durable Object, as this Bot is allowed to see its machines. */
 export interface BotMachineSeamV1 {
@@ -181,27 +186,37 @@ export function machineSeam(
  * The machine answers the backend, never the Bot, so this is how the Bot
  * learns without being asked: the same durable input queue a Routine hand-off
  * and an approval decision ride, idempotent on the command id, drained as a
- * preamble line on the Bot's next conversational Turn. The line carries a
- * preview; `machine_command_check` reads the whole result.
+ * preamble line on the Turn this opens. The line carries a preview;
+ * `machine_command_check` reads the whole result.
  */
 export async function deliverMachineResult(
   state: ShellBotStateV1,
   delivery: MachineResultDeliveryV1,
 ): Promise<{ status: "accepted" }> {
-  await state.ctx.storage.transaction(async (transaction) => {
-    await enqueuePendingBotInputV1(transaction, {
-      schemaVersion: 1,
-      kind: "machine-result",
-      commandId: delivery.commandId,
-      machineId: delivery.machineId,
-      outcome: delivery.outcome,
-      preview: delivery.preview,
-      createdAt: delivery.finishedAt,
-    });
-  });
+  const finished = {
+    schemaVersion: 1,
+    kind: "machine-result",
+    commandId: delivery.commandId,
+    machineId: delivery.machineId,
+    outcome: delivery.outcome,
+    preview: delivery.preview,
+    createdAt: delivery.finishedAt,
+  } satisfies PendingBotInputV1;
+  await state.ctx.storage.transaction((transaction) =>
+    enqueuePendingBotInputV1(transaction, finished),
+  );
   await state.ctx.storage.transaction((transaction) =>
     state.authority.refreshRecoveryAlarm(transaction),
   );
+  // The Bot asked for this command and ended its Turn; the result is what it
+  // was waiting on, so it opens the Turn that reports it. A delivery retried
+  // after this ran asks for the same Turn, by the command id.
+  const identity = await state.authority.readDurableIdentity();
+  if (identity) {
+    await openInputDeliveryTurnV1(state, identity, {
+      inputId: pendingBotInputIdV1(finished),
+    });
+  }
   return { status: "accepted" };
 }
 

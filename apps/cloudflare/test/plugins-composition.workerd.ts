@@ -275,6 +275,43 @@ async function pinnedGeneration(
   );
 }
 
+interface ApprovalDeliveryProbe {
+  runId: string;
+  sessionId: string;
+  status: string;
+  admission?: { origin?: { kind: string } };
+  preparedInputs?: {
+    bot: { enablement: { enabled: Record<string, boolean> } };
+  };
+}
+
+/**
+ * The Turn an approval decision opened, once it has settled. It starts on the
+ * promise the decision left behind, or on the recovery alarm, so this nudges
+ * the alarm between looks.
+ */
+async function settledApprovalDelivery(identity: {
+  userId: string;
+  botId: string;
+}): Promise<ApprovalDeliveryProbe> {
+  const stub = env.BOT_STATES.getByName(`${identity.userId}:${identity.botId}`);
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const found = await runInDurableObject(stub, async (_instance, state) =>
+      (await hydratedStoredRunsV1<ApprovalDeliveryProbe>(state.storage)).find(
+        (run) => run.admission?.origin?.kind === "input-delivery",
+      ),
+    );
+    if (found && found.status !== "running") return found;
+    await runInDurableObject(stub, (_instance, state) =>
+      state.storage.setAlarm(Date.now()),
+    );
+    await runInDurableObject(stub, (instance: unknown) =>
+      (instance as { alarm(): Promise<void> }).alarm(),
+    );
+  }
+  throw new Error("the decision never opened a Turn");
+}
+
 async function turn(
   identity: { userId: string; botId: string },
   runId: string,
@@ -1331,6 +1368,13 @@ describe("the User-owned Composition", () => {
           ...sibling,
         })
       ).enabled[STORE_PLUGIN_ID],
+    ).toBe(true);
+    // The answer opens the Bot's own Turn, with the Plugin already on in it,
+    // so the Bot can say it is ready without the person having to ask.
+    const delivery = await settledApprovalDelivery(sibling);
+    expect(delivery.status).toBe("completed");
+    expect(
+      delivery.preparedInputs?.bot.enablement.enabled[STORE_PLUGIN_ID],
     ).toBe(true);
 
     // And from the next Turn the Plugin's tool answers.
@@ -2567,6 +2611,21 @@ export const cards = {
           input.context === "The person opened the draft's details.",
       ),
     ).toBe(true);
+    // And it opened no Turn: the handler answered the press on the card, so
+    // its line rides the Bot's next Turn rather than spending one of its own.
+    expect(
+      await runInDurableObject(
+        env.BOT_STATES.getByName(`${userId}:bot-1`),
+        async (_instance, state) =>
+          (
+            await hydratedStoredRunsV1<{
+              runId: string;
+              sessionId: string;
+              admission?: { origin?: { kind: string } };
+            }>(state.storage)
+          ).filter((run) => run.admission?.origin?.kind === "input-delivery"),
+      ),
+    ).toEqual([]);
 
     const press = async (name: string, revision: number) =>
       bot(identity).cardAction({

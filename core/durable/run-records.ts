@@ -160,10 +160,28 @@ export interface StoredRunGroupOriginV1 {
   reason: "mention" | "continue" | "retry";
 }
 
+/**
+ * A conversational Turn opened because a pending input landed: a person's
+ * answer to an approval, their press on a card, a command their Mac finished.
+ *
+ * Each reaches the Bot only through the pending-input queue, which its next
+ * conversational Turn drains — and nothing opened one, so the person approved
+ * a Plugin, picked an answer, or waited on a command, and then had to ask
+ * before the Bot said anything. This is that Turn, opened by the input itself.
+ * It drains the whole queue, not only the input that opened it.
+ *
+ * `inputId` is that input's id in the queue (`pendingBotInputIdV1`).
+ */
+export interface StoredRunInputDeliveryOriginV1 {
+  kind: "input-delivery";
+  inputId: string;
+}
+
 /** What produced a Turn, when it was not a person speaking to the Bot. */
 export type StoredRunOriginV1 =
   | StoredRunRoutineOriginV1
   | StoredRunRoutineDeliveryOriginV1
+  | StoredRunInputDeliveryOriginV1
   | StoredRunSubagentOriginV1
   | StoredRunHandoffOriginV1
   | StoredRunBotOriginV1
@@ -328,22 +346,33 @@ export function storedRunLaneV1(run: {
 }
 
 /**
- * Whether this run is the delivery Turn the routine alarm opened.
+ * Whether a Turn with this origin is a delivery Turn: one opened only to carry
+ * the pending queue — a Routine's hand-off, or an input that landed — with
+ * nobody having spoken.
+ */
+export function isDeliveryOriginV1(origin?: { kind?: string }): boolean {
+  return (
+    origin?.kind === "routine-delivery" || origin?.kind === "input-delivery"
+  );
+}
+
+/**
+ * Whether this run is a delivery Turn.
  *
  * A chat Turn drains the pending queue before the model runs, so a Turn that
- * does not complete has consumed hand-offs it never delivered. Only a delivery
- * Turn gives them back: it is a Turn nobody asked for and nobody watched, so
- * losing its hand-off loses a morning's triage with no one there to ask again.
- * A Turn the person started keeps the behaviour it has always had — they were
- * there, and re-queuing what it drained would make the Bot re-tell them
- * something it has already said.
+ * does not complete has consumed inputs it never delivered. Only a delivery
+ * Turn gives them back: it is a Turn nobody asked for, so losing what it
+ * drained loses a morning's triage, or a person's answer, with no one
+ * there to ask again. A Turn the person started keeps the behaviour it has
+ * always had — they were there, and re-queuing what it drained would make the
+ * Bot re-tell them something it has already said.
  */
-export function storedRunIsRoutineDeliveryV1(run: {
+export function storedRunIsDeliveryV1(run: {
   // Structural rather than `StoredRunAdmissionV1`, so the one predicate also
   // answers for the Shell's deliberately wide settled-run shape.
   admission?: { origin?: { kind?: string } };
 }): boolean {
-  return run.admission?.origin?.kind === "routine-delivery";
+  return isDeliveryOriginV1(run.admission?.origin);
 }
 
 /**
@@ -666,6 +695,18 @@ function decodeStoredRunOrigin(
     return {
       kind: "routine-delivery",
       wakeRunId: candidate.wakeRunId,
+    };
+  }
+  if (candidate.kind === "input-delivery") {
+    requireExactOriginFields(candidate, ["kind", "inputId"], runId);
+    // An approval id is up to 256 characters, and a machine command's input
+    // id prefixes one.
+    if (!boundedString(candidate.inputId, 512)) {
+      throw new Error(`run "${runId}" has an invalid admission origin id`);
+    }
+    return {
+      kind: "input-delivery",
+      inputId: candidate.inputId,
     };
   }
   if (candidate.kind !== "routine") {

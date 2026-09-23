@@ -15,7 +15,11 @@ import {
   createMemoryRoutineStorageV1,
   type MemoryRoutineStorageV1,
 } from "../routines/testing.js";
-import type { RoutinePendingWakeV1 } from "../routines/inbox.js";
+import {
+  INPUT_DELIVERY_CUE_V1,
+  type PendingBotInputV1,
+  type RoutinePendingWakeV1,
+} from "../routines/inbox.js";
 import { failedTurnRecordsV1 } from "../notifications/bot.js";
 import type { ShellBotStateV1 } from "./backend-state.js";
 import { shellTerminalRecordsV1 } from "./terminal-records.js";
@@ -277,5 +281,134 @@ describe("a delivery Turn that did not deliver", () => {
     // Nothing settles a completed Turn back onto the queue, and the receipt
     // the recovered Turn reads back is not a second delivery.
     expect(await nextChatTurnText(inbox)).toBe("morning");
+  });
+});
+
+// The Turn an input opens when it lands — a person's answer to an approval,
+// their press on a card, a command their Mac finished — is a delivery Turn
+// too: its only input is what it drains, so it gets the same guarantees. What
+// it is told to do follows what the drain carried, not what opened it.
+describe("an input-delivery Turn", () => {
+  const ORIGIN = { kind: "input-delivery" as const, inputId: "ap-1" };
+  const APPROVED: PendingBotInputV1 = {
+    schemaVersion: 1,
+    kind: "approval",
+    approvalId: "ap-1",
+    decision: "approved",
+    createdAt: "2026-09-23T10:00:00.000Z",
+  };
+  const PRESSED: PendingBotInputV1 = {
+    schemaVersion: 1,
+    kind: "card-action",
+    pressId: "press-1",
+    surfaceId: "question-1",
+    name: "question-answer",
+    context: '{"answer":"Tuesday"}',
+    createdAt: "2026-09-23T10:00:01.000Z",
+  };
+  const FINISHED: PendingBotInputV1 = {
+    schemaVersion: 1,
+    kind: "machine-result",
+    commandId: "cmd-1",
+    machineId: "mac-1",
+    outcome: "ok",
+    preview: "3 files changed",
+    createdAt: "2026-09-23T10:00:02.000Z",
+  };
+
+  async function queued(...inputs: PendingBotInputV1[]): Promise<{
+    storage: MemoryRoutineStorageV1;
+    inbox: RoutineInboxStore;
+  }> {
+    const storage = createMemoryRoutineStorageV1();
+    const inbox = new RoutineInboxStore(storage);
+    for (const input of inputs) await inbox.enqueue(input);
+    return { storage, inbox };
+  }
+
+  function delivered(inbox: RoutineInboxStore, inputId = "ap-1") {
+    return turnInputTextV1(stateWith(inbox), {
+      runId: "dl-1",
+      text: INPUT_DELIVERY_CUE_V1,
+      turnType: "chat",
+      origin: { kind: "input-delivery", inputId },
+    });
+  }
+
+  test("carries the decision ahead of the cue, and what to do with it", async () => {
+    const { inbox } = await queued(APPROVED);
+
+    const text = await delivered(inbox);
+
+    expect(text).toContain('The decision on "ap-1" is approved.');
+    expect(text).toContain(INPUT_DELIVERY_CUE_V1);
+    expect(text).toContain("For an approval:");
+    expect(text).not.toContain("For a card they pressed");
+  });
+
+  test("a card press is read as a choice, not as something they said", async () => {
+    const { inbox } = await queued(PRESSED);
+
+    const text = await delivered(inbox, "card-action:press-1");
+
+    expect(text).toContain('"answer":"Tuesday"');
+    expect(text).toContain("not a message");
+    expect(text).not.toContain("For an approval:");
+  });
+
+  test("a machine result asks the Bot to report it or carry on", async () => {
+    const { inbox } = await queued(FINISHED);
+
+    const text = await delivered(inbox, "machine-result:cmd-1");
+
+    expect(text).toContain('Command "cmd-1" on machine mac-1 finished ok');
+    expect(text).toContain("For a machine command that finished");
+  });
+
+  test("is told about everything it drained, each kind once", async () => {
+    // Opened by the press, but the drain takes the whole queue.
+    const second = { ...PRESSED, pressId: "press-2" };
+    const { inbox } = await queued(PRESSED, second, FINISHED);
+
+    const text = (await delivered(inbox, "card-action:press-2"))!;
+
+    expect(text.split("For a card they pressed")).toHaveLength(2);
+    expect(text).toContain("For a machine command that finished");
+    expect(text).not.toContain("For an approval:");
+  });
+
+  test("ends without a model call when the person's own Turn took the input first", async () => {
+    const { inbox } = await queued(APPROVED);
+    expect(await inbox.drainInto("chat-1")).toHaveLength(1);
+
+    expect(await delivered(inbox)).toBeUndefined();
+  });
+
+  test("a failed input delivery leaves what it drained deliverable", async () => {
+    const { storage, inbox } = await queued(APPROVED);
+    await delivered(inbox);
+    expect(await inbox.pending()).toHaveLength(0);
+
+    await applyV1(
+      storage,
+      await failedTurnRecordsV1({
+        settings: {
+          ...initializeBotSettingsV1("primary"),
+          profile: { name: "Bob" },
+          notifications: { enabled: true },
+        },
+        read: <T>(key: string) => storage.get<T>(key),
+        failed: {
+          runId: "dl-1",
+          failure: "Bot turn ended with outcome model-error: 401",
+          events: chatAdmission(),
+          admission: { schemaVersion: 1, turnType: "chat", origin: ORIGIN },
+        },
+      }),
+    );
+
+    expect(await nextChatTurnText(inbox)).toContain(
+      'The decision on "ap-1" is approved.',
+    );
   });
 });

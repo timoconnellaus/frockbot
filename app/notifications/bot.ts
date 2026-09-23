@@ -4,7 +4,7 @@
 
 import type { SessionEvent } from "@frockbot/core/contracts";
 import {
-  storedRunIsRoutineDeliveryV1,
+  storedRunIsDeliveryV1,
   type StoredRunAdmissionV1,
 } from "@frockbot/core/durable";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
@@ -84,12 +84,12 @@ export async function failedTurnRecordsV1(input: {
       },
     ],
   });
-  // A delivery Turn the alarm opened drains the pending queue before the model
-  // runs, and has nobody present to ask again: the failure notice would stand
-  // alone over a morning's triage nothing carried. The drained inputs go back
-  // on the queue in the transaction that settles the failure, so the Bot's next
-  // conversational Turn carries them.
-  if (storedRunIsRoutineDeliveryV1(input.failed)) {
+  // A delivery Turn drains the pending queue before the model runs, and
+  // nobody spoke to it: the failure notice would stand alone over a morning's
+  // triage, or an approval's answer, that nothing carried. The drained inputs
+  // go back on the queue in the transaction that settles the failure, so the
+  // Bot's next conversational Turn carries them.
+  if (storedRunIsDeliveryV1(input.failed)) {
     await requeueDrainedInputsV1(
       pendingInputSettlementWritesV1(records, input.read),
       input.failed.runId,

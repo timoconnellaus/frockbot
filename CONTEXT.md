@@ -231,7 +231,7 @@ Where a firing's outcome lands for the User, because an automation Turn cannot s
 _Avoid_: Notification list, activity feed
 
 **Pending input**:
-A durable input the Bot's next conversational Turn is owed — a Routine hand-off, a decided approval, or the note that the Turn before it yielded unfinished. Drained once, idempotently, and never delivered as something the User said.
+A durable input the Bot's next conversational Turn is owed — a Routine hand-off, a decided approval, a press on a card, a finished machine command, or the note that the Turn before it yielded unfinished. Drained once, idempotently, and never delivered as something the User said. A decided approval, a card press no handler answered, and a machine result each open that Turn when they land.
 _Avoid_: Queued message, pending wake
 
 **Approval**:

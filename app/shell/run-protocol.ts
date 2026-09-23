@@ -20,6 +20,7 @@ import {
 } from "@frockbot/app/audit/classify";
 import { BOT_MESSAGE_TOOL_V1 } from "@frockbot/app/flock/shared";
 import { decodeRunCursorV1, RUN_CURSOR_PATTERN } from "./run-cursor.js";
+import { storedRunIsDeliveryV1 } from "@frockbot/core/durable";
 export { decodeRunCursorV1, RUN_CURSOR_PATTERN };
 import {
   decodeRunIdV1,
@@ -1128,15 +1129,14 @@ export function projectClientRunV1(
       run.admission?.origin === undefined &&
       run.directTool === undefined &&
       run.input.trim().length > 0,
-    // A delivery Turn's input is the hand-off it was opened to deliver, not
-    // anything the person said, and this field is their own bubble. Blanked
-    // for the same reason an automation Turn's is: GrokBot's
+    // A delivery Turn's input is the hand-off or decision it was opened to
+    // deliver, not anything the person said, and this field is their own
+    // bubble. Blanked for the same reason an automation Turn's is: GrokBot's
     // `quietOrigin.automation` — replaying it must not read as the User having
-    // spoken. What the Bot makes of the hand-off is in its sends, where the
-    // rest of its side of the conversation is.
+    // spoken. What the Bot makes of it is in its sends, where the rest of its
+    // side of the conversation is.
     input:
-      run.admission?.turnType === "automation" ||
-      run.admission?.origin?.kind === "routine-delivery"
+      run.admission?.turnType === "automation" || storedRunIsDeliveryV1(run)
         ? ""
         : truncateWireString(run.input, MAX_INPUT_BYTES),
     status,
