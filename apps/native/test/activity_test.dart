@@ -53,6 +53,71 @@ void main() {
     },
   );
 
+  test(
+    'a refresh requested during a mark runs once the mark settles',
+    () async {
+      final store = MemoryStore();
+      final markStarted = Completer<void>();
+      final releaseMark = Completer<void>();
+      var reads = 0;
+      Map<String, Object?> view({required bool notificationsEnabled}) => {
+        'schemaVersion': 1,
+        'botId': 'alpha',
+        'count': 0,
+        'capped': false,
+        'unread': false,
+        'manuallyUnread': false,
+        'notificationsEnabled': notificationsEnabled,
+        'lastActivityCursor': 'message-00000000000000000002',
+        'lastActivityAt': '2026-09-05T10:00:00.000Z',
+      };
+      final api = NativeSessionApi(store, (path, body) async {
+        if (body == null) {
+          reads += 1;
+          return {
+            'schemaVersion': 1,
+            'unread': [view(notificationsEnabled: false)],
+          };
+        }
+        final command = Map<String, dynamic>.from(body as Map);
+        markStarted.complete();
+        await releaseMark.future;
+        return {
+          'schemaVersion': 1,
+          'commandId': command['commandId'],
+          'status': 'applied',
+          'unread': view(notificationsEnabled: true),
+        };
+      });
+      final controller = ActivityController(api);
+      controller.unread['alpha'] = wire.UnreadView.fromJson({
+        ...view(notificationsEnabled: true),
+        'count': 2,
+        'unread': true,
+      });
+
+      final marking = controller.mark('alpha', read: true);
+      await markStarted.future;
+      // What the shell asks for when the open chat shows a message the unread
+      // view does not name yet. The directory must not land over the badge the
+      // tap predicted, so nothing is read while the mark is in flight.
+      await controller.load();
+      expect(controller.loading, isFalse);
+      expect(reads, 0);
+      expect(controller.unread['alpha']!.count, 0);
+
+      releaseMark.complete();
+      await marking;
+      await pumpEventQueue();
+
+      expect(reads, 1);
+      expect(controller.loading, isFalse);
+      expect(controller.unread['alpha']!.notificationsEnabled, isFalse);
+      controller.dispose();
+      api.close();
+    },
+  );
+
   test('read and manual unread commands carry the authoritative message boundaries', () async {
     final store = MemoryStore();
     final commands = <Map<String, dynamic>>[];
