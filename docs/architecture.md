@@ -521,7 +521,9 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
   production shipped, from `GET /api/whats-new`. Reached from What’s New on
   the account sheet, with an unread mark, and opened once after a native
   client restarts into a newer build. Dates are the first production tag that
-  contained the entry, not the pull request. A still is optional, one WebP
+  contained the entry, not the pull request: the tag deploy writes them into
+  the Worker with `app/whats-new/published.ts`, so every other build serves
+  the entries undated and they read “New”. A still is optional, one WebP
   served at `/whats-new/<file>`, same origin. A pull request that touches
   `app/whats-new/**` posts a comment with those stills from the branch head,
   and `PREVIEW.md` links the same pictures so they can be reviewed there.

@@ -15,6 +15,7 @@ export {
   projectWhatsNewEntryV1,
   whatsNewFeedV1,
   whatsNewImageSrcV1,
+  whatsNewPublishedAtV1,
   type WhatsNewEntryViewV1,
   type WhatsNewFeedViewV1,
   type WhatsNewImageViewV1,
