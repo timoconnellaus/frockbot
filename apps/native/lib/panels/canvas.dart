@@ -29,6 +29,14 @@ class PanelCanvasController extends ChangeNotifier
   bool _busy = false;
   String? _message;
   Timer? _follow;
+  int _asked = 0;
+  int _landed = 0;
+
+  /// Called when a read finds the pointer moved by someone other than this
+  /// client — the Bot's `panel_focus`, or another device — so the shell can
+  /// put the region in front of the person, or take it away. This client's
+  /// own [setFocus] is not a move: whoever pressed already chose where to be.
+  VoidCallback? onFocusMoved;
 
   List<wire.PanelBagEntry> get bag => opened?.bag ?? const [];
   List<wire.PanelDoor> get doors => opened?.doors ?? const [];
@@ -73,9 +81,11 @@ class PanelCanvasController extends ChangeNotifier
     _busy = true;
     loading = opened == null;
     _message = null;
-    _changed();
+    // A surface calls this from initState, mid-build for the shell and the Bot
+    // page that also listen here, so they hear of it once that build is done.
+    scheduleMicrotask(_changed);
     try {
-      opened = await panels.open(botId);
+      await _read();
     } catch (_) {
       _message =
           'Couldn’t load this panel. Check your connection and try again.';
@@ -88,13 +98,40 @@ class PanelCanvasController extends ChangeNotifier
 
   Future<void> poll() async {
     try {
-      opened = await panels.open(botId);
+      await _read();
       _message = null;
     } catch (_) {
       // Keep the last successful read while a Turn is running.
     } finally {
       _changed();
     }
+  }
+
+  /// The first read is where the pointer already was, not a move. After it, a
+  /// new surface is a move, and so is the same surface focused again: the
+  /// host stamps the document's revision from the write, so the Bot asking to
+  /// show the tab the person closed still reaches them. A read that lands
+  /// after a later one is dropped, so a poll that left before this client's
+  /// own switch cannot undo it.
+  Future<void> _read({bool own = false}) async {
+    final ticket = ++_asked;
+    final next = await panels.open(botId);
+    if (ticket < _landed) return;
+    _landed = ticket;
+    final before = opened;
+    opened = next;
+    if (own || before == null || _closed) return;
+    final was = before.focus.toJson() as Map;
+    final now = next.focus.toJson() as Map;
+    final wasRevision = before.document?.revision;
+    final nowRevision = next.document?.revision;
+    final moved =
+        was['pluginId'] != now['pluginId'] ||
+        was['surfaceId'] != now['surfaceId'] ||
+        (wasRevision != null &&
+            nowRevision != null &&
+            wasRevision != nowRevision);
+    if (moved) onFocusMoved?.call();
   }
 
   void followTurn(bool running) {
@@ -109,7 +146,7 @@ class PanelCanvasController extends ChangeNotifier
     _changed();
     try {
       await panels.setFocus(botId, pluginId: pluginId, surfaceId: surfaceId);
-      opened = await panels.open(botId);
+      await _read(own: true);
       _message = null;
     } catch (_) {
       _message = 'Couldn’t switch this panel. Try again.';

@@ -188,6 +188,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// pages its Composition declares. All belong to one Bot and are replaced
   /// whole when the selection moves.
   PanelCanvasController? panelCanvas;
+
+  /// The canvas page a phone pushed, so the pointer closing can take it away
+  /// and a second focus does not push another.
+  Route<void>? _canvasRoute;
   ComputerController? computer;
   BotSession? _selectedSession;
 
@@ -1203,7 +1207,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (!mounted || selected?.botId.value != botId) return;
     setState(() => _setCatalog(read));
 
-    final canvas = PanelCanvasController(widget.api, botId);
+    final canvas = PanelCanvasController(widget.api, botId)
+      ..onFocusMoved = _followPanelFocus;
     panelCanvas = canvas;
     canvas.addListener(_repaint);
     canvas.addListener(_syncPanelCanvasSlot);
@@ -1275,16 +1280,51 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         controller: canvas,
         store: widget.store,
         userId: widget.userId,
-        onClose: () => setState(() {
-          if (panelStack.isNotEmpty && panelStack.last == 'canvas') {
-            panelStack.removeLast();
-          }
-          if (panelStack.isEmpty) panelOpen = false;
-        }),
+        onClose: _closeCanvas,
       ),
       label: 'Panel',
     );
     setState(() {});
+  }
+
+  /// The pointer moved under this client, and the region follows it: a
+  /// focused surface is put in front of the person, a closed pointer takes
+  /// the region away. Without this the Bot's `panel_focus` only made the
+  /// panel reachable, and the Bot said it had shown something nobody saw.
+  void _followPanelFocus() {
+    final canvas = panelCanvas;
+    if (!mounted || canvas == null) return;
+    if (!canvas.regionOpen) {
+      _closeCanvas();
+      return;
+    }
+    final single =
+        shellTierForWidth(MediaQuery.sizeOf(context).width) == ShellTier.single;
+    // A phone at the Bot list is not looking at this Bot, and a canvas page
+    // already up follows the pointer by itself.
+    if (single && (!conversationOpen || (_canvasRoute?.isActive ?? false))) {
+      return;
+    }
+    _openPanel('canvas', push: true);
+  }
+
+  void _closeCanvas() {
+    if (!mounted) return;
+    final route = _canvasRoute;
+    if (route != null && route.isActive) {
+      final navigator = route.navigator!;
+      if (route.isCurrent) {
+        navigator.pop();
+      } else {
+        navigator.removeRoute(route);
+      }
+    }
+    setState(() {
+      if (panelStack.isNotEmpty && panelStack.last == 'canvas') {
+        panelStack.removeLast();
+        if (panelStack.isEmpty) panelOpen = false;
+      }
+    });
   }
 
   /// The Composition this Bot is showing, and the one signal a pushed page
@@ -1474,13 +1514,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
-  Future<void> _push(Widget page) {
+  Future<void> _push(Widget page) => _pushRoute(page).popped;
+
+  /// [_push], keeping the route so the shell can take that page away itself.
+  Route<void> _pushRoute(Widget page) {
     push.reading(null);
-    return Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (routeContext) => _withAccountTheme(routeContext, page),
-      ),
+    final route = MaterialPageRoute<void>(
+      builder: (routeContext) => _withAccountTheme(routeContext, page),
     );
+    unawaited(Navigator.of(context).push(route));
+    return route;
   }
 
   /// Back from a conversation on a phone: the list again, with nothing of the
@@ -2213,7 +2256,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       return;
     }
     if (key == 'canvas' && panelCanvas != null) {
-      _push(
+      _canvasRoute = _pushRoute(
         Scaffold(
           appBar: DesktopHeader(child: AppBar(title: const Text('Panel'))),
           body: SafeArea(
