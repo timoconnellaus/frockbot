@@ -232,6 +232,11 @@ export class GeminiFakeV1 {
     this.send({ serverContent: { turnComplete: true } });
   }
 
+  /**
+   * A function call. The real 3.8 server sends it before any audio and closes
+   * the generation straight after, so a faithful turn is `calls` then
+   * `endsTurn`, and the words come in a fresh turn once the result is back.
+   */
   calls(name: string, args: Record<string, unknown>, id: string): void {
     this.send({ toolCall: { functionCalls: [{ name, args, id }] } });
   }

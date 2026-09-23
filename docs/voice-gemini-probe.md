@@ -220,7 +220,22 @@ ADR's non-blocking calling stands.
 }
 ```
 
-The id is a string the server picks. A response may come back much later:
+The id is a string the server picks. On `gemini-3.8-live` the call comes
+before any audio, even under an instruction to keep talking while it runs,
+and the generation ends there (re-probed 2026-09-23):
+
+```json
+{"toolCall":{"functionCalls":[{"name":"subagent","args":{…},"id":"call_268385"}]}}
+{"serverContent":{"generationComplete":true}}
+{"serverContent":{"turnComplete":true},"usageMetadata":{…}}
+```
+
+Nothing more arrives until the response goes back. The model then speaks the
+result as a fresh generation — audio and `outputTranscription`, then its own
+`generationComplete` and `turnComplete`. This matches Google's 3.8 notes:
+the model waits for tool execution before speaking.
+
+A response may come back much later:
 
 ```json
 {

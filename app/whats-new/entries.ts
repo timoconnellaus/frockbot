@@ -23,6 +23,13 @@ export type WhatsNewEntrySourceV1 = {
  */
 export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
+    id: "voice-answers-after-tools",
+    title: "Calls answer without a false error",
+    summary:
+      "Asking for something on a call no longer shows “I couldn’t get that answer out loud” before the reply, and a goodbye or hand-over is heard in full.",
+    kind: "fix",
+  },
+  {
     id: "unread-keeps-up",
     title: "Unread that keeps up",
     summary:

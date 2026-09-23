@@ -81,9 +81,9 @@ export function decodeGeminiBase64V1(value: string): Uint8Array {
 /**
  * One tool the model may call, as the API declares it.
  *
- * `behavior: "NON_BLOCKING"` is accepted (probed) and is what lets the model
- * keep talking while we run the tool — the feature ADR 0031's whole design
- * rests on.
+ * `behavior: "NON_BLOCKING"` is accepted (probed). On `gemini-3.8-live` it
+ * does not make the model talk over a running tool: the generation that calls
+ * ends silent, and the result is spoken in a fresh one.
  */
 export interface GeminiFunctionDeclarationV1 {
   name: string;

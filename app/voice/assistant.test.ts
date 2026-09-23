@@ -4,6 +4,7 @@ import {
   renderVoiceChatResultV1,
   renderVoiceSubagentResultV1,
   renderVoiceSystemPromptV1,
+  renderVoiceToolResultTurnV1,
   runVoiceToolV1,
   voiceToolResponseV1,
   VOICE_ACCOUNT_FUNCTION_DECLARATIONS_V1,
@@ -329,6 +330,23 @@ describe("one function call", () => {
     });
     expect(long.length).toBeLessThan(2_300);
     expect(long).toContain("quoted as data");
+  });
+
+  // A memory tool closes the session that called it, so the fresh one hears
+  // the result as a turn. The model speaks after a tool, never during it.
+  test("a result the calling session never heard is told as its call's own", () => {
+    const told = renderVoiceToolResultTurnV1({
+      name: "memory_write",
+      result: "Kept. Acknowledge it plainly and follow it from here.",
+    });
+    expect(told).toContain("`memory_write` call just finished");
+    expect(told).toContain("Kept. Acknowledge it plainly");
+
+    const long = renderVoiceToolResultTurnV1({
+      name: "memory_write",
+      result: "x".repeat(VOICE_TOOL_RESULT_MAX_CHARS_V1 + 500),
+    });
+    expect(long.length).toBeLessThan(VOICE_TOOL_RESULT_MAX_CHARS_V1 + 100);
   });
 
   test("a hang-up result is a chat message, not a prompt for the live model", () => {

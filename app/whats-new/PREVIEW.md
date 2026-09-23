@@ -2,6 +2,12 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
+## Calls answer without a false error
+
+fix
+
+Asking for something on a call no longer shows “I couldn’t get that answer out loud” before the reply, and a goodbye or hand-over is heard in full.
+
 ## Unread that keeps up
 
 fix

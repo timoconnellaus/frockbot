@@ -28,6 +28,7 @@ import {
   parseChatCompletionStreamV1,
   renderVoiceChatResultV1,
   renderVoiceSubagentResultV1,
+  renderVoiceToolResultTurnV1,
   renderVoiceSystemPromptV1,
   runVoiceToolV1,
   voiceToolResponseV1,
@@ -415,6 +416,13 @@ interface LiveCall {
   answer: string;
   /** Audio bridged down this turn, so a turn that never spoke is on record. */
   turnAudioBytes: number;
+  /**
+   * The generation that called functions this turn has not closed. Gemini
+   * 3.8 says nothing before a tool: that generation ends in silence and the
+   * answer is a fresh one after the results, so until its `turnComplete` a
+   * silent boundary is the calling generation's, not the end of the turn.
+   */
+  callingGenerationOpen: boolean;
   /** Fires when a turn has gone this long without a sound. */
   silenceTimer?: ReturnType<typeof setTimeout>;
   /** The guard already told the client about this turn. */
@@ -2340,6 +2348,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       transcript: "",
       answer: "",
       turnAudioBytes: 0,
+      callingGenerationOpen: false,
       silenceSaid: false,
       dropping: false,
       delegations: 0,
@@ -2978,7 +2987,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         return;
       case "generation-complete":
       case "turn-complete":
-        await this.finishTurn(connection, call);
+        await this.finishTurn(connection, call, event.kind);
         return;
       case "tool-call":
         await this.runToolCalls(connection, call, event.calls);
@@ -3104,6 +3113,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     call.turnStartedAt = Date.now();
     call.answer = "";
     call.turnAudioBytes = 0;
+    call.callingGenerationOpen = false;
     call.silenceSaid = false;
     call.dropping = false;
     const traced = this.#traced.get(connection.id);
@@ -3113,9 +3123,22 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       turn: turnId,
       chars: call.transcript.length,
     });
-    // A turn that never makes a sound used to be invisible. The guard is what
-    // the speech-provider wrapper was: one sentence to the client, and the
-    // call goes on.
+    this.armSilenceGuard(connection, call);
+    return true;
+  }
+
+  /**
+   * A turn that never makes a sound used to be invisible. The guard is what
+   * the speech-provider wrapper was: one sentence to the client, and the
+   * call goes on.
+   *
+   * A function call's results start it again, because the model says
+   * nothing until they are back.
+   */
+  private armSilenceGuard(connection: Connection, call: LiveCall): void {
+    this.clearSilenceGuard(call);
+    const turnId = call.turnId;
+    if (!turnId) return;
     call.silenceTimer = setTimeout(() => {
       call.silenceTimer = undefined;
       if (this.#calls.get(connection.id) !== call || call.turnId !== turnId) {
@@ -3129,7 +3152,6 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       );
       this.setStatus(connection, call, "listening");
     }, this.modelSilenceTimeoutMs());
-    return true;
   }
 
   private clearSilenceGuard(call: LiveCall): void {
@@ -3146,6 +3168,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     const turnId = call.turnId;
     if (!turnId) return;
     call.turnId = undefined;
+    call.callingGenerationOpen = false;
     await this.ledger().settleTurn(turnId, outcome, call.transcript.trim());
   }
 
@@ -3157,17 +3180,34 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
    * turn and the second finds nothing to do. A hand-over waiting on this turn
    * happens here, which is what ADR 0031 means by honouring `switch_bot`
    * after the spoken turn ends. `end_call` waits the same way.
+   *
+   * A generation that only called functions does not end the turn. Gemini
+   * 3.8 speaks after a tool, never during it: that generation's two frames
+   * arrive with nothing said, and the answer is a fresh generation once the
+   * results are back. One ledger turn covers both, so what the person said
+   * stays with what answered it, the day's allowance counts one question
+   * once, and the hand-off burst spans the round trip. Only the calling
+   * generation's own frames are passed over; the next generation ends the
+   * turn whether or not it says anything.
    */
   private async finishTurn(
     connection: Connection,
     call: LiveCall,
+    boundary: "generation-complete" | "turn-complete",
   ): Promise<void> {
     const turnId = call.turnId;
     if (turnId) {
+      const silent = call.turnAudioBytes === 0 && !call.dropping;
+      if (silent && call.callingGenerationOpen) {
+        if (boundary === "turn-complete") call.callingGenerationOpen = false;
+        this.trace(connection, "turn-held", { turn: turnId });
+        return;
+      }
       this.clearSilenceGuard(call);
       const spoken = call.answer.trim();
-      const silent = call.turnAudioBytes === 0 && !call.dropping;
+      const leaving = Boolean(call.pendingEnd || call.pendingSwitch);
       call.turnId = undefined;
+      call.callingGenerationOpen = false;
       await this.ledger().settleTurn(
         turnId,
         spoken ? { answer: spoken } : { failure: "no_output" },
@@ -3180,10 +3220,11 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         answerChars: spoken.length,
         audioBytes: call.turnAudioBytes,
       });
-      if (silent && !call.silenceSaid) {
+      if (silent && !call.silenceSaid && !leaving) {
         // The turn finished having made no sound at all. The old TTS guard
         // caught this; it is still the person's evidence that something went
-        // wrong rather than that nobody answered.
+        // wrong rather than that nobody answered. A call that is hanging up
+        // or moving on has had its answer, even unspoken.
         this.sendError(
           connection,
           "I couldn't get that answer out loud. Say that again?",
@@ -3194,9 +3235,8 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       call.transcript = "";
       call.dropping = false;
       call.delegations = 0;
-      const spokenText = spoken;
-      if (spokenText) {
-        this.sendRaw(connection, { type: "transcript_end", text: spokenText });
+      if (spoken) {
+        this.sendRaw(connection, { type: "transcript_end", text: spoken });
       }
     }
     if (call.pendingEnd) {
@@ -3249,9 +3289,10 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   /**
    * Runs what the model asked for and answers it.
    *
-   * Every declaration is non-blocking, so the model is still talking while
-   * this runs and the answer is scheduled `WHEN_IDLE`: it is spoken at the
-   * next pause rather than over whatever is being said now.
+   * Answers other than memory's are scheduled `WHEN_IDLE`, so a result never
+   * cuts across speech. Gemini 3.8 says nothing until the results are back,
+   * so the turn waits for what the model says with them, and the silence
+   * guard starts again once they have gone.
    */
   private async runToolCalls(
     connection: Connection,
@@ -3297,7 +3338,8 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       }
       if (call.cancelledCalls.delete(request.id)) continue;
       const memoryTool = request.name.startsWith("memory_");
-      call.session?.send(
+      const session = call.session;
+      session?.send(
         encodeGeminiToolResponseV1([
           {
             id: request.id,
@@ -3307,9 +3349,39 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
           },
         ]),
       );
+      const answered = Boolean(session) && call.turnId === turnId;
+      if (answered) call.callingGenerationOpen = true;
       if (outcome.memoryInvalidated) {
         await this.reopenAfterMemoryInvalidation(connection, call);
+        // The session that asked closed before it could say anything with
+        // the result, and its boundaries will never arrive. The fresh one is
+        // told the result as a turn, the way a late subagent answer reaches a
+        // session that replaced the one that asked, and what it says is the
+        // answer.
+        if (call.turnId === turnId) call.callingGenerationOpen = false;
+        if (
+          answered &&
+          call.turnId === turnId &&
+          call.turnAudioBytes === 0 &&
+          call.session?.isOpen()
+        ) {
+          call.session.send(
+            encodeGeminiTextTurnV1(
+              renderVoiceToolResultTurnV1({
+                name: request.name,
+                result: outcome.result,
+              }),
+            ),
+          );
+        }
       }
+    }
+    if (
+      call.turnId === turnId &&
+      call.turnAudioBytes === 0 &&
+      !call.silenceSaid
+    ) {
+      this.armSilenceGuard(connection, call);
     }
   }
 
