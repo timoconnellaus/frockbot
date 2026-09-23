@@ -4,14 +4,17 @@
 // the list reads back, that the thread is the group's own log, and that the
 // selection survives a reload the way a Bot's does.
 import {
+  answerInputs,
   botIdByName,
   createBot,
   expect,
   field,
   openApplication,
+  press,
   revealSidebar,
   sem,
   settle,
+  spokenText,
   tap,
   test,
 } from "./fixtures.ts";
@@ -58,8 +61,11 @@ test("a Group Chat is made from the list, written in, and renamed", async ({
 
   // The person's words are the group's first message.
   const composer = field(page, "group-chat-composer");
-  await composer.fill("Plan the launch together.");
-  await composer.press("Enter");
+  await composer.click();
+  await page.waitForTimeout(300);
+  await answerInputs([[composer, "Plan the launch together."]]);
+  await press(sem(page, "group-chat-send"));
+  await expect(composer).toHaveValue("", { timeout: 60_000 });
   await expect(
     pane.locator('[flt-semantics-identifier^="group-chat-message-u-"]'),
   ).toContainText("Plan the launch together.");
@@ -72,12 +78,20 @@ test("a Group Chat is made from the list, written in, and renamed", async ({
   await expect(sem(page, `group-chat-member-${beta}`)).toBeVisible();
   await settle(page);
   await sem(page, "group-chat-rename").click();
-  await field(page, "group-chat-rename-field").fill("Launch");
+  await answerInputs([[field(page, "group-chat-rename-field"), "Launch"]]);
   await sem(page, "group-chat-rename-save").click();
-  await expect(row).toContainText("Launch");
+  await expect(members).toContainText("Launch");
+  // A modal sheet takes the list out of the accessibility tree, so the list
+  // is read once the sheet is closed.
   await page.keyboard.press("Escape");
   await expect(members).toBeHidden();
-  await expect(pane).toContainText("You renamed the group “Launch”.");
+  await expect(row).toContainText("Launch");
+  // The rename line carries its Undo, so its words are the line's label.
+  await expect(async () => {
+    expect(await spokenText(pane, { timeout: 1_000 })).toContain(
+      "You renamed the group “Launch”.",
+    );
+  }).toPass({ timeout: 30_000 });
 
   // A reload reads the group back from the account and reopens it.
   await page.reload();
