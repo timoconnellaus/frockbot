@@ -528,6 +528,7 @@ void main() {
             onCreateBot: () {},
             onSearch: () {},
             onProfile: () {},
+            onWhatsNew: () {},
             onMarketplace: () {},
             onToggleHidden: () {},
             onRetry: () async {},
@@ -585,6 +586,7 @@ void main() {
       onCreateBot: () {},
       onSearch: () {},
       onProfile: () {},
+      onWhatsNew: () {},
       onMarketplace: () {},
       onToggleHidden: () {},
       onRetry: () async {},
@@ -798,6 +800,7 @@ void main() {
             onCreateBot: () {},
             onSearch: () {},
             onProfile: () {},
+            onWhatsNew: () {},
             onMarketplace: () {},
             onToggleHidden: () {},
             onRetry: () async {},
@@ -850,6 +853,7 @@ void main() {
             onCreateBot: () {},
             onSearch: () {},
             onProfile: () {},
+            onWhatsNew: () {},
             onMarketplace: () {},
             onToggleHidden: () {},
             onRetry: () async {},
@@ -864,11 +868,13 @@ void main() {
       expect(byIdentifier(ShellIds.sidebarCreateBot), findsOneWidget);
       expect(byIdentifier(ShellIds.sidebarSearch), findsOneWidget);
       expect(byIdentifier(ShellIds.sidebarProfile), findsOneWidget);
-      // The row carries only what the account needs: you, search and a new
-      // Bot. A call is not among them — it addresses one Bot, so it starts on
-      // that Bot's composer (ADR 0029) — and the Marketplace is the column's
-      // foot, a named row below the list rather than an icon in its bar.
-      expect(find.byType(IconButton), findsNWidgets(2));
+      expect(byIdentifier(ShellIds.sidebarWhatsNew), findsOneWidget);
+      // The row carries only what the account needs: you, What’s New, search
+      // and a new Bot. A call is not among them — it addresses one Bot, so it
+      // starts on that Bot's composer (ADR 0029) — and the Marketplace is the
+      // column's foot, a named row below the list rather than an icon in its
+      // bar.
+      expect(find.byType(IconButton), findsNWidgets(3));
       final foot = byIdentifier(ShellIds.sidebarMarketplace);
       expect(foot, findsOneWidget);
       expect(
@@ -905,6 +911,7 @@ void main() {
             onCreateBot: () {},
             onSearch: () {},
             onProfile: () {},
+            onWhatsNew: () {},
             onMarketplace: () {},
             onToggleHidden: () {},
             onRetry: () async {},
@@ -940,6 +947,7 @@ void main() {
             onCreateBot: () {},
             onSearch: () {},
             onProfile: () {},
+            onWhatsNew: () {},
             onMarketplace: () => opened++,
             onToggleHidden: () {},
             onRetry: () async {},
@@ -954,10 +962,12 @@ void main() {
       expect(marketplace, findsOneWidget);
       expect(find.text('Marketplace'), findsNothing);
       expect(find.byTooltip('Marketplace'), findsOneWidget);
-      expect(find.byType(IconButton), findsNWidgets(4));
+      expect(find.byType(IconButton), findsNWidgets(5));
       final profile = tester.getRect(byIdentifier(ShellIds.sidebarProfile));
+      final whatsNew = tester.getRect(byIdentifier(ShellIds.sidebarWhatsNew));
       final door = tester.getRect(marketplace);
-      expect(door.left, greaterThanOrEqualTo(profile.right - 1));
+      expect(whatsNew.left, greaterThanOrEqualTo(profile.right - 1));
+      expect(door.left, greaterThanOrEqualTo(whatsNew.right - 1));
       expect(
         door.left,
         lessThan(tester.getRect(byIdentifier(ShellIds.sidebarSearch)).left),
@@ -986,6 +996,7 @@ void main() {
             onCreateBot: () {},
             onSearch: () {},
             onProfile: () {},
+            onWhatsNew: () {},
             onMarketplace: () {},
             onToggleHidden: () {},
             onRetry: () async {

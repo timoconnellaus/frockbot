@@ -53,6 +53,7 @@ void main() {
             onCreateBot: () {},
             onSearch: () {},
             onProfile: () {},
+            onWhatsNew: () {},
             profileName: 'Tim OConnell',
             onMarketplace: () {},
             onToggleHidden: () {},

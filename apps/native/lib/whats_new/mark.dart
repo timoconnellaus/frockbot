@@ -1,4 +1,5 @@
-/// The rose mark on unread What’s New: the profile row and each new card.
+/// The rose mark on unread What’s New: the sidebar's megaphone and each new
+/// card.
 library;
 
 import 'package:flutter/material.dart';

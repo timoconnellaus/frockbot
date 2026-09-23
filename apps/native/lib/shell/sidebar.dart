@@ -24,6 +24,7 @@ import '../flock/avatar.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../theme/frock_theme.dart';
 import '../update/desktop_update.dart';
+import '../whats_new/mark.dart';
 import 'chat_icons.dart';
 import 'desktop_layout.dart';
 import 'focus.dart';
@@ -263,6 +264,11 @@ class ShellSidebar extends StatelessWidget {
   final String? profileName;
   final String? profileImageUrl;
 
+  /// Opens What’s New, from the megaphone beside the You control, which
+  /// wears the unread mark while [whatsNewUnread].
+  final VoidCallback onWhatsNew;
+  final bool whatsNewUnread;
+
   /// Opens the Marketplace: the services a Bot can be given, and the accounts
   /// already on them. Where it is drawn depends on [phone].
   final VoidCallback onMarketplace;
@@ -307,6 +313,7 @@ class ShellSidebar extends StatelessWidget {
     required this.onCreateBot,
     required this.onSearch,
     required this.onProfile,
+    required this.onWhatsNew,
     required this.onMarketplace,
     required this.onToggleHidden,
     required this.onRetry,
@@ -318,6 +325,7 @@ class ShellSidebar extends StatelessWidget {
     this.error,
     this.profileName,
     this.profileImageUrl,
+    this.whatsNewUnread = false,
   });
 
   String _id(wire.BotRegistration bot) => bot.botId.value;
@@ -370,6 +378,8 @@ class ShellSidebar extends StatelessWidget {
           onProfile: onProfile,
           profileName: profileName,
           profileImageUrl: profileImageUrl,
+          onWhatsNew: onWhatsNew,
+          whatsNewUnread: whatsNewUnread,
           onMarketplace: phone ? onMarketplace : null,
         ),
         if (!phone)
@@ -1578,8 +1588,8 @@ class _BotRowState extends State<_BotRow> {
   }
 }
 
-/// The list's own controls, GrokBot's: you, search, and a new Bot — and on a
-/// phone, the Marketplace beside you.
+/// The list's own controls, GrokBot's: you, search, and a new Bot — with
+/// What’s New beside you, and on a phone the Marketplace too.
 ///
 /// Voice is not here: a call addresses one Bot, so it is started from that
 /// Bot's composer and nowhere else (ADR 0029).
@@ -1593,6 +1603,8 @@ class _Header extends StatelessWidget {
   final VoidCallback onProfile;
   final String? profileName;
   final String? profileImageUrl;
+  final VoidCallback onWhatsNew;
+  final bool whatsNewUnread;
 
   /// The Marketplace, where the header is the place for it; null where the
   /// column's foot names it instead.
@@ -1602,6 +1614,8 @@ class _Header extends StatelessWidget {
     required this.onCreateBot,
     required this.onSearch,
     required this.onProfile,
+    required this.onWhatsNew,
+    required this.whatsNewUnread,
     this.profileName,
     this.profileImageUrl,
     this.onMarketplace,
@@ -1651,6 +1665,27 @@ class _Header extends StatelessWidget {
                       : 'You',
                   imageUrl: profileImageUrl,
                   size: 32,
+                ),
+              ),
+            ),
+            const SizedBox(width: 2),
+            identified(
+              ShellIds.sidebarWhatsNew,
+              IconButton(
+                tooltip: 'What’s New',
+                onPressed: onWhatsNew,
+                style: quiet,
+                icon: Stack(
+                  clipBehavior: Clip.none,
+                  children: [
+                    const Icon(Icons.campaign_outlined),
+                    if (whatsNewUnread)
+                      const Positioned(
+                        top: 0,
+                        right: -1,
+                        child: WhatsNewUnreadMark(),
+                      ),
+                  ],
                 ),
               ),
             ),

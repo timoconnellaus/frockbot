@@ -1,10 +1,9 @@
-/// The What’s New feed the profile sheet and the post-update page read.
+/// The What’s New feed the sidebar's megaphone and its page read.
 library;
 
 import '../client/transport.dart';
 
 const whatsNewSeenKeyV1 = 'whats-new/seen';
-const whatsNewLaunchedVersionKeyV1 = 'whats-new/launched-version';
 
 class WhatsNewImage {
   final String src;
@@ -129,20 +128,6 @@ WhatsNewImage? _image(Map<Object?, Object?> row) {
 }
 
 String whatsNewImageUrlV1(String origin, String src) => '$origin$src';
-
-/// Open the page once after a native restart into a newer build, not on
-/// the first install and not on the web (there is no update event).
-bool shouldOpenWhatsNewAfterLaunchV1({
-  required bool web,
-  required String? previousVersion,
-  required String currentVersion,
-  required int unseen,
-}) =>
-    !web &&
-    previousVersion != null &&
-    previousVersion.isNotEmpty &&
-    previousVersion != currentVersion &&
-    unseen > 0;
 
 Future<WhatsNewFeed> readWhatsNewFeedV1(NativeApi api) async {
   try {

@@ -10,8 +10,7 @@ and not Sparkle notes. Dates come from the first production tag, not the
 pull request. The still is reviewed on the PR.
 
 Adding an entry is ordinary catalog work: one row, maybe a WebP, then
-generate. Do not rebuild the feed, unread mark, or auto-open path to add
-one.
+generate. Do not rebuild the feed or the unread mark to add one.
 
 ## When to add an entry
 

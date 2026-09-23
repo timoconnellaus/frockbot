@@ -16,6 +16,7 @@ abstract final class ShellIds {
   static const sidebarCreateBot = 'sidebar-create-bot';
   static const sidebarProfile = 'sidebar-profile';
   static const sidebarMarketplace = 'sidebar-marketplace';
+  static const sidebarWhatsNew = 'sidebar-whats-new';
   static const sidebarHiddenToggle = 'sidebar-hidden-toggle';
   static const sidebarRetry = 'sidebar-retry';
   static const conversation = 'shell-conversation';
@@ -101,7 +102,7 @@ abstract final class BotActionIds {
 Widget identified(String identifier, Widget child) =>
     Semantics(identifier: identifier, child: child);
 
-/// What’s New: the profile row and the page it opens.
+/// What’s New: the sidebar's megaphone and the page it opens.
 abstract final class WhatsNewIds {
   static const page = 'whats-new-page';
   static const unread = 'whats-new-unread';
@@ -215,10 +216,10 @@ abstract final class SettingsIds {
   static const profileName = 'profile-name';
   static const profileSettings = 'profile-settings';
   static const profileModels = 'profile-models';
+  static const profileBilling = 'profile-billing';
   static const profileManageBots = 'profile-manage-bots';
   static const profileSignOut = 'profile-sign-out';
   static const profileVersion = 'profile-version';
-  static const profileWhatsNew = 'profile-whats-new';
 
   /// What the account can still spend, at the top of the Profile page.
   static const profileCredit = 'profile-credit';
