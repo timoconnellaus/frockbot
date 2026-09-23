@@ -117,10 +117,7 @@ interface StoredStopReceipt {
 
 function isTerminalStoredRunStatus(status: StoredRunStatus): boolean {
   return (
-    status === "completed" ||
-    status === "failed" ||
-    status === "cancelled" ||
-    status === "superseded"
+    status === "completed" || status === "failed" || status === "cancelled"
   );
 }
 
@@ -429,6 +426,8 @@ export async function executeTurn(
           ),
         remainingEffectAdmissions: () =>
           remainingRunEffectAdmissions(state, input.command.runId),
+        userMessageWaiting: () =>
+          state.authority.userMessageWaiting(input.command.runId),
         // A model provider Plugin this Bot's selection runs (ADR 0032): the
         // provider contribution registers here, and the credential lease it
         // takes is settled where the loop settles the outcome.
@@ -908,12 +907,10 @@ export async function admitRunEffect(
         `effect admission "${effect.effectId}" does not match durable intent`,
       );
     }
-    // Supersede fences exactly as Stop does. It is what makes an interrupt
-    // durable rather than advisory: a Turn whose Agent never got the signal
-    // — because the object was evicted and resumed — still starts no new
-    // provider call or tool effect once the intent is recorded.
-    const outcome =
-      run.stopRequestedAt || run.supersededAt ? "fenced" : "admitted";
+    // Stop fences durably rather than advisorily: a Turn whose Agent never
+    // got the signal — because the object was evicted and resumed — still
+    // starts no new provider call or tool effect once the intent is recorded.
+    const outcome = run.stopRequestedAt ? "fenced" : "admitted";
     const next = requireStoredRunV1({
       ...run,
       effectAdmissions: [

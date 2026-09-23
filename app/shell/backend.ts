@@ -17,7 +17,6 @@ import {
   acknowledgeNotification,
   failedTurnRecordsV1,
   listNotifications,
-  supersededPackageRecords,
   terminalPackageRecords,
 } from "@frockbot/app/notifications/bot";
 import {
@@ -86,8 +85,6 @@ export class ShellBotBackendContribution {
       failureRecords: (snapshot, failed, read) =>
         failedTurnRecordsV1({ settings: snapshot, failed, read }),
       terminalRecords: (input) => terminalPackageRecords(input),
-      supersededRecords: (input) => supersededPackageRecords(input),
-      interruptTurn: (runId, reason) => state.turn.interrupt(runId, reason),
       runSettled: (runId) => host.runSettled?.(runId) ?? Promise.resolve(),
       scheduledDeadlines: (transaction) =>
         scheduledDeadlines(state, transaction),

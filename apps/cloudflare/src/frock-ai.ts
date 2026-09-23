@@ -164,8 +164,8 @@ export function createFrockAiGatewayHostV1(
       // way to tell the two apart from the abort alone.
       //
       // The caller's `signal` is still chained in, and it is never disarmed:
-      // a Stop or a superseding message must tear the request down whether the
-      // headers have arrived or not.
+      // a Stop must tear the request down whether the headers have arrived or
+      // not.
       const deadline = new AbortController();
       const timer = setTimeout(() => {
         deadline.abort(

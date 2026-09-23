@@ -6,10 +6,8 @@
 // records where the Turn earned one — a firing with two inbox entries — and
 // nobody would notice until they counted.
 import { describe, expect, test } from "bun:test";
-import {
-  shellTerminalRecordsV1,
-  supersededTurnRecordsV1,
-} from "./terminal-records.js";
+import { Session, type SessionEvent } from "@frockbot/core/contracts";
+import { shellTerminalRecordsV1 } from "./terminal-records.js";
 import { UNREAD_STATE_KEY } from "./unread.js";
 import { approvalKeyV1, decodeApprovalRecordV1 } from "./approvals.js";
 import { decodeRoutineInboxEntryV1 } from "@frockbot/app/routines/inbox";
@@ -202,50 +200,95 @@ describe("the settling transaction's records", () => {
   });
 });
 
-describe("what a superseded Turn leaves for the Turn that replaced it", () => {
+describe("what a Turn that yielded leaves for the next one", () => {
+  /** A chat Turn's journal: it called a tool, and maybe then answered. */
+  function journal(answered: boolean): SessionEvent[] {
+    const session = new Session("user-1:primary");
+    session.appendBatch([
+      { type: "turn/start", turn: 1 },
+      { type: "turn/admission", turn: 1, turnType: "chat" } as SessionEvent,
+      {
+        type: "tool/call",
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:0",
+        name: "look",
+        input: {},
+      },
+      ...(answered
+        ? ([
+            {
+              type: "tool/call",
+              turn: 1,
+              step: 2,
+              occurrenceId: "tool:1:2:0",
+              name: "send_to_user",
+              input: {
+                disposition: "finish",
+                payload: { type: "text", text: "Done." },
+              },
+            },
+            {
+              type: "send/to-user",
+              turn: 1,
+              step: 2,
+              occurrenceId: "tool:1:2:0",
+              payload: { type: "text", text: "Done." },
+            },
+          ] as SessionEvent[])
+        : []),
+      { type: "turn/end", turn: 1, outcome: "completed" },
+    ]);
+    return [...session.activeRunJournal];
+  }
+
   const run = {
     runId: "run-1",
     sessionId: "user-1:primary",
     acceptedAt: "2026-09-03T00:00:00.000Z",
     input: "first",
-    events: [] as { type: string }[],
   };
-  const now = "2026-09-03T00:00:05.000Z";
-  const read = <T>(): Promise<T | undefined> => Promise.resolve(undefined);
 
-  test("one durable input, keyed by the Turn it replaced", async () => {
-    const records = await supersededTurnRecordsV1({ run, now, read });
-
-    const values = Object.values(records);
-    expect(values).toHaveLength(2);
-    expect(values).toContainEqual({
-      schemaVersion: 1,
-      kind: "superseded-turn",
-      runId: "run-1",
-      unfinishedWork: false,
-      createdAt: now,
+  async function yieldedInputs(input: {
+    events: SessionEvent[];
+    admission?: { turnType?: string; lane?: string };
+  }): Promise<unknown[]> {
+    const records = await shellTerminalRecordsV1({
+      run: { ...run, ...input },
+      cursor: CURSOR,
+      now: NOW,
+      read: store().read,
     });
+    return keysUnder(records, ROUTINE_WAKE_PREFIX).map((key) => records[key]);
+  }
+
+  test("a Turn that completed still owing its reply leaves one note", async () => {
+    expect(await yieldedInputs({ events: journal(false) })).toEqual([
+      {
+        schemaVersion: 1,
+        kind: "yielded-turn",
+        runId: "run-1",
+        createdAt: NOW,
+      },
+    ]);
   });
 
-  test("a Turn that dispatched a subagent says so, because it is still running", async () => {
-    const records = await supersededTurnRecordsV1({
-      run: { ...run, events: [{ type: "task/dispatched" }] },
-      now,
-      read,
-    });
-
-    expect(Object.values(records)).toContainEqual(
-      expect.objectContaining({ unfinishedWork: true }),
-    );
+  test("a Turn that answered leaves nothing, however late a message came", async () => {
+    expect(await yieldedInputs({ events: journal(true) })).toEqual([]);
   });
 
-  test("an automation Turn contributes nothing: a firing is not the conversation", async () => {
+  test("a Turn off the person's own lane never yielded", async () => {
     expect(
-      await supersededTurnRecordsV1({
-        run: { ...run, admission: { turnType: "automation" } },
-        now,
-        read,
+      await yieldedInputs({
+        events: journal(false),
+        admission: { turnType: "chat", lane: "agent" },
       }),
-    ).toEqual({});
+    ).toEqual([]);
+    expect(
+      await yieldedInputs({
+        events: journal(false),
+        admission: { turnType: "automation" },
+      }),
+    ).toEqual([]);
   });
 });

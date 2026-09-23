@@ -3955,7 +3955,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
    * the Turn settles, which may be minutes, and the voice pipeline must not
    * wait. The lane is what keeps a person mid-conversation with that Bot, or a
    * Routine it is running, from being interrupted — a voice request queues
-   * behind them and never supersedes.
+   * behind them and never makes them yield.
    *
    * Three things carry the answer back, and none of them is load-bearing on
    * its own: the Bot's own durable outbox wakes this object the moment the
@@ -4135,7 +4135,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         ? { answer: answered }
         : outcome?.type === "completed"
           ? { failure: "the Bot finished without answering the voice request" }
-          : run.status === "cancelled" || run.status === "superseded"
+          : run.status === "cancelled"
             ? { cancelled: true }
             : { failure: outcome ? outcome.message : run.status },
       this.now(),

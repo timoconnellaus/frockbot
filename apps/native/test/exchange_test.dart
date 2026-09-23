@@ -277,7 +277,7 @@ void main() {
     expect(lines.where((line) => line.sends.isNotEmpty), hasLength(1));
   });
 
-  test('queued and running exchanges do not read as a supersede drain', () {
+  test('an exchange projects queued, working and failed', () {
     final queued = projectRuns([
       inboundRun(
         id: 'q',
@@ -289,10 +289,6 @@ void main() {
       ),
     ]);
     expect(queued.first.exchange!.status, ExchangeStatus.queued);
-    expect(
-      supersedeDrainState(queued, DateTime.utc(2026, 9, 16, 0, 3)),
-      SupersedeDrainState.none,
-    );
     expect(
       projectRuns([
         inboundRun(

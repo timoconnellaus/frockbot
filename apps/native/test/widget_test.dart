@@ -52,7 +52,6 @@ class FakeTransport implements ChatTransport {
   final MemoryStore store;
   final calls = <String>[];
   final sentTexts = <String>[];
-  final superseded = <String?>[];
   final completion = Completer<void>();
   Map<String, dynamic>? observed;
   bool loseReply = false;
@@ -67,7 +66,6 @@ class FakeTransport implements ChatTransport {
     String botId,
     String id,
     String text, {
-    String? supersedes,
     String? retryOf,
   }) async {
     expect(
@@ -77,7 +75,6 @@ class FakeTransport implements ChatTransport {
     );
     calls.add('send:$id');
     sentTexts.add(text);
-    superseded.add(supersedes);
     await completion.future;
     if (loseReply) throw const RequestFailure('lost');
   }
@@ -777,11 +774,8 @@ void main() {
 
   /// The composer never closes over a running Turn.
   ///
-  /// "Do this instead" is a thing a person means, and the send route admits it
-  /// on explicit supersede intent. The gate this replaces — no send while a
-  /// submission was unconfirmed — kept the composer shut for the whole of a
-  /// Turn, because the POST does not answer until the Turn settles. That made
-  /// the one path with the intent unreachable from the one surface that has it.
+  /// A message sent while the Bot works waits and steers it at the next step.
+  /// A composer shut for the length of a Turn would make that unreachable.
   test('a second message may be sent while the first Turn runs', () async {
     final store = MemoryStore();
     final transport = FakeTransport(store)..observed = running();
@@ -808,9 +802,6 @@ void main() {
       [for (final entry in controller.pending) entry.text],
       ['first', 'second'],
     );
-    // Both carry the run this client had observed, which is what makes the
-    // Bot replace what it was doing rather than refuse.
-    expect(transport.superseded, ['send-1', 'send-1']);
 
     transport.completion.complete();
     await first;

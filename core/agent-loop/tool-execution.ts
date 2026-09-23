@@ -151,8 +151,8 @@ async function runOccurrenceV1(
     result = preparation.result;
   } else {
     // Re-admitted on every dispatch, including a re-issue of an already
-    // journaled intent: admission is keyed by effect id, so a Stop or a
-    // supersede still fences a call the evicted Turn had already started.
+    // journaled intent: admission is keyed by effect id, so a Stop still
+    // fences a call the evicted Turn had already started.
     if (
       !(await options.admitEffect({
         kind: "tool",
@@ -239,8 +239,8 @@ interface BatchCallReportV1 {
  *
  * One failure does not abort the rest: the batch exists so the model can spend
  * one inference on several calls, and collapsing the whole batch because the
- * third call was refused would cost it the other two as well. A Stop or a
- * supersede is the exception, because it is not this batch failing: it fences
+ * third call was refused would cost it the other two as well. A Stop is the
+ * exception, because it is not this batch failing: it fences
  * the sub-call it reached exactly as it fences a top-level call, and the
  * Turn's own cancellation settles whatever never started.
  *

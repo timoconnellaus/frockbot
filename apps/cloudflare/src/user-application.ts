@@ -1026,14 +1026,6 @@ function createUserApplicationRoute() {
             // so what a Turn runs on is still whatever the instruction root
             // holds at the generation the Turn resolves.
             ...(turnCommand.skills ? { skills: turnCommand.skills } : {}),
-            // The composer's explicit authenticated intent to replace whatever
-            // the Bot is doing. It is forwarded exactly as sent — including
-            // the empty form, which means the sender had observed no run —
-            // because its presence is the decision. The lane is `user`
-            // because only the composer reaches this route.
-            ...(turnCommand.supersedes
-              ? { supersedes: turnCommand.supersedes, lane: "user" as const }
-              : {}),
           },
         }),
         { status: 202 },

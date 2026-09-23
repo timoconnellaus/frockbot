@@ -116,7 +116,6 @@ describe("the records a failed Turn leaves", () => {
       [],
       events,
       "Bot turn ended with outcome model-error: Model request failed (401)",
-      undefined,
       failureRecords,
     );
 
@@ -144,7 +143,6 @@ describe("the records a failed Turn leaves", () => {
       [],
       events,
       "Bot turn ended with outcome model-error",
-      undefined,
       failureRecords,
     );
 
@@ -162,7 +160,6 @@ describe("the records a failed Turn leaves", () => {
       [],
       events,
       "the service restarted",
-      undefined,
       failureRecords,
     );
     // What acknowledging it does. A recovery pass over the same run must not
@@ -177,34 +174,9 @@ describe("the records a failed Turn leaves", () => {
       [],
       events,
       "the service restarted",
-      undefined,
       failureRecords,
     );
 
-    expect(notifications(storage)).toEqual([]);
-  });
-
-  test("is not recorded for a Turn a later message replaced", async () => {
-    const { storage, events } = await settledStorage({
-      supersededAt: "2026-09-05T00:01:00.000Z",
-      supersededBy: "run-2",
-    });
-
-    await failStoredRun(
-      codec,
-      storage,
-      KEYS,
-      "run-1",
-      [],
-      events,
-      "Bot turn ended with outcome model-error",
-      undefined,
-      failureRecords,
-    );
-
-    expect((storage.values.get(KEYS.run) as StoredRunV1<Snapshot>).status).toBe(
-      "superseded",
-    );
     expect(notifications(storage)).toEqual([]);
   });
 
@@ -221,7 +193,6 @@ describe("the records a failed Turn leaves", () => {
       [],
       events,
       "Bot turn ended with outcome model-error",
-      undefined,
       failureRecords,
     );
 

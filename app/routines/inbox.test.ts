@@ -509,39 +509,35 @@ describe("the machine-result variant", () => {
   });
 });
 
-describe("a Turn the User's next message replaced", () => {
-  const superseded = {
+describe("a Turn that yielded to the person's next message", () => {
+  const yielded = {
     schemaVersion: 1 as const,
-    kind: "superseded-turn" as const,
+    kind: "yielded-turn" as const,
     runId: "run-1",
-    unfinishedWork: true,
     createdAt: NOW,
   };
 
-  test("round-trips, and is keyed by the Turn it replaced", () => {
-    expect(decodePendingBotInputV1(superseded, "input")).toEqual(superseded);
+  test("round-trips, and is keyed by the Turn that yielded", () => {
+    expect(decodePendingBotInputV1(yielded, "input")).toEqual(yielded);
+    expect(() =>
+      decodePendingBotInputV1({ ...yielded, extra: 1 }, "input"),
+    ).toThrow();
+    // The kind Supersede wrote no longer decodes.
     expect(() =>
       decodePendingBotInputV1(
-        { ...superseded, unfinishedWork: "yes" },
+        { ...yielded, kind: "superseded-turn", unfinishedWork: false },
         "input",
       ),
-    ).toThrow(/unfinishedWork is invalid/);
-    expect(() =>
-      decodePendingBotInputV1({ ...superseded, extra: 1 }, "input"),
     ).toThrow();
   });
 
-  test("tells the next Turn what happened and what is still running", () => {
-    const preamble = pendingBotInputPreambleV1([superseded]);
+  test("tells the next Turn its earlier work is unfinished, not abandoned", () => {
+    const preamble = pendingBotInputPreambleV1([yielded]);
 
-    expect(preamble).toContain("[Superseded]");
-    expect(preamble).toContain("must not be assumed to have happened");
-    expect(preamble).toContain("Do not pick the interrupted work back up");
-    expect(preamble).toContain("Subagents that Turn dispatched are still");
-    // With nothing left running the reminder says nothing about subagents.
-    expect(
-      pendingBotInputPreambleV1([{ ...superseded, unfinishedWork: false }]),
-    ).not.toContain("Subagents");
+    expect(preamble).toContain("[Steering]");
+    expect(preamble).toContain("nothing in flight was lost");
+    expect(preamble).toContain("Read this message first");
+    expect(preamble).toContain("decide whether to carry the earlier work on");
   });
 });
 
@@ -549,7 +545,7 @@ describe("the pending-input cap", () => {
   /**
    * The four input kinds are not interchangeable. A dropped `wake` still has
    * an inbox entry the user can read; an `approval`, a `machine-result` or a
-   * `superseded-turn` writes no entry anywhere, so dropping one loses a
+   * `yielded-turn` writes no entry anywhere, so dropping one loses a
    * decision the user made or a result a machine produced, silently.
    */
   test("keeps every non-wake input and spends the budget on the wakes", async () => {
@@ -567,21 +563,20 @@ describe("the pending-input cap", () => {
     });
     await inbox.enqueue({
       schemaVersion: 1,
-      kind: "superseded-turn",
+      kind: "yielded-turn",
       runId: "run-9",
-      unfinishedWork: true,
       createdAt: NOW,
     });
 
     const drained = await inbox.drainInto("chat-run-1");
     expect(drained).toHaveLength(ROUTINE_PENDING_INPUT_LIMIT);
-    // The approval decision and the superseded Turn survive; a flat
+    // The approval decision and the yielded Turn survive; a flat
     // `slice(-16)` used to drop whichever of them sat behind enough wakes.
     expect(drained.filter((input) => input.kind === "approval")).toHaveLength(
       1,
     );
     expect(
-      drained.filter((input) => input.kind === "superseded-turn"),
+      drained.filter((input) => input.kind === "yielded-turn"),
     ).toHaveLength(1);
     expect(drained.filter((input) => input.kind === "wake")).toHaveLength(
       ROUTINE_PENDING_INPUT_LIMIT - 2,
@@ -632,9 +627,8 @@ describe("the pending-input cap", () => {
     });
     await inbox.enqueue({
       schemaVersion: 1,
-      kind: "superseded-turn",
+      kind: "yielded-turn",
       runId: "run-9",
-      unfinishedWork: true,
       createdAt: NOW,
     });
 
@@ -647,7 +641,7 @@ describe("the pending-input cap", () => {
       drained.filter((input) => input.kind === "machine-result"),
     ).toHaveLength(1);
     expect(
-      drained.filter((input) => input.kind === "superseded-turn"),
+      drained.filter((input) => input.kind === "yielded-turn"),
     ).toHaveLength(1);
     const presses = drained.filter((input) => input.kind === "card-action");
     expect(presses).toHaveLength(ROUTINE_CARD_ACTION_LIMIT);

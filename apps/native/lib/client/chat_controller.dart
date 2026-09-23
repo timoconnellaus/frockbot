@@ -179,10 +179,8 @@ class ChatController extends ChangeNotifier {
   /// Whether this client could start a Turn.
   ///
   /// Not gated on a Turn already running, and not on a submission still being
-  /// delivered. "Do this instead" is a thing a person means and the send route
-  /// admits it: every send carries supersede intent, and the Bot replaces what
-  /// it was doing. A composer that closed for the length of a Turn made the
-  /// supersede path unreachable from the one surface that has it.
+  /// delivered. A message sent while the Bot works waits, and the Bot reads it
+  /// at its next step — so a person can steer it without waiting it out.
   bool get canSend => ready;
   void changed() {
     if (_disposed) return;
@@ -460,7 +458,6 @@ class ChatController extends ChangeNotifier {
       case 'completed':
       case 'failed':
       case 'cancelled':
-      case 'superseded':
         return true;
       default:
         return false;
@@ -763,20 +760,14 @@ class ChatController extends ChangeNotifier {
     );
     _notice = null;
     _publish();
-    // The intent goes with every send, and the run this client had observed
-    // rides along as provenance where there is one. Whether a Turn was showing
-    // as running is a race — the transcript is a poll behind — so gating the
-    // intent on what happened to be on screen would have the Bot refuse a
-    // message the person had every right to send.
-    final supersedes = runningRunId;
     // Whether this message is waiting behind anything at all — a Turn the Bot
     // is running, or an earlier send whose own admission is still in flight.
     // Read before the new submission joins the list.
     final waitsBehind = activeRunId != null;
     pending = [...pending, submission];
-    // A message that displaces a running Turn joins the thread at once, greyed
-    // and queued. The receipt does not say whether it queued, so this row
-    // stands until the transcript replaces it.
+    // A message sent while the Bot works joins the thread at once, greyed and
+    // queued until the Bot reads it. The receipt does not say whether it
+    // queued, so this row stands until the transcript replaces it.
     if (waitsBehind || submission.retryOf != null) {
       _putOptimisticRun(submission, queued: waitsBehind);
     }
@@ -799,7 +790,6 @@ class ChatController extends ChangeNotifier {
         botId,
         submission.id,
         text,
-        supersedes: supersedes,
         retryOf: submission.retryOf,
       );
       await _acceptAdmission(submission);

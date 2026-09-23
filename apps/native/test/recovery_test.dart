@@ -24,7 +24,6 @@ class GatedLookup implements ChatTransport {
     String botId,
     String id,
     String text, {
-    String? supersedes,
     String? retryOf,
   }) async {
     throw const RequestFailure('lost');
@@ -391,7 +390,6 @@ class _TimeoutAfterPage implements ChatTransport {
     String botId,
     String id,
     String text, {
-    String? supersedes,
     String? retryOf,
   }) => _send.future;
 
@@ -433,7 +431,6 @@ class _SplitDelivery implements ChatTransport {
     String botId,
     String id,
     String text, {
-    String? supersedes,
     String? retryOf,
   }) async {
     throw const RequestFailure('lost');
@@ -487,7 +484,6 @@ class _ReceiptThenFailedRun implements ChatTransport {
     String botId,
     String id,
     String text, {
-    String? supersedes,
     String? retryOf,
   }) async {
     if (refuseNext) throw const RequestFailure('no', 400);

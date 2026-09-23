@@ -16,11 +16,7 @@ import {
 import { MemoryStorage } from "./memory-storage.fixture.ts";
 import { SessionEventLog } from "./session-event-log.ts";
 import { createStoredRunCodecV1, type StoredRunV1 } from "./run-records.ts";
-import {
-  cancelStoredRun,
-  failStoredRun,
-  supersedeStoredRun,
-} from "./run-terminal.ts";
+import { cancelStoredRun, failStoredRun } from "./run-terminal.ts";
 
 const codec = createStoredRunCodecV1<null>({
   decodeRunId: (value) => String(value),
@@ -119,11 +115,11 @@ function admitNextTurn(latest: SessionEvent[]): void {
 }
 
 describe("settling a Turn interrupted mid-answer", () => {
-  test("a superseded run leaves a log the next Turn can start on", async () => {
+  test("a stopped run leaves a log the next Turn can start on", async () => {
     const { latest, storage } = await settled(
-      { supersededAt: "2026-09-03T00:01:00.000Z", supersededBy: "run-2" },
+      { stopRequestedAt: "2026-09-03T00:01:00.000Z" },
       (store, events) =>
-        supersedeStoredRun(codec, store, KEYS, "run-1", [], events),
+        cancelStoredRun(codec, store, KEYS, "run-1", [], events),
     );
 
     // Before the fix this threw "turn 2 started while turn 1 is open", and
@@ -135,20 +131,9 @@ describe("settling a Turn interrupted mid-answer", () => {
       StoredRunV1<null>,
       "events"
     >;
-    expect(record.status).toBe("superseded");
+    expect(record.status).toBe("cancelled");
     expect(Object.hasOwn(record, "events")).toBe(false);
     expect(record.eventRange).toEqual({ startSeq: 0, endSeq: latest.length });
-  });
-
-  test("a stopped run leaves a log the next Turn can start on", async () => {
-    const { latest } = await settled(
-      { stopRequestedAt: "2026-09-03T00:01:00.000Z" },
-      (store, events) =>
-        cancelStoredRun(codec, store, KEYS, "run-1", [], events),
-    );
-
-    expect(() => admitNextTurn(latest)).not.toThrow();
-    expect(latest.at(-1)).toMatchObject({ type: "turn/end", turn: 1 });
   });
 
   test("a failed run leaves a log the next Turn can start on", async () => {

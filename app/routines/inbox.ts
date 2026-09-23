@@ -240,22 +240,19 @@ export interface RoutinePendingMachineResultV1 {
 export const MACHINE_RESULT_PREVIEW_MAX_V1 = 400;
 
 /**
- * A Turn the User's next message took the place of, waiting to be told to the
- * Bot.
+ * A Turn that ended at a step boundary because the person sent another
+ * message, waiting to be told to the Bot.
  *
- * The fourth variant, and the only one a Turn writes about itself. A
- * superseded Turn's sends and completed tool results are already in the
- * session log, so the model sees what it did; what it cannot see is *why* it
- * stopped mid-sentence, or that a subagent it dispatched is still working. It
- * reaches the next Turn as durable input rather than as a silent gap.
+ * The only variant a Turn writes about itself. Everything the Turn did is in
+ * the session log, so the next Turn sees the work; what it cannot see is that
+ * the work was unfinished rather than done. It reaches the next Turn as
+ * durable input rather than as a silent gap.
  */
-export interface RoutinePendingSupersededTurnV1 {
+export interface RoutinePendingYieldedTurnV1 {
   schemaVersion: 1;
-  kind: "superseded-turn";
-  /** The Turn that was superseded. */
+  kind: "yielded-turn";
+  /** The Turn that yielded. */
   runId: string;
-  /** Whether that Turn had dispatched subagents that outlive it. */
-  unfinishedWork: boolean;
   createdAt: string;
 }
 
@@ -292,14 +289,14 @@ export type PendingBotInputV1 =
   | RoutinePendingWakeV1
   | RoutinePendingApprovalV1
   | RoutinePendingMachineResultV1
-  | RoutinePendingSupersededTurnV1
+  | RoutinePendingYieldedTurnV1
   | RoutinePendingCardActionV1;
 
 /** The id one pending input is keyed and de-duplicated by. */
 export function pendingBotInputIdV1(input: PendingBotInputV1): string {
   if (input.kind === "wake") return input.wakeId;
   if (input.kind === "approval") return input.approvalId;
-  if (input.kind === "superseded-turn") return `superseded-turn:${input.runId}`;
+  if (input.kind === "yielded-turn") return `yielded-turn:${input.runId}`;
   // A surface can be pressed more than once, and two presses in the same
   // millisecond are still two presses — a Workers isolate advances its clock
   // only on I/O, so the instant cannot tell them apart. The press id can: it
@@ -491,21 +488,17 @@ export function decodePendingBotInputV1(
       createdAt: routineTimestamp(candidate.createdAt, `${label} createdAt`),
     };
   }
-  if (candidate.kind === "superseded-turn") {
+  if (candidate.kind === "yielded-turn") {
     routineExactKeys(
       candidate,
-      ["schemaVersion", "kind", "runId", "unfinishedWork", "createdAt"],
+      ["schemaVersion", "kind", "runId", "createdAt"],
       [],
       label,
     );
-    if (typeof candidate.unfinishedWork !== "boolean") {
-      throw new RoutineDecodeError(`${label} unfinishedWork is invalid`);
-    }
     return {
       schemaVersion: 1,
-      kind: "superseded-turn",
+      kind: "yielded-turn",
       runId: routineText(candidate.runId, 256, `${label} runId`),
-      unfinishedWork: candidate.unfinishedWork,
       createdAt: routineTimestamp(candidate.createdAt, `${label} createdAt`),
     };
   }
@@ -639,18 +632,13 @@ export function pendingBotInputPreambleV1(
       );
       continue;
     }
-    if (input.kind === "superseded-turn") {
+    if (input.kind === "yielded-turn") {
       lines.push(
-        "[Superseded] Your previous Turn was interrupted because the User sent this message before it finished. What you had already sent and the tool results you had already received are above; anything still in flight was abandoned and must not be assumed to have happened.",
-        // A Bot answering "hi" with thirty steps of the interrupted job is
-        // what this line prevents (2026-09-04): the new message is the Turn's
-        // subject; the old job resumes only when the message asks for it.
-        "Answer this message. Do not pick the interrupted work back up unless this message asks you to; if it is unrelated, say in one sentence where that work stopped and ask whether to continue.",
-        ...(input.unfinishedWork
-          ? [
-              "Subagents that Turn dispatched are still running and will report when they finish.",
-            ]
-          : []),
+        "[Steering] The person sent this message while you were still working on the one before it. That work is above, with every tool result it received, and nothing in flight was lost — but it is unfinished.",
+        // A Bot answering "hi" with thirty steps of the earlier job is what
+        // this line guards against (2026-09-04): the new message is read
+        // first, and the Bot decides what becomes of the earlier work.
+        "Read this message first. It may change that work, add to it, stop it, or be about something else. Then decide whether to carry the earlier work on, and say so when the person would want to know.",
         "",
       );
       continue;

@@ -173,7 +173,7 @@ class FrockAiProvider implements LlmProvider {
     // cannot perform, and the Bot would stay wedged on a transient gateway
     // error.
     // Both bounds at once, and they are not the same bound. `signal` is the
-    // caller's cancellation — a Stop, a superseded Turn — and main's change
+    // caller's cancellation — a Stop, a Turn deadline — and main's change
     // hands it to the gateway so the request is actually torn down. The
     // deadline seam wraps that with the clock: this transport is a native
     // binding, so a gateway that accepted the request and then went quiet was

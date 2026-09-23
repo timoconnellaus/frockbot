@@ -72,7 +72,6 @@ void main() {
         'commandId': 'retry-command',
         'text': 'hi',
         'retryOf': 'original',
-        'supersedes': <String, Object?>{},
       });
       final run = await transport.lookup('bot', 'send-1');
       expect(run!['messageRunId'], 'original');
@@ -126,13 +125,7 @@ void main() {
   test(
     'no ordinary assistant text renders, even from a cached decoded run',
     () {
-      for (final status in [
-        'running',
-        'completed',
-        'failed',
-        'cancelled',
-        'superseded',
-      ]) {
+      for (final status in ['running', 'completed', 'failed', 'cancelled']) {
         final lines = projectRuns([
           {
             'runId': 'r',
@@ -148,66 +141,49 @@ void main() {
     },
   );
 
-  // Tim's report: a second message sent into a running Turn left the thread
-  // saying nothing while the first one wound down, so two Turns of waiting
-  // read as one Turn being slow. The send route does not answer until the Turn
-  // it replaced has settled, and the transcript is only re-read when authority
-  // says so — so the whole drain is over before a durable read could have
-  // drawn it. The client draws the queued row itself.
-  test(
-    'a message that displaces a running Turn says so while it drains',
-    () async {
-      final store = MemoryStore();
-      final transport = HeldSendTransport();
-      final controller = ChatController(
-        transport: transport,
-        store: store,
-        userId: 'user-1',
-        botId: 'bot-1',
+  // A message sent into a running Turn joins the thread at once, greyed until
+  // the Bot reads it at its next step. The running Turn is untouched: it is
+  // still the one a Stop would reach, and it keeps working.
+  test('a message sent into a running Turn waits in the thread', () async {
+    final store = MemoryStore();
+    final transport = HeldSendTransport();
+    final controller = ChatController(
+      transport: transport,
+      store: store,
+      userId: 'user-1',
+      botId: 'bot-1',
+    );
+    try {
+      await controller.initialize();
+      expect(controller.runningRunId, 'run-a');
+
+      final sending = controller.send('also check B');
+      await Future<void>.delayed(Duration.zero);
+
+      final lines = projectRuns(controller.runs);
+      final waiting = lines.firstWhere((line) => line.text == 'also check B');
+      expect(waiting.role, LineRole.user);
+      expect(waiting.pending, isTrue);
+      expect(controller.visiblePendingText, isNull);
+      expect(controller.runningRunId, 'run-a');
+
+      // A refusal takes the row back out: nothing in the thread claims a
+      // message that was never admitted.
+      transport.refuse();
+      await sending;
+      expect(
+        projectRuns(controller.runs).map((line) => line.text),
+        isNot(contains('also check B')),
       );
-      try {
-        await controller.initialize();
-        expect(controller.runningRunId, 'run-a');
+    } finally {
+      controller.dispose();
+    }
+  });
 
-        // The POST stays open, exactly as it does for the whole drain.
-        final sending = controller.send('do this instead');
-        await Future<void>.delayed(Duration.zero);
-
-        final lines = projectRuns(controller.runs);
-        expect(
-          supersedeDrainState(lines, DateTime.now()),
-          SupersedeDrainState.stopping,
-        );
-        // The person's own words are in the thread rather than beside it, and
-        // the Turn they displaced is still the one a Stop would reach.
-        expect(lines.map((line) => line.text), contains('do this instead'));
-        expect(controller.visiblePendingText, isNull);
-        expect(controller.runningRunId, 'run-a');
-        expect(transport.observedSupersedes, ['run-a']);
-
-        // A refusal takes the row back out: nothing in the thread claims a Turn
-        // that was never admitted.
-        transport.refuse();
-        await sending;
-        expect(
-          supersedeDrainState(projectRuns(controller.runs), DateTime.now()),
-          SupersedeDrainState.none,
-        );
-        expect(
-          projectRuns(controller.runs).map((line) => line.text),
-          isNot(contains('do this instead')),
-        );
-      } finally {
-        controller.dispose();
-      }
-    },
-  );
-  // The same window, one beat earlier: the Turn ahead has been sent but its own
-  // POST has not answered yet, so the transcript has no durable run to read it
-  // from. The composer is open either way — "do this instead" does not wait for
-  // a projection — and what the thread says has to be about the wait, not about
-  // what this client had managed to observe.
-  test('a message sent behind one still being delivered says so too', () async {
+  // One beat earlier: the message ahead has been sent but its own POST has
+  // not answered, so there is no durable run yet. The composer is open either
+  // way, and the second message waits in the thread just the same.
+  test('a message sent behind one still being delivered waits too', () async {
     final store = MemoryStore();
     final transport = HeldSendTransport(runs: const []);
     final controller = ChatController(
@@ -226,8 +202,10 @@ void main() {
       await Future<void>.delayed(Duration.zero);
 
       expect(
-        supersedeDrainState(projectRuns(controller.runs), DateTime.now()),
-        SupersedeDrainState.stopping,
+        projectRuns(controller.runs)
+            .firstWhere((line) => line.text == 'second')
+            .pending,
+        isTrue,
       );
     } finally {
       controller.dispose();
@@ -235,9 +213,8 @@ void main() {
   });
 }
 
-/// A transport whose send never answers, which is what superseding a running
-/// Turn looks like from the client: the route holds the POST open until the
-/// Turn it replaced has settled.
+/// A transport whose send never answers, so a test can look at the thread
+/// while the message is still on its way.
 class HeldSendTransport implements ChatTransport {
   HeldSendTransport({List<Map<String, dynamic>>? runs})
     : runs = runs ?? _oneRunning;
@@ -254,7 +231,6 @@ class HeldSendTransport implements ChatTransport {
 
   final List<Map<String, dynamic>> runs;
   final _held = Completer<void>();
-  final observedSupersedes = <String?>[];
 
   void refuse() => _held.completeError(const RequestFailure('refused', 409));
 
@@ -269,10 +245,8 @@ class HeldSendTransport implements ChatTransport {
     String botId,
     String id,
     String text, {
-    String? supersedes,
     String? retryOf,
   }) async {
-    observedSupersedes.add(supersedes);
     await _held.future;
   }
 

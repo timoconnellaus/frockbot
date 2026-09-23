@@ -377,11 +377,7 @@ export type RunEvent =
     };
 export type RunOutcome =
   | { type: "completed"; text: string }
-  | {
-      type: "failed" | "cancelled" | "superseded";
-      message: string;
-      text?: string;
-    };
+  | { type: "failed" | "cancelled"; message: string; text?: string };
 export type Run =
   | {
       schemaVersion: 1 | 2 | 3 | 4;
@@ -441,22 +437,6 @@ export type Run =
       events: Array<RunEvent>;
       stopRequestedAt: Instant;
       outcome: { type: "cancelled"; message: string; text?: string };
-      via?: RunVia;
-      messageRunId?: Identifier;
-      messageAdmittedAt?: Instant;
-      retryOf?: Identifier;
-      retriedBy?: Identifier;
-      canRetry?: boolean;
-    }
-  | {
-      schemaVersion: 1 | 2 | 3 | 4;
-      runId: Identifier;
-      admittedAt: Instant;
-      input: string;
-      status: "superseded";
-      events: Array<RunEvent>;
-      stopRequestedAt?: Instant;
-      outcome: { type: "superseded"; message: string; text?: string };
       via?: RunVia;
       messageRunId?: Identifier;
       messageAdmittedAt?: Instant;

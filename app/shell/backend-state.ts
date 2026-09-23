@@ -235,14 +235,6 @@ export class ActiveTurnSlotV1 {
     if (this.#active === active) this.#active = undefined;
   }
 
-  /** Cancels the resident Turn of one exact run; false if it is not resident. */
-  interrupt(runId: string, reason?: string): boolean {
-    const active = this.#active;
-    if (!active || active.runId !== runId) return false;
-    active.cancel(reason);
-    return true;
-  }
-
   /**
    * Cancels the resident Turn of one exact admitted run. A late Stop that
    * names a run this object is not executing changes nothing.

@@ -23,17 +23,17 @@ export interface StoredRunCodecV1<Snapshot> {
   optional(input: unknown): StoredRunV1<Snapshot> | undefined;
 }
 
-export type StoredRunStatus =
-  "running" | "completed" | "failed" | "cancelled" | "superseded";
+export type StoredRunStatus = "running" | "completed" | "failed" | "cancelled";
 
 /**
  * The admission lane a Turn was accepted on.
  *
- * A `user` admission is a person speaking to the Bot and may supersede
- * whatever is running; a `background` admission — a Routine firing, a subagent
- * dispatch — never supersedes and waits. The lane is durable because the
- * decision to interrupt is made in the admission transaction and has to
- * survive eviction alongside the run it interrupted.
+ * A `user` admission is a person speaking to the Bot: it queues ahead of
+ * agent work, and a chat Turn on this lane ends at its next step boundary when
+ * one is waiting. An `agent` admission queues FIFO behind it; a `background`
+ * admission — a Routine firing, a subagent dispatch — is refused while
+ * anything runs. The lane is durable because it decides which Turn yields,
+ * and that has to survive eviction alongside the run.
  */
 export type RunLaneV1 = "user" | "agent" | "background";
 
@@ -222,15 +222,6 @@ export interface StoredRunV1<Snapshot = unknown> {
   phase: StoredRunPhase;
   /** Durable Stop intent; orthogonal to status and phase. */
   stopRequestedAt?: string;
-  /**
-   * Durable supersede intent: a later user-lane admission has taken this
-   * Turn's place. Orthogonal to status and phase exactly as Stop is, and read
-   * the same way — every new effect is fenced from the instant it is
-   * recorded, and the settlement that follows is terminal `superseded`.
-   */
-  supersededAt?: string;
-  /** The run whose admission superseded this one. */
-  supersededBy?: string;
   /** The Composition generation pinned in the same transaction that admitted the run. */
   compositionGenerationId: string;
   /**
@@ -244,11 +235,6 @@ export interface StoredRunV1<Snapshot = unknown> {
    * those rather than substituting the live account.
    */
   preparedInputs?: unknown;
-  /**
-   * Set once a `model/request` is durable. Supersede reads this header instead
-   * of the journal: a Turn that has not dispatched is left to finish.
-   */
-  hasModelIntent?: true;
   configurationSnapshot: Snapshot;
   previousEventCount: number;
   /** Absent ⇒ the run was admitted as a `chat` Turn. */
@@ -385,7 +371,6 @@ const STORED_RUN_STATUSES: readonly StoredRunStatus[] = [
   "completed",
   "failed",
   "cancelled",
-  "superseded",
 ];
 const STORED_RUN_PHASES: readonly StoredRunPhase[] = [
   "queued",
@@ -411,8 +396,6 @@ const STORED_RUN_OPTIONAL_KEYS = [
   "responseText",
   "failure",
   "stopRequestedAt",
-  "supersededAt",
-  "supersededBy",
   "admission",
   "directTool",
   "retryOf",
@@ -420,7 +403,6 @@ const STORED_RUN_OPTIONAL_KEYS = [
   "messageRunId",
   "messageAdmittedAt",
   "mountedCompositionGenerationId",
-  "hasModelIntent",
   "preparedInputs",
 ] as const;
 const UTF8_ENCODER = new TextEncoder();
@@ -883,12 +865,6 @@ function requireStoredRunRecordV1<Snapshot>(
     );
   }
   if (
-    candidate.hasModelIntent !== undefined &&
-    candidate.hasModelIntent !== true
-  ) {
-    throw new Error(`run "${runId}" has invalid hasModelIntent`);
-  }
-  if (
     !Number.isSafeInteger(candidate.previousEventCount) ||
     (candidate.previousEventCount as number) < 0
   ) {
@@ -972,25 +948,6 @@ function requireStoredRunRecordV1<Snapshot>(
     throw new Error(`run "${runId}" has invalid stopRequestedAt`);
   }
   if (
-    candidate.supersededAt !== undefined &&
-    (!boundedString(candidate.supersededAt, 64) ||
-      !Number.isFinite(Date.parse(candidate.supersededAt as string)))
-  ) {
-    throw new Error(`run "${runId}" has invalid supersededAt`);
-  }
-  if (
-    candidate.supersededBy !== undefined &&
-    !boundedString(candidate.supersededBy, 128)
-  ) {
-    throw new Error(`run "${runId}" has invalid supersededBy`);
-  }
-  if (
-    candidate.supersededBy !== undefined &&
-    candidate.supersededAt === undefined
-  ) {
-    throw new Error(`run "${runId}" names a superseder with no supersede time`);
-  }
-  if (
     status === "completed"
       ? candidate.responseText === undefined || candidate.failure !== undefined
       : candidate.responseText !== undefined
@@ -1006,9 +963,6 @@ function requireStoredRunRecordV1<Snapshot>(
   }
   if (status === "cancelled" && candidate.stopRequestedAt === undefined) {
     throw new Error(`run "${runId}" has no durable stop intent`);
-  }
-  if (status === "superseded" && candidate.supersededAt === undefined) {
-    throw new Error(`run "${runId}" has no durable supersede intent`);
   }
   return {
     runId,
@@ -1029,9 +983,6 @@ function requireStoredRunRecordV1<Snapshot>(
           mountedCompositionGenerationId:
             candidate.mountedCompositionGenerationId as string,
         }),
-    ...(candidate.hasModelIntent === true
-      ? { hasModelIntent: true as const }
-      : {}),
     ...(preparedInputs === undefined ? {} : { preparedInputs }),
     configurationSnapshot,
     previousEventCount: candidate.previousEventCount as number,
@@ -1044,12 +995,6 @@ function requireStoredRunRecordV1<Snapshot>(
     ...(candidate.stopRequestedAt === undefined
       ? {}
       : { stopRequestedAt: candidate.stopRequestedAt as string }),
-    ...(candidate.supersededAt === undefined
-      ? {}
-      : { supersededAt: candidate.supersededAt as string }),
-    ...(candidate.supersededBy === undefined
-      ? {}
-      : { supersededBy: candidate.supersededBy as string }),
     ...(candidate.admission === undefined
       ? {}
       : { admission: decodeStoredRunAdmission(candidate.admission, runId) }),
@@ -1093,20 +1038,6 @@ export interface BotTurnCommand {
    * turn type defaults to.
    */
   lane?: RunLaneV1;
-  /**
-   * The explicit intent to replace whatever is running with this command. A
-   * user-lane command that carries it is the authenticated cancellation of the
-   * active Turn: that run terminalizes `superseded` and this one takes its
-   * place. Without it a second command is refused exactly as it always was.
-   *
-   * `runId` is provenance — the run the sender had observed, which may already
-   * be stale — and never the target. Its absence means the sender had observed
-   * no run at all, which is a race rather than a different intention, so it
-   * supersedes just the same. The whole field is part of the command
-   * fingerprint, so a replayed command replays and never interrupts a second
-   * Turn.
-   */
-  supersedes?: { runId?: string };
 }
 
 /**
@@ -1129,7 +1060,6 @@ export function botTurnCommandFingerprintV1(
     skills.length > 0 ||
     command.directTool !== undefined ||
     lane !== defaultRunLaneV1(turnType) ||
-    command.supersedes !== undefined ||
     command.retryOf !== undefined
   ) {
     return `bot-turn-command-v2:${JSON.stringify({
@@ -1141,15 +1071,6 @@ export function botTurnCommandFingerprintV1(
       ...(lane === defaultRunLaneV1(turnType) ? {} : { lane }),
       ...(command.subagentRole ? { subagentRole: command.subagentRole } : {}),
       ...(command.origin ? { origin: command.origin } : {}),
-      // The *intent* is part of the command's identity, as it must be: a
-      // replay of a command that carried no supersede can never become one that
-      // interrupts a second Turn. The provenance is not. A client retrying the
-      // same send — same commandId, same text — names whichever run it happened
-      // to have observed by then, and that is a fact about its polling, not
-      // about what the person asked for. Hashing it turned an ordinary retry
-      // into "this idempotency key was reused for a different command" and
-      // refused the send.
-      ...(command.supersedes ? { supersedes: true } : {}),
       ...(command.retryOf ? { retryOf: command.retryOf } : {}),
       ...(skills.length > 0 ? { skills: skills.map(formatSkillRefV1) } : {}),
       ...(command.directTool ? { directTool: command.directTool } : {}),

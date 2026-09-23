@@ -172,26 +172,13 @@ function assertPackageRecordKeys(
 }
 
 /**
- * Records a Package writes in the transaction that settles a Turn as
- * `superseded`. Same shape and same rule as `TerminalPackageRecords`: the
- * kernel writes opaque keys and holds none of the policy that produced them.
- * It is a separate seam because a superseded Turn is not a completed one — the
- * Package that owns the conversation wants to leave the *next* Turn a durable
- * note, not advance the records a finished Turn advances.
- */
-export type SupersededPackageRecords<Snapshot> = (input: {
-  run: StoredRunV1<Snapshot>;
-  read<T>(key: string): Promise<T | undefined>;
-}) => Promise<Record<string, unknown>>;
-
-/**
  * What a Turn that ended `failed` leaves for the person who was waiting on
  * it, decided by the Package that owns the conversation.
  *
  * A completed Turn already tells them — "Bob replied", with what it said —
  * through its sends. A failed Turn had nothing of its own, so the only person
  * who ever learned was the one still looking at that conversation. This is
- * the same seam as `SupersededPackageRecords` for the other outcome: the
+ * the same seam as `TerminalPackageRecords` for the other outcome: the
  * kernel hands over the settled record, whose `configurationSnapshot` is the
  * durable copy of the settings the Turn was admitted under, plus a reader
  * bound to the settling transaction, and writes back whatever records come
@@ -206,68 +193,6 @@ export type FailedRunRecords<Snapshot> = (input: {
   read<T>(key: string): Promise<T | undefined>;
 }) => Promise<Record<string, unknown>>;
 
-/**
- * Settles a superseded run as terminal `superseded` and clears its active
- * marker. Like a cancelled run it produces no response text, no failure, and
- * no notification: the Turn that replaced it is what the User is watching.
- */
-export async function supersedeStoredRun<Snapshot>(
-  codec: StoredRunCodecV1<Snapshot>,
-  storage: RunTerminalStorage,
-  keys: RunTerminalKeys,
-  runId: string,
-  previous: readonly SessionEvent[],
-  events: readonly SessionEvent[],
-  packageRecords?: SupersededPackageRecords<Snapshot>,
-): Promise<"superseded"> {
-  const run = await hydratedRun(codec, storage, keys.run);
-  if (!run) throw new Error(`run "${runId}" was not accepted`);
-  if (!run.supersededAt) {
-    throw new Error(`run "${runId}" has no durable supersede intent`);
-  }
-  const decodedEvents = settledEventsV1(run.sessionId, events);
-  const { responseText: _text, failure: _failure, ...settled } = run;
-  // A run superseded while still queued never started, never appended an
-  // event, and never spoke: it settles as a record on its own and leaves both
-  // the session log and the running Turn exactly where they were.
-  const queued = settled.phase === "queued";
-  const superseded = codec.require({
-    ...settled,
-    ...storedRunEventFieldsV2(
-      run.previousEventCount,
-      queued ? [] : decodedEvents,
-    ),
-    status: "superseded",
-    phase: settled.phase === "queued" ? "admitted" : settled.phase,
-  } satisfies StoredRunV1<Snapshot>);
-  const records: Record<string, unknown> = {
-    [keys.run]: structuredClone(storedRunRecordV2(superseded)),
-  };
-  if (packageRecords && !queued) {
-    const contributed = await packageRecords({
-      run: superseded,
-      read: <T>(key: string) => storage.get<T>(key),
-    });
-    assertPackageRecordKeys(contributed, keys);
-    for (const [key, value] of Object.entries(contributed)) {
-      records[key] = structuredClone(value);
-    }
-  }
-  if (!queued) {
-    await commitSuffixV1(
-      storage,
-      run.sessionId,
-      run.previousEventCount,
-      decodedEvents,
-    );
-  }
-  await storage.put(records);
-  if ((await storage.get<string>(keys.activeRun)) === runId) {
-    await storage.delete(keys.activeRun);
-  }
-  return "superseded";
-}
-
 export async function completeStoredRun<Snapshot>(
   codec: StoredRunCodecV1<Snapshot>,
   storage: RunTerminalStorage,
@@ -276,28 +201,13 @@ export async function completeStoredRun<Snapshot>(
   previous: readonly SessionEvent[],
   result: BotTurnCompletion,
   packageRecords?: TerminalPackageRecords<Snapshot>,
-  supersededRecords?: SupersededPackageRecords<Snapshot>,
-): Promise<"completed" | "cancelled" | "superseded"> {
+): Promise<"completed" | "cancelled"> {
   const activeRunId = await storage.get<string>(keys.activeRun);
   if (activeRunId !== runId) throw new Error(`run "${runId}" is not active`);
   const run = await hydratedRun(codec, storage, keys.run);
   if (!run) throw new Error(`run "${runId}" was not accepted`);
   const events = result.events.map(decodeSessionEvent);
   void previous;
-  // Stop outranks supersede: the User asked for this Turn to stop, and a
-  // message that arrived after that does not turn their cancellation into
-  // something else.
-  if (run.supersededAt && !run.stopRequestedAt) {
-    return supersedeStoredRun(
-      codec,
-      storage,
-      keys,
-      runId,
-      previous,
-      result.events,
-      supersededRecords,
-    );
-  }
   // Durable Stop intent recorded before this settlement wins: the run becomes
   // terminal `cancelled` with no response text, failure, or notification.
   if (run.stopRequestedAt) {
@@ -404,11 +314,8 @@ export async function failStoredRun<Snapshot>(
   previous: readonly SessionEvent[],
   events: readonly SessionEvent[],
   failure: string,
-  supersededRecords?: SupersededPackageRecords<Snapshot>,
   failureRecords?: FailedRunRecords<Snapshot>,
-): Promise<
-  "failed" | "cancelled" | "superseded" | "preserved-completion" | "missing"
-> {
+): Promise<"failed" | "cancelled" | "preserved-completion" | "missing"> {
   const run = await hydratedRun(codec, storage, keys.run);
   if (!run) return "missing";
   if (run.status === "completed") return "preserved-completion";
@@ -419,18 +326,6 @@ export async function failStoredRun<Snapshot>(
   // A stopped run never becomes `failed`: Stop is the durable outcome.
   if (run.stopRequestedAt) {
     return cancelStoredRun(codec, storage, keys, runId, previous, events);
-  }
-  // Nor does a superseded one. The Turn that replaced it is the outcome.
-  if (run.supersededAt) {
-    return supersedeStoredRun(
-      codec,
-      storage,
-      keys,
-      runId,
-      previous,
-      events,
-      supersededRecords,
-    );
   }
   const decodedEvents = settledEventsV1(run.sessionId, events);
   const failed = codec.require({

@@ -149,6 +149,90 @@ afterEach(async () => {
   );
 });
 
+describe("a Turn a person's message is waiting behind", () => {
+  function toolThenAnswer(): { provider: LlmProvider; calls: () => number } {
+    let calls = 0;
+    const provider: LlmProvider = {
+      id: "steered",
+      async *stream() {
+        calls += 1;
+        if (calls === 1) {
+          yield {
+            type: "tool-call",
+            call: { id: "provider-call", name: "look", input: {} },
+          };
+        } else {
+          yield { type: "text-delta", text: "the answer" };
+        }
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+    return { provider, calls: () => calls };
+  }
+
+  const look: ToolDefinition = {
+    name: "look",
+    description: "Reads something.",
+    inputSchema: { type: "object" },
+    execute: () => Promise.resolve({ content: "what it saw", isError: false }),
+  };
+
+  test("ends completed at the step boundary, after its tools settle", async () => {
+    const { provider, calls } = toolThenAnswer();
+    const runtime = mountRuntime(provider, look);
+    let asked = 0;
+    const handle = await runtime.loop.create({
+      ...allowEffectOptions,
+      botId: "bot-steered",
+      sessionId: "steered",
+      provider: provider.id,
+      model: "test-model",
+      userMessageWaiting: () => {
+        asked += 1;
+        return Promise.resolve(true);
+      },
+    });
+
+    handle.agent.send("look into it");
+    await handle.agent.whenIdle();
+
+    const journal = handle.agent.session.activeRunJournal;
+    // The tool ran and its result is durable; the next model call did not
+    // happen, because the next Turn is where the person's message is read.
+    expect(journal.filter((event) => event.type === "tool/result")).toEqual([
+      expect.objectContaining({ content: "what it saw", isError: false }),
+    ]);
+    expect(calls()).toBe(1);
+    expect(asked).toBe(1);
+    expect(journal.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "completed",
+    });
+  });
+
+  test("carries on when nothing is waiting", async () => {
+    const { provider, calls } = toolThenAnswer();
+    const runtime = mountRuntime(provider, look);
+    const handle = await runtime.loop.create({
+      ...allowEffectOptions,
+      botId: "bot-steered",
+      sessionId: "not-steered",
+      provider: provider.id,
+      model: "test-model",
+      userMessageWaiting: () => Promise.resolve(false),
+    });
+
+    handle.agent.send("look into it");
+    await handle.agent.whenIdle();
+
+    expect(calls()).toBe(2);
+    expect(handle.agent.session.activeRunJournal.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "completed",
+    });
+  });
+});
+
 describe("AgentLoop", () => {
   test("journals one reported usage event for a model request", async () => {
     const provider: LlmProvider = {

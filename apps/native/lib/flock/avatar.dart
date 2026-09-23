@@ -669,7 +669,7 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
     // An unlabelled avatar is decoration and leaves nothing in the tree — not
     // even an empty image node. One of those beside the working row's label
     // made that row a branch rather than a leaf, and the words the row spoke
-    // ("Stopping the previous reply…") moved from its text into an aria-label
+    // ("Stopping…") moved from its text into an aria-label
     // nothing reading the transcript's text could see.
     if (widget.semanticsLabel == null) return ExcludeSemantics(child: result);
     return Semantics(

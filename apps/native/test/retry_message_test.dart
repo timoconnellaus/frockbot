@@ -52,7 +52,6 @@ class RetryTransport implements ChatTransport {
     String botId,
     String id,
     String text, {
-    String? supersedes,
     String? retryOf,
   }) async {
     sent.add((id: id, retryOf: retryOf));
@@ -198,21 +197,6 @@ void main() {
         ),
       ),
       findsOneWidget,
-    );
-  });
-
-  test('a queued retry uses the attempt time for its stopping notice', () {
-    final lines = projectRuns([
-      attempt(
-        'retry',
-        status: 'running',
-        retryOf: 'original',
-        at: '2026-09-13T03:00:00.000Z',
-      )..['queued'] = true,
-    ]);
-    expect(
-      supersedeDrainState(lines, DateTime.parse('2026-09-13T03:00:01.000Z')),
-      SupersedeDrainState.stopping,
     );
   });
 

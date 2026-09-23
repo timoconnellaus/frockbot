@@ -1119,9 +1119,7 @@ describe("startup combined acceptance", () => {
       client.apply(updates);
     });
     expect(client.rows.map((row) => row.text)).toEqual(["hello"]);
-    const receipt = await authority.admit(
-      command("run-2", "On my way", { supersedes: { runId: "run-1" } }),
-    );
+    const receipt = await authority.admit(command("run-2", "On my way"));
     expect(receipt.disposition).toBe("queued");
     const admittedPin = (
       bot.values.get(`${RUN_PREFIX}run-2`) as StoredRunV1<BotSettingsViewV1>

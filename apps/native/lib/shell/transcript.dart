@@ -278,21 +278,15 @@ class _TranscriptViewState extends State<TranscriptView> {
 
   /// Whether [_row] would draw [line]. Deciding that here keeps the slot list
   /// from building every bubble just to count the children.
-  bool _draws(TranscriptLine line, SupersedeDrainState drain) {
+  bool _draws(TranscriptLine line) {
     if (line.exchange != null || line.voiceCall != null) return true;
     if (line.role == LineRole.system || line.role == LineRole.user) {
       return true;
     }
     if (line.status == LineStatus.streaming && line.empty) {
-      // Same branches as [_row]: a Stop the person asked for, or a pending
-      // line that still has a drain sentence. Anything else is the companion,
-      // not a row.
-      final label = line.stopRequested
-          ? 'Stopping…'
-          : line.pending
-          ? supersedeDrainLabel(drain) ?? 'Waiting…'
-          : null;
-      return label != null;
+      // Same branch as [_row]: only a Stop the person asked for has words.
+      // Anything else is the companion, not a row.
+      return line.stopRequested;
     }
     if (line.notice != null || line.text.isNotEmpty) return true;
     for (final send in line.sends) {
@@ -343,14 +337,13 @@ class _TranscriptViewState extends State<TranscriptView> {
       now.toUtc().toIso8601String(),
     );
     _newestSendId(ordered);
-    final drain = supersedeDrainState(ordered, now);
     final target = widget.focusRunId;
     // Oldest match: a Turn is a user line and then its reply, and the mark
     // belongs on the first of those, which is where the Turn starts.
     String? focusLineId;
     if (target != null) {
       for (final line in ordered) {
-        if (!_draws(line, drain)) continue;
+        if (!_draws(line)) continue;
         if (line.runId == target || line.id == '$target:user') {
           focusLineId = line.id;
           break;
@@ -367,7 +360,7 @@ class _TranscriptViewState extends State<TranscriptView> {
     }
     var anyLine = false;
     for (final line in ordered.reversed) {
-      if (!_draws(line, drain)) continue;
+      if (!_draws(line)) continue;
       anyLine = true;
       slots.add(_ThreadSlot('row:${line.id}', _SlotKind.line, line));
       if (line.id == widget.unreadFromMessageId ||
@@ -447,7 +440,7 @@ class _TranscriptViewState extends State<TranscriptView> {
                   key: ValueKey(slot.id),
                   id: slot.id,
                   heights: _rowHeights,
-                  child: _slotChild(context, slot, drain),
+                  child: _slotChild(context, slot),
                 );
               },
             ),
@@ -457,11 +450,7 @@ class _TranscriptViewState extends State<TranscriptView> {
     );
   }
 
-  Widget _slotChild(
-    BuildContext context,
-    _ThreadSlot slot,
-    SupersedeDrainState drain,
-  ) {
+  Widget _slotChild(BuildContext context, _ThreadSlot slot) {
     switch (slot.kind) {
       case _SlotKind.tail:
         return AnimatedSize(
@@ -547,7 +536,7 @@ class _TranscriptViewState extends State<TranscriptView> {
                 ),
           child: KeyedSubtree(
             key: probes.putIfAbsent(line.id, GlobalKey.new),
-            child: _row(context, line, drain)!,
+            child: _row(context, line)!,
           ),
         );
         if (line.id != _focusLineId) return row;
@@ -565,11 +554,7 @@ class _TranscriptViewState extends State<TranscriptView> {
 
   /// One line, or nothing where the line has nothing to say — a running Turn
   /// before its first token is the animated row, not an empty bubble.
-  Widget? _row(
-    BuildContext context,
-    TranscriptLine line,
-    SupersedeDrainState drain,
-  ) {
+  Widget? _row(BuildContext context, TranscriptLine line) {
     if (line.exchange != null) {
       final botId = line.exchange!.counterpart.botId;
       return _ExchangeMarker(
@@ -610,19 +595,14 @@ class _TranscriptViewState extends State<TranscriptView> {
       );
     }
     if (line.status == LineStatus.streaming && line.empty) {
-      // A plain running Turn draws nothing in the thread: the companion
-      // beside the companion in the header is the one that works. Two states earn words: a
-      // Stop the person asked for and is now waiting on, and a Turn still
-      // waiting behind the one it displaced.
-      final label = line.stopRequested
-          ? 'Stopping…'
-          : line.pending
-          ? supersedeDrainLabel(drain) ?? 'Waiting…'
-          : null;
-      if (label == null) return null;
+      // A running Turn draws nothing in the thread, and neither does a
+      // message waiting behind it: the Bot at the end of the thread is the one
+      // that works, and the greyed message is read at its next step. Only a
+      // Stop the person asked for and is now waiting on earns words.
+      if (!line.stopRequested) return null;
       return Padding(
         padding: workingPadding,
-        child: WorkingIndicator(label: label),
+        child: const WorkingIndicator(label: 'Stopping…'),
       );
     }
     final children = <Widget>[

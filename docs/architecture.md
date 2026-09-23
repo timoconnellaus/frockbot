@@ -116,7 +116,7 @@ The composer's dictation relay (`apps/cloudflare/src/voice-dictation.ts`) is not
 
 3. **Per-user application isolate.** Unmatched requests fall through to `routeUserApplication` (`:612`). It resolves the user's `applicationHash`, then `dependencies.loader.get(workerId, ...)` loads that artifact from R2 into a Worker Loader isolate whose `env` holds `BOT_STATE` — a Durable Object stub already scoped to the user — plus `DEPLOYMENT` (`:633-646`). The client's `x-frockbot-user-id` header is deleted before forwarding (`:650`); the gateway sets `x-frockbot-deployment`, `x-frockbot-auth-session-v1` and `x-frockbot-is-admin-v1` itself. Authorization is established here and passed downward as capability; nothing below re-verifies it.
 
-4. **Application.** `apps/cloudflare/src/user-application.ts:719` matches the turn route; `:1093` calls `env.BOT_STATE.run({schemaVersion, botId, command: {runId: commandId, sessionId: "<userId>:<botId>", acceptedAt, text, skills?, supersedes?}})`. The session id is derived server-side. The command decoder accepts exact keys only, so a client cannot name a turn type; an absent turn type means `chat`.
+4. **Application.** `apps/cloudflare/src/user-application.ts:719` matches the turn route; `:1093` calls `env.BOT_STATE.admitRun({schemaVersion, botId, command: {runId: commandId, sessionId: "<userId>:<botId>", acceptedAt, text, skills?, retryOf?}})` and answers 202 with the receipt. A message sent while a Turn runs is admitted into the user queue, and a chat Turn on the user lane ends at its next step boundary to let it run ([Steering](../CONTEXT.md)); the `supersedes` field installed apps still send is accepted and dropped. The session id is derived server-side. The command decoder accepts exact keys only, so a client cannot name a turn type; an absent turn type means `chat`.
 
 5. **Bot Durable Object.** `apps/cloudflare/src/bot-state.ts:1168` `run()` decodes the envelope, materializes the identity and calls `shell.run(...)`.
 
@@ -147,7 +147,7 @@ Every external effect that matters carries a key, and is retried **by that key**
 
 The loop never asks a provider what became of a call it lost. It sends the call again. A provider that honours the key answers once; one that does not may run it twice, and that is the accepted trade — reconstructing the history of a lost dispatch is what used to wedge a Bot behind a question nobody could answer.
 
-`admitEffect({kind, effectId})` still runs immediately before every dispatch, including a re-issue. Admissions are recorded per effect id, so re-admitting an effect returns its earlier outcome and a Stop or a supersede still fences a call the evicted Turn had already started.
+`admitEffect({kind, effectId})` still runs immediately before every dispatch, including a re-issue. Admissions are recorded per effect id, so re-admitting an effect returns its earlier outcome and a Stop still fences a call the evicted Turn had already started.
 
 ### Turn lifecycle — `#runTurn`
 
@@ -156,7 +156,7 @@ Appends `turn/start`, `composition/pinned`, `turn/admission` and `input/admitted
 - `agent/pre-step` waterfall; a `reject` decision ends the Turn as `blocked`.
 - `step/start`, then a `user/message` per admitted input.
 - `#callModel` — `requestModelV1`, then `assistant/message`, flush, `notifyModelOutcome`, `#announceAssistantText`.
-- `#completeStep` — the step's tool calls through `executeToolsV1`, then the `agent/step-continuation` waterfall and `step/end`.
+- `#completeStep` — the step's tool calls through `executeToolsV1`, then the `agent/step-continuation` waterfall and `step/end`. A step every hook would continue past still ends the Turn `completed` when `userMessageWaiting` answers true: the Bot Durable Object says so for a chat Turn on the user lane with a message queued behind it, and that message runs next ([Steering](../CONTEXT.md)).
 
 Exhausting the loop throws `StepLimitReachedError`, which settles the Turn as `interrupted` with `STEP_LIMIT_REASON_V1`.
 
@@ -545,9 +545,8 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
 
 The thread's rules were ported from the Vue shell without change and with its
 tests, and are unchanged since: a Turn is ordered as a unit by its own user
-message's stamp (`transcript_model.dart`), the thread's working notice says the
-previous reply is being
-stopped only while a supersede drains, a draft belongs to the Bot it was typed
+message's stamp (`transcript_model.dart`), a message sent while the Bot works
+is drawn greyed until its Turn starts, a draft belongs to the Bot it was typed
 for and survives a refusal (`composer.dart`), and readiness and the draft are
 separate questions so Try again works with an empty composer.
 

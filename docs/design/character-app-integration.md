@@ -157,7 +157,7 @@ The backend remains authoritative about work; animation is a client projection.
 | Explicit unresolved approval / required input | Needs you, with a curious/uncertain expression                              |
 | Newly completed successful turn               | One restrained success gesture, then idle                                   |
 | Failed turn                                   | Brief uncertain expression; preserve the actionable error text              |
-| User stopped or superseded the turn           | Return to neutral without celebrating                                       |
+| User stopped the turn                         | Return to neutral without celebrating                                       |
 | Connection unavailable                        | Keep the connection status visible; do not infer sadness or success         |
 
 Where a surface has only a `working` summary, use generic working rather than

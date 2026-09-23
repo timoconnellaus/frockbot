@@ -112,6 +112,8 @@ export interface FoundationRuntimeOptions {
   admitEffect: AgentOptions["admitEffect"];
   /** How many further effects the run's record can admit; absent ⇒ unbounded. */
   remainingEffectAdmissions?: AgentOptions["remainingEffectAdmissions"];
+  /** Whether a person's message is waiting; the Turn yields at its next step. */
+  userMessageWaiting?: AgentOptions["userMessageWaiting"];
   modelSelection?: RuntimeModelSelection;
   /** The Composition generation this root is pinned to; defaults to bootstrap. */
   composition?: CompositionPinV1;
@@ -215,6 +217,9 @@ export async function createFoundationRuntime(
     admitEffect: options.admitEffect,
     ...(options.remainingEffectAdmissions
       ? { remainingEffectAdmissions: options.remainingEffectAdmissions }
+      : {}),
+    ...(options.userMessageWaiting
+      ? { userMessageWaiting: options.userMessageWaiting }
       : {}),
     ...(options.turnType ? { turnType: options.turnType } : {}),
     ...(options.subagentRole ? { subagentRole: options.subagentRole } : {}),

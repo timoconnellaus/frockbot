@@ -94,6 +94,24 @@ function conversational(events: readonly SessionEvent[], turn: number) {
   return type === "chat" || type === "agent";
 }
 
+/**
+ * Whether a completed Turn ended before delivering its final reply.
+ *
+ * The delivery rule below keeps a conversational Turn going until it has
+ * answered, or fails it. The one way such a Turn completes still owing its
+ * answer is by yielding at a step boundary to a message the person sent
+ * meanwhile — so this is read off the journal alone, and survives eviction.
+ */
+export function endedOwingReplyV1(events: readonly SessionEvent[]): boolean {
+  const start = events.find((event) => event.type === "turn/start");
+  if (start?.type !== "turn/start" || typeof start.turn !== "number") {
+    return false;
+  }
+  return (
+    conversational(events, start.turn) && delivery(events, start.turn).required
+  );
+}
+
 /** Delivery is application policy; the loop still owns execution and settlement. */
 export const conversationDeliveryHooksV1: LoopHooksV1 = {
   async request(agent, _request, _turn, _step, _signal, next) {

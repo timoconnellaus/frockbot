@@ -171,7 +171,6 @@ function createAuthority(
     scheduledWorkInFlight: () => false,
     deferScheduledWork: () => Promise.resolve(),
     settleScheduledWork: () => Promise.resolve(),
-    interruptTurn: () => {},
   };
   return new BotDurableAuthority<undefined>({
     state: { storage } as unknown as DurableObjectState,

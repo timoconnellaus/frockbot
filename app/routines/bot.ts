@@ -668,8 +668,8 @@ async function deliverPendingHandoffs(state: ShellBotStateV1): Promise<void> {
     );
     if (routineOwed.length === 0) return;
     // A run already occupies the object — the person is talking to the Bot, or
-    // a firing is still going. Delivering into that would either be refused or
-    // supersede what is running, and the hand-off is owed, not urgent: the next
+    // a firing is still going. Delivering into that would be refused or make
+    // what is running yield, and the hand-off is owed, not urgent: the next
     // alarm opens the Turn, and a conversation the person started in the
     // meantime drains the queue itself, which is the better delivery anyway.
     if (await state.authority.readActiveRunId()) return;

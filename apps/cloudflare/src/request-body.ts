@@ -21,7 +21,7 @@ export const TURN_TEXT_MAX_CHARACTERS_V1 = 32_000;
  * The largest body the send route will read.
  *
  * Generous over the text limit because the same JSON also carries a command
- * id, Skill refs and the supersede intent; a body past it cannot contain an
+ * id, Skill refs and the retry target; a body past it cannot contain an
  * acceptable `text` no matter how it is shaped.
  */
 export const TURN_BODY_MAX_BYTES_V1 = TURN_TEXT_MAX_CHARACTERS_V1 * 2;
