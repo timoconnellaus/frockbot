@@ -381,6 +381,15 @@ arbitrary chunk boundaries (a chunk may end on an odd byte; carry the byte).
 This is Gemini's own output rate, sent on as it arrives. The client plays them
 in order and measures amplitude from what it is playing.
 
+Gemini generates a reply "as quickly as possible, and not in real time", and
+leaves playing it out in real time to the client. Both native speakers play
+silence the moment their queue is empty, so a chunk fed on arrival that is
+late by more than the one before it lasted is a gap mid-word. The player
+(`apps/native/lib/voice/player.dart`) therefore holds 200 ms of audio before
+an idle speaker starts, and again after it runs dry. The cushion is counted in
+audio, not time: a reply that arrives faster than real time starts at once, and
+a trickle waits at most 200 ms.
+
 `voice/delegation` (`botId`, `botName`, `runId`, `state` ∈ `asked |
 answering | finished`) tells the voice surface where a request to a Bot is:
 asked, its answer being put into words, done. `runId` is the Turn the request
