@@ -64,7 +64,7 @@ The model picker initially shows up to 90 catalog models per connection. Exact m
 
 Sign-in is available for **OpenAI Codex, GitHub Copilot, Kimi Coding, OpenRouter, xAI, and Radius**. Existing API-key connections are independent and can coexist with signed-in accounts.
 
-Choose **Sign in** in the web provider settings. On mobile, use the provider's sign-in connection in Connections; a short-lived FrockBot sign-in page opens. For device-code providers, open the provider link and enter the displayed code. FrockBot finishes the connection in the background. OpenRouter uses PKCE: after authorizing, copy the return URL into the sign-in form and choose **Finish connecting**. The return address is set by FrockBot's HTTPS gateway.
+A provider that takes a key or a sign-in is one card in the Marketplace and on its Provider accounts page; **Connect** opens it on both ways, **Use an API key** and **Sign in**. Choose **Sign in** and a short-lived FrockBot sign-in page opens. For device-code providers, open the provider link and enter the displayed code. FrockBot finishes the connection in the background. OpenRouter uses PKCE: after authorizing, copy the return URL into the sign-in form and choose **Finish connecting**. The return address is set by FrockBot's HTTPS gateway.
 
 A page refresh resumes a pending attempt. Closing the page does not cancel it; use **Cancel sign-in** to cancel. Pending device authorization is checked by the User's durable alarm. Sign-in attempts expire, are account-bound, and keep device codes, PKCE verifiers, and tokens encrypted. A mobile browser link grants only access to that attempt and expires with it. It never carries provider access or refresh tokens.
 

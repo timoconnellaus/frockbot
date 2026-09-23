@@ -23,6 +23,13 @@ export type WhatsNewEntrySourceV1 = {
  */
 export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
+    id: "one-card-per-provider",
+    title: "One card per model provider",
+    summary:
+      "A provider that takes a key or a sign-in is one card in the Marketplace, with both ways to connect.",
+    kind: "improvement",
+  },
+  {
     id: "add-a-model",
     title: "Add a model in one go",
     summary:

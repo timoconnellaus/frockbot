@@ -620,10 +620,14 @@ providers are Packages, not Plugins, and a Plugin cannot ship an image.
 Refresh the catalog set with `python3 scripts/sync-connector-icons.py`
 (Lobe Icons, MIT). Radius has no mark in that pack and stays a letter tile. The frame
 carries what the surface needs and no credential: a provider row per
-Connection Type (a Package with several types is a grouping, so the row is
-named by the type), the accounts with the line that says what their state
+Connection Type, the accounts with the line that says what their state
 means, and the "Model in use" line, written by `modelRuntimeLabel` where the
-settings live. A model provider's accounts and a connector's are one frame
+settings live. A connector Package with several types is a grouping, so each
+of its rows is named by its type and is a card of its own. A model provider's
+types are ways into one provider — a key, a sign-in — so every row of it is
+named for the provider, and the client draws them as one card that offers
+each way and lists the accounts of all of them; commands and accounts stay per
+Connection Type. A model provider's accounts and a connector's are one frame
 because the surface a person opens to connect something is one surface;
 `packageConfigurationHomeV1` decides which page shows a row, and travels as
 the row's `kind`. The requests a press becomes live in

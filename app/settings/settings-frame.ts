@@ -616,6 +616,22 @@ function modelInUseLineV1(
   }).slice(0, 300);
 }
 
+/** How one model provider is connected, in the words its card uses. */
+function modelProviderDescriptionV1(
+  name: string,
+  types: readonly { description?: string; authorization: { kind: string } }[],
+): string {
+  const described = types.find((type) => type.description)?.description;
+  if (described) return described;
+  const key = types.some((type) => type.authorization.kind === "api-key");
+  const signIn = types.some((type) => type.authorization.kind === "grant");
+  return key && signIn
+    ? `Use ${name} models with your own key, or sign in.`
+    : signIn
+      ? `Use ${name} models by signing in.`
+      : `Use ${name} models with your own key.`;
+}
+
 /**
  * Connectors: every account a User holds, and every Package they could hold
  * one against.
@@ -679,16 +695,19 @@ export function connectionsFrame(
           }
         }
       }
+      // A model provider is one thing however it is connected, so every row
+      // of it carries the provider's name and one description, and a client
+      // draws them as one card offering each way in. A connector Package's
+      // types are the apps themselves, so each is named for itself.
       const displayName = (
-        (item.connectionTypes?.length ?? 0) > 1
-          ? type.displayName
-          : (item.displayName ?? type.displayName)
+        kind === "model" || (item.connectionTypes?.length ?? 0) <= 1
+          ? (item.displayName ?? type.displayName)
+          : type.displayName
       ).slice(0, 200);
       const description = (
-        type.description ??
-        (kind === "model"
-          ? `Use ${displayName} models with your own key.`
-          : undefined)
+        kind === "model"
+          ? modelProviderDescriptionV1(displayName, item.connectionTypes ?? [])
+          : type.description
       )?.slice(0, 300);
       providers.push({
         packageId: item.packageId,

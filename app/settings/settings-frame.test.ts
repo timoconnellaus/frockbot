@@ -429,6 +429,58 @@ test("the Marketplace catalog lists uninstalled models and installed connectors"
   });
 });
 
+test("a model provider that takes a key or a sign-in is named once, for itself", () => {
+  const user = settings();
+  user.packages = [];
+  const openRouter: AvailableUserPackage = {
+    ...provider,
+    packageId: "provider-openrouter",
+    displayName: "OpenRouter",
+    connectionTypes: [
+      {
+        id: "openrouter-account",
+        displayName: "OpenRouter account",
+        icon: "openrouter",
+        allowMultiple: true,
+        authorization: { kind: "api-key" },
+        capabilities: ["models"],
+      },
+      {
+        id: "openrouter-oauth",
+        displayName: "OpenRouter sign-in",
+        icon: "openrouter",
+        allowMultiple: true,
+        authorization: { kind: "grant" },
+        capabilities: ["models"],
+      },
+    ],
+  };
+  const rows = connectionsFrame("tim", user, [openRouter], {
+    catalog: true,
+  }).providers;
+  // One row per way in, so each keeps its own command and accounts, and both
+  // carry the provider's own name and one description: a client draws them
+  // as the one card they are.
+  expect(rows.map((row) => [row.connectionTypeId, row.authorization])).toEqual([
+    ["openrouter-account", "api-key"],
+    ["openrouter-oauth", "grant"],
+  ]);
+  for (const row of rows) {
+    expect(row).toMatchObject({
+      displayName: "OpenRouter",
+      kind: "model",
+      description: "Use OpenRouter models with your own key, or sign in.",
+    });
+  }
+  const signInOnly = connectionsFrame(
+    "tim",
+    user,
+    [{ ...openRouter, connectionTypes: [openRouter.connectionTypes![1]!] }],
+    { catalog: true },
+  ).providers[0]!;
+  expect(signInOnly.description).toBe("Use OpenRouter models by signing in.");
+});
+
 test("a model removed with a key left behind is offered again, not shown as added", () => {
   const user = settings();
   user.packages[0]!.state = "disabled";

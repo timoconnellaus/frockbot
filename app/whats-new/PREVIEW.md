@@ -2,6 +2,12 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
+## One card per model provider
+
+improvement
+
+A provider that takes a key or a sign-in is one card in the Marketplace, with both ways to connect.
+
 ## Add a model in one go
 
 improvement

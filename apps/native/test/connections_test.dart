@@ -141,6 +141,34 @@ Map<String, Object?> catalogFrame({
   };
 }
 
+/// A model provider that takes a key or a sign-in: two rows, one per
+/// Connection Type, both named for the provider, as the server sends them.
+Map<String, Object?> twoWayFrame({bool installed = true}) => {
+  'schemaVersion': 1,
+  'ownerId': 'tim',
+  'revision': 1,
+  'modelInUse': 'Auto · Frock AI',
+  'accounts': <Map<String, Object?>>[],
+  'providers': [
+    for (final (type, authorization) in [
+      ('openrouter-account', 'api-key'),
+      ('openrouter-oauth', 'grant'),
+    ])
+      {
+        'packageId': 'provider-openrouter',
+        'connectionTypeId': type,
+        'displayName': 'OpenRouter',
+        'kind': 'model',
+        'authorization': authorization,
+        'connected': 0,
+        'mayConnect': installed,
+        'installed': installed,
+        'description': 'Use OpenRouter models with your own key, or sign in.',
+        'icon': 'openrouter',
+      },
+  ],
+};
+
 Widget page(
   SettingsApi api,
   MemoryStore store, {
@@ -789,6 +817,97 @@ void main() {
     // The key is the next thing asked for, so its form is already open.
     expect(find.text('Connect'), findsOneWidget);
     expect(find.text('Connect account'), findsOneWidget);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets(
+    'a provider with a key and a sign-in is one card in the catalog',
+    (tester) async {
+      tester.view.physicalSize = const Size(1280, 900);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.resetPhysicalSize);
+      addTearDown(tester.view.resetDevicePixelRatio);
+      final store = MemoryStore();
+      final api = SettingsApi(
+        store,
+        (_, _) async => twoWayFrame(installed: false),
+      );
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: MarketplacePage(api: api, store: store, userId: 'tim'),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(find.text('OpenRouter'), findsOneWidget);
+      expect(find.text('Add'), findsOneWidget);
+      expect(tester.takeException(), isNull);
+    },
+  );
+
+  testWidgets('its card offers both ways in, each on its own Connection Type', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final opened = <Uri>[];
+    final sent = <Map<String, Object?>>[];
+    final api = SettingsApi(store, (path, body) async {
+      if (body == null) return twoWayFrame();
+      final command = (body as Map).cast<String, Object?>();
+      sent.add({'path': path, ...command});
+      if (command['type'] == 'connection/start') {
+        return {
+          'schemaVersion': 1,
+          'status': 'authorization-required',
+          'connectionId': 'conn-oauth',
+          'redirectUrl': 'https://openrouter.example/authorize',
+          'expiresAt': '2026-09-11T00:10:00.000Z',
+        };
+      }
+      return {
+        'schemaVersion': 1,
+        'commandId': command['commandId'],
+        'connectionId': 'conn-key',
+        'status': 'applied',
+      };
+    });
+    // The Provider accounts page Models opens is the same card.
+    await tester.pumpWidget(
+      page(
+        api,
+        store,
+        models: true,
+        openBrowser: (uri) async {
+          opened.add(uri);
+          return true;
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('OpenRouter'), findsOneWidget);
+    // Connect opens the card on both ways rather than choosing one.
+    await tester.tap(find.text('Connect'));
+    await tester.pumpAndSettle();
+    expect(sent, isEmpty);
+    expect(find.text('Use an API key'), findsOneWidget);
+    expect(find.text('Sign in'), findsOneWidget);
+
+    await tester.tap(find.text('Sign in'));
+    await tester.pumpAndSettle();
+    expect(sent.single['type'], 'connection/start');
+    expect(sent.single['connectionTypeId'], 'openrouter-oauth');
+    expect(opened.single.toString(), 'https://openrouter.example/authorize');
+
+    await tester.tap(find.text('Use an API key'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'API key'),
+      'synthetic-test-key',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Connect account'));
+    await tester.pumpAndSettle();
+    expect(sent.last['type'], 'connection/create-api-key');
+    expect(sent.last['connectionTypeId'], 'openrouter-account');
     expect(tester.takeException(), isNull);
   });
 

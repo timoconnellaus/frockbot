@@ -99,5 +99,13 @@ test.describe("phone Marketplace", () => {
     await searchMarketplace(page, "DeepSeek");
     await expect(group(page, "DeepSeek")).toBeVisible();
     await capture(page, testInfo, "marketplace-phone-deepseek.png");
+
+    // A provider that takes a key or a sign-in is one card, named for itself,
+    // not one card per way in.
+    await searchMarketplace(page, "OpenRouter");
+    await expect(group(page, "OpenRouter")).toHaveCount(1);
+    await expect(group(page, "OpenRouter sign-in")).toHaveCount(0);
+    await expect(group(page, "OpenRouter account")).toHaveCount(0);
+    await capture(page, testInfo, "marketplace-phone-openrouter.png");
   });
 });
