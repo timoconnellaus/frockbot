@@ -54,7 +54,7 @@
   padding: 0.5rem 0.1rem;
   border: 0;
   background: transparent;
-  color: var(--pink-dark, #c93a5f);
+  color: var(--pink-dark, #b9205e);
   font: inherit;
   font-size: 0.85rem;
   font-weight: 800;
@@ -63,7 +63,7 @@
   cursor: pointer;
 }
 .capability-reference :is(input, select, button, summary):focus-visible {
-  outline: 3px solid var(--pink-dark, #c93a5f);
+  outline: 3px solid var(--pink-dark, #b9205e);
   outline-offset: 4px;
 }
 .capability-result-count {
