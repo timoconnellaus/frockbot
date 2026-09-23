@@ -282,24 +282,21 @@ export interface PluginModelProvider {
 /** Every model provider the module serves, by provider id. */
 export type PluginModelProviders = Record<string, PluginModelProvider>;
 
-export type MemoryScope = "bot" | "user" | "project";
+export type MemoryScope = "bot" | "user";
 export type MemoryTier = "profile" | "log" | "note";
 
 /** The `memory` grant. */
 export interface PluginMemory {
   read(request: {
     scope: MemoryScope;
-    projectId?: string;
   }): Promise<{ status: "available"; value: unknown } | CapabilityFailure>;
   write(request: {
     scope: MemoryScope;
-    projectId?: string;
     tier?: MemoryTier;
     fact: string;
   }): Promise<{ status: "available"; value: unknown } | CapabilityFailure>;
   forget(request: {
     scope: MemoryScope;
-    projectId?: string;
     tier?: MemoryTier;
     fact: string;
   }): Promise<{ status: "available"; value: unknown } | CapabilityFailure>;
@@ -521,7 +518,6 @@ export type AttachmentRoot =
   | { kind: "user-instructions"; userId: string }
   | { kind: "bot-memory"; userId: string; botId: string }
   | { kind: "user-memory"; userId: string }
-  | { kind: "project-memory"; userId: string; projectId: string }
   | {
       kind: "package-declared";
       userId: string;

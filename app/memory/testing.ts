@@ -5,16 +5,15 @@
 // `createObjectWorkspaceFilesV1` over the in-memory bucket and generation
 // ledger from `@frockbot/core/workspace-store/testing`, so what they prove is the
 // production store's behaviour and not a double's. What this module supplies
-// is the two seams that genuinely have no implementation in this Package: the
-// durable Project authority, and a deterministic clock.
+// is the two seams that genuinely have no implementation in this Package: Group
+// Chat membership, and a deterministic clock.
 import { createObjectWorkspaceFilesV1 } from "@frockbot/core/workspace-store";
 import {
   createInMemoryObjectBucketV1,
   createInMemoryWorkspaceGenerationsV1,
 } from "@frockbot/core/workspace-store/testing";
 import type { WorkspaceFilesV1 } from "@frockbot/core/contracts";
-import type { MemoryProjectsOutcomeV1, MemoryProjectsV1 } from "./projects.js";
-import type { MemoryProjectV1 } from "./render.js";
+import type { MemoryGroupsV1 } from "./groups.js";
 import { MemoryStore } from "./store.js";
 import type { MemoryOwnerV1 } from "./roots.js";
 import type { MemoryAuthorityV1 } from "./records.js";
@@ -33,46 +32,15 @@ export function createTestMemoryFilesV1(options: {
   });
 }
 
-/**
- * A Project authority in memory. Production's lives in the User Durable
- * Object; this one models the same contract, including create-is-join.
- */
-export function createInMemoryMemoryProjectsV1(
-  seed: MemoryProjectV1[] = [],
-): MemoryProjectsV1 & { known(): MemoryProjectV1[] } {
-  const known = new Map<string, MemoryProjectV1>(
-    seed.map((project) => [project.projectId, project]),
-  );
-  const joined = new Set<string>(seed.map((project) => project.projectId));
-  const list = (): MemoryProjectV1[] =>
-    [...joined]
-      .flatMap((projectId) => {
-        const project = known.get(projectId);
-        return project ? [project] : [];
-      })
-      .sort((left, right) => left.projectId.localeCompare(right.projectId));
-  const ok = (): MemoryProjectsOutcomeV1 => ({ status: "ok", joined: list() });
+/** Group Chat membership in memory; production reads the User object's list. */
+export function createInMemoryMemoryGroupsV1(
+  groupIds: string[] = [],
+): MemoryGroupsV1 & { set(groupIds: string[]): void } {
+  let current = [...groupIds];
   return {
-    known: () => [...known.values()],
-    joined: () => Promise.resolve(list()),
-    create: (project) => {
-      if (!known.has(project.projectId)) known.set(project.projectId, project);
-      joined.add(project.projectId);
-      return Promise.resolve(ok());
-    },
-    join: (projectId) => {
-      if (!known.has(projectId)) {
-        return Promise.resolve({
-          status: "refused",
-          reason: `no Project "${projectId}" exists`,
-        } satisfies MemoryProjectsOutcomeV1);
-      }
-      joined.add(projectId);
-      return Promise.resolve(ok());
-    },
-    leave: (projectId) => {
-      joined.delete(projectId);
-      return Promise.resolve(ok());
+    memberOf: () => Promise.resolve([...current]),
+    set: (next) => {
+      current = [...next];
     },
   };
 }

@@ -6,11 +6,7 @@ import type {
   WorkspaceWriterV1,
 } from "@frockbot/core/contracts";
 import { renderInjectedFactLineV1 } from "./facts.ts";
-import {
-  botMemoryRootV1,
-  projectMemoryRootV1,
-  userMemoryRootV1,
-} from "./roots.ts";
+import { botMemoryRootV1, userMemoryRootV1 } from "./roots.ts";
 import { MemoryStore, MEMORY_MAX_FILES_PER_TIER } from "./store.ts";
 import { createTestMemoryFilesV1 } from "./testing.ts";
 
@@ -88,18 +84,6 @@ describe("the Memory writer", () => {
       status: "ok",
       path: "by-agent/bot-1/profile.md",
     });
-
-    // Another Bot's shard is refused, whatever this Bot asks for.
-    const foreign = await new MemoryStore({
-      files,
-      owner: { userId: "user-1", botId: "bot-1" },
-      clock: () => AT,
-    }).writeFile({
-      path: { root, path: "by-agent/bot-2/profile.md" },
-      text: "- (2026-08-31) Forged.\n",
-      writer: writerFor("bot-1"),
-    });
-    expect(foreign.status).toBe("refused");
   });
 
   test("merges shards and tags every shared fact with the Bot that learned it", async () => {
@@ -444,26 +428,6 @@ describe("forgetting", () => {
       writer: writerFor("bot-1"),
     });
     expect(outcome.status).toBe("refused");
-  });
-});
-
-describe("project memory", () => {
-  test("shards a Project tier per writing Bot exactly as the User tier does", async () => {
-    const { store } = storeFor("bot-1");
-    const root = projectMemoryRootV1(OWNER, "ghetto-movement");
-    const written = await store.write({
-      root,
-      tier: "log",
-      fact: "The shoot is on Friday.",
-      writer: writerFor("bot-1"),
-    });
-    expect(written).toMatchObject({
-      status: "ok",
-      path: "by-agent/bot-1/log/2026-08.md",
-    });
-    expect((await store.read(root)).recent.map((fact) => fact.via)).toEqual([
-      "General",
-    ]);
   });
 });
 

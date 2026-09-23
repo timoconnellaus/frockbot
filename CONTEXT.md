@@ -43,7 +43,7 @@ _Avoid_: Priority, queue, channel
 _Avoid_: DM, room, channel, thread
 
 **Group Chat**
-: A conversation between the User and two to eight of their Bots. Every message reaches every member, and a member asked to reply — by an @mention, or by Jev judging the message is theirs — runs a Turn in its own Bot under the group's Session, whose sends are posted to the group. Replaces Project.
+: A conversation between the User and two to eight of their Bots. Every message reaches every member, and a member asked to reply — by an @mention, or by Jev judging the message is theirs — runs a Turn in its own Bot under the group's Session, whose sends are posted to the group. Its members share its Memory.
 _Avoid_: Channel, room, project, team
 
 **Hand-off**
@@ -127,12 +127,8 @@ The durable disk of a Computer. Declared durable roots on it survive hibernation
 _Avoid_: Volume, filesystem, box
 
 **Memory**:
-Markdown files under a durable root of the Workspace that persist what a Bot knows across Sessions, written only through the Memory Package and mirrored to the Workspace. Bot Memory belongs to one Bot; User Memory is shared by a User's Bots; Project Memory is shared by the Bots that have joined a Project. Shared tiers are sharded per writing Bot so each file has one writer.
+What a Bot knows across Sessions, written only through the Memory Package. Bot Memory belongs to one Bot; User Memory is shared by a User's Bots; a Group Chat's Memory is shared by its members, and a Bot that leaves the group loses it. Bot and User Memory are also Markdown files under durable roots of the Workspace, sharded per writing Bot so each file has one writer.
 _Avoid_: Context, history, knowledge base
-
-**Project**:
-An opt-in grouping a Bot creates or joins that carries its own shared Memory tier; only the Projects a Bot has joined are injected into its prompts.
-_Avoid_: Workspace, folder, team
 
 **Skill**:
 An instruction directory under a Bot's instruction root on the Workspace — one `SKILL.md` and the references beside it — that the Bot loads to learn how to do something. A Bot may write its own.

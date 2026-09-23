@@ -140,7 +140,12 @@ import {
   type WorkspaceGenerationRecordV1,
   type WorkspaceRootV1,
 } from "@frockbot/core/contracts";
-import type { MemoryProjectV1 } from "@frockbot/app/memory/agent";
+import { memoryMembershipRevisionV1 } from "@frockbot/app/memory/engine-tools";
+import { cleanRetiredProjectsV1 } from "./project-cleanup.js";
+import {
+  groupChatScopeV1,
+  memoryScopeKeyV1,
+} from "@frockbot/app/memory/records";
 import {
   createUserMemoryEngineV1,
   dispatchMemoryOperateV1,
@@ -198,13 +203,6 @@ import {
   type GroupChatCommandV1,
 } from "@frockbot/app/groups/shared";
 import type { BotUserConfigurationRpcTargetV1 } from "@frockbot/app/shell/durable-rpc-targets";
-
-/** The durable key holding this User's Project catalogue. */
-const MEMORY_PROJECTS_KEY = "memory:projects";
-/** Most Projects one User may have, and most one Bot may belong to. */
-const MEMORY_MAX_PROJECTS = 200;
-const MEMORY_MAX_JOINED_PROJECTS = 32;
-const MEMORY_PROJECT_ID = /^[a-z0-9][a-z0-9-]{0,127}$/;
 
 /** The durable key pinning the User this object was provisioned for. */
 const USER_IDENTITY_KEY = "user:identity";
@@ -269,6 +267,30 @@ export class UserConfiguration
       await cleanUndecodableSkillIndexesV1(this.ctx.storage);
       await cleanUndecodableConnectCatalogsV1(this.ctx.storage);
       const userId = await this.ctx.storage.get<string>(USER_IDENTITY_KEY);
+      const objects = this.env.MEMORY_FILES
+        ? createR2ObjectBucketV1(this.env.MEMORY_FILES)
+        : undefined;
+      await cleanRetiredProjectsV1(this.ctx.storage, {
+        ...(typeof userId === "string" ? { userId } : {}),
+        ...(objects
+          ? {
+              bucket: {
+                list: async (options) => {
+                  const page = await objects.list(options);
+                  return {
+                    keys: page.objects.map((object) => object.key),
+                    ...(page.cursor ? { cursor: page.cursor } : {}),
+                    truncated: page.truncated,
+                  };
+                },
+                delete: (key) => objects.delete(key),
+              },
+            }
+          : {}),
+        ...(durableObjectHasSqlV1(this.ctx.storage)
+          ? { engine: createUserMemoryEngineV1(this.ctx.storage) }
+          : {}),
+      });
       if (typeof userId === "string" && this.env.MEMORY_FILES) {
         await reseedInstructionRootV1({
           storage: this.ctx.storage,
@@ -1558,11 +1580,11 @@ export class UserConfiguration
   // ---------------------------------------------------------------------
   // Shared Memory roots.
   //
-  // "The User's Durable Object is the authority for everything User-scoped:
-  // ... and the generation records of User and Project Memory roots." The
-  // Bot's Durable Object does the writing — it is the Memory Package's host —
-  // but a shared root's generations are recorded here, so two Bots writing one
-  // root record into one ledger and their ids order against each other.
+  // The User's Durable Object is the authority for everything User-scoped,
+  // the User Memory root's generation records among it. The Bot's Durable
+  // Object does the writing — it is the Memory Package's host — but a shared
+  // root's generations are recorded here, so two Bots writing one root record
+  // into one ledger and their ids order against each other.
   //
   // Every one of these refuses a root that is not a shared Memory root of
   // *this* User. The Bot object is a caller like any other; authority follows
@@ -1880,64 +1902,16 @@ export class UserConfiguration
     );
   }
 
-  // ---------------------------------------------------------------------
-  // Project membership.
-  //
-  // "A Project is an opt-in grouping a Bot creates or joins that carries its
-  // own shared Memory tier; only the Projects a Bot has joined are injected
-  // into its prompts." Membership is User-scoped durable state, so it lives
-  // here: the catalogue of Projects the User has, and the joined list per Bot.
-  // ---------------------------------------------------------------------
-
-  private async projectCatalogue(): Promise<Record<string, MemoryProjectV1>> {
-    const stored = await this.ctx.storage.get<unknown>(MEMORY_PROJECTS_KEY);
-    if (!stored || typeof stored !== "object" || Array.isArray(stored)) {
-      return {};
-    }
-    const catalogue: Record<string, MemoryProjectV1> = {};
-    for (const [projectId, value] of Object.entries(
-      stored as Record<string, unknown>,
-    )) {
-      if (!value || typeof value !== "object" || Array.isArray(value)) continue;
-      const record = value as Record<string, unknown>;
-      if (typeof record.name !== "string") continue;
-      catalogue[projectId] = {
-        projectId,
-        name: record.name.slice(0, 128),
-        description:
-          typeof record.description === "string"
-            ? record.description.slice(0, 512)
-            : "",
-      };
-    }
-    return catalogue;
-  }
-
-  private async joinedProjects(botId: string): Promise<string[]> {
-    const stored = await this.ctx.storage.get<unknown>(
-      `${MEMORY_PROJECTS_KEY}:${botId}`,
-    );
-    if (!Array.isArray(stored)) return [];
-    return stored
-      .filter((value): value is string => typeof value === "string")
-      .slice(0, MEMORY_MAX_JOINED_PROJECTS);
-  }
-
-  private async membership(botId: string): Promise<MemoryProjectV1[]> {
-    const catalogue = await this.projectCatalogue();
-    return (await this.joinedProjects(botId)).flatMap((projectId) => {
-      const project = catalogue[projectId];
-      return project ? [project] : [];
-    });
-  }
-
-  async listMemoryProjects(input: unknown): Promise<MemoryProjectV1[]> {
+  /** The Group Chats a Bot is in: the group Memory scopes it may use. */
+  async listMemoryGroups(input: unknown): Promise<{ groupIds: string[] }> {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
       botId: rpcBotId,
     });
     await this.assertFlockIdentity(request.userId as string);
-    return this.membership(request.botId as string);
+    return {
+      groupIds: await this.groupChats().groupsOf(request.botId as string),
+    };
   }
 
   #memoryEngine: MemoryEngineV1 | undefined;
@@ -1975,11 +1949,7 @@ export class UserConfiguration
     const userId = envelope.userId as string;
     const botId = envelope.botId as string;
     await this.assertFlockIdentity(userId);
-    const joined = await this.membership(botId);
-    const revision =
-      (await this.ctx.storage.get<number>(
-        `${MEMORY_PROJECTS_KEY}:${botId}:rev`,
-      )) ?? 0;
+    const joined = await this.groupChats().groupsOf(botId);
     const inner = (envelope.request ?? {}) as Record<string, unknown>;
     const claimed = inner.authority;
     if (claimed && typeof claimed === "object" && !Array.isArray(claimed)) {
@@ -1989,8 +1959,8 @@ export class UserConfiguration
         botId,
         actor:
           (claimed as { actor?: unknown }).actor === "user" ? "user" : "bot",
-        joinedGroupChatIds: joined.map((project) => project.projectId),
-        membershipRevision: String(revision),
+        joinedGroupChatIds: joined,
+        membershipRevision: memoryMembershipRevisionV1(joined),
       };
     }
     const result = dispatchMemoryOperateV1(
@@ -2006,87 +1976,6 @@ export class UserConfiguration
       }
     }
     return result as object;
-  }
-
-  /**
-   * Create, join, or leave. Create is join when the slug already exists, which
-   * is GrokBot's own `update_state project create` behaviour, and the refusal
-   * for an unknown slug on `join` is a value rather than a throw so the Bot's
-   * tool can report it.
-   */
-  async changeMemoryProjects(
-    input: unknown,
-  ): Promise<
-    | { status: "ok"; joined: MemoryProjectV1[] }
-    | { status: "refused"; reason: string }
-  > {
-    const request = decodeRpcEnvelopeV1(
-      input,
-      {
-        userId: rpcIdentifier,
-        botId: rpcBotId,
-        action: rpcEnum(["create", "join", "leave"]),
-        projectId: rpcPattern(MEMORY_PROJECT_ID, 128),
-      },
-      { project: rpcDecodedValue },
-    );
-    const userId = request.userId as string;
-    await this.assertFlockIdentity(userId);
-    const botId = request.botId as string;
-    const projectId = request.projectId as string;
-    const action = request.action as "create" | "join" | "leave";
-    const catalogue = await this.projectCatalogue();
-    const joined = new Set(await this.joinedProjects(botId));
-
-    if (action === "create") {
-      if (!catalogue[projectId]) {
-        if (Object.keys(catalogue).length >= MEMORY_MAX_PROJECTS) {
-          return {
-            status: "refused",
-            reason: `this User already has ${MEMORY_MAX_PROJECTS} Projects`,
-          };
-        }
-        const supplied = request.project as Record<string, unknown> | undefined;
-        catalogue[projectId] = {
-          projectId,
-          name:
-            typeof supplied?.name === "string" && supplied.name.trim()
-              ? supplied.name.trim().slice(0, 128)
-              : projectId,
-          description:
-            typeof supplied?.description === "string"
-              ? supplied.description.trim().slice(0, 512)
-              : "",
-        };
-        await this.ctx.storage.put(MEMORY_PROJECTS_KEY, catalogue);
-      }
-      joined.add(projectId);
-    } else if (action === "join") {
-      if (!catalogue[projectId]) {
-        return {
-          status: "refused",
-          reason: `no Project "${projectId}" exists; create it first`,
-        };
-      }
-      joined.add(projectId);
-    } else {
-      joined.delete(projectId);
-    }
-    if (joined.size > MEMORY_MAX_JOINED_PROJECTS) {
-      return {
-        status: "refused",
-        reason: `a Bot may belong to at most ${MEMORY_MAX_JOINED_PROJECTS} Projects`,
-      };
-    }
-    await this.ctx.storage.put(
-      `${MEMORY_PROJECTS_KEY}:${botId}`,
-      [...joined].sort(),
-    );
-    const revisionKey = `${MEMORY_PROJECTS_KEY}:${botId}:rev`;
-    const revision =
-      ((await this.ctx.storage.get<number>(revisionKey)) ?? 0) + 1;
-    await this.ctx.storage.put(revisionKey, revision);
-    return { status: "ok", joined: await this.membership(botId) };
   }
 
   /**
@@ -2146,7 +2035,7 @@ export class UserConfiguration
 
   /**
    * The User-scoped state one deleted Bot leaves behind: its transcript rows,
-   * its audit entries and its Memory Project membership.
+   * its audit entries and its Group Chat membership.
    *
    * Every step is a delete, so repeating it is free, and the to-do entry is
    * dropped last — a crash before that simply replays the sweep.
@@ -2155,8 +2044,6 @@ export class UserConfiguration
     const contributions = await this.contributions();
     contributions.search.purge(botId);
     contributions.audit.purgeAuditForBot(botId);
-    await this.ctx.storage.delete(`${MEMORY_PROJECTS_KEY}:${botId}`);
-    await this.ctx.storage.delete(`${MEMORY_PROJECTS_KEY}:${botId}:rev`);
     await contributions.flock.forgetDeletedBot(botId);
     const userId = await this.provenIdentity();
     if (userId) {
@@ -2188,6 +2075,12 @@ export class UserConfiguration
     userId: string,
     change: GroupChatChangeV1,
   ): Promise<void> {
+    if (change.kind === "delete" && durableObjectHasSqlV1(this.ctx.storage)) {
+      // Deleting a group deletes what its members remembered in it.
+      this.memoryEngine().purgeScope(
+        memoryScopeKeyV1(groupChatScopeV1(userId, change.groupId)),
+      );
+    }
     const namespace = this.env.GROUP_CHATS;
     if (!namespace) return;
     const groupId =

@@ -45,8 +45,6 @@ import { exactKeysV1, recordV1 } from "./records.js";
 export const WORKSPACE_MAX_ROOT_ID_LENGTH = 128;
 /** Longest owner identifier, matching `IsolateIdentityV1.botId`. */
 export const WORKSPACE_MAX_OWNER_ID_LENGTH = 256;
-/** Longest Project identifier, matching the Package-declared root id bound. */
-export const WORKSPACE_MAX_PROJECT_ID_LENGTH = 128;
 /** Upper bound on a single durable-root file. */
 export const WORKSPACE_MAX_FILE_BYTES = 1_048_576;
 /** Upper bound on one `list` page. */
@@ -54,8 +52,6 @@ export const WORKSPACE_MAX_LIST_ENTRIES = 1_000;
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 const ROOT_ID = /^[a-z][a-z0-9-]{0,127}$/;
-/** A Project is named by a slug, exactly as GrokBot names one on disk. */
-const PROJECT_ID = /^[a-z0-9][a-z0-9-]{0,127}$/;
 
 /**
  * The kinds of durable root. "durable roots, declared by the Computer
@@ -68,7 +64,6 @@ export type WorkspaceRootKindV1 =
   | "user-instructions"
   | "bot-memory"
   | "user-memory"
-  | "project-memory"
   | "package-declared";
 
 /**
@@ -81,7 +76,6 @@ export type WorkspaceRootV1 =
   | { kind: "user-instructions"; userId: string }
   | { kind: "bot-memory"; userId: string; botId: string }
   | { kind: "user-memory"; userId: string }
-  | { kind: "project-memory"; userId: string; projectId: string }
   | {
       kind: "package-declared";
       userId: string;
@@ -121,16 +115,15 @@ export function isWorkspaceInstructionRootV1(
 /**
  * A Memory root. The Memory Package is its only writer.
  *
- * "Memory is Markdown files under durable roots of the Workspace in three
- * tiers: a Bot Memory root per Bot, a User Memory root shared by the User's
- * Bots, and a Project Memory root per Project that a Bot has joined." All
- * three kinds are covered here; the two shared ones are additionally
- * `WorkspaceSharedMemoryRootV1`, because sharding is what makes a shared tier
- * single-writer per file.
+ * Memory is Markdown files under two durable roots of the Workspace: a Bot
+ * Memory root per Bot, and a User Memory root shared by the User's Bots. The
+ * shared one is additionally `WorkspaceSharedMemoryRootV1`, because sharding
+ * is what makes a shared tier single-writer per file. A Group Chat's shared
+ * Memory has no root: it lives only in canonical Memory.
  */
 export type WorkspaceMemoryRootV1 = Extract<
   WorkspaceRootV1,
-  { kind: "bot-memory" | "user-memory" | "project-memory" }
+  { kind: "bot-memory" | "user-memory" }
 >;
 
 /**
@@ -141,18 +134,14 @@ export type WorkspaceMemoryRootV1 = Extract<
  */
 export type WorkspaceSharedMemoryRootV1 = Extract<
   WorkspaceRootV1,
-  { kind: "user-memory" | "project-memory" }
+  { kind: "user-memory" }
 >;
 
-/** True for the three Memory kinds and nothing else. */
+/** True for the two Memory kinds and nothing else. */
 export function isWorkspaceMemoryRootV1(
   root: WorkspaceRootV1,
 ): root is WorkspaceMemoryRootV1 {
-  return (
-    root.kind === "bot-memory" ||
-    root.kind === "user-memory" ||
-    root.kind === "project-memory"
-  );
+  return root.kind === "bot-memory" || root.kind === "user-memory";
 }
 
 /**
@@ -177,7 +166,7 @@ export function isWorkspaceComputerReadOnlyRootV1(
 export function isWorkspaceSharedMemoryRootV1(
   root: WorkspaceRootV1,
 ): root is WorkspaceSharedMemoryRootV1 {
-  return root.kind === "user-memory" || root.kind === "project-memory";
+  return root.kind === "user-memory";
 }
 
 /** A validated relative path inside one durable root. */
@@ -427,8 +416,7 @@ export function workspaceMemoryProjectionV1(
 
 /**
  * The directory a shared Memory tier gives one writing Bot. GrokBot's own
- * layout, kept verbatim: `user-memory/by-agent/<agent-uuid>/`, and
- * `projects/<slug>/memory/by-agent/<assistantId>/` for a Project. The prefix
+ * layout, kept verbatim: `user-memory/by-agent/<agent-uuid>/`. The prefix
  * is the mechanism behind "every Memory file has exactly one writer".
  */
 export const WORKSPACE_MEMORY_SHARD_PREFIX = "by-agent";
@@ -616,9 +604,6 @@ export function workspaceRootKeyV1(root: WorkspaceRootV1): string {
   // a key beginning `users/`, so it collides with none of them.
   if (root.kind === "user-instructions") return `users/${user}/skills`;
   if (root.kind === "user-memory") return `user-memory:${user}`;
-  if (root.kind === "project-memory") {
-    return `project-memory:${user}:${encodeURIComponent(root.projectId)}`;
-  }
   if (root.kind === "package-declared") {
     return `package-declared:${user}:${encodeURIComponent(root.packageId)}:${root.rootId}`;
   }
@@ -740,22 +725,6 @@ export function decodeWorkspaceRootV1(
     return {
       kind: value.kind,
       userId: ownerId(value.userId, `${label}.userId`),
-    };
-  }
-  if (value.kind === "project-memory") {
-    exactKeys(value, ["kind", "userId", "projectId"], label);
-    const projectId = boundedString(
-      value.projectId,
-      `${label}.projectId`,
-      WORKSPACE_MAX_PROJECT_ID_LENGTH,
-    );
-    if (!PROJECT_ID.test(projectId)) {
-      throw new Error(`${label}.projectId is invalid`);
-    }
-    return {
-      kind: "project-memory",
-      userId: ownerId(value.userId, `${label}.userId`),
-      projectId,
     };
   }
   if (value.kind === "package-declared") {

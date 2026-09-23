@@ -32,8 +32,8 @@ member per grant the descriptor declares that actually opens a handle:
   the Turn's Work view, tokens and cost. You cannot name another model.
   This is not a model _provider_; see `providers.md` for serving one.
 - `ctx.memory` (`memory`) — `read` / `write` / `forget` with `scope`
-  `bot` | `user` | `project` (project needs `projectId`) and optional
-  `tier` `profile` | `log` | `note`. Facts are strings. Never a secret.
+  `bot` | `user` and optional `tier` `profile` | `log` | `note`. Facts are
+  strings. Never a secret.
 - `ctx.workspace` (`workspace`) — `read`, `list`, `stat`, `write`,
   `delete` on a `WorkspacePath`. Roots are `{ kind: "bot-instructions",
 botId }`, `{ kind: "user-instructions" }`, or `{ kind:

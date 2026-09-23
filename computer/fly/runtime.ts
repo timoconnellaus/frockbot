@@ -2659,8 +2659,8 @@ export const COMPUTER_SPRITE_NAME = /^[a-z][a-z0-9-]{2,62}$/;
  *
  * "One Computer per User, shared by all Bots", so the name is
  * derived from the User and from nothing else. The digest is taken over a
- * JSON-encoded `["user", userId]` rather than the bare id, so a future
- * `["project", …]` key cannot collide with a User id that happens to spell the
+ * JSON-encoded `["user", userId]` rather than the bare id, so a future key
+ * of another kind cannot collide with a User id that happens to spell the
  * same string.
  *
  * `digest` is supplied by the caller because the two runtimes that need this

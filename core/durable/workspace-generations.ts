@@ -11,10 +11,9 @@
 // It implements `WorkspaceGenerationsV1`, declared in `@frockbot/core/contracts`,
 // and knows nothing about object storage: the store that consumes it supplies
 // etags and conflict keys as opaque strings. That is deliberate.
-// The Bot Durable Object owns its own roots; "The User's Durable Object is the
-// authority for ... the generation records of User and Project Memory roots",
-// and the same class serves either — the owner is whichever object constructs
-// it.
+// The Bot Durable Object owns its own roots; the User's Durable Object is the
+// authority for the User Memory root's generation records, and the same class
+// serves either — the owner is whichever object constructs it.
 //
 // A minted generation id is sortable and strictly increasing across eviction:
 // `<milliseconds>-<sequence>`, both zero-padded, with the milliseconds never

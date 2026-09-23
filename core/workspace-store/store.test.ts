@@ -28,11 +28,6 @@ const INSTRUCTIONS: WorkspaceRootV1 = {
   botId: "bot-1",
 };
 const USER_MEMORY: WorkspaceRootV1 = { kind: "user-memory", userId: USER };
-const PROJECT_MEMORY: WorkspaceRootV1 = {
-  kind: "project-memory",
-  userId: USER,
-  projectId: "school-run",
-};
 const BOT_MEMORY: WorkspaceRootV1 = {
   kind: "bot-memory",
   userId: USER,
@@ -414,7 +409,7 @@ describe("who may write", () => {
 
   test("the kernel surface refuses every Memory root and the Memory surface refuses every other", async () => {
     const { files, memory } = harness();
-    for (const root of [BOT_MEMORY, USER_MEMORY, PROJECT_MEMORY]) {
+    for (const root of [BOT_MEMORY, USER_MEMORY]) {
       expect(
         await files.write({
           path: memoryShardPathV1(root, "bot-1", "profile.md"),
@@ -451,7 +446,7 @@ describe("who may write", () => {
     expect(
       await sync.read(memoryShardPathV1(USER_MEMORY, "bot-1", "profile.md")),
     ).toMatchObject({ status: "ok" });
-    for (const root of [BOT_MEMORY, USER_MEMORY, PROJECT_MEMORY]) {
+    for (const root of [BOT_MEMORY, USER_MEMORY]) {
       expect(
         await sync.write({
           path: memoryShardPathV1(root, "bot-1", "profile.md"),
@@ -567,11 +562,11 @@ describe("shared Memory tiers are sharded per writing Bot", () => {
     ).toMatchObject({ status: "refused" });
   });
 
-  test("the User may write any shard of their own Project Memory", async () => {
+  test("the User may write any shard of their own User Memory", async () => {
     const { memory } = harness();
     expect(
       await memory.write({
-        path: memoryShardPathV1(PROJECT_MEMORY, "bot-9", "profile.md"),
+        path: memoryShardPathV1(USER_MEMORY, "bot-9", "profile.md"),
         bytes: bytes("corrected"),
         writer: user,
         expectedGenerationId: null,

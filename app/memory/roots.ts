@@ -1,8 +1,8 @@
 // Where a Memory fact lives: which durable root, which shard, which file.
 //
-// "Memory is Markdown files under durable roots of the Workspace in three
-// tiers: a Bot Memory root per Bot, a User Memory root shared by the User's
-// Bots, and a Project Memory root per Project that a Bot has joined."
+// Memory files live under two durable roots of the Workspace: a Bot Memory
+// root per Bot and a User Memory root shared by the User's Bots. A Group
+// Chat's shared Memory is canonical only, and has no root.
 //
 // Sharding is not decided here. `memoryShardPathV1` in
 // `@frockbot/core/contracts` owns `by-agent/<botId>/`, and this module calls
@@ -38,13 +38,6 @@ export const MEMORY_PROFILE_FILE = "profile.md";
 /** The directory dated facts live in, inside a shard. */
 export const MEMORY_LOG_DIRECTORY = "log";
 
-const PROJECT_ID = /^[a-z0-9][a-z0-9-]{0,127}$/;
-
-/** True for a Project slug the `project-memory` root will accept. */
-export function isMemoryProjectIdV1(value: unknown): value is string {
-  return typeof value === "string" && PROJECT_ID.test(value);
-}
-
 export function botMemoryRootV1(owner: MemoryOwnerV1): WorkspaceMemoryRootV1 {
   return { kind: "bot-memory", userId: owner.userId, botId: owner.botId };
 }
@@ -53,42 +46,19 @@ export function userMemoryRootV1(owner: MemoryOwnerV1): WorkspaceMemoryRootV1 {
   return { kind: "user-memory", userId: owner.userId };
 }
 
-export function projectMemoryRootV1(
-  owner: MemoryOwnerV1,
-  projectId: string,
-): WorkspaceMemoryRootV1 {
-  if (!isMemoryProjectIdV1(projectId)) {
-    throw new Error(`Project slug "${projectId}" is invalid`);
-  }
-  return { kind: "project-memory", userId: owner.userId, projectId };
-}
-
-/** The root one scope names, with a Project slug required for `project`. */
+/** The root one file-backed scope names. */
 export function memoryScopeRootV1(
-  scope: MemoryScopeNameV1,
+  scope: Exclude<MemoryScopeNameV1, "group">,
   owner: MemoryOwnerV1,
-  projectId?: string,
 ): WorkspaceMemoryRootV1 {
-  if (scope === "bot") return botMemoryRootV1(owner);
-  if (scope === "user") return userMemoryRootV1(owner);
-  if (projectId === undefined) {
-    throw new Error("the project scope requires a Project slug");
-  }
-  return projectMemoryRootV1(owner, projectId);
+  return scope === "bot" ? botMemoryRootV1(owner) : userMemoryRootV1(owner);
 }
 
 /** The scope name a root belongs to. */
 export function memoryScopeOfRootV1(
   root: WorkspaceMemoryRootV1,
-): MemoryScopeNameV1 {
-  if (root.kind === "bot-memory") return "bot";
-  if (root.kind === "user-memory") return "user";
-  return "project";
-}
-
-/** The Project slug a root names, or `""` for the two unprojected tiers. */
-export function memoryProjectIdOfRootV1(root: WorkspaceMemoryRootV1): string {
-  return root.kind === "project-memory" ? root.projectId : "";
+): Exclude<MemoryScopeNameV1, "group"> {
+  return root.kind === "bot-memory" ? "bot" : "user";
 }
 
 /**

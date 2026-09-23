@@ -4,7 +4,7 @@
 // The Bot Durable Object projects a *settled* run — one that has already
 // reached a durable terminal state — through the narrow `SearchSinkV1` binding
 // its host constructs, exactly as the Memory Package reaches the User Durable
-// Object through `MEMORY_PROJECTS` (`plugin-shell/src/backend-memory.ts`).
+// Object through `MEMORY_GROUPS` (`app/shell/backend-memory.ts`).
 //
 // Projection happens after settlement, never before it, so a failed index
 // write loses nothing: the run is already durable in the Bot Durable Object,

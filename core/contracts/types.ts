@@ -323,11 +323,12 @@ export interface CompositionPinV1 {
 }
 
 /**
- * The three Memory tiers a fact can be written to or injected from, named as
- * the session log records them. Bot Memory is the Bot's own; the other two are
- * shared roots sharded per writing Bot.
+ * The three Memory scopes a fact can be written to or injected from, named as
+ * the session log records them. Bot Memory is the Bot's own, User Memory is
+ * shared by all of the User's Bots, and a Group Chat's is shared by its
+ * members.
  */
-export type MemoryScopeNameV1 = "bot" | "user" | "project";
+export type MemoryScopeNameV1 = "bot" | "user" | "group";
 
 /**
  * Whole milliseconds one filed screenshot spent in each step. A step that did
@@ -705,21 +706,21 @@ export interface SessionEventMap {
    * render read; `facts` is every line that reached the prompt; `omissions`
    * names each tier a cap or a failure cut short.
    *
-   * `projectId` is `""` for the tiers that have none, so every entry has the
+   * `groupId` is `""` for the scopes that have none, so every entry has the
    * same shape and the decoder needs no optional field.
    */
   "memory/injected": {
     turn: number;
     sources: Array<{
       scope: MemoryScopeNameV1;
-      projectId: string;
+      groupId: string;
       path: string;
       generationId: string;
       contentHash: string;
     }>;
     facts: Array<{
       scope: MemoryScopeNameV1;
-      projectId: string;
+      groupId: string;
       /** The tier it was written as; a note lives in the log file. */
       tier: "profile" | "log" | "note";
       via: string;
@@ -734,7 +735,7 @@ export interface SessionEventMap {
      */
     faded?: Array<{
       scope: MemoryScopeNameV1;
-      projectId: string;
+      groupId: string;
       count: number;
     }>;
     /**
@@ -754,7 +755,7 @@ export interface SessionEventMap {
     effectId: string;
     action: "write" | "forget";
     scope: MemoryScopeNameV1;
-    projectId: string;
+    groupId: string;
     /**
      * `pending` when the intent cannot name a tier yet. A forget may rewrite
      * the profile file, one or more log files, or write a retraction, and
@@ -773,28 +774,11 @@ export interface SessionEventMap {
     effectId: string;
     action: "write" | "forget";
     scope: MemoryScopeNameV1;
-    projectId: string;
+    groupId: string;
     tier: "profile" | "log" | "note";
     path: string;
     generationId: string;
     contentHash: string;
-  };
-  /** The Bot recorded the intent to change Project membership, before it ran. */
-  "memory/project-intent": {
-    turn: number;
-    step: number;
-    effectId: string;
-    action: "create" | "join" | "leave";
-    projectId: string;
-  };
-  /** The Project membership the durable authority holds after the change. */
-  "memory/project-changed": {
-    turn: number;
-    step: number;
-    effectId: string;
-    action: "create" | "join" | "leave";
-    projectId: string;
-    projects: string[];
   };
   /**
    * The Bot recorded the intent to generate an image, before the model ran.
@@ -1083,7 +1067,7 @@ function eventString(
 }
 
 function memoryScope(value: unknown, label: string): void {
-  if (value !== "bot" && value !== "user" && value !== "project") {
+  if (value !== "bot" && value !== "user" && value !== "group") {
     throw new Error(`${label} is invalid`);
   }
 }
@@ -1107,12 +1091,6 @@ function memoryIntentTier(value: unknown, label: string): void {
 
 function memoryAction(value: unknown, label: string): void {
   if (value !== "write" && value !== "forget") {
-    throw new Error(`${label} is invalid`);
-  }
-}
-
-function memoryProjectAction(value: unknown, label: string): void {
-  if (value !== "create" && value !== "join" && value !== "leave") {
     throw new Error(`${label} is invalid`);
   }
 }
@@ -2336,11 +2314,11 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
         const entry = eventRecord(source, label);
         requireEventKeys(
           entry,
-          ["scope", "projectId", "path", "generationId", "contentHash"],
+          ["scope", "groupId", "path", "generationId", "contentHash"],
           label,
         );
         memoryScope(entry.scope, `${label}.scope`);
-        eventString(entry.projectId, `${label}.projectId`, true);
+        eventString(entry.groupId, `${label}.groupId`, true);
         eventString(entry.path, `${label}.path`);
         eventString(entry.generationId, `${label}.generationId`);
         eventString(entry.contentHash, `${label}.contentHash`);
@@ -2350,11 +2328,11 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
         const entry = eventRecord(fact, label);
         requireEventKeys(
           entry,
-          ["scope", "projectId", "tier", "via", "learnedAt", "text"],
+          ["scope", "groupId", "tier", "via", "learnedAt", "text"],
           label,
         );
         memoryScope(entry.scope, `${label}.scope`);
-        eventString(entry.projectId, `${label}.projectId`, true);
+        eventString(entry.groupId, `${label}.groupId`, true);
         // `note` too: a note lives in the log file, and recording it as `log`
         // left a reader of the durable event unable to tell the tiers apart.
         memoryTier(entry.tier, `${label}.tier`);
@@ -2376,9 +2354,9 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
         event.faded.forEach((fade, index) => {
           const label = `session event.faded[${index}]`;
           const entry = eventRecord(fade, label);
-          requireEventKeys(entry, ["scope", "projectId", "count"], label);
+          requireEventKeys(entry, ["scope", "groupId", "count"], label);
           memoryScope(entry.scope, `${label}.scope`);
-          eventString(entry.projectId, `${label}.projectId`, true);
+          eventString(entry.groupId, `${label}.groupId`, true);
           eventInteger(entry.count, `${label}.count`, 1);
         });
       }
@@ -2399,7 +2377,7 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
           "effectId",
           "action",
           "scope",
-          "projectId",
+          "groupId",
           "tier",
           "path",
           "contentHash",
@@ -2411,7 +2389,7 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       eventString(event.effectId, "session event.effectId");
       memoryAction(event.action, "session event.action");
       memoryScope(event.scope, "session event.scope");
-      eventString(event.projectId, "session event.projectId", true);
+      eventString(event.groupId, "session event.groupId", true);
       memoryIntentTier(event.tier, "session event.tier");
       eventString(event.path, "session event.path", true);
       eventString(event.contentHash, "session event.contentHash");
@@ -2425,7 +2403,7 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
           "effectId",
           "action",
           "scope",
-          "projectId",
+          "groupId",
           "tier",
           "path",
           "generationId",
@@ -2438,41 +2416,11 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       eventString(event.effectId, "session event.effectId");
       memoryAction(event.action, "session event.action");
       memoryScope(event.scope, "session event.scope");
-      eventString(event.projectId, "session event.projectId", true);
+      eventString(event.groupId, "session event.groupId", true);
       memoryTier(event.tier, "session event.tier");
       eventString(event.path, "session event.path");
       eventString(event.generationId, "session event.generationId");
       eventString(event.contentHash, "session event.contentHash");
-      break;
-    case "memory/project-intent":
-      requireEventKeys(
-        event,
-        keys("turn", "step", "effectId", "action", "projectId"),
-        "session event",
-      );
-      turn();
-      step();
-      eventString(event.effectId, "session event.effectId");
-      memoryProjectAction(event.action, "session event.action");
-      eventString(event.projectId, "session event.projectId");
-      break;
-    case "memory/project-changed":
-      requireEventKeys(
-        event,
-        keys("turn", "step", "effectId", "action", "projectId", "projects"),
-        "session event",
-      );
-      turn();
-      step();
-      eventString(event.effectId, "session event.effectId");
-      memoryProjectAction(event.action, "session event.action");
-      eventString(event.projectId, "session event.projectId");
-      if (!Array.isArray(event.projects)) {
-        throw new Error("session event.projects must be an array");
-      }
-      event.projects.forEach((project, index) =>
-        eventString(project, `session event.projects[${index}]`),
-      );
       break;
     case "image/generate-intent":
       requireEventKeys(

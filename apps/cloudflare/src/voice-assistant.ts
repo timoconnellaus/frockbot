@@ -153,7 +153,6 @@ import {
 } from "@frockbot/app/voice/resumption";
 import { MemoryStore } from "@frockbot/app/memory/store";
 import { voiceOpeningRereadsSessionMemoryV1 } from "@frockbot/app/voice/session-memory";
-import { isMemoryProjectIdV1 } from "@frockbot/app/memory/roots";
 import {
   decodeDirectoryViewV1,
   decodeFlockBootstrapViewV1,
@@ -4123,12 +4122,6 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
           name: bot.name,
           message: `Handed over. You are ${bot.name} from here, speaking in your own voice; say so in your reply.`,
         };
-      },
-      recallProject: async (projectId) => {
-        if (!isMemoryProjectIdV1(projectId)) return "That is not a Project id.";
-        if (!call.botId)
-          return "Memory is unavailable until a Bot is selected.";
-        return this.browseCanonicalMemory(userId, call.botId, projectId);
       },
     };
   }

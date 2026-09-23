@@ -257,11 +257,10 @@ export interface IsolateConnectionLeaseV1 {
 export type IsolateConnectionOutcomeV1 =
   IsolateConnectionLeaseV1 | IsolateCapabilityFailureV1;
 
-export type IsolateMemoryScopeV1 = "bot" | "user" | "project";
+export type IsolateMemoryScopeV1 = "bot" | "user";
 export type IsolateMemoryTierV1 = "profile" | "log" | "note";
 export interface IsolateMemoryReadRequestV1 {
   scope: IsolateMemoryScopeV1;
-  projectId?: string;
 }
 export interface IsolateMemoryWriteRequestV1 extends IsolateMemoryReadRequestV1 {
   tier?: IsolateMemoryTierV1;
@@ -1366,7 +1365,7 @@ export function decodeIsolateScheduleRequestV1(
   };
 }
 
-const MEMORY_SCOPES = ["bot", "user", "project"] as const;
+const MEMORY_SCOPES = ["bot", "user"] as const;
 const MEMORY_TIERS = ["profile", "log", "note"] as const;
 
 export function decodeIsolateMemoryReadRequestV1(
@@ -1374,20 +1373,10 @@ export function decodeIsolateMemoryReadRequestV1(
   label = "isolate Memory read request",
 ): IsolateMemoryReadRequestV1 {
   const value = record(input, label);
-  exactKeys(value, ["scope"], label, ["projectId"]);
+  exactKeys(value, ["scope"], label);
   const scope = MEMORY_SCOPES.find((candidate) => candidate === value.scope);
   if (!scope) throw new Error(`${label}.scope is invalid`);
-  if (scope === "project" && value.projectId === undefined) {
-    throw new Error(`${label}.projectId is required`);
-  }
-  return {
-    scope,
-    ...(value.projectId === undefined
-      ? {}
-      : {
-          projectId: boundedString(value.projectId, `${label}.projectId`, 128),
-        }),
-  };
+  return { scope };
 }
 
 export function decodeIsolateMemoryWriteRequestV1(
@@ -1395,7 +1384,7 @@ export function decodeIsolateMemoryWriteRequestV1(
   label = "isolate Memory write request",
 ): IsolateMemoryWriteRequestV1 {
   const value = record(input, label);
-  exactKeys(value, ["scope", "fact"], label, ["projectId", "tier"]);
+  exactKeys(value, ["scope", "fact"], label, ["tier"]);
   const scope = MEMORY_SCOPES.find((candidate) => candidate === value.scope);
   const tier =
     value.tier === undefined
@@ -1404,16 +1393,8 @@ export function decodeIsolateMemoryWriteRequestV1(
   if (!scope || (value.tier !== undefined && !tier)) {
     throw new Error(`${label} is invalid`);
   }
-  if (scope === "project" && value.projectId === undefined) {
-    throw new Error(`${label}.projectId is required`);
-  }
   return {
     scope,
-    ...(value.projectId === undefined
-      ? {}
-      : {
-          projectId: boundedString(value.projectId, `${label}.projectId`, 128),
-        }),
     ...(tier ? { tier } : {}),
     fact: boundedString(value.fact, `${label}.fact`, 2_000),
   };

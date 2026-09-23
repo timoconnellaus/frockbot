@@ -44,8 +44,6 @@ export type EmbedMemory = (texts: string[]) => Promise<number[][]>;
 /** One search hit: where the text is, never the authority for what it says. */
 export interface MemorySearchResult {
   scope: MemoryScopeNameV1;
-  /** `""` for the two unprojected tiers. */
-  projectId: string;
   path: string;
   startLine: number;
   endLine: number;

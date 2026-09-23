@@ -1,18 +1,16 @@
 // The Memory seam, bound in production.
 //
-// Two things live here, and both exist because of one sentence in `AGENTS.md`
-// § Authorities: "The User's Durable Object is the authority for everything
-// User-scoped: ... and the generation records of User and Project Memory
-// roots."
+// Two things live here, and both exist because the User's Durable Object is
+// the authority for everything User-scoped:
 //
-//  1. `createRoutedWorkspaceGenerationsV1` sends a *shared* Memory root's
-//     generations — `user-memory` and `project-memory` — to the User Durable
-//     Object over RPC, and everything else to the Bot's own ledger. Two Bots
-//     writing one shared root therefore record into one ledger, which is what
-//     makes "newest fact wins on conflict" answerable at all: the minted
-//     generation ids come from a single authority, so they order.
-//  2. `createUserMemoryProjectsV1` is the Project membership authority, also
-//     the User object, also over RPC.
+//  1. `createRoutedWorkspaceGenerationsV1` sends the *shared* Memory root's
+//     generations — `user-memory` — to the User Durable Object over RPC, and
+//     everything else to the Bot's own ledger. Two Bots writing one shared
+//     root therefore record into one ledger, which is what makes "newest fact
+//     wins on conflict" answerable at all: the minted generation ids come
+//     from a single authority, so they order.
+//  2. `createUserMemoryGroupsV1` reads which Group Chats the Bot is in, whose
+//     Memory it may use, from the User object's list of groups.
 //
 // Both are decoded at the seam. "Cross-runtime communication uses narrow,
 // versioned DTOs, and every inbound value is decoded at its seam" — an answer
@@ -26,11 +24,8 @@ import {
   type WorkspaceGenerationsV1,
   type WorkspaceRootV1,
 } from "@frockbot/core/contracts";
-import type {
-  MemoryProjectsOutcomeV1,
-  MemoryProjectsV1,
-  MemoryProjectV1,
-} from "@frockbot/app/memory/agent";
+import { isGroupIdV1 } from "@frockbot/app/groups/shared";
+import type { MemoryGroupsV1 } from "@frockbot/app/memory/groups";
 
 /** The User Durable Object's Memory RPC surface, as the Bot object calls it. */
 export interface UserMemoryRpc {
@@ -40,8 +35,7 @@ export interface UserMemoryRpc {
   tombstoneWorkspaceGeneration(input: unknown): Promise<void>;
   conflictWorkspaceGeneration(input: unknown): Promise<void>;
   listWorkspaceConflicts(input: unknown): Promise<unknown>;
-  listMemoryProjects(input: unknown): Promise<unknown>;
-  changeMemoryProjects(input: unknown): Promise<unknown>;
+  listMemoryGroups(input: unknown): Promise<unknown>;
   operateMemory(input: unknown): Promise<unknown>;
 }
 
@@ -127,84 +121,25 @@ export function createRoutedWorkspaceGenerationsV1(options: {
   };
 }
 
-function decodeProject(value: unknown): MemoryProjectV1 {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Project record is invalid");
-  }
-  const record = value as Record<string, unknown>;
-  const text = (key: string, maximum: number, required: boolean): string => {
-    const candidate = record[key];
-    if (candidate === undefined && !required) return "";
-    if (typeof candidate !== "string" || candidate.length > maximum) {
-      throw new Error(`Project record.${key} is invalid`);
-    }
-    return candidate;
-  };
-  return {
-    projectId: text("projectId", 128, true),
-    name: text("name", 128, true),
-    description: text("description", 512, false),
-  };
-}
-
-function decodeProjectsOutcome(value: unknown): MemoryProjectsOutcomeV1 {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("Project membership answer is invalid");
-  }
-  const record = value as Record<string, unknown>;
-  if (record.status === "refused") {
-    return {
-      status: "refused",
-      reason:
-        typeof record.reason === "string"
-          ? record.reason.slice(0, 512)
-          : "the Project change was refused",
-    };
-  }
-  if (record.status !== "ok" || !Array.isArray(record.joined)) {
-    throw new Error("Project membership answer is invalid");
-  }
-  return { status: "ok", joined: record.joined.map(decodeProject) };
-}
-
-/** Project membership over the User Durable Object, per Bot. */
-export function createUserMemoryProjectsV1(
+/** The Bot's Group Chat membership, over the User Durable Object. */
+export function createUserMemoryGroupsV1(
   rpc: UserMemoryRpc,
   identity: { userId: string; botId: string },
-): MemoryProjectsV1 {
-  const envelope = (extra: Record<string, unknown>) => ({
-    schemaVersion: 1,
-    userId: identity.userId,
-    botId: identity.botId,
-    ...extra,
-  });
-  const change = async (
-    action: "create" | "join" | "leave",
-    projectId: string,
-    project?: MemoryProjectV1,
-  ): Promise<MemoryProjectsOutcomeV1> =>
-    decodeProjectsOutcome(
-      await remoteCallV1("the Project membership authority", () =>
-        rpc.changeMemoryProjects(
-          envelope({
-            action,
-            projectId,
-            ...(project ? { project } : {}),
-          }),
-        ),
-      ),
-    );
+): MemoryGroupsV1 {
   return {
-    joined: async () => {
-      const answer = await remoteCallV1(
-        "the Project membership authority",
-        () => rpc.listMemoryProjects(envelope({})),
+    memberOf: async () => {
+      const answer = await remoteCallV1("the Group Chat list", () =>
+        rpc.listMemoryGroups({
+          schemaVersion: 1,
+          userId: identity.userId,
+          botId: identity.botId,
+        }),
       );
-      if (!Array.isArray(answer)) return [];
-      return answer.map(decodeProject);
+      const groupIds = (answer as { groupIds?: unknown } | null)?.groupIds;
+      if (!Array.isArray(groupIds) || !groupIds.every(isGroupIdV1)) {
+        throw new Error("Group Chat membership answer is invalid");
+      }
+      return groupIds;
     },
-    create: (project) => change("create", project.projectId, project),
-    join: (projectId) => change("join", projectId),
-    leave: (projectId) => change("leave", projectId),
   };
 }

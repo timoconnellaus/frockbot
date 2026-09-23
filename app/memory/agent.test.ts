@@ -1,27 +1,28 @@
 // The Memory runtime Contribution: what it injects, what it records, and what
 // its tools refuse.
-import { describe, expect, test } from "bun:test";
+import { afterEach, describe, expect, test } from "bun:test";
+import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { SessionStore, type Session } from "@frockbot/core/contracts";
 import type { WorkspaceFilesV1 } from "@frockbot/core/contracts";
 import {
   createMemoryForgetTool,
   createMemorySearchTool,
   createMemoryWriteTool,
-  createProjectTools,
   MemoryProjection,
   type MemoryRuntimeHostV1,
 } from "./agent.ts";
-import {
-  botMemoryRootV1,
-  projectMemoryRootV1,
-  userMemoryRootV1,
-} from "./roots.ts";
+import { botMemoryRootV1, userMemoryRootV1 } from "./roots.ts";
 import { TURN_READ_CONCURRENCY_V1 } from "@frockbot/core/concurrency";
 import { MemoryStore, MEMORY_MAX_FILES_PER_TIER } from "./store.ts";
 import {
-  createInMemoryMemoryProjectsV1,
+  createInMemoryMemoryGroupsV1,
+  createTestMemoryAuthorityV1,
   createTestMemoryFilesV1,
 } from "./testing.ts";
+import { MemoryEngineV1 } from "./engine.ts";
+import { MemoryRecordsV1, inProcessMemoryRemoteV1 } from "./owner.ts";
+import { groupChatScopeV1, memoryScopeKeyV1 } from "./records.ts";
+import type { MemorySqlStorageV1, MemorySqlValueV1 } from "./sql.ts";
 
 const OWNER = { userId: "user-1", botId: "bot-1" };
 const WRITER = { sessionId: "user-1:bot-1", turnId: "turn-4", runId: "run-9" };
@@ -268,9 +269,7 @@ describe("the note fade", () => {
     // The cutoff is on the log, so the request reconstructs exactly.
     expect(injected.noteTtlDays).toBe(14);
     expect(injected.noteCutoff).toBe("2026-08-17");
-    expect(injected.faded).toEqual([
-      { scope: "user", projectId: "", count: 1 },
-    ]);
+    expect(injected.faded).toEqual([{ scope: "user", groupId: "", count: 1 }]);
     // A fade is not an omission.
     expect(injected.omissions).toEqual([]);
 
@@ -323,7 +322,7 @@ describe("the Turn projection", () => {
     expect(injected.facts).toEqual([
       {
         scope: "user",
-        projectId: "",
+        groupId: "",
         tier: "profile",
         via: "School",
         learnedAt: "2026-08-31",
@@ -333,7 +332,7 @@ describe("the Turn projection", () => {
     expect(injected.sources).toEqual([
       {
         scope: "user",
-        projectId: "",
+        groupId: "",
         path: "by-agent/bot-2/profile.md",
         generationId:
           shared.status === "ok" ? shared.generationId : "unreachable",
@@ -346,72 +345,115 @@ describe("the Turn projection", () => {
   });
 });
 
-describe("the Project tools", () => {
-  test("create is join, and membership reaches durable state through the authority", async () => {
-    const host = { ...hostFor(), projects: createInMemoryMemoryProjectsV1() };
+const GROUP_ID = "g-5c0015c0015c0015c001";
+
+const databases: Database[] = [];
+afterEach(() => {
+  for (const database of databases.splice(0)) database.close();
+});
+
+function sqlStorage(): MemorySqlStorageV1 {
+  const database = new Database(":memory:");
+  databases.push(database);
+  return {
+    sql: {
+      exec<Row extends Record<string, MemorySqlValueV1>>(
+        query: string,
+        ...bindings: SQLQueryBindings[]
+      ) {
+        const rows = database
+          .query<Row, SQLQueryBindings[]>(query)
+          .all(...bindings);
+        return { toArray: () => rows };
+      },
+    },
+    transactionSync: (callback) => database.transaction(callback)(),
+  };
+}
+
+/** Canonical Memory split as production splits it: the Bot's, and the User's. */
+function canonical() {
+  const userEngine = new MemoryEngineV1({
+    storage: sqlStorage(),
+    ownedKinds: ["user", "groupChat"],
+  });
+  const records = new MemoryRecordsV1({
+    owner: "bot",
+    engine: new MemoryEngineV1({ storage: sqlStorage(), ownedKinds: ["bot"] }),
+    remote: inProcessMemoryRemoteV1(userEngine),
+  });
+  return { userEngine, records };
+}
+
+describe("a Group Chat's Memory", () => {
+  test("reaches the prompt in that group's Turns and nowhere else", async () => {
+    const { userEngine, records } = canonical();
+    const scope = groupChatScopeV1("user-1", GROUP_ID);
+    const authority = createTestMemoryAuthorityV1({
+      joinedGroupChatIds: [GROUP_ID],
+    });
+    expect(
+      userEngine.write({
+        authority,
+        scope,
+        content: "The offsite is in Bowral.",
+        operationKey: "g-1",
+      }).status,
+    ).toBe("ok");
+    userEngine.rebuildCore(memoryScopeKeyV1(scope));
+    const groups = createInMemoryMemoryGroupsV1([GROUP_ID]);
+
+    const inGroup = { ...hostFor(), records, groups, group: GROUP_ID };
+    const { session, dispose } = await openSession();
+    const injection = await new MemoryProjection(inGroup).refresh(4, session);
+    expect(injection.text).toContain("The offsite is in Bowral.");
+    const injected = session.activeRunJournal.find(
+      (event) => event.type === "memory/injected",
+    );
+    if (injected?.type !== "memory/injected") throw new Error("unreachable");
+    expect(injected.facts).toContainEqual(
+      expect.objectContaining({ scope: "group", groupId: GROUP_ID }),
+    );
+
+    // The Bot's own chat carries its own and its User's Memory, not a group's.
+    const oneToOne = await new MemoryProjection({
+      ...hostFor(),
+      records,
+      groups,
+    }).refresh(4, (await openSession()).session);
+    expect(oneToOne.text).not.toContain("Bowral");
+
+    // A Bot that left the group no longer reads it, even in the group's Turn.
+    groups.set([]);
+    const left = await new MemoryProjection(inGroup).refresh(
+      4,
+      (await openSession()).session,
+    );
+    expect(left.text).not.toContain("Bowral");
+    await dispose();
+  });
+
+  test("memory_write in a group's Turn defaults group_id to that group", async () => {
+    const { userEngine, records } = canonical();
+    const groups = createInMemoryMemoryGroupsV1([GROUP_ID]);
+    const host = { ...hostFor(), records, groups, group: GROUP_ID };
     const { session, sessions, dispose } = await openSession();
-    const projection = new MemoryProjection(host);
-    const [create, join, leave] = createProjectTools(
+    const write = createMemoryWriteTool(
       host,
       sessions,
-      projection,
+      new MemoryProjection(host),
     );
 
-    const created = await create!.execute(
-      {
-        project: "ghetto-movement",
-        name: "Ghetto Movement",
-        description: "The gym build.",
-      },
+    const written = await write.execute(
+      { scope: "group", fact: "Friday stand-ups are cancelled." },
       CONTEXT,
     );
-    expect(created.isError).toBe(false);
-    expect(await host.projects.joined()).toEqual([
-      {
-        projectId: "ghetto-movement",
-        name: "Ghetto Movement",
-        description: "The gym build.",
-      },
-    ]);
-
-    // The descriptor is a Memory file, written with the User's authority.
-    const descriptor = await host.store.reads.read({
-      root: {
-        kind: "project-memory",
-        userId: "user-1",
-        projectId: "ghetto-movement",
-      },
-      path: "projects/ghetto-movement/project.md",
-    });
-    expect(descriptor.status).toBe("ok");
+    expect(written).toEqual({ content: "Remembered.", isError: false });
     expect(
-      descriptor.status === "ok"
-        ? descriptor.file.generation.writer
-        : undefined,
-    ).toEqual({ kind: "user", userId: "user-1" });
-
-    const intent = session.activeRunJournal.find(
-      (event) => event.type === "memory/project-intent",
-    );
-    const changed = session.activeRunJournal.find(
-      (event) => event.type === "memory/project-changed",
-    );
-    expect(intent).toMatchObject({
-      action: "create",
-      projectId: "ghetto-movement",
-    });
-    expect(changed).toMatchObject({ projects: ["ghetto-movement"] });
-    expect(intent!.seq).toBeLessThan(changed!.seq);
-
-    await leave!.execute({ project: "ghetto-movement" }, CONTEXT);
-    expect(await host.projects.joined()).toEqual([]);
-    const rejoined = await join!.execute(
-      { project: "ghetto-movement" },
-      CONTEXT,
-    );
-    expect(rejoined.isError).toBe(false);
-    expect((await host.projects.joined()).map((p) => p.projectId)).toEqual([
-      "ghetto-movement",
+      session.activeRunJournal.find((event) => event.type === "memory/written"),
+    ).toMatchObject({ scope: "group", groupId: GROUP_ID });
+    expect(userEngine.scopeKeysOfKind("groupChat")).toEqual([
+      `groupChat:user-1:${GROUP_ID}`,
     ]);
     await dispose();
   });
@@ -765,27 +807,31 @@ describe("a Memory read that a bound cut short", () => {
   });
 });
 
-describe("a project-scope change to a Project the Bot never joined", () => {
+describe("the group scope where it cannot apply", () => {
   test("is refused, and nothing is recorded or written", async () => {
-    const host = { ...hostFor(), projects: createInMemoryMemoryProjectsV1() };
+    const host = hostFor();
     const { session, sessions, dispose } = await openSession();
     const projection = new MemoryProjection(host);
     const write = createMemoryWriteTool(host, sessions, projection);
     const forget = createMemoryForgetTool(host, sessions, projection);
 
+    // Outside a group's Turn, the group must be named.
+    expect(
+      await write.execute({ scope: "group", fact: "A shared fact." }, CONTEXT),
+    ).toMatchObject({ isError: true });
+    // Group Memory is canonical only; a host without it has none.
     const written = await write.execute(
-      { scope: "project", project: "never-joined", fact: "A shared fact." },
+      { scope: "group", group_id: GROUP_ID, fact: "A shared fact." },
       CONTEXT,
     );
     const forgotten = await forget.execute(
-      { scope: "project", project: "never-joined", fact: "A shared fact." },
+      { scope: "group", group_id: GROUP_ID, fact: "A shared fact." },
       CONTEXT,
     );
 
     expect(written.isError).toBe(true);
-    expect(written.content).toContain("you have not joined");
+    expect(written.content).toContain("group memory is not available");
     expect(forgotten.isError).toBe(true);
-    expect(forgotten.content).toContain("you have not joined");
     expect(
       session.activeRunJournal.some((event) => event.type === "memory/written"),
     ).toBe(false);
@@ -837,48 +883,6 @@ describe("a memory_forget that changes one file and then fails", () => {
     const remaining = await host.store.read(userMemoryRootV1(OWNER));
     expect(remaining.recent.map((entry) => entry.text)).toEqual([]);
     expect(remaining.profile.map((entry) => entry.text)).toEqual([fact]);
-    await dispose();
-  });
-});
-
-describe("project_create when the descriptor write conflicts", () => {
-  test("is a visible refusal, and no membership change is recorded", async () => {
-    const files = createTestMemoryFilesV1({ userId: "user-1" });
-    const conflicting: WorkspaceFilesV1 = {
-      read: (path) => files.read(path),
-      list: (request) => files.list(request),
-      stat: (path) => files.stat(path),
-      write: () =>
-        Promise.resolve({
-          status: "conflict" as const,
-          reason: "another writer holds a newer generation",
-        }),
-      delete: (request) => files.delete(request),
-    };
-    const host = {
-      ...hostFor("bot-1", conflicting),
-      projects: createInMemoryMemoryProjectsV1(),
-    };
-    const { session, sessions, dispose } = await openSession();
-    const [create] = createProjectTools(
-      host,
-      sessions,
-      new MemoryProjection(host),
-    );
-
-    const created = await create!.execute(
-      { project: "ghetto-movement", name: "Ghetto Movement" },
-      CONTEXT,
-    );
-
-    expect(created.isError).toBe(true);
-    expect(created.content).toContain("conflict");
-    expect(
-      session.activeRunJournal.some(
-        (event) => event.type === "memory/project-changed",
-      ),
-    ).toBe(false);
-    expect(await host.projects.joined()).toEqual([]);
     await dispose();
   });
 });
@@ -951,18 +955,9 @@ function readsCountConcurrency(files: WorkspaceFilesV1): {
 describe("the turn-start Memory read across every tier", () => {
   test("never holds more reads open at once than the declared bound", async () => {
     const seed = createTestMemoryFilesV1({ userId: "user-1" });
-    const projects = createInMemoryMemoryProjectsV1();
-    const projectIds = ["proj-a", "proj-b", "proj-c", "proj-d"];
-    for (const projectId of projectIds) {
-      await projects.create({
-        projectId,
-        name: projectId,
-        description: "",
-      });
-    }
-    // Several shards in each of several tiers: enough files that a squared
-    // bound and an honest one are far apart.
-    const shardCount = 6;
+    // Many shards in the shared tier: enough files that a squared bound and
+    // an honest one are far apart.
+    const shardCount = 16;
     for (let index = 0; index < shardCount; index += 1) {
       const botId = `bot-${String(index).padStart(3, "0")}`;
       const store = new MemoryStore({
@@ -973,9 +968,6 @@ describe("the turn-start Memory read across every tier", () => {
       for (const root of [
         botMemoryRootV1({ userId: "user-1", botId }),
         userMemoryRootV1(OWNER),
-        ...projectIds.map((projectId) =>
-          projectMemoryRootV1({ userId: "user-1", botId }, projectId),
-        ),
       ]) {
         const written = await store.write({
           root,
@@ -988,10 +980,7 @@ describe("the turn-start Memory read across every tier", () => {
     }
 
     const counting = readsCountConcurrency(seed);
-    const host = {
-      ...hostFor("bot-000", counting.files),
-      projects,
-    };
+    const host = hostFor("bot-000", counting.files);
     const { session, dispose } = await openSession();
 
     await new MemoryProjection(host).refresh(4, session);

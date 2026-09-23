@@ -10,7 +10,18 @@ import {
 } from "./engine-tools.ts";
 import { MemoryRecordsV1, inProcessMemoryRemoteV1 } from "./owner.ts";
 import type { MemorySqlStorageV1, MemorySqlValueV1 } from "./sql.ts";
-import { createInMemoryMemoryProjectsV1 } from "./testing.ts";
+import { createInMemoryMemoryGroupsV1 } from "./testing.ts";
+
+const SCHOOL = "g-5c0015c0015c0015c001";
+const CONTEXT = {
+  botId: "bot-1",
+  agentId: "bot-1",
+  sessionId: "s",
+  compositionGenerationId: "g",
+  turnType: "chat" as const,
+  effectId: "e",
+  signal: new AbortController().signal,
+};
 
 const databases: Database[] = [];
 afterEach(() => {
@@ -34,7 +45,7 @@ function sqlStorage(database: Database): MemorySqlStorageV1 {
   };
 }
 
-function recordsHost(joined: string[] = []) {
+function recordsHost(joined: string[] = [], group?: string) {
   const botDb = new Database(":memory:");
   const userDb = new Database(":memory:");
   databases.push(botDb, userDb);
@@ -51,18 +62,13 @@ function recordsHost(joined: string[] = []) {
     engine: botEngine,
     remote: inProcessMemoryRemoteV1(userEngine),
   });
-  const projects = createInMemoryMemoryProjectsV1(
-    joined.map((projectId) => ({
-      projectId,
-      name: projectId,
-      description: "",
-    })),
-  );
+  const groups = createInMemoryMemoryGroupsV1(joined);
   return {
     owner: { userId: "user-1", botId: "bot-1" },
     records,
     writer: { sessionId: "s", turnId: "t", runId: "r" },
-    projects,
+    groups,
+    ...(group ? { group } : {}),
   };
 }
 
@@ -143,19 +149,51 @@ describe("canonical Memory tools", () => {
     expect(search.content).toBe("No memory matches.");
   });
 
-  test("unjoined project write is refused", async () => {
-    const host = recordsHost();
-    const written = await executeRecordsWriteV1(
-      host,
+  test("a group's Memory is its members' alone", async () => {
+    const outsider = recordsHost();
+    const refused = await executeRecordsWriteV1(
+      outsider,
       {
-        scope: "project",
-        project: "school",
+        scope: "group",
+        groupId: SCHOOL,
         tier: "log",
         fact: "Assembly is Friday.",
       },
       "p1",
     );
-    expect(written.isError).toBe(true);
-    expect(String(written.content)).toContain("not joined");
+    expect(refused.isError).toBe(true);
+    expect(String(refused.content)).toContain("not a member");
+
+    const member = recordsHost([SCHOOL], SCHOOL);
+    expect(
+      await executeRecordsWriteV1(
+        member,
+        {
+          scope: "group",
+          groupId: SCHOOL,
+          tier: "log",
+          fact: "Assembly is Friday.",
+        },
+        "p2",
+      ),
+    ).toEqual({ content: "Remembered.", isError: false });
+    const found = await executeRecordsSearchV1(member, {
+      query: "Assembly",
+      scope: "group",
+    });
+    expect(found.content).toContain(`group/${SCHOOL}:`);
+    // In the group's own Turn, browse needs no group_id.
+    const page = await createMemoryBrowseTool(member).execute(
+      { scope: "group" },
+      CONTEXT,
+    );
+    expect(page.content).toContain("Assembly is Friday.");
+    // A Bot that leaves loses the group's Memory with the membership.
+    member.groups.set([]);
+    const gone = await executeRecordsSearchV1(member, {
+      query: "Assembly",
+      scope: "group",
+    });
+    expect(gone.content).toBe("No memory matches.");
   });
 });

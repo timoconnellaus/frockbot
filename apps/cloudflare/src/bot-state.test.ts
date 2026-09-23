@@ -272,9 +272,9 @@ describe("BotState Ollama execution", () => {
           ...rpc,
           ...userComposition,
           // The Memory half of the User Durable Object: the shared-root
-          // generation ledger and Project membership. This Bot writes no
+          // generation ledger and Group Chat membership. This Bot writes no
           // shared root in the test, so only the read paths are exercised.
-          listMemoryProjects: () => Promise.resolve([]),
+          listMemoryGroups: () => Promise.resolve({ groupIds: [] }),
           currentWorkspaceGeneration: () => Promise.resolve(undefined),
           listWorkspaceConflicts: () => Promise.resolve([]),
         }),
@@ -392,7 +392,7 @@ describe("BotState mount failures", () => {
               initialName: "Bot",
               avatar: randomAvatarAppearanceV1(() => 0),
             }),
-          listMemoryProjects: () => Promise.resolve([]),
+          listMemoryGroups: () => Promise.resolve({ groupIds: [] }),
           currentWorkspaceGeneration: () => Promise.resolve(undefined),
           listWorkspaceConflicts: () => Promise.resolve([]),
         }),

@@ -1,9 +1,17 @@
 import { afterEach, describe, expect, test } from "bun:test";
+import { Database, type SQLQueryBindings } from "bun:sqlite";
 import {
+  createInMemoryMemoryGroupsV1,
   createMemoryRuntimeFeature,
+  groupChatScopeV1,
+  inProcessMemoryRemoteV1,
+  MemoryEngineV1,
+  MemoryRecordsV1,
   MemoryStore,
   botMemoryRootV1,
   createTestMemoryFilesV1,
+  type MemorySqlStorageV1,
+  type MemorySqlValueV1,
 } from "@frockbot/app/memory";
 import clockFeature from "@frockbot/app/clock/agent";
 import echoFeature from "@frockbot/app/echo/agent";
@@ -40,9 +48,31 @@ async function createRuntime(): Promise<FoundationRuntime> {
   return runtime;
 }
 
+const databases: Database[] = [];
+
 afterEach(async () => {
   await Promise.all(runtimes.splice(0).map((runtime) => runtime.dispose()));
+  for (const database of databases.splice(0)) database.close();
 });
+
+function sqlStorage(): MemorySqlStorageV1 {
+  const database = new Database(":memory:");
+  databases.push(database);
+  return {
+    sql: {
+      exec<Row extends Record<string, MemorySqlValueV1>>(
+        query: string,
+        ...bindings: SQLQueryBindings[]
+      ) {
+        const rows = database
+          .query<Row, SQLQueryBindings[]>(query)
+          .all(...bindings);
+        return { toArray: () => rows };
+      },
+    },
+    transactionSync: (callback) => database.transaction(callback)(),
+  };
+}
 
 describe("foundation runtime", () => {
   test("streams a deterministic response through the custom loop", async () => {
@@ -242,6 +272,60 @@ describe("foundation runtime", () => {
         (event) => event.type === "memory/injected",
       ),
     ).toBe(true);
+  });
+
+  test("a group's Turn is remembered in the group's Memory", async () => {
+    const owner = { userId: "alice", botId: "primary" };
+    const groupId = "g-5c0015c0015c0015c001";
+    const sessionId = `group:${groupId}`;
+    const botEngine = new MemoryEngineV1({
+      storage: sqlStorage(),
+      ownedKinds: ["bot"],
+    });
+    const records = new MemoryRecordsV1({
+      owner: "bot",
+      engine: botEngine,
+      remote: inProcessMemoryRemoteV1(
+        new MemoryEngineV1({
+          storage: sqlStorage(),
+          ownedKinds: ["user", "groupChat"],
+        }),
+      ),
+    });
+    const runtime = await createFoundationRuntime(undefined, {
+      botId: owner.botId,
+      sessionId,
+      admitEffect: allowEffect,
+      agentPackages: [
+        ...basePackages(),
+        {
+          id: "@frockbot/app/memory",
+          feature: createMemoryRuntimeFeature({
+            owner,
+            store: new MemoryStore({
+              files: createTestMemoryFilesV1({ userId: owner.userId }),
+              owner,
+            }),
+            writer: { sessionId, turnId: "turn-1", runId: "run-1" },
+            records,
+            groups: createInMemoryMemoryGroupsV1([groupId]),
+            group: groupId,
+          }),
+        },
+      ],
+    });
+    runtimes.push(runtime);
+
+    runtime.agent.agent.send("User: the offsite is in Bowral this year.");
+    await runtime.agent.agent.whenIdle();
+
+    // The thread is the group's, so what it teaches is owed to the group's
+    // Memory, which the User's object keeps.
+    const [owed] = botEngine.inspectOutbox();
+    expect(owed).toBeDefined();
+    expect(botEngine.outboxPayload(owed!.id)?.destinationScope).toEqual(
+      groupChatScopeV1(owner.userId, groupId),
+    );
   });
 
   test("selects the configured OpenAI-compatible provider", async () => {

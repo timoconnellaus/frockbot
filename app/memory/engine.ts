@@ -1756,6 +1756,90 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
     this.rebuildTopic(scopeKey);
   }
 
+  /** Every scope with anything recorded under it, of one kind. */
+  scopeKeysOfKind(kind: MemoryScopeRefV1["kind"]): string[] {
+    this.open();
+    return this.#sql
+      .exec<{ scope_key: string }>(
+        `SELECT scope_key FROM memory_scope WHERE scope_key LIKE ?
+         UNION SELECT scope_key FROM memory_item WHERE scope_key LIKE ?
+         UNION SELECT scope_key FROM memory_job WHERE scope_key LIKE ?
+         ORDER BY scope_key`,
+        `${kind}:%`,
+        `${kind}:%`,
+        `${kind}:%`,
+      )
+      .toArray()
+      .map((row) => row.scope_key);
+  }
+
+  /**
+   * Deletes one scope's Memory whole — items, sources, derived views, jobs
+   * and receipts — for a scope that no longer exists, such as a deleted Group
+   * Chat's. Each vector written for it is queued for deletion, so the index
+   * forgets it too.
+   */
+  purgeScope(scopeKey: string): { items: number } {
+    this.open();
+    const now = this.#now();
+    const purged = this.#storage.transactionSync(() => {
+      const items = Number(
+        this.#sql
+          .exec<{ n: number }>(
+            `SELECT count(*) AS n FROM memory_item WHERE scope_key = ?`,
+            scopeKey,
+          )
+          .toArray()[0]?.n ?? 0,
+      );
+      const vectors = this.#sql
+        .exec<{ item_id: string; item_generation: number }>(
+          `SELECT DISTINCT item_id, item_generation FROM memory_vector_ledger
+           WHERE scope_key = ? AND operation = 'upsert'`,
+          scopeKey,
+        )
+        .toArray();
+      this.#sql.exec(
+        `DELETE FROM memory_job_result
+         WHERE job_id IN (SELECT id FROM memory_job WHERE scope_key = ?)`,
+        scopeKey,
+      );
+      for (const table of [
+        "memory_scope",
+        "memory_item",
+        "memory_item_fts",
+        "memory_source",
+        "memory_evidence",
+        "memory_relation",
+        "memory_derivation",
+        "memory_suppression",
+        "memory_receipt",
+        "memory_job",
+        "memory_projection",
+        "memory_index_intent",
+        "memory_source_retention",
+        "memory_vector_ledger",
+      ]) {
+        this.#sql.exec(`DELETE FROM ${table} WHERE scope_key = ?`, scopeKey);
+      }
+      this.#sql.exec(
+        `DELETE FROM memory_outbox WHERE destination_scope_key = ?`,
+        scopeKey,
+      );
+      for (const vector of vectors) {
+        this.queueIndexIntent(
+          scopeKey,
+          vector.item_id,
+          "delete",
+          now,
+          Number(vector.item_generation),
+        );
+      }
+      return { items };
+    });
+    this.armAfterCommit();
+    return purged;
+  }
+
   completeIndexIntent(
     claim: MemoryClaimedIndexIntentV1,
     mutationId: string | undefined,

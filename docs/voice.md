@@ -896,9 +896,9 @@ message on the request's own run. A new call is told silently about work
 that is still running (`<running-tasks>`), and does not announce it.
 The User Memory profile and the last 30 days of its log are read at call start
 through `MemoryStore` over the User Durable Object's generation ledger (so
-retractions and shards resolve as they do for Bots), and Project memory is
-read on demand through the same store when the assistant's `recall_project`
-tool asks for it. Live Bot directory and run status are read from
+retractions and shards resolve as they do for Bots). Group Chats have no voice
+yet, so a call reads no group's Memory. Live Bot directory and run status are
+read from
 `UserConfiguration.listBots` and the Bot's run projection, never from
 memory.
 

@@ -587,17 +587,6 @@ export const VOICE_FUNCTION_DECLARATIONS_V1: readonly GeminiFunctionDeclarationV
       behavior: "NON_BLOCKING",
     },
     {
-      name: "recall_project",
-      description:
-        "Read the shared memory of one of the person's Projects when the question is about it. Use the project id from a Bot's description or the person's words.",
-      parameters: {
-        type: "OBJECT",
-        properties: { project_id: { type: "STRING" } },
-        required: ["project_id"],
-      },
-      behavior: "NON_BLOCKING",
-    },
-    {
       name: "memory_search",
       description:
         "Search long-term memory for this person and this Bot. Blocking: wait for the result before you answer from memory.",
@@ -739,7 +728,6 @@ export interface VoiceAssistantHostV1 {
     | { status: "switched"; botId: string; name: string; message: string }
     | { status: "refused"; message: string }
   >;
-  recallProject(projectId: string): Promise<string>;
   /**
    * Writes one thing into the session's memory and answers what happened, in
    * words the model can repeat. A refusal (a credential, nowhere to write) is
@@ -942,10 +930,6 @@ export async function runVoiceToolV1(
         };
       case "forget":
         return { result: await host.forget(stringArgument(args, "text")) };
-      case "recall_project":
-        return {
-          result: await host.recallProject(stringArgument(args, "project_id")),
-        };
       default:
         return { result: `Unknown tool ${call.name}.` };
     }
