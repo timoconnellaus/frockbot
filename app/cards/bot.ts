@@ -346,7 +346,7 @@ export async function cardAction(
             message: reason,
             // A press is not a Turn, and the notice the person reads must
             // not tell them one was lost.
-            card: "press",
+            kind: "press",
           },
         );
       } catch {

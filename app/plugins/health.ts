@@ -18,14 +18,19 @@ export const PLUGIN_QUARANTINE_THRESHOLD_V1 = 3;
 export type PluginFailurePhaseV1 = "resolve" | "mount" | "health" | "hook";
 
 /**
- * What the Plugin was doing when it failed. Presses and draws count toward
- * the quarantine exactly as a Turn does — what turns a Plugin off is the
- * total — but none of them is a Turn, so the run has to carry what it is
- * made of for a notice to say so truthfully.
+ * What the Plugin was doing when it failed. Presses, draws and theme
+ * assemblies count toward the quarantine exactly as a Turn does — what turns
+ * a Plugin off is the total — but none of them is a Turn, so the run has to
+ * carry what it is made of for a notice to say so truthfully.
  */
-export type PluginFailureKindV1 = "turn" | "press" | "draw";
+export type PluginFailureKindV1 = "turn" | "press" | "draw" | "theme";
 
-const FAILURE_KINDS: readonly PluginFailureKindV1[] = ["turn", "press", "draw"];
+const FAILURE_KINDS: readonly PluginFailureKindV1[] = [
+  "turn",
+  "press",
+  "draw",
+  "theme",
+];
 
 export interface PluginHealthRecordV1 {
   schemaVersion: 1;
@@ -276,6 +281,8 @@ export function pluginQuarantineCopyV1(health: PluginHealthRecordV1): string {
         ? `${health.consecutiveFailures} card presses in a row that failed`
         : run === "draw"
           ? `${health.consecutiveFailures} card draws in a row that failed`
-          : `${health.consecutiveFailures} failures in a row`;
+          : run === "theme"
+            ? `${health.consecutiveFailures} theme updates in a row that failed`
+            : `${health.consecutiveFailures} failures in a row`;
   return `Turned off after ${what} (last: ${health.lastFailure.message.slice(0, 200)}). Turn it on to try again.`;
 }

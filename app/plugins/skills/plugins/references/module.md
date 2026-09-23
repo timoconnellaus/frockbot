@@ -49,6 +49,8 @@ export const hooks: PluginHooks = {
 - The module has no default export and no imports of its own except
   `import type … from "@frockbot/applet-sdk/plugin"`. A value import fails the
   build; the module is one file and the bundler inlines nothing from outside.
+  Every type that import names is in `types.md`. The types are not on the
+  Computer: `plugin_check` is what resolves the import.
 - `tools` is an array of at most 64. It may be empty when the Plugin's
   surface is only hooks, a card, a trigger, a view or a model provider. A
   name is `^[a-z][a-z0-9_]{0,63}$` and the description is what a model reads

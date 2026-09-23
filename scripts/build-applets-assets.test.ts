@@ -17,8 +17,11 @@ import { pathToFileURL } from "node:url";
 import {
   managedSkillModule,
   PLUGIN_SKILL_SOURCE,
+  PLUGIN_TYPES_REFERENCE,
+  pluginTypesReference,
   skillDirectory,
 } from "./build-applets-assets";
+import { SDK_PLUGIN_TYPES } from "../applets/sdk/src/build/paths";
 import {
   PLUGINS_SKILL_DOCUMENT_V1,
   PLUGINS_SKILL_REFERENCES_V1,
@@ -125,6 +128,24 @@ describe("the managed Skill generator", () => {
     expect(generated.APPLETS_SKILL_REFERENCES_V1).toEqual([
       { path: "forms.md", text: "# Forms\nOne per person.\n" },
     ]);
+  });
+
+  test("the Plugins Skill's types.md is the exact file plugin_check resolves", async () => {
+    const declarations = await Bun.file(SDK_PLUGIN_TYPES).text();
+    const reference = await pluginTypesReference();
+    // Byte for byte inside one fence: nothing summarised, nothing dropped.
+    const fenced = /^(`{3,})ts\n([\s\S]*)\n\1$/m.exec(reference)?.[2];
+    expect(fenced).toBe(declarations.trimEnd());
+    // What ships is what the generator makes from that file.
+    const shipped = PLUGINS_SKILL_REFERENCES_V1.find(
+      (entry) => entry.path === "types.md",
+    );
+    expect(shipped?.text).toBe(reference);
+    expect(
+      await Bun.file(
+        new URL(`../${PLUGIN_TYPES_REFERENCE}`, import.meta.url),
+      ).text(),
+    ).toBe(reference);
   });
 
   test("the committed Plugins Skill carries what its directory holds", async () => {
