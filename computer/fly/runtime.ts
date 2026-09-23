@@ -1377,7 +1377,7 @@ export const CLOCK_FLOOR_EPOCH = 1_756_684_800;
  * corrected. The version is compared on every adoption instead, and the whole
  * set is rewritten when it moves. Bump it whenever a document below changes.
  */
-export const REFERENCE_DOCS_VERSION = "2026-09-05.1";
+export const REFERENCE_DOCS_VERSION = "2026-09-23.1";
 
 /**
  * What a Bot reads to debug its own Computer.
@@ -1448,6 +1448,13 @@ on an image rebuild, a Computer reset, and a host migration. Put working files
 here, never the only copy of anything.
 
 \`/tmp\` is the same story with a shorter life: assume a restart empties it.
+
+## The runtime — not yours
+
+\`${RUNTIME_ROOT}\` holds the Computer runtime and its live state. The files an
+install owns are listed in \`${RUNTIME_ROOT}/provision/install-manifest\`, and
+the next install removes what it no longer ships. Keep nothing of yours under
+it, and do not read a library or SDK you find there as the one your tools use.
 `,
   },
   {
@@ -2025,6 +2032,112 @@ export const COMPUTER_RUNTIME_FILES: readonly {
   })),
 ];
 
+/**
+ * Where the runtime phase records every path it installed, one per line.
+ *
+ * The next install removes what the previous one owned and it does not, so a
+ * file a later release stopped shipping leaves the Computer instead of sitting
+ * there for ever looking current. `~/.frockbot` mixes what an install writes
+ * with live state, so it is never pruned wholesale: only a path an install
+ * once recorded can be removed, and live state is never recorded.
+ */
+export const INSTALL_MANIFEST = `${PROVISION_ROOT}/install-manifest`;
+
+/**
+ * Every path this release's install owns: the runtime and reference files, the
+ * viewer's links into noVNC, and what the browser phase installs. Nothing here
+ * is live state. The browser phase runs only when a Computer is provisioned,
+ * never in an update, so dropping one of its paths here removes it from every
+ * adopted Computer with nothing to put a replacement back: that needs an
+ * update path first.
+ */
+export const INSTALL_MANIFEST_PATHS: readonly string[] = [
+  ...COMPUTER_RUNTIME_FILES.map((file) => file.path),
+  `${VIEWER_ROOT}/core`,
+  `${VIEWER_ROOT}/vendor`,
+  `${RUNTIME_ROOT}/node_modules/playwright-core`,
+  CHROMIUM_PATH,
+  ...REFERENCE_RUNTIME_FILES.map((file) => file.path),
+];
+
+/**
+ * The manifest a Computer is taken to have when it has none: what earlier
+ * installs left and nothing ever deleted. The Applets phase's SDK, stopped at
+ * 0.3.14, and its shim, still on every tenant's `PATH`; and the per-slot
+ * desktop script the one-browser desktop replaced. A Computer provisioned
+ * since has none of it, and removing a missing path is nothing.
+ */
+export const INSTALL_MANIFEST_SEED: readonly string[] = [
+  `${RUNTIME_ROOT}/applets`,
+  `${BIN_ROOT}/applet`,
+  `${BIN_ROOT}/applet.tmp`,
+  `${RUNTIME_ROOT}/start-desktop.sh`,
+];
+
+/**
+ * What no manifest can make an install remove: the directories installs live
+ * in, and the live state beside them. A manifest line naming one of these, or
+ * anything outside the Computer's home, is ignored rather than trusted.
+ */
+export const INSTALL_KEPT_PATHS: readonly string[] = [
+  HOME_ROOT,
+  RUNTIME_ROOT,
+  BIN_ROOT,
+  SHIMS_ROOT,
+  VIEWER_ROOT,
+  FLUXBOX_ROOT,
+  REFERENCE_ROOT,
+];
+export const INSTALL_LIVE_STATE_PATHS: readonly string[] = [
+  BOTS_ROOT,
+  `${RUNTIME_ROOT}/sync`,
+  `${RUNTIME_ROOT}/tokens`,
+  PROVISION_ROOT,
+  BROWSERS_ROOT,
+  `${RUNTIME_ROOT}/registry.lock`,
+  `${RUNTIME_ROOT}/host-state.json`,
+  `${RUNTIME_ROOT}/fluxbox.log`,
+  WATCHDOG_LOG,
+  CHROME_PROFILE,
+  DATA_ROOT,
+];
+
+/**
+ * Records this install's manifest and removes what the previous one owned and
+ * this one does not. A path that will not go is kept in the new manifest, so
+ * the next install tries again rather than this one failing the Computer.
+ *
+ * A line is removed only in its plain spelling, never through a symlinked
+ * parent, and never when it holds or sits inside a path this install owns:
+ * the guard compares text, so everything that would make two spellings of
+ * one path is refused rather than resolved.
+ */
+const installManifestScript = `MANIFEST=${INSTALL_MANIFEST}
+mkdir -p ${PROVISION_ROOT}
+if [ -f "$MANIFEST" ]; then
+  PREVIOUS=$(cat "$MANIFEST")
+else
+  PREVIOUS=${shellQuote(INSTALL_MANIFEST_SEED.join("\n"))}
+fi
+printf '%s\\n' ${INSTALL_MANIFEST_PATHS.map(shellQuote).join(" ")} > "$MANIFEST.tmp"
+HOME_REAL=$(cd -P ${HOME_ROOT} && pwd)
+printf '%s\\n' "$PREVIOUS" | while IFS= read -r OWNED; do
+  [ -n "$OWNED" ] || continue
+  case "$OWNED" in
+    ${shellQuote(HOME_ROOT)}/?*) ;;
+    *) continue ;;
+  esac
+  case "$OWNED" in
+    *//*|*/./*|*/.|*/../*|*/..|*/|${INSTALL_KEPT_PATHS.map(shellQuote).join("|")}) continue ;;
+    ${INSTALL_LIVE_STATE_PATHS.map((path) => `${shellQuote(path)}|${shellQuote(path)}/*`).join("|")}) continue ;;
+  esac
+  awk -v owned="$OWNED" '$0 == owned || index($0, owned "/") == 1 || index(owned, $0 "/") == 1 { found = 1 } END { exit !found }' "$MANIFEST.tmp" && continue
+  PARENT=\${OWNED%/*}
+  [ "$(cd -P -- "$PARENT" 2>/dev/null && pwd)" = "$HOME_REAL\${PARENT#${HOME_ROOT}}" ] || continue
+  rm -rf -- "$OWNED" "$OWNED.tmp" || printf '%s\\n' "$OWNED" >> "$MANIFEST.tmp"
+done
+mv "$MANIFEST.tmp" "$MANIFEST"`;
+
 function installDeclaredFiles(
   files: readonly {
     readonly path: string;
@@ -2097,7 +2210,8 @@ ${installDeclaredFiles(COMPUTER_RUNTIME_FILES)}
 # noVNC's ES modules in core/ import one another and ../vendor/pako. The links
 # keep that package-owned graph intact while FrockBot owns every rendered element.
 ln -sfn /usr/share/novnc/core ${VIEWER_ROOT}/core
-ln -sfn /usr/share/novnc/vendor ${VIEWER_ROOT}/vendor`,
+ln -sfn /usr/share/novnc/vendor ${VIEWER_ROOT}/vendor
+${installManifestScript}`,
   },
   {
     name: "browser",
@@ -2141,9 +2255,11 @@ fi`,
 /**
  * The only phases an in-place runtime update may run.
  *
- * These atomically replace files owned by the provisioner. They never run
- * `apt`, install a browser, replace the instance, or touch `/home/box` User
- * content, the shared browser profile, or any durable root. A running Turn
+ * These atomically replace files owned by the provisioner, and remove what an
+ * earlier release installed and this one no longer does, by the install
+ * manifest. They never run `apt`, install a browser, replace the instance, or
+ * touch `/home/box` User content, the shared browser profile, or any durable
+ * root. A running Turn
  * keeps the old inode while each name is swapped, so it is not interrupted.
  * That is the Computer and Workspace rule made executable: an automatic
  * update loses nothing and cannot become an undeclared durability mechanism.
