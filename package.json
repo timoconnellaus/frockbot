@@ -61,6 +61,7 @@
     "eval:greeting": "bun scripts/eval-greeting.ts",
     "eval:conversation": "bun scripts/eval-conversation.ts",
     "eval:tool-approval": "bun scripts/eval-tool-approval.ts",
+    "eval:turn-start": "bun scripts/eval-turn-start.ts",
     "eval:routine-event": "bun scripts/eval-routine-event.ts",
     "eval:dictation-cleanup": "bun scripts/eval-dictation-cleanup.ts"
   },

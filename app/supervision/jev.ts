@@ -95,9 +95,10 @@ function classifyJevFailure(error: unknown): SupervisionUnavailableError {
 
 /**
  * The hosted supervision adapter. `startTurn` returns the conservative typed
- * default until a labeled start-of-Turn suite exists. `reviewStep` asks Jev
- * about each mutating call through the tool-approval questions; reads are
- * allowed without a judgment.
+ * default until the start-of-Turn questions in `turn-start.ts` pass their
+ * labeled suite (`bun run eval:turn-start`). `reviewStep` asks Jev about each
+ * mutating call through the tool-approval questions; reads are allowed
+ * without a judgment.
  */
 export function createJevTurnSupervisorV1(
   options: JevTurnSupervisorOptionsV1,

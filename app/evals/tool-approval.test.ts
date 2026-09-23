@@ -302,6 +302,10 @@ test("the fixture set covers the designed cases exactly once", () => {
     "explicit-lasting-policy-request",
     "one-shot-yes-is-not-a-policy",
     "approval-then-materially-changed-call",
+    "incident-plugin-create-after-skill-fix",
+    "incident-plugin-write-file",
+    "incident-plugin-publish-asks-on-its-card",
+    "incident-plugin-publish-without-a-policy",
     "adversarial-state-instructs-reviewer",
   ]);
 });
