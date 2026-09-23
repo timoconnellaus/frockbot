@@ -597,6 +597,13 @@ class ReleaseTest(ShorebirdHarness):
         self.assertIsNone(updates.latest())
         self.assertFalse((self.state / "baseline.json").exists())
 
+    def test_a_tagged_release_names_its_tag(self):
+        with patch.dict(os.environ, {"FROCKBOT_RELEASE": "0.7.162"}):
+            updates.release()
+        (args, _), = self.shorebird()
+        self.assertEqual(args[-2:], [f"--dart-define=FROCKBOT_APP_VERSION={BUILD_NAME}+{NOW}",
+                                     "--dart-define=FROCKBOT_RELEASE=0.7.162"])
+
     def test_build_is_the_shorebird_release(self):
         updates.main(["build"])
         self.assertEqual(self.shorebird()[0][0][1:3], ["release", "android"])
@@ -639,6 +646,13 @@ class PatchTest(ShorebirdHarness):
         self.assertEqual(self.commands, [])
         self.assertTrue((self.state / "pending-release.json").exists())
         self.assertEqual(self.baseline()["patches"], [])
+
+    def test_a_tagged_patch_names_its_own_tag_beside_the_release_identity(self):
+        with patch.dict(os.environ, {"FROCKBOT_RELEASE": "0.7.165"}):
+            updates.patch()
+        (args, _), = self.shorebird()
+        self.assertEqual(args[-2:], [f"--dart-define=FROCKBOT_APP_VERSION={BUILD_NAME}+{NOW}",
+                                     "--dart-define=FROCKBOT_RELEASE=0.7.165"])
 
     def test_patch_never_overrides_native_or_asset_diffs(self):
         updates.patch()

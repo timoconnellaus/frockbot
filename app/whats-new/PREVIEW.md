@@ -2,6 +2,12 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
+## Profile names the release
+
+fix
+
+The version at the foot of the page is the release that is running. The Mac app no longer calls itself a development build.
+
 ## Chat notices sit under the header
 
 fix

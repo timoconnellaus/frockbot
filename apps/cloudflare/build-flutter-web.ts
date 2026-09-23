@@ -172,13 +172,14 @@ async function stageRiveWasm(expected: string): Promise<string> {
 const SOURCE_ROOTS = ["lib", "web", "assets", "vendor"];
 const SOURCE_FILES = ["pubspec.yaml", "pubspec.lock"];
 
-async function sourceFingerprint(riveHostDefine: string): Promise<string> {
+async function sourceFingerprint(defines: string[]): Promise<string> {
   const digest = createHash("sha256");
   // The flags and this script are part of what the output is: a change to
-  // either produces a different bundle from the same Dart. So is the Rive
-  // runtime's URL, which a version bump moves and the bundle has baked in.
+  // either produces a different bundle from the same Dart. So are the
+  // defines, such as the Rive runtime's URL, which a version bump moves and
+  // the bundle has baked in.
   digest.update(BUILD_FLAGS.join(" "));
-  digest.update(riveHostDefine);
+  digest.update(defines.join(" "));
   digest.update(await readFile(fileURLToPath(import.meta.url)));
   // The toolchain too — a Flutter upgrade rewrites the engine even though no
   // file in this repository moved.
@@ -273,9 +274,16 @@ function flutter(...args: string[]): void {
 flutter("pub", "get");
 const nativeMetadata = await readNativeMetadata(resolve(root, "../.."));
 const riveVersion = await riveWasmVersion();
-const riveHostDefine = `--dart-define=RIVE_NATIVE_WASM_HOST=/rive/${riveVersion}/`;
+// `release.yml` names the tag it builds, which is the version the Profile page
+// shows; see `apps/native/lib/update/app_version.dart`.
+const release = process.env.FROCKBOT_RELEASE;
+const defines = [
+  `--dart-define=FROCKBOT_APP_VERSION=${nativeMetadata.app.versionName}`,
+  ...(release ? [`--dart-define=FROCKBOT_RELEASE=${release}`] : []),
+  `--dart-define=RIVE_NATIVE_WASM_HOST=/rive/${riveVersion}/`,
+];
 
-const fingerprint = await sourceFingerprint(riveHostDefine);
+const fingerprint = await sourceFingerprint(defines);
 if (await stagedIsCurrent(fingerprint)) {
   // The staging directory is rewritten whole by a build, so the runtime is
   // copied on the skipping path too rather than only alongside one.
@@ -286,13 +294,7 @@ if (await stagedIsCurrent(fingerprint)) {
   process.exit(0);
 }
 
-flutter(
-  "build",
-  "web",
-  ...BUILD_FLAGS,
-  `--dart-define=FROCKBOT_APP_VERSION=${nativeMetadata.app.versionName}`,
-  riveHostDefine,
-);
+flutter("build", "web", ...BUILD_FLAGS, ...defines);
 
 const files = await emittedFiles(flutterOut);
 if (

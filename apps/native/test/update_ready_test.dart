@@ -398,6 +398,7 @@ void main() {
       addTearDown(controller.dispose);
       final version = await controller.version();
       expect(version.patch, 3);
+      expect(version.release, compiledRelease);
       expect(version.build, compiledAppVersion);
       expect(
         const AppVersion(build: '1.2.0+17', patch: 3).label,
@@ -407,6 +408,17 @@ void main() {
 
     test('is the release alone when no patch is running', () {
       expect(const AppVersion(build: '1.2.0+17').label, 'Version 1.2.0+17');
+    });
+
+    test('names the version tag over the native build it was cut from', () {
+      expect(
+        const AppVersion(release: '0.7.162', build: '1.6.0+17', patch: 3).label,
+        'Version 0.7.162 · patch 3',
+      );
+      expect(
+        const AppVersion(release: '0.7.163-rc.1', build: '').label,
+        'Version 0.7.163-rc.1',
+      );
     });
 
     test('says so when the build was given no version', () {

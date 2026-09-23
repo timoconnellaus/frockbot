@@ -90,6 +90,16 @@ def app_version_define(release_version):
     return f"--dart-define=FROCKBOT_APP_VERSION={release_version}"
 
 
+def release_tag_defines():
+    """The version tag `release.yml` builds, which the Profile page shows over the release identity.
+
+    A patch is new Dart, so it names its own tag, and a release running its own Dart names the tag it
+    was cut from. Gradle never reads it, so it is no native change. A build cut by hand passes none.
+    """
+    tag = os.environ.get("FROCKBOT_RELEASE")
+    return [f"--dart-define=FROCKBOT_RELEASE={tag}"] if tag else []
+
+
 class FullReleaseRequired(RuntimeError):
     """Shorebird found native or asset differences, which no patch can carry."""
 
@@ -451,7 +461,7 @@ def release(floor=0, build_number=None):
     args = [cli, "release", "android", f"--flutter-version={FLUTTER_VERSION}", "--artifact=apk",
             f"--target-platform={TARGET_PLATFORM}", f"--build-name={build_name()}", f"--build-number={version}",
             f"--public-key-path={PUBLIC_KEY}", "--", origin_define(),
-            app_version_define(f"{build_name()}+{version}")]
+            app_version_define(f"{build_name()}+{version}"), *release_tag_defines()]
     if not intent:
         intent = {
             "versionCode": version, "package": PACKAGE, "appId": app_id(), "buildName": build_name(),
@@ -518,7 +528,7 @@ def patch(track="staging", baseline_source="local", result=None):
             f"--build-name={base['buildName']}", f"--build-number={base['buildNumber']}", f"--track={track}",
             f"--private-key-path={key}", f"--public-key-path={PUBLIC_KEY}",
             "--", f"--target-platform={base['targetPlatform']}", origin_define(),
-            app_version_define(base["releaseVersion"])]
+            app_version_define(base["releaseVersion"]), *release_tag_defines()]
     if any(flag in arg for arg in args for flag in FORBIDDEN_PATCH_FLAGS):
         raise RuntimeError("A patch never overrides native or asset diffs; ship a full release instead.")
     # The release was built one above its floor; the same floor makes Gradle emit the same versionCode.
