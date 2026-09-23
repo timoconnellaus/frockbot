@@ -67,6 +67,8 @@ export function visiblePublicationsV1(input: {
   events?: readonly SessionEvent[];
 }): PublicationContributionV1[] {
   const contributions: PublicationContributionV1[] = [];
+  // What a group Turn sends is the group's, read back by its own object.
+  if (input.run.admission?.origin?.kind === "group") return contributions;
   if (input.cause === "admission" || input.cause === "terminal") {
     const status = runStatusContribution(input.run);
     if (status) contributions.push(status);

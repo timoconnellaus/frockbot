@@ -176,6 +176,9 @@ export async function messageRecords(input: {
   read<T>(key: string): Promise<T | undefined>;
 }): Promise<Record<string, unknown>> {
   if (input.run.admission?.turnType === "subagent") return {};
+  // A group Turn's sends are the group's messages: they badge and notify
+  // from the group, never from the member's one-to-one chat.
+  if (input.run.admission?.origin?.kind === "group") return {};
   // Only a send is a message addressed to the User. An answer the Turn's
   // caller asked for is `reply/to-caller`, and it reaches that caller by its
   // own route: it mints no message, raises no badge and wakes no device, which

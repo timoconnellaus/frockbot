@@ -42,6 +42,10 @@ _Avoid_: Priority, queue, channel
 : One request and its answer between a Bot and a counterpart — another of the User's Bots, or the voice session — as the clients read it: a centred marker in the thread ("Messaged Codex Watch", "Message from Voice") that opens a view-only chat of every exchange between the two. Never a bubble in the conversation, and never typed into.
 _Avoid_: DM, room, channel, thread
 
+**Group Chat**
+: A conversation between the User and two to eight of their Bots. Every message reaches every member, and a member asked to reply — by an @mention, and later by Jev — runs a Turn in its own Bot under the group's Session, whose sends are posted to the group. Replaces Project.
+_Avoid_: Channel, room, project, team
+
 **Hand-off**
 : A Turn a Bot admitted on its own `agent` lane with the `subagent` tool, so the Turn that asked could answer the person straight away. It is an ordinary Turn of that Bot — its own tools, its own Session — and it speaks for itself with `send_to_user` rather than answering a caller; its origin names the run that handed it over and how deep the chain is. One level only, and a chat Turn may hand off four times.
 _Avoid_: Background job, async task, child agent (that is the Subagents Package's `Task`)

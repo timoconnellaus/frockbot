@@ -144,6 +144,22 @@ export interface StoredRunRoutineDeliveryOriginV1 {
   wakeRunId: string;
 }
 
+/**
+ * A Group Chat asking one of its members for a Turn.
+ *
+ * The group, its name and members as the Turn was asked, and the last group
+ * message the Turn was given — which is how a newer message tells the Turn to
+ * yield, and how the group knows what the member has read.
+ */
+export interface StoredRunGroupOriginV1 {
+  kind: "group";
+  groupId: string;
+  groupName: string;
+  members: Array<{ botId: string; name: string }>;
+  throughSeq: number;
+  reason: "mention" | "continue" | "retry";
+}
+
 /** What produced a Turn, when it was not a person speaking to the Bot. */
 export type StoredRunOriginV1 =
   | StoredRunRoutineOriginV1
@@ -151,7 +167,8 @@ export type StoredRunOriginV1 =
   | StoredRunSubagentOriginV1
   | StoredRunHandoffOriginV1
   | StoredRunBotOriginV1
-  | StoredRunVoiceOriginV1;
+  | StoredRunVoiceOriginV1
+  | StoredRunGroupOriginV1;
 
 /**
  * How deep a hand-off chain may go. One: a Turn a person or a Routine started
@@ -575,6 +592,50 @@ function decodeStoredRunOrigin(
       fromBotId: candidate.fromBotId,
       fromBotName: candidate.fromBotName,
       messageId: candidate.messageId,
+    };
+  }
+  if (candidate.kind === "group") {
+    requireExactOriginFields(
+      candidate,
+      ["kind", "groupId", "groupName", "members", "throughSeq", "reason"],
+      runId,
+    );
+    const members = candidate.members;
+    if (
+      !boundedString(candidate.groupId, 128) ||
+      !boundedString(candidate.groupName, 1_000) ||
+      !Array.isArray(members) ||
+      members.length === 0 ||
+      members.length > 8 ||
+      typeof candidate.throughSeq !== "number" ||
+      !Number.isSafeInteger(candidate.throughSeq) ||
+      candidate.throughSeq < 0 ||
+      (candidate.reason !== "mention" &&
+        candidate.reason !== "continue" &&
+        candidate.reason !== "retry")
+    ) {
+      throw new Error(`run "${runId}" has an invalid admission origin`);
+    }
+    return {
+      kind: "group",
+      groupId: candidate.groupId,
+      groupName: candidate.groupName,
+      members: members.map((member: unknown) => {
+        if (!member || typeof member !== "object" || Array.isArray(member)) {
+          throw new Error(`run "${runId}" has an invalid admission origin`);
+        }
+        const value = member as Record<PropertyKey, unknown>;
+        requireExactOriginFields(value, ["botId", "name"], runId);
+        if (
+          !boundedString(value.botId, 128) ||
+          !boundedString(value.name, 100)
+        ) {
+          throw new Error(`run "${runId}" has an invalid admission origin`);
+        }
+        return { botId: value.botId, name: value.name };
+      }),
+      throughSeq: candidate.throughSeq,
+      reason: candidate.reason,
     };
   }
   if (candidate.kind === "voice") {

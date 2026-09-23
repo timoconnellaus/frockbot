@@ -147,6 +147,27 @@ describe("client run protocol v1", () => {
     ).toEqual([...CONVERSATION_POSITIONED_EVENTS_V1]);
   });
 
+  test("a group Turn belongs to its group, not the member's one-to-one chat", () => {
+    const grouped = {
+      ...storedRun([]),
+      sessionId: "group:g-0123456789abcdef0123",
+      admission: {
+        schemaVersion: 1 as const,
+        turnType: "agent" as const,
+        lane: "agent" as const,
+        origin: {
+          kind: "group" as const,
+          groupId: "g-0123456789abcdef0123",
+          groupName: "Trip",
+          members: [{ botId: "scout", name: "Scout" }],
+          throughSeq: 2,
+          reason: "mention" as const,
+        },
+      },
+    };
+    expect(isVisibleRunV1(grouped)).toBe(false);
+  });
+
   test("projects an agent Turn with its Bot origin marker", () => {
     const agent = {
       ...storedRun([]),

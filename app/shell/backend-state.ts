@@ -74,6 +74,12 @@ export interface BotStateEnv {
   };
   USER_CONFIGURATIONS: BotUserConfigurationNamespaceV1;
   /**
+   * The Group Chat objects this Bot is a member of. A group Turn tells its
+   * group when it has something new to read; optional so a host without Group
+   * Chats still compiles, and the group's own alarm reads the Turn anyway.
+   */
+  GROUP_CHATS?: DurableObjectNamespace;
+  /**
    * The Bot Durable Object namespace, as the Subagent Durable Object namespace:
    * the same class, named `<userId>:<botId>#task:<taskId>`. Optional so a host
    * without it still compiles — `Task` is then not offered at all, rather than

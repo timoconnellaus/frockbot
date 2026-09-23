@@ -49,6 +49,7 @@ export interface BotSelfManagementTurn {
   /** This Turn's pinned profile name, stable across effect recovery. */
   fromBotName: string;
   inboundAgent?: FlockSelfRuntimeHostV1["inboundAgent"];
+  groupChat?: FlockSelfRuntimeHostV1["groupChat"];
   /**
    * How many `subagent` hand-offs deep this Turn is, off its own admission
    * record. Absent means none, which is every Turn a person or a Routine
@@ -227,6 +228,7 @@ export function createBotSelfManagementHost(
       );
     },
     ...(turn.inboundAgent ? { inboundAgent: turn.inboundAgent } : {}),
+    ...(turn.groupChat ? { groupChat: turn.groupChat } : {}),
     ...(authorities.spawnSubagent
       ? {
           subagent: {
