@@ -2,6 +2,14 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
+## Chat notices sit under the header
+
+fix
+
+Offline, paused and out-of-credit notices are no longer hidden behind it, and Reconnect and Open Billing can be pressed.
+
+![A phone chat with Fox: under the header, the notice “You’re offline. Your Bot can keep working.” with Reconnect beside it.](media/notices-under-header.webp)
+
 ## What’s New, easier to read
 
 improvement

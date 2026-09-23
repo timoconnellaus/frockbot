@@ -240,8 +240,10 @@ class ChatPane extends StatefulWidget {
   /// Conversation chrome laid over the thread: the fade, the companion, the
   /// name and the doors. The pane builds the companion so gaze stays with the
   /// pane; the shell wraps it in [ChatHeader]. The companion there is at
-  /// rest: a Turn is worn at the end of the thread instead.
-  final Widget Function(Widget companion)? overlay;
+  /// rest: a Turn is worn at the end of the thread instead. The pane's
+  /// notices (offline, out of credit) go under the header's row, since the
+  /// top of the thread is behind the header.
+  final Widget Function(Widget companion, List<Widget> notices)? overlay;
 
   /// What the empty thread offers to write into the composer.
   final List<StarterSuggestionV1> starters;
@@ -515,6 +517,41 @@ class _ChatPaneState extends State<ChatPane> {
       unreadFromMessageId: widget.unreadFromMessageId,
       onReadLatest: widget.onReadLatest,
     );
+    final notices = <Widget>[
+      if (c.connection == ConnectionState.disconnected ||
+          c.connection == ConnectionState.paused)
+        MaterialBanner(
+          content: Text(switch (c.connection) {
+            ConnectionState.paused => 'Conversation paused on this device.',
+            _ => 'You’re offline. Your Bot can keep working.',
+          }),
+          actions: [
+            identified(
+              ShellIds.reconnect,
+              TextButton(
+                key: const ValueKey('reconnect'),
+                onPressed: widget.onReconnect,
+                child: const Text('Reconnect'),
+              ),
+            ),
+          ],
+        ),
+      if (widget.outOfCredit)
+        identified(
+          ShellIds.outOfCredit,
+          MaterialBanner(
+            content: const Text(
+              'Your Bots can’t reply until you subscribe or add credit.',
+            ),
+            actions: [
+              TextButton(
+                onPressed: widget.onOpenBilling,
+                child: const Text('Open Billing'),
+              ),
+            ],
+          ),
+        ),
+    ];
     return Column(
       children: [
         Expanded(
@@ -522,40 +559,6 @@ class _ChatPaneState extends State<ChatPane> {
             children: [
               Column(
                 children: [
-                  if (c.connection == ConnectionState.disconnected ||
-                      c.connection == ConnectionState.paused)
-                    MaterialBanner(
-                      content: Text(switch (c.connection) {
-                        ConnectionState.paused =>
-                          'Conversation paused on this device.',
-                        _ => 'You’re offline. Your Bot can keep working.',
-                      }),
-                      actions: [
-                        identified(
-                          ShellIds.reconnect,
-                          TextButton(
-                            key: const ValueKey('reconnect'),
-                            onPressed: widget.onReconnect,
-                            child: const Text('Reconnect'),
-                          ),
-                        ),
-                      ],
-                    ),
-                  if (widget.outOfCredit)
-                    identified(
-                      ShellIds.outOfCredit,
-                      MaterialBanner(
-                        content: const Text(
-                          'Your Bots can’t reply until you subscribe or add credit.',
-                        ),
-                        actions: [
-                          TextButton(
-                            onPressed: widget.onOpenBilling,
-                            child: const Text('Open Billing'),
-                          ),
-                        ],
-                      ),
-                    ),
                   Expanded(
                     child: Center(
                       child: ConstrainedBox(
@@ -607,7 +610,7 @@ class _ChatPaneState extends State<ChatPane> {
                     ),
                 ],
               ),
-              Positioned.fill(child: _chrome(_companion())),
+              Positioned.fill(child: _chrome(_companion(), notices)),
             ],
           ),
         ),
@@ -622,18 +625,25 @@ class _ChatPaneState extends State<ChatPane> {
   }
 
   /// The fade and the pills wrap [companion] when the shell passed chrome;
-  /// pane-only tests still get the character at the same inset.
-  Widget _chrome(Widget companion) {
-    if (widget.overlay != null) return widget.overlay!(companion);
-    return Align(
-      alignment: Alignment.topLeft,
-      child: Padding(
-        padding: const EdgeInsets.only(
-          top: chatHeaderChromeTop,
-          left: chatHeaderChromeSide,
+  /// pane-only tests still get the character at the same inset, with the
+  /// notices under it.
+  Widget _chrome(Widget companion, List<Widget> notices) {
+    if (widget.overlay != null) return widget.overlay!(companion, notices);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Padding(
+          padding: const EdgeInsets.only(
+            top: chatHeaderChromeTop,
+            left: chatHeaderChromeSide,
+          ),
+          child: Align(
+            alignment: Alignment.topLeft,
+            child: IgnorePointer(child: companion),
+          ),
         ),
-        child: IgnorePointer(child: companion),
-      ),
+        ...notices,
+      ],
     );
   }
 
@@ -813,7 +823,7 @@ class ConversationView extends StatefulWidget {
   final String? primary;
 
   /// Conversation chrome laid over the thread. See [ChatPane.overlay].
-  final Widget Function(Widget companion)? overlay;
+  final Widget Function(Widget companion, List<Widget> notices)? overlay;
 
   /// Whether this is General, whose empty thread offers starter suggestions.
   final bool general;

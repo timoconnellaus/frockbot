@@ -1,10 +1,13 @@
 import 'dart:async';
 import 'dart:convert';
 
+import 'package:flutter/foundation.dart'
+    show debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/chat_controller.dart';
 import 'package:frockbot_native/client/transport.dart';
+import 'package:frockbot_native/shell/chat_header.dart';
 import 'package:frockbot_native/shell/chat_pane.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 
@@ -187,6 +190,86 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     controller.dispose();
   });
+
+  testWidgets(
+    'notices sit under the conversation header, over its fade, and still press',
+    (tester) async {
+      for (final (platform, size, phone) in [
+        (TargetPlatform.android, const Size(390, 844), true),
+        (TargetPlatform.android, const Size(1100, 760), false),
+        (TargetPlatform.macOS, const Size(390, 844), true),
+        (TargetPlatform.macOS, const Size(1100, 760), false),
+      ]) {
+        final where = '$platform ${size.width}';
+        debugDefaultTargetPlatformOverride = platform;
+        tester.view.physicalSize = size;
+        tester.view.devicePixelRatio = 1;
+        final store = MemoryStore();
+        final controller = ChatController(
+          transport: FakeTransport(store),
+          store: store,
+          userId: 'user-1',
+          botId: 'bot-1',
+        );
+        controller.connection = ConnectionState.disconnected;
+        var reconnected = 0;
+        var billed = 0;
+        try {
+          await tester.pumpWidget(
+            MaterialApp(
+              theme: FrockTheme.theme(Brightness.dark),
+              home: Scaffold(
+                body: ChatPane(
+                  controller: controller,
+                  onReconnect: () async => reconnected++,
+                  outOfCredit: true,
+                  onOpenBilling: () => billed++,
+                  overlay: (companion, notices) => ChatHeader(
+                    name: 'Fox',
+                    phone: phone,
+                    onBack: phone ? () {} : null,
+                    onTogglePanel: () {},
+                    companion: companion,
+                    below: notices,
+                  ),
+                ),
+              ),
+            ),
+          );
+          await tester.pump();
+
+          // Laid out by the header, which draws them after its fade; the top
+          // of the thread is behind that fade.
+          expect(
+            find.descendant(
+              of: find.byType(ChatHeader),
+              matching: find.byType(MaterialBanner),
+            ),
+            findsNWidgets(2),
+            reason: where,
+          );
+          final row = tester.getRect(find.byTooltip('Show the panel'));
+          for (final banner in tester.widgetList(find.byType(MaterialBanner))) {
+            expect(
+              tester.getRect(find.byWidget(banner)).top,
+              greaterThanOrEqualTo(row.bottom),
+              reason: where,
+            );
+          }
+
+          await tester.tap(find.byKey(const ValueKey('reconnect')));
+          await tester.tap(find.text('Open Billing'));
+          await tester.pump();
+          expect((reconnected, billed), (1, 1), reason: where);
+        } finally {
+          await tester.pumpWidget(const SizedBox());
+          controller.dispose();
+          debugDefaultTargetPlatformOverride = null;
+          tester.view.reset();
+        }
+      }
+    },
+  );
 
   testWidgets(
     'chat opens on the latest row and earlier pages preserve the reading position',

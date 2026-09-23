@@ -172,6 +172,8 @@ Future<void> _scene(
   String? typed,
   Future<void> Function(WidgetTester tester)? act,
   int frames = 0,
+  ConnectionState connection = ConnectionState.connected,
+  bool outOfCredit = false,
 }) async {
   tester.view.physicalSize = Size(width, height);
   tester.view.devicePixelRatio = 1;
@@ -187,7 +189,7 @@ Future<void> _scene(
     nextId: () => 'send-new',
   );
   await c.initialize();
-  c.connection = ConnectionState.connected;
+  c.connection = connection;
   final skills =
       SkillMenuController(api: SilentApi(VoidStore()), botId: 'bot-1')
         ..catalog = [
@@ -206,6 +208,8 @@ Future<void> _scene(
             controller: c,
             botName: 'Fox',
             onReconnect: () async {},
+            outOfCredit: outOfCredit,
+            onOpenBilling: () {},
             background: 'fox',
             primary: '#ff6b57',
             backgroundOf: (botId) => botId == 'bot-dog' ? 'dog' : null,
@@ -214,7 +218,8 @@ Future<void> _scene(
             skills: skills,
             onDictate: () {},
             onVoice: () {},
-            overlay: (companion) => ChatHeader(
+            overlay: (companion, notices) => ChatHeader(
+              below: notices,
               name: 'Fox',
               phone: phone,
               onBack: phone ? () {} : null,
@@ -253,6 +258,37 @@ void main() {
 
   testWidgets('idle', (tester) async {
     await _scene(tester, 'idle', runs: _history);
+  }, skip: _out.isEmpty);
+
+  testWidgets('offline', (tester) async {
+    await _scene(
+      tester,
+      'offline',
+      runs: _history,
+      connection: ConnectionState.disconnected,
+    );
+  }, skip: _out.isEmpty);
+
+  testWidgets('offline desk', (tester) async {
+    await _scene(
+      tester,
+      'offline-desk',
+      runs: _history,
+      width: 1100,
+      height: 760,
+      connection: ConnectionState.disconnected,
+    );
+  }, skip: _out.isEmpty);
+
+  testWidgets('out of credit desk', (tester) async {
+    await _scene(
+      tester,
+      'credit-desk',
+      runs: _history,
+      width: 1100,
+      height: 760,
+      outOfCredit: true,
+    );
   }, skip: _out.isEmpty);
 
   testWidgets('idle desk', (tester) async {

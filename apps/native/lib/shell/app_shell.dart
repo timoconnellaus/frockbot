@@ -2454,9 +2454,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         : null;
     final voiceHere = liveSession != null;
     final rightPanel = _rightPanel();
-    ChatHeader conversationHeader({Widget? companion}) => ChatHeader(
+    ChatHeader conversationHeader({
+      Widget? companion,
+      List<Widget> below = const [],
+    }) => ChatHeader(
       name: _name(bot!),
       companion: companion,
+      below: below,
       connection: _selectedConnection,
       textScale: MediaQuery.textScalerOf(context).scale(14) / 14,
       // A phone's bar is Back and the panel switch. A desk opens the Bot
@@ -2598,34 +2602,35 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                                   ?.unreadFromMessageId,
                               background: _background(bot.botId.value),
                               primary: _primary(bot.botId.value),
-                              overlay: (companion) => Stack(
-                                fit: StackFit.expand,
-                                children: [
-                                  conversationHeader(companion: companion),
-                                  if (liveSession != null)
-                                    Positioned(
-                                      top:
-                                          chatHeaderChromeTop +
-                                          chatCompanionSizeFor(phone: single) +
-                                          12,
-                                      left: 0,
-                                      right: 0,
-                                      child: Center(
-                                        child: VoiceCallChrome(
-                                          session: liveSession,
-                                          userInitials: profileName ?? '',
-                                          userImageUrl: profileImageUrl,
-                                          botName: _name(bot),
-                                          characterId: bot.avatar.characterId,
-                                          primary: bot.avatar.primary,
-                                          onEnd: () => unawaited(
-                                            _endVoice(reason: 'end-button'),
+                              // A live call sits under the notices, so neither
+                              // covers the other.
+                              overlay: (companion, notices) =>
+                                  conversationHeader(
+                                    companion: companion,
+                                    below: [
+                                      ...notices,
+                                      if (liveSession != null)
+                                        Padding(
+                                          padding: const EdgeInsets.only(
+                                            top: 12,
+                                          ),
+                                          child: Center(
+                                            child: VoiceCallChrome(
+                                              session: liveSession,
+                                              userInitials: profileName ?? '',
+                                              userImageUrl: profileImageUrl,
+                                              botName: _name(bot),
+                                              characterId:
+                                                  bot.avatar.characterId,
+                                              primary: bot.avatar.primary,
+                                              onEnd: () => unawaited(
+                                                _endVoice(reason: 'end-button'),
+                                              ),
+                                            ),
                                           ),
                                         ),
-                                      ),
-                                    ),
-                                ],
-                              ),
+                                    ],
+                                  ),
                               onDictate: () => unawaited(_dictate()),
                               onStopDictation: () =>
                                   unawaited(_stopDictation()),
