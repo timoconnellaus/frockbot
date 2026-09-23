@@ -2,17 +2,17 @@ import { describe, expect, test } from "bun:test";
 
 import {
   ACTIVE_RUN_KEY,
-  PENDING_RUN_KEY,
   RUN_INDEX_PREFIX,
   RUN_PREFIX,
   isRunStateStorageKeyV1,
+  pendingUserRunKey,
 } from "./storage-keys.js";
 
 describe("run-state storage keys", () => {
   test("recognizes only records that change the projected run state", () => {
     for (const key of [
       ACTIVE_RUN_KEY,
-      PENDING_RUN_KEY,
+      pendingUserRunKey("2026-09-19T00:00:00.000Z", "run-1"),
       `${RUN_PREFIX}run-1`,
       `${RUN_INDEX_PREFIX}2026-09-19T00:00:00.000Z:run-1`,
     ]) {

@@ -111,21 +111,12 @@ describe("admission returns before execution", () => {
     const firstGate = new Promise<void>((resolve) => {
       releaseFirst = resolve;
     });
-    const interrupts: string[] = [];
     let executions = 0;
-    const bot = authority(
-      storage,
-      async (input) => {
-        executions += 1;
-        if (input.command.runId === "run-1") await firstGate;
-        return completion(input.command.runId, input.command.text);
-      },
-      {
-        interruptTurn: (runId) => {
-          interrupts.push(runId);
-        },
-      },
-    );
+    const bot = authority(storage, async (input) => {
+      executions += 1;
+      if (input.command.runId === "run-1") await firstGate;
+      return completion(input.command.runId, input.command.text);
+    });
 
     expect(await bot.admit(command("run-1", "first"))).toMatchObject({
       schemaVersion: 1,
@@ -136,12 +127,7 @@ describe("admission returns before execution", () => {
       await new Promise((resolve) => setTimeout(resolve, 0));
     }
     expect(executions).toBe(1);
-    const queued = await bot.admit(
-      command("run-2", "second", {
-        lane: "user",
-        supersedes: { runId: "run-1" },
-      }),
-    );
+    const queued = await bot.admit(command("run-2", "second"));
     expect(queued).toMatchObject({
       schemaVersion: 1,
       runId: "run-2",
@@ -149,20 +135,13 @@ describe("admission returns before execution", () => {
     });
     expect(queued.completion).toBeUndefined();
     expect((await bot.readStoredRun("run-1"))?.status).toBe("running");
-    const interruptsBeforeReplay = interrupts.length;
 
-    const again = await bot.admit(
-      command("run-2", "second", {
-        lane: "user",
-        supersedes: { runId: "run-1" },
-      }),
-    );
+    const again = await bot.admit(command("run-2", "second"));
     expect(again).toMatchObject({
       schemaVersion: 1,
       runId: "run-2",
       disposition: "queued",
     });
-    expect(interrupts).toHaveLength(interruptsBeforeReplay);
 
     releaseFirst();
     await bot.pendingWork();

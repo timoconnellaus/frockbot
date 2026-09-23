@@ -9,7 +9,7 @@
 import {
   ACTIVE_RUN_KEY,
   PENDING_AGENT_RUN_PREFIX,
-  PENDING_RUN_KEY,
+  PENDING_USER_RUN_PREFIX,
   RUN_INDEX_PREFIX,
   RUN_PREFIX,
 } from "@frockbot/core/durable";
@@ -40,8 +40,7 @@ function nonTerminalRunId(value: unknown): string | undefined {
   if (
     stored.status === "completed" ||
     stored.status === "failed" ||
-    stored.status === "cancelled" ||
-    stored.status === "superseded"
+    stored.status === "cancelled"
   ) {
     return undefined;
   }
@@ -87,15 +86,13 @@ export async function cleanUnpreparedRunsV1(
   if (typeof active === "string" && removed.has(active)) {
     await storage.delete(ACTIVE_RUN_KEY);
   }
-  const pending = await storage.get(PENDING_RUN_KEY);
-  if (typeof pending === "string" && removed.has(pending)) {
-    await storage.delete(PENDING_RUN_KEY);
+  for (const prefix of [PENDING_USER_RUN_PREFIX, PENDING_AGENT_RUN_PREFIX]) {
+    await page(storage, prefix, async (key, value) => {
+      if (typeof value === "string" && removed.has(value)) {
+        await storage.delete(key);
+      }
+    });
   }
-  await page(storage, PENDING_AGENT_RUN_PREFIX, async (key, value) => {
-    if (typeof value === "string" && removed.has(value)) {
-      await storage.delete(key);
-    }
-  });
   await page(storage, RUN_INDEX_PREFIX, async (key, value) => {
     if (typeof value === "string" && removed.has(value)) {
       await storage.delete(key);

@@ -271,7 +271,7 @@ watch_run() {
       running)
         sleep 3
         ;;
-      completed | failed | interrupted | reconciliation-required | cancelled | superseded)
+      completed | failed | interrupted | reconciliation-required | cancelled)
         printf '%s' "$run" | jq '{
           sends: [.events[]? | select(.type == "send/to-user") | .payload],
           outcome: ({status: .status}

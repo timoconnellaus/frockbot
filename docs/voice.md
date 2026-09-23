@@ -799,7 +799,7 @@ A `subagent` call uses the Bot's `runVoice` door and the existing agent lane.
 The command records the call, voice Turn and request IDs before dispatch;
 the target Bot admits the same `runId` once. Active conversations and Routines
 finish normally, then queued voice requests run in FIFO order with User work
-prioritised. A voice request does not supersede existing work. Ending or
+prioritised. A voice request never makes existing work yield. Ending or
 interrupting the voice call does not cancel accepted Bot work. The `cancel` tool requires an explicit request to stop the call's own Bot and
 records intent before sending its authenticated stop command.
 

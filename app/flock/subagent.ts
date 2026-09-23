@@ -8,7 +8,7 @@
 // WHAT IT ADMITS. One ordinary Turn on *this* Bot's `agent` lane, through the
 // path `bot_message` uses pointed at the Bot that called it. That lane is the
 // point: the hand-off queues behind whatever the person or a Routine has
-// running and never supersedes it, and it carries this Bot's own tools and
+// running and never makes it yield, and it carries this Bot's own tools and
 // Session. There is no result channel and nothing waits — what the hand-off
 // has to say, it says with `send_to_user`, in the thread, in the Bot's own
 // words like any other Turn.

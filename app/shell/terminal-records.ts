@@ -24,13 +24,13 @@
  * One settlement also gets one `now`. Producers each reading their own clock
  * would stamp one transaction with several different instants.
  */
+import type { SessionEvent } from "@frockbot/core/contracts";
 import {
   enqueuePendingBotInputV1,
   pendingInputSettlementWritesV1,
-  requeueDrainedInputsV1,
 } from "@frockbot/app/routines/inbox-store";
 import type { PendingBotInputV1 } from "@frockbot/app/routines/inbox";
-import { storedRunIsRoutineDeliveryV1 } from "@frockbot/core/durable";
+import { endedOwingReplyV1 } from "./delivery.js";
 import { approvalTerminalRecordsV1 } from "./approvals.js";
 import { cardTerminalRecordsV1 } from "./cards.js";
 import { routineTerminalRecordsForRunV1 } from "@frockbot/app/routines/bot";
@@ -46,6 +46,7 @@ export interface ShellTerminalRunV1 {
   responseText?: string;
   admission?: {
     turnType?: string;
+    lane?: string;
     // Wide on purpose: the kernel records one origin shape per producer, and
     // this module only asks which producer it was.
     origin?: { kind: string; routineId?: string };
@@ -146,49 +147,38 @@ const SHELL_TERMINAL_PRODUCERS_V1 = [
   approvalRecordsV1,
   cardRecordsV1,
   voiceRecordsV1,
+  yieldedTurnRecordsV1,
 ] as const;
 
 /**
- * What a Turn the User's next message replaced leaves behind.
+ * What a Turn that yielded to the person's next message leaves behind.
  *
  * One durable input, drained once by the next conversational Turn. The session
- * log already carries what the Turn sent and what its tools returned; this is
- * the part that is *not* in the log — that it was cut off, that nothing still
- * in flight completed, and that a subagent it dispatched is still working.
- * Background work survives a supersede, so the reminder is how the Bot learns
- * that an answer is still coming rather than losing track of it.
- *
- * A delivery Turn also gives back whatever it drained and never carried. It is
- * opened by the alarm with nobody present, and so is replaced by the person's
- * very first word. The drained inputs go back on the queue in this same
- * transaction, and the Turn that replaced this one drains them itself. A Turn
- * the person themselves started gives back nothing: they were there, and the
- * Turn that replaced theirs would re-tell them what this one already said.
- *
- * An automation Turn contributes nothing: a firing is not the conversation,
- * and it reaches the User through its own inbox entry.
+ * log already carries everything the Turn did; this is the part that is not in
+ * the log — that the work was unfinished when the message arrived. Only a chat
+ * Turn on the person's own lane yields, and it is the only chat Turn that
+ * completes still owing its reply, which is how this producer tells a yield
+ * from a Turn that finished just as the message came in.
  */
-export async function supersededTurnRecordsV1(input: {
-  run: ShellTerminalRunV1;
-  now: string;
-  read<T>(key: string): Promise<T | undefined>;
-}): Promise<Record<string, unknown>> {
-  if ((input.run.admission?.turnType ?? "chat") !== "chat") return {};
-  const pending = {
-    schemaVersion: 1,
-    kind: "superseded-turn",
-    runId: input.run.runId,
-    unfinishedWork: input.run.events.some(
-      (event) => event.type === "task/dispatched",
-    ),
-    createdAt: input.now,
-  } satisfies PendingBotInputV1;
-  const records: Record<string, unknown> = {};
-  const writes = pendingInputSettlementWritesV1(records, input.read);
-  if (storedRunIsRoutineDeliveryV1(input.run)) {
-    await requeueDrainedInputsV1(writes, input.run.runId);
+async function yieldedTurnRecordsV1(
+  input: ShellTerminalInputV1,
+): Promise<Record<string, unknown>> {
+  const admission = input.run.admission;
+  if ((admission?.turnType ?? "chat") !== "chat") return {};
+  if ((admission?.lane ?? "user") !== "user") return {};
+  if (!endedOwingReplyV1(input.run.events as readonly SessionEvent[])) {
+    return {};
   }
-  await enqueuePendingBotInputV1(writes, pending);
+  const records: Record<string, unknown> = {};
+  await enqueuePendingBotInputV1(
+    pendingInputSettlementWritesV1(records, input.read),
+    {
+      schemaVersion: 1,
+      kind: "yielded-turn",
+      runId: input.run.runId,
+      createdAt: input.now,
+    } satisfies PendingBotInputV1,
+  );
   return records;
 }
 

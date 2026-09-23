@@ -39,7 +39,7 @@ TranscriptLine routineRunLineV1(Map<String, Object?> detail) {
     status: switch (status) {
       'running' => LineStatus.streaming,
       'failed' => LineStatus.error,
-      'cancelled' || 'superseded' => LineStatus.aborted,
+      'cancelled' => LineStatus.aborted,
       _ => LineStatus.completed,
     },
     notice: detail['outcome'] as String?,

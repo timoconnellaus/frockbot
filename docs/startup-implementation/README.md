@@ -23,7 +23,7 @@ The following remain outside these assignments:
 - Changing complete-model-step execution into incremental tool execution; showing private assistant output; changing model selection or provider billing policy.
 - Replacing the Bot with `AIChatAgent`, adding a second scheduler to an object, or introducing a global Memory DO.
 - Actual MCP Plugin implementation. Keep the prepared-catalog interface suitable for it, but implement the existing Composio REST path first. [SDK ownership constraints](../research/sdk-reuse-decision-review.md#mcp-the-managers-owner-is-the-important-constraint) apply when MCP is separately assigned.
-- Group Chat UI, avatars, text/voice participation rules and repository-wide Project rename. The direction is recorded, but those product designs were explicitly deferred. Memory must use the existing membership authority and keep its internal scope mapping isolated.
+- Group Chats and the removal of Projects. The text design is agreed in the [Group Chat plan](../plan.md#planned-group-chats-replace-projects) and assigned separately; voice is still undesigned. Memory must use the existing membership authority and keep its internal scope mapping isolated.
 - A new Jev recall gate or broad supervision rollout. Retain an interface for a later gate; a Memory task cannot silently turn on the separate supervision plan.
 
 ## Task order
@@ -51,7 +51,7 @@ S1 and the S2 contract/reducer work can begin independently. S4b, S4c and Memory
 - **One durable owner per change:** write an authoritative record, its derived projection and required pending work in the same owner's transaction when possible. User/Bot DOs and R2/Vectorize are separate transactions; use durable intents, acknowledgements and idempotent receivers between them.
 - **External I/O outside transactions:** compute/store intent first, perform external work outside the transaction, then commit its result only if the source revision and ownership still match. A transaction must not enclose model calls, embeddings, R2 fetches or other DO RPCs.
 - **Wakeups are part of correctness:** pending work must have a durable future wakeup even if the object is evicted immediately. Use the object's existing alarm owner. A post-commit callback, `waitUntil`, or startup scan alone is insufficient. Each task changing scheduling must document and test the record/alarm crash sequence.
-- **Exact effects:** retain durable model/tool intent before dispatch, current grants/credentials, Stop/supersede fencing, spend admission and uncertain-outcome handling. Retry only where the actual receiver/protocol supports the key. An ordinary retry key does not make every provider idempotent.
+- **Exact effects:** retain durable model/tool intent before dispatch, current grants/credentials, Stop fencing, spend admission and uncertain-outcome handling. Retry only where the actual receiver/protocol supports the key. An ordinary retry key does not make every provider idempotent.
 - **Prepared data is derived:** reuse revisions, catalogs and context; create fresh cancellation, billing, run/Session identity and capability bindings for each Turn. Permission changes take precedence over cache reuse.
 - **Keep context equivalent:** S2/S4 storage changes preserve assembled requests for unchanged history and policy, including provider replay fields, roles, tool IDs, ordering and prompt prefixes. Memory's deliberate content changes are tested separately.
 - **Bound every scan:** use indexed pages/ranges with count and byte limits. A smaller return value after reading the whole archive is not a bounded read. Preserve useful cancellation in all asynchronous paths.
@@ -76,7 +76,7 @@ Every task report must include:
 
 ## Combined acceptance
 
-V1 exercises an integrated scenario, using fakes where provider timing is involved: a User with several Bots, a long conversation with multiple compactions, queued/superseded work, a revoked Connection, a slow unrelated Bot, pending transcript delivery, and recent/corrected/forgotten Memory. Open chat, send, open voice, speak immediately, pause, disconnect/rejoin, wake, and receive a reply. Repeat after object eviction.
+V1 exercises an integrated scenario, using fakes where provider timing is involved: a User with several Bots, a long conversation with multiple compactions, queued and steered work, a revoked Connection, a slow unrelated Bot, pending transcript delivery, and recent/corrected/forgotten Memory. Open chat, send, open voice, speak immediately, pause, disconnect/rejoin, wake, and receive a reply. Repeat after object eviction.
 
 Pass only when unrelated history/Bots/integrations no longer gate startup; accepted commands/effects survive their defined crash points; context and provider replay remain correct; explicit sends arrive once in order without a transcript GET; opening speech survives until attempt readiness; and forbidden/stale Memory cannot reappear through cached views or vectors. Test live/paused expiry, scroll position and first-use catalog pinning as the packets specify. Verify required maintenance makes progress without another user request.
 

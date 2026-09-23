@@ -1620,7 +1620,7 @@
     }
   },
   {
-    "name": "explicit supersede",
+    "name": "installed app's ignored supersede",
     "schema": "TurnCommand",
     "value": {
       "schemaVersion": 1,

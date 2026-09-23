@@ -221,7 +221,7 @@ export async function enqueuePendingBotInputV1(
  * The inputs a delivery Turn drained but never carried, queued again.
  *
  * `drainInto` takes the whole queue in one transaction, before the model runs,
- * so a Turn that then fails, is stopped, or is superseded has consumed
+ * so a Turn that then fails or is stopped has consumed
  * hand-offs it never delivered. That is survivable when the Turn is one the
  * person themselves started — they were there, they may already have been told,
  * and they can ask again — and it stopped being survivable when the alarm began
@@ -297,7 +297,7 @@ export interface StoredPendingInputV1 {
  * The bound exists so a burst cannot hand a single Turn an unbounded prompt,
  * and it used to be a flat `slice(-16)` over everything queued. But the input
  * kinds are not interchangeable. An `approval`, a `machine-result` and a
- * `superseded-turn` are each minted by the kernel and bounded by it, and each
+ * `yielded-turn` are each minted by the kernel and bounded by it, and each
  * writes no entry anywhere, so dropping one silently loses a decision the user
  * made or a result a machine produced. Those are kept whole. The cap falls on
  * the other two: a `wake`, which still has an inbox entry the user can read,

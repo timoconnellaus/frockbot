@@ -291,10 +291,6 @@ export interface DecodedBotRunRpcV1 {
     text: string;
     skills?: SkillRefV1[];
     retryOf?: string;
-    /** The lane this command asks for. Only `user` crosses this seam. */
-    lane?: "user";
-    /** Explicit intent to replace the Turn the client observed running. */
-    supersedes?: { runId?: string };
   };
 }
 
@@ -304,38 +300,15 @@ export interface DecodedBotRunRpcV1 {
  * field one door accepts is never one another door rejects.
  *
  * Invoked Skills cross the RPC as refs and are decoded here, at the door,
- * exactly like every other inbound value. Only the User's own composer
- * supersedes. A Turn type is still never carried here, so the lane the HTTP
- * path may name is exactly the one an absent lane would already have meant.
+ * exactly like every other inbound value. Neither a Turn type nor a lane is
+ * carried here: only the composer reaches this door, and an absent lane is
+ * already the person's own.
  */
 export const rpcBotTurnCommandOptionalsV1: Readonly<
   Record<string, RpcValueDecoder>
 > = {
   skills: (value, label) => decodeSkillRefsV1(value, label),
   retryOf: (value) => decodeRunIdV1(value),
-  lane: (value, label) => {
-    if (value !== "user") throw new Error(`${label} is invalid`);
-    return "user" as const;
-  },
-  supersedes: (value, label) => {
-    if (!value || typeof value !== "object" || Array.isArray(value)) {
-      throw new Error(`${label} is invalid`);
-    }
-    const keys = Reflect.ownKeys(value);
-    const candidate = value as Record<string, unknown>;
-    // The intent is the whole of the command; the run id is provenance the
-    // composer supplies only when it has observed one. A composer that sent
-    // while it believed nothing was running still means "replace whatever you
-    // are doing with this", so an empty object is valid.
-    if (keys.length > 1 || (keys.length === 1 && keys[0] !== "runId")) {
-      throw new Error(`${label} is invalid`);
-    }
-    if (candidate.runId === undefined) return {};
-    if (typeof candidate.runId !== "string") {
-      throw new Error(`${label} is invalid`);
-    }
-    return { runId: decodeRunIdV1(candidate.runId) };
-  },
 };
 
 export function decodeBotRunRpcV1(input: unknown): DecodedBotRunRpcV1 {

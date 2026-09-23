@@ -9,7 +9,6 @@ import {
 } from "@frockbot/core/contracts";
 import {
   BotDurableAuthority,
-  SUPERSEDED_TURN_REASON_V1,
   type BotDurableAuthorityHooks,
   type BotTurnExecutionInput,
   type OwnedBotTurnCommand,
@@ -24,7 +23,10 @@ import {
 } from "./run-records.ts";
 import {
   MAX_PENDING_AGENT_RUNS_V1,
+  MAX_PENDING_USER_RUNS_V1,
+  PENDING_USER_RUN_PREFIX,
   pendingAgentRunKey,
+  pendingUserRunKey,
 } from "./storage-keys.ts";
 
 const codec = createStoredRunCodecV1<undefined>({
@@ -69,8 +71,6 @@ interface TurnHandle {
 interface Probe {
   authority: BotDurableAuthority<undefined>;
   observed: BotTurnExecutionInput<undefined>[];
-  interrupts: { runId: string; reason: string }[];
-  supersededRecordRuns: string[];
   handle(runId: string): TurnHandle;
 }
 
@@ -107,8 +107,7 @@ function deferred<T>(): Deferred<T> {
  * `turn/end` naming the opaque reason the caller passed, then a failure.
  *
  * `dispatch` decides whether a Turn journals a `model/request` before it
- * blocks. That event is the whole of what makes a Turn interruptible: a Turn
- * that has not reached its first durable checkpoint is left to finish.
+ * blocks.
  */
 function createAuthority(
   storage: MemoryStorage,
@@ -130,8 +129,6 @@ function createAuthority(
   } = {},
 ): Probe {
   const observed: BotTurnExecutionInput<undefined>[] = [];
-  const interrupts: { runId: string; reason: string }[] = [];
-  const supersededRecordRuns: string[] = [];
   const handles = new Map<
     string,
     {
@@ -273,16 +270,6 @@ function createAuthority(
     scheduledWorkInFlight: () => false,
     deferScheduledWork: () => Promise.resolve(),
     settleScheduledWork: () => Promise.resolve(),
-    interruptTurn: (runId, reason) => {
-      interrupts.push({ runId, reason });
-      handleFor(runId).settled.resolve({ interrupted: reason });
-    },
-    supersededRecords: ({ run }) => {
-      supersededRecordRuns.push(run.runId);
-      return Promise.resolve({
-        [`superseded-note:${run.runId}`]: { runId: run.runId },
-      });
-    },
   };
 
   return {
@@ -292,8 +279,6 @@ function createAuthority(
       hooks,
     }),
     observed,
-    interrupts,
-    supersededRecordRuns,
     handle: (runId) => {
       const handle = handleFor(runId);
       return {
@@ -312,241 +297,172 @@ function storedRun(
   return codec.require(storage.values.get(`run:${runId}`));
 }
 
-function turnEndOf(run: StoredRunV1<undefined>) {
-  return run.events.findLast((event) => event.type === "turn/end");
+function waitingUserRuns(storage: MemoryStorage): string[] {
+  return [...storage.values.entries()]
+    .filter(([key]) => key.startsWith(PENDING_USER_RUN_PREFIX))
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([, value]) => value as string);
 }
 
-describe("a user message supersedes the running Turn", () => {
-  test("the running Turn terminalizes superseded and the new one runs", async () => {
+describe("a message sent while a Turn runs", () => {
+  test("waits, asks the running Turn to yield, and runs next", async () => {
     const storage = new MemoryStorage();
     const probe = createAuthority(storage);
 
     const first = probe.authority.run(command("run-1", "first"));
     await probe.handle("run-1").started;
+    expect(await probe.authority.userMessageWaiting("run-1")).toBe(false);
 
-    const second = probe.authority.run(
-      command("run-2", "second", {
-        lane: "user",
-        supersedes: { runId: "run-1" },
-      }),
-    );
-    // The new Turn is durable before anything is acknowledged, and it is
-    // waiting rather than running.
-    await probe.handle("run-2").started.then(
-      () => undefined,
-      () => undefined,
-    );
-    await first;
-    probe.handle("run-2").finish();
-    const result = await second;
-
-    const superseded = await probe.authority.readRun("run-1");
-    expect(superseded).toBeDefined();
-    if (superseded === undefined) throw new Error("run-1 was not stored");
-    expect(superseded.status).toBe("superseded");
-    expect(superseded.supersededBy).toBe("run-2");
-    expect(turnEndOf(superseded)).toMatchObject({
-      outcome: "cancelled",
-      reason: SUPERSEDED_TURN_REASON_V1,
-    });
-    expect(probe.interrupts).toEqual([
-      { runId: "run-1", reason: SUPERSEDED_TURN_REASON_V1 },
-    ]);
-
-    const replacement = storedRun(storage, "run-2");
-    expect(replacement.status).toBe("completed");
-    expect(replacement.input).toBe("second");
-    expect(result.text).toBe("done: second");
-    expect(storage.values.get("active-run")).toBeUndefined();
-    expect(storage.values.get("pending-run")).toBeUndefined();
-  });
-
-  test("the superseded Turn's history is what the next Turn starts from", async () => {
-    const storage = new MemoryStorage();
-    const probe = createAuthority(storage);
-
-    const first = probe.authority.run(command("run-1", "first"));
-    await probe.handle("run-1").started;
-    const second = probe.authority.run(
-      command("run-2", "second", {
-        lane: "user",
-        supersedes: { runId: "run-1" },
-      }),
-    );
-    await first;
-    probe.handle("run-2").finish();
-    await second;
-
-    // The replacement was handed everything the superseded Turn made durable:
-    // what it said, and the fact that it ended cancelled and why.
-    const replacementInput = probe.observed.find(
-      (input) => input.command.runId === "run-2",
-    );
-    if (!replacementInput) throw new Error("the replacement Turn never ran");
-    expect(replacementInput.journal).toEqual([]);
-    const archived = await new SessionEventLog(storage).read(
-      replacementInput.command.sessionId,
-    );
-    const kinds = archived.map((event) => event.type);
-    expect(kinds).toContain("assistant/message");
-    expect(kinds).toContain("turn/end");
-    // The replacement starts after the durable prefix. Promotion recomputes
-    // that boundary from the cursor, not from an in-memory copy of the log.
-    expect(storedRun(storage, "run-2").previousEventCount).toBe(
-      replacementInput.cursor.nextSeq,
-    );
-  });
-
-  test("the superseded settlement writes the Package's durable note", async () => {
-    const storage = new MemoryStorage();
-    const probe = createAuthority(storage);
-
-    const first = probe.authority.run(command("run-1", "first"));
-    await probe.handle("run-1").started;
-    const second = probe.authority.run(
-      command("run-2", "second", {
-        lane: "user",
-        supersedes: { runId: "run-1" },
-      }),
-    );
-    await first;
-    probe.handle("run-2").finish();
-    await second;
-
-    expect(probe.supersededRecordRuns).toEqual(["run-1"]);
-    expect(storage.values.get("superseded-note:run-1")).toEqual({
-      runId: "run-1",
-    });
-  });
-});
-
-describe("a Turn that has not dispatched a model request is left alone", () => {
-  test("the new message queues and runs after it", async () => {
-    const storage = new MemoryStorage();
-    const probe = createAuthority(storage, { dispatch: () => false });
-
-    const first = probe.authority.run(command("run-1", "first"));
-    await probe.handle("run-1").started;
-
-    const second = probe.authority.run(
-      command("run-2", "second", {
-        lane: "user",
-        supersedes: { runId: "run-1" },
-      }),
-    );
+    const second = probe.authority.run(command("run-2", "second"));
     await admitted();
-    // No interrupt was signalled: there is no durable checkpoint to lose.
-    expect(probe.interrupts).toEqual([]);
-    expect(storage.values.get("pending-run")).toBe("run-2");
-    expect(storedRun(storage, "run-1").supersededAt).toBeUndefined();
+    // Durable and waiting, and the running Turn is untouched: it reads the
+    // queue at its next step boundary and ends there itself.
+    expect(storedRun(storage, "run-2").phase).toBe("queued");
+    expect(waitingUserRuns(storage)).toEqual(["run-2"]);
+    expect(storedRun(storage, "run-1").stopRequestedAt).toBeUndefined();
+    expect(await probe.authority.userMessageWaiting("run-1")).toBe(true);
 
     probe.handle("run-1").finish();
     expect(await first).toMatchObject({ text: "done: first" });
+    await probe.handle("run-2").started;
     probe.handle("run-2").finish();
     expect(await second).toMatchObject({ text: "done: second" });
 
     expect(storedRun(storage, "run-1").status).toBe("completed");
     expect(storedRun(storage, "run-2").status).toBe("completed");
+    expect(waitingUserRuns(storage)).toEqual([]);
+    expect(storage.values.get("active-run")).toBeUndefined();
   });
-});
 
-describe("several messages in quick succession", () => {
-  test("each earlier Turn is terminal, the last one runs, order is kept", async () => {
+  test("the next Turn starts from everything the one before it did", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage);
+
+    const first = probe.authority.run(command("run-1", "first"));
+    await probe.handle("run-1").started;
+    const second = probe.authority.run(command("run-2", "second"));
+    await admitted();
+    probe.handle("run-1").finish();
+    await first;
+    await probe.handle("run-2").started;
+    probe.handle("run-2").finish();
+    await second;
+
+    const nextInput = probe.observed.find(
+      (input) => input.command.runId === "run-2",
+    );
+    if (!nextInput) throw new Error("the waiting Turn never ran");
+    expect(nextInput.journal).toEqual([]);
+    const archived = await new SessionEventLog(storage).read(
+      nextInput.command.sessionId,
+    );
+    expect(archived.map((event) => event.type)).toContain("assistant/message");
+    // Promotion recomputes where the Turn starts from the cursor, not from an
+    // in-memory copy of the log.
+    expect(storedRun(storage, "run-2").previousEventCount).toBe(
+      nextInput.cursor.nextSeq,
+    );
+  });
+
+  test("several messages run in the order they were sent", async () => {
     const storage = new MemoryStorage();
     const probe = createAuthority(storage);
 
     const first = probe.authority.run(command("run-1", "one"));
     await probe.handle("run-1").started;
-    const second = probe.authority.run(
-      command("run-2", "two", {
-        lane: "user",
-        supersedes: { runId: "run-1" },
-      }),
-    );
-    // Sent before the object has finished admitting the one before it. The
-    // admissions still serialize, so the last message wins.
-    const third = probe.authority.run(
-      command("run-3", "three", {
-        lane: "user",
-        supersedes: { runId: "run-2" },
-      }),
-    );
+    const second = probe.authority.run(command("run-2", "two"));
     await admitted();
+    const third = probe.authority.run(command("run-3", "three"));
+    await admitted();
+    expect(waitingUserRuns(storage)).toEqual(["run-2", "run-3"]);
+
+    probe.handle("run-1").finish();
     await first;
+    await probe.handle("run-2").started;
+    // The one behind it is still waiting, so this Turn yields too.
+    expect(await probe.authority.userMessageWaiting("run-2")).toBe(true);
+    probe.handle("run-2").finish();
     await second;
+    await probe.handle("run-3").started;
+    expect(await probe.authority.userMessageWaiting("run-3")).toBe(false);
     probe.handle("run-3").finish();
     await third;
 
-    expect(storedRun(storage, "run-1").status).toBe("superseded");
-    // The one that never started is terminal too, and appended no event.
-    const skipped = storedRun(storage, "run-2");
-    expect(skipped.status).toBe("superseded");
-    expect(skipped.supersededBy).toBe("run-3");
-    expect(skipped.events).toEqual([]);
-    expect(storedRun(storage, "run-3").status).toBe("completed");
-    // Only the two Turns that ran ever reached the Package, in order.
+    // Nobody's message is dropped: every one ran, in order.
     expect(probe.observed.map((input) => input.command.text)).toEqual([
       "one",
+      "two",
       "three",
     ]);
   });
-});
 
-describe("supersede intent that names no run", () => {
-  test("still replaces whatever is active", async () => {
+  test("a replayed command replays rather than queueing twice", async () => {
     const storage = new MemoryStorage();
     const probe = createAuthority(storage);
+    const waiting = command("run-2", "second");
 
     const first = probe.authority.run(command("run-1", "first"));
     await probe.handle("run-1").started;
+    const second = probe.authority.run(waiting);
+    await admitted();
+    await probe.authority.admit(waiting);
+    expect(waitingUserRuns(storage)).toEqual(["run-2"]);
 
-    // The composer sent before it had observed its own run — a person typing
-    // faster than the client polls. The intent is there; the provenance is
-    // not, and the Bot supersedes whatever is actually active regardless.
-    const second = probe.authority.run(
-      command("run-2", "second", { lane: "user", supersedes: {} }),
+    probe.handle("run-1").finish();
+    await first;
+    await probe.handle("run-2").started;
+    probe.handle("run-2").finish();
+    await second;
+  });
+
+  test("refuses a message past the bounded queue", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage);
+    const first = probe.authority.run(command("run-1", "first"));
+    await probe.handle("run-1").started;
+    for (let index = 0; index < MAX_PENDING_USER_RUNS_V1; index += 1) {
+      const runId = `queued-${index}`;
+      storage.values.set(
+        pendingUserRunKey(
+          new Date(Date.UTC(2026, 8, 3, 1, 0, index)).toISOString(),
+          runId,
+        ),
+        runId,
+      );
+    }
+
+    await expect(
+      probe.authority.run(command("run-past-bound", "one more")),
+    ).rejects.toThrow(/message queue is full \(32 messages\)/);
+
+    probe.handle("run-1").finish();
+    await first;
+  });
+});
+
+describe("only a Turn on the person's own lane yields", () => {
+  test("a Turn answering another Bot finishes its job first", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage);
+    const agent = probe.authority.run(
+      command("run-agent", "question", { turnType: "agent" }),
     );
-    await first;
-    probe.handle("run-2").finish();
-    await second;
+    await probe.handle("run-agent").started;
+    const person = probe.authority.run(command("run-user", "hello"));
+    await admitted();
 
-    expect(storedRun(storage, "run-1").status).toBe("superseded");
-    expect(storedRun(storage, "run-1").supersededBy).toBe("run-2");
-    expect(storedRun(storage, "run-2").status).toBe("completed");
+    expect(await probe.authority.userMessageWaiting("run-agent")).toBe(false);
+    // A run that is not the active one never yields either.
+    expect(await probe.authority.userMessageWaiting("run-user")).toBe(false);
+
+    probe.handle("run-agent").finish();
+    await agent;
+    await probe.handle("run-user").started;
+    probe.handle("run-user").finish();
+    await person;
   });
 
-  test("a replayed command replays and never interrupts a second Turn", async () => {
-    const storage = new MemoryStorage();
-    const probe = createAuthority(storage);
-    const superseding = command("run-2", "second", {
-      lane: "user",
-      supersedes: {},
-    });
-
-    const first = probe.authority.run(command("run-1", "first"));
-    await probe.handle("run-1").started;
-    const second = probe.authority.run(superseding);
-    await first;
-    probe.handle("run-2").finish();
-    await second;
-
-    // The same command again — a retried POST. The intent is in its
-    // fingerprint, so this is the same command, and a replay reads back the
-    // Turn it already produced rather than interrupting the one now running.
-    const third = probe.authority.run(command("run-3", "third"));
-    await probe.handle("run-3").started;
-    const replay = await probe.authority.run(superseding);
-    expect(replay.runId).toBe("run-2");
-    expect(storedRun(storage, "run-3").supersededAt).toBeUndefined();
-
-    probe.handle("run-3").finish();
-    await third;
-    expect(storedRun(storage, "run-3").status).toBe("completed");
-  });
-});
-
-describe("a background admission never supersedes", () => {
-  test("it is refused exactly as a second command always was", async () => {
+  test("a Routine firing is refused while anything runs or waits", async () => {
     const storage = new MemoryStorage();
     const probe = createAuthority(storage);
 
@@ -555,21 +471,12 @@ describe("a background admission never supersedes", () => {
 
     await expect(
       probe.authority.run(
-        command("run-2", "firing", {
-          turnType: "automation",
-          supersedes: { runId: "run-1" },
-        }),
+        command("run-2", "firing", { turnType: "automation" }),
       ),
-    ).rejects.toThrow(/bot already has an active run/);
-    // And a user-lane command with no supersede intent is refused too: an
-    // interrupt is explicit or it does not happen.
-    await expect(
-      probe.authority.run(command("run-3", "second")),
     ).rejects.toThrow(/bot already has an active run/);
 
     probe.handle("run-1").finish();
     await first;
-    expect(probe.interrupts).toEqual([]);
   });
 
   test("the lane a Turn was admitted on is durable", async () => {
@@ -594,7 +501,7 @@ describe("a background admission never supersedes", () => {
 });
 
 describe("the agent lane", () => {
-  test("queues behind the active Turn without superseding it", async () => {
+  test("queues behind the active Turn without making it yield", async () => {
     const storage = new MemoryStorage();
     const probe = createAuthority(storage);
     const first = probe.authority.run(command("run-1", "person"));
@@ -612,7 +519,7 @@ describe("the agent lane", () => {
       }),
     );
     await admitted();
-    expect(probe.interrupts).toEqual([]);
+    expect(await probe.authority.userMessageWaiting("run-1")).toBe(false);
     expect(storedRun(storage, "run-agent")).toMatchObject({
       phase: "queued",
       admission: { turnType: "agent" },
@@ -671,12 +578,9 @@ describe("the agent lane", () => {
     );
     await admitted();
 
-    const user = probe.authority.run(
-      command("run-user", "next message", {
-        lane: "user",
-        supersedes: { runId: "run-1" },
-      }),
-    );
+    const user = probe.authority.run(command("run-user", "next message"));
+    await admitted();
+    probe.handle("run-1").finish();
     await active;
     await probe.handle("run-user").started;
     expect(probe.observed.map(({ command }) => command.runId)).toEqual([
@@ -749,22 +653,19 @@ describe("the agent lane", () => {
 
 describe("eviction between the two Turns", () => {
   /**
-   * Exactly what the object holds at the moment between the superseded Turn
-   * terminalizing and the queued one starting: no active run, a queued run
-   * record, and the pending marker naming it. Nothing else survives an
-   * eviction, so nothing else is given to the object that comes back.
+   * Exactly what the object holds at the moment between the first Turn
+   * settling and the waiting one starting: no active run, a queued run record,
+   * and the queue entry naming it. Nothing else survives an eviction, so
+   * nothing else is given to the object that comes back.
    */
-  async function evictedAfterSupersede(): Promise<MemoryStorage> {
+  async function evictedBetweenTurns(): Promise<MemoryStorage> {
     const storage = new MemoryStorage();
     const probe = createAuthority(storage);
     const first = probe.authority.run(command("run-1", "first"));
     await probe.handle("run-1").started;
-    const second = probe.authority.run(
-      command("run-2", "second", {
-        lane: "user",
-        supersedes: { runId: "run-1" },
-      }),
-    );
+    const second = probe.authority.run(command("run-2", "second"));
+    await admitted();
+    probe.handle("run-1").finish();
     await first.catch(() => undefined);
     // The caller that was waiting for the queued Turn is gone with the object.
     second.catch(() => undefined);
@@ -776,10 +677,10 @@ describe("eviction between the two Turns", () => {
   }
 
   test("a reconstructed object starts the queued Turn exactly once", async () => {
-    const storage = await evictedAfterSupersede();
-    expect(storage.values.get("pending-run")).toBe("run-2");
+    const storage = await evictedBetweenTurns();
+    expect(waitingUserRuns(storage)).toEqual(["run-2"]);
     expect(storage.values.get("active-run")).toBeUndefined();
-    expect(storedRun(storage, "run-1").status).toBe("superseded");
+    expect(storedRun(storage, "run-1").status).toBe("completed");
     expect(storedRun(storage, "run-2").phase).toBe("queued");
 
     const restarted = createAuthority(storage);
@@ -895,12 +796,7 @@ describe("a failing recovery of an older Turn", () => {
       failRecovery: (runId) => runId === "run-1",
     });
     const second = restarted.authority
-      .run(
-        command("run-2", "second", {
-          lane: "user",
-          supersedes: { runId: "run-1" },
-        }),
-      )
+      .run(command("run-2", "second"))
       .catch(() => undefined);
     await admitted();
 
@@ -934,8 +830,7 @@ describe("the run admission fence index", () => {
 describe("a Turn queued behind a run whose model never answered", () => {
   test("is started by that run's own settlement", async () => {
     const storage = new MemoryStorage();
-    // The first Turn has not dispatched when the second arrives, so it is left
-    // to finish and the second queues behind it. Its provider call is then
+    // The second message waits behind the first, whose provider call is then
     // never answered.
     const probe = createAuthority(storage, {
       dispatch: () => false,
@@ -944,12 +839,7 @@ describe("a Turn queued behind a run whose model never answered", () => {
 
     const first = probe.authority.run(command("run-1", "first"));
     await probe.handle("run-1").started;
-    const second = probe.authority.run(
-      command("run-2", "second", {
-        lane: "user",
-        supersedes: { runId: "run-1" },
-      }),
-    );
+    const second = probe.authority.run(command("run-2", "second"));
     await admitted();
     probe.handle("run-1").finish();
     await first.catch(() => undefined);
@@ -961,36 +851,11 @@ describe("a Turn queued behind a run whose model never answered", () => {
 
     expect(storedRun(storage, "run-1").status).toBe("failed");
     expect(storedRun(storage, "run-2").status).toBe("completed");
-    expect(storage.values.get("pending-run")).toBeUndefined();
+    expect(waitingUserRuns(storage)).toEqual([]);
   });
 });
 
-describe("an interrupt while the model is streaming", () => {
-  test("a superseded Turn settles superseded rather than parking the Bot", async () => {
-    const storage = new MemoryStorage();
-    const probe = createAuthority(storage, { uncertain: () => true });
-
-    const first = probe.authority.run(command("run-1", "first"));
-    await probe.handle("run-1").started;
-    const second = probe.authority.run(
-      command("run-2", "second", {
-        lane: "user",
-        supersedes: { runId: "run-1" },
-      }),
-    );
-    await first.catch(() => undefined);
-    probe.handle("run-2").finish();
-    const result = await second;
-
-    // The provider outcome of a Turn nobody is waiting for is worthless: the
-    // intent the User expressed is what settles it.
-    const superseded = storedRun(storage, "run-1");
-    expect(superseded.status).toBe("superseded");
-    expect(superseded.supersededBy).toBe("run-2");
-    expect(storage.values.get("active-run")).toBeUndefined();
-    expect(result.text).toBe("done: second");
-  });
-
+describe("a Stop while the model is streaming", () => {
   test("a stopped Turn settles cancelled and the next message is admitted", async () => {
     const storage = new MemoryStorage();
     const probe = createAuthority(storage, { uncertain: () => true });
@@ -1067,28 +932,6 @@ describe("a discarded Turn never crashes the object", () => {
     // User already said to throw it away.
     expect(evicted.observed).toEqual([]);
     expect(storedRun(storage, "run-1").status).toBe("cancelled");
-    expect(storage.values.get("active-run")).toBeUndefined();
-  });
-
-  test("recovery settles a superseded Turn instead of re-entering it", async () => {
-    const storage = new MemoryStorage();
-    const probe = createAuthority(storage, { uncertain: () => true });
-
-    const first = probe.authority.run(command("run-1", "first"));
-    await probe.handle("run-1").started;
-    const running = storedRun(storage, "run-1");
-    storage.values.set("run:run-1", {
-      ...running,
-      supersededAt: "2026-09-03T00:00:05.000Z",
-      supersededBy: "run-2",
-    });
-    first.catch(() => undefined);
-
-    const evicted = createAuthority(storage, { uncertain: () => true });
-    await expect(evicted.authority.alarm()).resolves.toBeUndefined();
-
-    expect(evicted.observed).toEqual([]);
-    expect(storedRun(storage, "run-1").status).toBe("superseded");
     expect(storage.values.get("active-run")).toBeUndefined();
   });
 

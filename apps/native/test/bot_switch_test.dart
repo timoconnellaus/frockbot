@@ -91,7 +91,6 @@ class LatchedPages implements ChatTransport {
     String botId,
     String id,
     String text, {
-    String? supersedes,
     String? retryOf,
   }) async {}
   @override

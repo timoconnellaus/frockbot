@@ -516,47 +516,27 @@ test("the working Bot sits under its bubbles and leaves without shifting them si
 // Tim's report: sending while the Bot is working put the new message *under*
 // the working avatar, because the avatar belonged to the running Turn's article
 // and the new message was appended after it. The reader watched their own words
-// arrive below the animation that was supposedly about to answer them — and the
-// Turn they had just replaced was labelled "Interrupted by your next message.",
-// which said nothing their own message did not already say.
-// Known failing since the character cast landed (2026-09-16), on `main` as
-// much as here, and unrelated to the avatars: sampled every 200 ms after the
-// second send, the transcript either shows the first Turn already delivered —
-// so nothing is superseded and "Stopping the previous reply" never has cause
-// to appear — or shows it superseded with a drain too brief for the poll to
-// catch. The behaviour itself needs a look before the assertion does; see the
-// e2e speed-up follow-up.
-test.fixme("a message sent mid-Turn lands above the working avatar, unlabelled", async () => {
+// arrive below the animation that was supposedly about to answer them.
+//
+// A message sent mid-Turn now steers rather than replaces: it waits in the
+// thread above the working Bot, the Turn ahead of it finishes its step, and
+// the Bot answers it next. Nothing is stopped, so nothing says it is.
+test("a message sent mid-Turn waits above the working avatar, and is answered", async () => {
   const { page, ollamaBaseUrl } = application();
   await createBot(page, "Stepper");
 
   // The provider holds every model call open for ten seconds, which is the
-  // window to send into. Not `streaming`, which splits an answer across a gap
-  // only for a Turn that scripted no tool call — and this one scripts a reply.
+  // window to send into.
   await setFakeOllamaChatMode(page, ollamaBaseUrl, "slow");
   await beginTurn(page, `first\n${says("Working on it")}`);
-  // Wait until the Turn is visibly running before superseding it.
   await expect(sem(page, "working-indicator")).toHaveCount(1, {
     timeout: 90_000,
   });
 
-  await beginTurn(page, "second");
+  await beginTurn(page, `second\n${says("Got the second one")}`);
 
-  // While the Turn they replaced is winding down, the row above their message
-  // says what is happening to it. It used to say nothing at all, so two Turns
-  // of waiting read as one Turn being slow.
-  await expect
-    .poll(
-      async () =>
-        ((await sem(page, "chat-transcript").textContent()) ?? "").includes(
-          "Stopping the previous reply",
-        ),
-      { timeout: 90_000 },
-    )
-    .toBe(true);
-
-  // The order the reader sees: their new message, then the avatar, with nothing
-  // of the thread after it.
+  // The order the reader sees: both of their messages, then the working Bot,
+  // with nothing of the thread after it.
   await expect
     .poll(
       () =>
@@ -564,11 +544,11 @@ test.fixme("a message sent mid-Turn lands above the working avatar, unlabelled",
           const transcript = document.querySelector(
             '[flt-semantics-identifier="chat-transcript"]',
           );
-          const row = transcript?.querySelector(
-            '[flt-semantics-identifier="working-notice"]',
+          const working = document.querySelector(
+            '[flt-semantics-identifier="working-indicator"]',
           );
-          if (!transcript || !row) return null;
-          const rowTop = row.getBoundingClientRect().top;
+          if (!transcript || !working) return null;
+          const workingTop = working.getBoundingClientRect().top;
           const lines = [
             ...transcript.querySelectorAll("[flt-semantics-identifier]"),
           ].filter((node) => {
@@ -577,7 +557,7 @@ test.fixme("a message sent mid-Turn lands above the working avatar, unlabelled",
           });
           return {
             everyLineAbove: lines.every(
-              (line) => line.getBoundingClientRect().top < rowTop,
+              (line) => line.getBoundingClientRect().top < workingTop,
             ),
             userLines: lines.filter((line) =>
               line.getAttribute("flt-semantics-identifier")?.endsWith(":user"),
@@ -588,21 +568,22 @@ test.fixme("a message sent mid-Turn lands above the working avatar, unlabelled",
     )
     .toEqual({ everyLineAbove: true, userLines: 2 });
 
-  // The superseded Turn is not labelled: the message above explains itself.
-  await expect(sem(page, "chat-transcript")).not.toContainText(
-    "Interrupted by your next message.",
+  // Both are answered, the second after the first, and nothing was stopped.
+  await expect(sem(page, "chat-transcript")).toContainText(
+    "Got the second one",
+    { timeout: 120_000 },
   );
-
+  await expect(sem(page, "chat-transcript")).toContainText("Working on it");
   await expect(sem(page, "working-indicator")).toHaveCount(0, {
     timeout: 120_000,
   });
-  await expect(sem(page, "chat-transcript")).not.toContainText(
-    "Interrupted by your next message.",
-  );
-  // And the words go with the drain: the new Turn is the one running now.
-  await expect(sem(page, "chat-transcript")).not.toContainText(
+  for (const retired of [
     "Stopping the previous reply",
-  );
+    "Interrupted by your next message.",
+    "You stopped this.",
+  ]) {
+    await expect(sem(page, "chat-transcript")).not.toContainText(retired);
+  }
 });
 
 // Tim's report, as the thread: a Bot that says three things in one Turn leaves

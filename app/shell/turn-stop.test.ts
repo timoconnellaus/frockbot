@@ -392,7 +392,7 @@ describe("stopped run settlement", () => {
     const run = storedRun({ events: modelIntentEvents() });
 
     expect(() => interruptedRunSettlementV1(run, run.events)).toThrow(
-      `run "${turn.runId}" has no durable stop or supersede intent`,
+      `run "${turn.runId}" has no durable stop intent`,
     );
   });
 });

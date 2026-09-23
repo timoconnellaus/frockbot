@@ -22,8 +22,8 @@ export {
 } from "@frockbot/core/durable";
 
 /**
- * Everything a fenced run — one a durable Stop or a later user message
- * interrupted — must append to settle the effects it left open.
+ * Everything a fenced run — one a durable Stop interrupted — must append to
+ * settle the effects it left open.
  *
  * Nothing is investigated. A model request with no answer is simply left
  * unanswered, and every open tool occurrence is closed as `interrupted`; the
@@ -35,12 +35,9 @@ export function interruptedRunSettlementV1(
   latest: readonly SessionEvent[],
 ): SessionEvent[] {
   requireStoredRunV1(run);
-  if (!run.stopRequestedAt && !run.supersededAt) {
-    throw new Error(
-      `run "${run.runId}" has no durable stop or supersede intent`,
-    );
+  if (!run.stopRequestedAt) {
+    throw new Error(`run "${run.runId}" has no durable stop intent`);
   }
-  const fenceReason = run.stopRequestedAt ? "Durable Stop" : "A supersede";
   const session = new Session(run.sessionId, latest);
   for (const entry of validateToolOccurrenceJournal(run.events).values()) {
     if (!entry.intent || entry.result) continue;
@@ -51,7 +48,7 @@ export function interruptedRunSettlementV1(
       step: intent.step,
       occurrenceId: intent.occurrenceId,
       name: intent.name,
-      content: `${fenceReason} fenced tool execution.`,
+      content: "Durable Stop fenced tool execution.",
       isError: true,
       status: "interrupted",
     });

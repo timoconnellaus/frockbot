@@ -1,8 +1,7 @@
 /// What the thread holds and the order it draws it in.
 ///
-/// Three rules live here: the projection that turns durable runs into lines,
-/// the ordering that keeps a Turn's lines together, and the words the working
-/// row says while a supersede drains.
+/// Two rules live here: the projection that turns durable runs into lines, and
+/// the ordering that keeps a Turn's lines together.
 /// Rendering is [TranscriptView]'s; nothing in this file touches a widget, so
 /// every rule below is testable without pumping a frame.
 library;
@@ -60,8 +59,8 @@ class PluginModelCall {
 
 enum LineRole { user, assistant, system }
 
-/// `streaming` is a Turn in flight; `aborted` is one that was stopped or
-/// superseded; `error` is one that broke.
+/// `streaming` is a Turn in flight; `aborted` is one that was stopped; `error`
+/// is one that broke.
 enum LineStatus { streaming, completed, aborted, error }
 
 /// The way out of an ending the person cannot otherwise act on. `resendTurn`
@@ -321,56 +320,6 @@ List<TranscriptLine> dedupeCardSendsV1(List<TranscriptLine> lines) {
   return changed ? kept : lines;
 }
 
-// ------------------------------------------------------- supersede drain
-
-/// The words while the previous reply is being stopped.
-const supersedeDrainLabelText = 'Stopping the previous reply…';
-
-/// The words once it is taking longer than anyone expects. It says the same
-/// thing, because the same thing is still true — it does not escalate, offer a
-/// button, or imply the person did something wrong.
-const supersedeDrainSlowLabelText = 'Still stopping the previous reply';
-
-/// How long the ordinary wording stands. A Turn cancels at its next external
-/// effect, so a few seconds is normal and a model mid-request can take longer;
-/// twenty is well past "normal" without reading as an app that has stopped.
-const supersedeDrainSlowAfter = Duration(seconds: 20);
-
-/// `none` is every ordinary moment, an ordinary running Turn included.
-enum SupersedeDrainState { none, stopping, slow }
-
-/// Read off the transcript rather than tracked as a flag, so it survives a
-/// reload: a Turn waiting behind another is queued in durable run state, and
-/// [TranscriptLine.pending] is that fact projected.
-SupersedeDrainState supersedeDrainState(
-  List<TranscriptLine> lines,
-  DateTime now,
-) {
-  TranscriptLine? waiting;
-  for (final line in lines) {
-    if (line.exchange == null &&
-        line.role == LineRole.assistant &&
-        line.status == LineStatus.streaming &&
-        line.pending) {
-      waiting = line;
-    }
-  }
-  if (waiting == null) return SupersedeDrainState.none;
-  final admittedAt = waiting.readAt ?? waiting.at;
-  final startedAt = admittedAt == null ? null : DateTime.tryParse(admittedAt);
-  if (startedAt == null) return SupersedeDrainState.stopping;
-  return now.difference(startedAt) >= supersedeDrainSlowAfter
-      ? SupersedeDrainState.slow
-      : SupersedeDrainState.stopping;
-}
-
-/// The words for a state, or null when the row says nothing.
-String? supersedeDrainLabel(SupersedeDrainState state) => switch (state) {
-  SupersedeDrainState.stopping => supersedeDrainLabelText,
-  SupersedeDrainState.slow => supersedeDrainSlowLabelText,
-  SupersedeDrainState.none => null,
-};
-
 // ----------------------------------------------------------- projection
 
 /// The half of a failure sentence that asks the person to send it again. The
@@ -543,7 +492,7 @@ ExchangeStatus _exchangeStatus({
     ? ExchangeStatus.answered
     : status == 'running'
     ? (queued ? ExchangeStatus.queued : ExchangeStatus.working)
-    : status == 'cancelled' || status == 'superseded'
+    : status == 'cancelled'
     ? ExchangeStatus.stopped
     : ExchangeStatus.failed;
 
@@ -788,28 +737,11 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
             readAt: run['admittedAt'] as String?,
             status: LineStatus.streaming,
             // A Turn that has not started shows nothing of its own: the greyed
-            // user message is the whole of what the thread says about it. A
-            // queued exchange says so on its marker instead, and is not a
-            // supersede the thread should report as draining.
+            // user message is the whole of what the thread says about it, and
+            // the Bot working ahead of it is at the end of the thread. A queued
+            // exchange says so on its marker instead.
             pending: queued && inbound == null,
             stopRequested: run['stopRequestedAt'] != null,
-            tools: tools,
-            pluginCalls: pluginCalls,
-          ),
-        );
-      case 'superseded':
-        // Quieter than a stopped Turn: it keeps everything it already sent and
-        // carries no notice at all. The message that superseded it is sitting
-        // right underneath, in the person's own words.
-        lines.add(
-          TranscriptLine(
-            id: '$runId:assistant',
-            runId: runId,
-            role: LineRole.assistant,
-            text: text,
-            at: admittedAt,
-            readAt: run['admittedAt'] as String?,
-            status: LineStatus.aborted,
             tools: tools,
             pluginCalls: pluginCalls,
           ),

@@ -122,7 +122,6 @@ class _SceneTransport implements ChatTransport, QuestionsTransport {
     String botId,
     String id,
     String text, {
-    String? supersedes,
     String? retryOf,
   }) async {}
   @override
@@ -325,6 +324,32 @@ void main() {
           'Draft the investor update from those notes',
           status: 'running',
         ),
+      ],
+    );
+  }, skip: _out.isEmpty);
+
+  testWidgets('steering', (tester) async {
+    await _scene(
+      tester,
+      'steering',
+      runs: [
+        ..._history,
+        _turn(
+          'run-2',
+          '2026-09-23T01:02:00Z',
+          'Draft the investor update from those notes',
+          status: 'running',
+          replies: const ['Starting with the runway numbers.'],
+        ),
+        {
+          ..._turn(
+            'run-3',
+            '2026-09-23T01:02:30Z',
+            'Lead with churn, the board will ask about it first',
+            status: 'running',
+          ),
+          'queued': true,
+        },
       ],
     );
   }, skip: _out.isEmpty);

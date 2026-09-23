@@ -15,10 +15,7 @@ import type {
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import { failedTurnMessageIdV1, visibleMessageRecordsV1 } from "./messages.js";
 import { runFailureCopyV1 } from "@frockbot/app/shell/run-failure-copy";
-import {
-  shellTerminalRecordsV1,
-  supersededTurnRecordsV1,
-} from "@frockbot/app/shell/terminal-records";
+import { shellTerminalRecordsV1 } from "@frockbot/app/shell/terminal-records";
 import {
   pendingInputSettlementWritesV1,
   requeueDrainedInputsV1,
@@ -116,25 +113,6 @@ export function terminalPackageRecords(input: {
   return shellTerminalRecordsV1({
     run: input.run,
     cursor: input.cursor,
-    now: new Date().toISOString(),
-    read: input.read,
-  });
-}
-
-/**
- * What a superseded Turn leaves for the Turn that replaced it.
- *
- * One durable input, drained once by the next conversational Turn. The session
- * log already carries what the Turn sent and what its tools returned; this is
- * the part that is not in the log — that it was cut off, that nothing in
- * flight completed, and that a subagent it dispatched is still working.
- */
-export function supersededPackageRecords(input: {
-  run: StoredRun;
-  read<T>(key: string): Promise<T | undefined>;
-}): Promise<Record<string, unknown>> {
-  return supersededTurnRecordsV1({
-    run: input.run,
     now: new Date().toISOString(),
     read: input.read,
   });

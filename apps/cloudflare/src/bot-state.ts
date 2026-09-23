@@ -9,6 +9,7 @@ import { cleanNotificationTestState } from "./notification-state-cleanup.js";
 import { cleanHiddenBotNotifications } from "./hidden-bot-notifications-cleanup.js";
 import { cleanRetiredRoutineStateV1 } from "./routine-state-cleanup.js";
 import { cleanUnpreparedRunsV1 } from "./prepared-input-cleanup.js";
+import { cleanSupersedeStateV1 } from "./supersede-cleanup.js";
 import { cleanUndecodableSkillIndexesV1 } from "./skill-index-cleanup.js";
 import {
   messageIdV1,
@@ -615,6 +616,8 @@ export class BotState
       await cleanBotProfileMirrorTestState(this.ctx.storage);
       await cleanRetiredRoutineStateV1(this.ctx.storage);
       await cleanBotAppletsV1(this.ctx.storage);
+      // Before anything decodes a run: a `superseded` record no longer parses.
+      await cleanSupersedeStateV1(this.ctx.storage);
       await cleanUnpreparedRunsV1(this.ctx.storage);
       await cleanUndecodableSkillIndexesV1(this.ctx.storage);
       await cleanRetiredPublicationStateV1(this.ctx.storage);

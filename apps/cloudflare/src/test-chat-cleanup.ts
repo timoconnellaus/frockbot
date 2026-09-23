@@ -4,7 +4,7 @@ import {
   LATEST_EVENTS_KEY,
   NOTIFICATION_PREFIX,
   PENDING_AGENT_RUN_PREFIX,
-  PENDING_RUN_KEY,
+  PENDING_USER_RUN_PREFIX,
   RUN_INDEX_PREFIX,
   RUN_PREFIX,
   SESSION_EVENT_LOG_PREFIX,
@@ -34,10 +34,10 @@ const PREFIXES = [
   "shell:turn-tool-catalog:",
   "stop-receipt:",
   "bot-announcement:",
+  PENDING_USER_RUN_PREFIX,
 ];
 const KEYS = [
   ACTIVE_RUN_KEY,
-  PENDING_RUN_KEY,
   LATEST_EVENTS_KEY,
   "conversation",
   "conversation-index",

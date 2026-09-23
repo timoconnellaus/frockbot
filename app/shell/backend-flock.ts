@@ -249,7 +249,7 @@ export function createBotSelfManagementHost(
                   text: request.task,
                   // The lane is the whole reason this is safe to start from
                   // inside a running Turn: it queues behind the conversation
-                  // instead of superseding it.
+                  // and never makes it yield.
                   turnType: "agent",
                   lane: "agent",
                   origin: {

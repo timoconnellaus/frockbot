@@ -113,7 +113,7 @@ export interface ClientRun {
   canRetry?: boolean;
   input: string;
   events: ClientTurnEvent[];
-  status: "running" | "completed" | "failed" | "cancelled" | "superseded";
+  status: "running" | "completed" | "failed" | "cancelled";
   responseText?: string;
   failure?: string;
   /** Durable Stop intent, projected independently of the run status. */
@@ -166,14 +166,13 @@ export const CLIENT_RUN_SCAN_LIMIT = CLIENT_RUN_PAGE_LIMIT * 8;
 export const CLIENT_RUN_LIST_MAX_BYTES = 512_000;
 
 export type ClientRunStatusV1 =
-  "running" | "completed" | "failed" | "cancelled" | "superseded";
+  "running" | "completed" | "failed" | "cancelled";
 
 // Both are sentences for the person, not descriptions of the mechanism: the
 // wire outcome is what a client with no copy of its own renders verbatim, and
 // "Stopped by an authenticated Stop command" told somebody who pressed Stop
 // about the authentication of their own button press.
 const CANCELLED_RUN_MESSAGE = "You stopped this.";
-const SUPERSEDED_RUN_MESSAGE = "Interrupted by your next message.";
 /**
  * Why the Bot declined to admit a Turn. A refusal is an ordinary answer — the
  * Bot is busy with a Turn this command did not ask to replace, or the command
@@ -302,8 +301,7 @@ export interface ClientDynamicToolCallInputV1 {
 export type ClientRunOutcomeV1 =
   | { type: "completed"; text: string }
   | { type: "failed"; message: string; text?: string }
-  | { type: "cancelled"; message: string; text?: string }
-  | { type: "superseded"; message: string; text?: string };
+  | { type: "cancelled"; message: string; text?: string };
 
 /**
  * The run projection. Version 2 added structured `send/to-user` and
@@ -410,20 +408,6 @@ export interface ClientTurnCommandV1 {
    * by pretending to invoke one.
    */
   skills?: SkillRefV1[];
-  /**
-   * The explicit authenticated intent to replace whatever the Bot is doing
-   * with this message. Without it a second command is refused exactly as it
-   * always was, so a reconnecting client never interrupts a Turn by accident.
-   *
-   * `runId` is provenance, not the target, and it is optional. The composer
-   * sends this intent on every send, because "replace what you are doing with
-   * this" is what a person means by typing — and whether the client had yet
-   * *observed* a run when they pressed send is a race, not a decision they
-   * made. A composer that names no run still supersedes whatever is actually
-   * active; one that names a run may name a stale one, and the Bot Durable
-   * Object supersedes the active Turn either way.
-   */
-  supersedes?: { runId?: string };
 }
 
 export interface ClientNotificationAcknowledgementCommandV1 {
@@ -542,10 +526,7 @@ function publicEventId(value: string, label: string): string {
 
 function isTerminalRunStatus(status: ClientRunStatusV1): boolean {
   return (
-    status === "completed" ||
-    status === "failed" ||
-    status === "cancelled" ||
-    status === "superseded"
+    status === "completed" || status === "failed" || status === "cancelled"
   );
 }
 
@@ -997,8 +978,8 @@ function visibleEvents(
 /**
  * What an interrupted Turn had already said, read back out of its journal.
  *
- * The kernel records a Turn's answer as it streams, so a Turn stopped or
- * superseded mid-sentence still holds every word it sent. It never reached a
+ * The kernel records a Turn's answer as it streams, so a Turn stopped
+ * mid-sentence still holds every word it sent. It never reached a
  * `responseText`, because it never completed — but the partial answer is a
  * fact about what the person watched arrive, not a claim that the Turn
  * succeeded, and the thread keeps it instead of replacing it with a notice.
@@ -1114,12 +1095,7 @@ export function projectClientRunV1(
                 MAX_FAILURE_BYTES,
               ),
             } satisfies ClientRunOutcomeV1)
-          : status === "superseded"
-            ? ({
-                type: "superseded",
-                message: SUPERSEDED_RUN_MESSAGE,
-              } satisfies ClientRunOutcomeV1)
-            : undefined;
+          : undefined;
   const origin = run.admission?.origin;
   // Who asked, for the two agent-lane callers. The voice marker deliberately
   // carries nothing else: a call id and a spoken turn id name durable voice
@@ -1524,8 +1500,7 @@ function status(value: unknown): ClientRunStatusV1 {
     value !== "running" &&
     value !== "completed" &&
     value !== "failed" &&
-    value !== "cancelled" &&
-    value !== "superseded"
+    value !== "cancelled"
   ) {
     throw new Error("run.status is invalid");
   }
@@ -1852,14 +1827,6 @@ function decodeOutcome(
       ...decodeInterruptedTextV1(outcome),
     };
   }
-  if (outcome.type === "superseded" && runStatus === "superseded") {
-    exactKeys(outcome, ["type", "message", "text"], "run.outcome");
-    return {
-      type: "superseded",
-      message: wireString(outcome, "message", MAX_FAILURE_BYTES, "run.outcome"),
-      ...decodeInterruptedTextV1(outcome),
-    };
-  }
   throw new Error("run.outcome does not match run.status");
 }
 
@@ -2047,7 +2014,7 @@ function decodeRun(value: unknown): ClientRun {
           ...(outcome.text ? { responseText: outcome.text } : {}),
         }
       : {}),
-    ...(outcome?.type === "cancelled" || outcome?.type === "superseded"
+    ...(outcome?.type === "cancelled"
       ? {
           failure: outcome.message,
           ...(outcome.text ? { responseText: outcome.text } : {}),
@@ -2338,30 +2305,11 @@ export function decodeClientTurnCommandV1(input: unknown): ClientTurnCommandV1 {
     "turn command",
   ).trim();
   if (!text) throw new Error("turn command.text is required");
-  let supersedes: { runId?: string } | undefined;
+  // Installed apps still send this on every message. It no longer means
+  // anything — a message sent mid-Turn waits and steers — so it is accepted
+  // and dropped until those apps have updated.
   if (command.supersedes !== undefined) {
-    const named = record(command.supersedes, "turn command.supersedes");
-    exactKeys(named, ["runId"], "turn command.supersedes");
-    if (named.runId === undefined) {
-      // Intent with no provenance: the composer sent while it had observed no
-      // running Turn. It still means "replace whatever you are doing".
-      supersedes = {};
-    } else {
-      try {
-        supersedes = {
-          runId: decodeRunIdV1(
-            string(
-              named,
-              "runId",
-              MAX_RUN_ID_LENGTH,
-              "turn command.supersedes",
-            ),
-          ),
-        };
-      } catch {
-        throw new Error("turn command.supersedes.runId is invalid");
-      }
-    }
+    record(command.supersedes, "turn command.supersedes");
   }
   const retryOf =
     command.retryOf === undefined
@@ -2381,7 +2329,6 @@ export function decodeClientTurnCommandV1(input: unknown): ClientTurnCommandV1 {
     text,
     ...(retryOf ? { retryOf } : {}),
     ...(skills.length > 0 ? { skills } : {}),
-    ...(supersedes ? { supersedes } : {}),
   };
 }
 

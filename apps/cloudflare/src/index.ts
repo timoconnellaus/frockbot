@@ -502,13 +502,6 @@ function botTurnRpcV1(command: OwnedBotTurnCommand) {
       text: command.text,
       ...(command.retryOf ? { retryOf: command.retryOf } : {}),
       ...(command.skills ? { skills: command.skills } : {}),
-      // The composer's supersede intent and the lane it implies. This
-      // rebuilds the command field by field rather than spreading it, so
-      // anything not named here is dropped silently — which is exactly how
-      // a supersede reached the Bot Durable Object as an ordinary second
-      // command and came back "bot already has an active run".
-      ...(command.lane ? { lane: command.lane } : {}),
-      ...(command.supersedes ? { supersedes: command.supersedes } : {}),
     },
   };
 }
@@ -937,8 +930,8 @@ function decodeUserBotTurnRpcV1(input: unknown) {
         acceptedAt: rpcString(64),
         text: rpcString(100_000),
       },
-      // The same optional members the Bot Durable Object's door accepts —
-      // a supersede the composer sends must not be refused one door earlier.
+      // The same optional members the Bot Durable Object's door accepts, so
+      // nothing the composer sends is refused one door earlier.
       rpcBotTurnCommandOptionalsV1,
     ),
   });

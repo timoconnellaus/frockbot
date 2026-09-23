@@ -9,13 +9,14 @@ export const RUN_ADMISSION_FENCE_INDEX_KEY = "run-admission-fences";
 export const MAX_RUN_ADMISSION_FENCES = 256;
 export const ACTIVE_RUN_KEY = "active-run";
 /**
- * The one admitted user-lane Turn waiting for the object to become free.
- *
- * A single slot, not a queue: a second user message supersedes the first
- * waiting one exactly as it supersedes a running one, so the Bot is never
- * working through a backlog of things the User has already replaced.
+ * User-lane Turns waiting for the object to become free, FIFO. A message the
+ * person sends while a Turn runs waits here; a chat Turn ends at its next step
+ * boundary when one is waiting, so the Bot reads it with everything so far in
+ * context rather than losing what it was doing.
  */
-export const PENDING_RUN_KEY = "pending-run";
+export const PENDING_USER_RUN_PREFIX = "pending-user-run:";
+/** A person cannot queue an unbounded backlog behind one long tool call. */
+export const MAX_PENDING_USER_RUNS_V1 = 32;
 /** Agent-lane Turns wait FIFO behind conversational work. */
 export const PENDING_AGENT_RUN_PREFIX = "pending-agent-run:";
 /** A Bot cannot accumulate an unbounded cross-Bot inbox. */
@@ -69,7 +70,7 @@ export function conversationUpdateKeyV1(cursor: number): string {
 export function isRunStateStorageKeyV1(key: string): boolean {
   return (
     key === ACTIVE_RUN_KEY ||
-    key === PENDING_RUN_KEY ||
+    key.startsWith(PENDING_USER_RUN_PREFIX) ||
     key.startsWith(RUN_PREFIX) ||
     key.startsWith(RUN_INDEX_PREFIX)
   );
@@ -218,6 +219,10 @@ export function workspaceConflictKey(
 
 export function runIndexKey(acceptedAt: string, runId: string): string {
   return `${RUN_INDEX_PREFIX}${acceptedAt}:${runId}`;
+}
+
+export function pendingUserRunKey(acceptedAt: string, runId: string): string {
+  return `${PENDING_USER_RUN_PREFIX}${acceptedAt}:${runId}`;
 }
 
 export function pendingAgentRunKey(acceptedAt: string, runId: string): string {

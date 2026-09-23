@@ -29,7 +29,7 @@ One run of an agent that begins when queued input is durably admitted and ends w
 _Avoid_: Message, request
 
 **Lane**:
-The queue a turn is admitted on. `user` is the conversation and may supersede what is running; `agent` is a question from another Bot, the voice session, or the Bot's own hand-off, and waits FIFO behind user work; `background` is work the bot started for itself — a routine firing, a subagent dispatch — and retries when the Bot is busy. A turn's lane is what its turn type says unless its record names another.
+The queue a turn is admitted on. `user` is the conversation: it waits FIFO ahead of other work, and a chat turn running on it yields at its next step boundary to a user message waiting behind it; `agent` is a question from another Bot, the voice session, or the Bot's own hand-off, and waits FIFO behind user work; `background` is work the bot started for itself — a routine firing, a subagent dispatch — and retries when the Bot is busy. A turn's lane is what its turn type says unless its record names another.
 
 **Agent Turn**
 : A non-user conversational Turn admitted by another Bot. It runs in the target Bot Durable Object on the `agent` lane, is visible in that Bot's thread with its origin, and answers its caller through `reply_to_request`.
@@ -46,9 +46,9 @@ _Avoid_: DM, room, channel, thread
 : A Turn a Bot admitted on its own `agent` lane with the `subagent` tool, so the Turn that asked could answer the person straight away. It is an ordinary Turn of that Bot — its own tools, its own Session — and it speaks for itself with `send_to_user` rather than answering a caller; its origin names the run that handed it over and how deep the chain is. One level only, and a chat Turn may hand off four times.
 _Avoid_: Background job, async task, child agent (that is the Subagents Package's `Task`)
 
-**Supersede**:
-A user message sent mid-turn taking the place of the running turn: the running turn is interrupted and reaches the terminal state `superseded`, and the message becomes a new turn. Never an injection into the model request already in flight, and never a stop — the bot's background work carries on.
-_Avoid_: Steer, interrupt, barge-in, queue
+**Steering**:
+A user message sent mid-turn reaching the running chat turn at its next step boundary. The turn finishes the step it is in — its model response and every tool call it made — and then ends `completed`; the message runs next, with everything that turn did in its context and a pending input saying the work was unfinished. The bot decides what to do with it. Nothing in flight is cut off or sent again, and only `/stop` cancels a turn. Not Jev's acknowledgement steering, which shapes a turn's first reply.
+_Avoid_: Supersede, interrupt, barge-in
 
 **Package**:
 A swappable implementation chosen at build time, behind an interface: sign-in, the Computer host, model providers, storage. First-party Packages ship with the deploy and describe themselves with a static `PackageDefinitionV1`; only untrusted code carries a descriptor, an artifact and a generation.
@@ -227,7 +227,7 @@ Where a firing's outcome lands for the User, because an automation Turn cannot s
 _Avoid_: Notification list, activity feed
 
 **Pending input**:
-A durable input the Bot's next conversational Turn is owed — a Routine hand-off or a decided approval. Drained once, idempotently, and never delivered as something the User said.
+A durable input the Bot's next conversational Turn is owed — a Routine hand-off, a decided approval, or the note that the Turn before it yielded unfinished. Drained once, idempotently, and never delivered as something the User said.
 _Avoid_: Queued message, pending wake
 
 **Approval**:

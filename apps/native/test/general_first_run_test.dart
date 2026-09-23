@@ -209,7 +209,6 @@ class RecordingTransport implements ChatTransport {
     String botId,
     String id,
     String text, {
-    String? supersedes,
     String? retryOf,
   }) async => sends.add(text);
   @override

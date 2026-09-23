@@ -46,6 +46,14 @@ export interface AgentOptions {
    * and admits without bound.
    */
   remainingEffectAdmissions?(): Promise<number>;
+  /**
+   * Whether a person's message is waiting for this Turn. Asked at each step
+   * boundary that would otherwise continue: when it answers true the Turn ends
+   * there, completed, and the message runs next with everything this Turn did
+   * already in its context. Nothing in flight is cut off or sent again.
+   * Absent ⇒ the Turn never yields.
+   */
+  userMessageWaiting?(): Promise<boolean>;
   modelBinding?: ModelBindingSnapshot;
 }
 

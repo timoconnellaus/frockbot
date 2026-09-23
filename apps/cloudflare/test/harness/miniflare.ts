@@ -793,7 +793,17 @@ async function deepseekStub(request: Request, url: URL): Promise<Response> {
   );
 }
 
-function webStub(url: URL): Response {
+async function webStub(url: URL): Promise<Response> {
+  // A page that takes its time, so a test can hold a Turn inside a tool call
+  // while the person sends another message.
+  if (url.pathname === "/slow") {
+    await new Promise((resolve) =>
+      setTimeout(resolve, Number(url.searchParams.get("ms") ?? "1000")),
+    );
+    return new Response("slow body", {
+      headers: { "content-type": "text/plain" },
+    });
+  }
   if (url.pathname === "/deepseek-calls") {
     return Response.json({ calls: deepseekCalls });
   }

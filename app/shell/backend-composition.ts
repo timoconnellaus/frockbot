@@ -160,6 +160,11 @@ export interface ShellCompositionMountOptions {
    */
   remainingEffectAdmissions?(): Promise<number>;
   /**
+   * Whether a person's message is waiting behind this Turn. The loop asks at
+   * each step boundary and ends the Turn there when it is.
+   */
+  userMessageWaiting?(): Promise<boolean>;
+  /**
    * The turn type the admitted Turn runs on; the mounted Agent trims its tool
    * catalog to it. Absent ⇒ `chat`.
    */
@@ -236,6 +241,9 @@ export function createShellCompositionHost(
         admitEffect: options.admitEffect,
         ...(options.remainingEffectAdmissions
           ? { remainingEffectAdmissions: options.remainingEffectAdmissions }
+          : {}),
+        ...(options.userMessageWaiting
+          ? { userMessageWaiting: options.userMessageWaiting }
           : {}),
         agentPackages: options.agentPackages,
         modelSelection: options.modelSelection,

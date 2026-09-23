@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   ACTIVE_RUN_KEY,
-  PENDING_RUN_KEY,
+  pendingUserRunKey,
   RUN_PREFIX,
   runIndexKey,
 } from "@frockbot/core/durable";
@@ -51,7 +51,7 @@ describe("prepared input cleanup", () => {
       [`${RUN_PREFIX}completed`]: run("completed"),
       [`${RUN_PREFIX}prepared`]: run("prepared", true),
       [ACTIVE_RUN_KEY]: "running",
-      [PENDING_RUN_KEY]: "running",
+      [pendingUserRunKey("2026-09-22T00:00:00.000Z", "running")]: "running",
       [runIndexKey("2026-09-22T00:00:00.000Z", "running")]: "running",
       [runIndexKey("2026-09-22T00:00:00.000Z", "completed")]: "completed",
     });
@@ -66,7 +66,11 @@ describe("prepared input cleanup", () => {
       preparedInputs: { schemaVersion: 1 },
     });
     expect(await storage.get(ACTIVE_RUN_KEY)).toBeUndefined();
-    expect(await storage.get(PENDING_RUN_KEY)).toBeUndefined();
+    expect(
+      await storage.get(
+        pendingUserRunKey("2026-09-22T00:00:00.000Z", "running"),
+      ),
+    ).toBeUndefined();
     expect(
       await storage.get(runIndexKey("2026-09-22T00:00:00.000Z", "running")),
     ).toBeUndefined();

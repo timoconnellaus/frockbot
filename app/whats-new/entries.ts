@@ -23,6 +23,17 @@ export type WhatsNewEntrySourceV1 = {
  */
 export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
+    id: "steering",
+    title: "A message sent mid-reply steers the Bot",
+    summary:
+      "It waits in the thread, and the Bot reads it at its next step instead of dropping what it was doing.",
+    kind: "improvement",
+    image: {
+      file: "steering.webp",
+      alt: "The end of a phone chat with Fox: under Fox’s “Starting with the runway numbers.”, the person’s next message waits greyed, with Fox working below it.",
+    },
+  },
+  {
     id: "paused-call-colour",
     title: "A paused call keeps the Bot’s colour",
     summary:

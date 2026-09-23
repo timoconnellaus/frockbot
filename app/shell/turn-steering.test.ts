@@ -1,8 +1,8 @@
 import { shellTestApplicationV1 } from "./backend-application.fixture.js";
 /**
- * What a superseded Turn does to the durable state the Shell owns: how its
- * unsettled effects are classified, what it leaves for the Turn that replaced
- * it, and what a Stop arriving afterwards is allowed to touch.
+ * What a message sent mid-Turn leaves in the durable state the Shell owns: it
+ * waits behind the running Turn, a Stop of that Turn leaves it alone, and work
+ * the running Turn dispatched outlives it.
  */
 import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "@frockbot/core/contracts";
@@ -20,6 +20,7 @@ import {
 } from "./backend-contracts.js";
 import { interruptedRunSettlementV1 } from "./backend-recovery.js";
 import { projectClientRunV1 } from "./run-protocol.js";
+import { pendingUserRunKey } from "@frockbot/core/durable";
 import { TaskStore } from "@frockbot/app/subagents/store";
 
 class MemoryStorage {
@@ -176,90 +177,21 @@ async function fixture(run: StoredRun = storedRun()): Promise<{
   return { storage, contribution };
 }
 
-describe("a superseded run settles its effects exactly as a stopped one does", () => {
-  test("an open tool occurrence is interrupted, never re-run", () => {
-    const run = storedRun({
-      events: toolIntentEvents(),
-      supersededAt: timestamp,
-      supersededBy: "run-2",
-      effectAdmissions: [
-        { kind: "model", effectId: "request-1", outcome: "admitted" },
-        { kind: "tool", effectId: "tool:1:1:0", outcome: "fenced" },
-      ],
-    });
-
-    const events = interruptedRunSettlementV1(run, run.events);
-
-    expect(events.find((event) => event.type === "tool/result")).toMatchObject({
-      status: "interrupted",
-      isError: true,
-      content: "A supersede fenced tool execution.",
-    });
-    expect(events.at(-1)).toMatchObject({
-      type: "turn/end",
-      outcome: "interrupted",
-    });
-  });
-
-  test("an admitted tool effect settles the same way", () => {
-    const run = storedRun({
-      events: toolIntentEvents(),
-      supersededAt: timestamp,
-      supersededBy: "run-2",
-      effectAdmissions: [
-        { kind: "model", effectId: "request-1", outcome: "admitted" },
-        { kind: "tool", effectId: "tool:1:1:0", outcome: "admitted" },
-      ],
-    });
-
-    // Identical to Stop: the occurrence is keyed, so the Turn that replaced it
-    // closes the occurrence rather than waiting to hear what it did.
-    expect(
-      interruptedRunSettlementV1(run, run.events).find(
-        (event) => event.type === "tool/result",
-      ),
-    ).toMatchObject({ status: "interrupted", isError: true });
-  });
-
-  test("a run carrying neither intent is refused a settlement", () => {
+describe("a fenced settlement", () => {
+  test("is refused for a run nobody stopped", () => {
     expect(() =>
       interruptedRunSettlementV1(
         storedRun({ events: toolIntentEvents() }),
         toolIntentEvents(),
       ),
-    ).toThrow(`run "${turn.runId}" has no durable stop or supersede intent`);
+    ).toThrow(`run "${turn.runId}" has no durable stop intent`);
   });
 });
 
-describe("Stop and supersede on the same Turn", () => {
-  test("Stop still records its intent on a superseded Turn", async () => {
+describe("Stop and a message waiting behind the Turn", () => {
+  test("Stop leaves the waiting message to run next", async () => {
     const { storage, contribution } = await fixture(
-      storedRun({
-        events: toolIntentEvents(),
-        supersededAt: timestamp,
-        supersededBy: "run-2",
-      }),
-    );
-
-    const receipt = await stopRun(contribution.state, identity, {
-      schemaVersion: 1,
-      action: "stop",
-      commandId: "stop-1",
-      runId: turn.runId,
-    });
-
-    expect(receipt.run.stopRequestedAt).toBeString();
-    const stored = storage.values.get(`run:${turn.runId}`) as StoredRun;
-    expect(stored.stopRequestedAt).toBeString();
-    // Both intents stand. Stop is the outcome the settlement writes, because
-    // the User asked for this Turn to stop and a later message does not turn
-    // their cancellation into something else.
-    expect(stored.supersededAt).toBe(timestamp);
-  });
-
-  test("Stop leaves a Turn already admitted as the next one alone", async () => {
-    const { storage, contribution } = await fixture(
-      storedRun({ events: toolIntentEvents(), supersededAt: timestamp }),
+      storedRun({ events: toolIntentEvents() }),
     );
     const queued = storedRun({
       runId: "run-2",
@@ -268,8 +200,9 @@ describe("Stop and supersede on the same Turn", () => {
       phase: "queued",
       previousEventCount: 0,
     });
+    const waiting = pendingUserRunKey(queued.acceptedAt, "run-2");
     storage.values.set("run:run-2", structuredClone(queued));
-    storage.values.set("pending-run", "run-2");
+    storage.values.set(waiting, "run-2");
 
     await stopRun(contribution.state, identity, {
       schemaVersion: 1,
@@ -278,7 +211,7 @@ describe("Stop and supersede on the same Turn", () => {
       runId: turn.runId,
     });
 
-    expect(storage.values.get("pending-run")).toBe("run-2");
+    expect(storage.values.get(waiting)).toBe("run-2");
     expect((storage.values.get("run:run-2") as StoredRun).status).toBe(
       "running",
     );
@@ -286,7 +219,7 @@ describe("Stop and supersede on the same Turn", () => {
 });
 
 describe("background work outlives the Turn that dispatched it", () => {
-  test("a subagent of a superseded Turn still settles, and is recorded", async () => {
+  test("a subagent of a Turn that yielded still settles, and is recorded", async () => {
     const { storage, contribution } = await fixture(
       storedRun({
         events: [
@@ -303,8 +236,6 @@ describe("background work outlives the Turn that dispatched it", () => {
             background: true,
           }),
         ],
-        supersededAt: timestamp,
-        supersededBy: "run-2",
       }),
     );
     const tasks = new TaskStore(
@@ -337,8 +268,8 @@ describe("background work outlives the Turn that dispatched it", () => {
     });
     expect(admitted.status).toBe("admitted");
 
-    // The parent Turn was superseded; nothing asked the child to stop, and its
-    // settlement is written exactly as it would have been.
+    // The parent Turn ended at a step boundary; nothing asked the child to
+    // stop, and its settlement is written exactly as it would have been.
     const settled = await settleTask(contribution.state, identity, "tk-1", {
       status: "completed",
       settledAt: "2026-09-03T00:00:09.000Z",
@@ -353,8 +284,8 @@ describe("background work outlives the Turn that dispatched it", () => {
   });
 });
 
-describe("the projection tells the three states apart", () => {
-  test("queued, running, and superseded each project distinctly", () => {
+describe("the projection tells a waiting message from the running Turn", () => {
+  test("queued and running project distinctly", () => {
     const queued = projectClientRunV1(
       storedRun({ runId: "run-2", phase: "queued", input: "second" }),
     );
@@ -363,19 +294,5 @@ describe("the projection tells the three states apart", () => {
     const running = projectClientRunV1(storedRun({ phase: "executing" }));
     expect(running.status).toBe("running");
     expect(running.queued).toBeUndefined();
-
-    const superseded = projectClientRunV1(
-      storedRun({
-        status: "superseded",
-        supersededAt: timestamp,
-        supersededBy: "run-2",
-        events: [],
-      }),
-    );
-    expect(superseded).toMatchObject({
-      status: "superseded",
-      outcome: { type: "superseded" },
-    });
-    expect(superseded.queued).toBeUndefined();
   });
 });

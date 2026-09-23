@@ -44,7 +44,6 @@ export interface SearchProjectableRunV1 {
     | "completed"
     | "failed"
     | "cancelled"
-    | "superseded"
     | "reconciliation-required";
   events: readonly {
     type: string;
@@ -73,8 +72,7 @@ export function isSettledSearchRunV1(run: {
   return (
     run.status === "completed" ||
     run.status === "failed" ||
-    run.status === "cancelled" ||
-    run.status === "superseded"
+    run.status === "cancelled"
   );
 }
 

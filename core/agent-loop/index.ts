@@ -676,7 +676,11 @@ class LoopAgent implements Agent, LoopRuntime {
       signal,
       () => Promise.resolve(proposed),
     );
-    return decision.kind === "stop";
+    if (decision.kind === "stop") return true;
+    // Applied after every policy hook, so a hook that would keep the Turn
+    // going to deliver a reply still yields to the person who just spoke: the
+    // next Turn has this one's work in context and replies with it.
+    return (await this.options.userMessageWaiting?.()) === true;
   }
 
   /**
@@ -690,7 +694,7 @@ class LoopAgent implements Agent, LoopRuntime {
    * Whatever the model request wrote before the clock ran out stays in the
    * journal. What the Turn does not do is stay open: the open step's tool
    * occurrences are closed as `interrupted`, then `step/end` and `turn/end`,
-   * exactly as `core/durable`'s `settledEventsV1` settles a Stop or a supersede.
+   * exactly as `core/durable`'s `settledEventsV1` settles a Stop.
    */
   #deadlineTurnReason(): string | undefined {
     return turnEndReason(TURN_DEADLINE_REASON_V1);

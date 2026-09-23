@@ -262,15 +262,8 @@ class NativeApi {
 abstract interface class ChatTransport {
   Future<Map<String, dynamic>> page(String botId, {String? before});
 
-  /// Starts a Turn. [supersedes] names the run this client had observed, where
-  /// it had observed one; the intent itself goes on every send.
-  Future<void> send(
-    String botId,
-    String id,
-    String text, {
-    String? supersedes,
-    String? retryOf,
-  });
+  /// Starts a Turn. Sent while the Bot is working, it waits and steers.
+  Future<void> send(String botId, String id, String text, {String? retryOf});
   Future<Map<String, dynamic>?> lookup(
     String botId,
     String id, {
@@ -348,7 +341,6 @@ class BackendChatTransport implements ChatTransport, QuestionsTransport {
     String botId,
     String id,
     String text, {
-    String? supersedes,
     String? retryOf,
   }) async {
     if (utf8.encode(text).length > 32000) {
@@ -362,11 +354,6 @@ class BackendChatTransport implements ChatTransport, QuestionsTransport {
       'commandId': id,
       'text': text,
       'retryOf': ?retryOf,
-      // Present on every send: the field's presence is the intent, and its
-      // empty form says this client had observed no run to name.
-      'supersedes': supersedes == null
-          ? <String, Object?>{}
-          : {'runId': supersedes},
     });
     final response = wire.TurnAdmission.fromJson(
       await api.request(path(botId), body: command.toJson(), limit: 256000),

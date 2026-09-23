@@ -50,7 +50,7 @@ The same ruling cleared two leftovers from that cut: Bot templates carried an `m
 
 **5. Split the agent loop.** _Done._ `index.ts` is 853 lines beside `model-request.ts`, `resume.ts`, `tool-execution.ts`, `errors.ts` and `runtime.ts`. The extraction changed no test, which is what proved it changed no behaviour.
 
-Forensic reconciliation is gone. Every external effect that matters carries an idempotency key — a model call's `requestId`, a tool call's `occurrenceId` — and is re-issued under that key rather than investigated afterwards. No Turn parks waiting for a person to resolve it. `admitEffect` and supersede fencing survive and now run before every dispatch, re-issues included.
+Forensic reconciliation is gone. Every external effect that matters carries an idempotency key — a model call's `requestId`, a tool call's `occurrenceId` — and is re-issued under that key rather than investigated afterwards. No Turn parks waiting for a person to resolve it. `admitEffect` and Stop fencing survive and now run before every dispatch, re-issues included.
 
 The seam that retrieved a lost response from the provider is deleted outright: `LlmReconciliationCapability`, `ctx.llm.reconcile`, and all four provider implementations. It was declared, implemented everywhere and called by nobody. Shape: [`architecture.md` §4](architecture.md#4-agent-loop--coreagent-loop).
 
@@ -133,15 +133,62 @@ Mirror current Bot names and descriptions into the existing User-owned Bot direc
 
 ## Planned: Group Chats replace Projects
 
-Recorded during the startup and memory review; implementation and further design are deferred.
+Agreed in the Group Chat design walkthrough, and built in the stages at the end of this section. Voice is designed separately, later.
 
-- Replace the current **Project** concept with **Group Chat** in the code and product vocabulary.
-- Show Group Chats in the sidebar alongside other chats. They can be arranged in the same way as other chats.
-- Show the Group Chat's members using multiple avatars. Build a reusable multiple-avatar component; its visual design is undecided.
-- Provide a Group Chat interface with differences from a normal chat; those differences still need design.
-- Work out how Group Chats behave in both text and voice modes in a later design discussion.
+A Group Chat is a conversation between the User and several of their Bots. It replaces **Project** entirely. The Project catalogue and per-Bot membership in the User Durable Object, the `project_create`, `project_join` and `project_leave` tools, the `project` memory scope, the `project-memory` Workspace root and voice's `recall_project` are deleted, not renamed, and existing Project state is discarded as disposable. The Memory engine's `groupChat` scope stays and becomes each Group Chat's shared memory.
 
-The existing Project memory scope is the starting point for this change. Group Chat conversation behaviour is not yet specified. This note records the direction only; it does not change the current implementation or start a Group Chat design exercise.
+**Conversation.**
+
+- **Every message reaches every member.** Each member Bot has the whole thread in its context, whether or not it was asked to reply, so it can follow the conversation.
+- **Jev decides who replies.** For every message, Jev chooses which members are triggered: none, one, several or all. There is no post that skips Jev. Its choice is not drawn in the thread; the triggered Bot's Work view records why it ran.
+- **The User's @mention always triggers** the Bot named. Jev still decides whether anyone else joins in.
+- **Bots address each other in the thread.** A Bot writes `@Name`; the mention is resolved against the members when the message is posted and stored by Bot id, so a rename does not break it. The asking Bot does not wait: its Turn ends when it posts, and the answer is the next message in the thread. There is no fixed cap on Bot-to-Bot Turns. Jev checks every Bot-triggered Turn and stops loops and drift.
+- **Bots outside the group** are reached with `bot_message`, which from a Group Chat accepts only non-members. The Exchange marker and its view-only Exchange are drawn in the group thread. `bot_message` in one-to-one chats is unchanged.
+- **A Bot may @mention the User**, which sends a push notification. Every other message only counts as unread.
+
+**Steering replaces Supersede, everywhere.** A message sent while a Bot is working waits, and the Bot reads it at its next step boundary. The running chat Turn finishes its model response and every tool call it made, then ends `completed`; the message runs next, with that work in its context and a note that it was unfinished. Nothing already sent to the model is re-issued and nothing in flight is cut off, so the model sees what injecting the message into the running Turn would have shown it. The message does not redirect the work by itself; the Bot decides what to do with it. A message that arrives while the Turn is producing its final answer simply runs next. `/stop` is the only cancel. This applies to one-to-one chats too: Supersede, its drain state and the `superseded` terminal state are removed. A Turn that is not the person's own — answering another Bot, the voice session or a Routine — does not yield; the message runs once it finishes. In a Group Chat, a member's running Turn yields the same way to a new group message and continues its unfinished work in its next group Turn, whether or not Jev triggered it for that message.
+
+**A Bot in a Group Chat.**
+
+- It brings its whole self: its tools, Computer and connected apps, and its Bot, User and Group Chat memory. It sees the group's thread, not its one-to-one history, which it can search on demand.
+- It does one thing at a time. A group Turn waits behind the Bot's other work, and the Bot is not drawn as working in the group until its group Turn starts.
+- A member Bot may post into a Group Chat from outside it — from its one-to-one chat or a Routine. The post goes through Jev like any other message.
+- Its group activity is not marked in its one-to-one thread.
+
+**Membership and lifecycle.**
+
+- The User and their Bots may create a Group Chat, rename it, and add or remove members. Every change is a line in the thread and can be undone. A group has 2 to 8 member Bots.
+- A new group is shown as its members' names ("General, Xero Books & Codex") until the User or a Bot names it. A Bot that creates a group names it for its purpose.
+- A Bot may archive a Group Chat, and the User may restore it. Only the User deletes one, which removes the thread and the group's memory.
+- A Bot that leaves loses access to the group's memory.
+
+**Interface.**
+
+- Every Bot message starts with a badge: a pill filled with the Bot's avatar colour (`avatarCatalog` in `app/flock/shared.ts`) and its name, with black or white text chosen for contrast and a hairline outline on the near-white and near-black colours. Cards a Bot posts carry the same badge. Two Bots of the same character share a colour and are told apart by name.
+- A mention is drawn as a chip in the mentioned Bot's colour. The composer's `@` opens a member picker, and the empty composer is addressed to the group by name. The User's messages are drawn as today.
+- The working indicator is the one-to-one chat's: each member whose group Turn is running stands at the end of the thread under the sheen, side by side, and leaves when its Turn ends. A queued Bot is not drawn. A Bot a member asked with `bot_message` stands beside that member, smaller, as it does in a one-to-one chat.
+- `/stop` stops every member Turn running for this group, and `/stop @Name` stops one. A Bot's work in other chats is untouched. A stop that produced nothing is a marker naming the Bot.
+- A member Turn that did not finish is the one-to-one chat's muted line with Retry, on that Bot's side and under its badge. Retry runs that Bot again.
+- Group Chats sit in the sidebar among the Bot rows, and are labelled, pinned, ordered and hidden the same way.
+- The multiple-avatar component is a row of up to three overlapping avatar stills followed by `+N`. It serves the sidebar row, the pinned tile and the thread header.
+
+**Architecture.**
+
+- Each Group Chat is a `GroupChat` Durable Object holding the ordered message log, its client publication channel, Jev's decisions and the User's read cursor.
+- The User Durable Object holds membership, which Memory already checks there, and the list of the User's Group Chats with their sidebar arrangement.
+- A member's Turn runs in its own Bot Durable Object, under a Session per group, on the `agent` lane.
+- The Channels implementation removed on 2026-09-01 (`ac7870294`, removed in `c2922891c`) is prior art for fan-out with idempotent per-recipient delivery. Its log lived in the User Durable Object; this design gives each group its own object.
+
+**Still open.** Group Chats in voice: a call stays with one Bot until that design. Whether Group Chats later replace `bot_message` and Exchanges in one-to-one chats.
+
+**Build stages.** Each leaves `main` shippable and production Bots able to reply. Nothing is visible to people until stage 4.
+
+- _Stage 1, steering, done._ Supersede is gone from every chat. A user-lane message joins a FIFO user queue (`pending-user-run:`, 32 deep); the loop asks `userMessageWaiting` after every step that would otherwise continue, and a chat Turn on the person's own lane ends there `completed`. Its settlement leaves a `yielded-turn` pending input when it still owed its reply. `supersede-cleanup.ts` rewrote the stored `superseded` runs, rows and replay updates as `cancelled` and removed the retired inputs and single waiting slot. Installed apps still send `supersedes`; it is accepted and dropped until they have updated.
+- _Stage 2, the Group Chat core, server only._ The `GroupChat` Durable Object with its log, publication channel and read cursor; membership and the group list in the User Durable Object; routes to create, rename, add and remove members, archive, restore and delete, post, read and subscribe. A member's Turn runs in its own Bot Durable Object under a `group:<id>` Session on the `agent` lane, with the group log as its conversation. Every message is delivered to every member, mentions are resolved to Bot ids, and `/stop` stops the group's member Turns. Until stage 3 only an @mention triggers a member.
+- _Stage 3, Jev decides who replies._ A narrow judgment built like the Routine event judge — a contract in `core/contracts`, fake and unavailable adapters, a labelled eval in `app/evals`, the hosted adapter in `app/supervision`. For each message it names the idle members to trigger; for a Bot-authored message it also says whether triggering the mentioned member continues the conversation or loops or drifts. The decision is recorded in the Group Chat and shown on the triggered Turn's Work view. What an unavailable judgment does is decided in this stage; the proposal is that the User's @mentions still run and the message is judged again when Jev returns.
+- _Stage 4, the app._ Group Chats in the sidebar with labels, pins, order, hiding and unread; the overlapping multiple-avatar component; the create gesture; the thread's colour badges, mention chips, several working Bots under the sheen and the per-Bot Retry line; the composer's `@` picker and the group's `/stop`; the header and its members sheet; search's Group Chats tab. The first stage people see, with its What's New entry.
+- _Stage 5, Bots act on groups._ Tools to create a group, rename it, add and remove members, and archive it; posting into a group from outside it, a Routine included; `bot_message` limited to non-members inside a group, with its Exchange marker in the group thread; a Bot's @mention of the User sending a push notification.
+- _Stage 6, Projects out and group memory in._ The Project catalogue and membership, the `project_*` tools, the `project` memory scope, the `project-memory` root and voice's `recall_project` are deleted with a scoped cleanup of their stored state. The `groupChat` memory scope is keyed by Group Chat id and authorized by Group Chat membership, and the group thread feeds the group's memory through the Memory engine's extraction. It depends only on stage 2 and may land any time after it.
 
 ## Planned: shared long-term Memory following Hindsight
 
@@ -167,7 +214,7 @@ Startup loads a small prepared core from the permitted scopes. Extraction, conso
 
 This replaces the long-term Memory design, not the whole conversation system. Working context remains recent messages and tool results; compaction maintains a rolling summary plus the recent tail; original conversation history remains separately recoverable as evidence. The prepared core and recalled memories draw from the same long-term engine for both text and voice.
 
-The [Memory packet](startup-implementation/memory.md) selects the existing Bot DO for Bot scope and existing User DO for User/shared scope, and specifies canonical records, transactions, source invalidation, projections, retrieval budgets and staged cutover. Gemini uses supported blocking Memory tools and transcript-triggered prefetch; guaranteed automatic recall before every relevant voice answer still needs a turn-control decision, because receiving a transcript does not pause generation. Jev gating and Group Chat UI/text/voice behaviour remain deferred. Shared Memory uses existing membership authority while the separate [Group Chat plan](#planned-group-chats-replace-projects) remains pending.
+The [Memory packet](startup-implementation/memory.md) selects the existing Bot DO for Bot scope and existing User DO for User/shared scope, and specifies canonical records, transactions, source invalidation, projections, retrieval budgets and staged cutover. Gemini uses supported blocking Memory tools and transcript-triggered prefetch; guaranteed automatic recall before every relevant voice answer still needs a turn-control decision, because receiving a transcript does not pause generation. The Jev recall gate remains deferred. Shared Memory uses the existing Project membership authority until the [Group Chat plan](#planned-group-chats-replace-projects) replaces it with Group Chat membership.
 
 The [existing Memory diagrams](research/memory-proposal/README.md) predate this decision and illustrate the earlier recall/write proposal; they are not yet a complete diagram of the selected Hindsight-based design. Its behaviour on our architecture must be verified during implementation; upstream evaluation results do not establish equivalent performance for a port.
 
@@ -204,7 +251,7 @@ When ending or replacing a call, durably record both memory-finalization and tra
 
 Give call-transcript delivery a durable outbox. Retry the same call ID with a stable delivery payload or retained source reference, using the Bot receiver's existing call-ID deduplication. Mark delivery complete only after acknowledgement; protect its source from retention until then. An RPC failure must leave a pending retry, not only a trace. Retain the existing durable delegation retry guarantees. Scheduling retries never authorizes replay of a model request or external effect with an uncertain outcome.
 
-For chat, durably admit the incoming command and its queue/supersede intent before resuming the previous Turn's model/tool execution. Retain command idempotency, lane ordering, cancellation, effect fences and the single active Turn. Recovery then reconciles and promotes work under those recorded intentions. Acceptance must not depend on completing unrelated old work; execution may still wait for the reconciliation needed to proceed safely. Combined with the bounded-context plan, admission must avoid full-history reconstruction. Context and transcript reads must not trigger unrelated Turn execution.
+For chat, durably admit the incoming command and its queue position before resuming the previous Turn's model/tool execution. Retain command idempotency, lane ordering, cancellation, effect fences and the single active Turn. Recovery then reconciles and promotes work under those recorded intentions. Acceptance must not depend on completing unrelated old work; execution may still wait for the reconciliation needed to proceed safely. Combined with the bounded-context plan, admission must avoid full-history reconstruction. Context and transcript reads must not trigger unrelated Turn execution.
 
 Retire completed one-off constructor cleanup after verifying the relevant release receipts. Required cleanup of incompatible state still belongs to its scoped release; do not move unsafe state initialization behind requests or discard unfinished obligations.
 
@@ -212,7 +259,7 @@ Verify during implementation:
 
 - Opening voice and admitting chat do not scan historical backlogs or wait for old cross-Bot deliveries; context remains equivalent under the agreed cache-preservation requirements.
 - Eviction around call replacement, job creation, scheduling, delivery and acknowledgement loses neither admitted work nor required wakeups. Duplicate callbacks/deliveries produce one transcript and do not repeat uncertain paid effects.
-- Rejoin, replacement, quota checks, live delegation replies, cancellation and lane/supersede ordering still hold when recovery races with new input.
+- Rejoin, replacement, quota checks, live delegation replies, cancellation and lane and queue ordering still hold when recovery races with new input.
 - Background jobs make progress without waiting for another user request, preserve unfinished source records, and recover after repeated eviction.
 
 [S3 chat](startup-implementation/context-and-recovery.md#s3-recovery-and-admission) and [S3 voice](startup-implementation/voice.md#s3-voice-recovery) specify indexes, transaction boundaries, crash-safe scheduling and starting batch limits. Follow these directions; report any source/API conflict that would change the agreed behavior instead of silently weakening recovery.
