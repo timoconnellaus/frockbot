@@ -85,17 +85,17 @@ test("browser and native Settings share one owner, revision, pending identity an
     models,
   );
   expect(models.sections[0]!.fields[0]!.value).toBeNull();
+  // A provider is added the way the Marketplace adds it; Models then lists it.
   const choose = {
     schemaVersion: 1,
+    type: "user/choose-model-provider",
     commandId: "choose-ollama",
     expectedRevision: models.revision,
-    sectionId: "provider.provider-ollama-cloud",
-    ownerId: userId,
-    values: {},
+    packageId: "provider-ollama-cloud",
   };
   expect(
     (
-      (await (await native("/api/settings/models", choose)).json()) as {
+      (await (await native("/api/settings", choose)).json()) as {
         status: string;
       }
     ).status,
@@ -108,9 +108,10 @@ test("browser and native Settings share one owner, revision, pending identity an
   const current = (await (
     await asUser(userId, "/api/settings?view=2")
   ).json()) as { packages: Array<{ packageId: string; state: string }> };
+  // Every Bot may choose its own model: Custom models is platform-owned.
   expect(
     current.packages.find((p) => p.packageId === "custom-models")?.state,
-  ).toBe("disabled");
+  ).toBe("installed");
   const oldView = await asUser(userId, "/api/settings?view=99");
   expect(oldView.status).toBe(426);
   expect(
