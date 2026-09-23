@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 
 import '../client/transport.dart';
@@ -60,8 +62,12 @@ class ActivityController extends ChangeNotifier {
   }
 
   Future<void> load() async {
-    if (_disposed || saving) return;
-    if (loading) {
+    if (_disposed) return;
+    // The directory replaces every view wholesale, so it waits for any mark in
+    // flight rather than landing over its prediction, and a read asked for
+    // meanwhile runs as soon as the marks settle: the shell asks only once for
+    // the view that catches up to the open chat.
+    if (loading || saving) {
       _reloadRequested = true;
       return;
     }
@@ -130,6 +136,7 @@ class ActivityController extends ChangeNotifier {
     } finally {
       _sending.remove(botId);
       _notify();
+      if (_reloadRequested && !saving) unawaited(load());
     }
   }
 
