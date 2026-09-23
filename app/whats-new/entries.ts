@@ -28,6 +28,10 @@ export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
     summary:
       "A provider that takes a key or a sign-in is one card in the Marketplace, with both ways to connect.",
     kind: "improvement",
+    image: {
+      file: "one-card-per-provider.webp",
+      alt: "The OpenRouter card in the Marketplace, open on two ways to connect: Use an API key and Sign in.",
+    },
   },
   {
     id: "add-a-model",
@@ -35,6 +39,10 @@ export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
     summary:
       "Adding a provider in the Marketplace asks for its key straight away, then leads on to choosing a model.",
     kind: "improvement",
+    image: {
+      file: "add-a-model.webp",
+      alt: "The DeepSeek card in the Marketplace after its key is connected, with the account ready and a Choose a model button.",
+    },
   },
   {
     id: "plugins-per-bot",
@@ -42,6 +50,10 @@ export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
     summary:
       "Built-in features are switched on a Bot’s own Plugins page, and every Bot can choose its own model. Account features is gone.",
     kind: "improvement",
+    image: {
+      file: "plugins-per-bot.webp",
+      alt: "A Bot’s Plugins page on a phone: Web, Routines and Image under Built in, each with its own switch.",
+    },
   },
   {
     id: "plugin-theme-refused",
