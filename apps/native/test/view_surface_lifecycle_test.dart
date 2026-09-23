@@ -5,6 +5,7 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/document_cache.dart';
 import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
 import 'package:frockbot_native/theme/states.dart';
+import 'package:frockbot_native/view/document.dart';
 import 'package:frockbot_native/view/surface.dart';
 
 import 'document_cache_test.dart' show listDocument;
@@ -151,6 +152,32 @@ void main() {
     controller.gate!.complete();
     await tester.pumpAndSettle();
     expect(find.text('From the network'), findsWidgets);
+    controller.dispose();
+  });
+
+  testWidgets('a background read does not move the page under it', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    await writeViewDocumentCache(
+      store,
+      'tim',
+      'tracked',
+      'bot-1',
+      wire.ViewDocument.fromJson(
+        listDocument(surfaceId: 'tracked', title: 'Last known'),
+      ),
+    );
+    final controller = _TrackedSurfaceController()..gate = Completer<void>();
+    await tester.pumpWidget(
+      _surface(controller, store: store, cacheScope: 'bot-1'),
+    );
+    expect(find.byType(LinearProgressIndicator), findsOneWidget);
+    final reading = tester.getTopLeft(find.byType(ViewDocumentView));
+    controller.gate!.complete();
+    await tester.pumpAndSettle();
+    expect(find.byType(LinearProgressIndicator), findsNothing);
+    expect(tester.getTopLeft(find.byType(ViewDocumentView)), reading);
     controller.dispose();
   });
 

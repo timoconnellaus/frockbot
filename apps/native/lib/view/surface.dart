@@ -395,26 +395,38 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
     final body = SafeArea(
       top: false,
       child: document != null && view != null
-          ? RefreshIndicator(
-              onRefresh: controller.load,
-              child: ListView(
-                physics: const AlwaysScrollableScrollPhysics(),
-                padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
-                children: [
-                  ...chrome,
-                  if (controller.busy)
-                    const Padding(
-                      padding: EdgeInsets.only(bottom: 12),
-                      child: LinearProgressIndicator(minHeight: 2),
-                    ),
-                  Center(
-                    child: ConstrainedBox(
-                      constraints: BoxConstraints(maxWidth: widget.maxWidth),
-                      child: pane,
-                    ),
+          ? Stack(
+              fit: StackFit.expand,
+              children: [
+                RefreshIndicator(
+                  onRefresh: controller.load,
+                  child: ListView(
+                    physics: const AlwaysScrollableScrollPhysics(),
+                    padding: const EdgeInsets.fromLTRB(20, 12, 20, 32),
+                    children: [
+                      ...chrome,
+                      Center(
+                        child: ConstrainedBox(
+                          constraints: BoxConstraints(
+                            maxWidth: widget.maxWidth,
+                          ),
+                          child: pane,
+                        ),
+                      ),
+                    ],
                   ),
-                ],
-              ),
+                ),
+                // Over the top edge, not in the list: a background read comes
+                // and goes on every mount and Turn, and the page under it must
+                // not jump each time.
+                if (controller.busy)
+                  const Positioned(
+                    top: 0,
+                    left: 0,
+                    right: 0,
+                    child: LinearProgressIndicator(minHeight: 2),
+                  ),
+              ],
             )
           : Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,

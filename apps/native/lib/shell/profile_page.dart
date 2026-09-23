@@ -260,22 +260,28 @@ class _ProfilePageState extends State<ProfilePage> {
             ),
           ),
           Expanded(
-            child: NavigatorPopHandler<void>(
-              onPopWithResult: (_) => pane.currentState?.maybePop(),
-              child: Navigator(
-                key: pane,
-                onGenerateRoute: (settings) => MaterialPageRoute<void>(
-                  settings: settings,
-                  // The theme spaces a title for the Back before it; the page
-                  // a row opens has none, so its title steps in from the rule.
-                  // What it pushes is built above this and keeps the theme's.
-                  builder: (context) => Theme(
-                    data: theme.copyWith(
-                      appBarTheme: theme.appBarTheme.copyWith(
-                        titleSpacing: NavigationToolbar.kMiddleSpacing,
+            // Its own semantics container: every route's barrier blocks the
+            // semantics painted before it in the same container, and without
+            // this the rows beside the page left the accessibility tree.
+            child: Semantics(
+              container: true,
+              child: NavigatorPopHandler<void>(
+                onPopWithResult: (_) => pane.currentState?.maybePop(),
+                child: Navigator(
+                  key: pane,
+                  onGenerateRoute: (settings) => MaterialPageRoute<void>(
+                    settings: settings,
+                    // The theme spaces a title for the Back before it; the page
+                    // a row opens has none, so its title steps in from the rule.
+                    // What it pushes is built above this and keeps the theme's.
+                    builder: (context) => Theme(
+                      data: theme.copyWith(
+                        appBarTheme: theme.appBarTheme.copyWith(
+                          titleSpacing: NavigationToolbar.kMiddleSpacing,
+                        ),
                       ),
+                      child: section.page(),
                     ),
-                    child: section.page(),
                   ),
                 ),
               ),
