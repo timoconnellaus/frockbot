@@ -39,6 +39,7 @@ import {
   type VoiceAssistantPromptInputV1,
   type VoiceBotSummaryV1,
   type VoiceCurrentBotV1,
+  type VoiceToolOutcomeV1,
 } from "@frockbot/app/voice/assistant";
 import { voiceCallTranscriptTurnsV1 } from "@frockbot/app/voice/call-transcript";
 import {
@@ -146,7 +147,9 @@ import {
 import {
   offerVoiceResumptionV1,
   voiceMemoryIdentityV1,
+  type VoiceResumptionOfferV1,
   type VoiceResumptionRecordV1,
+  type VoiceResumptionRejectV1,
 } from "@frockbot/app/voice/resumption";
 import { MemoryStore } from "@frockbot/app/memory/store";
 import { voiceOpeningRereadsSessionMemoryV1 } from "@frockbot/app/voice/session-memory";
@@ -378,8 +381,8 @@ interface LiveCall {
   session?: GeminiSessionV1;
   /**
    * The newest resumption handle the session was given. Sleep keeps it, and
-   * wake offers it back; a handle the server has forgotten closes the socket
-   * with 1008, which is when the call reopens fresh with a handover instead.
+   * wake offers it back when it may be offered; otherwise, and when the server
+   * has forgotten it (a 1008 close), the call reopens fresh with a handover.
    */
   resumptionHandle?: string;
   /** False once the provider said this handle must not be offered. */
@@ -437,12 +440,14 @@ interface LiveCall {
   /**
    * The hand-over the model asked for, held until its turn ends (ADR 0031):
    * the model may say its sign-off before or after calling the tool, and
-   * tearing the session down mid-turn would cut whichever came second.
+   * tearing the session down mid-turn would cut whichever came second. A
+   * session that goes before the turn ends takes the reason to wait with it
+   * (`honourTurnIntents`).
    */
   pendingSwitch?: { botId: string; name: string };
   /**
    * The model called `end_call`. Same wait as a hand-over: hang-up is after
-   * this turn, so a goodbye is not cut off.
+   * this turn, so a goodbye is not cut off — and, the same way, no later.
    */
   pendingEnd?: boolean;
   /**
@@ -517,6 +522,17 @@ const MEMORY_UPDATE_MAX_TOKENS = Math.ceil(
  * and may have been paid for.
  */
 const MEMORY_UPDATE_DEADLINE_MS = 60_000;
+
+/**
+ * What a session carries of the call it reopens. A call's first session
+ * carries neither. `resume` continues the call — its handle when that may be
+ * offered, its own turns otherwise — for a wake or a goAway. `handover` opens
+ * fresh with the turns: a hand-over, a memory write, a forgotten handle.
+ */
+interface SessionContinuityV1 {
+  resume?: boolean;
+  handover?: boolean;
+}
 
 /**
  * One opening: start, wake, rejoin, handover, rotation, or control-only.
@@ -1749,7 +1765,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       // Asked on the screen rather than in words, so nothing is mid-sentence:
       // the session moves now instead of waiting for a turn to end.
       if (switched.status === "switched") {
-        await this.applySwitch(connection, live);
+        await this.applySwitch(connection, live, { reopen: true });
       }
       return;
     }
@@ -2143,11 +2159,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       this.finishWithoutGemini(connection, call, attempt);
       return;
     }
-    await this.openSession(connection, call, attempt, {
-      ...(call.resumptionHandle && call.resumable
-        ? { handle: call.resumptionHandle }
-        : {}),
-    });
+    await this.openSession(connection, call, attempt, { resume: true });
   }
 
   private async onControl(
@@ -2420,7 +2432,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     connection: Connection,
     call: LiveCall,
     attempt: OpeningAttempt,
-    options: { handle?: string; handover?: boolean },
+    options: SessionContinuityV1,
   ): Promise<void> {
     const url = this.geminiUrl();
     if (!url) {
@@ -2459,7 +2471,6 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     this.trace(connection, "upstream", {
       state: "starting",
       attempt: attempt.id,
-      ...(options.handle ? { resumed: true } : {}),
     });
     this.sendState(connection, call);
 
@@ -2497,6 +2508,17 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     if (call.paused || call.muted || call.exhausted) {
       this.finishWithoutGemini(connection, call, attempt);
       return;
+    }
+    this.trace(connection, "upstream-setup", {
+      resumed: setup.resumed,
+      handover: setup.handover,
+      ...(setup.refused ? { reason: setup.refused } : {}),
+    });
+    if (!setup.resumed) {
+      // A function call belongs to the session that issued it, and only a
+      // resumed one still knows its id. Answers still owed go in as turns.
+      call.subagentCalls.clear();
+      call.cancelledCalls.clear();
     }
     attempt.phase = "configuring";
     try {
@@ -2538,17 +2560,17 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   private async prepareSessionSetup(
     connection: Connection,
     call: LiveCall,
-    options: { handle?: string; handover?: boolean },
+    options: SessionContinuityV1,
   ): Promise<{
     frame: Record<string, unknown>;
     instruction: string;
     fingerprint: string;
+    resumed: boolean;
+    handover: number;
+    refused?: VoiceResumptionRejectV1;
   }> {
     const context = await call.promptContext;
     this.timing(connection, "prompt-context-awaited");
-    const handover = options.handover
-      ? await this.callHistory(call.callId)
-      : [];
     const runningTasks = (await this.ledger().pendingDelegations()).map(
       (delegation) => ({
         botName: delegation.botName,
@@ -2563,13 +2585,6 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
           this.sessionMemoryContext(),
         )
       : context.session;
-    const instruction = renderVoiceSystemPromptV1({
-      ...context,
-      session: sessionMemory,
-      now: this.now(),
-      ...(handover.length > 0 ? { handover } : {}),
-      ...(runningTasks.length > 0 ? { runningTasks } : {}),
-    });
     const tools = call.botId
       ? VOICE_FUNCTION_DECLARATIONS_V1.map((item) => item.name)
       : VOICE_ACCOUNT_FUNCTION_DECLARATIONS_V1.map((item) => item.name);
@@ -2588,22 +2603,30 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         ),
       }),
     });
-    let handle = options.handle;
-    if (handle) {
-      const stored = await this.ledger().resumption(call.callId);
-      const offer = offerVoiceResumptionV1({
-        record: stored,
-        callId: call.callId,
-        botId: call.botId,
-        model: GEMINI_LIVE_MODEL_V1,
-        fingerprint,
-        uncertainEffects: await this.hasUncertainEffects(call),
-      });
-      handle = offer.status === "offer" ? offer.handle : undefined;
-    }
+    const offer = options.resume
+      ? await this.resumptionOffer(call, fingerprint)
+      : undefined;
+    const handle = offer?.status === "offer" ? offer.handle : undefined;
+    // A call that goes on keeps its conversation one way or the other: the
+    // handle when it may be offered, and otherwise its own turns so far.
+    // Without either the model starts again from nothing mid-call.
+    const handover =
+      options.handover || (options.resume && !handle)
+        ? await this.callHistory(call.callId)
+        : [];
+    const instruction = renderVoiceSystemPromptV1({
+      ...context,
+      session: sessionMemory,
+      now: this.now(),
+      ...(handover.length > 0 ? { handover } : {}),
+      ...(runningTasks.length > 0 ? { runningTasks } : {}),
+    });
     return {
       instruction,
       fingerprint,
+      resumed: Boolean(handle),
+      handover: handover.length,
+      ...(offer?.status === "fresh" ? { refused: offer.reason } : {}),
       frame: buildGeminiLiveSetupV1({
         systemInstruction: instruction,
         voiceName: call.voice.voiceName,
@@ -2614,6 +2637,24 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         ...(handle ? { resumptionHandle: handle } : {}),
       }),
     };
+  }
+
+  /** Whether this call's stored handle may be offered to the next session. */
+  private async resumptionOffer(
+    call: LiveCall,
+    fingerprint: string,
+  ): Promise<VoiceResumptionOfferV1> {
+    if (!call.resumptionHandle || !call.resumable) {
+      return { status: "fresh", reason: "not-resumable" };
+    }
+    return offerVoiceResumptionV1({
+      record: await this.ledger().resumption(call.callId),
+      callId: call.callId,
+      botId: call.botId,
+      model: GEMINI_LIVE_MODEL_V1,
+      fingerprint,
+      uncertainEffects: await this.hasUncertainEffects(call),
+    });
   }
 
   private async hasUncertainEffects(call: LiveCall): Promise<boolean> {
@@ -2815,6 +2856,9 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     await this.settleMeter(call);
     await this.settleOpenTurn(call, { failure: "the call was paused" });
     this.trace(connection, "upstream", { state: "asleep" });
+    if (await this.honourTurnIntents(connection, call, { reopen: false })) {
+      return;
+    }
     this.sendState(connection, call);
   }
 
@@ -2831,9 +2875,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     if (call.session) return;
     const attempt = this.announceAttempt(connection, call, "wake");
     const opening = this.openSession(connection, call, attempt, {
-      ...(call.resumptionHandle && call.resumable
-        ? { handle: call.resumptionHandle }
-        : {}),
+      resume: true,
     });
     call.waking = opening.finally(() => {
       call.waking = undefined;
@@ -2886,6 +2928,10 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
     this.clearSilenceGuard(call);
     call.session?.close();
     call.session = undefined;
+    // What the model asked of this turn goes with the call's memory. A
+    // hand-over is already on the ledger, which a rejoin opens on; a goodbye
+    // cut off with the socket leaves the call to its rejoin window like any
+    // other drop.
     await this.settleOpenTurn(call, { failure: "the call ended" });
     await this.settleMeter(call);
   }
@@ -3008,13 +3054,14 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         });
         call.session?.close();
         call.session = undefined;
+        // The turn being said cannot go on in another session: an open turn
+        // refuses the handle. So whatever it asked for is due now.
+        if (await this.honourTurnIntents(connection, call, { reopen: true })) {
+          return;
+        }
         {
           const next = this.announceAttempt(connection, call, "wake");
-          await this.openSession(connection, call, next, {
-            ...(call.resumptionHandle && call.resumable
-              ? { handle: call.resumptionHandle }
-              : {}),
-          });
+          await this.openSession(connection, call, next, { resume: true });
         }
         return;
       case "usage":
@@ -3054,6 +3101,9 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       code,
       reason: reason.slice(0, 200),
     });
+    if (await this.honourTurnIntents(connection, call, { reopen: true })) {
+      return;
+    }
     if (call.exhausted || call.muted || call.paused) {
       this.sendState(connection, call);
       return;
@@ -3240,17 +3290,53 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       }
     }
     if (call.pendingEnd) {
-      call.pendingEnd = false;
-      await this.endCall(connection);
-      try {
-        connection.close(1000, "end_call");
-      } catch {
-        // The client already closed.
-      }
+      await this.hangUpForModel(connection, call);
       return;
     }
     this.setStatus(connection, call, "listening");
-    if (call.pendingSwitch) await this.applySwitch(connection, call);
+    if (call.pendingSwitch) {
+      await this.applySwitch(connection, call, { reopen: true });
+    }
+  }
+
+  /**
+   * The session went before the turn that asked to hang up or hand over had
+   * ended: a sleep, a pause, the allowance, a close, a goAway, a memory write.
+   *
+   * `end_call` and `switch_bot` wait for their turn only so its last words
+   * are heard. With the session gone there is nothing left to hear, so they
+   * happen now rather than when some later, unrelated turn ends. The person
+   * asked to hang up, so the call ends. The ledger record moved when the tool
+   * ran, so the call moves to match, opening the new Bot only if `reopen`
+   * and the call may open at all; otherwise the next wake opens it. True
+   * when either happened, so the caller does not reopen as well.
+   */
+  private async honourTurnIntents(
+    connection: Connection,
+    call: LiveCall,
+    options: { reopen: boolean },
+  ): Promise<boolean> {
+    if (call.pendingEnd) {
+      await this.hangUpForModel(connection, call);
+      return true;
+    }
+    if (!call.pendingSwitch) return false;
+    await this.applySwitch(connection, call, options);
+    return true;
+  }
+
+  /** `end_call`, once nothing is left of the goodbye to hear. */
+  private async hangUpForModel(
+    connection: Connection,
+    call: LiveCall,
+  ): Promise<void> {
+    call.pendingEnd = false;
+    await this.endCall(connection);
+    try {
+      connection.close(1000, "end_call");
+    } catch {
+      // The client already closed.
+    }
   }
 
   /**
@@ -3259,14 +3345,20 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
    * The ledger record moved when the tool ran; this is the session, which
    * waits for the model's own turn to end so its sign-off is not cut off. The
    * new session is fresh — a different Bot, a different instruction and a
-   * different voice — and carries the tail of the call so nothing is lost.
+   * different voice — and carries the tail of the call so nothing is lost. A
+   * call that may not open one now moves without it: the next wake opens the
+   * new Bot, and with no handle to offer carries the same tail.
    */
   private async applySwitch(
     connection: Connection,
     call: LiveCall,
+    options: { reopen: boolean },
   ): Promise<void> {
     const target = call.pendingSwitch;
     call.pendingSwitch = undefined;
+    // Choosing another Bot on the screen is newer than a goodbye the model
+    // agreed to, so the new Bot's first turn does not hang up.
+    call.pendingEnd = false;
     call.session?.close();
     call.session = undefined;
     // A resumption handle belongs to the session that issued it, and that
@@ -3282,6 +3374,10 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       ...(target ? { requested: target.botId } : {}),
     });
     await this.ledger().clearResumption(call.callId);
+    if (!options.reopen || call.paused || call.muted || call.exhausted) {
+      this.sendState(connection, call);
+      return;
+    }
     const next = this.announceAttempt(connection, call, "start");
     await this.openSession(connection, call, next, { handover: true });
   }
@@ -3293,6 +3389,13 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
    * cuts across speech. Gemini 3.8 says nothing until the results are back,
    * so the turn waits for what the model says with them, and the silence
    * guard starts again once they have gone.
+   *
+   * An answer goes back under its call id only to the session that issued
+   * it. A memory write means that session must go once the batch has run,
+   * and a sleep or close may take it sooner; either way the turn that asked
+   * is over, and what it asked for happens then. The session never spoke
+   * again — its frames wait behind this batch — so every answer, including
+   * any it was sent, goes in as one turn to the session opened in its place.
    */
   private async runToolCalls(
     connection: Connection,
@@ -3301,6 +3404,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   ): Promise<void> {
     const identity = this.identity(connection);
     if (!identity) return;
+    const asker = call.session;
     await this.ensureTurn(connection, call);
     const turnId = call.turnId ?? `${call.callId}:tool`;
     const host = this.turnHost(
@@ -3309,6 +3413,11 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
       turnId,
       (await call.promptContext).timezone,
     );
+    const answered: {
+      request: GeminiFunctionCallV1;
+      outcome: VoiceToolOutcomeV1;
+    }[] = [];
+    let invalidated = false;
     for (const request of calls) {
       this.trace(connection, "tool", { tool: request.name, call: request.id });
       const outcome = await runVoiceToolV1(
@@ -3337,9 +3446,11 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
         call.pendingEnd = true;
       }
       if (call.cancelledCalls.delete(request.id)) continue;
+      answered.push({ request, outcome });
+      if (outcome.memoryInvalidated) invalidated = true;
+      if (invalidated || call.session !== asker) continue;
       const memoryTool = request.name.startsWith("memory_");
-      const session = call.session;
-      session?.send(
+      asker?.send(
         encodeGeminiToolResponseV1([
           {
             id: request.id,
@@ -3349,32 +3460,42 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
           },
         ]),
       );
-      const answered = Boolean(session) && call.turnId === turnId;
-      if (answered) call.callingGenerationOpen = true;
-      if (outcome.memoryInvalidated) {
-        await this.reopenAfterMemoryInvalidation(connection, call);
-        // The session that asked closed before it could say anything with
-        // the result, and its boundaries will never arrive. The fresh one is
-        // told the result as a turn, the way a late subagent answer reaches a
-        // session that replaced the one that asked, and what it says is the
-        // answer.
-        if (call.turnId === turnId) call.callingGenerationOpen = false;
-        if (
-          answered &&
-          call.turnId === turnId &&
-          call.turnAudioBytes === 0 &&
-          call.session?.isOpen()
-        ) {
-          call.session.send(
-            encodeGeminiTextTurnV1(
-              renderVoiceToolResultTurnV1({
-                name: request.name,
-                result: outcome.result,
-              }),
-            ),
-          );
-        }
+      if (asker && call.turnId === turnId) call.callingGenerationOpen = true;
+    }
+    const kept =
+      !invalidated &&
+      asker !== undefined &&
+      call.session === asker &&
+      asker.isOpen();
+    if (!kept) {
+      const live = call.session !== undefined;
+      if (invalidated) await this.retireSessionForMemory(call);
+      let replaced = await this.honourTurnIntents(connection, call, {
+        reopen: live,
+      });
+      if (!replaced && invalidated && live) {
+        const next = this.announceAttempt(connection, call, "start");
+        await this.openSession(connection, call, next, { handover: true });
+        replaced = true;
       }
+      // The session that called is gone, and its generation's boundaries
+      // with it: what the replacement says with the results is the answer.
+      if (call.turnId === turnId) call.callingGenerationOpen = false;
+      if (!replaced || answered.length === 0 || !call.session?.isOpen()) return;
+      call.session.send(
+        encodeGeminiTextTurnV1(
+          renderVoiceToolResultTurnV1(
+            answered.map(({ request, outcome }) => ({
+              name: request.name,
+              args: request.args,
+              result: outcome.result,
+            })),
+          ),
+        ),
+      );
+      this.trace(connection, "tool-results-relayed", {
+        calls: answered.length,
+      });
     }
     if (
       call.turnId === turnId &&
@@ -3386,21 +3507,16 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   }
 
   /**
-   * Injected memory cannot be withdrawn from a live Gemini session. Close it
-   * and open a fresh one with bounded continuity. Do not resume the handle.
+   * Injected memory cannot be withdrawn from a live Gemini session, so it
+   * goes, and so does its handle: whatever opens next opens fresh.
    */
-  private async reopenAfterMemoryInvalidation(
-    connection: Connection,
-    call: LiveCall,
-  ): Promise<void> {
+  private async retireSessionForMemory(call: LiveCall): Promise<void> {
     if (call.attemptId) this.#memoryPrefetch.cancel(call.attemptId);
     call.session?.close();
     call.session = undefined;
     call.resumptionHandle = undefined;
     call.resumable = false;
     await this.ledger().clearResumption(call.callId);
-    const next = this.announceAttempt(connection, call, "start");
-    await this.openSession(connection, call, next, { handover: true });
   }
 
   private prefetchMemory(call: LiveCall, transcript: string): void {

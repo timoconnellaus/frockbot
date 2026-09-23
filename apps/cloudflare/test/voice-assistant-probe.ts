@@ -424,6 +424,15 @@ export class WorkerdVoiceAssistant extends VoiceAssistant {
     return true;
   }
 
+  async probeCallsAll(
+    calls: { name: string; args: Record<string, unknown>; id: string }[],
+  ): Promise<boolean> {
+    const fake = this.#fake();
+    if (!fake) return false;
+    fake.callsAll(calls);
+    return true;
+  }
+
   async probeCancelsCalls(ids: string[]): Promise<boolean> {
     const fake = this.#fake();
     if (!fake) return false;

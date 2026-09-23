@@ -72,6 +72,18 @@ hand-over: the tool runs, the model says goodbye with its result, and the call
 hangs up once that turn ends. It is the same name as the client's hang-up
 frame, and it is offered even on a call with no Bot.
 
+Either wait is only so the turn's last words are heard, so it ends with that
+turn however the turn ends. A turn cut off first — a pause, a mute, a
+quiet-room sleep, the day's allowance, the session closing or going away, a memory write
+— has nothing left to hear, and the intent happens then rather than when some
+later, unrelated turn ends: the call hangs up, or it moves. A move that finds
+the call paused, muted or asleep tells the client with `voice/target` at once
+and opens the new Bot on the next wake, carrying the call's tail. A Bot chosen
+on the screen while the model was saying goodbye wins over the goodbye. A
+socket that drops mid-turn takes both with it: the hand-over is already on
+the call record a rejoin opens on, and an unfinished goodbye leaves the call
+to its rejoin window like any other drop.
+
 What is no longer two layers is the deciding. Every declaration is
 `NON_BLOCKING`, so nothing has to be classified as short or long in advance:
 `subagent` is the model's own judgement that something will take more than a
@@ -485,6 +497,14 @@ anything with the result. The fresh session is told it as a turn instead, and
 what it says settles the same ledger turn. A call the model withdraws
 (`toolCallCancellation`) is dropped rather than answered.
 
+A function call is answered only to the session that made it: its id means
+nothing to any other. Memory already in a live session cannot be withdrawn,
+so a batch that calls `memory_write` or `memory_forget` closes the session
+once the whole batch has run — once, however many writes it holds — and opens
+a fresh one carrying the call's tail. The batch's results then go in as one
+turn of the conversation, each with what was called and with what, rather
+than as responses to calls the new session never made.
+
 The instruction is rendered once, at setup, because a Live session cannot be
 re-instructed: everything the model will need for the whole call goes in then
 — who it is, how it sounds, its memory, the tail of its thread, the account's
@@ -588,8 +608,13 @@ subagent admitted.
   `<where-we-were>` — the person is not asked to start again.
   `VOICE_ASSISTANT_REJOIN_WINDOW_MS_V1` stays our own policy about a device
   coming back, not a guess at Google's window, because Google states none.
-- `goAway` — the server saying it is about to close — reconnects with the
-  handle immediately rather than letting the person hear the drop.
+- `goAway` — the server saying it is about to close — reconnects immediately
+  rather than letting the person hear the drop. A handle is not offered while
+  a turn is open or a `subagent` the call started is still running — and a
+  `subagent` runs for a minute or more — so that reconnect, like any wake
+  whose handle may not be offered, then opens fresh and carries the tail of
+  the call under `<where-we-were>` exactly as a 1008 does. A `subagent` answer owed to
+  the session before it then goes in as a turn.
 - The object also sleeps on its own after 30 s without an audio frame, so a
   client that never says `voice/sleep` still stops the meter.
 - **Pause** is the person doing the same thing deliberately: the client sends
@@ -635,7 +660,8 @@ rather than unmuting them.
 
 `voice/control` with `action:"end"`, then close. The model can also call `end_call` as a
 Live function when the person says they are done; hang-up waits for that
-spoken turn, then the object does the same as the client's hang-up and closes
+spoken turn — or for whatever cuts it off first (see "A call talks to one
+Bot") — then the object does the same as the client's hang-up and closes
 the socket so the surface says the call ended. The server closes the Live session, settles
 its meters, and answers `status: idle`. Closing the
 socket without `end_call` closes the Live session and settles its meters the
@@ -671,8 +697,10 @@ the socket is not the account's.
 The object writes one `voice assistant {json}` line per step, readable in
 `wrangler tail` and Workers Logs: `connected`, `refused-identity` (the socket
 was not the account's and was closed with `4403`), `call-admitted` (with the
-Bot and the voice it opened on), `upstream` (`starting` | `awake` | `asleep`,
-and whether this one is a resume and how many lines of handover it carried),
+Bot and the voice it opened on), `upstream` (`starting` | `awake` | `asleep`),
+`upstream-setup` (whether the session resumed the call's handle, how many
+lines of handover it carried, and — for a wake or `goAway` whose handle was
+refused — the `reason`: `uncertain` is an open turn or a running `subagent`),
 `upstream-failed` (the session could not be opened at all), `upstream-closed`
 (the session went on its own, with the code — `1008` is a handle the server
 has forgotten), `upstream-goaway` (the server is about to close it), `listening`,
@@ -684,6 +712,8 @@ only called functions ended, and its turn waits for what the model says with
 the results), `turn-silent` (a turn that had said nothing after the guard's
 window, so the client was told), `tool` (a
 function call, by name and id, never its arguments), `tool-cancelled`,
+`tool-results-relayed` (a batch's results went in as one turn because the
+session that made the calls had to go),
 `interrupted` (with `source`: `model` when the session's own detector heard
 someone, `client` when the phone's speech gate did), `call-switched` (with the
 Bot and voice the session reopened as), `answer-told` (a subagent result went
