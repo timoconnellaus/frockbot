@@ -72,10 +72,12 @@ export function groupReplyQuestionsV1(
         decision:
           "Does the message call for an answer or action from a member Bot who has not been @mentioned in it?",
         rules: [
-          "The group is the User and the member Bots listed in `members`. Every member reads every message.",
+          "The group is the User and the member Bots listed in `members`. It is a group chat: every member reads every message and speaks up as a person in a group chat would.",
           "A member @mentioned in `message.mentions` is already answering; judge only whether someone else is needed.",
           "A question, request or task put to the group, or to a member by name without @, calls for an answer.",
-          "Thanks, acknowledgements, reactions and remarks that ask nothing do not.",
+          "A greeting or check-in from the User to the group calls for replies, as it would among people.",
+          "Thanks, acknowledgements, reactions and sign-offs do not.",
+          "A member Bot's own greeting, answer or report does not call for the other members unless it asks them something.",
           "A message that only hands a question to the @mentioned members does not call for anyone else.",
         ],
       },
@@ -102,7 +104,9 @@ export function groupReplyQuestionsV1(
         decision: `Should ${name} answer or act on the latest message now?`,
         rules: [
           `Yes when the message is put to ${name} by name, is squarely ${name}'s kind of work, follows up on what ${name} said last, or is put to everyone.`,
-          `No when it is for someone else, asks nothing, or another member is clearly the one it is for.`,
+          `Yes when the User greets or checks in with the group, as in "hi", "morning all" or "hey team": in a group chat everyone says hello back.`,
+          `No when it is for someone else, only thanks or reacts, or another member is clearly the one it is for.`,
+          `No when another member Bot wrote it and it asks ${name} nothing: members do not greet, thank or answer each other unasked.`,
           "Several members may each be right to answer; judge this member on its own.",
         ],
       },
