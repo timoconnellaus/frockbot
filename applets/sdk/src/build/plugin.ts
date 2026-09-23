@@ -29,10 +29,12 @@ import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import ts from "typescript";
 
 import type { AppletDiagnostic } from "../lint/index.js";
-import { bootedWithin, withOneMoreBoot } from "./boot.js";
+import { bootedWithin } from "./boot.js";
 import { stableModulePaths } from "./module-paths.js";
-import { APPLET_COMPATIBILITY_DATE } from "./runtime.js";
 import { SDK_PLUGIN_TYPES } from "./paths.js";
+
+/** Pinned with the SDK: the runtime a Plugin build is checked against. */
+const PLUGIN_COMPATIBILITY_DATE = "2026-08-27";
 
 export type PluginBuildStage =
   "descriptor" | "typecheck" | "bundle" | "describe";
@@ -349,16 +351,10 @@ export default {
 
 /**
  * Ask the built module what it exports, by running it. The boot is bounded
- * and tried once more (`boot.ts`), so a build answers rather than hanging on
- * a runtime that never came up.
+ * (`boot.ts`), so a build answers rather than hanging on a runtime that never
+ * came up.
  */
-export function describePlugin(
-  moduleCode: string,
-): Promise<PluginDescriptionV1> {
-  return withOneMoreBoot(() => describeInWorkerd(moduleCode));
-}
-
-async function describeInWorkerd(
+export async function describePlugin(
   moduleCode: string,
 ): Promise<PluginDescriptionV1> {
   const miniflare = new Miniflare(
@@ -368,7 +364,7 @@ async function describeInWorkerd(
         { type: "ESModule", path: "/plugin.js", contents: moduleCode },
       ],
       modulesRoot: "/",
-      compatibilityDate: APPLET_COMPATIBILITY_DATE,
+      compatibilityDate: PLUGIN_COMPATIBILITY_DATE,
       // Import-time code runs with no way out: every fetch is answered here.
       outboundService: async () =>
         new Response("the build describes a Plugin without a network", {
@@ -378,10 +374,8 @@ async function describeInWorkerd(
       port: 0,
     }),
   );
-  let started = false;
   try {
     const url = await bootedWithin(miniflare.ready);
-    started = true;
     const response = (await miniflare.dispatchFetch(
       new URL(`/describe?${randomUUID()}`, url).toString(),
     )) as unknown as Response;
@@ -393,9 +387,11 @@ async function describeInWorkerd(
     }
     return validateDescription(body.description);
   } finally {
-    // A runtime that never started is let go of rather than waited on.
-    if (started) await miniflare.dispose();
-    else void miniflare.dispose().catch(() => {});
+    // Awaited on every path, a boot that missed its deadline included: this
+    // is what kills workerd. Miniflare's fallback is a process exit hook,
+    // `bun test` runs none, and a dispose still pending when the host exits
+    // leaves workerd running.
+    await miniflare.dispose();
   }
 }
 
