@@ -320,14 +320,20 @@ class MarkdownRun {
   });
 }
 
+// Emphasis follows CommonMark's flanking rules: a delimiter never opens
+// before a space or closes after one, so `2 * 3 * 4` stays arithmetic, and an
+// underscore inside a word is never a delimiter, so `say_hello` and
+// `list_greetings` in one sentence stay identifiers instead of italicising
+// the words between them.
 final _inlinePattern = RegExp(
   r'`([^`]+)`'
   r'|!?\[([^\]]*)\]\(([^)\s]+)[^)]*\)'
-  r'|\*\*([^*]+)\*\*'
-  r'|__([^_]+)__'
-  r'|\*([^*]+)\*'
-  r'|_([^_]+)_'
+  r'|\*\*(?!\s)([^*]+)(?<!\s)\*\*'
+  r'|(?<![\p{L}\p{N}_])__(?!\s)([^_]+)(?<!\s)__(?![\p{L}\p{N}_])'
+  r'|\*(?!\s)([^*]+)(?<!\s)\*'
+  r'|(?<![\p{L}\p{N}_])_(?!\s)([^_]+)(?<!\s)_(?![\p{L}\p{N}_])'
   r'|(https?://[^\s<>)\]]+)',
+  unicode: true,
 );
 
 /// Splits one block's text into styled runs. Code wins over emphasis, so a

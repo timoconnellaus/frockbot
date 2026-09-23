@@ -1121,6 +1121,35 @@ void main() {
       expect(runs.last.bold, isTrue);
     });
 
+    test('an underscore inside a word is not emphasis', () {
+      const source =
+          'three tools — say_hello, list_greetings, clear_greetings — '
+          'and I ran say_hello once';
+      final runs = parseMarkdownInline(source);
+
+      expect(runs, hasLength(1));
+      expect(runs.single.text, source);
+      expect(runs.single.italic, isFalse);
+    });
+
+    test('emphasis still wraps whole words', () {
+      final runs = parseMarkdownInline('an _italic_ and __bold__ word');
+
+      expect(
+        [for (final run in runs) run.text],
+        ['an ', 'italic', ' and ', 'bold', ' word'],
+      );
+      expect(runs[1].italic, isTrue);
+      expect(runs[3].bold, isTrue);
+    });
+
+    test('a delimiter beside a space is not emphasis', () {
+      final runs = parseMarkdownInline('2 * 3 * 4 and a _ b _ c');
+
+      expect(runs, hasLength(1));
+      expect(runs.single.italic, isFalse);
+    });
+
     test('a link keeps its label and its href', () {
       final runs = parseMarkdownInline('see [the docs](https://example.com)');
 
