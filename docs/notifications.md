@@ -50,7 +50,7 @@ The one-time, repeatable `notification-state-cleanup.ts` cleanup removes disposa
 
 Android native Firebase changes require a full Shorebird release through `scripts/native-update.py release`, followed by publishing and `adb install -r`; they cannot ship as a Dart-only patch. Deploy the backend before installing the message-cursor client.
 
-Read cursors are message cursors, which a build from before them cannot decode. A change like this raises the client protocol ([`core/protocol-schemas/README.md`](../core/protocol-schemas/README.md#compatibility-window)), so an install that is not upgraded is told to update rather than left with a broken sidebar. A read command an older build left behind is discarded on load instead of retried.
+Read cursors are message cursors, which a build from before them cannot decode. A change like this raises the client protocol ([`core/protocol-schemas/README.md`](../core/protocol-schemas/README.md#compatibility-window)), so an install that is not upgraded is told to update rather than left with a broken sidebar. The client keeps no read command: a refused receipt is dropped, and that Bot's receipts pause until the next unread read.
 
 The app icon badge adds `notificationsEnabled` to the unread view, and the view refuses unknown and missing fields, so a native build without it cannot decode `/api/bots/unread`. The Android half ships as a full release because it changes Kotlin. Deploy the backend before installing the new native clients. Check the dock badge with the focused chat receiving a reply, a minimised window receiving a reply, a muted Bot, 100 or more unread, and sign-out; check an Android launcher with a muted Bot's notification present, a swiped notification, and a read on another device.
 

@@ -134,11 +134,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     widget.store,
     widget.userId,
   );
-  late final ActivityController activity = ActivityController(
-    widget.api,
-    widget.store,
-    widget.userId,
-  );
+  late final ActivityController activity = ActivityController(widget.api);
 
   /// One field of a Bot's settings at a time, from its row in the list.
   late final BotQuickWrites quickWrites = BotQuickWrites(widget.api);

@@ -1,5 +1,3 @@
-import 'dart:convert';
-
 import 'package:flutter/foundation.dart';
 
 import '../client/transport.dart';
@@ -24,9 +22,7 @@ String? botLink(Uri uri) {
 
 class ActivityController extends ChangeNotifier {
   final NativeApi api;
-  final LocalStore store;
-  final String userId;
-  ActivityController(this.api, this.store, this.userId);
+  ActivityController(this.api);
   Map<String, wire.UnreadView> unread = {};
   String? error;
   bool loading = false;
@@ -34,23 +30,31 @@ class ActivityController extends ChangeNotifier {
   bool _disposed = false;
   bool _reloadRequested = false;
 
-  /// One retained command per Bot, and the Bots whose command is in flight.
-  /// Both are keyed by Bot because the controls are a Bot's: a single flag
-  /// disabled every Bot's unread menu while any one of them was marked.
-  final Map<String, Map<String, dynamic>> _pending = {};
+  /// The Bots whose command is in flight, and the Bots whose last command was
+  /// refused since the directory was last read. Keyed by Bot because the
+  /// controls are a Bot's: a single flag disabled every Bot's unread menu
+  /// while any one of them was marked.
+  ///
+  /// A refused command is not kept to be sent again. Read state is disposable
+  /// and a later glance names a newer cursor, so the one thing a refusal owes
+  /// is a pause: the open chat asks to be marked on every frame, and without
+  /// one a Bot the cloud keeps refusing would be asked again as fast as the
+  /// refusals came back. The next directory read ends the pause whether or not
+  /// it succeeds, so a directory that keeps failing cannot leave a Bot's
+  /// controls disabled for the session.
   final Set<String> _sending = {};
+  final Set<String> _refused = {};
 
   /// What the badge said before a prediction was drawn over it, so a refused
   /// command puts back what the cloud last reported. A Bot the directory did
   /// not mention is held as a null.
   final Map<String, wire.UnreadView?> _predicted = {};
-  bool get pending => _pending.isNotEmpty;
   bool get saving => _sending.isNotEmpty;
 
-  /// Whether this Bot's unread controls are waiting on a command of their own.
+  /// Whether this Bot's unread controls are waiting on a command of their own,
+  /// or on the directory read that follows one the cloud refused.
   bool busy(String botId) =>
-      _pending.containsKey(botId) || _sending.contains(botId);
-  String get _key => 'activity-pending.$userId';
+      _sending.contains(botId) || _refused.contains(botId);
   void _notify() {
     if (!_disposed) notifyListeners();
   }
@@ -66,8 +70,6 @@ class ActivityController extends ChangeNotifier {
       loading = true;
       _notify();
       try {
-        final saved = await store.read(_key);
-        if (saved != null) await _restore(saved);
         final views = wire.UnreadDirectory.fromJson(
           await api.request('/api/bots/unread'),
         );
@@ -81,6 +83,7 @@ class ActivityController extends ChangeNotifier {
               'Couldn’t reach FrockBot. Check your connection and try again.';
         }
       } finally {
+        _refused.clear();
         loading = false;
         _notify();
       }
@@ -95,17 +98,39 @@ class ActivityController extends ChangeNotifier {
     if (_disposed || busy(botId) || loading) return;
     final cursor = unread[botId]?.lastActivityCursor?.value;
     if (read && cursor == null) return;
+    final commandId = randomId();
     final command = wire.MarkReadCommand.fromJson({
       'schemaVersion': 1,
       'type': read ? 'bot/mark-read' : 'bot/mark-unread',
-      'commandId': randomId(),
+      'commandId': commandId,
       'botId': botId,
       if (read) 'upToCursor': cursor,
       if (!read && fromMessageId != null) 'fromMessageId': fromMessageId,
     });
-    _pending[botId] = Map<String, dynamic>.from(command.toJson() as Map);
+    _sending.add(botId);
     _predict(botId, read: read, fromMessageId: fromMessageId);
-    await _send(botId);
+    try {
+      final receipt = wire.MarkReadReceipt.fromJson(
+        await api.request(
+          '/api/bots/${Uri.encodeComponent(botId)}/unread',
+          body: command.toJson(),
+        ),
+      );
+      if (receipt.commandId.value != commandId ||
+          receipt.unread.botId.value != botId) {
+        throw const FormatException('Mismatched unread receipt');
+      }
+      _predicted.remove(botId);
+      unread[botId] = receipt.unread;
+      error = null;
+    } catch (_) {
+      _rollback(botId);
+      _refused.add(botId);
+      error = _unconfirmed;
+    } finally {
+      _sending.remove(botId);
+      _notify();
+    }
   }
 
   /// Draws the badge the tap asked for, ahead of the receipt that confirms it.
@@ -142,9 +167,8 @@ class ActivityController extends ChangeNotifier {
     _notify();
   }
 
-  /// Puts back what the cloud last said about this Bot. A command retained for
-  /// a later attempt rolls back too: until the cloud has accepted it, its own
-  /// answer is the only honest thing to draw.
+  /// Puts back what the cloud last said about this Bot: until the cloud has
+  /// accepted a command, its own answer is the only honest thing to draw.
   void _rollback(String botId) {
     if (!_predicted.containsKey(botId)) return;
     final before = _predicted.remove(botId);
@@ -155,110 +179,7 @@ class ActivityController extends ChangeNotifier {
     }
   }
 
-  /// A command this build cannot speak is dropped, never retried for ever.
-  ///
-  /// Read state is disposable: the cloud is authoritative and the next glance
-  /// at the conversation marks it again. A command left behind by an older
-  /// build — one naming a cursor this build no longer accepts — would fail to
-  /// decode on every attempt, and a retained command gates that Bot's marking,
-  /// manual unread and acknowledgement alike, so keeping it would disable all
-  /// three for that Bot until its data was cleared.
-  Future<void> _discard(String? botId) async {
-    if (botId == null) {
-      _pending.clear();
-    } else {
-      _pending.remove(botId);
-    }
-    try {
-      await _persist();
-    } catch (_) {
-      /* The next write replaces it; nothing here is authoritative. */
-    }
-  }
-
-  Future<void> _persist() async {
-    if (_pending.isEmpty) {
-      await store.delete(_key);
-      return;
-    }
-    await store.write(_key, jsonEncode(_pending));
-  }
-
-  Future<void> _restore(String saved) async {
-    final Map<String, dynamic> held;
-    try {
-      held = Map<String, dynamic>.from(jsonDecode(saved) as Map);
-    } catch (_) {
-      await _discard(null);
-      return;
-    }
-    for (final entry in held.entries) {
-      try {
-        final command = wire.MarkReadCommand.fromJson(
-          Map<String, dynamic>.from(entry.value as Map),
-        );
-        _pending[entry.key] = Map<String, dynamic>.from(
-          command.toJson() as Map,
-        );
-      } catch (_) {
-        await _discard(entry.key);
-      }
-    }
-  }
-
-  /// Every command still waiting for an answer, sent again.
-  Future<void> retry() async {
-    for (final botId in _pending.keys.toList()) {
-      await _send(botId);
-    }
-  }
-
-  Future<void> _send(String botId) async {
-    if (_disposed || _sending.contains(botId)) return;
-    final held = _pending[botId];
-    if (held == null) return;
-    final Map<String, dynamic> body;
-    try {
-      body = Map<String, dynamic>.from(
-        wire.MarkReadCommand.fromJson(held).toJson() as Map,
-      );
-    } catch (_) {
-      await _discard(botId);
-      _rollback(botId);
-      error = _refused;
-      _notify();
-      return;
-    }
-    _sending.add(botId);
-    _notify();
-    try {
-      await _persist();
-      if (_disposed) return;
-      final receipt = wire.MarkReadReceipt.fromJson(
-        await api.request(
-          '/api/bots/${Uri.encodeComponent(body['botId'] as String)}/unread',
-          body: body,
-        ),
-      );
-      if (receipt.commandId.value != body['commandId'] ||
-          receipt.unread.botId.value != body['botId']) {
-        throw const FormatException('Mismatched unread receipt');
-      }
-      _pending.remove(botId);
-      await _persist();
-      _predicted.remove(botId);
-      unread[receipt.unread.botId.value] = receipt.unread;
-      error = null;
-    } catch (_) {
-      _rollback(botId);
-      error = _refused;
-    } finally {
-      _sending.remove(botId);
-      _notify();
-    }
-  }
-
-  static const _refused =
+  static const _unconfirmed =
       'Couldn’t confirm the read status. Check it before making another change.';
 
   @override
