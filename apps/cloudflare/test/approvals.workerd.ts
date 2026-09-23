@@ -6,7 +6,7 @@
 //
 //  * The object may be gone entirely between the Turn that asked and the click
 //    that answers. The record is durable, so the decision lands on the record
-//    the settled Turn wrote and the queued input reaches the next chat Turn.
+//    the settled Turn wrote, and the click opens the Turn that acts on it.
 //  * Nobody may ever click. The alarm expires the card exactly once, records
 //    `expired`, and queues the same input — so the Bot always learns the
 //    outcome and never waits unboundedly.
@@ -72,6 +72,11 @@ interface StoredRunProbe {
   sessionId: string;
   status: string;
   events: Array<{ type: string; text?: string }>;
+  admission?: {
+    turnType: string;
+    lane?: string;
+    origin?: { kind: string; inputId?: string };
+  };
 }
 
 function rpc(identity: { userId: string; botId: string }): ApprovalRpc {
@@ -88,6 +93,33 @@ async function storedRuns(identity: {
     bot(identity.userId, identity.botId),
     (_instance, state) => hydratedStoredRunsV1<StoredRunProbe>(state.storage),
   );
+}
+
+/**
+ * The Turn a decision opened, once it has settled. It starts on the promise
+ * the decision left behind, or on the recovery alarm after an eviction, so
+ * this nudges the alarm between looks rather than assuming which of the two
+ * won.
+ */
+async function approvalDelivery(identity: {
+  userId: string;
+  botId: string;
+}): Promise<StoredRunProbe> {
+  for (let attempt = 0; attempt < 20; attempt += 1) {
+    const found = (await storedRuns(identity)).find(
+      (run) => run.admission?.origin?.kind === "input-delivery",
+    );
+    if (found && found.status !== "running") return found;
+    await runInDurableObject(
+      bot(identity.userId, identity.botId),
+      (_instance, state) => state.storage.setAlarm(Date.now()),
+    );
+    await runInDurableObject(
+      bot(identity.userId, identity.botId),
+      (instance: unknown) => (instance as { alarm(): Promise<void> }).alarm(),
+    );
+  }
+  throw new Error("the decision never opened a Turn");
 }
 
 /** One chat Turn whose scripted tool call is an approval card. */
@@ -178,7 +210,37 @@ describe("a pending decision's durable life in Workerd", () => {
     expect(replayed.status).toBe("replayed");
     expect(replayed.approval).toEqual(recorded.approval);
 
-    // And the Bot learns the outcome on its next conversational Turn.
+    // And the Bot acts on it at once, in a Turn of its own: nobody has to
+    // speak again for the answer to reach it.
+    const delivery = await approvalDelivery(identity);
+    expect(delivery).toMatchObject({
+      status: "completed",
+      sessionId: `${identity.userId}:${identity.botId}`,
+      admission: {
+        turnType: "chat",
+        lane: "agent",
+        origin: { kind: "input-delivery", inputId: "ap-1" },
+      },
+    });
+    const delivered = delivery.events
+      .filter((event) => event.type === "user/message")
+      .map((event) => event.text ?? "");
+    expect(
+      delivered.some((text) =>
+        text.includes('The decision on "ap-1" is approved.'),
+      ),
+    ).toBe(true);
+    expect(
+      delivered.some((text) => text.includes("Nobody has said anything")),
+    ).toBe(true);
+    // One Turn per decision, whatever the replay did.
+    expect(
+      (await storedRuns(identity)).filter(
+        (run) => run.admission?.origin?.kind === "input-delivery",
+      ),
+    ).toHaveLength(1);
+
+    // Delivered once. The person's own next Turn is not told again.
     await evictDurableObject(bot(identity.userId, identity.botId));
     const next = await rpc(identity).run({
       schemaVersion: 1,
@@ -193,31 +255,8 @@ describe("a pending decision's durable life in Workerd", () => {
     const chat = (await storedRuns(identity)).find(
       (run) => run.runId === next.runId,
     )!;
-    const inputs = chat.events
-      .filter((event) => event.type === "user/message")
-      .map((event) => event.text ?? "");
     expect(
-      inputs.some((text) =>
-        text.includes('The decision on "ap-1" is approved.'),
-      ),
-    ).toBe(true);
-
-    // Delivered once. A later Turn is not told again.
-    const again = await rpc(identity).run({
-      schemaVersion: 1,
-      ...identity,
-      command: {
-        runId: `chat-again-${suffix}`,
-        sessionId: `${identity.userId}:${identity.botId}`,
-        acceptedAt: new Date().toISOString(),
-        text: "anything else?",
-      },
-    });
-    const laterRun = (await storedRuns(identity)).find(
-      (run) => run.runId === again.runId,
-    )!;
-    expect(
-      laterRun.events
+      chat.events
         .filter((event) => event.type === "user/message")
         .some((event) => (event.text ?? "").includes('The decision on "ap-1"')),
     ).toBe(false);

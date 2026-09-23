@@ -1,7 +1,11 @@
 // What the kernel does with one press on a Card: the three routes, and the
 // two things it refuses before it does anything at all.
 import { describe, expect, test } from "bun:test";
-import type { BotIdentity } from "@frockbot/core/durable";
+import {
+  PENDING_AGENT_RUN_PREFIX,
+  type BotIdentity,
+  type OwnedBotTurnCommand,
+} from "@frockbot/core/durable";
 import { a2uiByteLengthV1, A2UI_LIMITS_V1 } from "@frockbot/core/contracts";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import { approvalKeyV1 } from "@frockbot/app/shell/approvals";
@@ -58,6 +62,7 @@ function harness(
   memberPackageId = "email",
 ) {
   const notices: { title: string; body: string }[] = [];
+  const admitted: OwnedBotTurnCommand[] = [];
   const storage = {
     get: (key: string) => Promise.resolve(values.get(key)),
     put: (keyOrEntries: unknown, value?: unknown) => {
@@ -115,9 +120,25 @@ function harness(
         notices.push(notification);
         return Promise.resolve();
       },
+      // Every Turn a press opens is admitted and left waiting behind one
+      // still running, which is when a repeated press has one to ride.
+      admit: (command: OwnedBotTurnCommand) => {
+        admitted.push(command);
+        values.set(
+          `${PENDING_AGENT_RUN_PREFIX}${command.acceptedAt}:${command.runId}`,
+          command.runId,
+        );
+        return Promise.resolve({ runId: command.runId, state: "queued" });
+      },
+      readRunHeader: (runId: string) => {
+        const command = admitted.find((turn) => turn.runId === runId);
+        return Promise.resolve(
+          command && { admission: { origin: command.origin } },
+        );
+      },
     },
   } as unknown as ShellBotStateV1;
-  return { state, values, notices };
+  return { state, values, notices, admitted };
 }
 
 describe("reading a Bot's Cards", () => {
@@ -354,7 +375,7 @@ describe("the three routes", () => {
         },
       ],
     ]);
-    const { state } = harness(values);
+    const { state, admitted } = harness(values);
     const receipt = await cardAction(state, IDENTITY, {
       schemaVersion: 1,
       surfaceId: SURFACE,
@@ -366,6 +387,10 @@ describe("the three routes", () => {
       decision: "approved",
       decidedBy: "user",
     });
+    // The answer opens the Turn that acts on it, as the approval route does.
+    expect(admitted.map((command) => command.origin)).toEqual([
+      { kind: "input-delivery", inputId: "ap-1" },
+    ]);
   });
 
   test("a Card cannot mint an approval the kernel never recorded", async () => {
@@ -645,11 +670,12 @@ describe("the three routes", () => {
 
   test("anything else becomes the Bot's next input, never the User's words", async () => {
     const values = new Map<string, unknown>([[cardKeyV1(SURFACE), card()]]);
-    const { state } = harness(values);
+    const { state, admitted } = harness(values);
     const receipt = await cardAction(state, IDENTITY, {
       schemaVersion: 1,
       surfaceId: SURFACE,
       revision: 2,
+      commandId: "press-1",
       event: { name: "pick-tuesday", context: { day: "Tue" } },
     });
     expect(receipt.routed).toBe("input");
@@ -663,6 +689,40 @@ describe("the three routes", () => {
       name: "pick-tuesday",
       context: '{"day":"Tue"}',
     });
+    // Nothing else answers the press, so it opens the Turn that does: the
+    // person picked an answer, and the Bot replies without being asked.
+    expect(admitted).toEqual([
+      expect.objectContaining({
+        turnType: "chat",
+        lane: "agent",
+        origin: { kind: "input-delivery", inputId: "card-action:press-1" },
+      }),
+    ]);
+  });
+
+  test("a press repeated before its Turn starts rides that Turn", async () => {
+    // The person changes their answer while the Bot is still busy. The Turn
+    // the first press opened drains every press when it starts, so a second
+    // would find nothing and only fill the agent queue.
+    const values = new Map<string, unknown>([[cardKeyV1(SURFACE), card()]]);
+    const { state, admitted } = harness(values);
+    for (const [commandId, day] of [
+      ["press-1", "Tue"],
+      ["press-2", "Wed"],
+    ] as const) {
+      await cardAction(state, IDENTITY, {
+        schemaVersion: 1,
+        surfaceId: SURFACE,
+        revision: 2,
+        commandId,
+        event: { name: "pick-day", context: { day } },
+      });
+    }
+
+    expect(
+      [...values.keys()].filter((key) => key.startsWith("routine-wake:")),
+    ).toHaveLength(2);
+    expect(admitted).toHaveLength(1);
   });
 
   /**
@@ -724,7 +784,7 @@ describe("the three routes", () => {
     // The Bot reads this verbatim, so half of a JSON object is worse than a
     // refusal the person is told about.
     const values = new Map<string, unknown>([[cardKeyV1(SURFACE), card()]]);
-    const { state } = harness(values);
+    const { state, admitted } = harness(values);
     await expect(
       cardAction(state, IDENTITY, {
         schemaVersion: 1,
@@ -739,5 +799,6 @@ describe("the three routes", () => {
     expect(
       [...values.keys()].filter((key) => key.startsWith("routine-wake:")),
     ).toHaveLength(0);
+    expect(admitted).toEqual([]);
   });
 });

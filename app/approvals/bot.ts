@@ -2,7 +2,8 @@
 //
 // `app/shell/approvals.ts` is the record, the policy and the projection — read
 // by the client too. This is the half that writes: the decision, the durable
-// input it owes the Bot, and the machine command a "yes" releases.
+// input it owes the Bot, the machine command a "yes" releases, and the Turn
+// that lets the Bot act on the answer.
 
 import type { BotIdentity } from "@frockbot/core/durable";
 import { settleMachineIntentV1 } from "@frockbot/app/machine/approval";
@@ -30,6 +31,7 @@ import {
   type ApprovalRecordV1,
 } from "@frockbot/app/shell/approvals";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
+import { openInputDeliveryTurnV1 } from "../shell/input-delivery.js";
 
 /**
  * Every pending approval this Bot's alarm now owes an expiry, expired in one
@@ -206,6 +208,17 @@ export async function decideApproval(
     settled.pluginIntent?.decision === "approved"
   ) {
     await applyApprovedPluginIntentV1(state, identity, settled.pluginIntent);
+  }
+  // The Bot ended its Turn to ask, so the answer opens the Turn that acts on
+  // it. Last, so an approved Plugin is already on when that Turn is admitted.
+  // Only the write that decided it opens one, as with dispatch: a replay reads
+  // back a decision whose Turn was opened then. The run id carries the Turn
+  // that asked, because a Bot may reuse an approval id in a later Turn.
+  if (settled.status === "recorded") {
+    await openInputDeliveryTurnV1(state, identity, {
+      inputId: approvalId,
+      key: `approval\u0000${settled.approval.runId}\u0000${approvalId}`,
+    });
   }
   return {
     schemaVersion: 1,

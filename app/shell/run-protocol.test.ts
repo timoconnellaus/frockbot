@@ -168,6 +168,32 @@ describe("client run protocol v1", () => {
     expect(isVisibleRunV1(grouped)).toBe(false);
   });
 
+  test("a delivery Turn's cue is never drawn as the person's words", () => {
+    // The Turn an approval, a card press or a machine result opens runs on a
+    // cue saying nobody spoke. The person's bubble is theirs alone.
+    for (const origin of [
+      { kind: "input-delivery" as const, inputId: "card-action:press-1" },
+      { kind: "routine-delivery" as const, wakeRunId: "rf-1" },
+    ]) {
+      const delivery = {
+        ...storedRun([]),
+        input: "[Delivery] Nobody has said anything to you.",
+        admission: {
+          schemaVersion: 1 as const,
+          turnType: "chat" as const,
+          lane: "agent" as const,
+          origin,
+        },
+      };
+
+      expect(isVisibleRunV1(delivery)).toBe(true);
+      expect(projectClientRunV1(delivery)).toMatchObject({
+        input: "",
+        canRetry: false,
+      });
+    }
+  });
+
   test("projects an agent Turn with its Bot origin marker", () => {
     const agent = {
       ...storedRun([]),

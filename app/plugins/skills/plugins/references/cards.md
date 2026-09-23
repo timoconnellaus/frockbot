@@ -95,6 +95,11 @@ export const cards: Record<string, PluginCard> = {
   costs no Turn. Return `{ messages, input }` to also leave one line for the
   Bot's next Turn. Action names are the Plugin's, so two cards may not share
   one, and a handler that throws or overruns leaves the card exactly as it was.
+- A component `action` whose name is neither `plugin/<pluginId>/…` nor
+  `approval/…` reaches no handler: it is the person's answer to the Bot, and
+  it opens a Turn in which the Bot reads the name and `context` as a press on
+  a control, never as their words. Use it when the Bot should act on the
+  choice; use a handler when the card can answer the press itself.
 - A handler is handed `{ cardId, surfaceId, action, context, dataModel, record }`:
   `cardId` is the card the pressed surface was drawn from, `record` is that
   Card's data model as the kernel stores it — read your card's state from there

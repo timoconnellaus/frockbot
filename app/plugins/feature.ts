@@ -301,7 +301,7 @@ export function pluginTools(
     tool({
       name: "plugin_publish",
       description:
-        "Build a Plugin's current source, store it, and ask the User to approve running it on this Bot with a card in the conversation. Nothing runs until they approve; the decision arrives on a later Turn, and the Plugin is live from the Turn after that. Run plugin_check first; a publish that does not build is refused with the same diagnostics.",
+        "Build a Plugin's current source, store it, and ask the User to approve running it on this Bot with a card in the conversation. Nothing runs until they approve; their answer opens a Turn of yours that carries the decision, and an approved Plugin is already live in it. Run plugin_check first; a publish that does not build is refused with the same diagnostics.",
       inputSchema: {
         type: "object",
         properties: { ...PLUGIN_ID_PROPERTY },
@@ -334,14 +334,14 @@ export function pluginTools(
         return [
           `Built ${pluginId} and asked the User to approve it (approval ${result.ask.approvalId}).`,
           "Tell the User in your own words what it does and why you built it, then end your Turn.",
-          "Their decision arrives as durable input on a later Turn; approved, the Plugin runs on this Bot from the Turn after that.",
+          "Their answer opens a Turn of yours that carries the decision; approved, the Plugin is already running on this Bot in that Turn, so tell them it is ready.",
         ].join(" ");
       },
     }),
     tool({
       name: "plugin_enable",
       description:
-        "Ask the User to turn a Plugin that is already in the account's Composition on for this Bot, with a card in the conversation. Turning a Plugin on widens what you can do, so it is the User's decision; the answer arrives on a later Turn.",
+        "Ask the User to turn a Plugin that is already in the account's Composition on for this Bot, with a card in the conversation. Turning a Plugin on widens what you can do, so it is the User's decision; their answer opens a Turn of yours that carries it.",
       inputSchema: {
         type: "object",
         properties: { ...PLUGIN_ID_PROPERTY },
@@ -370,7 +370,7 @@ export function pluginTools(
           result.ask,
           cards(),
         );
-        return `Asked the User to turn ${pluginId} on for this Bot (approval ${result.ask.approvalId}). Say why you want it, then end your Turn; the decision arrives on a later Turn.`;
+        return `Asked the User to turn ${pluginId} on for this Bot (approval ${result.ask.approvalId}). Say why you want it, then end your Turn; their answer opens a Turn of yours that carries the decision.`;
       },
     }),
     tool({

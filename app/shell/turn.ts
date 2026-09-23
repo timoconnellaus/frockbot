@@ -22,7 +22,8 @@ import {
   SessionEventLog,
   STORED_EFFECT_ADMISSIONS_MAX,
   storedRunRecordV2,
-  storedRunIsRoutineDeliveryV1,
+  isDeliveryOriginV1,
+  storedRunIsDeliveryV1,
   workingContextHeadKeyV1,
   type BotIdentity,
   type BotTurnExecutionInput,
@@ -50,7 +51,10 @@ import {
 } from "@frockbot/app/plugins/catalog";
 import { isolateMountOptions } from "@frockbot/app/isolates/bot";
 import { settlePluginHealthV1 } from "@frockbot/app/plugins/health";
-import { pendingBotInputPreambleV1 } from "@frockbot/app/routines/inbox";
+import {
+  inputDeliveryGuidanceV1,
+  pendingBotInputPreambleV1,
+} from "@frockbot/app/routines/inbox";
 import { requeueDrainedInputsV1 } from "@frockbot/app/routines/inbox-store";
 import {
   admittedBotSettingsV1,
@@ -227,14 +231,14 @@ export async function stopRun(
         stopRequestedAt,
       } satisfies StoredStopReceipt,
     });
-    // A delivery Turn the alarm opened drains the pending queue before the
-    // model runs, and a Turn carrying a durable Stop intent never completes —
-    // it settles `cancelled`. So a morning's triage would be lost to one press
-    // on a Turn nobody asked for. Its drained hand-offs go back on the queue
-    // here, in the same transaction as the intent that decided it, and the
-    // Bot's next conversational Turn carries them as it did before. A Turn the
-    // person started gives back nothing: they stopped it themselves.
-    if (storedRunIsRoutineDeliveryV1(run)) {
+    // A delivery Turn drains the pending queue before the model runs, and a
+    // Turn carrying a durable Stop intent never completes — it settles
+    // `cancelled`. So a morning's triage, or an approval's answer, would be
+    // lost to one press on a Turn nobody asked for. What it drained goes back
+    // on the queue here, in the same transaction as the intent that decided
+    // it, and the Bot's next conversational Turn carries it as it did before.
+    // A Turn the person started gives back nothing: they stopped it themselves.
+    if (storedRunIsDeliveryV1(run)) {
       await requeueDrainedInputsV1(transaction, command.runId);
     }
     await state.authority.refreshRecoveryAlarm(transaction);
@@ -570,12 +574,17 @@ export async function executeTurn(
  * hand-off addressed to the parent must not be consumed by another firing.
  *
  * A delivery Turn is the one Turn whose *only* input is the drain: its own
- * text is a cue saying nobody spoke. The alarm decides to open one by reading
- * the queue, and the person's own Turn can drain it in the window between that
- * read and this one — so the drain coming back empty is reachable, and it
+ * text is a cue saying nobody spoke. It is opened because the queue held
+ * something — a hand-off the alarm read, an input that just landed — and the
+ * person's own Turn can drain it before this one reaches it, or while this one
+ * waits behind it — so the drain coming back empty is reachable, and it
  * leaves the cue standing alone over nothing. This is where that is known, so
  * this is where it ends: the caller returns without a model call and without a
  * send rather than letting the Bot speak from an empty hand-off.
+ *
+ * An input-delivery Turn's cue says only that nobody spoke: what to do is
+ * decided here, by what the drain actually carried, because the drain takes
+ * the whole queue and not only the input that opened the Turn.
  */
 export async function turnInputTextV1(
   state: ShellBotStateV1,
@@ -590,9 +599,14 @@ export async function turnInputTextV1(
   const drained = await state.routineInbox.drainInto(command.runId);
   const preamble = pendingBotInputPreambleV1(drained);
   if (preamble.length === 0) {
-    return command.origin?.kind === "routine-delivery"
-      ? undefined
-      : command.text;
+    return isDeliveryOriginV1(command.origin) ? undefined : command.text;
+  }
+  const guidance =
+    command.origin?.kind === "input-delivery"
+      ? inputDeliveryGuidanceV1(drained)
+      : "";
+  if (guidance.length > 0) {
+    return `${preamble}\n${command.text}\n${guidance}`;
   }
   return `${preamble}\n${command.text}`;
 }

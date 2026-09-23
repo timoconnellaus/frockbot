@@ -582,6 +582,54 @@ export const ROUTINE_DELIVERY_CUE_V1 = [
 ].join("\n");
 
 /**
+ * The cue an input-delivery Turn is admitted with: the Turn a person's answer
+ * to an approval, a press on a card, or a command their Mac finished opens.
+ *
+ * It says only that nobody spoke. What to do depends on what the drain
+ * actually carried — which is the whole queue, not just the input that opened
+ * the Turn — so the rest is {@link inputDeliveryGuidanceV1}, composed when the
+ * Turn drains.
+ */
+export const INPUT_DELIVERY_CUE_V1 = [
+  "[Delivery] Nobody has said anything to you. This Turn exists so you can act on what arrived above, in the context of this conversation.",
+  "Do not mention that this Turn happened or that anything was queued.",
+].join("\n");
+
+/**
+ * One line of what to do per kind of input an input-delivery Turn drained, in
+ * a fixed order, each kind once however many of it arrived.
+ */
+export function inputDeliveryGuidanceV1(
+  inputs: readonly PendingBotInputV1[],
+): string {
+  const kinds = new Set(inputs.map((input) => input.kind));
+  const lines: string[] = [];
+  if (kinds.has("approval")) {
+    lines.push(
+      "For an approval: if they approved, carry on with what you asked approval for, then tell them where it stands; if it was denied or expired, do not do it, and say so in one line.",
+    );
+  }
+  if (kinds.has("card-action")) {
+    // A press is a choice on a control. Answered as a message, a Bot thanks
+    // the person for their reply; the point is to act on what they chose.
+    lines.push(
+      "For a card they pressed: the press is their choice on a control, not a message. Act on what they chose — answer the question it settles, or carry on with the work it was waiting for — rather than replying to the press itself.",
+    );
+  }
+  if (kinds.has("machine-result")) {
+    lines.push(
+      "For a machine command that finished: tell them what matters in the result, or carry on with the work it was for. If you already told them that result, do not repeat it.",
+    );
+  }
+  if (kinds.has("wake")) {
+    lines.push(
+      "For a hand-off from a Routine or a subagent: tell them what matters in it, leaving out what they already know.",
+    );
+  }
+  return lines.join("\n");
+}
+
+/**
  * The hand-off text an automation Turn produced, if it produced one. The
  * `wake/parent` event is the only durable statement a Routine can make to its
  * parent, so the last one recorded in the Turn wins.
