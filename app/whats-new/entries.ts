@@ -23,6 +23,17 @@ export type WhatsNewEntrySourceV1 = {
  */
 export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
+    id: "group-chats",
+    title: "Group Chats",
+    summary:
+      "Talk with several Bots at once. Every Bot in the group reads every message, and the ones with something to add reply.",
+    kind: "feature",
+    image: {
+      file: "group-chats.webp",
+      alt: "A Group Chat called Launch beside the Bot list: the person asks @Ledger about the budget, Ledger and Fox reply under their coloured badges, and Ledger and Pixel work at the end of the thread.",
+    },
+  },
+  {
     id: "voice-answers-after-tools",
     title: "Calls answer without a false error",
     summary:

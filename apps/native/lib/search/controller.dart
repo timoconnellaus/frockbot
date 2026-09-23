@@ -7,6 +7,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 
 import '../client/transport.dart';
+import '../groups/faces.dart';
 
 const searchMaxQueryLengthV1 = 200;
 const searchDebounce = Duration(milliseconds: 200);
@@ -32,11 +33,31 @@ class SearchSelection {
   final String? runId;
   final String? routineId;
   final String? actionId;
+  final String? groupId;
   const SearchSelection({
     this.botId,
     this.runId,
     this.routineId,
     this.actionId,
+    this.groupId,
+  });
+}
+
+/// A Group Chat as search finds it: by its name, or by who is in it.
+class SearchGroupChat {
+  final String id;
+  final String name;
+  final List<GroupFace> faces;
+  final bool unread;
+  final bool archived;
+  final bool hidden;
+  const SearchGroupChat({
+    required this.id,
+    required this.name,
+    required this.faces,
+    this.unread = false,
+    this.archived = false,
+    this.hidden = false,
   });
 }
 
@@ -75,6 +96,7 @@ class SearchEntry {
   final SearchCategory category;
   final SearchSelection selection;
   final SearchBot? bot;
+  final SearchGroupChat? groupChat;
   const SearchEntry({
     required this.key,
     required this.title,
@@ -82,6 +104,7 @@ class SearchEntry {
     required this.category,
     required this.selection,
     this.bot,
+    this.groupChat,
   });
 }
 
@@ -151,10 +174,12 @@ class SearchGroup {
 class BotSearchController extends ChangeNotifier {
   final NativeApi api;
   final List<SearchBot> bots;
+  final List<SearchGroupChat> groupChats;
   final List<SearchAction> actions;
   BotSearchController(
     this.api, {
     this.bots = const [],
+    this.groupChats = const [],
     this.actions = const [],
   });
 
@@ -229,6 +254,24 @@ class BotSearchController extends ChangeNotifier {
               category: SearchCategory.bots,
               selection: SearchSelection(botId: bot.id),
               bot: bot,
+            ),
+      if (category == SearchCategory.groups ||
+          (category == SearchCategory.all && text.isNotEmpty))
+        for (final chat in groupChats)
+          if ((includeArchived || !chat.archived) &&
+              matches(
+                '${chat.name} ${[for (final face in chat.faces) face.name].join(' ')}',
+              ))
+            SearchEntry(
+              key: 'group:${chat.id}',
+              title: chat.name,
+              subtitle: [
+                if (chat.archived) 'Archived' else if (chat.hidden) 'Hidden',
+                [for (final face in chat.faces) face.name].join(', '),
+              ].join(' · '),
+              category: SearchCategory.groups,
+              selection: SearchSelection(groupId: chat.id),
+              groupChat: chat,
             ),
       if (wantsIndex)
         for (final group in groups ?? const <SearchGroup>[])

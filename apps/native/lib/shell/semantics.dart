@@ -77,6 +77,46 @@ abstract final class ShellIds {
   static String slot(String name) => 'shell-slot-$name';
 }
 
+/// A Group Chat: its place in the list, its thread, and the sheets that
+/// change it.
+abstract final class GroupIds {
+  static const create = 'group-chat-create';
+  static const createSheet = 'group-chat-create-sheet';
+  static const createName = 'group-chat-create-name';
+  static const createConfirm = 'group-chat-create-confirm';
+  static String createMember(String botId) => 'group-chat-create-member-$botId';
+  static String row(String groupId) => 'group-chat-row-$groupId';
+  static String pinned(String groupId) => 'group-chat-pinned-$groupId';
+  static String actions(String groupId) => 'group-chat-actions-$groupId';
+  static const pane = 'group-chat-pane';
+  static const thread = 'group-chat-thread';
+  static const earlier = 'group-chat-earlier';
+  static const composer = 'group-chat-composer';
+  static const send = 'group-chat-send';
+  static const stop = 'group-chat-stop';
+  static const working = 'group-chat-working';
+  static const note = 'group-chat-note';
+  static String message(String messageId) => 'group-chat-message-$messageId';
+  static String pending(String commandId) => 'group-chat-pending-$commandId';
+  static String resend(String commandId) => 'group-chat-resend-$commandId';
+  static String retry(String runId) => 'group-chat-retry-$runId';
+  static String exchange(String messageId) => 'group-chat-exchange-$messageId';
+  static String mentionOption(String botId) => 'group-chat-mention-$botId';
+  static const members = 'group-chat-members';
+  static const membersButton = 'group-chat-members-button';
+  static String member(String botId) => 'group-chat-member-$botId';
+  static String removeMember(String botId) => 'group-chat-remove-$botId';
+  static const addMember = 'group-chat-add-member';
+  static String addCandidate(String botId) => 'group-chat-add-$botId';
+  static const rename = 'group-chat-rename';
+  static const renameField = 'group-chat-rename-field';
+  static const renameSave = 'group-chat-rename-save';
+  static const archive = 'group-chat-archive';
+  static const restore = 'group-chat-restore';
+  static const delete = 'group-chat-delete';
+  static const deleteConfirm = 'group-chat-delete-confirm';
+}
+
 /// The quick actions on one Bot in the list.
 abstract final class BotActionIds {
   /// The control a desktop row grows on hover and focus.
@@ -445,6 +485,10 @@ abstract final class SearchIds {
   static String action(String actionId) => 'search-action-$actionId';
 
   static String group(String botId) => 'search-group-$botId';
+
+  /// A Group Chat found by name or member. Not [group], which is one Bot's
+  /// hits gathered together.
+  static String groupChat(String groupId) => 'search-chat-$groupId';
   static String hit(String runId) => 'search-hit-$runId';
 }
 

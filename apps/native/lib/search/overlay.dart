@@ -10,6 +10,7 @@ import 'package:flutter/services.dart';
 
 import '../client/transport.dart';
 import '../flock/avatar.dart';
+import '../groups/faces.dart';
 import '../shell/semantics.dart';
 import '../shell/desktop_layout.dart';
 import '../theme/caret.dart';
@@ -19,12 +20,18 @@ Future<SearchSelection?> showSearchOverlayV1(
   BuildContext context,
   NativeApi api, {
   List<SearchBot> bots = const [],
+  List<SearchGroupChat> groupChats = const [],
   List<SearchAction> actions = const [],
 }) => showDialog<SearchSelection>(
   context: context,
   useSafeArea: false,
   barrierColor: Colors.black.withValues(alpha: 0.65),
-  builder: (_) => SearchOverlay(api: api, bots: bots, actions: actions),
+  builder: (_) => SearchOverlay(
+    api: api,
+    bots: bots,
+    groupChats: groupChats,
+    actions: actions,
+  ),
 );
 
 /// The shortcut belongs to the signed-in shell, including pages above it and
@@ -75,11 +82,13 @@ class _SearchShortcutListenerState extends State<SearchShortcutListener> {
 class SearchOverlay extends StatefulWidget {
   final NativeApi api;
   final List<SearchBot> bots;
+  final List<SearchGroupChat> groupChats;
   final List<SearchAction> actions;
   const SearchOverlay({
     super.key,
     required this.api,
     this.bots = const [],
+    this.groupChats = const [],
     this.actions = const [],
   });
 
@@ -91,6 +100,7 @@ class _SearchOverlayState extends State<SearchOverlay> {
   late final controller = BotSearchController(
     widget.api,
     bots: widget.bots,
+    groupChats: widget.groupChats,
     actions: widget.actions,
   );
   final editor = TextEditingController();
@@ -557,13 +567,6 @@ class _SearchOverlayState extends State<SearchOverlay> {
   );
 
   Widget _body() {
-    if (controller.category == SearchCategory.groups) {
-      return _empty(
-        Icons.forum_outlined,
-        'Group chats aren’t available yet',
-        'Your Bots are in the Bots category.',
-      );
-    }
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -592,7 +595,11 @@ class _SearchOverlayState extends State<SearchOverlay> {
                     : _empty(
                         Icons.search_rounded,
                         controller.query.trim().isEmpty
-                            ? 'No ${controller.category == SearchCategory.all ? 'Bots' : controller.category.label.toLowerCase()} yet'
+                            ? 'No ${switch (controller.category) {
+                                SearchCategory.all => 'Bots',
+                                SearchCategory.groups => 'Group Chats',
+                                final category => category.label.toLowerCase(),
+                              }} yet'
                             : 'No results for “${controller.query.trim()}”',
                         controller.query.trim().isEmpty
                             ? ''
@@ -655,7 +662,10 @@ class _SearchOverlayState extends State<SearchOverlay> {
     final scheme = Theme.of(context).colorScheme;
     final bot = entry.bot;
     final destination = entry.selection;
-    final id = destination.runId != null
+    final chat = entry.groupChat;
+    final id = destination.groupId != null
+        ? SearchIds.groupChat(destination.groupId!)
+        : destination.runId != null
         ? SearchIds.hit(destination.runId!)
         : destination.routineId != null
         ? SearchIds.routine(destination.botId!, destination.routineId!)
@@ -691,6 +701,17 @@ class _SearchOverlayState extends State<SearchOverlay> {
                       primary: bot.primary,
                       motion: CharacterMotion.quiet,
                     )
+                  else if (chat != null)
+                    SizedBox(
+                      width: phone ? 42 : 32,
+                      child: Center(
+                        child: GroupAvatars(
+                          faces: chat.faces,
+                          size: phone ? 26 : 22,
+                          overlap: 0.55,
+                        ),
+                      ),
+                    )
                   else
                     _icon(entry),
                   SizedBox(width: phone ? 14 : 12),
@@ -725,8 +746,9 @@ class _SearchOverlayState extends State<SearchOverlay> {
                       ],
                     ),
                   ),
-                  if (entry.category == SearchCategory.bots &&
-                      bot?.unread == true) ...[
+                  if ((entry.category == SearchCategory.bots &&
+                          bot?.unread == true) ||
+                      chat?.unread == true) ...[
                     const SizedBox(width: 10),
                     Semantics(
                       label: 'Unread',

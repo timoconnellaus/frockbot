@@ -2,6 +2,14 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
+## Group Chats
+
+feature
+
+Talk with several Bots at once. Every Bot in the group reads every message, and the ones with something to add reply.
+
+![A Group Chat called Launch beside the Bot list: the person asks @Ledger about the budget, Ledger and Fox reply under their coloured badges, and Ledger and Pixel work at the end of the thread.](media/group-chats.webp)
+
 ## Calls answer without a false error
 
 fix

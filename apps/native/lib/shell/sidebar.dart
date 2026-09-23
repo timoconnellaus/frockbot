@@ -21,6 +21,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_slidable/flutter_slidable.dart';
 
 import '../flock/avatar.dart';
+import '../groups/faces.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../theme/frock_theme.dart';
 import '../update/desktop_update.dart';
@@ -234,14 +235,53 @@ String formatSidebarMessageTime(String at, [DateTime? clock]) {
   return '${message.month}/${message.day}';
 }
 
+/// A Group Chat as the list draws it: among the Bots, labelled, pinned,
+/// ordered and hidden the same way.
+class SidebarGroupChat {
+  final String groupId;
+  final String name;
+  final List<GroupFace> faces;
+
+  /// The group's arrangement, in the shape a Bot's profile has it.
+  final SidebarProfile profile;
+  final int unread;
+  final bool working;
+  const SidebarGroupChat({
+    required this.groupId,
+    required this.name,
+    required this.faces,
+    required this.profile,
+    this.unread = 0,
+    this.working = false,
+  });
+}
+
+/// The id a Group Chat's row answers to, in the one id space the list's
+/// order, labels and drops share with Bot ids. No Bot id has a colon.
+String sidebarGroupEntryId(String groupId) => 'group:$groupId';
+
+/// The group an entry id names, or null for a Bot's.
+String? sidebarGroupIdOf(String entryId) =>
+    entryId.startsWith('group:') ? entryId.substring(6) : null;
+
 // ------------------------------------------------------------ the widget
 
 class ShellSidebar extends StatelessWidget {
   final List<wire.BotRegistration> bots;
+
+  /// The User's Group Chats that are not archived. Every callback below that
+  /// names a row names it by entry id, which for a group is
+  /// [sidebarGroupEntryId].
+  final List<SidebarGroupChat> groupChats;
   final Map<String, SidebarProfile> profiles;
   final Map<String, wire.UnreadView> unread;
   final Set<String> archived;
   final String? activeBotId;
+  final String? activeGroupId;
+
+  /// The group the User is reading, whose count is not drawn for the same
+  /// reason as [focusedBotId]'s.
+  final String? focusedGroupId;
 
   /// The Bot the User is actually reading: its chat is open, this window holds
   /// focus, and nothing is covering it. Its row draws no count, because the
@@ -257,6 +297,9 @@ class ShellSidebar extends StatelessWidget {
   final bool showHidden;
   final void Function(String botId) onSelect;
   final VoidCallback onCreateBot;
+
+  /// Starts a Group Chat, from the header beside a new Bot.
+  final VoidCallback? onCreateGroup;
   final VoidCallback onSearch;
   final VoidCallback onProfile;
 
@@ -301,6 +344,10 @@ class ShellSidebar extends StatelessWidget {
   const ShellSidebar({
     super.key,
     required this.bots,
+    this.groupChats = const [],
+    this.activeGroupId,
+    this.focusedGroupId,
+    this.onCreateGroup,
     required this.profiles,
     required this.unread,
     required this.archived,
@@ -334,6 +381,36 @@ class ShellSidebar extends StatelessWidget {
   bool _hidden(wire.BotRegistration bot) =>
       profiles[_id(bot)]?.hiddenFromSidebar == true;
 
+  /// A row of the list: a Bot, or a Group Chat.
+  String _entryId(Object entry) => switch (entry) {
+    final wire.BotRegistration bot => _id(bot),
+    final SidebarGroupChat chat => sidebarGroupEntryId(chat.groupId),
+    _ => throw ArgumentError.value(entry),
+  };
+
+  /// Bots' profiles and groups' arrangements in one map, keyed by entry id,
+  /// which is what ordering, pinning and labelling read.
+  Map<String, SidebarProfile> get _entryProfiles => groupChats.isEmpty
+      ? profiles
+      : {
+          ...profiles,
+          for (final chat in groupChats)
+            sidebarGroupEntryId(chat.groupId): chat.profile,
+        };
+
+  bool _entryHidden(Object entry) => switch (entry) {
+    final SidebarGroupChat chat => chat.profile.hiddenFromSidebar,
+    final wire.BotRegistration bot => _hidden(bot),
+    _ => false,
+  };
+
+  int _entryUnread(Object entry) => switch (entry) {
+    final SidebarGroupChat chat =>
+      chat.groupId == focusedGroupId ? 0 : chat.unread,
+    final wire.BotRegistration bot => _unread(_id(bot)).count,
+    _ => 0,
+  };
+
   /// The open Bot's own Turn is the shell's — it projects the run and knows
   /// about it a poll sooner — so that row reads [workingBotId]. Every other
   /// row reads the unread fan-out, which is the only thing that knows a Bot in
@@ -350,19 +427,25 @@ class ShellSidebar extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final entryProfiles = _entryProfiles;
+    final entries = <Object>[...bots, ...groupChats];
     final visible = [
-      for (final bot in bots)
-        if (!_hidden(bot)) bot,
+      for (final entry in entries)
+        if (!_entryHidden(entry)) entry,
     ];
     final hidden = [
-      for (final bot in bots)
-        if (_hidden(bot)) bot,
+      for (final entry in entries)
+        if (_entryHidden(entry)) entry,
     ];
-    final partitioned = partitionPinnedSidebarBots(visible, _id, profiles);
-    final grouped = groupSidebarBots(partitioned.rest, _id, profiles);
+    final partitioned = partitionPinnedSidebarBots(
+      visible,
+      _entryId,
+      entryProfiles,
+    );
+    final grouped = groupSidebarBots(partitioned.rest, _entryId, entryProfiles);
     final hiddenUnread = hidden.fold(
       0,
-      (total, bot) => total + _unread(_id(bot)).count,
+      (total, entry) => total + _entryUnread(entry),
     );
     // A phone's rows are cards a shade lighter than the ground they sit on,
     // so the thing a thumb slides is a thing and not a stripe of the page.
@@ -374,6 +457,7 @@ class ShellSidebar extends StatelessWidget {
       children: [
         _Header(
           onCreateBot: onCreateBot,
+          onCreateGroup: onCreateGroup,
           onSearch: phone ? onSearch : null,
           onProfile: onProfile,
           profileName: profileName,
@@ -467,7 +551,7 @@ class ShellSidebar extends StatelessWidget {
                   _Error(message: error!, onRetry: onRetry)
                 else if (!loaded)
                   const _Skeleton()
-                else if (bots.isEmpty)
+                else if (bots.isEmpty && groupChats.isEmpty)
                   const _NoBots()
                 else ...[
                   if (partitioned.pinned.isNotEmpty)
@@ -477,25 +561,8 @@ class ShellSidebar extends StatelessWidget {
                         spacing: 4,
                         runSpacing: 4,
                         children: [
-                          for (final bot in partitioned.pinned)
-                            identified(
-                              ShellIds.sidebarPinned(_id(bot)),
-                              _PinnedTile(
-                                name: _name(bot),
-                                background: bot.avatar.characterId,
-                                primary: bot.avatar.primary,
-                                active: _id(bot) == activeBotId,
-                                unread: _unread(_id(bot)).unread,
-                                working: _working(bot),
-                                onTap: () => onSelect(_id(bot)),
-                                onActions: onActions == null
-                                    ? null
-                                    : ({Offset? position}) => onActions!(
-                                        _id(bot),
-                                        position: position,
-                                      ),
-                              ),
-                            ),
+                          for (final entry in partitioned.pinned)
+                            _pinned(entry),
                         ],
                       ),
                     ),
@@ -509,7 +576,7 @@ class ShellSidebar extends StatelessWidget {
                             _HeadingTarget(
                               label: sidebarGroupDropLabel(group),
                               groupIds: [
-                                for (final bot in group.bots) _id(bot),
+                                for (final entry in group.bots) _entryId(entry),
                               ],
                               onMove: onMove,
                               child: Padding(
@@ -528,8 +595,8 @@ class ShellSidebar extends StatelessWidget {
                                 ),
                               ),
                             ),
-                          for (final bot in group.bots)
-                            _row(context, bot, group: group),
+                          for (final entry in group.bots)
+                            _entryRow(context, entry, group: group),
                         ],
                       ),
                     ),
@@ -562,7 +629,7 @@ class ShellSidebar extends StatelessWidget {
                       ),
                     ),
                   if (showHidden)
-                    for (final bot in hidden) _row(context, bot),
+                    for (final entry in hidden) _entryRow(context, entry),
                 ],
                 // The same failure over a list that still has rows: a banner,
                 // not a replacement, because what is on screen is still the last
@@ -603,10 +670,175 @@ class ShellSidebar extends StatelessWidget {
   /// One row. In a [group] it can be dragged to another place or another
   /// group, and is where another row can be dropped; a hidden Bot's row is
   /// outside every group, so it is neither.
+  Widget _entryRow(
+    BuildContext context,
+    Object entry, {
+    SidebarBotGroup<Object>? group,
+  }) => switch (entry) {
+    final SidebarGroupChat chat => _groupRow(context, chat, group: group),
+    final wire.BotRegistration bot => _row(context, bot, group: group),
+    _ => const SizedBox.shrink(),
+  };
+
+  Widget _pinned(Object entry) {
+    final actions = onActions;
+    if (entry is SidebarGroupChat) {
+      final id = sidebarGroupEntryId(entry.groupId);
+      return identified(
+        GroupIds.pinned(entry.groupId),
+        _PinnedTile(
+          name: entry.name,
+          avatar: _GroupFaces(
+            faces: entry.faces,
+            size: 24,
+            overlap: 0.5,
+            working: entry.working,
+          ),
+          active: entry.groupId == activeGroupId,
+          unread: _entryUnread(entry) > 0,
+          onTap: () => onSelect(id),
+          onActions: actions == null
+              ? null
+              : ({Offset? position}) => actions(id, position: position),
+        ),
+      );
+    }
+    final bot = entry as wire.BotRegistration;
+    return identified(
+      ShellIds.sidebarPinned(_id(bot)),
+      _PinnedTile(
+        name: _name(bot),
+        avatar: CharacterAvatar(
+          size: 40,
+          characterId: bot.avatar.characterId,
+          primary: bot.avatar.primary,
+          motion: CharacterMotion.quiet,
+          activity: _working(bot)
+              ? CharacterActivity.working
+              : CharacterActivity.idle,
+          working: _working(bot),
+        ),
+        active: _id(bot) == activeBotId,
+        unread: _unread(_id(bot)).unread,
+        onTap: () => onSelect(_id(bot)),
+        onActions: actions == null
+            ? null
+            : ({Offset? position}) => actions(_id(bot), position: position),
+      ),
+    );
+  }
+
+  /// A Group Chat's row: its members' faces, its name, and who is in it.
+  /// It moves, labels and hides the way a Bot's row does; it has no read
+  /// cursor to mark back to unread, so its swipe only marks it read.
+  Widget _groupRow(
+    BuildContext context,
+    SidebarGroupChat chat, {
+    SidebarBotGroup<Object>? group,
+  }) {
+    final theme = Theme.of(context);
+    final id = sidebarGroupEntryId(chat.groupId);
+    final count = _entryUnread(chat);
+    final isUnread = count > 0;
+    final actions = onActions == null
+        ? null
+        : ({Offset? position}) => onActions!(id, position: position);
+    final move = onMove;
+    final touchDrag =
+        move != null && group != null && sidebarDragIsHeld(context);
+    final names = [for (final face in chat.faces) face.name];
+    final named = chat.profile.name?.trim().isNotEmpty == true;
+    final faces = _GroupFaces(
+      faces: chat.faces,
+      size: 26,
+      overlap: 0.55,
+      working: chat.working,
+    );
+    final row = _BotRow(
+      key: ValueKey('bot-$id'),
+      identifier: GroupIds.row(chat.groupId),
+      card: phone,
+      selected: chat.groupId == activeGroupId,
+      enabled: true,
+      onTap: () => onSelect(id),
+      onActions: actions,
+      longPressOpens: !touchDrag,
+      control: !phone && actions != null
+          ? identified(
+              GroupIds.actions(chat.groupId),
+              _RowControl(
+                tooltip: 'Group actions',
+                onPressed: (at) => actions(position: at),
+              ),
+            )
+          : null,
+      avatar: ConstrainedBox(
+        constraints: const BoxConstraints(minWidth: sidebarRowAvatarSlot),
+        child: SizedBox(height: sidebarRowAvatarSlot, child: faces),
+      ),
+      name: chat.name,
+      nameStyle: theme.textTheme.bodyMedium?.copyWith(
+        fontSize: 14,
+        fontWeight: isUnread ? FontWeight.w600 : FontWeight.w500,
+        letterSpacing: -0.1,
+        color: theme.colorScheme.onSurface,
+      ),
+      time: null,
+      preview: named ? names.join(', ') : 'Group Chat · ${names.length} Bots',
+      previewStyle: theme.textTheme.bodySmall?.copyWith(
+        fontSize: 12.5,
+        color: isUnread
+            ? theme.colorScheme.onSurface.withValues(alpha: 0.78)
+            : theme.colorScheme.onSurfaceVariant,
+      ),
+      trailing: isUnread
+          ? Badge(label: Text(count > 99 ? '99+' : '$count'))
+          : null,
+    );
+    final Widget lifted = move == null || group == null
+        ? row
+        : _DragSource(
+            botId: id,
+            held: touchDrag,
+            onHeldInPlace: actions == null ? null : () => actions(),
+            ghost: _DragGhost(
+              card: phone,
+              name: chat.name,
+              avatar: _GroupFaces(faces: chat.faces, size: 22, overlap: 0.5),
+            ),
+            child: row,
+          );
+    final read = onSwipeRead;
+    final hide = onSwipeHide;
+    final onRead = read == null || !isUnread ? null : () => read(id);
+    final onHide = hide == null || chat.profile.hiddenFromSidebar
+        ? null
+        : () => hide(id);
+    final Widget swiped = !phone || (onRead == null && onHide == null)
+        ? lifted
+        : _SwipeRow(
+            key: ValueKey('swipe-$id'),
+            botId: id,
+            unread: isUnread,
+            onRead: onRead,
+            onHide: onHide,
+            child: lifted,
+          );
+    if (move == null || group == null) return swiped;
+    return _RowDropTarget(
+      key: ValueKey('drop-$id'),
+      botId: id,
+      label: sidebarGroupDropLabel(group),
+      groupIds: [for (final member in group.bots) _entryId(member)],
+      onMove: move,
+      child: swiped,
+    );
+  }
+
   Widget _row(
     BuildContext context,
     wire.BotRegistration bot, {
-    SidebarBotGroup<wire.BotRegistration>? group,
+    SidebarBotGroup<Object>? group,
   }) {
     final theme = Theme.of(context);
     final botId = _id(bot);
@@ -720,8 +952,12 @@ class ShellSidebar extends StatelessWidget {
             ghost: _DragGhost(
               card: phone,
               name: _name(bot),
-              characterId: bot.avatar.characterId,
-              primary: bot.avatar.primary,
+              avatar: CharacterAvatar(
+                size: 28,
+                characterId: bot.avatar.characterId,
+                primary: bot.avatar.primary,
+                motion: CharacterMotion.quiet,
+              ),
             ),
             child: row,
           );
@@ -731,7 +967,7 @@ class ShellSidebar extends StatelessWidget {
       key: ValueKey('drop-$botId'),
       botId: botId,
       label: sidebarGroupDropLabel(group),
-      groupIds: [for (final member in group.bots) _id(member)],
+      groupIds: [for (final member in group.bots) _entryId(member)],
       onMove: move,
       child: swiped,
     );
@@ -789,13 +1025,11 @@ class _DragGhost extends StatelessWidget {
   /// which plane the ghost has to clear to read as held in the air.
   final bool card;
   final String name;
-  final String characterId;
-  final String primary;
+  final Widget avatar;
   const _DragGhost({
     required this.card,
     required this.name,
-    required this.characterId,
-    required this.primary,
+    required this.avatar,
   });
 
   @override
@@ -817,12 +1051,7 @@ class _DragGhost extends StatelessWidget {
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              CharacterAvatar(
-                size: 28,
-                characterId: characterId,
-                primary: primary,
-                motion: CharacterMotion.quiet,
-              ),
+              avatar,
               const SizedBox(width: 10),
               ConstrainedBox(
                 constraints: const BoxConstraints(maxWidth: 180),
@@ -1073,7 +1302,8 @@ class _DropLine extends StatelessWidget {
 /// line would read as a toolbar.
 class _RowControl extends StatelessWidget {
   final void Function(Offset at) onPressed;
-  const _RowControl({required this.onPressed});
+  final String tooltip;
+  const _RowControl({required this.onPressed, this.tooltip = 'Bot actions'});
 
   @override
   Widget build(BuildContext context) {
@@ -1086,7 +1316,7 @@ class _RowControl extends StatelessWidget {
           final box = context.findRenderObject()! as RenderBox;
           onPressed(box.localToGlobal(box.size.bottomLeft(Offset.zero)));
         },
-        tooltip: 'Bot actions',
+        tooltip: tooltip,
         padding: EdgeInsets.zero,
         iconSize: 18,
         constraints: const BoxConstraints(),
@@ -1599,6 +1829,7 @@ class _BotRowState extends State<_BotRow> {
 /// what it is.
 class _Header extends StatelessWidget {
   final VoidCallback onCreateBot;
+  final VoidCallback? onCreateGroup;
   final VoidCallback? onSearch;
   final VoidCallback onProfile;
   final String? profileName;
@@ -1612,6 +1843,7 @@ class _Header extends StatelessWidget {
 
   const _Header({
     required this.onCreateBot,
+    this.onCreateGroup,
     required this.onSearch,
     required this.onProfile,
     required this.onWhatsNew,
@@ -1726,6 +1958,18 @@ class _Header extends StatelessWidget {
                   icon: const Icon(Icons.search_rounded),
                 ),
               ),
+            if (onCreateGroup case final VoidCallback start) ...[
+              const SizedBox(width: 2),
+              identified(
+                GroupIds.create,
+                IconButton(
+                  tooltip: 'New Group Chat',
+                  onPressed: start,
+                  style: quiet,
+                  icon: const Icon(Icons.group_add_outlined),
+                ),
+              ),
+            ],
             const SizedBox(width: 2),
             identified(
               ShellIds.sidebarCreateBot,
@@ -1807,20 +2051,16 @@ class _Foot extends StatelessWidget {
 
 class _PinnedTile extends StatefulWidget {
   final String name;
-  final String background;
-  final String primary;
+  final Widget avatar;
   final bool active;
   final bool unread;
-  final bool working;
   final VoidCallback onTap;
   final void Function({Offset? position})? onActions;
   const _PinnedTile({
     required this.name,
-    required this.background,
-    required this.primary,
+    required this.avatar,
     required this.active,
     required this.unread,
-    required this.working,
     required this.onTap,
     this.onActions,
   });
@@ -1864,16 +2104,7 @@ class _PinnedTileState extends State<_PinnedTile> {
                   Stack(
                     clipBehavior: Clip.none,
                     children: [
-                      CharacterAvatar(
-                        size: 40,
-                        characterId: widget.background,
-                        primary: widget.primary,
-                        motion: CharacterMotion.quiet,
-                        activity: widget.working
-                            ? CharacterActivity.working
-                            : CharacterActivity.idle,
-                        working: widget.working,
-                      ),
+                      SizedBox(height: 40, child: Center(child: widget.avatar)),
                       if (widget.unread)
                         Positioned(
                           right: -3,
@@ -1999,4 +2230,43 @@ class _NoBots extends StatelessWidget {
           ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
     ),
   );
+}
+
+/// A group's faces with the thinking badge over them while any member works.
+class _GroupFaces extends StatelessWidget {
+  final List<GroupFace> faces;
+  final double size;
+  final double overlap;
+  final bool working;
+  const _GroupFaces({
+    required this.faces,
+    required this.size,
+    required this.overlap,
+    this.working = false,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final stack = GroupAvatars(
+      faces: faces,
+      size: size,
+      overlap: overlap,
+      ring: Theme.of(context).colorScheme.surface,
+    );
+    if (!working) return Center(child: stack);
+    final badge = ThinkingBadge(height: (size * 0.45).clamp(10.0, 14.0));
+    return Center(
+      child: Stack(
+        clipBehavior: Clip.none,
+        children: [
+          stack,
+          Positioned(
+            right: -badge.height * 0.3,
+            top: -badge.height * 0.3,
+            child: badge,
+          ),
+        ],
+      ),
+    );
+  }
 }

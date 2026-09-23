@@ -42,6 +42,13 @@ import {
 } from "@frockbot/app/flock/shared";
 
 import { decodeClientAuditPageV1 } from "@frockbot/app/audit";
+import {
+  decodeGroupChatCommandV1,
+  decodeGroupPostCommandV1,
+  decodeGroupReadCommandV1,
+  decodeGroupRetryCommandV1,
+  decodeGroupStopCommandV1,
+} from "@frockbot/app/groups/shared";
 import { decodeCompositionGenerationListViewV1 } from "@frockbot/core/configuration";
 
 const existing: Record<string, (value: unknown) => unknown> = {
@@ -88,6 +95,11 @@ const existing: Record<string, (value: unknown) => unknown> = {
   UnreadDirectory: decodeBotUnreadDirectoryViewV1,
   NotificationDirectory: decodeBotNotificationDirectoryViewV1,
   MarkReadReceipt: decodeBotUnreadReceiptV1,
+  GroupChatCommand: decodeGroupChatCommandV1,
+  GroupPostCommand: decodeGroupPostCommandV1,
+  GroupReadCommand: decodeGroupReadCommandV1,
+  GroupStopCommand: decodeGroupStopCommandV1,
+  GroupRetryCommand: decodeGroupRetryCommandV1,
 };
 
 for (const [accepted, fixtures] of [

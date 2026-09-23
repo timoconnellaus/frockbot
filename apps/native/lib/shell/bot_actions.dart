@@ -212,6 +212,7 @@ Future<String?> showBotLabelPicker({
   required String botName,
   required String current,
   required Iterable<String> existing,
+  int maxLength = 120,
 }) {
   final choices = <String>{
     for (final label in existing)
@@ -219,8 +220,12 @@ Future<String?> showBotLabelPicker({
   }.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
   return showDialog<String>(
     context: context,
-    builder: (dialog) =>
-        _LabelPicker(botName: botName, current: current, choices: choices),
+    builder: (dialog) => _LabelPicker(
+      botName: botName,
+      current: current,
+      choices: choices,
+      maxLength: maxLength,
+    ),
   );
 }
 
@@ -228,10 +233,12 @@ class _LabelPicker extends StatefulWidget {
   final String botName;
   final String current;
   final List<String> choices;
+  final int maxLength;
   const _LabelPicker({
     required this.botName,
     required this.current,
     required this.choices,
+    required this.maxLength,
   });
 
   @override
@@ -285,7 +292,7 @@ class _LabelPickerState extends State<_LabelPicker> {
                 child: TextField(
                   controller: controller,
                   autofocus: widget.choices.isEmpty,
-                  maxLength: 120,
+                  maxLength: widget.maxLength,
                   textInputAction: TextInputAction.done,
                   decoration: const InputDecoration(
                     labelText: 'Label',

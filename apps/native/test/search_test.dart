@@ -305,7 +305,7 @@ void main() {
       });
       await pump(tester, api);
       await choose(tester, SearchCategory.groups);
-      expect(find.text('Group chats aren’t available yet'), findsOneWidget);
+      expect(find.text('No Group Chats yet'), findsOneWidget);
       await choose(tester, SearchCategory.messages);
       expect(find.text('No messages yet'), findsOneWidget);
       await tester.enterText(find.byType(TextField), 'ledger');

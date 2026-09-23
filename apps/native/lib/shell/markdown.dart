@@ -23,11 +23,16 @@ class ShellMarkdown extends StatefulWidget {
   final String text;
   final void Function(String url)? onOpenLink;
   final TextStyle? style;
+
+  /// Draws a run of plain words — not code, not a link — where the caller
+  /// has more to say about them than the text does: a Group Chat's mentions.
+  final InlineSpan Function(String text, TextStyle style)? decorate;
   const ShellMarkdown({
     super.key,
     required this.text,
     this.onOpenLink,
     this.style,
+    this.decorate,
   });
 
   @override
@@ -181,7 +186,12 @@ class _ShellMarkdownState extends State<ShellMarkdown> {
         );
         continue;
       }
-      spans.add(TextSpan(text: run.text, style: style));
+      final decorate = widget.decorate;
+      spans.add(
+        decorate != null && !run.code
+            ? decorate(run.text, style)
+            : TextSpan(text: run.text, style: style),
+      );
     }
     return TextSpan(children: spans);
   }

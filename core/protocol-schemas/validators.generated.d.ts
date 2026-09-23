@@ -166,5 +166,51 @@ declare const validators: {
   isAuditPage(value: unknown): value is ProtocolTypes["AuditPage"];
   isSetupHistory(value: unknown): value is ProtocolTypes["SetupHistory"];
   isMessageCursor(value: unknown): value is ProtocolTypes["MessageCursor"];
+  isGroupId(value: unknown): value is ProtocolTypes["GroupId"];
+  isGroupChatRecord(value: unknown): value is ProtocolTypes["GroupChatRecord"];
+  isGroupChatList(value: unknown): value is ProtocolTypes["GroupChatList"];
+  isGroupMember(value: unknown): value is ProtocolTypes["GroupMember"];
+  isGroupChatView(value: unknown): value is ProtocolTypes["GroupChatView"];
+  isGroupMention(value: unknown): value is ProtocolTypes["GroupMention"];
+  isGroupEvent(value: unknown): value is ProtocolTypes["GroupEvent"];
+  isGroupMessageBody(
+    value: unknown,
+  ): value is ProtocolTypes["GroupMessageBody"];
+  isGroupAuthor(value: unknown): value is ProtocolTypes["GroupAuthor"];
+  isGroupMessage(value: unknown): value is ProtocolTypes["GroupMessage"];
+  isGroupMessagePage(
+    value: unknown,
+  ): value is ProtocolTypes["GroupMessagePage"];
+  isGroupChatCommand(
+    value: unknown,
+  ): value is ProtocolTypes["GroupChatCommand"];
+  isGroupChatReceipt(
+    value: unknown,
+  ): value is ProtocolTypes["GroupChatReceipt"];
+  isGroupPostCommand(
+    value: unknown,
+  ): value is ProtocolTypes["GroupPostCommand"];
+  isGroupPostReceipt(
+    value: unknown,
+  ): value is ProtocolTypes["GroupPostReceipt"];
+  isGroupReadCommand(
+    value: unknown,
+  ): value is ProtocolTypes["GroupReadCommand"];
+  isGroupReadReceipt(
+    value: unknown,
+  ): value is ProtocolTypes["GroupReadReceipt"];
+  isGroupStopCommand(
+    value: unknown,
+  ): value is ProtocolTypes["GroupStopCommand"];
+  isGroupStopReceipt(
+    value: unknown,
+  ): value is ProtocolTypes["GroupStopReceipt"];
+  isGroupRetryCommand(
+    value: unknown,
+  ): value is ProtocolTypes["GroupRetryCommand"];
+  isGroupRetryReceipt(
+    value: unknown,
+  ): value is ProtocolTypes["GroupRetryReceipt"];
+  isGroupStateFrame(value: unknown): value is ProtocolTypes["GroupStateFrame"];
 };
 export default validators;
