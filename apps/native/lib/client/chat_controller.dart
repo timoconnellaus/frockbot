@@ -434,7 +434,9 @@ class ChatController extends ChangeNotifier {
     if (existing != null && _settledRun(existing) && !_settledRun(run)) return;
     _cachedRunIds.remove(id);
     _optimisticRunIds.remove(id);
-    _runs[id] = run;
+    _runs[id] = existing == null || _settledRun(run)
+        ? run
+        : _keepingLaterSends(run, existing);
     // An authoritative row is proof of admission, including while its POST
     // is still open. Pending delivery state for that command is over.
     if (pending.any((submission) => submission.id == id)) {
@@ -447,6 +449,41 @@ class ChatController extends ChangeNotifier {
       unawaited(_persist());
       _publish();
     }
+  }
+
+  /// A running Turn's row read before a send was delivered, kept with the
+  /// sends the live channel has drawn since. Sends only ever append, so the
+  /// older row is a prefix of them; putting it back as it was would take a
+  /// message off the screen until the Turn settled.
+  Map<String, dynamic> _keepingLaterSends(
+    Map<String, dynamic> row,
+    Map<String, dynamic> existing,
+  ) {
+    final events = [
+      for (final item in (row['events'] as List?) ?? const [])
+        Map<String, dynamic>.from(item as Map),
+    ];
+    final drawn = {
+      for (final event in events)
+        if (event['type'] == 'send/to-user') event['ordinal'],
+    };
+    final later = [
+      for (final item in (existing['events'] as List?) ?? const [])
+        if (item is Map &&
+            item['type'] == 'send/to-user' &&
+            !drawn.contains(item['ordinal']))
+          Map<String, dynamic>.from(item),
+    ];
+    if (later.isEmpty) return row;
+    later.sort(
+      (left, right) => ((left['ordinal'] as int?) ?? 0).compareTo(
+        (right['ordinal'] as int?) ?? 0,
+      ),
+    );
+    return {
+      ...row,
+      'events': [...events, ...later],
+    };
   }
 
   /// Runs this client drew for itself, so it can take them back if the

@@ -177,6 +177,54 @@ void main() {
     controller.dispose();
   });
 
+  test('a late page cannot take back a send the live channel drew', () async {
+    final store = MemoryStore();
+    final controller = ChatController(
+      transport: _StaleRunningPage(),
+      store: store,
+      userId: 'user-1',
+      botId: 'bot-1',
+    );
+    await controller.applyFrame({
+      'type': 'state/update',
+      'epoch': '1',
+      'cursor': '1',
+      'kind': 'run-status',
+      'entityId': 'run:run-1',
+      'revision': 1,
+      'payload': {'run': run(runId: 'run-1')},
+    });
+    await controller.applyFrame({
+      'type': 'state/update',
+      'epoch': '1',
+      'cursor': '2',
+      'kind': 'message',
+      'entityId': 'msg:s:run-1:occ-1',
+      'revision': 1,
+      'payload': {
+        'runId': 'run-1',
+        'sessionId': 's',
+        'occurrenceId': 'occ-1',
+        'event': {
+          'type': 'send/to-user',
+          'payload': {'type': 'text', 'text': 'Still working on it'},
+          'ordinal': 0,
+        },
+      },
+    });
+    // The page was read before that send was delivered, and lands after it.
+    await controller.refresh();
+    expect(controller.activeRunId, 'run-1');
+    expect(controller.runs.single['events'], [
+      {
+        'type': 'send/to-user',
+        'payload': {'type': 'text', 'text': 'Still working on it'},
+        'ordinal': 0,
+      },
+    ]);
+    controller.dispose();
+  });
+
   test('stale revisions and computer updates leave the transcript alone', () async {
     final store = MemoryStore();
     final controller = ChatController(
