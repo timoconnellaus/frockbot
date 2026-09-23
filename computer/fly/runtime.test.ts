@@ -6,6 +6,7 @@ import {
   mkdtemp,
   readFile,
   rm,
+  symlink,
   utimes,
   writeFile,
 } from "node:fs/promises";
@@ -63,6 +64,11 @@ import {
   DESKTOP_GUI_LEASE_KEY,
   ENSURE_AGENT_SCRIPT,
   HOME_ROOT,
+  INSTALL_KEPT_PATHS,
+  INSTALL_LIVE_STATE_PATHS,
+  INSTALL_MANIFEST,
+  INSTALL_MANIFEST_PATHS,
+  INSTALL_MANIFEST_SEED,
   PROVISION_LOCK,
   PROVISION_DIGEST,
   PROVISION_PHASES,
@@ -461,6 +467,221 @@ state running`);
     expect(updateDocument).not.toContain("apt-get");
     expect(updateDocument).not.toContain("playwright-core/cli.js install");
     expect(updateDocument).not.toContain("npm install");
+  });
+});
+
+describe("the install manifest", () => {
+  /**
+   * A Computer's home in a temporary directory, with the layout phase's
+   * directories and whatever `files` names. The update's runtime phase runs
+   * against it with real bash, its paths moved under the temporary home.
+   */
+  async function computerHome(files: Record<string, string>) {
+    const home = await mkdtemp(join(tmpdir(), "frockbot-home-"));
+    const at = (path: string) => path.replace(HOME_ROOT, home);
+    for (const directory of [RUNTIME_ROOT, BIN_ROOT, SHIMS_ROOT]) {
+      await mkdir(at(directory), { recursive: true });
+    }
+    for (const [path, content] of Object.entries(files)) {
+      await mkdir(dirname(at(path)), { recursive: true });
+      await writeFile(at(path), content);
+    }
+    const update = async (path?: string) => {
+      const runtime = UPDATE_PHASES.find((phase) => phase.name === "runtime")!;
+      const run = Bun.spawn(["bash"], {
+        stdin: new Blob([
+          `set -eEu\n${runtime.body.replaceAll(HOME_ROOT, home)}\n`,
+        ]),
+        env: {
+          ...process.env,
+          ...(path === undefined
+            ? {}
+            : { PATH: `${path}:${process.env.PATH}` }),
+        },
+        stdout: "pipe",
+        stderr: "pipe",
+      });
+      const [exitCode, stderr] = await Promise.all([
+        run.exited,
+        new Response(run.stderr).text(),
+      ]);
+      expect(stderr).toBe("");
+      expect(exitCode).toBe(0);
+    };
+    const manifest = async () =>
+      (await readFile(at(INSTALL_MANIFEST), "utf8"))
+        .trimEnd()
+        .split("\n")
+        .map((line) => line.replace(home, HOME_ROOT));
+    /** A manifest as an earlier install left it, in `HOME_ROOT` terms. */
+    const writeManifest = async (paths: readonly string[]) => {
+      await mkdir(dirname(at(INSTALL_MANIFEST)), { recursive: true });
+      await writeFile(
+        at(INSTALL_MANIFEST),
+        paths.map((path) => at(path)).join("\n") + "\n",
+      );
+    };
+    return {
+      home,
+      at,
+      update,
+      manifest,
+      writeManifest,
+      exists: (path: string) => existsSync(at(path)),
+      cleanup: () => rm(home, { recursive: true, force: true }),
+    };
+  }
+
+  /** Live state as a running Computer has it, none of it any install's. */
+  const LIVE = {
+    [`${BOTS_ROOT}/bob-1/slot`]: "3",
+    [`${RUNTIME_ROOT}/sync/signal`]: "41",
+    [`${RUNTIME_ROOT}/tokens`]: "bob-1 token",
+    [`${RUNTIME_ROOT}/provision/state.json`]: "{}",
+    [`${RUNTIME_ROOT}/browsers/chromium-1187/chrome-linux/chrome`]: "ELF",
+    [`${RUNTIME_ROOT}/registry.lock`]: "",
+    [`${RUNTIME_ROOT}/host-state.json`]: "{}",
+    [`${RUNTIME_ROOT}/fluxbox.log`]: "started",
+    [`${HOME_ROOT}/chrome-profile/Default/Cookies`]: "sqlite",
+    [`${DATA_ROOT}/agents/bob-1/skills/notes.md`]: "# Notes",
+  };
+
+  test("a Computer from before the manifest loses what the Applets phase left, and nothing else", async () => {
+    const computer = await computerHome({
+      ...LIVE,
+      [`${RUNTIME_ROOT}/applets/node_modules/@frockbot/applet-sdk/package.json`]:
+        '{"version":"0.3.14"}',
+      [`${RUNTIME_ROOT}/applets/.sdk-unavailable`]: "",
+      [`${BIN_ROOT}/applet`]: "#!/bin/sh",
+      [`${BIN_ROOT}/applet.tmp`]: "#!/bin/sh",
+      // Nothing recorded it, so nothing may remove it.
+      [`${RUNTIME_ROOT}/notes-a-person-left.txt`]: "keep me",
+    });
+    try {
+      await computer.update();
+
+      for (const path of INSTALL_MANIFEST_SEED) {
+        expect(computer.exists(path)).toBe(false);
+      }
+      for (const path of Object.keys(LIVE)) {
+        expect(computer.exists(path)).toBe(true);
+      }
+      expect(computer.exists(`${RUNTIME_ROOT}/notes-a-person-left.txt`)).toBe(
+        true,
+      );
+      expect(computer.exists(`${SHIMS_ROOT}/xdotool`)).toBe(true);
+      expect(await computer.manifest()).toEqual([...INSTALL_MANIFEST_PATHS]);
+    } finally {
+      await computer.cleanup();
+    }
+  });
+
+  test("a path the last install owned and this one does not is removed; the next run changes nothing", async () => {
+    const retired = `${RUNTIME_ROOT}/retired-helper.sh`;
+    const computer = await computerHome({ ...LIVE, [retired]: "#!/bin/sh" });
+    try {
+      await computer.writeManifest([...INSTALL_MANIFEST_PATHS, retired]);
+      await computer.update();
+      expect(computer.exists(retired)).toBe(false);
+      expect(computer.exists(CONTROL_SCRIPT)).toBe(true);
+
+      await computer.update();
+      expect(await computer.manifest()).toEqual([...INSTALL_MANIFEST_PATHS]);
+      expect(computer.exists(CONTROL_SCRIPT)).toBe(true);
+    } finally {
+      await computer.cleanup();
+    }
+  });
+
+  test("a manifest line naming live state, a kept directory or anything outside the home removes nothing", async () => {
+    const computer = await computerHome(LIVE);
+    const outside = await mkdtemp(join(tmpdir(), "frockbot-outside-"));
+    await writeFile(join(outside, "precious"), "keep");
+    try {
+      // A symlink under the home that leads out of it.
+      await symlink(outside, computer.at(`${RUNTIME_ROOT}/linked-out`));
+      await computer.writeManifest([
+        ...INSTALL_LIVE_STATE_PATHS,
+        ...INSTALL_KEPT_PATHS,
+        `${RUNTIME_ROOT}/bots/../tokens`,
+        // Other spellings of a kept directory and of live state.
+        `${RUNTIME_ROOT}/`,
+        `${RUNTIME_ROOT}//bots`,
+        `${HOME_ROOT}/./agent-data`,
+        `${RUNTIME_ROOT}/linked-out/precious`,
+        outside,
+      ]);
+      await computer.update();
+      for (const path of Object.keys(LIVE)) {
+        expect(computer.exists(path)).toBe(true);
+      }
+      expect(existsSync(join(outside, "precious"))).toBe(true);
+      expect(computer.exists(`${RUNTIME_ROOT}/tokens`)).toBe(true);
+    } finally {
+      await computer.cleanup();
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
+
+  test("a path that will not go stays in the manifest for the next install to retry", async () => {
+    const stuck = `${RUNTIME_ROOT}/stuck-helper.sh`;
+    const computer = await computerHome({ [stuck]: "#!/bin/sh" });
+    // An `rm` that refuses this one path, as a busy or root-owned file would.
+    const shim = await mkdtemp(join(tmpdir(), "frockbot-rm-"));
+    await writeFile(
+      join(shim, "rm"),
+      `#!/bin/sh\ncase "$*" in *stuck-helper*) exit 1 ;; esac\nexec /bin/rm "$@"\n`,
+    );
+    await chmod(join(shim, "rm"), 0o755);
+    try {
+      await computer.writeManifest([...INSTALL_MANIFEST_PATHS, stuck]);
+      await computer.update(shim);
+      expect(computer.exists(stuck)).toBe(true);
+      expect(await computer.manifest()).toContain(stuck);
+
+      await computer.update();
+      expect(computer.exists(stuck)).toBe(false);
+      expect(await computer.manifest()).not.toContain(stuck);
+    } finally {
+      await computer.cleanup();
+      await rm(shim, { recursive: true, force: true });
+    }
+  });
+
+  test("a retired path holding one this install owns is left, and so is what it holds", async () => {
+    const owned = `${RUNTIME_ROOT}/node_modules/playwright-core/package.json`;
+    const computer = await computerHome({ [owned]: "{}" });
+    try {
+      await computer.writeManifest([
+        ...INSTALL_MANIFEST_PATHS,
+        `${RUNTIME_ROOT}/node_modules`,
+      ]);
+      await computer.update();
+      expect(computer.exists(owned)).toBe(true);
+    } finally {
+      await computer.cleanup();
+    }
+  });
+
+  test("every recorded path is spelled plainly, and none holds another", () => {
+    const recorded = [...INSTALL_MANIFEST_PATHS, ...INSTALL_MANIFEST_SEED];
+    for (const path of recorded) {
+      expect(path).toStartWith(`${HOME_ROOT}/`);
+      expect(path).not.toMatch(/\/\/|\/\.\.?(\/|$)|\/$/);
+      for (const other of recorded) {
+        expect(other.startsWith(`${path}/`)).toBe(false);
+      }
+    }
+    expect(new Set(recorded).size).toBe(recorded.length);
+  });
+
+  test("records no live state and nothing a kept directory holds only by being one", () => {
+    for (const path of INSTALL_MANIFEST_PATHS) {
+      expect(INSTALL_KEPT_PATHS).not.toContain(path);
+      for (const live of INSTALL_LIVE_STATE_PATHS) {
+        expect(path === live || path.startsWith(`${live}/`)).toBe(false);
+      }
+    }
   });
 });
 

@@ -48,7 +48,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 22. ~~**`apps/cloudflare/src/native-fallback.ts:1` hardcodes `ARTIFACT_ORIGIN`**, so staging cannot serve the native Applet page.~~ **Gone with step 9.** The bootstrap page, its gateway route, the `/api/native/applets/:id/bootstrap` route and the `FallbackBootstrap` wire type are deleted: the phone frames the Applet's own page on the origin the `/api/applets/:id/ui` read names, which is derived from the request rather than hardcoded.
 
-23. ~~**`@frockbot/applet-sdk` is not published to npm**; the Computer installs dist-tag `latest` and writes `.sdk-unavailable` on failure.~~ **Gone with step 8.** No Computer installs the SDK: the build service's image copies it out of the repository, and the Sprite's `applets` provisioning phase, its `applet` shim and its two doctor checks are deleted.
+23. ~~**`@frockbot/applet-sdk` is not published to npm**; the Computer installs dist-tag `latest` and writes `.sdk-unavailable` on failure.~~ **Gone with step 8.** No Computer installs the SDK: the build service's image copies it out of the repository, and the Sprite's `applets` provisioning phase, its `applet` shim and its two doctor checks are deleted. What that phase left on a Computer provisioned before — `~/.frockbot/applets` with an SDK stuck at 0.3.14, and `~/bin/applet` — is removed by the install manifest's seed on the Computer's next runtime update.
 
 24. ~~**`computer_screenshot` captures the whole 5120×720 root window.**~~ **Fixed.** The capture was a bare `scrot` with no `-a` clip, so one Bot's screenshot contained its siblings' windows. It now clips to the Bot's slot, read from the same `bots/<key>/slot` file the VNC viewer clips by.
 
