@@ -83,7 +83,7 @@ void main() {
     expect(encoded['look'], 'studio');
     expect(decodeThemeDocument(encoded)?.look, NamedLook.studio);
     expect(decodeThemeDocument(encoded)?.tokens.botBubble, BotBubble.plain);
-    expect(encodeHexColor(ThemeDocument.ink.tokens.surfaces.window), '#121214');
+    expect(encodeHexColor(ThemeDocument.ink.tokens.surfaces.window), '#18161a');
   });
 
   test('forbidden keys and a contrast failure skip the document', () {

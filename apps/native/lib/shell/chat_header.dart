@@ -10,8 +10,9 @@ import 'chat_icons.dart';
 import 'desktop_layout.dart';
 
 /// The blue a running Computer's icon wears: a cooler note beside the
-/// accent, so "working" and "yours" never read as the same colour.
-const computerRunningColor = Color(0xff5aa9ff);
+/// accent, so "working" and "yours" never read as the same colour. It is
+/// Chill's blue, so it still reads as one of the flock.
+const computerRunningColor = Color(0xff59c7ff);
 
 /// Silhouette height of the conversation companion. The empty canvas around
 /// a still is clipped, so this is the drawing, not the frame.

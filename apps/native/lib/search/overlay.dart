@@ -790,13 +790,13 @@ class _SearchOverlayState extends State<SearchOverlay> {
   (IconData, Color) _fileIcon(String title) {
     final name = title.split('\n').first.toLowerCase();
     if (name.endsWith('.pdf') || title.contains('application/pdf')) {
-      return (Icons.picture_as_pdf_outlined, const Color(0xffff596c));
+      return (Icons.picture_as_pdf_outlined, const Color(0xffff6b57));
     }
     if (title.contains('image/') ||
         RegExp(r'\.(png|jpe?g|gif|webp|heic|svg)$').hasMatch(name)) {
-      return (Icons.image_outlined, const Color(0xffffa64d));
+      return (Icons.image_outlined, const Color(0xffff9c35));
     }
-    return (Icons.insert_drive_file_outlined, const Color(0xff65aaff));
+    return (Icons.insert_drive_file_outlined, const Color(0xff59c7ff));
   }
 
   Widget _icon(SearchEntry entry) {
@@ -804,10 +804,10 @@ class _SearchOverlayState extends State<SearchOverlay> {
     final (icon, color) = switch (entry.category) {
       SearchCategory.routines => (
         Icons.schedule_rounded,
-        const Color(0xffb88aff),
+        const Color(0xff9a72dd),
       ),
       SearchCategory.files => _fileIcon(entry.title),
-      SearchCategory.links => (Icons.link_rounded, const Color(0xff70b6eb)),
+      SearchCategory.links => (Icons.link_rounded, const Color(0xff6578ee)),
       SearchCategory.actions => (
         switch (entry.selection.actionId) {
           'computer' || 'machines' => Icons.computer_outlined,

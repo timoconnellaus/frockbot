@@ -173,9 +173,9 @@ class _ShellMarkdownState extends State<ShellMarkdown> {
             text: run.text,
             recognizer: recognizer,
             style: style.copyWith(
-              color: theme.colorScheme.primary,
+              color: FrockTheme.accentInk(theme),
               decoration: TextDecoration.underline,
-              decorationColor: theme.colorScheme.primary,
+              decorationColor: FrockTheme.accentInk(theme),
             ),
           ),
         );

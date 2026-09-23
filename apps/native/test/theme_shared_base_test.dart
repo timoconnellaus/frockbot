@@ -13,8 +13,8 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 
 void main() {
-  test('the dark window is #121214, and it is the theme that says so', () {
-    expect(FrockTheme.window, const Color(0xff121214));
+  test('the dark window is #18161a, and it is the theme that says so', () {
+    expect(FrockTheme.window, const Color(0xff18161a));
     for (final platform in TargetPlatform.values) {
       debugDefaultTargetPlatformOverride = platform;
       addTearDown(() => debugDefaultTargetPlatformOverride = null);

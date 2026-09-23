@@ -12,52 +12,57 @@ import 'document.dart';
 /// radii, the weight of a line — so that a stock widget dropped anywhere in
 /// the app already looks like it belongs here.
 abstract final class FrockTheme {
-  static const accent = Color(0xffdb4b6d);
+  static const accent = Color(0xffd92d71);
 
-  /// The pale pink secondary actions are written in. The voice footer's
-  /// lobes use it as the tint between white and the accent.
-  static const accentSoft = Color(0xfff59ab6);
+  /// The pale pink secondary actions are written in: Pixel's own body
+  /// colour. The voice footer's lobes use it as the tint between white and
+  /// the accent.
+  static const accentSoft = Color(0xfffc85ae);
 
   /// The deep rose the Bot speaks in on the voice footer's pink slab: the
   /// same hue as [accent], darker, so the two voices are one family told
   /// apart by weight rather than by a second colour.
-  static const accentDeep = Color(0xff9c1a44);
+  static const accentDeep = Color(0xff9a124c);
   /// The two states the scheme has no slot for. A Card's pill says "Sent" in
   /// green and "Needs your attention" in amber; `primary` is the brand and
   /// `error` is a failure, and neither of those is what those two mean. Each
   /// has a darker twin for the light theme, where the dark one would not
-  /// carry against paper.
-  static const success = Color(0xff44a877);
+  /// carry against paper. The dark ones are the avatar picker's green and
+  /// Sunny's yellow, so a state reads as one of the flock.
+  static const success = Color(0xff58c98b);
   static const successInk = Color(0xff1c7a4e);
-  static const warning = Color(0xffd9a441);
+  static const warning = Color(0xffffc928);
   static const warningInk = Color(0xff8a6000);
 
-  static const window = Color(0xff121214);
+  static const window = Color(0xff18161a);
 
   /// The ground the furniture stands on: app bar, composer, sidebar. It sits
   /// one step *below* the window, so the thread is the lit part of the screen
   /// and the chrome falls back from it.
-  static const surface = Color(0xff0c0c0e);
-  static const raised = Color(0xff1e1e22);
-  static const border = Color(0xff2c2c32);
-  static const muted = Color(0xffa8a3a6);
+  static const surface = Color(0xff111013);
+  static const raised = Color(0xff242127);
+  static const border = Color(0xff35313a);
+  static const muted = Color(0xffaba49c);
 
   /// A third rung below [muted], where a timestamp or a run's age goes. On
   /// paper it would fall under the contrast floor, so the light theme reads
   /// those in [inkMuted] instead and only the dark theme has three rungs.
-  static const subtle = Color(0xff8d8896);
+  static const subtle = Color(0xff8f887f);
 
   /// Cream written on ink, not lilac: the dark theme is the site's paper
-  /// inverted, which is why the whites here are warm.
-  static const text = Color(0xfff6f2ee);
+  /// inverted, which is why the whites here are warm — the cream of the
+  /// characters' eyes.
+  static const text = Color(0xfff9f3e7);
 
   /// The light theme is the site's own paper — cream ground, white cards, a
   /// warm line — rather than the lavender grey Material mixes from the seed.
-  static const cream = Color(0xfffaf7f2);
+  static const cream = Color(0xfffbf6ec);
   static const paper = Color(0xffffffff);
-  static const ink = Color(0xff1e1d27);
-  static const inkMuted = Color(0xff6d6974);
-  static const line = Color(0xffe7e0d9);
+
+  /// The soft black the characters are outlined in.
+  static const ink = Color(0xff151416);
+  static const inkMuted = Color(0xff6b645b);
+  static const line = Color(0xffe8ddcd);
 
   /// What a selected row, chip or rail tab is filled with. Rose at low alpha
   /// went muddy over both grounds — over cream because the ground is warm and
@@ -93,6 +98,27 @@ abstract final class FrockTheme {
   static Color hairline(ColorScheme scheme) =>
       scheme.outlineVariant.withValues(alpha: 0.72);
 
+  /// The accent where it is read as text: a link, a text button. A fill that
+  /// carries white type is too dark to read on ink, so it steps toward the
+  /// text colour until it clears 4.5:1 against the window. Paper's accent
+  /// already does and comes back as it is.
+  static Color readableAccent(ThemeSurfaces surfaces) {
+    for (var step = 0; step <= 20; step++) {
+      final colour = Color.lerp(surfaces.accent, surfaces.text, step / 20)!;
+      if (_contrast(colour, surfaces.window) >= 4.5) return colour;
+    }
+    return surfaces.text;
+  }
+
+  static Color accentInk(ThemeData theme) =>
+      theme.extension<FrockLook>()?.accentInk ?? theme.colorScheme.primary;
+
+  static double _contrast(Color a, Color b) {
+    final x = a.computeLuminance();
+    final y = b.computeLuminance();
+    return x > y ? (x + 0.05) / (y + 0.05) : (y + 0.05) / (x + 0.05);
+  }
+
   static ThemeData theme(Brightness brightness) => fromDocument(
     brightness == Brightness.dark ? ThemeDocument.ink : ThemeDocument.paper,
   );
@@ -123,7 +149,8 @@ abstract final class FrockTheme {
       onPrimary: surfaces.onAccent,
       secondary: surfaces.accent,
       onSecondary: surfaces.onAccent,
-      error: const Color(0xffe05a5a),
+      // The dark red reads on ink; paper needs a deeper one to carry text.
+      error: dark ? const Color(0xffe05a5a) : const Color(0xffc73a28),
       onError: Colors.white,
       surface: surfaces.surface,
       onSurface: surfaces.text,
@@ -297,6 +324,7 @@ abstract final class FrockTheme {
       textButtonTheme: TextButtonThemeData(
         style: TextButton.styleFrom(
           minimumSize: const Size(40, 40),
+          foregroundColor: readableAccent(surfaces),
           shape: control,
           padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           textStyle: textTheme.labelLarge,
@@ -587,6 +615,8 @@ class FrockLook extends ThemeExtension<FrockLook> {
   factory FrockLook.fromTokens(ThemeTokens tokens) => FrockLook(tokens);
 
   ThemeSurfaces get surfaces => tokens.surfaces;
+
+  Color get accentInk => FrockTheme.readableAccent(tokens.surfaces);
 
   Color bubbleFill({required bool mine}) {
     if (mine) {

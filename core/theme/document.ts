@@ -90,13 +90,13 @@ const SURFACE_KEYS = [
 
 export const INK_TOKENS_V1: ThemeTokensV1 = {
   surfaces: {
-    window: "#121214",
-    surface: "#0c0c0e",
-    raised: "#1e1e22",
-    text: "#f6f2ee",
-    muted: "#a8a3a6",
-    line: "#2c2c32",
-    accent: "#c44580",
+    window: "#18161a",
+    surface: "#111013",
+    raised: "#242127",
+    text: "#f9f3e7",
+    muted: "#aba49c",
+    line: "#35313a",
+    accent: "#d92d71",
     onAccent: "#ffffff",
   },
   type: "inter",
@@ -105,33 +105,33 @@ export const INK_TOKENS_V1: ThemeTokensV1 = {
 
 export const PAPER_TOKENS_V1: ThemeTokensV1 = {
   surfaces: {
-    window: "#faf7f2",
+    window: "#fbf6ec",
     surface: "#ffffff",
-    raised: "#f2ece4",
-    text: "#1e1d27",
-    muted: "#6d6974",
-    line: "#e7e0d9",
-    accent: "#c23d7b",
+    raised: "#f4ecdf",
+    text: "#151416",
+    muted: "#6b645b",
+    line: "#e8ddcd",
+    accent: "#d3266d",
     onAccent: "#ffffff",
   },
   type: "inter",
-  bubbles: { bot: "raised", me: "accent" },
+  bubbles: { bot: "raised", me: "tint" },
 };
 
 /** Paper tokens for the thread: this Bot's room, sitting in the app's ink. */
 export const STUDIO_TOKENS_V1: ThemeTokensV1 = {
   surfaces: {
-    window: "#faf7f2",
+    window: "#fbf6ec",
     surface: "#ffffff",
-    raised: "#f2ece4",
-    text: "#1e1d27",
-    muted: "#6d6974",
-    line: "#e7e0d9",
-    accent: "#c23d7b",
+    raised: "#f4ecdf",
+    text: "#151416",
+    muted: "#6b645b",
+    line: "#e8ddcd",
+    accent: "#d3266d",
     onAccent: "#ffffff",
   },
   type: "inter",
-  bubbles: { bot: "plain", me: "accent" },
+  bubbles: { bot: "plain", me: "tint" },
 };
 
 export const INK_DOCUMENT_V1: ThemeDocumentV1 = {

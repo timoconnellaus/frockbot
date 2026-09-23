@@ -110,7 +110,7 @@ describe("phases", () => {
         new Date("2026-09-18T08:30:00.000Z"),
         "UTC",
       ).surfaces.accent,
-    ).toBe("#c23d7b");
+    ).toBe("#d3266d");
     expect(
       resolveThemeTokensV1(
         document,

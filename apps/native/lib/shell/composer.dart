@@ -463,6 +463,9 @@ class _ComposerState extends State<Composer> {
                   padding: EdgeInsets.zero,
                   iconSize: composerControlIconSize(extent),
                   shape: const CircleBorder(),
+                  // The app's icon buttons draw in the text colour; the
+                  // filled send button draws in the accent's own ink.
+                  foregroundColor: theme.colorScheme.onPrimary,
                   disabledBackgroundColor: theme.colorScheme.onSurface
                       .withValues(alpha: 0.06),
                   disabledForegroundColor: theme.colorScheme.onSurfaceVariant

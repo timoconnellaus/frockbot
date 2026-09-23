@@ -33,12 +33,12 @@ Map<String, Object?> studioDocument() => {
   'look': 'studio',
   'tokens': {
     'surfaces': {
-      'window': '#faf7f2',
+      'window': '#fbf6ec',
       'surface': '#ffffff',
-      'raised': '#f2ece4',
-      'text': '#1e1d27',
-      'muted': '#6d6974',
-      'line': '#e7e0d9',
+      'raised': '#f4ecdf',
+      'text': '#151416',
+      'muted': '#6b645b',
+      'line': '#e8ddcd',
       'accent': '#c23359',
       'onAccent': '#ffffff',
     },
