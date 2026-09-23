@@ -6,7 +6,6 @@
 // isolate's `ai` grant (`app/isolates/bot.ts`) resolve the same way.
 
 import {
-  decodeSendToUserPayloadV1,
   PLUGIN_MODEL_PROVIDER_UNAVAILABLE_REASON_V1,
   type NormalizedModelRequest,
   type TurnTypeV1,
@@ -473,22 +472,10 @@ export async function agentRuntime(
                 const completed = decodeClientTurnV1(
                   structuredClone(await rpc.runAgent(request)),
                 );
-                let sentText: string | undefined;
-                for (const event of completed.events) {
-                  if (event.type !== "send/to-user") continue;
-                  const payload = decodeSendToUserPayloadV1(
-                    event.payload,
-                    "agent send/to-user payload",
-                    { kernelMinted: true },
-                  );
-                  if (payload.type === "text") {
-                    sentText = payload.text;
-                    break;
-                  }
-                }
-                return {
-                  text: sentText ?? completed.text,
-                };
+                // The settled text is the Turn's last send or caller reply, so
+                // a note the target sent its own User before answering is not
+                // what the asking Bot is handed.
+                return { text: completed.text };
               },
               // The same admission `runAgent` makes, without the hop: the
               // target is the object this Turn is already running in, so a
