@@ -102,8 +102,8 @@ describe("the managed Skill generator", () => {
 
   test("a reference authored beside a SKILL.md reaches the generated module", async () => {
     const source = await managedSkillModule({
-      prefix: "APPLETS",
-      slug: "applets",
+      prefix: "PLUGINS",
+      slug: "plugins",
       authoredAt: "a temporary directory",
       directory: authored({
         "SKILL.md": DOCUMENT,
@@ -116,16 +116,16 @@ describe("the managed Skill generator", () => {
     // Imported the way the Worker bundle imports it: the module is the
     // contract, so what it exports is what the assertion reads.
     const generated = (await import(pathToFileURL(module).href)) as {
-      APPLETS_SKILL_SLUG_V1: string;
-      APPLETS_SKILL_DOCUMENT_V1: string;
-      APPLETS_SKILL_REFERENCES_V1: ReadonlyArray<{
+      PLUGINS_SKILL_SLUG_V1: string;
+      PLUGINS_SKILL_DOCUMENT_V1: string;
+      PLUGINS_SKILL_REFERENCES_V1: ReadonlyArray<{
         path: string;
         text: string;
       }>;
     };
-    expect(generated.APPLETS_SKILL_SLUG_V1).toBe("applets");
-    expect(generated.APPLETS_SKILL_DOCUMENT_V1).toBe(DOCUMENT);
-    expect(generated.APPLETS_SKILL_REFERENCES_V1).toEqual([
+    expect(generated.PLUGINS_SKILL_SLUG_V1).toBe("plugins");
+    expect(generated.PLUGINS_SKILL_DOCUMENT_V1).toBe(DOCUMENT);
+    expect(generated.PLUGINS_SKILL_REFERENCES_V1).toEqual([
       { path: "forms.md", text: "# Forms\nOne per person.\n" },
     ]);
   });

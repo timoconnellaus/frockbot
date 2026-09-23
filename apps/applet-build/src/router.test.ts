@@ -1,37 +1,36 @@
 import { describe, expect, test } from "bun:test";
 
 import {
-  APPLET_BUILD_ROUTE,
   APPLET_BUILD_TOKEN_HEADER,
-  encodeAppletBuildRequestV1,
-  type AppletBuildRequestV1,
+  PLUGIN_BUILD_ROUTE,
+  encodePluginBuildRequestV1,
+  type PluginBuildRequestV1,
 } from "@frockbot/applets/build-contract";
 import {
-  appletBuildShardCountV1,
-  appletBuildShardV1,
   fnv1aV1,
-  routeAppletBuildRequestV1,
+  pluginBuildShardCountV1,
+  pluginBuildShardV1,
+  routePluginBuildRequestV1,
 } from "./router.ts";
 
 const TOKEN = "shared-token";
-const APPLET_ID = "vgpqfaCcwnPlzjYdb2mI.weekly-todos";
+const PLUGIN_ID = "weather";
 
-function body(overrides: Partial<AppletBuildRequestV1> = {}): string {
+function body(overrides: Partial<PluginBuildRequestV1> = {}): string {
   return JSON.stringify(
-    encodeAppletBuildRequestV1({
+    encodePluginBuildRequestV1({
       version: 1,
       effectId: "effect-1",
-      kind: "applet",
-      id: APPLET_ID,
+      id: PLUGIN_ID,
       mode: "build",
-      files: [{ path: "server.ts", text: "export default class {}\n" }],
+      files: [{ path: "plugin.ts", text: "export const tools = [];\n" }],
       ...overrides,
     }),
   );
 }
 
 function post(headers: Record<string, string> = {}, text = body()): Request {
-  return new Request(`https://applet-build.internal${APPLET_BUILD_ROUTE}`, {
+  return new Request(`https://applet-build.internal${PLUGIN_BUILD_ROUTE}`, {
     method: "POST",
     headers: { "content-type": "application/json", ...headers },
     body: text,
@@ -44,7 +43,7 @@ interface Seen {
 }
 
 function route(request: Request, seen: Seen = {}): Promise<Response> {
-  return routeAppletBuildRequestV1(
+  return routePluginBuildRequestV1(
     request,
     { hostToken: TOKEN, shards: 2 },
     (shard) => ({
@@ -57,7 +56,7 @@ function route(request: Request, seen: Seen = {}): Promise<Response> {
   );
 }
 
-describe("the Applet build router", () => {
+describe("the Plugin build router", () => {
   test("answers /healthz without a token", async () => {
     const response = await route(
       new Request("https://applet-build.internal/healthz"),
@@ -82,7 +81,7 @@ describe("the Applet build router", () => {
   });
 
   test("refuses every request when the Worker holds no token", async () => {
-    const response = await routeAppletBuildRequestV1(
+    const response = await routePluginBuildRequestV1(
       post({ [APPLET_BUILD_TOKEN_HEADER]: "" }),
       { hostToken: "", shards: 1 },
       () => ({
@@ -114,7 +113,7 @@ describe("the Applet build router", () => {
     expect(seen.request).toBeUndefined();
   });
 
-  test("forwards the body and the token to the Applet's shard", async () => {
+  test("forwards the body and the token to the Plugin's shard", async () => {
     const seen: Seen = {};
     const text = body();
     const response = await route(
@@ -124,41 +123,41 @@ describe("the Applet build router", () => {
     expect(await response.json<{ status: string }>()).toEqual({
       status: "built",
     });
-    expect(seen.shard).toBe(appletBuildShardV1(APPLET_ID, 2));
+    expect(seen.shard).toBe(pluginBuildShardV1(PLUGIN_ID, 2));
     expect(seen.request?.method).toBe("POST");
-    expect(new URL(seen.request!.url).pathname).toBe(APPLET_BUILD_ROUTE);
+    expect(new URL(seen.request!.url).pathname).toBe(PLUGIN_BUILD_ROUTE);
     expect(seen.request?.headers.get(APPLET_BUILD_TOKEN_HEADER)).toBe(TOKEN);
     expect(await seen.request!.text()).toBe(text);
   });
 });
 
-describe("Applet build sharding", () => {
+describe("Plugin build sharding", () => {
   test("uses the neutral UTF-8 FNV-1a vectors", () => {
     expect(fnv1aV1("")).toBe(2_166_136_261);
     expect(fnv1aV1("a")).toBe(0xe40c_292c);
     expect(fnv1aV1("💡")).toBe(0x3091_f3c5);
   });
 
-  test("sends every build of one Applet to one container", () => {
-    expect(appletBuildShardV1(APPLET_ID, 4)).toBe(
-      appletBuildShardV1(APPLET_ID, 4),
+  test("sends every build of one Plugin to one container", () => {
+    expect(pluginBuildShardV1(PLUGIN_ID, 4)).toBe(
+      pluginBuildShardV1(PLUGIN_ID, 4),
     );
-    expect(appletBuildShardV1(APPLET_ID, 4)).toMatch(/^applet-build-[0-3]$/);
+    expect(pluginBuildShardV1(PLUGIN_ID, 4)).toMatch(/^applet-build-[0-3]$/);
   });
 
-  test("spreads different Applets", () => {
+  test("spreads different Plugins", () => {
     const shards = new Set(
       Array.from({ length: 32 }, (_, index) =>
-        appletBuildShardV1(`owner.applet-${index}`, 4),
+        pluginBuildShardV1(`plugin-${index}`, 4),
       ),
     );
     expect(shards.size).toBeGreaterThan(1);
   });
 
   test("a pool is at least one container, whatever the configuration held", () => {
-    expect(appletBuildShardV1(APPLET_ID, 0)).toBe("applet-build-0");
-    expect(appletBuildShardCountV1(undefined)).toBe(1);
-    expect(appletBuildShardCountV1("nonsense")).toBe(1);
-    expect(appletBuildShardCountV1("3")).toBe(3);
+    expect(pluginBuildShardV1(PLUGIN_ID, 0)).toBe("applet-build-0");
+    expect(pluginBuildShardCountV1(undefined)).toBe(1);
+    expect(pluginBuildShardCountV1("nonsense")).toBe(1);
+    expect(pluginBuildShardCountV1("3")).toBe(3);
   });
 });

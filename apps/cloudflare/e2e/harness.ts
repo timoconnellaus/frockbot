@@ -13,11 +13,11 @@
 // `wrangler dev`), lifted here so the test layer runs the developer's own
 // path rather than a second one.
 //
-// The Applet build service is real too: `apps/applet-build` runs under its own
+// The Plugin build service is real too: `apps/applet-build` runs under its own
 // `wrangler dev` in the same dev service registry, so the app's `APPLET_BUILD`
-// binding resolves and an Applet is compiled by the container production
+// binding resolves and a Plugin is compiled by the container production
 // compiles it with. That needs Docker; `appletBuildAvailableV1` says whether
-// this machine has it, and the one spec that builds an Applet fails with that
+// this machine has it, and the one spec that builds a Plugin fails with that
 // sentence rather than passing without having built anything.
 //
 // The providers are the only things that are not real. `wrangler dev` has no
@@ -37,9 +37,9 @@ import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import {
-  APPLET_BUILD_ROUTE,
+  PLUGIN_BUILD_ROUTE,
   APPLET_BUILD_TOKEN_HEADER,
-  encodeAppletBuildRequestV1,
+  encodePluginBuildRequestV1,
 } from "@frockbot/applets/build-contract";
 import { appletBuildRequested } from "./suite.ts";
 import { reserveFreePort } from "./ports.ts";
@@ -104,7 +104,7 @@ export const E2E_STREAM_GAP_MS = 8_000;
 const READY_TIMEOUT_MS = 120_000;
 /**
  * A cold container start, behind a first-ever pull of the container runtime's
- * proxy image, is minutes rather than seconds. Only the Applet build service
+ * proxy image, is minutes rather than seconds. Only the Plugin build service
  * waits this long, and only once per run.
  */
 const APPLET_BUILD_READY_TIMEOUT_MS = 420_000;
@@ -608,10 +608,10 @@ export function e2eComputerConfiguredV1(
 }
 
 /**
- * Whether this machine can run the Applet build service.
+ * Whether this machine can run the Plugin build service.
  *
  * `wrangler dev` builds and runs the container's image, which needs a running
- * Docker daemon. A spec calls this to say so out loud: an Applet build that
+ * Docker daemon. A spec calls this to say so out loud: a Plugin build that
  * cannot happen is a spec that fails with the reason, never one that quietly
  * proves nothing.
  */
@@ -630,7 +630,7 @@ export interface HarnessOptions {
   ollamaPort: number;
   /** The port the auxiliary Frock AI RPC Worker listens on. */
   frockAiPort: number;
-  /** The port the Applet build service listens on, when Docker can run it. */
+  /** The port the Plugin build service listens on, when Docker can run it. */
   appletBuildPort: number;
 }
 
@@ -863,7 +863,7 @@ export async function startHarness(
         // transcript deliberately hides them — when it has to explain a state.
         "--var",
         `DEBUG_TOKEN:${E2E_DEBUG_TOKEN}`,
-        // The Applet build service, when this machine has Docker. The binding
+        // The Plugin build service, when this machine has Docker. The binding
         // is declared either way; without the token the app refuses a publish
         // with "the build service is unavailable" rather than calling a
         // service that is not there.
@@ -942,10 +942,10 @@ export async function startHarness(
     // service its APPLET_BUILD binding names.
     const appletBuildUrl = `http://127.0.0.1:${options.appletBuildPort}`;
     if (!appletBuildRequested()) {
-      note("Applet build service is off for this browser-suite corpus.");
+      note("Plugin build service is off for this browser-suite corpus.");
     } else if (appletBuildAvailableV1()) {
       const supervisedAppletBuild = superviseProcess({
-        label: "Applet build wrangler dev",
+        label: "Plugin build wrangler dev",
         spawnChild: spawnAppletBuild,
         // `/healthz` is the Worker's own route and answers without starting a
         // container, so it proves nothing about whether a build can run: the
@@ -963,7 +963,7 @@ export async function startHarness(
       await supervisedAppletBuild.start();
     } else {
       note(
-        "Docker is not running, so the Applet build service was not started and APPLET_BUILD reads [not connected].",
+        "Docker is not running, so the Plugin build service was not started and APPLET_BUILD reads [not connected].",
       );
     }
 
@@ -1006,12 +1006,12 @@ export async function startHarness(
 }
 
 /**
- * The Applet build service is ready when it has actually built something.
+ * The Plugin build service is ready when it has actually built something.
  *
- * The cheapest build there is: one file and no `applet.json`, which the
+ * The cheapest build there is: one file and no `plugin.json`, which the
  * container refuses at the descriptor stage. It costs a round trip and proves
  * the whole path — Worker, container image, container runtime — and it leaves
- * the instance warm, so the first spec to publish an Applet is not the one
+ * the instance warm, so the first spec to publish a Plugin is not the one
  * paying for a cold start.
  *
  * Longer than the other waits because a machine that has never run this pulls
@@ -1023,20 +1023,19 @@ async function waitForAppletBuild(baseUrl: string): Promise<void> {
   let lastFailure = "no attempt was made";
   while (Date.now() < deadline) {
     try {
-      const response = await fetch(`${baseUrl}${APPLET_BUILD_ROUTE}`, {
+      const response = await fetch(`${baseUrl}${PLUGIN_BUILD_ROUTE}`, {
         method: "POST",
         headers: {
           "content-type": "application/json",
           [APPLET_BUILD_TOKEN_HEADER]: E2E_APPLET_BUILD_TOKEN,
         },
         body: JSON.stringify(
-          encodeAppletBuildRequestV1({
+          encodePluginBuildRequestV1({
             version: 1,
             effectId: "e2e-harness-warmup",
-            kind: "applet",
-            id: "e2e.warmup",
+            id: "e2e-warmup",
             mode: "check",
-            files: [{ path: "server.ts", text: "export default {};\n" }],
+            files: [{ path: "plugin.ts", text: "export {};\n" }],
           }),
         ),
       });
@@ -1049,7 +1048,7 @@ async function waitForAppletBuild(baseUrl: string): Promise<void> {
     await new Promise((sleep) => setTimeout(sleep, 1_000));
   }
   throw new Error(
-    `Timed out waiting for the Applet build service to build: ${lastFailure}`,
+    `Timed out waiting for the Plugin build service to build: ${lastFailure}`,
   );
 }
 

@@ -197,7 +197,7 @@ const REFERENCES_TYPE = "ReadonlyArray<{ path: string; text: string }>";
  * Package, read-only because there is no path from `skill_write` to one.
  */
 export async function managedSkillModule(source: {
-  /** The constant prefix the module exports under, like `APPLETS`. */
+  /** The constant prefix the module exports under, like `PLUGINS`. */
   prefix: string;
   slug: string;
   directory: URL;

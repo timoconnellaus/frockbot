@@ -311,7 +311,7 @@ Merging integrates; tagging ships. The pipeline has four stages, and a person de
 
 Pushing a valid SemVer tag by hand — `v0.8.0` for a minor bump, `v0.8.0-rc.1` for a prerelease — runs the same release workflow; the automatic cut continues from whatever tag is highest. Build metadata such as `+build.1` is rejected because npm does not accept it in package versions. Prereleases use npm's `next` dist-tag rather than `latest`. Application workspaces remain private.
 
-Two jobs exist for the other profile rather than for this one, and neither is on the production deploy's path. `publish-images` pushes the Computer host and Applet build container images to Docker Hub under `timoconnellaus`, which is what an installer with no Docker pulls; while the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets are unset it skips with a warning. `release-assets` builds the Flutter web client and the application artifact, and `github-release` attaches both to the Release, because a deployer has neither Flutter nor this repository's build. Details are in [`scripts/deployment-config/README.md`](scripts/deployment-config/README.md#what-a-release-publishes-and-what-an-installer-pulls).
+Two jobs exist for the other profile rather than for this one, and neither is on the production deploy's path. `publish-images` pushes the Computer host and Plugin build container images to Docker Hub under `timoconnellaus`, which is what an installer with no Docker pulls; while the `DOCKERHUB_USERNAME` and `DOCKERHUB_TOKEN` repository secrets are unset it skips with a warning. `release-assets` builds the Flutter web client and the application artifact, and `github-release` attaches both to the Release, because a deployer has neither Flutter nor this repository's build. Details are in [`scripts/deployment-config/README.md`](scripts/deployment-config/README.md#what-a-release-publishes-and-what-an-installer-pulls).
 
 Neither leg is finished when it starts, so `scripts/ci-watch.ts` watches each to a terminal state and reduces it to an exit code — `0` green or landed, `1` failed, `2` still pending:
 
@@ -399,15 +399,15 @@ Register `https://staging-bot.frockbot.com/api/auth/callback/google` as an autho
 
 ### Production deployment
 
-Once a version tag verifies, `release.yml` deploys five Cloudflare Workers — marketing, the admin portal, the Applet build service, the Computer host and the app — through the GitHub `production` environment, and only then publishes `applets/sdk` to npm. Publishing waits on the backend deploy because a package published for a release whose deploy then failed would sit on the registry ahead of a production that never moved. Merging to `main` deploys nothing — a tag is the only thing that reaches production, so code can be integrated freely and released deliberately:
+Once a version tag verifies, `release.yml` deploys five Cloudflare Workers — marketing, the admin portal, the Plugin build service, the Computer host and the app — through the GitHub `production` environment, and only then publishes `applets/sdk` to npm. Publishing waits on the backend deploy because a package published for a release whose deploy then failed would sit on the registry ahead of a production that never moved. Merging to `main` deploys nothing — a tag is the only thing that reaches production, so code can be integrated freely and released deliberately:
 
 - `apps/marketing` serves the public marketing site at `https://frockbot.com` and redirects `www.frockbot.com` to the apex domain;
 - `apps/admin-portal` serves the administrative surface at `https://admin.frockbot.com`; see [The admin portal](#the-admin-portal);
-- `apps/applet-build` is the Applet build service: an internal Worker with no public route and a Cloudflare Container that type-checks, lints, bundles and boots an Applet's source, and builds a Plugin's the same way without the lint stage. It deploys before the app because that binding must resolve;
+- `apps/applet-build` is the Plugin build service: an internal Worker with no public route and a Cloudflare Container that type-checks a Plugin's source, bundles it into one module and reads its exports by running it. It deploys before the app because that binding must resolve;
 - `apps/computer-host` is the shared Computer host: an internal Worker with no public route, a bounded pool of Cloudflare Containers, and the only place `SPRITES_TOKEN` is used. It deploys before the app because that binding must resolve, and because a stale host would be serving a current app;
 - `apps/cloudflare` serves the authenticated application and API at `https://bot.frockbot.com`.
 
-The Computer host and the Applet build service both run Containers, which require the **Workers Paid plan**; each hosted deploy step builds and pushes its container image from the Dockerfile, so the runner needs Docker (`ubuntu-latest` has it). The images `publish-images` pushes to Docker Hub are for the simple profile; switching this deploy to pull them instead is its own later tag, with the previous tag as the rollback, since staging shares the production Computer host.
+The Computer host and the Plugin build service both run Containers, which require the **Workers Paid plan**; each hosted deploy step builds and pushes its container image from the Dockerfile, so the runner needs Docker (`ubuntu-latest` has it). The images `publish-images` pushes to Docker Hub are for the simple profile; switching this deploy to pull them instead is its own later tag, with the previous tag as the rollback, since staging shares the production Computer host.
 
 The app deployment applies remote D1 migrations, uploads the immutable application artifact to R2 under its SHA-256 digest, writes that digest into the generated config as `DEFAULT_APPLICATION_HASH`, and then deploys the Worker, so each build is content-addressed and never overwrites a previously deployed artifact. Every deployment's generated configuration declares its custom domains, so Cloudflare creates and maintains the required proxied DNS records when the Workers are first deployed.
 
@@ -535,7 +535,7 @@ applets/          Applets: the seven applet_* tools, the source root, and the sh
   sdk/            Applet authoring SDK, component kit, linter, the Applet and Plugin build pipelines, and the declarations-only Plugin entry; published to npm
 apps/
   admin-portal/     Hosted-only administrative Worker behind its own Access application
-  applet-build/     Applet build service Worker and its Node container
+  applet-build/     Plugin build service Worker and its Node container
   cloudflare/       User application loader, Dynamic Worker artifact, the client's web build, and bot state
   computer-host/    Shared Computer host Worker and its Node container
   marketing/        Public frockbot.com site and static-assets Worker

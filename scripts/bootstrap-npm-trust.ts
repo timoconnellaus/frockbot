@@ -46,9 +46,8 @@ export type WorkspacePackage = {
 /**
  * Every publishable workspace, in a stable order.
  *
- * The Applets SDK sits beside the module it authors for, and is the only
- * workspace a release publishes: nothing else in this repository has a
- * consumer off it.
+ * The Plugin SDK is the only workspace a release publishes: nothing else in
+ * this repository has a consumer off it.
  */
 export function readWorkspacePackages(root: string): WorkspacePackage[] {
   const directories = [join("applets", "sdk")];

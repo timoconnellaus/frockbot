@@ -79,11 +79,11 @@ type A2uiDepth3V1 =
 type A2uiDepth4V1 =
   A2uiScalarV1 | A2uiDepth3V1[] | { [key: string]: A2uiDepth3V1 };
 /**
- * Plain JSON, spelled out and bounded rather than recursive, for the reason
- * `AppletJsonValueV1` is: a Card crosses a Durable Object RPC boundary, where
- * `unknown` is not transferable — a record typed with it collapses the whole
- * answer to `never` at the call site — and a self-referential type makes the
- * serializability mapper give up instead. A component's properties and a data
+ * Plain JSON, spelled out and bounded rather than recursive, because a Card
+ * crosses a Durable Object RPC boundary, where `unknown` is not transferable —
+ * a record typed with it collapses the whole answer to `never` at the call
+ * site — and a self-referential type makes the serializability mapper give up
+ * instead. A component's properties and a data
  * model are a handful of levels at the outside; the byte budget is the real
  * bound, and the decoder enforces it whatever the depth.
  */

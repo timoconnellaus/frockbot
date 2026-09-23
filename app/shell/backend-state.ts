@@ -88,12 +88,12 @@ export interface BotStateEnv {
   BOT_STATES?: BotStateNamespaceV1;
   COMPUTER_HOST?: Fetcher;
   /**
-   * The Applet build service. Optional so a host without it still compiles; a
+   * The Plugin build service. Optional so a host without it still compiles; a
    * publish is then refused with "the build service is unavailable" rather
    * than throwing inside a Turn.
    */
   APPLET_BUILD?: Fetcher;
-  /** The shared secret presented on every Applet build call. */
+  /** The shared secret presented on every Plugin build call. */
   APPLET_BUILD_TOKEN?: string;
   /**
    * The deployment's own origin. Applets derive the anonymous artifact origin

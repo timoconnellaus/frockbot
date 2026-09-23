@@ -14,8 +14,8 @@
 
 import { Container, ContainerProxy } from "@cloudflare/containers";
 import {
-  appletBuildShardCountV1,
-  routeAppletBuildRequestV1,
+  pluginBuildShardCountV1,
+  routePluginBuildRequestV1,
 } from "./router.ts";
 
 export interface AppletBuildEnv {
@@ -54,11 +54,11 @@ export { ContainerProxy };
 
 export default {
   fetch(request: Request, env: AppletBuildEnv): Promise<Response> {
-    return routeAppletBuildRequestV1(
+    return routePluginBuildRequestV1(
       request,
       {
         hostToken: env.APPLET_BUILD_TOKEN,
-        shards: appletBuildShardCountV1(env.APPLET_BUILD_SHARDS),
+        shards: pluginBuildShardCountV1(env.APPLET_BUILD_SHARDS),
       },
       (shard) => env.APPLET_BUILD_CONTAINER.getByName(shard),
     );

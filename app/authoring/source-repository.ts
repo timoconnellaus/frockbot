@@ -1,6 +1,6 @@
 import {
-  APPLET_BUILD_LIMITS,
-  type AppletBuildSourceFileV1,
+  PLUGIN_BUILD_LIMITS,
+  type PluginBuildSourceFileV1,
 } from "@frockbot/applets/build-contract";
 import type {
   WorkspaceFilesV1,
@@ -41,7 +41,7 @@ export interface AuthoringSourceRepositoryV1 {
   ): Promise<void>;
   readBuildSource(
     artifactId: string,
-  ): Promise<{ files: AppletBuildSourceFileV1[] } | { failure: string }>;
+  ): Promise<{ files: PluginBuildSourceFileV1[] } | { failure: string }>;
 }
 
 /**
@@ -64,7 +64,7 @@ export function createAuthoringSourceRepositoryV1(
       root: policy.root,
       // Workspace prefixes are relative paths and may not end in a slash.
       prefix: prefix.slice(0, -1),
-      limit: APPLET_BUILD_LIMITS.files + 1,
+      limit: PLUGIN_BUILD_LIMITS.files + 1,
     });
     if (listed.status !== "ok") {
       return {
@@ -138,12 +138,12 @@ export function createAuthoringSourceRepositoryV1(
       if (listed.entries.length === 0) {
         return { failure: policy.emptySourceFailure(artifactId) };
       }
-      if (listed.entries.length > APPLET_BUILD_LIMITS.files) {
+      if (listed.entries.length > PLUGIN_BUILD_LIMITS.files) {
         return {
-          failure: `${artifactId} has more than ${APPLET_BUILD_LIMITS.files} source files; the build service takes no more.`,
+          failure: `${artifactId} has more than ${PLUGIN_BUILD_LIMITS.files} source files; the build service takes no more.`,
         };
       }
-      const files: AppletBuildSourceFileV1[] = [];
+      const files: PluginBuildSourceFileV1[] = [];
       let total = 0;
       for (const entry of listed.entries) {
         const source = await readOutcome(artifactId, entry.path);
@@ -151,11 +151,11 @@ export function createAuthoringSourceRepositoryV1(
         const { text } = source;
         total += text.length;
         if (
-          text.length > APPLET_BUILD_LIMITS.fileText ||
-          total > APPLET_BUILD_LIMITS.sourceBytes
+          text.length > PLUGIN_BUILD_LIMITS.fileText ||
+          total > PLUGIN_BUILD_LIMITS.sourceBytes
         ) {
           return {
-            failure: `${artifactId}'s source is over the ${APPLET_BUILD_LIMITS.sourceBytes}-byte ceiling the build service accepts.`,
+            failure: `${artifactId}'s source is over the ${PLUGIN_BUILD_LIMITS.sourceBytes}-byte ceiling the build service accepts.`,
           };
         }
         files.push({ path: entry.path, text });

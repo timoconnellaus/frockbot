@@ -16,12 +16,12 @@
 // bounds a check refuses on.
 import { env } from "cloudflare:workers";
 import { describe, expect, test } from "vitest";
-import { APPLET_BUILD_LIMITS } from "@frockbot/applets/build-contract";
+import { PLUGIN_BUILD_LIMITS } from "@frockbot/applets/build-contract";
 import { workspaceObjectKeyV1 } from "@frockbot/core/workspace-store";
 import { pluginsSourceRootV1 } from "@frockbot/app/plugins/root";
 import { frockbotToolCallPrompt } from "./harness/miniflare.ts";
 import { provisionBot } from "./provision-bot.ts";
-import type { FakeAppletBuildRequestV1 } from "./applet-build-fake.ts";
+import type { FakePluginBuildRequestV1 } from "./applet-build-fake.ts";
 
 function suffix(): string {
   return crypto.randomUUID().slice(0, 8);
@@ -108,12 +108,12 @@ function listedFiles(content: string): Array<{ path: string; size: number }> {
   });
 }
 
-async function buildsFor(id: string): Promise<FakeAppletBuildRequestV1[]> {
+async function buildsFor(id: string): Promise<FakePluginBuildRequestV1[]> {
   const response = await env.APPLET_BUILD.fetch(
     "https://applet-build.internal/__fake/requests",
   );
   const { requests } = (await response.json()) as {
-    requests: FakeAppletBuildRequestV1[];
+    requests: FakePluginBuildRequestV1[];
   };
   return requests.filter((request) => request.id === id);
 }
@@ -233,7 +233,6 @@ describe("Bot-authored source through the tools", () => {
     expect(checked).toContain("checked-notes builds.");
 
     const [pluginBuild] = await buildsFor("checked-notes");
-    expect(pluginBuild?.kind).toBe("plugin");
     expect(pluginBuild?.mode).toBe("check");
     expect(pluginBuild?.files.map((file) => file.path)).toEqual([
       "plugin.json",

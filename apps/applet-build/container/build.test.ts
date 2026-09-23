@@ -5,17 +5,16 @@
 
 import { describe, expect, test } from "bun:test";
 import { scaffoldPluginTemplateV1 } from "../../../applets/sdk/test/plugin-scaffold.ts";
-import { buildAppletRequestV1 } from "./build.ts";
+import { buildPluginRequestV1 } from "./build.ts";
 
 describe("the Plugin build service", () => {
   test("builds a Plugin from the same route: one module, and what it exports", async () => {
     const { files } = await scaffoldPluginTemplateV1({
       prefix: "plugin-build-golden-",
     });
-    const built = await buildAppletRequestV1({
+    const built = await buildPluginRequestV1({
       version: 1,
       effectId: "effect-6",
-      kind: "plugin",
       id: "notes",
       mode: "build",
       files,
@@ -30,20 +29,18 @@ describe("the Plugin build service", () => {
     ]);
     expect(built.manifest.hashes.module).toMatch(/^[0-9a-f]{64}$/);
     expect(
-      await buildAppletRequestV1({
+      await buildPluginRequestV1({
         version: 1,
         effectId: "effect-7",
-        kind: "plugin",
         id: "notes",
         mode: "check",
         files,
       }),
     ).toEqual({ status: "built" });
     expect(
-      await buildAppletRequestV1({
+      await buildPluginRequestV1({
         version: 1,
         effectId: "effect-8",
-        kind: "plugin",
         id: "weather",
         mode: "check",
         files,
@@ -55,10 +52,9 @@ describe("the Plugin build service", () => {
     const { files } = await scaffoldPluginTemplateV1({
       prefix: "plugin-build-oversize-",
     });
-    const oversize = await buildAppletRequestV1({
+    const oversize = await buildPluginRequestV1({
       version: 1,
       effectId: "effect-9",
-      kind: "plugin",
       id: "notes",
       mode: "build",
       files: files.map((file) =>

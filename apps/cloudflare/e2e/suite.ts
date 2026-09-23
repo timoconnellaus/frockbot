@@ -1,11 +1,8 @@
-export const publicationSpecFiles = [
-  "applets-publish.e2e.ts",
-  "plugins-publish.e2e.ts",
-] as const;
+export const publicationSpecFiles = ["plugins-publish.e2e.ts"] as const;
 
 /**
- * What one real publication journey is allowed: two container builds, a live
- * Applet in an iframe and eight scripted Turns, on a two-core runner.
+ * What one real publication journey is allowed: two container builds and five
+ * scripted Turns, on a two-core runner.
  *
  * Each journey applies it, and the lane that runs them reads it to size its
  * own clock, so the two can never disagree about what a journey may spend.

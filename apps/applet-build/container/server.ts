@@ -2,7 +2,7 @@
  * The Node process inside the Cloudflare Container.
  *
  * It owns no build knowledge: it converts a Node request into a `Request`,
- * hands it to the decoder and then to `buildAppletRequestV1`, and writes the
+ * hands it to the decoder and then to `buildPluginRequestV1`, and writes the
  * answer back. Builds are serialized — the type checker, esbuild and a
  * Miniflare boot each want the whole box, and two concurrent builds on one
  * instance make both slower than they would have been in a queue.
@@ -14,19 +14,19 @@ import {
   type ServerResponse,
 } from "node:http";
 import {
-  APPLET_BUILD_LIMITS,
   APPLET_BUILD_TOKEN_HEADER,
-  appletBuildProblemResponseV1,
-  decodeAppletBuildHttpRequestV1,
-  encodeAppletBuildResponseV1,
+  PLUGIN_BUILD_LIMITS,
+  pluginBuildProblemResponseV1,
+  decodePluginBuildHttpRequestV1,
+  encodePluginBuildResponseV1,
 } from "@frockbot/applets/build-contract";
 import { constantTimeEqualsV1 } from "@frockbot/core/crypto";
-import { buildAppletRequestV1 } from "./build.ts";
+import { buildPluginRequestV1 } from "./build.ts";
 
 function required(name: string): string {
   const value = process.env[name]?.trim();
   if (!value)
-    throw new Error(`${name} is required by the Applet build service`);
+    throw new Error(`${name} is required by the Plugin build service`);
   return value;
 }
 
@@ -52,7 +52,7 @@ async function webRequest(incoming: IncomingMessage): Promise<Request> {
   for await (const chunk of incoming) {
     const bytes = Buffer.isBuffer(chunk) ? chunk : Buffer.from(chunk as string);
     size += bytes.byteLength;
-    if (size > APPLET_BUILD_LIMITS.requestBytes) {
+    if (size > PLUGIN_BUILD_LIMITS.requestBytes) {
       throw new Error("request-too-large");
     }
     chunks.push(bytes);
@@ -122,12 +122,12 @@ async function handle(
     await send(
       outgoing,
       (error instanceof Error ? error.message : "") === "request-too-large"
-        ? appletBuildProblemResponseV1(
+        ? pluginBuildProblemResponseV1(
             413,
             "limit-exceeded",
             "request body too large",
           )
-        : appletBuildProblemResponseV1(
+        : pluginBuildProblemResponseV1(
             400,
             "invalid-request",
             "unreadable request",
@@ -141,28 +141,28 @@ async function handle(
   ) {
     await send(
       outgoing,
-      appletBuildProblemResponseV1(
+      pluginBuildProblemResponseV1(
         401,
         "not-authorized",
-        "Applet build token is missing or wrong",
+        "Plugin build token is missing or wrong",
       ),
     );
     return;
   }
 
-  const decoded = await decodeAppletBuildHttpRequestV1(request);
+  const decoded = await decodePluginBuildHttpRequestV1(request);
   if (!decoded.ok) {
     await send(outgoing, decoded.response);
     return;
   }
 
   try {
-    const result = await serialize(() => buildAppletRequestV1(decoded.value));
-    await send(outgoing, Response.json(encodeAppletBuildResponseV1(result)));
+    const result = await serialize(() => buildPluginRequestV1(decoded.value));
+    await send(outgoing, Response.json(encodePluginBuildResponseV1(result)));
   } catch (error) {
     await send(
       outgoing,
-      appletBuildProblemResponseV1(
+      pluginBuildProblemResponseV1(
         500,
         "provider-failure",
         error instanceof Error ? error.message : "the build failed",
@@ -178,5 +178,5 @@ createServer((incoming, outgoing) => {
     outgoing.end();
   });
 }).listen(port, () => {
-  process.stdout.write(`applet build service listening on ${port}\n`);
+  process.stdout.write(`plugin build service listening on ${port}\n`);
 });

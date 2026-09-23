@@ -22,7 +22,7 @@ const harness = await startHarness({
 });
 
 console.log(
-  `FrockBot e2e harness ready on ${harness.baseUrl} (fake Ollama on ${harness.ollamaUrl}, fake Frock AI on ${harness.frockAiUrl}, Applet build ${harness.appletBuildUrl ?? "off — no Docker"})`,
+  `FrockBot e2e harness ready on ${harness.baseUrl} (fake Ollama on ${harness.ollamaUrl}, fake Frock AI on ${harness.frockAiUrl}, Plugin build ${harness.appletBuildUrl ?? "off — no Docker"})`,
 );
 console.log(`Harness and wrangler logs: ${harness.logFile}`);
 

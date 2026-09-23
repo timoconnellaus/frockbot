@@ -10,25 +10,23 @@
 import { SELF } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 import {
-  APPLET_BUILD_ROUTE,
   APPLET_BUILD_TOKEN_HEADER,
-  encodeAppletBuildRequestV1,
+  PLUGIN_BUILD_ROUTE,
+  encodePluginBuildRequestV1,
 } from "@frockbot/applets/build-contract";
 import { FRONT_WORKER_TOKEN } from "./front-worker.ts";
 
-const APPLET_ID = "vgpqfaCcwnPlzjYdb2mI.weekly-todos";
-const URL_ = `https://applet-build.internal${APPLET_BUILD_ROUTE}`;
+const URL_ = `https://applet-build.internal${PLUGIN_BUILD_ROUTE}`;
 
 const BODY = JSON.stringify(
-  encodeAppletBuildRequestV1({
+  encodePluginBuildRequestV1({
     version: 1,
     effectId: "effect-1",
-    kind: "applet",
-    id: APPLET_ID,
+    id: "weather",
     mode: "build",
     files: [
-      { path: "applet.json", text: "{}" },
-      { path: "server.ts", text: "export default class {}\n" },
+      { path: "plugin.json", text: "{}" },
+      { path: "plugin.ts", text: "export const tools = [];\n" },
     ],
   }),
 );
@@ -44,7 +42,7 @@ function post(token: string | undefined, body = BODY): Request {
   });
 }
 
-describe("the Applet build front Worker in workerd", () => {
+describe("the Plugin build front Worker in workerd", () => {
   test("answers /healthz without a token", async () => {
     const response = await SELF.fetch("https://applet-build.internal/healthz");
     expect(response.status).toBe(200);
@@ -72,13 +70,13 @@ describe("the Applet build front Worker in workerd", () => {
     expect(response.status).toBe(400);
   });
 
-  test("forwards the body verbatim, with the token, to the Applet's shard", async () => {
+  test("forwards the body verbatim, with the token, to the Plugin's shard", async () => {
     const response = await SELF.fetch(post(FRONT_WORKER_TOKEN));
     expect(response.status).toBe(200);
     expect(await response.json()).toEqual({
       shard: expect.stringMatching(/^applet-build-[01]$/),
       method: "POST",
-      path: APPLET_BUILD_ROUTE,
+      path: PLUGIN_BUILD_ROUTE,
       token: FRONT_WORKER_TOKEN,
       contentType: "application/json",
       body: BODY,

@@ -64,7 +64,7 @@ what production runs. `apps/cloudflare/tsconfig.access.json` type-checks the who
 Worker against the other chooser, so an `env` name only the hosted build has
 cannot reach the Access build unnoticed.
 
-Five deployables: the app Worker, the Computer host, the Applet build service,
+Five deployables: the app Worker, the Computer host, the Plugin build service,
 the marketing site and the admin portal. A profile generates exactly the ones it
 names, which is how `staging.json` has neither the marketing site nor the portal,
 and how `simple.json` has neither either: with Access deciding admission there is
@@ -126,7 +126,7 @@ Two things the fixtures make explicit:
 - **The staging expectation is derived.** The gate resolves `env.staging` over
   the fixture's top level the way `wrangler --env staging` does, and asserts
   staging redefines every non-inheritable key so that overlay is that
-  resolution. It also asserts staging's Computer host and Applet build service
+  resolution. It also asserts staging's Computer host and Plugin build service
   are production's Workers, which is deliberate: both are stateless request
   handlers holding no per-user data, so staging exercises the ones production
   runs rather than paying for a second container deployment. The consequence is
