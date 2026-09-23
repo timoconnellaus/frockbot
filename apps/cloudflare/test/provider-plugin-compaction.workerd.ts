@@ -199,10 +199,18 @@ test("a provider Plugin compacts a long conversation durably under the compactio
   // model effect; neither the mounted provider nor its in-memory tickets
   // survive to make this assertion pass accidentally.
   await evictDurableObject(bot(identity));
-  await runInDurableObject(bot(identity), async (_instance, state) => {
-    await state.storage.setAlarm(Date.now() + 60_000);
-  });
-  expect(await runDurableObjectAlarm(bot(identity))).toBe(true);
+  // The revived Bot keeps its own alarm too — Memory's background work arms
+  // one — and when that fires on its own it recomputes the schedule, which
+  // can clear the one set here before it runs. The claim is that a recovery
+  // alarm ran, so set it again until one has.
+  await expect
+    .poll(async () => {
+      await runInDurableObject(bot(identity), async (_instance, state) => {
+        await state.storage.setAlarm(Date.now() + 60_000);
+      });
+      return runDurableObjectAlarm(bot(identity));
+    })
+    .toBe(true);
   expect(await calls()).toEqual(beforeEviction);
 
   const before = (await rpc().durableSessionEvents()).length;
