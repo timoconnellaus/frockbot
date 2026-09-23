@@ -20,6 +20,7 @@ import type {
   WorkspaceFilesV1,
   WorkspaceRootV1,
 } from "@frockbot/core/contracts";
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import { COMPUTER_DOCTOR_ROOT_ID } from "./roots.js";
 import {
   captureComputerFrameV1,
@@ -725,18 +726,28 @@ export class ComputerBotBackendContribution {
     });
   }
 
+  /**
+   * Opens the Computer for one command. `run` names each host request it
+   * makes `<effectId>:<step>`, from the id this derives: a command id is the
+   * client's own text, unique only within its Bot, while the Computer and its
+   * billing account are the User's.
+   */
   private async withComputer<T>(
     userId: string,
     command: ComputerCommandV1,
-    run: (computer: ComputerHostSessionV1) => Promise<T>,
+    run: (computer: ComputerHostSessionV1, effectId: string) => Promise<T>,
   ): Promise<T> {
+    const digest = await sha256HexTextV1(
+      `${command.botId}\u0000${command.commandId}`,
+    );
+    const effectId = `computer-command-${digest.slice(0, 32)}`;
     const computer = await this.host.openComputer(
       userId,
       command.botId,
-      `computer:${command.commandId}`,
+      effectId,
     );
     try {
-      return await run(computer);
+      return await run(computer, effectId);
     } finally {
       await computer.close();
     }
@@ -967,15 +978,17 @@ export class ComputerBotBackendContribution {
       stored && isFresh(stored.expiresAt, this.now()) ? stored : undefined;
     let session: ComputerViewerSession | undefined;
     try {
-      session = await this.withComputer(userId, command, async (computer) => {
-        if (!computer.viewer) return undefined;
-        const options = {
-          effectId: `computer:${command.commandId}:attach-viewer`,
-        };
-        return fresh
-          ? computer.viewer.renew(fresh.id, options)
-          : computer.viewer.open(options);
-      });
+      session = await this.withComputer(
+        userId,
+        command,
+        async (computer, effectId) => {
+          if (!computer.viewer) return undefined;
+          const options = { effectId: `${effectId}:attach-viewer` };
+          return fresh
+            ? computer.viewer.renew(fresh.id, options)
+            : computer.viewer.open(options);
+        },
+      );
     } catch (error) {
       // A missing desktop and one that is mid-update are the same answer from
       // here: no running viewer was confirmed. The connect below waits that
@@ -1052,7 +1065,7 @@ export class ComputerBotBackendContribution {
     const session = await this.withComputer(
       userId,
       command,
-      async (computer) => {
+      async (computer, effectId) => {
         if (!computer.presence) {
           throw new Error("The selected Computer does not support presence");
         }
@@ -1070,7 +1083,7 @@ export class ComputerBotBackendContribution {
           } satisfies StoredProviderAnswerV2);
         };
         return computer.presence.connect({
-          effectId: `computer:${command.commandId}:connect`,
+          effectId: `${effectId}:connect`,
           onProgress: report,
         });
       },
@@ -1134,7 +1147,7 @@ export class ComputerBotBackendContribution {
     const acquired = await this.withComputer(
       userId,
       command,
-      async (computer) => {
+      async (computer, effectId) => {
         if (!computer.control) {
           throw new Error(
             "The selected Computer does not support human control",
@@ -1142,7 +1155,7 @@ export class ComputerBotBackendContribution {
         }
         return computer.control.acquire(
           { scope: "desktop-gui", ownerId: intent.ownerId },
-          { effectId: `computer:${command.commandId}:take-control` },
+          { effectId: `${effectId}:take-control` },
         );
       },
     );
@@ -1167,7 +1180,7 @@ export class ComputerBotBackendContribution {
     const renewed = await this.withComputer(
       userId,
       command,
-      async (computer) => {
+      async (computer, effectId) => {
         if (!computer.control) {
           throw new Error(
             "The selected Computer does not support human control",
@@ -1180,7 +1193,7 @@ export class ComputerBotBackendContribution {
         return computer.control.renew(
           lease,
           { scope: "desktop-gui", ownerId: current.ownerId },
-          { effectId: `computer:${command.commandId}:refresh-control` },
+          { effectId: `${effectId}:refresh-control` },
         );
       },
     );
@@ -1203,12 +1216,12 @@ export class ComputerBotBackendContribution {
     const renewed = await this.withComputer(
       userId,
       command,
-      async (computer) => {
+      async (computer, effectId) => {
         if (!computer.viewer) {
           throw new Error("The selected Computer does not support a viewer");
         }
         return computer.viewer.renew(current.id, {
-          effectId: `computer:${command.commandId}:refresh-viewer`,
+          effectId: `${effectId}:refresh-viewer`,
         });
       },
     );
@@ -1232,7 +1245,7 @@ export class ComputerBotBackendContribution {
     if (currentValue === undefined) return;
     const current = decodeStoredComputerControlV1(currentValue);
     try {
-      await this.withComputer(userId, command, async (computer) => {
+      await this.withComputer(userId, command, async (computer, effectId) => {
         if (!computer.control) {
           throw new Error(
             "The selected Computer does not support human control",
@@ -1241,7 +1254,7 @@ export class ComputerBotBackendContribution {
         await computer.control.release(
           { id: current.ownerId, expiresAt: current.expiresAt },
           { scope: "desktop-gui", ownerId: current.ownerId },
-          { effectId: `computer:${command.commandId}:release-control` },
+          { effectId: `${effectId}:release-control` },
         );
       });
     } finally {
@@ -1287,11 +1300,11 @@ export class ComputerBotBackendContribution {
       if (isStoredComputerControlFreshV1(control, this.now())) return;
     }
     try {
-      await this.withComputer(userId, command, (computer) =>
+      await this.withComputer(userId, command, (computer, effectId) =>
         captureComputerFrameV1({
           computer,
           frames: computerFrameSinkV1(this.host.storage),
-          effectId: `computer:${command.commandId}:close-viewer-frame`,
+          effectId: `${effectId}:close-viewer-frame`,
         }),
       );
     } catch {
@@ -1307,12 +1320,12 @@ export class ComputerBotBackendContribution {
     const report = await this.withComputer(
       userId,
       command,
-      async (computer) => {
+      async (computer, effectId) => {
         if (!computer.doctor) {
           throw new Error("The selected Computer does not support self-checks");
         }
         return computer.doctor.run({
-          effectId: `computer:${command.commandId}:doctor`,
+          effectId: `${effectId}:doctor`,
         });
       },
     );

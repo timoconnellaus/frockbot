@@ -167,13 +167,11 @@ describe("auditing one Turn's effects", () => {
       entries: number;
       indexState: string;
       unknownOutcomes: number;
-      hostJournalDiscrepancies: number;
     };
     expect(receipt).toMatchObject({
       status: "rebuilt",
       indexState: "ready",
       unknownOutcomes: 0,
-      hostJournalDiscrepancies: 0,
     });
     expect(receipt.entries).toBe(all.total);
     const after = (await expectOkJson(

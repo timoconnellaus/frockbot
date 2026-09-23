@@ -1,6 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import { computerOperationIdV1 } from "@frockbot/computer/core";
-import { auditEntriesFromStoredRunV1 } from "./bot.ts";
 import { AuditUserBackendContribution, resolveAuditTargetV1 } from "./user.ts";
 import { FakeAuditSql } from "./testing.ts";
 import type { AuditEntryV1 } from "./shared.ts";
@@ -34,7 +32,6 @@ function contribution(
   options: {
     entries?: AuditEntryV1[];
     hosts?: Map<string, string>;
-    journal?: string[];
   } = {},
 ) {
   return new AuditUserBackendContribution({
@@ -46,9 +43,6 @@ function contribution(
       entries: cursor ? [] : (options.entries ?? []),
     }),
     ...(options.hosts ? { readMcpHosts: async () => options.hosts! } : {}),
-    ...(options.journal
-      ? { readHostJournalEffectIds: async () => options.journal! }
-      : {}),
   });
 }
 
@@ -114,80 +108,6 @@ describe("the User Contribution", () => {
     // trail, silently.
     expect(receipt).toEqual({ indexed: 1, quarantined: 1 });
     expect(audit.query({}).entries).toHaveLength(1);
-  });
-
-  test("counts host-journal discrepancies without writing them in", async () => {
-    const known = entry();
-    const audit = contribution({
-      entries: [known],
-      // The host claims an effect no session event accounts for. The host is
-      // non-authoritative, so this is a number a person is shown — never a row.
-      journal: [known.effectId, "tool:9:9:9"],
-    });
-    await audit.indexAuditEntries([known]);
-    const receipt = await audit.rebuildAuditIndex();
-    expect(receipt).toMatchObject({
-      status: "rebuilt",
-      entries: 1,
-      hostJournalDiscrepancies: 1,
-      unknownOutcomes: 0,
-    });
-    expect(audit.query({}).entries.map((row) => row.effectId)).toEqual([
-      known.effectId,
-    ]);
-  });
-
-  test("accounts for ordinary Computer use by the ids its host requests carried", async () => {
-    // Two Sessions of one Bot, each making the same first calls. The host
-    // names a Computer call by its Bot, run and occurrence, because the
-    // occurrence id alone repeats in every Session.
-    const run = (runId: string) =>
-      auditEntriesFromStoredRunV1("foreman", {
-        runId,
-        status: "completed",
-        acceptedAt: "2026-08-31T00:00:00.000Z",
-        events: [
-          {
-            type: "tool/call",
-            occurrenceId: "tool:1:1:0",
-            name: "computer_exec",
-            input: { command: "ls" },
-          },
-          { type: "tool/result", occurrenceId: "tool:1:1:0", content: "a" },
-          {
-            type: "tool/call",
-            occurrenceId: "tool:1:2:0",
-            name: "computer_process_stop",
-            input: { processId: "p-1" },
-          },
-          { type: "tool/result", occurrenceId: "tool:1:2:0", content: "{}" },
-        ],
-      });
-    const entries = [...(await run("run-chat")), ...(await run("run-daily"))];
-    const sent = (botId: string, runId: string, occurrenceId: string) =>
-      computerOperationIdV1({ botId, runId, effectId: occurrenceId });
-    const journal: string[] = [];
-    for (const runId of ["run-chat", "run-daily"]) {
-      journal.push(await sent("foreman", runId, "tool:1:1:0"));
-      // A stop reads the process back as its second request.
-      const stop = await sent("foreman", runId, "tool:1:2:0");
-      journal.push(stop, `${stop}:read`);
-    }
-
-    const ordinary = contribution({ entries, journal });
-    expect(await ordinary.rebuildAuditIndex()).toMatchObject({
-      entries: 4,
-      hostJournalDiscrepancies: 0,
-    });
-
-    // The same occurrence in the same run of another Bot is not this Bot's.
-    const foreign = contribution({
-      entries,
-      journal: [...journal, await sent("scheduler", "run-chat", "tool:1:1:0")],
-    });
-    expect((await foreign.rebuildAuditIndex()).hostJournalDiscrepancies).toBe(
-      1,
-    );
   });
 
   test("counts outcomes the durable log cannot explain", async () => {

@@ -2976,7 +2976,8 @@ export class UserConfiguration
 
   /**
    * Throws the audit table away and re-projects it from the Bots' own stored
-   * runs. The receipt names the discrepancy count, never a silent gap.
+   * runs. The receipt counts the outcomes the logs do not know, never a
+   * silent gap.
    */
   async rebuildAuditIndex(input: unknown): Promise<AuditRebuildReceiptV1> {
     const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });

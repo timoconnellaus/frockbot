@@ -160,8 +160,8 @@ export async function auditEntriesFromStoredRunV1(
       runId: run.runId,
       occurrenceId,
       ...coordinates,
-      // A Computer tool runs on the host under the id derived from its
-      // occurrence, so that is the id the host's journal names it by.
+      // A Computer tool runs on the host and is billed under the id derived
+      // from its occurrence, so that is the id to look it up by there.
       effectId: toolName.startsWith("computer_")
         ? await computerOperationIdV1({
             botId,

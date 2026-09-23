@@ -83,7 +83,6 @@ const RECEIPT: AuditRebuildReceiptV1 = {
   bots: 1,
   indexState: "ready",
   unknownOutcomes: 0,
-  hostJournalDiscrepancies: 0,
 };
 
 function host(
@@ -178,7 +177,7 @@ describe("the audit gateway route", () => {
     expect(wrong?.status).toBe(405);
   });
 
-  test("rebuilds on POST and answers the receipt, discrepancies and all", async () => {
+  test("rebuilds on POST and answers the receipt", async () => {
     const route = createAuditBackendContribution(host());
     const target = new URL("https://bot.frockbot.com/api/audit/rebuild");
     const response = await route.route(

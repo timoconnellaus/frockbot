@@ -152,7 +152,6 @@ describe("the audit table in Workerd", () => {
     expect(receipt).toMatchObject({
       status: "rebuilt",
       indexState: "ready",
-      hostJournalDiscrepancies: 0,
     });
     expect(receipt.entries).toBeGreaterThanOrEqual(2);
     const rebuilt = await readAudit(userId);
