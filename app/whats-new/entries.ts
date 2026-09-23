@@ -23,6 +23,17 @@ export type WhatsNewEntrySourceV1 = {
  */
 export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
+    id: "flock-palette",
+    title: "Colours from the characters",
+    summary:
+      "The pink, the creams and the black come from the characters. Your messages on Paper sit in a soft tint.",
+    kind: "improvement",
+    image: {
+      file: "flock-palette.webp",
+      alt: "A dark chat with Pixel: warm cream text, your messages in a pink tint, and a bright pink send button.",
+    },
+  },
+  {
     id: "one-card-per-provider",
     title: "One card per model provider",
     summary:

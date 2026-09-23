@@ -146,13 +146,13 @@ class ThemeDocument {
 
 const inkTokens = ThemeTokens(
   surfaces: ThemeSurfaces(
-    window: Color(0xff121214),
-    surface: Color(0xff0c0c0e),
-    raised: Color(0xff1e1e22),
-    text: Color(0xfff6f2ee),
-    muted: Color(0xffa8a3a6),
-    line: Color(0xff2c2c32),
-    accent: Color(0xffc44580),
+    window: Color(0xff18161a),
+    surface: Color(0xff111013),
+    raised: Color(0xff242127),
+    text: Color(0xfff9f3e7),
+    muted: Color(0xffaba49c),
+    line: Color(0xff35313a),
+    accent: Color(0xffd92d71),
     onAccent: Color(0xffffffff),
   ),
   type: ThemeTypeface.inter,
@@ -162,34 +162,34 @@ const inkTokens = ThemeTokens(
 
 const paperTokens = ThemeTokens(
   surfaces: ThemeSurfaces(
-    window: Color(0xfffaf7f2),
+    window: Color(0xfffbf6ec),
     surface: Color(0xffffffff),
-    raised: Color(0xfff2ece4),
-    text: Color(0xff1e1d27),
-    muted: Color(0xff6d6974),
-    line: Color(0xffe7e0d9),
-    accent: Color(0xffc23d7b),
+    raised: Color(0xfff4ecdf),
+    text: Color(0xff151416),
+    muted: Color(0xff6b645b),
+    line: Color(0xffe8ddcd),
+    accent: Color(0xffd3266d),
     onAccent: Color(0xffffffff),
   ),
   type: ThemeTypeface.inter,
   botBubble: BotBubble.raised,
-  meBubble: MeBubble.accent,
+  meBubble: MeBubble.tint,
 );
 
 const studioTokens = ThemeTokens(
   surfaces: ThemeSurfaces(
-    window: Color(0xfffaf7f2),
+    window: Color(0xfffbf6ec),
     surface: Color(0xffffffff),
-    raised: Color(0xfff2ece4),
-    text: Color(0xff1e1d27),
-    muted: Color(0xff6d6974),
-    line: Color(0xffe7e0d9),
-    accent: Color(0xffc23d7b),
+    raised: Color(0xfff4ecdf),
+    text: Color(0xff151416),
+    muted: Color(0xff6b645b),
+    line: Color(0xffe8ddcd),
+    accent: Color(0xffd3266d),
     onAccent: Color(0xffffffff),
   ),
   type: ThemeTypeface.inter,
   botBubble: BotBubble.plain,
-  meBubble: MeBubble.accent,
+  meBubble: MeBubble.tint,
 );
 
 AccountLook parseAccountLook(String? value) => switch (value) {

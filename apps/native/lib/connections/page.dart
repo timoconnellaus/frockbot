@@ -1525,7 +1525,7 @@ class _AccountRow extends StatelessWidget {
   });
 
   Color _dot(ColorScheme scheme) => switch (account['state']) {
-    'ready' => const Color(0xff46c184),
+    'ready' => FrockTheme.success,
     'disabled' => scheme.onSurfaceVariant,
     'failed' || 'reconciliation-required' => scheme.error,
     _ => FrockTheme.accentSoft,

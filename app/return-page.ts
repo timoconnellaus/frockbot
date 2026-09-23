@@ -61,19 +61,19 @@ ${page.script}
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="dark light">
-<meta name="theme-color" content="#121214">
+<meta name="theme-color" content="#18161a">
 <title>${escape(page.title)}</title>
 <style nonce="${nonce}">
   :root {
-    --window: #121214; --raised: #1e1e22; --border: #2c2c32;
-    --text: #f4f2f6; --muted: #aaa6b1; --accent: #c44580; --accent-hover: #d45d92;
-    --glow: rgba(196, 69, 128, .22); --shadow: rgba(0, 0, 0, .45);
+    --window: #18161a; --raised: #242127; --border: #35313a;
+    --text: #f9f3e7; --muted: #aba49c; --accent: #d92d71; --accent-hover: #de4b83;
+    --glow: rgba(217, 45, 113, .22); --shadow: rgba(0, 0, 0, .45);
   }
   @media (prefers-color-scheme: light) {
     :root {
-      --window: #faf8fb; --raised: #ffffff; --border: #dfd9e3;
-      --text: #121214; --muted: #625c6b; --accent: #c23d7b; --accent-hover: #b11f4b;
-      --glow: rgba(189, 30, 80, .14); --shadow: rgba(31, 30, 36, .12);
+      --window: #fbf6ec; --raised: #ffffff; --border: #e8ddcd;
+      --text: #151416; --muted: #6b645b; --accent: #d3266d; --accent-hover: #b9205e;
+      --glow: rgba(211, 38, 109, .14); --shadow: rgba(21, 20, 22, .12);
     }
   }
   * { box-sizing: border-box; }

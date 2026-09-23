@@ -504,7 +504,7 @@ class _TranscriptViewState extends State<TranscriptView> {
                 child: Text(
                   'Unread from here',
                   style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: Theme.of(context).colorScheme.primary,
+                    color: FrockTheme.accentInk(Theme.of(context)),
                     letterSpacing: 0.3,
                   ),
                 ),

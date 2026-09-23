@@ -2,6 +2,14 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
+## Colours from the characters
+
+improvement
+
+The pink, the creams and the black come from the characters. Your messages on Paper sit in a soft tint.
+
+![A dark chat with Pixel: warm cream text, your messages in a pink tint, and a bright pink send button.](media/flock-palette.webp)
+
 ## One card per model provider
 
 improvement

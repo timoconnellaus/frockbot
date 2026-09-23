@@ -393,7 +393,7 @@ class _VoiceModeState extends State<VoiceMode> {
               const Icon(
                 Icons.check_rounded,
                 size: 18,
-                color: Color(0xff4fbf7a),
+                color: FrockTheme.success,
               ),
               const SizedBox(width: 8),
             ],
