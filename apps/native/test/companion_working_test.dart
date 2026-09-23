@@ -169,7 +169,7 @@ void main() {
       expect(indicator, findsOneWidget);
       expect(find.descendant(of: transcript, matching: indicator), findsOne);
       expect(
-        find.descendant(of: indicator, matching: find.byType(ThinkingMotion)),
+        find.descendant(of: indicator, matching: find.byType(WorkingSheen)),
         findsOneWidget,
       );
       expect(find.byType(ThinkingBadge), findsNothing);
@@ -305,6 +305,101 @@ void main() {
       controller.dispose();
     },
   );
+
+  testWidgets('a Bot asked something works beside the one asking, until it '
+      'answers', (tester) async {
+    tester.view.physicalSize = const Size(390, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final store = MemoryStore();
+    Map<String, dynamic> asking({bool answered = false}) => {
+      ...running(),
+      'events': <Object>[
+        {
+          'type': 'message/to-bot',
+          'callId': 'tool-1',
+          'botId': 'bot-dog',
+          'text': 'When is the Series B expected to close?',
+        },
+        if (answered)
+          {
+            'type': 'tool/result',
+            'callId': 'tool-1',
+            'content': 'Early December.',
+            'isError': false,
+          },
+      ],
+    };
+    final transport = FakeTransport(store)..observed = asking();
+    final c = ChatController(
+      transport: transport,
+      store: store,
+      userId: 'user-1',
+      botId: 'bot-1',
+      nextId: () => 'send-2',
+    );
+    await c.initialize();
+    c.connection = ConnectionState.connected;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: Scaffold(
+          body: ChatPane(
+            controller: c,
+            onReconnect: () async {},
+            background: 'fox',
+            primary: '#ff6b57',
+            backgroundOf: (botId) => botId == 'bot-dog' ? 'dog' : null,
+            primaryOf: (_) => null,
+            nameOf: (botId) => botId == 'bot-dog' ? 'Dog' : null,
+          ),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+
+    final indicator = byIdentifier(ShellIds.workingIndicator);
+    CharacterAvatar? dog() => tester
+        .widgetList<CharacterAvatar>(
+          find.descendant(
+            of: indicator,
+            matching: find.byType(CharacterAvatar),
+          ),
+        )
+        .where((avatar) => avatar.characterId == 'dog')
+        .firstOrNull;
+    // Dog is working on Fox's question, so Dog stands beside Fox, smaller,
+    // under the same sheen, and the working mark says who is helping.
+    expect(dog(), isNotNull);
+    expect(dog()!.size, askedCompanionSize);
+    expect(
+      find.descendant(of: indicator, matching: find.byType(WorkingSheen)),
+      findsNWidgets(2),
+    );
+    expect(find.bySemanticsLabel('Working with Dog'), findsOneWidget);
+    final fox = tester.getRect(
+      find
+          .descendant(of: indicator, matching: find.byType(CharacterAvatar))
+          .first,
+    );
+    final helper = tester.getRect(
+      find
+          .descendant(of: indicator, matching: find.byType(CharacterAvatar))
+          .last,
+    );
+    expect(helper.left, greaterThan(fox.left));
+
+    // Dog has answered: Fox carries on alone.
+    transport.observed = asking(answered: true);
+    await c.refresh();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(indicator, findsOneWidget);
+    expect(dog(), isNull);
+    expect(find.bySemanticsLabel('Working'), findsOneWidget);
+
+    await tester.pumpWidget(const SizedBox());
+    c.dispose();
+  });
 
   testWidgets('the companion looks where the pointer is over the pane', (
     tester,

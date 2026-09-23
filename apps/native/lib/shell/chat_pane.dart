@@ -24,6 +24,7 @@ import '../client/bot_sessions.dart';
 import '../client/chat_controller.dart';
 import '../client/transport.dart';
 import '../flock/avatar.dart';
+import '../theme/frock_theme.dart';
 import '../theme/states.dart';
 import '../voice/dictation.dart';
 import 'approvals.dart';
@@ -40,23 +41,38 @@ import 'transcript.dart';
 /// taller than a line of the Bot's words, so it reads as the Bot, not a glyph.
 const double threadCompanionSize = 52;
 
-/// The companion's working motion: a small side-to-side hop on its feet,
-/// paced by the Turn. It moves the drawing itself, so the still a runtime
-/// falls back to thinks as visibly as the live artboard does. A person who
-/// asked for less motion is told in a word instead.
-class ThinkingMotion extends StatefulWidget {
+/// A Bot this Turn has asked something, standing beside the one asking.
+const double askedCompanionSize = 34;
+
+/// How much of each cycle the sheen spends crossing; the rest is rest.
+const double workingSheenSweep = 0.35;
+
+/// While a Turn runs, a sheen crosses the character and rests for a beat: the
+/// light moves, the drawing does not. It is painted over the character's own
+/// pixels, so the live artboard and the still it falls back to shine alike.
+/// A person who asked for less motion gets no sheen, and the thread says
+/// "Working…" beside the character instead.
+class WorkingSheen extends StatefulWidget {
   final Duration tempo;
+
+  /// How far behind the cycle this one's light runs, as a share of it, so a
+  /// sweep can cross one character and carry on into the next.
+  final double lag;
   final Widget child;
-  const ThinkingMotion({super.key, required this.tempo, required this.child});
+  const WorkingSheen({
+    super.key,
+    required this.tempo,
+    required this.child,
+    this.lag = 0,
+  });
 
   @override
-  State<ThinkingMotion> createState() => _ThinkingMotionState();
+  State<WorkingSheen> createState() => _WorkingSheenState();
 }
 
-class _ThinkingMotionState extends State<ThinkingMotion>
+class _WorkingSheenState extends State<WorkingSheen>
     with SingleTickerProviderStateMixin {
-  /// One cycle is two hops, one leaning each way.
-  late final AnimationController _beat = AnimationController(
+  late final AnimationController _cycle = AnimationController(
     vsync: this,
     duration: widget.tempo * 2,
   );
@@ -68,73 +84,95 @@ class _ThinkingMotionState extends State<ThinkingMotion>
   }
 
   @override
-  void didUpdateWidget(ThinkingMotion old) {
+  void didUpdateWidget(WorkingSheen old) {
     super.didUpdateWidget(old);
     if (old.tempo != widget.tempo) {
-      _beat.duration = widget.tempo * 2;
+      _cycle.duration = widget.tempo * 2;
       _run();
     }
   }
 
   void _run() {
     if (MediaQuery.disableAnimationsOf(context)) {
-      _beat
+      _cycle
         ..stop()
-        ..value = 0;
+        ..value = 1;
     } else {
-      _beat.repeat();
+      _cycle.repeat();
     }
   }
 
   @override
   void dispose() {
-    _beat.dispose();
+    _cycle.dispose();
     super.dispose();
   }
 
   @override
-  Widget build(BuildContext context) {
-    if (MediaQuery.disableAnimationsOf(context)) {
-      final theme = Theme.of(context);
-      return Row(
-        mainAxisSize: MainAxisSize.min,
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          widget.child,
-          const SizedBox(width: 10),
-          Text(
-            'Working…',
-            style: theme.textTheme.labelMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ],
+  Widget build(BuildContext context) => AnimatedBuilder(
+    animation: _cycle,
+    child: widget.child,
+    // The mask stays in the tree at rest, with the light parked off the
+    // edge: swapping it in and out would rebuild the artboard every cycle.
+    builder: (context, child) {
+      final phase = (_cycle.value - widget.lag) % 1.0;
+      final crossed = MediaQuery.disableAnimationsOf(context)
+          ? 1.0
+          : (phase / workingSheenSweep).clamp(0.0, 1.0);
+      // Where the middle of the light is, in widths: from just off the left
+      // edge to just off the right.
+      final at = -0.3 + 1.6 * Curves.easeInOut.transform(crossed);
+      return ShaderMask(
+        blendMode: BlendMode.srcATop,
+        shaderCallback: (bounds) => LinearGradient(
+          begin: const Alignment(-1, -0.35),
+          end: const Alignment(1, 0.35),
+          colors: const [
+            Color(0x00FFFFFF),
+            Color(0xB3FFFFFF),
+            Color(0x00FFFFFF),
+          ],
+          stops: const [0.38, 0.5, 0.62],
+          transform: _SheenAt((at - 0.5) * bounds.width),
+        ).createShader(bounds),
+        child: child,
       );
-    }
-    return AnimatedBuilder(
-      animation: _beat,
-      child: widget.child,
-      builder: (context, child) {
-        final turn = _beat.value * 2 * math.pi;
-        // Two hops a cycle: 0 on the ground, 1 at the top of each.
-        final lift = (1 - math.cos(2 * turn)) / 2;
-        final land = 1 - lift;
-        return Transform.translate(
-          offset: Offset(0, -6 * lift),
-          child: Transform.rotate(
-            angle: 0.07 * math.sin(turn),
-            alignment: Alignment.bottomCenter,
-            child: Transform.scale(
-              scaleX: 1 + 0.035 * land - 0.02 * lift,
-              scaleY: 1 - 0.045 * land + 0.03 * lift,
-              alignment: Alignment.bottomCenter,
-              child: child,
-            ),
-          ),
-        );
-      },
-    );
-  }
+    },
+  );
+}
+
+class _SheenAt extends GradientTransform {
+  final double dx;
+  const _SheenAt(this.dx);
+
+  @override
+  Matrix4 transform(Rect bounds, {TextDirection? textDirection}) =>
+      Matrix4.translationValues(dx, 0, 0);
+}
+
+/// Pops a Bot that has just been asked something in beside the one asking.
+class _Asked extends StatelessWidget {
+  final Widget child;
+  const _Asked({super.key, required this.child});
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.only(left: 4),
+    child: TweenAnimationBuilder<double>(
+      tween: Tween(begin: 0, end: 1),
+      duration: FrockTheme.motion(context, FrockTheme.enter),
+      curve: Curves.easeOutBack,
+      builder: (context, value, child) => Opacity(
+        opacity: value.clamp(0.0, 1.0),
+        child: Transform.scale(
+          scale: 0.6 + 0.4 * value,
+          alignment: Alignment.bottomCenter,
+          child: child,
+        ),
+      ),
+      child: child,
+    ),
+  );
 }
 
 class ChatPane extends StatefulWidget {
@@ -449,6 +487,18 @@ class _ChatPaneState extends State<ChatPane> {
               )
               .lastOrNull
         : null;
+    // The Bots this Turn has asked something and is still waiting on. Only
+    // this Turn's own open questions count: another Bot busy with its own
+    // work is not this conversation's business.
+    final asking = working
+        ? {
+            for (final line in runs)
+              if (line.runId == c.activeRunId &&
+                  line.exchange?.direction == ExchangeDirection.outbound &&
+                  line.exchange?.status == ExchangeStatus.working)
+                ?line.exchange!.counterpart.botId,
+          }.toList()
+        : const <String>[];
     final thread = TranscriptView(
       background: widget.background,
       starters: widget.starters.isEmpty
@@ -459,7 +509,7 @@ class _ChatPaneState extends State<ChatPane> {
       loading: c.loading,
       hasEarlier: c.before != null,
       storageKey: 'history-${c.botId}',
-      tail: working ? _typing(runningLine) : null,
+      tail: working ? _typing(runningLine, asking) : null,
       focusRunId: c.focusRunId,
       onRefresh: _refresh,
       onOpenRun: widget.onOpenRun ?? (_) {},
@@ -596,30 +646,68 @@ class _ChatPaneState extends State<ChatPane> {
   }
 
   /// The Bot at the end of its own thread while a Turn runs, where its next
-  /// words will land: the typing indicator is the character itself moving,
-  /// with nothing hung over it. Gone again when the Turn settles.
-  Widget _typing(TranscriptLine? line) => identified(
-    ShellIds.workingIndicator,
-    Semantics(
-      container: true,
-      liveRegion: true,
-      label: 'Working',
-      child: WorkingPace(
-        line: line,
-        builder: (context, tempo) => ThinkingMotion(
-          tempo: tempo,
-          child: CharacterAvatar(
-            size: threadCompanionSize,
-            characterId: widget.background,
-            primary: widget.primary,
-            cropToInk: true,
-            motion: CharacterMotion.active,
-            activity: CharacterActivity.working,
+  /// words will land. It works under a sheen, and a Bot it has asked
+  /// something stands beside it, working too, until it answers.
+  Widget _typing(TranscriptLine? line, List<String> asking) {
+    final names = [
+      for (final botId in asking) widget.nameOf?.call(botId) ?? 'another Bot',
+    ];
+    return identified(
+      ShellIds.workingIndicator,
+      Semantics(
+        container: true,
+        liveRegion: true,
+        label: names.isEmpty
+            ? 'Working'
+            : 'Working with ${names.join(' and ')}',
+        child: WorkingPace(
+          line: line,
+          builder: (context, tempo) => Row(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.end,
+            children: [
+              WorkingSheen(
+                tempo: tempo,
+                child: CharacterAvatar(
+                  size: threadCompanionSize,
+                  characterId: widget.background,
+                  primary: widget.primary,
+                  cropToInk: true,
+                  motion: CharacterMotion.active,
+                  activity: CharacterActivity.working,
+                ),
+              ),
+              for (final botId in asking)
+                _Asked(
+                  key: ValueKey('asked:$botId'),
+                  child: WorkingSheen(
+                    tempo: tempo,
+                    lag: workingSheenSweep * 0.55,
+                    child: CharacterAvatar(
+                      size: askedCompanionSize,
+                      characterId: widget.backgroundOf?.call(botId),
+                      primary: widget.primaryOf?.call(botId),
+                      cropToInk: true,
+                      motion: CharacterMotion.active,
+                      activity: CharacterActivity.working,
+                    ),
+                  ),
+                ),
+              if (MediaQuery.disableAnimationsOf(context)) ...[
+                const SizedBox(width: 10),
+                Text(
+                  'Working…',
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                    color: Theme.of(context).colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
       ),
-    ),
-  );
+    );
+  }
 
   /// The companion in the header, at rest.
   Widget _companion() {

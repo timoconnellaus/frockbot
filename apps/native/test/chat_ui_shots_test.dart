@@ -193,6 +193,9 @@ Future<void> _scene(
             onReconnect: () async {},
             background: 'fox',
             primary: '#ff6b57',
+            backgroundOf: (botId) => botId == 'bot-dog' ? 'dog' : null,
+            primaryOf: (_) => null,
+            nameOf: (botId) => botId == 'bot-dog' ? 'Dog' : null,
             skills: skills,
             onDictate: () {},
             onVoice: () {},
@@ -328,6 +331,31 @@ void main() {
       'frames',
       frames: 30,
       runs: [..._history, runningTurn],
+    );
+  }, skip: _out.isEmpty);
+
+  final askingTurn = {
+    ...runningTurn,
+    'events': <Object>[
+      {
+        'type': 'message/to-bot',
+        'callId': 'tool-1',
+        'botId': 'bot-dog',
+        'text': 'When is the Series B expected to close?',
+      },
+    ],
+  };
+
+  testWidgets('asking another Bot', (tester) async {
+    await _scene(tester, 'asking', runs: [..._history, askingTurn]);
+  }, skip: _out.isEmpty);
+
+  testWidgets('asking frames', (tester) async {
+    await _scene(
+      tester,
+      'asking-frames',
+      frames: 36,
+      runs: [..._history, askingTurn],
     );
   }, skip: _out.isEmpty);
 
