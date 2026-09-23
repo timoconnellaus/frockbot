@@ -19,6 +19,8 @@ import {
   decodeClientRunStopReceiptV1,
   decodeClientTurnCommandV1,
   decodeClientRunLookupV1,
+  decodeClientRunQuestionsV1,
+  openBotQuestionsV1,
   decodeClientTurnV1,
   decodeClientRunPageV1,
   decodeClientRunListV1,
@@ -259,6 +261,98 @@ describe("client run protocol v1", () => {
         page: { truncated: false },
       })[0]?.events,
     ).toEqual(refusedEvents);
+  });
+
+  test("names a running Turn's open questions by the ids it projects them under", () => {
+    const ask = (
+      occurrenceId: string,
+      step: number,
+      target: string,
+      seq: number,
+    ): SessionEvent =>
+      event({
+        type: "tool/call",
+        seq,
+        timestamp,
+        turn: 1,
+        step,
+        occurrenceId,
+        name: "call_dynamic_tool",
+        input: {
+          namespace: "frockbot",
+          toolName: "bot_message",
+          arguments: { target_id: target, message: `A question for ${target}` },
+        },
+      });
+    const answer = (occurrenceId: string, step: number, seq: number) =>
+      event({
+        type: "tool/result",
+        seq,
+        timestamp,
+        turn: 1,
+        step,
+        occurrenceId,
+        name: "call_dynamic_tool",
+        content: "An answer.",
+        isError: false,
+        status: "completed",
+      });
+    const events: SessionEvent[] = [
+      event({
+        type: "tool/call",
+        seq: 0,
+        timestamp,
+        turn: 1,
+        step: 1,
+        occurrenceId: "tool:1:1:0",
+        name: "search",
+        input: { query: "board pack" },
+      }),
+      answer("tool:1:1:0", 1, 1),
+      ask("tool:1:2:0", 2, "researcher", 2),
+      ask("tool:1:2:1", 2, "writer", 3),
+      answer("tool:1:2:1", 2, 4),
+    ];
+    const running = storedRun(events, "running");
+
+    // The writer has answered; the researcher has not.
+    const open = openBotQuestionsV1(running);
+    expect(open).toEqual([
+      { occurrenceId: "tool:1:2:0", callId: "tool-2", botId: "researcher" },
+    ]);
+    // The id the client already holds for that message, exactly.
+    expect(
+      projectClientRunV1(running).events.find(
+        (projected) =>
+          projected.type === "message/to-bot" &&
+          projected.botId === "researcher",
+      ),
+    ).toMatchObject({ callId: open[0]!.callId });
+    // A settled Turn is waiting on nobody.
+    expect(openBotQuestionsV1(storedRun(events, "completed"))).toEqual([]);
+
+    const questions = {
+      schemaVersion: 1 as const,
+      runId: "run-events",
+      questions: [
+        {
+          callId: "tool-2",
+          botId: "researcher",
+          runId: "agent-0123456789abcdef0123456789abcdef",
+        },
+      ],
+    };
+    expect(decodeClientRunQuestionsV1(questions)).toEqual(questions);
+    expect(isProtocolValue("RunQuestions", questions)).toBe(true);
+    expect(() =>
+      decodeClientRunQuestionsV1({ ...questions, answered: [] }),
+    ).toThrow();
+    expect(() =>
+      decodeClientRunQuestionsV1({
+        ...questions,
+        questions: [{ ...questions.questions[0], botId: "Xero Books" }],
+      }),
+    ).toThrow();
   });
 
   test("projects and decodes a Bot caller's reply", () => {

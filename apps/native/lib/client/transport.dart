@@ -248,16 +248,9 @@ class NativeApi {
       // Plain HTTP only ever names the local stack.
       scheme: origin.scheme == 'http' ? 'ws' : 'wss',
       path: '/api/bots/$botId/state-channel',
-      queryParameters: {
-        'version': '1',
-        'cursor': ?cursor,
-        'epoch': ?epoch,
-      },
+      queryParameters: {'version': '1', 'cursor': ?cursor, 'epoch': ?epoch},
     );
-    return connectSocketV1(
-      uri,
-      await headers(),
-    );
+    return connectSocketV1(uri, await headers());
   }
 
   void close() => _client.close();
@@ -281,6 +274,17 @@ abstract interface class ChatTransport {
     bool fence = false,
   });
   Future<Map<String, dynamic>> stop(String botId, String id, String commandId);
+}
+
+/// One question a running Turn has put to another Bot and not had answered:
+/// the call that asked it, the Bot asked, and the Turn that Bot answers in.
+typedef OpenQuestion = ({String callId, String botId, String runId});
+
+/// The read behind "Dog is working on it" beside the Bot that asked. The asking
+/// Bot knows which Turn will answer each of its open questions; whether that
+/// Turn has started is the answering Bot's own lookup.
+abstract interface class QuestionsTransport {
+  Future<List<OpenQuestion>> questions(String botId, String runId);
 }
 
 /// The exchange view's read: the Turns of one Bot that crossed to or from a
@@ -316,7 +320,7 @@ class BackendExchangeTransport implements ExchangeTransport {
   }
 }
 
-class BackendChatTransport implements ChatTransport {
+class BackendChatTransport implements ChatTransport, QuestionsTransport {
   final NativeApi api;
   BackendChatTransport(this.api);
   String path(String bot) => '/api/bots/${Uri.encodeComponent(bot)}/turns';
@@ -392,6 +396,26 @@ class BackendChatTransport implements ChatTransport {
       throw const FormatException('Mismatched run');
     }
     return run;
+  }
+
+  @override
+  Future<List<OpenQuestion>> questions(String botId, String runId) async {
+    final response = wire.RunQuestions.fromJson(
+      await api.request(
+        '${path(botId)}/${Uri.encodeComponent(runId)}/questions',
+      ),
+    );
+    if (response.runId.value != runId) {
+      throw const FormatException('Mismatched questions');
+    }
+    return [
+      for (final question in response.questions)
+        (
+          callId: question['callId'] as String,
+          botId: question['botId'] as String,
+          runId: question['runId'] as String,
+        ),
+    ];
   }
 
   @override

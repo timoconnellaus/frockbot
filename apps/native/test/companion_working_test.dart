@@ -7,6 +7,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart' show FontLoader, rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/chat_controller.dart';
+import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/flock/avatar.dart';
 import 'package:frockbot_native/shell/chat_header.dart';
 import 'package:frockbot_native/shell/chat_pane.dart';
@@ -306,8 +307,8 @@ void main() {
     },
   );
 
-  testWidgets('a Bot asked something works beside the one asking, until it '
-      'answers', (tester) async {
+  testWidgets('a Bot asked something joins the one asking once it starts on '
+      'the question, until it answers', (tester) async {
     tester.view.physicalSize = const Size(390, 800);
     tester.view.devicePixelRatio = 1;
     addTearDown(tester.view.reset);
@@ -330,7 +331,9 @@ void main() {
           },
       ],
     };
-    final transport = FakeTransport(store)..observed = asking();
+    final transport = _AskingTransport(store)
+      ..observed = asking()
+      ..answering = {...running(), 'runId': 'agent-dog-1', 'queued': true};
     final c = ChatController(
       transport: transport,
       store: store,
@@ -368,8 +371,18 @@ void main() {
         )
         .where((avatar) => avatar.characterId == 'dog')
         .firstOrNull;
-    // Dog is working on Fox's question, so Dog stands beside Fox, smaller,
-    // under the same sheen, and the working mark says who is helping.
+    // Fox has asked, but Dog is still finishing something of its own: the
+    // question waits in Dog's queue, so Fox works alone.
+    expect(transport.asked, ['bot-1:send-1']);
+    expect(transport.calls, contains('lookup:bot-dog:agent-dog-1'));
+    expect(dog(), isNull);
+    expect(find.bySemanticsLabel('Working'), findsOneWidget);
+
+    // Dog starts on Fox's question, so Dog stands beside Fox, smaller, under
+    // the same sheen, and the working mark says who is helping.
+    transport.answering = {...transport.answering!, 'queued': false};
+    await tester.pump(ChatController.questionPoll);
+    await tester.pump(const Duration(milliseconds: 300));
     expect(dog(), isNotNull);
     expect(dog()!.size, askedCompanionSize);
     expect(
@@ -388,14 +401,25 @@ void main() {
           .last,
     );
     expect(helper.left, greaterThan(fox.left));
+    // Which Turn answers is asked once, and a Turn seen started is not looked
+    // at again: its answer arrives in Fox's own log.
+    expect(transport.asked, ['bot-1:send-1']);
+    final looks = transport.calls.where((call) => call.contains('bot-dog'));
+    final seen = looks.length;
+    await tester.pump(ChatController.questionPoll * 3);
+    expect(looks.length, seen);
+    expect(dog(), isNotNull);
 
-    // Dog has answered: Fox carries on alone.
+    // Dog has answered: Fox carries on alone, and nothing is read any more.
     transport.observed = asking(answered: true);
     await c.refresh();
     await tester.pump(const Duration(milliseconds: 300));
     expect(indicator, findsOneWidget);
     expect(dog(), isNull);
     expect(find.bySemanticsLabel('Working'), findsOneWidget);
+    final reads = transport.calls.length;
+    await tester.pump(ChatController.questionPoll * 3);
+    expect(transport.calls.length, reads);
 
     await tester.pumpWidget(const SizedBox());
     c.dispose();
@@ -462,4 +486,29 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     c.dispose();
   });
+}
+
+/// A Fox whose Turn has asked Dog something. [answering] is the Turn Dog
+/// answers in, as Dog's own lookup reports it.
+class _AskingTransport extends FakeTransport implements QuestionsTransport {
+  _AskingTransport(super.store);
+  Map<String, dynamic>? answering;
+  final asked = <String>[];
+
+  @override
+  Future<List<OpenQuestion>> questions(String botId, String runId) async {
+    asked.add('$botId:$runId');
+    return [(callId: 'tool-1', botId: 'bot-dog', runId: 'agent-dog-1')];
+  }
+
+  @override
+  Future<Map<String, dynamic>?> lookup(
+    String botId,
+    String id, {
+    bool fence = false,
+  }) async {
+    if (botId != 'bot-dog') return super.lookup(botId, id, fence: fence);
+    calls.add('lookup:$botId:$id');
+    return answering;
+  }
 }

@@ -133,6 +133,7 @@ declare const validators: {
   isPanelOpenView(value: unknown): value is ProtocolTypes["PanelOpenView"];
   isUnreadDirectory(value: unknown): value is ProtocolTypes["UnreadDirectory"];
   isRunLookup(value: unknown): value is ProtocolTypes["RunLookup"];
+  isRunQuestions(value: unknown): value is ProtocolTypes["RunQuestions"];
   isBotIdentity(value: unknown): value is ProtocolTypes["BotIdentity"];
   isBotWriter(value: unknown): value is ProtocolTypes["BotWriter"];
   isTurnAdmission(value: unknown): value is ProtocolTypes["TurnAdmission"];

@@ -150,7 +150,12 @@ export async function handoffRunIdV1(
   return `handoff-${hex.slice(0, 32)}`;
 }
 
-async function agentRunIdV1(
+/**
+ * The Turn a Bot's question to another Bot runs as, on that other Bot. Derived
+ * from the question's own effect, so a re-issued call lands on the same Turn,
+ * and so the asking Bot's reads can name the Turn answering it.
+ */
+export async function agentRunIdV1(
   identity: BotSelfManagementIdentity,
   targetBotId: string,
   effectId: string,

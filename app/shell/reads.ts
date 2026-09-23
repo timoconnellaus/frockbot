@@ -30,10 +30,16 @@ import {
   projectClientRunLookupV1,
   projectClientRunOrDegradedV1,
   botMessageCallV1,
+  openBotQuestionsV1,
   type ClientRunListV1,
   type ClientRunLookupV1,
+  type ClientRunQuestionsV1,
   type ClientRunV1,
 } from "./run-protocol.js";
+import {
+  agentRunIdV1,
+  type BotSelfManagementIdentity,
+} from "./backend-flock.js";
 
 /**
  * The Bot's durable announcement log: Session events that happen outside any
@@ -439,6 +445,36 @@ export async function listRuns(
     throw new Error("required run projections exceed the wire byte limit");
   }
   return page;
+}
+
+/**
+ * The questions a running Turn is waiting on from other Bots, and the Turn
+ * answering each. Nothing here reads the other Bot: whether its Turn has
+ * started is that Bot's own lookup's to say.
+ */
+export async function lookupRunQuestions(
+  state: ShellBotStateV1,
+  identity: BotSelfManagementIdentity,
+  input: unknown,
+): Promise<ClientRunQuestionsV1> {
+  const query = decodeClientRunLookupQueryV1(input);
+  const run = await state.authority.readRun(query.runId);
+  const open = run && isVisibleRunV1(run) ? openBotQuestionsV1(run) : [];
+  return {
+    schemaVersion: 1,
+    runId: query.runId,
+    questions: await Promise.all(
+      open.map(async (question) => ({
+        callId: question.callId,
+        botId: question.botId,
+        runId: await agentRunIdV1(
+          identity,
+          question.botId,
+          question.occurrenceId,
+        ),
+      })),
+    ),
+  };
 }
 
 export async function lookupRun(

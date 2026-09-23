@@ -3244,6 +3244,24 @@ export class BotState
     return shell.debugSnapshot(identity, request.query);
   }
 
+  async runQuestions(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      query: rpcDecoded(decodeClientRunLookupQueryV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return shell.runQuestions(
+      identity,
+      request.query as ClientRunLookupQueryV1,
+    );
+  }
+
   async lookupRun(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,

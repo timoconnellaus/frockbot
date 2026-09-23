@@ -689,6 +689,9 @@ function createUserApplicationRoute() {
     const fenceMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/turns\/([^/]+)\/fence$/,
     );
+    const questionsMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/turns\/([^/]+)\/questions$/,
+    );
     const stopMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/turns\/([^/]+)\/stop$/,
     );
@@ -699,6 +702,7 @@ function createUserApplicationRoute() {
       !workspaceFileMatch &&
       !turnMatch &&
       !lookupMatch &&
+      !questionsMatch &&
       !fenceMatch &&
       !stopMatch
     ) {
@@ -713,6 +717,7 @@ function createUserApplicationRoute() {
         workspaceFileMatch ??
         turnMatch ??
         lookupMatch ??
+        questionsMatch ??
         fenceMatch ??
         stopMatch;
       botId = decodeURIComponent(matched![1]);
@@ -727,7 +732,8 @@ function createUserApplicationRoute() {
     const missingBot = await requireRegisteredBot(
       env,
       botId,
-      request.method === "GET" && Boolean(turnMatch || lookupMatch),
+      request.method === "GET" &&
+        Boolean(turnMatch || lookupMatch || questionsMatch),
     );
     if (missingBot) return missingBot;
 
@@ -886,6 +892,34 @@ function createUserApplicationRoute() {
           409,
           error instanceof Error ? error.message : "Stop failed",
         );
+      }
+    }
+
+    if (questionsMatch) {
+      if (request.method !== "GET") {
+        return jsonError(405, "method not allowed");
+      }
+      let query: ClientRunLookupQueryV1;
+      try {
+        if ([...url.searchParams.keys()].length > 0) {
+          throw new Error("run questions do not accept URL parameters");
+        }
+        query = decodeClientRunLookupQueryV1({
+          schemaVersion: 1,
+          runId: decodeURIComponent(questionsMatch[2]),
+        });
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof Error ? error.message : "invalid run questions",
+        );
+      }
+      try {
+        return Response.json(
+          await env.BOT_STATE.runQuestions({ schemaVersion: 1, botId, query }),
+        );
+      } catch (error) {
+        return botFailure(error, "run questions failed");
       }
     }
 

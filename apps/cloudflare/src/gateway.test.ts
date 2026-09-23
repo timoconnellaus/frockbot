@@ -54,6 +54,7 @@ import {
   projectClientTurnV1,
   type ClientRunLookupQueryV1,
   type ClientRunLookupV1,
+  type ClientRunQuestionsV1,
   type ClientRunListQueryV1,
   type ClientRunListV1,
   type ClientRunStopCommandV1,
@@ -190,6 +191,17 @@ class MemoryBotState implements BotStateBinding {
     );
   }
 
+  runQuestions(
+    _botId: string,
+    query: ClientRunLookupQueryV1,
+  ): Promise<ClientRunQuestionsV1> {
+    return Promise.resolve({
+      schemaVersion: 1,
+      runId: query.runId,
+      questions: [],
+    });
+  }
+
   lookupRun(
     botId: string,
     query: ClientRunLookupQueryV1,
@@ -317,6 +329,7 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
     },
     listRuns: ({ botId, query }) => state.listRuns(botId, query),
     lookupRun: ({ botId, query }) => state.lookupRun(botId, query),
+    runQuestions: ({ botId, query }) => state.runQuestions(botId, query),
     fenceRunAdmission: ({ botId, query }) =>
       state.fenceRunAdmission(botId, query),
     listNotifications: ({ botId }) => state.listNotifications(botId),

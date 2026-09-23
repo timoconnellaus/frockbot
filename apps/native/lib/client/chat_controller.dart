@@ -123,6 +123,7 @@ class ChatController extends ChangeNotifier {
   /// otherwise.
   String? focusRunId;
   final Map<String, Map<String, dynamic>> _runs = {};
+
   /// Publication envelope restored with the page cache. A reconnect presents
   /// both, never a later cursor against an older page.
   String? publicationEpoch;
@@ -184,7 +185,153 @@ class ChatController extends ChangeNotifier {
   /// supersede path unreachable from the one surface that has it.
   bool get canSend => ready;
   void changed() {
-    if (!_disposed) notifyListeners();
+    if (_disposed) return;
+    _watchQuestions();
+    notifyListeners();
+  }
+
+  /// The Bots working on something the running Turn asked them, while it
+  /// waits on the answer.
+  ///
+  /// A Bot joins once its answering Turn is actually running. One that has the
+  /// question queued behind its own work is not working on it yet, and a Bot
+  /// busy with something else was never this conversation's business.
+  List<String> helpers = const [];
+
+  /// How often the answering Turns are looked at while a question is open.
+  static const questionPoll = Duration(milliseconds: 1500);
+
+  /// The running Turn's open questions and the Turns that answer them, as the
+  /// asking Bot reported them. Keyed by the call that asked.
+  final Map<String, OpenQuestion> _answerers = {};
+  String? _answerersFor;
+
+  /// The calls the answerers were last read for, so a call the asking Bot
+  /// does not report is not asked about again on every change.
+  final Set<String> _answerersAsked = {};
+
+  /// Calls, as `runId:callId`, whose answering Turn has been seen running. A
+  /// Turn that has started does not go back to its queue, and its answer
+  /// arrives in this conversation's own log, so it is not looked at again.
+  final Set<String> _started = {};
+
+  /// The running Turn's open questions still waiting to be seen started.
+  Iterable<String> _unstarted(Map<String, String> open) {
+    final runId = runningRunId;
+    return open.keys.where((callId) => !_started.contains('$runId:$callId'));
+  }
+
+  Timer? _questionTimer;
+  bool _questioning = false;
+
+  QuestionsTransport? get _questions =>
+      transport is QuestionsTransport ? transport as QuestionsTransport : null;
+
+  /// The running Turn's `message/to-bot` calls that have no result yet, by
+  /// call id, with the Bot each one asked.
+  Map<String, String> _openQuestions() {
+    final run = _runs[runningRunId];
+    if (run == null) return const {};
+    final events = (run['events'] as List?) ?? const [];
+    final answered = {
+      for (final event in events)
+        if (event is Map && event['type'] == 'tool/result') event['callId'],
+    };
+    return {
+      for (final event in events)
+        if (event is Map &&
+            event['type'] == 'message/to-bot' &&
+            event['callId'] is String &&
+            event['botId'] is String &&
+            !answered.contains(event['callId']))
+          event['callId'] as String: event['botId'] as String,
+    };
+  }
+
+  /// Keeps [helpers] to questions still open, and starts looking at the
+  /// answering Turns when one opens. Runs inside [changed], so it never
+  /// notifies itself.
+  void _watchQuestions() {
+    final open = _openQuestions();
+    if (open.isEmpty || _questions == null) {
+      _questionTimer?.cancel();
+      _questionTimer = null;
+      _started.clear();
+      if (helpers.isNotEmpty) helpers = const [];
+      return;
+    }
+    final asked = open.values.toSet();
+    if (helpers.any((bot) => !asked.contains(bot))) {
+      helpers = [
+        for (final bot in helpers)
+          if (asked.contains(bot)) bot,
+      ];
+    }
+    if (_questionTimer == null &&
+        !_questioning &&
+        _unstarted(open).isNotEmpty) {
+      unawaited(_lookAtHelpers());
+    }
+  }
+
+  Future<void> _lookAtHelpers() async {
+    final questions = _questions;
+    final runId = runningRunId;
+    if (_disposed || questions == null || runId == null) return;
+    _questionTimer = null;
+    _questioning = true;
+    try {
+      var open = _openQuestions();
+      if (open.isEmpty) return;
+      if (_answerersFor != runId ||
+          open.keys.any((callId) => !_answerersAsked.contains(callId))) {
+        final found = await questions.questions(botId, runId);
+        if (_disposed) return;
+        _answerersFor = runId;
+        _answerersAsked
+          ..clear()
+          ..addAll(open.keys);
+        _answerers
+          ..clear()
+          ..addEntries(found.map((q) => MapEntry(q.callId, q)));
+      }
+      final working = <String>{};
+      for (final MapEntry(key: callId, value: asked) in open.entries) {
+        final answerer = _answerers[callId];
+        if (answerer == null || answerer.botId != asked) continue;
+        if (_started.contains('$runId:$callId')) {
+          working.add(asked);
+          continue;
+        }
+        final run = await transport.lookup(answerer.botId, answerer.runId);
+        if (run != null &&
+            run['status'] == 'running' &&
+            run['queued'] != true) {
+          _started.add('$runId:$callId');
+          working.add(asked);
+        }
+      }
+      if (_disposed) return;
+      // The thread may have moved on while the lookups were out. Only a
+      // question the running Turn is still waiting on keeps its Bot.
+      open = runningRunId == runId ? _openQuestions() : const {};
+      final next = [
+        for (final bot in working)
+          if (open.containsValue(bot)) bot,
+      ];
+      if (!listEquals(next, helpers)) {
+        helpers = next;
+        notifyListeners();
+      }
+    } catch (_) {
+      // A read that failed changes nothing on screen; the next look retries.
+    } finally {
+      _questioning = false;
+      // Only a question still waiting in its Bot's queue is looked at again.
+      if (!_disposed && _unstarted(_openQuestions()).isNotEmpty) {
+        _questionTimer = Timer(questionPoll, () => unawaited(_lookAtHelpers()));
+      }
+    }
   }
 
   Future<void> _persist() => store.write(
@@ -404,7 +551,9 @@ class ChatController extends ChangeNotifier {
   }
 
   void _applySnapshot(Map<String, dynamic> frame) {
-    final conversation = Map<String, dynamic>.from(frame['conversation'] as Map);
+    final conversation = Map<String, dynamic>.from(
+      frame['conversation'] as Map,
+    );
     for (final id in _cachedRunIds) {
       _runs.remove(id);
     }
@@ -848,6 +997,7 @@ class ChatController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    _questionTimer?.cancel();
     invalidations.dispose();
     super.dispose();
   }

@@ -2,6 +2,7 @@
 // Turn is, decided here rather than by the model's arguments.
 import { describe, expect, test } from "bun:test";
 import {
+  agentRunIdV1,
   createBotSelfManagementHost,
   handoffRunIdV1,
   type BotSelfManagementAuthorities,
@@ -130,5 +131,49 @@ describe("a spawned hand-off", () => {
       },
     );
     expect(host.subagent).toBeUndefined();
+  });
+});
+
+describe("a question to another Bot", () => {
+  test("runs as the Turn the asking Bot's reads name", async () => {
+    const ran: string[] = [];
+    const authorities: BotSelfManagementAuthorities = {
+      readSettings: () => unreachable("readSettings"),
+      executeConfiguration: () => unreachable("executeConfiguration"),
+      listBots: async () =>
+        ({
+          schemaVersion: 1,
+          bots: [{ botId: "bot-dog", initialName: "Dog" }],
+        }) as never,
+      createBot: () => unreachable("createBot"),
+      reserveAgentTurn: async () => ({ status: "reserved" }) as never,
+      releaseAgentTurn: async () => undefined as never,
+      runAgent: async (request) => {
+        ran.push(request.command.runId);
+        return { text: "Early December." } as never;
+      },
+      readBotVoice: () => unreachable("readBotVoice"),
+      updateBotVoice: () => unreachable("updateBotVoice"),
+    };
+    const host = createBotSelfManagementHost(
+      IDENTITY,
+      {
+        runId: "run-parent",
+        turnId: "run-parent",
+        sessionId: "user-1:bot-1",
+        fromBotName: "Bot One",
+      },
+      authorities,
+    );
+    const outcome = await host.messageBot({
+      targetBotId: "bot-dog",
+      message: "When is the Series B expected to close?",
+      effectId: "tool:1:2:0",
+    });
+    // The client finds the answering Turn by this id, so it is the one
+    // actually run, derived from the question's own effect.
+    const expected = await agentRunIdV1(IDENTITY, "bot-dog", "tool:1:2:0");
+    expect(ran).toEqual([expected]);
+    expect(outcome.runId).toBe(expected);
   });
 });

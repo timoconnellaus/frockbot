@@ -106,7 +106,8 @@ final _history = [
   ),
 ];
 
-class _SceneTransport implements ChatTransport {
+/// Every Bot a scene's Turn has asked is already working on the question.
+class _SceneTransport implements ChatTransport, QuestionsTransport {
   final List<Map<String, dynamic>> runs;
   final List<Object?> announcements;
   _SceneTransport(this.runs, {this.announcements = const []});
@@ -129,13 +130,27 @@ class _SceneTransport implements ChatTransport {
     String botId,
     String id, {
     bool fence = false,
-  }) async => null;
+  }) async => botId == 'bot-1'
+      ? null
+      : {'runId': id, 'status': 'running', 'queued': false};
   @override
   Future<Map<String, dynamic>> stop(
     String botId,
     String id,
     String commandId,
   ) async => runs.last;
+  @override
+  Future<List<OpenQuestion>> questions(String botId, String runId) async => [
+    for (final run in runs)
+      if (run['runId'] == runId)
+        for (final event in run['events'] as List)
+          if (event is Map && event['type'] == 'message/to-bot')
+            (
+              callId: event['callId'] as String,
+              botId: event['botId'] as String,
+              runId: 'agent-${event['callId']}',
+            ),
+  ];
 }
 
 SkillCatalogEntry _skill(String slug, String name, String description) =>

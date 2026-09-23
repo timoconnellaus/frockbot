@@ -17,6 +17,7 @@ import {
   decodeClientRunListQueryV1,
   decodeClientRunLookupV1,
   decodeClientRunPageV1,
+  decodeClientRunQuestionsV1,
   decodeClientRunStopCommandV1,
   decodeClientRunStopReceiptV1,
   decodeClientTurnCommandV1,
@@ -52,6 +53,7 @@ const existing: Record<string, (value: unknown) => unknown> = {
   ConversationProjection: decodeClientRunPageV1,
   ConversationQuery: decodeClientRunListQueryV1,
   RunLookup: decodeClientRunLookupV1,
+  RunQuestions: decodeClientRunQuestionsV1,
   Run: (value) =>
     decodeClientRunPageV1({
       schemaVersion: 1,

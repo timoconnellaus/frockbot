@@ -487,18 +487,10 @@ class _ChatPaneState extends State<ChatPane> {
               )
               .lastOrNull
         : null;
-    // The Bots this Turn has asked something and is still waiting on. Only
-    // this Turn's own open questions count: another Bot busy with its own
-    // work is not this conversation's business.
-    final asking = working
-        ? {
-            for (final line in runs)
-              if (line.runId == c.activeRunId &&
-                  line.exchange?.direction == ExchangeDirection.outbound &&
-                  line.exchange?.status == ExchangeStatus.working)
-                ?line.exchange!.counterpart.botId,
-          }.toList()
-        : const <String>[];
+    // The Bots working on something this Turn asked them. The controller
+    // counts one only once its answering Turn is running, not while the
+    // question waits in its queue.
+    final asking = working ? c.helpers : const <String>[];
     final thread = TranscriptView(
       background: widget.background,
       starters: widget.starters.isEmpty
