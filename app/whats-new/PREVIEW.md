@@ -2,6 +2,12 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
+## Voice replies play smoothly
+
+fix
+
+A Bot’s voice no longer breaks up mid-word when the connection is uneven.
+
 ## A message sent mid-reply steers the Bot
 
 improvement

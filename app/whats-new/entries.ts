@@ -23,6 +23,13 @@ export type WhatsNewEntrySourceV1 = {
  */
 export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
+    id: "voice-smooth-playback",
+    title: "Voice replies play smoothly",
+    summary:
+      "A Bot’s voice no longer breaks up mid-word when the connection is uneven.",
+    kind: "fix",
+  },
+  {
     id: "steering",
     title: "A message sent mid-reply steers the Bot",
     summary:

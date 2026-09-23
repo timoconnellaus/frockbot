@@ -45,7 +45,8 @@ abstract class VoicePlayer extends ChangeNotifier {
   Future<void> close();
   double get level;
 
-  /// Includes silent samples still queued on the device.
+  /// Includes audio held before the device starts, and silent samples still
+  /// queued on it.
   bool get playing;
 
   /// Changes whenever audio is dropped, rejected or interrupted.
@@ -56,10 +57,26 @@ abstract class VoicePlayer extends ChangeNotifier {
 }
 
 class PcmVoicePlayer extends VoicePlayer {
+  PcmVoicePlayer({this.cushion = defaultCushion});
+
   static const _channel = MethodChannel('com.frockbot/pcm');
   static const retryAfter = Duration(seconds: 2);
   static const _feedFrames = 30;
   static const _heldSeconds = 5;
+
+  /// How much audio an idle speaker waits for before it starts.
+  ///
+  /// Gemini sends a reply as fast as it generates it, not paced to real time,
+  /// and leaves the pacing to the client; the relay and the network add their
+  /// own unevenness. Both native speakers play silence the moment their queue
+  /// is empty, so fed on arrival, every chunk that is late by more than the
+  /// one before it lasted becomes a gap mid-word — the stutter. Holding this
+  /// much first puts that jitter in the queue instead. It is counted in
+  /// audio, not time, so a reply that arrives faster than real time starts at
+  /// once; the wait is only ever paid by a stream that is trickling, and
+  /// never exceeds this.
+  static const defaultCushion = Duration(milliseconds: 200);
+  final Duration cushion;
 
   /// Chunks fed but not yet reported played. A receipt follows the playback
   /// head, so everything inside the device's own buffer is still in flight;
@@ -83,6 +100,14 @@ class PcmVoicePlayer extends VoicePlayer {
   bool _closed = false;
   bool _rebuilding = false;
 
+  /// Whether the device is being fed. False while it is idle — nothing fed
+  /// is still unplayed — and until [cushion] has built up again.
+  bool _flowing = false;
+
+  /// Starts a trickling stream once [cushion] has passed, so the tail of a
+  /// short reply is not held for audio that is never coming.
+  Timer? _priming;
+
   /// Whether each of the two diagnostic milestones has been said. One player
   /// is one call, so "first" means first of the call; an interrupt rebuilds
   /// the device but does not make the next buffer the first one again.
@@ -98,10 +123,13 @@ class PcmVoicePlayer extends VoicePlayer {
   @override
   int get lossCount => _lossCount;
   @override
-  bool get playing => _sent.isNotEmpty;
+  bool get playing => _sent.isNotEmpty || _priming != null;
   @override
   double get level => _sent.isEmpty ? 0 : _sent.values.first;
   int get _feedBytes => (_sampleRate ~/ _feedFrames) * 2;
+  int get _cushionBytes =>
+      (_sampleRate * cushion.inMicroseconds ~/ Duration.microsecondsPerSecond) *
+      2;
 
   @override
   Future<void> configure(int sampleRate) async {
@@ -159,6 +187,9 @@ class PcmVoicePlayer extends VoicePlayer {
       onDiagnostic?.call(voicePlayerFirstPlayedV1);
     }
     _sent.remove(args['sequence']);
+    // The device has run dry and is playing silence: whatever comes next
+    // waits for its cushion rather than going out one late chunk at a time.
+    if (_sent.isEmpty && _available == 0) _flowing = false;
     _pump();
     _completeDrains();
     notifyListeners();
@@ -201,7 +232,17 @@ class PcmVoicePlayer extends VoicePlayer {
 
   void _pump() {
     if (_closed || !_configured) return;
-    while (_available > 0 && _sent.length < _ahead) {
+    if (!_flowing && _available > 0) {
+      if (_available >= _cushionBytes) {
+        _startFlowing();
+      } else {
+        _priming ??= Timer(cushion, () {
+          _startFlowing();
+          _pump();
+        });
+      }
+    }
+    while (_flowing && _available > 0 && _sent.length < _ahead) {
       final bytes = _take(math.min(_feedBytes, _available));
       final sequence = ++_sequence;
       final epoch = _epoch;
@@ -223,9 +264,23 @@ class PcmVoicePlayer extends VoicePlayer {
     notifyListeners();
   }
 
+  void _startFlowing() {
+    _priming?.cancel();
+    _priming = null;
+    _flowing = true;
+  }
+
+  /// The device is empty again, so the next audio builds a fresh cushion.
+  void _stopFlowing() {
+    _priming?.cancel();
+    _priming = null;
+    _flowing = false;
+  }
+
   void _feedFailed(int epoch) {
     if (_closed || epoch != _epoch) return;
     _epoch = ++_nextEpoch;
+    _stopFlowing();
     _sent.clear();
     _configured = false;
     _rebuilding = false;
@@ -280,6 +335,7 @@ class PcmVoicePlayer extends VoicePlayer {
 
   void _discard() {
     _epoch = ++_nextEpoch;
+    _stopFlowing();
     _configured = false;
     _chunks.clear();
     _sent.clear();

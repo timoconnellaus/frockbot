@@ -1,4 +1,3 @@
-
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/voice/assistant.dart';
@@ -71,11 +70,11 @@ void main() {
   );
 
   test('a superseded player closing leaves the new speaker playing', () async {
-    final old = PcmVoicePlayer();
+    final old = PcmVoicePlayer(cushion: Duration.zero);
     await old.configure(24000);
     // The person ends the call and the app builds the next session's player
     // while the old one's teardown is still running.
-    final next = PcmVoicePlayer();
+    final next = PcmVoicePlayer(cushion: Duration.zero);
     await next.configure(24000);
     expect(native.device, isTrue);
 
@@ -100,7 +99,7 @@ void main() {
 
   test('a disposed session sends no speaker command for late audio', () async {
     final socket = FakeVoiceSocket();
-    final player = PcmVoicePlayer();
+    final player = PcmVoicePlayer(cushion: Duration.zero);
     final controller = AssistantSessionController(
       openSocket: () async => socket,
       capture: FakeVoiceCapture(),
@@ -112,7 +111,7 @@ void main() {
     await settle();
 
     controller.dispose();
-    final next = PcmVoicePlayer();
+    final next = PcmVoicePlayer(cushion: Duration.zero);
     await next.configure(24000);
     final owner = native.owner;
 

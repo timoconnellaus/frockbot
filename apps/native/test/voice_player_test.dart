@@ -57,7 +57,7 @@ void main() {
   test(
     'handing all silent samples to the device is not a playback receipt',
     () async {
-      final player = PcmVoicePlayer();
+      final player = PcmVoicePlayer(cushion: Duration.zero);
       await player.configure(24000);
       player.write(Uint8List(1600));
       await Future<void>.delayed(Duration.zero);
@@ -77,7 +77,7 @@ void main() {
   );
 
   test('every device receipt is required, including the queued tail', () async {
-    final player = PcmVoicePlayer();
+    final player = PcmVoicePlayer(cushion: Duration.zero);
     await player.configure(24000);
     player.write(Uint8List(16000));
     await Future<void>.delayed(Duration.zero);
@@ -97,7 +97,7 @@ void main() {
   test(
     'interruption invalidates drains and stale receipts after rebuilding',
     () async {
-      final player = PcmVoicePlayer();
+      final player = PcmVoicePlayer(cushion: Duration.zero);
       await player.configure(24000);
       player.write(Uint8List(1600));
       await Future<void>.delayed(Duration.zero);
@@ -121,7 +121,7 @@ void main() {
   test(
     'a device failure while an interrupt rebuild is pending still plays',
     () async {
-      final player = PcmVoicePlayer();
+      final player = PcmVoicePlayer(cushion: Duration.zero);
       await player.configure(24000);
       player.write(Uint8List(1600));
       await Future<void>.delayed(Duration.zero);
@@ -145,7 +145,7 @@ void main() {
   test(
     'failed feeds and dropped held samples invalidate the delivery',
     () async {
-      final player = PcmVoicePlayer();
+      final player = PcmVoicePlayer(cushion: Duration.zero);
       await player.configure(24000);
       final before = player.lossCount;
       failFeed = true;
@@ -166,7 +166,7 @@ void main() {
   test(
     'odd sample carry prevents success until its other byte arrives',
     () async {
-      final player = PcmVoicePlayer();
+      final player = PcmVoicePlayer(cushion: Duration.zero);
       await player.configure(24000);
       player.write(Uint8List(3));
       await Future<void>.delayed(Duration.zero);
@@ -184,7 +184,7 @@ void main() {
   test(
     'changing rate discards old audio and rebuilds only at the new rate',
     () async {
-      final player = PcmVoicePlayer();
+      final player = PcmVoicePlayer(cushion: Duration.zero);
       await player.configure(24000);
       player.write(Uint8List(1600));
       await Future<void>.delayed(Duration.zero);
@@ -197,7 +197,7 @@ void main() {
   );
 
   test('the first buffer fed and the first one played are said once', () async {
-    final player = PcmVoicePlayer();
+    final player = PcmVoicePlayer(cushion: Duration.zero);
     final said = <String>[];
     player.onDiagnostic = said.add;
     await player.configure(24000);
@@ -228,13 +228,13 @@ void main() {
   test(
     'a receipt from a closed player cannot finish its replacement',
     () async {
-      final oldPlayer = PcmVoicePlayer();
+      final oldPlayer = PcmVoicePlayer(cushion: Duration.zero);
       await oldPlayer.configure(24000);
       oldPlayer.write(Uint8List(1600));
       await Future<void>.delayed(Duration.zero);
       final oldReceipt = fed.single;
       await oldPlayer.close();
-      final player = PcmVoicePlayer();
+      final player = PcmVoicePlayer(cushion: Duration.zero);
       await player.configure(24000);
       player.write(Uint8List(1600));
       await Future<void>.delayed(Duration.zero);
@@ -248,4 +248,87 @@ void main() {
       await player.close();
     },
   );
+  test(
+    'a trickling reply waits for its cushion before the device starts',
+    () async {
+      // 100 ms at 24 kHz is 4800 bytes: three 1600-byte feeds.
+      final player = PcmVoicePlayer(cushion: const Duration(milliseconds: 100));
+      await player.configure(24000);
+      player.write(Uint8List(1600));
+      await Future<void>.delayed(Duration.zero);
+      expect(fed, isEmpty, reason: 'one late chunk would play as a gap');
+      expect(player.playing, isTrue, reason: 'held audio is about to play');
+      player.write(Uint8List(3200));
+      await Future<void>.delayed(Duration.zero);
+      expect(fed, hasLength(3));
+      await player.close();
+    },
+  );
+
+  test('audio faster than real time starts at once', () async {
+    final player = PcmVoicePlayer();
+    await player.configure(24000);
+    player.write(Uint8List(24000 * 2 ~/ 4));
+    await Future<void>.delayed(Duration.zero);
+    expect(fed, isNotEmpty);
+    await player.close();
+  });
+
+  test('a short reply plays once the cushion has passed', () async {
+    final player = PcmVoicePlayer(cushion: const Duration(milliseconds: 30));
+    await player.configure(24000);
+    player.write(Uint8List(480));
+    await Future<void>.delayed(Duration.zero);
+    expect(fed, isEmpty);
+    bool? drained;
+    final pending = player.drain().then((value) => drained = value);
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+    expect(fed, hasLength(1));
+    expect(drained, isNull);
+    await receipt(fed.single);
+    await pending;
+    expect(drained, isTrue);
+    expect(player.playing, isFalse);
+    await player.close();
+  });
+
+  test('a device that runs dry builds a fresh cushion', () async {
+    final player = PcmVoicePlayer(cushion: const Duration(milliseconds: 100));
+    await player.configure(24000);
+    player.write(Uint8List(4800));
+    await Future<void>.delayed(Duration.zero);
+    expect(fed, hasLength(3));
+
+    // Still playing: a late chunk joins the queue behind what is in flight.
+    player.write(Uint8List(1600));
+    await Future<void>.delayed(Duration.zero);
+    expect(fed, hasLength(4));
+
+    for (final data in List.of(fed)) {
+      await receipt(data);
+    }
+    expect(player.playing, isFalse);
+
+    // Starved: the next chunk waits for company rather than stuttering out.
+    player.write(Uint8List(1600));
+    await Future<void>.delayed(Duration.zero);
+    expect(fed, hasLength(4));
+    player.write(Uint8List(3200));
+    await Future<void>.delayed(Duration.zero);
+    expect(fed, hasLength(7));
+    await player.close();
+  });
+
+  test('an interrupt drops audio that was waiting for its cushion', () async {
+    final player = PcmVoicePlayer(cushion: const Duration(milliseconds: 30));
+    await player.configure(24000);
+    player.write(Uint8List(480));
+    await Future<void>.delayed(Duration.zero);
+    expect(player.playing, isTrue);
+    await player.interrupt();
+    expect(player.playing, isFalse);
+    await Future<void>.delayed(const Duration(milliseconds: 60));
+    expect(fed, isEmpty);
+    await player.close();
+  });
 }
