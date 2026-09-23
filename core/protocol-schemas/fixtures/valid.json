@@ -2302,5 +2302,470 @@
     "name": "RunQuestions none open",
     "schema": "RunQuestions",
     "value": { "schemaVersion": 1, "runId": "run-1", "questions": [] }
+  },
+  {
+    "name": "GroupId valid",
+    "schema": "GroupId",
+    "value": "g-0123456789abcdef0123"
+  },
+  {
+    "name": "GroupChatRecord unnamed",
+    "schema": "GroupChatRecord",
+    "value": {
+      "schemaVersion": 1,
+      "groupId": "g-0123456789abcdef0123",
+      "members": ["general", "xero"],
+      "createdAt": "2026-09-23T10:00:00.000Z",
+      "updatedAt": "2026-09-23T10:00:00.000Z"
+    }
+  },
+  {
+    "name": "GroupChatRecord arranged and archived",
+    "schema": "GroupChatRecord",
+    "value": {
+      "schemaVersion": 1,
+      "groupId": "g-0123456789abcdef0123",
+      "members": ["general", "xero"],
+      "createdAt": "2026-09-23T10:00:00.000Z",
+      "updatedAt": "2026-09-23T10:00:00.000Z",
+      "name": "Books",
+      "label": "Work",
+      "pinnedAt": "2026-09-23T10:00:00.000Z",
+      "sidebarOrder": 1000,
+      "hiddenFromSidebar": true,
+      "archivedAt": "2026-09-23T10:00:00.000Z"
+    }
+  },
+  {
+    "name": "GroupChatList",
+    "schema": "GroupChatList",
+    "value": {
+      "schemaVersion": 1,
+      "revision": 3,
+      "groups": [
+        {
+          "schemaVersion": 1,
+          "groupId": "g-0123456789abcdef0123",
+          "members": ["general", "xero"],
+          "createdAt": "2026-09-23T10:00:00.000Z",
+          "updatedAt": "2026-09-23T10:00:00.000Z"
+        },
+        {
+          "schemaVersion": 1,
+          "groupId": "g-0123456789abcdef0123",
+          "members": ["general", "xero"],
+          "createdAt": "2026-09-23T10:00:00.000Z",
+          "updatedAt": "2026-09-23T10:00:00.000Z",
+          "name": "Books",
+          "label": "Work",
+          "pinnedAt": "2026-09-23T10:00:00.000Z",
+          "sidebarOrder": 1000,
+          "hiddenFromSidebar": true,
+          "archivedAt": "2026-09-23T10:00:00.000Z"
+        }
+      ]
+    }
+  },
+  {
+    "name": "GroupMember with description",
+    "schema": "GroupMember",
+    "value": {
+      "botId": "xero",
+      "name": "Xero Books",
+      "description": "Bookkeeping."
+    }
+  },
+  {
+    "name": "GroupChatView",
+    "schema": "GroupChatView",
+    "value": {
+      "schemaVersion": 1,
+      "group": {
+        "schemaVersion": 1,
+        "groupId": "g-0123456789abcdef0123",
+        "members": ["general", "xero"],
+        "createdAt": "2026-09-23T10:00:00.000Z",
+        "updatedAt": "2026-09-23T10:00:00.000Z"
+      },
+      "members": [
+        {
+          "botId": "general",
+          "name": "General"
+        },
+        {
+          "botId": "xero",
+          "name": "Xero Books"
+        }
+      ],
+      "head": 4,
+      "readThrough": 2,
+      "unread": 1,
+      "working": ["xero"]
+    }
+  },
+  {
+    "name": "GroupMention",
+    "schema": "GroupMention",
+    "value": {
+      "botId": "xero",
+      "start": 0,
+      "end": 11
+    }
+  },
+  {
+    "name": "GroupEvent created",
+    "schema": "GroupEvent",
+    "value": {
+      "type": "created",
+      "members": ["general", "xero"],
+      "name": "Books"
+    }
+  },
+  {
+    "name": "GroupEvent renamed to nothing",
+    "schema": "GroupEvent",
+    "value": {
+      "type": "renamed",
+      "name": null
+    }
+  },
+  {
+    "name": "GroupEvent turn failed",
+    "schema": "GroupEvent",
+    "value": {
+      "type": "turn-failed",
+      "botId": "xero",
+      "runId": "grp-0123"
+    }
+  },
+  {
+    "name": "GroupEvent exchange",
+    "schema": "GroupEvent",
+    "value": {
+      "type": "bot-message",
+      "botId": "general",
+      "toBotId": "codex",
+      "runId": "grp-0123",
+      "callId": "tool:1:1:0"
+    }
+  },
+  {
+    "name": "GroupMessageBody text",
+    "schema": "GroupMessageBody",
+    "value": {
+      "kind": "text",
+      "text": "@Xero Books what is left?",
+      "mentions": [
+        {
+          "botId": "xero",
+          "start": 0,
+          "end": 11
+        }
+      ]
+    }
+  },
+  {
+    "name": "GroupAuthor bot",
+    "schema": "GroupAuthor",
+    "value": {
+      "kind": "bot",
+      "botId": "xero"
+    }
+  },
+  {
+    "name": "GroupMessage from the User",
+    "schema": "GroupMessage",
+    "value": {
+      "schemaVersion": 1,
+      "seq": 3,
+      "messageId": "u-cmd-1",
+      "at": "2026-09-23T10:00:00.000Z",
+      "author": {
+        "kind": "user"
+      },
+      "body": {
+        "kind": "text",
+        "text": "@Xero Books what is left?",
+        "mentions": [
+          {
+            "botId": "xero",
+            "start": 0,
+            "end": 11
+          }
+        ]
+      }
+    }
+  },
+  {
+    "name": "GroupMessage calling the User",
+    "schema": "GroupMessage",
+    "value": {
+      "schemaVersion": 1,
+      "seq": 4,
+      "messageId": "b-grp-1-0",
+      "at": "2026-09-23T10:00:00.000Z",
+      "author": {
+        "kind": "bot",
+        "botId": "xero"
+      },
+      "body": {
+        "kind": "text",
+        "text": "$420. @User want me to pay it?",
+        "mentions": [],
+        "mentionsUser": true
+      }
+    }
+  },
+  {
+    "name": "GroupMessage event",
+    "schema": "GroupMessage",
+    "value": {
+      "schemaVersion": 1,
+      "seq": 5,
+      "messageId": "e-5",
+      "at": "2026-09-23T10:00:00.000Z",
+      "author": {
+        "kind": "user"
+      },
+      "body": {
+        "kind": "event",
+        "event": {
+          "type": "member-added",
+          "botId": "codex"
+        }
+      }
+    }
+  },
+  {
+    "name": "GroupMessagePage",
+    "schema": "GroupMessagePage",
+    "value": {
+      "schemaVersion": 1,
+      "messages": [
+        {
+          "schemaVersion": 1,
+          "seq": 3,
+          "messageId": "u-cmd-1",
+          "at": "2026-09-23T10:00:00.000Z",
+          "author": {
+            "kind": "user"
+          },
+          "body": {
+            "kind": "text",
+            "text": "@Xero Books what is left?",
+            "mentions": [
+              {
+                "botId": "xero",
+                "start": 0,
+                "end": 11
+              }
+            ]
+          }
+        },
+        {
+          "schemaVersion": 1,
+          "seq": 4,
+          "messageId": "b-grp-1-0",
+          "at": "2026-09-23T10:00:00.000Z",
+          "author": {
+            "kind": "bot",
+            "botId": "xero"
+          },
+          "body": {
+            "kind": "text",
+            "text": "$420. @User want me to pay it?",
+            "mentions": [],
+            "mentionsUser": true
+          }
+        }
+      ],
+      "hasMore": false
+    }
+  },
+  {
+    "name": "GroupChatCommand create",
+    "schema": "GroupChatCommand",
+    "value": {
+      "type": "group/create",
+      "commandId": "create-1",
+      "members": ["general", "xero"],
+      "name": "Books"
+    }
+  },
+  {
+    "name": "GroupChatCommand rename to nothing",
+    "schema": "GroupChatCommand",
+    "value": {
+      "type": "group/rename",
+      "commandId": "rename-1",
+      "groupId": "g-0123456789abcdef0123",
+      "name": null
+    }
+  },
+  {
+    "name": "GroupChatCommand add member",
+    "schema": "GroupChatCommand",
+    "value": {
+      "type": "group/add-member",
+      "commandId": "add-1",
+      "groupId": "g-0123456789abcdef0123",
+      "botId": "codex"
+    }
+  },
+  {
+    "name": "GroupChatCommand archive",
+    "schema": "GroupChatCommand",
+    "value": {
+      "type": "group/archive",
+      "commandId": "archive-1",
+      "groupId": "g-0123456789abcdef0123"
+    }
+  },
+  {
+    "name": "GroupChatCommand arrange",
+    "schema": "GroupChatCommand",
+    "value": {
+      "type": "group/arrange",
+      "commandId": "arrange-1",
+      "groupId": "g-0123456789abcdef0123",
+      "label": "Work",
+      "pinned": true,
+      "sidebarOrder": null,
+      "hidden": false
+    }
+  },
+  {
+    "name": "GroupChatReceipt",
+    "schema": "GroupChatReceipt",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "create-1",
+      "groupId": "g-0123456789abcdef0123",
+      "status": "applied",
+      "group": {
+        "schemaVersion": 1,
+        "groupId": "g-0123456789abcdef0123",
+        "members": ["general", "xero"],
+        "createdAt": "2026-09-23T10:00:00.000Z",
+        "updatedAt": "2026-09-23T10:00:00.000Z"
+      },
+      "revision": 1
+    }
+  },
+  {
+    "name": "GroupChatReceipt deleted",
+    "schema": "GroupChatReceipt",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "delete-1",
+      "groupId": "g-0123456789abcdef0123",
+      "status": "applied",
+      "revision": 2
+    }
+  },
+  {
+    "name": "GroupPostCommand",
+    "schema": "GroupPostCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "cmd-1",
+      "text": "@Xero Books what is left?"
+    }
+  },
+  {
+    "name": "GroupPostReceipt",
+    "schema": "GroupPostReceipt",
+    "value": {
+      "schemaVersion": 1,
+      "message": {
+        "schemaVersion": 1,
+        "seq": 3,
+        "messageId": "u-cmd-1",
+        "at": "2026-09-23T10:00:00.000Z",
+        "author": {
+          "kind": "user"
+        },
+        "body": {
+          "kind": "text",
+          "text": "@Xero Books what is left?",
+          "mentions": [
+            {
+              "botId": "xero",
+              "start": 0,
+              "end": 11
+            }
+          ]
+        }
+      }
+    }
+  },
+  {
+    "name": "GroupReadCommand",
+    "schema": "GroupReadCommand",
+    "value": {
+      "schemaVersion": 1,
+      "upTo": 4
+    }
+  },
+  {
+    "name": "GroupReadReceipt",
+    "schema": "GroupReadReceipt",
+    "value": {
+      "schemaVersion": 1,
+      "readThrough": 4
+    }
+  },
+  {
+    "name": "GroupStopCommand every member",
+    "schema": "GroupStopCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "stop-1"
+    }
+  },
+  {
+    "name": "GroupStopCommand one member",
+    "schema": "GroupStopCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "stop-2",
+      "botId": "xero"
+    }
+  },
+  {
+    "name": "GroupStopReceipt",
+    "schema": "GroupStopReceipt",
+    "value": {
+      "schemaVersion": 1,
+      "stopped": ["xero"]
+    }
+  },
+  {
+    "name": "GroupRetryCommand",
+    "schema": "GroupRetryCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "retry-1",
+      "botId": "xero",
+      "runId": "grp-0123"
+    }
+  },
+  {
+    "name": "GroupRetryReceipt",
+    "schema": "GroupRetryReceipt",
+    "value": {
+      "schemaVersion": 1
+    }
+  },
+  {
+    "name": "GroupStateFrame",
+    "schema": "GroupStateFrame",
+    "value": {
+      "schemaVersion": 1,
+      "type": "group/state",
+      "head": 4,
+      "readThrough": 2,
+      "working": ["xero"]
+    }
   }
 ]

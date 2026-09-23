@@ -29,6 +29,14 @@ import '../connections/page.dart';
 import '../flock/avatar.dart';
 import '../flock/create.dart';
 import '../flock/lifecycle.dart';
+import '../groups/api.dart';
+import '../groups/channel.dart';
+import '../groups/directory.dart';
+import '../groups/faces.dart';
+import '../groups/model.dart';
+import '../groups/pane.dart';
+import '../groups/sheets.dart';
+import '../groups/thread.dart';
 import '../machines/page.dart';
 import '../machines/mac_messages.dart';
 import '../packages/catalog.dart';
@@ -170,6 +178,21 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Map<String, SidebarProfile> profiles = {};
   Set<String> archived = {};
   wire.BotRegistration? selected;
+
+  /// The User's Group Chats, drawn among the Bots in the list.
+  late final GroupDirectoryController groupDirectory = GroupDirectoryController(
+    GroupChatApi(widget.api),
+  );
+
+  /// The open Group Chat. A group and a Bot are never open together: opening
+  /// either closes the other.
+  String? selectedGroupId;
+  GroupThreadController? _groupThread;
+  GroupStateChannel? _groupChannel;
+
+  /// A group the saved selection or a link named before the list of groups
+  /// was read.
+  String? _pendingGroupId;
 
   /// Account look: Ink, Paper, or System. Paints the shell in the same
   /// frame as a Bot switch. A Bot with its own look (Studio or a stored
@@ -324,6 +347,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     microphone.stopDictation = _stopDictation;
     activity.addListener(_repaint);
     activity.addListener(_reconcileBadge);
+    groupDirectory.addListener(_groupsChanged);
+    unawaited(groupDirectory.load());
     // Read once, now, so the first press on a voice control answers at once.
     unawaited(voiceProbe.load());
     push.onNotificationsChanged = () {
@@ -433,6 +458,20 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     return open;
   }
 
+  /// The group the User is reading right now, by the same rule as
+  /// [_focusedBotId].
+  String? get _focusedGroupId {
+    final open = selectedGroupId;
+    if (open == null ||
+        !resumed ||
+        !push.focused ||
+        !_conversationVisible ||
+        ModalRoute.of(context)?.isCurrent != true) {
+      return null;
+    }
+    return open;
+  }
+
   /// Whether the panel is over the conversation rather than beside it, which
   /// is the "nothing is covering it" clause of the focus rule in `focus.dart`.
   ///
@@ -520,6 +559,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         _startPolling(every: const Duration(seconds: 30));
       }
       widget.sessions.pause();
+      _groupChannel?.pause();
       unawaited(_stopDictation());
       // A live call sleeps rather than hanging up: Gemini closes, the
       // microphone is released, the socket stays. Coming back resumes.
@@ -538,6 +578,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       return;
     }
     widget.sessions.resume();
+    _groupChannel?.resume();
     unawaited(voiceSession?.enterForeground());
     _refresh();
     _startPolling();
@@ -550,6 +591,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void _refresh() {
     unawaited(activity.load());
     if (!directoryLoaded) unawaited(load());
+    unawaited(
+      groupDirectory.loaded
+          ? groupDirectory.refreshUnread()
+          : groupDirectory.load(),
+    );
   }
 
   /// The composer's voice control: it starts a call with this Bot, moves a
@@ -926,11 +972,24 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   Future<void> _restoreSelection() async {
-    if (selected != null || widget.botLinks.value != null) return;
+    if (selected != null ||
+        selectedGroupId != null ||
+        widget.botLinks.value != null) {
+      return;
+    }
     final saved = await widget.store.read('selection.${widget.userId}');
-    if (!mounted || selected != null || widget.botLinks.value != null) return;
+    if (!mounted ||
+        selected != null ||
+        selectedGroupId != null ||
+        widget.botLinks.value != null) {
+      return;
+    }
     if (saved == null) {
       _openGeneral();
+      return;
+    }
+    if (sidebarGroupIdOf(saved) case final String groupId) {
+      _openGroupWhenListed(groupId);
       return;
     }
     final bot = bots.where((bot) => bot.botId.value == saved).firstOrNull;
@@ -948,6 +1007,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     final general = generalBotId;
     if (general == null ||
         selected != null ||
+        selectedGroupId != null ||
         widget.botLinks.value != null ||
         ModalRoute.of(context)?.isCurrent != true ||
         !bots.any((bot) => bot.botId.value == general)) {
@@ -999,6 +1059,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void _followBotLink() {
     final botId = widget.botLinks.value;
     if (botId == null) return;
+    if (sidebarGroupIdOf(botId) case final String groupId) {
+      widget.botLinks.value = null;
+      Navigator.of(context).popUntil((route) => route.isFirst);
+      _openGroupWhenListed(groupId);
+      return;
+    }
     if (bots.every((bot) => bot.botId.value != botId)) {
       unawaited(load());
       return;
@@ -1009,6 +1075,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void _resolveBotLink() {
     final botId = widget.botLinks.value;
     if (botId == null) return;
+    if (sidebarGroupIdOf(botId) != null) {
+      _followBotLink();
+      return;
+    }
     widget.botLinks.value = null;
     final bot = bots.where((bot) => bot.botId.value == botId).firstOrNull;
     if (bot == null) {
@@ -1026,10 +1096,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   }
 
   void _select(String botId) {
+    if (sidebarGroupIdOf(botId) case final String groupId) {
+      _selectGroup(groupId);
+      return;
+    }
     clearManualForBot = botId;
     push.reading(null);
     final bot = bots.where((bot) => bot.botId.value == botId).firstOrNull;
     if (bot == null) return;
+    _closeGroup();
     // A capture belongs to the Bot it started on. Switching away commits it
     // there rather than carrying the words into the new Bot's composer.
     if (dictation?.active == true && dictation?.context != botId) {
@@ -2175,18 +2250,40 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// refusal puts the whole list back to what the authority last said, since
   /// a half-applied reorder is not a state anyone asked for.
   Future<void> _moveBot(SidebarDrop drop) async {
-    final writes = planSidebarDropV1(drop, profiles);
+    final writes = planSidebarDropV1(drop, _entryProfiles);
     if (writes.isEmpty) return;
     final before = profiles;
     setState(() {
       profiles = {
         ...profiles,
         for (final write in writes)
-          write.botId: (profiles[write.botId] ?? const SidebarProfile())
-              .patched(write.patch),
+          if (sidebarGroupIdOf(write.botId) == null)
+            write.botId: (profiles[write.botId] ?? const SidebarProfile())
+                .patched(write.patch),
       };
     });
     for (final write in writes) {
+      // A group's place is the group's to keep; the directory draws it at
+      // once and puts it back itself if the group refuses.
+      if (sidebarGroupIdOf(write.botId) case final String groupId) {
+        final label = write.patch['label'] as String?;
+        try {
+          await groupDirectory.arrange(
+            groupId,
+            label: label == null || label.isEmpty ? null : label,
+            clearLabel: label != null && label.isEmpty,
+            sidebarOrder: write.patch['sidebarOrder'] as num?,
+          );
+        } catch (failure) {
+          if (!mounted) return;
+          setState(() => profiles = before);
+          _say(_groupFailure(failure));
+          await _loadIdentities();
+          await groupDirectory.load();
+          return;
+        }
+        continue;
+      }
       final failure = await quickWrites.setProfile(write.botId, write.patch);
       if (!mounted) return;
       if (failure != null) {
@@ -2498,6 +2595,367 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     });
   }
 
+  // ------------------------------------------------------------ Group Chats
+
+  /// Bots' profiles and groups' arrangements in the one map the list's order
+  /// and labels are planned over, keyed by sidebar entry id.
+  Map<String, SidebarProfile> get _entryProfiles => {
+    ...profiles,
+    for (final group in groupDirectory.active)
+      sidebarGroupEntryId(group.groupId): SidebarProfile(
+        name: group.name,
+        label: group.label,
+        pinnedAt: group.pinnedAt,
+        hiddenFromSidebar: group.hidden,
+        sidebarOrder: group.sidebarOrder?.toInt(),
+      ),
+  };
+
+  /// Any Bot of the account, archived or not, as a group draws it.
+  GroupFace? _faceOf(String botId) {
+    final bot = searchableBots
+        .where((bot) => bot.botId.value == botId)
+        .firstOrNull;
+    if (bot == null) return null;
+    return GroupFace(
+      botId: botId,
+      name: _name(bot),
+      characterId: _background(botId) ?? bot.avatar.characterId,
+      primary: _primary(botId) ?? bot.avatar.primary,
+    );
+  }
+
+  /// The Bots a group can hold: every Bot that is not archived.
+  List<GroupFace> get _groupableBots => [
+    for (final bot in bots)
+      if (!archived.contains(bot.botId.value)) ?_faceOf(bot.botId.value),
+  ];
+
+  String _groupName(GroupRecord group) =>
+      groupDisplayName(group, (botId) => _faceOf(botId)?.name ?? 'A Bot');
+
+  List<SidebarGroupChat> get _sidebarGroups => [
+    for (final group in groupDirectory.active)
+      SidebarGroupChat(
+        groupId: group.groupId,
+        name: _groupName(group),
+        faces: [for (final botId in group.members) ?_faceOf(botId)],
+        profile: _entryProfiles[sidebarGroupEntryId(group.groupId)]!,
+        unread: groupDirectory.unread[group.groupId] ?? 0,
+        working: group.groupId == selectedGroupId
+            ? (_groupThread?.working.isNotEmpty ?? false)
+            : groupDirectory.working[group.groupId] == true,
+      ),
+  ];
+
+  void _groupsChanged() {
+    if (!mounted) return;
+    final pending = _pendingGroupId;
+    if (pending != null && groupDirectory.loaded) {
+      _pendingGroupId = null;
+      if (groupDirectory.byId(pending) != null) {
+        _selectGroup(pending);
+        return;
+      }
+      if (selected == null && selectedGroupId == null) _openGeneral();
+    }
+    final open = selectedGroupId;
+    if (open != null &&
+        groupDirectory.loaded &&
+        groupDirectory.byId(open) == null) {
+      _closeGroup();
+      conversationOpen = false;
+    }
+    setState(() {});
+  }
+
+  /// Opens a group now if the list has it, or once the list is read.
+  void _openGroupWhenListed(String groupId) {
+    if (groupDirectory.byId(groupId) != null) {
+      _selectGroup(groupId);
+      return;
+    }
+    if (groupDirectory.loaded) {
+      unawaited(
+        groupDirectory.load().then((_) {
+          if (!mounted) return;
+          if (groupDirectory.byId(groupId) != null) {
+            _selectGroup(groupId);
+          } else {
+            _say('That Group Chat isn’t available any more.');
+          }
+        }),
+      );
+      return;
+    }
+    _pendingGroupId = groupId;
+  }
+
+  void _selectGroup(String groupId) {
+    if (groupDirectory.byId(groupId) == null) return;
+    push.reading(null);
+    if (selected != null) _closeOpenBot();
+    if (dictation?.active == true) unawaited(_stopDictation());
+    if (selectedGroupId != groupId) {
+      _closeGroup();
+      final thread = GroupThreadController(
+        api: GroupChatApi(widget.api),
+        store: widget.store,
+        userId: widget.userId,
+        groupId: groupId,
+      );
+      final channel = GroupStateChannel(
+        api: widget.api,
+        groupId: groupId,
+        apply: thread.applyState,
+        status: thread.applyConnection,
+      );
+      thread.addListener(_groupThreadChanged);
+      _groupThread = thread;
+      _groupChannel = channel;
+      unawaited(thread.initialize().then((_) => channel.connect()));
+    }
+    setState(() {
+      selectedGroupId = groupId;
+      conversationOpen = true;
+    });
+    unawaited(
+      widget.store
+          .write('selection.${widget.userId}', sidebarGroupEntryId(groupId))
+          .catchError((Object _) {}),
+    );
+  }
+
+  /// The open thread moved: its count and its working members are drawn in
+  /// the list, and a read that caught up clears the count there too.
+  void _groupThreadChanged() {
+    final thread = _groupThread;
+    if (thread == null || !mounted) return;
+    if (thread.ready && thread.readThrough >= thread.lastSeq) {
+      groupDirectory.setUnread(thread.groupId, 0);
+    }
+    // Presence: the group holds its push back while the person is in it.
+    push.reading(_focusedGroupId == thread.groupId ? thread.groupId : null);
+    scheduleMicrotask(() {
+      if (mounted) setState(() {});
+    });
+  }
+
+  void _closeGroup() {
+    final thread = _groupThread;
+    _groupChannel?.dispose();
+    thread?.removeListener(_groupThreadChanged);
+    thread?.dispose();
+    _groupThread = null;
+    _groupChannel = null;
+    if (selectedGroupId != null) push.reading(null);
+    selectedGroupId = null;
+  }
+
+  Future<void> _createGroup({Set<String> initial = const {}}) async {
+    final made = await CreateGroupSheet.show(
+      context,
+      directory: groupDirectory,
+      bots: _groupableBots,
+      initial: initial,
+    );
+    if (made == null || !mounted) return;
+    _selectGroup(made.groupId);
+  }
+
+  void _openGroupMembers(String groupId) => unawaited(
+    GroupMembersSheet.show(
+      context,
+      directory: groupDirectory,
+      groupId: groupId,
+      bots: _groupableBots,
+      faceOf: _faceOf,
+      nameOf: _groupName,
+      onDeleted: () {
+        if (!mounted) return;
+        setState(() {
+          if (selectedGroupId == groupId) {
+            _closeGroup();
+            conversationOpen = false;
+          }
+        });
+        unawaited(
+          widget.store
+              .delete('group/${widget.userId}/$groupId')
+              .catchError((Object _) {}),
+        );
+      },
+    ),
+  );
+
+  Future<void> _undoGroupChange(GroupEvent event, String? previousName) async {
+    final groupId = selectedGroupId;
+    final botId = event.botId;
+    if (groupId == null) return;
+    try {
+      switch (event.type) {
+        case 'member-added' when botId != null:
+          await groupDirectory.removeMember(groupId, botId);
+        case 'member-removed' when botId != null:
+          await groupDirectory.addMember(groupId, botId);
+        case 'renamed':
+          await groupDirectory.rename(groupId, previousName);
+      }
+    } catch (failure) {
+      _say(_groupFailure(failure));
+    }
+  }
+
+  String _groupFailure(Object failure) => failure is RequestFailure
+      ? failure.message
+      : 'That didn’t work. Please try again.';
+
+  /// The view-only chat behind a message a member sent a Bot outside the
+  /// group, read from the Bot it was sent to: the question arrived there,
+  /// and its answer went back from there.
+  void _openGroupExchange(String botId, String toBotId) {
+    final to = _faceOf(toBotId);
+    final from = _faceOf(botId);
+    if (to == null) return;
+    final counterpart = ExchangeCounterpart.bot(
+      botId: botId,
+      name: from?.name ?? 'A Bot',
+    );
+    final controller = ExchangeController(
+      transport: BackendExchangeTransport(widget.api),
+      botId: toBotId,
+      counterpart: counterpart,
+    );
+    unawaited(controller.load());
+    _push(
+      _ExchangeScreen(
+        controller: controller,
+        self: ExchangeParty(
+          name: to.name,
+          background: to.characterId,
+          primary: to.primary,
+        ),
+        counterpartBackground: from?.characterId,
+        counterpartPrimary: from?.primary,
+        chat: widget.sessions.open(widget.userId, toBotId).controller,
+      ),
+    );
+  }
+
+  Future<void> _groupActions(String groupId, {Offset? position}) async {
+    final group = groupDirectory.byId(groupId);
+    if (group == null) return;
+    final unread = (groupDirectory.unread[groupId] ?? 0) > 0;
+    final action = await showBotActions(
+      context: context,
+      botName: _groupName(group),
+      position: position,
+      actions: [
+        if (unread)
+          const BotActionItem(
+            BotAction.markRead,
+            'Mark as read',
+            Icons.mark_chat_read_outlined,
+          ),
+        if (group.pinnedAt != null)
+          const BotActionItem(BotAction.unpin, 'Unpin', Icons.push_pin)
+        else
+          const BotActionItem(BotAction.pin, 'Pin', Icons.push_pin_outlined),
+        const BotActionItem(BotAction.label, 'Label…', Icons.label_outline),
+        if (group.hidden)
+          const BotActionItem(
+            BotAction.show,
+            'Show in list',
+            Icons.visibility_outlined,
+          )
+        else
+          const BotActionItem(
+            BotAction.hide,
+            'Hide from list',
+            Icons.visibility_off_outlined,
+          ),
+        const BotActionItem(
+          BotAction.archive,
+          'Archive group',
+          Icons.archive_outlined,
+          confirms: true,
+        ),
+      ],
+    );
+    if (action == null || !mounted) return;
+    await _runGroupAction(groupId, action);
+  }
+
+  Future<void> _runGroupAction(String groupId, BotAction action) async {
+    final group = groupDirectory.byId(groupId);
+    if (group == null) return;
+    try {
+      switch (action) {
+        case BotAction.markRead:
+          await groupDirectory.markRead(groupId);
+        case BotAction.pin || BotAction.unpin:
+          await groupDirectory.arrange(
+            groupId,
+            pinned: action == BotAction.pin,
+          );
+        case BotAction.hide || BotAction.show:
+          await groupDirectory.arrange(
+            groupId,
+            hidden: action == BotAction.hide,
+          );
+        case BotAction.label:
+          final label = await showBotLabelPicker(
+            context: context,
+            botName: _groupName(group),
+            current: group.label ?? '',
+            maxLength: 40,
+            existing: [
+              for (final profile in _entryProfiles.values) ?profile.label,
+            ],
+          );
+          if (label == null || !mounted) return;
+          await groupDirectory.arrange(
+            groupId,
+            label: label.isEmpty ? null : label,
+            clearLabel: label.isEmpty,
+          );
+        case BotAction.archive:
+          final confirmed = await showDialog<bool>(
+            context: context,
+            builder: (dialog) => AlertDialog(
+              title: Text('Archive ${_groupName(group)}?'),
+              content: const Text(
+                'Its Bots stop replying here. You can find it in Search and '
+                'restore it.',
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => Navigator.pop(dialog, false),
+                  child: const Text('Cancel'),
+                ),
+                FilledButton(
+                  onPressed: () => Navigator.pop(dialog, true),
+                  child: const Text('Archive'),
+                ),
+              ],
+            ),
+          );
+          if (confirmed != true || !mounted) return;
+          await groupDirectory.archive(groupId);
+          if (selectedGroupId == groupId && mounted) {
+            setState(() {
+              _closeGroup();
+              conversationOpen = false;
+            });
+          }
+        default:
+          return;
+      }
+    } catch (failure) {
+      _say(_groupFailure(failure));
+    }
+  }
+
   /// Adding a Bot: the sheet, then the Bot, then the first thing said to it.
   ///
   /// The message is sent through the same session the conversation uses, so a
@@ -2592,7 +3050,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 children: [
                   ShellLayout(
                     header: null,
-                    conversationOpen: bot != null && conversationOpen,
+                    conversationOpen:
+                        (bot != null || selectedGroupId != null) &&
+                        conversationOpen,
                     onBack: _openBack,
                     panelOpen: panelOpen,
                     panelCollapsed: panelCollapsed,
@@ -2601,6 +3061,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     panelTheme: ownLook ? botTheme : null,
                     sidebar: ShellSidebar(
                       bots: bots,
+                      groupChats: _sidebarGroups,
+                      activeGroupId: single ? null : selectedGroupId,
+                      focusedGroupId: _focusedGroupId,
+                      onCreateGroup: () => unawaited(_createGroup()),
                       profiles: profiles,
                       unread: activity.unread,
                       archived: archived,
@@ -2631,116 +3095,144 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                           setState(() => showHidden = !showHidden),
                       onRetry: load,
                       onMove: (drop) => unawaited(_moveBot(drop)),
-                      onActions: (botId, {position}) =>
-                          unawaited(_botActions(botId, position: position)),
-                      onSwipeRead: (botId) => unawaited(
-                        _runBotAction(
-                          botId,
-                          _botActionState(botId).unread
-                              ? BotAction.markRead
-                              : BotAction.markUnread,
-                        ),
-                      ),
-                      onSwipeHide: (botId) =>
-                          unawaited(_runBotAction(botId, BotAction.hide)),
+                      onActions: (id, {position}) =>
+                          unawaited(switch (sidebarGroupIdOf(id)) {
+                            final String groupId => _groupActions(
+                              groupId,
+                              position: position,
+                            ),
+                            null => _botActions(id, position: position),
+                          }),
+                      onSwipeRead: (id) =>
+                          unawaited(switch (sidebarGroupIdOf(id)) {
+                            final String groupId => _runGroupAction(
+                              groupId,
+                              BotAction.markRead,
+                            ),
+                            null => _runBotAction(
+                              id,
+                              _botActionState(id).unread
+                                  ? BotAction.markRead
+                                  : BotAction.markUnread,
+                            ),
+                          }),
+                      onSwipeHide: (id) =>
+                          unawaited(switch (sidebarGroupIdOf(id)) {
+                            final String groupId => _runGroupAction(
+                              groupId,
+                              BotAction.hide,
+                            ),
+                            null => _runBotAction(id, BotAction.hide),
+                          }),
                     ),
-                    conversation: _maybeBotLookScope(
-                      wrap: ownLook,
-                      key: 'thread-theme-${bot?.botId.value ?? 'none'}',
-                      theme: botTheme,
-                      child: bot == null
-                          ? NoConversation(
-                              empty: bots.isEmpty,
-                              failure: bots.isEmpty ? error : null,
-                              action: 'Refresh Bots',
-                              onAction: () => unawaited(load()),
-                            )
-                          : ConversationView(
-                              key: ValueKey(
-                                '${widget.userId}:${bot.botId.value}',
-                              ),
-                              session: _selectedSession!,
-                              botName: _name(bot),
-                              store: widget.store,
-                              general: bot.botId.value == generalBotId,
-                              featuresRevision: featuresRevision,
-                              onOpenRun: _openRun,
-                              onOpenExchange: _openExchange,
-                              backgroundOf: _background,
-                              primaryOf: _primary,
-                              nameOf: _botNameOf,
-                              outOfCredit: credit?.canSpend == false,
-                              onOpenBilling: () => unawaited(_openBilling()),
-                              onMessageActions: (line, {position}) => unawaited(
-                                _messageActions(line, position: position),
-                              ),
-                              onReadLatest: (newest, onScreen) => _readLatest(
-                                bot.botId.value,
-                                newest,
-                                onScreen: onScreen,
-                              ),
-                              unreadFromMessageId: activity
-                                  .unread[bot.botId.value]
-                                  ?.unreadFromMessageId,
-                              background: _background(bot.botId.value),
-                              primary: _primary(bot.botId.value),
-                              // A live call sits under the notices, so neither
-                              // covers the other.
-                              overlay: (companion, notices) =>
-                                  conversationHeader(
-                                    companion: companion,
-                                    below: [
-                                      ...notices,
-                                      if (liveSession != null)
-                                        Padding(
-                                          padding: const EdgeInsets.only(
-                                            top: 12,
-                                          ),
-                                          child: Center(
-                                            child: VoiceCallChrome(
-                                              session: liveSession,
-                                              userInitials: profileName ?? '',
-                                              userImageUrl: profileImageUrl,
-                                              botName: _name(bot),
-                                              characterId:
-                                                  bot.avatar.characterId,
-                                              primary: bot.avatar.primary,
-                                              onEnd: () => unawaited(
-                                                _endVoice(reason: 'end-button'),
+                    conversation:
+                        _groupPane(single) ??
+                        _maybeBotLookScope(
+                          wrap: ownLook,
+                          key: 'thread-theme-${bot?.botId.value ?? 'none'}',
+                          theme: botTheme,
+                          child: bot == null
+                              ? NoConversation(
+                                  empty: bots.isEmpty,
+                                  failure: bots.isEmpty ? error : null,
+                                  action: 'Refresh Bots',
+                                  onAction: () => unawaited(load()),
+                                )
+                              : ConversationView(
+                                  key: ValueKey(
+                                    '${widget.userId}:${bot.botId.value}',
+                                  ),
+                                  session: _selectedSession!,
+                                  botName: _name(bot),
+                                  store: widget.store,
+                                  general: bot.botId.value == generalBotId,
+                                  featuresRevision: featuresRevision,
+                                  onOpenRun: _openRun,
+                                  onOpenExchange: _openExchange,
+                                  backgroundOf: _background,
+                                  primaryOf: _primary,
+                                  nameOf: _botNameOf,
+                                  outOfCredit: credit?.canSpend == false,
+                                  onOpenBilling: () =>
+                                      unawaited(_openBilling()),
+                                  onMessageActions: (line, {position}) =>
+                                      unawaited(
+                                        _messageActions(
+                                          line,
+                                          position: position,
+                                        ),
+                                      ),
+                                  onReadLatest: (newest, onScreen) =>
+                                      _readLatest(
+                                        bot.botId.value,
+                                        newest,
+                                        onScreen: onScreen,
+                                      ),
+                                  unreadFromMessageId: activity
+                                      .unread[bot.botId.value]
+                                      ?.unreadFromMessageId,
+                                  background: _background(bot.botId.value),
+                                  primary: _primary(bot.botId.value),
+                                  // A live call sits under the notices, so neither
+                                  // covers the other.
+                                  overlay: (companion, notices) =>
+                                      conversationHeader(
+                                        companion: companion,
+                                        below: [
+                                          ...notices,
+                                          if (liveSession != null)
+                                            Padding(
+                                              padding: const EdgeInsets.only(
+                                                top: 12,
+                                              ),
+                                              child: Center(
+                                                child: VoiceCallChrome(
+                                                  session: liveSession,
+                                                  userInitials:
+                                                      profileName ?? '',
+                                                  userImageUrl: profileImageUrl,
+                                                  botName: _name(bot),
+                                                  characterId:
+                                                      bot.avatar.characterId,
+                                                  primary: bot.avatar.primary,
+                                                  onEnd: () => unawaited(
+                                                    _endVoice(
+                                                      reason: 'end-button',
+                                                    ),
+                                                  ),
+                                                ),
                                               ),
                                             ),
-                                          ),
-                                        ),
-                                    ],
+                                        ],
+                                      ),
+                                  onDictate: () => unawaited(_dictate()),
+                                  onStopDictation: () =>
+                                      unawaited(_stopDictation()),
+                                  onDiscardDictation: () =>
+                                      unawaited(_discardDictation()),
+                                  // Voice, on the Bot whose page this is (ADR 0029).
+                                  onVoice: () => unawaited(
+                                    _startOrSwitchVoice(botId: bot.botId.value),
                                   ),
-                              onDictate: () => unawaited(_dictate()),
-                              onStopDictation: () =>
-                                  unawaited(_stopDictation()),
-                              onDiscardDictation: () =>
-                                  unawaited(_discardDictation()),
-                              // Voice, on the Bot whose page this is (ADR 0029).
-                              onVoice: () => unawaited(
-                                _startOrSwitchVoice(botId: bot.botId.value),
-                              ),
-                              voiceClosing: voiceClosing,
-                              voiceActive: voiceHere,
-                              dictationState:
-                                  dictation?.context == bot.botId.value
-                                  ? dictation!.state
-                                  : DictationState.idle,
-                              // The offer belongs to the composer the capture
-                              // was dictated into, exactly as the words do.
-                              canRevertDictation: () =>
-                                  dictation?.context == bot.botId.value &&
-                                  dictation!.cleaned,
-                              onRevertDictation:
-                                  dictation?.context == bot.botId.value
-                                  ? dictation!.revertCleanup
-                                  : null,
-                              dictationLevel: dictation?.level,
-                              dictationElapsed: dictation?.elapsed,
-                            ),
-                    ),
+                                  voiceClosing: voiceClosing,
+                                  voiceActive: voiceHere,
+                                  dictationState:
+                                      dictation?.context == bot.botId.value
+                                      ? dictation!.state
+                                      : DictationState.idle,
+                                  // The offer belongs to the composer the capture
+                                  // was dictated into, exactly as the words do.
+                                  canRevertDictation: () =>
+                                      dictation?.context == bot.botId.value &&
+                                      dictation!.cleaned,
+                                  onRevertDictation:
+                                      dictation?.context == bot.botId.value
+                                      ? dictation!.revertCleanup
+                                      : null,
+                                  dictationLevel: dictation?.level,
+                                  dictationElapsed: dictation?.elapsed,
+                                ),
+                        ),
                   ),
                 ],
               ),
@@ -2788,6 +3280,36 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
   }
 
+  /// The open Group Chat's pane, or null when a Bot or nothing is open.
+  Widget? _groupPane(bool single) {
+    final groupId = selectedGroupId;
+    final thread = _groupThread;
+    final group = groupId == null ? null : groupDirectory.byId(groupId);
+    if (groupId == null || thread == null || group == null) return null;
+    return GroupChatPane(
+      key: ValueKey('${widget.userId}:group:$groupId'),
+      controller: thread,
+      name: _groupName(group),
+      faceOf: _faceOf,
+      focused: _focusedGroupId == groupId,
+      phone: single,
+      onBack: single ? _openBack : null,
+      onOpenMembers: () => _openGroupMembers(groupId),
+      onOpenExchange: _openGroupExchange,
+      onUndo: (event, previous) => unawaited(_undoGroupChange(event, previous)),
+      archived: group.archived,
+      onRestore: () => unawaited(
+        groupDirectory
+            .restore(groupId)
+            .catchError((Object failure) => _say(_groupFailure(failure))),
+      ),
+      onReconnect: () {
+        _groupChannel?.resume();
+        unawaited(_groupChannel?.connect());
+      },
+    );
+  }
+
   Future<void> _openSearch() async {
     if (_searchOpen) return;
     _searchOpen = true;
@@ -2810,6 +3332,17 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               unread: activity.unread[bot.botId.value]?.unread == true,
               archived: archived.contains(bot.botId.value),
               hidden: profiles[bot.botId.value]?.hiddenFromSidebar == true,
+            ),
+        ],
+        groupChats: [
+          for (final group in groupDirectory.groups)
+            SearchGroupChat(
+              id: group.groupId,
+              name: _groupName(group),
+              faces: [for (final botId in group.members) ?_faceOf(botId)],
+              unread: (groupDirectory.unread[group.groupId] ?? 0) > 0,
+              archived: group.archived,
+              hidden: group.hidden,
             ),
         ],
         actions: [
@@ -2866,6 +3399,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         case 'routines':
           _openPanel('routines');
       }
+      return;
+    }
+    if (hit.groupId case final String groupId) {
+      Navigator.of(context).popUntil((route) => route.isFirst);
+      _openGroupWhenListed(groupId);
       return;
     }
     final botId = hit.botId;
@@ -3211,6 +3749,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     activity.removeListener(_repaint);
     activity.removeListener(_reconcileBadge);
     activity.dispose();
+    groupDirectory.removeListener(_groupsChanged);
+    _closeGroup();
+    groupDirectory.dispose();
     lifecycle.dispose();
     push.dispose();
     botSettings?.removeListener(_paintFromSettings);

@@ -402,7 +402,16 @@ void main() {
   test('only exact links to this deployment become navigation intent', () {
     final hosted = Uri.parse(hostedOrigin);
     expect(botLink(hosted.replace(path: '/', query: 'bot=alpha')), 'alpha');
+    expect(
+      botLink(hosted.replace(path: '/', query: 'group=g-0123456789abcdef0123')),
+      'group:g-0123456789abcdef0123',
+    );
     for (final url in [
+      hosted.replace(path: '/', query: 'group=alpha'),
+      hosted.replace(
+        path: '/',
+        query: 'group=g-0123456789abcdef0123&bot=alpha',
+      ),
       Uri.parse('https://evil.test/?bot=alpha'),
       hosted.replace(path: '/', query: 'bot=alpha&bot=beta'),
       hosted.replace(path: '/', userInfo: 'name', query: 'bot=alpha'),

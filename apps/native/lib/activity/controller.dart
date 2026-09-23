@@ -6,20 +6,28 @@ import '../client/transport.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 
 /// Navigation only; authority comes from membership in the live directory.
+/// A Group Chat's link answers with its sidebar entry id, `group:<id>`.
 String? botLink(Uri uri) {
   if (uri.scheme != 'https' ||
       uri.origin != hostedOrigin ||
       uri.userInfo.isNotEmpty ||
       uri.hasFragment ||
-      (uri.path != '/' && uri.path.isNotEmpty) ||
-      uri.queryParametersAll['bot']?.length != 1) {
+      (uri.path != '/' && uri.path.isNotEmpty)) {
     return null;
   }
+  final bots = uri.queryParametersAll['bot'];
+  final groups = uri.queryParametersAll['group'];
   try {
-    return wire.BotId.fromJson(uri.queryParameters['bot']).value;
+    if (bots?.length == 1 && groups == null) {
+      return wire.BotId.fromJson(bots!.single).value;
+    }
+    if (groups?.length == 1 && bots == null) {
+      return 'group:${wire.GroupId.fromJson(groups!.single).value}';
+    }
   } catch (_) {
-    return null;
+    // Not an id this build accepts: not a link it follows.
   }
+  return null;
 }
 
 class ActivityController extends ChangeNotifier {

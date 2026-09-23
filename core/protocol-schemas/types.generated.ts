@@ -950,6 +950,147 @@ export type SetupHistory = {
   cursor?: string;
 };
 export type MessageCursor = string;
+export type GroupId = string;
+export type GroupChatRecord = {
+  schemaVersion: 1;
+  groupId: GroupId;
+  name?: string;
+  members: Array<BotId>;
+  createdAt: Instant;
+  updatedAt: Instant;
+  archivedAt?: Instant;
+  label?: string;
+  pinnedAt?: Instant;
+  sidebarOrder?: number;
+  hiddenFromSidebar?: true;
+};
+export type GroupChatList = {
+  schemaVersion: 1;
+  revision: number;
+  groups: Array<GroupChatRecord>;
+};
+export type GroupMember = { botId: BotId; name: string; description?: string };
+export type GroupChatView = {
+  schemaVersion: 1;
+  group: GroupChatRecord;
+  members: Array<GroupMember>;
+  head: number;
+  readThrough: number;
+  unread: number;
+  working: Array<BotId>;
+};
+export type GroupMention = { botId: BotId; start: number; end: number };
+export type GroupEvent =
+  | { type: "created"; members: Array<BotId>; name?: string }
+  | { type: "renamed"; name: string | null }
+  | { type: "member-added"; botId: BotId }
+  | { type: "member-removed"; botId: BotId }
+  | { type: "archived" }
+  | { type: "restored" }
+  | { type: "turn-stopped"; botId: BotId; runId: Identifier }
+  | { type: "turn-failed"; botId: BotId; runId: Identifier }
+  | {
+      type: "bot-message";
+      botId: BotId;
+      toBotId: BotId;
+      runId: Identifier;
+      callId: string;
+    };
+export type GroupMessageBody =
+  | {
+      kind: "text";
+      text: string;
+      mentions: Array<GroupMention>;
+      mentionsUser?: true;
+    }
+  | { kind: "event"; event: GroupEvent };
+export type GroupAuthor = { kind: "user" } | { kind: "bot"; botId: BotId };
+export type GroupMessage = {
+  schemaVersion: 1;
+  seq: number;
+  messageId: string;
+  at: Instant;
+  author: GroupAuthor;
+  body: GroupMessageBody;
+};
+export type GroupMessagePage = {
+  schemaVersion: 1;
+  messages: Array<GroupMessage>;
+  hasMore: boolean;
+};
+export type GroupChatCommand =
+  | {
+      type: "group/create";
+      commandId: Identifier;
+      members: Array<BotId>;
+      name?: string;
+    }
+  | {
+      type: "group/rename";
+      commandId: Identifier;
+      groupId: GroupId;
+      name: string | null;
+    }
+  | {
+      type: "group/add-member";
+      commandId: Identifier;
+      groupId: GroupId;
+      botId: BotId;
+    }
+  | {
+      type: "group/remove-member";
+      commandId: Identifier;
+      groupId: GroupId;
+      botId: BotId;
+    }
+  | { type: "group/archive"; commandId: Identifier; groupId: GroupId }
+  | { type: "group/restore"; commandId: Identifier; groupId: GroupId }
+  | { type: "group/delete"; commandId: Identifier; groupId: GroupId }
+  | {
+      type: "group/arrange";
+      commandId: Identifier;
+      groupId: GroupId;
+      label?: string | null;
+      pinned?: boolean;
+      sidebarOrder?: number | null;
+      hidden?: boolean;
+    };
+export type GroupChatReceipt = {
+  schemaVersion: 1;
+  commandId: Identifier;
+  groupId: GroupId;
+  status: "applied" | "unchanged";
+  group?: GroupChatRecord;
+  revision: number;
+};
+export type GroupPostCommand = {
+  schemaVersion: 1;
+  commandId: Identifier;
+  text: string;
+};
+export type GroupPostReceipt = { schemaVersion: 1; message: GroupMessage };
+export type GroupReadCommand = { schemaVersion: 1; upTo: number };
+export type GroupReadReceipt = { schemaVersion: 1; readThrough: number };
+export type GroupStopCommand = {
+  schemaVersion: 1;
+  commandId: Identifier;
+  botId?: BotId;
+};
+export type GroupStopReceipt = { schemaVersion: 1; stopped: Array<BotId> };
+export type GroupRetryCommand = {
+  schemaVersion: 1;
+  commandId: Identifier;
+  botId: BotId;
+  runId: Identifier;
+};
+export type GroupRetryReceipt = { schemaVersion: 1 };
+export type GroupStateFrame = {
+  schemaVersion: 1;
+  type: "group/state";
+  head: number;
+  readThrough: number;
+  working: Array<BotId>;
+};
 export interface ProtocolTypes {
   Identifier: Identifier;
   BotId: BotId;
@@ -1054,4 +1195,26 @@ export interface ProtocolTypes {
   AuditPage: AuditPage;
   SetupHistory: SetupHistory;
   MessageCursor: MessageCursor;
+  GroupId: GroupId;
+  GroupChatRecord: GroupChatRecord;
+  GroupChatList: GroupChatList;
+  GroupMember: GroupMember;
+  GroupChatView: GroupChatView;
+  GroupMention: GroupMention;
+  GroupEvent: GroupEvent;
+  GroupMessageBody: GroupMessageBody;
+  GroupAuthor: GroupAuthor;
+  GroupMessage: GroupMessage;
+  GroupMessagePage: GroupMessagePage;
+  GroupChatCommand: GroupChatCommand;
+  GroupChatReceipt: GroupChatReceipt;
+  GroupPostCommand: GroupPostCommand;
+  GroupPostReceipt: GroupPostReceipt;
+  GroupReadCommand: GroupReadCommand;
+  GroupReadReceipt: GroupReadReceipt;
+  GroupStopCommand: GroupStopCommand;
+  GroupStopReceipt: GroupStopReceipt;
+  GroupRetryCommand: GroupRetryCommand;
+  GroupRetryReceipt: GroupRetryReceipt;
+  GroupStateFrame: GroupStateFrame;
 }

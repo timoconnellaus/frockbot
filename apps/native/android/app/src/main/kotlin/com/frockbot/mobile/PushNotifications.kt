@@ -104,26 +104,31 @@ object PushNotifications {
         val cursor = data["cursor"] ?: return
         if (!Regex("message-[0-9]{20}").matches(cursor)) return
         if (data["kind"] == "read") { read(context, botId, cursor); changed("activity"); return }
-        if (cursor <= store.getString("read:$botId", "")!!) return
-        val messages = JSONArray(store.getString("messages:$botId", "[]"))
-        val seen = JSONArray(store.getString("seen:$botId", "[]"))
+        // A Group Chat is one conversation whichever member wrote to it, and
+        // its cursors count its own thread. No Bot id has a colon.
+        val groupId = data["groupId"]
+        if (groupId != null && !Regex("g-[0-9a-f]{20}").matches(groupId)) return
+        val key = if (groupId != null) "group:$groupId" else botId
+        if (cursor <= store.getString("read:$key", "")!!) return
+        val messages = JSONArray(store.getString("messages:$key", "[]"))
+        val seen = JSONArray(store.getString("seen:$key", "[]"))
         for (i in 0 until seen.length()) if (seen.getString(i) == cursor) return
         seen.put(cursor)
         while (seen.length() > 200) seen.remove(0)
-        store.edit().putString("seen:$botId", seen.toString()).commit()
+        store.edit().putString("seen:$key", seen.toString()).commit()
         changed("activity")
         // Only the persisted read cursor above discards an alert. Local focus is
         // a lease the server already honours by holding delivery back, and a
         // stale one here would lose a message that did arrive.
         if (data["notify"] != "true") return
-        val newest = store.getString("newest:$botId", "")!!
+        val newest = store.getString("newest:$key", "")!!
         val alert = cursor > newest
-        if (alert) store.edit().putString("newest:$botId", cursor).commit()
+        if (alert) store.edit().putString("newest:$key", cursor).commit()
         messages.put(JSONObject().put("cursor",cursor).put("title",data["title"] ?: "FrockBot").put("body",data["body"] ?: "New message").put("at",System.currentTimeMillis()))
         val ordered = (0 until messages.length()).map { messages.getJSONObject(it) }.sortedBy { it.getString("cursor") }.takeLast(25)
         val saved = JSONArray(ordered)
-        store.edit().putString("messages:$botId",saved.toString()).commit()
-        show(context,botId,saved,alert)
+        store.edit().putString("messages:$key",saved.toString()).commit()
+        show(context,key,saved,alert)
     }
     private fun show(context: Context, botId: String, messages: JSONArray, alert: Boolean) {
         setup(context)
@@ -136,7 +141,7 @@ object PushNotifications {
             style.addMessage(message.getString("body"),message.getLong("at"),person)
         }
         val uri = Uri.Builder().scheme("https").authority(BuildConfig.LINK_HOST).path("/")
-            .appendQueryParameter("bot",botId).build()
+            .appendQueryParameter(if (botId.startsWith("group:")) "group" else "bot", botId.removePrefix("group:")).build()
         val intent = Intent(context, MainActivity::class.java).setAction(Intent.ACTION_VIEW).setData(uri).addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP)
         val pending = PendingIntent.getActivity(context,0,intent,PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notification = NotificationCompat.Builder(context,CHANNEL)

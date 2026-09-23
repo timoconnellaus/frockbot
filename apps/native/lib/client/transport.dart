@@ -193,6 +193,11 @@ class NativeApi {
           413 =>
             _refusalReason(bytes) ??
                 'That message is too long. Please shorten it.',
+          // A Group Chat's refusals are written for the person — "a Group
+          // Chat has 2 to 8 Bots" — and are the only useful thing to say.
+          409 when path.startsWith('/api/groups') =>
+            _refusalReason(bytes) ??
+                'That action could not be completed. Refresh and try again.',
           409 => 'That action could not be completed. Refresh and try again.',
           _ => 'FrockBot couldn’t complete that request. Please try again.',
         };
@@ -252,6 +257,17 @@ class NativeApi {
       scheme: origin.scheme == 'http' ? 'ws' : 'wss',
       path: '/api/bots/$botId/state-channel',
       queryParameters: {'version': '1', 'cursor': ?cursor, 'epoch': ?epoch},
+    );
+    return connectSocketV1(uri, await headers());
+  }
+
+  /// A Group Chat's channel: it says where the thread is and who is working,
+  /// and the thread itself is read over HTTP.
+  Future<WebSocketChannel> groupSocket(String groupId) async {
+    final origin = Uri.parse(hostedOrigin);
+    final uri = origin.replace(
+      scheme: origin.scheme == 'http' ? 'ws' : 'wss',
+      path: '/api/groups/$groupId/channel',
     );
     return connectSocketV1(uri, await headers());
   }

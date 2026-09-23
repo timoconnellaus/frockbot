@@ -79,6 +79,9 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   final VoidCallback? onTogglePanel;
   final bool panelShown;
 
+  /// A Group Chat's members sheet, where a Bot's header has its panel.
+  final VoidCallback? onMembers;
+
   /// Whether this Bot is the one on the call (ADR 0031). The bar keeps the
   /// name, a mark that says why the thread is gone, and the Computer: every
   /// other door leads out of a call that has no way out but ending it.
@@ -105,6 +108,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     this.connection = ConnectionState.initializing,
     this.onTogglePanel,
     this.panelShown = false,
+    this.onMembers,
     this.voiceMode = false,
     this.companion,
     this.below = const [],
@@ -245,6 +249,19 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
                               color: computerRunning
                                   ? computerRunningColor
                                   : null,
+                            ),
+                          ),
+                        ),
+                      ],
+                      if (onMembers != null) ...[
+                        const SizedBox(width: 8),
+                        _chromeInset(
+                          identified(
+                            GroupIds.membersButton,
+                            _iconButton(
+                              'Members',
+                              const Icon(Icons.group_outlined),
+                              onMembers,
                             ),
                           ),
                         ),
