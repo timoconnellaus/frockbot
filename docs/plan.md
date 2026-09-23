@@ -133,15 +133,50 @@ Mirror current Bot names and descriptions into the existing User-owned Bot direc
 
 ## Planned: Group Chats replace Projects
 
-Recorded during the startup and memory review; implementation and further design are deferred.
+Agreed in the Group Chat design walkthrough; implementation has not started. Voice is designed separately, later.
 
-- Replace the current **Project** concept with **Group Chat** in the code and product vocabulary.
-- Show Group Chats in the sidebar alongside other chats. They can be arranged in the same way as other chats.
-- Show the Group Chat's members using multiple avatars. Build a reusable multiple-avatar component; its visual design is undecided.
-- Provide a Group Chat interface with differences from a normal chat; those differences still need design.
-- Work out how Group Chats behave in both text and voice modes in a later design discussion.
+A Group Chat is a conversation between the User and several of their Bots. It replaces **Project** entirely. The Project catalogue and per-Bot membership in the User Durable Object, the `project_create`, `project_join` and `project_leave` tools, the `project` memory scope, the `project-memory` Workspace root and voice's `recall_project` are deleted, not renamed, and existing Project state is discarded as disposable. The Memory engine's `groupChat` scope stays and becomes each Group Chat's shared memory.
 
-The existing Project memory scope is the starting point for this change. Group Chat conversation behaviour is not yet specified. This note records the direction only; it does not change the current implementation or start a Group Chat design exercise.
+**Conversation.**
+
+- **Every message reaches every member.** Each member Bot has the whole thread in its context, whether or not it was asked to reply, so it can follow the conversation.
+- **Jev decides who replies.** For every message, Jev chooses which members are triggered: none, one, several or all. There is no post that skips Jev. Its choice is not drawn in the thread; the triggered Bot's Work view records why it ran.
+- **The User's @mention always triggers** the Bot named. Jev still decides whether anyone else joins in.
+- **Bots address each other in the thread.** A Bot writes `@Name`; the mention is resolved against the members when the message is posted and stored by Bot id, so a rename does not break it. The asking Bot does not wait: its Turn ends when it posts, and the answer is the next message in the thread. There is no fixed cap on Bot-to-Bot Turns. Jev checks every Bot-triggered Turn and stops loops and drift.
+- **Bots outside the group** are reached with `bot_message`, which from a Group Chat accepts only non-members. The Exchange marker and its view-only Exchange are drawn in the group thread. `bot_message` in one-to-one chats is unchanged.
+- **A Bot may @mention the User**, which sends a push notification. Every other message only counts as unread.
+
+**Steering replaces Supersede, everywhere.** A message sent while a Bot is working enters that Bot's context at its next step boundary: after the current model response and its tool calls settle, before the next model call. Nothing already sent to the model is re-issued. The message does not redirect the Turn by itself; the Bot decides what to do with it. A message that arrives while the Turn is producing its final answer is taken up by the next Turn. Stop is the only cancel. This applies to one-to-one chats too: Supersede, its drain state and the `superseded` terminal state are removed.
+
+**A Bot in a Group Chat.**
+
+- It brings its whole self: its tools, Computer and connected apps, and its Bot, User and Group Chat memory. It sees the group's thread, not its one-to-one history, which it can search on demand.
+- It does one thing at a time. A group Turn waits behind the Bot's other work, and the group shows that the Bot is busy elsewhere.
+- A member Bot may post into a Group Chat from outside it — from its one-to-one chat or a Routine. The post goes through Jev like any other message.
+- Its group activity is not marked in its one-to-one thread.
+
+**Membership and lifecycle.**
+
+- The User and their Bots may create a Group Chat, rename it, and add or remove members. Every change is a line in the thread and can be undone. A group has 2 to 8 member Bots.
+- A new group is shown as its members' names ("General, Xero Books & Codex") until the User or a Bot names it. A Bot that creates a group names it for its purpose.
+- A Bot may archive a Group Chat, and the User may restore it. Only the User deletes one, which removes the thread and the group's memory.
+- A Bot that leaves loses access to the group's memory.
+
+**Interface.**
+
+- Every Bot message starts with a badge: a pill filled with the Bot's avatar colour (`avatarCatalog` in `app/flock/shared.ts`) and its name, with black or white text chosen for contrast and a hairline outline on the near-white and near-black colours. Cards a Bot posts carry the same badge. Two Bots of the same character share a colour and are told apart by name.
+- A mention is drawn as a chip in the mentioned Bot's colour. The composer's `@` opens a member picker. The User's messages are drawn as today.
+- Group Chats sit in the sidebar among the Bot rows, and are labelled, pinned, ordered and hidden the same way.
+- The multiple-avatar component is a row of up to three overlapping avatar stills followed by `+N`. It serves the sidebar row, the pinned tile and the thread header.
+
+**Architecture.**
+
+- Each Group Chat is a `GroupChat` Durable Object holding the ordered message log, its client publication channel, Jev's decisions and the User's read cursor.
+- The User Durable Object holds membership, which Memory already checks there, and the list of the User's Group Chats with their sidebar arrangement.
+- A member's Turn runs in its own Bot Durable Object, under a Session per group, on the `agent` lane.
+- The Channels implementation removed on 2026-09-01 (`ac7870294`, removed in `c2922891c`) is prior art for fan-out with idempotent per-recipient delivery. Its log lived in the User Durable Object; this design gives each group its own object.
+
+**Still open.** Group Chats in voice: a call stays with one Bot until that design. Whether Group Chats later replace `bot_message` and Exchanges in one-to-one chats.
 
 ## Planned: shared long-term Memory following Hindsight
 
@@ -167,7 +202,7 @@ Startup loads a small prepared core from the permitted scopes. Extraction, conso
 
 This replaces the long-term Memory design, not the whole conversation system. Working context remains recent messages and tool results; compaction maintains a rolling summary plus the recent tail; original conversation history remains separately recoverable as evidence. The prepared core and recalled memories draw from the same long-term engine for both text and voice.
 
-The [Memory packet](startup-implementation/memory.md) selects the existing Bot DO for Bot scope and existing User DO for User/shared scope, and specifies canonical records, transactions, source invalidation, projections, retrieval budgets and staged cutover. Gemini uses supported blocking Memory tools and transcript-triggered prefetch; guaranteed automatic recall before every relevant voice answer still needs a turn-control decision, because receiving a transcript does not pause generation. Jev gating and Group Chat UI/text/voice behaviour remain deferred. Shared Memory uses existing membership authority while the separate [Group Chat plan](#planned-group-chats-replace-projects) remains pending.
+The [Memory packet](startup-implementation/memory.md) selects the existing Bot DO for Bot scope and existing User DO for User/shared scope, and specifies canonical records, transactions, source invalidation, projections, retrieval budgets and staged cutover. Gemini uses supported blocking Memory tools and transcript-triggered prefetch; guaranteed automatic recall before every relevant voice answer still needs a turn-control decision, because receiving a transcript does not pause generation. The Jev recall gate remains deferred. Shared Memory uses the existing Project membership authority until the [Group Chat plan](#planned-group-chats-replace-projects) replaces it with Group Chat membership.
 
 The [existing Memory diagrams](research/memory-proposal/README.md) predate this decision and illustrate the earlier recall/write proposal; they are not yet a complete diagram of the selected Hindsight-based design. Its behaviour on our architecture must be verified during implementation; upstream evaluation results do not establish equivalent performance for a port.
 
