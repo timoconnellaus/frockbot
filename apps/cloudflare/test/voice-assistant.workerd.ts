@@ -897,7 +897,7 @@ describe("what the model asks the object to do", () => {
       "the result told to the fresh session",
     );
     const relayed = told.find((frame) => frame.kind === "text")!;
-    expect(relayed.text).toContain("`memory_forget` call just finished");
+    expect(relayed.text).toContain('- memory_forget {"text":"call me mate"}:');
     await settle(100);
     expect(opened.frames.filter((frame) => frame.type === "error")).toEqual([]);
 
@@ -1059,6 +1059,168 @@ describe("what the model asks the object to do", () => {
     // Hanging up is the answer, even unspoken.
     expect(opened.frames.filter((frame) => frame.type === "error")).toEqual([]);
   });
+
+  test("end_call whose goodbye is cut off by a pause still hangs up", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-end-paused-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    const opened = await open(identity.userId);
+    await startCall(opened, identity.botId);
+    await opened.waitFor(state("awake"), "awake");
+    const callId = await callIdOf(stub);
+
+    await stub.probeHears("that's all, goodbye");
+    await stub.probeCalls("end_call", {}, "call_end");
+    await eventually(
+      async () =>
+        (await stub.probeUpstreamFrames()).some(
+          (frame) => frame.kind === "tool-response",
+        ),
+      (seen) => seen,
+      "the hang-up answered",
+    );
+    await stub.probeSpeaks();
+    await eventually(
+      async () => opened.audio.length,
+      (count) => count === 1,
+      "the goodbye playing",
+    );
+    // The pause lands before the goodbye's turn ends. The person asked to
+    // hang up; there is no turn left to wait for, so the call ends now
+    // rather than on whatever is said after Resume.
+    opened.socket.send(
+      JSON.stringify({ schemaVersion: 1, type: "voice/sleep", paused: true }),
+    );
+    // The handshake's own idle is the first; hang-up sends the second.
+    await eventually(
+      async () => opened.frames.filter(status("idle")).length,
+      (count) => count === 2,
+      "idle after the cut-off goodbye",
+    );
+    const closed = await opened.closed;
+    expect(closed).toMatchObject({ code: 1000, reason: "end_call" });
+    await eventually(
+      () => stub.probeMemoryJobs(),
+      (jobs) => jobs.some((job) => job.callId === callId),
+      "the ended call's memory job",
+    );
+  });
+
+  test("switch_bot whose sign-off is cut off by a pause moves the call, and Resume carries the conversation", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-switch-paused-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    const sibling = { ...identity, botId: `voice-sibling-${suffix}` };
+    await provisionBot(identity);
+    await provisionSiblingBot(sibling);
+    const stub = assistant(identity.userId);
+    const opened = await open(identity.userId);
+    await startCall(opened, identity.botId);
+    await opened.waitFor(state("awake"), "awake");
+    await exchange(stub, "what is on today", "Two meetings and a flight.");
+
+    await stub.probeHears("put me through to the other one");
+    await stub.probeCalls("switch_bot", { bot_id: sibling.botId }, "call_sw");
+    await eventually(
+      async () =>
+        (await stub.probeUpstreamFrames()).some(
+          (frame) => frame.kind === "tool-response",
+        ),
+      (seen) => seen,
+      "the hand-over answered",
+    );
+    await stub.probeSpeaks();
+    opened.socket.send(
+      JSON.stringify({ schemaVersion: 1, type: "voice/sleep", paused: true }),
+    );
+    await opened.waitFor(state("asleep"), "asleep");
+    // The record moved when the tool ran, so the client is told who the call
+    // is on now — and a paused call opens nothing to say so.
+    await opened.waitFor(
+      (frame) => frame.type === "voice/target" && frame.botId === sibling.botId,
+      "the client told who the call is on",
+    );
+    await settle(100);
+    expect(await stub.probeUpstreamCount()).toBe(1);
+
+    // Resume opens the new Bot, with the call's own turns in place of the
+    // other Bot's handle.
+    sendWake(opened);
+    const setups = await eventually(
+      async () =>
+        (await stub.probeAllUpstreamFrames())
+          .map((frames) => frames.find((frame) => frame.kind === "setup"))
+          .filter(Boolean),
+      (rows) => rows.length === 2,
+      "the new Bot's session opened by Resume",
+    );
+    expect(setups[1]!.instruction).toContain(sibling.botId);
+    expect(setups[1]!.handle).toBeUndefined();
+    expect(setups[1]!.instruction).toContain("<where-we-were>");
+    expect(setups[1]!.instruction).toContain("Two meetings and a flight.");
+    await opened.waitFor(state("awake"), "awake after Resume");
+
+    // The hand-over is spent: the next turn does not move the call again.
+    await exchange(stub, "hello?", "Hi, it's me now.");
+    await settle(100);
+    expect(await stub.probeUpstreamCount()).toBe(2);
+  });
+
+  test("a batch with memory writes reopens once and hands every result to the new session", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `voice-memory-batch-${suffix}`,
+      botId: `voice-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const stub = assistant(identity.userId);
+    const opened = await open(identity.userId);
+    await startCall(opened, identity.botId);
+    await opened.waitFor(state("awake"), "awake");
+
+    await stub.probeHears(
+      "remember I drink tea now, forget the coffee, and what are you up to",
+    );
+    await stub.probeCallsAll([
+      {
+        name: "memory_write",
+        args: { text: "Drinks tea in the morning." },
+        id: "call_write",
+      },
+      { name: "status", args: {}, id: "call_status" },
+      { name: "memory_forget", args: { text: "coffee" }, id: "call_forget" },
+    ]);
+    const sessions = await eventually(
+      () => stub.probeAllUpstreamFrames(),
+      (rows) =>
+        rows.length >= 2 && rows.at(-1)!.some((frame) => frame.kind === "text"),
+      "the results relayed to the reopened session",
+    );
+    await settle(200);
+    // One reopen for the whole batch, not one per write.
+    expect(await stub.probeUpstreamCount()).toBe(2);
+    expect(
+      sessions[1]!.find((frame) => frame.kind === "setup")!.handle,
+    ).toBeUndefined();
+    // The new session never issued those call ids, so nothing is answered
+    // under them; the results go in as one turn instead.
+    expect(
+      sessions[1]!.filter((frame) => frame.kind === "tool-response"),
+    ).toEqual([]);
+    const relayed = sessions[1]!.filter((frame) => frame.kind === "text");
+    expect(relayed).toHaveLength(1);
+    expect(relayed[0]!.text).toContain("memory_write");
+    expect(relayed[0]!.text).toContain("Drinks tea in the morning.");
+    expect(relayed[0]!.text).toContain("status");
+    expect(relayed[0]!.text).toContain(identity.botId);
+    expect(relayed[0]!.text).toContain("memory_forget");
+  });
 });
 
 describe("pausing and coming back", () => {
@@ -1159,6 +1321,75 @@ describe("pausing and coming back", () => {
       "the session reopened after goAway",
     );
     expect(setups[1]!.handle).toBeTruthy();
+  });
+
+  test("goAway mid-reply cannot resume, so it reopens carrying the conversation", async () => {
+    const userId = `voice-goaway-turn-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const opened = await open(userId);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    await exchange(stub, "book the flights", "Booked, both legs.");
+    // The server says it is going while the model is still answering. An
+    // open turn is an effect nobody has settled, so the handle is refused.
+    await stub.probeHears("and a hotel near the airport");
+    await stub.probeSpeaks();
+    await eventually(
+      async () => opened.audio.length,
+      (count) => count === 2,
+      "the reply playing",
+    );
+    await stub.probeGoAway();
+    const setups = await eventually(
+      async () =>
+        (await stub.probeAllUpstreamFrames())
+          .map((frames) => frames.find((frame) => frame.kind === "setup"))
+          .filter(Boolean),
+      (rows) => rows.length === 2,
+      "the session reopened after goAway",
+    );
+    expect(setups[1]!.handle).toBeUndefined();
+    expect(setups[1]!.instruction).toContain("<where-we-were>");
+    expect(setups[1]!.instruction).toContain("book the flights");
+    expect(setups[1]!.instruction).toContain("Booked, both legs.");
+  });
+
+  test("goAway while a task is running reopens carrying the conversation", async () => {
+    const userId = `voice-goaway-task-${crypto.randomUUID()}`;
+    const stub = assistant(userId);
+    const opened = await open(userId);
+    await startCall(opened);
+    await opened.waitFor(state("awake"), "awake");
+    await exchange(stub, "plan my week", "On it, I've asked.");
+    // A subagent runs for a minute or more, so goAway usually lands while
+    // one is admitted — and admitted work also refuses the handle.
+    const callId = await callIdOf(stub);
+    const runId = `voice-${crypto.randomUUID().replaceAll("-", "")}`;
+    await stub.probePutStorage(`${VOICE_DELEGATION_PREFIX_V1}${runId}`, {
+      schemaVersion: 1,
+      runId,
+      turnId: `${callId}:1`,
+      callId,
+      botId: "",
+      botName: "Scout",
+      text: "plan my week",
+      admittedAt: new Date().toISOString(),
+      state: "admitted",
+      attempts: 0,
+    } satisfies VoiceDelegationRecordV1);
+    await stub.probeGoAway();
+    const setups = await eventually(
+      async () =>
+        (await stub.probeAllUpstreamFrames())
+          .map((frames) => frames.find((frame) => frame.kind === "setup"))
+          .filter(Boolean),
+      (rows) => rows.length === 2,
+      "the session reopened after goAway",
+    );
+    expect(setups[1]!.handle).toBeUndefined();
+    expect(setups[1]!.instruction).toContain("<where-we-were>");
+    expect(setups[1]!.instruction).toContain("On it, I've asked.");
+    expect(setups[1]!.instruction).toContain("<running-tasks>");
   });
 
   test("a session that drops on its own tells the person and keeps listening", async () => {

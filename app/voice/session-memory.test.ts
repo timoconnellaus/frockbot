@@ -7,9 +7,7 @@ describe("voice session memory", () => {
   });
 
   test("a wake or handover reads again", () => {
-    expect(voiceOpeningRereadsSessionMemoryV1({ handle: "resume-1" })).toBe(
-      true,
-    );
+    expect(voiceOpeningRereadsSessionMemoryV1({ resume: true })).toBe(true);
     expect(voiceOpeningRereadsSessionMemoryV1({ handover: true })).toBe(true);
   });
 });

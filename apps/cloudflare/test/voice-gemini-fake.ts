@@ -238,7 +238,18 @@ export class GeminiFakeV1 {
    * `endsTurn`, and the words come in a fresh turn once the result is back.
    */
   calls(name: string, args: Record<string, unknown>, id: string): void {
-    this.send({ toolCall: { functionCalls: [{ name, args, id }] } });
+    this.callsAll([{ name, args, id }]);
+  }
+
+  /** Several function calls in one `toolCall`, the way the model batches them. */
+  callsAll(
+    functionCalls: {
+      name: string;
+      args: Record<string, unknown>;
+      id: string;
+    }[],
+  ): void {
+    this.send({ toolCall: { functionCalls } });
   }
 
   cancels(ids: string[]): void {
