@@ -744,7 +744,7 @@ export interface SkillCatalogCapsV1 {
 export const SKILL_CATALOG_CAPS_V1: SkillCatalogCapsV1 = {
   bot: 40,
   user: 40,
-  // Seven managed Skills ship today — `write-skill` replaced GrokBot's
+  // Six managed Skills ship today — `write-skill` replaced GrokBot's
   // `learn-from-demonstration`, which this product cannot run. The five
   // first-party cards are locked Plugins now (step 7) and brought none:
   // `send_to_user` already tells the Bot what an approval, a question, an

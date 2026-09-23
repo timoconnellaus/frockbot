@@ -1,11 +1,11 @@
 /**
- * One build, from a decoded request to a decoded response.
+ * One Plugin build, from a decoded request to a decoded response.
  *
- * The posted files are written into a fresh temporary directory and the SDK's
- * pipeline runs against it exactly as it runs against an author's own
- * directory — same type checker, same rules, same two esbuild passes, same
- * Miniflare boot. That is the whole point of the service: the artifact a
- * publish stores is byte-identical to the one `applet build` writes.
+ * The posted files are written into a fresh temporary directory and
+ * `runPluginBuildV1` runs against it exactly as it runs against any other
+ * directory — same type checker, same esbuild pass, same Miniflare boot — so
+ * the module a publish stores is byte-identical to the one the same source
+ * builds to anywhere else.
  *
  * `effectId` is carried, not journalled. A build is pure, so a retry under the
  * same key re-derives the same bytes and the caller's own record is the only
@@ -36,9 +36,9 @@ async function materialize(request: AppletBuildRequestV1): Promise<string> {
 }
 
 /**
- * A Plugin build: the same seam, a different pipeline. The manifest came out
- * of the built module run in Miniflare, so it is decoded here before it is
- * believed, and both artifacts are held to the ceilings a publish stores.
+ * The manifest came out of the built module run in Miniflare, so it is
+ * decoded here before it is believed, and both artifacts are held to the
+ * ceilings a publish stores.
  */
 async function buildPlugin(
   directory: string,
