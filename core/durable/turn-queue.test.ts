@@ -659,20 +659,37 @@ describe("eviction between the two Turns", () => {
    * nothing else is given to the object that comes back.
    */
   async function evictedBetweenTurns(): Promise<MemoryStorage> {
-    const storage = new MemoryStorage();
-    const probe = createAuthority(storage);
+    // The object promotes the queued Turn as soon as the first settles, racing
+    // the test's own `await first`. What it held at that promotion is the
+    // moment between the two, whichever side of the race wins.
+    const evicted = new MemoryStorage();
+    class PromotionWatch extends MemoryStorage {
+      override put(
+        key: string | Record<string, unknown>,
+        value?: unknown,
+      ): Promise<void> {
+        const activates =
+          typeof key === "string"
+            ? key === "active-run" && value === "run-2"
+            : key["active-run"] === "run-2";
+        if (activates && evicted.values.size === 0) {
+          for (const [entry, item] of this.values) {
+            evicted.values.set(entry, structuredClone(item));
+          }
+        }
+        return super.put(key, value);
+      }
+    }
+    const probe = createAuthority(new PromotionWatch());
     const first = probe.authority.run(command("run-1", "first"));
     await probe.handle("run-1").started;
     const second = probe.authority.run(command("run-2", "second"));
     await admitted();
     probe.handle("run-1").finish();
     await first.catch(() => undefined);
+    await probe.handle("run-2").started;
     // The caller that was waiting for the queued Turn is gone with the object.
     second.catch(() => undefined);
-    const evicted = new MemoryStorage();
-    for (const [key, value] of storage.values) {
-      evicted.values.set(key, structuredClone(value));
-    }
     return evicted;
   }
 

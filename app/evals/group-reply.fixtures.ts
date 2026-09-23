@@ -78,6 +78,30 @@ export const groupReplyFixturesV1: readonly GroupReplyFixtureV1[] = [
     expected: { reply: ["general", "books", "codex"] },
   },
   {
+    name: "greeting-to-group",
+    intent: "Saying hi to a group chat gets a hello back from everyone.",
+    evidence: evidence({
+      message: { speaker: "User", text: "hi", mentions: [] },
+    }),
+    expected: { reply: ["general", "books", "codex"] },
+  },
+  {
+    name: "greeting-after-a-break",
+    intent: "A greeting after earlier work is still put to everyone.",
+    evidence: evidence({
+      recent: [
+        { speaker: "User", text: "Can you reconcile March?" },
+        {
+          speaker: "Xero Books",
+          text: "Done — March is reconciled, no exceptions.",
+        },
+        { speaker: "User", text: "Great, thanks!" },
+      ],
+      message: { speaker: "User", text: "Morning all", mentions: [] },
+    }),
+    expected: { reply: ["general", "books", "codex"] },
+  },
+  {
     name: "thanks-to-group",
     intent: "Thanks asks nothing of anyone.",
     evidence: evidence({
@@ -125,6 +149,42 @@ export const groupReplyFixturesV1: readonly GroupReplyFixtureV1[] = [
       },
     }),
     expected: { reply: ["books"] },
+  },
+  {
+    name: "member-greets-back",
+    intent:
+      "A member returning the User's hello is not a greeting the others answer.",
+    evidence: evidence({
+      recent: [
+        { speaker: "User", text: "hi" },
+        { speaker: "Xero Books", text: "Hi! Anything on the books today?" },
+        { speaker: "Codex", text: "Hey — what are we building?" },
+      ],
+      message: {
+        speaker: "General",
+        text: "Hello! What can I help with today?",
+        mentions: [],
+      },
+    }),
+    expected: { reply: [] },
+  },
+  {
+    name: "member-answer-asks-nobody",
+    intent: "A member's answer to the User is not for the other members.",
+    evidence: evidence({
+      recent: [
+        {
+          speaker: "User",
+          text: "What did we spend on software last quarter?",
+        },
+      ],
+      message: {
+        speaker: "Xero Books",
+        text: "$4,120 across 14 subscriptions; GitHub and Figma are the largest.",
+        mentions: [],
+      },
+    }),
+    expected: { reply: [] },
   },
   {
     name: "bot-asks-bot-new-work",
