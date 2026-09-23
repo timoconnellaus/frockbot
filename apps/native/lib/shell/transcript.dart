@@ -54,7 +54,11 @@ class TranscriptView extends StatefulWidget {
   final void Function(String url)? onOpenLink;
   final void Function(TranscriptLine, {Offset? position})? onMessageActions;
   final String? unreadFromMessageId;
-  final void Function(String?)? onReadLatest;
+
+  /// The newest message this thread delivers while its route is current, and
+  /// whether any of its row is on screen. The newest is named even when it is
+  /// not: a person scrolled up in the chat is still in it.
+  final void Function(String? newest, bool onScreen)? onReadLatest;
   final String storageKey;
 
   /// The Bot itself at the end of the thread, where its next words will land,
@@ -249,13 +253,11 @@ class _TranscriptViewState extends State<TranscriptView> {
               DateTime.now().toUtc().toIso8601String(),
             ),
           );
-    widget.onReadLatest?.call(
-      newest != null &&
-              _showingLatest &&
-              ModalRoute.of(context)?.isCurrent == true
-          ? newest
-          : null,
-    );
+    if (ModalRoute.of(context)?.isCurrent != true) {
+      widget.onReadLatest?.call(null, false);
+      return;
+    }
+    widget.onReadLatest?.call(newest, newest != null && _showingLatest);
   }
 
   @override

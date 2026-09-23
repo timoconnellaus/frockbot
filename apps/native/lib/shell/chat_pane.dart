@@ -197,7 +197,7 @@ class ChatPane extends StatefulWidget {
   final String? Function(String botId)? nameOf;
   final void Function(TranscriptLine, {Offset? position})? onMessageActions;
   final String? unreadFromMessageId;
-  final void Function(String?)? onReadLatest;
+  final void Function(String? newest, bool onScreen)? onReadLatest;
 
   /// True when the account cannot pay for a reply: the banner says so before
   /// the person types one, and a failed reply's notice can open Billing.
@@ -790,7 +790,7 @@ class ConversationView extends StatefulWidget {
   final String? Function(String botId)? nameOf;
   final void Function(TranscriptLine, {Offset? position})? onMessageActions;
   final String? unreadFromMessageId;
-  final void Function(String?)? onReadLatest;
+  final void Function(String? newest, bool onScreen)? onReadLatest;
   final bool outOfCredit;
   final VoidCallback? onOpenBilling;
   final VoidCallback? onDictate;

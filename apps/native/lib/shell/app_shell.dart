@@ -157,7 +157,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// Whether the push channel has already been seen ready, so the one focus
   /// report that needs the badge redrawn is told apart from the rest.
   bool _pushReadySeen = false;
+
+  /// The Bot whose manual unread mark the next read clears: set by opening
+  /// it, and spent by the first read that sees it.
   String? clearManualForBot;
+
+  /// The newest message this device was showing when the cloud also named it
+  /// the latest. A newer one on screen means the chat is ahead of the unread
+  /// view, not that the Bot stopped being read.
+  ({String botId, String messageId})? _agreedLatest;
+
+  /// The newest message a catch-up read of unread has already been asked for.
+  String? _catchingUpTo;
   bool resumed = true;
   Timer? _activityTimer;
   List<wire.BotRegistration> bots = [];
@@ -314,6 +325,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     microphone.dictationActive = () => dictation?.active == true;
     microphone.stopDictation = _stopDictation;
     activity.addListener(_repaint);
+    activity.addListener(_reconcileBadge);
     // Read once, now, so the first press on a voice control answers at once.
     unawaited(voiceProbe.load());
     push.onNotificationsChanged = () {
@@ -350,6 +362,21 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   void _repaint() {
     if (mounted) setState(() {});
     unawaited(push.syncRead());
+  }
+
+  /// Also run straight from the unread fan-out, not only from a build: a
+  /// hidden window draws no frames, and the dock still has to move.
+  void _reconcileBadge() {
+    if (!mounted) return;
+    appBadge.reconcile(
+      appBadgeFor(
+        unread: activity.unread,
+        botIds: [for (final registration in bots) registration.botId.value],
+        archived: archived,
+        focusedBotId: _focusedBotId,
+      ),
+      authoritative: activity.loaded && directoryLoaded,
+    );
   }
 
   /// Settings writes that should paint now — a Look chosen beside the
@@ -422,22 +449,51 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       shellTierForWidth(MediaQuery.sizeOf(context).width) == ShellTier.dual &&
       panelOpen;
 
-  void _readLatest(String botId, String? messageId) {
+  /// [messageId] is the newest message the open chat delivers, and
+  /// [onScreen] whether any of it is in view.
+  void _readLatest(String botId, String? messageId, {required bool onScreen}) {
     if (!mounted) return;
-    final viewing = _focusedBotId == botId;
     final view = activity.unread[botId];
-    // Presence is only claimed for the message the cloud says is the latest and
-    // this device is actually showing. Claiming it for anything else asks the
-    // server to hold an alert back for a message nobody is looking at.
-    final showingLatest =
-        viewing && messageId != null && view?.lastMessageId == messageId;
-    push.reading(showingLatest ? botId : null);
-    if (!showingLatest ||
-        ((view?.count ?? 0) == 0 && view?.manuallyUnread != true) ||
-        (view?.manuallyUnread == true && clearManualForBot != botId)) {
+    final newest = _focusedBotId == botId ? messageId : null;
+    final latest = view?.lastMessageId;
+    final caughtUp = newest != null && latest == newest;
+    if (caughtUp) _agreedLatest = (botId: botId, messageId: newest);
+    // Presence holds an alert back while the person is in the chat — the same
+    // focus rule the badge is drawn by, scrolled to the end or not — and only
+    // while the chat holds the cloud's latest message or something newer. A
+    // reply reaches the chat a poll before the unread view names it, and
+    // dropping the claim there released the Turn's next send as an alert to
+    // the person reading it. A claim is only a delay: leaving without reading
+    // releases the alert. A cloud ahead of this device names a message nobody
+    // here has, and holds nothing back.
+    final reading =
+        caughtUp ||
+        (newest != null &&
+            latest != null &&
+            _agreedLatest == (botId: botId, messageId: latest));
+    push.reading(reading ? botId : null);
+    if (newest != null &&
+        latest != null &&
+        !caughtUp &&
+        !activity.loading &&
+        _catchingUpTo != newest) {
+      // The receipt names the cloud's cursor, so it waits on the view: ask
+      // for it now rather than on the next poll.
+      _catchingUpTo = newest;
+      unawaited(activity.load());
+    }
+    if (!caughtUp || !onScreen || activity.loading || activity.busy(botId)) {
       return;
     }
-    if (activity.loading || activity.busy(botId)) return;
+    final manual = view?.manuallyUnread == true;
+    if (!manual && (view?.count ?? 0) == 0) {
+      // Opening a Bot clears its manual mark once. Seen with nothing to clear,
+      // the open is spent: a mark made after it, here or on another device,
+      // stays until the Bot is opened again.
+      if (clearManualForBot == botId) clearManualForBot = null;
+      return;
+    }
+    if (manual && clearManualForBot != botId) return;
     clearManualForBot = null;
     unawaited(activity.mark(botId, read: true));
   }
@@ -448,12 +504,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       shellTierForWidth(MediaQuery.sizeOf(context).width) != ShellTier.single ||
       conversationOpen;
 
-  void _startPolling() {
+  void _startPolling({Duration every = const Duration(seconds: 10)}) {
     _activityTimer?.cancel();
-    _activityTimer = Timer.periodic(
-      const Duration(seconds: 10),
-      (_) => _refresh(),
-    );
+    _activityTimer = Timer.periodic(every, (_) => _refresh());
   }
 
   @override
@@ -464,6 +517,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _activityTimer?.cancel();
     _activityTimer = null;
     if (appIsAwayV1(state)) {
+      if (state != AppLifecycleState.detached &&
+          appBadge.needsRefreshWhileAway) {
+        _startPolling(every: const Duration(seconds: 30));
+      }
       widget.sessions.pause();
       unawaited(_stopDictation());
       // A live call sleeps rather than hanging up: Gemini closes, the
@@ -2486,15 +2543,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // Every input the badge reads — the fan-out, the directory, and focus —
     // repaints the shell, so the icon is reconciled on the same build that
     // redraws the sidebar.
-    appBadge.reconcile(
-      appBadgeFor(
-        unread: activity.unread,
-        botIds: [for (final registration in bots) registration.botId.value],
-        archived: archived,
-        focusedBotId: _focusedBotId,
-      ),
-      authoritative: activity.loaded && directoryLoaded,
-    );
+    _reconcileBadge();
     final shell = ShellSlotScope(
       slots: slots,
       // The footer is drawn below the whole three-tier layout, so it survives
@@ -2595,8 +2644,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                               onMessageActions: (line, {position}) => unawaited(
                                 _messageActions(line, position: position),
                               ),
-                              onReadLatest: (messageId) =>
-                                  _readLatest(bot.botId.value, messageId),
+                              onReadLatest: (newest, onScreen) => _readLatest(
+                                bot.botId.value,
+                                newest,
+                                onScreen: onScreen,
+                              ),
                               unreadFromMessageId: activity
                                   .unread[bot.botId.value]
                                   ?.unreadFromMessageId,
@@ -3223,6 +3275,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     widget.botLinks.removeListener(_followBotLink);
     _activityTimer?.cancel();
     activity.removeListener(_repaint);
+    activity.removeListener(_reconcileBadge);
     activity.dispose();
     lifecycle.dispose();
     push.dispose();

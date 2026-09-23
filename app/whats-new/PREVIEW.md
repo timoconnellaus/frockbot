@@ -2,6 +2,12 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
+## Unread that keeps up
+
+fix
+
+A reply landing in the chat you have open no longer sends an alert, and Mark unread stays until you open the Bot again. On a Mac, the Dock badge updates while the window is minimised.
+
 ## Voice replies play smoothly
 
 fix
