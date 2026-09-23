@@ -472,6 +472,29 @@ export type ClientRunLookupV1 =
       run: ClientRunV1;
     };
 
+/**
+ * The questions one Turn has put to other Bots and is still waiting on, each
+ * with the Turn answering it on the other Bot. The client asks that Bot's own
+ * lookup whether the answering Turn has started: a question queued behind the
+ * other Bot's own work is not being worked on yet.
+ */
+export interface ClientRunQuestionsV1 {
+  schemaVersion: 1;
+  runId: string;
+  questions: ClientRunQuestionV1[];
+}
+
+export interface ClientRunQuestionV1 {
+  /** The id the run's projected `message/to-bot` event carries. */
+  callId: string;
+  botId: string;
+  /** The answering Bot's Turn. */
+  runId: string;
+}
+
+/** More open questions than this in one Turn is not a conversation. */
+export const MAX_RUN_QUESTIONS_V1 = 32;
+
 export type ClientRunLookup =
   | { state: "not-admitted" }
   | {
@@ -1195,6 +1218,40 @@ export function projectClientRunLookupV1(
     state: lookupState(projected.status),
     run: projected,
   };
+}
+
+/**
+ * A Turn's open questions to other Bots, in log order, each under the call id
+ * `projectionUnits` gives its `message/to-bot` event. Only a running Turn waits
+ * on anything, and a question whose result is in the log is answered.
+ */
+export function openBotQuestionsV1(
+  run: StoredRun,
+): Array<{ occurrenceId: string; callId: string; botId: string }> {
+  if (runStatus(run) !== "running") return [];
+  const expanded = expandedBatchOccurrencesV1(run.events);
+  const settled = new Set(
+    run.events.flatMap((event) =>
+      event.type === "tool/result" ? [event.occurrenceId] : [],
+    ),
+  );
+  const open: Array<{ occurrenceId: string; callId: string; botId: string }> =
+    [];
+  let callCount = 0;
+  for (const event of run.events) {
+    if (event.type !== "tool/call" || expanded.has(event.occurrenceId)) {
+      continue;
+    }
+    callCount += 1;
+    const toBot = botMessageCallV1(event);
+    if (!toBot || settled.has(event.occurrenceId)) continue;
+    open.push({
+      occurrenceId: event.occurrenceId,
+      callId: `tool-${callCount}`,
+      botId: toBot.botId,
+    });
+  }
+  return open.slice(0, MAX_RUN_QUESTIONS_V1);
 }
 
 function projectNotificationV1(
@@ -2504,6 +2561,61 @@ export function decodeClientRunLookupV1(input: unknown): ClientRunLookup {
     throw new Error("run lookup.state does not match run.status");
   }
   return { state: lookup.state, run };
+}
+
+export function decodeClientRunQuestionsV1(
+  input: unknown,
+): ClientRunQuestionsV1 {
+  const value = record(input, "run questions");
+  exactKeys(value, ["schemaVersion", "runId", "questions"], "run questions");
+  if (value.schemaVersion !== 1) {
+    throw new Error("run questions.schemaVersion is invalid");
+  }
+  const runId = decodeRunIdV1(
+    string(value, "runId", MAX_RUN_ID_LENGTH, "run questions"),
+  );
+  if (
+    !Array.isArray(value.questions) ||
+    value.questions.length > MAX_RUN_QUESTIONS_V1
+  ) {
+    throw new Error("run questions.questions is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    runId,
+    questions: value.questions.map((item) => {
+      const question = record(item, "run questions.question");
+      exactKeys(
+        question,
+        ["callId", "botId", "runId"],
+        "run questions.question",
+      );
+      const botId = string(question, "botId", 128, "run questions.question");
+      if (!isPublicIdentifier(botId)) {
+        throw new Error("run questions.question.botId is invalid");
+      }
+      return {
+        callId: publicEventId(
+          string(
+            question,
+            "callId",
+            MAX_EVENT_ID_LENGTH,
+            "run questions.question",
+          ),
+          "run questions.question.callId",
+        ),
+        botId,
+        runId: decodeRunIdV1(
+          string(
+            question,
+            "runId",
+            MAX_RUN_ID_LENGTH,
+            "run questions.question",
+          ),
+        ),
+      };
+    }),
+  };
 }
 
 function decodeAnnouncementInstant(

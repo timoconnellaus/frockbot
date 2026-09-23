@@ -133,59 +133,22 @@ class ComposerDraftStore {
   }
 }
 
-/// Shared with the transcript's idle spacer so text scaling reserves the
-/// same height that the Stop control takes while a Turn is running.
-class ComposerStopButton extends StatelessWidget {
-  final bool stopping;
-  final VoidCallback? onStop;
-  const ComposerStopButton({super.key, this.stopping = false, this.onStop});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Align(
-      alignment: Alignment.centerRight,
-      child: Padding(
-        padding: const EdgeInsets.fromLTRB(0, 0, 16, 6),
-        child: identified(
-          ShellIds.stopButton,
-          OutlinedButton.icon(
-            key: onStop == null ? null : const ValueKey('stop'),
-            onPressed: stopping || onStop == null
-                ? null
-                : () {
-                    unawaitedHaptic();
-                    onStop!();
-                  },
-            icon: const Icon(Icons.stop_rounded, size: 14),
-            label: Text(stopping ? 'Stopping…' : 'Stop'),
-            style: OutlinedButton.styleFrom(
-              foregroundColor: theme.colorScheme.onSurface,
-              minimumSize: const Size(0, 30),
-              padding: const EdgeInsets.fromLTRB(10, 0, 12, 0),
-              tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-              shape: const StadiumBorder(),
-              side: BorderSide(color: FrockTheme.hairline(theme.colorScheme)),
-              textStyle: theme.textTheme.labelMedium,
-              backgroundColor: theme.colorScheme.surface,
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
 /// The composer row: the field, the Skill popover above it, the attached Skill
-/// chips, the counter as the budget runs out, Stop and Send.
+/// chips, the counter as the budget runs out, and Send. A running reply is
+/// stopped with `/stop`, typed here like any other command.
 class Composer extends StatefulWidget {
   final TextEditingController editor;
   final FocusNode focus;
 
   /// Whether this client could start a Turn at all, ignoring the draft.
   final bool ready;
+
+  /// Who the draft is for, named in the empty field. Absent before the
+  /// directory has named the Bot.
+  final String? botName;
+
+  /// Whether a reply is running, which is what `/stop` is offered for.
   final bool stoppable;
-  final bool stopping;
   final Future<void> Function() onSend;
   final Future<void> Function() onStop;
   final void Function(String text) onChanged;
@@ -246,8 +209,8 @@ class Composer extends StatefulWidget {
     required this.editor,
     required this.focus,
     required this.ready,
+    this.botName,
     required this.stoppable,
-    required this.stopping,
     required this.onSend,
     required this.onStop,
     required this.onChanged,
@@ -275,13 +238,24 @@ class _ComposerState extends State<Composer> {
     super.initState();
     widget.skills?.addListener(_changed);
     widget.focus.addListener(_changed);
+    _offerCommands();
   }
 
   @override
   void didUpdateWidget(Composer oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.dictating && !oldWidget.dictating) widget.focus.unfocus();
+    _offerCommands();
   }
+
+  String get _prompt {
+    final name = widget.botName?.trim();
+    return name == null || name.isEmpty ? 'Message your Bot' : 'Message $name';
+  }
+
+  void _offerCommands() => widget.skills?.offerCommands(
+    widget.stoppable ? const [stopComposerCommand] : const [],
+  );
 
   void _changed() {
     if (mounted) setState(() {});
@@ -320,11 +294,32 @@ class _ComposerState extends State<Composer> {
     widget.focus.requestFocus();
   }
 
+  /// Runs a command chosen from the popover: its `/name` comes back out of
+  /// the draft, and nothing is sent.
+  void _runCommand(ComposerCommand command) {
+    final replaced = widget.skills?.takeTrigger(
+      widget.editor.text,
+      widget.editor.selection.baseOffset,
+    );
+    if (replaced == null) return;
+    widget.editor.value = TextEditingValue(
+      text: replaced.text,
+      selection: TextSelection.collapsed(offset: replaced.caret),
+    );
+    widget.onChanged(replaced.text);
+    _refreshPopover();
+    if (command.name == stopCommandName) widget.onStop();
+  }
+
   void _enter() {
     final skills = widget.skills;
     if (skills != null && skills.open) {
-      if (skills.highlighted < skills.candidates.length) {
-        _choose(skills.candidates[skills.highlighted]);
+      final command = skills.highlightedCommand;
+      final skill = skills.highlightedSkill;
+      if (command != null) {
+        _runCommand(command);
+      } else if (skill != null) {
+        _choose(skill);
       }
       return;
     }
@@ -512,7 +507,11 @@ class _ComposerState extends State<Composer> {
       mainAxisSize: MainAxisSize.min,
       children: [
         if (skills != null && skills.open)
-          SkillMenu(controller: skills, onChoose: _choose),
+          SkillMenu(
+            controller: skills,
+            onChoose: _choose,
+            onCommand: _runCommand,
+          ),
         if (skills != null && skills.attached.isNotEmpty)
           identified(
             ShellIds.skillChips,
@@ -534,8 +533,6 @@ class _ComposerState extends State<Composer> {
               ),
             ),
           ),
-        if (widget.stoppable)
-          ComposerStopButton(stopping: widget.stopping, onStop: widget.onStop),
         // Said once, quietly, and only while it is still true. Tidying is
         // something done to the person's words without being asked, so the
         // way back has to be visible — but it is not an action anybody came
@@ -789,7 +786,7 @@ class _ComposerState extends State<Composer> {
                   child: identified(
                     ShellIds.composer,
                     Semantics(
-                      label: 'Message your Bot',
+                      label: _prompt,
                       child: SteadyCaret(
                         child: TextField(
                           key: const ValueKey('composer'),
@@ -801,7 +798,10 @@ class _ComposerState extends State<Composer> {
                           keyboardType: TextInputType.multiline,
                           textInputAction: TextInputAction.newline,
                           decoration: InputDecoration(
-                            hintText: 'Message your Bot',
+                            hintText: _prompt,
+                            // A long name is cut, not wrapped: at large text
+                            // a wrapped hint grew the empty field by lines.
+                            hintMaxLines: 1,
                             filled: false,
                             border: InputBorder.none,
                             enabledBorder: InputBorder.none,
@@ -877,8 +877,4 @@ class _ComposerState extends State<Composer> {
       ),
     );
   }
-}
-
-void unawaitedHaptic() {
-  HapticFeedback.mediumImpact().catchError((Object _) {});
 }

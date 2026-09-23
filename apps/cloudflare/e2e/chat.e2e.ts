@@ -413,12 +413,12 @@ test("a delivered reply is one bubble, wide enough for its own text", async () =
   expect(said).not.toMatch(/tool call/i);
 });
 
-// The settled case above, from the other end of a Turn. The avatar used to sit
-// in a gutter to the left of the running Turn's bubbles and then vanish when
-// the Turn ended, which took the bubble sideways with it. The companion now
-// stays in the conversation header and the thread draws no working row at all,
-// so changing its pose at the end of the Turn moves no bubble.
-test("the working companion stays in the header and never shifts the bubbles", async () => {
+// The settled case above, from the other end of a Turn. The avatar once sat in
+// a gutter to the left of the running Turn's bubbles and took them sideways
+// when it went. The working Bot is now the last thing in the thread, under its
+// own words like a typing indicator, and it leaves downward: when the Turn
+// ends the thread settles into the space it held, and nothing moves sideways.
+test("the working Bot sits under its bubbles and leaves without shifting them sideways", async () => {
   const { page, ollamaBaseUrl } = application();
   // Measure layout without the bubble's entrance motion.
   await page.emulateMedia({ reducedMotion: "reduce" });
@@ -482,30 +482,35 @@ test("the working companion stays in the header and never shifts the bubbles", a
     transcriptTop: number;
   };
 
-  // The working pose sits 8px above the header's 20px chrome inset, above the
-  // bubble and outside the transcript: the thread has no row to draw or take
-  // away.
-  expect(midTurn.companionTop - midTurn.transcriptTop).toBeCloseTo(12, 0);
-  expect(midTurn.companionBottom).toBeLessThanOrEqual(midTurn.bubbleTop);
+  // The working Bot is in the thread, under the reply it is still writing,
+  // where the next of its words will land.
+  expect(midTurn.companionTop).toBeGreaterThanOrEqual(midTurn.bubbleBottom);
+  expect(midTurn.companionTop).toBeGreaterThan(midTurn.transcriptTop);
   await expect(
     sem(page, "chat-transcript").locator(
       '[flt-semantics-identifier="working-indicator"]',
     ),
-  ).toHaveCount(0);
+  ).toHaveCount(1);
 
   await expect(sem(page, "working-indicator")).toHaveCount(0, {
     timeout: 120_000,
   });
 
-  // The Turn ended and the row went; the bubble did not move.
+  // The Turn ended and the Bot went; the bubble did not move sideways.
   const settled = await sends(page).first().boundingBox();
   expect(settled).not.toBeNull();
   expect(settled?.x).toBeCloseTo(midTurn.bubbleLeft, 0);
-  // Another send may arrive before completion; the latest reply keeps the
-  // same bottom edge when the working row and Stop control disappear.
+  // Another send may arrive before completion. Either way the latest reply
+  // settles into the space the Bot held at the end of the thread, and no
+  // further: down, never up, and not past where the Bot's feet were.
   const latest = await sends(page).last().boundingBox();
   expect(latest).not.toBeNull();
-  expect(latest!.y + latest!.height).toBeCloseTo(midTurn.bubbleBottom, 0);
+  expect(latest!.y + latest!.height).toBeGreaterThanOrEqual(
+    midTurn.bubbleBottom - 1,
+  );
+  expect(latest!.y + latest!.height).toBeLessThanOrEqual(
+    midTurn.companionBottom + 8,
+  );
 });
 
 // Tim's report: sending while the Bot is working put the new message *under*
@@ -709,13 +714,18 @@ test("a provider that stops accepting the key ends the Turn with a reason", asyn
       })
       .toContain(notice);
     // The sentence used to end by telling the person to try again with nothing
-    // to press; the retry is beside it now, and it sends the same message.
+    // to press; the retry is beside it now, and it sends the same message. It
+    // sits under the person's message on the Bot's side, not inside their
+    // bubble: their message arrived, and the reply is what did not.
     const originalMessage = saidByUser(page);
     await expect(originalMessage).toHaveCount(1);
     const messageId = await originalMessage.getAttribute(
       "flt-semantics-identifier",
     );
-    const retry = originalMessage.locator(
+    await expect(
+      originalMessage.locator('[flt-semantics-identifier^="retry-turn-"]'),
+    ).toHaveCount(0);
+    const retry = sem(page, "chat-transcript").locator(
       '[flt-semantics-identifier^="retry-turn-"]',
     );
     await expect(retry).toBeVisible();
@@ -872,8 +882,8 @@ test("a Bot the client cannot reach settles with a reason and a Retry", async ({
     })
     .toContain("Couldn’t confirm your message");
 
-  // Nothing is running, so nothing offers to stop it, and the way to find out
-  // what became of the message is offered beside the reason.
+  // The way to find out what became of the message is offered beside the
+  // reason.
   //
   // The words are not handed back to the composer, and deliberately: this
   // client cannot tell a message that never arrived from one the Bot admitted
@@ -881,7 +891,6 @@ test("a Bot the client cannot reach settles with a reason and a Retry", async ({
   // twice. It stays a submission the client is still holding — which is what
   // "Check message status" is about — and the composer is free for whatever
   // they want to say next.
-  await expect(sem(page, "stop-button")).toHaveCount(0);
   await expect(composer).toHaveValue("");
   await expect(sem(page, "check-delivery")).toBeVisible();
 });

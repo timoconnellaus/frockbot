@@ -2283,5 +2283,25 @@
         }
       ]
     }
+  },
+  {
+    "name": "RunQuestions valid",
+    "schema": "RunQuestions",
+    "value": {
+      "schemaVersion": 1,
+      "runId": "run-1",
+      "questions": [
+        {
+          "callId": "tool-2",
+          "botId": "bot-dog",
+          "runId": "agent-0123456789abcdef0123456789abcdef"
+        }
+      ]
+    }
+  },
+  {
+    "name": "RunQuestions none open",
+    "schema": "RunQuestions",
+    "value": { "schemaVersion": 1, "runId": "run-1", "questions": [] }
   }
 ]

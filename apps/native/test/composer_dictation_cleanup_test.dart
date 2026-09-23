@@ -55,7 +55,6 @@ class _WiredComposerState extends State<_WiredComposer> {
           focus: focus,
           ready: true,
           stoppable: false,
-          stopping: false,
           onSend: () async {},
           onStop: () async {},
           onChanged: (value) => setState(() {
@@ -95,7 +94,6 @@ Future<List<String>> pumpComposer(
             focus: focus,
             ready: true,
             stoppable: false,
-            stopping: false,
             onSend: () async {},
             onStop: () async {},
             onChanged: (_) {},

@@ -94,6 +94,7 @@ import type {
 import type {
   ClientRunLookupQueryV1,
   ClientRunLookupV1,
+  ClientRunQuestionsV1,
   ClientRunListQueryV1,
   ClientRunListV1,
   ClientRunStopCommandV1,
@@ -175,6 +176,10 @@ export interface BotStateBinding {
     botId: string,
     query: ClientRunLookupQueryV1,
   ): Promise<ClientRunLookupV1>;
+  runQuestions(
+    botId: string,
+    query: ClientRunLookupQueryV1,
+  ): Promise<ClientRunQuestionsV1>;
   fenceRunAdmission(
     botId: string,
     query: ClientRunLookupQueryV1,
@@ -264,6 +269,12 @@ export interface UserBotStateBinding {
     botId: string;
     query: ClientRunLookupQueryV1;
   }): Promise<ClientRunLookupV1>;
+  /** The questions a running Turn is waiting on from other Bots. */
+  runQuestions(input: {
+    schemaVersion: 1;
+    botId: string;
+    query: ClientRunLookupQueryV1;
+  }): Promise<ClientRunQuestionsV1>;
   fenceRunAdmission(input: {
     schemaVersion: 1;
     botId: string;

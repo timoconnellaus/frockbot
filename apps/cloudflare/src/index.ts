@@ -38,6 +38,7 @@ import {
   decodeClientRunStopCommandV1,
   type ClientRunLookupQueryV1,
   type ClientRunLookupV1,
+  type ClientRunQuestionsV1,
   type ClientRunListQueryV1,
   type ClientRunListV1,
   type ClientRunStopCommandV1,
@@ -438,6 +439,7 @@ interface BotStateRpc extends BotConfigurationBinding {
   listRuns(query: ClientRunListQueryV1): Promise<ClientRunListV1>;
   debugSnapshot(query: BotDebugQueryV1): Promise<unknown>;
   lookupRun(query: ClientRunLookupQueryV1): Promise<ClientRunLookupV1>;
+  runQuestions(query: ClientRunLookupQueryV1): Promise<ClientRunQuestionsV1>;
   fenceRunAdmission(query: ClientRunLookupQueryV1): Promise<ClientRunLookupV1>;
   listSkills(): Promise<ClientSkillCatalogV1>;
   listPackageUi(): Promise<PackageIframeCompositionV1>;
@@ -576,6 +578,8 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
       rpc.debugSnapshot({ schemaVersion: 1, userId, botId, query }),
     lookupRun: (query) =>
       rpc.lookupRun({ schemaVersion: 1, userId, botId, query }),
+    runQuestions: (query) =>
+      rpc.runQuestions({ schemaVersion: 1, userId, botId, query }),
     fenceRunAdmission: (query) =>
       rpc.fenceRunAdmission({ schemaVersion: 1, userId, botId, query }),
     listSkills: () => rpc.listSkills({ schemaVersion: 1, userId, botId }),
@@ -1036,6 +1040,15 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
       this.ctx.props.userId,
       request.botId,
     ).lookupRun(request.query);
+  }
+
+  async runQuestions(input: unknown): Promise<ClientRunQuestionsV1> {
+    const request = decodeUserBotRunLookupRpcV1(input);
+    return botStateStub(
+      this.env,
+      this.ctx.props.userId,
+      request.botId,
+    ).runQuestions(request.query);
   }
 
   async fenceRunAdmission(input: unknown): Promise<ClientRunLookupV1> {

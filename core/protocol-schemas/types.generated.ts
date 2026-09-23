@@ -755,6 +755,11 @@ export type UnreadDirectory = { schemaVersion: 1; unread: Array<UnreadView> };
 export type RunLookup =
   | { schemaVersion: 1; state: "not-admitted" }
   | { schemaVersion: 1; state: "running" | "terminal"; run: Run };
+export type RunQuestions = {
+  schemaVersion: 1;
+  runId: Identifier;
+  questions: Array<{ callId: string; botId: BotId; runId: Identifier }>;
+};
 export type BotIdentity = {
   schemaVersion: 1;
   botId: BotId;
@@ -1051,6 +1056,7 @@ export interface ProtocolTypes {
   PanelOpenView: PanelOpenView;
   UnreadDirectory: UnreadDirectory;
   RunLookup: RunLookup;
+  RunQuestions: RunQuestions;
   BotIdentity: BotIdentity;
   BotWriter: BotWriter;
   TurnAdmission: TurnAdmission;

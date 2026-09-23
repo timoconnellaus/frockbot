@@ -2074,5 +2074,26 @@
       },
       "doors": []
     }
+  },
+  {
+    "name": "RunQuestions unknown field",
+    "schema": "RunQuestions",
+    "value": {
+      "schemaVersion": 1,
+      "runId": "run-1",
+      "questions": [],
+      "answered": []
+    }
+  },
+  {
+    "name": "RunQuestions bad bot id",
+    "schema": "RunQuestions",
+    "value": {
+      "schemaVersion": 1,
+      "runId": "run-1",
+      "questions": [
+        { "callId": "tool-2", "botId": "Xero Books", "runId": "agent-1" }
+      ]
+    }
   }
 ]

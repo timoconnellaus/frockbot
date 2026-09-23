@@ -18,6 +18,13 @@ const computerRunningColor = Color(0xff59c7ff);
 /// a still is clipped, so this is the drawing, not the frame.
 const chatCompanionSize = 88.0;
 
+/// The same companion on a phone, where the header shares the screen with a
+/// thread that is only a thumb wide.
+const chatCompanionPhoneSize = 53.0;
+
+double chatCompanionSizeFor({required bool phone}) =>
+    phone ? chatCompanionPhoneSize : chatCompanionSize;
+
 /// How far the thread fade reaches down from the top of the conversation.
 const chatHeaderFadeHeight = 168.0;
 
@@ -134,7 +141,11 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
           child: IgnorePointer(
             child: SizedBox(
               key: const ValueKey('chat-header-fade'),
-              height: chatHeaderFadeHeight,
+              height: phone
+                  ? chatHeaderFadeHeight *
+                        chatCompanionPhoneSize /
+                        chatCompanionSize
+                  : chatHeaderFadeHeight,
               width: double.infinity,
               child: DecoratedBox(
                 decoration: BoxDecoration(

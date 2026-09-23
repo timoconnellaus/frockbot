@@ -7,6 +7,7 @@ import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart' show FontLoader, rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/chat_controller.dart';
+import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/flock/avatar.dart';
 import 'package:frockbot_native/shell/chat_header.dart';
 import 'package:frockbot_native/shell/chat_pane.dart';
@@ -124,7 +125,7 @@ void main() {
   });
 
   for (final width in [390.0, 1280.0]) {
-    testWidgets('a running Turn is worn by the companion, not the thread, at '
+    testWidgets('a running Turn is the Bot at the end of the thread, at '
         '$width', (tester) async {
       tester.view.physicalSize = Size(width, 800);
       tester.view.devicePixelRatio = 1;
@@ -161,29 +162,41 @@ void main() {
       await tester.pump(const Duration(milliseconds: 300));
 
       expect(c.activeRunId, 'send-1');
-      // The companion is the working indicator and wears the badge.
+      // The Bot is the working indicator, at the end of its own thread where
+      // the reply will land, and it is the character that moves: nothing is
+      // hung over it.
       final indicator = byIdentifier(ShellIds.workingIndicator);
+      final transcript = find.byType(TranscriptView);
       expect(indicator, findsOneWidget);
+      expect(find.descendant(of: transcript, matching: indicator), findsOne);
       expect(
-        find.descendant(of: indicator, matching: find.byType(ThinkingBadge)),
+        find.descendant(of: indicator, matching: find.byType(WorkingSheen)),
         findsOneWidget,
       );
-      // Over the shoulder, not under the feet.
+      expect(find.byType(ThinkingBadge), findsNothing);
+      expect(byIdentifier(ShellIds.workingNotice), findsNothing);
+      // Below the person's message and above the field.
       final avatar = tester.getRect(
         find.descendant(of: indicator, matching: find.byType(CharacterAvatar)),
       );
-      final badge = tester.getRect(find.byType(ThinkingBadge));
-      expect(badge.top, lessThan(avatar.top + 2));
-      expect(badge.right, greaterThan(avatar.right - 8));
-      expect(badge.bottom, lessThan(avatar.center.dy));
-      // The thread draws no working row and no badge of its own.
-      final transcript = find.byType(TranscriptView);
+      final message = tester.getRect(find.text('Hello'));
+      final field = tester.getRect(find.byKey(const ValueKey('composer')));
+      expect(avatar.top, greaterThan(message.bottom));
+      expect(avatar.bottom, lessThan(field.top));
+      // Laid out at its size; the motion only draws it hopping.
       expect(
-        find.descendant(of: transcript, matching: find.byType(ThinkingBadge)),
-        findsNothing,
+        tester
+            .getSize(
+              find.descendant(
+                of: indicator,
+                matching: find.byType(CharacterAvatar),
+              ),
+            )
+            .height,
+        threadCompanionSize,
       );
-      expect(byIdentifier(ShellIds.workingNotice), findsNothing);
-      expect(find.byKey(const ValueKey('row:working-space')), findsNothing);
+      // The header keeps its companion, at rest.
+      expect(find.bySemanticsLabel('Bot is ready'), findsOneWidget);
 
       await capture(tester, 'companion-working-${width.toInt()}');
       await tester.pumpWidget(const SizedBox());
@@ -192,7 +205,7 @@ void main() {
   }
 
   testWidgets(
-    'the working companion stays in the header with the desk panel open',
+    'the working Bot sits under the running reply and eases away after it',
     (tester) async {
       tester.view.physicalSize = const Size(1351, 831);
       tester.view.devicePixelRatio = 1;
@@ -256,18 +269,14 @@ void main() {
       expect(bubble, findsOneWidget);
       expect(
         find.descendant(of: find.byType(ChatHeader), matching: indicator),
-        findsOneWidget,
-      );
-      expect(
-        find.descendant(of: transcript, matching: indicator),
         findsNothing,
       );
+      expect(find.descendant(of: transcript, matching: indicator), findsOne);
       final runningBubble = tester.getRect(bubble);
       expect(
         tester.getTopLeft(indicator).dy,
-        chatHeaderChromeTop - chatHeaderCompanionLift,
+        greaterThan(runningBubble.bottom),
       );
-      expect(tester.getBottomLeft(indicator).dy, lessThan(runningBubble.top));
 
       transport.observed = {
         ...active,
@@ -275,7 +284,7 @@ void main() {
         'outcome': {'type': 'completed', 'text': ''},
       };
       await controller.refresh();
-      await tester.pump(const Duration(milliseconds: 300));
+      await tester.pump();
 
       expect(indicator, findsNothing);
       expect(
@@ -285,11 +294,136 @@ void main() {
         ),
         findsOneWidget,
       );
-      expect(tester.getRect(bubble), runningBubble);
+      // The space it held closes over the motion, not in one frame: part
+      // way through, the reply has only part way to go.
+      await tester.pump(FrockTheme.enter ~/ 2);
+      final settling = tester.getRect(bubble).top;
+      await tester.pump(FrockTheme.enter);
+      final settled = tester.getRect(bubble).top;
+      expect(settling, greaterThan(runningBubble.top));
+      expect(settled, greaterThan(settling));
       await tester.pumpWidget(const SizedBox());
       controller.dispose();
     },
   );
+
+  testWidgets('a Bot asked something joins the one asking once it starts on '
+      'the question, until it answers', (tester) async {
+    tester.view.physicalSize = const Size(390, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    final store = MemoryStore();
+    Map<String, dynamic> asking({bool answered = false}) => {
+      ...running(),
+      'events': <Object>[
+        {
+          'type': 'message/to-bot',
+          'callId': 'tool-1',
+          'botId': 'bot-dog',
+          'text': 'When is the Series B expected to close?',
+        },
+        if (answered)
+          {
+            'type': 'tool/result',
+            'callId': 'tool-1',
+            'content': 'Early December.',
+            'isError': false,
+          },
+      ],
+    };
+    final transport = _AskingTransport(store)
+      ..observed = asking()
+      ..answering = {...running(), 'runId': 'agent-dog-1', 'queued': true};
+    final c = ChatController(
+      transport: transport,
+      store: store,
+      userId: 'user-1',
+      botId: 'bot-1',
+      nextId: () => 'send-2',
+    );
+    await c.initialize();
+    c.connection = ConnectionState.connected;
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: Scaffold(
+          body: ChatPane(
+            controller: c,
+            onReconnect: () async {},
+            background: 'fox',
+            primary: '#ff6b57',
+            backgroundOf: (botId) => botId == 'bot-dog' ? 'dog' : null,
+            primaryOf: (_) => null,
+            nameOf: (botId) => botId == 'bot-dog' ? 'Dog' : null,
+          ),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+
+    final indicator = byIdentifier(ShellIds.workingIndicator);
+    CharacterAvatar? dog() => tester
+        .widgetList<CharacterAvatar>(
+          find.descendant(
+            of: indicator,
+            matching: find.byType(CharacterAvatar),
+          ),
+        )
+        .where((avatar) => avatar.characterId == 'dog')
+        .firstOrNull;
+    // Fox has asked, but Dog is still finishing something of its own: the
+    // question waits in Dog's queue, so Fox works alone.
+    expect(transport.asked, ['bot-1:send-1']);
+    expect(transport.calls, contains('lookup:bot-dog:agent-dog-1'));
+    expect(dog(), isNull);
+    expect(find.bySemanticsLabel('Working'), findsOneWidget);
+
+    // Dog starts on Fox's question, so Dog stands beside Fox, smaller, under
+    // the same sheen, and the working mark says who is helping.
+    transport.answering = {...transport.answering!, 'queued': false};
+    await tester.pump(ChatController.questionPoll);
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(dog(), isNotNull);
+    expect(dog()!.size, askedCompanionSize);
+    expect(
+      find.descendant(of: indicator, matching: find.byType(WorkingSheen)),
+      findsNWidgets(2),
+    );
+    expect(find.bySemanticsLabel('Working with Dog'), findsOneWidget);
+    final fox = tester.getRect(
+      find
+          .descendant(of: indicator, matching: find.byType(CharacterAvatar))
+          .first,
+    );
+    final helper = tester.getRect(
+      find
+          .descendant(of: indicator, matching: find.byType(CharacterAvatar))
+          .last,
+    );
+    expect(helper.left, greaterThan(fox.left));
+    // Which Turn answers is asked once, and a Turn seen started is not looked
+    // at again: its answer arrives in Fox's own log.
+    expect(transport.asked, ['bot-1:send-1']);
+    final looks = transport.calls.where((call) => call.contains('bot-dog'));
+    final seen = looks.length;
+    await tester.pump(ChatController.questionPoll * 3);
+    expect(looks.length, seen);
+    expect(dog(), isNotNull);
+
+    // Dog has answered: Fox carries on alone, and nothing is read any more.
+    transport.observed = asking(answered: true);
+    await c.refresh();
+    await tester.pump(const Duration(milliseconds: 300));
+    expect(indicator, findsOneWidget);
+    expect(dog(), isNull);
+    expect(find.bySemanticsLabel('Working'), findsOneWidget);
+    final reads = transport.calls.length;
+    await tester.pump(ChatController.questionPoll * 3);
+    expect(transport.calls.length, reads);
+
+    await tester.pumpWidget(const SizedBox());
+    c.dispose();
+  });
 
   testWidgets('the companion looks where the pointer is over the pane', (
     tester,
@@ -352,4 +486,29 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     c.dispose();
   });
+}
+
+/// A Fox whose Turn has asked Dog something. [answering] is the Turn Dog
+/// answers in, as Dog's own lookup reports it.
+class _AskingTransport extends FakeTransport implements QuestionsTransport {
+  _AskingTransport(super.store);
+  Map<String, dynamic>? answering;
+  final asked = <String>[];
+
+  @override
+  Future<List<OpenQuestion>> questions(String botId, String runId) async {
+    asked.add('$botId:$runId');
+    return [(callId: 'tool-1', botId: 'bot-dog', runId: 'agent-dog-1')];
+  }
+
+  @override
+  Future<Map<String, dynamic>?> lookup(
+    String botId,
+    String id, {
+    bool fence = false,
+  }) async {
+    if (botId != 'bot-dog') return super.lookup(botId, id, fence: fence);
+    calls.add('lookup:$botId:$id');
+    return answering;
+  }
 }

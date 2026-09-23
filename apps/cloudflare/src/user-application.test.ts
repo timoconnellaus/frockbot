@@ -44,6 +44,7 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
     },
     listRuns: ({ botId, query }) => state.listRuns(botId, query),
     lookupRun: ({ botId, query }) => state.lookupRun(botId, query),
+    runQuestions: ({ botId, query }) => state.runQuestions(botId, query),
     fenceRunAdmission: ({ botId, query }) =>
       state.fenceRunAdmission(botId, query),
     listNotifications: ({ botId }) => state.listNotifications(botId),
@@ -320,6 +321,7 @@ describe("user application Bot seam", () => {
         }),
       lookupRun: () =>
         Promise.resolve({ schemaVersion: 1, state: "not-admitted" }),
+      runQuestions: () => Promise.reject(new Error("unexpected")),
       fenceRunAdmission: () =>
         Promise.resolve({ schemaVersion: 1, state: "not-admitted" }),
       listNotifications: () => Promise.resolve([]),
@@ -505,6 +507,20 @@ describe("user application Bot seam", () => {
           reads.push(`lookup:${botId}`);
           return Promise.resolve({ schemaVersion: 1, state: "not-admitted" });
         },
+        runQuestions: ({
+          botId,
+          query,
+        }: {
+          botId: string;
+          query: { runId: string };
+        }) => {
+          reads.push(`questions:${botId}:${query.runId}`);
+          return Promise.resolve({
+            schemaVersion: 1,
+            runId: query.runId,
+            questions: [],
+          });
+        },
         run: unexpected,
         fenceRunAdmission: unexpected,
         stopRun: unexpected,
@@ -515,12 +531,25 @@ describe("user application Bot seam", () => {
     } satisfies UserApplicationEnv;
     const fetchUserApplication = createUserApplication();
     const base = "https://frockbot.test/api/bots/primary";
-    for (const path of ["/turns", "/turns/run-1"]) {
+    for (const path of ["/turns", "/turns/run-1", "/turns/run-1/questions"]) {
       expect(
         (await fetchUserApplication(new Request(base + path), env)).status,
       ).toBe(200);
     }
-    expect(reads).toEqual(["list:primary", "lookup:primary"]);
+    expect(reads).toEqual([
+      "list:primary",
+      "lookup:primary",
+      "questions:primary:run-1",
+    ]);
+    // A read, so it takes no parameters it would silently ignore.
+    expect(
+      (
+        await fetchUserApplication(
+          new Request(base + "/turns/run-1/questions?all=1"),
+          env,
+        )
+      ).status,
+    ).toBe(400);
     for (const path of [
       "/turns",
       "/turns/run-1/fence",
@@ -962,6 +991,7 @@ describe("the cards route", () => {
       run: () => Promise.reject(new Error("unexpected")),
       listRuns: () => Promise.reject(new Error("unexpected")),
       lookupRun: () => Promise.reject(new Error("unexpected")),
+      runQuestions: () => Promise.reject(new Error("unexpected")),
       fenceRunAdmission: () => Promise.reject(new Error("unexpected")),
       listNotifications: () => Promise.resolve([]),
       listApprovals: (botId: string) =>
@@ -1175,6 +1205,7 @@ describe("run list failures", () => {
           new Error('run "run-1" has no valid Composition generation'),
         ),
       lookupRun: () => Promise.reject(new Error("unexpected")),
+      runQuestions: () => Promise.reject(new Error("unexpected")),
       fenceRunAdmission: () => Promise.reject(new Error("unexpected")),
       listNotifications: () => Promise.resolve([]),
       listApprovals: (botId) =>

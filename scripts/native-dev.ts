@@ -799,7 +799,7 @@ async function smoke(): Promise<void> {
   adb(serial, "shell", "am", "start", "-n", `${APP}/.MainActivity`);
 
   // The composer's placeholder, which is also its accessibility label.
-  const composer = "Message your Bot";
+  const composer = `Message ${BOT_NAME}`;
   // The shell's sidebar toggle on a phone, which is also what the empty state
   // offers: either one opens the Bot list.
   const openBots = "Your Bots";

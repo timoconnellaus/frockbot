@@ -1075,6 +1075,42 @@ void main() {
       );
     });
 
+    testWidgets('a stop with nothing said is a marker, not a bubble', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(
+            body: TranscriptView(
+              lines: projectRuns([
+                run(
+                  runId: 'run-a',
+                  input: 'Draft the update',
+                  status: 'cancelled',
+                  admittedAt: '2026-09-05T12:19:00.000Z',
+                ),
+              ]),
+              loading: false,
+              hasEarlier: false,
+              onRefresh: ({older = false}) async {},
+              onOpenRun: (_) {},
+              storageKey: 'stopped-test',
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(find.text('You stopped this.'), findsOneWidget);
+      expect(
+        find.ancestor(
+          of: find.text('You stopped this.'),
+          matching: find.bySemanticsLabel('Bot'),
+        ),
+        findsNothing,
+      );
+    });
+
     testWidgets('expands a hang-up accordion to the spoken turns', (
       tester,
     ) async {
@@ -1107,12 +1143,21 @@ void main() {
         ),
       );
       await tester.pump();
-      expect(find.text('Voice chat · 3 min'), findsOneWidget);
+      // Closed, it is a card that says what the call was and how it began.
+      expect(find.text('Voice chat'), findsOneWidget);
+      expect(find.text('3 min · 1 exchange'), findsOneWidget);
+      expect(find.text('“plan my week”'), findsOneWidget);
       expect(find.text('plan my week'), findsNothing);
-      await tester.tap(find.text('Voice chat · 3 min'));
+      await tester.tap(find.text('Voice chat'));
       await tester.pump();
+      // Open, it is the call itself, each side in its own bubble.
       expect(find.text('plan my week'), findsOneWidget);
       expect(find.text('On it.'), findsOneWidget);
+      expect(find.text('“plan my week”'), findsNothing);
+      expect(
+        tester.getCenter(find.text('plan my week')).dx,
+        greaterThan(tester.getCenter(find.text('On it.')).dx),
+      );
     });
 
     test('a marker is seated among the Turns it happened between', () {

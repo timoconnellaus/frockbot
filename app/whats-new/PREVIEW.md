@@ -2,6 +2,20 @@
 
 Generated from `entries.ts`. Open this file on the pull request to review the copy and the screenshot as they will ship.
 
+## A working Bot sits at the end of the thread
+
+improvement
+
+A sheen crosses it while it works. A Bot it has asked something joins it once it starts on the answer.
+
+![The end of a phone chat with Fox: after “Messaged Dog”, Fox sits under a passing sheen with Dog beside it, above the composer.](media/working-bot.webp)
+
+## Stop is /stop
+
+improvement
+
+The Stop button is gone from the chat. /stop ends what the Bot is doing.
+
 ## The Mac window keeps its place
 
 fix

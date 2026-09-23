@@ -39,10 +39,12 @@ import {
   listRunEventPage,
   listRuns,
   lookupRun,
+  lookupRunQuestions,
 } from "./reads.js";
 import type {
   ClientRunListV1,
   ClientRunLookupV1,
+  ClientRunQuestionsV1,
   ClientTurnV1,
 } from "./run-protocol.js";
 import {
@@ -164,6 +166,13 @@ export class ShellBotBackendContribution {
 
   async lookupRun(input: unknown): Promise<ClientRunLookupV1> {
     return lookupRun(this.state, input);
+  }
+
+  async runQuestions(
+    identity: { userId: string; botId: string },
+    input: unknown,
+  ): Promise<ClientRunQuestionsV1> {
+    return lookupRunQuestions(this.state, identity, input);
   }
 
   async listRunEventPage(cursor?: string): ReturnType<typeof listRunEventPage> {

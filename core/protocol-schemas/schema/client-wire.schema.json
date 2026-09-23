@@ -4375,6 +4375,42 @@
         }
       ]
     },
+    "RunQuestions": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "runId": {
+          "$ref": "#/$defs/Identifier"
+        },
+        "questions": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "properties": {
+              "callId": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256
+              },
+              "botId": {
+                "$ref": "#/$defs/BotId"
+              },
+              "runId": {
+                "$ref": "#/$defs/Identifier"
+              }
+            },
+            "required": ["callId", "botId", "runId"],
+            "additionalProperties": false
+          },
+          "minItems": 0,
+          "maxItems": 32
+        }
+      },
+      "required": ["schemaVersion", "runId", "questions"],
+      "additionalProperties": false
+    },
     "BotIdentity": {
       "type": "object",
       "properties": {

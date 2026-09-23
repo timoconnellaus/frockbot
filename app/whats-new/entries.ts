@@ -23,6 +23,24 @@ export type WhatsNewEntrySourceV1 = {
  */
 export const WHATS_NEW_ENTRIES_V1: readonly WhatsNewEntrySourceV1[] = [
   {
+    id: "working-bot",
+    title: "A working Bot sits at the end of the thread",
+    summary:
+      "A sheen crosses it while it works. A Bot it has asked something joins it once it starts on the answer.",
+    kind: "improvement",
+    image: {
+      file: "working-bot.webp",
+      alt: "The end of a phone chat with Fox: after “Messaged Dog”, Fox sits under a passing sheen with Dog beside it, above the composer.",
+    },
+  },
+  {
+    id: "stop-command",
+    title: "Stop is /stop",
+    summary:
+      "The Stop button is gone from the chat. /stop ends what the Bot is doing.",
+    kind: "improvement",
+  },
+  {
     id: "mac-window-place",
     title: "The Mac window keeps its place",
     summary:
