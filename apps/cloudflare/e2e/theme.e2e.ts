@@ -13,7 +13,7 @@ import type { Page } from "@playwright/test";
 /**
  * The default Ink look's accessible pink accent, sampled at full opacity.
  */
-const INK_ACCENT: [number, number, number] = [196, 69, 128];
+const INK_ACCENT: [number, number, number] = [217, 45, 113];
 
 type Colour = [number, number, number];
 
