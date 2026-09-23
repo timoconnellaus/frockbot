@@ -1,0 +1,528 @@
+/*
+ * The character studio's layout. `cast.css` layers the cast switcher and
+ * per-page adjustments on top of this.
+ */
+
+:root {
+  color-scheme: light;
+  --ground: #f6f4ee;
+  --card: #ffffff;
+  --ink: #202224;
+  --muted: #686969;
+  --plum: #7e6174;
+  --accent: #a34477;
+  --focus: #c46d99;
+  --line: #ddd8d0;
+  --rule: #eee9e2;
+  --soft: #f0e0e9;
+  --stage: min(440px, 100%, calc(52vh * 457 / 615));
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--ground);
+  color: var(--ink);
+  font:
+    14px/1.5 system-ui,
+    -apple-system,
+    "Segoe UI",
+    sans-serif;
+}
+
+button,
+input {
+  font: inherit;
+  color: inherit;
+}
+
+button:focus-visible,
+input:focus-visible,
+a:focus-visible,
+summary:focus-visible {
+  outline: 3px solid var(--focus);
+  outline-offset: 3px;
+}
+
+button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+[hidden] {
+  display: none !important;
+}
+
+/* Type */
+
+.eyebrow {
+  font-size: 11px;
+  letter-spacing: 0.19em;
+  text-transform: uppercase;
+  color: var(--plum);
+}
+
+h1,
+h2 {
+  margin: 6px 0 0;
+  line-height: 1.1;
+  letter-spacing: -0.035em;
+  text-wrap: balance;
+}
+
+h1 {
+  font-size: 34px;
+}
+
+h2 {
+  font-size: 24px;
+}
+
+p {
+  margin: 4px 0;
+  color: var(--muted);
+}
+
+/* Page frame */
+
+header {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 22px 44px 14px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+}
+
+.brand {
+  font-size: 16px;
+  font-weight: 650;
+  letter-spacing: -0.01em;
+  color: var(--ink);
+  text-decoration: none;
+}
+
+.brand span {
+  font-weight: 400;
+  color: var(--muted);
+}
+
+.version {
+  padding: 7px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  font-size: 11px;
+  letter-spacing: 0.19em;
+  color: var(--plum);
+  white-space: nowrap;
+}
+
+main {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 0 44px 40px;
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(320px, 1fr);
+  gap: 44px;
+  align-items: start;
+}
+
+footer {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 20px 44px 40px;
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 13px;
+}
+
+footer span {
+  color: var(--plum);
+}
+
+/* Preview */
+
+.preview-panel {
+  position: sticky;
+  top: 16px;
+}
+
+.preview-heading {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.live {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--card);
+  font-size: 12px;
+  color: var(--muted);
+  white-space: nowrap;
+}
+
+.live i {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #3fa66b;
+  box-shadow: 0 0 0 3px rgb(63 166 107 / 0.18);
+}
+
+/* The stage keeps the characters' own 457 × 615 canvas, so every cast
+   member sits at the same scale and the static SVG lines up with it. */
+.stage {
+  position: relative;
+  width: var(--stage);
+  aspect-ratio: 457 / 615;
+  margin: 0 auto;
+  border: 1px solid var(--line);
+  border-radius: 24px;
+  background:
+    radial-gradient(60% 40% at 50% 62%, #fbf8f4 0%, transparent 100%),
+    var(--card);
+  overflow: hidden;
+}
+
+.stage canvas,
+.stage img {
+  position: absolute;
+  inset: 0;
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+#reference {
+  object-fit: contain;
+}
+
+.compare #pixel {
+  visibility: hidden;
+}
+
+.stage-footer,
+.mini-row {
+  width: var(--stage);
+  margin: 12px auto 0;
+}
+
+.stage-footer {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+#caption {
+  margin: 0;
+  font-style: italic;
+}
+
+.mini-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin-top: 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--card);
+}
+
+.mini-row > span {
+  font-size: 11px;
+  letter-spacing: 0.19em;
+  color: var(--plum);
+  white-space: nowrap;
+}
+
+#small {
+  flex: none;
+  width: 64px;
+  height: 76px;
+}
+
+.mini-row p {
+  margin: 0;
+  font-size: 12px;
+}
+
+/* Controls */
+
+aside {
+  display: grid;
+  gap: 18px;
+}
+
+.intro p {
+  margin-top: 6px;
+}
+
+fieldset,
+.interaction,
+.palette {
+  min-width: 0;
+  margin: 0;
+  padding: 14px 16px 16px;
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  background: var(--card);
+}
+
+legend {
+  padding: 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--plum);
+}
+
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.choices button {
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--ground);
+  cursor: pointer;
+}
+
+.choices button:hover:not(:disabled) {
+  border-color: var(--plum);
+}
+
+.choices button[aria-pressed="true"] {
+  border-color: var(--ink);
+  background: var(--ink);
+  color: #fff;
+}
+
+.celebrate {
+  justify-self: start;
+  padding: 11px 16px;
+  border: 0;
+  border-radius: 12px;
+  background: var(--accent);
+  color: #fff;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.celebrate span {
+  margin-left: 4px;
+}
+
+button.quiet {
+  padding: 6px 12px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+}
+
+button.quiet:hover:not(:disabled) {
+  border-color: var(--plum);
+  color: var(--ink);
+}
+
+.interaction,
+.palette {
+  display: grid;
+  gap: 4px;
+}
+
+.switch {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 0;
+  border-top: 1px solid var(--rule);
+  cursor: pointer;
+}
+
+.eyebrow + .switch {
+  border-top: 0;
+}
+
+.switch span {
+  display: grid;
+}
+
+.switch strong {
+  font-weight: 600;
+}
+
+.switch small {
+  font-size: 12px;
+  color: var(--muted);
+}
+
+.switch input {
+  appearance: none;
+  position: relative;
+  flex: none;
+  width: 38px;
+  height: 22px;
+  margin: 0;
+  border-radius: 999px;
+  background: #d9d4cc;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.switch input::after {
+  content: "";
+  position: absolute;
+  top: 3px;
+  left: 3px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.2);
+  transition: transform 0.15s;
+}
+
+.switch input:checked {
+  background: var(--accent);
+}
+
+.switch input:checked::after {
+  transform: translateX(16px);
+}
+
+.swatches {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding-top: 8px;
+}
+
+.swatches button {
+  width: 34px;
+  height: 34px;
+  padding: 0;
+  border: 2px solid #fff;
+  border-radius: 50%;
+  background: var(--swatch);
+  box-shadow: 0 0 0 1px var(--line);
+  cursor: pointer;
+}
+
+.swatches button[aria-pressed="true"] {
+  box-shadow: 0 0 0 2px var(--ink);
+}
+
+.custom-color {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 4px;
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.custom-color input {
+  width: 40px;
+  height: 32px;
+  padding: 0;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: none;
+  cursor: pointer;
+}
+
+.review {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+  padding: 16px;
+  border-radius: 16px;
+  background: var(--soft);
+}
+
+.review strong {
+  font-size: 15px;
+}
+
+.review p {
+  margin: 0;
+}
+
+.review a {
+  font-size: 13px;
+  color: var(--accent);
+  text-decoration: none;
+}
+
+.review a:hover {
+  text-decoration: underline;
+}
+
+.review details {
+  justify-self: stretch;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .switch input,
+  .switch input::after {
+    transition: none;
+  }
+}
+
+@media (max-width: 1000px) {
+  header,
+  main,
+  footer {
+    padding-left: 24px;
+    padding-right: 24px;
+  }
+
+  main {
+    grid-template-columns: 1fr;
+    gap: 32px;
+  }
+
+  .preview-panel {
+    position: static;
+  }
+}
+
+@media (max-width: 560px) {
+  header,
+  .preview-heading {
+    flex-wrap: wrap;
+  }
+
+  h1 {
+    font-size: 28px;
+  }
+
+  .mini-row > span {
+    max-width: 8em;
+    white-space: normal;
+  }
+}
