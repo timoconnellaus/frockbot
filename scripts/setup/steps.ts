@@ -25,7 +25,6 @@ import {
   accountChoiceV1,
   accountRefusalV1,
   applicationArtifactKeyV1,
-  artifactHostnameV1,
   chosenAccountV1,
   credentialKeyringV1,
   formatMintedSecretsV1,
@@ -256,9 +255,6 @@ export async function writeProfileV1(
     region: deploymentRegionV1(region),
     imageTag: tag.tag,
   });
-  context.runner.say(
-    `  artifact   ${artifactHostnameV1(appHostname)} — the anonymous origin an Applet's page is served from; it needs a DNS record on the same zone.`,
-  );
   return generateFromV1(context, profile);
 }
 

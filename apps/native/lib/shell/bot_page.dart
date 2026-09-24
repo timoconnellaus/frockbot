@@ -3,10 +3,9 @@
 /// One page drawn twice — the right panel's root at the wide tiers, a pushed
 /// page on a phone — because the two used to be different maps of the same
 /// Bot. It is activity and only activity: the Computer as it is now, the
-/// Routines that have fired, the Plugin panels that are open, the doors this
-/// Bot's Packages open. What the Bot *is* — its character, its name, its
-/// switches, its model, the way to archive it — is Settings, one level down
-/// behind the gear, and nothing of it is here.
+/// Routines that have fired, the Plugin panels that are open. What the Bot
+/// *is* — its character, its name, its switches, its model, the way to archive
+/// it — is Settings, one level down behind the gear, and nothing of it is here.
 library;
 
 import 'package:flutter/material.dart';
@@ -18,7 +17,7 @@ import '../routines/page.dart';
 import '../theme/rows.dart';
 import 'semantics.dart';
 
-/// One door a Package opened, as the Bot page draws it.
+/// One door a Plugin panel opened, as the Bot page draws it.
 class BotPageDoor {
   final String identifier;
   final IconData icon;
@@ -53,7 +52,6 @@ class BotPageView extends StatelessWidget {
   /// Plugin conversation panels for this Bot.
   final PanelCanvasController? panels;
   final List<BotPageDoor> panelDoors;
-  final List<BotPageDoor> doors;
   const BotPageView({
     super.key,
     required this.botName,
@@ -65,7 +63,6 @@ class BotPageView extends StatelessWidget {
     this.onOpenRoutines,
     this.panels,
     this.panelDoors = const [],
-    this.doors = const [],
   });
 
   @override
@@ -91,18 +88,6 @@ class BotPageView extends StatelessWidget {
       if (panels != null && panelDoors.isNotEmpty) ...[
         const FrockSectionLabel('Panels'),
         _panels(context),
-      ],
-      if (doors.isNotEmpty) ...[
-        const FrockSectionLabel('More'),
-        FrockRowGroup(
-          rows: [
-            for (final door in doors)
-              identified(
-                door.identifier,
-                FrockRow(icon: door.icon, title: door.label, onTap: door.onTap),
-              ),
-          ],
-        ),
       ],
     ];
     return identified(

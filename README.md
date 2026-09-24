@@ -13,7 +13,7 @@ FrockBot installs into your own Cloudflare account with one command. That is the
 ### What you need
 
 - A **Cloudflare account on the Workers Paid plan**. Containers and Dynamic Workers both need it, and both are load-bearing: no Computer and no Plugins without them.
-- **One domain on that account**, its zone active. The app answers on a hostname you choose (`bot.example.com`), and an Applet's page is served from `ui.` in front of it. That pairing is derived from the prefix, and a `workers.dev` name cannot contain a dot, so the artifact origin needs a zone; [`scripts/deployment-config/README.md`](scripts/deployment-config/README.md#the-artifact-origin-needs-a-zone) explains why in full.
+- **One domain on that account**, its zone active. The app answers on a hostname you choose on it (`bot.example.com`).
 - A **Cloudflare Zero Trust team** (free). Its Access policy is this deployment's allowlist.
 - A **Fly Sprites token** for the Computer, from [fly.io](https://fly.io/dashboard). Fly is the one non-Cloudflare account a deployment needs.
 - [**Bun**](https://bun.sh) 1.4 or newer, and `git`, `curl` and `unzip` on `PATH`. No Docker and no Flutter: the container images and the web client are published with each release and pulled. `gh` is used to fetch the release assets when it is installed; without it the same public URLs are fetched with `curl`.
@@ -55,7 +55,7 @@ Setting `CLOUDFLARE_API_TOKEN` as well as signing wrangler in lets the installer
 It runs eight steps — account, profile, resources, internal secrets, your keys, Access, the client and artifact, deploy — and each says what it did. What it asks for:
 
 - A Worker name prefix (default `frockbot`); everything below is named from it.
-- The app's hostname, on a zone this account holds. The artifact origin is derived as `ui.<that hostname>`.
+- The app's hostname, on a zone this account holds.
 - Admin email addresses, which become `FROCKBOT_ADMIN_EMAILS`: the deployment's admins. They bypass admission, and the operator debug surface, which is gated on its own `DEBUG_TOKEN`, checks this list before it will send a Turn as an account.
 - The Zero Trust team domain, e.g. `yourteam.cloudflareaccess.com`.
 - The region for the R2 buckets and the Vectorize index (default `enam`).
@@ -70,11 +70,11 @@ The answers are written to `deployments/simple.json`, and `bun run deployment:co
 
 In your Cloudflare account:
 
-- **Three Workers.** `<prefix>` is the app, on your hostname and on `ui.<your hostname>` — both declared as custom domains, so Cloudflare creates and maintains their proxied DNS records on the first deploy. `<prefix>-computer-host` and `<prefix>-applet-build` have no public route at all and are reached only over the app's service bindings.
+- **Three Workers.** `<prefix>` is the app, on your hostname — declared as a custom domain, so Cloudflare creates and maintains its proxied DNS record on the first deploy. `<prefix>-computer-host` and `<prefix>-applet-build` have no public route at all and are reached only over the app's service bindings.
 - **Two container applications**, one in front of each of those two Workers, pulling the images `release.yml` published for your tag from Docker Hub. A public Docker Hub image needs no registry credentials, so nothing is configured and nothing is built locally.
 - **Two R2 buckets** — `<prefix>-application-artifacts` and `<prefix>-memory-files` — and **one Vectorize index**, `<prefix>-memory`, with 768 cosine dimensions from `@cf/baai/bge-base-en-v1.5`. Each step is create-if-absent.
 - **Five Durable Object namespaces**, which come with the app Worker that declares them, plus the `AI` binding and the Worker Loader bindings, which are configuration rather than resources.
-- **Two Cloudflare Access applications** on the app's hostname: Allow on the hostname itself — the document, the client, sign-out and the native sign-in flow, and the policy that is the allowlist — and Bypass on `/api`, so API requests reach the Worker, which authenticates every one of them itself from the Access cookie a browser sends or the bearer a phone exchanged. `ui.<your hostname>` is in neither: an Applet's page is anonymous by design.
+- **Two Cloudflare Access applications** on the app's hostname: Allow on the hostname itself — the document, the client, sign-out and the native sign-in flow, and the policy that is the allowlist — and Bypass on `/api`, so API requests reach the Worker, which authenticates every one of them itself from the Access cookie a browser sends or the bearer a phone exchanged.
 - **No D1.** The Access auth Package stores nothing.
 
 It mints six secrets and sets them with the deploy: `CREDENTIAL_KEYRING`, `COMPUTER_HOST_TOKEN`, `APPLET_BUILD_TOKEN`, `ROUTINE_HOOK_SECRET`, `MACHINE_TOKEN_SECRET` and `NATIVE_TOKEN_SECRET`. They are recorded in `.deployment/simple/secrets.env`, git-ignored and mode 0600, and that is the only copy: they encrypt and sign durable state — stored Connection credentials, issued Routine webhook keys, paired machines — so back the file up. A run whose record is intact mints nothing a second time.

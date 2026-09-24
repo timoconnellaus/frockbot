@@ -96,11 +96,6 @@ export interface BotStateEnv {
   /** The shared secret presented on every Plugin build call. */
   APPLET_BUILD_TOKEN?: string;
   /**
-   * The deployment's own origin. Applets derive the anonymous artifact origin
-   * from it for the preview URL a check hands the Bot.
-   */
-  BETTER_AUTH_URL?: string;
-  /**
    * The shared secret the app Worker presents to the Computer host. Absent,
    * and no Computer host call is made: an unauthenticated call would be
    * refused at the host anyway, and a missing secret is a deployment fault

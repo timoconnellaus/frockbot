@@ -60,13 +60,6 @@ export const DEPLOYMENT_PROFILE_SCHEMA_V1 = {
         },
       },
     },
-    artifactHostname: {
-      description:
-        "The anonymous origin an Applet's page is served from. It must be `ui.<the app's hostname>`: the gateway derives the pairing from that prefix, so a hostname of any other shape serves pages whose socket the gateway refuses (see the README).",
-      type: "string",
-      pattern:
-        "^ui\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?(\\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$",
-    },
     images: {
       description:
         "Where the two container Workers get their image. Absent is `dockerfile`: wrangler builds it on the deploying machine, which needs Docker. `registry` pulls the image `release.yml` published for one tag, which is what an installer with no Docker deploys.",

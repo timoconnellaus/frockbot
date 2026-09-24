@@ -284,15 +284,6 @@ export interface UserBotStateBinding {
     schemaVersion: 1;
     botId: string;
   }): Promise<ClientSkillCatalogV1>;
-  listPackageUi(input: {
-    schemaVersion: 1;
-    botId: string;
-  }): Promise<import("@frockbot/core/contracts").PackageIframeCompositionV1>;
-  runPackageUiTool(input: {
-    schemaVersion: 1;
-    botId: string;
-    command: import("@frockbot/core/contracts").PackageIframeToolCommandV1;
-  }): Promise<BotTurnResult>;
   readWorkspaceFileV1(input: {
     schemaVersion: 1;
     botId: string;
@@ -387,8 +378,6 @@ export type BotPackageLoader = WorkerLoader<
 
 export interface ApplicationArtifactStore {
   load(applicationHash: string): Promise<string>;
-  /** Hash-verified immutable HTML for the anonymous UI artifact hostname. */
-  loadPackageUiArtifact?(contentHash: string): Promise<string | undefined>;
 }
 
 /**
@@ -778,10 +767,6 @@ export interface GatewayDependencies {
   nativeAuth?: import("./native-auth.js").NativeAuth;
   loader: WorkerLoader;
   artifacts: ApplicationArtifactStore;
-  /** Dedicated anonymous hostnames that serve only immutable iframe pages. */
-  uiArtifactHosts?: readonly string[];
-  /** The request's `ctx.waitUntil`, for work that may outlive the answer. */
-  waitUntil?: (promise: Promise<unknown>) => void;
   auth: AuthPackageV1;
   /**
    * The beta-access authority, asked before browser requests reach a User;

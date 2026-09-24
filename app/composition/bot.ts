@@ -78,7 +78,7 @@ export async function syncCompositionFromUser(
 
 /**
  * Admission. Every Turn enters the kernel through here — a chat Turn, a
- * Routine firing, a Package-UI tool, a Subagent task — so the pin the
+ * Routine firing, a Subagent task — so the pin the
  * admission transaction takes inside the Bot is always the User's current
  * generation mirrored a moment earlier, never one this Bot minted alone.
  */

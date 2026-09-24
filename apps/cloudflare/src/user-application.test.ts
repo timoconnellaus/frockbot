@@ -17,20 +17,6 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
     assertRegistered: () => Promise.resolve(),
     listSkills: () =>
       Promise.resolve({ schemaVersion: 1 as const, skills: [] }),
-    listPackageUi: ({ botId }) =>
-      Promise.resolve({
-        schemaVersion: 1 as const,
-        botId,
-        generationId: "foundation-v1",
-        contributions: [],
-      }),
-    runPackageUiTool: ({ botId, command }) =>
-      state.run(botId, {
-        runId: command.commandId,
-        sessionId: `session:${botId}`,
-        acceptedAt: new Date().toISOString(),
-        text: command.name,
-      }),
     readWorkspaceFileV1: () =>
       Promise.resolve({
         schemaVersion: 1 as const,
@@ -140,7 +126,7 @@ describe("user application security headers", () => {
     expect(policy.get("img-src")).toEqual(["'self'", "data:", "blob:"]);
     // Two deliberate relaxations, and neither is optional: CanvasKit
     // instantiates WebAssembly, and the engine injects a `<style>` element to
-    // measure text. The artifact origin's own policy is untouched.
+    // measure text.
     expect(policy.get("style-src")).toEqual(["'self'", "'unsafe-inline'"]);
     // The zone injects the Cloudflare Insights beacon above this Worker, so a
     // policy that refused it logged a console error on every page load.
@@ -157,11 +143,10 @@ describe("user application security headers", () => {
     // The document sets a `<base href>` of its own to the content-addressed
     // directory the engine's URLs are relative to.
     expect(policy.get("base-uri")).toEqual(["'self'"]);
-    // Package pages use the anonymous UI origin; the expanded Computer viewer
-    // frames a page the Computer host serves, and the policy names whatever
-    // origins that host declared rather than a literal of its own.
+    // The expanded Computer viewer frames a page the Computer host serves,
+    // and the policy names whatever origins that host declared rather than a
+    // literal of its own.
     expect(policy.get("frame-src")).toEqual([
-      "https://ui.app.example",
       ...COMPUTER_HOST_CAPABILITIES_V1.viewerFrameOrigins,
     ]);
     expect(
@@ -241,65 +226,6 @@ describe("user application security headers", () => {
 });
 
 describe("user application Bot seam", () => {
-  test("projects Package UI and forwards exact direct-tool commands", async () => {
-    const toolCommands: unknown[] = [];
-    const result: BotTurnResult = {
-      schemaVersion: 1,
-      runId: "command-1",
-      text: "Sydney Weather",
-      events: [],
-    };
-    const binding = rpcBindingFor({} as BotStateBinding);
-    binding.listPackageUi = ({ botId }) =>
-      Promise.resolve({
-        schemaVersion: 1,
-        botId,
-        contributions: [],
-      });
-    binding.runPackageUiTool = (request) => {
-      toolCommands.push(request);
-      return Promise.resolve(result);
-    };
-    const env: UserApplicationEnv = {
-      BOT_STATE: binding,
-      DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
-    };
-    const fetchUserApplication = createUserApplication();
-
-    const catalogResponse = await fetchUserApplication(
-      new Request("https://app.example/api/bots/primary/package-ui"),
-      env,
-    );
-    expect(catalogResponse.status).toBe(200);
-    expect((await catalogResponse.json()) as Record<string, unknown>).toEqual({
-      schemaVersion: 1,
-      botId: "primary",
-      artifactOrigin: "https://ui.app.example",
-      contributions: [],
-    });
-
-    const command = {
-      schemaVersion: 1 as const,
-      commandId: "command-1",
-      packageId: "weather-page",
-      name: "weather_lookup",
-      input: { city: "Sydney" },
-    };
-    const toolResponse = await fetchUserApplication(
-      new Request("https://app.example/api/bots/primary/package-ui/tools", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify(command),
-      }),
-      env,
-    );
-    expect(toolResponse.status).toBe(200);
-    expect((await toolResponse.json()) as BotTurnResult).toEqual(result);
-    expect(toolCommands).toEqual([
-      { schemaVersion: 1, botId: "primary", command },
-    ]);
-  });
-
   test("delegates an admitted turn to the Bot owner", async () => {
     const calls: Array<{ botId: string; text: string }> = [];
     const result: BotTurnResult = {

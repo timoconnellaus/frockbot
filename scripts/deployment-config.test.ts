@@ -261,7 +261,6 @@ describe("the generator", () => {
       ...loadProfileV1("hosted"),
       name: "simple",
       workers: { app: {} },
-      artifactHostname: undefined,
     };
     const app = generateWorkerConfigV1("app", {
       profile: profile as ReturnType<typeof loadProfileV1>,
@@ -269,7 +268,6 @@ describe("the generator", () => {
     expect(app.config.routes).toBeUndefined();
     expect(app.config.workers_dev).toBe(true);
     expect(app.config.name).toBe("frockbot");
-    expect((app.config.vars as Config).UI_ARTIFACT_HOSTS).toBeUndefined();
   });
 
   test("builds the container images from the Dockerfile by default", () => {

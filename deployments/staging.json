@@ -12,7 +12,6 @@
     "computerHost": {},
     "appletBuild": {}
   },
-  "artifactHostname": "ui.staging-bot.frockbot.com",
   "resources": {
     "applicationArtifactsBucket": "frockbot-application-artifacts-staging",
     "memoryFilesBucket": "frockbot-memory-files-staging",

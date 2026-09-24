@@ -9,10 +9,6 @@ import {
   isRpcIdentifier,
 } from "@frockbot/core/configuration";
 import {
-  decodePackageIframeToolCommandV1,
-  type PackageIframeCatalogV1,
-} from "@frockbot/core/contracts";
-import {
   decodeClientNotificationAcknowledgementCommandV1,
   type ClientNotificationAcknowledgementV1,
   type ClientNotificationListV1,
@@ -46,18 +42,6 @@ import {
   turnBodyIsOversizedV1,
 } from "./request-body.js";
 import { whatsNewImageResponseV1 } from "@frockbot/app/whats-new";
-
-/** The anonymous artifact origin belonging to one app origin. */
-function packageUiArtifactOriginV1(appOrigin: URL): string {
-  const host = appOrigin.hostname;
-  const artifactHost =
-    host === "localhost" || host === "127.0.0.1"
-      ? "ui.localhost"
-      : host.startsWith("ui.")
-        ? host
-        : `ui.${host}`;
-  return `${appOrigin.protocol}//${artifactHost}${appOrigin.port ? `:${appOrigin.port}` : ""}`;
-}
 
 declare const __FROCKBOT_FLUTTER_BUILD__: string;
 declare const __FROCKBOT_CLIENT_ICON__: string;
@@ -153,13 +137,11 @@ function appHtml(
 }
 
 /** The Computer host's viewer origins, as `frame-src` sources. */
-const viewerFrameOrigins = COMPUTER_HOST_CAPABILITIES_V1.viewerFrameOrigins
-  .map((origin) => ` ${origin}`)
-  .join("");
+const viewerFrameSources =
+  COMPUTER_HOST_CAPABILITIES_V1.viewerFrameOrigins.join(" ") || "'none'";
 
 function withSecurityHeaders(
   response: Response,
-  artifactOrigin: string,
   applicationUrl: URL,
 ): Response {
   const secured = new Response(response.body, response);
@@ -167,7 +149,7 @@ function withSecurityHeaders(
   secured.headers.set("referrer-policy", "no-referrer");
   secured.headers.set(
     "content-security-policy",
-    // Package pages use the anonymous artifact origin. The expanded Computer
+    // The expanded Computer viewer is the one thing the app frames.
     //
     // Cloudflare Insights is injected into every response by the zone itself,
     // above this Worker, so the page loads it whether or not the policy allows
@@ -181,12 +163,10 @@ function withSecurityHeaders(
     // `script-src 'wasm-unsafe-eval'` and `style-src 'unsafe-inline'` are what
     // the Flutter engine needs and neither is optional: CanvasKit instantiates
     // WebAssembly, and the engine injects a `<style>` element to measure text.
-    // The relaxation is on the app origin only - the artifact origin, where
-    // untrusted pages live, keeps `default-src 'none'` (`gateway.ts`).
     // `base-uri 'self'` rather than `'none'` because the document sets a
     // `<base href>` of its own to the content-addressed directory every engine
     // URL is relative to.
-    `default-src 'self'; script-src 'self' 'wasm-unsafe-eval' ${INSIGHTS_SCRIPT_ORIGIN}; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self' ${INSIGHTS_REPORT_ORIGIN} ${applicationUrl.protocol === "https:" ? "wss:" : "ws:"}//${applicationUrl.host}; frame-src ${artifactOrigin}${viewerFrameOrigins}; frame-ancestors 'none'; base-uri 'self'`,
+    `default-src 'self'; script-src 'self' 'wasm-unsafe-eval' ${INSIGHTS_SCRIPT_ORIGIN}; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self' ${INSIGHTS_REPORT_ORIGIN} ${applicationUrl.protocol === "https:" ? "wss:" : "ws:"}//${applicationUrl.host}; frame-src ${viewerFrameSources}; frame-ancestors 'none'; base-uri 'self'`,
   );
   return secured;
 }
@@ -397,7 +377,6 @@ function createUserApplicationRoute() {
             headers: { "content-type": "text/html; charset=utf-8" },
           },
         ),
-        packageUiArtifactOriginV1(url),
         url,
       );
     }
@@ -411,18 +390,13 @@ function createUserApplicationRoute() {
             "cache-control": "no-cache",
           },
         }),
-        packageUiArtifactOriginV1(url),
         url,
       );
     }
     if (request.method === "GET") {
       const picture = whatsNewImageResponseV1(url.pathname);
       if (picture) {
-        return withSecurityHeaders(
-          picture,
-          packageUiArtifactOriginV1(url),
-          url,
-        );
+        return withSecurityHeaders(picture, url);
       }
     }
     if (request.method === "GET" && url.pathname === "/app-manifest") {
@@ -673,12 +647,6 @@ function createUserApplicationRoute() {
     }
 
     const skillsMatch = url.pathname.match(/^\/api\/bots\/([^/]+)\/skills$/);
-    const packageUiMatch = url.pathname.match(
-      /^\/api\/bots\/([^/]+)\/package-ui$/,
-    );
-    const packageUiToolMatch = url.pathname.match(
-      /^\/api\/bots\/([^/]+)\/package-ui\/tools$/,
-    );
     const workspaceFileMatch = url.pathname.match(
       /^\/api\/bots\/([^/]+)\/workspace\/file$/,
     );
@@ -697,8 +665,6 @@ function createUserApplicationRoute() {
     );
     if (
       !skillsMatch &&
-      !packageUiMatch &&
-      !packageUiToolMatch &&
       !workspaceFileMatch &&
       !turnMatch &&
       !lookupMatch &&
@@ -712,8 +678,6 @@ function createUserApplicationRoute() {
     try {
       const matched =
         skillsMatch ??
-        packageUiMatch ??
-        packageUiToolMatch ??
         workspaceFileMatch ??
         turnMatch ??
         lookupMatch ??
@@ -747,46 +711,6 @@ function createUserApplicationRoute() {
         );
       } catch (error) {
         return botFailure(error, "skill catalog failed");
-      }
-    }
-
-    if (packageUiMatch) {
-      if (request.method !== "GET") return jsonError(405, "method not allowed");
-      try {
-        const composition = await env.BOT_STATE.listPackageUi({
-          schemaVersion: 1,
-          botId,
-        });
-        return Response.json({
-          ...composition,
-          artifactOrigin: packageUiArtifactOriginV1(url),
-        } satisfies PackageIframeCatalogV1);
-      } catch (error) {
-        return botFailure(error, "Package UI catalog failed");
-      }
-    }
-
-    if (packageUiToolMatch) {
-      if (request.method !== "POST")
-        return jsonError(405, "method not allowed");
-      try {
-        const command = decodePackageIframeToolCommandV1(await request.json());
-        return Response.json(
-          await env.BOT_STATE.runPackageUiTool({
-            schemaVersion: 1,
-            botId,
-            command,
-          }),
-        );
-      } catch (error) {
-        const message =
-          error instanceof Error
-            ? error.message
-            : "Package UI tool call failed";
-        return jsonError(
-          message.includes("did not declare") ? 403 : 409,
-          message,
-        );
       }
     }
 

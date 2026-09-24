@@ -604,10 +604,6 @@ class BotSettingsView extends StatefulWidget {
   /// and is about to send are predicted.
   final void Function(SidebarProfile profile)? onPredict;
 
-  /// The package settings cards the host mounts, drawn between Capabilities
-  /// and Danger — each Package's own section, in the same card grammar.
-  final List<Widget> sections;
-
   /// This Bot's avatar, so the avatar here is the one the sidebar draws.
   final String? background;
   final String? primary;
@@ -645,7 +641,6 @@ class BotSettingsView extends StatefulWidget {
     this.onOpenVoice,
     this.onOpenLook,
     this.dangerZone,
-    this.sections = const [],
   });
 
   @override
@@ -980,7 +975,6 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                   if (state.modelAvailable) _model(context),
                 ],
               ),
-              ...widget.sections,
               if (widget.dangerZone case final Widget zone) ...[
                 FrockSectionLabel(
                   'Danger',

@@ -121,9 +121,7 @@ import {
 import { deliverMachineResult } from "@frockbot/app/machine/bot";
 import {
   listOwnSkillDocuments,
-  listPackageUi,
   listSkills,
-  runPackageUiTool,
   writeUserSkill,
 } from "@frockbot/app/skills/bot";
 import {
@@ -205,7 +203,6 @@ import {
   type CardActionCommandV1,
 } from "@frockbot/app/shell/cards";
 import {
-  decodePackageIframeToolCommandV1,
   decodeIsolateMemoryReadRequestV1,
   decodeIsolateStorageDeleteRequestV1,
   decodeIsolateStorageGetRequestV1,
@@ -2493,28 +2490,6 @@ export class BotState
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
     return listSkills(shell.state, identity);
-  }
-
-  async listPackageUi(input: unknown) {
-    const identity = decodeBotIdentityRpcV1(input);
-    const { shell } = await this.materialized(identity);
-    return listPackageUi(shell.state, identity);
-  }
-
-  async runPackageUiTool(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-      command: rpcDecoded(decodePackageIframeToolCommandV1),
-    });
-    const identity = {
-      userId: request.userId as string,
-      botId: request.botId as string,
-    };
-    const { shell } = await this.materialized(identity);
-    const command =
-      request.command as import("@frockbot/core/contracts").PackageIframeToolCommandV1;
-    return runPackageUiTool(shell.state, identity, command);
   }
 
   /**

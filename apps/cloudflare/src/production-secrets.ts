@@ -252,7 +252,6 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] 
       name: "DEFAULT_APPLICATION_HASH",
       why: "A `vars` entry the deploy writes.",
     },
-    { name: "UI_ARTIFACT_HOSTS", why: "A `vars` entry." },
     {
       name: "ALLOWED_CLIENT_ORIGINS",
       why: "Admits a cross-origin client; no deployment configures one, since the web app is same-origin and the native app sends no `Origin`.",

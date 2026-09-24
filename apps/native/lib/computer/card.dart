@@ -395,7 +395,7 @@ class ComputerViewerPage extends StatefulWidget {
   final ComputerController controller;
 
   /// Whose Computer this is, for the title. Absent where the surface that
-  /// opened it does not know — the card inside a Package page, say.
+  /// opened it does not know.
   final String? botName;
   const ComputerViewerPage({super.key, required this.controller, this.botName});
 

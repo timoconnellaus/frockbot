@@ -85,8 +85,7 @@ The tracked file, with identity applied:
 | `env.development`, `env.e2e`              | dropped — a named environment in a deployed config is a second Worker                                     |
 
 The identity vars the app Worker gains: `NATIVE_SLICE_2_AUTH`,
-`UI_ARTIFACT_HOSTS`, `FROCK_AI_GATEWAY_ID`, `FROCK_AI_ACCOUNT_ID`,
-`FROCK_AI_AUTO_ROUTE`, and `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` when the profile
+`FROCK_AI_GATEWAY_ID`, `FROCK_AI_ACCOUNT_ID`, `FROCK_AI_AUTO_ROUTE`, and `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` when the profile
 builds the Access auth Package. `FROCK_AI_ACCOUNT_ID` is what selects the compat
 HTTP transport, the only one that accepts a `dynamic/<route>` model
 (cloudflare/ai#617); a profile with no `aiGateway` takes the `AI` binding, where
@@ -211,36 +210,3 @@ not an installer asset: `bun run setup` does not download it, and a deployer
 who wants the phone app builds it against their own origin (`docs/app-updates.md`).
 
 [image-management]: https://developers.cloudflare.com/containers/image-management/
-
-## The artifact origin needs a zone
-
-`UI_ARTIFACT_HOSTS` is the anonymous origin an Applet's page is served from, and
-ADR 0028 proposed serving it from a second Worker named `<prefix>-ui` so a
-deployment with no zone could have one. **It cannot work on `workers.dev`**, for
-a reason that has nothing to do with bindings:
-
-- The pairing between the two origins is _derived from the `ui.` prefix_, in
-  three places: `packageUiGatewayOriginV1` and `isPackageUiArtifactOriginFor`
-  (`apps/cloudflare/src/gateway.ts`) and `appletUiArtifactOriginV1`
-  (`applets/preview.ts`). The page's `connect-src` is `ui.<host>` with the prefix
-  stripped, and the gateway admits an Applet viewer socket from `ui.<its own
-host>` and nothing else.
-- A `workers.dev` hostname is `<worker name>.<account subdomain>.workers.dev`,
-  and a Worker name cannot contain a dot. No second Worker name can produce a
-  hostname of the form `ui.<the app's hostname>`, so a page served from
-  `<prefix>-ui.<subdomain>.workers.dev` would be given a `connect-src` naming a
-  host that does not exist, and its socket would be refused.
-
-So the generator **requires** `artifactHostname`, and the schema requires it to
-be `ui.<something>`: a profile that gives the app Worker a hostname must also
-name the artifact origin, which means a zone. The alternative is to make that
-pairing explicit configuration in all three places instead of derived — a change
-to the Applet path, not to deployment identity, so it is not bundled here.
-
-What the investigation did settle: **the artifact origin needs only R2.**
-`servePackageUiArtifact` answers before any identity or Durable Object work — a
-request to a configured artifact host reaches nothing else in the gateway — and
-the Applet viewer socket is served by the _app_ origin, which is what the page's
-`connect-src` names. So if the pairing is ever made explicit, the second Worker
-needs the `APPLICATION_ARTIFACTS` bucket and no Durable Object bindings at all,
-`script_name` or otherwise.

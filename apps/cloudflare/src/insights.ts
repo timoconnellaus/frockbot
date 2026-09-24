@@ -4,10 +4,9 @@
  * The beacon is injected into every HTML response by the zone, above this
  * Worker, so a page loads it whether or not that page's policy allows it. A
  * policy that does not name these origins does not remove the beacon; it turns
- * every page load into a refused request and a red console error. Both
- * policies this deployment serves — the application's and the anonymous
- * Package-UI artifact's — therefore name them, and neither pretends the
- * feature is off.
+ * every page load into a refused request and a red console error. The
+ * application's policy therefore names them, and does not pretend the feature
+ * is off.
  */
 
 /** Where the zone's injected beacon script is served from. */

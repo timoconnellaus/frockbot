@@ -543,18 +543,3 @@ abstract final class ComputerIds {
   static const releaseControl = 'computer-release-control';
   static const reconnect = 'computer-reconnect';
 }
-
-/// Package pages: a first-party or Bot-authored page, and the control that
-/// opens it.
-///
-/// The names follow what `package-iframe-ui.e2e.ts` selects on — the framed
-/// page and its attribution. An entry is named by the Package and the entry
-/// the manifest declared, because that pair is what a spec means when it says
-/// "the Applets door" — a row under More on the Bot page, since this Bot's
-/// Package entries left the conversation bar.
-abstract final class PackageIds {
-  static String entry(String packageId, String entryId) =>
-      'package-entry-$packageId-$entryId';
-  static String page(String packageId, String pageId) =>
-      'package-page-$packageId-$pageId';
-}

@@ -20,7 +20,6 @@ export const accessProfile: DeploymentProfileV1 = {
     computerHost: {},
     appletBuild: {},
   },
-  artifactHostname: "ui.bot.example.com",
   images: {
     source: "registry",
     registry: "docker.io/timoconnellaus",
