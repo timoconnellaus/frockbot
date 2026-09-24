@@ -499,19 +499,25 @@ export async function refreshMcpSignInV1(input: {
 }
 
 /**
- * Tells the server a token is done with (RFC 7009). Answers whether it said
- * so; a server with no revocation endpoint cannot be told, and a token it
- * does not know is, by the RFC, a success.
+ * What telling a server a token is done with came to. `revoked` is its
+ * success, which by RFC 7009 is also its answer for a token it no longer
+ * knows; `refused` is any other answer it gave, which asking again would not
+ * change; `unsupported` is a server with nowhere to ask; `unreachable` is no
+ * answer at all, the one worth asking again.
  */
+export type McpRevocationV1 =
+  "revoked" | "refused" | "unsupported" | "unreachable";
+
+/** Tells the server a token is done with (RFC 7009). */
 export async function revokeMcpSignInV1(input: {
   server: McpSignInServerV1;
   client: McpSignInClientV1;
   token: string;
   hint: "access_token" | "refresh_token";
   fetch?: McpFetchV1;
-}): Promise<boolean> {
+}): Promise<McpRevocationV1> {
   const endpoint = input.server.metadata.revocation_endpoint;
-  if (!endpoint) return false;
+  if (!endpoint) return "unsupported";
   const body = new URLSearchParams({
     token: input.token,
     token_type_hint: input.hint,
@@ -541,9 +547,13 @@ export async function revokeMcpSignInV1(input: {
       headers,
       body,
     });
-    return response.ok;
+    if (response.ok) return "revoked";
+    // A server in trouble, or one asking us to slow down, may answer later.
+    return response.status >= 500 || response.status === 429
+      ? "unreachable"
+      : "refused";
   } catch {
-    return false;
+    return "unreachable";
   }
 }
 

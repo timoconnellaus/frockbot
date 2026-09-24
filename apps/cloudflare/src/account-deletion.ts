@@ -62,11 +62,23 @@ export interface AccountDeletionUserSeamsV1 {
   deleteIdentity(): Promise<void>;
   /** Erases the voice session object. */
   eraseVoice(): Promise<void>;
+  /**
+   * Revokes the grants the User's MCP servers issued, forgetting each once
+   * its server has answered — or, with `giveUp`, whether it did or not.
+   * Answers how many servers did not answer.
+   */
+  revokeMcpGrants(giveUp: boolean): Promise<number>;
 }
 
 const COMPLETE: AccountDeletionStepOutcomeV1 = { status: "complete" };
 /** One listing page, and one bulk delete, of object storage or the index. */
 const PAGE = 1_000;
+/**
+ * Passes an MCP server that does not answer its revocation is given — about
+ * half a minute of the saga's backoff — before its grant is forgotten
+ * unrevoked, so a server that is gone never holds a deletion up.
+ */
+export const MCP_REVOCATION_ATTEMPTS_V1 = 5;
 
 interface DeploymentPolicyDeletionRpc {
   closeAccountForDeletion(input: unknown): Promise<unknown>;
@@ -226,6 +238,18 @@ export async function runAccountDeletionStepV1(
             record,
           )
         : COMPLETE;
+    case "mcp-servers": {
+      // A failure is what backs the saga off between passes; the record's
+      // count of them is what bounds how long a silent server is waited on.
+      const owed = await seams.revokeMcpGrants(
+        record.attempts + 1 >= MCP_REVOCATION_ATTEMPTS_V1,
+      );
+      if (owed > 0)
+        throw new Error(
+          `${owed} MCP server${owed === 1 ? "" : "s"} did not answer the revocation`,
+        );
+      return COMPLETE;
+    }
     case "payments":
       return deletePayments(env, userId, seams.recordedPaymentCustomer());
     case "files":

@@ -75,6 +75,7 @@ import {
 import {
   forgetMcpGrantV1,
   forgetMcpSignInV1,
+  listMcpGrantConnectionsV1,
   markMcpSignInExchangingV1,
   openMcpSignInV1,
   readMcpGrantV1,
@@ -94,6 +95,7 @@ import {
   refreshMcpSignInV1,
   registerMcpClientV1,
   revokeMcpSignInV1,
+  type McpRevocationV1,
   type McpSignInGrantV1,
   type McpSignInTokensV1,
 } from "./oauth.js";
@@ -502,6 +504,40 @@ export class McpUserBackendContribution {
         "Adding this server didn't finish. Remove it and add it again.",
       ).catch(() => undefined);
     }
+  }
+
+  /**
+   * Revokes every grant this User's servers hold, for the account's deletion,
+   * before this object is wiped and the tokens with it. The grant record is
+   * the key: it goes once its server has answered — revoked, or refused in a
+   * way asking again would not change — or has nowhere to ask, and a crash
+   * between the two only asks again, which RFC 7009 answers the same way. A
+   * server that did not answer keeps its record for the next pass, until
+   * `giveUp`, when it is forgotten too: a server that is gone must never keep
+   * an account from being deleted. Answers how many are still owed.
+   */
+  async revokeGrantsForDeletion(input: {
+    userId: string;
+    giveUp: boolean;
+  }): Promise<number> {
+    const owed = await Promise.all(
+      (await listMcpGrantConnectionsV1(this.host.storage)).map(
+        async (connectionId) => {
+          const grant = await readMcpGrantV1(
+            this.host.storage,
+            this.host.credentials,
+            { accountId: input.userId, connectionId },
+          ).catch(() => undefined);
+          const outcome: McpRevocationV1 = grant
+            ? await this.revokeGrant(grant).catch(() => "unreachable" as const)
+            : "unsupported";
+          if (outcome === "unreachable" && !input.giveUp) return true;
+          await forgetMcpGrantV1(this.host.storage, connectionId);
+          return false;
+        },
+      ),
+    );
+    return owed.filter(Boolean).length;
   }
 
   /** `<namespace> → <host>` for every server this User holds, for audit. */
@@ -1433,8 +1469,8 @@ export class McpUserBackendContribution {
       accessToken: string;
       refreshToken?: string;
     },
-  ): Promise<void> {
-    await revokeMcpSignInV1({
+  ): Promise<McpRevocationV1> {
+    return revokeMcpSignInV1({
       server: grant.server,
       client: grant.client,
       ...(grant.refreshToken
