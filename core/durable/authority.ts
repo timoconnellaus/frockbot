@@ -809,6 +809,7 @@ export class BotDurableAuthority<Snapshot> {
         previousEventCount: seeded.cursor.nextSeq,
         ...storedRunEventFieldsV2(seeded.cursor.nextSeq, []),
       } satisfies StoredRunV1<Snapshot>);
+      await this.clearRunRepair(transaction, runId);
       await transaction.put({
         [key]: structuredClone(storedRunRecordV2(promoted)),
         [ACTIVE_RUN_KEY]: runId,
@@ -1616,14 +1617,17 @@ export class BotDurableAuthority<Snapshot> {
    * The verdict is taken inside the transaction, against the record and the
    * log as they are committed there, so a Turn that settled itself since the
    * repair came due is left exactly as it settled — and so is one that started
-   * executing in this object in the meantime. The settlement is
-   * `failStoredRun`, exactly as recovery's is, which closes the open Turn in
-   * the log on the way, and its run-record write is what publishes the `runs`
-   * invalidation watching clients re-read on.
+   * executing in this object, or was promoted into the active slot, in the
+   * meantime. The active Turn is recovery's, and a promoted one that waited in
+   * the queue already looks past its deadline to liveness, which counts from
+   * admission. The settlement is `failStoredRun`, exactly as recovery's is,
+   * which closes the open Turn in the log on the way, and its run-record write
+   * is what publishes the `runs` invalidation watching clients re-read on.
    */
   private async settleStaleRun(runId: string): Promise<void> {
     await this.ctx.storage.transaction(async (transaction) => {
       if (runId === this.executingRunId) return;
+      if ((await transaction.get<string>(ACTIVE_RUN_KEY)) === runId) return;
       const run = await this.readRunFrom(transaction, runId);
       if (!run || run.runId !== runId || run.status !== "running") return;
       const eventLog = new SessionEventLog(transaction);

@@ -1116,16 +1116,11 @@ describe("a message that waits longer than the Turn deadline", () => {
     expect(await second).toMatchObject({ text: "done: second" });
   });
 
-  test("a queue entry naming a settled Turn does not hold the Turns behind it", async () => {
-    const storage = new MemoryStorage();
-    const admitting = createAuthority(storage, { kickDriver: false });
-    await admitting.authority.admit(command("run-1", "first"));
-    await admitting.authority.admit(command("run-2", "second"));
-    await admitting.authority.admit(command("run-3", "third"));
-    expect(waitingUserRuns(storage)).toEqual(["run-2", "run-3"]);
-
-    // What the repair used to leave behind: the Turn ahead settled, and the
-    // waiting Turn failed in the queue with its entry still at the head.
+  /**
+   * What the repair used to leave behind: `run-1` settled, and `run-2` failed
+   * in the queue with its entry still at the head.
+   */
+  function wedgeBehindFailedHead(storage: MemoryStorage): void {
     const active = storage.values.get("run:run-1") as Record<string, unknown>;
     storage.values.set("run:run-1", {
       ...active,
@@ -1139,6 +1134,17 @@ describe("a message that waits longer than the Turn deadline", () => {
       status: "failed",
       failure: STALE_RUNNING_RUN_FAILURE_V1,
     });
+  }
+
+  test("a queue entry naming a settled Turn does not hold the Turns behind it", async () => {
+    const storage = new MemoryStorage();
+    const admitting = createAuthority(storage, { kickDriver: false });
+    await admitting.authority.admit(command("run-1", "first"));
+    await admitting.authority.admit(command("run-2", "second"));
+    await admitting.authority.admit(command("run-3", "third"));
+    expect(waitingUserRuns(storage)).toEqual(["run-2", "run-3"]);
+
+    wedgeBehindFailedHead(storage);
 
     const restarted = createAuthority(storage);
     const alarm = restarted.authority.alarm();
@@ -1152,6 +1158,30 @@ describe("a message that waits longer than the Turn deadline", () => {
     expect(storedRun(storage, "run-2").status).toBe("failed");
     expect(storedRun(storage, "run-3").status).toBe("completed");
     expect(waitingUserRuns(storage)).toEqual([]);
+  });
+
+  test("a dead user entry does not hold an agent Turn its caller waits on", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage, { kickDriver: false });
+    await probe.authority.admit(command("run-1", "first"));
+    await probe.authority.admit(command("run-2", "second"));
+    wedgeBehindFailedHead(storage);
+
+    // Nothing is driving, so the waiting caller promotes its own Turn.
+    const agent = probe.authority.run(
+      command("run-agent", "question", { turnType: "agent" }),
+    );
+    await Promise.race([probe.handle("run-agent").started, agent]);
+    probe.handle("run-agent").finish();
+    expect(await agent).toMatchObject({ text: "done: question" });
+    expect(waitingUserRuns(storage)).toEqual([]);
+
+    // And the Bot takes background work again.
+    expect(
+      await probe.authority.admit(
+        command("run-firing", "firing", { turnType: "automation" }),
+      ),
+    ).toMatchObject({ disposition: "admitted" });
   });
 
   test("a Turn settled while it waits leaves the queue", async () => {
