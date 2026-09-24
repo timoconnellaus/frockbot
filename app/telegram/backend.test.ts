@@ -117,7 +117,7 @@ describe("the Telegram webhook", () => {
     const host = fakeHost({}, { account: "alice" });
     const response = await deliver(host, update("What's on today?"));
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
+    expect((await response.json()) as object).toEqual({
       method: "sendChatAction",
       chat_id: "4242",
       action: "typing",
@@ -258,7 +258,9 @@ describe("the Telegram webhook", () => {
       {},
       { account: "alice", decision: { kind: "reply", text: "Your Bots:" } },
     );
-    expect(await (await deliver(host, update("/bots"))).json()).toEqual({
+    expect(
+      (await (await deliver(host, update("/bots"))).json()) as object,
+    ).toEqual({
       method: "sendMessage",
       chat_id: "4242",
       text: "Your Bots:",
