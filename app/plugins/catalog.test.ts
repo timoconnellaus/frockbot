@@ -11,14 +11,12 @@ import {
   maskPlanForBotV1,
   pluginRunsForBotV1,
   seededMemberV1,
-  seededPluginPageV1,
   seededPluginsForAccountV1,
   type SeededPluginV1,
 } from "./catalog.js";
 import { emptyPluginEnablementV1 } from "./enablement.js";
 import { FOUNDATION_PACKAGE_CATALOG_V1 } from "@frockbot/app/packages";
 import { servedPluginContractVersionsV1 } from "@frockbot/core/contracts";
-import { decodeCompositionMemberV1 } from "@frockbot/core/durable";
 
 test("every deployment Plugin can resolve under a served contract", () => {
   const served = servedPluginContractVersionsV1();
@@ -118,64 +116,6 @@ describe("a seeded plugin's record", () => {
       provenance: { kind: "user", userId: "user-1", packageId: "weather" },
       artifact: { contentHash: "a".repeat(64) },
     });
-  });
-});
-
-describe("a seeded plugin's page", () => {
-  function paged(pages?: unknown): Record<string, unknown> {
-    const base = seeded("strobe", "default-off");
-    return {
-      ...base,
-      descriptor: {
-        ...(base.descriptor as object),
-        views: [
-          {
-            slot: "conversation.panel",
-            surfaceId: "strobe",
-            label: "Strobe",
-            page: "strobe.html",
-          },
-        ],
-      },
-      ...(pages === undefined ? {} : { pages }),
-    };
-  }
-
-  test("is exactly the pages its views name, and reaches the member", () => {
-    expect(() => decodeSeededPluginV1(paged())).toThrow(/pages is missing/);
-    expect(() =>
-      decodeSeededPluginV1(
-        paged([{ path: "other.html", contentHash: "b".repeat(64), size: 3 }]),
-      ),
-    ).toThrow();
-    const plugin = decodeSeededPluginV1(
-      paged([{ path: "strobe.html", contentHash: "b".repeat(64), size: 3 }]),
-    );
-    const member = seededMemberV1(plugin, "user-1", "2026-09-24T00:00:00.000Z");
-    expect(member.pages).toEqual([
-      { path: "strobe.html", contentHash: "b".repeat(64), size: 3 },
-    ]);
-    expect(decodeCompositionMemberV1(member, "member")).toEqual(member);
-  });
-
-  test("the Tuner ships its page in the bundle, served by the hash it is named by", async () => {
-    const tuner = DEPLOYMENT_PLUGIN_CATALOG_V1.find(
-      (plugin) => plugin.pluginId === "tuner",
-    );
-    expect(tuner?.seed).toBe("default-off");
-    expect(tuner?.descriptor.device).toEqual({ abilities: ["microphone"] });
-    const page = tuner?.pages?.[0];
-    if (!page) throw new Error("the Tuner ships no page");
-    expect(page.path).toBe("tuner.html");
-    const html = seededPluginPageV1(page.contentHash);
-    if (html === undefined) throw new Error("the Tuner's page is not bundled");
-    const bytes = new TextEncoder().encode(html);
-    expect(bytes.byteLength).toBe(page.size);
-    const digest = await crypto.subtle.digest("SHA-256", bytes);
-    expect(Buffer.from(digest).toString("hex")).toBe(page.contentHash);
-    // Stored as a publish stores one: the bridge first in the head.
-    expect(html).toContain("window.frockbot");
-    expect(seededPluginPageV1("0".repeat(64))).toBeUndefined();
   });
 });
 

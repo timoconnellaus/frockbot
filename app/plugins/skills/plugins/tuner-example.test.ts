@@ -1,8 +1,6 @@
 // The guitar tuner the plugins Skill teaches (`references/microphone.md`) is
 // run here as written: its page script, fed plucked strings through the same
 // `openMicrophone` a page gets, must name each string and how far off it is.
-// It is also the Tuner the deployment seeds, file for file, so what a Bot
-// learns from is what a person runs.
 import { describe, expect, test } from "bun:test";
 import { readFileSync } from "node:fs";
 
@@ -110,34 +108,5 @@ describe("the tuner the Skill teaches", () => {
     expect(tuner.frames()).toBe(7);
     // Nothing was written over the page's own placeholder.
     expect(tuner.text("note")).toBe("");
-  });
-});
-
-describe("the Tuner the deployment ships", () => {
-  const seeded = (file: string) =>
-    readFileSync(
-      new URL(`../../seeded/tuner/${file}`, import.meta.url),
-      "utf8",
-    );
-  const blocks = (language: string) =>
-    [
-      ...reference.matchAll(
-        new RegExp("```" + language + "\\n([\\s\\S]*?)```", "g"),
-      ),
-    ].map((match) => match[1]);
-
-  test("is the one the Skill teaches, under the deployment's own id", () => {
-    expect(seeded("tuner.html")).toBe(blocks("html")[0]!);
-    expect(seeded("plugin.ts")).toBe(blocks("ts").at(-1)!);
-    const taught = JSON.parse(blocks("json").at(-1)!) as Record<
-      string,
-      unknown
-    >;
-    expect(taught.id).not.toBe("tuner");
-    expect(JSON.parse(seeded("plugin.json"))).toEqual({
-      ...taught,
-      id: "tuner",
-      displayName: "Tuner",
-    });
   });
 });

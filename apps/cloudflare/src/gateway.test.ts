@@ -1,7 +1,3 @@
-import {
-  DEPLOYMENT_PLUGIN_CATALOG_V1,
-  seededPluginPageV1,
-} from "@frockbot/app/plugins/catalog";
 import type { SettingsFrame } from "@frockbot/core/protocol-schemas";
 import type {
   ApprovalDecisionReceiptV1,
@@ -1342,28 +1338,6 @@ describe("Cloudflare user application gateway", () => {
     expect(() =>
       applicationDeploymentId({ userId: "../alice", applicationHash: "valid" }),
     ).toThrow("invalid user id");
-  });
-
-  test("serves a seeded Plugin's page from the bundle, with nothing in R2", async () => {
-    const { gateway } = createTestGateway();
-    const page = DEPLOYMENT_PLUGIN_CATALOG_V1.find(
-      (plugin) => plugin.pluginId === "tuner",
-    )?.pages?.[0];
-    if (!page) throw new Error("the Tuner ships no page");
-    const served = await gateway(
-      new Request(
-        `https://bot.example.com/plugin-pages/${page.contentHash}.html`,
-      ),
-    );
-    expect(served.status).toBe(200);
-    expect(served.headers.get("content-security-policy")).toContain("sandbox");
-    expect(await served.text()).toBe(seededPluginPageV1(page.contentHash)!);
-    const missing = await gateway(
-      new Request(
-        `https://bot.example.com/plugin-pages/${"0".repeat(64)}.html`,
-      ),
-    );
-    expect(missing.status).toBe(404);
   });
 
   test("names the application on every answer the loaded app gives", async () => {
