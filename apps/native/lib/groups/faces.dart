@@ -57,12 +57,17 @@ class GroupAvatars extends StatelessWidget {
 
   /// How much of each face the next one covers.
   final double overlap;
+
+  /// A member is working: the faces shine as one picture, under the light
+  /// every working Bot wears.
+  final bool working;
   const GroupAvatars({
     super.key,
     required this.faces,
     this.size = 28,
     this.ring,
     this.overlap = 0.38,
+    this.working = false,
   });
 
   static const shown = 3;
@@ -116,18 +121,19 @@ class GroupAvatars extends StatelessWidget {
           ),
         ),
     ];
-    return ExcludeSemantics(
-      child: SizedBox(
-        width: widthFor(faces.length, size, overlap: overlap),
-        height: size,
-        child: Stack(
-          children: [
-            // The first face is in front, so it is drawn last.
-            for (var index = discs.length - 1; index >= 0; index--)
-              Positioned(left: index * step, top: 0, child: discs[index]),
-          ],
-        ),
+    final Widget stack = SizedBox(
+      width: widthFor(faces.length, size, overlap: overlap),
+      height: size,
+      child: Stack(
+        children: [
+          // The first face is in front, so it is drawn last.
+          for (var index = discs.length - 1; index >= 0; index--)
+            Positioned(left: index * step, top: 0, child: discs[index]),
+        ],
       ),
+    );
+    return ExcludeSemantics(
+      child: working ? WorkingSheen(child: stack) : stack,
     );
   }
 

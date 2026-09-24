@@ -1,11 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:frockbot_native/flock/avatar.dart';
 import 'package:frockbot_native/groups/api.dart';
 import 'package:frockbot_native/groups/faces.dart';
 import 'package:frockbot_native/groups/lines.dart';
 import 'package:frockbot_native/groups/model.dart';
 import 'package:frockbot_native/groups/pane.dart';
 import 'package:frockbot_native/groups/thread.dart';
+import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
 import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/shell/sidebar.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
@@ -285,6 +287,21 @@ void main() {
         find.byKey(const ValueKey('group-working-general')),
         findsOneWidget,
       );
+      // Each wears the working light, and so do the faces in the header.
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('group-working-xero')),
+          matching: find.byType(WorkingSheen),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(GroupAvatars),
+          matching: find.byType(WorkingSheen),
+        ),
+        findsOneWidget,
+      );
       // With someone working and nothing typed, the button stops them all.
       expect(byIdentifier(GroupIds.stop), findsOneWidget);
     });
@@ -294,6 +311,7 @@ void main() {
     Widget sidebar({
       required List<SidebarGroupChat> groups,
       void Function(String)? onSelect,
+      Map<String, wire.UnreadView> unread = const {},
     }) => host(
       ShellSidebar(
         bots: [bot('general', 'General'), bot('xero', 'Xero Books')],
@@ -302,7 +320,7 @@ void main() {
           'general': SidebarProfile(sidebarOrder: 2000),
           'xero': SidebarProfile(sidebarOrder: 3000),
         },
-        unread: const {},
+        unread: unread,
         archived: const {},
         activeBotId: null,
         focusedBotId: null,
@@ -324,13 +342,54 @@ void main() {
     SidebarGroupChat chat({
       SidebarProfile profile = const SidebarProfile(),
       int unread = 0,
+      bool working = false,
     }) => SidebarGroupChat(
       groupId: groupId,
       name: 'Books',
       faces: [faces['general']!, faces['xero']!],
       profile: profile,
       unread: unread,
+      working: working,
     );
+
+    testWidgets('a Bot at work lights the conversation it is working in', (
+      tester,
+    ) async {
+      Finder lit(String identifier) => find.descendant(
+        of: byIdentifier(identifier),
+        matching: find.byType(WorkingSheen),
+      );
+      final xeroRow = ShellIds.sidebarBot('xero');
+      final groupRow = GroupIds.row(groupId);
+
+      // Xero is answering in the group while its own chat is quiet: the
+      // light is on the group's row, where the typing is, not on Xero's.
+      await tester.pumpWidget(sidebar(groups: [chat(working: true)]));
+      expect(lit(groupRow), findsOneWidget);
+      expect(lit(xeroRow), findsNothing);
+
+      // Xero is working in its own chat and the group is quiet: the other
+      // way round.
+      await tester.pumpWidget(
+        sidebar(
+          groups: [chat()],
+          unread: {
+            'xero': wire.UnreadView.fromJson({
+              'schemaVersion': 1,
+              'botId': 'xero',
+              'count': 0,
+              'capped': false,
+              'unread': false,
+              'manuallyUnread': false,
+              'notificationsEnabled': true,
+              'working': true,
+            }),
+          },
+        ),
+      );
+      expect(lit(xeroRow), findsOneWidget);
+      expect(lit(groupRow), findsNothing);
+    });
 
     testWidgets('a group is a row among the Bots, in its order', (
       tester,

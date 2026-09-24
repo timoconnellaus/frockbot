@@ -697,6 +697,7 @@ class _SearchOverlayState extends State<SearchOverlay> {
                   if (entry.category == SearchCategory.bots && bot != null)
                     CharacterAvatar(
                       size: phone ? 42 : 32,
+                      botId: bot.id,
                       characterId: bot.background,
                       primary: bot.primary,
                       motion: CharacterMotion.quiet,

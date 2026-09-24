@@ -6,6 +6,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/scheduler.dart';
 import 'package:rive/rive.dart' as rive;
 
 // flutter_tester cannot host Rive Native's renderer. Keep widget tests on the
@@ -67,6 +68,18 @@ class CharacterInk {
 
   Size boxForHeight(double inkHeight) =>
       Size(inkHeight * width / height, inkHeight);
+
+  /// Where the silhouette sits in a square the canvas is contained in, as
+  /// fractions of the square.
+  Rect get withinSquare {
+    final scale = 1 / math.max(canvasWidth, canvasHeight);
+    return Rect.fromLTWH(
+      (1 - canvasWidth * scale) / 2 + left * scale,
+      (1 - canvasHeight * scale) / 2 + top * scale,
+      width * scale,
+      height * scale,
+    );
+  }
 }
 
 @immutable
@@ -302,9 +315,131 @@ class CharacterHoverScope extends InheritedWidget {
       hovered != oldWidget.hovered;
 }
 
+/// What every avatar of one Bot shares, so the Bot moves as one wherever it
+/// is drawn at once — the sidebar, the conversation header, the end of its
+/// thread: one twitch, one greeting, one place the eyes look. An avatar that
+/// names no Bot — a picker, a preview — has a presence of its own.
+class _Presence {
+  final String? botId;
+  _Presence(this.botId);
+
+  static final _shared = <String, _Presence>{};
+  static final _random = math.Random();
+
+  final _avatars = <_CharacterAvatarState>{};
+
+  /// The avatars under a pointer, or in a row a pointer is over.
+  final _hovers = <_CharacterAvatarState>{};
+
+  /// The avatars that twitch between Turns: quiet ones, with motion allowed.
+  final _twitchers = <_CharacterAvatarState>{};
+  bool twitching = false;
+  Timer? _twitchTimer;
+  Timer? _settleTimer;
+
+  /// Where the eyes look, fed by the one avatar whose surface owns a pointer.
+  Offset? gaze;
+  _CharacterAvatarState? _looker;
+
+  bool get greeting => _hovers.isNotEmpty;
+
+  /// Whether a surface has asked the Bot's artboards not to draw: the
+  /// composer's guard in the frames after a tap. Every copy honours it, since
+  /// the pointer that raised it also moves the eyes of every copy.
+  bool get holding => _avatars.any((each) => each._ownHold);
+
+  static _Presence attach(String? botId, _CharacterAvatarState avatar) {
+    final presence = botId == null
+        ? _Presence(null)
+        : _shared.putIfAbsent(botId, () => _Presence(botId));
+    presence._avatars.add(avatar);
+    return presence;
+  }
+
+  void detach(_CharacterAvatarState avatar) {
+    _avatars.remove(avatar);
+    hover(avatar, false);
+    twitch(avatar, false);
+    if (identical(_looker, avatar)) look(avatar, null);
+    if (avatar._ownHold) held();
+    if (_avatars.isEmpty && botId != null) _shared.remove(botId);
+  }
+
+  /// A hold began or ended. One that begins stops a moment's wake on every
+  /// copy at once; one that ends draws whatever the eyes were told meanwhile.
+  void held() {
+    _syncAll();
+    if (holding || gaze == null) return;
+    for (final each in [..._avatars]) {
+      each._wake();
+    }
+  }
+
+  void hover(_CharacterAvatarState avatar, bool hovered) {
+    final was = greeting;
+    hovered ? _hovers.add(avatar) : _hovers.remove(avatar);
+    if (greeting != was) _syncAll();
+  }
+
+  void twitch(_CharacterAvatarState avatar, bool wants) {
+    wants ? _twitchers.add(avatar) : _twitchers.remove(avatar);
+    if (_twitchers.isNotEmpty) {
+      if (_twitchTimer == null && _settleTimer == null) _scheduleTwitch();
+      return;
+    }
+    _twitchTimer?.cancel();
+    _settleTimer?.cancel();
+    _twitchTimer = _settleTimer = null;
+    if (twitching) {
+      twitching = false;
+      _syncAll();
+    }
+  }
+
+  void _scheduleTwitch() {
+    _twitchTimer = Timer(
+      Duration(milliseconds: 7000 + _random.nextInt(11000)),
+      () {
+        _twitchTimer = null;
+        twitching = true;
+        _syncAll();
+        _settleTimer = Timer(const Duration(milliseconds: 850), () {
+          _settleTimer = null;
+          twitching = false;
+          _syncAll();
+          if (_twitchers.isNotEmpty) _scheduleTwitch();
+        });
+      },
+    );
+  }
+
+  void look(_CharacterAvatarState avatar, Offset? at) {
+    _looker = at == null ? null : avatar;
+    gaze = at;
+    for (final each in [..._avatars]) {
+      each._look();
+    }
+  }
+
+  /// Every avatar of the Bot is told in the same call, so a greeting starts
+  /// on the same frame everywhere it is drawn. Only the artboards are told:
+  /// nothing rebuilds, which is what lets a change that lands while another
+  /// widget builds reach them all.
+  void _syncAll() {
+    for (final each in [..._avatars]) {
+      each._sync();
+    }
+  }
+}
+
 /// A Bot's character. The Rive artboard is transparent; its parent owns the backdrop.
 class CharacterAvatar extends StatefulWidget {
   final double size;
+
+  /// Which Bot this is. Every avatar of one Bot on screen moves as one: it
+  /// twitches, greets a pointer and looks where it is looking together, and
+  /// its working light is on the one clock every working light shares.
+  final String? botId;
   final String? characterId;
   final String? background;
   final String? primary;
@@ -331,14 +466,21 @@ class CharacterAvatar extends StatefulWidget {
   /// element in the frames after a tap, and an artboard drawing beside the
   /// field in those frames cost the first keystroke typed into it.
   final ValueListenable<bool>? hold;
-  final bool workingRing;
+
+  /// The Bot is working in the conversation this surface stands for. Every
+  /// surface draws that one way — the drawing held in place, the eyes ahead,
+  /// and [WorkingSheen]'s light crossing it — so a working Bot looks the same
+  /// in the sidebar, in the header and at the end of its thread, whatever
+  /// [activity] and [motion] each passes. It is about the conversation, not
+  /// the Bot: a Bot answering in a group lights the group, and its own row
+  /// and its own chat stay at rest.
   final bool working;
-  final Duration tempo;
   final String? semanticsLabel;
 
   const CharacterAvatar({
     super.key,
     this.size = 40,
+    this.botId,
     this.characterId,
     this.background,
     this.primary,
@@ -347,10 +489,8 @@ class CharacterAvatar extends StatefulWidget {
     this.motion = CharacterMotion.active,
     this.gaze,
     this.hold,
-    this.workingRing = false,
     this.working = false,
     this.cropToInk = false,
-    this.tempo = thinkingBadgeDefaultTempo,
     this.semanticsLabel,
   });
 
@@ -360,20 +500,24 @@ class CharacterAvatar extends StatefulWidget {
 
 class _CharacterAvatarState extends State<CharacterAvatar> {
   static final _loaders = <String, rive.FileLoader>{};
-  final _random = math.Random();
   rive.RiveLoaded? _loaded;
-  Timer? _quietTimer;
-  Timer? _settleTimer;
   Timer? _restTimer;
+  late _Presence _presence;
+
+  /// Keeps the artboard's state when the working light is put over it or
+  /// taken off: the light is a layer above the same drawing.
+  final _figureKey = GlobalKey();
 
   /// The last state the ticker was woken for; see `_sync`.
   String? _synced;
+
+  /// Where the eyes were last pointed; see `_look`.
+  Offset? _lookedAt;
 
   /// Whether `_sync` last left the ticker running for good, as opposed to a
   /// moment's wake that `_restTimer` ends.
   bool _running = false;
   bool _localHovered = false;
-  bool _twitching = false;
 
   String get _characterId =>
       characterCatalogV1.containsKey(widget.characterId ?? widget.background)
@@ -391,29 +535,55 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
   @override
   void initState() {
     super.initState();
+    _presence = _Presence.attach(widget.botId, this);
     riveRuntimeReady.addListener(_runtimeChanged);
     widget.gaze?.addListener(_gazeChanged);
     widget.hold?.addListener(_holdChanged);
-    WidgetsBinding.instance.addPostFrameCallback((_) => _scheduleQuietTwitch());
   }
 
-  bool get _held => widget.hold?.value ?? false;
+  /// The hold this avatar's own surface raised; see [_Presence.holding].
+  bool get _ownHold => widget.hold?.value ?? false;
+  bool get _held => _presence.holding;
 
-  /// A hold that begins stops a moment's wake at once; one that ends draws
-  /// whatever the eyes were told meanwhile.
-  void _holdChanged() {
-    _sync();
-    if (!_held && widget.gaze?.value != null) _wake();
-  }
+  /// Whether the artboard is held from drawing, by its own surface or by
+  /// another copy's.
+  @visibleForTesting
+  bool get held => _held;
 
-  /// The surface's pointer moved: the eyes turn, and a resting artboard is
-  /// woken long enough to draw the turn before it rests again.
-  void _gazeChanged() {
+  void _holdChanged() => _presence.held();
+
+  /// The surface's pointer moved: the Bot looks there, wherever it is drawn.
+  void _gazeChanged() => _presence.look(this, widget.gaze?.value);
+
+  /// Working holds the drawing where it is, as still does: the light
+  /// crossing it is the motion, and it is the same everywhere.
+  bool get _heldStill =>
+      widget.working || widget.motion == CharacterMotion.still;
+
+  /// Whether the artboard greets: a pointer over any avatar of the Bot, or
+  /// the Bot's twitch.
+  @visibleForTesting
+  bool get greeting =>
+      !_heldStill && (_presence.greeting || _presence.twitching);
+
+  /// Where the eyes look: where the Bot looks, or ahead while it works.
+  @visibleForTesting
+  Offset? get looking => widget.working ? null : _presence.gaze;
+
+  /// Turns the eyes to where the Bot is looking and wakes a resting artboard
+  /// long enough to draw the turn before it rests again.
+  void _look() {
     final model = _loaded?.viewModelInstance;
     if (model == null) return;
-    final at = widget.gaze?.value;
-    model.number('lookX')?.value = (at?.dx ?? 0).clamp(-1.0, 1.0);
-    model.number('lookY')?.value = (at?.dy ?? 0).clamp(-1.0, 1.0);
+    final at = looking;
+    final look = Offset(
+      (at?.dx ?? 0).clamp(-1.0, 1.0),
+      (at?.dy ?? 0).clamp(-1.0, 1.0),
+    );
+    if (look == _lookedAt) return;
+    _lookedAt = look;
+    model.number('lookX')?.value = look.dx;
+    model.number('lookY')?.value = look.dy;
     _wake();
   }
 
@@ -445,65 +615,79 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
     if (!identical(oldWidget.gaze, widget.gaze)) {
       oldWidget.gaze?.removeListener(_gazeChanged);
       widget.gaze?.addListener(_gazeChanged);
+      if (widget.gaze != null || identical(_presence._looker, this)) {
+        _gazeChanged();
+      }
     }
     if (!identical(oldWidget.hold, widget.hold)) {
       oldWidget.hold?.removeListener(_holdChanged);
       widget.hold?.addListener(_holdChanged);
     }
+    if (oldWidget.botId != widget.botId) {
+      _presence.detach(this);
+      _presence = _Presence.attach(widget.botId, this);
+      _lookedAt = null;
+    }
     if (oldWidget.characterId != widget.characterId) {
       _loaded = null;
       _synced = null;
+      _lookedAt = null;
     }
-    _scheduleQuietTwitch();
+    _share();
     _sync();
+    _look();
   }
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    _scheduleQuietTwitch();
+    _share();
     _sync();
   }
 
-  void _scheduleQuietTwitch() {
-    _quietTimer?.cancel();
-    if (!mounted ||
-        widget.motion != CharacterMotion.quiet ||
-        !TickerMode.valuesOf(context).enabled ||
-        MediaQuery.disableAnimationsOf(context)) {
-      return;
-    }
-    _quietTimer = Timer(
-      Duration(milliseconds: 7000 + _random.nextInt(11000)),
-      () {
-        if (!mounted) return;
-        setState(() => _twitching = true);
-        _sync();
-        _settleTimer?.cancel();
-        _settleTimer = Timer(const Duration(milliseconds: 850), () {
-          if (!mounted) return;
-          setState(() => _twitching = false);
-          _sync();
-          _scheduleQuietTwitch();
-        });
-      },
+  /// Out of the tree, even for a moment, this avatar is no part of the Bot's
+  /// presence: a greeting or a glance that lands meanwhile never reaches an
+  /// element that may not look anything up.
+  @override
+  void deactivate() {
+    _presence.detach(this);
+    super.deactivate();
+  }
+
+  /// Back in the tree, the avatar rejoins the presence; what it shares is
+  /// told in `didChangeDependencies`, which follows once its render object is
+  /// attached again — a greeting reaching a detached artboard would restart
+  /// a ticker nothing disposes.
+  @override
+  void activate() {
+    super.activate();
+    _presence = _Presence.attach(widget.botId, this);
+  }
+
+  /// Tells the Bot's presence what this avatar adds to it: a pointer over it
+  /// or its row, and whether it is one that twitches between Turns.
+  void _share() {
+    _presence.hover(this, _localHovered || CharacterHoverScope.of(context));
+    _presence.twitch(
+      this,
+      widget.motion == CharacterMotion.quiet &&
+          !widget.working &&
+          TickerMode.valuesOf(context).enabled &&
+          !MediaQuery.disableAnimationsOf(context),
     );
   }
 
   void _sync() {
     final loaded = _loaded;
     if (loaded == null) return;
-    final inheritedHover = CharacterHoverScope.of(context);
-    final hovered =
-        widget.motion != CharacterMotion.still &&
-        (_localHovered || inheritedHover || _twitching);
+    final hovered = greeting;
     final reduce =
         MediaQuery.disableAnimationsOf(context) ||
-        widget.motion == CharacterMotion.still ||
-        (widget.motion == CharacterMotion.quiet &&
-            !_twitching &&
-            !_localHovered &&
-            !inheritedHover);
+        _heldStill ||
+        (widget.motion == CharacterMotion.quiet && !hovered);
+    final activity = widget.working
+        ? CharacterActivity.working
+        : widget.activity;
     // A resting artboard is not advanced. The state machine's reduced-motion
     // pose is a still, but the widget's ticker would go on asking it for a
     // frame sixty times a second — for every Bot in the sidebar at once —
@@ -518,7 +702,7 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
     // and a wake per rebuild kept the companion animating for as long as
     // anyone typed.
     final signature =
-        '$run:$_held:${widget.activity}:${widget.emotion}:$primary:$hovered';
+        '$run:$_held:$activity:${widget.emotion}:$primary:$hovered';
     if (signature != _synced) {
       _synced = signature;
       _running = run;
@@ -541,7 +725,7 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
     final shade = hsl
         .withLightness((hsl.lightness * 0.72).clamp(0.12, 0.65))
         .toColor();
-    model.number('activity')?.value = widget.activity.index.toDouble();
+    model.number('activity')?.value = activity.index.toDouble();
     model.number('emotion')?.value = widget.emotion.index.toDouble();
     model.boolean('hovered')?.value = hovered;
     model.boolean('reducedMotion')?.value = reduce;
@@ -573,8 +757,9 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
             onLoaded: (loaded) {
               _loaded = loaded;
               _synced = null;
+              _lookedAt = null;
               _sync();
-              if (widget.gaze != null) _gazeChanged();
+              _look();
             },
             // A runtime that never arrives — a script the CSP refuses, a
             // request that hangs — leaves the file loading forever rather
@@ -591,12 +776,12 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
 
   @override
   Widget build(BuildContext context) {
+    final ink =
+        (characterCatalogV1[_characterId] ??
+                characterCatalogV1[defaultCharacterIdV1]!)
+            .ink;
     final Widget avatar;
     if (widget.cropToInk) {
-      final ink =
-          (characterCatalogV1[_characterId] ??
-                  characterCatalogV1[defaultCharacterIdV1]!)
-              .ink;
       final scale = widget.size / ink.height;
       final box = ink.boxForHeight(widget.size);
       avatar = ClipRect(
@@ -620,52 +805,31 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
     } else {
       avatar = _figure(Size.square(widget.size), fit: BoxFit.contain);
     }
-    final interactive = MouseRegion(
-      onEnter: (_) {
-        setState(() => _localHovered = true);
-        _sync();
-      },
-      onExit: (_) {
-        setState(() => _localHovered = false);
-        _sync();
-      },
-      // Its own layer: a frame the artboard redraws is then the artboard's
-      // picture alone, not the composer, the thread and the sidebar with it.
-      child: RepaintBoundary(child: avatar),
-    );
-    Widget result = widget.workingRing
-        ? Container(
-            padding: const EdgeInsets.all(2),
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              border: Border.all(
-                color: Theme.of(context).colorScheme.primary,
-                width: 2,
-              ),
-            ),
-            child: interactive,
-          )
-        : interactive;
+    // Its own layer: a frame the artboard redraws is then the artboard's
+    // picture alone, not the composer, the thread and the sidebar with it.
+    Widget figure = RepaintBoundary(key: _figureKey, child: avatar);
     if (widget.working) {
-      final badge = ThinkingBadge(
-        height: (widget.size * 0.38).clamp(10.0, 14.0),
-        tempo: widget.tempo,
-      );
-      result = Stack(
-        clipBehavior: Clip.none,
-        children: [
-          result,
-          // Over the character's shoulder, not under its feet. Hung below the
-          // box, the badge left the artboard entirely and read as a stray
-          // control rather than as this character thinking.
-          Positioned(
-            right: -badge.height * 0.3,
-            top: -badge.height * 0.3,
-            child: badge,
-          ),
-        ],
+      figure = WorkingSheen(
+        // The silhouette, not the box: a square in the sidebar keeps empty
+        // canvas around the drawing that the header's crop does not, and the
+        // light has to meet the drawing at the same moment in both.
+        across: widget.cropToInk
+            ? const Rect.fromLTWH(0, 0, 1, 1)
+            : ink.withinSquare,
+        child: figure,
       );
     }
+    final result = MouseRegion(
+      onEnter: (_) {
+        _localHovered = true;
+        _share();
+      },
+      onExit: (_) {
+        _localHovered = false;
+        _share();
+      },
+      child: figure,
+    );
     // An unlabelled avatar is decoration and leaves nothing in the tree — not
     // even an empty image node. One of those beside the working row's label
     // made that row a branch rather than a leaf, and the words the row spoke
@@ -696,8 +860,6 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
     riveRuntimeReady.removeListener(_runtimeChanged);
     widget.gaze?.removeListener(_gazeChanged);
     widget.hold?.removeListener(_holdChanged);
-    _quietTimer?.cancel();
-    _settleTimer?.cancel();
     _restTimer?.cancel();
     super.dispose();
   }
@@ -785,105 +947,130 @@ class _LiveCharacterState extends State<_LiveCharacter> {
   }
 }
 
-const Duration thinkingBadgeDefaultTempo = Duration(milliseconds: 1200);
+/// How long one pass of the working light takes, with its rest.
+const Duration workingSheenCycle = Duration(milliseconds: 2400);
 
-/// Three dots on a working Bot. The thread adjusts the beat to its live pace;
-/// compact avatar surfaces use the steady default.
-class ThinkingBadge extends StatefulWidget {
-  final double height;
-  final Duration tempo;
-  const ThinkingBadge({
+/// How much of each cycle the light spends crossing; the rest is rest.
+const double workingSheenSweep = 0.35;
+
+/// Where the middle of the working light is at [time] on the frame clock, in
+/// widths of what it crosses: from just off the left edge to just off the
+/// right, where it waits for the next pass.
+double workingSheenAt(Duration time) {
+  final cycle = workingSheenCycle.inMicroseconds;
+  final phase = time.inMicroseconds % cycle / cycle;
+  final crossed = (phase / workingSheenSweep).clamp(0.0, 1.0);
+  return -0.3 + 1.6 * Curves.easeInOut.transform(crossed);
+}
+
+/// While a Bot works, a light crosses its character and rests for a beat: the
+/// light moves, the drawing does not. Every sheen reads the one frame clock
+/// rather than a clock of its own, so a Bot in the sidebar, in the
+/// conversation header and at the end of its thread shines at the same
+/// moment, however long each has been on screen. It is painted over the
+/// child's own pixels, so the live artboard and the still it falls back to
+/// shine alike, and a group's faces shine as one picture.
+///
+/// A person who asked for less motion sees the light hold still across the
+/// middle: the Bot still reads as working everywhere it is drawn, and nothing
+/// moves.
+class WorkingSheen extends StatefulWidget {
+  /// The part of the child the light crosses, as fractions of its size.
+  final Rect across;
+  final Widget child;
+  const WorkingSheen({
     super.key,
-    required this.height,
-    this.tempo = thinkingBadgeDefaultTempo,
+    required this.child,
+    this.across = const Rect.fromLTWH(0, 0, 1, 1),
   });
 
   @override
-  State<ThinkingBadge> createState() => _ThinkingBadgeState();
+  State<WorkingSheen> createState() => _WorkingSheenState();
 }
 
-class _ThinkingBadgeState extends State<ThinkingBadge>
+class _WorkingSheenState extends State<WorkingSheen>
     with SingleTickerProviderStateMixin {
-  late final AnimationController _beat = AnimationController(
-    vsync: this,
-    duration: widget.tempo,
+  /// Just off the right edge, where the light waits between passes.
+  static const double _parked = 1.3;
+
+  late final Ticker _ticker = createTicker(
+    (_) => _light.value = workingSheenAt(
+      SchedulerBinding.instance.currentFrameTimeStamp,
+    ),
   );
+  final _light = ValueNotifier<double>(_parked);
+
+  /// Where the middle of the light is now, in widths of what it crosses.
+  @visibleForTesting
+  double get light => _light.value;
 
   @override
   void didChangeDependencies() {
     super.didChangeDependencies();
-    final still = MediaQuery.disableAnimationsOf(context);
-    if (still && _beat.isAnimating) {
-      _beat.stop();
-    } else if (!still && !_beat.isAnimating) {
-      _beat.repeat();
+    if (MediaQuery.disableAnimationsOf(context)) {
+      _ticker.stop();
+      _light.value = 0.5;
+      return;
     }
-  }
-
-  @override
-  void didUpdateWidget(ThinkingBadge oldWidget) {
-    super.didUpdateWidget(oldWidget);
-    if (oldWidget.tempo != widget.tempo) {
-      _beat.duration = widget.tempo;
-      if (_beat.isAnimating) _beat.repeat(period: widget.tempo);
+    // A sheen that appears mid-pass starts where every other one is, not
+    // off the edge for a frame. Outside a frame there is no frame clock to
+    // read, and the first tick puts it in place.
+    final scheduler = SchedulerBinding.instance;
+    if (scheduler.schedulerPhase != SchedulerPhase.idle) {
+      _light.value = workingSheenAt(scheduler.currentFrameTimeStamp);
     }
+    if (!_ticker.isActive) _ticker.start();
   }
 
   @override
   void dispose() {
-    _beat.dispose();
+    _ticker.dispose();
+    _light.dispose();
     super.dispose();
   }
 
+  // Its own layer: each frame of a pass repaints the light over this
+  // character, not the header, the thread and the pane around it.
   @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final height = widget.height;
-    final dot = height * 0.24;
-    final lift = height * 0.16;
-    return Container(
-      height: height + 3,
-      padding: const EdgeInsets.all(1.5),
-      decoration: BoxDecoration(
-        color: Theme.of(context).scaffoldBackgroundColor,
-        borderRadius: BorderRadius.circular(height / 2 + 1.5),
-      ),
-      child: Container(
-        height: height,
-        padding: EdgeInsets.symmetric(horizontal: height * 0.32),
-        decoration: BoxDecoration(
-          color: scheme.primary,
-          borderRadius: BorderRadius.circular(height / 2),
-        ),
-        child: AnimatedBuilder(
-          animation: _beat,
-          builder: (context, _) => Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (var index = 0; index < 3; index++) ...[
-                if (index > 0) SizedBox(width: dot * 0.7),
-                Transform.translate(
-                  offset: Offset(0, -lift * _rise(_beat.value, index)),
-                  child: Container(
-                    width: dot,
-                    height: dot,
-                    decoration: BoxDecoration(
-                      color: scheme.onPrimary,
-                      shape: BoxShape.circle,
-                    ),
-                  ),
-                ),
-              ],
+  Widget build(BuildContext context) => RepaintBoundary(
+    child: ValueListenableBuilder<double>(
+      valueListenable: _light,
+      child: widget.child,
+      // Only the light's position changes from frame to frame; while it
+      // waits off the edge nothing is rebuilt at all.
+      builder: (context, at, child) => ShaderMask(
+        blendMode: BlendMode.srcATop,
+        shaderCallback: (bounds) {
+          final across = widget.across;
+          final span = Rect.fromLTWH(
+            bounds.left + across.left * bounds.width,
+            bounds.top + across.top * bounds.height,
+            across.width * bounds.width,
+            across.height * bounds.height,
+          );
+          return LinearGradient(
+            begin: const Alignment(-1, -0.35),
+            end: const Alignment(1, 0.35),
+            colors: const [
+              Color(0x00FFFFFF),
+              Color(0xB3FFFFFF),
+              Color(0x00FFFFFF),
             ],
-          ),
-        ),
+            stops: const [0.38, 0.5, 0.62],
+            transform: _SheenAt((at - 0.5) * span.width),
+          ).createShader(span);
+        },
+        child: child,
       ),
-    );
-  }
+    ),
+  );
+}
 
-  static double _rise(double t, int index) {
-    final local = t * 4 - index;
-    if (local < 0 || local > 1) return 0;
-    return math.sin(local * math.pi);
-  }
+class _SheenAt extends GradientTransform {
+  final double dx;
+  const _SheenAt(this.dx);
+
+  @override
+  Matrix4 transform(Rect bounds, {TextDirection? textDirection}) =>
+      Matrix4.translationValues(dx, 0, 0);
 }
