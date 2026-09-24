@@ -774,12 +774,22 @@
               Plugins should be able to shape more than the text of a reply.
             </p>
             <p>
-              A card in the conversation, a panel beside your work, a settings
+              A card in the conversation, a panel beside the chat, a settings
               section or a whole page could give a capability its own useful
               interface, backed by the plugin’s stored data. A slot says where
-              something appears; a renderer says how it is drawn. Most of these
-              placements are part of the target design; conversation cards and
-              settings sections are the starting point today.
+              something appears; a renderer says how it is drawn. Four
+              placements are available today: conversation cards, settings
+              sections, the conversation panel and a door on the Bot’s page. The
+              rest are part of the target design.
+            </p>
+            <p>
+              The <strong>conversation panel</strong> is a tabbed page beside
+              the chat: the right-hand column on a wide window, its own page on
+              a phone. Each plugin can add tabs to it. The Bot can bring one to
+              the front with <code>panel_focus</code> while it works, and a
+              <strong>door</strong> on the Bot’s page opens the panel whenever
+              you want it. The open tab is kept in the cloud, so your devices
+              show the same one.
             </p>
             <figure
               class="inside-figure rendering-figure"
@@ -871,10 +881,11 @@
               </p>
             </div>
             <p>
-              Cards use A2UI; settings sections currently use a smaller
-              host-rendered view format. General A2UI/HTML slots, full pages and
-              the broader placements in the capability reference describe the
-              target platform.
+              Cards use A2UI; settings sections and conversation panels use a
+              smaller host-rendered view format, and the Bot page’s doors are
+              rows the host draws. General A2UI/HTML slots, full pages and the
+              broader placements in the capability reference describe the target
+              platform.
             </p>
             <p>
               The host retains ownership of the conversation, audit, undo and
@@ -901,8 +912,8 @@
               The target platform connects those capabilities: a phone event
               could start a Turn that uses a desktop, and a webhook can already
               update a conversation card. The plugin combines the pieces; the
-              host decides what is available and allowed. Of the 148
-              capabilities in the reference below, 10 are available today.
+              host decides what is available and allowed. Of the 150
+              capabilities in the reference below, 12 are available today.
             </p>
             <figure
               class="cross-device-flow"
@@ -1006,10 +1017,10 @@
 <div class="capability-filter"><label for="capability-status">Status</label><select id="capability-status" name="status"><option value="all">All statuses</option><option value="available">Available today</option><option value="planned">In the plan</option><option value="not-applicable">No equivalent</option></select></div>
 <button class="capability-reset" type="reset">Reset filters</button>
 </form>
-<p class="capability-result-count" data-capability-count role="status" aria-live="polite" aria-atomic="true">148 capabilities across 5 surface types.</p>
+<p class="capability-result-count" data-capability-count role="status" aria-live="polite" aria-atomic="true">150 capabilities across 5 surface types.</p>
 <p class="capability-empty" data-capability-empty hidden>No capabilities match these filters. Try a broader search or reset the filters.</p>
 <details class="capability-group" data-capability-group="slot">
-<summary><span class="capability-group-heading" role="heading" aria-level="3">Slots <span class="capability-group-count" data-capability-group-count>41</span></span><span class="capability-group-description">A place in the interface a plugin contributes to. The host renders its supported description or contained HTML surface.</span></summary>
+<summary><span class="capability-group-heading" role="heading" aria-level="3">Slots <span class="capability-group-count" data-capability-group-count>43</span></span><span class="capability-group-description">A place in the interface a plugin contributes to. The host renders its supported description or contained HTML surface.</span></summary>
 <section class="capability-category" data-capability-category>
 <h4 id="capability-category-slot-in-the-conversation">In the conversation</h4>
 <div class="capability-rows"><article class="capability-row" data-capability-row data-capability-id="conversation-card" data-capability-type="slot" data-capability-category-value="In the conversation" data-scope="device" data-platform-web="available" data-platform-android="available" data-platform-iphone="planned" data-platform-macos="available" data-platform-windows="planned" data-platform-linux="planned" data-platform-apple-watch="planned" data-platform-wear-os="planned" data-platform-browser-extension="not-applicable" data-search="conversation card a rich card inside the conversation. in the conversation" aria-labelledby="capability-conversation-card">
@@ -1017,6 +1028,12 @@
 <p class="capability-description">A rich card inside the conversation.</p>
 <dl class="capability-platforms"><div class="capability-status--available"><dt>Available today</dt><dd>Web, Android, macOS</dd></div><div class="capability-status--planned"><dt>In the plan</dt><dd>iPhone, Windows, Linux, Apple Watch, Wear OS</dd></div><div class="capability-status--not-applicable"><dt>No equivalent</dt><dd>Browser extension</dd></div></dl>
 
+</article>
+<article class="capability-row" data-capability-row data-capability-id="conversation-panel" data-capability-type="slot" data-capability-category-value="In the conversation" data-scope="device" data-platform-web="available" data-platform-android="available" data-platform-iphone="planned" data-platform-macos="available" data-platform-windows="planned" data-platform-linux="planned" data-platform-apple-watch="not-applicable" data-platform-wear-os="not-applicable" data-platform-browser-extension="not-applicable" data-search="conversation panel a tabbed page beside the chat. in the conversation beside the conversation on a wide window, its own page on a phone. the bot can bring a tab to the front with panel_focus." aria-labelledby="capability-conversation-panel">
+<h5 id="capability-conversation-panel">Conversation panel</h5>
+<p class="capability-description">A tabbed page beside the chat.</p>
+<dl class="capability-platforms"><div class="capability-status--available"><dt>Available today</dt><dd>Web, Android, macOS</dd></div><div class="capability-status--planned"><dt>In the plan</dt><dd>iPhone, Windows, Linux</dd></div><div class="capability-status--not-applicable"><dt>No equivalent</dt><dd>Apple Watch, Wear OS, Browser extension</dd></div></dl>
+<p class="capability-note">Beside the conversation on a wide window, its own page on a phone. The Bot can bring a tab to the front with panel_focus.</p>
 </article>
 <article class="capability-row" data-capability-row data-capability-id="message-action" data-capability-type="slot" data-capability-category-value="In the conversation" data-scope="device" data-platform-web="planned" data-platform-android="planned" data-platform-iphone="planned" data-platform-macos="planned" data-platform-windows="planned" data-platform-linux="planned" data-platform-apple-watch="not-applicable" data-platform-wear-os="not-applicable" data-platform-browser-extension="not-applicable" data-search="message action an action attached to a message. in the conversation" aria-labelledby="capability-message-action">
 <h5 id="capability-message-action">Message action</h5>
@@ -1119,6 +1136,12 @@
 <p class="capability-description">A panel on a Bot page.</p>
 <dl class="capability-platforms"><div class="capability-status--planned"><dt>In the plan</dt><dd>Web, Android, iPhone, macOS, Windows, Linux</dd></div><div class="capability-status--not-applicable"><dt>No equivalent</dt><dd>Apple Watch, Wear OS, Browser extension</dd></div></dl>
 
+</article>
+<article class="capability-row" data-capability-row data-capability-id="bot-nav" data-capability-type="slot" data-capability-category-value="Navigation and pages" data-scope="device" data-platform-web="available" data-platform-android="available" data-platform-iphone="planned" data-platform-macos="available" data-platform-windows="planned" data-platform-linux="planned" data-platform-apple-watch="not-applicable" data-platform-wear-os="not-applicable" data-platform-browser-extension="not-applicable" data-search="bot page door a row on the bot’s page that opens its panel. navigation and pages a plugin that declares a panel but no door still gets one, drawn by the host." aria-labelledby="capability-bot-nav">
+<h5 id="capability-bot-nav">Bot page door</h5>
+<p class="capability-description">A row on the Bot’s page that opens its panel.</p>
+<dl class="capability-platforms"><div class="capability-status--available"><dt>Available today</dt><dd>Web, Android, macOS</dd></div><div class="capability-status--planned"><dt>In the plan</dt><dd>iPhone, Windows, Linux</dd></div><div class="capability-status--not-applicable"><dt>No equivalent</dt><dd>Apple Watch, Wear OS, Browser extension</dd></div></dl>
+<p class="capability-note">A plugin that declares a panel but no door still gets one, drawn by the host.</p>
 </article>
 <article class="capability-row" data-capability-row data-capability-id="full-page" data-capability-type="slot" data-capability-category-value="Navigation and pages" data-scope="device" data-platform-web="planned" data-platform-android="planned" data-platform-iphone="planned" data-platform-macos="planned" data-platform-windows="planned" data-platform-linux="planned" data-platform-apple-watch="not-applicable" data-platform-wear-os="not-applicable" data-platform-browser-extension="not-applicable" data-search="full page a plugin surface with its own route. navigation and pages" aria-labelledby="capability-full-page">
 <h5 id="capability-full-page">Full page</h5>
@@ -1984,6 +2007,10 @@
 <th scope="row"><span>Conversation card</span><small>In the conversation</small></th>
 <td>slot</td>
 <td class="capability-status--available">Available today</td><td class="capability-status--available">Available today</td><td class="capability-status--planned">In the plan</td><td class="capability-status--available">Available today</td><td class="capability-status--planned">In the plan</td><td class="capability-status--planned">In the plan</td><td class="capability-status--planned">In the plan</td><td class="capability-status--planned">In the plan</td><td class="capability-status--not-applicable">No equivalent</td>
+</tr><tr data-capability-comparison-row="conversation-panel">
+<th scope="row"><span>Conversation panel</span><small>In the conversation</small></th>
+<td>slot</td>
+<td class="capability-status--available">Available today</td><td class="capability-status--available">Available today</td><td class="capability-status--planned">In the plan</td><td class="capability-status--available">Available today</td><td class="capability-status--planned">In the plan</td><td class="capability-status--planned">In the plan</td><td class="capability-status--not-applicable">No equivalent</td><td class="capability-status--not-applicable">No equivalent</td><td class="capability-status--not-applicable">No equivalent</td>
 </tr><tr data-capability-comparison-row="message-action">
 <th scope="row"><span>Message action</span><small>In the conversation</small></th>
 <td>slot</td>
@@ -2048,6 +2075,10 @@
 <th scope="row"><span>Bot page panel</span><small>Navigation and pages</small></th>
 <td>slot</td>
 <td class="capability-status--planned">In the plan</td><td class="capability-status--planned">In the plan</td><td class="capability-status--planned">In the plan</td><td class="capability-status--planned">In the plan</td><td class="capability-status--planned">In the plan</td><td class="capability-status--planned">In the plan</td><td class="capability-status--not-applicable">No equivalent</td><td class="capability-status--not-applicable">No equivalent</td><td class="capability-status--not-applicable">No equivalent</td>
+</tr><tr data-capability-comparison-row="bot-nav">
+<th scope="row"><span>Bot page door</span><small>Navigation and pages</small></th>
+<td>slot</td>
+<td class="capability-status--available">Available today</td><td class="capability-status--available">Available today</td><td class="capability-status--planned">In the plan</td><td class="capability-status--available">Available today</td><td class="capability-status--planned">In the plan</td><td class="capability-status--planned">In the plan</td><td class="capability-status--not-applicable">No equivalent</td><td class="capability-status--not-applicable">No equivalent</td><td class="capability-status--not-applicable">No equivalent</td>
 </tr><tr data-capability-comparison-row="full-page">
 <th scope="row"><span>Full page</span><small>Navigation and pages</small></th>
 <td>slot</td>
@@ -2706,16 +2737,26 @@
               persistent.
             </p>
             <p>
-              Dictation puts spoken words into the composer. Live voice is a
-              real-time conversation: you keep talking while the voice layer
-              hands work to your Bots. The Bot’s durable Turn remains where that
-              work is executed and recorded.
+              Dictation puts spoken words into the composer. A voice call is a
+              different mode of one Bot, running on Gemini Live. It starts with
+              that Bot’s instructions, memory and recent conversation, and
+              speaks in the Bot’s own voice. Ask for another Bot by name and
+              <code>switch_bot</code> hands the call over.
+            </p>
+            <p>
+              Anything that takes more than a moment goes to
+              <code>subagent</code>: a Turn of the same Bot that runs while you
+              keep talking. Its answer is spoken when it lands, or written into
+              the chat if no call is open by then. The call itself does not
+              share the thread. Nothing said on it becomes a message; when it
+              ends, the spoken exchange is kept on the thread as one collapsible
+              section.
             </p>
             <div class="voice-flow">
-              <span>Speak</span><b aria-hidden="true">→</b
-              ><span>Live conversation</span><b aria-hidden="true">→</b
-              ><span>Bot work</span><b aria-hidden="true">→</b
-              ><span>Recorded result</span>
+              <span>Call one Bot</span><b aria-hidden="true">→</b
+              ><span>Gemini Live, with the Bot’s context</span
+              ><b aria-hidden="true">→</b><span>Subagent for longer work</span
+              ><b aria-hidden="true">→</b><span>A recorded Turn</span>
             </div>
             <p>
               Model choice sits behind an interface too. The provider catalogue

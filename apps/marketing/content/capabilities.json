@@ -91,6 +91,28 @@
       }
     },
     {
+      "id": "conversation-panel",
+      "type": "slot",
+      "category": "In the conversation",
+      "name": "Conversation panel",
+      "description": "A tabbed page beside the chat.",
+      "scope": "device",
+      "platforms": {
+        "web": "available",
+        "android": "available",
+        "iphone": "planned",
+        "macos": "available",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      },
+      "notes": [
+        "Beside the conversation on a wide window, its own page on a phone. The Bot can bring a tab to the front with panel_focus."
+      ]
+    },
+    {
       "id": "message-action",
       "type": "slot",
       "category": "In the conversation",
@@ -393,6 +415,28 @@
         "wear-os": "not-applicable",
         "browser-extension": "not-applicable"
       }
+    },
+    {
+      "id": "bot-nav",
+      "type": "slot",
+      "category": "Navigation and pages",
+      "name": "Bot page door",
+      "description": "A row on the Bot’s page that opens its panel.",
+      "scope": "device",
+      "platforms": {
+        "web": "available",
+        "android": "available",
+        "iphone": "planned",
+        "macos": "available",
+        "windows": "planned",
+        "linux": "planned",
+        "apple-watch": "not-applicable",
+        "wear-os": "not-applicable",
+        "browser-extension": "not-applicable"
+      },
+      "notes": [
+        "A plugin that declares a panel but no door still gets one, drawn by the host."
+      ]
     },
     {
       "id": "full-page",

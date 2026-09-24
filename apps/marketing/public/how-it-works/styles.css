@@ -657,6 +657,9 @@
   font-size: 0.86rem;
   overflow-wrap: anywhere;
 }
+.inside-section > p code {
+  font-size: 0.9em;
+}
 .hook-list li > span {
   font-size: 0.8rem;
   color: var(--muted);
