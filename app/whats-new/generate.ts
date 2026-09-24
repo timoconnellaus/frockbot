@@ -2,7 +2,8 @@
  * Writes `entries.generated.ts` and `media.generated.ts` from `entries/` and
  * `media/`. The Worker has no filesystem, so it imports every entry and
  * embeds every still. Both lists are alphabetical, never newest first, so
- * two pull requests that each add an entry change different lines.
+ * two pull requests that each add an entry almost always change different
+ * lines; when their ids sort into the same gap, rerunning this resolves it.
  */
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";

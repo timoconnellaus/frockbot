@@ -302,7 +302,7 @@ Everything from here to [Security model](#security-model) is the hosted profile 
 
 ### Releases
 
-Merging integrates; tagging ships. The pipeline has four stages, and a person decides at one of them:
+Merging integrates; tagging ships. The pipeline has four stages, and the only decision in it is the merge:
 
 1. **Pull request** — `check.yml` runs the fast tier (format, typecheck, unit tests, the two small package suites) in a couple of minutes. It needs no secret, so a fork's pull request runs it too. Its two jobs, `Check` and `Flutter`, are the status checks the `main` ruleset requires.
 2. **Merge** — the babysitter ([`.claude/skills/babysit/SKILL.md`](.claude/skills/babysit/SKILL.md), run as `/loop /babysit` in one session) is the only merger: it squash-merges a green, non-draft pull request without the `hold` label, and only while `main` is green. The `main-health` status, required by the ruleset and kept by `scripts/main-health.ts`, makes GitHub refuse any other merge onto a red `main` except a pull request labelled `fix-main` or a revert. There is no auto-merge. A branch need not be rebased first; the ruleset does not require it to be up to date, because at this merge rate that was a rebase-and-rerun loop. (GitHub's merge queue would prove the combination before landing it, but it is only offered on organization-owned repositories.)

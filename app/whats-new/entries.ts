@@ -12,8 +12,8 @@ export {
 
 /**
  * Newest first by `added`; the id breaks a tie. Each entry is its own file
- * and the order is computed here, so two pull requests that each add one
- * touch different lines.
+ * and the order is computed here rather than kept in a list, so two pull
+ * requests that each add one do not both edit the same line.
  */
 export function orderWhatsNewEntriesV1(
   files: readonly WhatsNewEntryFileV1[],

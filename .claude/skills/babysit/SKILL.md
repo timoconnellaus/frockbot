@@ -32,6 +32,11 @@ push, take a new one before deciding anything else.
 
 **Green:** nothing to do. If a run is in flight over merges you made, note it.
 
+The snapshot counts a run as red unless it passed: a job that hits its
+timeout shows as `cancelled`, and a failed run you reran stays red
+(`rerunning`) until its new attempt passes. Only a run the concurrency group
+displaced before it started is passed over.
+
 **Red — stop the line.** Only a pull request labelled `fix-main`, or a
 revert, may merge until `main` is green; the snapshot marks every other
 green pull request `held`, and the `main-health` status makes GitHub
@@ -109,14 +114,19 @@ The snapshot gives each open pull request an action:
   conflict in a generated file (`*.generated.ts`) is resolved by taking
   either side and running its generator — `bun app/whats-new/generate.ts`
   for What's New — never by hand.
-- **wait** — checks running, or GitHub still deciding mergeability. Nothing.
+- **wait** — checks running, or GitHub still deciding mergeability (it
+  computes that when first asked, so the next snapshot usually has it), or
+  `main-health` behind `main`. If `main-health` still disagrees with the
+  snapshot a tick later, refresh it: `gh workflow run main-health.yml`.
 - **held** — green, but `main` is red. Nothing; it merges when `main` is
   green again. A failing `main-health` is this, never a `fix`.
-- **skip** — draft, labelled `hold`, or not based on `main`. Nothing.
+- **skip** — draft, labelled `hold`, not based on `main`, changes
+  requested, or from a fork. A fork's pull request is an outside
+  contribution to a public repository whose merges deploy production: never
+  merge, push to or rerun it; list it once under "needs Tim".
 
-A pull request from a fork can't be pushed to; comment instead. Dependabot
-pull requests go through the same actions; a bump that breaks `Check` in a
-way that isn't a one-line fix goes to Tim.
+Dependabot pull requests go through the same actions; a bump that breaks
+`Check` in a way that isn't a one-line fix goes to Tim.
 
 The labels are `hold` (leave it alone), `fix-main` (repairs a red `main`)
 and `flaky` (issues). If one is missing, create it with `gh label create`.

@@ -5,26 +5,36 @@ import { healthStatus, setHealth } from "./main-health.js";
 
 describe("main-health", () => {
   test("follows main", () => {
-    const pr = { labels: [], title: "Add a thing" };
+    const pr = { labels: [], title: "Add a thing", crossRepository: false };
     expect(healthStatus("green", pr).state).toBe("success");
     expect(healthStatus("red", pr).state).toBe("failure");
     expect(healthStatus("unknown", pr).state).toBe("pending");
   });
 
   test("a repair may always merge, or main could never go green again", () => {
+    const pr = { labels: [], title: "x", crossRepository: false };
+    expect(healthStatus("red", { ...pr, labels: ["fix-main"] }).state).toBe(
+      "success",
+    );
     expect(
-      healthStatus("red", { labels: ["fix-main"], title: "x" }).state,
+      healthStatus("red", { ...pr, title: 'Revert "Add a thing"' }).state,
     ).toBe("success");
+    // A fork's title is anyone's to write.
     expect(
-      healthStatus("red", { labels: [], title: 'Revert "Add a thing"' }).state,
-    ).toBe("success");
+      healthStatus("red", {
+        ...pr,
+        title: 'Revert "Add a thing"',
+        crossRepository: true,
+      }).state,
+    ).toBe("failure");
   });
 
   test("every description fits GitHub's 140 characters", () => {
     for (const main of ["green", "red", "unknown"] as const)
       for (const labels of [[], ["fix-main"]])
         expect(
-          healthStatus(main, { labels, title: "" }).description.length,
+          healthStatus(main, { labels, title: "", crossRepository: false })
+            .description.length,
         ).toBeLessThanOrEqual(140);
   });
 

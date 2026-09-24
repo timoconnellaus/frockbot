@@ -35,8 +35,20 @@ export const FIX_MAIN_LABEL = "fix-main";
  */
 export const MAIN_HEALTH_CHECK = "main-health";
 
-export function repairsMain(labels: readonly string[], title: string): boolean {
-  return labels.includes(FIX_MAIN_LABEL) || /^Revert "/.test(title);
+/**
+ * Whether a pull request may merge while `main` is red. Applying a label
+ * takes triage rights, but anyone can title a fork's pull request
+ * `Revert "…"`, so the title counts only on a branch of this repository.
+ */
+export function repairsMain(pullRequest: {
+  labels: readonly string[];
+  title: string;
+  crossRepository: boolean;
+}): boolean {
+  return (
+    pullRequest.labels.includes(FIX_MAIN_LABEL) ||
+    (!pullRequest.crossRepository && /^Revert "/.test(pullRequest.title))
+  );
 }
 
 export interface RunRef {
@@ -48,6 +60,8 @@ export interface RunRef {
 
 export interface FailedJob {
   name: string;
+  /** `failure`, or `cancelled` for a job that hit its timeout. */
+  conclusion: string;
   steps: string[];
   url: string;
 }
@@ -62,8 +76,19 @@ export interface Suspect {
 export interface MainState {
   /** `unknown` when no run on `main` has settled yet. */
   status: "green" | "red" | "unknown";
-  /** The newest run that passed or failed. Cancelled runs were superseded. */
+  /**
+   * The newest run that decides `status`. A run the concurrency group
+   * displaced before it started proves nothing and is passed over; any other
+   * run that did not pass — failed, timed out (GitHub reports that as
+   * cancelled), cancelled by hand — leaves `main` unproven, so red.
+   */
   settled?: RunRef;
+  /**
+   * `settled` is a failed run being rerun. `main` stays red until the rerun
+   * passes: a rerun keeps its id and creation time, so without this the run
+   * would drop out of the settled list and an older green run would decide.
+   */
+  rerunning?: boolean;
   /** A run still going, which covers commits newer than `settled`. */
   running?: RunRef;
   /** When the first failed run of the current red streak started. */
@@ -202,61 +227,95 @@ export async function mainState(gh: GitHubJson): Promise<MainState> {
       "--branch",
       "main",
       "--json",
-      "databaseId,headSha,status,conclusion,createdAt,url,event",
+      "databaseId,headSha,status,conclusion,createdAt,url,event,attempt",
       "--limit",
       "40",
     ]),
   ).map((run) => record(run, "workflow run"));
 
-  // A dispatched run on `main` proves the same thing a push run does. Runs
-  // dispatched on other branches are filtered out by `--branch` already.
-  const relevant = runs.filter((run) =>
-    ["push", "workflow_dispatch"].includes(text(run.event)),
-  );
-  const running = relevant.find(
-    (run) => text(run.status).toLowerCase() !== "completed",
-  );
-  const settledRuns = relevant.filter((run) =>
-    ["success", "failure"].includes(text(run.conclusion).toLowerCase()),
-  );
+  const jobsOf = async (run: Record<string, unknown>, attempt?: number) =>
+    list(
+      record(
+        await gh([
+          "run",
+          "view",
+          String(run.databaseId),
+          ...(attempt ? ["--attempt", String(attempt)] : []),
+          "--json",
+          "jobs",
+        ]),
+        "workflow run",
+      ).jobs,
+    ).map((job) => record(job, "job"));
+
+  // Newest first, each run's verdict on `main`; the walk stops at the first
+  // green, which is the last good commit. A dispatched run on `main` proves
+  // the same thing a push run does; `--branch` already drops other branches.
+  let running: Record<string, unknown> | undefined;
+  const verdicts: Array<{
+    run: Record<string, unknown>;
+    green: boolean;
+    rerunning: boolean;
+  }> = [];
+  for (const run of runs) {
+    if (!["push", "workflow_dispatch"].includes(text(run.event))) continue;
+    const conclusion = text(run.conclusion).toLowerCase();
+    if (text(run.status).toLowerCase() !== "completed") {
+      if (Number(run.attempt) > 1)
+        verdicts.push({ run, green: false, rerunning: true });
+      else running ??= run;
+    } else if (conclusion === "success") {
+      verdicts.push({ run, green: true, rerunning: false });
+      break;
+    } else if (conclusion === "cancelled") {
+      // With `cancel-in-progress: false` only a queued run is displaced, and
+      // a queued run has no jobs yet.
+      if ((await jobsOf(run)).length > 0)
+        verdicts.push({ run, green: false, rerunning: false });
+    } else if (conclusion !== "skipped" && conclusion !== "neutral") {
+      verdicts.push({ run, green: false, rerunning: false });
+    }
+  }
+
   const empty: MainState = {
     status: "unknown",
     failedJobs: [],
     suspects: [],
     ...(running ? { running: runRef(running) } : {}),
   };
-  const newest = settledRuns[0];
+  const newest = verdicts[0];
   if (!newest) return empty;
-
-  const settled = runRef(newest);
-  if (text(newest.conclusion).toLowerCase() === "success") {
+  const settled = runRef(newest.run);
+  if (newest.green)
     return { ...empty, status: "green", settled, lastGreen: settled };
-  }
 
-  const greenIndex = settledRuns.findIndex(
-    (run) => text(run.conclusion).toLowerCase() === "success",
-  );
-  const streak =
-    greenIndex < 0 ? settledRuns : settledRuns.slice(0, greenIndex);
-  const firstRed = streak[streak.length - 1] ?? newest;
-  const lastGreen =
-    greenIndex < 0 ? undefined : runRef(settledRuns[greenIndex]!);
+  const last = verdicts[verdicts.length - 1]!;
+  const lastGreen = last.green ? runRef(last.run) : undefined;
+  const streak = verdicts.filter((verdict) => !verdict.green);
+  const firstRed = streak[streak.length - 1]!;
 
-  const view = record(
-    await gh(["run", "view", String(settled.id), "--json", "jobs"]),
-    "workflow run",
+  // A rerun's own jobs are still going; what failed is the attempt before.
+  const jobs = await jobsOf(
+    newest.run,
+    newest.rerunning ? Number(newest.run.attempt) - 1 : undefined,
   );
-  const failedJobs = list(view.jobs)
-    .map((job) => record(job, "job"))
+  const failedJobs = jobs
     .filter((job) =>
-      ["failure", "timed_out"].includes(text(job.conclusion).toLowerCase()),
+      ["failure", "timed_out", "cancelled"].includes(
+        text(job.conclusion).toLowerCase(),
+      ),
     )
     .map((job) => ({
       name: text(job.name),
+      conclusion: text(job.conclusion).toLowerCase(),
       url: text(job.url),
       steps: list(job.steps)
         .map((step) => record(step, "step"))
-        .filter((step) => text(step.conclusion).toLowerCase() === "failure")
+        .filter((step) =>
+          ["failure", "cancelled"].includes(
+            text(step.conclusion).toLowerCase(),
+          ),
+        )
         .map((step) => text(step.name)),
     }));
 
@@ -264,7 +323,8 @@ export async function mainState(gh: GitHubJson): Promise<MainState> {
     ...empty,
     status: "red",
     settled,
-    redSince: text(firstRed.createdAt),
+    ...(newest.rerunning ? { rerunning: true } : {}),
+    redSince: text(firstRed.run.createdAt),
     ...(lastGreen ? { lastGreen } : {}),
     failedJobs,
     suspects: lastGreen
@@ -335,7 +395,8 @@ export function pullRequestState(
     )
     .map((check) => check.name);
   const title = text(value.title);
-  const fixesMain = repairsMain(labels, title);
+  const crossRepository = value.isCrossRepository === true;
+  const fixesMain = repairsMain({ labels, title, crossRepository });
   const state = (
     action: PullRequestAction,
     reason: string,
@@ -358,6 +419,11 @@ export function pullRequestState(
     return state("skip", `labelled ${HOLD_LABEL}`);
   if (text(value.baseRefName) !== "main")
     return state("skip", `targets ${text(value.baseRefName)}, not main`);
+  // The repository is public and merging deploys production, so an outside
+  // contribution waits for Tim's review rather than for its checks.
+  if (crossRepository) return state("skip", "from a fork: Tim reviews it");
+  if (text(value.reviewDecision).toUpperCase() === "CHANGES_REQUESTED")
+    return state("skip", "changes requested");
   if (text(value.mergeable).toUpperCase() === "CONFLICTING")
     return state("rebase", "conflicts with main");
   if (failedChecks.length > 0)
@@ -406,7 +472,7 @@ export async function pullRequestStates(
       "--limit",
       "100",
       "--json",
-      "number,title,url,isDraft,labels,headRefName,headRefOid,baseRefName,mergeable,statusCheckRollup,author",
+      "number,title,url,isDraft,labels,headRefName,headRefOid,baseRefName,mergeable,statusCheckRollup,author,isCrossRepository,reviewDecision",
     ]),
   ).map((value) => record(value, "pull request"));
   const states = open
@@ -497,9 +563,13 @@ export function formatSnapshot(value: Snapshot): string {
     lines.push(
       `main   RED for ${since(main.redSince ?? main.settled!.createdAt, now)} — run ${main.settled!.id} on ${short(main.settled!.sha)}`,
     );
+    if (main.rerunning)
+      lines.push(
+        `       rerunning: run ${main.settled!.id} is on a new attempt`,
+      );
     for (const job of main.failedJobs)
       lines.push(
-        `       ✗ ${job.name}${job.steps.length ? ` › ${job.steps.join(", ")}` : ""}`,
+        `       ✗ ${job.name}${job.conclusion === "failure" ? "" : ` (${job.conclusion})`}${job.steps.length ? ` › ${job.steps.join(", ")}` : ""}`,
       );
     if (main.lastGreen) {
       lines.push(

@@ -38,9 +38,9 @@ function text(value: unknown): string {
 /** What `main-health` says on one pull request. GitHub caps a description at 140 characters. */
 export function healthStatus(
   main: MainState["status"],
-  pullRequest: { labels: readonly string[]; title: string },
+  pullRequest: Parameters<typeof repairsMain>[0],
 ): HealthStatus {
-  if (repairsMain(pullRequest.labels, pullRequest.title))
+  if (repairsMain(pullRequest))
     return {
       state: "success",
       description: "Repairs main, so it may merge while main is red",
@@ -61,7 +61,7 @@ export async function setHealth(
   only?: number,
 ): Promise<string[]> {
   const main = await mainState(gh);
-  const fields = "number,title,labels,headRefOid,baseRefName";
+  const fields = "number,title,labels,headRefOid,baseRefName,isCrossRepository";
   const pullRequests = (
     only
       ? [await gh(["pr", "view", String(only), "--json", fields])]
@@ -87,6 +87,7 @@ export async function setHealth(
     const status = healthStatus(main.status, {
       labels,
       title: text(value.title),
+      crossRepository: value.isCrossRepository === true,
     });
     await gh([
       "api",

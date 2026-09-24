@@ -87,6 +87,29 @@ function git(args: string[]): string | undefined {
   return run.status === 0 ? run.stdout : undefined;
 }
 
+/**
+ * The ids [revision] declares, in either layout. `--full-tree` because git
+ * runs from this directory and would otherwise read the path relative to it.
+ */
+export function whatsNewIdsAtV1(revision: string): string[] {
+  return [
+    ...whatsNewIdsInTreeV1(
+      git([
+        "ls-tree",
+        "--full-tree",
+
+        "--name-only",
+        revision,
+        "--",
+        ENTRIES_DIRECTORY_V1,
+      ]) ?? "",
+    ),
+    ...whatsNewIdsInSourceV1(
+      git(["show", `${revision}:${ENTRIES_LIST_PATH_V1}`]) ?? "",
+    ),
+  ];
+}
+
 function tagDatesInCheckout(): Record<string, string> {
   const listing =
     git([
@@ -109,14 +132,11 @@ if (import.meta.main) {
     );
   }
   const ids = WHATS_NEW_ENTRIES_V1.map((entry) => entry.id);
-  const days = whatsNewPublishedDaysV1(ids, tagDatesInCheckout(), (tag) => [
-    ...whatsNewIdsInTreeV1(
-      git(["ls-tree", "--name-only", tag, "--", ENTRIES_DIRECTORY_V1]) ?? "",
-    ),
-    ...whatsNewIdsInSourceV1(
-      git(["show", `${tag}:${ENTRIES_LIST_PATH_V1}`]) ?? "",
-    ),
-  ]);
+  const days = whatsNewPublishedDaysV1(
+    ids,
+    tagDatesInCheckout(),
+    whatsNewIdsAtV1,
+  );
   writeFileSync(publishedPath, whatsNewPublishedSourceV1(days));
   const dated = Object.keys(days).length;
   if (dated === 0) {

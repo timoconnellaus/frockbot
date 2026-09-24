@@ -5,6 +5,7 @@ import { WHATS_NEW_ENTRIES_V1 } from "./entries.ts";
 import { whatsNewPublishedAtV1 } from "./feed.ts";
 import { whatsNewEntryIdsOnDiskV1 } from "./generate.ts";
 import {
+  whatsNewIdsAtV1,
   whatsNewIdsInSourceV1,
   whatsNewIdsInTreeV1,
   whatsNewPublishedDaysV1,
@@ -21,6 +22,16 @@ describe("What’s New ship dates", () => {
       .join("\n");
     expect(whatsNewIdsInTreeV1(`${listing}\n`).sort()).toEqual(
       WHATS_NEW_ENTRIES_V1.map((entry) => entry.id).sort(),
+    );
+  });
+
+  test("reads a real revision's entry files through git", () => {
+    // HEAD is committed history, so this holds even in a shallow checkout.
+    // `whats-new` has shipped, and a shipped id is never removed.
+    const ids = whatsNewIdsAtV1("HEAD");
+    expect(ids).toContain("whats-new");
+    expect(ids.every((id) => whatsNewEntryIdsOnDiskV1().includes(id))).toBe(
+      true,
     );
   });
 

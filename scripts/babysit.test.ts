@@ -16,7 +16,8 @@ import type { GitHubJson } from "./ci-watch.js";
  */
 function fakeGitHub(state: {
   mainRuns?: unknown[];
-  jobs?: unknown[];
+  /** Jobs for every run, or per run keyed `<id>` or `<id>#<attempt>`. */
+  jobs?: unknown[] | Record<string, unknown[]>;
   compare?: unknown[];
   pullRequests?: unknown[];
   tags?: unknown[][];
@@ -35,8 +36,16 @@ function fakeGitHub(state: {
           ? (state.mainRuns ?? [])
           : (state.releaseRuns ?? []),
       );
-    if (command === "run" && sub === "view")
-      return Promise.resolve({ jobs: state.jobs ?? [] });
+    if (command === "run" && sub === "view") {
+      if (Array.isArray(state.jobs) || !state.jobs)
+        return Promise.resolve({ jobs: state.jobs ?? [] });
+      const attempt = args.includes("--attempt")
+        ? `#${args[args.indexOf("--attempt") + 1]}`
+        : "";
+      return Promise.resolve({
+        jobs: state.jobs[`${args[2]}${attempt}`] ?? [],
+      });
+    }
     if (command === "pr") return Promise.resolve(state.pullRequests ?? []);
     if (path.includes("/compare/"))
       return Promise.resolve({ commits: state.compare ?? [] });
@@ -169,6 +178,7 @@ describe("main", () => {
     expect(state.failedJobs).toEqual([
       {
         name: "Browser end-to-end (core 4/4)",
+        conclusion: "failure",
         url: "j2",
         steps: ["Test browser end to end"],
       },
@@ -181,6 +191,65 @@ describe("main", () => {
       "api",
       "repos/{owner}/{repo}/compare/sha2...sha4",
     ]);
+  });
+
+  test("a run that timed out reads as red: GitHub reports the timeout as cancelled", async () => {
+    const state = await mainState(
+      fakeGitHub({
+        mainRuns: [
+          run(3, "cancelled", "2026-09-24T03:00:00Z"),
+          run(2, "success", "2026-09-24T02:00:00Z"),
+        ],
+        jobs: {
+          "3": [
+            { name: "Validate", conclusion: "success", url: "j1", steps: [] },
+            {
+              name: "Browser end-to-end (core 1/4)",
+              conclusion: "cancelled",
+              url: "j2",
+              steps: [
+                { name: "Test browser end to end", conclusion: "cancelled" },
+              ],
+            },
+          ],
+        },
+      }),
+    );
+    expect(state.status).toBe("red");
+    expect(state.settled?.id).toBe(3);
+    expect(state.failedJobs).toMatchObject([
+      { name: "Browser end-to-end (core 1/4)", conclusion: "cancelled" },
+    ]);
+  });
+
+  test("a failed run being rerun keeps main red until the rerun passes", async () => {
+    const state = await mainState(
+      fakeGitHub({
+        // A rerun keeps its id and creation time and goes back in progress.
+        mainRuns: [
+          run(3, "", "2026-09-24T03:00:00Z", { attempt: 2 }),
+          run(2, "success", "2026-09-24T02:00:00Z"),
+        ],
+        jobs: {
+          "3#1": [
+            {
+              name: "Cloudflare runtime",
+              conclusion: "failure",
+              url: "j",
+              steps: [],
+            },
+          ],
+        },
+      }),
+    );
+    expect(state).toMatchObject({
+      status: "red",
+      rerunning: true,
+      settled: { id: 3 },
+      lastGreen: { id: 2 },
+      failedJobs: [{ name: "Cloudflare runtime" }],
+    });
+    expect(state.running).toBeUndefined();
   });
 
   test("red with no green in the window says so rather than guessing suspects", async () => {
@@ -242,6 +311,27 @@ describe("pull requests", () => {
 
   test("green but main has no settled run is held too", () => {
     expect(decide(pr(), "unknown").action).toBe("held");
+  });
+
+  test("a fork's pull request waits for Tim, however green it is", () => {
+    expect(decide(pr({ isCrossRepository: true }))).toMatchObject({
+      action: "skip",
+      reason: "from a fork: Tim reviews it",
+    });
+  });
+
+  test("anyone can title a fork `Revert`, so only a branch here repairs main by title", () => {
+    const revert = { title: 'Revert "Add a thing"' };
+    expect(decide(pr(revert), "red").action).toBe("merge");
+    expect(
+      decide(pr({ ...revert, isCrossRepository: true }), "red").action,
+    ).toBe("skip");
+  });
+
+  test("a review asking for changes holds the merge", () => {
+    expect(decide(pr({ reviewDecision: "CHANGES_REQUESTED" })).reason).toBe(
+      "changes requested",
+    );
   });
 
   test("drafts, held pull requests and stacked branches are left alone", () => {
@@ -408,6 +498,7 @@ describe("format", () => {
         failedJobs: [
           {
             name: "Cloudflare runtime",
+            conclusion: "failure",
             steps: ["Test Cloudflare runtime compatibility"],
             url: "u",
           },
