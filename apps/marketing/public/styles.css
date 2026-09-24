@@ -1262,6 +1262,114 @@
     color: #ffd3df;
   }
 
+  .apps {
+    --tile: 76px;
+    --tile-gap: 14px;
+    overflow: hidden;
+    border-top: 1px solid var(--line);
+    background: var(--paper);
+  }
+  .app-wall {
+    position: relative;
+    margin-top: 58px;
+  }
+  .app-rows {
+    display: grid;
+    gap: var(--tile-gap);
+    -webkit-mask-image: linear-gradient(
+      90deg,
+      transparent,
+      #000 14%,
+      #000 86%,
+      transparent
+    );
+    mask-image: linear-gradient(
+      90deg,
+      transparent,
+      #000 14%,
+      #000 86%,
+      transparent
+    );
+  }
+  .app-row {
+    display: flex;
+    justify-content: center;
+  }
+  /* Every other row sits half a tile over, so the wall reads as bricks. */
+  .app-row:nth-child(even) {
+    transform: translateX(calc((var(--tile) + var(--tile-gap)) / 2));
+  }
+  .app-track {
+    display: flex;
+    flex: none;
+    gap: var(--tile-gap);
+    padding-right: var(--tile-gap);
+    animation: app-drift 90s linear infinite;
+  }
+  .app-row:nth-child(2) .app-track {
+    animation-duration: 110s;
+    animation-direction: reverse;
+  }
+  .app-row:nth-child(3) .app-track {
+    animation-duration: 100s;
+  }
+  .app-row:nth-child(4) .app-track {
+    animation-duration: 120s;
+    animation-direction: reverse;
+  }
+  .app-wall:hover .app-track {
+    animation-play-state: paused;
+  }
+  .app-tile {
+    width: var(--tile);
+    height: var(--tile);
+    flex: none;
+    display: grid;
+    place-items: center;
+    border: 1px solid var(--line);
+    border-radius: 22px;
+    background: #fff;
+    box-shadow: 0 10px 24px rgb(30 29 39 / 6%);
+  }
+  .app-tile img {
+    width: 40px;
+    height: 40px;
+    object-fit: contain;
+  }
+  .app-count {
+    position: absolute;
+    top: 50%;
+    left: 50%;
+    display: grid;
+    justify-items: center;
+    gap: 6px;
+    padding: 24px 38px 22px;
+    border-radius: 26px;
+    background: var(--ink);
+    color: #fff;
+    text-align: center;
+    box-shadow: 0 30px 70px rgb(30 29 39 / 28%);
+    transform: translate(-50%, -50%) rotate(-2deg);
+  }
+  .app-count strong {
+    font-family: "Archivo Black", "Arial Black", sans-serif;
+    font-size: clamp(2.8rem, 6vw, 4.4rem);
+    font-weight: 400;
+    letter-spacing: -0.05em;
+    line-height: 0.95;
+  }
+  .app-count em {
+    margin-left: 2px;
+    font-family: inherit;
+  }
+  .app-count span {
+    color: #d8d3dc;
+    font-size: 0.85rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    white-space: nowrap;
+  }
+
   .pricing {
     background: var(--cream);
   }
@@ -2457,5 +2565,41 @@
   }
   .bot-builder-tile::after {
     width: 38px;
+  }
+}
+
+/* One copy of a row's tiles out of three: the loop never shows its seam. */
+@keyframes app-drift {
+  to {
+    transform: translateX(-33.3333%);
+  }
+}
+
+@media (max-width: 860px) {
+  .apps {
+    --tile: 58px;
+    --tile-gap: 10px;
+  }
+  .app-wall {
+    margin-top: 40px;
+  }
+  .app-tile {
+    border-radius: 17px;
+  }
+  .app-tile img {
+    width: 30px;
+    height: 30px;
+  }
+  .app-count {
+    padding: 18px 26px 16px;
+  }
+  .app-count span {
+    font-size: 0.75rem;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-track {
+    animation: none;
   }
 }

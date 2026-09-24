@@ -257,6 +257,15 @@ export function createConnectBackendContribution(
             callbackUrl: `${url.origin}${connectCallbackPathV1(command.returnClient)}`,
           }),
         );
+        // An app with nothing to sign in to is connected already: there is
+        // no page to open, and the next settings read shows it.
+        if (receipt.status === "applied" && receipt.oauth?.status === "ready") {
+          return Response.json({
+            schemaVersion: 1,
+            status: "ready",
+            connectionId: receipt.connectionId,
+          });
+        }
         const redirectUrl = receipt.oauth?.authorizationUrl;
         if (receipt.status !== "applied" || !redirectUrl) {
           return jsonError(

@@ -119,7 +119,7 @@ describe("the provider client", () => {
     ).toBe(true);
   });
 
-  test("lists only the important tools of one app", async () => {
+  test("lists every current tool of one app", async () => {
     const { client: c, recorded } = client(() =>
       Response.json({
         items: [
@@ -151,11 +151,12 @@ describe("the provider client", () => {
         next_cursor: null,
       }),
     );
-    const tools = await c.listImportantTools("gmail");
+    const tools = await c.listTools("gmail");
     const url = new URL(recorded[0]!.url);
     expect(url.pathname).toBe("/api/v3.1/tools");
     expect(url.searchParams.get("toolkit_slug")).toBe("gmail");
-    expect(url.searchParams.get("important")).toBe("true");
+    expect(url.searchParams.has("important")).toBe(false);
+    expect(url.searchParams.get("include_deprecated")).toBe("false");
     expect(tools.map((tool) => tool.name)).toEqual([
       "send_email",
       "fetch_emails",
@@ -165,6 +166,62 @@ describe("the provider client", () => {
       properties: { query: { type: "string" } },
       required: ["query"],
     });
+  });
+
+  test("creates each sign-in kind's auth config, and an open account at once", async () => {
+    const { client: c, recorded } = client(() =>
+      Response.json({
+        id: "ca_9",
+        toolkit: { slug: "hackernews" },
+        auth_config: { id: "ac_1" },
+      }),
+    );
+    await c.createAuthConfig("gmail", "FrockBot Gmail", "managed");
+    await c.createAuthConfig("freshdesk", "FrockBot Freshdesk", "API_KEY");
+    expect(
+      await c.createOpenAccount({ userId: "tim", authConfigId: "ac_1" }),
+    ).toBe("ca_9");
+    const bodies = recorded.map((entry) =>
+      JSON.parse(String(entry.init?.body)),
+    );
+    expect(bodies[0].auth_config).toEqual({
+      type: "use_composio_managed_auth",
+      name: "FrockBot Gmail",
+    });
+    expect(bodies[1].auth_config).toEqual({
+      type: "use_custom_auth",
+      authScheme: "API_KEY",
+      name: "FrockBot Freshdesk",
+    });
+    expect(new URL(recorded[2]!.url).pathname).toBe(
+      "/api/v3.1/connected_accounts",
+    );
+    expect(bodies[2]).toEqual({
+      auth_config: { id: "ac_1" },
+      connection: {
+        user_id: "tim",
+        state: { authScheme: "NO_AUTH", val: { status: "ACTIVE" } },
+      },
+    });
+  });
+
+  test("lists one app's auth configs by its slug", async () => {
+    const { client: c, recorded } = client(() =>
+      Response.json({
+        items: [
+          { id: "ac_1", status: "ENABLED", toolkit: { slug: "gmail" } },
+          { id: "ac_2", status: "DISABLED", toolkit: { slug: "gmail" } },
+          { id: "ac_3", status: "ENABLED", toolkit: { slug: "slack" } },
+        ],
+        next_cursor: null,
+      }),
+    );
+    expect(await c.listAuthConfigs("gmail")).toEqual([
+      { id: "ac_1", toolkitSlug: "gmail" },
+    ]);
+    expect(new URL(recorded[0]!.url).searchParams.get("toolkit_slug")).toBe(
+      "gmail",
+    );
   });
 
   test("refuses a tool whose input schema is not an object schema", async () => {
@@ -184,9 +241,7 @@ describe("the provider client", () => {
         next_cursor: null,
       }),
     );
-    await expect(c.listImportantTools("gmail")).rejects.toThrow(
-      "invalid tool schema",
-    );
+    await expect(c.listTools("gmail")).rejects.toThrow("invalid tool schema");
   });
 
   test("refuses a tool listed under another app", async () => {
@@ -203,7 +258,7 @@ describe("the provider client", () => {
         ],
       }),
     );
-    await expect(c.listImportantTools("gmail")).rejects.toThrow("another app");
+    await expect(c.listTools("gmail")).rejects.toThrow("another app");
   });
 
   test("executes a tool against one account and reads the tool-level outcome", async () => {
@@ -314,6 +369,8 @@ describe("the provider client", () => {
     const { client: c } = client(() =>
       Response.json({ items: [], next_cursor: "same" }),
     );
-    await expect(c.listAuthConfigs()).rejects.toThrow("invalid list cursor");
+    await expect(c.listAuthConfigs("gmail")).rejects.toThrow(
+      "invalid list cursor",
+    );
   });
 });

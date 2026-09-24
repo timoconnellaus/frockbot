@@ -5,8 +5,10 @@
 // downstream reads it.
 //
 // Verified against https://backend.composio.dev/api/v3.1/openapi.json on
-// 2026-09-11. The one v3.1-only call this module needs is nothing: revocation
+// 2026-09-23. The one v3.1-only call this module needs is nothing: revocation
 // goes through `DELETE ?revoke_on_delete=true`, which both versions carry.
+
+import type { ConnectAuthV1 } from "./catalog.js";
 
 export const COMPOSIO_DEFAULT_BASE_URL =
   "https://backend.composio.dev/api/v3.1";
@@ -196,31 +198,42 @@ export class ComposioClient {
       config.fetch ?? ((input, init) => globalThis.fetch(input, init));
   }
 
-  /** Every enabled auth config in the project, by app. */
-  async listAuthConfigs(): Promise<AuthConfigSummaryV1[]> {
-    return (await this.pages("/auth_configs?limit=50")).flatMap((candidate) => {
+  /** The enabled auth configs for one app. */
+  async listAuthConfigs(toolkitSlug: string): Promise<AuthConfigSummaryV1[]> {
+    const query = new URLSearchParams({
+      toolkit_slug: toolkitSlug,
+      limit: "50",
+    });
+    return (await this.pages(`/auth_configs?${query}`)).flatMap((candidate) => {
       const config = asRecord(candidate);
       if (config.status !== "ENABLED") return [];
-      return [
-        {
-          id: requiredString(config, "id"),
-          toolkitSlug: requiredString(asRecord(config.toolkit), "slug"),
-        },
-      ];
+      const summary = {
+        id: requiredString(config, "id"),
+        toolkitSlug: requiredString(asRecord(config.toolkit), "slug"),
+      };
+      return summary.toolkitSlug === toolkitSlug ? [summary] : [];
     });
   }
 
-  /** A provider-managed OAuth app for one toolkit, created once per project. */
-  async createManagedAuthConfig(
+  /**
+   * How one app signs in, created once per project: the provider's own OAuth
+   * app, or a custom config for a scheme that needs nothing of ours — the
+   * person supplies the key on the hosted page, or there is nothing to supply.
+   */
+  async createAuthConfig(
     toolkitSlug: string,
     name: string,
+    auth: ConnectAuthV1,
   ): Promise<AuthConfigSummaryV1> {
     const result = asRecord(
       await this.request("/auth_configs", {
         method: "POST",
         body: JSON.stringify({
           toolkit: { slug: toolkitSlug },
-          auth_config: { type: "use_composio_managed_auth", name },
+          auth_config:
+            auth === "managed"
+              ? { type: "use_composio_managed_auth", name }
+              : { type: "use_custom_auth", authScheme: auth, name },
         }),
       }),
     );
@@ -228,6 +241,26 @@ export class ComposioClient {
       id: requiredString(asRecord(result.auth_config), "id"),
       toolkitSlug: requiredString(asRecord(result.toolkit), "slug"),
     };
+  }
+
+  /** An account for an app with nothing to sign in to, live at once. */
+  async createOpenAccount(input: {
+    userId: string;
+    authConfigId: string;
+  }): Promise<string> {
+    const value = asRecord(
+      await this.request("/connected_accounts", {
+        method: "POST",
+        body: JSON.stringify({
+          auth_config: { id: input.authConfigId },
+          connection: {
+            user_id: input.userId,
+            state: { authScheme: "NO_AUTH", val: { status: "ACTIVE" } },
+          },
+        }),
+      }),
+    );
+    return requiredString(value, "id");
   }
 
   /** The hosted sign-in a person is sent to, and the account it will fill. */
@@ -284,11 +317,10 @@ export class ComposioClient {
     }
   }
 
-  /** The app's important tools: the curated subset, never the whole surface. */
-  async listImportantTools(toolkitSlug: string): Promise<ConnectToolV1[]> {
+  /** Every current tool of one app: a Bot can reach all of them. */
+  async listTools(toolkitSlug: string): Promise<ConnectToolV1[]> {
     const query = new URLSearchParams({
       toolkit_slug: toolkitSlug,
-      important: "true",
       include_deprecated: "false",
       limit: "100",
     });

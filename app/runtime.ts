@@ -168,9 +168,10 @@ type EnabledRuntimeContributionFactory = (config: {
     connectionId: string,
     read: () => Promise<unknown>,
   ): Promise<unknown>;
+  /** The account catalog's directory, or one tool's schema when named. */
   readConnectToolCatalog?(
     connection: { connectionId: string; generation?: string },
-    disclose: boolean,
+    toolName?: string,
   ): Promise<unknown>;
   /** The Package's own outbound seam, when the host owns one. */
   fetch?: typeof fetch;
@@ -223,8 +224,8 @@ const enabledRuntimeContributionFactories = new Map<
         ...(pinToolCatalog ? { pinToolCatalog } : {}),
         ...(readConnectToolCatalog && connection
           ? {
-              readAccountCatalog: (disclose) =>
-                readConnectToolCatalog(connection, disclose),
+              readAccountCatalog: (toolName) =>
+                readConnectToolCatalog(connection, toolName),
             }
           : {}),
         ...(permitConnection && connection

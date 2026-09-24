@@ -78,6 +78,32 @@ describe("the Connected apps gateway routes", () => {
     });
   });
 
+  test("answers ready, with no page, for an app with nothing to sign in to", async () => {
+    const { backend } = contribution((command) => ({
+      schemaVersion: 1,
+      commandId: command.commandId,
+      connectionId: "connection-2",
+      status: "applied",
+      oauth: { attemptId: command.commandId, status: "ready" },
+    }));
+    const response = await backend.route(
+      ...post("/api/plugins/connect/connections", {
+        schemaVersion: 1,
+        type: "connection/start",
+        commandId: "start-4",
+        connectionTypeId: "connect-hackernews",
+      }),
+      CONTEXT,
+    );
+    expect(response?.status).toBe(200);
+    const body: unknown = await response!.json();
+    expect(body).toEqual({
+      schemaVersion: 1,
+      status: "ready",
+      connectionId: "connection-2",
+    });
+  });
+
   test("refuses an app this deployment does not offer, before any command", async () => {
     const { backend, commands } = contribution(() => {
       throw new Error("must not be called");

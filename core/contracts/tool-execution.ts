@@ -246,6 +246,12 @@ export interface ToolNamespaceRegistration {
    * in the namespace is dispatched.
    */
   resolve?: () => Promise<LazyNamespaceResolutionV1>;
+  /**
+   * Loads one tool's complete schema by name, for a namespace too large to
+   * load whole. The directory is what lists and searches it; this is called
+   * only when that one tool's schema is returned or it is dispatched.
+   */
+  resolveTool?: (toolName: string) => Promise<LazyNamespaceResolutionV1>;
 }
 
 /** Contributing Packages register tool definitions through this surface. */

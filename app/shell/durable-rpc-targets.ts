@@ -65,7 +65,7 @@ export interface BotUserConfigurationRpcTargetV1
     input: UserRpcEnvelopeV1<{
       connectionId: string;
       generation: string;
-      disclose: boolean;
+      toolName?: string;
     }>,
   ): Promise<object>;
   getConnection(

@@ -405,6 +405,10 @@ test("the Marketplace catalog lists uninstalled models and installed connectors"
     version: "1.0.0",
     state: "installed",
   });
+  // The ordinary read carries an app only once it has an account.
+  expect(connectionsFrame("tim", user, [together, gmail]).providers).toEqual(
+    [],
+  );
   const catalog = connectionsFrame("tim", user, [together, gmail], {
     catalog: true,
   });
@@ -427,6 +431,24 @@ test("the Marketplace catalog lists uninstalled models and installed connectors"
     icon: "together",
     description: "Use Together models with your own key.",
   });
+  // Connectors keep the order their Package declares, ahead of the models.
+  const declared = connectionsFrame(
+    "tim",
+    user,
+    [
+      together,
+      {
+        ...gmail,
+        connectionTypes: [...(gmail.connectionTypes ?? [])].reverse(),
+      },
+    ],
+    { catalog: true },
+  );
+  expect(declared.providers.map((row) => row.displayName)).toEqual([
+    "Slack",
+    "Gmail",
+    "Together",
+  ]);
 });
 
 test("a model provider that takes a key or a sign-in is named once, for itself", () => {

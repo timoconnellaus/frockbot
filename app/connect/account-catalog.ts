@@ -1,8 +1,14 @@
 // Account-owned Composio catalogs. The User Durable Object holds them; a Turn
-// pins a copy when it first discloses schemas. Credentials never appear here.
+// pins one tool's schema when it first discloses it. Credentials never appear
+// here.
 //
-// R2 is not involved. The directory and the schema body are both Durable
-// Object records, written body-then-directory because a directory must not
+// An app's catalog is every tool it has — up to several hundred — so the
+// schemas are stored in chunks, each well under a Durable Object value, and
+// the directory says which chunk holds each tool. A Turn reads the one chunk
+// it needs, never the whole catalog.
+//
+// R2 is not involved. The directory and the schema chunks are all Durable
+// Object records, written chunks-then-directory because a directory must not
 // name bytes that were not stored. They are still not one atomic publish
 // with the provider: the fetch happens outside the transaction, and the
 // directory is updated only when the Connection generation still matches.
@@ -11,7 +17,7 @@ import { createHash } from "node:crypto";
 import type { ConnectToolV1 } from "./composio.js";
 
 /** Freshness policy these records were published under. */
-export const CONNECT_CATALOG_POLICY_VERSION_V1 = 1;
+export const CONNECT_CATALOG_POLICY_VERSION_V1 = 2;
 /** A successful catalog is refreshed after this age. Starting value. */
 export const CONNECT_CATALOG_REFRESH_AFTER_MS_V1 = 60 * 60 * 1000;
 /** First disclosure refuses a catalog older than this until a refresh succeeds. */
@@ -22,10 +28,15 @@ export const CONNECT_CATALOG_FIRST_USE_MS_V1 = 5_000;
 export const CONNECT_CATALOG_ALARM_FETCHES_V1 = 1;
 /** Schema bodies kept per Connection: the published one and the one before it. */
 export const CONNECT_CATALOG_RETAINED_BODIES_V1 = 2;
-/** Same ceiling a Turn pin enforces, so an account catalog cannot be larger than its pin. */
-export const CONNECT_CATALOG_MAX_BYTES_V1 = 1_000_000;
-/** Matches the provider listing page the important-tools query already asks for. */
-export const CONNECT_CATALOG_MAX_TOOLS_V1 = 100;
+/** Largest one app's schemas may encode to, all chunks together. */
+export const CONNECT_CATALOG_MAX_BYTES_V1 = 16_000_000;
+/**
+ * Largest one stored chunk of schemas: under a Durable Object value, and under
+ * what a Turn pins for one tool, so a tool that fits a chunk fits its pin.
+ */
+export const CONNECT_CATALOG_CHUNK_BYTES_V1 = 900_000;
+/** The provider's listing bound: ten pages of a hundred. */
+export const CONNECT_CATALOG_MAX_TOOLS_V1 = 1_000;
 export const CONNECT_CATALOG_PROVIDER_V1 = "composio";
 
 export const CONNECT_CATALOG_DIR_PREFIX_V1 = "connect:tool-catalog:v1:dir:";
@@ -39,6 +50,8 @@ export interface ConnectCatalogToolNameV1 {
   name: string;
   description: string;
   version: string;
+  /** Which stored chunk holds this tool's schema. */
+  chunk: number;
 }
 
 export interface ConnectCatalogDirectoryV1 {
@@ -56,9 +69,11 @@ export interface ConnectCatalogDirectoryV1 {
   tools: ConnectCatalogToolNameV1[];
 }
 
-export interface ConnectCatalogBodyV1 {
+/** One stored chunk of an app's schemas. */
+export interface ConnectCatalogChunkV1 {
   schemaVersion: 1;
   contentHash: string;
+  index: number;
   tools: ConnectToolV1[];
 }
 
@@ -107,8 +122,9 @@ export function connectCatalogJobKeyV1(connectionId: string): string {
 export function connectCatalogBodyKeyV1(
   connectionId: string,
   contentHash: string,
+  index: number,
 ): string {
-  return `${CONNECT_CATALOG_BODY_PREFIX_V1}${connectionId}:${contentHash}`;
+  return `${CONNECT_CATALOG_BODY_PREFIX_V1}${connectionId}:${contentHash}:${index}`;
 }
 
 export function connectCatalogRetryDelayMsV1(attempts: number): number {
@@ -133,6 +149,7 @@ export type ConnectAccountCatalogAnswerV1 =
       tools: readonly { name: string; description: string }[];
     }
   | {
+      /** The one tool a Turn asked for, as a catalog of one. */
       kind: "catalog";
       catalog: {
         schemaVersion: 1;
@@ -184,7 +201,9 @@ export function decodeConnectCatalogDirectoryV1(
       !tool ||
       typeof tool.name !== "string" ||
       typeof tool.description !== "string" ||
-      typeof tool.version !== "string"
+      typeof tool.version !== "string" ||
+      !Number.isInteger(tool.chunk) ||
+      (tool.chunk as number) < 0
     ) {
       throw new ConnectCatalogInvalidError("Stored tool catalog is invalid");
     }
@@ -192,6 +211,7 @@ export function decodeConnectCatalogDirectoryV1(
       name: tool.name,
       description: tool.description,
       version: tool.version,
+      chunk: tool.chunk as number,
     };
   });
   return {
@@ -212,24 +232,26 @@ export function decodeConnectCatalogDirectoryV1(
   };
 }
 
-export function decodeConnectCatalogBodyV1(
+export function decodeConnectCatalogChunkV1(
   value: unknown,
-): ConnectCatalogBodyV1 {
+): ConnectCatalogChunkV1 {
   const record = asRecord(value);
   if (
     !record ||
     record.schemaVersion !== 1 ||
     typeof record.contentHash !== "string" ||
+    !Number.isInteger(record.index) ||
+    (record.index as number) < 0 ||
     !Array.isArray(record.tools)
   ) {
     throw new ConnectCatalogInvalidError("Stored tool catalog is invalid");
   }
-  const tools = record.tools.map(decodeStoredToolV1);
-  const contentHash = connectCatalogContentHashV1(tools);
-  if (contentHash !== record.contentHash) {
-    throw new ConnectCatalogInvalidError("Stored tool catalog is invalid");
-  }
-  return { schemaVersion: 1, contentHash, tools };
+  return {
+    schemaVersion: 1,
+    contentHash: record.contentHash,
+    index: record.index as number,
+    tools: record.tools.map(decodeStoredToolV1),
+  };
 }
 
 function decodeStoredToolV1(value: unknown): ConnectToolV1 {
@@ -280,22 +302,52 @@ export function decodeConnectCatalogJobV1(value: unknown): ConnectCatalogJobV1 {
   };
 }
 
-export function validateConnectCatalogToolsV1(
+function encodedBytes(value: unknown): number {
+  return new TextEncoder().encode(JSON.stringify(value)).byteLength;
+}
+
+/**
+ * The tools in stored order, grouped into chunks under the chunk ceiling. A
+ * single tool too large for a chunk on its own refuses the catalog: leaving it
+ * out would hide a tool the app has.
+ */
+export function chunkConnectCatalogToolsV1(
   tools: readonly ConnectToolV1[],
-): void {
+): ConnectToolV1[][] {
   if (tools.length > CONNECT_CATALOG_MAX_TOOLS_V1) {
     throw new ConnectCatalogInvalidError("The tool catalog exceeds its limit");
   }
-  for (const tool of tools) decodeStoredToolV1(tool);
-  const body = {
-    schemaVersion: 1 as const,
-    contentHash: connectCatalogContentHashV1(tools),
-    tools,
-  };
-  const bytes = new TextEncoder().encode(JSON.stringify(body)).byteLength;
-  if (bytes > CONNECT_CATALOG_MAX_BYTES_V1) {
-    throw new ConnectCatalogInvalidError("The tool catalog exceeds its limit");
+  const chunks: ConnectToolV1[][] = [];
+  let current: ConnectToolV1[] = [];
+  let currentBytes = 0;
+  let total = 0;
+  for (const tool of tools) {
+    decodeStoredToolV1(tool);
+    const bytes = encodedBytes(tool) + 1;
+    if (bytes > CONNECT_CATALOG_CHUNK_BYTES_V1 - 512) {
+      throw new ConnectCatalogInvalidError(
+        "The tool catalog exceeds its limit",
+      );
+    }
+    total += bytes;
+    if (total > CONNECT_CATALOG_MAX_BYTES_V1) {
+      throw new ConnectCatalogInvalidError(
+        "The tool catalog exceeds its limit",
+      );
+    }
+    if (
+      current.length > 0 &&
+      currentBytes + bytes > CONNECT_CATALOG_CHUNK_BYTES_V1 - 512
+    ) {
+      chunks.push(current);
+      current = [];
+      currentBytes = 0;
+    }
+    current.push(tool);
+    currentBytes += bytes;
   }
+  if (current.length > 0) chunks.push(current);
+  return chunks;
 }
 
 export function connectCatalogAgeMsV1(
@@ -330,12 +382,17 @@ export function connectCatalogRefreshDueV1(
   );
 }
 
-function namesOf(tools: readonly ConnectToolV1[]): ConnectCatalogToolNameV1[] {
-  return tools.map((tool) => ({
-    name: tool.name,
-    description: tool.description.slice(0, 240),
-    version: tool.version,
-  }));
+function namesOf(
+  chunks: readonly ConnectToolV1[][],
+): ConnectCatalogToolNameV1[] {
+  return chunks.flatMap((tools, chunk) =>
+    tools.map((tool) => ({
+      name: tool.name,
+      description: tool.description.slice(0, 240),
+      version: tool.version,
+      chunk,
+    })),
+  );
 }
 
 /** Moves the User alarm earlier when this job is due before whatever else is waiting. */
@@ -416,7 +473,7 @@ async function retainBodiesV1(
   const listed = await storage.list<unknown>({ prefix });
   const kept = new Set(keep);
   for (const [key] of listed) {
-    const hash = key.slice(prefix.length);
+    const hash = key.slice(prefix.length).split(":")[0] ?? "";
     if (!kept.has(hash)) await storage.delete(key);
   }
 }
@@ -436,22 +493,24 @@ export async function publishConnectCatalogV1(
     ): Promise<{ state?: string; generation?: string } | undefined>;
   },
 ): Promise<"published" | "stale-generation"> {
-  validateConnectCatalogToolsV1(input.tools);
   const tools = input.tools.map(decodeStoredToolV1);
+  const chunks = chunkConnectCatalogToolsV1(tools);
   const contentHash = connectCatalogContentHashV1(tools);
-  const body: ConnectCatalogBodyV1 = {
-    schemaVersion: 1,
-    contentHash,
-    tools,
-  };
   const before = await input.readConnection(storage);
   if (before?.state !== "ready" || before.generation !== input.generation) {
     return "stale-generation";
   }
-  await storage.put(
-    connectCatalogBodyKeyV1(input.connectionId, contentHash),
-    body,
-  );
+  for (const [index, chunk] of chunks.entries()) {
+    await storage.put(
+      connectCatalogBodyKeyV1(input.connectionId, contentHash, index),
+      {
+        schemaVersion: 1,
+        contentHash,
+        index,
+        tools: chunk,
+      } satisfies ConnectCatalogChunkV1,
+    );
+  }
   let previousHash = "";
   const directory: ConnectCatalogDirectoryV1 = {
     schemaVersion: 1,
@@ -464,7 +523,7 @@ export async function publishConnectCatalogV1(
     fetchedAt: new Date(input.now).toISOString(),
     policyVersion: CONNECT_CATALOG_POLICY_VERSION_V1,
     status: "ready",
-    tools: namesOf(tools),
+    tools: namesOf(chunks),
   };
   const wrote = await storage.transaction(async (tx) => {
     const current = await input.readConnection(tx);
@@ -582,18 +641,33 @@ export async function readConnectCatalogDirectoryV1(
   return decodeConnectCatalogDirectoryV1(stored);
 }
 
-export async function readConnectCatalogBodyV1(
+/** One tool's schema from a published catalog, or nothing when it has none by that name. */
+export async function readConnectCatalogToolV1(
   storage: ConnectCatalogStorageV1,
-  connectionId: string,
-  contentHash: string,
-): Promise<ConnectCatalogBodyV1> {
+  directory: ConnectCatalogDirectoryV1,
+  toolName: string,
+): Promise<ConnectToolV1 | undefined> {
+  const entry = directory.tools.find((tool) => tool.name === toolName);
+  if (!entry) return undefined;
   const stored = await storage.get(
-    connectCatalogBodyKeyV1(connectionId, contentHash),
+    connectCatalogBodyKeyV1(
+      directory.connectionId,
+      directory.contentHash,
+      entry.chunk,
+    ),
   );
   if (stored === undefined) {
     throw new ConnectCatalogInvalidError("The tool catalog is unavailable");
   }
-  return decodeConnectCatalogBodyV1(stored);
+  const chunk = decodeConnectCatalogChunkV1(stored);
+  if (chunk.contentHash !== directory.contentHash) {
+    throw new ConnectCatalogInvalidError("Stored tool catalog is invalid");
+  }
+  const tool = chunk.tools.find((candidate) => candidate.name === toolName);
+  if (!tool) {
+    throw new ConnectCatalogInvalidError("Stored tool catalog is invalid");
+  }
+  return tool;
 }
 
 export async function dueConnectCatalogJobsV1(
@@ -615,7 +689,7 @@ export async function dueConnectCatalogJobsV1(
   return jobs.sort((left, right) => left.dueAt - right.dueAt);
 }
 
-const CLEANUP_RECEIPT = "maintenance:connect-catalog-decode:2026-09-22";
+const CLEANUP_RECEIPT = "maintenance:connect-catalog-decode:2026-09-23";
 const CLEANUP_PAGE = 50;
 
 export async function cleanUndecodableConnectCatalogsV1(
@@ -643,7 +717,7 @@ export async function cleanUndecodableConnectCatalogsV1(
           if (prefix === CONNECT_CATALOG_DIR_PREFIX_V1) {
             decodeConnectCatalogDirectoryV1(value);
           } else if (prefix === CONNECT_CATALOG_BODY_PREFIX_V1) {
-            decodeConnectCatalogBodyV1(value);
+            decodeConnectCatalogChunkV1(value);
           } else {
             decodeConnectCatalogJobV1(value);
           }

@@ -4556,7 +4556,7 @@
         },
         "providers": {
           "type": "array",
-          "maxItems": 100,
+          "maxItems": 2000,
           "items": {
             "type": "object",
             "properties": {

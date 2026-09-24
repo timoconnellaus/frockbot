@@ -764,13 +764,13 @@ describe("startup combined acceptance", () => {
       userId: USER,
       connection: connections.get("gmail")!,
       apiKey: "project-key",
-      readAccountCatalog: async (disclose) => {
-        if (disclose) discloseReads += 1;
+      readAccountCatalog: async (toolName) => {
+        if (toolName !== undefined) discloseReads += 1;
         return contribution.readToolCatalog({
           userId: USER,
           connectionId: "gmail",
           generation: "g1",
-          disclose,
+          ...(toolName === undefined ? {} : { toolName }),
         });
       },
       pinToolCatalog: turnToolCatalogPin(bot, "turn-live"),
@@ -792,7 +792,7 @@ describe("startup combined acceptance", () => {
     const disclosed = await runTool(root, {
       id: "disclose",
       name: "get_dynamic_tools",
-      input: { namespace: "gmail" },
+      input: { namespace: "gmail", toolName: "send_email" },
     });
     expect(disclosed.isError).toBe(false);
     expect(disclosed.content).toContain("Sends an email.");
@@ -810,7 +810,7 @@ describe("startup combined acceptance", () => {
     const again = await runTool(root, {
       id: "disclose-2",
       name: "get_dynamic_tools",
-      input: { namespace: "gmail" },
+      input: { namespace: "gmail", toolName: "send_email" },
     });
     expect(again.content).toContain("Sends an email.");
     expect(again.content).not.toContain("Sends a revised email.");
@@ -825,13 +825,13 @@ describe("startup combined acceptance", () => {
       userId: USER,
       connection: connections.get("gmail")!,
       apiKey: "project-key",
-      readAccountCatalog: async (disclose) => {
-        if (disclose) discloseReads += 1;
+      readAccountCatalog: async (toolName) => {
+        if (toolName !== undefined) discloseReads += 1;
         return contribution.readToolCatalog({
           userId: USER,
           connectionId: "gmail",
           generation: "g1",
-          disclose,
+          ...(toolName === undefined ? {} : { toolName }),
         });
       },
       pinToolCatalog: turnToolCatalogPin(bot, "turn-next"),
@@ -841,7 +841,7 @@ describe("startup combined acceptance", () => {
     const revised = await runTool(nextTurn, {
       id: "disclose-next",
       name: "get_dynamic_tools",
-      input: { namespace: "gmail" },
+      input: { namespace: "gmail", toolName: "send_email" },
     });
     expect(revised.content).toContain("Sends a revised email.");
     connections.set("gmail", {
@@ -866,14 +866,14 @@ describe("startup combined acceptance", () => {
         userId: USER,
         connectionId: "slack",
         generation: "g1",
-        disclose: true,
+        toolName: "send",
         firstUseMs: 200,
       }),
       contribution.readToolCatalog({
         userId: USER,
         connectionId: "slack",
         generation: "g1",
-        disclose: true,
+        toolName: "send",
         firstUseMs: 200,
       }),
     ]);
@@ -882,7 +882,7 @@ describe("startup combined acceptance", () => {
       userId: USER,
       connectionId: "notion",
       generation: "g1",
-      disclose: true,
+      toolName: "send",
       firstUseMs: 20,
     });
     expect(timedOut.kind).toBe("unavailable");
@@ -1327,10 +1327,10 @@ describe("startup combined acceptance", () => {
     expect(
       await cleanRetiredMemoryFactObjectsV1(cleanup, bucket, "bot-memory/"),
     ).toBe(0);
-    await catalog.put(connectCatalogBodyKeyV1("gmail", "garbage"), "nope");
+    await catalog.put(connectCatalogBodyKeyV1("gmail", "garbage", 0), "nope");
     await cleanUndecodableConnectCatalogsV1(catalog);
     expect(
-      await catalog.get(connectCatalogBodyKeyV1("gmail", "garbage")),
+      await catalog.get(connectCatalogBodyKeyV1("gmail", "garbage", 0)),
     ).toBeUndefined();
     await cleanUndecodableConnectCatalogsV1(catalog);
 

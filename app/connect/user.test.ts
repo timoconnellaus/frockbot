@@ -106,14 +106,28 @@ class FakeClient {
   links: string[] = [];
   deleted: string[] = [];
   private counter = 0;
-  listAuthConfigs() {
-    return Promise.resolve([...this.authConfigs]);
+  schemes: string[] = [];
+  listAuthConfigs(toolkitSlug: string) {
+    return Promise.resolve(
+      this.authConfigs.filter((config) => config.toolkitSlug === toolkitSlug),
+    );
   }
-  createManagedAuthConfig(toolkitSlug: string) {
+  createAuthConfig(toolkitSlug: string, _name: string, auth: string) {
     this.created.push(toolkitSlug);
+    this.schemes.push(auth);
     const config = { id: `ac_${toolkitSlug}`, toolkitSlug };
     this.authConfigs.push(config);
     return Promise.resolve(config);
+  }
+  createOpenAccount(input: { authConfigId: string }) {
+    const id = `ca_${++this.counter}`;
+    this.accounts.set(id, {
+      id,
+      status: "ACTIVE",
+      toolkitSlug: input.authConfigId.slice(3),
+      disabled: false,
+    });
+    return Promise.resolve(id);
   }
   callbacks: string[] = [];
   createConnectLink(input: { authConfigId: string; callbackUrl: string }) {
@@ -368,6 +382,39 @@ describe("starting a connected app", () => {
     await contribution.executeConnection("tim", start("s1"));
     expect(client.created).toEqual([]);
     expect(client.links).toEqual(["ac_gmail"]);
+  });
+
+  test("a key or dynamically registered app signs in on the provider's page too", async () => {
+    const { contribution, client } = fixture();
+    const keyed = await contribution.executeConnection(
+      "tim",
+      start("s1", "connect-freshdesk"),
+    );
+    const registered = await contribution.executeConnection(
+      "tim",
+      start("s2", "connect-canva_mcp"),
+    );
+    expect(client.created).toEqual(["freshdesk", "canva_mcp"]);
+    expect(client.schemes).toEqual(["API_KEY", "DCR_OAUTH"]);
+    expect(keyed.oauth?.authorizationUrl).toBe("https://connect.example/ca_1");
+    expect(registered.oauth?.authorizationUrl).toBe(
+      "https://connect.example/ca_2",
+    );
+  });
+
+  test("an app with nothing to sign in to is ready at once, with no page", async () => {
+    const { contribution, client, settings } = fixture();
+    const receipt = await contribution.executeConnection(
+      "tim",
+      start("s1", "connect-hackernews"),
+    );
+    expect(receipt.status).toBe("applied");
+    expect(receipt.oauth).toEqual({ attemptId: "s1", status: "ready" });
+    expect(client.links).toEqual([]);
+    expect(client.schemes).toEqual(["NO_AUTH"]);
+    const connection = settings.state.connections[0]!;
+    expect(connection.state).toBe("ready");
+    expect(connection.generation).toBeDefined();
   });
 
   test("fails plainly when there is no provider key or the app is unknown", async () => {

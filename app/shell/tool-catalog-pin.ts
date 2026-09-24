@@ -1,16 +1,16 @@
 /**
  * External schemas are an admitted Turn's inputs, owned by its Bot.
  *
- * A Turn that mounts a Connection's tools reads that provider's catalog once
- * and pins it, so the Turn keeps the exact schemas and versions it was
- * admitted under however many times its Durable Object is evicted and its
- * Composition remounted mid-run. A later Turn reads the provider again and
- * sees whatever the provider has since published.
+ * A Turn that uses a Connection's tool reads that tool's schema once and pins
+ * it, so the Turn keeps the exact schema and version it first used however
+ * many times its Durable Object is evicted and its Composition remounted
+ * mid-run. A later Turn reads again and sees whatever the provider has since
+ * published. A pin is named by the caller — one tool of one Connection.
  *
  * The pins are durable state, so they are bounded state. Three bounds, all
  * enforced here and all durable:
  *
- *  * **One pin.** A single Connection's catalog may not exceed
+ *  * **One pin.** A single pinned schema may not exceed
  *    {@link TURN_TOOL_CATALOG_PIN_BYTES_V1}.
  *  * **All pins together.** Every retained pin's encoded bytes are accounted
  *    in a durable index and may not exceed

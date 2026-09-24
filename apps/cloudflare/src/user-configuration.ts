@@ -1846,21 +1846,23 @@ export class UserConfiguration
   }
 
   async readConnectToolCatalog(input: unknown): Promise<object> {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      connectionId: rpcIdentifier,
-      generation: rpcString(128),
-      disclose: (value, label) => {
-        if (typeof value !== "boolean") throw new Error(`${label} is invalid`);
-        return value;
+    const request = decodeRpcEnvelopeV1(
+      input,
+      {
+        userId: rpcIdentifier,
+        connectionId: rpcIdentifier,
+        generation: rpcString(128),
       },
-    });
+      { toolName: rpcString(256) },
+    );
     const userId = await this.assertUserIdentity(request.userId as string);
     return (await this.connectContribution()).readToolCatalog({
       userId,
       connectionId: request.connectionId as string,
       generation: request.generation as string,
-      disclose: request.disclose as boolean,
+      ...(typeof request.toolName === "string"
+        ? { toolName: request.toolName }
+        : {}),
     });
   }
 
