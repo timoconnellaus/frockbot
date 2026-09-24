@@ -25,7 +25,11 @@ import {
   PUSH_OUTBOX_DRAIN_LIMIT,
   PUSH_OUTBOX_PREFIX,
   PUSH_READ_KEY,
+  TELEGRAM_MIRROR_KEY,
+  TELEGRAM_OUTBOX_PREFIX,
+  type TelegramOutboxEntryV1,
 } from "@frockbot/app/notifications/storage-keys";
+import { decodeTelegramMirrorOutcomeV1 } from "@frockbot/app/telegram/shared";
 import {
   UNREAD_STATE_KEY,
   optionalUnreadStateV1,
@@ -354,6 +358,7 @@ import {
   decodeVoiceChatResultRpcV1,
   decodeVoiceCallTranscriptRpcV1,
   decodeBotGroupTurnRpcV1,
+  decodeBotTelegramTurnRpcV1,
   decodeRpcEnvelopeV1,
   rpcBoolean,
   rpcBotId,
@@ -890,7 +895,14 @@ export class BotState
                 ?.scheduledDeadlines(transaction)) ?? []),
               ...((
                 await transaction.list({ prefix: PUSH_OUTBOX_PREFIX, limit: 1 })
-              ).size || (await transaction.get(PUSH_READ_KEY))
+              ).size ||
+              (await transaction.get(PUSH_READ_KEY)) ||
+              (
+                await transaction.list({
+                  prefix: TELEGRAM_OUTBOX_PREFIX,
+                  limit: 1,
+                })
+              ).size
                 ? [Date.now() + 30_000]
                 : []),
               ...(await themeAssembleDeadlineV1(transaction)),
@@ -2228,6 +2240,62 @@ export class BotState
     return receipt;
   }
 
+  /**
+   * The person, writing from Telegram, into this Bot's conversation.
+   *
+   * The user lane, exactly as a typed message: it queues ahead of agent work
+   * and a chat Turn running here yields to it at its next step boundary. The
+   * webhook answers Telegram only once this returns, so the message is durable
+   * before Telegram is told it arrived, and a redelivery — the same run id —
+   * replays this admission rather than making a second Turn. Being spoken to
+   * from Telegram also makes this Bot the one whose messages go back there.
+   */
+  async admitTelegramTurn(input: unknown) {
+    const request = decodeBotTelegramTurnRpcV1(input);
+    const identity = { userId: request.userId, botId: request.botId };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    await this.ctx.storage.put(TELEGRAM_MIRROR_KEY, { schemaVersion: 1 });
+    const receipt = await shell.admit({
+      ...identity,
+      runId: request.command.runId,
+      sessionId: request.command.sessionId,
+      acceptedAt: request.command.acceptedAt,
+      text: request.command.text,
+      turnType: "chat",
+      lane: "user",
+      origin: request.command.origin,
+    });
+    const work = shell.pendingWork();
+    if (work) this.ctx.waitUntil(work);
+    return receipt;
+  }
+
+  /**
+   * Whether this Bot's messages are queued for the linked Telegram chat. Set
+   * by the User object when the chat starts or stops talking to this Bot; a
+   * hint only, since delivery asks the User object again for every message.
+   */
+  async setTelegramMirror(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      on: rpcBoolean,
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    if (request.on) {
+      await this.ctx.storage.put(TELEGRAM_MIRROR_KEY, { schemaVersion: 1 });
+    } else {
+      await this.ctx.storage.delete(TELEGRAM_MIRROR_KEY);
+    }
+    return { schemaVersion: 1 } as const;
+  }
+
   /** One of this member's group Turns, as its group reads it back. */
   async readGroupTurn(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
@@ -2755,7 +2823,14 @@ export class BotState
       let delivered = 0;
       do {
         this.pushDrainAgain = false;
-        delivered = await this.flushPush();
+        delivered =
+          (await this.flushPush()) +
+          (await this.flushTelegram().catch(() => {
+            // Still durable, still owed: the alarm drains it again. A failure
+            // here must not hold back the push entries behind it.
+            console.error(JSON.stringify({ event: "telegram-outbox-pending" }));
+            return 0;
+          }));
       } while (this.pushDrainAgain || delivered > 0);
     })()
       .catch(() => {
@@ -2824,6 +2899,47 @@ export class BotState
       });
     }
     return entries.size;
+  }
+
+  /**
+   * How many Telegram outbox entries this pass settled.
+   *
+   * Each goes to the User object, which sends it at most once to whichever
+   * chat the link names now. An entry leaves the outbox once that object has
+   * an answer for it — sent, refused, skipped, or uncertain — and stays only
+   * while Telegram has asked to be left alone, which ends the pass so the
+   * order the Bot said things in is the order they arrive.
+   */
+  private async flushTelegram(): Promise<number> {
+    const identity = await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
+    if (!identity) return 0;
+    const entries = await this.ctx.storage.list<TelegramOutboxEntryV1>({
+      prefix: TELEGRAM_OUTBOX_PREFIX,
+      limit: PUSH_OUTBOX_DRAIN_LIMIT,
+    });
+    if (entries.size === 0) return 0;
+    // SAFETY: USER_CONFIGURATIONS is bound to UserConfiguration; this is its reviewed RPC door.
+    const rpc = this.env.USER_CONFIGURATIONS.get(
+      this.env.USER_CONFIGURATIONS.idFromName(identity.userId),
+    ) as unknown as {
+      deliverTelegramMirror(input: unknown): Promise<unknown>;
+    };
+    let settled = 0;
+    for (const [key, entry] of entries) {
+      const outcome = decodeTelegramMirrorOutcomeV1(
+        await rpc.deliverTelegramMirror({
+          schemaVersion: 1,
+          userId: identity.userId,
+          botId: identity.botId,
+          cursor: entry.cursor,
+          text: entry.text,
+        }),
+      );
+      if (outcome.status === "retry") break;
+      await this.ctx.storage.delete(key);
+      settled += 1;
+    }
+    return settled;
   }
 
   /** The Bot's unread projection; the Bot Durable Object derives the count. */

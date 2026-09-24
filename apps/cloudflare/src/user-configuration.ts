@@ -242,6 +242,20 @@ import {
 } from "./computer-host.js";
 import type { AuthPackageEnvironmentV1 } from "#auth-package";
 import type { VoiceAssistant } from "./voice-assistant.js";
+import {
+  decodeTelegramAccountV1,
+  decodeTelegramInboundMessageV1,
+  type TelegramMirrorOutcomeV1,
+  type TelegramRouteDecisionV1,
+  type TelegramStatusViewV1,
+} from "@frockbot/app/telegram/shared";
+import {
+  TelegramUserStoreV1,
+  type TelegramSwitchV1,
+  type TelegramUserHostV1,
+} from "@frockbot/app/telegram/user";
+import { telegramApiV1 } from "@frockbot/app/telegram/api";
+import { telegramPlatformBotV1 } from "@frockbot/app/telegram/shared";
 
 /** The durable key pinning the User this object was provisioned for. */
 const USER_IDENTITY_KEY = "user:identity";
@@ -264,6 +278,13 @@ interface UserConfigurationEnv
    * verify.
    */
   MACHINE_TOKEN_SECRET?: string;
+  /**
+   * The deployment's Telegram bot. This object sends each message a Bot owes
+   * the linked chat, holding the token for that one call; absent, nothing is
+   * sent and the link is inert.
+   */
+  TELEGRAM_BOT_TOKEN?: string;
+  TELEGRAM_WEBHOOK_SECRET?: string;
   /** Bot authority: archive and restore are carried to the Bot Durable Object. */
   BOT_STATES: DurableObjectNamespace;
   /** Each Group Chat's own object, told about every change to its group. */
@@ -2446,6 +2467,8 @@ export class UserConfiguration
     const contributions = await this.contributions();
     contributions.search.purge(botId);
     contributions.audit.purgeAuditForBot(botId);
+    // Before the to-do entry goes, so a sweep interrupted here runs again.
+    await this.telegram().forgetBot(botId);
     await contributions.flock.forgetDeletedBot(botId);
     const userId = await this.provenIdentity();
     if (userId) {
@@ -3636,5 +3659,225 @@ export class UserConfiguration
     await (
       await this.settingsContribution()
     ).readConfiguration({ schemaVersion: 1, userId });
+  }
+
+  /** The User's Telegram link, over this object's storage and Bot directory. */
+  private telegram(): TelegramUserStoreV1 {
+    return new TelegramUserStoreV1({
+      storage: this.ctx.storage as unknown as TelegramUserHostV1["storage"],
+      bots: async () => {
+        const flock = await this.flockContribution();
+        const [directory, lifecycles, bootstrap] = await Promise.all([
+          flock.listBots(),
+          flock.listBotLifecycles(),
+          flock.readBootstrap(),
+        ]);
+        const inactive = new Set(
+          lifecycles.lifecycles
+            .filter((lifecycle) => lifecycle.status !== "active")
+            .map((lifecycle) => lifecycle.botId),
+        );
+        return {
+          bots: directory.bots
+            .filter((bot) => !inactive.has(bot.botId))
+            .map((bot) => ({
+              botId: bot.botId,
+              name: (bot.currentProfile?.name ?? bot.initialName).slice(0, 200),
+            })),
+          ...(bootstrap.generalBotId
+            ? { generalBotId: bootstrap.generalBotId }
+            : {}),
+        };
+      },
+    });
+  }
+
+  /**
+   * Tell the Bots a change of which one the chat talks to. The flag is only
+   * the Bot's hint to queue its messages for Telegram — delivery asks this
+   * object which Bot the chat talks to now — so a Bot that cannot be reached
+   * is left for the chat's next message to that Bot to correct.
+   */
+  private async carryTelegramSwitch(
+    userId: string,
+    switched: TelegramSwitchV1,
+  ): Promise<void> {
+    const moves: Array<[string, boolean]> = [];
+    if (switched.to) moves.push([switched.to, true]);
+    if (switched.from && switched.from !== switched.to) {
+      moves.push([switched.from, false]);
+    }
+    for (const [botId, on] of moves) {
+      const id = this.env.BOT_STATES.idFromName(`${userId}:${botId}`);
+      // SAFETY: BOT_STATES is bound to BotState; this is its reviewed RPC door.
+      const bot = this.env.BOT_STATES.get(id) as unknown as {
+        setTelegramMirror(input: unknown): Promise<unknown>;
+      };
+      try {
+        await bot.setTelegramMirror({ schemaVersion: 1, userId, botId, on });
+      } catch (error) {
+        console.error(
+          JSON.stringify({
+            event: "telegram-mirror-flag-failed",
+            botId,
+            on,
+            message: error instanceof Error ? error.message.slice(0, 200) : "",
+          }),
+        );
+      }
+    }
+  }
+
+  async readTelegram(input: unknown): Promise<TelegramStatusViewV1> {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertUserIdentity(request.userId as string);
+    return this.telegram().read();
+  }
+
+  /**
+   * Link the Telegram account that just spent this User's code. The gateway
+   * calls it only for an account the directory says claimed one.
+   */
+  async completeTelegramLink(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      account: rpcDecoded(decodeTelegramAccountV1),
+      now: rpcString(64),
+    });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    const { link, previous, botName } = await this.telegram().complete(
+      request.account as ReturnType<typeof decodeTelegramAccountV1>,
+      request.now as string,
+    );
+    await this.carryTelegramSwitch(userId, {
+      ...(previous?.botId ? { from: previous.botId } : {}),
+      ...(link.botId ? { to: link.botId } : {}),
+    });
+    return {
+      schemaVersion: 1 as const,
+      ...(botName ? { botName } : {}),
+      ...(previous ? { previousTelegramUserId: previous.telegramUserId } : {}),
+    };
+  }
+
+  /** Another User claimed this account: its link here ends. */
+  async dropTelegramLink(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      telegramUserId: rpcPattern(/^-?[0-9]{1,20}$/, 21),
+      claimedAt: rpcString(64),
+    });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    const dropped = await this.telegram().drop(
+      request.telegramUserId as string,
+      request.claimedAt as string,
+    );
+    if (dropped?.botId) {
+      await this.carryTelegramSwitch(userId, { from: dropped.botId });
+    }
+    return { schemaVersion: 1 as const };
+  }
+
+  async unlinkTelegram(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    const previous = await this.telegram().unlink();
+    if (previous?.botId) {
+      await this.carryTelegramSwitch(userId, { from: previous.botId });
+    }
+    return {
+      schemaVersion: 1 as const,
+      ...(previous ? { telegramUserId: previous.telegramUserId } : {}),
+    };
+  }
+
+  async selectTelegramBot(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+    });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    const outcome = await this.telegram().select(request.botId as string);
+    if (outcome.status === "rejected") {
+      return {
+        schemaVersion: 1 as const,
+        status: "rejected" as const,
+        reason: outcome.reason,
+      };
+    }
+    await this.carryTelegramSwitch(userId, outcome.switched);
+    return { schemaVersion: 1 as const, status: "applied" as const };
+  }
+
+  /** What one message from the linked chat is: a command, or words for a Bot. */
+  async routeTelegramMessage(input: unknown): Promise<TelegramRouteDecisionV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      message: rpcDecoded(decodeTelegramInboundMessageV1),
+    });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    const { decision, switched } = await this.telegram().route(
+      request.message as ReturnType<typeof decodeTelegramInboundMessageV1>,
+    );
+    if (switched) await this.carryTelegramSwitch(userId, switched);
+    return decision;
+  }
+
+  /**
+   * Send one message a Bot owes the linked chat, at most once.
+   *
+   * The Bot's outbox drain is the only caller. The link decides where it goes
+   * — the chat the link names now, and only while the link names this Bot —
+   * and the intent is recorded before Telegram is called, so an outcome lost
+   * with this object is recorded as uncertain rather than sent twice. The
+   * message stays in the conversation whatever happens here.
+   */
+  async deliverTelegramMirror(
+    input: unknown,
+  ): Promise<TelegramMirrorOutcomeV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      cursor: rpcPattern(/^message-[0-9]{20}$/, 28),
+      text: rpcString(4_096),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    const platform = telegramPlatformBotV1(this.env);
+    if (!platform) return { status: "skipped" };
+    const botId = request.botId as string;
+    const cursor = request.cursor as string;
+    const store = this.telegram();
+    const claim = await store.claimDelivery(botId, cursor, Date.now());
+    if (claim.kind === "done") return claim.outcome;
+    const sent = await telegramApiV1(platform.botToken).sendMessage(
+      claim.chatId,
+      request.text as string,
+    );
+    const now = Date.now();
+    const outcome: TelegramMirrorOutcomeV1 =
+      sent.status === "sent"
+        ? { status: "sent" }
+        : sent.status === "retry"
+          ? {
+              status: "retry",
+              retryAt: new Date(now + sent.retryAfterMs).toISOString(),
+            }
+          : sent.status === "rejected"
+            ? { status: "failed" }
+            : { status: "uncertain" };
+    if (outcome.status === "failed" || outcome.status === "uncertain") {
+      console.error(
+        JSON.stringify({
+          event: `telegram-delivery-${outcome.status}`,
+          botId,
+          cursor,
+          ...(sent.status === "rejected"
+            ? { description: sent.description }
+            : {}),
+        }),
+      );
+    }
+    await store.finishDelivery(botId, cursor, outcome, now);
+    return outcome;
   }
 }

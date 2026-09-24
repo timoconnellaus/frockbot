@@ -281,6 +281,28 @@ describe("the admission record names what produced the Turn", () => {
     );
   });
 
+  test("a Telegram origin is the person's own chat Turn, keyed by the message", () => {
+    const withOrigin = (origin: unknown) =>
+      legacyRun({
+        admission: { schemaVersion: 1, turnType: "chat", origin },
+      } as never);
+    const origin: StoredRunOriginV1 = { kind: "telegram", messageId: "12" };
+    const decoded = codec.require(withOrigin(origin));
+
+    expect(decoded.admission?.origin).toEqual(origin);
+    // The user lane, like a typed message: not work anybody else started.
+    expect(storedRunLaneV1(decoded)).toBe("user");
+    expect(storedRunIsDeliveryV1(decoded)).toBe(false);
+    expect(codec.require(structuredClone(decoded))).toEqual(decoded);
+
+    expect(() =>
+      codec.require(withOrigin({ ...origin, chatId: "4242" })),
+    ).toThrow(/invalid admission origin fields/);
+    expect(() =>
+      codec.require(withOrigin({ ...origin, messageId: "twelve" })),
+    ).toThrow(/invalid admission origin id/);
+  });
+
   test("a voice origin cannot borrow another origin's fields", () => {
     const withOrigin = (origin: unknown) =>
       legacyRun({

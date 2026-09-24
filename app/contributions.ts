@@ -65,6 +65,10 @@ import {
   backendContribution as mcpGatewayContribution,
   type McpGatewayHost,
 } from "@frockbot/app/mcp/backend";
+import {
+  backendContribution as telegramGatewayContribution,
+  type TelegramGatewayHostV1,
+} from "@frockbot/app/telegram/backend";
 
 import {
   userContribution as settingsUserContribution,
@@ -135,6 +139,7 @@ export {
   subagentsGatewayContribution,
   machineGatewayContribution,
   mcpGatewayContribution,
+  telegramGatewayContribution,
   settingsUserContribution,
   credentialsUserContribution,
   connectUserContribution,
@@ -219,6 +224,7 @@ export type FoundationGatewayHost = {
   SubagentsGatewayHost &
   MachineGatewayHostV1 &
   McpGatewayHost &
+  TelegramGatewayHostV1 &
   SearchGatewayHost &
   AuditGatewayHost;
 
@@ -296,6 +302,7 @@ export const backendDescriptorsV1: readonly AnyBackendDescriptor[] = [
   subagentsGatewayContribution,
   machineGatewayContribution,
   mcpGatewayContribution,
+  telegramGatewayContribution,
   settingsUserContribution,
   credentialsUserContribution,
   connectUserContribution,

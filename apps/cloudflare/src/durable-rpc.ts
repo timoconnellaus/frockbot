@@ -6,7 +6,10 @@ import {
 } from "@frockbot/core/contracts";
 import { decodeBotIdV1, isRpcIdentifier } from "@frockbot/core/configuration";
 import { decodeRunIdV1 } from "@frockbot/app/shell/backend-contracts";
-import type { StoredRunGroupOriginV1 } from "@frockbot/core/durable";
+import type {
+  StoredRunGroupOriginV1,
+  StoredRunTelegramOriginV1,
+} from "@frockbot/core/durable";
 import {
   VOICE_CALL_TRANSCRIPT_TEXT_MAX_V1,
   VOICE_CALL_TRANSCRIPT_TURNS_MAX_V1,
@@ -613,6 +616,55 @@ export function decodeBotAgentRunRpcV1(
     botId: request.botId as string,
     command,
   };
+}
+
+export interface DecodedBotTelegramTurnRpcV1 {
+  schemaVersion: 1;
+  userId: string;
+  botId: string;
+  command: {
+    runId: string;
+    sessionId: string;
+    acceptedAt: string;
+    text: string;
+    origin: StoredRunTelegramOriginV1;
+  };
+}
+
+/**
+ * Internal-only Telegram admission: the person, writing from Telegram, into
+ * this Bot's own conversation. Its own door so that the one caller able to
+ * name a `telegram` origin is the gateway's webhook, after the User object
+ * said which Bot the chat talks to; the HTTP Turn decoder cannot name it.
+ */
+export function decodeBotTelegramTurnRpcV1(
+  input: unknown,
+): DecodedBotTelegramTurnRpcV1 {
+  const request = decodeRpcEnvelopeV1(input, {
+    userId: rpcIdentifier,
+    botId: rpcBotId,
+    command: rpcObject({
+      runId: rpcPattern(/^tg-[0-9a-f]{64}$/, 67),
+      sessionId: rpcString(257),
+      acceptedAt: rpcString(64),
+      text: rpcString(4_096),
+      origin: rpcObject({
+        kind: rpcPattern(/^telegram$/, 8),
+        messageId: rpcPattern(/^[0-9]{1,20}$/, 20),
+      }),
+    }),
+  });
+  const userId = request.userId as string;
+  const botId = request.botId as string;
+  const command = request.command as DecodedBotTelegramTurnRpcV1["command"];
+  // The person's own conversation, never a group's or another Bot's.
+  if (command.sessionId !== `${userId}:${botId}`) {
+    throw new Error("telegram RPC request.command.sessionId is invalid");
+  }
+  if (!Number.isFinite(Date.parse(command.acceptedAt))) {
+    throw new Error("telegram RPC request.command.acceptedAt is invalid");
+  }
+  return { schemaVersion: 1, userId, botId, command };
 }
 
 export interface DecodedBotGroupTurnRpcV1 {

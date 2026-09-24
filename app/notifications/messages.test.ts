@@ -11,6 +11,9 @@ import {
   optionalProjectedSendV1,
   PUSH_OUTBOX_PREFIX,
   sentAutomationRunKeyV1,
+  TELEGRAM_MIRROR_KEY,
+  TELEGRAM_OUTBOX_PREFIX,
+  type TelegramOutboxEntryV1,
 } from "./storage-keys.js";
 import {
   decodeUnreadStateV1,
@@ -275,5 +278,97 @@ describe("a message whose run has no send event to carry it", () => {
     const state = decodeUnreadStateV1(records[UNREAD_STATE_KEY]);
     expect(state.lastMessageId).toBeUndefined();
     expect(state.lastActivityCursor).toBe("message-00000000000000000001");
+  });
+});
+
+describe("the Telegram outbox at the minting point", () => {
+  const long = "word ".repeat(200).trim();
+  const mirrored = { [TELEGRAM_MIRROR_KEY]: { schemaVersion: 1 } };
+  const owedOf = (records: Record<string, unknown>) =>
+    Object.entries(records)
+      .filter(([key]) => key.startsWith(TELEGRAM_OUTBOX_PREFIX))
+      .map(([, value]) => value as TelegramOutboxEntryV1);
+
+  test("owes the chat nothing while this Bot is not the one it talks to", async () => {
+    const first = send(1, "Hello");
+    expect(
+      owedOf(
+        await messageRecords({
+          run: run([first]),
+          events: [first],
+          read: reader(),
+        }),
+      ),
+    ).toEqual([]);
+  });
+
+  test("owes it the whole message, in the transaction that mints it", async () => {
+    const first = send(1, long);
+    const approval = send(2, "Delete the draft", "approval");
+    const records = await messageRecords({
+      run: run([first, approval]),
+      events: [first, approval],
+      read: reader(mirrored),
+    });
+    expect(owedOf(records)).toEqual([
+      {
+        schemaVersion: 1,
+        cursor: "message-00000000000000000001",
+        messageId: "run-1:send:0",
+        // The alert carries a 240-character preview; the chat carries it all.
+        text: long,
+      },
+      {
+        schemaVersion: 1,
+        cursor: "message-00000000000000000002",
+        messageId: "run-1:send:1",
+        text: "Waiting for your approval: Delete the draft. Approve or decline it in FrockBot.",
+      },
+    ]);
+  });
+
+  test("a reply to a message from Telegram is told there and wakes no device", async () => {
+    const first = send(1, "Answered in Telegram");
+    const records = await messageRecords({
+      run: {
+        ...run([first]),
+        admission: {
+          schemaVersion: 1,
+          turnType: "chat",
+          origin: { kind: "telegram", messageId: "7" },
+        },
+      },
+      events: [first],
+      read: reader(mirrored),
+    });
+    expect(
+      (
+        records[
+          `${PUSH_OUTBOX_PREFIX}message-00000000000000000001`
+        ] as MessageNotice
+      ).notify,
+    ).toBe(false);
+    expect(owedOf(records)).toMatchObject([{ text: "Answered in Telegram" }]);
+  });
+
+  test("a voice answer is not mirrored: the person is hearing it", async () => {
+    const records = await visibleMessageRecordsV1({
+      settings: {
+        ...initializeBotSettingsV1("primary"),
+        profile: { name: "Primary" },
+        notifications: { enabled: true },
+      },
+      read: reader(mirrored),
+      messages: [
+        {
+          messageId: "voice-1:send:0",
+          runId: "voice-1",
+          createdAt: "2026-09-01T00:00:00.000Z",
+          body: "Spoken",
+          voice: true,
+        },
+      ],
+    });
+    expect(owedOf(records)).toEqual([]);
   });
 });

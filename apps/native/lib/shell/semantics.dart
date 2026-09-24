@@ -458,6 +458,19 @@ abstract final class MachineIds {
   static const pairingDismiss = 'machine-pairing-dismiss';
 }
 
+/// Telegram: the linked account, which Bot answers there, and the one-time
+/// link that connects a Telegram account — host chrome, like a pairing code,
+/// because it exists once, on a receipt.
+abstract final class TelegramIds {
+  static const document = 'telegram-document';
+  static const refresh = 'telegram-refresh';
+  static const profileEntry = 'profile-telegram';
+  static const offer = 'telegram-link-offer';
+  static const open = 'telegram-link-open';
+  static const copy = 'telegram-link-copy';
+  static const dismiss = 'telegram-link-dismiss';
+}
+
 /// Audit: every effect a Bot performed, and what the log can and cannot say.
 abstract final class AuditIds {
   static const document = 'audit-document';

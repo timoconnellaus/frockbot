@@ -285,6 +285,9 @@ export const MINTED_SECRETS_V1 = [
   { name: "ROUTINE_HOOK_SECRET", workers: ["app"], shape: "hex" },
   { name: "MACHINE_TOKEN_SECRET", workers: ["app"], shape: "hex" },
   { name: "NATIVE_TOKEN_SECRET", workers: ["app"], shape: "hex" },
+  // Minted whether or not a Telegram bot is ever added: it is the webhook's
+  // credential, and a deployer who later adds the token then has one.
+  { name: "TELEGRAM_WEBHOOK_SECRET", workers: ["app"], shape: "hex" },
 ] as const satisfies readonly {
   name: string;
   workers: readonly ("app" | "computerHost" | "appletBuild")[];
@@ -469,6 +472,12 @@ export const HUMAN_SECRETS_V1: readonly HumanSecretV1[] = [
   {
     name: "JEV_API_KEY",
     enables: "hosted turn supervision against Jev",
+    workers: ["app"],
+  },
+  {
+    name: "TELEGRAM_BOT_TOKEN",
+    enables: "talking to your Bots from Telegram, through a bot of your own",
+    where: "https://t.me/BotFather — /newbot, then the token it gives you",
     workers: ["app"],
   },
 ];

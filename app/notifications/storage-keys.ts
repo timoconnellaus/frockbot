@@ -11,6 +11,31 @@ export const PUSH_OUTBOX_PREFIX = "shell:push:";
 export const PUSH_READ_KEY = "shell:push-read";
 
 /**
+ * One visible message owed to the linked Telegram chat, keyed by its message
+ * cursor exactly as the push outbox beside it is, so the drain delivers in the
+ * order the conversation said them.
+ */
+export const TELEGRAM_OUTBOX_PREFIX = "shell:telegram:";
+
+/**
+ * Present while this Bot is the one the User's Telegram chat talks to.
+ *
+ * A hint for the minting transaction, never an authority: the User Durable
+ * Object holds the link, and delivery asks it which chat, if any, each entry
+ * still goes to. A stale flag costs one refused delivery; a missing one means
+ * the Bot's messages stay in the app until the chat next speaks to it.
+ */
+export const TELEGRAM_MIRROR_KEY = "telegram:mirror";
+
+/** One message owed to Telegram: the whole text, never the preview. */
+export interface TelegramOutboxEntryV1 {
+  schemaVersion: 1;
+  cursor: string;
+  messageId: string;
+  text: string;
+}
+
+/**
  * How many outbox entries one drain pass delivers. A full page means the outbox
  * may hold more, and the drainer takes another pass rather than leaving the
  * remainder to the next alarm.
