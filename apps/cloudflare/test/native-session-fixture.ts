@@ -121,7 +121,22 @@ export async function nativeHeaders(userId: string) {
     }),
   );
   const view = decodeProtocol("AuthStartView", await start!.json());
-  const redirect = await auth.route(new Request(view.authorizationUrl));
+  // The browser is signed in, so it is asked; the press is the page's own.
+  const page = await (await auth.route(
+    new Request(view.authorizationUrl),
+  ))!.text();
+  const consent = /name="consent" value="([A-Za-z0-9_.-]+)"/.exec(page)![1]!;
+  const redirect = await auth.route(
+    new Request(`${NATIVE_ORIGIN}/native/authorize`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        origin: NATIVE_ORIGIN,
+        "sec-fetch-site": "same-origin",
+      },
+      body: new URLSearchParams({ consent }).toString(),
+    }),
+  );
   const destination = new URL(redirect!.headers.get("location")!);
   const exchanged = await auth.route(
     request("/api/auth/native/exchange", {

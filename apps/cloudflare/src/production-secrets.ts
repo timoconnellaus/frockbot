@@ -246,7 +246,7 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] 
   [
     {
       name: "NATIVE_SLICE_2_AUTH",
-      why: "Native sign-in targets; production enables Android, macOS and iOS.",
+      why: "Native sign-in returns, exactly as listed; production enables Android, macOS, the FrockBot Dev Mac and iOS.",
     },
     {
       name: "DEFAULT_APPLICATION_HASH",

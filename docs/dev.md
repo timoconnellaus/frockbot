@@ -37,8 +37,10 @@ if missing) needs `CREDENTIAL_KEYRING`. Optional:
 
 A debug build carries `--dart-define=FROCKBOT_ORIGIN=…` and
 `--dart-define=FROCKBOT_DEV_AUTH=true`. It starts the real native sign-in
-(`/api/auth/native/start`), the Worker's `/native/authorize` issues the code for
-the `development` User instead of bouncing to Google, and the app receives it on
+(`/api/auth/native/start`); for a browser with no session the Worker's
+`/native/authorize` issues the code for the `development` User instead of
+bouncing to Google (a signed-in browser is asked on the consent page first, as
+everywhere), and the app receives it on
 `frockbot-dev://native/return/android` — a custom scheme, because a plain-HTTP
 loopback origin can never be an App Link. The exchange, the bearer
 and the session are production's. The scheme is declared in the debug manifest

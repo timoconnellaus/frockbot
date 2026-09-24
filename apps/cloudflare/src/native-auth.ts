@@ -31,7 +31,8 @@ import type {
  * Each signed app's return page under `/native/return/`: Android's verified
  * App Link, and the page each Apple build's browser return hands over on its
  * own scheme. `macos-dev` and `ios-dev` are the FrockBot Dev builds, separate
- * apps installed beside the released ones.
+ * apps installed beside the released ones, which a deployment serves only
+ * when its profile names them.
  */
 export type NativeReturnPlatformV1 =
   "android" | "macos" | "macos-dev" | "ios" | "ios-dev";
@@ -96,21 +97,37 @@ const PREFIX = "frockbot-native.";
 const encoder = new TextEncoder();
 const NO_STORE = AUTH_NO_STORE_HEADERS_V1;
 
-/** Deployment policy, never a client-selected target or a per-Bot grant. */
+/**
+ * Deployment policy, never a client-selected target or a per-Bot grant: the
+ * returns the profile's `nativeAuth` names, comma-separated. Nothing is
+ * implied — a FrockBot Dev return is served only where it is named — and a
+ * flag with an unknown name, a space or a repeat serves none.
+ */
 export function nativeReturnUris(
   flag: string | undefined,
   origin: string,
 ): readonly string[] {
-  const platforms: readonly NativeReturnPlatformV1[] =
-    flag === "android"
-      ? ["android"]
-      : flag === "android,macos"
-        ? ["android", "macos", "macos-dev"]
-        : flag === "android,macos,ios"
-          ? NATIVE_RETURN_PLATFORMS
-          : [];
-  return platforms.map((platform) => nativeReturnUriV1(origin, platform));
+  const named = flag?.split(",") ?? [];
+  const valid =
+    new Set(named).size === named.length &&
+    named.every((name) =>
+      (NATIVE_RETURN_PLATFORMS as readonly string[]).includes(name),
+    );
+  return valid
+    ? NATIVE_RETURN_PLATFORMS.filter((platform) =>
+        named.includes(platform),
+      ).map((platform) => nativeReturnUriV1(origin, platform))
+    : [];
 }
+
+/** What the consent page calls the app a return belongs to. */
+const NATIVE_APP_NAMES: Record<NativeReturnPlatformV1, string> = {
+  android: "the FrockBot app on this Android device",
+  macos: "the FrockBot app on this Mac",
+  "macos-dev": "FrockBot Dev on this Mac",
+  ios: "the FrockBot app on this iPhone",
+  "ios-dev": "FrockBot Dev on this iPhone",
+};
 
 /** The request origin with a fully qualified (trailing-dot) host normalised. */
 export function requestOrigin(url: URL): string {
@@ -147,8 +164,14 @@ interface StartClaims {
   hello: ClientHello;
   expires: number;
 }
+/**
+ * A pending authorization bound to the User it is for. `consent` is what the
+ * consent page's button posts, and only that post turns it into the
+ * `exchange` code the app redeems. The two are signed alike and are never
+ * each other: `verify` reads only the kind it was asked for.
+ */
 interface ExchangeClaims {
-  kind: "exchange";
+  kind: "consent" | "exchange";
   start: AuthStartCommand;
   hello: ClientHello;
   expires: number;
@@ -235,6 +258,27 @@ export async function readNativeJsonBody(
   request: Request,
   maximumBytes = 8192,
 ): Promise<unknown> {
+  const text = await readLimitedText(request, maximumBytes);
+  let depth = 0,
+    quoted = false,
+    escaped = false;
+  for (const character of text) {
+    if (quoted) {
+      if (escaped) escaped = false;
+      else if (character === "\\") escaped = true;
+      else if (character === '"') quoted = false;
+    } else if (character === '"') quoted = true;
+    else if (character === "{" || character === "[") {
+      if (++depth > 16) throw new Error("Input nesting limit");
+    } else if (character === "}" || character === "]") depth--;
+  }
+  return JSON.parse(text);
+}
+
+async function readLimitedText(
+  request: Request,
+  maximumBytes: number,
+): Promise<string> {
   const reader = request.body?.getReader();
   if (!reader) throw new Error("Missing input");
   let size = 0;
@@ -255,21 +299,7 @@ export async function readNativeJsonBody(
     data.set(chunk, offset);
     offset += chunk.length;
   }
-  const text = new TextDecoder().decode(data);
-  let depth = 0,
-    quoted = false,
-    escaped = false;
-  for (const character of text) {
-    if (quoted) {
-      if (escaped) escaped = false;
-      else if (character === "\\") escaped = true;
-      else if (character === '"') quoted = false;
-    } else if (character === '"') quoted = true;
-    else if (character === "{" || character === "[") {
-      if (++depth > 16) throw new Error("Input nesting limit");
-    } else if (character === "}" || character === "]") depth--;
-  }
-  return JSON.parse(text);
+  return new TextDecoder().decode(data);
 }
 
 export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
@@ -351,7 +381,7 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
       if (!isProtocolValue("Identifier", v.userId))
         throw new Error("Invalid User");
       return {
-        kind: "exchange",
+        kind,
         start: v.start,
         hello: v.hello,
         expires: v.expires,
@@ -420,6 +450,67 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
       return admissionRefusedResponse(decision.reason, false);
     }
     return decision;
+  }
+  /** The code for `userId`, sent to the return the app started with. */
+  async function handBack(
+    claims: StartClaims | ExchangeClaims,
+    userId: string,
+    status: 302 | 303,
+  ): Promise<Response> {
+    const code = await sign({
+      kind: "exchange",
+      start: claims.start,
+      hello: claims.hello,
+      expires: claims.expires,
+      userId,
+    });
+    const destination = new URL(claims.start.returnUri);
+    destination.searchParams.set("code", code);
+    destination.searchParams.set("state", claims.start.state);
+    return new Response(null, {
+      status,
+      headers: { ...NO_STORE, location: destination.toString() },
+    });
+  }
+  /**
+   * The press that lets this browser's User sign the app in. The consent it
+   * posts is bound to that User and to this authorization's state, challenge
+   * and return, and expires with it; the page cannot be framed.
+   */
+  async function consentPage(
+    claims: StartClaims,
+    session: AuthIdentityV1,
+  ): Promise<Response> {
+    const consent = await sign({
+      kind: "consent",
+      start: claims.start,
+      hello: claims.hello,
+      expires: claims.expires,
+      userId: session.user.id,
+    });
+    const platform = NATIVE_RETURN_PLATFORMS.find(
+      (candidate) =>
+        nativeReturnUriV1(origin, candidate) === claims.start.returnUri,
+    );
+    const destination = new URL(claims.start.returnUri);
+    return returnPageV1({
+      title: "Sign in to FrockBot",
+      heading: `Sign in to ${platform ? NATIVE_APP_NAMES[platform] : "the FrockBot development build on this device"}?`,
+      lead: session.user.email
+        ? `You’ll be signed in as ${session.user.email}.`
+        : "You’ll be signed in with the account this browser uses.",
+      form: {
+        label: "Sign in",
+        action: `${origin}/native/authorize`,
+        fields: { consent },
+        // The development scheme is the one return off this origin.
+        ...(destination.origin === origin
+          ? {}
+          : { redirects: [destination.protocol] }),
+      },
+      footnote:
+        "Only continue if you just started signing in from the app. If you didn’t, close this page: nothing is signed in until you press Sign in.",
+    });
   }
   return {
     async authenticate(request) {
@@ -618,6 +709,13 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
             { headers: NO_STORE },
           );
         }
+        // A code is issued only from the consent page's press. Anyone can
+        // call the start with their own PKCE values and open this URL in the
+        // person's browser — an app that claims `frockbot://` can — so a
+        // browser that is already signed in must not hand that app a code by
+        // itself. `/native/complete` shows the same page after a fresh
+        // sign-in: it is a GET any page can open, so it cannot tell a sign-in
+        // that just happened from a browser that was signed in already.
         if (
           ["/native/authorize", "/native/complete"].includes(url.pathname) &&
           request.method === "GET"
@@ -627,19 +725,39 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
           const claims = await verify(token, "start");
           if (claims.kind !== "start") return error();
           const session = await browserIdentity(request);
-          const userId = session?.user.id ?? options.developmentUserId;
-          if (!userId) {
-            if (url.pathname === "/native/complete") return error(401);
-            return options.auth.startSignIn(
-              request,
-              `${origin}/native/complete?request=${token}`,
-            );
-          }
-          const code = await sign({ ...claims, kind: "exchange", userId });
-          const destination = new URL(claims.start.returnUri);
-          destination.searchParams.set("code", code);
-          destination.searchParams.set("state", claims.start.state);
-          return redirect(destination.toString());
+          if (session) return consentPage(claims, session);
+          // The development door signs in a scripted app with no browser to
+          // press in, on a stack production refuses.
+          if (options.developmentUserId !== undefined)
+            return handBack(claims, options.developmentUserId, 302);
+          if (url.pathname === "/native/complete") return error(401);
+          return options.auth.startSignIn(
+            request,
+            `${origin}/native/complete?request=${token}`,
+          );
+        }
+        if (url.pathname === "/native/authorize" && request.method === "POST") {
+          // The press must come from the consent page itself. The signed
+          // consent below is what a cross-site form cannot have; this refuses
+          // one before any identity is asked.
+          const site = request.headers.get("sec-fetch-site");
+          const from = request.headers.get("origin");
+          if (
+            (site === null && from === null) ||
+            (site !== null && site !== "same-origin") ||
+            (from !== null && from !== origin)
+          )
+            return error(403);
+          const form = new URLSearchParams(
+            await readLimitedText(request, 8192),
+          );
+          if ([...form.keys()].join() !== "consent") return error();
+          const claims = await verify(form.get("consent") ?? "", "consent");
+          if (claims.kind !== "consent") return error();
+          const session = await browserIdentity(request);
+          if (!session) return error(401);
+          if (session.user.id !== claims.userId) return error(403);
+          return handBack(claims, claims.userId, 303);
         }
         if (
           url.pathname === "/api/auth/native/exchange" &&

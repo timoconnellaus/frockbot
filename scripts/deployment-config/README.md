@@ -84,7 +84,8 @@ The tracked file, with identity applied:
 | `containers[].image` a Dockerfile path    | the published image, when the profile's `images.source` is `registry`                                     |
 | `env.development`, `env.e2e`              | dropped — a named environment in a deployed config is a second Worker                                     |
 
-The identity vars the app Worker gains: `NATIVE_SLICE_2_AUTH`,
+The identity vars the app Worker gains: `NATIVE_SLICE_2_AUTH` (the profile's
+`nativeAuth` list, comma-joined),
 `FROCK_AI_GATEWAY_ID`, `FROCK_AI_ACCOUNT_ID`, `FROCK_AI_AUTO_ROUTE`, and `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` when the profile
 builds the Access auth Package. `FROCK_AI_ACCOUNT_ID` is what selects the compat
 HTTP transport, the only one that accepts a `dynamic/<route>` model

@@ -164,8 +164,14 @@ export const DEPLOYMENT_PROFILE_SCHEMA_V1 = {
     },
     nativeAuth: {
       description:
-        "Which signed clients may receive a sign-in. Absent, the deployment offers no native sign-in at all.",
-      enum: ["android", "android,macos", "android,macos,ios"],
+        "The native returns this deployment serves: `android`, the released Mac and iPhone apps (`macos`, `ios`), and the FrockBot Dev builds (`macos-dev`, `ios-dev`), each named only where such a build signs in. Nothing is implied by another entry. Absent, the deployment offers no native sign-in at all.",
+      type: "array",
+      minItems: 1,
+      uniqueItems: true,
+      items: {
+        type: "string",
+        enum: ["android", "macos", "macos-dev", "ios", "ios-dev"],
+      },
     },
     resources: {
       description:
