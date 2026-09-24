@@ -27,6 +27,7 @@ import {
   type ComputerCommandV1,
 } from "./protocol.js";
 import { FakeWorkspace } from "@frockbot/computer/fake";
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import { computerFrameFromCaptureV1, computerFrameSinkV1 } from "./frame.js";
 
 /** A host that offers nothing beyond the operations under test. */
@@ -927,6 +928,59 @@ describe("Computer Bot Durable Object Contribution", () => {
     });
   });
 
+  test("names a command's host requests by its Bot as well as its id", async () => {
+    // A command id is the client's own text, unique only within one Bot,
+    // while the Computer and its billing account are the User's.
+    const sent: string[] = [];
+    const bot = () =>
+      createComputerBotBackendContribution({
+        storage: new MemoryStorage(),
+        configured: true,
+        providerLabel: "Fake Computer",
+        now: () => new Date("2026-09-02T00:00:00.000Z"),
+        newId: () => "owner-1",
+        openComputer: (_userId, _botId, effectId) => {
+          sent.push(effectId);
+          const handle = fakeHandle({
+            acquire: (ownerId) =>
+              Promise.resolve({
+                id: ownerId,
+                expiresAt: "2026-09-02T00:01:30.000Z",
+              }),
+          });
+          return Promise.resolve({
+            ...handle,
+            control: {
+              ...handle.control!,
+              acquire: (request, options) => {
+                sent.push(options?.effectId ?? "missing");
+                return handle.control!.acquire(request, options);
+              },
+            },
+          });
+        },
+      });
+    const take = (botId: string): ComputerCommandV1 => ({
+      version: 1,
+      commandId: "take control 1",
+      botId,
+      type: "takeControl",
+    });
+
+    await bot().execute("user-1", "scout", take("scout"));
+    await bot().execute("user-1", "ranger", take("ranger"));
+    const [scoutOpen, scoutTake, rangerOpen, rangerTake] = sent;
+    expect(scoutTake).toBe(`${scoutOpen}:take-control`);
+    expect(rangerTake).toBe(`${rangerOpen}:take-control`);
+    expect(rangerOpen).not.toBe(scoutOpen);
+    // The host accepts only identifiers, and the client's id need not be one.
+    expect(scoutTake).toMatch(/^[A-Za-z0-9][A-Za-z0-9._:@-]*$/);
+
+    // The same command sent again derives the same id.
+    await bot().execute("user-1", "scout", take("scout"));
+    expect(sent.slice(4)).toEqual([scoutOpen, scoutTake]);
+  });
+
   test("reclaims a stale lease under a new durable owner", async () => {
     const storage = new MemoryStorage();
     let now = new Date("2026-09-02T00:00:00.000Z");
@@ -1445,6 +1499,9 @@ describe("Computer Bot Durable Object Contribution", () => {
     let opens = 0;
     let connects = 0;
     const renewedWith: string[] = [];
+    const commandEffectId = `computer-command-${(
+      await sha256HexTextV1("scout\u0000connect-after-eviction")
+    ).slice(0, 32)}`;
     const contribution = createComputerBotBackendContribution({
       storage,
       configured: true,
@@ -1453,7 +1510,7 @@ describe("Computer Bot Durable Object Contribution", () => {
         opens += 1;
         // The attach is charged as this command's own effect, so a replayed
         // command settles against the reservation it already made.
-        expect(effectId).toBe("computer:connect-after-eviction");
+        expect(effectId).toBe(commandEffectId);
         return Promise.resolve(
           fakeHandle({
             presence: () => {

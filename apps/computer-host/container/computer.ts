@@ -630,9 +630,14 @@ interface ExecStreamSink {
  * admission and the running command is reachable. `pending` is that latch:
  * `spawn` reads it and terminates immediately rather than starting work
  * somebody has already withdrawn.
+ *
+ * An effect id is unique only within its User, and a retry of a call reuses
+ * its id while the first attempt may still be running, so an effect is found
+ * by its User and id together and owned by the request that admitted it.
  */
 interface InFlightEffect {
   userId: string;
+  effectId: string;
   cancel: (reason: "cancelled" | "timeout") => void;
   pending?: "cancelled" | "timeout";
 }
@@ -761,7 +766,7 @@ export class ComputerHost {
     spriteName: string,
     reason: string,
   ) => void;
-  private readonly inFlight = new Map<string, InFlightEffect>();
+  private readonly inFlight = new Set<InFlightEffect>();
   /** Re-derivable cache of what this container has learned about a Computer. */
   private readonly computers = new Map<string, ComputerRecord>();
   private readonly openings = new Map<string, Promise<ComputerRecord>>();
@@ -827,12 +832,17 @@ export class ComputerHost {
     signal?: AbortSignal,
   ): Promise<Response> {
     if (request.operation.kind === "cancel") {
-      const held = this.inFlight.get(request.effectId);
-      held?.cancel("cancelled");
+      // Every attempt of the effect: a retry is the same call.
+      const held = [...this.inFlight].filter(
+        (effect) =>
+          effect.userId === request.identity.userId &&
+          effect.effectId === request.effectId,
+      );
+      for (const effect of held) effect.cancel("cancelled");
       return Response.json({
         version: 1,
         effectId: request.effectId,
-        cancelled: Boolean(held),
+        cancelled: held.length > 0,
       });
     }
     const admitted = this.admit(request);
@@ -844,7 +854,12 @@ export class ComputerHost {
       (request.operation.kind === "exec" && request.operation.stream) ||
       (request.operation.kind === "open" && request.operation.stream === true);
     try {
-      const response = await this.dispatch(request, signal, admitted.release);
+      const response = await this.dispatch(
+        request,
+        signal,
+        admitted.effect,
+        admitted.release,
+      );
       if (!streaming) admitted.release();
       return response;
     } catch (error) {
@@ -862,7 +877,9 @@ export class ComputerHost {
    */
   private admit(
     request: ComputerHostRequestV1,
-  ): { ok: true; release: () => void } | { ok: false; response: Response } {
+  ):
+    | { ok: true; effect: InFlightEffect; release: () => void }
+    | { ok: false; response: Response } {
     if (this.inFlight.size >= this.concurrency.perContainer) {
       return {
         ok: false,
@@ -892,15 +909,17 @@ export class ComputerHost {
     }
     const effect: InFlightEffect = {
       userId,
+      effectId: request.effectId,
       cancel: (reason) => {
         effect.pending = reason;
       },
     };
-    this.inFlight.set(request.effectId, effect);
+    this.inFlight.add(effect);
     return {
       ok: true,
+      effect,
       release: () => {
-        this.inFlight.delete(request.effectId);
+        this.inFlight.delete(effect);
       },
     };
   }
@@ -918,13 +937,14 @@ export class ComputerHost {
   private dispatch(
     request: ComputerHostRequestV1,
     signal: AbortSignal | undefined,
+    effect: InFlightEffect,
     release: () => void,
   ): Promise<Response> {
     switch (request.operation.kind) {
       case "open":
         return this.open(request, request.operation, release);
       case "exec":
-        return this.exec(request, request.operation, signal, release);
+        return this.exec(request, request.operation, signal, effect, release);
       case "file/read":
       case "file/write":
       case "file/list":
@@ -1972,6 +1992,7 @@ export class ComputerHost {
     request: ComputerHostRequestV1,
     operation: ComputerHostExecOperationV1,
     signal: AbortSignal | undefined,
+    effect: InFlightEffect,
     release: () => void,
   ): Promise<Response> {
     const record = await this.computer(request.identity.userId);
@@ -1982,6 +2003,7 @@ export class ComputerHost {
       const outcome = await this.spawn(sprite, script, {
         effectId: request.effectId,
         userId: request.identity.userId,
+        admitted: effect,
         stdinBase64: operation.stdinBase64,
         timeoutMs: operation.timeoutMs,
         maxOutputBytes: operation.maxOutputBytes,
@@ -2014,6 +2036,7 @@ export class ComputerHost {
           const outcome = await host.spawn(sprite, script, {
             effectId: request.effectId,
             userId: request.identity.userId,
+            admitted: effect,
             stdinBase64: operation.stdinBase64,
             timeoutMs: operation.timeoutMs,
             maxOutputBytes: operation.maxOutputBytes,
@@ -2088,6 +2111,8 @@ export class ComputerHost {
     options: {
       effectId: string;
       userId: string;
+      /** The request's own entry; a maintenance command has none. */
+      admitted?: InFlightEffect;
       stdinBase64?: string;
       timeoutMs: number;
       maxOutputBytes: number;
@@ -2137,19 +2162,21 @@ export class ComputerHost {
       }, COMPUTER_HOST_PHASE_TIMEOUTS.termination);
     };
 
-    // The admitted entry, when there is one. A maintenance command the host
-    // runs for itself was never admitted, so it registers and removes its own.
-    const admitted = this.inFlight.get(options.effectId);
-    const owned = !admitted;
+    // A maintenance command the host runs for itself was never admitted, so
+    // it registers and removes its own entry.
+    const { admitted } = options;
+    let owned: InFlightEffect | undefined;
     if (admitted) {
       const pending = admitted.pending;
       admitted.cancel = terminate;
       if (pending) terminate(pending);
     } else {
-      this.inFlight.set(options.effectId, {
+      owned = {
         userId: options.userId,
+        effectId: options.effectId,
         cancel: terminate,
-      });
+      };
+      this.inFlight.add(owned);
     }
     const onAbort = () => terminate("cancelled");
     options.signal?.addEventListener("abort", onAbort, { once: true });
@@ -2224,7 +2251,7 @@ export class ComputerHost {
         clearTimeout(timeoutTimer);
         if (killTimer) clearTimeout(killTimer);
         options.signal?.removeEventListener("abort", onAbort);
-        if (owned) this.inFlight.delete(options.effectId);
+        if (owned) this.inFlight.delete(owned);
       });
   }
 

@@ -48,12 +48,6 @@ export interface AuditUserBackendHost {
    * went, rather than a row that claims a host nobody can vouch for.
    */
   readMcpHosts?(): Promise<ReadonlyMap<string, string>>;
-  /**
-   * The Computer host's own per-effect journal, when the deployment exposes
-   * one. It is non-authoritative (`AGENTS.md` § Computer and Workspace), so it
-   * is only ever *compared* against the table — never inserted into it.
-   */
-  readHostJournalEffectIds?(): Promise<readonly string[]>;
   /** Overridable so a test can drive eviction. */
   maxRows?: number;
   /** Overridable so a test can drive age eviction. */
@@ -170,9 +164,8 @@ export class AuditUserBackendContribution {
    * Reconstructs the whole table from the Bots' own stored runs.
    *
    * This is what makes the table disposable rather than authoritative. The
-   * receipt names how many entries it wrote and how many effects the Computer
-   * host's journal reported that no durable event accounts for — an `unknown`
-   * the User is told about rather than a row invented to cover it.
+   * receipt names how many entries it wrote, and how many of their outcomes
+   * the durable log does not know.
    */
   async rebuildAuditIndex(): Promise<AuditRebuildReceiptV1> {
     const directory = await this.host.readDirectory();
@@ -201,36 +194,7 @@ export class AuditUserBackendContribution {
       unknownOutcomes: this.store
         .all()
         .filter((entry) => entry.outcome === "unknown").length,
-      hostJournalDiscrepancies: await this.countHostJournalDiscrepancies(),
     };
-  }
-
-  /**
-   * Effects the host journal claims that the durable events do not.
-   *
-   * Counted, never written. The host is non-authoritative, so an effect it
-   * reports with no matching session event is a discrepancy for a person to
-   * look at — not evidence a Turn did something.
-   */
-  private async countHostJournalDiscrepancies(): Promise<number> {
-    if (!this.host.readHostJournalEffectIds) return 0;
-    let journal: readonly string[];
-    try {
-      journal = await this.host.readHostJournalEffectIds();
-    } catch {
-      return 0;
-    }
-    if (journal.length === 0) return 0;
-    const known = new Set(this.store.all().map((entry) => entry.effectId));
-    // A call's requests after its first are named `<call>:<step>`, and each
-    // is accounted for by the call that sent it.
-    const call = (effectId: string) =>
-      effectId.includes(":")
-        ? effectId.slice(0, effectId.lastIndexOf(":"))
-        : effectId;
-    return journal.filter(
-      (effectId) => !known.has(effectId) && !known.has(call(effectId)),
-    ).length;
   }
 }
 

@@ -66,8 +66,8 @@ describe("projecting a settled run", () => {
       botId: "foreman",
       runId: "run-1",
       occurrenceId: "tool:1:2:0",
-      // The id the Computer host was sent, so its journal joins here: the
-      // occurrence id alone repeats in every Session and every Bot.
+      // The id the Computer host was sent: the occurrence id alone repeats in
+      // every Session and every Bot.
       effectId: await computerOperationIdV1({
         botId: "foreman",
         runId: "run-1",

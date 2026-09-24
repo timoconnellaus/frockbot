@@ -122,11 +122,10 @@ export interface AuditEntryV1 {
   step: number;
   ordinal: number;
   /**
-   * The id the effect ran under, and the key a host-journal reconciliation
-   * joins on. A Computer tool's is the id its host envelope carried —
-   * `computerOperationIdV1` of the Bot, the run and the occurrence, because an
-   * occurrence id repeats across Sessions and Bots — and anything else's is
-   * its occurrence id.
+   * The id the effect ran under. A Computer tool's is the id its host requests
+   * and billing reservation carried — `computerOperationIdV1` of the Bot, the
+   * run and the occurrence, because an occurrence id repeats across Sessions
+   * and Bots — and anything else's is its occurrence id.
    */
   effectId: string;
   /** ISO-8601: the run's admission time, so a rebuild reproduces it exactly. */
@@ -169,13 +168,6 @@ export interface AuditRebuildReceiptV1 {
    * the same events the table is.
    */
   unknownOutcomes: number;
-  /**
-   * Effects the Computer host's own journal reported that no durable session
-   * event accounts for. The host is non-authoritative (`AGENTS.md`
-   * § Computer and Workspace), so such an effect is *counted and named*, never
-   * written into the table as if a Turn had recorded it.
-   */
-  hostJournalDiscrepancies: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -602,19 +594,13 @@ export function decodeAuditRebuildReceiptV1(
       "bots",
       "indexState",
       "unknownOutcomes",
-      "hostJournalDiscrepancies",
     ],
     "audit rebuild receipt",
   );
   if (receipt.schemaVersion !== 1 || receipt.status !== "rebuilt") {
     throw new AuditDecodeError("audit rebuild receipt is invalid");
   }
-  for (const key of [
-    "entries",
-    "bots",
-    "unknownOutcomes",
-    "hostJournalDiscrepancies",
-  ] as const) {
+  for (const key of ["entries", "bots", "unknownOutcomes"] as const) {
     if (!Number.isSafeInteger(receipt[key]) || (receipt[key] as number) < 0) {
       throw new AuditDecodeError(
         `audit rebuild receipt.${key} must be a non-negative integer`,
@@ -635,6 +621,5 @@ export function decodeAuditRebuildReceiptV1(
     bots: receipt.bots as number,
     indexState: receipt.indexState,
     unknownOutcomes: receipt.unknownOutcomes as number,
-    hostJournalDiscrepancies: receipt.hostJournalDiscrepancies as number,
   };
 }

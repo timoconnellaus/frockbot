@@ -237,7 +237,6 @@ export async function createFoundationUserBackendContributions(host: {
   audit: {
     sql: AuditUserBackendHost["sql"];
     projectBotEntries: AuditUserBackendHost["projectBotEntries"];
-    readHostJournalEffectIds?: AuditUserBackendHost["readHostJournalEffectIds"];
     maxRows?: number;
     maxAgeMs?: number;
   };

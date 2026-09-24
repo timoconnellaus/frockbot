@@ -1605,6 +1605,78 @@ describe("cancellation", () => {
     expect(sprite.commands.at(-1)?.signals).toContain("SIGTERM");
   });
 
+  test("a cancel reaches only the effect of the User who sent it", async () => {
+    // Effect ids are unique only within a User, and one container serves many.
+    const { client, host, sprite } = provisioned();
+    const other = new FakeSprite(host.spriteNameFor("user-2"));
+    client.sprites.set(other.name, other);
+    writeFile(
+      other,
+      COMPUTER_HOST_STATE_PATH,
+      JSON.stringify({ version: 1, generation: 4 }),
+    );
+    sprite.scripts = [{ hang: true }];
+    other.scripts = [{ hang: true }];
+    const mine = host.handle(
+      request(exec({ timeoutMs: 30_000 }), { effectId: "tool:1:1:0" }),
+    );
+    const theirs = host.handle(
+      request(exec({ timeoutMs: 30_000 }), {
+        effectId: "tool:1:1:0",
+        identity: { userId: "user-2" },
+      }),
+    );
+    await Bun.sleep(20);
+
+    const cancelled = decodeComputerHostCancelResultV1(
+      await (
+        await host.handle(
+          request(
+            { kind: "cancel" },
+            { effectId: "tool:1:1:0", identity: { userId: "user-2" } },
+          ),
+        )
+      ).json(),
+    );
+    expect(cancelled.cancelled).toBe(true);
+    expect((await theirs).status).toBe(499);
+    expect(sprite.commands.at(-1)?.signals).toEqual([]);
+    expect(host.inFlightCount).toBe(1);
+
+    await host.handle(request({ kind: "cancel" }, { effectId: "tool:1:1:0" }));
+    expect((await mine).status).toBe(499);
+  });
+
+  test("a retry of an effect still running is held beside it, and a cancel stops both", async () => {
+    const { host, sprite } = provisioned();
+    sprite.scripts = [{ hang: true }];
+    const first = host.handle(request(exec({ timeoutMs: 30_000 })));
+    await Bun.sleep(10);
+    const retry = host.handle(request(exec({ timeoutMs: 30_000 })));
+    await Bun.sleep(10);
+    // The retry used to replace the first attempt's entry, which then
+    // nothing could cancel, and whose release dropped the retry's.
+    expect(host.inFlightCount).toBe(2);
+
+    const cancelled = decodeComputerHostCancelResultV1(
+      await (
+        await host.handle(request({ kind: "cancel" }, { effectId: "effect-1" }))
+      ).json(),
+    );
+    expect(cancelled.cancelled).toBe(true);
+    await Bun.sleep(10);
+    const runs = sprite.commands.filter(
+      (command) => command.command === "bash",
+    );
+    expect(runs.slice(-2).map((command) => command.signals)).toEqual([
+      ["SIGTERM"],
+      ["SIGTERM"],
+    ]);
+    expect((await first).status).toBe(499);
+    expect((await retry).status).toBe(499);
+    expect(host.inFlightCount).toBe(0);
+  });
+
   test("a cancel that arrives before the command starts still stops it", async () => {
     const { host } = provisioned();
     const result = decodeComputerHostCancelResultV1(
