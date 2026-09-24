@@ -8,14 +8,23 @@ import {
   createCredentialUserBackendContribution,
 } from "@frockbot/app/credentials/user";
 import type { UserSettingsBackendContribution } from "@frockbot/app/settings/user";
-import { createFakeMcpServerV1, type FakeMcpToolV1 } from "./testing.js";
+import {
+  createFakeMcpAuthorizationServerV1,
+  createFakeMcpServerV1,
+  type FakeMcpAuthorizationServerV1,
+  type FakeMcpToolV1,
+} from "./testing.js";
 import {
   MCP_CATALOG_JOB_PREFIX_V1,
   MCP_CATALOG_REFRESH_AFTER_MS_V1,
   readMcpCatalogV1,
 } from "./catalog.js";
+import { decodeMcpAccessSecretV1, MCP_SIGN_IN_TTL_MS_V1 } from "./oauth.js";
+import { verifyMcpOAuthStateV1 } from "./oauth-state.js";
 import {
   MCP_MAX_SERVERS_V1,
+  MCP_SIGN_IN_AGAIN_LINE_V1,
+  MCP_SIGN_IN_LINE_V1,
   McpUserBackendContribution,
   mcpNamespaceBaseV1,
   mcpSafeMetadataV1,
@@ -138,7 +147,13 @@ const echo: FakeMcpToolV1 = {
   }),
 };
 
-function setup(options: { token?: string; tools?: FakeMcpToolV1[] } = {}) {
+function setup(
+  options: {
+    token?: string;
+    tools?: FakeMcpToolV1[];
+    auth?: FakeMcpAuthorizationServerV1;
+  } = {},
+) {
   let now = Date.parse("2026-09-24T00:00:00.000Z");
   let ids = 0;
   const storage = new MemoryStorage();
@@ -149,16 +164,19 @@ function setup(options: { token?: string; tools?: FakeMcpToolV1[] } = {}) {
     keyring,
     now: () => now,
   });
-  const server = createFakeMcpServerV1({
-    tools: options.tools ?? [echo],
-    ...(options.token ? { token: options.token } : {}),
-    instructions: "Echo repeats.",
-  });
+  const server =
+    options.auth?.server ??
+    createFakeMcpServerV1({
+      tools: options.tools ?? [echo],
+      ...(options.token ? { token: options.token } : {}),
+      instructions: "Echo repeats.",
+    });
   const contribution = new McpUserBackendContribution({
     storage,
     settings: settings as unknown as UserSettingsBackendContribution,
     credentials,
-    fetch: server.fetch,
+    keyring,
+    fetch: options.auth?.fetch ?? server.fetch,
     now: () => now,
     randomId: () => `id${++ids}`,
   });
@@ -498,5 +516,361 @@ describe("managing a server", () => {
     expect(await contribution.readHosts()).toEqual(
       new Map([["mcp-example", "mcp.example.test"]]),
     );
+  });
+
+  test("changes a server's token in place, and keeps the old one when the new one is refused", async () => {
+    const { contribution, settings, server } = setup({ token: "sk-1" });
+    await add(contribution, "add-1", { token: "sk-1" });
+    const before = only(settings);
+    const rotate = (commandId: string, apiKey: string) =>
+      contribution.executeConnection("tim", {
+        schemaVersion: 1,
+        type: "connection/rotate-api-key",
+        commandId,
+        connectionId: before.connectionId,
+        apiKey,
+      });
+    server.token = "sk-2";
+    expect(await rotate("rotate-1", "sk-2")).toMatchObject({
+      status: "applied",
+    });
+    const after = only(settings);
+    expect(after).toMatchObject({
+      state: "ready",
+      authorization: { kind: "api-key" },
+    });
+    expect(after.generation).not.toBe(before.generation);
+    expect(await leaseSecret(contribution, after, "tool:1")).toBe("sk-2");
+    expect(await rotate("rotate-2", "wrong")).toMatchObject({
+      status: "failed",
+    });
+    expect(only(settings)).toMatchObject({
+      state: "ready",
+      generation: after.generation,
+    });
+    expect(await leaseSecret(contribution, after, "tool:2")).toBe("sk-2");
+  });
+
+  test("reconnects a server that could not be reached", async () => {
+    const { contribution, settings, server, storage } = setup();
+    server.status = 503;
+    await add(contribution, "add-1");
+    const failed = only(settings);
+    expect(failed.state).toBe("failed");
+    const retry = (commandId: string) =>
+      contribution.executeConnection("tim", {
+        schemaVersion: 1,
+        type: "connection/refresh-models",
+        commandId,
+        connectionId: failed.connectionId,
+      });
+    expect(await retry("retry-1")).toMatchObject({ status: "failed" });
+    server.status = undefined;
+    expect(await retry("retry-2")).toMatchObject({ status: "applied" });
+    const ready = only(settings);
+    expect(ready.state).toBe("ready");
+    expect(ready.failure).toBeUndefined();
+    expect(
+      (await readMcpCatalogV1(storage, ready.connectionId))?.tools.map(
+        (tool) => tool.name,
+      ),
+    ).toEqual(["echo"]);
+  });
+});
+
+async function leaseSecret(
+  contribution: McpUserBackendContribution,
+  connection: ConnectionView,
+  effectId: string,
+): Promise<string> {
+  const lease = await contribution.leaseToolCredential({
+    accountId: "tim",
+    connectionId: connection.connectionId,
+    effectId,
+    connectionGeneration: connection.generation!,
+  });
+  const secret = await new CredentialLeaseRuntime({
+    readSecret: () => keyring,
+  }).open({
+    accountId: "tim",
+    connectionId: connection.connectionId,
+    packageId: "mcp",
+    lease,
+  });
+  await contribution.settleToolCredential({
+    accountId: "tim",
+    connectionId: connection.connectionId,
+    effectId,
+  });
+  return secret;
+}
+
+const CALLBACK = "https://bot.frockbot.test/api/mcp/oauth/callback/android";
+
+function signIn(
+  contribution: McpUserBackendContribution,
+  connectionId: string,
+  attemptId: string,
+) {
+  return contribution.executeConnection("tim", {
+    schemaVersion: 1,
+    type: "connection/oauth",
+    commandId: attemptId,
+    attemptId,
+    packageId: "mcp",
+    action: "start",
+    connectionId,
+    callbackUrl: CALLBACK,
+  });
+}
+
+function comeBack(
+  contribution: McpUserBackendContribution,
+  connectionId: string,
+  attemptId: string,
+  callback: string,
+  commandId = `return-${attemptId}`,
+) {
+  return contribution.executeConnection("tim", {
+    schemaVersion: 1,
+    type: "connection/oauth",
+    commandId,
+    attemptId,
+    packageId: "mcp",
+    action: "complete",
+    connectionId,
+    code: callback,
+  });
+}
+
+/** Adds a server that asks for a sign-in, and signs in to it. */
+async function signedIn(options: { expiresIn?: number } = {}) {
+  const auth = createFakeMcpAuthorizationServerV1({ tools: [echo] });
+  if ("expiresIn" in options) auth.expiresIn = options.expiresIn;
+  const harness = setup({ auth });
+  await add(harness.contribution, "add-1", { url: auth.server.url });
+  const pending = only(harness.settings);
+  const started = await signIn(
+    harness.contribution,
+    pending.connectionId,
+    "sign-in-1",
+  );
+  await comeBack(
+    harness.contribution,
+    pending.connectionId,
+    "sign-in-1",
+    auth.approve(started.oauth!.authorizationUrl!),
+  );
+  return { ...harness, auth, connection: only(harness.settings) };
+}
+
+describe("signing in to a server", () => {
+  test("offers a sign-in, signs in, and leases only the access token", async () => {
+    const auth = createFakeMcpAuthorizationServerV1({ tools: [echo] });
+    const { contribution, settings, storage, now } = setup({ auth });
+    expect(
+      await add(contribution, "add-1", { url: auth.server.url }),
+    ).toMatchObject({ status: "failed" });
+    const pending = only(settings);
+    expect(pending).toMatchObject({
+      state: "failed",
+      failure: MCP_SIGN_IN_LINE_V1,
+      authorization: { kind: "grant", credential: { configured: false } },
+    });
+
+    const started = await signIn(
+      contribution,
+      pending.connectionId,
+      "sign-in-1",
+    );
+    expect(started).toMatchObject({
+      status: "applied",
+      oauth: {
+        attemptId: "sign-in-1",
+        status: "waiting",
+        expiresAt: now() + MCP_SIGN_IN_TTL_MS_V1,
+      },
+    });
+    const authorize = new URL(started.oauth!.authorizationUrl!);
+    expect(authorize.searchParams.get("redirect_uri")).toBe(CALLBACK);
+    // The state names this User, this server and this attempt, signed.
+    expect(
+      await verifyMcpOAuthStateV1(
+        keyring,
+        authorize.searchParams.get("state"),
+        now(),
+      ),
+    ).toEqual({
+      userId: "tim",
+      connectionId: pending.connectionId,
+      attemptId: "sign-in-1",
+      expiresAt: now() + MCP_SIGN_IN_TTL_MS_V1,
+    });
+
+    const back = auth.approve(authorize.href);
+    expect(
+      await comeBack(contribution, pending.connectionId, "sign-in-1", back),
+    ).toMatchObject({ status: "applied", oauth: { status: "ready" } });
+    const ready = only(settings);
+    expect(ready).toMatchObject({
+      state: "ready",
+      authorization: { kind: "grant", credential: { configured: true } },
+    });
+    expect(ready.failure).toBeUndefined();
+    expect(ready.generation).not.toBe(pending.generation);
+    expect(
+      (await readMcpCatalogV1(storage, ready.connectionId))?.tools.map(
+        (tool) => tool.name,
+      ),
+    ).toEqual(["echo"]);
+
+    // The same callback again, however it arrives, trades nothing.
+    expect(
+      await comeBack(
+        contribution,
+        pending.connectionId,
+        "sign-in-1",
+        back,
+        "return-again",
+      ),
+    ).toMatchObject({ status: "failed" });
+    expect(auth.tokenRequests).toHaveLength(1);
+
+    // Nothing is kept in the clear, and a lease is the access token alone.
+    const stored = JSON.stringify([...storage.values]);
+    expect(stored).not.toContain("access-");
+    expect(stored).not.toContain("refresh-");
+    const secret = await leaseSecret(contribution, ready, "tool:1:1:0");
+    expect(secret).not.toContain("refresh");
+    expect(
+      auth.accessTokens.has(decodeMcpAccessSecretV1(secret).accessToken),
+    ).toBe(true);
+  });
+
+  test("refreshes an access token that would expire inside a lease", async () => {
+    const { contribution, connection, auth, advance } = await signedIn({
+      expiresIn: 3600,
+    });
+    advance(3600_000 - 60_000);
+    const secret = await leaseSecret(contribution, connection, "tool:1");
+    expect(auth.tokenRequests.at(-1)?.get("grant_type")).toBe("refresh_token");
+    const refreshed = decodeMcpAccessSecretV1(secret);
+    expect(refreshed.accessToken).not.toBe("access-2");
+    expect(auth.accessTokens.has(refreshed.accessToken)).toBe(true);
+    // Refreshed once; the next lease finds a fresh token.
+    await leaseSecret(contribution, connection, "tool:2");
+    expect(
+      auth.tokenRequests.filter(
+        (form) => form.get("grant_type") === "refresh_token",
+      ),
+    ).toHaveLength(1);
+  });
+
+  test("asks for a sign-in again when a refresh is refused, and never retries it", async () => {
+    const { contribution, connection, auth, settings, advance } =
+      await signedIn({ expiresIn: 60 });
+    await auth.fetch(`${auth.issuer}/revoke`, {
+      method: "POST",
+      body: new URLSearchParams({ token: "refresh-2" }),
+    });
+    advance(60_000);
+    await expect(
+      leaseSecret(contribution, connection, "tool:1"),
+    ).rejects.toThrow();
+    expect(only(settings)).toMatchObject({
+      state: "failed",
+      failure: MCP_SIGN_IN_AGAIN_LINE_V1,
+    });
+    await expect(
+      leaseSecret(contribution, connection, "tool:2"),
+    ).rejects.toThrow();
+    expect(
+      auth.tokenRequests.filter(
+        (form) => form.get("grant_type") === "refresh_token",
+      ),
+    ).toHaveLength(1);
+
+    // Signing in again reuses FrockBot's registration and makes it ready.
+    const again = await signIn(contribution, connection.connectionId, "again");
+    await comeBack(
+      contribution,
+      connection.connectionId,
+      "again",
+      auth.approve(again.oauth!.authorizationUrl!),
+    );
+    expect(only(settings).state).toBe("ready");
+    expect(auth.registrations).toHaveLength(1);
+  });
+
+  test("changes nothing for a cancelled, stale or forged return", async () => {
+    const auth = createFakeMcpAuthorizationServerV1({ tools: [echo] });
+    const { contribution, settings, advance } = setup({ auth });
+    await add(contribution, "add-1", { url: auth.server.url });
+    const pending = only(settings);
+
+    const denied = await signIn(contribution, pending.connectionId, "one");
+    expect(
+      await comeBack(
+        contribution,
+        pending.connectionId,
+        "one",
+        auth.deny(denied.oauth!.authorizationUrl!),
+      ),
+    ).toMatchObject({ status: "failed" });
+    expect(only(settings)).toMatchObject({
+      state: "failed",
+      failure: "The sign-in was cancelled.",
+    });
+
+    const forged = await signIn(contribution, pending.connectionId, "two");
+    const back = new URL(auth.approve(forged.oauth!.authorizationUrl!));
+    back.searchParams.set("state", "not-the-state");
+    expect(
+      await comeBack(contribution, pending.connectionId, "two", back.href),
+    ).toMatchObject({ status: "failed" });
+
+    const late = await signIn(contribution, pending.connectionId, "three");
+    advance(MCP_SIGN_IN_TTL_MS_V1);
+    expect(
+      await comeBack(
+        contribution,
+        pending.connectionId,
+        "three",
+        auth.approve(late.oauth!.authorizationUrl!),
+      ),
+    ).toMatchObject({ status: "failed" });
+    expect(only(settings).failure).toContain("took too long");
+    expect(auth.tokenRequests).toHaveLength(0);
+  });
+
+  test("revokes the grant when the server is removed, or given a token instead", async () => {
+    const first = await signedIn();
+    await first.contribution.executeConnection("tim", {
+      schemaVersion: 1,
+      type: "connection/disconnect",
+      commandId: "remove",
+      connectionId: first.connection.connectionId,
+      revokeUpstream: false,
+    });
+    expect(first.auth.revoked).toEqual(["refresh-2"]);
+    expect(
+      [...first.storage.values.keys()].some((key) =>
+        key.startsWith("mcp:grant"),
+      ),
+    ).toBe(false);
+
+    const second = await signedIn();
+    second.auth.server.accepts = (header) => header === "Bearer sk-own";
+    expect(
+      await second.contribution.executeConnection("tim", {
+        schemaVersion: 1,
+        type: "connection/rotate-api-key",
+        commandId: "use-token",
+        connectionId: second.connection.connectionId,
+        apiKey: "sk-own",
+      }),
+    ).toMatchObject({ status: "applied" });
+    expect(only(second.settings).authorization?.kind).toBe("api-key");
+    expect(second.auth.revoked).toEqual(["refresh-2"]);
   });
 });

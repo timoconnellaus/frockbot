@@ -91,9 +91,8 @@ function host(receiptOverride?: unknown, compositionOverride?: unknown) {
           schemaVersion: 1,
           commandId: command.commandId,
           connectionId:
-            "connectionId" in command
-              ? command.connectionId
-              : "connection-test",
+            ("connectionId" in command ? command.connectionId : undefined) ??
+            "connection-test",
           status: "applied",
         } satisfies ConnectionCommandReceiptV1;
         receipts.set(command.commandId, receipt);

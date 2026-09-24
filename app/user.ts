@@ -308,7 +308,15 @@ export async function createFoundationUserBackendContributions(host: {
       if (!settings || !credentials) {
         throw new Error("MCP servers require Settings and Credentials");
       }
-      return { storage: host.storage, settings, credentials };
+      // A sign-in's state is signed under the keyring, so the callback can
+      // refuse a forged one before it reaches this object.
+      const keyring = host.readSecret("CREDENTIAL_KEYRING");
+      return {
+        storage: host.storage,
+        settings,
+        credentials,
+        ...(keyring ? { keyring } : {}),
+      };
     },
     get connect() {
       const settings = mountedContributions.get(settingsUserContribution);

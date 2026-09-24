@@ -30,6 +30,8 @@ const connectionActionKindsV1 = <String>{
   'disconnect',
   'revoke',
   'refresh-models',
+  'rotate-api-key',
+  'sign-in',
 };
 
 /// The kind an action names, or nothing when it names none.
@@ -86,8 +88,8 @@ String _string(Map<String, Object?> input, String key) {
 }
 
 /// The Connection request one view action becomes, for every kind but
-/// `authorize` — which is a hosted door rather than a command, and belongs to
-/// the surface that can open a browser.
+/// `authorize` and `sign-in` — which are hosted doors rather than commands,
+/// and belong to the surface that can open a browser.
 ConnectionRequestV1 connectionRequestV1(Map<String, Object?> command) {
   final input = _input(command);
   final kind = connectionActionKindV1(command);
@@ -141,6 +143,18 @@ ConnectionRequestV1 connectionRequestV1(Map<String, Object?> command) {
         'commandId': commandId,
         'connectionId': _string(input, 'connectionId'),
       });
+    case 'rotate-api-key':
+      final apiKey = (input['apiKey'] as String?)?.trim() ?? '';
+      if (apiKey.isEmpty) {
+        throw const FormatException('Enter the new token.');
+      }
+      return ConnectionRequestV1('/api/connections', {
+        'schemaVersion': 1,
+        'type': 'connection/rotate-api-key',
+        'commandId': commandId,
+        'connectionId': _string(input, 'connectionId'),
+        'apiKey': apiKey,
+      });
     case 'revoke':
       final packageId = Uri.encodeComponent(_string(input, 'packageId'));
       final connectionId = Uri.encodeComponent(_string(input, 'connectionId'));
@@ -160,6 +174,9 @@ const mcpPackageIdV1 = 'mcp';
 
 /// The Connection setting an MCP server's address travels in.
 const mcpUrlSettingV1 = 'url';
+
+/// The one Connection Type an MCP server is.
+const mcpConnectionTypeIdV1 = 'mcp-server';
 
 /// An MCP server address as a person typed it, or the sentence that says
 /// why it is not one. The server holds it to the same rule and says more;
@@ -206,6 +223,25 @@ Map<String, Object?> mcpServerActionV1({
       if (token.isNotEmpty) '$prefix.key': token,
     },
   };
+}
+
+/// The sign-in to an MCP server already added: the server's own door, which
+/// answers the address of its authorization server's sign-in, as a hosted
+/// grant's door does. `returnClient` is as for [startConnectionRequestV1].
+ConnectionRequestV1 mcpSignInRequestV1(Map<String, Object?> command) {
+  final input = _input(command);
+  final connectionId = Uri.encodeComponent(_string(input, 'connectionId'));
+  final returnClient = input['returnClient'];
+  return ConnectionRequestV1(
+    '/api/plugins/$mcpPackageIdV1/connections/$connectionId/authorize',
+    {
+      'schemaVersion': 1,
+      'type': 'connection/start',
+      'commandId': command['commandId'],
+      'connectionTypeId': mcpConnectionTypeIdV1,
+      if (returnClient is String) 'returnClient': returnClient,
+    },
+  );
 }
 
 /// The `connection/start` command that opens a provider's hosted door.

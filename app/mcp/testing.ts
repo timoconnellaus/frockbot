@@ -28,6 +28,10 @@ export interface FakeMcpServerV1 {
   tools: FakeMcpToolV1[];
   /** The bearer token the server accepts; absent accepts anything. */
   token?: string;
+  /** Decides the Authorization header instead of `token`, when set. */
+  accepts?: (authorization: string | null) => boolean;
+  /** What a refusal's `WWW-Authenticate` says. */
+  challenge?: string;
   /** Answer every request with this status instead of serving it. */
   status?: number;
 }
@@ -56,13 +60,15 @@ export function createFakeMcpServerV1(
       if (new URL(request.url).href !== url) {
         return new Response("not found", { status: 404 });
       }
+      const authorization = request.headers.get("authorization");
       if (
-        state.token &&
-        request.headers.get("authorization") !== `Bearer ${state.token}`
+        state.accepts
+          ? !state.accepts(authorization)
+          : state.token && authorization !== `Bearer ${state.token}`
       ) {
         return new Response("unauthorized", {
           status: 401,
-          headers: { "www-authenticate": "Bearer" },
+          headers: { "www-authenticate": state.challenge ?? "Bearer" },
         });
       }
       const server = new Server(
@@ -111,4 +117,199 @@ export function createFakeMcpServerV1(
     },
   };
   return state;
+}
+
+/**
+ * An MCP server behind its own OAuth authorization server, as the MCP
+ * authorization specification describes one: protected-resource metadata on
+ * the server, authorization-server metadata, dynamic registration, an
+ * authorization-code grant with PKCE S256, refresh tokens that rotate, and
+ * revocation. `approve` stands in for the person signing in: it takes the
+ * address FrockBot sent them to and answers where the server sends them back.
+ */
+export interface FakeMcpAuthorizationServerV1 {
+  readonly server: FakeMcpServerV1;
+  /** Everything a test reaches: the MCP server and its authorization server. */
+  readonly fetch: McpFetchV1;
+  readonly issuer: string;
+  readonly registrations: Record<string, unknown>[];
+  readonly revoked: string[];
+  readonly tokenRequests: URLSearchParams[];
+  /** Access tokens the MCP server takes. */
+  readonly accessTokens: Set<string>;
+  /** Seconds an access token lives; absent says nothing of expiry. */
+  expiresIn?: number;
+  /** Whether the metadata offers a client metadata document. */
+  clientMetadataDocuments: boolean;
+  /** Whether the metadata offers dynamic registration. */
+  registration: boolean;
+  approve(authorizationUrl: string): string;
+  deny(authorizationUrl: string): string;
+}
+
+async function s256(verifier: string): Promise<string> {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)),
+  );
+  return btoa(String.fromCharCode(...digest))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/, "");
+}
+
+export function createFakeMcpAuthorizationServerV1(
+  options: { tools?: FakeMcpToolV1[]; issuer?: string } = {},
+): FakeMcpAuthorizationServerV1 {
+  const server = createFakeMcpServerV1(
+    options.tools ? { tools: options.tools } : {},
+  );
+  const mcp = new URL(server.url);
+  const issuer = options.issuer ?? "https://auth.example.test";
+  const resourceMetadata = `${mcp.origin}/.well-known/oauth-protected-resource${mcp.pathname}`;
+  const codes = new Map<
+    string,
+    {
+      clientId: string;
+      redirectUri: string;
+      challenge: string;
+      resource: string | null;
+    }
+  >();
+  const refreshTokens = new Set<string>();
+  let issued = 0;
+  const fake: FakeMcpAuthorizationServerV1 = {
+    server,
+    issuer,
+    registrations: [],
+    revoked: [],
+    tokenRequests: [],
+    accessTokens: new Set(),
+    expiresIn: 3600,
+    clientMetadataDocuments: false,
+    registration: true,
+    approve(authorizationUrl) {
+      const url = new URL(authorizationUrl);
+      const code = `code-${++issued}`;
+      codes.set(code, {
+        clientId: url.searchParams.get("client_id") ?? "",
+        redirectUri: url.searchParams.get("redirect_uri") ?? "",
+        challenge: url.searchParams.get("code_challenge") ?? "",
+        resource: url.searchParams.get("resource"),
+      });
+      const back = new URL(url.searchParams.get("redirect_uri")!);
+      back.searchParams.set("code", code);
+      back.searchParams.set("state", url.searchParams.get("state") ?? "");
+      return back.href;
+    },
+    deny(authorizationUrl) {
+      const url = new URL(authorizationUrl);
+      const back = new URL(url.searchParams.get("redirect_uri")!);
+      back.searchParams.set("error", "access_denied");
+      back.searchParams.set("state", url.searchParams.get("state") ?? "");
+      return back.href;
+    },
+    fetch: async (input, init) => {
+      const request = new Request(input, init);
+      const url = new URL(request.url);
+      if (url.href === resourceMetadata) {
+        return Response.json({
+          resource: server.url,
+          authorization_servers: [issuer],
+          scopes_supported: ["tools"],
+        });
+      }
+      if (url.origin !== issuer) return server.fetch(input, init);
+      const issue = (rotatedFrom?: string) => {
+        if (rotatedFrom) refreshTokens.delete(rotatedFrom);
+        const access = `access-${++issued}`;
+        const refresh = `refresh-${issued}`;
+        fake.accessTokens.add(access);
+        refreshTokens.add(refresh);
+        return Response.json({
+          access_token: access,
+          token_type: "Bearer",
+          refresh_token: refresh,
+          ...(fake.expiresIn === undefined
+            ? {}
+            : { expires_in: fake.expiresIn }),
+        });
+      };
+      switch (url.pathname) {
+        case "/.well-known/oauth-authorization-server":
+          return Response.json({
+            issuer,
+            authorization_endpoint: `${issuer}/authorize`,
+            token_endpoint: `${issuer}/token`,
+            revocation_endpoint: `${issuer}/revoke`,
+            ...(fake.registration
+              ? { registration_endpoint: `${issuer}/register` }
+              : {}),
+            ...(fake.clientMetadataDocuments
+              ? { client_id_metadata_document_supported: true }
+              : {}),
+            response_types_supported: ["code"],
+            grant_types_supported: ["authorization_code", "refresh_token"],
+            code_challenge_methods_supported: ["S256"],
+            token_endpoint_auth_methods_supported: ["none"],
+          });
+        case "/register": {
+          const body = (await request.json()) as Record<string, unknown>;
+          fake.registrations.push(body);
+          return Response.json(
+            { ...body, client_id: `client-${fake.registrations.length}` },
+            { status: 201 },
+          );
+        }
+        case "/token": {
+          const form = new URLSearchParams(await request.text());
+          fake.tokenRequests.push(form);
+          if (form.get("resource") !== server.url) {
+            return Response.json({ error: "invalid_target" }, { status: 400 });
+          }
+          if (form.get("grant_type") === "authorization_code") {
+            const code = form.get("code") ?? "";
+            const grant = codes.get(code);
+            codes.delete(code);
+            if (
+              !grant ||
+              grant.clientId !== form.get("client_id") ||
+              grant.redirectUri !== form.get("redirect_uri") ||
+              grant.resource !== server.url ||
+              grant.challenge !== (await s256(form.get("code_verifier") ?? ""))
+            ) {
+              return Response.json({ error: "invalid_grant" }, { status: 400 });
+            }
+            return issue();
+          }
+          if (form.get("grant_type") === "refresh_token") {
+            const refresh = form.get("refresh_token") ?? "";
+            if (!refreshTokens.has(refresh)) {
+              return Response.json({ error: "invalid_grant" }, { status: 400 });
+            }
+            return issue(refresh);
+          }
+          return Response.json(
+            { error: "unsupported_grant_type" },
+            { status: 400 },
+          );
+        }
+        case "/revoke": {
+          const form = new URLSearchParams(await request.text());
+          const token = form.get("token") ?? "";
+          fake.revoked.push(token);
+          refreshTokens.delete(token);
+          fake.accessTokens.delete(token);
+          return new Response(null, { status: 200 });
+        }
+        default:
+          return new Response("not found", { status: 404 });
+      }
+    },
+  };
+  server.accepts = (authorization) =>
+    authorization !== null &&
+    authorization.startsWith("Bearer ") &&
+    fake.accessTokens.has(authorization.slice("Bearer ".length));
+  server.challenge = `Bearer resource_metadata="${resourceMetadata}", scope="tools"`;
+  return fake;
 }

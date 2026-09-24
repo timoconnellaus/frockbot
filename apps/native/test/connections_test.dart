@@ -223,7 +223,8 @@ Map<String, Object?> mcpFrame({
         'connectionTypeId': 'mcp-server',
         'kind': 'connector',
         'authorization': account['authorization'] ?? 'none',
-        'detail': 'Ready',
+        'detail': account['state'] == 'failed' ? 'Not working' : 'Ready',
+        if (account['failure'] != null) 'failure': account['failure'],
       },
   ],
   'providers': [
@@ -1490,5 +1491,216 @@ void main() {
     expect(sent.map((request) => request['path']).toSet(), {
       '/api/connections',
     });
+  });
+
+  group('an MCP server sign-in', () {
+    test('is the server\'s own door, and a token change is a command', () {
+      expect(
+        mcpSignInRequestV1({
+          'commandId': 'c1',
+          'input': {
+            'kind': 'sign-in',
+            'connectionId': 'conn/1',
+            'returnClient': 'android',
+          },
+        }).path,
+        '/api/plugins/mcp/connections/conn%2F1/authorize',
+      );
+      expect(
+        mcpSignInRequestV1({
+          'commandId': 'c1',
+          'input': {'kind': 'sign-in', 'connectionId': 'conn-1'},
+        }).body,
+        {
+          'schemaVersion': 1,
+          'type': 'connection/start',
+          'commandId': 'c1',
+          'connectionTypeId': 'mcp-server',
+        },
+      );
+      final rotate = connectionRequestV1({
+        'commandId': 'c2',
+        'input': {
+          'kind': 'rotate-api-key',
+          'connectionId': 'conn-1',
+          'apiKey': ' sk-new ',
+        },
+      });
+      expect(rotate.path, '/api/connections');
+      expect(rotate.body, {
+        'schemaVersion': 1,
+        'type': 'connection/rotate-api-key',
+        'commandId': 'c2',
+        'connectionId': 'conn-1',
+        'apiKey': 'sk-new',
+      });
+      expect(
+        () => connectionRequestV1({
+          'commandId': 'c3',
+          'input': {'kind': 'rotate-api-key', 'connectionId': 'conn-1'},
+        }),
+        throwsFormatException,
+      );
+    });
+  });
+
+  testWidgets('a server that asks for a sign-in is signed in to from its row', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final sent = <Map<String, Object?>>[];
+    final opened = <Uri>[];
+    final api = SettingsApi(store, (path, body) async {
+      if (body == null) {
+        return mcpFrame(
+          accounts: [
+            {
+              'id': 'conn-1',
+              'label': 'Linear',
+              'state': 'failed',
+              'authorization': 'grant',
+              'failure': 'This server asks you to sign in.',
+            },
+          ],
+        );
+      }
+      sent.add({'path': path, ...(body as Map).cast<String, Object?>()});
+      return {
+        'schemaVersion': 1,
+        'status': 'authorization-required',
+        'connectionId': 'conn-1',
+        'redirectUrl': 'https://auth.linear.app/authorize?state=s',
+        'expiresAt': '2026-09-24T00:10:00.000Z',
+      };
+    });
+    await tester.pumpWidget(
+      page(
+        api,
+        store,
+        openBrowser: (uri) async {
+          opened.add(uri);
+          return true;
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('MCP servers'));
+    await tester.pumpAndSettle();
+    expect(find.text('This server asks you to sign in.'), findsOneWidget);
+    await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
+    await tester.pumpAndSettle();
+    expect(sent.single['path'], '/api/plugins/mcp/connections/conn-1/authorize');
+    expect(sent.single['type'], 'connection/start');
+    expect(opened, [Uri.parse('https://auth.linear.app/authorize?state=s')]);
+  });
+
+  testWidgets('a server added without a token goes on to its sign-in', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final sent = <Map<String, Object?>>[];
+    final opened = <Uri>[];
+    var added = false;
+    final api = SettingsApi(store, (path, body) async {
+      if (body == null) {
+        return mcpFrame(
+          accounts: [
+            if (added)
+              {
+                'id': 'conn-1',
+                'label': 'mcp.linear.app',
+                'state': 'failed',
+                'authorization': 'grant',
+              },
+          ],
+        );
+      }
+      sent.add({'path': path, ...(body as Map).cast<String, Object?>()});
+      if (path == '/api/connections') {
+        added = true;
+        return {
+          'schemaVersion': 1,
+          'commandId': body['commandId'],
+          'connectionId': 'conn-1',
+          'status': 'failed',
+        };
+      }
+      return {
+        'schemaVersion': 1,
+        'status': 'authorization-required',
+        'connectionId': 'conn-1',
+        'redirectUrl': 'https://auth.linear.app/authorize',
+        'expiresAt': '2026-09-24T00:10:00.000Z',
+      };
+    });
+    await tester.pumpWidget(
+      page(
+        api,
+        store,
+        openBrowser: (uri) async {
+          opened.add(uri);
+          return true;
+        },
+      ),
+    );
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Connect'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Server address'),
+      'https://mcp.linear.app/mcp',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Add server'));
+    await tester.pumpAndSettle();
+    expect(sent.map((request) => request['path']), [
+      '/api/connections',
+      '/api/plugins/mcp/connections/conn-1/authorize',
+    ]);
+    expect(opened, [Uri.parse('https://auth.linear.app/authorize')]);
+  });
+
+  testWidgets('a server\'s token is changed in place, and a refusal said', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final sent = <Map<String, Object?>>[];
+    final api = SettingsApi(store, (path, body) async {
+      if (body == null) {
+        return mcpFrame(
+          accounts: [
+            {'id': 'conn-1', 'label': 'Work', 'authorization': 'api-key'},
+          ],
+        );
+      }
+      sent.add((body as Map).cast<String, Object?>());
+      return {
+        'schemaVersion': 1,
+        'commandId': body['commandId'],
+        'connectionId': 'conn-1',
+        'status': 'failed',
+      };
+    });
+    await tester.pumpWidget(page(api, store));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('MCP servers'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Manage Work'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Change token'));
+    await tester.pumpAndSettle();
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Access token'),
+      'sk-new',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Save token'));
+    await tester.pumpAndSettle();
+    expect(sent.single, {
+      'schemaVersion': 1,
+      'type': 'connection/rotate-api-key',
+      'commandId': sent.single['commandId'],
+      'connectionId': 'conn-1',
+      'apiKey': 'sk-new',
+    });
+    expect(find.text('The server didn’t take that token.'), findsOneWidget);
   });
 }

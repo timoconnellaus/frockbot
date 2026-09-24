@@ -283,12 +283,36 @@ class _ConnectionsPageState extends State<ConnectionsPage>
         toggledOn = input['enabled'] == true;
       }
     });
+    String? signInNext;
     try {
-      if (connectionActionKindV1(command) == 'authorize') {
-        await _authorize(command);
-      } else {
-        final request = connectionRequestV1(command);
-        await widget.api.request(request.path, body: request.body);
+      switch (connectionActionKindV1(command)) {
+        case 'authorize':
+          await _authorize(command);
+        case 'sign-in':
+          await openMcpSignInV1(
+            widget.api,
+            command,
+            openBrowser: widget.openBrowser,
+          );
+        default:
+          final request = connectionRequestV1(command);
+          final receipt = await widget.api.request(
+            request.path,
+            body: request.body,
+          );
+          final refused = receipt is Map && receipt['status'] == 'failed';
+          // A server keeps the token it had when a new one is refused, so
+          // the row does not change; this is where the person hears of it.
+          if (refused && input['kind'] == 'rotate-api-key' && mounted) {
+            setState(() => notice = 'The server didn’t take that token.');
+          }
+          // A server added without a token that asks for a sign-in goes on
+          // to it, as Connect goes on to an app's.
+          if (refused &&
+              input['kind'] == 'enable-connection' &&
+              input['packageId'] == mcpPackageIdV1) {
+            signInNext = receipt['connectionId'] as String?;
+          }
       }
     } on FormatException catch (error) {
       if (mounted) {
@@ -311,6 +335,18 @@ class _ConnectionsPageState extends State<ConnectionsPage>
       // The read is the authority on what the command did, so what this client
       // drew for itself stops being drawn the moment that read lands.
       if (mounted) setState(() => toggledConnection = null);
+    }
+    final added = (frame?.accounts ?? const []).where(
+      (account) => account['id'] == signInNext,
+    );
+    if (mounted &&
+        added.isNotEmpty &&
+        added.first['state'] == 'failed' &&
+        added.first['authorization'] == 'grant') {
+      await _send({
+        'commandId': _commandId(),
+        'input': {'kind': 'sign-in', 'connectionId': signInNext},
+      }, row);
     }
   }
 
@@ -1629,12 +1665,31 @@ class _AccountRow extends StatelessWidget {
     final mcp = account['packageId'] == mcpPackageIdV1;
     final id = account['id'] as String;
     final failure = account['failure'] as String?;
+    final working = state == 'ready' || state == 'disabled';
+    // A server that signs in and is not working has one thing to do next,
+    // so it is a button rather than a menu entry.
+    final signInFirst = mcp && authorization == 'grant' && state == 'failed';
     final items = <PopupMenuEntry<String>>[
       // A server's tools are listed again on the hour; this asks now.
-      if (mcp && (state == 'ready' || state == 'disabled'))
+      if (mcp && working)
         const PopupMenuItem(
           value: 'refresh-models',
           child: Text('Refresh tools'),
+        ),
+      // A server that could not be reached is asked again with what it has.
+      if (mcp && state == 'failed')
+        const PopupMenuItem(value: 'refresh-models', child: Text('Try again')),
+      if (mcp && authorization == 'grant' && working)
+        const PopupMenuItem(value: 'sign-in', child: Text('Sign in again')),
+      if (mcp &&
+          (authorization != 'none' || state == 'failed') &&
+          state != 'revoking' &&
+          state != 'authorizing')
+        PopupMenuItem(
+          value: 'rotate-api-key',
+          child: Text(
+            authorization == 'api-key' ? 'Change token' : 'Use a token',
+          ),
         ),
       if (!mcp &&
           models &&
@@ -1709,6 +1764,20 @@ class _AccountRow extends StatelessWidget {
                       ),
                     ),
                   ),
+                if (signInFirst)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 6),
+                    child: identified(
+                      ConnectorIds.action('mcp-sign-in-$id'),
+                      FilledButton.tonalIcon(
+                        onPressed: busy
+                            ? null
+                            : () => onCommand('sign-in', {'connectionId': id}),
+                        icon: const Icon(Icons.login_rounded, size: 18),
+                        label: const Text('Sign in'),
+                      ),
+                    ),
+                  ),
               ],
             ),
           ),
@@ -1717,17 +1786,82 @@ class _AccountRow extends StatelessWidget {
               tooltip: 'Manage ${account['label']}',
               enabled: !busy,
               icon: const Icon(Icons.more_horiz_rounded),
-              onSelected: (kind) => onCommand(kind, {
-                'connectionId': id,
-                if (kind == 'set-enabled') 'enabled': state != 'ready',
-                if (kind == 'revoke') 'packageId': account['packageId'],
-              }),
+              onSelected: (kind) async {
+                if (kind == 'rotate-api-key') {
+                  final token = await _askForToken(context);
+                  if (token == null) return;
+                  await onCommand(kind, {'connectionId': id, 'apiKey': token});
+                  return;
+                }
+                await onCommand(kind, {
+                  'connectionId': id,
+                  if (kind == 'set-enabled') 'enabled': state != 'ready',
+                  if (kind == 'revoke') 'packageId': account['packageId'],
+                });
+              },
               itemBuilder: (_) => items,
             ),
         ],
       ),
     );
   }
+
+  /// The new token for a server, typed where only this dialog sees it.
+  Future<String?> _askForToken(BuildContext context) => showDialog<String>(
+    context: context,
+    builder: (context) => const _TokenDialog(),
+  );
+}
+
+/// Asks for a server's new access token. Like a key, the token exists only
+/// between a person typing it and the request that carries it.
+class _TokenDialog extends StatefulWidget {
+  const _TokenDialog();
+
+  @override
+  State<_TokenDialog> createState() => _TokenDialogState();
+}
+
+class _TokenDialogState extends State<_TokenDialog> {
+  final token = TextEditingController();
+
+  @override
+  void dispose() {
+    token.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final value = token.text.trim();
+    if (value.isNotEmpty) Navigator.pop(context, value);
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: const Text('Access token'),
+    content: SteadyCaret(
+      child: TextField(
+        controller: token,
+        autofocus: true,
+        obscureText: true,
+        autocorrect: false,
+        enableSuggestions: false,
+        decoration: const InputDecoration(
+          labelText: 'Access token',
+          helperText: 'The server keeps its old one if it refuses this.',
+          helperMaxLines: 2,
+        ),
+        onSubmitted: (_) => _save(),
+      ),
+    ),
+    actions: [
+      TextButton(
+        onPressed: () => Navigator.pop(context),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(onPressed: _save, child: const Text('Save token')),
+    ],
+  );
 }
 
 /// The connect form for a keyed provider: a name, the key, and whatever the

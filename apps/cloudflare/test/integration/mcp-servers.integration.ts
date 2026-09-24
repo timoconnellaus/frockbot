@@ -1,12 +1,15 @@
 // Remote MCP servers, end to end through the gateway: the Connectors row, an
-// add by address with and without a token, a Bot calling the server's tool
-// under its namespace, the call's audit row, and the removal. The server is
-// the harness stub at `mcp.example.test`.
+// add by address with and without a token, a sign-in to a server behind
+// OAuth, a Bot calling the server's tool under its namespace, the call's audit
+// row, and the removal. The server is the harness stub at `mcp.example.test`,
+// and its authorization server the one at `mcp-auth.example.test`.
+import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import {
   asUser,
   expectOkJson,
   freshUserId,
+  MCP_AUTH_STUB_ORIGIN,
   MCP_STUB_ORIGIN,
   MCP_TEST_TOKEN,
   postAsUser,
@@ -183,5 +186,99 @@ describe("MCP servers", () => {
     expect(
       turn.events.find((event) => event.type === "tool/result"),
     ).toMatchObject({ isError: true });
+  });
+
+  it("removes a server from an installed app's Disconnect", async () => {
+    const userId = freshUserId("mcp-old-app");
+    await provisionThroughGateway({ userId, botId: "old-app" });
+    await expectOkJson(await addServer(userId, "add", "/mcp"));
+    const [server] = await servers(userId);
+    // An app that has not taken the patch sends a server with no token to
+    // its Package's revoke door, as it does every account it does not key.
+    expect(
+      await expectOkJson(
+        await postAsUser(
+          userId,
+          `/api/plugins/mcp/connections/${server!.connectionId}/revoke`,
+          { schemaVersion: 1, type: "connection/revoke" },
+        ),
+      ),
+    ).toEqual({ schemaVersion: 1, status: "revoked" });
+    expect(await servers(userId)).toEqual([]);
+  });
+
+  it("signs in to a server behind OAuth, and a Bot calls it", async () => {
+    const userId = freshUserId("mcp-oauth");
+    const botId = "oauth-bot";
+    await provisionThroughGateway({ userId, botId });
+    expect(
+      await expectOkJson(await addServer(userId, "add-oauth", "/oauth/mcp")),
+    ).toMatchObject({ status: "failed" });
+    const [pending] = await servers(userId);
+    expect(pending).toMatchObject({
+      state: "failed",
+      authorization: { kind: "grant" },
+    });
+
+    const start = (await expectOkJson(
+      await postAsUser(
+        userId,
+        `/api/plugins/mcp/connections/${pending!.connectionId}/authorize`,
+        {
+          schemaVersion: 1,
+          type: "connection/start",
+          commandId: "sign-in",
+          connectionTypeId: "mcp-server",
+        },
+      ),
+    )) as { status: string; redirectUrl: string };
+    expect(start.status).toBe("authorization-required");
+    expect(new URL(start.redirectUrl).origin).toBe(MCP_AUTH_STUB_ORIGIN);
+
+    // The authorization server approves at once and sends the browser back.
+    const approved = await fetch(start.redirectUrl, { redirect: "manual" });
+    const back = new URL(approved.headers.get("location")!);
+    expect(back.pathname).toBe("/api/mcp/oauth/callback");
+
+    // A state FrockBot did not sign is refused before anything is asked.
+    const forged = new URL(back);
+    forged.searchParams.set("state", "forged");
+    expect(await (await SELF.fetch(forged)).text()).toContain("expired");
+    expect((await servers(userId))[0]?.state).toBe("failed");
+
+    // The browser that comes back carries no session; the state is enough.
+    expect(await (await SELF.fetch(back)).text()).toContain("Signed in");
+    const [ready] = await servers(userId);
+    expect(ready).toMatchObject({
+      state: "ready",
+      authorization: { kind: "grant" },
+    });
+    expect(
+      JSON.stringify(await (await asUser(userId, "/api/settings")).json()),
+    ).not.toMatch(/oauth-(access|refresh)-/);
+
+    const turn = await callEcho(userId, botId, "call-oauth");
+    expect(
+      turn.events.find((event) => event.type === "tool/result"),
+    ).toMatchObject({ isError: false, content: "echo: hello" });
+
+    // Removing the server revokes the grant FrockBot was given.
+    expect(
+      await expectOkJson(
+        await postAsUser(userId, "/api/connections", {
+          schemaVersion: 1,
+          type: "connection/disconnect",
+          commandId: "remove-oauth",
+          connectionId: ready!.connectionId,
+          revokeUpstream: false,
+        }),
+      ),
+    ).toMatchObject({ status: "applied" });
+    const revoked = (await (
+      await fetch(`${MCP_AUTH_STUB_ORIGIN}/__revoked`)
+    ).json()) as string[];
+    expect(revoked.some((token) => token.startsWith("oauth-refresh-"))).toBe(
+      true,
+    );
   });
 });

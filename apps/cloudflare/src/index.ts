@@ -309,6 +309,10 @@ interface Env {
   ACCESS_AUD?: string;
   /** The native door's signing key on the Access build; see `AUTH_PACKAGE_V1`. */
   NATIVE_TOKEN_SECRET?: string;
+  /**
+   * Seals every Connection credential, and — through a key derived from it
+   * for that purpose alone — signs the `state` of an MCP server's sign-in.
+   */
   CREDENTIAL_KEYRING?: string;
   /** Signs every Routine webhook key. Absent closes the webhook door. */
   ROUTINE_HOOK_SECRET?: string;
@@ -327,11 +331,6 @@ interface Env {
    * rather than admitting a caller nothing could verify.
    */
   MACHINE_TOKEN_SECRET?: string;
-  /**
-   * Signs the callback `state` of every redirect-based Connection. Absent — or
-   * weak, or equal to `BETTER_AUTH_SECRET` — closes that door: the routes
-   * answer 503 rather than trusting a forgeable identity.
-   */
   ALLOW_DEVELOPMENT_AUTH?: string;
   FROCKBOT_ADMIN_EMAILS?: string;
   ALLOWED_CLIENT_ORIGINS?: string;
@@ -1962,6 +1961,11 @@ const createGatewayBackendContributions = (env: Env) =>
     },
     ...(typeof env.COMPOSIO_WEBHOOK_SECRET === "string"
       ? { connectWebhookSecret: env.COMPOSIO_WEBHOOK_SECRET }
+      : {}),
+    // The User object signs a sign-in's state under the keyring; the
+    // callback verifies it here before any object is addressed.
+    ...(typeof env.CREDENTIAL_KEYRING === "string"
+      ? { mcpSignInKeyring: env.CREDENTIAL_KEYRING }
       : {}),
     handleConnectEvent: (input) =>
       userConfigurationStub(env, input.userId).handleConnectEvent({

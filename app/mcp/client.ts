@@ -18,6 +18,7 @@
 //    the call left and its outcome is unknown.
 import {
   Client,
+  extractWWWAuthenticateParams,
   ProtocolError,
   SdkError,
   SdkErrorCode,
@@ -53,9 +54,19 @@ export interface McpServerInfoV1 {
   instructions?: string;
 }
 
+/**
+ * What a server's `WWW-Authenticate` said about signing in to it: where its
+ * protected-resource metadata is, and the scope it asked for. Either may be
+ * absent, and discovery then tries the well-known locations.
+ */
+export interface McpAuthChallengeV1 {
+  resourceMetadataUrl?: string;
+  scope?: string;
+}
+
 /** The server refused the request for want of a credential it accepts. */
 export class McpUnauthorizedError extends Error {
-  constructor() {
+  constructor(readonly challenge: McpAuthChallengeV1 = {}) {
     super("The server asked for a credential FrockBot does not hold.");
     this.name = "McpUnauthorizedError";
   }
@@ -242,6 +253,20 @@ function isUnauthorized(error: unknown): boolean {
   return status === 401 || status === 403;
 }
 
+/** The sign-in hints a refusal carried; a URL too long to be one is dropped. */
+function authChallengeOf(response: Response): McpAuthChallengeV1 {
+  const params = extractWWWAuthenticateParams(response);
+  const metadata = params.resourceMetadataUrl?.href;
+  return {
+    ...(metadata && metadata.length <= 2_048
+      ? { resourceMetadataUrl: metadata }
+      : {}),
+    ...(params.scope && params.scope.length <= 1_024
+      ? { scope: params.scope }
+      : {}),
+  };
+}
+
 /**
  * Whether a failed first request means the address speaks the older
  * HTTP+SSE transport: the specification's own test is a 4xx that is not a
@@ -252,9 +277,12 @@ function suggestsLegacyTransport(error: unknown): boolean {
   return status === 400 || status === 404 || status === 405;
 }
 
-function handshakeFailure(error: unknown): Error {
+function handshakeFailure(
+  error: unknown,
+  challenge: McpAuthChallengeV1 = {},
+): Error {
   if (error instanceof McpUnauthorizedError) return error;
-  if (isUnauthorized(error)) return new McpUnauthorizedError();
+  if (isUnauthorized(error)) return new McpUnauthorizedError(challenge);
   if (error instanceof McpUnreachableError) return error;
   if (error instanceof SdkError && error.code === SdkErrorCode.RequestTimeout) {
     return new McpUnreachableError("The server did not answer in time.");
@@ -296,9 +324,19 @@ export async function withMcpSessionV1<T>(
   options: McpSessionOptionsV1,
   use: (session: McpSessionV1) => Promise<T>,
 ): Promise<T> {
-  const fetcher = guardedMcpFetchV1(
+  const guarded = guardedMcpFetchV1(
     options.fetch ?? ((input, init) => globalThis.fetch(input, init)),
   );
+  // The transport reports a refused credential without the response, and the
+  // response is what says where signing in starts.
+  let challenge: McpAuthChallengeV1 = {};
+  const fetcher: McpFetchV1 = async (input, init) => {
+    const response = await guarded(input, init);
+    if (response.status === 401 || response.status === 403) {
+      challenge = authChallengeOf(response);
+    }
+    return response;
+  };
   let client: Client;
   let transport: McpTransportV1 = options.transport ?? "streamable-http";
   try {
@@ -312,7 +350,7 @@ export async function withMcpSessionV1<T>(
       client = await connect(transport, options, fetcher);
     }
   } catch (error) {
-    throw handshakeFailure(error);
+    throw handshakeFailure(error, challenge);
   }
   const server = client.getServerVersion();
   const instructions = client.getInstructions()?.trim();
@@ -352,7 +390,7 @@ export async function withMcpSessionV1<T>(
             : [],
         );
       } catch (error) {
-        throw handshakeFailure(error);
+        throw handshakeFailure(error, challenge);
       }
     },
     async callTool(name, args, signal) {
@@ -365,7 +403,7 @@ export async function withMcpSessionV1<T>(
           },
         );
       } catch (error) {
-        if (isUnauthorized(error)) throw new McpUnauthorizedError();
+        if (isUnauthorized(error)) throw new McpUnauthorizedError(challenge);
         // The request-shape errors are the server refusing the call before
         // running it. Any other error it sends — an internal one — may have
         // come from partway through, so it stays an unknown outcome.

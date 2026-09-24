@@ -1037,11 +1037,15 @@ connectionId, triggerType }` on a Routine, an instance at the provider, and
   namespace (`gmail`, `gmail-2`). Each MCP server is a Connection too, so
   GrokBot's `RenameMcpAccount` and `RemoveMcpAccount` are the ordinary
   `connection/update-label` and `connection/disconnect`, and its status is the
-  Connection's state and failure line on the Connectors surface. What is
-  missing: `SetMcpInstructions` (the server's own instructions reach the
-  prompt, and a User cannot write their own over them), `RestartMcpServers`
-  (nothing is resident to restart; Refresh tools lists the server again), and
-  a status tool a Bot can call.
+  Connection's state and failure line on the Connectors surface.
+  `AuthenticateMcpServer` is the server's own Sign in on that surface — the
+  MCP authorization specification, with the refresh token kept in the User
+  object — and a server's token is changed in place. What is missing:
+  `SetMcpInstructions` (the server's own instructions reach the prompt, and a
+  User cannot write their own over them), `RestartMcpServers` (nothing is
+  resident to restart; Refresh tools lists the server again, and Try again
+  asks a failed one again), a status tool a Bot can call, and a sign-in a Bot
+  can offer in the conversation.
 - **44** — **`deferred`, with the dependency stated.** A remote server is
   added by address (`app/mcp`); a stdio server has no address, and the form
   takes only an https one, so the gap is visible rather than silent. Shipping
