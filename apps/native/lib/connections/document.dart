@@ -152,6 +152,61 @@ ConnectionRequestV1 connectionRequestV1(Map<String, Object?> command) {
   }
 }
 
+/// The Package a remote MCP server is added under. Its one way in is a form
+/// of its own — an address first, a token only when the server asks for one —
+/// rather than the key form every other keyed provider draws.
+const mcpPackageIdV1 = 'mcp';
+
+/// The Connection setting an MCP server's address travels in.
+const mcpUrlSettingV1 = 'url';
+
+/// An MCP server address as a person typed it, or the sentence that says
+/// why it is not one. The server holds it to the same rule and says more;
+/// this only saves a round trip on the obvious mistakes.
+({Uri? uri, String? problem}) mcpServerAddressV1(String typed) {
+  final text = typed.trim();
+  if (text.isEmpty) {
+    return (uri: null, problem: 'Enter the server’s address.');
+  }
+  final uri = Uri.tryParse(text);
+  if (uri == null ||
+      uri.scheme != 'https' ||
+      uri.host.isEmpty ||
+      uri.userInfo.isNotEmpty) {
+    return (
+      uri: null,
+      problem: 'Enter the server’s full https address, like https://mcp.example.com/mcp.',
+    );
+  }
+  return (uri: uri, problem: null);
+}
+
+/// The action an MCP server form's answer becomes: a server added with a
+/// token is a keyed Connection, one without is a plain one, and both carry
+/// the address as the Connection's setting. The name defaults to the host.
+Map<String, Object?> mcpServerActionV1({
+  required String commandId,
+  required int index,
+  required String connectionTypeId,
+  required Uri address,
+  required String name,
+  required String token,
+}) {
+  final prefix = 'c$index';
+  final label = name.trim().isEmpty ? address.host : name.trim();
+  return {
+    'commandId': commandId,
+    'input': {
+      'kind': token.isEmpty ? 'enable-connection' : 'connect-api-key',
+      'packageId': mcpPackageIdV1,
+      'connectionTypeId': connectionTypeId,
+      '$prefix.label': label.length > 120 ? label.substring(0, 120) : label,
+      '$prefix.s.$mcpUrlSettingV1': address.toString(),
+      if (token.isNotEmpty) '$prefix.key': token,
+    },
+  };
+}
+
 /// The `connection/start` command that opens a provider's hosted door.
 ///
 /// `returnClient` names which return page this app can come back through

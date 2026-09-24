@@ -21,6 +21,12 @@ on a connector they already have, or to revoke one. A connector that is already
 set up shows in your prompt as the Package it contributes; one that is not
 will not be there at all.
 
+Connectors is also where the User adds an MCP server: its https address, and
+a token when the server asks for one. That is their act, as connecting an app
+is — say which server and what it lets you do, and let them add it. The token
+goes in that form, never in the conversation. Once added, the server's tools
+are one `mcp-…` namespace in your prompt on every Bot the User owns.
+
 **Plugins** is what runs on a Bot. A Plugin is installed per account and
 enabled per Bot. Switching one on for this Bot is how "make this Bot able to
 do X" is said. The Plugins page lists first-party features beside installed

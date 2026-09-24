@@ -74,6 +74,10 @@ import {
   userContribution as connectUserContribution,
   type ConnectUserApplicationHostV1,
 } from "@frockbot/app/connect/user";
+import {
+  userContribution as mcpUserContribution,
+  type McpUserApplicationHostV1,
+} from "@frockbot/app/mcp/user";
 import { userContribution as ollamaCloudUserContribution } from "@frockbot/providers/ollama-cloud/user";
 import type { ModelConnectionsUserApplicationHostV1 } from "@frockbot/providers/model-connections/user";
 import {
@@ -129,6 +133,7 @@ export {
   settingsUserContribution,
   credentialsUserContribution,
   connectUserContribution,
+  mcpUserContribution,
   ollamaCloudUserContribution,
   frockAiUserContribution,
   botTemplateUserContribution,
@@ -144,12 +149,10 @@ export {
 export interface BackendRouteContribution {
   packageId: string;
   /**
-   * A route the gateway dispatches *before* it authenticates anyone.
-   *
-   * Exactly one Contribution needs it — the `mcp-oauth` callback, which an
-   * authorization server reaches by redirecting a browser that carries no
-   * FrockBot session. A `publicRoute` takes its identity from a signed
-   * artifact it verifies itself; it never reads one from the request.
+   * A route the gateway dispatches *before* it authenticates anyone: the
+   * connected-app return page a sign-in redirects a sessionless browser to,
+   * and the provider's signed events door. A `publicRoute` takes no identity
+   * from the request; what it trusts, it verifies itself.
    */
   publicRoute?(
     request: Request,
@@ -227,6 +230,7 @@ export type FoundationUserBackendHostV1 = {
 } & SettingsUserApplicationHostV1 &
   CredentialsUserApplicationHostV1 &
   ConnectUserApplicationHostV1 &
+  McpUserApplicationHostV1 &
   ModelConnectionsUserApplicationHostV1 &
   FrockAiUserApplicationHostV1 &
   BotTemplateUserApplicationHostV1 &
@@ -288,6 +292,7 @@ export const backendDescriptorsV1: readonly AnyBackendDescriptor[] = [
   settingsUserContribution,
   credentialsUserContribution,
   connectUserContribution,
+  mcpUserContribution,
   ...catalogUserContributionsV1,
   ollamaCloudUserContribution,
   frockAiUserContribution,

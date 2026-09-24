@@ -325,6 +325,86 @@ function recordVoiceUpstreamUpgrade(request: Request, url: URL): void {
 }
 
 /**
+ * A remote MCP server, speaking streamable HTTP with JSON answers. `/mcp`
+ * asks for nothing; `/secure/mcp` asks for {@link MCP_TEST_TOKEN} and answers
+ * anything else 401, as a server behind a token does. It has one tool, `echo`,
+ * which says back the message it was given.
+ */
+export const MCP_STUB_ORIGIN = "https://mcp.example.test";
+export const MCP_TEST_TOKEN = "workerd-mcp-token";
+
+async function mcpStub(request: Request, url: URL): Promise<Response> {
+  if (url.pathname !== "/mcp" && url.pathname !== "/secure/mcp") {
+    return new Response("not found", { status: 404 });
+  }
+  if (
+    url.pathname === "/secure/mcp" &&
+    request.headers.get("authorization") !== `Bearer ${MCP_TEST_TOKEN}`
+  ) {
+    return new Response("unauthorized", {
+      status: 401,
+      headers: { "www-authenticate": "Bearer" },
+    });
+  }
+  if (request.method !== "POST") return new Response(null, { status: 405 });
+  const message = (await request.json()) as {
+    id?: number | string;
+    method?: string;
+    params?: {
+      protocolVersion?: string;
+      name?: string;
+      arguments?: { message?: unknown };
+    };
+  };
+  if (message.id === undefined) return new Response(null, { status: 202 });
+  const reply = (result: unknown) =>
+    Response.json({ jsonrpc: "2.0", id: message.id, result });
+  switch (message.method) {
+    case "initialize":
+      return reply({
+        protocolVersion: message.params?.protocolVersion ?? "2025-06-18",
+        capabilities: { tools: {} },
+        serverInfo: { name: "stub-mcp", version: "1.0.0" },
+        instructions: "Echo says back what it is given.",
+      });
+    case "tools/list":
+      return reply({
+        tools: [
+          {
+            name: "echo",
+            description: "Say it back.",
+            inputSchema: {
+              type: "object",
+              properties: { message: { type: "string" } },
+              required: ["message"],
+            },
+          },
+        ],
+      });
+    case "tools/call":
+      return message.params?.name === "echo"
+        ? reply({
+            content: [
+              {
+                type: "text",
+                text: `echo: ${String(message.params.arguments?.message)}`,
+              },
+            ],
+          })
+        : reply({
+            content: [{ type: "text", text: "no such tool" }],
+            isError: true,
+          });
+    default:
+      return Response.json({
+        jsonrpc: "2.0",
+        id: message.id,
+        error: { code: -32601, message: "Method not found" },
+      });
+  }
+}
+
+/**
  * The Connected apps provider, as the User and Bot objects reach it. The key
  * is what `vitest.*.config.ts` binds as `COMPOSIO_API_KEY`; anything else is
  * refused as the real service would.
@@ -817,6 +897,7 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
   if (url.origin === WEB_STUB_ORIGIN) return webStub(url);
   if (url.origin === DEEPSEEK_STUB_ORIGIN) return deepseekStub(request, url);
   if (url.origin === COMPOSIO_STUB_ORIGIN) return composioStub(request, url);
+  if (url.origin === MCP_STUB_ORIGIN) return mcpStub(request, url);
   if (
     url.origin === "https://auth.x.ai" &&
     url.pathname === "/oauth2/device/code"

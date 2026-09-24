@@ -32,15 +32,17 @@ describe("the classifier table", () => {
     ["memory_write", { text: "a fact" }, "file", "workspace"],
     ["skill_write", { path: "a.md" }, "file", "workspace"],
     ["package_author", { packageId: "x" }, "file", "workspace"],
-    ["mcp__example__echo", { message: "hi" }, "mcp", "remote:example"],
-    ["mcp__beeper__send_message", {}, "mcp", "remote:beeper"],
+    ["mcp-example/echo", { message: "hi" }, "mcp", "remote:mcp-example"],
+    ["mcp-beeper/send_message", {}, "mcp", "remote:mcp-beeper"],
+    // A connected app's namespace is not a remote MCP server.
+    ["gmail/GMAIL_SEND_EMAIL", {}, undefined],
     // Read-only and product tools perform no audited effect at all. An audit
     // surface that logged them would be a transcript.
     ["current_time", {}, undefined],
     ["memory_search", { query: "gym" }, undefined],
     ["skill_load", { skill: "a" }, undefined],
     ["send_to_user", { text: "hi" }, undefined],
-    ["mcp__", {}, undefined],
+    ["mcp-/", {}, undefined],
   ];
 
   for (const [name, input, kind, target] of table) {
@@ -180,13 +182,17 @@ describe("the classifier table", () => {
     ).toEqual({ kind: "shell", target: "computer" });
   });
 
-  test("an MCP tool whose own name contains __ still names its server", () => {
-    // The slug capture was greedy: `mcp__gh__list__files` reported server
-    // `gh__list`, a target no Connection can resolve to a host.
-    expect(auditKindForToolV1("mcp__gh__list__files", {})).toEqual({
-      kind: "mcp",
-      target: "remote:gh",
-    });
+  test("an MCP call through the dynamic envelope names its server", () => {
+    // The tool's own name may carry a slash; the namespace is what ends at
+    // the first one.
+    expect(
+      auditKindForToolV1("call_dynamic_tool", {
+        namespace: "mcp-linear",
+        toolName: "issues/list",
+        arguments: {},
+        mcpDetails: { description: "Look at the open issues" },
+      }),
+    ).toEqual({ kind: "mcp", target: "remote:mcp-linear" });
   });
 
   test("is pure: the same call always classifies the same way", () => {

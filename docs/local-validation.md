@@ -93,8 +93,8 @@ configs keep `fileParallelism: false`, deliberately and not as an oversight.
 The fakes those suites run against are shared mutable state that files assert
 exact increments on: the Computer host fake is a single Node-side closure whose
 exec table, file map and call log belong to the run rather than to a file, and
-the Workers AI call counter, the outbound stub's MCP handshake counter and its
-blocked-address tally are each read, driven through a Turn, and asserted to
+the Workers AI call counter and the outbound stub's blocked-address tally are
+each read, driven through a Turn, and asserted to
 have risen by exactly one. Parallel files race on all of them, and a per-test
 reset is itself a thing that races, so switching the flag on today buys
 flakiness rather than speed.

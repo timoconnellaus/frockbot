@@ -47,8 +47,9 @@ If there is no `connectors` namespace, send them to Marketplace instead.
 2. Send them to **Marketplace** (Settings → Marketplace) for something this
    account does not have yet — a model provider or a connector offer. Send
    them to **Connectors** (Settings → Connectors) to add another account on a
-   connector they already installed. Send them to **Plugins** to switch on a
-   Plugin that is already installed for a Bot.
+   connector they already installed, or to add an MCP server by its address.
+   Send them to **Plugins** to switch on a Plugin that is already installed
+   for a Bot.
 3. If the entry needs an API key or an OAuth sign-in, say so before they
    start, and say what the key is for. Never ask the User to paste a secret
    into the conversation.

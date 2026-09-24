@@ -7,14 +7,14 @@
 // never a registry, never the Bot's mounted Composition — exactly as
 // `searchRowsFromClientRunV1` does for the transcript index.
 //
-// The MCP target is the one thing a tool name cannot answer on its own: the
-// name carries the Connection's *slug* (`mcp__<slug>__<tool>`), and the host
-// lives in the Connection's settings, which the User Durable Object owns. So
-// this answers `remote:<slug>` and the
-// User object — the authority for Connections — resolves it to `remote:<host>`
-// on the one code path both projection and rebuild go through
-// (`resolveAuditTargetV1` in `user.ts`). One resolution point, in the object
-// that holds the registry, is the only arrangement where the two cannot drift.
+// The MCP target is the one thing a tool call cannot answer on its own: the
+// call names the server's Tool Namespace (`mcp-<name>`), and the host lives
+// on the server's Connection, which the User Durable Object owns. So this
+// answers `remote:<namespace>` and the User object — the authority for
+// Connections — resolves it to `remote:<host>` on the one code path both
+// projection and rebuild go through (`resolveAuditTargetV1` in `user.ts`).
+// One resolution point, in the object that holds the registry, is the only
+// arrangement where the two cannot drift.
 import {
   AUDIT_TARGET_COMPUTER_V1,
   AUDIT_TARGET_MACHINE_PREFIX_V1,
@@ -27,8 +27,8 @@ import {
 export interface AuditClassificationV1 {
   kind: AuditKindV1;
   /**
-   * `computer`, `machine:<id>`, or the provisional `remote:<slug>` an MCP call
-   * carries until the Connection registry resolves its host.
+   * `computer`, `machine:<id>`, or the provisional `remote:<namespace>` an
+   * MCP call carries until the Connection registry resolves its host.
    */
   target: string;
 }
@@ -89,12 +89,11 @@ const MACHINE_SHELL_TOOL = "machine_exec";
  */
 const MACHINE_MESSAGES_PREFIX = "machine_messages_";
 
-// The slug capture is LAZY. Greedy, `mcp__gh__list__files` reported server
-// `gh__list` — a target that names no Connection, so `resolveAuditTargetV1`
-// could never resolve it to a host and the row filtered under a server nobody
-// has. The slug is the first segment; everything after the second `__` is the
-// remote tool's own name, `__` included.
-const MCP_TOOL = /^mcp__([a-zA-Z0-9_]{1,64}?)__(.{1,96})$/;
+// An MCP server's tools are called through the dynamic envelope, so the
+// resolved name is `<namespace>/<tool>`, and every server's namespace is
+// `mcp-<name>`, short enough that the pair fits an audit row. A connected
+// app's namespace never starts that way.
+const MCP_TOOL = /^(mcp-[a-z0-9-]{1,31})\/(.{1,96})$/;
 const MACHINE_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/;
 
 function isObject(value: unknown): value is Record<string, unknown> {

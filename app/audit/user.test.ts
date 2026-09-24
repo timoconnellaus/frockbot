@@ -47,26 +47,29 @@ function contribution(
 }
 
 describe("resolving an MCP target against the Connection registry", () => {
-  test("turns the Connection slug into the server's host", () => {
-    const hosts = new Map([["example", "mcp.example.test"]]);
-    expect(resolveAuditTargetV1("remote:example", hosts)).toBe(
+  test("turns the server's namespace into its host", () => {
+    const hosts = new Map([["mcp-example", "mcp.example.test"]]);
+    expect(resolveAuditTargetV1("remote:mcp-example", hosts)).toBe(
       "remote:mcp.example.test",
     );
-    // A slug the registry does not know stays a slug. That is a less specific
-    // row, not a wrong one — better than claiming a host nobody can vouch for.
-    expect(resolveAuditTargetV1("remote:beeper", hosts)).toBe("remote:beeper");
+    // A namespace the registry does not know stays as it is. That is a less
+    // specific row, not a wrong one — better than claiming a host nobody can
+    // vouch for.
+    expect(resolveAuditTargetV1("remote:mcp-beeper", hosts)).toBe(
+      "remote:mcp-beeper",
+    );
     // Everything else is complete as the classifier wrote it.
     expect(resolveAuditTargetV1("computer", hosts)).toBe("computer");
     expect(resolveAuditTargetV1("machine:mac-1", hosts)).toBe("machine:mac-1");
   });
 
   test("is applied on the projection path and the rebuild path alike", async () => {
-    const hosts = new Map([["example", "mcp.example.test"]]);
+    const hosts = new Map([["mcp-example", "mcp.example.test"]]);
     const mcp = entry({
       occurrenceId: "tool:1:1:1",
       kind: "mcp",
-      target: "remote:example",
-      toolName: "mcp__example__echo",
+      target: "remote:mcp-example",
+      toolName: "mcp-example/echo",
     });
     const audit = contribution({ entries: [mcp], hosts });
     await audit.indexAuditEntries([mcp]);
