@@ -62,14 +62,8 @@ test("a Bot builds the guitar tuner its Skill teaches from the conversation, and
   page,
   userId,
   ollamaBaseUrl,
-  allowedFailures,
 }) => {
   test.setTimeout(publicationJourneyTimeoutMs);
-  // The scripted messages carry the tuner's source, and the thread draws it:
-  // its "♯" sends Flutter looking for a symbol font on gstatic, which the app
-  // document's CSP does not let it fetch. That is the thread's rendering of
-  // the script, not the tuner.
-  allowedFailures.console.push(/fonts\.gstatic\.com/);
   expect(
     appletBuildAvailableV1(),
     "Docker is not running, so apps/applet-build could not start and no Plugin can be built. Start Docker and run this spec again.",
