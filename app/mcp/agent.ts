@@ -4,9 +4,10 @@
 // AUTHORITY. A namespace exists only through the enabled `mcp-tools`
 // Capability bound to a `ready` Connection the runtime host has already
 // authorized, and permission is asked again before a schema is disclosed and
-// before a call is sent. A server's token is leased for one call under the
-// call's effect id, opened here, used and settled; it never reaches a tool
-// argument, a result or the log.
+// before a call is sent. A server's token — the one it was given, or the
+// access token its sign-in holds, never the refresh token — is leased for one
+// call under the call's effect id, opened here, used and settled; it never
+// reaches a tool argument, a result or the log.
 //
 // SCHEMAS. The directory comes from the User's copy, so listing costs no
 // round trip to the server; one tool's schema is read and pinned by the Turn
@@ -36,6 +37,7 @@ import {
   type McpToolV1,
 } from "./client.js";
 import { MCP_CAPABILITY_ID, MCP_PACKAGE_ID } from "./definition.js";
+import { decodeMcpAccessSecretV1 } from "./oauth.js";
 import {
   MCP_CATALOG_UNAVAILABLE_MESSAGE_V1,
   MCP_STALE_CONTRACT_MESSAGE_V1,
@@ -273,14 +275,23 @@ function decodeAndWrap(value: unknown): PinnedMcpToolV1 {
   };
 }
 
-/** The token for one call, when the server was added with one. */
+/** Whether a server holds a credential a call leases. */
+function holdsCredential(connection: ConnectionView): boolean {
+  const kind = connection.authorization?.kind;
+  return kind === "api-key" || kind === "grant";
+}
+
+/**
+ * The bearer token for one call: the token the server was given, or the
+ * access token its sign-in holds. Nothing else a sign-in keeps is leased.
+ */
 async function openToken(
   config: McpRuntimeConfigV1,
   runtime: McpRuntimeV1,
   effectId: string,
 ): Promise<string | undefined> {
   const connection = config.connection;
-  if (connection.authorization?.kind !== "api-key") return undefined;
+  if (!holdsCredential(connection)) return undefined;
   const generation = connection.generation;
   if (!generation || !config.leaseCredential || !runtime.credentials) {
     throw new Error("The server's token is unavailable");
@@ -293,12 +304,15 @@ async function openToken(
   ) {
     throw new Error("The server's token lease is invalid");
   }
-  return runtime.credentials.open({
+  const secret = await runtime.credentials.open({
     accountId: config.userId,
     connectionId: connection.connectionId,
     packageId: MCP_PACKAGE_ID,
     lease,
   });
+  return connection.authorization?.kind === "grant"
+    ? decodeMcpAccessSecretV1(secret).accessToken
+    : secret;
 }
 
 export async function executeMcpToolV1(
@@ -321,7 +335,7 @@ export async function executeMcpToolV1(
       isError: true,
     };
   }
-  const leased = config.connection.authorization?.kind === "api-key";
+  const leased = holdsCredential(config.connection);
   let dispatched = false;
   try {
     let token: string | undefined;
@@ -330,7 +344,7 @@ export async function executeMcpToolV1(
     } catch {
       return {
         content:
-          "The call was not sent: this server's token could not be opened. The User may need to add the server again.",
+          "The call was not sent: this server's credential could not be opened. The User may need to sign in to it again, or give it a new token, in Connectors.",
         isError: true,
       };
     }
@@ -369,7 +383,7 @@ export async function executeMcpToolV1(
     if (error instanceof McpUnauthorizedError) {
       return {
         content:
-          "The call was not run: the server refused this connection's credential. The User needs to add the server again.",
+          "The call was not run: the server refused this connection's credential. The User needs to sign in to it again, or give it a new token, in Connectors.",
         isError: true,
       };
     }

@@ -327,14 +327,149 @@ function recordVoiceUpstreamUpgrade(request: Request, url: URL): void {
 /**
  * A remote MCP server, speaking streamable HTTP with JSON answers. `/mcp`
  * asks for nothing; `/secure/mcp` asks for {@link MCP_TEST_TOKEN} and answers
- * anything else 401, as a server behind a token does. It has one tool, `echo`,
- * which says back the message it was given.
+ * anything else 401, as a server behind a token does; `/oauth/mcp` asks for
+ * an access token from its own authorization server at
+ * {@link MCP_AUTH_STUB_ORIGIN}, and says where signing in starts when it
+ * refuses. It has one tool, `echo`, which says back the message it was given.
  */
 export const MCP_STUB_ORIGIN = "https://mcp.example.test";
 export const MCP_TEST_TOKEN = "workerd-mcp-token";
+export const MCP_AUTH_STUB_ORIGIN = "https://mcp-auth.example.test";
+const MCP_OAUTH_RESOURCE_METADATA = `${MCP_STUB_ORIGIN}/.well-known/oauth-protected-resource/oauth/mcp`;
+const mcpOAuthCodes = new Map<
+  string,
+  { clientId: string; redirectUri: string; challenge: string }
+>();
+const mcpOAuthAccessTokens = new Set<string>();
+const mcpOAuthRefreshTokens = new Set<string>();
+const mcpOAuthRevoked: string[] = [];
+let mcpOAuthIssued = 0;
+
+async function pkceS256(verifier: string): Promise<string> {
+  const digest = new Uint8Array(
+    await crypto.subtle.digest("SHA-256", new TextEncoder().encode(verifier)),
+  );
+  return btoa(String.fromCharCode(...digest))
+    .replaceAll("+", "-")
+    .replaceAll("/", "_")
+    .replace(/=+$/, "");
+}
+
+/**
+ * The OAuth authorization server behind `/oauth/mcp`: metadata, dynamic
+ * registration, an authorize endpoint that approves at once and redirects
+ * back, the token endpoint with PKCE, rotating refresh and revocation.
+ * `GET /__revoked` lets a test see what FrockBot revoked.
+ */
+async function mcpAuthStub(request: Request, url: URL): Promise<Response> {
+  const resource = `${MCP_STUB_ORIGIN}/oauth/mcp`;
+  const issue = (rotatedFrom?: string) => {
+    if (rotatedFrom) mcpOAuthRefreshTokens.delete(rotatedFrom);
+    mcpOAuthIssued += 1;
+    const access = `oauth-access-${mcpOAuthIssued}`;
+    const refresh = `oauth-refresh-${mcpOAuthIssued}`;
+    mcpOAuthAccessTokens.add(access);
+    mcpOAuthRefreshTokens.add(refresh);
+    return Response.json({
+      access_token: access,
+      token_type: "Bearer",
+      refresh_token: refresh,
+      expires_in: 3600,
+    });
+  };
+  switch (url.pathname) {
+    case "/.well-known/oauth-authorization-server":
+      return Response.json({
+        issuer: MCP_AUTH_STUB_ORIGIN,
+        authorization_endpoint: `${MCP_AUTH_STUB_ORIGIN}/authorize`,
+        token_endpoint: `${MCP_AUTH_STUB_ORIGIN}/token`,
+        registration_endpoint: `${MCP_AUTH_STUB_ORIGIN}/register`,
+        revocation_endpoint: `${MCP_AUTH_STUB_ORIGIN}/revoke`,
+        response_types_supported: ["code"],
+        grant_types_supported: ["authorization_code", "refresh_token"],
+        code_challenge_methods_supported: ["S256"],
+        token_endpoint_auth_methods_supported: ["none"],
+      });
+    case "/register": {
+      const body = (await request.json()) as Record<string, unknown>;
+      mcpOAuthIssued += 1;
+      return Response.json(
+        { ...body, client_id: `mcp-client-${mcpOAuthIssued}` },
+        { status: 201 },
+      );
+    }
+    case "/authorize": {
+      if (url.searchParams.get("resource") !== resource) {
+        return new Response("wrong resource", { status: 400 });
+      }
+      mcpOAuthIssued += 1;
+      const code = `oauth-code-${mcpOAuthIssued}`;
+      const redirectUri = url.searchParams.get("redirect_uri") ?? "";
+      mcpOAuthCodes.set(code, {
+        clientId: url.searchParams.get("client_id") ?? "",
+        redirectUri,
+        challenge: url.searchParams.get("code_challenge") ?? "",
+      });
+      const back = new URL(redirectUri);
+      back.searchParams.set("code", code);
+      back.searchParams.set("state", url.searchParams.get("state") ?? "");
+      return new Response(null, {
+        status: 302,
+        headers: { location: back.href },
+      });
+    }
+    case "/token": {
+      const form = new URLSearchParams(await request.text());
+      if (form.get("resource") !== resource) {
+        return Response.json({ error: "invalid_target" }, { status: 400 });
+      }
+      if (form.get("grant_type") === "refresh_token") {
+        const refresh = form.get("refresh_token") ?? "";
+        return mcpOAuthRefreshTokens.has(refresh)
+          ? issue(refresh)
+          : Response.json({ error: "invalid_grant" }, { status: 400 });
+      }
+      const code = form.get("code") ?? "";
+      const grant = mcpOAuthCodes.get(code);
+      mcpOAuthCodes.delete(code);
+      if (
+        !grant ||
+        grant.clientId !== form.get("client_id") ||
+        grant.redirectUri !== form.get("redirect_uri") ||
+        grant.challenge !== (await pkceS256(form.get("code_verifier") ?? ""))
+      ) {
+        return Response.json({ error: "invalid_grant" }, { status: 400 });
+      }
+      return issue();
+    }
+    case "/revoke": {
+      const token = new URLSearchParams(await request.text()).get("token");
+      if (token) {
+        mcpOAuthRevoked.push(token);
+        mcpOAuthRefreshTokens.delete(token);
+        mcpOAuthAccessTokens.delete(token);
+      }
+      return new Response(null, { status: 200 });
+    }
+    case "/__revoked":
+      return Response.json(mcpOAuthRevoked);
+    default:
+      return new Response("not found", { status: 404 });
+  }
+}
 
 async function mcpStub(request: Request, url: URL): Promise<Response> {
-  if (url.pathname !== "/mcp" && url.pathname !== "/secure/mcp") {
+  if (url.pathname === new URL(MCP_OAUTH_RESOURCE_METADATA).pathname) {
+    return Response.json({
+      resource: `${MCP_STUB_ORIGIN}/oauth/mcp`,
+      authorization_servers: [MCP_AUTH_STUB_ORIGIN],
+    });
+  }
+  if (
+    url.pathname !== "/mcp" &&
+    url.pathname !== "/secure/mcp" &&
+    url.pathname !== "/oauth/mcp"
+  ) {
     return new Response("not found", { status: 404 });
   }
   if (
@@ -344,6 +479,18 @@ async function mcpStub(request: Request, url: URL): Promise<Response> {
     return new Response("unauthorized", {
       status: 401,
       headers: { "www-authenticate": "Bearer" },
+    });
+  }
+  const bearer = request.headers.get("authorization")?.replace(/^Bearer /, "");
+  if (
+    url.pathname === "/oauth/mcp" &&
+    !(bearer && mcpOAuthAccessTokens.has(bearer))
+  ) {
+    return new Response("unauthorized", {
+      status: 401,
+      headers: {
+        "www-authenticate": `Bearer resource_metadata="${MCP_OAUTH_RESOURCE_METADATA}"`,
+      },
     });
   }
   if (request.method !== "POST") return new Response(null, { status: 405 });
@@ -946,6 +1093,7 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
   if (url.origin === DEEPSEEK_STUB_ORIGIN) return deepseekStub(request, url);
   if (url.origin === COMPOSIO_STUB_ORIGIN) return composioStub(request, url);
   if (url.origin === MCP_STUB_ORIGIN) return mcpStub(request, url);
+  if (url.origin === MCP_AUTH_STUB_ORIGIN) return mcpAuthStub(request, url);
   if (url.origin === BRAVE_STUB_ORIGIN) return braveSearchStub(request, url);
   if (
     url.origin === "https://auth.x.ai" &&

@@ -341,6 +341,7 @@ describe("foundation application", () => {
       "connect",
       "flock",
       "groups",
+      "mcp",
       "routines",
       "search",
       "settings",

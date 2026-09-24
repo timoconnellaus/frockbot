@@ -6,6 +6,7 @@ import type { ConnectionView } from "@frockbot/core/configuration";
 import { createConfiguredMcpRuntimeContributionV1 } from "./agent.js";
 import { createFakeMcpServerV1, type FakeMcpToolV1 } from "./testing.js";
 import type { McpFetchV1 } from "./client.js";
+import { encodeMcpAccessSecretV1 } from "./oauth.js";
 
 const echo: FakeMcpToolV1 = {
   name: "echo",
@@ -103,6 +104,8 @@ async function mount(
     fetch?: (server: ReturnType<typeof createFakeMcpServerV1>) => McpFetchV1;
     permit?: () => Promise<boolean>;
     pinned?: Map<string, unknown>;
+    /** What the lease opens to, when it is not the token itself. */
+    secret?: string;
   } = {},
 ) {
   const server = createFakeMcpServerV1({
@@ -118,7 +121,7 @@ async function mount(
     credentials: {
       open: async (input: { lease: CredentialLeaseV1 }) => {
         expect(input.lease.connectionId).toBe(target.connectionId);
-        return options.token ?? "";
+        return options.secret ?? options.token ?? "";
       },
     },
   });
@@ -250,6 +253,40 @@ describe("an MCP server in a Bot's Turn", () => {
     expect(settled).toEqual(["tool:1:1:0"]);
     expect(new Set(server.authorizations)).toEqual(
       new Set(["Bearer sk-secret"]),
+    );
+    await root.dispose();
+  });
+
+  test("sends a signed-in server the access token its lease holds", async () => {
+    const signedIn = connection({
+      authorization: {
+        schemaVersion: 1,
+        kind: "grant",
+        credential: {
+          schemaVersion: 1,
+          configured: true,
+          source: "grant",
+          writable: true,
+          generation: "g1",
+        },
+      },
+    });
+    const { root, server, run, leases, settled } = await mount({
+      connection: signedIn,
+      token: "access-1",
+      secret: encodeMcpAccessSecretV1({
+        accessToken: "access-1",
+        expiresAt: Date.parse("2099-01-01T00:00:00.000Z"),
+      }),
+    });
+    expect(await run(call("echo", { message: "hi" }))).toEqual({
+      content: "echo: hi",
+      isError: false,
+    });
+    expect(leases).toEqual(["tool:1:1:0"]);
+    expect(settled).toEqual(["tool:1:1:0"]);
+    expect(new Set(server.authorizations)).toEqual(
+      new Set(["Bearer access-1"]),
     );
     await root.dispose();
   });

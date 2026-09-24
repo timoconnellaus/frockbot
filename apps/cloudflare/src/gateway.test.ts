@@ -578,9 +578,9 @@ class MemoryConfiguration
       >;
     }
     const connectionId =
-      "connectionId" in request.command
+      ("connectionId" in request.command
         ? request.command.connectionId
-        : "connection-test";
+        : undefined) ?? "connection-test";
     const receipt = {
       schemaVersion: 1 as const,
       commandId: request.command.commandId,

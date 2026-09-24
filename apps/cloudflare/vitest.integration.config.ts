@@ -121,11 +121,8 @@ export default defineConfig({
           // per-test identities here are ordinary Users.
           FROCKBOT_ADMIN_EMAILS: "owner@example.com",
           DEBUG_TOKEN: "integration-debug-token",
+          // Seals credentials, and signs an MCP sign-in's callback state.
           CREDENTIAL_KEYRING: TEST_CREDENTIAL_KEYRING,
-          // Signs the `mcp-oauth` callback state. Fixed, so a test can mint a
-          // state the gateway accepts and forge one it must refuse; strong
-          // enough to pass the same check production makes, because the
-          // Contribution refuses to serve its routes at all otherwise.
           COMPUTER_HOST_TOKEN: FAKE_COMPUTER_HOST_TOKEN,
           // A fixed signing secret, so a test can mint the key it presents and
           // forge one that must be refused.

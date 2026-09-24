@@ -424,6 +424,7 @@ export function decodeConnectionCommandV1(input: unknown): ConnectionCommandV1 {
           "callbackUrl",
           "browserKey",
           "connectionTypeId",
+          "connectionId",
         ].filter((k) => value[k] !== undefined),
       ]);
       if (
@@ -462,6 +463,11 @@ export function decodeConnectionCommandV1(input: unknown): ConnectionCommandV1 {
                 "connectionTypeId",
                 128,
               ),
+            }),
+        ...(value.connectionId === undefined
+          ? {}
+          : {
+              connectionId: text(value.connectionId, "connectionId", 128),
             }),
       };
     }

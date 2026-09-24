@@ -27,6 +27,11 @@ export interface ModelOAuthCommandV1 {
    * than one. A model provider's OAuth has exactly one and never sets it.
    */
   connectionTypeId?: string;
+  /**
+   * The Connection a sign-in is for, when the Connection exists before it:
+   * an MCP server is added by its address and signed in to afterwards.
+   */
+  connectionId?: string;
 }
 export function decodeModelOAuthProgressV1(
   input: unknown,

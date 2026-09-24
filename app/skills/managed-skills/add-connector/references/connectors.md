@@ -22,10 +22,13 @@ set up shows in your prompt as the Package it contributes; one that is not
 will not be there at all.
 
 Connectors is also where the User adds an MCP server: its https address, and
-a token when the server asks for one. That is their act, as connecting an app
-is — say which server and what it lets you do, and let them add it. The token
-goes in that form, never in the conversation. Once added, the server's tools
-are one `mcp-…` namespace in your prompt on every Bot the User owns.
+then a sign-in when the server asks for one, or a token. That is their act, as
+connecting an app is — say which server and what it lets you do, and let them
+add it. The sign-in happens in their browser and the token goes in that form,
+never in the conversation. Once added, the server's tools are one `mcp-…`
+namespace in your prompt on every Bot the User owns. When a call says the
+server refused its credential, the User signs in to it again, or gives it a
+new token, from its row in Connectors.
 
 **Plugins** is what runs on a Bot. A Plugin is installed per account and
 enabled per Bot. Switching one on for this Bot is how "make this Bot able to

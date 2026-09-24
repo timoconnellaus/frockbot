@@ -232,6 +232,41 @@ export function parseCredentialKeyringV1(input: string): CredentialKeyringV1 {
   return decodeKeyring(input);
 }
 
+/**
+ * An HMAC key derived from one keyring key for one named purpose. HKDF keeps
+ * the key that seals credentials from ever signing anything itself, and one
+ * purpose's signature from verifying as another's.
+ */
+export async function deriveKeyringSigningKeyV1(input: {
+  keyring: CredentialKeyringV1;
+  keyId: string;
+  purpose: string;
+}): Promise<CryptoKey> {
+  const encoded = Object.hasOwn(input.keyring.keys, input.keyId)
+    ? input.keyring.keys[input.keyId]
+    : undefined;
+  if (!encoded) throw new Error("credential signing key is unavailable");
+  const base = await crypto.subtle.importKey(
+    "raw",
+    fromBase64Url(encoded) as Uint8Array<ArrayBuffer>,
+    "HKDF",
+    false,
+    ["deriveKey"],
+  );
+  return crypto.subtle.deriveKey(
+    {
+      name: "HKDF",
+      hash: "SHA-256",
+      salt: new Uint8Array(0),
+      info: encoder.encode(input.purpose),
+    },
+    base,
+    { name: "HMAC", hash: "SHA-256", length: 256 },
+    false,
+    ["sign", "verify"],
+  );
+}
+
 export async function sealCredentialV1(input: {
   keyring: CredentialKeyringV1;
   context: CredentialContextV1;

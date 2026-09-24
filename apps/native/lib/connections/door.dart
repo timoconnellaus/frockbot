@@ -1,9 +1,9 @@
-/// An app's hosted sign-in, opened in the system browser.
+/// An app's hosted sign-in, or an MCP server's, opened in the system browser.
 ///
-/// Two things open one: Connect on a Marketplace or Connectors row, and the
-/// Connect button on a Card's `ConnectApp`. They open it the same way, from
-/// here, so a door a Bot put in the thread is exactly the door the person
-/// would have found in Settings.
+/// Three things open one: Connect on a Marketplace or Connectors row, the
+/// Connect button on a Card's `ConnectApp`, and Sign in on an MCP server.
+/// They open it the same way, from here, so a door a Bot put in the thread is
+/// exactly the door the person would have found in Settings.
 library;
 
 import 'package:flutter/foundation.dart'
@@ -39,20 +39,39 @@ Future<bool> openConnectionDoorV1(
   NativeApi api,
   Map<String, Object?> command, {
   Future<bool> Function(Uri)? openBrowser,
-}) async {
+}) => _openDoor(
+  api,
+  startConnectionRequestV1(_returningHere(command)),
+  openBrowser,
+);
+
+/// Starts the sign-in to an MCP server a `sign-in` [command] names, and sends
+/// the person to its authorization server in the system browser, checked the
+/// same way.
+Future<bool> openMcpSignInV1(
+  NativeApi api,
+  Map<String, Object?> command, {
+  Future<bool> Function(Uri)? openBrowser,
+}) => _openDoor(api, mcpSignInRequestV1(_returningHere(command)), openBrowser);
+
+Map<String, Object?> _returningHere(Map<String, Object?> command) {
   final client = connectReturnClientV1;
-  final request = startConnectionRequestV1(
-    client == null
-        ? command
-        : {
-            ...command,
-            'input': {
-              ...((command['input'] as Map?) ?? const {})
-                  .cast<String, Object?>(),
-              'returnClient': client,
-            },
+  return client == null
+      ? command
+      : {
+          ...command,
+          'input': {
+            ...((command['input'] as Map?) ?? const {}).cast<String, Object?>(),
+            'returnClient': client,
           },
-  );
+        };
+}
+
+Future<bool> _openDoor(
+  NativeApi api,
+  ConnectionRequestV1 request,
+  Future<bool> Function(Uri)? openBrowser,
+) async {
   final answer =
       ((await api.request(request.path, body: request.body) as Map?) ??
               const {})

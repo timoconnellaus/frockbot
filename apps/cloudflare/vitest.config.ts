@@ -49,11 +49,8 @@ const workerdBindings = {
   CI: process.env.CI ?? "",
   BETTER_AUTH_URL: "https://bot.frockbot.com",
   TEST_MIGRATIONS: authMigrations,
+  // Seals credentials, and signs an MCP sign-in's callback state.
   CREDENTIAL_KEYRING: TEST_CREDENTIAL_KEYRING,
-  // Signs the `mcp-oauth` callback state. Fixed, so a test can mint a
-  // state the gateway accepts and forge one it must refuse; strong
-  // enough to pass the same check production makes, because the
-  // Contribution refuses to serve its routes at all otherwise.
   COMPUTER_HOST_TOKEN: FAKE_COMPUTER_HOST_TOKEN,
   COMPUTER_HOST_SHARDS: String(FAKE_COMPUTER_HOST_SHARDS),
   // A fixed signing secret, so a test can mint the key it presents.

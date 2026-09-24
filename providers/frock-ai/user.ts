@@ -292,9 +292,8 @@ export class FrockAiUserBackendContribution implements UserConfigurationReadBoot
         return decoded.receipt;
       }
       const connectionId =
-        "connectionId" in command
-          ? command.connectionId
-          : FROCK_AI_CONNECTION_ID;
+        ("connectionId" in command ? command.connectionId : undefined) ??
+        FROCK_AI_CONNECTION_ID;
       let status: ConnectionCommandReceiptV1["status"] = "failed";
       const current = await this.host.settings.getConnection(
         accountId,

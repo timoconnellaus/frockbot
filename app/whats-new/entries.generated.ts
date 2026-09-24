@@ -13,6 +13,7 @@ import entry_header_align from "./entries/header-align.ts";
 import entry_mac_window_place from "./entries/mac-window-place.ts";
 import entry_marketplace_installed from "./entries/marketplace-installed.ts";
 import entry_mcp_servers from "./entries/mcp-servers.ts";
+import entry_mcp_sign_in from "./entries/mcp-sign-in.ts";
 import entry_notices_under_header from "./entries/notices-under-header.ts";
 import entry_one_card_per_provider from "./entries/one-card-per-provider.ts";
 import entry_paused_call_colour from "./entries/paused-call-colour.ts";
@@ -49,6 +50,7 @@ export const WHATS_NEW_ENTRY_FILES_V1 = [
   entry_mac_window_place,
   entry_marketplace_installed,
   entry_mcp_servers,
+  entry_mcp_sign_in,
   entry_notices_under_header,
   entry_one_card_per_provider,
   entry_paused_call_colour,
