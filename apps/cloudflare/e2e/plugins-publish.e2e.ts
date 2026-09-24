@@ -13,69 +13,23 @@
 //
 // The build needs Docker. When it is not running this spec fails saying so,
 // rather than passing without having built anything.
-import type { Page } from "@playwright/test";
 import {
   test,
   expect,
   press,
   enablePluginAuthoring,
   provisionThroughApi,
-  sem,
   sendMessage,
 } from "./fixtures.ts";
 import {
   appletBuildAvailableV1,
-  E2E_DEBUG_TOKEN,
   E2E_OLLAMA_GOOD_API_KEY,
-  e2eFrockbotToolCallPrompt,
   e2eToolCallPrompt,
 } from "./harness.ts";
+import { botIdOf, expectToolSaid, runTool } from "./publish-journey.ts";
 import { publicationJourneyTimeoutMs } from "./suite.ts";
 
 const DESKTOP = { width: 1351, height: 831 } as const;
-
-/**
- * The latest Turns' tool results, from the operator surface. The transcript
- * hides them on purpose, so this is what an assertion about what a tool *did*
- * reads, and what says why when one fails.
- */
-async function recentToolResults(page: Page, userId: string): Promise<string> {
-  const headers = { authorization: `Bearer ${E2E_DEBUG_TOKEN}` };
-  const botId = await botIdOf(page, userId);
-  const detail = await page.request.get(
-    `/api/debug/bots/${botId}?userId=${userId}&events=true`,
-    { headers },
-  );
-  return JSON.stringify(await detail.json(), null, 2);
-}
-
-/** Poll the operator surface until a tool result says `text`, or explain. */
-async function expectToolSaid(
-  page: Page,
-  userId: string,
-  text: string,
-  timeoutMs = 300_000,
-): Promise<void> {
-  const deadline = Date.now() + timeoutMs;
-  let results = "";
-  while (Date.now() < deadline) {
-    results = await recentToolResults(page, userId);
-    if (results.includes(text)) return;
-    await new Promise((sleep) => setTimeout(sleep, 2_000));
-  }
-  throw new Error(`no tool result said "${text}".\n${results}`);
-}
-
-async function runTool(
-  page: Page,
-  text: string,
-  name: string,
-  input: unknown = {},
-): Promise<void> {
-  // The Plugin authoring tools are first-party registrations, so the scripted
-  // model reaches them through the `frockbot` namespace.
-  await sendMessage(page, `${text}\n${e2eFrockbotToolCallPrompt(name, input)}`);
-}
 
 test("a Bot writes, checks and publishes a Plugin; the User approves it; its tool reaches the Bot", async ({
   page,
@@ -172,12 +126,3 @@ test("a Bot writes, checks and publishes a Plugin; the User approves it; its too
   );
   await expectToolSaid(page, userId, "1 note(s).");
 });
-
-async function botIdOf(page: Page, userId: string): Promise<string> {
-  const bots = (await (await page.request.get("/api/bots")).json()) as {
-    bots?: Array<{ botId: string; initialName: string }>;
-  };
-  const botId = bots.bots?.find((bot) => bot.initialName === "Author")?.botId;
-  if (!botId) throw new Error("no Bot");
-  return botId;
-}

@@ -186,8 +186,12 @@ function scriptedToolCalls(
     typeof value === "string" ? value : JSON.stringify(value ?? "");
   const calls: Array<{ name: string; arguments: string }> = [];
   // A JSON-encoded message escapes the newline, so both separators end a
-  // trigger line.
-  for (const line of content.split(/\\n|\n/)) {
+  // trigger line there. A string message is split on real newlines only: its
+  // tool calls carry JSON, whose own escaped newlines are part of a file a
+  // script writes, not the end of the line.
+  const lines =
+    typeof value === "string" ? content.split("\n") : content.split(/\\n|\n/);
+  for (const line of lines) {
     const trimmed = line.trim();
     const start = trimmed.indexOf(E2E_TOOL_CALL_TRIGGER);
     if (start < 0) continue;

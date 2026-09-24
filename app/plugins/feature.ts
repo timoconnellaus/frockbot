@@ -234,7 +234,7 @@ export function pluginTools(
           ...PLUGIN_ID_PROPERTY,
           path: {
             type: "string",
-            description: "plugin.ts or plugin.json.",
+            description: "plugin.ts, plugin.json, or a page plugin.json names.",
           },
         },
         required: ["pluginId", "path"],
@@ -259,7 +259,7 @@ export function pluginTools(
           path: {
             type: "string",
             description:
-              "plugin.ts or plugin.json. Relative, no leading slash and no `..`.",
+              "plugin.ts, plugin.json, or a page plugin.json names (tuner.html). Relative, no leading slash and no `..`.",
           },
           text: {
             type: "string",
