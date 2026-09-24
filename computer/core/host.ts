@@ -383,18 +383,8 @@ export interface ComputerControl {
   ): Promise<void>;
 }
 
-/**
- * Why one run of the durable-root sync happened.
- *
- * `publish` is the only reason outside the Turn's own policy, and it is one
- * root rather than all of them: a caller reads the bytes from the Workspace
- * *store*, so what a shell left on the Computer
- * have to reach the store before it looks. It is recorded
- * under its own name rather than borrowed from `signal`, because a record that
- * said "the watcher moved" when a publish asked would be a record nobody could
- * use to explain the sync afterwards.
- */
-export type ComputerSyncReasonV1 = "open" | "signal" | "turn-end" | "publish";
+/** Why one run of the durable-root sync happened. */
+export type ComputerSyncReasonV1 = "open" | "signal" | "turn-end";
 
 /**
  * What one sync run moved, flattened to counts.

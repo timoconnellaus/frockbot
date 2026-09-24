@@ -2664,10 +2664,6 @@ describe("message identity across retry pages", () => {
           },
         },
       },
-      {
-        ...failed,
-        directTool: { packageId: "test", name: "write", input: {} },
-      },
     ];
     for (const run of ineligible) {
       expect(projectClientRunV1(run).canRetry).toBe(false);

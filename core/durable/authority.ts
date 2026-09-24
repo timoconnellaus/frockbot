@@ -1061,7 +1061,6 @@ export class BotDurableAuthority<Snapshot> {
             ? { subagentRole: storedRunSubagentRoleV1(run) }
             : {}),
           ...(run.admission?.origin ? { origin: run.admission.origin } : {}),
-          ...(run.directTool ? { directTool: run.directTool } : {}),
         },
         cursor: seed.cursor,
         contextAvailability: seed.contextAvailability,
@@ -1960,12 +1959,10 @@ export class BotDurableAuthority<Snapshot> {
           storedRunTurnTypeV1(retryTarget) !== "chat" ||
           storedRunLaneV1(retryTarget) !== "user" ||
           retryTarget.admission?.origin !== undefined ||
-          retryTarget.directTool !== undefined ||
           retryTarget.input !== command.text ||
           (command.turnType ?? "chat") !== "chat" ||
           (command.lane ?? "user") !== "user" ||
           command.origin !== undefined ||
-          command.directTool !== undefined ||
           (command.skills?.length ?? 0) !== 0
         ) {
           throw new BotTurnRefusedError(
@@ -2086,9 +2083,6 @@ export class BotDurableAuthority<Snapshot> {
           command.subagentRole,
           command.lane,
         ),
-        ...(command.directTool
-          ? { directTool: structuredClone(command.directTool) }
-          : {}),
       } satisfies StoredRunV1<Snapshot>);
       await transaction.put({
         [key]: storedRunRecordV2(admittedRun),
@@ -2373,7 +2367,6 @@ export class BotDurableAuthority<Snapshot> {
         ? { subagentRole: storedRunSubagentRoleV1(run) }
         : {}),
       ...(run.admission?.origin ? { origin: run.admission.origin } : {}),
-      ...(run.directTool ? { directTool: run.directTool } : {}),
     };
   }
 

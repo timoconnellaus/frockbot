@@ -1147,7 +1147,6 @@ export function projectClientRunV1(
       (run.admission?.turnType ?? "chat") === "chat" &&
       (run.admission?.lane ?? "user") === "user" &&
       run.admission?.origin === undefined &&
-      run.directTool === undefined &&
       run.input.trim().length > 0,
     // A delivery Turn's input is the hand-off or decision it was opened to
     // deliver, not anything the person said, and this field is their own
