@@ -327,9 +327,9 @@ describe("conversation compaction in Workerd", () => {
       (event) => event.type === "conversation/compaction-intent",
     );
     expect(lost).toBeDefined();
-    await runInDurableObject(bot(name), (_bot, state) =>
-      state.abort(),
-    ).catch(() => {});
+    await runInDurableObject(bot(name), (_bot, state) => state.abort()).catch(
+      () => {},
+    );
 
     await turn(13);
     await runInDurableObject(bot(name), (_bot, state) =>

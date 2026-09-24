@@ -32,10 +32,7 @@ import {
   type ParkedCompactionStoreV1,
   runCompactionV1,
 } from "./compaction.js";
-import {
-  compactionScopeV1,
-  compactionWorkV1,
-} from "./compaction-scheduler.js";
+import { compactionScopeV1, compactionWorkV1 } from "./compaction-scheduler.js";
 import { conversationDeliveryHooksV1 } from "./delivery.js";
 import { shellDefinitionV1 } from "./definition.js";
 import { drawFirstPartyCardV1 } from "./first-party-cards.js";
