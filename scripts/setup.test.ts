@@ -11,7 +11,6 @@ import {
   accountChoiceV1,
   accountRefusalV1,
   applicationArtifactKeyV1,
-  artifactHostnameV1,
   chosenAccountV1,
   CONFIGURED_AS_VARS_V1,
   credentialKeyringV1,
@@ -144,13 +143,6 @@ describe("the profile the installer writes", () => {
       "appletBuild",
     ]);
     expect(profile.d1DatabaseId).toBeUndefined();
-  });
-
-  test("derives the artifact origin from the app's own hostname", () => {
-    // The gateway derives the pairing from the `ui.` prefix in three places; a
-    // hostname of any other shape serves pages whose socket it refuses.
-    expect(profile.artifactHostname).toBe("ui.bot.example.com");
-    expect(artifactHostnameV1("bot.example.com")).toBe("ui.bot.example.com");
   });
 
   test("names the registry the generator and release.yml agree on", () => {
@@ -375,24 +367,12 @@ describe("the Access applications", () => {
       destination: "bot.example.com",
       decision: "allow",
     });
-    // Without the bypass, a native bearer request and an Applet viewer socket
-    // would both be answered by Access instead of by the Worker.
+    // Without the bypass, a native bearer request would be answered by Access
+    // instead of by the Worker.
     expect(applications[1]).toMatchObject({
       destination: "bot.example.com/api",
       decision: "bypass",
     });
-  });
-
-  test("leaves the artifact origin outside Access altogether", () => {
-    const artifact = artifactHostnameV1("bot.example.com");
-    for (const application of applications) {
-      expect(application.destination.startsWith(artifact)).toBe(false);
-    }
-    expect(
-      accessDashboardStepsV1(applications, "example.cloudflareaccess.com", [
-        "someone@example.com",
-      ]).join(" "),
-    ).toContain(artifact);
   });
 
   test("the dashboard steps name the team, both applications and the AUD", () => {

@@ -65,23 +65,6 @@ export const FORBIDDEN_SKILL_TOKENS_V1 = [
   "teach-sessions",
 ] as const;
 
-export const APPLET_TOOL_NAMES_V1 = [
-  "applet_list",
-  "applet_create",
-  "applet_files",
-  "applet_read_file",
-  "applet_write_file",
-  "applet_check",
-  "applet_publish",
-  "applet_revert",
-  "applet_delete",
-  "applet_share",
-  "applet_unshare",
-  "applet_transfer",
-  "applet_focus",
-  "applet_generations",
-] as const;
-
 export const PLUGIN_AUTHORING_TOOL_NAMES_V1 = [
   "plugin_list",
   "plugin_create",

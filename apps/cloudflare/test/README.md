@@ -11,9 +11,9 @@ expose a Sprites credential.
 
 `APPLET_BUILD` is a stand-in here: a build needs a container this pool cannot
 start, so `test/applet-build-fake.ts` answers the binding and records each
-request for a suite to read back. It has to be bound for `applet_check` or
-`plugin_check` to reach the source-reading half at all; unbound, both answer
-that the deployment cannot build.
+request for a suite to read back. It has to be bound for `plugin_check` to
+reach the source-reading half at all; unbound, it answers that the deployment
+cannot build.
 
 It also binds a local D1 `AUTH_DB`, and `vitest.config.ts` reads `migrations/`
 into `TEST_MIGRATIONS` so `auth-schema.workerd.ts` can apply the real schema and

@@ -39,8 +39,6 @@ import '../groups/sheets.dart';
 import '../groups/thread.dart';
 import '../machines/page.dart';
 import '../machines/mac_messages.dart';
-import '../packages/catalog.dart';
-import '../packages/frame.dart';
 import '../plugins/page.dart';
 import '../recovery/page.dart';
 import '../routines/page.dart';
@@ -207,9 +205,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   RoutineInboxController? routineInbox;
   RoutinesPanelHandle? routinesPanel;
 
-  /// The selected Bot's conversation panel, its Computer, and the Package
-  /// pages its Composition declares. All belong to one Bot and are replaced
-  /// whole when the selection moves.
+  /// The selected Bot's conversation panel and its Computer. Both belong to
+  /// one Bot and are replaced whole when the selection moves.
   PanelCanvasController? panelCanvas;
 
   /// The canvas page a phone pushed, so the pointer closing can take it away
@@ -221,16 +218,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// The last shell-visible projection observed for the selected Session.
   /// The values drawn stay on [ChatController]; these markers only suppress
   /// whole-shell rebuilds for controller changes the shell does not draw, and
-  /// identify the one working-to-idle transition that refreshes Applets.
+  /// identify the one working-to-idle transition that reloads the panel canvas.
   String? _observedWorkingRunId;
   ConnectionState? _observedConnection;
   bool _observedBotComputerRunning = false;
-  PackageCatalog? catalog;
-
-  /// Bumped whenever [catalog] changes. A Bot page pushed as its own route
-  /// is a subtree the shell's `setState` does not reach, so the page listens
-  /// to this to redraw the rows its Packages contribute.
-  final ValueNotifier<int> catalogRevision = ValueNotifier(0);
 
   /// Bumped when a Bot's character changes, so a pushed Bot page — which the
   /// shell's own rebuilds do not reach — redraws its preview with the choice.
@@ -271,20 +262,15 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// What the panel is showing over the Bot page.
   ///
   /// The Bot page is the panel's floor and is never in here: an empty stack is
-  /// that page. A sub-page — Settings, All Routines, Plugins, a Package's own
-  /// page — is pushed onto it, and the panel header grows a back
-  /// chevron for as long as there is something to go back to. A Bot switch
+  /// that page. A sub-page — Settings, All Routines, Plugins — is pushed onto
+  /// it, and the panel header grows a back chevron for as long as there is
+  /// something to go back to. A Bot switch
   /// empties it, because a sub-page of one Bot is not a sub-page of another.
   final List<String> panelStack = [];
 
   /// Hot doors visited on this Bot, kept mounted so a return is the same
-  /// page. Cleared on a Bot switch. Voice, Look, Audit and framed pages
-  /// are never in here.
+  /// page. Cleared on a Bot switch. Voice, Look and Audit are never in here.
   final Set<String> keptPanels = {};
-
-  /// The Package page the `package` entry is showing, which is chosen when the
-  /// door is pressed rather than registered per page.
-  PackageEntryPage? panelPackage;
 
   /// Voice. The footer and both captures live here rather than in the pane
   /// because they outlive it: a call survives a Bot switch, a page and a
@@ -1123,7 +1109,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       panelOpen = false;
       panelStack.clear();
       keptPanels.clear();
-      panelPackage = null;
     });
     _adoptBotPanels(botId);
     unawaited(
@@ -1241,7 +1226,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     computer?.dispose();
     panelCanvas = null;
     computer = null;
-    _setCatalog(null);
     slots.remove(ShellSlot.rightPanel, 'canvas');
     slots.remove(ShellSlot.rightPanel, 'computer');
     unawaited(controller.load());
@@ -1266,22 +1250,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         path: '/api/bots/${Uri.encodeComponent(botId)}/plugins?as=document',
       ),
     );
-    unawaited(_adoptComposition(botId));
+    _adoptComposition(botId);
   }
 
-  /// What this Bot's Composition declares it may show: the conversation panel,
-  /// the Computer, and the Package pages and entries.
-  Future<void> _adoptComposition(String botId) async {
-    panelCanvas?.removeListener(_repaint);
-    panelCanvas?.removeListener(_syncPanelCanvasSlot);
-    panelCanvas?.disposeController();
-    panelCanvas = null;
-    slots.remove(ShellSlot.rightPanel, 'canvas');
-
-    final read = await readPackageCatalogV1(widget.api, botId);
-    if (!mounted || selected?.botId.value != botId) return;
-    setState(() => _setCatalog(read));
-
+  /// What this Bot's Composition declares it may show: the conversation panel
+  /// and the Computer.
+  void _adoptComposition(String botId) {
     final canvas = PanelCanvasController(widget.api, botId)
       ..onFocusMoved = _followPanelFocus;
     panelCanvas = canvas;
@@ -1289,10 +1263,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     canvas.addListener(_syncPanelCanvasSlot);
     unawaited(canvas.load());
 
-    // Two adoptions of one Bot can both land; the controller the later one
-    // replaces must stop polling and listening.
-    computer?.removeListener(_repaint);
-    computer?.dispose();
     final machine = ComputerController(
       widget.api,
       botId,
@@ -1305,13 +1275,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     unawaited(machine.read());
     if (mounted) setState(() {});
   }
-
-  /// The Package doors worth drawing beside the native ones.
-  ///
-  List<PackageEntryPage> _packageEntries() => [
-    for (final entry in packageIframeEntriesV1(catalog))
-      if (entry.entry.label.toLowerCase() != 'applets') entry,
-  ];
 
   List<BotPageDoor> _panelDoors() {
     final canvas = panelCanvas;
@@ -1401,71 +1364,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       }
     });
   }
-
-  /// The Composition this Bot is showing, and the one signal a pushed page
-  /// watches for it.
-  void _setCatalog(PackageCatalog? read) {
-    catalog = read;
-    catalogRevision.value++;
-  }
-
-  /// The icon set a Package may name. A Package naming one this client does
-  /// not have falls back to the generic one rather than drawing nothing.
-  IconData _packageIcon(String name) => switch (name) {
-    'applets' => Icons.widgets_outlined,
-    'plugins' => Icons.extension_outlined,
-    'settings' => Icons.settings_outlined,
-    'search' => Icons.search,
-    _ => Icons.extension_outlined,
-  };
-
-  /// A Package page as a surface. Its chrome — the title and the way out —
-  /// belongs to the shell; the page fills the body and is attributed to the
-  /// Package that ships it, so a reader always knows whose screen this is.
-  void _openPackagePage(PackageEntryPage entry) {
-    final held = catalog;
-    final bot = selected;
-    if (held == null || bot == null) return;
-    if (shellTierForWidth(MediaQuery.sizeOf(context).width) ==
-        ShellTier.single) {
-      _push(
-        Scaffold(
-          appBar: DesktopHeader(child: AppBar(title: Text(entry.entry.label))),
-          body: SafeArea(
-            top: false,
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-              child: _packagePage(entry, held, bot.botId.value),
-            ),
-          ),
-        ),
-      );
-      return;
-    }
-    // A Package door is one of the Bot page's rows, so it opens where the
-    // other rows do: inside the panel, over the page it was pressed on.
-    setState(() => panelPackage = entry);
-    _openPanel('package', push: true);
-  }
-
-  /// One Package page, framed and attributed, wherever it is drawn.
-  Widget _packagePage(
-    PackageEntryPage entry,
-    PackageCatalog held,
-    String botId,
-  ) => identified(
-    PackageIds.page(entry.contribution.packageId, entry.page.id),
-    PackagePageFrame(
-      api: widget.api,
-      catalog: held,
-      contribution: entry.contribution,
-      page: entry.page,
-      botId: botId,
-      slot: entry.slot,
-      layout: PackageFrameLayout.fill,
-      surfaceTitle: entry.entry.label,
-    ),
-  );
 
   ThemeData _accountThemeOf(BuildContext context) => FrockTheme.fromDocument(
     namedLookDocument(
@@ -1784,7 +1682,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   Widget? _panelChild(wire.BotRegistration bot, String? key) {
     if (key == null) return _botPageView(bot);
-    if (key == 'package') return _packagePanel(bot);
     return slots.buildOne(context, ShellSlot.rightPanel, key);
   }
 
@@ -1882,7 +1779,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                         panelOpen = false;
                         panelCollapsed = true;
                         panelStack.clear();
-                        panelPackage = null;
                       }),
                       style: _panelControl(theme),
                       icon: const Icon(Icons.close_rounded),
@@ -1911,9 +1807,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (key == 'routines' && routinesPanel?.editorTitle != null) {
       return routinesPanel!.editorTitle;
     }
-    return key == 'package'
-        ? panelPackage?.entry.label
-        : slots.labelOf(ShellSlot.rightPanel, key);
+    return slots.labelOf(ShellSlot.rightPanel, key);
   }
 
   Future<void> _popPanel() async {
@@ -1930,16 +1824,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     });
   }
 
-  Widget? _packagePanel(wire.BotRegistration bot) {
-    final entry = panelPackage;
-    final held = catalog;
-    if (entry == null || held == null) return null;
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 16),
-      child: _packagePage(entry, held, bot.botId.value),
-    );
-  }
-
   /// The Bot page itself, wherever it is drawn: the panel's root, and the
   /// page a phone pushes from the name in its bar.
   ///
@@ -1950,12 +1834,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Widget _botPageView(wire.BotRegistration bot) {
     final botId = bot.botId.value;
     return ListenableBuilder(
-      listenable: Listenable.merge([
-        slots,
-        catalogRevision,
-        avatarRevision,
-        ?panelCanvas,
-      ]),
+      listenable: Listenable.merge([slots, avatarRevision, ?panelCanvas]),
       builder: (context, _) => BotPageView(
         botName: _name(bot),
         computer: computer,
@@ -1968,18 +1847,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         onOpenRoutines: () => _openPanel('routines', push: true),
         panels: panelCanvas,
         panelDoors: _panelDoors(),
-        doors: [
-          for (final entry in _packageEntries())
-            BotPageDoor(
-              identifier: PackageIds.entry(
-                entry.contribution.packageId,
-                entry.entry.id,
-              ),
-              icon: _packageIcon(entry.entry.icon),
-              label: entry.entry.label,
-              onTap: () => _openPackagePage(entry),
-            ),
-        ],
       ),
     );
   }
@@ -1999,7 +1866,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// gear pushes on a phone.
   Widget _botSettings(String botId, BotSettingsController controller) =>
       ListenableBuilder(
-        listenable: Listenable.merge([catalogRevision, avatarRevision]),
+        listenable: avatarRevision,
         builder: (context, _) {
           final name = _botNameOf(botId) ?? botId;
           return SingleChildScrollView(
@@ -2018,7 +1885,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   onOpenVoice: () => _openPanel('voice', push: true),
                   onOpenLook: () => _openPanel('look', push: true),
                   dangerZone: _dangerZone(botId, name),
-                  sections: _packageSettings(botId),
                 ),
               ],
             ),
@@ -2464,33 +2330,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     );
   }
 
-  /// The Package pages mounted in Bot settings, drawn under the Bot's own
-  /// sections.
-  List<Widget> _packageSettings(String botId) {
-    final held = catalog;
-    if (held == null) return const [];
-    return [
-      for (final mounted in packageIframePagesForSlotV1(
-        held,
-        packageBotSettingsSlotV1,
-      ))
-        Padding(
-          padding: const EdgeInsets.only(top: 16),
-          child: identified(
-            PackageIds.page(mounted.contribution.packageId, mounted.page.id),
-            PackagePageFrame(
-              api: widget.api,
-              catalog: held,
-              contribution: mounted.contribution,
-              page: mounted.page,
-              botId: botId,
-              slot: packageBotSettingsSlotV1,
-            ),
-          ),
-        ),
-    ];
-  }
-
   /// Colours chosen here that the directory has not reported back yet. The
   /// Flock owns what a Bot looks like, and the client picked the recipe it
   /// sent, so drawing it now is showing what was chosen rather than guessing.
@@ -2563,7 +2402,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     Navigator.of(context).popUntil((route) => route.isFirst);
     panelStack.clear();
     keptPanels.clear();
-    panelPackage = null;
     slots.remove(ShellSlot.rightPanel, 'bot-settings');
     slots.remove(ShellSlot.rightPanel, 'routines');
     slots.remove(ShellSlot.rightPanel, 'plugins');
@@ -2598,7 +2436,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       conversationOpen = false;
       panelOpen = false;
       panelCollapsed = true;
-      _setCatalog(null);
     });
   }
 
@@ -3770,7 +3607,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     computer?.dispose();
     _selectedChat?.removeListener(_selectedChatChanged);
     slots.dispose();
-    catalogRevision.dispose();
     avatarRevision.dispose();
     voiceSession?.dispose();
     dictation?.removeListener(_repaint);

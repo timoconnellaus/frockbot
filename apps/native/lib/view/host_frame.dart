@@ -3,10 +3,9 @@
 /// Two implementations, one seam. In the browser the frame is a platform view
 /// over an iframe under the `sandbox` attribute `host_frame_web.dart` sets; on
 /// the phone it is a WebView with every one of those guarantees set by hand.
-/// Both
-/// take the same three things — the URL, the messages the host hands the
-/// page, and whether the document keeps its own origin — because everything
-/// above this line is about which page is shown, never about how.
+/// Both take the same two things — the URL and whether the document keeps its
+/// own origin — because everything above this line is about which page is
+/// shown, never about how.
 library;
 
 import 'package:flutter/material.dart';
@@ -17,18 +16,9 @@ import 'host_frame_io.dart' if (dart.library.js_interop) 'host_frame_web.dart';
 /// outside it.
 class HostFrame extends StatelessWidget {
   final String url;
-  final List<Map<String, Object?>> messages;
   final bool allowSameOrigin;
   final String label;
   final BorderRadius borderRadius;
-  final ValueChanged<String>? onFailure;
-
-  /// The document has loaded: the moment the host's messages are delivered.
-  final VoidCallback? onLoaded;
-
-  /// What the page said, decoded from JSON and proved to have come from this
-  /// frame. The host decides what any of it means.
-  final ValueChanged<Map<String, Object?>>? onMessage;
 
   /// The frame is remade rather than reused when this changes: a new
   /// generation, or a new viewer session, is a new document.
@@ -38,11 +28,7 @@ class HostFrame extends StatelessWidget {
     required this.url,
     required this.label,
     required this.identity,
-    this.messages = const [],
     this.allowSameOrigin = false,
-    this.onFailure,
-    this.onLoaded,
-    this.onMessage,
     this.borderRadius = const BorderRadius.all(Radius.circular(12)),
   });
 
@@ -55,11 +41,7 @@ class HostFrame extends StatelessWidget {
         key: ValueKey(identity),
         url: url,
         label: label,
-        messages: messages,
         allowSameOrigin: allowSameOrigin,
-        onFailure: onFailure,
-        onLoaded: onLoaded,
-        onMessage: onMessage,
       ),
     ),
   );

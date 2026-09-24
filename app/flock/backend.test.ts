@@ -227,7 +227,6 @@ describe("Flock gateway Contribution", () => {
 
   test("a person's Bot deletion is issued to the lifecycle", async () => {
     const issued: unknown[] = [];
-    let stale = false;
     const contribution = createFlockBackendContribution({
       listBots: () =>
         Promise.resolve({ schemaVersion: 1, revision: 0, bots: [] }),
@@ -242,12 +241,6 @@ describe("Flock gateway Contribution", () => {
         Promise.resolve({ schemaVersion: 1, generalBotId: null }),
       executeBotLifecycle: (_user, command) => {
         issued.push(command);
-        // The User Durable Object's refusal, as RPC serializes it: a name.
-        if (stale)
-          return Promise.reject({
-            name: "AppletImpactConflictError",
-            message: "the Applets this Bot owns changed",
-          });
         return Promise.resolve({
           schemaVersion: 1,
           commandId: command.commandId,

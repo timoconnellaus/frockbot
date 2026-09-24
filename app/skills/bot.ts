@@ -4,8 +4,7 @@
 // Two things live here. The seam an admitted Turn runs the Skills Package
 // under — whether a Workspace surface exists and what provenance a write
 // records — and the reads and writes a User makes as themselves: the composer's
-// Skill catalog, the first-party page registry, and the two direct writes that
-// stand in for a Computer's sync.
+// Skill catalog and the two direct writes that stand in for a Computer's sync.
 //
 // HIBERNATION. "The Agent loop, Memory, Skills, Package composition, and
 // Routines function correctly while the Computer is hibernated and do not wake
@@ -24,8 +23,6 @@
 // second store to read them from.
 
 import type {
-  PackageIframeCompositionV1,
-  PackageIframeToolCommandV1,
   WorkspaceFilesV1,
   WorkspaceReadsV1,
   WorkspaceRootV1,
@@ -44,8 +41,6 @@ import {
 import type { PluginSkillContributionV1 } from "@frockbot/app/skills/plugin";
 import { writeSkillDocumentV1 } from "@frockbot/app/skills/write";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
-import { admitTurnV1 } from "@frockbot/app/composition/bot";
-import { projectFirstPartyPackageIframeV1 } from "@frockbot/app/shell/composition-views";
 import {
   userAccountFeaturesReaderV1,
   type UserAccountFeaturesReadV1,
@@ -53,11 +48,6 @@ import {
 import type { UserFeaturesV1 } from "@frockbot/app/admin/shared";
 import { PLUGINS_SKILL_SLUG_V1 } from "@frockbot/app/skills/managed";
 import { readBotPluginRosterV1 } from "@frockbot/app/plugins/worker-bot";
-import { PACKAGE_IFRAME_FOCUS_TOOL_V2 } from "@frockbot/core/contracts";
-import {
-  projectClientTurnV1,
-  type ClientTurnV1,
-} from "@frockbot/app/shell/run-protocol";
 import {
   clientSkillCatalogEntryV1,
   type ClientSkillCatalogEntryV1,
@@ -291,46 +281,6 @@ export function createBotSkillsReads(
   return (env as BotSkillsEnv).WORKSPACE_FILES;
 }
 
-/** Server-side allowlist for the untrusted page's only effectful message. */
-export function requirePackageUiToolDeclarationV1(
-  catalog: PackageIframeCompositionV1,
-  command: Pick<PackageIframeToolCommandV1, "packageId" | "name">,
-): PackageIframeCompositionV1["contributions"][number] {
-  const contribution = catalog.contributions.find(
-    (candidate) => candidate.packageId === command.packageId,
-  );
-  if (!contribution || !contribution.declaredTools.includes(command.name)) {
-    throw new Error(
-      `Package "${command.packageId}" did not declare tool "${command.name}"`,
-    );
-  }
-  return contribution;
-}
-
-export async function runPackageUiTool(
-  state: ShellBotStateV1,
-  identity: BotIdentity,
-  command: PackageIframeToolCommandV1,
-): Promise<ClientTurnV1> {
-  await state.authority.validateIdentity(identity);
-  const catalog = await listPackageUi(state, identity);
-  const contribution = requirePackageUiToolDeclarationV1(catalog, command);
-  return projectClientTurnV1(
-    await admitTurnV1(state, {
-      ...identity,
-      runId: command.commandId,
-      sessionId: `${identity.userId}:${identity.botId}`,
-      acceptedAt: new Date().toISOString(),
-      text: `${contribution.displayName} · ${command.name}`,
-      directTool: {
-        packageId: command.packageId,
-        name: command.name,
-        input: command.input,
-      },
-    }),
-  );
-}
-
 /**
  * The Bot's invocable Skills, for the composer's `/` and `@` popover.
  *
@@ -382,23 +332,6 @@ export async function listSkills(
     );
   }
   return { schemaVersion: 1, skills: entries };
-}
-
-/**
- * The first-party page registry, as inert iframe metadata for one Bot.
- *
- * A Package whose pages may focus an Applet is offered only when an admin
- * has turned Applets on for this User. The client derives "Applets are here"
- * from exactly that declaration, so leaving the Package out is what makes
- * the canvas, the picker and the Applet routes silent for an account without
- * the feature.
- */
-export async function listPackageUi(
-  state: ShellBotStateV1,
-  identity: BotIdentity,
-): Promise<PackageIframeCompositionV1> {
-  await state.authority.validateIdentity(identity);
-  return projectFirstPartyPackageIframeV1(identity.botId);
 }
 
 /**

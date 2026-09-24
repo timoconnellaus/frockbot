@@ -54,10 +54,7 @@ export interface DeclaredPackageRootSourceV1 {
  *
  * "Durable roots, declared by the Computer Package's Workspace layout and by
  * Package definitions." `image/generated` is the one that exists, and it
- * reaches the durable-root sync through here. Applet source is a declared root
- * too, but Applets declares none to the Computer: it is authored and built in
- * the cloud, so mirroring it onto the Computer would materialize files no tool
- * there reads.
+ * reaches the durable-root sync through here.
  *
  * ENABLEMENT decides membership, by the same `state === "installed"` test
  * `resolveBotExecutionPlanV1` applies to Capabilities. A root of a Package the

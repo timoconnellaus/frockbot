@@ -433,8 +433,8 @@ void main() {
           {
             'type': 'embed',
             'kind': 'frame',
-            'source': appletViewerFrameV1,
-            'label': 'Applet preview',
+            'source': computerViewerFrameV1,
+            'label': 'Computer preview',
           },
           {
             'type': 'embed',
@@ -445,7 +445,7 @@ void main() {
         ],
       }),
     );
-    expect(find.text('The Applet viewer opens here.'), findsOneWidget);
+    expect(find.text('The Computer viewer opens here.'), findsOneWidget);
     expect(hostViewFramesV1.containsKey(computerViewerFrameV1), isTrue);
     expect(
       find.text('This part of the view isn’t available here.'),
@@ -516,7 +516,7 @@ void main() {
         'type': 'embed',
         'kind': 'frame',
         'source': 'https://attacker.example/frame.html',
-        'label': 'Applet preview',
+        'label': 'Preview',
       }),
       throwsFormatException,
     );
@@ -662,7 +662,7 @@ void main() {
     expect(find.text('Deploy target'), findsOneWidget);
     expect(find.text('Recent deploys'), findsOneWidget);
     expect(find.text('Sydney · 2 minutes ago'), findsOneWidget);
-    expect(find.text('Applet preview'), findsOneWidget);
+    expect(find.text('Computer preview'), findsOneWidget);
     expect(find.text('Deploy'), findsOneWidget);
     // The sample is a real document, not a fixture shaped to pass.
     expect(

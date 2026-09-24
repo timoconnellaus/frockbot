@@ -46,9 +46,6 @@ class PanelDeskApi extends NativeApi {
     if (path == '/api/bots/unread') {
       return {'schemaVersion': 1, 'unread': <Object>[]};
     }
-    if (path.endsWith('/package-ui')) {
-      return {'schemaVersion': 1, 'packages': <Object>[]};
-    }
     if (path.endsWith('/panels/open')) return view;
     if (path.endsWith('/settings') && body == null) {
       return {

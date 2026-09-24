@@ -121,9 +121,7 @@ import {
 import { deliverMachineResult } from "@frockbot/app/machine/bot";
 import {
   listOwnSkillDocuments,
-  listPackageUi,
   listSkills,
-  runPackageUiTool,
   writeUserSkill,
 } from "@frockbot/app/skills/bot";
 import {
@@ -205,7 +203,6 @@ import {
   type CardActionCommandV1,
 } from "@frockbot/app/shell/cards";
 import {
-  decodePackageIframeToolCommandV1,
   decodeIsolateMemoryReadRequestV1,
   decodeIsolateStorageDeleteRequestV1,
   decodeIsolateStorageGetRequestV1,
@@ -241,14 +238,6 @@ function hostedModelLimits(raw?: string) {
       : 0,
   };
 }
-
-/*
- * Where an Applet's source lives.
- *
- * The Applets Package declares this root in its manifest (plan §7); these are
- * the ids that name it, restated here because the canvas's read is served from
- * the Bot Durable Object rather than from the Package's own module.
- */
 
 /** Base64 without a Node Buffer: this object runs in workerd. */
 function bytesToBase64(bytes: Uint8Array): string {
@@ -1190,9 +1179,9 @@ export class BotState
    * the session event log and its runs, the transcript and conversations, the
    * Bot's Memory and Skills generation ledger, Routines and their schedules,
    * Subagent tasks, approvals, notifications, unread and sidebar preview, the
-   * Package composition generations, the Applet mirror, and the state-channel
-   * log. Then the two object-store roots the Bot owns, which are the only
-   * Bot-scoped state that does not live in this object.
+   * Package composition generations, and the state-channel log. Then the two
+   * object-store roots the Bot owns, which are the only Bot-scoped state that
+   * does not live in this object.
    *
    * If Vectorize is not bound (local development and workerd by default), the
    * journal records that the derived cleanup was skipped before teardown.
@@ -2493,28 +2482,6 @@ export class BotState
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
     return listSkills(shell.state, identity);
-  }
-
-  async listPackageUi(input: unknown) {
-    const identity = decodeBotIdentityRpcV1(input);
-    const { shell } = await this.materialized(identity);
-    return listPackageUi(shell.state, identity);
-  }
-
-  async runPackageUiTool(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-      command: rpcDecoded(decodePackageIframeToolCommandV1),
-    });
-    const identity = {
-      userId: request.userId as string,
-      botId: request.botId as string,
-    };
-    const { shell } = await this.materialized(identity);
-    const command =
-      request.command as import("@frockbot/core/contracts").PackageIframeToolCommandV1;
-    return runPackageUiTool(shell.state, identity, command);
   }
 
   /**

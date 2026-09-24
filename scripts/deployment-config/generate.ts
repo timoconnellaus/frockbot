@@ -264,23 +264,6 @@ function bindingNamed(
   return entries.find((entry) => entry.binding === binding);
 }
 
-function routesForV1(
-  worker: DeployableWorkerV1,
-  profile: DeploymentProfileV1,
-  entry: DeploymentWorkerV1,
-): string[] {
-  const hostnames = [...(entry.hostnames ?? [])];
-  if (worker === "app" && hostnames.length > 0) {
-    if (!profile.artifactHostname) {
-      throw new Error(
-        `Profile "${profile.name}" gives the app Worker a hostname but no artifactHostname; Applet pages need their own origin`,
-      );
-    }
-    hostnames.push(profile.artifactHostname);
-  }
-  return hostnames;
-}
-
 function identityVarsV1(
   worker: DeployableWorkerV1,
   profile: DeploymentProfileV1,
@@ -292,9 +275,6 @@ function identityVarsV1(
   if (profile.aiGateway) vars.FROCK_AI_ACCOUNT_ID = profile.aiGateway.accountId;
   if (profile.aiGateway?.autoRoute) {
     vars.FROCK_AI_AUTO_ROUTE = profile.aiGateway.autoRoute;
-  }
-  if (profile.artifactHostname) {
-    vars.UI_ARTIFACT_HOSTS = profile.artifactHostname;
   }
   if (profile.access) {
     vars.ACCESS_TEAM_DOMAIN = profile.access.teamDomain;
@@ -327,7 +307,7 @@ export function generateWorkerConfigV1(
   config.name = derivedWorkerNameV1(worker, profile);
   config.account_id = profile.accountId;
 
-  const routes = routesForV1(worker, profile, entry);
+  const routes = entry.hostnames ?? [];
   if (routes.length > 0) {
     config.routes = routes.map((pattern) => ({
       pattern,

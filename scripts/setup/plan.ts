@@ -165,11 +165,6 @@ export interface ProfileAnswersV1 {
  */
 export const UNISSUED_ACCESS_AUD_V1 = "0".repeat(64);
 
-/** The artifact origin, which the gateway derives from the app's own hostname. */
-export function artifactHostnameV1(appHostname: string): string {
-  return `ui.${appHostname}`;
-}
-
 /** The profile `deployments/simple.json` holds. */
 export function simpleProfileV1(
   answers: ProfileAnswersV1,
@@ -186,7 +181,6 @@ export function simpleProfileV1(
       computerHost: {},
       appletBuild: {},
     },
-    artifactHostname: artifactHostnameV1(answers.appHostname),
     images: {
       source: "registry",
       registry: PUBLISHED_IMAGE_REGISTRY_V1,
@@ -352,7 +346,7 @@ export interface MintPlanV1 {
  * "If absent" means absent from the local record, not absent from the Worker:
  * every one of these signs or decrypts something durable, so minting a second
  * value would invalidate stored Connection credentials, issued Routine webhook
- * keys, paired machines and open Applet pages. The record is the authority, and
+ * keys, paired machines and native sessions. The record is the authority, and
  * a run whose record is intact converges to doing nothing.
  */
 export function mintPlanV1(
@@ -381,9 +375,9 @@ export function formatMintedSecretsV1(
   const lines = [
     "# Written by `bun run setup`. Not tracked, never committed, mode 0600.",
     "# These values encrypt and sign durable state: stored Connection",
-    "# credentials, issued Routine webhook keys, paired machines, open Applet",
-    "# pages and native sessions. Losing this file means the installer can only",
-    "# mint new ones, which invalidates all of it. Back it up.",
+    "# credentials, issued Routine webhook keys, paired machines and native",
+    "# sessions. Losing this file means the installer can only mint new ones,",
+    "# which invalidates all of it. Back it up.",
   ];
   for (const name of Object.keys(values).sort()) {
     lines.push(`${name}=${values[name]!}`);
@@ -543,12 +537,7 @@ export interface AccessApplicationSpecV1 {
  * sign-in flow; `/api` is then bypassed so it reaches the Worker, which is what
  * the ADR means by the application being path-scoped. `/api` being public is
  * not a hole: every `/api` request is authenticated by the Worker itself, from
- * the Access cookie a browser sends or the bearer a phone sends, and the
- * Applet viewer socket is deliberately anonymous and carries its own signed
- * token.
- *
- * The artifact origin, `ui.<the app's hostname>`, is in neither: an Applet's
- * page is served to nobody in particular and must never be behind a sign-in.
+ * the Access cookie a browser sends or the bearer a phone sends.
  */
 export function accessApplicationsV1(
   appHostname: string,
@@ -565,7 +554,7 @@ export function accessApplicationsV1(
       name: `${prefix} api`,
       destination: `${appHostname}/api`,
       decision: "bypass",
-      why: "Reaches the Worker, which authenticates every one of these itself — from the Access cookie a browser sends, or the bearer token a phone exchanged. Without this, no native client could sign in and no Applet page could open its socket.",
+      why: "Reaches the Worker, which authenticates every one of these itself — from the Access cookie a browser sends, or the bearer token a phone exchanged. Without this, no native client could sign in.",
     },
   ];
 }
@@ -589,9 +578,6 @@ export function accessDashboardStepsV1(
   }
   steps.push(
     `Open "${applications[0]!.name}" again, copy its Application Audience (AUD) tag, and paste it below.`,
-    "Leave ui." +
-      applications[0]!.destination +
-      " outside Access entirely: an Applet's page is anonymous by design.",
   );
   return steps;
 }

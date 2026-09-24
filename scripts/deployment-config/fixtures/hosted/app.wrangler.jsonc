@@ -10,10 +10,6 @@
       "pattern": "bot.frockbot.com",
       "custom_domain": true,
     },
-    {
-      "pattern": "ui.bot.frockbot.com",
-      "custom_domain": true,
-    },
   ],
   // The Flutter client, staged by `build-flutter-web.ts` under
   // `_flutter/<buildHash>/`. It is uploaded with the deploy and answered by
@@ -167,7 +163,6 @@
     // The `flock-auto` dynamic route's target model is configured and deployed
     // in the Cloudflare AI Gateway dashboard, never selected in application code.
     "FROCK_AI_AUTO_ROUTE": "flock-auto",
-    "UI_ARTIFACT_HOSTS": "ui.bot.frockbot.com",
   },
   "env": {
     "development": {
@@ -271,7 +266,6 @@
         // with the FROCK_AI_GATEWAY_TOKEN secret.
         "FROCK_AI_ACCOUNT_ID": "374784ce2915a597adcecf9bcb2c5ee6",
         "FROCK_AI_AUTO_ROUTE": "flock-auto",
-        "UI_ARTIFACT_HOSTS": "ui.localhost",
         // Placeholder only. Production supplies this as a secret.
         "FROCKBOT_ADMIN_EMAILS": "owner@example.com",
       },
@@ -293,10 +287,6 @@
       "routes": [
         {
           "pattern": "staging-bot.frockbot.com",
-          "custom_domain": true,
-        },
-        {
-          "pattern": "ui.staging-bot.frockbot.com",
           "custom_domain": true,
         },
       ],
@@ -393,7 +383,6 @@
         // transport's account id is repeated here (cloudflare/ai#617). The
         // Gateway id and Auto route keep their code defaults.
         "FROCK_AI_ACCOUNT_ID": "374784ce2915a597adcecf9bcb2c5ee6",
-        "UI_ARTIFACT_HOSTS": "ui.staging-bot.frockbot.com",
       },
     },
     // The browser end-to-end harness (`apps/cloudflare/e2e/harness.ts`) runs
@@ -514,7 +503,6 @@
         // with the FROCK_AI_GATEWAY_TOKEN secret.
         "FROCK_AI_ACCOUNT_ID": "374784ce2915a597adcecf9bcb2c5ee6",
         "FROCK_AI_AUTO_ROUTE": "flock-auto",
-        "UI_ARTIFACT_HOSTS": "ui.localhost",
         // The canonical `development` identity is admin in this environment;
         // this placeholder also proves the configured-allowlist rule.
         "FROCKBOT_ADMIN_EMAILS": "owner@example.com",

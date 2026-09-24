@@ -198,8 +198,6 @@ export async function createFoundationUserBackendContributions(host: {
    */
   commandBotLifecycle: FlockUserBackendHost["commandBotLifecycle"];
   readBotLifecycle: FlockUserBackendHost["readBotLifecycle"];
-  /** What a Bot's lifecycle does to the Applets it owns and is shared. */
-  lifecycleEffects?: FlockUserBackendHost["lifecycleEffects"];
   /**
    * The Bot Template seams the adapter owns: the Bot Durable Object reads one
    * export needs, and the immutable blob store the recipe is published into.
@@ -387,9 +385,6 @@ export async function createFoundationUserBackendContributions(host: {
         storage: host.storage,
         commandBotLifecycle: host.commandBotLifecycle,
         readBotLifecycle: host.readBotLifecycle,
-        ...(host.lifecycleEffects
-          ? { lifecycleEffects: host.lifecycleEffects }
-          : {}),
       };
     },
   };

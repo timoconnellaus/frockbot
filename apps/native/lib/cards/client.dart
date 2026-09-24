@@ -19,9 +19,9 @@ String _surface(String surfaceId) => Uri.encodeComponent(surfaceId);
 
 /// One Card as the backend reports it: `CardViewV1` in `app/shell/cards.ts`.
 ///
-/// Decoded by hand and exactly, like the Applet views next door: this is a
-/// view the shell owns rather than a wire shape the native protocol declares,
-/// and an unexpected answer is a `FormatException` rather than half a card.
+/// Decoded by hand and exactly: this is a view the shell owns rather than a
+/// wire shape the native protocol declares, and an unexpected answer is a
+/// `FormatException` rather than half a card.
 class CardView {
   final String surfaceId;
   final int revision;

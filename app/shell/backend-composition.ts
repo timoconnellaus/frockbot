@@ -707,11 +707,6 @@ export function createShellCompositionHost(
         }
       }
 
-      // Applet members. Their tools are ordinary tools in this Bot's catalog,
-      // pinned to this generation like every other member, and routed to the
-      // Applet Durable Object. An Applet contributes no module and no manifest,
-      // so there is nothing here to mount, load, or health-check: the
-      // instance's own health check ran when its generation was published, and
       const dispose = async () => {
         for (const unregister of registeredModelProviders.toReversed()) {
           unregister();

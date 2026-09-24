@@ -64,7 +64,6 @@ export function messagePreview(payload: Record<string, unknown>): string {
         audio: "Audio",
         video: "Video",
         widget: "Message",
-        applet: "Applet",
       } as Record<string, string>
     )[String(payload.type)] ?? "New message"
   );

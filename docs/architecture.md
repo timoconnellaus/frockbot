@@ -10,7 +10,7 @@ Five Workers, two container images, one Flutter client — on the web and on the
 
 | Deployable           | Worker name              | Config                              | Serves                                                                                                                                                                                                                                                                                                                                                        |
 | -------------------- | ------------------------ | ----------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `apps/cloudflare`    | `frockbot-cloudflare`    | `apps/cloudflare/wrangler.jsonc`    | The product. Custom domains `bot.frockbot.com` and `ui.bot.frockbot.com`. `main: src/index.ts`, compatibility date `2026-08-27`, flag `nodejs_compat`. Carries an `assets` payload: the Flutter web client, uploaded with the deploy.                                                                                                                         |
+| `apps/cloudflare`    | `frockbot-cloudflare`    | `apps/cloudflare/wrangler.jsonc`    | The product. Custom domain `bot.frockbot.com`. `main: src/index.ts`, compatibility date `2026-08-27`, flag `nodejs_compat`. Carries an `assets` payload: the Flutter web client, uploaded with the deploy.                                                                                                                                                    |
 | `apps/computer-host` | `frockbot-computer-host` | `apps/computer-host/wrangler.jsonc` | No routes; reached only through the app's `COMPUTER_HOST` service binding. Fronts a Cloudflare Container built from `apps/computer-host/Dockerfile` (`node:24-slim`, `instance_type: basic`, `max_instances: 3`).                                                                                                                                             |
 | `apps/applet-build`  | `frockbot-applet-build`  | `apps/applet-build/wrangler.jsonc`  | No routes; reached only through the app's `APPLET_BUILD` service binding. Fronts a Cloudflare Container built from `apps/applet-build/Dockerfile` (`node:24-slim`, `instance_type: standard`, `max_instances: 3`, no egress) that runs the Plugin SDK's build pipeline. `plugin_check` and `plugin_publish` are its only callers.                             |
 | `apps/marketing`     | `frockbot-marketing`     | `apps/marketing/wrangler.jsonc`     | `frockbot.com` and `www.frockbot.com`. Static `ASSETS` from `./public` with `run_worker_first: true`; the Worker is a canonical-host redirect plus security headers, and `macDownloadRedirect` (`apps/marketing/src/index.ts`) sends `/download/mac` to the disk image's R2 custom domain.                                                                    |
@@ -24,7 +24,7 @@ Named environments on the app Worker, both for local runs and never deployed:
 - `development` — `wrangler dev --env development`
 - `e2e` — `"routes": []`, the browser harness
 
-Staging is a profile rather than an environment: `frockbot-cloudflare-staging` on `staging-bot.frockbot.com` and `ui.staging-bot.frockbot.com`, with its own D1, buckets and Vectorize index, sharing production's Computer host and Plugin build service.
+Staging is a profile rather than an environment: `frockbot-cloudflare-staging` on `staging-bot.frockbot.com`, with its own D1, buckets and Vectorize index, sharing production's Computer host and Plugin build service.
 
 The client's bytes are not in the Worker bundle and not in R2. `apps/cloudflare/build-flutter-web.ts` builds `apps/native` for the browser and stages it under `apps/cloudflare/dist/web/_flutter/<buildHash>/`, which is the `assets` directory; the asset router answers those URLs before the Worker runs. The Worker renders only the document that names them (§6).
 
@@ -59,23 +59,21 @@ A profile is which auth Package is built in, which secrets exist, which workflow
 
 Identity lives in `deployments/<name>.json`, validated against `deployments/profile.schema.json`. `scripts/deployment-config.ts` (`bun run deployment:config <profile>`) reads one and writes `.deployment/<profile>/<worker>/wrangler.jsonc` from the tracked files, which is what every `wrangler deploy -c` takes. `scripts/deployment-config.test.ts` is the equivalence gate: it generates `hosted` and `staging` and proves the result is still the configs those deployments ran before identity moved out, because a Worker name, Durable Object class or migration tag that differs on deploy is a new namespace, which is data loss.
 
-**The artifact-origin rule.** A profile that gives the app Worker a hostname must also name `artifactHostname`, and the schema requires the form `ui.<the app's hostname>`. The pairing between the two origins is derived from that prefix rather than configured — `packageUiGatewayOriginV1` and `isPackageUiArtifactOriginFor` in `apps/cloudflare/src/gateway.ts`, `appletUiArtifactOriginV1` in `applets/preview.ts` — so a page served from any other host is given a `connect-src` naming a host that does not exist, and the gateway refuses its viewer socket. A `workers.dev` hostname cannot contain a dot, so no second Worker there can be the artifact origin: it is a second custom domain on the app Worker, which is why the simple profile needs a zone. Making that pairing explicit configuration is a change to the Applet path and has not been made.
-
 ---
 
 ## 2. Durable Objects
 
 Five classes in the app Worker, exported from `apps/cloudflare/src/index.ts`. `core/durable` defines no Durable Object class; it is the storage and authority library `BotState` delegates to. Four are hand-rolled; `VoiceAssistant` is the one Cloudflare Agents SDK class.
 
-### `BotState` — `apps/cloudflare/src/bot-state.ts:535`
+### `BotState` — `apps/cloudflare/src/bot-state.ts:524`
 
-- Binding `BOT_STATES`; id `idFromName("<userId>:<botId>")` (`apps/cloudflare/src/index.ts:539`, `:644`).
+- Binding `BOT_STATES`; id `idFromName("<userId>:<botId>")` (`apps/cloudflare/src/index.ts:532`, `:634`).
 - Authoritative for all Bot-scoped state: identity, runs, admission fences, the pending and agent-lane queues, the session event log, notifications, conversations, its Plugin enable map, Workspace file generations and conflicts, the memory vector purge journal. Its `composition:` records are a mirror of the User's Composition, not an authority over it (§5). Keys are enumerated in `core/durable/storage-keys.ts`.
 - Bot-scoped state is key-value — `ctx.storage.get/put/list/delete/transaction`. SQLite holds the Bot's Memory: `createBotMemoryEngineV1` (`apps/cloudflare/src/memory-records.ts`) hands `ctx.storage.sql` to the Memory engine (`app/memory/engine.ts`), which owns the `bot` scope's tables (`app/memory/schema.ts`) — items, their FTS5 index, jobs and vector index intents. The class issues no `sql.exec` of its own.
-- Roughly 100 RPC methods (`bot-state.ts:1332-3486`), each taking `input: unknown` and decoding through an envelope decoder. They include `run`/`runAgent`, the `isolate*` loopback surface, Composition reads and reverts, routines, tasks, approvals, notifications, `debugSnapshot` and `fenceRunAdmission`.
+- Roughly 100 RPC methods (`bot-state.ts:1321-3453`), each taking `input: unknown` and decoding through an envelope decoder. They include `run`/`runAgent`, the `isolate*` loopback surface, Composition reads and reverts, routines, tasks, approvals, notifications, `debugSnapshot` and `fenceRunAdmission`.
 - `alarm()` drains the push-notification outbox first. While the Bot is being deleted it then runs one page of the Memory vector purge and finishes the teardown when the purge completes; otherwise it runs the mounted contribution's alarm, then drains the audit and voice-reply outboxes.
 - `GET /api/bots/:bot/cards` answers the newest Cards that fit one listing — `truncated` says some did not — `GET /api/bots/:bot/cards/:surfaceId` answers one Card by its id whatever the listing's byte budget cut (404 when this Bot never drew it), and `POST` to the listing path is one renderer action — `{surfaceId, revision, event:{name, context}, dataModel?, commandId?}` — routed by the kernel, never by the Card: `approval/<approvalId>` goes to `decideApproval` and cannot name a decision the kernel never recorded, `plugin/<pluginId>/<action>` is a `cardAction` RPC on the Plugin worker whose returned messages fold into the card, and anything else becomes the Bot's next user-lane pending input, keyed on the client's `commandId` when it sent one — so a retried post is the same press — and on a minted id when it did not, and opens an input-delivery Turn (below) so the Bot answers the press without the person having to type. A handler's `input` opens none: that press was answered on the card and costs no Turn. A stale revision is a 409. A card write is a transcript write, so `shell:card:` joins the keys `bot-state-channel` invalidates `runs` for.
-- `fetch()` at `:3553` serves one path: the state-channel WebSocket upgrade. Sockets use the hibernation API — `state.acceptWebSocket(server, [CHANNEL_TAG])` (`apps/cloudflare/src/bot-state-channel.ts:473`), with `webSocketMessage/Close/Error` forwarded from `bot-state.ts:3580-3603`.
+- `fetch()` at `:3520` serves one path: the state-channel WebSocket upgrade. Sockets use the hibernation API — `state.acceptWebSocket(server, [CHANNEL_TAG])` (`apps/cloudflare/src/bot-state-channel.ts:473`), with `webSocketMessage/Close/Error` forwarded from `bot-state.ts:3547-3570`.
 
 ### `UserConfiguration` — `apps/cloudflare/src/user-configuration.ts:255`
 
@@ -89,7 +87,7 @@ Five classes in the app Worker, exported from `apps/cloudflare/src/index.ts`. `c
 
 ### `DeploymentPolicy` — `apps/cloudflare/src/deployment-policy.ts`
 
-- Binding `DEPLOYMENT_POLICY`; singleton `getByName("frockbot-deployment-policy")` (`apps/cloudflare/src/index.ts:704`).
+- Binding `DEPLOYMENT_POLICY`; singleton `getByName("frockbot-deployment-policy")` (`apps/cloudflare/src/index.ts:694`).
 - Owns deployment admission, account access and email invitations. The authority contract and scoped release cleanup are in [`beta-access.md`](beta-access.md); storage keys and RPCs are defined in `apps/cloudflare/src/deployment-policy.ts`. No fetch, no alarm.
 - Storage is key-value through the synchronous `ctx.storage.kv` API inside `transactionSync`, which only SQLite-backed storage provides. It creates no tables.
 
@@ -125,15 +123,15 @@ The composer's dictation relay (`apps/cloudflare/src/voice-dictation.ts`) is not
 
 1. **Client.** `apps/native/lib/client/transport.dart:197` posts `{schemaVersion, commandId, text}` to `POST /api/bots/{botId}/turns`.
 
-2. **Gateway.** `apps/cloudflare/src/gateway.ts`, the Worker's `fetch`. Order of dispatch in `createGateway`: client-compatibility refusal, native-auth routes, `/api/auth/*` to the auth Package, the Applet socket, `/sign-out` to the auth Package, the debug route, public Package routes, then identity resolution — native bearer token, development identity, or the auth Package's session — then the [beta-access admission check](beta-access.md#where-it-is-asked), then authenticated Package backend contributions.
+2. **Gateway.** `apps/cloudflare/src/gateway.ts`, the Worker's `fetch`. Order of dispatch in `createGateway`: client-compatibility refusal, native-auth routes, `/api/auth/*` to the auth Package, `/sign-out` to the auth Package, the debug route, public Package routes, then identity resolution — native bearer token, development identity, or the auth Package's session — then the [beta-access admission check](beta-access.md#where-it-is-asked), then authenticated Package backend contributions.
 
-3. **Per-user application isolate.** Unmatched requests fall through to `routeUserApplication` (`:612`). It resolves the user's `applicationHash`, then `dependencies.loader.get(workerId, ...)` loads that artifact from R2 into a Worker Loader isolate whose `env` holds `BOT_STATE` — a Durable Object stub already scoped to the user — plus `DEPLOYMENT` (`:633-646`). The client's `x-frockbot-user-id` header is deleted before forwarding (`:650`); the gateway sets `x-frockbot-deployment`, `x-frockbot-auth-session-v1` and `x-frockbot-is-admin-v1` itself. Authorization is established here and passed downward as capability; nothing below re-verifies it.
+3. **Per-user application isolate.** Unmatched requests fall through to `routeUserApplication` (`:187`). It resolves the user's `applicationHash`, then `dependencies.loader.get(workerId, ...)` loads that artifact from R2 into a Worker Loader isolate whose `env` holds `BOT_STATE` — a Durable Object stub already scoped to the user — plus `DEPLOYMENT` (`:209-222`). The client's `x-frockbot-user-id` header is deleted before forwarding (`:225`); the gateway sets `x-frockbot-deployment`, `x-frockbot-auth-session-v1` and `x-frockbot-is-admin-v1` itself. Authorization is established here and passed downward as capability; nothing below re-verifies it.
 
-4. **Application.** `apps/cloudflare/src/user-application.ts:719` matches the turn route; `:1093` calls `env.BOT_STATE.admitRun({schemaVersion, botId, command: {runId: commandId, sessionId: "<userId>:<botId>", acceptedAt, text, skills?, retryOf?}})` and answers 202 with the receipt. A message sent while a Turn runs is admitted into the user queue, and a chat Turn on the user lane ends at its next step boundary to let it run ([Steering](../CONTEXT.md)); the `supersedes` field installed apps still send is accepted and dropped. The session id is derived server-side. The command decoder accepts exact keys only, so a client cannot name a turn type; an absent turn type means `chat`.
+4. **Application.** `apps/cloudflare/src/user-application.ts:653` matches the turn route; `:940` calls `env.BOT_STATE.admitRun({schemaVersion, botId, command: {runId: commandId, sessionId: "<userId>:<botId>", acceptedAt, text, skills?, retryOf?}})` and answers 202 with the receipt. A message sent while a Turn runs is admitted into the user queue, and a chat Turn on the user lane ends at its next step boundary to let it run ([Steering](../CONTEXT.md)); the `supersedes` field installed apps still send is accepted and dropped. The session id is derived server-side. The command decoder accepts exact keys only, so a client cannot name a turn type; an absent turn type means `chat`.
 
-5. **Bot Durable Object.** `apps/cloudflare/src/bot-state.ts:1168` `run()` decodes the envelope, materializes the identity and calls `shell.run(...)`.
+5. **Bot Durable Object.** `apps/cloudflare/src/bot-state.ts:2001` `run()` decodes the envelope, materializes the identity and calls `shell.run(...)`.
 
-6. **Shell.** `app/shell/turn.ts:97` `run()` yields any in-flight compaction, calls `resolveAppletComposition()`, then delegates to `admitTurnV1`, which mirrors the User's Composition and calls `BotDurableAuthority.run` (`core/durable/authority.ts:293`): recover whatever the object holds, check for a settled replay, then `acceptRun`. An accepted run executes inline; otherwise it is durably queued — one user-lane slot, FIFO agent lane — and promoted by `runQueuedRun` (`:332`).
+6. **Shell.** `app/shell/turn.ts:151` `run()` yields any in-flight compaction, then delegates to `admitTurnV1`, which mirrors the User's Composition and calls `BotDurableAuthority.run` (`core/durable/authority.ts:293`): recover whatever the object holds, check for a settled replay, then `acceptRun`. An accepted run executes inline; otherwise it is durably queued — one user-lane slot, FIFO agent lane — and promoted by `runQueuedRun` (`:332`).
 
 7. **Mount.** `activateCompositionV1` reads the pin and builds the Turn's runtime through `createShellCompositionHost` (`app/shell/backend-composition.ts:274`).
 
@@ -143,7 +141,7 @@ The composer's dictation relay (`apps/cloudflare/src/voice-dictation.ts`) is not
 
 10. **Tools.** `ctx.tools.prepare` then `ctx.tools.executePrepared`.
 
-11. **Return.** The POST returns the settled turn. Live updates arrive on a separate WebSocket, `GET /api/bots/{botId}/state-channel?version=1&cursor=N` (`apps/cloudflare/src/gateway.ts:894`). That channel carries invalidation notices, not content; the client re-reads over REST. Notices are coalesced and throttled per interval (`apps/cloudflare/src/bot-state-channel.ts:245-265`).
+11. **Return.** The POST returns the settled turn. Live updates arrive on a separate WebSocket, `GET /api/bots/{botId}/state-channel?version=1&cursor=N` (`apps/cloudflare/src/gateway.ts:502`). That channel carries invalidation notices, not content; the client re-reads over REST. Notices are coalesced and throttled per interval (`apps/cloudflare/src/bot-state-channel.ts:245-265`).
 
 ---
 
@@ -261,7 +259,7 @@ Composition is the untrusted layer and nothing else. First-party Packages are or
 
 The User Durable Object owns the Composition (ADR 0026): `DurableCompositionStore` (`core/durable/composition-store.ts`) and `DurableCompositionFailureLog` write into the User object under `composition:current` (a `{generationId, artifactSetHash}` pin), `composition:generation:<id>`, `composition:index:<createdAt>:<id>`, `composition:last-known-good`, plus failure, failure-count and quarantine keys, reached through the `readComposition`, `proposeComposition`, `commitComposition`, `failComposition`, `revertComposition` and failure-log RPCs (`app/composition/user.ts`). Pinning is compare-and-swap; a lost race raises `CompositionPinConflictError` and the caller re-reads and re-derives (four attempts).
 
-A Bot admits a Turn inside its own storage transaction, which cannot make a cross-object call, so every admission goes through `admitTurnV1` (`app/composition/bot.ts`) — a chat Turn, a Routine firing, a Package-UI tool, a Subagent task — which first reads the User's pin and fallback and `adopt`s them into the Bot's own `composition:` records: a mirror the admission pins from, never a second truth. A stale mirror is replaced whole, which is also what retires the records a Bot held from before the store moved. Activation reads the mirror, commits and fails against the User, and refreshes the mirror after; the settings views read the User directly.
+A Bot admits a Turn inside its own storage transaction, which cannot make a cross-object call, so every admission goes through `admitTurnV1` (`app/composition/bot.ts`) — a chat Turn, a Routine firing, a Subagent task — which first reads the User's pin and fallback and `adopt`s them into the Bot's own `composition:` records: a mirror the admission pins from, never a second truth. A stale mirror is replaced whole, which is also what retires the records a Bot held from before the store moved. Activation reads the mirror, commits and fails against the User, and refreshes the mirror after; the settings views read the User directly.
 
 Which of the User's installed Plugins a Bot runs is the Bot's own revisioned enable map, `plugins:enablement` (`app/plugins/enablement.ts`), read at every mount. The rule per Plugin is its seed state (`app/plugins/catalog.ts`): `locked` always runs, `default-off` runs only when switched on, `default-on` and an opened `admin-gated` run unless switched off, `installable` (a provider Plugin, installed by the account's own Package command) runs only when switched on, and a Plugin a Bot wrote — never in the catalog — runs only when switched on, so a publish alone runs nowhere. A provider Plugin's _model_ contribution is the exception the state does not govern: a Bot whose model names that provider is served by it whatever the switch says (ADR 0032). The list it yields is what the Plugin worker registers tools for and passes as the enabled list on every hook. The same map switches off the first-party features a User may turn off per Bot — web, routines, image, subagents, machine messages, never custom models — while the account-wide installation stays the precondition. Two places enforce it, because only one of the five reaches a Turn through the plan: `maskPlanForBotV1` filters the Bot's execution plan, which is what drops Web's enabled Contribution, and `firstPartyFeatureOnForBotV1` gates the hosted seams in `app/shell/runtime-mount.ts`, which is what leaves image, routines, subagents and machine messages unmounted so their tools are never registered. A Bot with Routines switched off also fires no Routine: the scheduler consumes the occurrence without admitting a Turn (`app/routines/bot.ts`), so its clock advances and the Routine resumes when the switch goes back on.
 
@@ -371,7 +369,7 @@ an asset directory that answered `/` or invented an index would answer for it.
 copy, loaded by a plain GET. No request for the client's own bytes ever
 reaches the gateway.
 
-The document is `appHtml()` (`apps/cloudflare/src/user-application.ts:117`).
+The document is `appHtml()` (`apps/cloudflare/src/user-application.ts:101`).
 `build-artifact.ts` defines `__FROCKBOT_FLUTTER_BUILD__` from `flutter-web.json`
 and `__FROCKBOT_CLIENT_ICON__` from the brand icon; those two are all the
 artifact carries of the client. The page is a
@@ -382,7 +380,7 @@ changes when the client does.
 
 Identity is handed over in the document. A browser's session is a cookie it
 cannot read, so the Worker stamps the account onto `<body>` —
-`HOSTED_EMBEDDED_BODY_ATTRIBUTES_V1` (`user-application.ts:111`):
+`HOSTED_EMBEDDED_BODY_ATTRIBUTES_V1` (`user-application.ts:103`):
 `data-frockbot-user-id`, `data-frockbot-auth-mode`, `data-frockbot-is-admin` —
 and `bootstrapUserIdV1()` (`apps/native/lib/client/identity_web.dart`) reads
 them on the first frame, so `restore()` (`apps/native/lib/main.dart:117`) paints
@@ -390,15 +388,16 @@ the shell instead of flashing the sign-in door at someone who is already signed 
 The `/api/identity` read still happens; the attributes are what it confirms.
 `identity_io.dart` returns null, because the phone is handed no document.
 
-The app origin's policy is `withSecurityHeaders` (`user-application.ts:147`).
+The app origin's policy is `withSecurityHeaders` (`user-application.ts:143`).
 Two relaxations belong to the engine and neither is avoidable:
 `script-src 'wasm-unsafe-eval'`, because CanvasKit instantiates WebAssembly, and
 `style-src 'unsafe-inline'`, because the engine injects a `<style>` element to
 measure text.
 `img-src` allows `data:` and `blob:` for what the app decodes itself, and
 `base-uri` is `'self'` rather than `'none'` because the document sets a `<base
-href>` of its own. All of this is the app origin's alone — the artifact origin,
-where untrusted pages live, keeps `default-src 'none'` (`gateway.ts`) unchanged.
+href>` of its own. `frame-src` names only the Computer host's viewer origins
+(`COMPUTER_HOST_CAPABILITIES_V1.viewerFrameOrigins`): the Computer viewer is the
+one page the app frames.
 CanvasKit is built local (`--no-web-resources-cdn`) so `script-src 'self'` stays
 true and no engine byte is fetched from gstatic. Rive Native's WebAssembly
 runtime is staged and served from this origin for the same reason: left to
@@ -502,12 +501,12 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
   panel's root at the wide tiers and a pushed page on the phone, in one scroll:
   the Computer card when the Bot has one, the last Routine firings as loose
   one-line rows — name, then the time and a running / finished / failed mark
-  at the end — with the All Routines door under them, the Applets it is
-  running, and the doors its Packages declare. The Bot's name in the conversation bar is the one way in at
+  at the end — with the All Routines door under them, and the doors of its
+  Plugin panels. The Bot's name in the conversation bar is the one way in at
   every tier, and the gear in the page's own header is the one way to Settings
 - `BotSettingsView` — `lib/settings/bot_settings.dart`: what a Bot _is_ — its
   character, its About fields, its behaviour switches, its Plugins and model,
-  the Package settings its Composition mounts, and the two danger rows — written
+  and the two danger rows — written
   as they are edited rather than on a Save button. One level under the Bot page
   at every width, in one card grammar: a section label over a `FrockRowGroup`,
   with the About fields on a card of their own. There is no Advanced expander
@@ -561,8 +560,6 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
 - `PanelCanvas` — `lib/panels/canvas.dart`: the conversation panel for this Bot. A host tab strip over the focused Plugin's `ViewDocument`, in the right column on a wide window and a pushed page on a phone. The bag, the Session focus and the `bot.nav` doors come from `GET /api/bots/:bot/panels/open`. Empty bag: the region is not offered
 - `ComputerCard` → `ComputerViewerPage` — `lib/computer/card.dart`: the Bot's
   screen, live or as its last capture, and the full-window viewer it opens
-- `PackagePageFrame` — `lib/packages/frame.dart`: a first-party or Bot-authored
-  Package page, mounted in Bot Settings and behind a door on the Bot page
 - `ViewSamplePage` — `lib/view/sample_page.dart:117`, reachable only from a `--dart-define=FROCKBOT_DEV_AUTH=true` build
 
 The thread's rules were ported from the Vue shell without change and with its
@@ -773,10 +770,10 @@ left at the same inset. The name is the door to the Bot page; the Computer icon
 takes a cooler blue while the Bot is driving one. A call still uses a solid bar:
 the thread is gone, and the bar is the name, a mark that says why, and the
 Computer.
-Routines, Plugins, Settings, Applets and the doors a Bot's Packages declare are
-rows on the Bot page rather than icons here: five doors in a bar was the same
-five doors the panel could have named, and a Package adding a sixth made the bar
-the Bot's navigation rather than its title.
+Routines, Plugins, Settings and the doors of a Bot's Plugin panels are rows on
+the Bot page rather than icons here: a bar of doors was the same doors the panel
+could have named, and a Plugin adding one more made the bar the Bot's navigation
+rather than its title.
 
 The right panel holds a small stack: the Bot page is its floor, a row pushes a
 sub-page onto it, the header grows a back chevron (`right-panel-back`) and names
@@ -815,8 +812,8 @@ details or records “Mark unread from here”. That boundary names a validated
 chat message in the Bot-owned unread record, is included in the command
 fingerprint and receipt, and is projected to the native transcript after
 reconnect. An explicit mark-read
-clears it. Applets and Computer continue through their existing backend surfaces;
-header navigation adds no authority or credentials.
+clears it. The Computer continues through its existing backend surface; header
+navigation adds no authority or credentials.
 
 Session announcements such as rename and compaction remain system lines,
 projected by `projectAnnouncements` and ordered by their recorded timestamps.
@@ -850,12 +847,7 @@ copy. The zone is
 contributed by the Flock rather than rebuilt inside the settings surface,
 because the directory a delete changes is the Flock's. The route answers
 `pending` for a saga that has not settled, which is why the zone locks rather
-than offering a second command. Both surfaces read
-`GET /api/bots/:bot/applets/impact` before they ask: archive names the Applets
-that become unavailable, delete names the Applets it destroys and the Bots
-that also use them, and a delete carries the impact's fingerprint as
-`appletImpact`. A 409 `applet-impact-changed` drops the retained command, which
-was never admitted, and asks again over the new list.
+than offering a second command.
 
 Three more projections in the settings-document family:
 
@@ -896,17 +888,7 @@ the create command fences on a directory revision `ViewController` has no way
 to express, and the lifecycle receipt has a third state — `pending` — that a
 view action's two do not.
 
-**PR 10a: Applets, the Computer and Package pages.**
-
-`lib/applets/` is the Applet canvas, over the Applet routes of §9. Two states
-and the transition between them: the source as the Bot writes it, and the live
-Applet arriving over it once a generation is active. `progress.dart` is the sentence in between — a projection
-of the thread the client already holds, taking the furthest step it has evidence
-for across every Turn rather than only the open one, and recognising the
-`applet` CLI's own stated output rather than guessing at a command.
-`failure.dart` classifies a caught read once, into a sentence and a retry
-policy: a network that might come back is retried on a widening backoff, and a
-deployment that cannot sign a viewer token is not retried at all.
+**PR 10a: the Computer.**
 
 `lib/computer/` is the Computer card and its full-window viewer: the
 projection, one versioned command per action, and the two rules the card needs —
@@ -919,35 +901,14 @@ carries is on this account's own origin and an anonymous image request there
 is answered 401. There is one destination: the card, the bar's
 Computer icon and the search hit all open the same full window on the same
 session, with Take control in it. Taking control is two gestures, and only the
-second reaches the Bot.
+second reaches the Bot. The viewer is a `HostFrame` (`lib/view/host_frame.dart`):
+an iframe under `sandbox` in the browser, a hardened WebView on the phone.
 
-`lib/packages/` is the entry projection and the postMessage bridge.
-`catalog.dart` is the entry read over `/api/bots/:botId/package-ui`;
-`frame.dart` is the frame host — the handshake, the theme tokens, the
-named state feeds, and a page's five messages back, each refused against what
-its Package declared rather than trusted. On the phone the page is its own
-`parent`, so what it posts raises a `message` event on the same window and a
-forwarding listener carries it over a channel; the host's own messages are
-dropped there rather than handed back as if a page had said them.
-
-**Why these three are host chrome and not projections.** Each of them holds a
-credential minted per reader — the Applet viewer token, the Computer's bearer
-viewer URL — and a document can be read twice. That is the rule PR 9 arrived
-at from the other direction, and it settles the shape here: the host holds the
-credential, the host frames the page, and what a plugin may say about either is
-the name of a region.
-
-The Applet canvas frames the Applet's own page directly rather than nesting it
-inside the Applets Package's `canvas` page as the browser does. The middle
-document existed because the browser host had no way to reach across an origin
-into a grandchild frame; a Flutter host is the frame's parent and hands the
-`init` over itself, so the second document buys nothing.
-
-**Deleted with this change.** `lib/extensions/fallback.dart`,
-`apps/cloudflare/src/native-fallback.ts` and its gateway route, the
-`/api/native/applets/:id/bootstrap` route and the `nativeAppletBootstrap` RPC
-behind it, and `FallbackBootstrap` from the wire schema. The phone reaches an
-Applet the way every other client does.
+**Why the Computer is host chrome and not a projection.** It holds a credential
+minted per reader — the Computer's bearer viewer URL — and a document can be
+read twice. That is the rule PR 9 arrived at from the other direction, and it
+settles the shape here: the host holds the credential, the host frames the
+page, and what a plugin may say about it is the name of a region.
 
 ### ViewNode — how a plugin renders
 
@@ -966,7 +927,7 @@ A plugin does not ship UI. It returns a `ViewDocument` and the host draws it, wh
 
 `ViewDocument` is `{schemaVersion, surfaceId, revision, root, actions}`, where `actions` is `{id, schema: ActionSchema}` pairs. An action's submitted input is the node's declared map overlaid with the current value of every `field` whose id the action's schema names; a key the schema does not declare never travels, and a missing required key refuses before dispatch.
 
-`embed`'s frame names are the host's, not the plugin's: `applet-viewer` and `computer-viewer` (`apps/native/lib/view/embed.dart`). A `HostViewFrames` scope is what a host surface puts in one — the Applet canvas fills `applet-viewer`, the Computer card fills `computer-viewer` — so a region a plugin names is drawn by whichever host surface is above it and by nothing at all elsewhere, where it stays the trust-neutral reserved region. A name this host does not offer draws the unavailable one. `ui.bot.frockbot.com/packages/<sha256>.html` survives for the Applet's own arbitrary web page and for a Package's, both reached through a host frame.
+`embed`'s frame names are the host's, not the plugin's: `computer-viewer` (`apps/native/lib/view/embed.dart`). A `HostViewFrames` scope is what a host surface puts in one — the Computer card fills `computer-viewer` — so a region a plugin names is drawn by whichever host surface is above it and by nothing at all elsewhere, where it stays the trust-neutral reserved region. A name this host does not offer draws the unavailable one.
 
 **Budgets**, checked by `ViewDocumentView` before it builds a widget (`lib/view/budgets.dart`): 512 nodes, depth 16, 262,144 bytes. A document past any of them is refused whole rather than half-rendered. The schema's own shape caps are separate — 256 children per `group`, 256 rows per `list`, 32 declared actions.
 
@@ -992,7 +953,7 @@ The renderer is `apps/native/lib/cards/`: `client.dart` (the two routes the clie
 
 **The first-party cards are Plugins.** `approval`, `widget`, `attachment`, `secret-request` and `agent-card` are drawn by five locked seeded Plugins — `approvals`, `questions`, `attachments`, `credentials`, `agents` (`app/plugins/seeded/`) — so the deployment's own cards take the path a User's Plugin takes: a declared `dataSchema`, a `renderCard` in the Plugin worker, the Frock catalog, and `sendCard`. The mapping is `app/shell/first-party-cards.ts`, reached through `AgentRuntimeV1.firstPartyCards`, which the Plugin host sets when it mounts a generation and the Shell's send seam reads. The payload itself is still recorded on the Turn's log unchanged — it is where an Approval record is minted, where a Machine command and a Plugin intent find the id they are keyed by, and where delivery decides the Turn is over — so the Card is the _face_ of the send and never its meaning. A decision the seam maps is bound to the `approvalId` the Bot chose (`PluginCardSendV1.approvalIds`) rather than to a minted one, because that is the id everything downstream already names. The client draws nothing for those five members; a draw that could not happen leaves the send with no face and writes nothing else.
 
-**Staying put.** The card reads over REST when it mounts and re-reads when the Bot's durable state is invalidated (`ChatController.invalidations`, bumped once per state-channel notice), and is kept alive in the transcript like an Applet card. A notice names no record, and every adopted record is admitted and then rebuilt into a fresh controller — there is no same-record path that keeps the live renderer. What the rebuild no longer costs is the person's half-finished answer: when the record's own data model has not moved, the model the old renderer held is theirs alone and is handed to the new one (`keptDataModel`), which is what makes a card with `ChoiceChips` and a `MultiSelect` on it answerable over the several seconds it takes. A card that is answering a press ignores the notice instead, because the receipt carries the surface back. Adopting any record ends the reads older than it, so a read still in flight never redraws over the receipt a press carried back. A later `card` send naming the same `surfaceId` updates the record rather than adding a second card, so `dedupeCardSendsV1` (`lib/shell/transcript_model.dart`) drops the repeat where the thread is ordered and the card stays where it was first drawn.
+**Staying put.** The card reads over REST when it mounts and re-reads when the Bot's durable state is invalidated (`ChatController.invalidations`, bumped once per state-channel notice), and is kept alive in the transcript. A notice names no record, and every adopted record is admitted and then rebuilt into a fresh controller — there is no same-record path that keeps the live renderer. What the rebuild no longer costs is the person's half-finished answer: when the record's own data model has not moved, the model the old renderer held is theirs alone and is handed to the new one (`keptDataModel`), which is what makes a card with `ChoiceChips` and a `MultiSelect` on it answerable over the several seconds it takes. A card that is answering a press ignores the notice instead, because the receipt carries the surface back. Adopting any record ends the reads older than it, so a read still in flight never redraws over the receipt a press carried back. A later `card` send naming the same `surfaceId` updates the record rather than adding a second card, so `dedupeCardSendsV1` (`lib/shell/transcript_model.dart`) drops the repeat where the thread is ordered and the card stays where it was first drawn.
 
 ---
 
@@ -1053,7 +1014,7 @@ The selected tab is a Session pointer on the Bot Durable Object (`core/durable/p
 
 `GET /api/bots/:bot/panels/open` answers `PanelOpenView`: the bag, the focus, the focused document and the doors. `GET` and `POST /api/bots/:bot/panels/focus` read and write the pointer. Both slots render as the Bot whose page they are on; `renderView` already carries `botId`.
 
-The Applet product is gone: no `AppletState`, no `applet_*` tools, no account `applets` switch, no `send_to_user` type `applet`, no Composition `applets[]`. `apps/applet-build` still builds Plugins. Disposable storage is dropped once per User and Bot under `maintenance:plugin-panels:2026-09-21` (`apps/cloudflare/src/plugin-panels-cleanup.ts`). Migration `deleted_classes` includes `AppletState`.
+The Applet product is gone: no `AppletState`, no `applet_*` tools, no account `applets` switch, no `send_to_user` type `applet`, no Composition `applets[]`. `apps/applet-build` still builds Plugins. The Package page went with it: no `/api/bots/:bot/package-ui` catalog, no `packages/<hash>.html` object and no `ui.<host>` origin to serve one from, so the app frames no page but the Computer viewer. Disposable storage is dropped once per User and Bot under `maintenance:plugin-panels:2026-09-21` (`apps/cloudflare/src/plugin-panels-cleanup.ts`). Migration `deleted_classes` includes `AppletState`.
 
 ---
 
@@ -1132,22 +1093,22 @@ All from `computer/`; neither implementation registers one.
 
 Bindings are declared in `apps/cloudflare/wrangler.jsonc`.
 
-| Binding                       | Kind               | Contents                                                                                                                                                                                                                                                               |
-| ----------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `USER_APPLICATIONS` (:28)     | Worker Loader      | The per-user foundation application artifact, loaded by the gateway (`apps/cloudflare/src/index.ts:2421`)                                                                                                                                                              |
-| `BOT_PACKAGES` (:34)          | Worker Loader      | The per-User Plugin worker, whose `globalOutbound` is the `PluginEgress` loopback, or disabled when no enabled Plugin declared network (`app/isolates/bot.ts:150-184`)                                                                                                 |
-| `COMPUTER_HOST` (:45)         | Service            | `frockbot-computer-host` (`apps/cloudflare/src/computer-host.ts:61-67`)                                                                                                                                                                                                |
-| `APPLET_BUILD` (:53)          | Service            | `frockbot-applet-build`, the Plugin build service in `apps/applet-build`: it type-checks, lints, bundles and boots a Plugin's source and returns the artifacts (`app/plugins/authoring-bot.ts:52-60`)                                                                  |
-| `APPLICATION_ARTIFACTS` (:59) | R2                 | Content-addressed: application artifacts (`applications/<hash>.mjs`, uploaded by the release workflows), Plugin artifacts (`packages/<hash>.mjs`), exported Bot templates (`templates/<hash>.json`) and the UI pages the artifact host serves (`packages/<hash>.html`) |
-| `MEMORY_FILES` (:62)          | R2                 | Memory and workspace file bodies (`apps/cloudflare/src/workspace.ts:131`, `:206`)                                                                                                                                                                                      |
-| `AUTH_DB` (:67)               | D1 `frockbot-auth` | better-auth only                                                                                                                                                                                                                                                       |
-| `MEMORY_INDEX` (:73)          | Vectorize          | Memory embeddings: upserted and deleted by the Memory drain (`app/memory/processing.ts`), deleted with the Bot (`bot-state.ts:1225-1260`), queried for semantic recall (`bot-state.ts:1148-1160`, `app/memory/semantic.ts`)                                            |
-| `AI` (:78)                    | Workers AI         | Frock AI gateway transport and image generation                                                                                                                                                                                                                        |
-| `BOT_STATES` (:83)            | Durable Object     | `BotState` (§2)                                                                                                                                                                                                                                                        |
-| `USER_CONFIGURATIONS` (:87)   | Durable Object     | `UserConfiguration` (§2)                                                                                                                                                                                                                                               |
-| `DEPLOYMENT_POLICY` (:91)     | Durable Object     | `DeploymentPolicy` (§2)                                                                                                                                                                                                                                                |
-| `VOICE_ASSISTANTS` (:97)      | Durable Object     | `VoiceAssistant` (§2)                                                                                                                                                                                                                                                  |
-| `GROUP_CHATS` (:102)          | Durable Object     | `GroupChat` (§2)                                                                                                                                                                                                                                                       |
+| Binding                       | Kind               | Contents                                                                                                                                                                                                                                                                                                                                                         |
+| ----------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `USER_APPLICATIONS` (:28)     | Worker Loader      | The per-user foundation application artifact, loaded by the gateway (`apps/cloudflare/src/index.ts:2357`)                                                                                                                                                                                                                                                        |
+| `BOT_PACKAGES` (:34)          | Worker Loader      | The per-User Plugin worker, whose `globalOutbound` is the `PluginEgress` loopback, or disabled when no enabled Plugin declared network (`app/isolates/bot.ts:150-184`)                                                                                                                                                                                           |
+| `COMPUTER_HOST` (:45)         | Service            | `frockbot-computer-host` (`apps/cloudflare/src/computer-host.ts:61-67`)                                                                                                                                                                                                                                                                                          |
+| `APPLET_BUILD` (:53)          | Service            | `frockbot-applet-build`, the Plugin build service in `apps/applet-build`: it type-checks, lints, bundles and boots a Plugin's source and returns the artifacts (`app/plugins/authoring-bot.ts:52-60`)                                                                                                                                                            |
+| `APPLICATION_ARTIFACTS` (:59) | R2                 | Content-addressed: application artifacts (`applications/<hash>.mjs`, uploaded by the release workflows), Plugin artifacts (`packages/<hash>.mjs`, written by Plugin authoring in `app/plugins/authoring-bot.ts` and read hash-verified by `createR2PackageArtifactStore` in `app/isolates/capabilities.ts`) and exported Bot templates (`templates/<hash>.json`) |
+| `MEMORY_FILES` (:62)          | R2                 | Memory and workspace file bodies (`apps/cloudflare/src/workspace.ts:130`, `:186`)                                                                                                                                                                                                                                                                                |
+| `AUTH_DB` (:67)               | D1 `frockbot-auth` | better-auth only                                                                                                                                                                                                                                                                                                                                                 |
+| `MEMORY_INDEX` (:73)          | Vectorize          | Memory embeddings: upserted and deleted by the Memory drain (`app/memory/processing.ts`), deleted with the Bot (`bot-state.ts:1214-1249`), queried for semantic recall (`bot-state.ts:1137-1149`, `app/memory/semantic.ts`)                                                                                                                                      |
+| `AI` (:78)                    | Workers AI         | Frock AI gateway transport and image generation                                                                                                                                                                                                                                                                                                                  |
+| `BOT_STATES` (:83)            | Durable Object     | `BotState` (§2)                                                                                                                                                                                                                                                                                                                                                  |
+| `USER_CONFIGURATIONS` (:87)   | Durable Object     | `UserConfiguration` (§2)                                                                                                                                                                                                                                                                                                                                         |
+| `DEPLOYMENT_POLICY` (:91)     | Durable Object     | `DeploymentPolicy` (§2)                                                                                                                                                                                                                                                                                                                                          |
+| `VOICE_ASSISTANTS` (:97)      | Durable Object     | `VoiceAssistant` (§2)                                                                                                                                                                                                                                                                                                                                            |
+| `GROUP_CHATS` (:102)          | Durable Object     | `GroupChat` (§2)                                                                                                                                                                                                                                                                                                                                                 |
 
 D1 schema: `apps/cloudflare/migrations/` holds `0001_better_auth.sql`, defining `user`, `session`, `account` and `verification` with their indexes, and `0002_drop_account_issuer.sql`, which removes the `account.issuer` column and its unique index — better-auth wrote that column through 1.7.2 only, and from 1.7.3 refuses every `/api/auth/*` request while a column it never writes is `not null`. All other product state lives in Durable Objects.
 
@@ -1155,7 +1116,7 @@ Durable Object state is key-value unless a store owns tables. SQLite tables are 
 
 Not used anywhere in the repository: KV namespaces, Queues, Workflows, Hyperdrive, Browser Rendering, Analytics Engine, Pipelines. Containers appear only in `apps/computer-host`.
 
-Top-level vars: `NATIVE_SLICE_2_AUTH`, `DEFAULT_APPLICATION_HASH`, `FROCK_AI_GATEWAY_ID`, `FROCK_AI_ACCOUNT_ID`, `FROCK_AI_AUTO_ROUTE`, `UI_ARTIFACT_HOSTS`. `ALLOWED_CLIENT_ORIGINS` is read but set nowhere: the web app is same-origin and the Flutter app sends no `Origin`.
+Top-level vars: `NATIVE_SLICE_2_AUTH`, `DEFAULT_APPLICATION_HASH`, `FROCK_AI_GATEWAY_ID`, `FROCK_AI_ACCOUNT_ID`, `FROCK_AI_AUTO_ROUTE`. `ALLOWED_CLIENT_ORIGINS` is read but set nowhere: the web app is same-origin and the Flutter app sends no `Origin`.
 
 Secrets are declared in `apps/cloudflare/src/production-secrets.ts`, where a required secret may belong to one auth Package: the hosted build requires `BETTER_AUTH_*` and `GOOGLE_*`, and an Access build requires `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` instead. Required of the hosted build: `BETTER_AUTH_URL`, `BETTER_AUTH_SECRET`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `SPRITES_TOKEN`, `COMPUTER_HOST_TOKEN`, `CREDENTIAL_KEYRING`, `ROUTINE_HOOK_SECRET`, `MACHINE_TOKEN_SECRET`, `APPLET_BUILD_TOKEN`, `OPENAI_API_KEY` (composer dictation), `GEMINI_API_KEY` (the voice session). Optional: `FROCKBOT_ADMIN_EMAILS`, `DEBUG_TOKEN`, `COMPOSIO_API_KEY` (Connected apps, §8), `COMPOSIO_WEBHOOK_SECRET` (Connected-app Routine events, §8), `FROCK_AI_GATEWAY_TOKEN`, `JEV_API_KEY` (hosted turn supervision, routine-event rejector, dictation tidy review). `VOICE_ASSISTANT_MODEL` and `VOICE_DICTATION_CLEANUP_MODEL` are optional vars; `VOICE_DICTATION_UPSTREAM_URL` and `VOICE_ASSISTANT_UPSTREAM_URL` are harness-only doors the release gate refuses to find live.
 
@@ -1188,9 +1149,9 @@ Afterwards, every request carrying that bearer passes the compatibility gate —
 
 The singleton `DeploymentPolicy` owns beta access. [`beta-access.md`](beta-access.md) defines the admission rule, admin and development exceptions, enforcement paths, refusal responses and release procedure. Its administration is `app/admin/operations.ts`, mounted by `AdminEntrypoint` and reached only by the admin portal over a service binding (§1); `createDeploymentPolicyAdminHost` adapts the Durable Object RPC results for both production and the Worker fixture.
 
-Applets are off for every account until an admin turns them on. The switch is the account's `UserFeaturesV1` record (`app/admin/shared.ts`), held by the User Durable Object under `user:features:v1` and read and written by RPCs that never pin the identity, so an admin can set it for an account that has no access without admitting that account. `AdminEntrypoint` lists accounts from the Better Auth `user` table and writes one account's features; the operator surface writes the same record under the deployment's debug token, which is how a deployment with no portal turns the feature on. Each account's features are read from its own User Durable Object, so one failed read marks that account `{ unavailable: true }` in `AdminUserListViewV1` rather than failing the list or reporting the default: the portal shows that account as unreadable and never as off, and every other account stays usable. Off means silence everywhere the feature shows: the Bot object mounts no `applet_*` tools and resolves the account's Applets to no Composition members (`app/applets-host/bot.ts`, `appletsRuntimeHost` and `appletsEnabled`), the package-ui projection omits the Package that declares the Applet focus tool so the client draws no canvas or picker (`app/skills/bot.ts`, `listPackageUi`), the managed Applets Skill is withheld from the Turn's catalog and the composer's list (`app/skills/bot.ts`, `createBotSkillsHost` and `listSkills`, through `SkillsRuntimeHostV1.withheldManagedSlugs`), and the User-scoped Applet RPCs on `UserBotState` refuse. The Applets a User already holds keep their data and return at the first Turn after the switch goes back on. The same record carries the account's two Plugin fields (ADR 0026): `pluginAuthoring`, the admin-held gate on a Bot writing Plugins, and `plugins`, the admin-gated seeded Plugins opened for this account that §5 reconciles into its Composition. Both arrived after the record did, so a record written without them reads as closed and none opened.
+An account's features are its `UserFeaturesV1` record (`app/admin/shared.ts`), held by the User Durable Object under `user:features:v1` and read and written by RPCs that never pin the identity, so an admin can set it for an account that has no access without admitting that account. It carries the account's two Plugin fields (ADR 0026): `pluginAuthoring`, the admin-held gate on a Bot writing Plugins, and `plugins`, the admin-gated seeded Plugins opened for this account that §5 reconciles into its Composition. A record written without them reads as closed and none opened. `AdminEntrypoint` lists accounts from the Better Auth `user` table and writes one account's features; the operator surface writes the same record under the deployment's debug token, which is how a deployment with no portal turns them on. Each account's features are read from its own User Durable Object, so one failed read marks that account `{ unavailable: true }` in `AdminUserListViewV1` rather than failing the list or reporting the default: the portal shows that account as unreadable and never as off, and every other account stays usable.
 
-`ALLOW_DEVELOPMENT_AUTH` enables an identity bypass: `?as_user=` is accepted and persisted as the `frockbot_dev_user` cookie (`gateway.ts:342-362`, `:673-681`). Its admission exception is described in [`beta-access.md`](beta-access.md#where-it-is-asked). `admin-identities.ts:20-21` treats the id `development` as admin unconditionally, and `:27` treats any development identity as admin when `FROCKBOT_ADMIN_EMAILS` is empty.
+`ALLOW_DEVELOPMENT_AUTH` enables an identity bypass: `?as_user=` is accepted and persisted as the `frockbot_dev_user` cookie (`gateway.ts:115-136`, `:250-256`). Its admission exception is described in [`beta-access.md`](beta-access.md#where-it-is-asked). `admin-identities.ts:20-21` treats the id `development` as admin unconditionally, and `:27` treats any development identity as admin when `FROCKBOT_ADMIN_EMAILS` is empty.
 
 ---
 

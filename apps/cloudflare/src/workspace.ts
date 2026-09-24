@@ -17,7 +17,6 @@
 import type {
   WorkspaceFilesV1,
   WorkspaceGenerationsV1,
-  WorkspaceRootV1,
 } from "@frockbot/core/contracts";
 import {
   createObjectWorkspaceFilesV1,
@@ -161,25 +160,6 @@ async function deleteObjectPrefixV1(
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor !== undefined);
   return removed;
-}
-
-/**
- * One deleted Applet's source, removed from the bucket: the objects under
- * `applets/source/<appletId>/` in the User's Package-declared root, conflict
- * copies included. The root is the User's and holds every other Applet, so
- * the prefix is the Applet's directory, trailing slash and all, and never the
- * root. Idempotent, like the Applet's own state deletion it runs beside.
- */
-export async function deleteAppletSourceV1(
-  env: WorkspaceStoreEnv,
-  input: { root: WorkspaceRootV1; appletPrefix: string },
-): Promise<number> {
-  const bucket = env.MEMORY_FILES;
-  if (!bucket) return 0;
-  return deleteObjectPrefixV1(
-    createR2ObjectBucketV1(bucket),
-    `${workspaceObjectPrefixV1(input.root)}${input.appletPrefix}`,
-  );
 }
 
 /**

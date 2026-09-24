@@ -16,7 +16,7 @@ export interface AuthoringSourceFileV1 {
 
 export interface AuthoringSourcePolicyV1 {
   /** Used in failures a Bot or operator acts on. */
-  artifactName: "Applet" | "Plugin";
+  artifactName: string;
   root: WorkspaceRootV1;
   /** A validated directory prefix with a trailing slash. */
   sourcePath(artifactId: string): string;
@@ -24,7 +24,7 @@ export interface AuthoringSourcePolicyV1 {
   sourceFilePath(artifactId: string, path: string): WorkspacePathV1;
   sourceMediaType(path: string): string;
   emptySourceFailure(artifactId: string): string;
-  /** Plugins reject malformed UTF-8; Applets preserve their existing replacement behavior. */
+  /** How stored bytes become source text; Plugins reject malformed UTF-8. */
   textDecoder: TextDecoder;
 }
 
@@ -45,10 +45,10 @@ export interface AuthoringSourceRepositoryV1 {
 }
 
 /**
- * Source persistence shared by Bot-authored Applets and Plugins.
+ * Source persistence for Bot-authored Plugins.
  *
- * This stops at the build boundary. What each product builds, hashes, stores,
- * approves, and activates is different policy and remains in its own host.
+ * This stops at the build boundary. What is built, hashed, stored, approved
+ * and activated is the Plugin host's policy and remains there.
  */
 export function createAuthoringSourceRepositoryV1(
   workspace: WorkspaceFilesV1,

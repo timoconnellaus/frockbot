@@ -257,7 +257,7 @@ export function assessCompactionV1(input: {
  *
  * The identifier rule is the one artifact worth carrying over verbatim from
  * the design this replaces, and FrockBot's stakes are higher than a chat app's:
- * a paraphrased Package id, Applet id, Session id or Workspace path becomes a
+ * a paraphrased Package id, Plugin id, Session id or Workspace path becomes a
  * later tool call with a plausible-looking wrong argument. Asking the model to
  * *list* what it saw is a far stronger constraint than asking it not to mangle
  * ids in passing, and the list is what the event stores.
@@ -265,7 +265,7 @@ export function assessCompactionV1(input: {
 export const COMPACTION_SYSTEM_PROMPT_V1 = [
   "You are compressing the earlier part of a conversation so it can be carried forward in a smaller prompt.",
   "",
-  "CRITICAL: You MUST preserve ALL opaque identifiers exactly as they appear. That includes UUIDs, hashes, full URLs with their query parameters, file and Workspace paths, Package ids, Applet ids, Bot ids, Session ids, tool call ids, model names and version strings. Do NOT paraphrase, abbreviate, or generalise an identifier. Copy it exactly.",
+  "CRITICAL: You MUST preserve ALL opaque identifiers exactly as they appear. That includes UUIDs, hashes, full URLs with their query parameters, file and Workspace paths, Package ids, Plugin ids, Bot ids, Session ids, tool call ids, model names and version strings. Do NOT paraphrase, abbreviate, or generalise an identifier. Copy it exactly.",
   "",
   "Put the gist in `summary`, decisions and their reasons in `decisions`, pending work in `openItems`, and every opaque identifier copied exactly in `identifiers`. Keep only the latest decision where one superseded another.",
   "",

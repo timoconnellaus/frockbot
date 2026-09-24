@@ -23,7 +23,6 @@ import {
   revertUserCompositionV1,
 } from "@frockbot/app/composition/bot";
 import type { ShellBotStateV1 } from "./backend-state.js";
-import type { PackageIframeCompositionV1 } from "@frockbot/core/contracts";
 import type {
   CompositionFailureV1,
   CompositionQuarantineV1,
@@ -43,16 +42,6 @@ import type {
 export type CompositionMemberSourceReaderV1 = (
   member: CompositionMemberV1,
 ) => Promise<string | undefined>;
-
-/**
- * First-party package iframe pages. With Applets deleted (ADR 0034) there are
- * no first-party pages; this returns an empty contribution list.
- */
-export function projectFirstPartyPackageIframeV1(
-  botId: string,
-): PackageIframeCompositionV1 {
-  return { schemaVersion: 1, botId, contributions: [] };
-}
 
 function provenanceView(
   member: CompositionMemberV1,

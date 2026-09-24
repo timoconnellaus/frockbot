@@ -673,9 +673,8 @@ export async function startHarness(
   options: HarnessOptions,
 ): Promise<RunningHarness> {
   // Named by port rather than random, so a spec that must seed object storage
-  // while the Worker runs — an Applet's built `dist/`, which only a Computer
-  // writes in production — can find the same directory from
-  // `FROCKBOT_E2E_PORT` (see `e2ePersistDirectory`). Still fresh per run.
+  // while the Worker runs can find the same directory from `FROCKBOT_E2E_PORT`
+  // (see `e2ePersistDirectory`). Still fresh per run.
   const persistDirectory = e2ePersistDirectory(options.port);
   await rm(persistDirectory, { recursive: true, force: true });
   await mkdir(persistDirectory, { recursive: true });

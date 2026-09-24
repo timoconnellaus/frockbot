@@ -1135,18 +1135,11 @@ describe("client run protocol v1", () => {
     );
   });
 
-  test.each([
-    ["applet_publish", "owner.applet-one", undefined],
-    ["applet_write_file", "owner.applet-two", undefined],
-    ["applet_check", "../invalid", undefined],
-    ["applet_check", 42, undefined],
-    ["computer_exec", "owner.applet-one", undefined],
-    ["applet_create", "owner.applet-one", undefined],
-  ])(
-    "projects no Applet attribution after ADR 0034 for %s (%s)",
-    (toolName, appletId, argumentsJson) => {
+  test.each(["computer_exec", "plugin_write_file"])(
+    "keeps first-party arguments inside the Bot for %s",
+    (toolName) => {
       const projected = projectClientTurnV1({
-        runId: "run-applet-attribution",
+        runId: "run-first-party-arguments",
         text: "",
         events: [
           event({
@@ -1161,7 +1154,6 @@ describe("client run protocol v1", () => {
               namespace: "frockbot",
               toolName,
               arguments: {
-                appletId,
                 text: "private-source",
                 command: "private-command",
               },
@@ -1174,11 +1166,7 @@ describe("client run protocol v1", () => {
         call: {
           id: "tool-1",
           name: "call_dynamic_tool",
-          input: {
-            namespace: "frockbot",
-            toolName,
-            ...(argumentsJson === undefined ? {} : { argumentsJson }),
-          },
+          input: { namespace: "frockbot", toolName },
         },
       });
       expect(JSON.stringify(projected)).not.toContain("private-");

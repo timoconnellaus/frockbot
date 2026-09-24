@@ -1,6 +1,6 @@
 /// One user-facing send, drawn in the thread on the Bot's side.
 ///
-/// Three payloads are drawn here now: `text`, the Applet embed, and a Card.
+/// Two payloads are drawn here now: `text` and a Card.
 /// A card is an A2UI surface, drawn by the renderer in `../cards/` from the
 /// two catalogs this build compiled in. The surface is durable and read over
 /// REST, so the card in the thread is the surface as it stands; a later send
@@ -71,8 +71,6 @@ class SendPayloadView extends StatelessWidget {
           text: '${payload['text'] ?? ''}',
           onOpenLink: onOpenLink,
         );
-      case 'applet':
-        return const _Unsupported();
       case 'card':
         final surfaceId = payload['surfaceId'];
         if (surfaceId is! String || surfaceId.isEmpty) {

@@ -1,22 +1,17 @@
 import { sentTextV1 } from "./sent-text.js";
-import type {
-  AgentEffectAdmission,
-  AgentHandle,
-} from "@frockbot/core/agent-loop/agent";
+import type { AgentHandle } from "@frockbot/core/agent-loop/agent";
 import {
   type PersistSessionEvents,
   type SessionEvent,
   type SkillRefV1,
   turnFailureMessage,
   type TurnTypeV1,
-  validateToolOccurrenceJournal,
 } from "@frockbot/core/contracts";
 import type { ShellMountedComposition } from "./backend-composition.js";
 import {
   BotTurnExecutionError,
   BotTurnRecoveryRequiredError,
 } from "@frockbot/core/durable";
-import { frockbotToolCallV1 } from "@frockbot/core/tools";
 import type { BotTurnCommand, BotTurnCompletion } from "./backend-contracts.js";
 import {
   compactionInFlightV1,
@@ -137,187 +132,6 @@ export interface ExecuteBotTurnOptions {
    * here, including events appended while the Session was mounted.
    */
   suffixStartSeq?: number;
-}
-
-export interface ExecuteDirectToolTurnOptions {
-  command: BotTurnCommand & {
-    directTool: NonNullable<BotTurnCommand["directTool"]>;
-  };
-  composition: ShellMountedComposition;
-  admitEffect(effect: AgentEffectAdmission): Promise<boolean>;
-  signal: AbortSignal;
-  /** @see ExecuteBotTurnOptions.suffixStartSeq */
-  suffixStartSeq?: number;
-}
-
-/**
- * Runs a Package-page tool as one ordinary durable Turn, without a model call.
- * The same Session journal and effect fence make retry/recovery identical to a
- * model-selected tool occurrence.
- */
-export async function executeDirectToolTurn(
-  options: ExecuteDirectToolTurnOptions,
-): Promise<BotTurnCompletion> {
-  const { command, composition, admitEffect, signal } = options;
-  const session = composition.runtime.agent.agent.session;
-  const seededCount = session.activeRunJournal.length;
-  // The tool the page names is a registered first-party tool, called by its
-  // discovered namespace: the same registry, guards and durable
-  // occurrence a model-selected call goes through.
-  const call = frockbotToolCallV1({
-    id: command.runId,
-    name: command.directTool.name,
-    input: command.directTool.input,
-  });
-  try {
-    let turnStart = [...session.activeRunJournal].findLast(
-      (event) =>
-        event.type === "turn/start" &&
-        !session.activeRunJournal.some(
-          (candidate) =>
-            candidate.type === "turn/end" && candidate.turn === event.turn,
-        ),
-    );
-    if (!turnStart || turnStart.type !== "turn/start") {
-      const turn = session.nextTurn();
-      const messageId = `iframe:${command.runId}`;
-      session.appendBatch([
-        { type: "input/queued", messageId, text: command.text },
-        { type: "turn/start", turn },
-        {
-          type: "composition/pinned",
-          turn,
-          generationId: composition.generation.generationId,
-          artifactSetHash: composition.generation.artifactSetHash,
-        },
-        { type: "turn/admission", turn, turnType: "chat" },
-        { type: "input/admitted", messageId, turn },
-        { type: "step/start", turn, step: 1 },
-        { type: "user/message", turn, step: 1, messageId, text: command.text },
-        {
-          type: "assistant/message",
-          turn,
-          step: 1,
-          requestId: `iframe:${command.runId}`,
-          text: "",
-          toolCalls: [call],
-        },
-      ]);
-      await session.flush();
-      turnStart = session.activeRunJournal.findLast(
-        (event) => event.type === "turn/start" && event.turn === turn,
-      );
-    }
-    if (!turnStart || turnStart.type !== "turn/start") {
-      throw new Error("Package UI tool Turn has no durable start");
-    }
-    const turn = turnStart.turn;
-    const occurrenceId = `tool:${turn}:1:0`;
-    const journal = validateToolOccurrenceJournal(session.activeRunJournal);
-    const existing = journal.get(occurrenceId);
-    if (!existing) throw new Error("Package UI tool occurrence is unavailable");
-
-    if (!existing.result) {
-      const context = {
-        botId: composition.runtime.agent.agent.botId,
-        agentId: composition.runtime.agent.agent.id,
-        sessionId: command.sessionId,
-        compositionGenerationId: composition.generation.generationId,
-        effectId: occurrenceId,
-        toolCall: call,
-        turnType: "chat" as const,
-        signal,
-      };
-      const preparation = await composition.runtime.services.tools.prepare(
-        call,
-        context,
-      );
-      let result;
-      if (!existing.intent) {
-        session.append({
-          type: "tool/call",
-          turn,
-          step: 1,
-          occurrenceId,
-          name: call.name,
-          input: call.input,
-        });
-        await session.flush();
-      }
-      if (preparation.kind === "denied") {
-        result = preparation.result;
-      } else {
-        // Admission is keyed by effect id, so a call the object had already
-        // started is fenced by a later Stop exactly as a new one is.
-        if (!(await admitEffect({ kind: "tool", effectId: occurrenceId }))) {
-          session.appendBatch([
-            {
-              type: "tool/result",
-              turn,
-              step: 1,
-              occurrenceId,
-              name: call.name,
-              content: "Cancelled before tool execution started.",
-              isError: true,
-              status: "interrupted",
-            },
-            { type: "step/end", turn, step: 1, outcome: "cancelled" },
-            { type: "turn/end", turn, outcome: "cancelled" },
-          ]);
-          await session.flush();
-          throw new Error("Package UI tool effect was fenced by Stop");
-        }
-        try {
-          result = await composition.runtime.services.tools.executePrepared(
-            preparation,
-            context,
-          );
-        } catch (error) {
-          if (signal.aborted) throw error;
-          result = {
-            content:
-              error instanceof Error ? error.message : "Tool execution failed",
-            isError: true,
-          };
-        }
-      }
-      session.append({
-        type: "tool/result",
-        turn,
-        step: 1,
-        occurrenceId,
-        name: call.name,
-        content: result.content,
-        isError: result.isError,
-        status: "completed",
-        ...(result.attachments?.length
-          ? { attachments: result.attachments }
-          : {}),
-      });
-      await session.flush();
-    }
-    const hasTerminal = session.activeRunJournal.some(
-      (event) => event.type === "turn/end" && event.turn === turn,
-    );
-    if (!hasTerminal) {
-      session.appendBatch([
-        { type: "step/end", turn, step: 1, outcome: "completed" },
-        { type: "turn/end", turn, outcome: "completed" },
-      ]);
-      await session.flush();
-    }
-    return {
-      runId: command.runId,
-      text: "",
-      events: journalSuffix(
-        seededCount,
-        session.activeRunJournal,
-        options.suffixStartSeq,
-      ),
-    };
-  } finally {
-    await composition.dispose();
-  }
 }
 
 export async function executeBotTurn(
