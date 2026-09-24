@@ -76,7 +76,7 @@ function text(value: unknown): string {
   return typeof value === "string" ? value : "";
 }
 
-interface Check {
+export interface Check {
   name: string;
   /** Absent while the check is still running. */
   conclusion: string;
@@ -88,8 +88,12 @@ interface Check {
  * and the older `StatusContext` has a context and a state. Read both, so a
  * required check reported by either is not silently treated as passing.
  */
-function checksOf(rollup: unknown): Check[] {
-  return list(rollup).map((entry) => {
+export function checksOf(rollup: unknown): Check[] {
+  // Two runs of one workflow on the same head both report — `main-health`
+  // runs on every pull request event — so a later run of a check replaces
+  // an earlier one rather than standing beside it as a second verdict.
+  const latest = new Map<string, { check: Check; startedAt: string }>();
+  for (const entry of list(rollup)) {
     const value = record(entry, "status check");
     const name = text(value.name) || text(value.context) || "unnamed check";
     const conclusion = (
@@ -103,8 +107,12 @@ function checksOf(rollup: unknown): Check[] {
       : conclusion !== "" &&
         conclusion !== "PENDING" &&
         conclusion !== "EXPECTED";
-    return { name, conclusion, complete };
-  });
+    const startedAt = text(value.startedAt);
+    const seen = latest.get(name);
+    if (!seen || startedAt >= seen.startedAt)
+      latest.set(name, { check: { name, conclusion, complete }, startedAt });
+  }
+  return [...latest.values()].map((entry) => entry.check);
 }
 
 export async function pullRequestReport(

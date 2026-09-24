@@ -117,6 +117,33 @@ describe("pull request leg", () => {
     expect(report.summary).toContain("the babysitter merges it");
   });
 
+  test("a later run of a check replaces an earlier one on the same head", async () => {
+    const report = await pullRequestReport(
+      fakeGitHub({
+        pr: {
+          state: "OPEN",
+          statusCheckRollup: [
+            {
+              name: "Set main-health",
+              status: "COMPLETED",
+              conclusion: "SUCCESS",
+              startedAt: "2026-09-24T02:22:05Z",
+            },
+            {
+              name: "Set main-health",
+              status: "COMPLETED",
+              conclusion: "CANCELLED",
+              startedAt: "2026-09-24T02:21:50Z",
+            },
+            { name: "Check", status: "COMPLETED", conclusion: "SUCCESS" },
+          ],
+        },
+      }),
+      128,
+    );
+    expect(report.status).toBe("passed");
+  });
+
   test("a red main-health holds a green pull request without failing it", async () => {
     const report = await pullRequestReport(
       fakeGitHub({

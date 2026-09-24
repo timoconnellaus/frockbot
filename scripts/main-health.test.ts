@@ -114,6 +114,7 @@ describe("main-health workflow", () => {
       pull_request_target: { types: string[] };
     };
     permissions: Record<string, string>;
+    concurrency: { "cancel-in-progress": boolean };
     jobs: {
       status: {
         steps: Array<{
@@ -158,5 +159,11 @@ describe("main-health workflow", () => {
       statuses: "write",
     });
     expect(steps.at(-1)?.run).toBe("bun scripts/main-health.ts $PULL_REQUEST");
+  });
+
+  test("queues runs rather than cancelling one that started", () => {
+    // A started run that is cancelled stands on the pull request as a
+    // cancelled check; a displaced queued run never creates one.
+    expect(workflow.concurrency["cancel-in-progress"]).toBe(false);
   });
 });
