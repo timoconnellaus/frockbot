@@ -567,8 +567,8 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
 
 The thread's rules were ported from the Vue shell without change and with its
 tests, and are unchanged since: a Turn is ordered as a unit by its own user
-message's stamp (`transcript_model.dart`), a message sent while the Bot works
-is drawn greyed until its Turn starts, a draft belongs to the Bot it was typed
+message's stamp (`transcript_model.dart`), a message the person sends is drawn
+at full strength from the moment it is sent, a draft belongs to the Bot it was typed
 for and survives a refusal (`composer.dart`), and readiness and the draft are
 separate questions so Try again works with an empty composer.
 

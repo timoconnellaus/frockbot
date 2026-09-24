@@ -138,18 +138,21 @@ class GroupThreadController extends ChangeNotifier {
     _notify();
   }
 
-  /// Reads everything after the last message this client holds. Serialized,
-  /// so two frames that arrive together read the same page once.
-  Future<void> catchUp() {
+  /// Reads everything after the last message this client holds, or after
+  /// [after] when a gap below that is known. Serialized, so two frames that
+  /// arrive together read the same page once.
+  Future<void> catchUp({int? after}) {
     _catchingUp = _catchingUp.then((_) async {
       if (!ready || _disposed) return;
       try {
         var changed = false;
+        var from = after ?? lastSeq;
         for (;;) {
-          final page = await api.page(groupId, after: lastSeq, limit: 100);
+          final page = await api.page(groupId, after: from, limit: 100);
           _add(page.messages);
           changed = changed || page.messages.any(_changesGroup);
           if (!page.hasMore || page.messages.isEmpty) break;
+          from = page.messages.map((message) => message.seq).reduce(math.max);
         }
         // Who is in the group and what it is called travel as thread lines.
         if (changed) await refreshView();
@@ -203,10 +206,7 @@ class GroupThreadController extends ChangeNotifier {
   Future<void> discard(String commandId) async {
     final submission = _pending(commandId);
     if (submission == null) return;
-    pending = [
-      for (final entry in pending)
-        if (entry.commandId != commandId) entry,
-    ];
+    _retire(commandId);
     if (draft.isEmpty) draft = submission.text;
     await _persist();
     _notify();
@@ -226,31 +226,45 @@ class GroupThreadController extends ChangeNotifier {
         commandId: submission.commandId,
         text: submission.text,
       );
+      final held = lastSeq;
       _add([message]);
-      pending = [
-        for (final entry in pending)
-          if (entry.commandId != submission.commandId) entry,
-      ];
-    } on RequestFailure catch (failure) {
+      _retire(submission.commandId);
+      // The post can answer ahead of the channel. What landed between the last
+      // message held and this one is read now, or the head the channel reports
+      // next would already look caught up.
+      if (message.seq > held + 1) unawaited(catchUp(after: held));
+    } catch (failure) {
+      // The channel may have read the message in while the answer was lost
+      // on the way back; then it arrived, whatever the post says.
+      if (_pending(submission.commandId) != null) {
+        _undelivered(submission, failure);
+      }
+    }
+    await _persist();
+    _notify();
+  }
+
+  void _undelivered(GroupPendingSend submission, Object failure) {
+    if (failure is RequestFailure) {
       error = failure.message;
       if (failure.refused) {
         // The group refused the words themselves; they go back to the draft
         // so the person can change them.
-        pending = [
-          for (final entry in pending)
-            if (entry.commandId != submission.commandId) entry,
-        ];
+        _retire(submission.commandId);
         if (draft.isEmpty) draft = submission.text;
-      } else {
-        _unconfirmed(submission);
+        return;
       }
-    } catch (_) {
-      // An answer this build cannot read says nothing about whether the
-      // message arrived; it waits to be sent again under its own id.
-      _unconfirmed(submission);
     }
-    await _persist();
-    _notify();
+    // Anything short of a refusal says nothing about whether the message
+    // arrived; it waits to be sent again under its own id.
+    _unconfirmed(submission);
+  }
+
+  void _retire(String commandId) {
+    pending = [
+      for (final entry in pending)
+        if (entry.commandId != commandId) entry,
+    ];
   }
 
   void _unconfirmed(GroupPendingSend submission) {
@@ -312,9 +326,29 @@ class GroupThreadController extends ChangeNotifier {
   }
 
   void _add(Iterable<GroupMessage> messages) {
+    final arrived = <String>{};
     for (final message in messages) {
       _messages[message.seq] = message;
+      arrived.add(message.messageId);
     }
+    // The group names the person's message after the command that posted
+    // it, so a send the channel reads in before the post answers stops
+    // standing in for itself at once rather than showing twice.
+    final waiting = <GroupPendingSend>[];
+    var recovered = false;
+    for (final entry in pending) {
+      if (!arrived.contains('u-${entry.commandId}')) {
+        waiting.add(entry);
+      } else if (entry.failed) {
+        recovered = true;
+      }
+    }
+    if (waiting.length == pending.length) return;
+    pending = waiting;
+    // A send marked failed that turns up after all was never lost; only the
+    // answer to it was, so the error that said otherwise goes with it.
+    if (recovered) error = null;
+    unawaited(_persist());
   }
 
   Future<void> _persist() => store.write(

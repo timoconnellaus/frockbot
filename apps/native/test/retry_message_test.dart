@@ -227,7 +227,7 @@ void main() {
       expect(saved['pending'].single['retryOf'], 'original');
       expect(saved['pending'].single['messageRunId'], 'original');
       expect(c.draft, 'Unrelated draft');
-      expect(c.visiblePendingText, isNull);
+      expect(c.visiblePending, isNull);
       expect(
         projectRuns(c.runs).where((l) => l.role == LineRole.user).single.id,
         'original:user',
@@ -304,7 +304,7 @@ void main() {
     addTearDown(c.dispose);
     await c.initialize();
     expect(c.pending.single.retryOf, 'original');
-    expect(c.visiblePendingText, isNull);
+    expect(c.visiblePending, isNull);
     expect(projectRuns(c.runs).where((l) => l.role == LineRole.user).length, 1);
     await c.retryRun('original');
     expect(transport.sent, isEmpty);

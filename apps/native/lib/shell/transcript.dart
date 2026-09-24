@@ -24,10 +24,11 @@ export 'transcript_model.dart';
 class TranscriptView extends StatefulWidget {
   final List<TranscriptLine> lines;
 
-  /// The message the person has sent but the backend has not confirmed. It is
-  /// drawn at the end, from this device's clock, because there is nothing
-  /// durable to order it by yet.
-  final String? pendingText;
+  /// The message the person has sent but the backend has not confirmed, as
+  /// [unconfirmedLine] draws it. It is drawn at the end, because there is
+  /// nothing durable to order it by yet, and offers no message actions: there
+  /// is no Turn yet to open or to mark unread from.
+  final TranscriptLine? pending;
   final bool loading;
 
   /// Whether there is an older page to fetch.
@@ -87,7 +88,7 @@ class TranscriptView extends StatefulWidget {
     required this.onOpenRun,
     required this.storageKey,
     this.tail,
-    this.pendingText,
+    this.pending,
     this.onOpenExchange,
     this.backgroundOf,
     this.primaryOf,
@@ -268,7 +269,6 @@ class _TranscriptViewState extends State<TranscriptView> {
 
   String? focused;
 
-  String? get pendingText => widget.pendingText;
   bool get loading => widget.loading;
   bool get hasEarlier => widget.hasEarlier;
   Future<void> Function({bool older}) get onRefresh => widget.onRefresh;
@@ -357,8 +357,9 @@ class _TranscriptViewState extends State<TranscriptView> {
     // newest first.
     final slots = <_ThreadSlot>[];
     slots.add(const _ThreadSlot('tail', _SlotKind.tail));
-    if (pendingText != null) {
-      slots.add(const _ThreadSlot('row:pending', _SlotKind.pending));
+    final pending = widget.pending;
+    if (pending != null) {
+      slots.add(_ThreadSlot('row:${pending.id}', _SlotKind.line, pending));
     }
     var anyLine = false;
     for (final line in ordered.reversed) {
@@ -379,7 +380,7 @@ class _TranscriptViewState extends State<TranscriptView> {
         if (slot.kind == _SlotKind.line) slot.line!.id,
     };
     probes.removeWhere((id, _) => !drawn.contains(id));
-    if (!anyLine && pendingText == null) {
+    if (!anyLine && pending == null) {
       _slots = const [];
       _rowHeights.clear();
       return loading
@@ -469,13 +470,6 @@ class _TranscriptViewState extends State<TranscriptView> {
                   ),
                 ),
         );
-      case _SlotKind.pending:
-        return _Bubble(
-          id: 'pending',
-          mine: true,
-          pending: true,
-          child: Text(pendingText!),
-        );
       case _SlotKind.earlier:
         return identified(
           ShellIds.transcriptEarlier,
@@ -523,19 +517,16 @@ class _TranscriptViewState extends State<TranscriptView> {
         );
       case _SlotKind.line:
         final line = slot.line!;
+        final actions =
+            line.role == LineRole.system || identical(line, widget.pending)
+            ? null
+            : widget.onMessageActions;
         final row = GestureDetector(
           key: ValueKey('row:${line.id}'),
-          onLongPress:
-              widget.onMessageActions == null || line.role == LineRole.system
+          onLongPress: actions == null ? null : () => actions(line),
+          onSecondaryTapUp: actions == null
               ? null
-              : () => widget.onMessageActions!(line),
-          onSecondaryTapUp:
-              widget.onMessageActions == null || line.role == LineRole.system
-              ? null
-              : (details) => widget.onMessageActions!(
-                  line,
-                  position: details.globalPosition,
-                ),
+              : (details) => actions(line, position: details.globalPosition),
           child: KeyedSubtree(
             key: probes.putIfAbsent(line.id, GlobalKey.new),
             child: _row(context, line)!,
@@ -574,12 +565,7 @@ class _TranscriptViewState extends State<TranscriptView> {
       return _Announcement(text: line.text);
     }
     if (line.role == LineRole.user) {
-      final bubble = _Bubble(
-        id: line.id,
-        mine: true,
-        pending: line.pending,
-        child: Text(line.text),
-      );
+      final bubble = _Bubble(id: line.id, mine: true, child: Text(line.text));
       if (line.notice == null) return bubble;
       // The person's message arrived; it is the reply that did not. So the
       // way out sits where the reply would have been, not on their words.
@@ -597,9 +583,9 @@ class _TranscriptViewState extends State<TranscriptView> {
       );
     }
     if (line.status == LineStatus.streaming && line.empty) {
-      // A running Turn draws nothing in the thread, and neither does a
-      // message waiting behind it: the Bot at the end of the thread is the one
-      // that works, and the greyed message is read at its next step. Only a
+      // A running Turn draws nothing in the thread, and neither does the Turn
+      // of a message waiting behind it: the Bot at the end of the thread is the
+      // one that works, and it reads the waiting message at its next step. Only a
       // Stop the person asked for and is now waiting on earns words.
       if (!line.stopRequested) return null;
       return Padding(
@@ -636,7 +622,6 @@ class _TranscriptViewState extends State<TranscriptView> {
       id: line.id,
       mine: false,
       background: widget.background,
-      pending: line.pending,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -657,7 +642,7 @@ class _TranscriptViewState extends State<TranscriptView> {
   }
 }
 
-enum _SlotKind { tail, pending, line, unread, earlier }
+enum _SlotKind { tail, line, unread, earlier }
 
 class _ThreadSlot {
   final String id;
@@ -765,14 +750,12 @@ class _RenderMeasuredSlot extends RenderProxyBox {
 class _Bubble extends StatelessWidget {
   final String id;
   final bool mine;
-  final bool pending;
   final String? background;
   final Widget child;
   const _Bubble({
     required this.id,
     required this.mine,
     required this.child,
-    this.pending = false,
     this.background,
   });
 
@@ -787,7 +770,7 @@ class _Bubble extends StatelessWidget {
         duration: FrockTheme.motion(context),
         curve: Curves.easeOutCubic,
         builder: (context, value, child) => Opacity(
-          opacity: (pending ? 0.55 : 0.7 + value * 0.3).clamp(0.0, 1.0),
+          opacity: (0.7 + value * 0.3).clamp(0.0, 1.0),
           child: Transform.translate(
             offset: Offset(0, 6 * (1 - value)),
             child: child,

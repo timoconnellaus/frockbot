@@ -141,7 +141,7 @@ void main() {
     },
   );
 
-  // A message sent into a running Turn joins the thread at once, greyed until
+  // A message sent into a running Turn joins the thread at once, queued until
   // the Bot reads it at its next step. The running Turn is untouched: it is
   // still the one a Stop would reach, and it keeps working.
   test('a message sent into a running Turn waits in the thread', () async {
@@ -163,8 +163,13 @@ void main() {
       final lines = projectRuns(controller.runs);
       final waiting = lines.firstWhere((line) => line.text == 'also check B');
       expect(waiting.role, LineRole.user);
-      expect(waiting.pending, isTrue);
-      expect(controller.visiblePendingText, isNull);
+      expect(
+        controller.runs.firstWhere(
+          (run) => run['input'] == 'also check B',
+        )['queued'],
+        isTrue,
+      );
+      expect(controller.visiblePending, isNull);
       expect(controller.runningRunId, 'run-a');
 
       // A refusal takes the row back out: nothing in the thread claims a
@@ -202,9 +207,11 @@ void main() {
       await Future<void>.delayed(Duration.zero);
 
       expect(
-        projectRuns(controller.runs)
-            .firstWhere((line) => line.text == 'second')
-            .pending,
+        projectRuns(controller.runs).map((line) => line.text),
+        contains('second'),
+      );
+      expect(
+        controller.runs.firstWhere((run) => run['input'] == 'second')['queued'],
         isTrue,
       );
     } finally {
