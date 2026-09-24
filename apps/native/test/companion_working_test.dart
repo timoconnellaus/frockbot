@@ -126,6 +126,13 @@ void main() {
       // The header's companion works too, and says so.
       expect(find.bySemanticsLabel('Bot is ready'), findsNothing);
       expect(find.bySemanticsLabel('Bot is working'), findsOneWidget);
+      // Both are this Bot's, so they share its presence.
+      expect(
+        tester
+            .widgetList<CharacterAvatar>(find.byType(CharacterAvatar))
+            .map((avatar) => avatar.botId),
+        everyElement('bot-1'),
+      );
       // One light on one clock: through a whole pass, the Bot in the header
       // and the Bot at the end of the thread shine at the same place.
       final lights = find.byType(WorkingSheen);

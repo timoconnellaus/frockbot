@@ -343,6 +343,11 @@ class _Presence {
 
   bool get greeting => _hovers.isNotEmpty;
 
+  /// Whether a surface has asked the Bot's artboards not to draw: the
+  /// composer's guard in the frames after a tap. Every copy honours it, since
+  /// the pointer that raised it also moves the eyes of every copy.
+  bool get holding => _avatars.any((each) => each._ownHold);
+
   static _Presence attach(String? botId, _CharacterAvatarState avatar) {
     final presence = botId == null
         ? _Presence(null)
@@ -356,7 +361,18 @@ class _Presence {
     hover(avatar, false);
     twitch(avatar, false);
     if (identical(_looker, avatar)) look(avatar, null);
+    if (avatar._ownHold) held();
     if (_avatars.isEmpty && botId != null) _shared.remove(botId);
+  }
+
+  /// A hold began or ended. One that begins stops a moment's wake on every
+  /// copy at once; one that ends draws whatever the eyes were told meanwhile.
+  void held() {
+    _syncAll();
+    if (holding || gaze == null) return;
+    for (final each in [..._avatars]) {
+      each._wake();
+    }
   }
 
   void hover(_CharacterAvatarState avatar, bool hovered) {
@@ -525,14 +541,16 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
     widget.hold?.addListener(_holdChanged);
   }
 
-  bool get _held => widget.hold?.value ?? false;
+  /// The hold this avatar's own surface raised; see [_Presence.holding].
+  bool get _ownHold => widget.hold?.value ?? false;
+  bool get _held => _presence.holding;
 
-  /// A hold that begins stops a moment's wake at once; one that ends draws
-  /// whatever the eyes were told meanwhile.
-  void _holdChanged() {
-    _sync();
-    if (!_held && _presence.gaze != null) _wake();
-  }
+  /// Whether the artboard is held from drawing, by its own surface or by
+  /// another copy's.
+  @visibleForTesting
+  bool get held => _held;
+
+  void _holdChanged() => _presence.held();
 
   /// The surface's pointer moved: the Bot looks there, wherever it is drawn.
   void _gazeChanged() => _presence.look(this, widget.gaze?.value);
@@ -636,11 +654,14 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
     super.deactivate();
   }
 
+  /// Back in the tree, the avatar rejoins the presence; what it shares is
+  /// told in `didChangeDependencies`, which follows once its render object is
+  /// attached again — a greeting reaching a detached artboard would restart
+  /// a ticker nothing disposes.
   @override
   void activate() {
     super.activate();
     _presence = _Presence.attach(widget.botId, this);
-    _share();
   }
 
   /// Tells the Bot's presence what this avatar adds to it: a pointer over it
@@ -989,9 +1010,16 @@ class _WorkingSheenState extends State<WorkingSheen>
     if (MediaQuery.disableAnimationsOf(context)) {
       _ticker.stop();
       _light.value = 0.5;
-    } else if (!_ticker.isActive) {
-      _ticker.start();
+      return;
     }
+    // A sheen that appears mid-pass starts where every other one is, not
+    // off the edge for a frame. Outside a frame there is no frame clock to
+    // read, and the first tick puts it in place.
+    final scheduler = SchedulerBinding.instance;
+    if (scheduler.schedulerPhase != SchedulerPhase.idle) {
+      _light.value = workingSheenAt(scheduler.currentFrameTimeStamp);
+    }
+    if (!_ticker.isActive) _ticker.start();
   }
 
   @override
@@ -1001,35 +1029,39 @@ class _WorkingSheenState extends State<WorkingSheen>
     super.dispose();
   }
 
+  // Its own layer: each frame of a pass repaints the light over this
+  // character, not the header, the thread and the pane around it.
   @override
-  Widget build(BuildContext context) => ValueListenableBuilder<double>(
-    valueListenable: _light,
-    child: widget.child,
-    // Only the light's position changes from frame to frame; while it waits
-    // off the edge nothing is rebuilt at all.
-    builder: (context, at, child) => ShaderMask(
-      blendMode: BlendMode.srcATop,
-      shaderCallback: (bounds) {
-        final across = widget.across;
-        final span = Rect.fromLTWH(
-          bounds.left + across.left * bounds.width,
-          bounds.top + across.top * bounds.height,
-          across.width * bounds.width,
-          across.height * bounds.height,
-        );
-        return LinearGradient(
-          begin: const Alignment(-1, -0.35),
-          end: const Alignment(1, 0.35),
-          colors: const [
-            Color(0x00FFFFFF),
-            Color(0xB3FFFFFF),
-            Color(0x00FFFFFF),
-          ],
-          stops: const [0.38, 0.5, 0.62],
-          transform: _SheenAt((at - 0.5) * span.width),
-        ).createShader(span);
-      },
-      child: child,
+  Widget build(BuildContext context) => RepaintBoundary(
+    child: ValueListenableBuilder<double>(
+      valueListenable: _light,
+      child: widget.child,
+      // Only the light's position changes from frame to frame; while it
+      // waits off the edge nothing is rebuilt at all.
+      builder: (context, at, child) => ShaderMask(
+        blendMode: BlendMode.srcATop,
+        shaderCallback: (bounds) {
+          final across = widget.across;
+          final span = Rect.fromLTWH(
+            bounds.left + across.left * bounds.width,
+            bounds.top + across.top * bounds.height,
+            across.width * bounds.width,
+            across.height * bounds.height,
+          );
+          return LinearGradient(
+            begin: const Alignment(-1, -0.35),
+            end: const Alignment(1, 0.35),
+            colors: const [
+              Color(0x00FFFFFF),
+              Color(0xB3FFFFFF),
+              Color(0x00FFFFFF),
+            ],
+            stops: const [0.38, 0.5, 0.62],
+            transform: _SheenAt((at - 0.5) * span.width),
+          ).createShader(span);
+        },
+        child: child,
+      ),
     ),
   );
 }

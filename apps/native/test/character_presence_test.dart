@@ -8,6 +8,7 @@ import 'package:frockbot_native/groups/faces.dart';
 /// the cropped companion in the header, beside another Bot's sidebar row.
 Widget cast({
   ValueNotifier<Offset?>? gaze,
+  ValueNotifier<bool>? hold,
   bool header = true,
   bool working = false,
   bool headerWorking = false,
@@ -32,6 +33,7 @@ Widget cast({
             cropToInk: true,
             motion: CharacterMotion.quiet,
             gaze: gaze,
+            hold: hold,
             working: headerWorking,
           ),
         const SizedBox(width: 40),
@@ -107,6 +109,32 @@ void main() {
     await tester.pumpWidget(const SizedBox());
   });
 
+  testWidgets('the composer\'s hold keeps every copy of the Bot from drawing', (
+    tester,
+  ) async {
+    // The pointer that moves the header's eyes moves every copy's, so the
+    // guard raised on a tap beside the composer has to reach them all.
+    final hold = ValueNotifier<bool>(false);
+    addTearDown(hold.dispose);
+    await tester.pumpWidget(cast(hold: hold));
+    expect(avatar(tester, 'sidebar').held, isFalse);
+
+    hold.value = true;
+    expect(avatar(tester, 'header').held, isTrue);
+    expect(avatar(tester, 'sidebar').held, isTrue);
+    expect(avatar(tester, 'dog').held, isFalse);
+
+    hold.value = false;
+    expect(avatar(tester, 'sidebar').held, isFalse);
+
+    // A header that goes with its hold still up lets the rest draw again.
+    hold.value = true;
+    await tester.pumpWidget(cast(hold: hold, header: false));
+    expect(avatar(tester, 'sidebar').held, isFalse);
+
+    await tester.pumpWidget(const SizedBox());
+  });
+
   testWidgets('a working Bot holds still, looks ahead and wears the light', (
     tester,
   ) async {
@@ -133,10 +161,6 @@ void main() {
 
   testWidgets('every working light is on the one clock', (tester) async {
     await tester.pumpWidget(cast(working: true, header: false));
-    // The header appears well into the sidebar's pass, as it does when a
-    // conversation is opened on a Bot already working.
-    await tester.pump(const Duration(milliseconds: 170));
-    await tester.pumpWidget(cast(working: true, headerWorking: true));
     final sidebar = find.descendant(
       of: find.byKey(const ValueKey('sidebar')),
       matching: find.byType(WorkingSheen),
@@ -145,6 +169,14 @@ void main() {
       of: find.byKey(const ValueKey('header')),
       matching: find.byType(WorkingSheen),
     );
+    // The header appears part way through the sidebar's pass, as it does
+    // when a conversation is opened on a Bot already working, and its
+    // light is already where the sidebar's is on the frame it appears.
+    while (light(tester, sidebar) < 0.2 || light(tester, sidebar) > 0.8) {
+      await tester.pump(const Duration(milliseconds: 30));
+    }
+    await tester.pumpWidget(cast(working: true, headerWorking: true));
+    expect(light(tester, header), light(tester, sidebar));
     final seen = <double>{};
     for (var at = 0; at < workingSheenCycle.inMilliseconds; at += 60) {
       await tester.pump(const Duration(milliseconds: 60));

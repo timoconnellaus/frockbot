@@ -7,6 +7,7 @@ import 'package:frockbot_native/groups/lines.dart';
 import 'package:frockbot_native/groups/model.dart';
 import 'package:frockbot_native/groups/pane.dart';
 import 'package:frockbot_native/groups/thread.dart';
+import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
 import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/shell/sidebar.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
@@ -310,6 +311,7 @@ void main() {
     Widget sidebar({
       required List<SidebarGroupChat> groups,
       void Function(String)? onSelect,
+      Map<String, wire.UnreadView> unread = const {},
     }) => host(
       ShellSidebar(
         bots: [bot('general', 'General'), bot('xero', 'Xero Books')],
@@ -318,7 +320,7 @@ void main() {
           'general': SidebarProfile(sidebarOrder: 2000),
           'xero': SidebarProfile(sidebarOrder: 3000),
         },
-        unread: const {},
+        unread: unread,
         archived: const {},
         activeBotId: null,
         focusedBotId: null,
@@ -350,27 +352,43 @@ void main() {
       working: working,
     );
 
-    testWidgets('a Bot at work in a group lights the group, not its own row', (
+    testWidgets('a Bot at work lights the conversation it is working in', (
       tester,
     ) async {
-      // Xero is answering in the group; its own chat is quiet. The light is
-      // where the typing is: on the group's row, and not on Xero's.
+      Finder lit(String identifier) => find.descendant(
+        of: byIdentifier(identifier),
+        matching: find.byType(WorkingSheen),
+      );
+      final xeroRow = ShellIds.sidebarBot('xero');
+      final groupRow = GroupIds.row(groupId);
+
+      // Xero is answering in the group while its own chat is quiet: the
+      // light is on the group's row, where the typing is, not on Xero's.
       await tester.pumpWidget(sidebar(groups: [chat(working: true)]));
-      expect(
-        find.descendant(
-          of: byIdentifier(GroupIds.row(groupId)),
-          matching: find.byType(WorkingSheen),
+      expect(lit(groupRow), findsOneWidget);
+      expect(lit(xeroRow), findsNothing);
+
+      // Xero is working in its own chat and the group is quiet: the other
+      // way round.
+      await tester.pumpWidget(
+        sidebar(
+          groups: [chat()],
+          unread: {
+            'xero': wire.UnreadView.fromJson({
+              'schemaVersion': 1,
+              'botId': 'xero',
+              'count': 0,
+              'capped': false,
+              'unread': false,
+              'manuallyUnread': false,
+              'notificationsEnabled': true,
+              'working': true,
+            }),
+          },
         ),
-        findsOneWidget,
       );
-      expect(
-        find.descendant(
-          of: byIdentifier(ShellIds.sidebarBot('xero')),
-          matching: find.byType(WorkingSheen),
-        ),
-        findsNothing,
-      );
-      expect(find.byType(WorkingSheen), findsOneWidget);
+      expect(lit(xeroRow), findsOneWidget);
+      expect(lit(groupRow), findsNothing);
     });
 
     testWidgets('a group is a row among the Bots, in its order', (
