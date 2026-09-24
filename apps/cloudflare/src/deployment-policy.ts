@@ -17,6 +17,13 @@ import {
   type DeploymentPolicyV1,
   type EmailInvitationV1,
 } from "@frockbot/app/admin/shared";
+import {
+  claimTelegramLinkV1,
+  offerTelegramLinkV1,
+  releaseTelegramAccountV1,
+  resolveTelegramAccountV1,
+  type TelegramClaimV1,
+} from "@frockbot/app/telegram/directory";
 import { DurableObject } from "cloudflare:workers";
 import {
   evaluateAdmissionV1,
@@ -35,11 +42,21 @@ import {
   seedHostedModelRatesStorageV1,
   type ModelRatesWriteV1,
 } from "./model-rates.js";
+import {
+  decodeRpcEnvelopeV1,
+  rpcIdentifier,
+  rpcInteger,
+  rpcPattern,
+  rpcString,
+} from "./durable-rpc.js";
 
 const POLICY_KEY = "deployment:admission:v1";
 const ACCESS_PREFIX = "account:access:v1:";
 const INVITATION_PREFIX = "invitation:email:v1:";
 export const DEPLOYMENT_POLICY_SINGLETON_NAME = "frockbot-deployment-policy";
+
+const TELEGRAM_DIGEST = rpcPattern(/^[0-9a-f]{64}$/, 64);
+const TELEGRAM_ID = rpcPattern(/^-?[0-9]{1,20}$/, 21);
 
 /** Written by admission itself, so an audit can tell a sign-in from an admin. */
 export const ADMISSION_UPDATED_BY = "admission";
@@ -106,7 +123,10 @@ function nextRevision(current: number, label: string): number {
  * The deployment's beta-access authority: the admission mode, each account's
  * access record and the email invitations not yet redeemed. It also holds the
  * versioned hosted model rate table (`./model-rates.ts`), which is equally
- * deployment-wide and equally an administrator's to change.
+ * deployment-wide and equally an administrator's to change, and the
+ * deployment's Telegram directory (`app/telegram/directory.ts`), because the
+ * webhook has to learn which User an account speaks for before it may address
+ * any User's object, and this is the one object the whole deployment shares.
  *
  * One object, and every read-decide-write in it is a synchronous storage
  * transaction, so two sign-ins, or a sign-in racing an admin, are serialized
@@ -278,6 +298,79 @@ export class DeploymentPolicy extends DurableObject<Record<string, never>> {
       () =>
         this.evaluateAccount(identity, this.access(identity.userId)).decision,
     );
+  }
+
+  /**
+   * A new Telegram link code for one User, stored as its digest. The gateway
+   * minted it and hands it to the User once; nothing here ever holds it.
+   */
+  async offerTelegramLink(input: unknown): Promise<{ schemaVersion: 1 }> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      codeDigest: TELEGRAM_DIGEST,
+      expiresAt: rpcString(64),
+    });
+    if (!Number.isFinite(Date.parse(request.expiresAt as string))) {
+      throw new Error("RPC request.expiresAt is invalid");
+    }
+    this.ctx.storage.transactionSync(() =>
+      offerTelegramLinkV1(this.kv, {
+        userId: request.userId as string,
+        codeDigest: request.codeDigest as string,
+        expiresAt: request.expiresAt as string,
+      }),
+    );
+    return { schemaVersion: 1 };
+  }
+
+  /** Spend a link code on the Telegram account that sent it to the bot. */
+  async claimTelegramLink(input: unknown): Promise<TelegramClaimV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      codeDigest: TELEGRAM_DIGEST,
+      telegramUserId: TELEGRAM_ID,
+      now: rpcInteger({ minimum: 0, maximum: Number.MAX_SAFE_INTEGER }),
+    });
+    return this.ctx.storage.transactionSync(() =>
+      claimTelegramLinkV1(this.kv, {
+        codeDigest: request.codeDigest as string,
+        telegramUserId: request.telegramUserId as string,
+        now: request.now as number,
+      }),
+    );
+  }
+
+  /** The User a Telegram account speaks for, or `null`. */
+  async resolveTelegramAccount(
+    input: unknown,
+  ): Promise<{ schemaVersion: 1; userId: string | null }> {
+    const request = decodeRpcEnvelopeV1(input, {
+      telegramUserId: TELEGRAM_ID,
+    });
+    return {
+      schemaVersion: 1,
+      userId:
+        resolveTelegramAccountV1(this.kv, request.telegramUserId as string) ??
+        null,
+    };
+  }
+
+  /** Forget an account, only while it still names this User. */
+  async releaseTelegramAccount(
+    input: unknown,
+  ): Promise<{ schemaVersion: 1; released: boolean }> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      telegramUserId: TELEGRAM_ID,
+    });
+    return {
+      schemaVersion: 1,
+      released: this.ctx.storage.transactionSync(() =>
+        releaseTelegramAccountV1(this.kv, {
+          userId: request.userId as string,
+          telegramUserId: request.telegramUserId as string,
+        }),
+      ),
+    };
   }
 
   async mayCreateIdentity(input: unknown): Promise<boolean> {

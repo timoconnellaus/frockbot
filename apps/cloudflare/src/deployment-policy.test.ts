@@ -538,3 +538,65 @@ describe("hosted model rates", () => {
     );
   });
 });
+
+describe("the Telegram directory", () => {
+  const digest = "d".repeat(64);
+  const now = Date.parse("2026-09-24T00:00:00.000Z");
+
+  test("links an account through a code it holds only as a digest", async () => {
+    const { policy, storage } = authority();
+    await policy.offerTelegramLink({
+      schemaVersion: 1,
+      userId: "alice",
+      codeDigest: digest,
+      expiresAt: new Date(now + 60_000).toISOString(),
+    });
+    expect(
+      await policy.claimTelegramLink({
+        schemaVersion: 1,
+        codeDigest: digest,
+        telegramUserId: "4242",
+        now,
+      }),
+    ).toEqual({ status: "claimed", userId: "alice" });
+    expect(
+      await policy.resolveTelegramAccount({
+        schemaVersion: 1,
+        telegramUserId: "4242",
+      }),
+    ).toEqual({ schemaVersion: 1, userId: "alice" });
+    // A restart reads the same directory back.
+    const again = authority(storage).policy;
+    expect(
+      await again.releaseTelegramAccount({
+        schemaVersion: 1,
+        userId: "alice",
+        telegramUserId: "4242",
+      }),
+    ).toEqual({ schemaVersion: 1, released: true });
+    expect(
+      await again.resolveTelegramAccount({
+        schemaVersion: 1,
+        telegramUserId: "4242",
+      }),
+    ).toEqual({ schemaVersion: 1, userId: null });
+  });
+
+  test("refuses a request that is not a digest and an id", async () => {
+    const { policy } = authority();
+    await expect(
+      policy.claimTelegramLink({
+        schemaVersion: 1,
+        codeDigest: "not-a-digest",
+        telegramUserId: "4242",
+        now,
+      }),
+    ).rejects.toThrow();
+    await expect(
+      policy.resolveTelegramAccount({
+        schemaVersion: 1,
+        telegramUserId: "@tim",
+      }),
+    ).rejects.toThrow();
+  });
+});

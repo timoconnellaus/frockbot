@@ -1723,6 +1723,8 @@ jobs:
           BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
           FROCK_AI_GATEWAY_TOKEN: ${{ secrets.FROCK_AI_GATEWAY_TOKEN || secrets.FLOCK_AI_GATEWAY_TOKEN }}
           JEV_API_KEY: ${{ secrets.JEV_API_KEY }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
         shell: bash
         run: |
           missing=()
@@ -1927,6 +1929,10 @@ jobs:
           # Optional: the hosted TurnSupervisor's Jev credential. Absent,
           # the chooser is unavailable.
           JEV_API_KEY: ${{ secrets.JEV_API_KEY }}
+          # Optional: the deployment's Telegram bot and its webhook secret.
+          # Absent, Telegram is off and its settings page says so.
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_WEBHOOK_SECRET: ${{ secrets.TELEGRAM_WEBHOOK_SECRET }}
         shell: bash
         run: |
           secrets_file="$RUNNER_TEMP/frockbot-production.env"

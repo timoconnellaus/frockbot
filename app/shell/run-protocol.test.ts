@@ -588,6 +588,32 @@ describe("client run protocol v1", () => {
     ).toEqual({ kind: "voice" });
   });
 
+  test("marks the person's message as written in Telegram, and nothing more", () => {
+    const written = {
+      ...storedRun([]),
+      admission: {
+        schemaVersion: 1 as const,
+        turnType: "chat" as const,
+        origin: { kind: "telegram" as const, messageId: "12" },
+      },
+    };
+
+    const projected = projectClientRunV1(written);
+    expect(projected).toMatchObject({
+      input: "continue",
+      via: { kind: "telegram" },
+    });
+    // Telegram's message id is how the run was keyed, not something to draw.
+    expect(projected.via).toEqual({ kind: "telegram" });
+    expect(
+      decodeClientRunListV1({
+        schemaVersion: 1,
+        runs: [projected],
+        page: { truncated: false },
+      })[0]?.via,
+    ).toEqual({ kind: "telegram" });
+  });
+
   test("refuses a voice origin marker carrying a Bot's fields", () => {
     const [degraded] = decodeClientRunListV1({
       schemaVersion: 1,

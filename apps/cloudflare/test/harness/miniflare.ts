@@ -552,6 +552,42 @@ async function mcpStub(request: Request, url: URL): Promise<Response> {
 }
 
 /**
+ * The Telegram Bot API, as the gateway and the User object reach it. The
+ * token is what `vitest.integration.config.ts` binds as `TELEGRAM_BOT_TOKEN`;
+ * anything else is refused as the real service would. Every accepted call is
+ * recorded — method and body, never the token — and read back through the
+ * stub origin's `/telegram-calls`, because this handler runs in Node and the
+ * assertions run in workerd.
+ */
+export const TELEGRAM_TEST_BOT_TOKEN = "123456:TESTtokenTESTtokenTESTtoken0123";
+const telegramCalls: { method: string; body: unknown }[] = [];
+
+async function telegramStub(request: Request, url: URL): Promise<Response> {
+  const [, token, method] =
+    /^\/bot([^/]+)\/([A-Za-z]+)$/.exec(url.pathname) ?? [];
+  if (token !== TELEGRAM_TEST_BOT_TOKEN || !method) {
+    return Response.json(
+      { ok: false, error_code: 401, description: "Unauthorized" },
+      { status: 401 },
+    );
+  }
+  let body: unknown;
+  try {
+    body = await request.clone().json();
+  } catch {
+    body = undefined;
+  }
+  telegramCalls.push({ method, body });
+  if (method === "getMe") {
+    return Response.json({
+      ok: true,
+      result: { id: 123456, is_bot: true, username: "frock_test_bot" },
+    });
+  }
+  return Response.json({ ok: true, result: true });
+}
+
+/**
  * The Connected apps provider, as the User and Bot objects reach it. The key
  * is what `vitest.*.config.ts` binds as `COMPOSIO_API_KEY`; anything else is
  * refused as the real service would.
@@ -1026,6 +1062,9 @@ async function webStub(url: URL): Promise<Response> {
   if (url.pathname === "/voice-upstream-upgrades") {
     return Response.json({ upgrades: voiceUpstreamUpgrades });
   }
+  if (url.pathname === "/telegram-calls") {
+    return Response.json({ calls: telegramCalls });
+  }
   if (url.pathname === "/forget-voice-upstream-upgrades") {
     voiceUpstreamUpgrades.length = 0;
     return Response.json({ upgrades: [] });
@@ -1095,6 +1134,9 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
   if (url.origin === MCP_STUB_ORIGIN) return mcpStub(request, url);
   if (url.origin === MCP_AUTH_STUB_ORIGIN) return mcpAuthStub(request, url);
   if (url.origin === BRAVE_STUB_ORIGIN) return braveSearchStub(request, url);
+  if (url.origin === "https://api.telegram.org") {
+    return telegramStub(request, url);
+  }
   if (
     url.origin === "https://auth.x.ai" &&
     url.pathname === "/oauth2/device/code"

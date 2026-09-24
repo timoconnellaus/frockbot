@@ -599,7 +599,30 @@ class _TranscriptViewState extends State<TranscriptView> {
               id: line.id,
               mine: true,
               time: _stamped[line.id],
-              child: Text(line.text),
+              child: line.via == 'telegram'
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(line.text),
+                        const SizedBox(height: 4),
+                        // In the bubble's own ink, quieter: whatever colour the
+                        // person's bubble is, the caption stays readable on it.
+                        Builder(
+                          builder: (context) => Text(
+                            'via Telegram',
+                            style: Theme.of(context).textTheme.labelSmall
+                                ?.copyWith(
+                                  color: DefaultTextStyle.of(context)
+                                      .style
+                                      .color
+                                      ?.withValues(alpha: 0.72),
+                                ),
+                          ),
+                        ),
+                      ],
+                    )
+                  : Text(line.text),
             );
       // The files go above the words, outside the bubble: a picture is its
       // own thing to look at, not a line of text.

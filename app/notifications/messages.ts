@@ -8,8 +8,15 @@ import { BOT_CONFIGURATION_KEY } from "../settings/bot.js";
 import {
   PUSH_OUTBOX_PREFIX,
   sentAutomationRunKeyV1,
+  TELEGRAM_MIRROR_KEY,
+  TELEGRAM_OUTBOX_PREFIX,
   type SentAutomationRunV1,
+  type TelegramOutboxEntryV1,
 } from "./storage-keys.js";
+import {
+  telegramMessageTextV1,
+  telegramMirrorTextV1,
+} from "../telegram/mirror.js";
 import {
   MESSAGE_PREFIX,
   MESSAGE_SEQUENCE_KEY,
@@ -85,6 +92,19 @@ export interface VisibleMessageDraftV1 {
    */
   voice?: boolean;
   /**
+   * Whether the run was asked from Telegram. Its answer is told there, so —
+   * like a voice answer — it counts as unread and wakes no device: a buzz from
+   * the app for the reply the person is reading in Telegram is the same
+   * message twice.
+   */
+  telegram?: boolean;
+  /**
+   * The whole of what was said, when `body` is only its alert preview. The
+   * Telegram chat shows the message itself, so it carries this rather than the
+   * preview's 240 characters.
+   */
+  text?: string;
+  /**
    * The ordinal of a message whose run could not journal a send of its own,
    * because the run had already ended when the message was minted. The
    * transcript projects the run with this send appended at that ordinal, so
@@ -103,6 +123,13 @@ export interface VisibleMessageDraftV1 {
  * kind of message cannot arrive with a badge and no notification, or the other
  * way round. `notifications.enabled` is the mute on *alerting* only: a muted
  * Bot still counts its unread and still writes nothing anyone is woken for.
+ *
+ * It is also where a message is owed to Telegram, for the same reason: while
+ * this Bot is the one the User's Telegram chat talks to, every message the
+ * person could read in the app is committed to that outbox in the same
+ * transaction, so none is mirrored that the conversation does not hold, and
+ * none the conversation holds is missed. A voice answer is the exception, as
+ * it is for push: the person is hearing it.
  */
 export async function visibleMessageRecordsV1(input: {
   settings: BotSettingsViewV1;
@@ -112,6 +139,7 @@ export async function visibleMessageRecordsV1(input: {
   if (!input.messages.length) return {};
   let sequence = (await input.read<number>(MESSAGE_SEQUENCE_KEY)) ?? 0;
   let unread = optionalUnreadStateV1(await input.read(UNREAD_STATE_KEY));
+  const mirrored = (await input.read(TELEGRAM_MIRROR_KEY)) !== undefined;
   const records: Record<string, unknown> = {};
   for (const message of input.messages) {
     const cursor = `message-${String(++sequence).padStart(20, "0")}`;
@@ -122,10 +150,21 @@ export async function visibleMessageRecordsV1(input: {
       createdAt: message.createdAt,
       title: input.settings.profile.name,
       body: message.body,
-      notify: input.settings.notifications.enabled && !message.voice,
+      notify:
+        input.settings.notifications.enabled &&
+        !message.voice &&
+        !message.telegram,
     };
     records[`${MESSAGE_PREFIX}${cursor}`] = notice;
     records[`${PUSH_OUTBOX_PREFIX}${cursor}`] = notice;
+    if (mirrored && !message.voice) {
+      records[`${TELEGRAM_OUTBOX_PREFIX}${cursor}`] = {
+        schemaVersion: 1,
+        cursor,
+        messageId: message.messageId,
+        text: telegramMessageTextV1(message.text ?? message.body),
+      } satisfies TelegramOutboxEntryV1;
+    }
     if (message.automation) {
       records[sentAutomationRunKeyV1(message.runId)] = {
         schemaVersion: 1,
@@ -199,6 +238,7 @@ export async function messageRecords(input: {
   const allSends = allSendsOnRun;
   const automation = input.run.admission?.turnType === "automation";
   const voice = input.run.admission?.origin?.kind === "voice";
+  const telegram = input.run.admission?.origin?.kind === "telegram";
   return visibleMessageRecordsV1({
     settings,
     read: input.read,
@@ -210,8 +250,10 @@ export async function messageRecords(input: {
       runId: input.run.runId,
       createdAt: event.timestamp,
       body: messagePreview(event.payload as unknown as Record<string, unknown>),
+      text: telegramMirrorTextV1(event.payload),
       ...(automation ? { automation: true } : {}),
       ...(voice ? { voice: true } : {}),
+      ...(telegram ? { telegram: true } : {}),
     })),
   });
 }

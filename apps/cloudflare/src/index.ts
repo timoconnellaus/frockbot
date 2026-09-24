@@ -221,6 +221,12 @@ import {
 } from "./deployment-policy.js";
 import { ACCOUNT_ADMISSION_UNAVAILABLE_MESSAGE } from "./account-admission.js";
 import { RoutineHookError } from "@frockbot/app/routines/hook";
+import { telegramPlatformBotV1 } from "@frockbot/app/telegram/backend";
+import { decodeTelegramClaimV1 } from "@frockbot/app/telegram/directory";
+import {
+  decodeTelegramRouteDecisionV1,
+  decodeTelegramStatusViewV1,
+} from "@frockbot/app/telegram/shared";
 import type { ConnectTriggerOfferV1 } from "@frockbot/app/connect/triggers";
 import type { ConnectEventV1 } from "@frockbot/app/connect/events";
 
@@ -321,6 +327,14 @@ interface Env {
   CREDENTIAL_KEYRING?: string;
   /** Signs every Routine webhook key. Absent closes the webhook door. */
   ROUTINE_HOOK_SECRET?: string;
+  /**
+   * The deployment's Telegram bot, from BotFather. With the webhook secret it
+   * is what lets a person talk to their Bots from Telegram; either absent,
+   * Telegram is off and the settings page says so.
+   */
+  TELEGRAM_BOT_TOKEN?: string;
+  /** The secret Telegram echoes on every webhook call: that door's credential. */
+  TELEGRAM_WEBHOOK_SECRET?: string;
   /** The Connected apps provider key. Absent, no app can be connected. */
   COMPOSIO_API_KEY?: string;
   /**
@@ -741,6 +755,10 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
 }
 
 interface DeploymentPolicyRpc {
+  offerTelegramLink(input: unknown): Promise<unknown>;
+  claimTelegramLink(input: unknown): Promise<unknown>;
+  resolveTelegramAccount(input: unknown): Promise<unknown>;
+  releaseTelegramAccount(input: unknown): Promise<unknown>;
   readPolicy(input: unknown): Promise<unknown>;
   setAdmissionMode(input: unknown): Promise<unknown>;
   readAccountAccess(input: unknown): Promise<unknown>;
@@ -982,6 +1000,23 @@ function userMachineStub(env: Env, userId: string): UserMachineRpc {
 interface UserAuditRpc {
   readAuditEntries(input: unknown): Promise<unknown>;
   rebuildAuditIndex(input: unknown): Promise<unknown>;
+}
+
+/** The User Durable Object's Telegram RPCs. */
+interface UserTelegramRpc {
+  readTelegram(input: unknown): Promise<unknown>;
+  completeTelegramLink(input: unknown): Promise<unknown>;
+  dropTelegramLink(input: unknown): Promise<unknown>;
+  unlinkTelegram(input: unknown): Promise<unknown>;
+  selectTelegramBot(input: unknown): Promise<unknown>;
+  routeTelegramMessage(input: unknown): Promise<unknown>;
+}
+
+function userTelegramStub(env: Env, userId: string): UserTelegramRpc {
+  // SAFETY: Wrangler binds USER_CONFIGURATIONS to UserConfiguration; workers-types cannot infer its RPC surface.
+  return env.USER_CONFIGURATIONS.get(
+    env.USER_CONFIGURATIONS.idFromName(userId),
+  ) as unknown as UserTelegramRpc;
 }
 
 function userAuditStub(env: Env, userId: string): UserAuditRpc {
@@ -2227,6 +2262,142 @@ const createGatewayBackendContributions = (env: Env) =>
           }),
         ),
       ),
+    // The platform Telegram bot. The webhook secret is checked at the edge,
+    // before the directory or any User's object is addressed; the token
+    // leaves the Worker only to call Telegram.
+    ...(() => {
+      const telegram = telegramPlatformBotV1(env);
+      return telegram ? { telegram } : {};
+    })(),
+    offerTelegramLink: async (userId, offer) => {
+      await deploymentPolicyStub(env).offerTelegramLink({
+        schemaVersion: 1,
+        userId,
+        codeDigest: offer.codeDigest,
+        expiresAt: offer.expiresAt,
+      });
+    },
+    claimTelegramLink: async (claim) =>
+      decodeTelegramClaimV1(
+        rpcJsonSnapshotV1(
+          await deploymentPolicyStub(env).claimTelegramLink({
+            schemaVersion: 1,
+            ...claim,
+          }),
+        ),
+      ),
+    resolveTelegramAccount: async (telegramUserId) => {
+      const answer = rpcJsonSnapshotV1(
+        await deploymentPolicyStub(env).resolveTelegramAccount({
+          schemaVersion: 1,
+          telegramUserId,
+        }),
+      ) as { userId?: unknown };
+      return typeof answer.userId === "string" ? answer.userId : undefined;
+    },
+    releaseTelegramAccount: async (userId, telegramUserId) => {
+      await deploymentPolicyStub(env).releaseTelegramAccount({
+        schemaVersion: 1,
+        userId,
+        telegramUserId,
+      });
+    },
+    readTelegram: async (userId) =>
+      decodeTelegramStatusViewV1(
+        rpcJsonSnapshotV1(
+          await userTelegramStub(env, userId).readTelegram({
+            schemaVersion: 1,
+            userId,
+          }),
+        ),
+      ),
+    completeTelegramLink: async (userId, account, now) => {
+      const answer = rpcJsonSnapshotV1(
+        await userTelegramStub(env, userId).completeTelegramLink({
+          schemaVersion: 1,
+          userId,
+          account,
+          now,
+        }),
+      ) as { botName?: unknown; previousTelegramUserId?: unknown };
+      return {
+        ...(typeof answer.botName === "string"
+          ? { botName: answer.botName }
+          : {}),
+        ...(typeof answer.previousTelegramUserId === "string"
+          ? { previousTelegramUserId: answer.previousTelegramUserId }
+          : {}),
+      };
+    },
+    dropTelegramLink: async (userId, telegramUserId, claimedAt) => {
+      await userTelegramStub(env, userId).dropTelegramLink({
+        schemaVersion: 1,
+        userId,
+        telegramUserId,
+        claimedAt,
+      });
+    },
+    unlinkTelegram: async (userId) => {
+      const answer = rpcJsonSnapshotV1(
+        await userTelegramStub(env, userId).unlinkTelegram({
+          schemaVersion: 1,
+          userId,
+        }),
+      ) as { telegramUserId?: unknown };
+      return typeof answer.telegramUserId === "string"
+        ? { telegramUserId: answer.telegramUserId }
+        : {};
+    },
+    selectTelegramBot: async (userId, botId) => {
+      const answer = rpcJsonSnapshotV1(
+        await userTelegramStub(env, userId).selectTelegramBot({
+          schemaVersion: 1,
+          userId,
+          botId,
+        }),
+      ) as { status?: unknown; reason?: unknown };
+      return answer.status === "applied"
+        ? { status: "applied" as const }
+        : {
+            status: "rejected" as const,
+            reason:
+              typeof answer.reason === "string"
+                ? answer.reason
+                : "That Bot can’t answer in Telegram.",
+          };
+    },
+    routeTelegramMessage: async (userId, message) =>
+      decodeTelegramRouteDecisionV1(
+        rpcJsonSnapshotV1(
+          await userTelegramStub(env, userId).routeTelegramMessage({
+            schemaVersion: 1,
+            userId,
+            message,
+          }),
+        ),
+      ),
+    admitTelegramTurn: async (userId, botId, command) => {
+      // SAFETY: Wrangler binds BOT_STATES to BotState; this is its reviewed Telegram door.
+      const bot = env.BOT_STATES.get(
+        env.BOT_STATES.idFromName(
+          `${userId}:${decodeBotIdV1(botId, "bot id")}`,
+        ),
+      ) as unknown as { admitTelegramTurn(input: unknown): Promise<unknown> };
+      await bot.admitTelegramTurn({
+        schemaVersion: 1,
+        userId,
+        botId,
+        command: {
+          runId: command.runId,
+          sessionId: `${userId}:${botId}`,
+          acceptedAt: new Date().toISOString(),
+          text: command.text,
+          origin: { kind: "telegram", messageId: command.messageId },
+        },
+      });
+    },
+    telegramAccountRefusal: async (userId) =>
+      (await externalAccountRefusal(env, userId))?.message,
     // The secret the gateway verifies a presented webhook key against. It
     // never leaves the Worker; a Bot only ever sees a digest.
     ...(typeof env.ROUTINE_HOOK_SECRET === "string"

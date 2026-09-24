@@ -327,6 +327,29 @@ describe("foundation application", () => {
       listMachines: () => Promise.reject(new Error("not used while composing")),
       revokeMachine: () =>
         Promise.reject(new Error("not used while composing")),
+      offerTelegramLink: () =>
+        Promise.reject(new Error("not used while composing")),
+      claimTelegramLink: () =>
+        Promise.reject(new Error("not used while composing")),
+      resolveTelegramAccount: () =>
+        Promise.reject(new Error("not used while composing")),
+      releaseTelegramAccount: () =>
+        Promise.reject(new Error("not used while composing")),
+      readTelegram: () => Promise.reject(new Error("not used while composing")),
+      completeTelegramLink: () =>
+        Promise.reject(new Error("not used while composing")),
+      dropTelegramLink: () =>
+        Promise.reject(new Error("not used while composing")),
+      unlinkTelegram: () =>
+        Promise.reject(new Error("not used while composing")),
+      selectTelegramBot: () =>
+        Promise.reject(new Error("not used while composing")),
+      routeTelegramMessage: () =>
+        Promise.reject(new Error("not used while composing")),
+      admitTelegramTurn: () =>
+        Promise.reject(new Error("not used while composing")),
+      telegramAccountRefusal: () =>
+        Promise.reject(new Error("not used while composing")),
       readTask: () => Promise.reject(new Error("not used while composing")),
       stopTask: () => Promise.reject(new Error("not used while composing")),
     });
@@ -346,6 +369,7 @@ describe("foundation application", () => {
       "search",
       "settings",
       "subagents",
+      "telegram",
       "user-machine",
     ]);
     interface TestContribution {
