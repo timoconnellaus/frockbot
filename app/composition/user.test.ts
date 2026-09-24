@@ -169,6 +169,52 @@ describe("reconciling the deployment's catalog into a User's Composition", () =>
     ).toBeUndefined();
   });
 
+  test("a page the catalog moved on reaches the next read, at the same module", async () => {
+    const withPage = (pageHash: string): SeededPluginV1 => {
+      const plugin = seeded("strobe");
+      return decodeSeededPluginV1({
+        ...plugin,
+        descriptor: {
+          ...plugin.descriptor,
+          views: [
+            {
+              slot: "conversation.panel",
+              surfaceId: "strobe",
+              label: "Strobe",
+              page: "strobe.html",
+            },
+          ],
+        },
+        pages: [{ path: "strobe.html", contentHash: pageHash, size: 3 }],
+      });
+    };
+    const subject = store();
+    await reconcileSeededCompositionV1({
+      store: subject,
+      userId: "user-1",
+      seeded: [withPage("b".repeat(64))],
+      now: new Date("2026-09-24T00:00:00.000Z"),
+    });
+    // Only the page changed: the module and descriptor an account carries are
+    // the ones it will keep, so the page alone has to move it.
+    const moved = await reconcileSeededCompositionV1({
+      store: subject,
+      userId: "user-1",
+      seeded: [withPage("c".repeat(64))],
+      now: new Date("2026-09-24T00:01:00.000Z"),
+    });
+    expect(moved!.members[0]!.pages).toEqual([
+      { path: "strobe.html", contentHash: "c".repeat(64), size: 3 },
+    ]);
+    expect(
+      await reconcileSeededCompositionV1({
+        store: subject,
+        userId: "user-1",
+        seeded: [withPage("c".repeat(64))],
+      }),
+    ).toBeUndefined();
+  });
+
   test("keeps what a Bot wrote beside the seeded set", async () => {
     const subject = store();
     const bootstrap = await subject.current();

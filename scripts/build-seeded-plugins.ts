@@ -11,6 +11,8 @@
 //
 //   plugin.json   the descriptor, minus its Skills
 //   plugin.ts     the module, written against `@frockbot/applet-sdk/plugin`
+//   *.html        the pages its `conversation.panel` views name, stored with
+//                 the bridge helper injected exactly as a publish stores one
 //   SKILL.md      optional: the Skill it ships, spliced into the descriptor as
 //                 `skills[0]` so the authored Markdown stays Markdown, with
 //                 optional `references/*.md` loaded on their own by
@@ -33,7 +35,10 @@ import { existsSync, readdirSync } from "node:fs";
 import { format } from "prettier";
 import { runPluginBuildV1 } from "../applets/sdk/src/build/plugin.ts";
 import { decodePluginDescriptorV1 } from "../core/contracts/plugin-descriptor.ts";
-import { pluginManifestDisagreementV1 } from "../app/plugins/authoring.ts";
+import {
+  pluginManifestDisagreementV1,
+  pluginPagesFromSourceV1,
+} from "../app/plugins/authoring.ts";
 import { seededPluginWordsV1 } from "../app/plugins/catalog.ts";
 import { skillDirectory } from "./build-applets-assets.ts";
 
@@ -84,6 +89,19 @@ interface BuiltSeededPlugin {
   size: number;
   /** The digest of the sources this artifact was built from. */
   sourceHash: string;
+  pages: { path: string; contentHash: string; size: number; html: string }[];
+}
+
+/** The page files a descriptor's views name, in the order they are named. */
+function pagePathsV1(descriptor: { views?: unknown }): string[] {
+  const views = Array.isArray(descriptor.views) ? descriptor.views : [];
+  return [
+    ...new Set(
+      views.flatMap((view: { page?: unknown }) =>
+        typeof view.page === "string" ? [view.page] : [],
+      ),
+    ),
+  ];
 }
 
 async function loadSeededSkillV1(
@@ -163,6 +181,18 @@ async function buildSeededPlugin(pluginId: string): Promise<BuiltSeededPlugin> {
   if (disagreement) {
     throw new Error(`seeded plugin "${pluginId}": ${disagreement}`);
   }
+  const pages = await pluginPagesFromSourceV1(
+    descriptor,
+    await Promise.all(
+      pagePathsV1(descriptor).map(async (path) => ({
+        path,
+        text: await Bun.file(new URL(path, directory)).text(),
+      })),
+    ),
+  );
+  if ("failure" in pages) {
+    throw new Error(`seeded plugin "${pluginId}": ${pages.failure}`);
+  }
   const contentHash = await sha256Hex(outcome.module);
   if (contentHash !== outcome.manifest.hashes.module) {
     throw new Error(
@@ -176,6 +206,7 @@ async function buildSeededPlugin(pluginId: string): Promise<BuiltSeededPlugin> {
     contentHash,
     size: new TextEncoder().encode(outcome.module).byteLength,
     sourceHash: await sourceHashV1(pluginId),
+    pages: pages.pages.map(({ artifact, html }) => ({ ...artifact, html })),
   };
 }
 
@@ -192,6 +223,16 @@ async function artifactsModule(): Promise<string> {
         `    sourceHash: ${JSON.stringify(plugin.sourceHash)},`,
         `    descriptor: ${JSON.stringify(plugin.descriptor)},`,
         `    module: fromBase64V1(${JSON.stringify(base64(plugin.module))}),`,
+        ...(plugin.pages.length === 0
+          ? []
+          : [
+              "    pages: [",
+              ...plugin.pages.map(
+                (page) =>
+                  `      { path: ${JSON.stringify(page.path)}, contentHash: ${JSON.stringify(page.contentHash)}, size: ${page.size}, html: fromBase64V1(${JSON.stringify(base64(page.html))}) },`,
+              ),
+              "    ],",
+            ]),
         "  },",
       ].join("\n"),
     )
@@ -218,6 +259,13 @@ async function artifactsModule(): Promise<string> {
       "  descriptor: PluginDescriptorV1;",
       "  /** The built module, exactly as the worker loads it. */",
       "  module: string;",
+      "  /** Its pages, bridge injected, exactly as the page route serves them. */",
+      "  pages?: readonly {",
+      "    path: string;",
+      "    contentHash: string;",
+      "    size: number;",
+      "    html: string;",
+      "  }[];",
       "}",
       "",
       "export const SEEDED_PLUGIN_ARTIFACTS_V1: readonly SeededPluginArtifactV1[] =",
@@ -242,6 +290,11 @@ async function artifactsModule(): Promise<string> {
 async function sourceHashV1(pluginId: string): Promise<string> {
   const directory = at(`${SEEDED_DIRECTORY}${pluginId}/`);
   const files = ["plugin.json", "plugin.ts", "SKILL.md", "skill.md"];
+  files.push(
+    ...pagePathsV1(
+      JSON.parse(await Bun.file(new URL("plugin.json", directory)).text()),
+    ),
+  );
   const referencesDirectory = new URL("references/", directory);
   if (existsSync(referencesDirectory)) {
     files.push(
