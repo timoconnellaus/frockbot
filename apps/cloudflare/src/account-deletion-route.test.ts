@@ -47,6 +47,10 @@ function post(path: string, body: unknown): Request {
 
 const COMMAND_ID = "command-0123456789abcdef";
 
+async function body(response: Response): Promise<Record<string, unknown>> {
+  return (await response.json()) as Record<string, unknown>;
+}
+
 describe("deleting the account", () => {
   test("answers what to type: the email this session signed in with", async () => {
     const gateway = gatewayFor({
@@ -61,7 +65,7 @@ describe("deleting the account", () => {
     );
     expect(response.status).toBe(200);
     expect(response.headers.get("cache-control")).toBe("no-store");
-    expect(await response.json()).toEqual({
+    expect(await body(response)).toEqual({
       schemaVersion: 1,
       confirmation: "Member@Example.com",
     });
@@ -87,7 +91,7 @@ describe("deleting the account", () => {
       }),
     );
     expect(wrong.status).toBe(409);
-    expect(await wrong.json()).toMatchObject({
+    expect(await body(wrong)).toMatchObject({
       code: "confirmation-mismatch",
     });
     expect(asked).toEqual([]);
@@ -100,7 +104,7 @@ describe("deleting the account", () => {
       }),
     );
     expect(confirmed.status).toBe(202);
-    expect(await confirmed.json()).toEqual({
+    expect(await body(confirmed)).toEqual({
       schemaVersion: 1,
       status: "deleting",
     });
@@ -190,7 +194,7 @@ describe("deleting the Computer", () => {
       post("/api/computer/delete", { schemaVersion: 1, commandId: COMMAND_ID }),
     );
     expect(response.status).toBe(200);
-    expect(await response.json()).toEqual({
+    expect(await body(response)).toEqual({
       schemaVersion: 1,
       status: "deleted",
     });
@@ -210,7 +214,7 @@ describe("deleting the Computer", () => {
       post("/api/computer/delete", { schemaVersion: 1, commandId: COMMAND_ID }),
     );
     expect(response.status).toBe(502);
-    expect(await response.json()).toEqual({
+    expect(await body(response)).toEqual({
       error: "The Computer host is unavailable",
     });
   });
