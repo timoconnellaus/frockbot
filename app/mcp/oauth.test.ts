@@ -265,12 +265,17 @@ describe("the sign-in's pieces", () => {
     expect(mcpOAuthReturnClientV1("/api/mcp/oauth/callback/macos-dev")).toBe(
       "macos-dev",
     );
-    expect(mcpOAuthReturnClientV1("/api/mcp/oauth/callback/ios")).toBeNull();
+    expect(mcpOAuthReturnClientV1("/api/mcp/oauth/callback/ios")).toBe("ios");
+    expect(
+      mcpOAuthReturnClientV1("/api/mcp/oauth/callback/windows"),
+    ).toBeNull();
     expect(mcpOAuthRedirectUrisV1(ORIGIN)).toEqual([
       `${ORIGIN}/api/mcp/oauth/callback`,
       `${ORIGIN}/api/mcp/oauth/callback/android`,
       `${ORIGIN}/api/mcp/oauth/callback/macos`,
       `${ORIGIN}/api/mcp/oauth/callback/macos-dev`,
+      `${ORIGIN}/api/mcp/oauth/callback/ios`,
+      `${ORIGIN}/api/mcp/oauth/callback/ios-dev`,
     ]);
   });
 });

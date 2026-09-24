@@ -4,7 +4,7 @@
 //
 //   POST /api/plugins/mcp/connections/:connectionId/authorize   start a sign-in
 //   POST /api/plugins/mcp/connections/:connectionId/revoke      remove a server
-//   GET  /api/mcp/oauth/callback[/android|/macos|/macos-dev]    the return page
+//   GET  /api/mcp/oauth/callback[/<return client>]              the return page
 //   GET  /api/mcp/oauth/client                                  client metadata
 //
 // The callback is public: an authorization server redirects a browser that
