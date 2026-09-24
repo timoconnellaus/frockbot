@@ -17,6 +17,13 @@ export const FROCK_AI_DEFAULT_MODEL = "@frock/auto";
  * named `flock-auto`; the value is the resource's name, not ours.
  */
 export const FROCK_AI_DEFAULT_AUTO_ROUTE = "flock-auto";
+/**
+ * The model conversation summaries run on, whatever model the Bot itself is
+ * on. Never listed in the catalog: nobody picks it, the platform does.
+ */
+export const FROCK_AI_SUMMARY_MODEL = "@frock/structured";
+/** The AI Gateway dynamic route behind {@link FROCK_AI_SUMMARY_MODEL}. */
+export const FROCK_AI_SUMMARY_ROUTE = "frock-structured";
 /** Workers AI model selected when Auto must honor a JSON Schema request. */
 export const FROCK_AI_STRUCTURED_MODEL =
   "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
@@ -96,6 +103,13 @@ export function gatewayModelForFrockIdV1(
   const id = normalizeFrockModelIdV1(input);
   if (!isFrockModelIdV1(id)) {
     throw new Error(`Frock AI model id "${input}" must start with "@frock/"`);
+  }
+  if (id === FROCK_AI_SUMMARY_MODEL) {
+    // The binding path has no routes; its Auto model has the context a
+    // summary needs.
+    return autoRoute === null
+      ? FROCK_AI_BINDING_AUTO_MODEL
+      : `dynamic/${FROCK_AI_SUMMARY_ROUTE}`;
   }
   if (id === FROCK_AI_DEFAULT_MODEL) {
     if (autoRoute === null) return FROCK_AI_BINDING_AUTO_MODEL;

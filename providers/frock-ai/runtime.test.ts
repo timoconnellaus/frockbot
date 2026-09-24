@@ -14,10 +14,12 @@ import {
   FROCK_AI_CONNECTION_GENERATION,
   FROCK_AI_CONNECTION_ID,
   FROCK_AI_DEFAULT_MODEL,
+  FROCK_AI_SUMMARY_MODEL,
 } from "./catalog.js";
 import {
   classifyFrockAiFailureV1,
   createFrockAiFeature,
+  createFrockAiSummaryFeature,
   FrockAiTransportErrorV1,
 } from "./runtime.js";
 import { manualClock, settle } from "../test-support.ts";
@@ -535,3 +537,57 @@ describe("Frock AI request isolation", () => {
 // bounded by nothing short of the fifteen-minute Turn deadline: an empty
 // bubble, for a quarter of an hour, saying nothing about why.
 describe("Frock AI reconciliation", () => {});
+
+describe("Frock AI as the summariser", () => {
+  test("offers its summary model on the ambient Connection", async () => {
+    const root = createAgentRuntimeHarness();
+    await root.mount(
+      createFrockAiSummaryFeature(runtimeConfig(() => Promise.reject())),
+    );
+    expect(root.llm.get("flock-ai")?.summaryModel).toEqual({
+      model: FROCK_AI_SUMMARY_MODEL,
+      modelBinding: {
+        connectionId: FROCK_AI_CONNECTION_ID,
+        connectionGeneration: FROCK_AI_CONNECTION_GENERATION,
+      },
+    });
+  });
+
+  test("mounts nothing beside a Bot already on Frock AI", async () => {
+    const root = createAgentRuntimeHarness();
+    await root.mount(
+      createFrockAiFeature(runtimeConfig(() => Promise.reject())),
+    );
+    const bots = root.llm.get("flock-ai");
+    await root.mount(
+      createFrockAiSummaryFeature(runtimeConfig(() => Promise.reject())),
+    );
+    expect(root.llm.get("flock-ai")).toBe(bots);
+  });
+
+  test("sends a summary to the summary route", async () => {
+    const calls: string[] = [];
+    const root = createAgentRuntimeHarness();
+    await root.mount(
+      createFrockAiSummaryFeature(
+        runtimeConfig((gatewayModel) => {
+          calls.push(gatewayModel);
+          return Promise.resolve(
+            sse(
+              'data: {"choices":[{"delta":{"content":"## Summary"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+            ),
+          );
+        }),
+      ),
+    );
+    let text = "";
+    for await (const event of root.llm.stream(
+      { ...request, model: FROCK_AI_SUMMARY_MODEL, tools: [] },
+      new AbortController().signal,
+    )) {
+      if (event.type === "text-delta") text += event.text;
+    }
+    expect(text).toBe("## Summary");
+    expect(calls).toEqual(["dynamic/frock-structured"]);
+  });
+});

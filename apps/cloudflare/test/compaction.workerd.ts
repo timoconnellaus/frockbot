@@ -4,9 +4,9 @@
 // deployed object:
 //
 //  1. A conversation that grows past the trigger compacts **itself**, at Turn
-//     end, on the Bot's own model binding — no test seam, no injected
-//     summariser, the ordinary `agent/turn-stopping` path in the shipped
-//     Composition.
+//     end, on the platform's summary model whatever model the Bot is on — no
+//     test seam, no injected summariser, the ordinary `agent/turn-stopping`
+//     path in the shipped Composition.
 //  2. The summary is a **durable event**, not a per-request recomputation:
 //     `conversation/compacted` sits on the log with the range it covers, and
 //     the next Turn's `model/request` carries it as its first message with the
@@ -25,7 +25,7 @@ import { runInDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 import { whenCompactionSettledV1 } from "../../../app/shell/compaction-scheduler.ts";
 import { provisionBot } from "./provision-bot.ts";
-import { STALLED_SUMMARISER_SENTINEL } from "./harness/miniflare.ts";
+import { STALLED_SUMMARISER_SENTINEL_V1 } from "./frock-ai-fake.ts";
 
 function bot(name: string) {
   return env.BOT_STATES.getByName(name);
@@ -94,7 +94,9 @@ describe("conversation compaction in Workerd", () => {
     expect(compacted.throughTurn).toBeLessThanOrEqual(7);
     expect(compacted.throughTurn).toBeGreaterThan(0);
     expect(compacted.summary.length).toBeGreaterThan(0);
-    expect(compacted.provider).toBe("ollama-cloud");
+    // The Bot is on Ollama; its summary is not.
+    expect(compacted.provider).toBe("flock-ai");
+    expect(compacted.model).toBe("@frock/structured");
     expect(
       intents[0]!.type === "conversation/compaction-intent" &&
         intents[0]!.effectId,
@@ -212,7 +214,7 @@ describe("conversation compaction in Workerd", () => {
           acceptedAt: new Date(1_800_000_000_000 + index * 1_000).toISOString(),
           // Carried into the summariser's own request, which is how the stub
           // knows to hang on this conversation and no other.
-          text: `${STALLED_SUMMARISER_SENTINEL} ${say(index)}`,
+          text: `${STALLED_SUMMARISER_SENTINEL_V1} ${say(index)}`,
         },
       });
       expect(result.text).toBe("Ollama reply");

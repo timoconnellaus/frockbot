@@ -17,8 +17,9 @@ import {
   parseCompactionSummaryV1,
   PRUNED_TOOL_RESULT_V1,
   pruneToolOutputsV1,
-  renderCompactionSummaryV1,
   runCompactionV1,
+  COMPACTION_INPUT_MAX_CHARS_V1,
+  COMPACTION_SYSTEM_PROMPT_V1,
   COMPACTION_TRIGGER_RATIO_V1,
 } from "./compaction.js";
 import { chatWindowV1, turnScopedMessagesV1 } from "./history.js";
@@ -388,29 +389,16 @@ describe("injecting a compaction", () => {
 });
 
 describe("reading the summariser's answer", () => {
-  test("renders the validated fields into the durable heading format", () => {
-    expect(
-      renderCompactionSummaryV1({
-        summary: "Work on the Applet.",
-        decisions: ["Keep the first design."],
-        openItems: [],
-        identifiers: ["applet-9f2c"],
-      }),
-    ).toBe(
-      [
-        "## Summary",
-        "Work on the Applet.",
-        "",
-        "## Decisions",
-        "- Keep the first design.",
-        "",
-        "## Open items",
-        "- none",
-        "",
-        "## Identifiers mentioned",
-        "- applet-9f2c",
-      ].join("\n"),
-    );
+  test("asks for the headings it reads back, not for JSON", () => {
+    for (const heading of [
+      "## Summary",
+      "## Decisions",
+      "## Open items",
+      "## Identifiers mentioned",
+    ]) {
+      expect(COMPACTION_SYSTEM_PROMPT_V1).toContain(heading);
+    }
+    expect(COMPACTION_SYSTEM_PROMPT_V1).not.toContain("`summary`");
   });
 
   test("lifts the identifiers out of their heading", () => {
@@ -547,7 +535,7 @@ describe("running a compaction", () => {
     ).toHaveLength(1);
   });
 
-  test("settles an intent a restart left open, and writes no summary for it", async () => {
+  test("settles an intent a restart left open, then tries again", async () => {
     const session = await sessionFrom([
       MODEL_REQUEST,
       ...wordy(10, 400),
@@ -566,20 +554,102 @@ describe("running a compaction", () => {
         return SUMMARY;
       }),
     );
-    expect(calls).toBe(0);
-    expect(outcome).toEqual({
-      kind: "failed",
-      throughTurn: 6,
-      reason: "interrupted",
-    });
+    // An interruption says nothing about the next attempt, so there is no
+    // backoff to wait out: the range is summarised in the same run.
+    expect(calls).toBe(1);
+    expect(outcome).toEqual({ kind: "compacted", throughTurn: 6, fromTurn: 1 });
+    const failed = session.activeRunJournal.filter(
+      (event) => event.type === "conversation/compaction-failed",
+    );
     expect(
-      session.activeRunJournal.some(
-        (event) => event.type === "conversation/compacted",
+      failed.map(
+        (event) =>
+          event.type === "conversation/compaction-failed" && event.effectId,
       ),
-    ).toBe(false);
+    ).toEqual(["orphan"]);
     expect(
       compactionStateV1(session.activeRunJournal).unsettled,
     ).toBeUndefined();
+  });
+
+  test("runs on the model it is given rather than the Turn's own", async () => {
+    const session = await sessionFrom([MODEL_REQUEST, ...wordy(10, 400)]);
+    const seen: { provider: string; model: string }[] = [];
+    await runCompactionV1({
+      ...runner(session, async (request) => {
+        seen.push({ provider: request.provider, model: request.model });
+        return SUMMARY;
+      }),
+      model: {
+        provider: "flock-ai",
+        model: "@frock/structured",
+        modelBinding: { connectionId: "ambient", connectionGeneration: "v1" },
+      },
+    });
+    expect(seen).toEqual([
+      { provider: "flock-ai", model: "@frock/structured" },
+    ]);
+    const compacted = session.activeRunJournal.findLast(
+      (event) => event.type === "conversation/compacted",
+    );
+    expect(compacted).toMatchObject({
+      provider: "flock-ai",
+      model: "@frock/structured",
+    });
+  });
+
+  test("summarises a backlog larger than one call can read a slice at a time", async () => {
+    // Each Turn is a fifth of what one summariser call may read.
+    const turnChars = Math.floor(COMPACTION_INPUT_MAX_CHARS_V1 / 5);
+    const session = await sessionFrom([MODEL_REQUEST, ...wordy(20, turnChars)]);
+    const budget = turnChars * 20;
+    const seen: number[] = [];
+    const run = () =>
+      runCompactionV1({
+        ...runner(
+          session,
+          async (request) => {
+            seen.push(String(request.effectId).length);
+            return SUMMARY;
+          },
+          21,
+        ),
+        window: chatWindowV1(
+          session.activeRunJournal,
+          session.deriveMessages(),
+        ),
+        budget,
+      });
+    const first = await run();
+    expect(first).toMatchObject({ kind: "compacted", fromTurn: 1 });
+    const firstThrough = first.kind === "compacted" ? first.throughTurn : 0;
+    // Bounded: well short of the sixteen Turns that were due.
+    expect(firstThrough).toBeGreaterThanOrEqual(1);
+    expect(firstThrough).toBeLessThan(6);
+    const second = await run();
+    expect(second.kind).toBe("compacted");
+    expect(second.kind === "compacted" && second.throughTurn).toBeGreaterThan(
+      firstThrough,
+    );
+  });
+
+  test("summarises one Turn larger than the cap on its own, from its beginning", async () => {
+    const session = await sessionFrom([
+      MODEL_REQUEST,
+      ...wordy(10, COMPACTION_INPUT_MAX_CHARS_V1 * 2),
+    ]);
+    let sent = 0;
+    const outcome = await runCompactionV1({
+      ...runner(session, async () => SUMMARY),
+      budget: COMPACTION_INPUT_MAX_CHARS_V1 * 4,
+      summarise: async (request) => {
+        sent = String(request.messages[0]?.content ?? "").length;
+        return SUMMARY;
+      },
+    });
+    expect(outcome).toEqual({ kind: "compacted", throughTurn: 1, fromTurn: 1 });
+    expect(sent).toBeGreaterThan(COMPACTION_INPUT_MAX_CHARS_V1 / 2);
+    expect(sent).toBeLessThan(COMPACTION_INPUT_MAX_CHARS_V1 + 200);
   });
 
   test("records a failure and leaves the conversation alone", async () => {

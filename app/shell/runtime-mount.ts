@@ -93,6 +93,7 @@ import { createBotSelfManagementHost } from "./backend-flock.js";
 import { createBotImageHost } from "./backend-image.js";
 import { createBotMemoryHost } from "./backend-memory.js";
 import { executionPackagesV1, type ShellBotStateV1 } from "./backend-state.js";
+import type { ShellModelRuntimeHostV1 } from "./backend-runtime.js";
 import { decodeClientTurnV1 } from "./run-protocol.js";
 import {
   computerFrameSinkV1,
@@ -820,6 +821,16 @@ export async function agentRuntime(
         generationId: turn?.compositionGenerationId,
       })
     : undefined;
+  const frockAiHost: Pick<
+    ShellModelRuntimeHostV1,
+    "frockAiAutoRoute" | "runFrockAiChatCompletion"
+  > = state.env.FROCK_AI
+    ? {
+        frockAiAutoRoute: state.env.FROCK_AI.autoRoute,
+        runFrockAiChatCompletion: (gatewayModel, body) =>
+          state.env.FROCK_AI!.runChatCompletion(gatewayModel, body),
+      }
+    : {};
   if (!pluginModel) {
     agentPackages.push(
       state.application.runtime.model(binding, {
@@ -849,17 +860,17 @@ export async function agentRuntime(
             bindingPackageId,
             effectId,
           ),
-        ...(state.env.FROCK_AI
-          ? {
-              frockAiAutoRoute: state.env.FROCK_AI.autoRoute,
-              runFrockAiChatCompletion: (gatewayModel, body) =>
-                state.env.FROCK_AI!.runChatCompletion(gatewayModel, body),
-            }
-          : {}),
+        ...frockAiHost,
         fetch: state.outboundFetch,
       }),
     );
   }
+  const summariser = state.application.runtime.summariser?.({
+    accountId: identity.userId,
+    connectionId: binding.connection.connectionId,
+    ...frockAiHost,
+  });
+  if (summariser) agentPackages.push(summariser);
   // The slugs `<available_subagent_models>` renders, and the only ones a
   // `Task` call may name. They come from User enablement as resolved for this
   // Turn — never anything the Bot claimed about a model.

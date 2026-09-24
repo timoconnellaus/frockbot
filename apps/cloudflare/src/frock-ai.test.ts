@@ -331,3 +331,45 @@ describe("Frock AI gateway deadline", () => {
     expect((cancelled as Error | undefined)?.message).toBe("You stopped this.");
   });
 });
+
+describe("Frock AI prepaid limits", () => {
+  function limitedHost(sent: Record<string, unknown>[]) {
+    return createFrockAiGatewayHostV1(unusedBinding(), {
+      autoRoute: "flock-auto",
+      accountId: ACCOUNT_ID,
+      token: TOKEN,
+      billingLimits: {
+        "@frock/auto": { inputTokens: 2_000, outputTokens: 500 },
+        "@frock/structured": { inputTokens: 200_000, outputTokens: 4_000 },
+      },
+      fetch: ((_url: string, init: RequestInit) => {
+        sent.push(JSON.parse(init.body as string) as Record<string, unknown>);
+        return Promise.resolve(new Response("data: [DONE]\n\n"));
+      }) as unknown as typeof fetch,
+    });
+  }
+  const long = { messages: [{ role: "user", content: "x".repeat(10_000) }] };
+
+  test("holds a request to its own model's bound", async () => {
+    const sent: Record<string, unknown>[] = [];
+    await limitedHost(sent).runChatCompletion("dynamic/frock-structured", long);
+    expect(sent[0]).toMatchObject({ max_tokens: 4_000 });
+  });
+
+  test("a smaller model's bound no longer refuses a larger one's request", async () => {
+    const sent: Record<string, unknown>[] = [];
+    const host = limitedHost(sent);
+    await expect(
+      host.runChatCompletion("dynamic/flock-auto", long),
+    ).rejects.toThrow("exceeds its prepaid model limit");
+    await host.runChatCompletion("dynamic/frock-structured", long);
+    expect(sent).toHaveLength(1);
+  });
+
+  test("holds a model with no bound of its own to the smallest", async () => {
+    const sent: Record<string, unknown>[] = [];
+    await expect(
+      limitedHost(sent).runChatCompletion("workers-ai/@cf/other", long),
+    ).rejects.toThrow("exceeds its prepaid model limit");
+  });
+});

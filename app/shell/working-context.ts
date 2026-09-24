@@ -33,7 +33,7 @@ import {
 import {
   automationParentPointerV1,
   CHAT_HISTORY_BUDGET_CHARS_V1,
-  omittedHistoryNoticeV1,
+  OMITTED_HISTORY_NOTICE_V1,
 } from "./history.js";
 
 export interface TurnProjectionV1 {
@@ -379,7 +379,7 @@ export interface WorkingTurnMetaV1 {
  * whole-Turn eviction. `verbatim` is the newest tool-output window of the
  * post-compaction chat, including Turns the budget then drops.
  */
-export function chooseWorkingTurnsV1(input: {
+function chooseWithinBudgetV1(input: {
   head: ConversationHeadV1;
   /** Newest first. */
   turns: readonly WorkingTurnMetaV1[];
@@ -387,7 +387,7 @@ export function chooseWorkingTurnsV1(input: {
   currentTurnType: TurnTypeV1 | "unspecified";
   currentChars: number;
   budget: number;
-}): { kept: number[]; omitted: number } {
+}): { kept: number[]; omitted: number; spent: number } {
   const compaction =
     input.head.compaction &&
     input.head.compaction.throughTurn < input.currentTurn
@@ -398,7 +398,7 @@ export function chooseWorkingTurnsV1(input: {
     : 0;
   const budgetForTurns = Math.max(0, input.budget - summaryChars);
   if (!chatLike(input.currentTurnType)) {
-    return { kept: [], omitted: 0 };
+    return { kept: [], omitted: 0, spent: input.currentChars };
   }
   let verbatimLeft = TOOL_OUTPUT_KEEP_RECENT_TURNS_V1;
   if (input.currentChars > 0) verbatimLeft -= 1;
@@ -420,7 +420,50 @@ export function chooseWorkingTurnsV1(input: {
     0,
     input.head.messageBearingChatTurns - covered - currentBearing,
   );
-  return { kept, omitted: Math.max(0, uncovered - kept.length) };
+  return { kept, omitted: Math.max(0, uncovered - kept.length), spent };
+}
+
+/**
+ * How far a Turn may grow past the budget before its history is chosen again.
+ *
+ * History is chosen against the Turn's opening, not its size at each step, so
+ * every step of a Turn sends the same history and hits the provider's prompt
+ * cache. A Turn whose own tool traffic outgrows this is re-chosen against its
+ * real size, which costs one cache miss rather than an overlong request.
+ */
+export const TURN_GROWTH_CEILING_V1 = 2;
+
+/**
+ * Which committed Turns fit, using metadata only.
+ *
+ * `openingChars` is the size of what opened the current Turn. When it is
+ * given, the choice is the one the Turn's first step made, for as long as the
+ * Turn stays under {@link TURN_GROWTH_CEILING_V1} budgets.
+ */
+export function chooseWorkingTurnsV1(
+  input: Parameters<typeof chooseWithinBudgetV1>[0] & { openingChars?: number },
+): { kept: number[]; omitted: number } {
+  const { openingChars, ...rest } = input;
+  if (openingChars !== undefined && openingChars < rest.currentChars) {
+    const pinned = chooseWithinBudgetV1({
+      ...rest,
+      currentChars: openingChars,
+    });
+    const actual = pinned.spent - openingChars + rest.currentChars;
+    if (actual <= rest.budget * TURN_GROWTH_CEILING_V1) {
+      return { kept: pinned.kept, omitted: pinned.omitted };
+    }
+  }
+  const choice = chooseWithinBudgetV1(rest);
+  return { kept: choice.kept, omitted: choice.omitted };
+}
+
+/** What opened a Turn: its messages before the model first answered. */
+export function turnOpeningMessagesV1(
+  messages: readonly LlmMessage[],
+): LlmMessage[] {
+  const answered = messages.findIndex((message) => message.role !== "user");
+  return answered < 0 ? [...messages] : messages.slice(0, answered);
 }
 
 function compactionAsV1(
@@ -489,7 +532,7 @@ export function renderWorkingContextV1(input: {
   if (input.omitted > 0) {
     preamble.push({
       role: "user",
-      content: omittedHistoryNoticeV1(input.omitted),
+      content: OMITTED_HISTORY_NOTICE_V1,
     });
   }
   return [...preamble, ...pruned];
@@ -531,6 +574,7 @@ export function assembleJournalContextV1(input: {
     currentTurn: input.currentTurn,
     currentTurnType: input.currentTurnType,
     currentChars: historyCharsV1(input.currentMessages),
+    openingChars: historyCharsV1(turnOpeningMessagesV1(input.currentMessages)),
     budget: input.budget ?? CHAT_HISTORY_BUDGET_CHARS_V1,
   });
   return renderWorkingContextV1({

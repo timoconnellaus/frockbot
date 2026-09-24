@@ -102,7 +102,6 @@ describe("one request carries a bounded amount of history", () => {
     expect(contents).toContain("the newest thing");
     expect(contents.join(" ")).not.toContain("the oldest thing");
     expect(contents[0]).toContain("not included here");
-    expect(contents[0]).toContain("1 Turn");
   });
 
   test("carries everything when it fits, and says nothing about omission", () => {

@@ -1,4 +1,8 @@
-import type { LlmStreamEvent, NormalizedModelRequest } from "./types.js";
+import type {
+  LlmStreamEvent,
+  ModelBindingSnapshot,
+  NormalizedModelRequest,
+} from "./types.js";
 import type {
   JsonSchemaResponseFormatV1,
   ModelProviderSupportsV1,
@@ -176,6 +180,12 @@ export interface LlmProvider {
   id: string;
   /** Legacy/test adapters that omit this are treated as supporting nothing. */
   supports?: ModelProviderSupportsV1;
+  /**
+   * The model this provider offers for conversation summaries, and the
+   * Connection authority a summary request carries. A Bot's summaries run on
+   * it whatever model the Bot itself is on.
+   */
+  summaryModel?: { model: string; modelBinding: ModelBindingSnapshot };
   stream(
     request: NormalizedModelRequest,
     signal: AbortSignal,

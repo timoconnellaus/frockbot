@@ -26,9 +26,7 @@ import {
 } from "./history.js";
 import { assembleJournalContextV1 } from "./working-context.js";
 import {
-  COMPACTION_RESPONSE_SCHEMA_V1,
-  type CompactionSummaryPayloadV1,
-  renderCompactionSummaryV1,
+  COMPACTION_MAX_SLICES_PER_RUN_V1,
   runCompactionV1,
 } from "./compaction.js";
 import { compactionWorkV1 } from "./compaction-scheduler.js";
@@ -721,20 +719,45 @@ export const shellAgentFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
         const session = agent.session;
         const types = turnTypesByTurnV1(session.activeRunJournal);
         if ((types.get(turn) ?? "chat") !== "chat") return;
+        // The platform's summary model when a provider offers one, so a
+        // conversation is compacted whatever model the Bot is on.
+        const summaryModel = runtime.llm
+          .list()
+          .find((provider) => provider.summaryModel);
         compactionWorkV1(session.id).start(async (signal) => {
-          await runCompactionV1({
-            session,
-            window: await compactionWindowV1(session, turn),
-            budget: CHAT_HISTORY_BUDGET_CHARS_V1,
-            currentTurn: turn,
-            newEffectId: () => `compaction-${crypto.randomUUID()}`,
-            summarise: async (request) => {
-              // Two deadlines, one call: the compaction's own, and the abort
-              // a newly admitted Turn raises when it takes the log back.
-              const cancelled = AbortSignal.any([request.signal, signal]);
-              try {
-                const result =
-                  await runtime.llm.structured<CompactionSummaryPayloadV1>(
+          // A backlog is summarised a bounded slice at a time; keep going
+          // until it is covered, the next Turn takes the log back, or a
+          // slice fails.
+          for (
+            let slice = 0;
+            slice < COMPACTION_MAX_SLICES_PER_RUN_V1;
+            slice++
+          ) {
+            if (signal.aborted) return;
+            const outcome = await runCompactionV1({
+              session,
+              window: await compactionWindowV1(session, turn),
+              budget: CHAT_HISTORY_BUDGET_CHARS_V1,
+              currentTurn: turn,
+              ...(summaryModel?.summaryModel
+                ? {
+                    model: {
+                      provider: summaryModel.id,
+                      model: summaryModel.summaryModel.model,
+                      modelBinding: summaryModel.summaryModel.modelBinding,
+                    },
+                  }
+                : {}),
+              newEffectId: () => `compaction-${crypto.randomUUID()}`,
+              summarise: async (request) => {
+                // Two deadlines, one call: the compaction's own, and the
+                // abort a newly admitted Turn raises when it takes the log
+                // back.
+                const cancelled = AbortSignal.any([request.signal, signal]);
+                try {
+                  let text = "";
+                  let truncated = false;
+                  for await (const event of runtime.llm.stream(
                     {
                       // The intent's own effect id, never a fresh one: the
                       // summariser is a model effect like any other, and the
@@ -750,33 +773,38 @@ export const shellAgentFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
                         ? { modelBinding: request.modelBinding }
                         : {}),
                     },
-                    {
-                      name: "conversation_compaction",
-                      schema: COMPACTION_RESPONSE_SCHEMA_V1,
-                    },
                     cancelled,
-                  );
-                if (result.status === "failed") {
-                  throw new Error(result.failure.message);
+                  )) {
+                    if (event.type === "text-delta") text += event.text;
+                    if (event.type === "finish") {
+                      truncated = event.reason === "max-tokens";
+                    }
+                  }
+                  if (truncated) {
+                    throw new Error(
+                      "The summary was cut off at its length limit.",
+                    );
+                  }
+                  return text;
+                } finally {
+                  // The loop settles a model call's held resources when it
+                  // dispatches it; this call is the compaction's own, outside
+                  // any loop, so its lease is settled here — however the call
+                  // ended. A failed settlement cannot be re-announced by a
+                  // compaction, so it must not fail a summary that succeeded.
+                  try {
+                    await runtime.hooks.modelOutcomeCommitted(
+                      agent,
+                      request.effectId,
+                    );
+                  } catch {
+                    // Nothing left to tell.
+                  }
                 }
-                return renderCompactionSummaryV1(result.value);
-              } finally {
-                // The loop settles a model call's held resources when it
-                // dispatches it; this call is the compaction's own, outside
-                // any loop, so its lease is settled here — however the call
-                // ended. A failed settlement cannot be re-announced by a
-                // compaction, so it must not fail a summary that succeeded.
-                try {
-                  await runtime.hooks.modelOutcomeCommitted(
-                    agent,
-                    request.effectId,
-                  );
-                } catch {
-                  // Nothing left to tell.
-                }
-              }
-            },
-          });
+              },
+            });
+            if (outcome.kind !== "compacted") return;
+          }
         });
       },
     }),

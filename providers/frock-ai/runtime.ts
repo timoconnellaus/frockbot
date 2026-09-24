@@ -19,6 +19,7 @@ import {
 import {
   FROCK_AI_DEFAULT_MODEL,
   FROCK_AI_PROVIDER_TYPE,
+  FROCK_AI_SUMMARY_MODEL,
   gatewayModelForFrockRequestV1,
   normalizeFrockModelIdV1,
 } from "./catalog.js";
@@ -130,6 +131,7 @@ class FrockAiProvider implements LlmProvider {
   readonly id = FROCK_AI_PROVIDER_TYPE;
   readonly supports = { structuredOutput: "json_schema" } as const;
   readonly autoFallbackFailures = new WeakSet<ModelProviderFailureError>();
+  readonly summaryModel;
 
   /**
    * The Gateway keeps no addressable copy of a completion, so an interrupted
@@ -137,7 +139,15 @@ class FrockAiProvider implements LlmProvider {
    * failure with its partial text intact; staying silent parks it on a
    * retrieval that would never arrive.
    */
-  constructor(private readonly config: FrockAiRuntimeConfig) {}
+  constructor(private readonly config: FrockAiRuntimeConfig) {
+    this.summaryModel = {
+      model: FROCK_AI_SUMMARY_MODEL,
+      modelBinding: {
+        connectionId: config.connectionId,
+        connectionGeneration: config.connectionGeneration,
+      },
+    };
+  }
 
   async *stream(
     request: NormalizedModelRequest,
@@ -206,6 +216,20 @@ class FrockAiProvider implements LlmProvider {
       throw failure;
     }
   }
+}
+
+/**
+ * Frock AI as the summariser beside a Bot on another provider: the provider
+ * alone, so its Auto fallback never touches the Bot's own requests. A Turn
+ * already on Frock AI has the provider, and this mounts nothing.
+ */
+export function createFrockAiSummaryFeature(
+  config: FrockAiRuntimeConfig,
+): RuntimeFeatureV1<AgentRuntimeV1> {
+  return (runtime) => {
+    if (runtime.llm.get(FROCK_AI_PROVIDER_TYPE)) return () => {};
+    return runtime.llm.register(new FrockAiProvider(config));
+  };
 }
 
 export function createFrockAiFeature(

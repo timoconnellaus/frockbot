@@ -1,5 +1,8 @@
 import { MODEL_FIRST_BYTE_DEADLINE_MS_V1 } from "@frockbot/core/contracts";
-import { FROCK_AI_DEFAULT_AUTO_ROUTE } from "@frockbot/providers/frock-ai/catalog";
+import {
+  FROCK_AI_DEFAULT_AUTO_ROUTE,
+  gatewayModelForFrockIdV1,
+} from "@frockbot/providers/frock-ai/catalog";
 import { FrockAiTransportErrorV1 } from "@frockbot/providers/frock-ai/runtime";
 
 export const DEFAULT_FROCK_AI_GATEWAY_ID_V1 = "flock";
@@ -37,8 +40,18 @@ export interface FrockAiGatewayHostV1 {
  */
 export const FROCK_AI_GATEWAY_TIMEOUT_MS_V1 = MODEL_FIRST_BYTE_DEADLINE_MS_V1;
 
+export interface FrockAiBillingLimitV1 {
+  inputTokens: number;
+  outputTokens: number;
+}
+
 export interface FrockAiGatewayConfigV1 {
-  billingLimits?: { inputTokens: number; outputTokens: number };
+  /**
+   * Each hosted model's prepaid bound, keyed by its Frock AI model id. A
+   * request is held to its own model's bound; one whose model has none — a
+   * structured Auto request pinned to a model of its own — to the smallest.
+   */
+  billingLimits?: Record<string, FrockAiBillingLimitV1>;
   gatewayId?: string;
   autoRoute?: string;
   /**
@@ -117,6 +130,36 @@ async function streamOrThrowV1(
   return response.body;
 }
 
+/** The prepaid bounds by the gateway model each Frock AI model is sent as. */
+function gatewayBillingLimitsV1(
+  limits: Record<string, FrockAiBillingLimitV1>,
+  autoRoute: string | null,
+): {
+  byGatewayModel: Map<string, FrockAiBillingLimitV1>;
+  smallest: FrockAiBillingLimitV1;
+} {
+  const byGatewayModel = new Map<string, FrockAiBillingLimitV1>();
+  for (const [model, limit] of Object.entries(limits)) {
+    try {
+      byGatewayModel.set(gatewayModelForFrockIdV1(model, autoRoute), limit);
+    } catch {
+      // A priced id this deployment cannot send is never requested.
+    }
+  }
+  const all = Object.values(limits);
+  return {
+    byGatewayModel,
+    smallest: {
+      inputTokens: all.length
+        ? Math.min(...all.map((limit) => limit.inputTokens))
+        : 0,
+      outputTokens: all.length
+        ? Math.min(...all.map((limit) => limit.outputTokens))
+        : 0,
+    },
+  };
+}
+
 /** Keep the generated Cloudflare binding type on the Worker side of the seam. */
 export function createFrockAiGatewayHostV1(
   ai: Pick<Ai, "gateway">,
@@ -137,12 +180,17 @@ export function createFrockAiGatewayHostV1(
     ? config.autoRoute || FROCK_AI_DEFAULT_AUTO_ROUTE
     : null;
   const timeoutMs = config.timeoutMs ?? FROCK_AI_GATEWAY_TIMEOUT_MS_V1;
+  const billingLimits = config.billingLimits
+    ? gatewayBillingLimitsV1(config.billingLimits, autoRoute)
+    : undefined;
   const doFetch = config.fetch ?? fetch;
   return {
     autoRoute,
     async runChatCompletion(gatewayModel, body, signal) {
-      if (config.billingLimits) {
-        const { inputTokens, outputTokens } = config.billingLimits;
+      if (billingLimits) {
+        const { inputTokens, outputTokens } =
+          billingLimits.byGatewayModel.get(gatewayModel) ??
+          billingLimits.smallest;
         // A byte bound overcounts text tokens. Images require a separate model
         // quote; do not silently price their pixels as a short URL.
         const encoded = JSON.stringify(body);
@@ -211,10 +259,14 @@ export function createFrockAiGatewayHostV1(
         // that answered normally left one of each attached to a signal that
         // lives as long as the Turn. `abandonRace` is what ends it.
         const abandonRace = new AbortController();
+        // An RPC-backed binding hands back a stub; left undisposed, it keeps
+        // the Durable Object that asked referenced and unevictable.
+        const gateway = ai.gateway(gatewayId) as ReturnType<Ai["gateway"]> &
+          Partial<Disposable>;
         let response: Response;
         try {
           response = await Promise.race([
-            ai.gateway(gatewayId).run({
+            gateway.run({
               provider: "compat",
               endpoint: "chat/completions",
               headers: {},
@@ -232,6 +284,7 @@ export function createFrockAiGatewayHostV1(
           return timedOut(error);
         } finally {
           abandonRace.abort();
+          gateway[Symbol.dispose]?.();
         }
         return streamOrThrowV1(response);
       };
