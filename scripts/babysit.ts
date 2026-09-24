@@ -14,6 +14,7 @@
  */
 
 import {
+  checksOf,
   releaseReport,
   type GitHubJson,
   type WatchReport,
@@ -339,26 +340,12 @@ interface CheckState {
   passed: boolean;
 }
 
-/** Reads both rollup shapes, as `ci-watch.ts` does. */
-function checksOf(rollup: unknown): CheckState[] {
-  return list(rollup).map((entry) => {
-    const value = record(entry, "status check");
-    const name = text(value.name) || text(value.context) || "unnamed check";
-    const conclusion = (
-      text(value.conclusion) || text(value.state)
-    ).toUpperCase();
-    const status = text(value.status).toUpperCase();
-    const complete = status
-      ? status === "COMPLETED"
-      : conclusion !== "" &&
-        conclusion !== "PENDING" &&
-        conclusion !== "EXPECTED";
-    return {
-      name,
-      complete,
-      passed: ["SUCCESS", "NEUTRAL", "SKIPPED"].includes(conclusion),
-    };
-  });
+function checkStatesOf(rollup: unknown): CheckState[] {
+  return checksOf(rollup).map((check) => ({
+    name: check.name,
+    complete: check.complete,
+    passed: ["SUCCESS", "NEUTRAL", "SKIPPED"].includes(check.conclusion),
+  }));
 }
 
 /** The status checks the `main` ruleset requires, read from GitHub. */
@@ -387,7 +374,7 @@ export function pullRequestState(
   const labels = list(value.labels)
     .map((label) => text(record(label, "label").name))
     .filter(Boolean);
-  const checks = checksOf(value.statusCheckRollup);
+  const checks = checkStatesOf(value.statusCheckRollup);
   const failedChecks = checks
     .filter(
       (check) =>

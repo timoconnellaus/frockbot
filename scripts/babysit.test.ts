@@ -417,6 +417,29 @@ describe("pull requests", () => {
     expect(decide(withHealth("SUCCESS"), "green").action).toBe("merge");
   });
 
+  test("a superseded run of a check does not outvote the run after it", () => {
+    const state = decide(
+      pr({
+        statusCheckRollup: [
+          ...green,
+          {
+            name: "Set main-health",
+            status: "COMPLETED",
+            conclusion: "CANCELLED",
+            startedAt: "2026-09-24T02:21:50Z",
+          },
+          {
+            name: "Set main-health",
+            status: "COMPLETED",
+            conclusion: "SUCCESS",
+            startedAt: "2026-09-24T02:22:05Z",
+          },
+        ],
+      }),
+    );
+    expect(state).toMatchObject({ action: "merge", failedChecks: [] });
+  });
+
   test("waits while GitHub is still computing mergeability", () => {
     expect(decide(pr({ mergeable: "UNKNOWN" })).action).toBe("wait");
   });

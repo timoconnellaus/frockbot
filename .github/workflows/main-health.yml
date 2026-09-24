@@ -38,9 +38,13 @@ permissions:
   pull-requests: read
   statuses: write
 
+# Queued, not cancelled: a run that had started and was then cancelled would
+# stand on the pull request as a cancelled check. A queued run displaced by a
+# newer one never starts, and the run that does start reads `main` and the
+# labels as they are then, so the last one to run is right.
 concurrency:
   group: main-health-${{ github.event.pull_request.number || 'all' }}
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   status:
