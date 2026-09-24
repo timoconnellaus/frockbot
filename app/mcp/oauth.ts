@@ -325,9 +325,10 @@ function sdkMetadata(server: McpSignInServerV1): AuthorizationServerMetadata {
 }
 
 /**
- * FrockBot's identity at a server: its client metadata document where the
- * server takes one — nothing is written at the server — otherwise a public
- * client registered for every return address.
+ * FrockBot's identity at a server: a public client registered for every
+ * return address where the server offers registration, which every server
+ * that signs in MCP clients has offered longest; otherwise its client
+ * metadata document, where the server takes a URL as a `client_id`.
  */
 export async function registerMcpClientV1(input: {
   server: McpSignInServerV1;
@@ -335,13 +336,13 @@ export async function registerMcpClientV1(input: {
   fetch?: McpFetchV1;
 }): Promise<McpSignInClientV1> {
   const document = mcpOAuthClientMetadataV1(input.origin);
-  if (
-    input.server.metadata.client_id_metadata_document_supported === true &&
-    new URL(input.origin).protocol === "https:"
-  ) {
-    return { client_id: document.client_id };
-  }
   if (!input.server.metadata.registration_endpoint) {
+    if (
+      input.server.metadata.client_id_metadata_document_supported === true &&
+      new URL(input.origin).protocol === "https:"
+    ) {
+      return { client_id: document.client_id };
+    }
     throw new McpSignInError(
       "This server's sign-in doesn't let FrockBot register with it. Give it an access token from the server instead.",
     );

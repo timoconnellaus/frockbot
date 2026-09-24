@@ -184,9 +184,10 @@ describe("signing in to an MCP server", () => {
     expect(auth.revoked).toEqual([refreshed.refreshToken!]);
   });
 
-  test("uses a client metadata document where the server takes one", async () => {
+  test("uses a client metadata document where the server takes nothing else", async () => {
     const auth = createFakeMcpAuthorizationServerV1();
     auth.clientMetadataDocuments = true;
+    auth.registration = false;
     const server = await discoverMcpSignInV1({
       url: auth.server.url,
       fetch: auth.fetch,
@@ -195,6 +196,14 @@ describe("signing in to an MCP server", () => {
       await registerMcpClientV1({ server, origin: ORIGIN, fetch: auth.fetch }),
     ).toEqual({ client_id: `${ORIGIN}/api/mcp/oauth/client` });
     expect(auth.registrations).toEqual([]);
+    // A local deployment has no https address to be fetched at.
+    await expect(
+      registerMcpClientV1({
+        server,
+        origin: "http://127.0.0.1:8787",
+        fetch: auth.fetch,
+      }),
+    ).rejects.toThrow("doesn't let FrockBot register");
     expect(mcpOAuthClientMetadataV1(ORIGIN)).toMatchObject({
       client_id: `${ORIGIN}/api/mcp/oauth/client`,
       redirect_uris: mcpOAuthRedirectUrisV1(ORIGIN),
