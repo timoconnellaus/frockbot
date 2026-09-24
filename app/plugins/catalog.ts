@@ -300,7 +300,7 @@ const SEEDED_PLUGIN_WORDS_V1: Record<string, SeededPluginWordsV1> = {
   tuner: {
     displayName: "Tuner",
     description:
-      "Tunes a guitar or any string by ear: a page in the conversation panel that listens through your microphone while you have it open, and shows the note and how far off it is. Off until you switch it on.",
+      "Tunes a guitar or any string by ear, listening through your microphone while its panel is open. Shows the note and how far off it is. Off until you switch it on.",
     seed: "default-off",
   },
 };

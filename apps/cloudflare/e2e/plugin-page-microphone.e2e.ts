@@ -101,7 +101,12 @@ test("the Tuner, switched on, hears the microphone through the host, and the hos
   });
   await page.screenshot({ path: testInfo.outputPath("tuner-switched-on.png") });
 
+  // A fresh read of the Bot, whose page now has the Tuner's door.
   await page.setViewportSize({ width: 1351, height: 831 });
+  await page.reload();
+  await expect(sem(page, "shell-conversation")).toBeVisible({
+    timeout: SHELL_TIMEOUT_MS,
+  });
   await settle(page);
   await openBotPage(page);
   await press(sem(page, `bot-page-panel-${PLUGIN_ID}`));
