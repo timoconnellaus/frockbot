@@ -64,6 +64,9 @@ declare const validators: {
   isBotLookCommand(value: unknown): value is ProtocolTypes["BotLookCommand"];
   isFlockReceipt(value: unknown): value is ProtocolTypes["FlockReceipt"];
   isSkillRef(value: unknown): value is ProtocolTypes["SkillRef"];
+  isAttachment(value: unknown): value is ProtocolTypes["Attachment"];
+  isUploadRef(value: unknown): value is ProtocolTypes["UploadRef"];
+  isUploadReceipt(value: unknown): value is ProtocolTypes["UploadReceipt"];
   isTurnCommand(value: unknown): value is ProtocolTypes["TurnCommand"];
   isStopCommand(value: unknown): value is ProtocolTypes["StopCommand"];
   isRunFenceCommand(value: unknown): value is ProtocolTypes["RunFenceCommand"];

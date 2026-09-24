@@ -35,6 +35,8 @@ import {
   projectClientRunOrDegradedV1,
   projectClientTurnV1,
   UNRECORDED_TOOL_RESULT_TEXT_V1,
+  clientProtocolOfV1,
+  withoutRunAttachmentsV1,
 } from "./run-protocol.js";
 
 const timestamp = "2026-08-29T00:00:00.000Z";
@@ -94,6 +96,94 @@ function storedRun(
       : {}),
   };
 }
+
+describe("a message's files on the client wire", () => {
+  const photo = {
+    kind: "image" as const,
+    uploadId: "a".repeat(64),
+    name: "beach.jpg",
+    mediaType: "image/jpeg",
+    bytes: 482_113,
+  };
+
+  test("a Turn command names files by upload, and may be files alone", () => {
+    expect(
+      decodeClientTurnCommandV1({
+        schemaVersion: 1,
+        commandId: "command-1",
+        text: "  ",
+        attachments: [{ uploadId: photo.uploadId }],
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      commandId: "command-1",
+      text: "",
+      attachments: [{ uploadId: photo.uploadId }],
+    });
+    expect(() =>
+      decodeClientTurnCommandV1({
+        schemaVersion: 1,
+        commandId: "command-1",
+        text: "",
+      }),
+    ).toThrow("turn command.text is required");
+    // A command names an upload; it cannot describe one.
+    expect(() =>
+      decodeClientTurnCommandV1({
+        schemaVersion: 1,
+        commandId: "command-1",
+        text: "look",
+        attachments: [photo],
+      }),
+    ).toThrow();
+  });
+
+  test("the projected Run carries the files, and files alone can be retried", () => {
+    const run = projectClientRunV1({
+      ...storedRun([], "failed"),
+      input: "",
+      attachments: [photo],
+    });
+    expect(run.attachments).toEqual([photo]);
+    expect(run.canRetry).toBe(true);
+    expect(isProtocolValue("Run", run)).toBe(true);
+  });
+
+  test("an older client is sent every Run without its files", () => {
+    const run = projectClientRunV1({
+      ...storedRun([]),
+      attachments: [photo],
+    });
+    const page = { schemaVersion: 1, runs: [run], page: { truncated: false } };
+    const legacy = withoutRunAttachmentsV1(page);
+    expect(legacy.runs[0]).not.toHaveProperty("attachments");
+    expect(legacy.runs[0]).toEqual(
+      Object.fromEntries(
+        Object.entries(run).filter(([key]) => key !== "attachments"),
+      ) as never,
+    );
+    // The value handed in is left as it was.
+    expect(page.runs[0]).toHaveProperty("attachments");
+    const frame = withoutRunAttachmentsV1({
+      type: "state/update",
+      payload: { run },
+    });
+    expect(frame.payload.run).not.toHaveProperty("attachments");
+  });
+
+  test("a client's protocol is read from its hello, and none is the oldest", () => {
+    expect(
+      clientProtocolOfV1(
+        JSON.stringify({ schemaVersion: 1, protocolVersion: 3, catalogs: [] }),
+      ),
+    ).toBe(3);
+    expect(clientProtocolOfV1(null)).toBe(2);
+    expect(clientProtocolOfV1("not json")).toBe(2);
+    expect(clientProtocolOfV1(JSON.stringify({ protocolVersion: "3" }))).toBe(
+      2,
+    );
+  });
+});
 
 describe("client run protocol v1", () => {
   test("draws every conversation-positioned event as its own row, in log order", () => {

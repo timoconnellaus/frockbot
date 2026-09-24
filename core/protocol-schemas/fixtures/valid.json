@@ -2879,5 +2879,110 @@
         "seq": 9
       }
     }
+  },
+  {
+    "name": "Attachment image valid",
+    "schema": "Attachment",
+    "value": {
+      "uploadId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "kind": "image",
+      "name": "beach.jpg",
+      "mediaType": "image/jpeg",
+      "bytes": 482113
+    }
+  },
+  {
+    "name": "Attachment document valid",
+    "schema": "Attachment",
+    "value": {
+      "uploadId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "kind": "document",
+      "name": "Q3 report.pdf",
+      "mediaType": "application/pdf",
+      "bytes": 1048576
+    }
+  },
+  {
+    "name": "UploadRef valid",
+    "schema": "UploadRef",
+    "value": {
+      "uploadId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+    }
+  },
+  {
+    "name": "UploadReceipt valid",
+    "schema": "UploadReceipt",
+    "value": {
+      "schemaVersion": 1,
+      "upload": {
+        "uploadId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+        "kind": "document",
+        "name": "Q3 report.pdf",
+        "mediaType": "application/pdf",
+        "bytes": 1048576
+      }
+    }
+  },
+  {
+    "name": "TurnCommand with files",
+    "schema": "TurnCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "command-1",
+      "text": "What's in these?",
+      "attachments": [
+        {
+          "uploadId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "uploadId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        }
+      ]
+    }
+  },
+  {
+    "name": "TurnCommand of files alone",
+    "schema": "TurnCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "command-1",
+      "text": "",
+      "attachments": [
+        {
+          "uploadId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ]
+    }
+  },
+  {
+    "name": "Run V4 message with files",
+    "schema": "Run",
+    "value": {
+      "schemaVersion": 4,
+      "runId": "run-3",
+      "admittedAt": "2026-09-24T00:00:10.000Z",
+      "messageRunId": "run-3",
+      "messageAdmittedAt": "2026-09-24T00:00:10.000Z",
+      "input": "",
+      "attachments": [
+        {
+          "uploadId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "kind": "image",
+          "name": "beach.jpg",
+          "mediaType": "image/jpeg",
+          "bytes": 482113
+        },
+        {
+          "uploadId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "kind": "document",
+          "name": "Q3 report.pdf",
+          "mediaType": "application/pdf",
+          "bytes": 1048576
+        }
+      ],
+      "status": "running",
+      "events": [],
+      "canRetry": false
+    }
   }
 ]

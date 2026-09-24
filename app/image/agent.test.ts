@@ -149,6 +149,23 @@ describe("generate_image", () => {
     // model request of the Turn.
     expect(result.content).not.toContain("iVBOR");
     expect(result.content.length).toBeLessThan(400);
+    // The picture itself rides along as a reference, so a model that can see
+    // it is shown what it made; the bytes are resolved per request.
+    expect(result.attachments).toEqual([
+      {
+        kind: "image",
+        mediaType: "image/png",
+        workspacePath: generatedImagePathV1(
+          OWNER,
+          WRITER.runId,
+          EFFECT_ID,
+          "png",
+        ),
+        contentHash: parsed.contentHash,
+        bytes: expect.any(Number),
+      },
+    ]);
+    expect(result.attachments![0]).not.toHaveProperty("dataBase64");
 
     expect(
       session.activeRunJournal.find(

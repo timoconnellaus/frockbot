@@ -585,3 +585,88 @@ describe("tool result attachments", () => {
     expect((withheld.messages as unknown[]).length).toBe(1);
   });
 });
+
+// What the person attached, on the wire: images as images, documents as
+// their text, and a line for anything the request does not carry.
+describe("user message attachments", () => {
+  const photo = {
+    kind: "image" as const,
+    uploadId: "a".repeat(64),
+    name: "beach.jpg",
+    mediaType: "image/jpeg",
+    bytes: 3,
+  };
+  const report = {
+    kind: "document" as const,
+    uploadId: "b".repeat(64),
+    name: "report.pdf",
+    mediaType: "application/pdf",
+    bytes: 10,
+  };
+
+  function requestWith(
+    attachments: {
+      kind: "image" | "document";
+      uploadId: string;
+      name: string;
+      mediaType: string;
+      bytes: number;
+      dataBase64?: string;
+      text?: string;
+    }[],
+  ) {
+    return {
+      requestId: "request-1",
+      provider: "openai-compatible",
+      model: "some-model",
+      system: "",
+      tools: [],
+      messages: [
+        { role: "user" as const, content: "What is this?", attachments },
+      ],
+    };
+  }
+
+  test("an image goes as an image_url part beside the words", () => {
+    const wire = requestToWire(
+      requestWith([{ ...photo, dataBase64: "AAAA" }]),
+      { acceptsImages: true },
+    );
+    expect(wire.messages).toEqual([
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "What is this?" },
+          {
+            type: "image_url",
+            image_url: { url: "data:image/jpeg;base64,AAAA" },
+          },
+        ],
+      },
+    ]);
+  });
+
+  test("a document goes as its text, and words alone stay a string", () => {
+    const wire = requestToWire(
+      requestWith([{ ...report, text: "Revenue rose." }]),
+      { acceptsImages: true },
+    );
+    expect(wire.messages).toEqual([
+      {
+        role: "user",
+        content:
+          'What is this?\n\n<attachment name="report.pdf" type="application/pdf">\nRevenue rose.\n</attachment>',
+      },
+    ]);
+  });
+
+  test("a model that cannot see images is told one is there", () => {
+    const wire = requestToWire(
+      requestWith([{ ...photo, dataBase64: "AAAA" }]),
+      { acceptsImages: false },
+    );
+    const content = (wire.messages as { content: unknown }[])[0]!.content;
+    expect(content).toContain("This model cannot see images.");
+    expect(JSON.stringify(wire)).not.toContain("AAAA");
+  });
+});

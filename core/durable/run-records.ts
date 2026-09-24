@@ -1,7 +1,9 @@
 import {
+  decodeMessageAttachmentsV1,
   decodeSessionEvent,
   decodeTurnTypeV1,
   formatSkillRefV1,
+  type MessageAttachmentV1,
   type SessionEvent,
   type SkillRefV1,
   type TurnTypeV1,
@@ -240,6 +242,11 @@ export interface StoredRunV1<Snapshot = unknown> {
   sessionId: string;
   acceptedAt: string;
   input: string;
+  /**
+   * The files the person attached, as references. The message is words and
+   * these together, so a message may be files alone and `input` empty.
+   */
+  attachments?: MessageAttachmentV1[];
   /** A fresh execution attempt of the same visible user message. */
   retryOf?: string;
   /** Recorded on the predecessor in the same transaction as its retry. */
@@ -459,6 +466,7 @@ const STORED_RUN_OPTIONAL_KEYS = [
   "landedAt",
   "mountedCompositionGenerationId",
   "preparedInputs",
+  "attachments",
 ] as const;
 const UTF8_ENCODER = new TextEncoder();
 
@@ -902,7 +910,20 @@ function requireStoredRunRecordV1<Snapshot>(
   ) {
     throw new Error(`run "${runId}" has no valid acceptance time`);
   }
-  if (!boundedString(candidate.input, 32_000)) {
+  let attachments: MessageAttachmentV1[] | undefined;
+  if (candidate.attachments !== undefined) {
+    try {
+      attachments = decodeMessageAttachmentsV1(
+        candidate.attachments,
+        "attachments",
+        true,
+      );
+    } catch {
+      throw new Error(`run "${runId}" has invalid attachments`);
+    }
+  }
+  // Files alone are a message; nothing at all is not.
+  if (!boundedString(candidate.input, 32_000, attachments !== undefined)) {
     throw new Error(`run "${runId}" has no valid input`);
   }
   if (candidate.events === undefined && candidate.eventRange === undefined) {
@@ -1067,6 +1088,7 @@ function requireStoredRunRecordV1<Snapshot>(
     sessionId: candidate.sessionId,
     acceptedAt: candidate.acceptedAt,
     input: candidate.input,
+    ...(attachments ? { attachments } : {}),
     ...lineage,
     ...(landedAt ? { landedAt } : {}),
     events,
@@ -1107,6 +1129,12 @@ export interface BotTurnCommand {
   acceptedAt: string;
   text: string;
   /**
+   * The files attached to this message, resolved from the Bot's uploads by
+   * the Bot Durable Object before admission. Part of the command's identity,
+   * like its Skills.
+   */
+  attachments?: MessageAttachmentV1[];
+  /**
    * Absent ⇒ `chat`. Only an in-Durable-Object producer may name another type;
    * the HTTP Turn path always admits `chat`.
    */
@@ -1146,12 +1174,14 @@ export function botTurnCommandFingerprintV1(
 ): string {
   const turnType = command.turnType ?? "chat";
   const skills = command.skills ?? [];
+  const attachments = command.attachments ?? [];
   const lane = command.lane ?? defaultRunLaneV1(turnType);
   if (
     turnType !== "chat" ||
     command.origin !== undefined ||
     command.subagentRole !== undefined ||
     skills.length > 0 ||
+    attachments.length > 0 ||
     lane !== defaultRunLaneV1(turnType) ||
     command.retryOf !== undefined
   ) {
@@ -1166,6 +1196,10 @@ export function botTurnCommandFingerprintV1(
       ...(command.origin ? { origin: command.origin } : {}),
       ...(command.retryOf ? { retryOf: command.retryOf } : {}),
       ...(skills.length > 0 ? { skills: skills.map(formatSkillRefV1) } : {}),
+      // The bytes are the identity of a file, and the upload id is their hash.
+      ...(attachments.length > 0
+        ? { attachments: attachments.map((item) => item.uploadId) }
+        : {}),
     })}`;
   }
   return `bot-turn-command-v1:${JSON.stringify({

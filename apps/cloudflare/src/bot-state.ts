@@ -82,7 +82,14 @@ import {
   BotDurableAuthority,
   IDENTITY_KEY,
   type BotIdentity,
+  type BotTurnCommand,
 } from "@frockbot/core/durable";
+import { recordUploadV1, resolveUploadRefsV1 } from "@frockbot/app/uploads/bot";
+import {
+  decodeStoredUploadV1,
+  type StoredUploadV1,
+} from "@frockbot/app/uploads/shared";
+import { deleteBotUploadsV1, releaseBotUploadQuotaRpcV1 } from "./uploads.js";
 import type {
   OwnedBotTurnCommand,
   ShellBotBackendContribution,
@@ -342,6 +349,7 @@ import {
 import {
   decodeBotAgentRunRpcV1,
   decodeBotRunRpcV1,
+  type DecodedBotRunRpcV1,
   decodeBotVoiceRunRpcV1,
   decodeVoiceChatResultRpcV1,
   decodeVoiceCallTranscriptRpcV1,
@@ -1221,6 +1229,9 @@ export class BotState
     await this.ctx.storage.deleteAlarm();
     await this.ctx.storage.deleteAll();
     await deleteBotWorkspaceRootsV1(this.env, identity);
+    // The Bot's uploads go with it, and the account gets their space back.
+    await deleteBotUploadsV1(this.env, identity);
+    await releaseBotUploadQuotaRpcV1(this.env, identity);
     this.mounted = undefined;
     this.surfacesFor = undefined;
   }
@@ -2074,7 +2085,43 @@ export class BotState
     const request = decodeBotRunRpcV1(input);
     const identity = { userId: request.userId, botId: request.botId };
     const { shell } = await this.materialized(identity);
-    return shell.run({ ...identity, ...request.command });
+    return shell.run({
+      ...identity,
+      ...(await this.withAttachments(request.command)),
+    });
+  }
+
+  /**
+   * A command's file refs, resolved against the uploads this Bot holds. A
+   * ref to anything else is refused here, before the Turn is admitted, so a
+   * message can only carry a file this Bot was given.
+   */
+  private async withAttachments(
+    command: DecodedBotRunRpcV1["command"],
+  ): Promise<BotTurnCommand> {
+    const { attachments: refs, ...rest } = command;
+    const attachments = await resolveUploadRefsV1(this.ctx.storage, refs);
+    return { ...rest, ...(attachments ? { attachments } : {}) };
+  }
+
+  /**
+   * Records one upload the gateway has just written to object storage. The
+   * upload route answers only after this, so the file a later message names
+   * is one this Bot durably holds.
+   */
+  async recordUploadV1(input: unknown): Promise<StoredUploadV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      upload: rpcDecoded(decodeStoredUploadV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return recordUploadV1(this.ctx.storage, request.upload as StoredUploadV1);
   }
 
   /**
@@ -2088,7 +2135,10 @@ export class BotState
     const request = decodeBotRunRpcV1(input);
     const identity = { userId: request.userId, botId: request.botId };
     const { shell } = await this.materialized(identity);
-    const receipt = await shell.admit({ ...identity, ...request.command });
+    const receipt = await shell.admit({
+      ...identity,
+      ...(await this.withAttachments(request.command)),
+    });
     const work = shell.pendingWork();
     if (work) this.ctx.waitUntil(work);
     return receipt;

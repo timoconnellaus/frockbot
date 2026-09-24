@@ -200,6 +200,12 @@ import {
 } from "./durable-rpc.js";
 import { loggedEntryV1 } from "./entry-boundary.js";
 import {
+  releaseBotUploadQuotaV1,
+  reserveUploadQuotaV1,
+  type UploadQuotaAnswerV1,
+} from "@frockbot/app/uploads/quota";
+import { UPLOAD_MAX_BYTES_V1 } from "@frockbot/core/contracts";
+import {
   GroupChatUserStoreV1,
   type GroupChatChangeV1,
   type GroupChatUserStorageV1,
@@ -487,6 +493,48 @@ export class UserConfiguration
   async requirePaidAccount(input: { userId: string }) {
     await this.assertUserIdentity(input.userId);
     this.billing().requireSubscription();
+  }
+
+  /**
+   * Counts one upload against the account's upload space, once for each Bot
+   * and file, in one transaction so two uploads cannot both take the last of
+   * it (`app/uploads/quota.ts`).
+   */
+  async reserveUploadQuota(input: unknown): Promise<UploadQuotaAnswerV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      uploadId: rpcPattern(/^[0-9a-f]{64}$/, 64),
+      bytes: rpcInteger({ minimum: 1, maximum: UPLOAD_MAX_BYTES_V1 }),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    // A deleting account takes no new file: its Bots' uploads are being
+    // removed, and one counted now could land after its Bot's were.
+    await this.assertAccountOpen();
+    return this.ctx.storage.transaction((transaction) =>
+      reserveUploadQuotaV1(transaction, {
+        botId: request.botId as string,
+        uploadId: request.uploadId as string,
+        bytes: request.bytes as number,
+      }),
+    );
+  }
+
+  /** Gives back the upload space of a Bot that has been deleted. Idempotent. */
+  async releaseBotUploadQuota(input: unknown): Promise<{ released: number }> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+    });
+    await this.assertUserIdentity(request.userId as string);
+    let released = 0;
+    for (;;) {
+      const page = await this.ctx.storage.transaction((transaction) =>
+        releaseBotUploadQuotaV1(transaction, request.botId as string),
+      );
+      released += page.released;
+      if (!page.more) return { released };
+    }
   }
 
   async registerPush(input: { userId: string; registration: unknown }) {

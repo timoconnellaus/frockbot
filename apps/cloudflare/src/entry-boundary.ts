@@ -35,6 +35,9 @@ const ENTRY_STATUS_BY_ERROR_NAME_V1 = new Map<string, number>([
   ["BotDeletedError", 410],
   // The same for the whole account, from the moment its deletion began.
   ["AccountDeletedError", 410],
+  // A message named a file this Bot was never given, or no longer holds. The
+  // request was well formed; what it names is not there to attach.
+  ["UploadNotFoundError", 422],
 ]);
 
 function errorName(error: unknown): string | undefined {

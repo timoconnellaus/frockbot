@@ -24,6 +24,7 @@ import {
 } from "@frockbot/core/contracts";
 import type { MachineResultDeliveryV1 } from "@frockbot/app/machine/delivery";
 import type { DebugGatewaySurface } from "./debug.js";
+import type { BotTurnCommandRequestV1 } from "./durable-rpc.js";
 import type {
   BotConfigurationExecuteRpcV1,
   BotConfigurationReadRpcV1,
@@ -248,7 +249,7 @@ export interface UserBotStateBinding {
   run(input: {
     schemaVersion: 1;
     botId: string;
-    command: BotTurnCommand;
+    command: BotTurnCommandRequestV1<BotTurnCommand>;
   }): Promise<BotTurnResult>;
   /**
    * Durable acceptance of a composer command. The receipt is not the Turn's
@@ -257,7 +258,7 @@ export interface UserBotStateBinding {
   admitRun(input: {
     schemaVersion: 1;
     botId: string;
-    command: BotTurnCommand;
+    command: BotTurnCommandRequestV1<BotTurnCommand>;
   }): Promise<{ schemaVersion: 1; runId: string }>;
   listRuns(input: {
     schemaVersion: 1;

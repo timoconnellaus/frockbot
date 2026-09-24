@@ -2,7 +2,10 @@ import type {
   LlmStreamEvent,
   NormalizedModelRequest,
 } from "@frockbot/core/contracts";
-import { ModelProviderFailureError } from "@frockbot/core/contracts";
+import {
+  ModelProviderFailureError,
+  userMessagePartsV1,
+} from "@frockbot/core/contracts";
 import {
   classifyOpenAICompatibleFailureV1,
   modelReplayBindingV1,
@@ -21,7 +24,19 @@ export async function* bedrockStreamV1(
 ): AsyncIterable<LlmStreamEvent> {
   const rawMessages = request.messages.map((message) => {
     if (message.role === "user")
-      return { role: "user", content: [{ text: message.content }] };
+      return {
+        role: "user",
+        content: userMessagePartsV1(message, {
+          images: true,
+        }).map((part) => {
+          const format = part.type === "image" ? part.mediaType.slice(6) : "";
+          return part.type === "text"
+            ? { text: part.text }
+            : ["png", "jpeg", "gif", "webp"].includes(format)
+              ? { image: { format, source: { bytes: part.dataBase64 } } }
+              : { text: `[Image "${part.name}" is attached to this message.]` };
+        }),
+      };
     if (message.role === "tool")
       return {
         role: "user",

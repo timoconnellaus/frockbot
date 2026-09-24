@@ -141,7 +141,7 @@ const STATIC_CATALOG: ConnectionModelCatalogV1 = {
     {
       providerModelId: FROCK_AI_DEFAULT_MODEL,
       displayName: "Auto (recommended)",
-      capabilities: { tools: true, vision: false, reasoning: true },
+      capabilities: { tools: true, vision: true, reasoning: true },
       source: "discovered",
     },
     ...CLOUDFLARE_TEXT_MODELS.map((model) => ({

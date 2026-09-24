@@ -15,6 +15,7 @@ import type {
   AgentOptions,
 } from "@frockbot/core/agent-loop/agent";
 import type {
+  ModelAttachmentResolverV1,
   SessionSeedV1,
   WorkingContextSelectorV1,
 } from "@frockbot/core/contracts";
@@ -140,6 +141,8 @@ export interface ShellIsolateMountOptions {
 
 export interface ShellCompositionMountOptions {
   billing?: ModelBilling;
+  /** Fills in what a request's attachments name, for one dispatch. */
+  attachments?: ModelAttachmentResolverV1;
   botId: string;
   sessionId: string;
   sessionEvents?: readonly SessionEvent[];
@@ -234,6 +237,7 @@ export function createShellCompositionHost(
       const runtime = await createFoundationRuntime(undefined, {
         agentId: options.botId,
         billing: options.billing,
+        ...(options.attachments ? { attachments: options.attachments } : {}),
         sessionId: options.sessionId,
         ...(options.sessionSeed
           ? { sessionSeed: options.sessionSeed }

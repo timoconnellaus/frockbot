@@ -226,8 +226,33 @@ function refusal(reason: string): ToolExecutionResult {
   return { content: `generate_image was refused: ${reason}`, isError: true };
 }
 
-function success(result: GenerateImageResultV1): ToolExecutionResult {
-  return { content: JSON.stringify(result), isError: false };
+/**
+ * The durable result, and the image itself as an attachment: a reference to
+ * the Workspace file, which the model request resolves for a model that can
+ * see it. The Bot looks at what it made instead of taking its word for it.
+ */
+function success(
+  result: GenerateImageResultV1,
+  recorded: RecordedImageV1,
+): ToolExecutionResult {
+  return {
+    content: JSON.stringify(result),
+    isError: false,
+    ...(recorded.dimensions.mimeType === "image/png" ||
+    recorded.dimensions.mimeType === "image/jpeg"
+      ? {
+          attachments: [
+            {
+              kind: "image" as const,
+              mediaType: recorded.dimensions.mimeType,
+              workspacePath: recorded.path,
+              contentHash: recorded.contentHash,
+              bytes: recorded.bytes,
+            },
+          ],
+        }
+      : {}),
+  };
 }
 
 /** The turn and step an image event belongs to, read from the open step. */
@@ -329,7 +354,7 @@ export function createGenerateImageTool(
     // video roles. See `@frockbot/app/subagents` `SUBAGENT_TOOL_REACH_V1`.
     admission: { subagentRoles: ["executor"] },
     description:
-      "Generate one image from a text prompt and store it in your Workspace. Answers the file's path, content hash and size — not the image bytes; read the path to see the picture.",
+      "Generate one image from a text prompt and store it in your Workspace. Answers the file's path, content hash and size, with the image attached for a model that can see it.",
     inputSchema: GENERATE_IMAGE_INPUT_SCHEMA as unknown as Record<
       string,
       unknown
@@ -404,6 +429,7 @@ export function createGenerateImageTool(
             stored.contentHash,
             stored.dimensions,
           ),
+          stored,
         );
       }
       let position: { turn: number; step: number };
@@ -509,6 +535,7 @@ export function createGenerateImageTool(
         generationId: outcome.generation.generationId,
         contentHash,
         dimensions,
+        bytes: bytes.byteLength,
       });
     },
   };
@@ -519,6 +546,7 @@ interface RecordedImageV1 {
   generationId: string;
   contentHash: string;
   dimensions: ImageDimensionsV1;
+  bytes: number;
 }
 
 /** The object this effect wrote, read back from the Workspace, or nothing. */
@@ -542,6 +570,7 @@ async function readRecordedImage(
       generationId: outcome.file.generation.generationId,
       contentHash: outcome.file.generation.contentHash,
       dimensions,
+      bytes: outcome.file.bytes.byteLength,
     };
   }
   return undefined;
@@ -575,7 +604,7 @@ async function recordGenerated(
   });
   // The model must not be told the image exists before the record is durable.
   await session.flush();
-  return success(result);
+  return success(result, recorded);
 }
 
 /**

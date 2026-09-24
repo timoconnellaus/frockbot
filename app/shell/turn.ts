@@ -6,6 +6,8 @@
 // fences it, and the one alarm that recovers it.
 
 import { groupMessageWaitingV1 } from "@frockbot/app/groups/bot";
+import { createUploadReaderV1 } from "@frockbot/app/uploads/bot";
+import { createModelAttachmentResolverV1 } from "@frockbot/app/uploads/resolver";
 import type { AgentEffectAdmission } from "@frockbot/core/agent-loop/agent";
 import {
   validateToolOccurrenceJournal,
@@ -436,6 +438,23 @@ export async function executeTurn(
           input.identity.botId,
           input.command.sessionId,
         ),
+        // The files this conversation carries, read for each dispatch and
+        // never written into the request the log keeps.
+        attachments: createModelAttachmentResolverV1({
+          uploads: createUploadReaderV1(
+            {
+              get: (key, options) =>
+                state.env.MEMORY_FILES.get(
+                  key,
+                  options?.range ? { range: options.range } : undefined,
+                ),
+            },
+            input.identity,
+          ),
+          ...(state.env.WORKSPACE_FILES
+            ? { workspace: state.env.WORKSPACE_FILES }
+            : {}),
+        }),
         persistSessionEvents: input.persistSessionEvents,
         agentPackages: runtime.agentPackages,
         modelSelection: runtime.modelSelection,

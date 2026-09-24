@@ -8,6 +8,7 @@ library;
 
 import 'dart:convert';
 
+import '../client/attachments.dart';
 import '../theme/time.dart';
 
 /// One user-facing send, as the thread draws it. `unsupported` is a payload
@@ -180,6 +181,9 @@ class TranscriptLine {
   /// transcript carried it: where it falls among the others sent from here.
   /// See [orderTranscript].
   final int? localOrder;
+
+  /// The files the person attached to their message.
+  final List<MessageAttachment> attachments;
   const TranscriptLine({
     required this.id,
     required this.runId,
@@ -200,6 +204,7 @@ class TranscriptLine {
     this.exchange,
     this.voiceCall,
     this.localOrder,
+    this.attachments = const [],
   });
 
   /// A send still being written: drawn where its message will land and
@@ -208,6 +213,7 @@ class TranscriptLine {
 
   bool get empty =>
       text.isEmpty &&
+      attachments.isEmpty &&
       notice == null &&
       sends.isEmpty &&
       retry == null &&
@@ -236,6 +242,7 @@ class TranscriptLine {
     exchange: exchange,
     voiceCall: voiceCall,
     localOrder: localOrder,
+    attachments: attachments,
   );
 }
 
@@ -290,6 +297,7 @@ TranscriptLine unconfirmedLine(
   String runId,
   String text, {
   required int localOrder,
+  List<MessageAttachment> attachments = const [],
 }) => TranscriptLine(
   id: '$runId:user',
   runId: runId,
@@ -297,6 +305,7 @@ TranscriptLine unconfirmedLine(
   text: text,
   status: LineStatus.completed,
   localOrder: localOrder,
+  attachments: attachments,
 );
 
 /// The thread, in the order it is drawn.
@@ -798,10 +807,13 @@ List<TranscriptLine> projectRuns(
     final messageId = run['messageRunId'] as String? ?? runId;
     final inbound = inboundExchange(run);
     // A Routine's Turn is projected with no input at all: nobody typed it. A
-    // chat Turn cannot be admitted empty, so an empty input means there is no
-    // person's message to draw above the Bot's — not an empty one. A Turn a
+    // chat Turn cannot be admitted empty — words, files or both — so neither
+    // means there is no person's message to draw above the Bot's. A Turn a
     // counterpart asked for has input, but it is theirs, not the person's.
     final input = inbound == null ? (run['input'] as String?) ?? '' : '';
+    final files = inbound == null
+        ? MessageAttachment.decodeList(run['attachments'])
+        : const <MessageAttachment>[];
     if (inbound != null) {
       lines.add(
         TranscriptLine(
@@ -815,7 +827,7 @@ List<TranscriptLine> projectRuns(
         ),
       );
     }
-    if (input.isNotEmpty && emitted.add(messageId)) {
+    if ((input.isNotEmpty || files.isNotEmpty) && emitted.add(messageId)) {
       final current = latest[messageId]!;
       final currentId = current['runId'] as String;
       final failed =
@@ -847,6 +859,9 @@ List<TranscriptLine> projectRuns(
               : failure?.action,
           failureMessageId: failed ? '$currentId:failed' : null,
           localOrder: current['localOrder'] as int?,
+          attachments: current['attachments'] == null
+              ? files
+              : MessageAttachment.decodeList(current['attachments']),
         ),
       );
     }

@@ -18,6 +18,7 @@ import {
   type NormalizedModelRequest,
   type RuntimeFeatureV1,
   ModelProviderFailureError,
+  userMessagePartsV1,
 } from "@frockbot/core/contracts";
 import {
   classifyOpenAICompatibleFailureV1,
@@ -57,8 +58,25 @@ export function catalogContextV1(
       parameters: tool.inputSchema,
     })),
     messages: request.messages.map((message) => {
-      if (message.role === "user")
-        return { role: "user", content: message.content, timestamp: 0 };
+      if (message.role === "user") {
+        if (!message.attachments?.length)
+          return { role: "user", content: message.content, timestamp: 0 };
+        return {
+          role: "user",
+          content: userMessagePartsV1(message, {
+            images: model.input.includes("image"),
+          }).map((part) =>
+            part.type === "text"
+              ? { type: "text" as const, text: part.text }
+              : {
+                  type: "image" as const,
+                  data: part.dataBase64,
+                  mimeType: part.mediaType,
+                },
+          ),
+          timestamp: 0,
+        };
+      }
       if (message.role === "tool")
         return {
           role: "toolResult",

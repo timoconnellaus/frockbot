@@ -43,6 +43,18 @@ dependencies:
   genui: 0.10.3
   a2ui_core: 0.1.1
   json_schema_builder: 0.1.7
+  # Attaching files to a message: the system picker, a drop onto the
+  # desktop window, and an image pasted from the clipboard. Native plugins,
+  # so the first Android delivery that carries them is a full APK.
+  file_picker: 13.1.0
+  desktop_drop: 0.8.4
+  pasteboard: 0.5.0
+  # What the picker and a drop hand over: a file's name and its bytes.
+  cross_file: 0.3.5+5
+  # A photo is scaled to 2,048 pixels on the device before it is sent; the
+  # engine decodes it (HEIC included, where the platform can) and this
+  # encodes the JPEG. Pure Dart.
+  image: 4.10.1
 
 dev_dependencies:
   flutter_test:

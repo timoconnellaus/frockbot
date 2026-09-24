@@ -3289,3 +3289,75 @@ describe("AgentLoop", () => {
     expect(raised).toBe(0);
   });
 });
+
+describe("a message with files", () => {
+  const photo = {
+    kind: "image" as const,
+    uploadId: "a".repeat(64),
+    name: "beach.jpg",
+    mediaType: "image/jpeg",
+    bytes: 482_113,
+  };
+
+  function answering(seen: NormalizedModelRequest[]): LlmProvider {
+    return {
+      id: "sees-files",
+      async *stream(request) {
+        seen.push(request);
+        yield { type: "text-delta", text: "A beach." };
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+  }
+
+  test("records references and hands the model the message with them", async () => {
+    const seen: NormalizedModelRequest[] = [];
+    const provider = answering(seen);
+    const runtime = mountRuntime(provider);
+    const handle = await runtime.loop.create({
+      ...allowEffectOptions,
+      botId: "bot-files",
+      sessionId: "files",
+      provider: provider.id,
+      model: "test-model",
+    });
+
+    handle.agent.send({ text: "What is this?", attachments: [photo] });
+    await handle.agent.whenIdle();
+
+    const journal = handle.agent.session.activeRunJournal;
+    for (const type of ["input/queued", "user/message"] as const) {
+      expect(journal.find((event) => event.type === type)).toMatchObject({
+        attachments: [photo],
+      });
+    }
+    for (const event of journal) decodeSessionEvent(event);
+    expect(seen[0]!.messages.at(-1)).toEqual({
+      role: "user",
+      content: "What is this?",
+      attachments: [photo],
+    });
+  });
+
+  test("files alone are a message; nothing at all is not", async () => {
+    const seen: NormalizedModelRequest[] = [];
+    const provider = answering(seen);
+    const runtime = mountRuntime(provider);
+    const handle = await runtime.loop.create({
+      ...allowEffectOptions,
+      botId: "bot-files",
+      sessionId: "files-alone",
+      provider: provider.id,
+      model: "test-model",
+    });
+
+    expect(() => handle.agent.send({ text: "  " })).toThrow(/empty/);
+    handle.agent.send({ text: "", attachments: [photo] });
+    await handle.agent.whenIdle();
+    expect(seen[0]!.messages.at(-1)).toEqual({
+      role: "user",
+      content: "",
+      attachments: [photo],
+    });
+  });
+});

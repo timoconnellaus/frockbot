@@ -45,6 +45,14 @@ export interface FrockAiBillingLimitV1 {
   outputTokens: number;
 }
 
+/**
+ * The input tokens one image is held to under a prepaid limit: about what a
+ * model that tiles at 28 pixels spends on a 2,048-pixel photo, which is the
+ * largest the app sends. Generous on purpose — it only decides whether a
+ * request fits its reservation; the charge is what the model reports.
+ */
+export const FROCK_AI_IMAGE_INPUT_TOKENS_V1 = 6_000;
+
 export interface FrockAiGatewayConfigV1 {
   /**
    * Each hosted model's prepaid bound, keyed by its Frock AI model id, as the
@@ -208,12 +216,21 @@ export function createFrockAiGatewayHostV1(
         const { inputTokens, outputTokens } =
           billingLimits.byGatewayModel.get(gatewayModel) ??
           billingLimits.smallest;
-        // A byte bound overcounts text tokens. Images require a separate model
-        // quote; do not silently price their pixels as a short URL.
-        const encoded = JSON.stringify(body);
+        // A byte bound overcounts text tokens. An image is not its base64:
+        // each one counts as a fixed allowance instead, and what it really
+        // cost settles from the model's reported usage, whose prompt tokens
+        // include the image's.
+        let images = 0;
+        const encoded = JSON.stringify(body, (key, value: unknown) => {
+          if (key !== "image_url") return value;
+          images += 1;
+          return {};
+        });
         if (
-          encoded.includes('"image_url"') ||
-          new TextEncoder().encode(encoded).length + 1024 > inputTokens
+          new TextEncoder().encode(encoded).length +
+            1024 +
+            images * FROCK_AI_IMAGE_INPUT_TOKENS_V1 >
+          inputTokens
         ) {
           throw new FrockAiTransportErrorV1(
             "This request exceeds its prepaid model limit. Use a connected model for this request.",

@@ -192,6 +192,8 @@ import {
   type VoiceDictationCleanupV1,
 } from "./voice-dictation.js";
 import { createFrockAiGatewayHostV1 } from "./frock-ai.js";
+import { uploadRoutes, type UploadRouteDependenciesV1 } from "./uploads.js";
+import type { DocumentConverterV1 } from "@frockbot/app/uploads/extract";
 import { createHostedDictationCleanupJudgeV1 } from "@frockbot/app/supervision";
 import { VOICE_DICTATION_CLEANUP_MODEL_V1 } from "@frockbot/app/voice/dictation-cleanup";
 import { voiceDictationConfiguredV1 } from "@frockbot/app/voice/dictation-upstream";
@@ -206,6 +208,9 @@ import {
   rpcJsonSnapshotV1,
   rpcObject,
   rpcBotTurnCommandOptionalsV1,
+  requireTurnCommandContentV1,
+  rpcTurnText,
+  type BotTurnCommandRequestV1,
   rpcPattern,
   rpcString,
 } from "./durable-rpc.js";
@@ -451,9 +456,11 @@ interface BotStateRpc extends BotConfigurationBinding {
     contentHash: string,
   ): Promise<{ bytesBase64: string } | null>;
   executeComputerPresenceCommand(command: ComputerCommandV1): Promise<unknown>;
-  run(command: OwnedBotTurnCommand): Promise<BotTurnResult>;
+  run(
+    command: BotTurnCommandRequestV1<OwnedBotTurnCommand>,
+  ): Promise<BotTurnResult>;
   admitRun(
-    command: OwnedBotTurnCommand,
+    command: BotTurnCommandRequestV1<OwnedBotTurnCommand>,
   ): Promise<{ schemaVersion: 1; runId: string }>;
   listRuns(query: ClientRunListQueryV1): Promise<ClientRunListV1>;
   debugSnapshot(query: BotDebugQueryV1): Promise<unknown>;
@@ -505,7 +512,52 @@ type RpcBoundary<T> = {
     : never;
 };
 
-function botTurnRpcV1(command: OwnedBotTurnCommand) {
+/** The upload route's bindings: the object store, the converter, two objects. */
+function uploadRouteDependenciesV1(env: Env): UploadRouteDependenciesV1 {
+  const ai = env.AI as unknown as Partial<DocumentConverterV1> | undefined;
+  return {
+    bucket: {
+      put: (key, value, options) => env.MEMORY_FILES.put(key, value, options),
+      get: (key) => env.MEMORY_FILES.get(key),
+    },
+    // A stand-in `AI` binding (local, CI) may convert nothing; plain text
+    // still reads without it.
+    ...(typeof ai?.toMarkdown === "function"
+      ? {
+          converter: {
+            toMarkdown: (files, options) => ai.toMarkdown!(files, options),
+          },
+        }
+      : {}),
+    botRegistered: async (userId, botId) =>
+      decodeBotMembershipViewV1(
+        await userConfigurationStub(env, userId).hasBot({
+          schemaVersion: 1,
+          userId,
+          botId,
+        }),
+      ).registered,
+    reserveQuota: (input) =>
+      // SAFETY: this binding names UserConfiguration; this is its reviewed RPC.
+      (
+        env.USER_CONFIGURATIONS.get(
+          env.USER_CONFIGURATIONS.idFromName(input.userId),
+        ) as unknown as Pick<UserConfiguration, "reserveUploadQuota">
+      ).reserveUploadQuota({ schemaVersion: 1, ...input }),
+    recordUpload: (input) =>
+      // SAFETY: this binding names BotState; this is its reviewed RPC. The
+      // name is decoded where the route read it, so no `#` reaches here.
+      (
+        env.BOT_STATES.get(
+          env.BOT_STATES.idFromName(
+            `${input.userId}:${decodeBotIdV1(input.botId, "bot id")}`,
+          ),
+        ) as unknown as Pick<BotState, "recordUploadV1">
+      ).recordUploadV1({ schemaVersion: 1, ...input }),
+  };
+}
+
+function botTurnRpcV1(command: BotTurnCommandRequestV1<OwnedBotTurnCommand>) {
   return {
     schemaVersion: 1 as const,
     userId: command.userId,
@@ -517,6 +569,14 @@ function botTurnRpcV1(command: OwnedBotTurnCommand) {
       text: command.text,
       ...(command.retryOf ? { retryOf: command.retryOf } : {}),
       ...(command.skills ? { skills: command.skills } : {}),
+      // Refs only across the door, whatever the caller held.
+      ...(command.attachments?.length
+        ? {
+            attachments: command.attachments.map(({ uploadId }) => ({
+              uploadId,
+            })),
+          }
+        : {}),
     },
   };
 }
@@ -944,7 +1004,7 @@ function decodeUserBotTurnRpcV1(input: unknown) {
         runId: rpcIdentifier,
         sessionId: rpcString(257),
         acceptedAt: rpcString(64),
-        text: rpcString(100_000),
+        text: rpcTurnText(100_000),
       },
       // The same optional members the Bot Durable Object's door accepts, so
       // nothing the composer sends is refused one door earlier.
@@ -1004,7 +1064,8 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
 
   async run(input: unknown): Promise<BotTurnResult> {
     const request = decodeUserBotTurnRpcV1(input);
-    const command = request.command as BotTurnCommand;
+    const command = request.command as BotTurnCommandRequestV1<BotTurnCommand>;
+    requireTurnCommandContentV1(command);
     return botStateStub(
       this.env,
       this.ctx.props.userId,
@@ -1018,7 +1079,8 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
 
   async admitRun(input: unknown): Promise<{ schemaVersion: 1; runId: string }> {
     const request = decodeUserBotTurnRpcV1(input);
-    const command = request.command as BotTurnCommand;
+    const command = request.command as BotTurnCommandRequestV1<BotTurnCommand>;
+    requireTurnCommandContentV1(command);
     return botStateStub(
       this.env,
       this.ctx.props.userId,
@@ -2404,6 +2466,7 @@ export default {
           voice: voiceGatewayDependencies(env),
           backendContributions: [
             ...mountedBackend.contributions,
+            uploadRoutes(uploadRouteDependenciesV1(env)),
             billingRoutes(
               env,
               (userId) =>

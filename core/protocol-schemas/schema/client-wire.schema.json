@@ -959,6 +959,69 @@
         }
       ]
     },
+    "Attachment": {
+      "type": "object",
+      "properties": {
+        "uploadId": {
+          "$ref": "#/$defs/Digest"
+        },
+        "kind": {
+          "enum": ["image", "document"]
+        },
+        "name": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 255,
+          "pattern": "\\S"
+        },
+        "mediaType": {
+          "enum": [
+            "image/png",
+            "image/jpeg",
+            "image/webp",
+            "image/gif",
+            "application/pdf",
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "text/csv",
+            "text/plain",
+            "text/markdown",
+            "application/json"
+          ]
+        },
+        "bytes": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 20971520
+        }
+      },
+      "required": ["uploadId", "kind", "name", "mediaType", "bytes"],
+      "additionalProperties": false
+    },
+    "UploadRef": {
+      "type": "object",
+      "properties": {
+        "uploadId": {
+          "$ref": "#/$defs/Digest"
+        }
+      },
+      "required": ["uploadId"],
+      "additionalProperties": false
+    },
+    "UploadReceipt": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "upload": {
+          "$ref": "#/$defs/Attachment"
+        }
+      },
+      "required": ["schemaVersion", "upload"],
+      "additionalProperties": false
+    },
     "TurnCommand": {
       "type": "object",
       "properties": {
@@ -970,9 +1033,9 @@
         },
         "text": {
           "type": "string",
-          "minLength": 1,
+          "minLength": 0,
           "maxLength": 32000,
-          "pattern": "\\S"
+          "pattern": "^$|\\S"
         },
         "skills": {
           "type": "array",
@@ -981,6 +1044,15 @@
           },
           "minItems": 0,
           "maxItems": 3,
+          "uniqueItems": true
+        },
+        "attachments": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/UploadRef"
+          },
+          "minItems": 1,
+          "maxItems": 5,
           "uniqueItems": true
         },
         "supersedes": {
@@ -998,7 +1070,28 @@
         }
       },
       "required": ["schemaVersion", "commandId", "text"],
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "if": {
+            "type": "object",
+            "required": ["text"],
+            "properties": {
+              "text": {
+                "type": "string",
+                "maxLength": 0
+              }
+            }
+          },
+          "then": {
+            "type": "object",
+            "required": ["attachments"],
+            "properties": {
+              "attachments": {}
+            }
+          }
+        }
+      ]
     },
     "StopCommand": {
       "type": "object",
@@ -1913,6 +2006,14 @@
               "minLength": 0,
               "maxLength": 32000
             },
+            "attachments": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Attachment"
+              },
+              "minItems": 1,
+              "maxItems": 5
+            },
             "status": {
               "const": "running"
             },
@@ -2136,6 +2237,14 @@
               "type": "string",
               "minLength": 0,
               "maxLength": 32000
+            },
+            "attachments": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Attachment"
+              },
+              "minItems": 1,
+              "maxItems": 5
             },
             "status": {
               "const": "completed"
@@ -2368,6 +2477,14 @@
               "type": "string",
               "minLength": 0,
               "maxLength": 32000
+            },
+            "attachments": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Attachment"
+              },
+              "minItems": 1,
+              "maxItems": 5
             },
             "status": {
               "const": "failed"
@@ -2605,6 +2722,14 @@
               "type": "string",
               "minLength": 0,
               "maxLength": 32000
+            },
+            "attachments": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/Attachment"
+              },
+              "minItems": 1,
+              "maxItems": 5
             },
             "status": {
               "const": "cancelled"
@@ -6122,7 +6247,7 @@
   },
   "x-frockbot-compatibility": {
     "protocolMin": 2,
-    "protocolMax": 2,
+    "protocolMax": 3,
     "catalogs": []
   },
   "x-frockbot-state-channel": {

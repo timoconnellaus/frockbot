@@ -1,5 +1,6 @@
 /** Every entry under `entries/`, alphabetically. `generate.ts` writes it; `entries.ts` orders it. */
 import entry_add_a_model from "./entries/add-a-model.ts";
+import entry_attachments from "./entries/attachments.ts";
 import entry_avatar_colour_flash from "./entries/avatar-colour-flash.ts";
 import entry_chat_scroll from "./entries/chat-scroll.ts";
 import entry_chat_type from "./entries/chat-type.ts";
@@ -37,6 +38,7 @@ import entry_working_bot from "./entries/working-bot.ts";
 
 export const WHATS_NEW_ENTRY_FILES_V1 = [
   entry_add_a_model,
+  entry_attachments,
   entry_avatar_colour_flash,
   entry_chat_scroll,
   entry_chat_type,

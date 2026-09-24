@@ -20,6 +20,10 @@ import {
 } from "@frockbot/core/durable";
 import { readConversationSnapshotV1 } from "@frockbot/app/shell/conversation-snapshot";
 import type { ReplyDraftV1 } from "@frockbot/app/shell/reply-draft";
+import {
+  RUN_ATTACHMENTS_PROTOCOL_V1,
+  withoutRunAttachmentsV1,
+} from "@frockbot/app/shell/run-protocol";
 import type {
   ComputerBotStorage,
   ComputerBotTransaction,
@@ -59,6 +63,33 @@ interface ChannelAttachmentV1 {
   botId: string;
   epoch: string;
   lastSent: string;
+  /**
+   * The client protocol the socket named when it opened. Absent on a socket
+   * opened before this was recorded, and on any client that names none: both
+   * are read as the oldest protocol this deployment serves.
+   */
+  protocol?: number;
+}
+
+/** Whether a socket is sent a Run's files, or a Run without them. */
+function currentProtocol(attachment: ChannelAttachmentV1): boolean {
+  return (attachment.protocol ?? 2) >= RUN_ATTACHMENTS_PROTOCOL_V1;
+}
+
+/** The frames for one socket's protocol, stripped once and only if needed. */
+class ProtocolFrames {
+  private readonly frame: CursoredFrameV1;
+  private readonly current: string[];
+  private legacy: string[] | undefined;
+  constructor(frame: CursoredFrameV1) {
+    this.frame = frame;
+    this.current = framesFor(frame);
+  }
+  for(attachment: ChannelAttachmentV1): string[] {
+    if (currentProtocol(attachment)) return this.current;
+    this.legacy ??= framesFor(withoutRunAttachmentsV1(this.frame));
+    return this.legacy;
+  }
 }
 
 const utf8 = new TextEncoder();
@@ -155,21 +186,20 @@ function updateFrame(update: ConversationUpdateV1): CursoredFrameV1 {
 }
 
 function decodeAttachment(value: unknown): ChannelAttachmentV1 | undefined {
-  if (
-    !value ||
-    typeof value !== "object" ||
-    Array.isArray(value) ||
-    Object.keys(value).length !== 5
-  ) {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
     return undefined;
   }
   const attachment = value as ChannelAttachmentV1;
+  const keys = Object.keys(value).length;
   if (
+    keys !== (attachment.protocol === undefined ? 5 : 6) ||
     attachment.schemaVersion !== 1 ||
     typeof attachment.userId !== "string" ||
     !attachment.userId ||
     typeof attachment.botId !== "string" ||
-    !attachment.botId
+    !attachment.botId ||
+    (attachment.protocol !== undefined &&
+      !Number.isSafeInteger(attachment.protocol))
   ) {
     return undefined;
   }
@@ -337,9 +367,9 @@ export class BotStateChannel {
   broadcastCommitted(updates: readonly ConversationUpdateV1[]): void {
     if (this.silenced || updates.length === 0) return;
     for (const update of updates) {
-      let frames: string[];
+      let frames: ProtocolFrames;
       try {
-        frames = framesFor(updateFrame(update));
+        frames = new ProtocolFrames(updateFrame(update));
       } catch {
         continue;
       }
@@ -425,13 +455,17 @@ export class BotStateChannel {
     return this.alarmRefresher?.(transaction) ?? Promise.resolve();
   }
 
-  private sendFrames(frames: string[], epoch: number, cursor: number): void {
+  private sendFrames(
+    frames: ProtocolFrames,
+    epoch: number,
+    cursor: number,
+  ): void {
     for (const socket of this.state.getWebSockets(CHANNEL_TAG)) {
       try {
         const attachment = decodeAttachment(socket.deserializeAttachment());
         if (!attachment || Number(attachment.epoch) !== epoch) continue;
         if (Number(attachment.lastSent) >= cursor) continue;
-        for (const frame of frames) socket.send(frame);
+        for (const frame of frames.for(attachment)) socket.send(frame);
         socket.serializeAttachment({
           ...attachment,
           lastSent: String(cursor),
@@ -466,6 +500,13 @@ export class BotStateChannel {
     const drafts = url.searchParams.get("drafts") === "1";
     const presentedCursor = url.searchParams.get("cursor");
     const presentedEpoch = url.searchParams.get("epoch");
+    // A browser cannot put a header on a WebSocket, so the client names its
+    // protocol here. One that names none is the oldest this deployment serves.
+    const presentedProtocol = Number(url.searchParams.get("protocol") ?? "2");
+    const protocol =
+      Number.isSafeInteger(presentedProtocol) && presentedProtocol > 0
+        ? presentedProtocol
+        : 2;
     let cursor: number | undefined;
     let epoch: number | undefined;
     if (presentedCursor !== null) {
@@ -513,15 +554,18 @@ export class BotStateChannel {
         server,
         drafts ? [CHANNEL_TAG, DRAFT_TAG] : [CHANNEL_TAG],
       );
-      server.serializeAttachment({
+      const attachment = {
         schemaVersion: 1,
         ...identity,
         epoch: handshake.epoch,
         lastSent: handshake.lastSent,
-      } satisfies ChannelAttachmentV1);
+        protocol,
+      } satisfies ChannelAttachmentV1;
+      server.serializeAttachment(attachment);
       for (const frame of handshake.frames) {
         try {
-          for (const encoded of framesFor(frame)) server.send(encoded);
+          for (const encoded of new ProtocolFrames(frame).for(attachment))
+            server.send(encoded);
         } catch {
           server.close(1011, "handshake failed");
           return new Response(null, { status: 101, webSocket: client });

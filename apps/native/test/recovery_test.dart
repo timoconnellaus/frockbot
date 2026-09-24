@@ -25,6 +25,7 @@ class GatedLookup implements ChatTransport {
     String id,
     String text, {
     String? retryOf,
+    List<MessageAttachment> attachments = const [],
   }) async {
     throw const RequestFailure('lost');
   }
@@ -391,6 +392,7 @@ class _TimeoutAfterPage implements ChatTransport {
     String id,
     String text, {
     String? retryOf,
+    List<MessageAttachment> attachments = const [],
   }) => _send.future;
 
   @override
@@ -432,6 +434,7 @@ class _SplitDelivery implements ChatTransport {
     String id,
     String text, {
     String? retryOf,
+    List<MessageAttachment> attachments = const [],
   }) async {
     throw const RequestFailure('lost');
   }
@@ -485,6 +488,7 @@ class _ReceiptThenFailedRun implements ChatTransport {
     String id,
     String text, {
     String? retryOf,
+    List<MessageAttachment> attachments = const [],
   }) async {
     if (refuseNext) throw const RequestFailure('no', 400);
     sent = id;

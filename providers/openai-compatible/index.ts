@@ -13,6 +13,7 @@ import {
   type ResponseFormatNoteV1,
   type RuntimeFeatureV1,
   type StructuredOutputSupportV1,
+  userMessagePartsV1,
 } from "@frockbot/core/contracts";
 import { APICallError, type LanguageModelV4StreamPart } from "@ai-sdk/provider";
 import { OpenAICompatibleChatLanguageModel } from "@ai-sdk/openai-compatible";
@@ -277,8 +278,34 @@ function messageToWire(
   message: LlmMessage,
   acceptsImages: boolean,
 ): Record<string, unknown>[] {
-  if (message.role === "user")
-    return [{ role: "user", content: message.content }];
+  if (message.role === "user") {
+    const parts = userMessagePartsV1(message, { images: acceptsImages });
+    // Words alone go as a string: the widest-understood shape, and the one
+    // every message without an image has always been sent as.
+    if (parts.every((part) => part.type === "text")) {
+      return [
+        {
+          role: "user",
+          content: parts
+            .map((part) => (part.type === "text" ? part.text : ""))
+            .join("\n\n"),
+        },
+      ];
+    }
+    return [
+      {
+        role: "user",
+        content: parts.map((part) =>
+          part.type === "text"
+            ? { type: "text", text: part.text }
+            : {
+                type: "image_url",
+                image_url: { url: dataUrl(part.mediaType, part.dataBase64) },
+              },
+        ),
+      },
+    ];
+  }
   if (message.role === "tool") {
     const attachments = message.attachments ?? [];
     // An attachment this adapter cannot show is said in the text rather than

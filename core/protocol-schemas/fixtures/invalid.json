@@ -2440,5 +2440,128 @@
       "canRetry": false,
       "landedAt": { "runId": "run-1", "seq": -1 }
     }
+  },
+  {
+    "name": "Attachment wrong shape",
+    "schema": "Attachment",
+    "value": null
+  },
+  {
+    "name": "Attachment of a kind no message carries",
+    "schema": "Attachment",
+    "value": {
+      "uploadId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "kind": "image",
+      "name": "beach.jpg",
+      "mediaType": "application/zip",
+      "bytes": 482113
+    }
+  },
+  {
+    "name": "Attachment carries its bytes",
+    "schema": "Attachment",
+    "value": {
+      "uploadId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "kind": "image",
+      "name": "beach.jpg",
+      "mediaType": "image/jpeg",
+      "bytes": 482113,
+      "dataBase64": "AAAA"
+    }
+  },
+  {
+    "name": "UploadRef wrong shape",
+    "schema": "UploadRef",
+    "value": null
+  },
+  {
+    "name": "UploadRef names no hash",
+    "schema": "UploadRef",
+    "value": {
+      "uploadId": "beach.jpg"
+    }
+  },
+  {
+    "name": "UploadReceipt wrong shape",
+    "schema": "UploadReceipt",
+    "value": null
+  },
+  {
+    "name": "UploadReceipt without its upload",
+    "schema": "UploadReceipt",
+    "value": {
+      "schemaVersion": 1
+    }
+  },
+  {
+    "name": "TurnCommand with neither words nor files",
+    "schema": "TurnCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "command-1",
+      "text": ""
+    }
+  },
+  {
+    "name": "TurnCommand with more than five files",
+    "schema": "TurnCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "command-1",
+      "text": "all of them",
+      "attachments": [
+        {
+          "uploadId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "uploadId": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+        },
+        {
+          "uploadId": "cccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"
+        },
+        {
+          "uploadId": "dddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd"
+        },
+        {
+          "uploadId": "eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee"
+        },
+        {
+          "uploadId": "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"
+        }
+      ]
+    }
+  },
+  {
+    "name": "TurnCommand names one file twice",
+    "schema": "TurnCommand",
+    "value": {
+      "schemaVersion": 1,
+      "commandId": "command-1",
+      "text": "twice",
+      "attachments": [
+        {
+          "uploadId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        },
+        {
+          "uploadId": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+        }
+      ]
+    }
+  },
+  {
+    "name": "Run with an empty file list",
+    "schema": "Run",
+    "value": {
+      "schemaVersion": 4,
+      "runId": "run-3",
+      "admittedAt": "2026-09-24T00:00:10.000Z",
+      "messageRunId": "run-3",
+      "messageAdmittedAt": "2026-09-24T00:00:10.000Z",
+      "input": "hi",
+      "attachments": [],
+      "status": "running",
+      "events": [],
+      "canRetry": false
+    }
   }
 ]

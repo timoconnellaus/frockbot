@@ -5,6 +5,7 @@ import {
   type LlmStreamEvent,
   type LlmUsageV1,
   type LoopHookListV1,
+  type ModelAttachmentResolverV1,
   type NormalizedModelRequest,
 } from "@frockbot/core/contracts";
 import { FROCK_AI_PROVIDER_TYPE } from "@frockbot/providers/frock-ai/catalog";
@@ -131,8 +132,9 @@ export class BilledLlmRegistry extends LlmRegistry {
   constructor(
     hooks: LoopHookListV1,
     private readonly billing: ModelBilling,
+    attachments?: ModelAttachmentResolverV1,
   ) {
-    super(hooks);
+    super(hooks, attachments);
   }
   override register(provider: LlmProvider): () => void {
     const billed = this;

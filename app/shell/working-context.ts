@@ -215,12 +215,23 @@ export function reduceWorkingContextAppendV1(input: {
     }
     if (event.type === "user/message") {
       const turn = ensure(turns, head.sessionId, event.turn, event.seq);
-      turn.messages.push({ role: "user", content: event.text });
+      turn.messages.push({
+        role: "user",
+        content: event.text,
+        ...(event.attachments && event.attachments.length > 0
+          ? { attachments: event.attachments.map((item) => ({ ...item })) }
+          : {}),
+      });
       turn.index.endSeq = Math.max(turn.index.endSeq, event.seq + 1);
       noteMessages(head, turn);
       pushVoice(voice, {
         role: "user",
-        text: event.text,
+        // A message that is files alone is still something they said.
+        text:
+          event.text ||
+          (event.attachments ?? [])
+            .map((item) => `[attached ${item.name}]`)
+            .join(" "),
         turn: event.turn,
         seq: event.seq,
         at: event.timestamp,

@@ -1,4 +1,9 @@
-import { decodeSkillRefsV1, type SkillRefV1 } from "@frockbot/core/contracts";
+import {
+  decodeSkillRefsV1,
+  decodeUploadRefsV1,
+  type SkillRefV1,
+  type UploadRefV1,
+} from "@frockbot/core/contracts";
 import { decodeBotIdV1, isRpcIdentifier } from "@frockbot/core/configuration";
 import { decodeRunIdV1 } from "@frockbot/app/shell/backend-contracts";
 import type { StoredRunGroupOriginV1 } from "@frockbot/core/durable";
@@ -309,8 +314,43 @@ export interface DecodedBotRunRpcV1 {
     acceptedAt: string;
     text: string;
     skills?: SkillRefV1[];
+    /** Refs only: the Bot resolves each against its own uploads. */
+    attachments?: UploadRefV1[];
     retryOf?: string;
   };
+}
+
+/**
+ * A Turn command as it crosses an RPC door: its files are refs, and only the
+ * Bot Durable Object that holds the uploads turns them into attachments.
+ */
+export type BotTurnCommandRequestV1<Command extends object> = Omit<
+  Command,
+  "attachments"
+> & { attachments?: readonly UploadRefV1[] };
+
+/**
+ * A Turn command's text. Empty is allowed here and nowhere else: a message may
+ * be files alone, which {@link requireTurnCommandContentV1} checks once the
+ * whole command is decoded.
+ */
+export function rpcTurnText(maximum: number): RpcValueDecoder {
+  return (value, label) => {
+    if (typeof value !== "string" || value.length > maximum) {
+      throw new Error(`${label} must be a bounded string`);
+    }
+    return value;
+  };
+}
+
+/** A command carries words, files, or both — never neither. */
+export function requireTurnCommandContentV1(command: {
+  text: string;
+  attachments?: readonly unknown[];
+}): void {
+  if (command.text.trim().length === 0 && !command.attachments?.length) {
+    throw new Error("RPC request.command.text is required");
+  }
 }
 
 /**
@@ -327,6 +367,7 @@ export const rpcBotTurnCommandOptionalsV1: Readonly<
   Record<string, RpcValueDecoder>
 > = {
   skills: (value, label) => decodeSkillRefsV1(value, label),
+  attachments: (value, label) => decodeUploadRefsV1(value, label),
   retryOf: (value) => decodeRunIdV1(value),
 };
 
@@ -339,12 +380,13 @@ export function decodeBotRunRpcV1(input: unknown): DecodedBotRunRpcV1 {
         runId: rpcString(128),
         sessionId: rpcString(257),
         acceptedAt: rpcString(64),
-        text: rpcString(32_000),
+        text: rpcTurnText(32_000),
       },
       rpcBotTurnCommandOptionalsV1,
     ),
   });
   const command = request.command as DecodedBotRunRpcV1["command"];
+  requireTurnCommandContentV1(command);
   command.runId = decodeRunIdV1(command.runId);
   if (!Number.isFinite(Date.parse(command.acceptedAt))) {
     throw new Error("RPC request.command.acceptedAt is invalid");

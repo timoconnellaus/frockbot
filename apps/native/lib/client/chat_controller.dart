@@ -5,6 +5,8 @@ import 'dart:convert';
 import 'package:flutter/foundation.dart';
 
 import '../shell/transcript_model.dart' show ReplyDraft;
+import 'attachments.dart';
+import 'image_prep.dart';
 import 'page_cache.dart';
 import 'transport.dart';
 
@@ -30,12 +32,16 @@ class PendingSend {
   final String? retryOf;
   final String? messageRunId;
   final String? messageAdmittedAt;
+
+  /// The files the message carries: uploads the Bot already holds.
+  final List<MessageAttachment> attachments;
   const PendingSend(
     this.id,
     this.text, {
     this.retryOf,
     this.messageRunId,
     this.messageAdmittedAt,
+    this.attachments = const [],
   });
 
   Map<String, Object?> toJson() => {
@@ -44,6 +50,10 @@ class PendingSend {
     if (retryOf != null) 'retryOf': retryOf,
     if (messageRunId != null) 'messageRunId': messageRunId,
     if (messageAdmittedAt != null) 'messageAdmittedAt': messageAdmittedAt,
+    if (attachments.isNotEmpty)
+      'attachments': [
+        for (final attachment in attachments) attachment.toJson(),
+      ],
   };
 
   static PendingSend? decode(Object? value) {
@@ -67,6 +77,7 @@ class PendingSend {
       retryOf: retryOf as String?,
       messageRunId: messageRunId as String?,
       messageAdmittedAt: messageAdmittedAt as String?,
+      attachments: MessageAttachment.decodeList(value['attachments']),
     );
   }
 }
@@ -83,7 +94,60 @@ class ChatController extends ChangeNotifier {
     required this.userId,
     required this.botId,
     String Function()? nextId,
+    this.uploads,
+    this.prepare = prepareUploadV1,
   }) : nextId = nextId ?? randomId;
+
+  /// Where this Bot's files go. Absent, nothing can be attached here.
+  final UploadTransport? uploads;
+
+  /// What a picked file becomes before it is uploaded.
+  final PrepareUpload prepare;
+
+  /// The files attached to this Bot's draft, uploaded as they are attached.
+  late final AttachmentTray attachments = AttachmentTray(
+    upload: ({required name, required mediaType, required bytes}) {
+      final destination = uploads;
+      if (destination == null) {
+        throw const RequestFailure('Files can’t be attached here.');
+      }
+      return destination.upload(
+        botId,
+        name: name,
+        mediaType: mediaType,
+        bytes: bytes,
+      );
+    },
+    prepare: prepare,
+  );
+
+  /// Bytes this client already holds or has read for an upload, by its id:
+  /// what a thumbnail is drawn from. Bounded, because a long thread can
+  /// carry more pictures than are worth keeping in memory.
+  final Map<String, Uint8List> _attachmentBytes = {};
+  static const _attachmentBytesKept = 24;
+
+  void _keepAttachmentBytes(String uploadId, Uint8List bytes) {
+    _attachmentBytes.remove(uploadId);
+    _attachmentBytes[uploadId] = bytes;
+    while (_attachmentBytes.length > _attachmentBytesKept) {
+      _attachmentBytes.remove(_attachmentBytes.keys.first);
+    }
+  }
+
+  /// An uploaded file's bytes, from memory when this client has them.
+  Future<Uint8List> attachmentBytes(MessageAttachment attachment) async {
+    final held = _attachmentBytes[attachment.uploadId];
+    if (held != null) return held;
+    final destination = uploads;
+    if (destination == null) {
+      throw const RequestFailure('That file can’t be shown here.');
+    }
+    final bytes = await destination.download(botId, attachment.uploadId);
+    _keepAttachmentBytes(attachment.uploadId, bytes);
+    return bytes;
+  }
+
   String get key => 'chat/$userId/$botId';
   String get pageKey => pageCacheKey(userId, botId);
   String draft = '';
@@ -578,6 +642,10 @@ class ChatController extends ChangeNotifier {
     _runs[submission.id] = {
       'runId': submission.id,
       'input': submission.text,
+      if (submission.attachments.isNotEmpty)
+        'attachments': [
+          for (final attachment in submission.attachments) attachment.toJson(),
+        ],
       'admittedAt': DateTime.now().toUtc().toIso8601String(),
       'status': 'running',
       'queued': queued,
@@ -835,9 +903,22 @@ class ChatController extends ChangeNotifier {
     changed();
   }
 
+  /// Sends the draft with whatever is ready in the tray. Files alone are a
+  /// message; while one is still uploading, nothing is sent.
   Future<void> send(String text) async {
-    if (!canSend || text.trim().isEmpty) return;
-    await _submit(PendingSend(nextId(), text));
+    if (!canSend || attachments.busy) return;
+    final ready = attachments.ready;
+    if (text.trim().isEmpty && ready.isEmpty) return;
+    // The tray's previews are the thumbnails the thread draws until the
+    // server's copy is read.
+    for (final item in attachments.items) {
+      final uploaded = item.uploaded;
+      final preview = item.preview;
+      if (uploaded != null && preview != null) {
+        _keepAttachmentBytes(uploaded.uploadId, preview);
+      }
+    }
+    await _submit(PendingSend(nextId(), text, attachments: attachments.take()));
   }
 
   /// A fresh attempt over the same visible message, without touching the composer.
@@ -852,7 +933,8 @@ class ChatController extends ChangeNotifier {
       return;
     }
     final text = run['input'] as String?;
-    if (text == null || text.trim().isEmpty) return;
+    final files = MessageAttachment.decodeList(run['attachments']);
+    if (text == null || (text.trim().isEmpty && files.isEmpty)) return;
     await _submit(
       PendingSend(
         nextId(),
@@ -861,6 +943,8 @@ class ChatController extends ChangeNotifier {
         messageRunId: run['messageRunId'] as String? ?? runId,
         messageAdmittedAt:
             run['messageAdmittedAt'] as String? ?? run['admittedAt'] as String,
+        // A retry is the same message, and its files are part of it.
+        attachments: files,
       ),
     );
   }
@@ -907,6 +991,7 @@ class ChatController extends ChangeNotifier {
         submission.id,
         text,
         retryOf: submission.retryOf,
+        attachments: submission.attachments,
       );
       await _acceptAdmission(submission);
     } on RequestFailure catch (failure) {
@@ -962,7 +1047,11 @@ class ChatController extends ChangeNotifier {
   void _restoreSubmission(PendingSend submission) {
     if (submission.retryOf != null) return;
     final text = submission.text;
-    draft = draft.isEmpty ? text : '$text\n\n$draft';
+    if (text.isNotEmpty) draft = draft.isEmpty ? text : '$text\n\n$draft';
+    attachments.restore(
+      submission.attachments,
+      preview: (uploadId) => _attachmentBytes[uploadId],
+    );
   }
 
   void _forget(PendingSend submission) {
@@ -1103,6 +1192,7 @@ class ChatController extends ChangeNotifier {
   @override
   void dispose() {
     _disposed = true;
+    attachments.dispose();
     _questionTimer?.cancel();
     invalidations.dispose();
     computerNotices.dispose();

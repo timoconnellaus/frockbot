@@ -6,9 +6,9 @@
 //  1. Access ends before the request answers, and a deleting account starts
 //     nothing new: no Turn, no Bot.
 //  2. Driven by nothing but its own alarm, the saga removes every Bot, the
-//     voice session, the Computer, the provider accounts, the User's files
-//     and Memory vectors, the sign-in identity with its sessions, and the
-//     access record and invitation — and nobody else's.
+//     voice session, the Computer, the provider accounts, the User's files,
+//     uploads and Memory vectors, the sign-in identity with its sessions, and
+//     the access record and invitation — and nobody else's.
 //  3. The User object ends holding its tombstone and nothing else, stays
 //     that way across a restart, and refuses to be provisioned again.
 //  4. "Delete my Computer" destroys the Computer once per command.
@@ -23,6 +23,10 @@ import { getAgentByName } from "agents";
 import { beforeAll, describe, expect, test } from "vitest";
 import { workspaceObjectKeyV1 } from "@frockbot/core/workspace-store";
 import { ACCOUNT_DELETED_KEY_V1 } from "@frockbot/app/account/deletion";
+import {
+  uploadObjectKeyV1,
+  uploadTextKeyV1,
+} from "@frockbot/app/uploads/shared";
 import { createUserMemoryEngineV1 } from "../src/memory-records.ts";
 import { DEPLOYMENT_POLICY_SINGLETON_NAME } from "../src/deployment-policy.ts";
 import type { FakeComputerHostCall } from "./computer-host-fake.ts";
@@ -38,6 +42,7 @@ interface UserRpc {
   listBots(input: unknown): Promise<{ bots: Array<{ botId: string }> }>;
   createBot(input: unknown): Promise<unknown>;
   prepareAccount(input: unknown): Promise<unknown>;
+  reserveUploadQuota(input: unknown): Promise<{ status: string }>;
   executeGroupChatCommand(input: unknown): Promise<unknown>;
 }
 
@@ -241,6 +246,49 @@ describe("deleting an account", () => {
     );
     for (const key of [...mine, theirs]) await env.MEMORY_FILES.put(key, "x");
 
+    // An upload the way the upload route admits one: counted in the User
+    // object, its bytes and text in the bucket, and its record in the Bot.
+    // Beside it, one left by a Bot already gone, and a stranger's.
+    const uploadId = "c".repeat(64);
+    expect(
+      await userRpc(userId).reserveUploadQuota({
+        schemaVersion: 1,
+        userId,
+        botId,
+        uploadId,
+        bytes: 1,
+      }),
+    ).toMatchObject({ status: "reserved" });
+    await env.BOT_STATES.getByName(`${userId}:${botId}`).recordUploadV1({
+      schemaVersion: 1,
+      userId,
+      botId,
+      upload: {
+        schemaVersion: 1,
+        uploadId,
+        kind: "document",
+        name: "notes.md",
+        mediaType: "text/markdown",
+        bytes: 1,
+        uploadedAt: "2026-09-24T00:00:00.000Z",
+        textChars: 1,
+      },
+    });
+    const uploads = [
+      uploadObjectKeyV1(userId, botId, uploadId),
+      uploadTextKeyV1(userId, botId, uploadId),
+      uploadObjectKeyV1(userId, "long-gone", uploadId),
+    ];
+    const strangersUpload = uploadObjectKeyV1(stranger, botId, uploadId);
+    for (const key of [...uploads, strangersUpload])
+      await env.MEMORY_FILES.put(key, "x");
+    expect(
+      (await storedKeys(env.BOT_STATES.getByName(`${userId}:${botId}`))).keys,
+    ).toContain(`upload:${uploadId}`);
+    expect((await storedKeys(user(userId))).keys).toEqual(
+      expect.arrayContaining(["uploads:total"]),
+    );
+
     // User Memory vectors the index holds.
     await env.MEMORY_INDEX_PROBE.reset();
     const vectorIds = [
@@ -349,6 +397,12 @@ describe("deleting an account", () => {
     expect(await providerAccounts(stranger)).toHaveLength(1);
     for (const key of mine) expect(await env.MEMORY_FILES.head(key)).toBeNull();
     expect(await env.MEMORY_FILES.head(theirs)).not.toBeNull();
+    // The uploads go too — the Bots' own, and the one a lost Bot left — and
+    // their records and quota ledger with the objects that held them, which
+    // the exact key lists above and below prove.
+    for (const key of uploads)
+      expect(await env.MEMORY_FILES.head(key)).toBeNull();
+    expect(await env.MEMORY_FILES.head(strangersUpload)).not.toBeNull();
     expect((await env.MEMORY_INDEX_PROBE.deletedBatches()).flat()).toEqual(
       expect.arrayContaining(vectorIds),
     );

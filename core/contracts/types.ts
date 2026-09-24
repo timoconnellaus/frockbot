@@ -9,6 +9,10 @@ import {
   type SkillRefV1,
 } from "./skills.js";
 import {
+  decodeMessageAttachmentsV1,
+  type MessageAttachmentV1,
+} from "./message-attachments.js";
+import {
   decodeModelResponseFormatV1,
   STRUCTURED_OUTPUT_ISSUE_LIMIT_V1,
   type ModelResponseFormatV1,
@@ -163,7 +167,16 @@ export function requireModelReplayStateV1(
 }
 
 export type LlmMessage =
-  | { role: "user"; content: string }
+  | {
+      role: "user";
+      content: string;
+      /**
+       * What the person attached. References in every durable place; the
+       * bytes and text are filled in for one dispatch after the request is
+       * journaled.
+       */
+      attachments?: MessageAttachmentV1[];
+    }
   | {
       role: "assistant";
       content: string;
@@ -388,6 +401,8 @@ export interface SessionEventMap {
     messageId: string;
     text: string;
     skills?: SkillRefV1[];
+    /** The files the person attached. Absent means none. */
+    attachments?: MessageAttachmentV1[];
   };
   "input/admitted": { messageId: string; turn: number };
   "input/cancelled": { messageId: string; reason: "user" | "shutdown" };
@@ -457,6 +472,8 @@ export interface SessionEventMap {
     step: number;
     messageId: string;
     text: string;
+    /** References to what the person attached, never the bytes. */
+    attachments?: MessageAttachmentV1[];
   };
   "model/request": {
     turn: number;
@@ -1216,8 +1233,23 @@ function requireLlmMessage(value: unknown, label: string): void {
   const message = eventRecord(value, label);
   const role = eventString(message.role, `${label}.role`);
   if (role === "user") {
-    requireEventKeys(message, ["role", "content"], label);
+    requireEventKeys(
+      message,
+      [
+        "role",
+        "content",
+        ...(Object.hasOwn(message, "attachments") ? ["attachments"] : []),
+      ],
+      label,
+    );
     eventString(message.content, `${label}.content`, true);
+    if (message.attachments !== undefined) {
+      decodeMessageAttachmentsV1(
+        message.attachments,
+        `${label}.attachments`,
+        false,
+      );
+    }
     return;
   }
   if (role === "assistant") {
@@ -1634,18 +1666,29 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       break;
     case "input/queued":
       // Exact keys either way: an input that invoked no Skill carries no
-      // `skills` field, and one that did carries a bounded, decoded list.
+      // `skills` field, and one that did carries a bounded, decoded list. The
+      // same holds for attachments.
       requireEventKeys(
         event,
-        event.skills === undefined
-          ? keys("messageId", "text")
-          : keys("messageId", "text", "skills"),
+        keys(
+          "messageId",
+          "text",
+          ...(event.skills === undefined ? [] : ["skills"]),
+          ...(event.attachments === undefined ? [] : ["attachments"]),
+        ),
         "session event",
       );
       eventString(event.messageId, "session event.messageId");
       text();
       if (event.skills !== undefined) {
         decodeSkillRefsV1(event.skills, "session event.skills");
+      }
+      if (event.attachments !== undefined) {
+        decodeMessageAttachmentsV1(
+          event.attachments,
+          "session event.attachments",
+          true,
+        );
       }
       break;
     case "input/admitted":
@@ -1727,13 +1770,26 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
     case "user/message":
       requireEventKeys(
         event,
-        keys("turn", "step", "messageId", "text"),
+        keys(
+          "turn",
+          "step",
+          "messageId",
+          "text",
+          ...(event.attachments === undefined ? [] : ["attachments"]),
+        ),
         "session event",
       );
       turn();
       step();
       eventString(event.messageId, "session event.messageId");
       text();
+      if (event.attachments !== undefined) {
+        decodeMessageAttachmentsV1(
+          event.attachments,
+          "session event.attachments",
+          true,
+        );
+      }
       break;
     case "model/request":
       requireEventKeys(event, keys("turn", "step", "request"), "session event");

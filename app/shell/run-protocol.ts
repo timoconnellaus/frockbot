@@ -1,8 +1,13 @@
 import { sentTextV1 } from "./sent-text.js";
 import {
   BATCH_TOOL_NAME,
+  decodeMessageAttachmentsV1,
   decodeSendToUserPayloadV1,
   decodeSkillRefsV1,
+  decodeUploadRefsV1,
+  durableMessageAttachmentV1,
+  type MessageAttachmentV1,
+  type UploadRefV1,
   VOICE_CALL_TRANSCRIPT_TEXT_MAX_V1,
   VOICE_CALL_TRANSCRIPT_TURNS_MAX_V1,
   type SendToUserPayloadV1,
@@ -115,6 +120,8 @@ export interface ClientRun {
   /** See `ClientRunV1.landedAt`. */
   landedAt?: ClientRunLandingV1;
   input: string;
+  /** See `ClientRunV1.attachments`. */
+  attachments?: ClientRunAttachmentV1[];
   events: ClientTurnEvent[];
   status: "running" | "completed" | "failed" | "cancelled";
   responseText?: string;
@@ -333,6 +340,13 @@ export interface ClientRunV1 {
   retriedBy?: string;
   canRetry?: boolean;
   input: string;
+  /**
+   * The files the person attached to this message, as references: the
+   * client reads an image's bytes from the upload route by its id. Only a
+   * client that negotiated protocol 3 is sent this field; see
+   * `withoutRunAttachmentsV1`.
+   */
+  attachments?: ClientRunAttachmentV1[];
   status: ClientRunStatusV1;
   events: ClientRunEventV1[];
   stopRequestedAt?: string;
@@ -353,6 +367,67 @@ export interface ClientRunV1 {
 export interface ClientRunLandingV1 {
   runId: string;
   seq: number;
+}
+
+/** One attached file, as the thread draws it. */
+export type ClientRunAttachmentV1 = Omit<
+  MessageAttachmentV1,
+  "dataBase64" | "text"
+>;
+
+/**
+ * The first client protocol that decodes a Run's `attachments`. An older
+ * client validates a Run against an exact-key schema, so the field is left
+ * off every Run it is sent: it still draws the words, and the files are
+ * simply not in its thread.
+ */
+export const RUN_ATTACHMENTS_PROTOCOL_V1 = 3;
+
+/**
+ * The same value with every Run's `attachments` removed, for a client older
+ * than {@link RUN_ATTACHMENTS_PROTOCOL_V1}. Walks whatever envelope carries
+ * the Runs — a page, a lookup, a Stop receipt, a state frame — so each seam
+ * strips with one call rather than knowing where its Runs are.
+ */
+export function withoutRunAttachmentsV1<T>(value: T): T {
+  const strip = (node: unknown, depth: number): unknown => {
+    if (depth > 12 || node === null || typeof node !== "object") return node;
+    if (Array.isArray(node)) return node.map((item) => strip(item, depth + 1));
+    const record = node as Record<string, unknown>;
+    const isRun =
+      typeof record.runId === "string" &&
+      typeof record.input === "string" &&
+      Array.isArray(record.events);
+    const copy: Record<string, unknown> = {};
+    for (const [key, child] of Object.entries(record)) {
+      if (isRun && key === "attachments") continue;
+      // A Run's own fields hold nothing that nests another Run.
+      copy[key] = isRun ? child : strip(child, depth + 1);
+    }
+    return copy;
+  };
+  return strip(value, 0) as T;
+}
+
+/**
+ * The protocol a request's `x-frockbot-client` hello names, or the oldest one
+ * this deployment still serves when it names none. A browser sends no hello
+ * on a WebSocket, so a socket names its protocol in its URL instead.
+ */
+export function clientProtocolOfV1(hello: string | null): number {
+  if (!hello || hello.length > 4096) return 2;
+  try {
+    const parsed = JSON.parse(hello) as unknown;
+    const version =
+      parsed && typeof parsed === "object" && !Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>).protocolVersion
+        : undefined;
+    return typeof version === "number" && Number.isSafeInteger(version)
+      ? version
+      : 2;
+  } catch {
+    return 2;
+  }
 }
 
 export interface ClientRunPageV1 {
@@ -431,6 +506,13 @@ export interface ClientTurnCommandV1 {
    * by pretending to invoke one.
    */
   skills?: SkillRefV1[];
+  /**
+   * Files this message carries, each an upload the Bot already holds. The
+   * bytes went to the upload route first; this names them by their hash, and
+   * the Bot resolves each name against its own uploads before it admits the
+   * Turn. With files, `text` may be empty.
+   */
+  attachments?: UploadRefV1[];
 }
 
 export interface ClientNotificationAcknowledgementCommandV1 {
@@ -1147,7 +1229,7 @@ export function projectClientRunV1(
       (run.admission?.turnType ?? "chat") === "chat" &&
       (run.admission?.lane ?? "user") === "user" &&
       run.admission?.origin === undefined &&
-      run.input.trim().length > 0,
+      (run.input.trim().length > 0 || (run.attachments?.length ?? 0) > 0),
     // A delivery Turn's input is the hand-off or decision it was opened to
     // deliver, not anything the person said, and this field is their own
     // bubble. Blanked for the same reason an automation Turn's is: GrokBot's
@@ -1158,6 +1240,9 @@ export function projectClientRunV1(
       run.admission?.turnType === "automation" || storedRunIsDeliveryV1(run)
         ? ""
         : truncateWireString(run.input, MAX_INPUT_BYTES),
+    ...(run.attachments && run.attachments.length > 0
+      ? { attachments: run.attachments.map(durableMessageAttachmentV1) }
+      : {}),
     status,
     events: visibleEvents(events, status),
     ...(run.stopRequestedAt
@@ -1909,6 +1994,7 @@ function decodeRun(value: unknown): ClientRun {
       "retriedBy",
       "canRetry",
       "landedAt",
+      "attachments",
     ],
     "run",
   );
@@ -2058,12 +2144,17 @@ function decodeRun(value: unknown): ClientRun {
       seq,
     };
   }
+  const attachments =
+    run.attachments === undefined
+      ? undefined
+      : decodeMessageAttachmentsV1(run.attachments, "run.attachments", true);
   return {
     runId,
     admittedAt,
     ...lineage,
     ...(landedAt ? { landedAt } : {}),
     input: wireString(run, "input", MAX_INPUT_BYTES, "run"),
+    ...(attachments ? { attachments } : {}),
     status: runStatus,
     events: decodeEvents(run.events),
     ...(stopRequestedAt ? { stopRequestedAt } : {}),
@@ -2345,7 +2436,15 @@ export function decodeClientTurnCommandV1(input: unknown): ClientTurnCommandV1 {
   const command = record(input, "turn command");
   exactKeys(
     command,
-    ["schemaVersion", "commandId", "text", "skills", "supersedes", "retryOf"],
+    [
+      "schemaVersion",
+      "commandId",
+      "text",
+      "skills",
+      "supersedes",
+      "retryOf",
+      "attachments",
+    ],
     "turn command",
   );
   if (command.schemaVersion !== 1) {
@@ -2366,7 +2465,13 @@ export function decodeClientTurnCommandV1(input: unknown): ClientTurnCommandV1 {
     MAX_INPUT_BYTES,
     "turn command",
   ).trim();
-  if (!text) throw new Error("turn command.text is required");
+  const attachments =
+    command.attachments === undefined
+      ? []
+      : decodeUploadRefsV1(command.attachments, "turn command.attachments");
+  if (!text && attachments.length === 0) {
+    throw new Error("turn command.text is required");
+  }
   // Installed apps still send this on every message. It no longer means
   // anything — a message sent mid-Turn waits and steers — so it is accepted
   // and dropped until those apps have updated.
@@ -2391,6 +2496,7 @@ export function decodeClientTurnCommandV1(input: unknown): ClientTurnCommandV1 {
     text,
     ...(retryOf ? { retryOf } : {}),
     ...(skills.length > 0 ? { skills } : {}),
+    ...(attachments.length > 0 ? { attachments } : {}),
   };
 }
 

@@ -53,6 +53,7 @@ class RetryTransport implements ChatTransport {
     String id,
     String text, {
     String? retryOf,
+    List<MessageAttachment> attachments = const [],
   }) async {
     sent.add((id: id, retryOf: retryOf));
     if (gate != null) await gate!.future;

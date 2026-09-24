@@ -147,6 +147,7 @@ export async function executeBotTurn(
       runtime.agent.agent.send({
         text: command.text,
         ...(command.skills ? { skills: command.skills } : {}),
+        ...(command.attachments ? { attachments: command.attachments } : {}),
       });
     }
     await runtime.agent.agent.whenIdle();

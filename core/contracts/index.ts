@@ -9,6 +9,7 @@ export * from "./isolate-context-catalog.generated.js";
 export * from "./json-schema.js";
 export * from "./loop-events.js";
 export * from "./loop-hooks.js";
+export * from "./message-attachments.js";
 export * from "./model-invocation.js";
 export * from "./package-catalog.js";
 export * from "./package-definition.js";
