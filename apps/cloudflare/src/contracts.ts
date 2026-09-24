@@ -382,20 +382,6 @@ export interface ApplicationArtifactStore {
   loadPluginPage?(contentHash: string): Promise<string | undefined>;
 }
 
-/**
- * Bot-authored Package artifacts. Content-addressed and immutable, stored at
- * `packages/<contentHash>.mjs` in the same `APPLICATION_ARTIFACTS` bucket.
- * Unlike `ApplicationArtifactStore.load`, the reader verifies the hash before
- * the bytes are used.
- */
-export interface PackageArtifactStore {
-  putPackageArtifact(contentHash: string, module: string): Promise<void>;
-  headPackageArtifact(
-    contentHash: string,
-  ): Promise<{ contentHash: string; size: number } | undefined>;
-  loadPackageArtifact(contentHash: string): Promise<string>;
-}
-
 export interface ConnectionBinding {
   start(input: {
     commandId: string;
