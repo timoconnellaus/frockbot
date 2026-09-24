@@ -10,7 +10,6 @@ import type {
   AuthPackageIdentityStoreV1,
 } from "@frockbot/core/contracts";
 import { pluginPageKeyV1 } from "@frockbot/core/contracts";
-import { sha256HexV1 as sha256Hex } from "@frockbot/core/crypto";
 import type { ClientSkillCatalogV1 } from "@frockbot/app/shell/skill-protocol";
 import { GroupChat, GROUP_CHANNEL_INTERNAL_PATH } from "./group-chat.js";
 import {
@@ -169,7 +168,6 @@ import {
 } from "./bot-state.js";
 import type {
   ApplicationArtifactStore,
-  PackageArtifactStore,
   BotConfigurationBinding,
   BotNotificationIntent,
   BotTurnCommand,
@@ -1199,16 +1197,7 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
   }
 }
 
-function packageArtifactKey(contentHash: string): string {
-  if (!/^[0-9a-f]{64}$/.test(contentHash)) {
-    throw new Error("package artifact contentHash is invalid");
-  }
-  return `packages/${contentHash}.mjs`;
-}
-
-class R2ApplicationArtifacts
-  implements ApplicationArtifactStore, PackageArtifactStore
-{
+class R2ApplicationArtifacts implements ApplicationArtifactStore {
   constructor(private readonly bucket: R2Bucket) {}
 
   async load(applicationHash: string): Promise<string> {
@@ -1224,46 +1213,6 @@ class R2ApplicationArtifacts
   async loadPluginPage(contentHash: string): Promise<string | undefined> {
     const object = await this.bucket.get(pluginPageKeyV1(contentHash));
     return object ? object.text() : undefined;
-  }
-
-  /**
-   * Content-addressed, so the write is idempotent: the same bytes always land
-   * at the same key. The hash is verified here too — the caller does not get to
-   * name bytes something they are not.
-   */
-  async putPackageArtifact(contentHash: string, module: string): Promise<void> {
-    const key = packageArtifactKey(contentHash);
-    if ((await sha256Hex(module)) !== contentHash) {
-      throw new Error(
-        `package artifact "${contentHash}" does not match its content hash`,
-      );
-    }
-    await this.bucket.put(key, module, {
-      httpMetadata: { contentType: "application/javascript" },
-    });
-  }
-
-  async headPackageArtifact(
-    contentHash: string,
-  ): Promise<{ contentHash: string; size: number } | undefined> {
-    const object = await this.bucket.head(packageArtifactKey(contentHash));
-    return object ? { contentHash, size: object.size } : undefined;
-  }
-
-  /** Hash-verified read: mismatched bytes are never handed to a loader. */
-  async loadPackageArtifact(contentHash: string): Promise<string> {
-    const key = packageArtifactKey(contentHash);
-    const object = await this.bucket.get(key);
-    if (!object) {
-      throw new Error(`package artifact "${contentHash}" was not found`);
-    }
-    const module = await object.text();
-    if ((await sha256Hex(module)) !== contentHash) {
-      throw new Error(
-        `package artifact "${contentHash}" failed hash verification`,
-      );
-    }
-    return module;
   }
 }
 
