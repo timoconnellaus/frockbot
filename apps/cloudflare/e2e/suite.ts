@@ -1,4 +1,7 @@
-export const publicationSpecFiles = ["plugins-publish.e2e.ts"] as const;
+export const publicationSpecFiles = [
+  "plugins-publish.e2e.ts",
+  "plugin-tuner-publish.e2e.ts",
+] as const;
 
 /**
  * What one real publication journey is allowed: two container builds and five

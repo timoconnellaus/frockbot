@@ -6,9 +6,7 @@
 // the host opens it, never the page, and the host draws who is listening and
 // the Stop that ends it. The page naming the note is what proves the rate and
 // the encoding the host hands it are the ones it says.
-import { readFileSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { readFileSync } from "node:fs";
 import { withPluginPageBridgeV1 } from "@frockbot/core/contracts";
 import { PLUGIN_PAGE_CSP_V1 } from "../src/plugin-page-route.ts";
 import type { Page } from "@playwright/test";
@@ -21,52 +19,12 @@ import {
   press,
   sem,
 } from "./fixtures.ts";
+import { hearingAnAString } from "./fake-string.ts";
 
 const CONTENT_HASH = "d".repeat(64);
 const PLUGIN_ID = "tuner";
-const A_STRING_HZ = 110 * 2 ** (-12 / 1200);
 
-/** A sustained string as 16-bit mono WAV, whole cycles so its loop is seamless. */
-function stringRecording(frequency: number): string {
-  const rate = 48_000;
-  const cycles = Math.round(frequency * 2);
-  const length = Math.round((cycles * rate) / frequency);
-  const wav = Buffer.alloc(44 + length * 2);
-  wav.write("RIFF", 0);
-  wav.writeUInt32LE(36 + length * 2, 4);
-  wav.write("WAVEfmt ", 8);
-  wav.writeUInt32LE(16, 16);
-  wav.writeUInt16LE(1, 20);
-  wav.writeUInt16LE(1, 22);
-  wav.writeUInt32LE(rate, 24);
-  wav.writeUInt32LE(rate * 2, 28);
-  wav.writeUInt16LE(2, 32);
-  wav.writeUInt16LE(16, 34);
-  wav.write("data", 36);
-  wav.writeUInt32LE(length * 2, 40);
-  for (let i = 0; i < length; i++) {
-    const phase = (2 * Math.PI * cycles * i) / length;
-    const sample =
-      0.3 * Math.sin(phase) +
-      0.15 * Math.sin(2 * phase) +
-      0.08 * Math.sin(3 * phase);
-    wav.writeInt16LE(Math.round(sample * 32_767), 44 + i * 2);
-  }
-  const path = join(tmpdir(), "frockbot-e2e-a-string.wav");
-  writeFileSync(path, wav);
-  return path;
-}
-
-test.use({
-  launchOptions: {
-    args: [
-      "--use-fake-device-for-media-stream",
-      "--use-fake-ui-for-media-stream",
-      "--autoplay-policy=no-user-gesture-required",
-      `--use-file-for-fake-audio-capture=${stringRecording(A_STRING_HZ)}`,
-    ],
-  },
-});
+test.use(hearingAnAString());
 
 function tunerPage(): string {
   const reference = readFileSync(
