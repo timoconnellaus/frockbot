@@ -14,6 +14,7 @@ import entry_marketplace_installed from "./entries/marketplace-installed.ts";
 import entry_notices_under_header from "./entries/notices-under-header.ts";
 import entry_one_card_per_provider from "./entries/one-card-per-provider.ts";
 import entry_paused_call_colour from "./entries/paused-call-colour.ts";
+import entry_plugin_pages_listen from "./entries/plugin-pages-listen.ts";
 import entry_plugin_theme_refused from "./entries/plugin-theme-refused.ts";
 import entry_plugins_per_bot from "./entries/plugins-per-bot.ts";
 import entry_quiet_delivery from "./entries/quiet-delivery.ts";
@@ -45,6 +46,7 @@ export const WHATS_NEW_ENTRY_FILES_V1 = [
   entry_notices_under_header,
   entry_one_card_per_provider,
   entry_paused_call_colour,
+  entry_plugin_pages_listen,
   entry_plugin_theme_refused,
   entry_plugins_per_bot,
   entry_quiet_delivery,
