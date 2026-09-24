@@ -42,7 +42,8 @@ export type PluginGrant =
   | "files"
   | "memory"
   | "workspace"
-  | "computer";
+  | "computer"
+  | "device";
 
 /** One tool the Plugin offers the Bot. Its name must be in `plugin.json` too. */
 export interface PluginTool {

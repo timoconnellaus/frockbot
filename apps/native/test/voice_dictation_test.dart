@@ -8,6 +8,7 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -379,7 +380,6 @@ void main() {
     });
   });
 
-
   // The tidy-up the server runs once a capture is finished. Everything here
   // is about the same question asked from different directions: can the
   // tidied text ever cost the person words they already have?
@@ -402,45 +402,48 @@ void main() {
       return harness;
     }
 
-    test('replaces the capture\'s own span and leaves the rest alone', () async {
-      final harness = Harness();
-      harness.drafts.setDraft('bot-a', 'typed first');
-      await harness.controller.start('bot-a');
-      await settle();
-      harness.say('ready');
-      harness.say('segment', {'text': 'um so check the Friday flights'});
-      await settle();
-      expect(harness.drafts.draftFor('bot-a'), 'typed first');
+    test(
+      'replaces the capture\'s own span and leaves the rest alone',
+      () async {
+        final harness = Harness();
+        harness.drafts.setDraft('bot-a', 'typed first');
+        await harness.controller.start('bot-a');
+        await settle();
+        harness.say('ready');
+        harness.say('segment', {'text': 'um so check the Friday flights'});
+        await settle();
+        expect(harness.drafts.draftFor('bot-a'), 'typed first');
 
-      // A `cleaning` that arrives while the person is still speaking is not a
-      // capture that has finished, and is ignored.
-      harness.say('cleaning');
-      await settle();
-      expect(harness.controller.state, DictationState.capturing);
-      expect(harness.drafts.draftFor('bot-a'), 'typed first');
+        // A `cleaning` that arrives while the person is still speaking is not a
+        // capture that has finished, and is ignored.
+        harness.say('cleaning');
+        await settle();
+        expect(harness.controller.state, DictationState.capturing);
+        expect(harness.drafts.draftFor('bot-a'), 'typed first');
 
-      unawaited(harness.controller.stop());
-      await settle();
-      harness.say('cleaning');
-      await settle();
-      expect(harness.controller.state, DictationState.cleaning);
-      expect(harness.controller.active, isFalse);
-      expect(
-        harness.drafts.draftFor('bot-a'),
-        'typed first um so check the Friday flights',
-      );
+        unawaited(harness.controller.stop());
+        await settle();
+        harness.say('cleaning');
+        await settle();
+        expect(harness.controller.state, DictationState.cleaning);
+        expect(harness.controller.active, isFalse);
+        expect(
+          harness.drafts.draftFor('bot-a'),
+          'typed first um so check the Friday flights',
+        );
 
-      harness.say('cleaned', {'text': 'Check the Friday flights.'});
-      harness.say('final');
-      await settle();
+        harness.say('cleaned', {'text': 'Check the Friday flights.'});
+        harness.say('final');
+        await settle();
 
-      expect(
-        harness.drafts.draftFor('bot-a'),
-        'typed first Check the Friday flights.',
-      );
-      expect(harness.controller.cleaned, isTrue);
-      harness.controller.dispose();
-    });
+        expect(
+          harness.drafts.draftFor('bot-a'),
+          'typed first Check the Friday flights.',
+        );
+        expect(harness.controller.cleaned, isTrue);
+        harness.controller.dispose();
+      },
+    );
 
     test('the raw transcript comes back on revert', () async {
       final harness = Harness();
@@ -567,60 +570,66 @@ void main() {
 
     // A tidy-up belongs to the Bot the capture started on, exactly as every
     // segment does.
-    test('the tidied text lands in the composer it was dictated into', () async {
-      final harness = Harness();
-      await harness.controller.start('bot-a');
-      await settle();
-      harness.say('ready');
-      harness.say('segment', {'text': 'um so check the Friday flights'});
-      await settle();
-      unawaited(harness.controller.stop());
-      await settle();
-      harness.drafts.setDraft('bot-b', 'typed into B');
-      harness.say('cleaning');
-      harness.say('cleaned', {'text': 'Check the Friday flights.'});
-      harness.say('final');
-      await settle();
+    test(
+      'the tidied text lands in the composer it was dictated into',
+      () async {
+        final harness = Harness();
+        await harness.controller.start('bot-a');
+        await settle();
+        harness.say('ready');
+        harness.say('segment', {'text': 'um so check the Friday flights'});
+        await settle();
+        unawaited(harness.controller.stop());
+        await settle();
+        harness.drafts.setDraft('bot-b', 'typed into B');
+        harness.say('cleaning');
+        harness.say('cleaned', {'text': 'Check the Friday flights.'});
+        harness.say('final');
+        await settle();
 
-      expect(harness.drafts.draftFor('bot-a'), 'Check the Friday flights.');
-      expect(harness.drafts.draftFor('bot-b'), 'typed into B');
-      harness.controller.dispose();
-    });
+        expect(harness.drafts.draftFor('bot-a'), 'Check the Friday flights.');
+        expect(harness.drafts.draftFor('bot-b'), 'typed into B');
+        harness.controller.dispose();
+      },
+    );
 
     // A server that says it is tidying and then goes quiet must not leave the
     // microphone button looking busy for the rest of the session.
-    test('a tidy-up that never answers ends the capture on what arrived', () async {
-      final harness = Harness(
-        finalTimeout: const Duration(milliseconds: 20),
-        cleanupTimeout: const Duration(milliseconds: 40),
-      );
-      await harness.controller.start('bot-a');
-      await settle();
-      harness.say('ready');
-      harness.say('segment', {'text': 'um so check the Friday flights'});
-      await settle();
-      unawaited(harness.controller.stop());
-      await settle();
-      harness.say('cleaning');
-      await settle();
-      expect(harness.controller.state, DictationState.cleaning);
-      expect(harness.controller.active, isFalse);
-      expect(
-        harness.drafts.draftFor('bot-a'),
-        'um so check the Friday flights',
-      );
+    test(
+      'a tidy-up that never answers ends the capture on what arrived',
+      () async {
+        final harness = Harness(
+          finalTimeout: const Duration(milliseconds: 20),
+          cleanupTimeout: const Duration(milliseconds: 40),
+        );
+        await harness.controller.start('bot-a');
+        await settle();
+        harness.say('ready');
+        harness.say('segment', {'text': 'um so check the Friday flights'});
+        await settle();
+        unawaited(harness.controller.stop());
+        await settle();
+        harness.say('cleaning');
+        await settle();
+        expect(harness.controller.state, DictationState.cleaning);
+        expect(harness.controller.active, isFalse);
+        expect(
+          harness.drafts.draftFor('bot-a'),
+          'um so check the Friday flights',
+        );
 
-      await Future<void>.delayed(const Duration(milliseconds: 80));
-      await settle();
+        await Future<void>.delayed(const Duration(milliseconds: 80));
+        await settle();
 
-      expect(harness.controller.state, DictationState.done);
-      expect(harness.controller.error, isNull);
-      expect(
-        harness.drafts.draftFor('bot-a'),
-        'um so check the Friday flights',
-      );
-      harness.controller.dispose();
-    });
+        expect(harness.controller.state, DictationState.done);
+        expect(harness.controller.error, isNull);
+        expect(
+          harness.drafts.draftFor('bot-a'),
+          'um so check the Friday flights',
+        );
+        harness.controller.dispose();
+      },
+    );
 
     // A new capture is a new span. Nothing from the last one may be reverted
     // into it.
@@ -685,28 +694,25 @@ void main() {
       harness.controller.dispose();
     });
 
-    test(
-      'an edit inside the landed transcript refuses the tidy-up',
-      () async {
-        final harness = Harness();
-        await harness.controller.start('bot-a');
-        await settle();
-        harness.say('ready');
-        unawaited(harness.controller.stop());
-        await settle();
-        harness.say('segment', {'text': 'recognised wrongly'});
-        await settle();
+    test('an edit inside the landed transcript refuses the tidy-up', () async {
+      final harness = Harness();
+      await harness.controller.start('bot-a');
+      await settle();
+      harness.say('ready');
+      unawaited(harness.controller.stop());
+      await settle();
+      harness.say('segment', {'text': 'recognised wrongly'});
+      await settle();
 
-        // The person corrects the transcription itself. Its span is gone, so
-        // swapping in the tidy-up would lose their correction.
-        harness.drafts.setDraft('bot-a', 'recognised rightly');
-        harness.say('cleaned', {'text': 'Recognised wrongly.'});
-        harness.say('final');
-        await settle();
-        expect(harness.drafts.draftFor('bot-a'), 'recognised rightly');
-        harness.controller.dispose();
-      },
-    );
+      // The person corrects the transcription itself. Its span is gone, so
+      // swapping in the tidy-up would lose their correction.
+      harness.drafts.setDraft('bot-a', 'recognised rightly');
+      harness.say('cleaned', {'text': 'Recognised wrongly.'});
+      harness.say('final');
+      await settle();
+      expect(harness.drafts.draftFor('bot-a'), 'recognised rightly');
+      harness.controller.dispose();
+    });
   });
 
   group('the range itself', () {
@@ -752,6 +758,87 @@ void main() {
     test('a frame is the rate and the duration, in bytes', () {
       expect(pcmFrameBytes(24000, const Duration(milliseconds: 32)), 1536);
       expect(pcmFrameBytes(16000, const Duration(milliseconds: 40)), 1280);
+    });
+  });
+
+  group('the rate conformer', () {
+    Uint8List tone(int rate, int channels, {double hz = 110, int ms = 1000}) {
+      final samples = rate * ms ~/ 1000;
+      final data = ByteData(samples * channels * 2);
+      for (var i = 0; i < samples; i++) {
+        final value = (12000 * math.sin(2 * math.pi * hz * i / rate)).round();
+        for (var channel = 0; channel < channels; channel++) {
+          data.setInt16((i * channels + channel) * 2, value, Endian.little);
+        }
+      }
+      return data.buffer.asUint8List();
+    }
+
+    Int16List mono(Uint8List bytes) =>
+        Int16List.sublistView(Uint8List.fromList(bytes));
+
+    int crossings(Int16List samples) {
+      var count = 0;
+      for (var i = 1; i < samples.length; i++) {
+        if ((samples[i - 1] < 0) != (samples[i] < 0)) count++;
+      }
+      return count;
+    }
+
+    test('passes what was asked for through untouched', () {
+      final conformer = PcmConformer(16000);
+      final chunk = tone(16000, 1, ms: 40);
+      expect(identical(conformer.add(chunk), chunk), isTrue);
+    });
+
+    test(
+      'a browser\'s 48 kHz stereo becomes 16 kHz mono at the same pitch',
+      () {
+        final conformer = PcmConformer(16000)
+          ..adopt(sampleRate: 48000, channels: 2);
+        final heard = mono(conformer.add(tone(48000, 2)));
+        expect(heard.length, closeTo(16000, 1));
+        // 110 Hz crosses zero 220 times a second, whatever the rate.
+        expect(crossings(heard), closeTo(220, 2));
+        final asked = mono(tone(16000, 1));
+        for (var i = 16; i < 15984; i += 997) {
+          expect(heard[i], closeTo(asked[i], 400));
+        }
+      },
+    );
+
+    test('converts the same however the stream is cut', () {
+      final whole = PcmConformer(16000)..adopt(sampleRate: 44100, channels: 2);
+      final cut = PcmConformer(16000)..adopt(sampleRate: 44100, channels: 2);
+      final input = tone(44100, 2, ms: 500);
+      final expected = whole.add(input);
+      final pieces = BytesBuilder();
+      for (var at = 0; at < input.length; at += 7) {
+        pieces.add(
+          cut.add(
+            Uint8List.sublistView(input, at, math.min(at + 7, input.length)),
+          ),
+        );
+      }
+      expect(pieces.takeBytes(), expected);
+      expect(expected.length ~/ 2, closeTo(8000, 1));
+    });
+
+    test('mixes channels down and fills a slower rate up', () {
+      final stereo = PcmConformer(16000)..adopt(sampleRate: 16000, channels: 2);
+      final opposed = ByteData(8)
+        ..setInt16(0, 1000, Endian.little)
+        ..setInt16(2, -1000, Endian.little)
+        ..setInt16(4, 1000, Endian.little)
+        ..setInt16(6, 3000, Endian.little);
+      // A sample is out once the next one shows where its period ends.
+      final mixed = BytesBuilder()
+        ..add(stereo.add(opposed.buffer.asUint8List()))
+        ..add(stereo.add(Uint8List(4)));
+      expect(mono(mixed.takeBytes()), [0, 2000]);
+
+      final slow = PcmConformer(16000)..adopt(sampleRate: 8000, channels: 1);
+      expect(mono(slow.add(tone(8000, 1))).length, closeTo(16000, 2));
     });
   });
 }

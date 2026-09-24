@@ -25,7 +25,7 @@
 ```
 
 Required keys: `id`, `displayName`, `version`, `contractVersion`, `tools`,
-`hooks`, `grants`, `contextKeys`. Optional keys: `network`, `settingsSchema`,
+`hooks`, `grants`, `contextKeys`. Optional keys: `network`, `device`, `settingsSchema`,
 `provides`, `consumes`, `triggers`, `skills`, `cards`, `modelProviders`,
 `slots`, `views`.
 
@@ -42,7 +42,8 @@ Required keys: `id`, `displayName`, `version`, `contractVersion`, `tools`,
   match the module's exports, name for name. `provides` must match
   `export const services`. A mismatch is refused at publish with both lists.
 - `grants` is what the module may use. `network` is present exactly when
-  `grants` holds `http`. See `grants.md`.
+  `grants` holds `http`, and `device` exactly when it holds `device`. See
+  `grants.md`.
 - `settingsSchema` (optional) is a JSON Schema for an object of per-Bot
   values the User can set; read them with `ctx.settings.read()` or
   `plugin_settings`. Never put a secret in it. At most 64 KiB of schema

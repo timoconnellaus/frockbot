@@ -2237,6 +2237,7 @@
     "name": "PanelPage valid",
     "schema": "PanelPage",
     "value": {
+      "abilities": ["microphone"],
       "url": "https://bot.example/plugin-pages/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.html",
       "state": {
         "score": 2,

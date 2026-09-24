@@ -159,6 +159,10 @@ function pageWindow() {
     state: Record<string, unknown>;
     onState(fn: (state: Record<string, unknown>) => void): () => void;
     callTool(name: string, input?: Record<string, unknown>): Promise<string>;
+    openMicrophone(
+      onSamples: (samples: Float32Array) => void,
+      onClosed?: (reason: string) => void,
+    ): Promise<{ sampleRate: number; close(): void }>;
   };
   return {
     frockbot,
@@ -243,5 +247,108 @@ describe("the helper, as a page runs it", () => {
     });
     expect(await moved).toBe("moved");
     await expect(refused).rejects.toThrow("e9 is off the board");
+  });
+});
+
+describe("the microphone, as a page asks for it", () => {
+  const OPEN = {
+    frockbotPage: 1,
+    type: "device",
+    ability: "microphone",
+    status: "open",
+    sampleRate: 16000,
+  };
+
+  test("a page's device message is decoded exactly", () => {
+    expect(
+      decodePluginPageMessageV1({
+        frockbotPage: 1,
+        type: "device",
+        ability: "microphone",
+        open: true,
+      }),
+    ).toEqual({
+      frockbotPage: 1,
+      type: "device",
+      ability: "microphone",
+      open: true,
+    });
+    for (const message of [
+      { frockbotPage: 1, type: "device", ability: "camera", open: true },
+      { frockbotPage: 1, type: "device", ability: "microphone", open: "yes" },
+      { frockbotPage: 1, type: "device", ability: "microphone" },
+    ]) {
+      expect(decodePluginPageMessageV1(message)).toBeUndefined();
+    }
+  });
+
+  test("opens once the host says so, then hears each frame as samples", async () => {
+    const page = pageWindow();
+    const heard: number[][] = [];
+    const opening = page.frockbot.openMicrophone((samples: Float32Array) =>
+      heard.push([...samples]),
+    );
+    expect(page.posted.at(-1)).toEqual({
+      frockbotPage: 1,
+      type: "device",
+      ability: "microphone",
+      open: true,
+    });
+    // A frame before the host opened it is not the page's to hear.
+    page.deliver({ frockbotPage: 1, type: "audio", pcm: "AAA=" });
+    page.deliver(OPEN);
+    expect((await opening).sampleRate).toBe(16000);
+    // Little-endian 16-bit: 0, 16384 (0.5), -32768 (-1).
+    const bytes = new Uint8Array([0, 0, 0, 0x40, 0, 0x80]);
+    page.deliver({
+      frockbotPage: 1,
+      type: "audio",
+      pcm: btoa(String.fromCharCode(...bytes)),
+    });
+    expect(heard).toEqual([[0, 0.5, -1]]);
+  });
+
+  test("hears the host close it, and refuses a second open meanwhile", async () => {
+    const page = pageWindow();
+    const closed: string[] = [];
+    const opening = page.frockbot.openMicrophone(
+      () => {},
+      (reason: string) => closed.push(reason),
+    );
+    await expect(page.frockbot.openMicrophone(() => {})).rejects.toThrow(
+      "already open",
+    );
+    page.deliver(OPEN);
+    await opening;
+    page.deliver({
+      frockbotPage: 1,
+      type: "device",
+      ability: "microphone",
+      status: "closed",
+      reason: "You stopped the microphone.",
+    });
+    expect(closed).toEqual(["You stopped the microphone."]);
+  });
+
+  test("rejects with the host's reason when refused, and closes by asking", async () => {
+    const page = pageWindow();
+    const refused = page.frockbot.openMicrophone(() => {});
+    page.deliver({
+      frockbotPage: 1,
+      type: "device",
+      ability: "microphone",
+      status: "closed",
+      reason: "This Plugin was not allowed the microphone.",
+    });
+    await expect(refused).rejects.toThrow("not allowed the microphone");
+    const opening = page.frockbot.openMicrophone(() => {});
+    page.deliver(OPEN);
+    (await opening).close();
+    expect(page.posted.at(-1)).toEqual({
+      frockbotPage: 1,
+      type: "device",
+      ability: "microphone",
+      open: false,
+    });
   });
 });

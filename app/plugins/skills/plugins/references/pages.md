@@ -79,5 +79,7 @@ After a tool the page called, the panel is read again and the page gets the
 new state. Keep the truth in `ctx.storage`, never only in the page: the frame
 is torn down when the person leaves the panel.
 
+A page may listen to the microphone through the host: see `microphone.md`.
+
 `plugin_check` and `plugin_publish` refuse a view whose page file is missing.
 The approval card tells the User the Plugin draws its own page.

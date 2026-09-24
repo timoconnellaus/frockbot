@@ -727,6 +727,7 @@ export type PanelPage = {
   state: {
     [key: string]: Json;
   };
+  abilities?: Array<"microphone">;
 };
 export type PanelOpenView = {
   schemaVersion: 1;

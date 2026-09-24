@@ -54,6 +54,11 @@ enum VoiceCaptureProfile {
   /// device with the smallest buffer the platform allows, because how fast
   /// the meter follows a word is how fast the audio reaches it.
   call,
+
+  /// A Plugin page listening to sound rather than speech — a tuner. Every
+  /// cleanup is off, because noise suppression and automatic gain treat a
+  /// held note as noise to remove.
+  instrument,
 }
 
 abstract interface class VoiceCapture {
@@ -107,6 +112,83 @@ class PcmFrameChunker {
 
   /// How many bytes are held back waiting for a full frame.
   int get pending => _pending.length;
+}
+
+/// Brings what the recorder delivers to PCM16 mono at [toRate].
+///
+/// A browser captures at the track's own rate and channel count whatever is
+/// asked, and a device that cannot do the rate picks its nearest; either says
+/// so only through the recorder's config-changed callback, as [adopt]. Left
+/// alone, 48 kHz stereo read as 16 kHz mono is every pitch six times too low
+/// and every word six times too slow.
+///
+/// Each output sample is the mean of the input samples its period covers, so
+/// a stream cut at any boundary converts the same as one that was not.
+class PcmConformer {
+  final int toRate;
+  int _fromRate;
+  int _channels;
+  final BytesBuilder _carry = BytesBuilder(copy: true);
+  int _read = 0;
+  int _slot = 0;
+  double _sum = 0;
+  int _summed = 0;
+
+  PcmConformer(this.toRate) : _fromRate = toRate, _channels = 1;
+
+  /// What the recorder says it is actually delivering from now on.
+  void adopt({required int sampleRate, required int channels}) {
+    if (sampleRate == _fromRate && channels == _channels) return;
+    _fromRate = sampleRate;
+    _channels = math.max(1, channels);
+    _carry.clear();
+    _read = 0;
+    _slot = 0;
+    _sum = 0;
+    _summed = 0;
+  }
+
+  Uint8List add(Uint8List chunk) {
+    if (_fromRate == toRate && _channels == 1 && _carry.isEmpty) {
+      if (chunk.length.isEven) return chunk;
+    }
+    _carry.add(chunk);
+    final bytes = _carry.takeBytes();
+    final frameBytes = 2 * _channels;
+    final whole = bytes.length - bytes.length % frameBytes;
+    if (whole < bytes.length) _carry.add(Uint8List.sublistView(bytes, whole));
+    final input = ByteData.sublistView(bytes, 0, whole);
+    final frames = whole ~/ frameBytes;
+    final room = (frames + 1) * toRate ~/ _fromRate + toRate ~/ _fromRate + 2;
+    final out = ByteData(room * 2);
+    var written = 0;
+    for (var at = 0; at < whole; at += frameBytes) {
+      var mixed = 0;
+      for (var channel = 0; channel < _channels; channel++) {
+        mixed += input.getInt16(at + channel * 2, Endian.little);
+      }
+      final slot = (_read * toRate) ~/ _fromRate;
+      if (slot != _slot && _summed > 0) {
+        final mean = (_sum / _summed).round().clamp(-32768, 32767);
+        // Upsampling leaves slots no input fell in; they hold the last value.
+        for (var gap = _slot; gap < slot; gap++) {
+          out.setInt16(written, mean, Endian.little);
+          written += 2;
+        }
+        _sum = 0;
+        _summed = 0;
+        _slot = slot;
+      }
+      _sum += mixed / _channels;
+      _summed++;
+      _read++;
+      if (_read == _fromRate) {
+        _read = 0;
+        _slot -= toRate;
+      }
+    }
+    return Uint8List.sublistView(out.buffer.asUint8List(), 0, written);
+  }
 }
 
 int pcmFrameBytes(int sampleRate, Duration frame) =>
@@ -179,6 +261,23 @@ RecordConfig voiceRecordConfigV1({
       // reads a whole buffer at a time, so the buffer is the latency.
       streamBufferSize: streamBufferSize,
     ),
+    VoiceCaptureProfile.instrument => RecordConfig(
+      encoder: AudioEncoder.pcm16bits,
+      numChannels: 1,
+      sampleRate: sampleRate,
+      echoCancel: false,
+      noiseSuppress: false,
+      autoGain: false,
+      // The recognition source is the one Android keeps free of automatic
+      // gain and noise suppression on every device; `unprocessed` is not
+      // offered everywhere.
+      androidConfig: const AndroidRecordConfig(
+        audioSource: AndroidAudioSource.voiceRecognition,
+        audioManagerMode: AudioManagerMode.modeNormal,
+        manageBluetooth: false,
+      ),
+      streamBufferSize: streamBufferSize,
+    ),
   };
 }
 
@@ -217,18 +316,25 @@ class RecordVoiceCapture implements VoiceCapture {
     if (!await _recorder.hasPermission()) throw const MicrophoneDenied();
     final frameBytes = pcmFrameBytes(sampleRate, frame);
     final chunker = PcmFrameChunker(frameBytes);
+    final conformer = PcmConformer(sampleRate);
     final frames = StreamController<AudioFrame>.broadcast();
     _frames = frames;
     final Stream<Uint8List> source;
     try {
+      await _recorder.setOnConfigChanged(
+        (actual) => conformer.adopt(
+          sampleRate: actual.sampleRate,
+          channels: actual.numChannels,
+        ),
+      );
       source = await _recorder.startStream(
         voiceRecordConfigV1(
           profile: profile,
           platform: defaultTargetPlatform,
           sampleRate: sampleRate,
-          streamBufferSize: profile == VoiceCaptureProfile.call
-              ? await _callBuffer(sampleRate, frameBytes)
-              : null,
+          streamBufferSize: profile == VoiceCaptureProfile.dictation
+              ? null
+              : await _callBuffer(sampleRate, frameBytes),
         ),
       );
     } on Object {
@@ -245,7 +351,7 @@ class RecordVoiceCapture implements VoiceCapture {
     _subscription = source.listen(
       (chunk) {
         final at = _clock.elapsedMilliseconds;
-        for (final piece in chunker.add(chunk)) {
+        for (final piece in chunker.add(conformer.add(chunk))) {
           if (frames.isClosed) return;
           frames.add(AudioFrame(piece, pcm16Rms(piece), at));
         }

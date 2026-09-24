@@ -14,6 +14,7 @@ import {
 } from "@frockbot/core/protocol-schemas";
 import type {
   PluginGrantV1,
+  PluginDeviceV1,
   PluginNetworkV1,
   PluginTriggerV1,
 } from "@frockbot/core/contracts";
@@ -42,6 +43,8 @@ export interface BotPluginRowV1 {
   on: boolean;
   /** The network the descriptor declares, shown on the card before it is on. */
   network?: PluginNetworkV1;
+  /** The device abilities its page may use, shown before it is on. */
+  device?: PluginDeviceV1;
   /** The grants the descriptor asked for; `http` also opens this deployment's sender. */
   grants?: readonly PluginGrantV1[];
   /** Human-facing triggers this Plugin declares, for the Routine picker. */
@@ -331,6 +334,13 @@ function pluginNode(row: BotPluginRowV1, revision: number): ViewNode {
   ];
   const reach = pluginNetworkCopyV1(row.network, row.grants);
   if (reach) lines.push({ type: "text", text: reach, style: "status" });
+  if (row.device?.abilities.includes("microphone")) {
+    lines.push({
+      type: "text",
+      text: "Its page can use your microphone while you have it open.",
+      style: "status",
+    });
+  }
   const serves = pluginModelProviderCopyV1(row.modelProviders);
   if (serves) lines.push({ type: "text", text: serves, style: "status" });
   if (row.quarantined) {
@@ -398,6 +408,7 @@ export function botPluginsDocumentV1(frame: BotPluginsFrameV1): ViewDocument {
       6 +
       (kinds.has(kind) ? 0 : 1) +
       (row.network ? 1 : 0) +
+      (row.device ? 1 : 0) +
       (row.quarantined ? 1 : 0) +
       (row.omitted ? 1 : 0) +
       (row.sections ?? []).reduce(

@@ -122,6 +122,13 @@ every later cleanup of Applet leftovers.
 > every page with no network at all (`connect-src` names only the Insights
 > beacon); a page reaching its Plugin's approved hosts comes with the policy
 > that names them.
+>
+> The microphone shipped as described below, with three narrowings. The
+> ability is declared as `"device": {"abilities": ["microphone"]}` beside
+> the `device` grant, and only on a Plugin with a page. A page is the
+> weakest owner of the microphone: it gets it only when nobody holds it, and
+> dictation or a call takes it back. No audit row is written yet; the
+> host-drawn bar and its Stop are how a person sees and ends it.
 
 ### The frame
 

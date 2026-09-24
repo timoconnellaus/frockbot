@@ -18,6 +18,7 @@ import type { BotIdentity } from "@frockbot/core/durable";
 import {
   pluginPageStateV1,
   pluginPageUrlV1,
+  type PluginDeviceAbilityV1,
   type PluginWorkerViewResultV1,
 } from "@frockbot/core/contracts";
 import { pluginMountOrderV1 } from "@frockbot/frock-compose";
@@ -58,7 +59,12 @@ export interface PanelOpenViewV1 {
    * The focused surface when its view names a page (ADR 0036): where the
    * artifact host serves it, and the state its view returned.
    */
-  page?: { url: string; state: Record<string, unknown> };
+  page?: {
+    url: string;
+    state: Record<string, unknown>;
+    /** The device abilities the User approved for this Plugin's page. */
+    abilities?: PluginDeviceAbilityV1[];
+  };
   failure?: string;
   doors: PanelDoorViewV1[];
 }
@@ -323,6 +329,9 @@ export function focusedPanelPageV1(
     page: {
       url: pluginPageUrlV1(appOrigin, stored.contentHash),
       state: state.state,
+      ...(member.descriptor.device
+        ? { abilities: [...member.descriptor.device.abilities] }
+        : {}),
     },
   };
 }

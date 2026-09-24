@@ -174,6 +174,10 @@ _Avoid_: Status, indicator (those are the host's)
 A Plugin `sidebar.sections` view: a host-drawn block in the Bot list, beneath the row of the Bot it renders as, headed with the Plugin's name.
 _Avoid_: Sidebar entry, Bot list row
 
+**Device ability**:
+Something on the person's device the host opens for a Plugin's page, never the page itself — today the microphone. Declared under the `device` grant, approved on the Plugin's card, and shown in host chrome with a Stop while in use ([ADR 0035](docs/adr/0035-device-bridge.md), [ADR 0036](docs/adr/0036-plugin-html-surfaces.md)).
+_Avoid_: Permission, capability (that is a Package's)
+
 **Panel focus**:
 The Session's selected conversation-panel tab, `{ pluginId, surfaceId }`, or closed. Written by a tab click, a bot-nav press, or the Bot's `panel_focus` tool. The cloud is the authority.
 _Avoid_: Active applet, selected gadget

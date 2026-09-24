@@ -42,8 +42,12 @@ void main() {
     }
 
     for (final platform in [TargetPlatform.android, TargetPlatform.iOS]) {
-      test('keeps the phone’s cleaning on $platform', () {
-        for (final profile in VoiceCaptureProfile.values) {
+      test('keeps the phone’s cleaning for speech on $platform', () {
+        // An instrument is the deliberate exception, proved below.
+        for (final profile in [
+          VoiceCaptureProfile.dictation,
+          VoiceCaptureProfile.call,
+        ]) {
           final config = voiceRecordConfigV1(
             profile: profile,
             platform: platform,
@@ -99,6 +103,40 @@ void main() {
         AudioManagerMode.modeInCommunication,
       );
       expect(dictation.streamBufferSize, isNull);
+    });
+
+    test('an instrument is heard unprocessed on every platform', () {
+      for (final web in [true, false]) {
+        for (final platform in TargetPlatform.values) {
+          final config = voiceRecordConfigV1(
+            profile: VoiceCaptureProfile.instrument,
+            platform: platform,
+            sampleRate: 16000,
+            web: web,
+          );
+          expect(
+            [config.echoCancel, config.noiseSuppress, config.autoGain],
+            [false, false, false],
+            reason: '$platform, web: $web',
+          );
+          expect(config.numChannels, 1);
+          expect(config.sampleRate, 16000);
+        }
+      }
+      final android = voiceRecordConfigV1(
+        profile: VoiceCaptureProfile.instrument,
+        platform: TargetPlatform.android,
+        sampleRate: 16000,
+        web: false,
+      );
+      expect(
+        android.androidConfig.audioSource,
+        AndroidAudioSource.voiceRecognition,
+      );
+      expect(
+        android.androidConfig.audioManagerMode,
+        AudioManagerMode.modeNormal,
+      );
     });
   });
 }

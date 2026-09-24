@@ -351,6 +351,13 @@ export function pluginApprovalActionV1(
       "It draws its own web page in the conversation panel, on your devices, with no network access and nothing of this Bot's but its own tools.",
     );
   }
+  // The host opens the device, never the page; what the page hears it can
+  // still hand to this Plugin's tools, so the card says that too.
+  if (descriptor.device?.abilities.includes("microphone")) {
+    parts.push(
+      "Its page can use your microphone while you have it open, with a sign on screen and a Stop control; what it hears reaches only this Plugin's own tools.",
+    );
+  }
   // A model provider contribution runs when a Bot's model names it, which is
   // not the switch this card asks about — so the card says what it serves and
   // what choosing it means.
@@ -406,6 +413,7 @@ export function pluginApprovalRiskV1(
   const descriptor = member.descriptor;
   if (descriptor.network && "open" in descriptor.network) return "high";
   if (descriptor.grants.includes("http")) return "high";
+  if (descriptor.device) return "medium";
   if (descriptor.hooks.length > 0) return "medium";
   if ((descriptor.views ?? []).some((view) => view.page !== undefined)) {
     return "medium";
