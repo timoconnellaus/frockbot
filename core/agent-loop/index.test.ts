@@ -14,6 +14,7 @@ import {
   SessionStore,
   type ToolDefinition,
   type ToolExecutionContext,
+  UNRUN_TOOL_CALL_RESULT_V1,
 } from "@frockbot/core/contracts";
 import { LlmRegistry } from "@frockbot/core/models";
 import { SystemPromptRegistry } from "@frockbot/core/prompt";
@@ -713,6 +714,80 @@ describe("AgentLoop", () => {
     expect(recorded.request.tools.map((tool) => tool.name)).toEqual([
       "hook_visible",
     ]);
+  });
+
+  // Bob's history held a Turn interrupted while the first of two parallel calls
+  // ran; the second was never answered, and a provider refused every later
+  // request for it.
+  test("answers a history tool call that never ran before the provider sees it", async () => {
+    let received: NormalizedModelRequest | undefined;
+    const provider: LlmProvider = {
+      id: "unanswered-history",
+      async *stream(request) {
+        received = structuredClone(request);
+        yield { type: "finish", reason: "completed" };
+      },
+    };
+    const runtime = mountRuntime(provider);
+    runtime.hooks.add({
+      messageWindow: async (_agent, _messages, _turn, _step, _signal, next) => [
+        { role: "user" as const, content: "change the theme" },
+        {
+          role: "assistant" as const,
+          content: "",
+          toolCalls: [
+            { id: "call_fw0m3y0b", name: "computer_exec", input: {} },
+            { id: "call_7wdosrkl", name: "computer_exec", input: {} },
+          ],
+        },
+        {
+          role: "tool" as const,
+          callId: "call_fw0m3y0b",
+          name: "computer_exec",
+          content: "Interrupted before a durable result was recorded.",
+          isError: true,
+        },
+        ...(await next()),
+      ],
+    });
+    const handle = await runtime.loop.create({
+      ...allowEffectOptions,
+      botId: "bot-unanswered-history",
+      sessionId: "unanswered-history",
+      provider: provider.id,
+      model: "model-1",
+    });
+
+    handle.agent.send("can you build a tuner");
+    await handle.agent.whenIdle();
+
+    const recorded = handle.agent.session.activeRunJournal.find(
+      (event) => event.type === "model/request",
+    );
+    if (recorded?.type !== "model/request" || !received) {
+      throw new Error("model request was not recorded and received");
+    }
+    expect(recorded.request).toEqual(received);
+    expect(received.messages.slice(2, 4)).toEqual([
+      {
+        role: "tool",
+        callId: "call_fw0m3y0b",
+        name: "computer_exec",
+        content: "Interrupted before a durable result was recorded.",
+        isError: true,
+      },
+      {
+        role: "tool",
+        callId: "call_7wdosrkl",
+        name: "computer_exec",
+        content: UNRUN_TOOL_CALL_RESULT_V1,
+        isError: true,
+      },
+    ]);
+    expect(received.messages.at(-1)).toEqual({
+      role: "user",
+      content: "can you build a tuner",
+    });
   });
 
   test("fences a model after durable intent without invoking its provider", async () => {

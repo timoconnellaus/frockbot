@@ -1,4 +1,5 @@
 import {
+  answerEveryToolCallV1,
   type LlmStreamEvent,
   requireModelReplayStateV1,
   type LlmUsageV1,
@@ -89,7 +90,7 @@ async function buildModelRequestV1(
       ? { modelBinding: structuredClone(options.modelBinding) }
       : {}),
   };
-  return services.hooks.request(
+  const shaped = await services.hooks.request(
     runtime.agent,
     proposed,
     turn,
@@ -97,6 +98,11 @@ async function buildModelRequestV1(
     signal,
     () => Promise.resolve(proposed),
   );
+  // Last, so no history source or hook can send a provider a call it refuses.
+  const answered = answerEveryToolCallV1(shaped.messages);
+  return answered === shaped.messages
+    ? shaped
+    : { ...shaped, messages: [...answered] };
 }
 
 function failureClassificationV1(error: unknown): ModelProviderFailureClassV1 {
