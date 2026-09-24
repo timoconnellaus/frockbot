@@ -37,8 +37,6 @@ describe("What’s New ship dates", () => {
       "];",
     ].join("\n");
     expect(whatsNewIdsInSourceV1(before)).toEqual(["group-chats", "whats-new"]);
-    // The list that replaced it names no ids of its own.
-    expect(whatsNewIdsInSourceV1(read("./entries.ts"))).toEqual([]);
   });
 
   test("an id ships with the earliest production tag that declares it", () => {

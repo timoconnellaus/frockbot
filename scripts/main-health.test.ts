@@ -89,21 +89,64 @@ describe("main-health", () => {
 });
 
 describe("main-health workflow", () => {
-  const workflow = readFileSync(
-    new URL("../.github/workflows/main-health.yml", import.meta.url),
-    "utf8",
-  );
+  const workflow = Bun.YAML.parse(
+    readFileSync(
+      new URL("../.github/workflows/main-health.yml", import.meta.url),
+      "utf8",
+    ),
+  ) as {
+    on: {
+      workflow_run: {
+        workflows: string[];
+        types: string[];
+        branches: string[];
+      };
+      pull_request_target: { types: string[] };
+    };
+    permissions: Record<string, string>;
+    jobs: {
+      status: {
+        steps: Array<{
+          uses?: string;
+          with?: Record<string, unknown>;
+          run?: string;
+          env?: Record<string, string>;
+        }>;
+      };
+    };
+  };
+  const main = Bun.YAML.parse(
+    readFileSync(
+      new URL("../.github/workflows/main.yml", import.meta.url),
+      "utf8",
+    ),
+  ) as { name: string };
 
   test("reruns when main settles and when a pull request's labels or title change", () => {
-    expect(workflow).toContain("workflows: [Main]");
-    for (const type of ["labeled", "unlabeled", "edited", "synchronize"])
-      expect(workflow).toContain(type);
+    expect(workflow.on.workflow_run).toEqual({
+      workflows: [main.name],
+      types: ["completed"],
+      branches: ["main"],
+    });
+    expect(workflow.on.pull_request_target.types).toEqual(
+      expect.arrayContaining(["synchronize", "labeled", "unlabeled", "edited"]),
+    );
   });
 
-  test("never checks out or runs the pull request's own code", () => {
-    // `pull_request_target` runs with a write token, which is safe only
-    // while the job runs `main`'s copy of the script.
-    expect(workflow).toContain("pull_request_target");
-    expect(workflow).not.toMatch(/ref:\s*\$\{\{\s*github\.event\.pull_request/);
+  test("never checks out the pull request's code under its write token", () => {
+    const steps = workflow.jobs.status.steps;
+    const checkout = steps.find((step) =>
+      step.uses?.startsWith("actions/checkout@"),
+    );
+    // No `ref`: `pull_request_target` then checks out the base branch.
+    expect(checkout?.with?.ref).toBeUndefined();
+    expect(checkout?.with?.["persist-credentials"]).toBe(false);
+    expect(workflow.permissions).toEqual({
+      contents: "read",
+      actions: "read",
+      "pull-requests": "read",
+      statuses: "write",
+    });
+    expect(steps.at(-1)?.run).toBe("bun scripts/main-health.ts $PULL_REQUEST");
   });
 });
