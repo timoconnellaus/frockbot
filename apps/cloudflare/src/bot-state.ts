@@ -171,7 +171,10 @@ import {
 } from "@frockbot/app/shell/composition-views";
 import { executeUnreadCommand, readUnread } from "@frockbot/app/shell/unread";
 import { appendAnnouncement } from "@frockbot/app/shell/reads";
-import type { FlockBotBackendContribution } from "@frockbot/app/flock/bot";
+import {
+  isBotTombstoneV1,
+  type FlockBotBackendContribution,
+} from "@frockbot/app/flock/bot";
 import type { ComputerBotBackendContribution } from "@frockbot/computer/bot";
 import { decodeComputerCommandV1 } from "@frockbot/computer/protocol";
 import {
@@ -613,6 +616,9 @@ export class BotState
     super(ctx, env);
     // Runs before any request or alarm can mount the old conversation.
     this.ctx.blockConcurrencyWhile(async () => {
+      // A deleted Bot has no conversation left to clean, and a receipt
+      // written here would be the only thing in it besides its tombstone.
+      if (await isBotTombstoneV1(this.ctx.storage)) return;
       await cleanIncidentTestChatsV1(this.ctx.storage);
       await cleanNotificationTestState(this.ctx.storage);
       await cleanHiddenBotNotifications(this.ctx.storage);

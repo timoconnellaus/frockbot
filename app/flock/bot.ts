@@ -74,6 +74,24 @@ export interface FlockBotBackendHost {
   }): Promise<"complete" | "pending">;
 }
 
+/**
+ * Whether this storage is a deleted Bot's tombstone. The Bot Durable Object
+ * asks before its constructor's cleanups, which would otherwise write their
+ * receipts back into an object whose deletion left it nothing else.
+ */
+export async function isBotTombstoneV1(storage: {
+  get<T>(key: string): Promise<T | undefined>;
+}): Promise<boolean> {
+  const stored = await storage.get<unknown>(LIFECYCLE_KEY);
+  if (stored === undefined) return false;
+  try {
+    return decodeBotLifecycleViewV1(stored).status === "deleted";
+  } catch {
+    // Not a tombstone this code can read; the cleanups decide what it is.
+    return false;
+  }
+}
+
 export class BotArchivedError extends Error {
   constructor(readonly botId: string) {
     super(`Bot "${botId}" is archived`);
