@@ -36,6 +36,10 @@ function harness(
   return { routes, executed };
 }
 
+async function bodyOf(response: Response | undefined): Promise<unknown> {
+  return response?.json();
+}
+
 function receipt(
   command: ConnectionCommandV1,
   rest: Partial<ConnectionCommandReceiptV1> = {},
@@ -78,7 +82,7 @@ describe("the MCP sign-in routes", () => {
       url,
       { userId: "tim" },
     );
-    expect(await response?.json()).toEqual({
+    expect(await bodyOf(response)).toEqual({
       schemaVersion: 1,
       status: "authorization-required",
       connectionId: "connection-1",
@@ -117,7 +121,7 @@ describe("the MCP sign-in routes", () => {
       url,
       { userId: "tim" },
     );
-    expect(await response?.json()).toEqual({
+    expect(await bodyOf(response)).toEqual({
       schemaVersion: 1,
       status: "revoked",
     });

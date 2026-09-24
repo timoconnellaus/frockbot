@@ -1,5 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import { McpUnauthorizedError, withMcpSessionV1 } from "./client.js";
+import {
+  McpUnauthorizedError,
+  withMcpSessionV1,
+  type McpFetchV1,
+} from "./client.js";
 import {
   authorizeMcpSignInV1,
   decodeMcpAccessSecretV1,
@@ -23,7 +27,7 @@ import {
 const ORIGIN = "https://bot.frockbot.test";
 const now = Date.parse("2026-09-24T00:00:00.000Z");
 
-async function challengeOf(fetch: typeof globalThis.fetch, url: string) {
+async function challengeOf(fetch: McpFetchV1, url: string) {
   try {
     await withMcpSessionV1({ url, fetch }, async () => undefined);
   } catch (error) {
