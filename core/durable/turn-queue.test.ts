@@ -5,6 +5,7 @@ import {
 } from "./composition/generation.js";
 import {
   type SessionEvent,
+  TURN_DEADLINE_MS_V1,
   validateToolOccurrenceJournal,
 } from "@frockbot/core/contracts";
 import {
@@ -22,11 +23,20 @@ import {
   type StoredRunV1,
 } from "./run-records.ts";
 import {
+  STALE_RUNNING_RUN_FAILURE_V1,
+  STALE_RUNNING_RUN_GRACE_MS_V1,
+} from "./run-liveness.ts";
+import { failStoredRun } from "./run-terminal.ts";
+import {
   MAX_PENDING_AGENT_RUNS_V1,
   MAX_PENDING_USER_RUNS_V1,
   PENDING_USER_RUN_PREFIX,
+  RECOVERY_ALARM_DELAY_MS,
+  REPAIR_DUE_PREFIX,
   pendingAgentRunKey,
   pendingUserRunKey,
+  repairDueKey,
+  repairRunKey,
 } from "./storage-keys.ts";
 
 const codec = createStoredRunCodecV1<undefined>({
@@ -126,6 +136,8 @@ function createAuthority(
     unresolvedOnRelease?(runId: string): boolean;
     /** Fails the recovery of an evicted Turn, leaving it active and owed. */
     failRecovery?(runId: string): boolean;
+    /** False admits without starting anything, as an evicted object would. */
+    kickDriver?: boolean;
   } = {},
 ): Probe {
   const observed: BotTurnExecutionInput<undefined>[] = [];
@@ -277,6 +289,9 @@ function createAuthority(
       state: { storage } as unknown as DurableObjectState,
       codec,
       hooks,
+      ...(options.kickDriver === undefined
+        ? {}
+        : { kickDriver: options.kickDriver }),
     }),
     observed,
     handle: (runId) => {
@@ -991,5 +1006,245 @@ describe("a Turn whose provider call was never answered", () => {
     expect(settled.status).toBe("failed");
     expect(settled.failure).toContain("was never answered");
     expect(storage.values.get("active-run")).toBeUndefined();
+  });
+});
+
+describe("a message that waits longer than the Turn deadline", () => {
+  /** An acceptance time whose admission-based repair deadline has passed. */
+  function pastRepairDeadline(offsetMs = 0): string {
+    return new Date(
+      Date.now() -
+        TURN_DEADLINE_MS_V1 -
+        STALE_RUNNING_RUN_GRACE_MS_V1 -
+        60_000 +
+        offsetMs,
+    ).toISOString();
+  }
+
+  function repairDueRuns(storage: MemoryStorage): string[] {
+    return [...storage.values.entries()]
+      .filter(([key]) => key.startsWith(REPAIR_DUE_PREFIX))
+      .map(([, value]) => value as string);
+  }
+
+  test("is not settled while it waits, and runs once the Turn ahead settles", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage);
+
+    const first = probe.authority.run(
+      command("run-1", "first", { acceptedAt: pastRepairDeadline() }),
+    );
+    await probe.handle("run-1").started;
+    const second = probe.authority.run(
+      command("run-2", "second", { acceptedAt: pastRepairDeadline(1_000) }),
+    );
+    const third = probe.authority.run(
+      command("run-3", "third", { acceptedAt: pastRepairDeadline(2_000) }),
+    );
+    await admitted();
+    expect(waitingUserRuns(storage)).toEqual(["run-2", "run-3"]);
+    // Waiting is not running: the queue owes these Turns their terminal
+    // state, so nothing counts down on them yet.
+    expect(repairDueRuns(storage)).toEqual(["run-1"]);
+
+    // The alarm fires, and fires again, while the first Turn holds the Bot.
+    await probe.authority.alarm();
+    await probe.authority.alarm();
+    expect(storedRun(storage, "run-2")).toMatchObject({
+      status: "running",
+      phase: "queued",
+    });
+    expect(storedRun(storage, "run-3")).toMatchObject({
+      status: "running",
+      phase: "queued",
+    });
+    expect(waitingUserRuns(storage)).toEqual(["run-2", "run-3"]);
+
+    const promotedFrom = Date.now();
+    probe.handle("run-1").finish();
+    await first;
+    await probe.handle("run-2").started;
+    // Its clock starts when it does, as the loop's own deadline does.
+    expect(storage.values.get(repairRunKey("run-2"))).toBeGreaterThanOrEqual(
+      promotedFrom + TURN_DEADLINE_MS_V1 + STALE_RUNNING_RUN_GRACE_MS_V1,
+    );
+    expect(storage.alarmAt).toBeGreaterThan(Date.now());
+    probe.handle("run-2").finish();
+    expect(await second).toMatchObject({ text: "done: second" });
+    await probe.handle("run-3").started;
+    probe.handle("run-3").finish();
+    expect(await third).toMatchObject({ text: "done: third" });
+
+    expect(probe.observed.map((input) => input.command.runId)).toEqual([
+      "run-1",
+      "run-2",
+      "run-3",
+    ]);
+    expect(waitingUserRuns(storage)).toEqual([]);
+    expect(repairDueRuns(storage)).toEqual([]);
+  });
+
+  test("a repair entry on a waiting Turn is dropped, not acted on", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage);
+
+    const first = probe.authority.run(command("run-1", "first"));
+    await probe.handle("run-1").started;
+    const second = probe.authority.run(
+      command("run-2", "second", { acceptedAt: pastRepairDeadline() }),
+    );
+    await admitted();
+    const due = Date.now() - 1_000;
+    await storage.put({
+      [repairRunKey("run-2")]: due,
+      [repairDueKey(due, "run-2")]: "run-2",
+    });
+
+    await probe.authority.alarm();
+    expect(storedRun(storage, "run-2")).toMatchObject({
+      status: "running",
+      phase: "queued",
+    });
+    expect(storage.values.has(repairRunKey("run-2"))).toBe(false);
+    expect(repairDueRuns(storage)).not.toContain("run-2");
+    expect(storage.alarmAt).toBeGreaterThan(Date.now());
+
+    probe.handle("run-1").finish();
+    await first;
+    await probe.handle("run-2").started;
+    probe.handle("run-2").finish();
+    expect(await second).toMatchObject({ text: "done: second" });
+  });
+
+  /**
+   * What the repair used to leave behind: `run-1` settled, and `run-2` failed
+   * in the queue with its entry still at the head.
+   */
+  function wedgeBehindFailedHead(storage: MemoryStorage): void {
+    const active = storage.values.get("run:run-1") as Record<string, unknown>;
+    storage.values.set("run:run-1", {
+      ...active,
+      status: "completed",
+      responseText: "done: first",
+    });
+    storage.values.delete("active-run");
+    const waiting = storage.values.get("run:run-2") as Record<string, unknown>;
+    storage.values.set("run:run-2", {
+      ...waiting,
+      status: "failed",
+      failure: STALE_RUNNING_RUN_FAILURE_V1,
+    });
+  }
+
+  test("a queue entry naming a settled Turn does not hold the Turns behind it", async () => {
+    const storage = new MemoryStorage();
+    const admitting = createAuthority(storage, { kickDriver: false });
+    await admitting.authority.admit(command("run-1", "first"));
+    await admitting.authority.admit(command("run-2", "second"));
+    await admitting.authority.admit(command("run-3", "third"));
+    expect(waitingUserRuns(storage)).toEqual(["run-2", "run-3"]);
+
+    wedgeBehindFailedHead(storage);
+
+    const restarted = createAuthority(storage);
+    const alarm = restarted.authority.alarm();
+    await Promise.race([restarted.handle("run-3").started, alarm]);
+    restarted.handle("run-3").finish();
+    await alarm;
+
+    expect(restarted.observed.map((input) => input.command.runId)).toEqual([
+      "run-3",
+    ]);
+    expect(storedRun(storage, "run-2").status).toBe("failed");
+    expect(storedRun(storage, "run-3").status).toBe("completed");
+    expect(waitingUserRuns(storage)).toEqual([]);
+  });
+
+  test("a dead user entry does not hold an agent Turn its caller waits on", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage, { kickDriver: false });
+    await probe.authority.admit(command("run-1", "first"));
+    await probe.authority.admit(command("run-2", "second"));
+    wedgeBehindFailedHead(storage);
+
+    // Nothing is driving, so the waiting caller promotes its own Turn.
+    const agent = probe.authority.run(
+      command("run-agent", "question", { turnType: "agent" }),
+    );
+    await Promise.race([probe.handle("run-agent").started, agent]);
+    probe.handle("run-agent").finish();
+    expect(await agent).toMatchObject({ text: "done: question" });
+    expect(waitingUserRuns(storage)).toEqual([]);
+
+    // And the Bot takes background work again.
+    expect(
+      await probe.authority.admit(
+        command("run-firing", "firing", { turnType: "automation" }),
+      ),
+    ).toMatchObject({ disposition: "admitted" });
+  });
+
+  test("a Turn settled while it waits leaves the queue", async () => {
+    const storage = new MemoryStorage();
+    const admitting = createAuthority(storage, { kickDriver: false });
+    await admitting.authority.admit(command("run-1", "first"));
+    await admitting.authority.admit(command("run-2", "second"));
+    expect(waitingUserRuns(storage)).toEqual(["run-2"]);
+
+    await storage.transaction((transaction) =>
+      failStoredRun(
+        codec,
+        transaction,
+        {
+          run: "run:run-2",
+          activeRun: "active-run",
+          latestEvents: "latest-events",
+          notificationPrefix: "notification:",
+        },
+        "run-2",
+        [],
+        [],
+        STALE_RUNNING_RUN_FAILURE_V1,
+      ),
+    );
+
+    expect(storedRun(storage, "run-2").status).toBe("failed");
+    expect(waitingUserRuns(storage)).toEqual([]);
+    expect(storage.values.get("active-run")).toBe("run-1");
+  });
+});
+
+describe("an active Turn running past its repair deadline", () => {
+  test("keeps the alarm at the recovery interval rather than in the past", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage);
+
+    // A Turn recovery restarted late in its life, or one that waited in the
+    // queue before the deadline ran from its promotion: executing, active, and
+    // past the due time its repair entry names.
+    const first = probe.authority.run(
+      command("run-1", "first", {
+        acceptedAt: new Date(
+          Date.now() -
+            TURN_DEADLINE_MS_V1 -
+            STALE_RUNNING_RUN_GRACE_MS_V1 -
+            1_000,
+        ).toISOString(),
+      }),
+    );
+    await probe.handle("run-1").started;
+    expect(storage.values.get(repairRunKey("run-1"))).toBeLessThan(Date.now());
+
+    const firedAt = Date.now();
+    await probe.authority.alarm();
+    // The repair skips the active Turn, so an alarm armed on its due time
+    // fired straight back into the same skip until the Turn settled.
+    expect(storage.alarmAt).toBeGreaterThanOrEqual(
+      firedAt + RECOVERY_ALARM_DELAY_MS,
+    );
+    expect(storedRun(storage, "run-1").status).toBe("running");
+
+    probe.handle("run-1").finish();
+    expect(await first).toMatchObject({ text: "done: first" });
   });
 });

@@ -299,6 +299,23 @@ function runWasDiscardedV1(
   return Boolean(run?.stopRequestedAt);
 }
 
+/**
+ * The repair-index entries for a Turn that has just started.
+ *
+ * Its clock runs from its start, as the loop's own deadline does: a Turn
+ * admitted straight into the active slot starts at its acceptance, and one that
+ * waited in the queue starts at its promotion. A queued Turn has none: the
+ * queue owes it its terminal state, and a deadline counted from admission would
+ * fail a message for waiting behind a long Turn.
+ */
+function runRepairRecordsV1(
+  runId: string,
+  startedAt: number,
+): Record<string, unknown> {
+  const dueAt = startedAt + TURN_DEADLINE_MS_V1 + STALE_RUNNING_RUN_GRACE_MS_V1;
+  return { [repairRunKey(runId)]: dueAt, [repairDueKey(dueAt, runId)]: runId };
+}
+
 /** The oldest entry of one pending queue, as `[key, runId]`. */
 async function firstPendingRunV1(
   storage: {
@@ -739,18 +756,21 @@ export class BotDurableAuthority<Snapshot> {
   > {
     const key = `${RUN_PREFIX}${runId}`;
     return this.ctx.storage.transaction(async (transaction) => {
-      const firstPendingUser = await firstPendingRunV1(
+      const users = await this.livePendingHead(
         transaction,
         PENDING_USER_RUN_PREFIX,
       );
+      const agents = await this.livePendingHead(
+        transaction,
+        PENDING_AGENT_RUN_PREFIX,
+      );
+      if (users.pruned || agents.pruned) {
+        await this.refreshRecoveryAlarm(transaction);
+      }
+      const firstPendingUser = users.head;
+      const firstPendingAgentEntry = agents.head;
       const run = this.codec.optional(await transaction.get<unknown>(key));
       const lane = run ? storedRunLaneV1(run) : undefined;
-      const firstPendingAgent = await transaction.list<string>({
-        prefix: PENDING_AGENT_RUN_PREFIX,
-        limit: 1,
-      });
-      const firstPendingAgentEntry = firstPendingAgent.entries().next()
-        .value as [string, string] | undefined;
       if (!run || run.status !== "running" || run.phase !== "queued") {
         return "not-queued" as const;
       }
@@ -789,9 +809,11 @@ export class BotDurableAuthority<Snapshot> {
         previousEventCount: seeded.cursor.nextSeq,
         ...storedRunEventFieldsV2(seeded.cursor.nextSeq, []),
       } satisfies StoredRunV1<Snapshot>);
+      await this.clearRunRepair(transaction, runId);
       await transaction.put({
         [key]: structuredClone(storedRunRecordV2(promoted)),
         [ACTIVE_RUN_KEY]: runId,
+        ...runRepairRecordsV1(runId, Date.now()),
       });
       // A watching chat drew this Turn queued from its admission, and the
       // status it patches is the one publication carries: without this it
@@ -812,6 +834,33 @@ export class BotDurableAuthority<Snapshot> {
         compositionGenerationId: promoted.compositionGenerationId,
       };
     });
+  }
+
+  /**
+   * The oldest entry of one pending queue whose run is still waiting to start.
+   *
+   * An entry ahead of it naming a run that will never start — settled, already
+   * promoted, or gone — is deleted on the way. The head of the queue is what
+   * every later Turn waits behind, and a dead head would hold them there for
+   * good.
+   */
+  private async livePendingHead(
+    transaction: DurableObjectTransaction,
+    prefix: string,
+  ): Promise<{ head?: [string, string]; pruned: boolean }> {
+    let pruned = false;
+    for (;;) {
+      const head = await firstPendingRunV1(transaction, prefix);
+      if (!head) return { pruned };
+      const run = this.codec.optional(
+        await transaction.get<unknown>(`${RUN_PREFIX}${head[1]}`),
+      );
+      if (run?.status === "running" && run.phase === "queued") {
+        return { head, pruned };
+      }
+      await transaction.delete(head[0]);
+      pruned = true;
+    }
   }
 
   /**
@@ -1568,14 +1617,17 @@ export class BotDurableAuthority<Snapshot> {
    * The verdict is taken inside the transaction, against the record and the
    * log as they are committed there, so a Turn that settled itself since the
    * repair came due is left exactly as it settled — and so is one that started
-   * executing in this object in the meantime. The settlement is
-   * `failStoredRun`, exactly as recovery's is, which closes the open Turn in
-   * the log on the way, and its run-record write is what publishes the `runs`
-   * invalidation watching clients re-read on.
+   * executing in this object, or was promoted into the active slot, in the
+   * meantime. The active Turn is recovery's, and a promoted one that waited in
+   * the queue already looks past its deadline to liveness, which counts from
+   * admission. The settlement is `failStoredRun`, exactly as recovery's is,
+   * which closes the open Turn in the log on the way, and its run-record write
+   * is what publishes the `runs` invalidation watching clients re-read on.
    */
   private async settleStaleRun(runId: string): Promise<void> {
     await this.ctx.storage.transaction(async (transaction) => {
       if (runId === this.executingRunId) return;
+      if ((await transaction.get<string>(ACTIVE_RUN_KEY)) === runId) return;
       const run = await this.readRunFrom(transaction, runId);
       if (!run || run.runId !== runId || run.status !== "running") return;
       const eventLog = new SessionEventLog(transaction);
@@ -1686,7 +1738,9 @@ export class BotDurableAuthority<Snapshot> {
       if (!Number.isFinite(dueAt) || dueAt > now) break;
       if (runId === this.executingRunId || runId === active) continue;
       const before = await this.readRunHeader(runId);
-      if (!before || before.status !== "running") {
+      // A Turn still in the queue has not started, so it has no deadline to
+      // miss; its promotion arms the repair.
+      if (!before || before.status !== "running" || before.phase === "queued") {
         await this.ctx.storage.delete([key, repairRunKey(runId)]);
         continue;
       }
@@ -1779,15 +1833,20 @@ export class BotDurableAuthority<Snapshot> {
       // recovery alarm even with nothing running.
       deadlines.push(Date.now() + RECOVERY_ALARM_DELAY_MS);
     }
-    const [repair, publication] = await Promise.all([
-      transaction.list<string>({ prefix: REPAIR_DUE_PREFIX, limit: 1 }),
+    const [repairs, publication] = await Promise.all([
+      // Past the active and the executing run, which differ only inside a
+      // settlement, the next due is within three.
+      transaction.list<string>({ prefix: REPAIR_DUE_PREFIX, limit: 3 }),
       transaction.list<unknown>({
         prefix: PUBLICATION_PENDING_PREFIX,
         limit: 1,
       }),
     ]);
-    const repairKey = repair.keys().next().value as string | undefined;
-    if (repairKey) {
+    // The active Turn's repair is recovery's, which the deadline above already
+    // keeps. `drainDueRepairs` skips it, so arming on its due time once passed
+    // would fire the alarm back to back until the Turn settled.
+    for (const [repairKey, runId] of repairs) {
+      if (runId === activeRunId || runId === this.executingRunId) continue;
       const due = Number(
         repairKey.slice(
           REPAIR_DUE_PREFIX.length,
@@ -1795,6 +1854,7 @@ export class BotDurableAuthority<Snapshot> {
         ),
       );
       if (Number.isFinite(due)) deadlines.push(due);
+      break;
     }
     // Committed publication is owed even while a Turn is executing. A past
     // or current cursor is due immediately; the drain bounds each pass.
@@ -1969,10 +2029,6 @@ export class BotDurableAuthority<Snapshot> {
       );
       const preparedInputs = this.hooks.preparedInputs?.(settings);
       const pin = await this.composition.pin(transaction);
-      const repairAt =
-        Date.parse(command.acceptedAt) +
-        TURN_DEADLINE_MS_V1 +
-        STALE_RUNNING_RUN_GRACE_MS_V1;
       const admittedRun = this.codec.require({
         runId: command.runId,
         commandFingerprint: botTurnCommandFingerprintV1(command),
@@ -2031,13 +2087,17 @@ export class BotDurableAuthority<Snapshot> {
                 [pendingUserRunKey(command.acceptedAt, command.runId)]:
                   command.runId,
               }
-          : { [ACTIVE_RUN_KEY]: command.runId }),
+          : {
+              [ACTIVE_RUN_KEY]: command.runId,
+              ...runRepairRecordsV1(
+                command.runId,
+                Date.parse(command.acceptedAt),
+              ),
+            }),
         [IDENTITY_KEY]: identity ?? {
           userId: command.userId,
           botId: command.botId,
         },
-        [repairRunKey(command.runId)]: repairAt,
-        [repairDueKey(repairAt, command.runId)]: command.runId,
       });
       await this.commitVisible(transaction, {
         cause: "admission",
@@ -2233,29 +2293,39 @@ export class BotDurableAuthority<Snapshot> {
    * do the promoting itself.
    */
   private async recoverQueuedRun(): Promise<void> {
-    const pendingRunId = ((await firstPendingRunV1(
-      this.ctx.storage,
-      PENDING_USER_RUN_PREFIX,
-    )) ??
-      (await firstPendingRunV1(
+    // A head naming a run that will never start is pruned by the promotion
+    // that finds it, and the Turn behind it starts in the same pass.
+    for (
+      let attempt = 0;
+      attempt <= MAX_PENDING_USER_RUNS_V1 + MAX_PENDING_AGENT_RUNS_V1;
+      attempt += 1
+    ) {
+      const pendingRunId = ((await firstPendingRunV1(
         this.ctx.storage,
-        PENDING_AGENT_RUN_PREFIX,
-      )))?.[1];
-    if (!pendingRunId || this.queuedWaiters.has(pendingRunId)) return;
-    if (pendingRunId === this.executingRunId) return;
-    const durableIdentity =
-      await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
-    const promoted = await this.promoteQueuedRun(pendingRunId);
-    if (typeof promoted === "string") return;
-    if (!durableIdentity) throw new Error("Bot identity is unavailable");
-    const run = await this.readRun(pendingRunId);
-    if (!run) throw new Error(`run "${pendingRunId}" was not accepted`);
-    await this.executeAcceptedRun(
-      this.executionCommand(durableIdentity, run),
-      promoted.seed,
-      promoted.settings,
-      promoted.compositionGenerationId,
-    );
+        PENDING_USER_RUN_PREFIX,
+      )) ??
+        (await firstPendingRunV1(
+          this.ctx.storage,
+          PENDING_AGENT_RUN_PREFIX,
+        )))?.[1];
+      if (!pendingRunId || this.queuedWaiters.has(pendingRunId)) return;
+      if (pendingRunId === this.executingRunId) return;
+      const durableIdentity =
+        await this.ctx.storage.get<BotIdentity>(IDENTITY_KEY);
+      const promoted = await this.promoteQueuedRun(pendingRunId);
+      if (promoted === "not-queued") continue;
+      if (promoted === "blocked") return;
+      if (!durableIdentity) throw new Error("Bot identity is unavailable");
+      const run = await this.readRun(pendingRunId);
+      if (!run) throw new Error(`run "${pendingRunId}" was not accepted`);
+      await this.executeAcceptedRun(
+        this.executionCommand(durableIdentity, run),
+        promoted.seed,
+        promoted.settings,
+        promoted.compositionGenerationId,
+      );
+      return;
+    }
   }
 
   /** The command a durable run record replays as after eviction. */
