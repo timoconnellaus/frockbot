@@ -205,6 +205,10 @@ export function billingRoutes(
         const customer = await stripe.call(
           `customers/${stripeId(data.customer)}`,
         );
+        // Deleting an account deletes its customer, and Stripe then reports
+        // the subscription that took with it. There is nobody left to tell,
+        // and refusing would only have Stripe retry for days.
+        if (customer.deleted === true) return Response.json({ received: true });
         const userId = object(customer.metadata).frockbot_user_id;
         if (
           typeof userId !== "string" ||
@@ -214,6 +218,9 @@ export function billingRoutes(
         await account(userId).billingWebhook({ userId, event });
         return Response.json({ received: true });
       } catch (error) {
+        // An event that raced the account's deletion has nothing to apply to.
+        if (error instanceof Error && error.name === "AccountDeletedError")
+          return Response.json({ received: true });
         return failure(error);
       }
     },

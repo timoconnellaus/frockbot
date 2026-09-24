@@ -74,6 +74,7 @@ The adapter pins Stripe API version `2025-02-24.acacia`. Configure the webhook d
 - Top-up credit is granted once per paid Checkout Session, with currency/amount/customer/intent validation.
 - Failed renewal payment cannot grant credit. Cancellation preserves the already paid window and stops the next renewal. Refund/dispute events suspend further paid work pending review.
 - A repeat purchase command with different values conflicts rather than silently changing the amount.
+- Deleting the account deletes its Stripe customer: the one the ledger recorded, and any a search by `metadata['frockbot_user_id']` finds, since a creation whose answer was lost leaves one the ledger never saw. Stripe cancels a deleted customer's subscription at once, without proration, so what is left of the paid period and any credit is forfeited — the confirmation says so. A `DELETE` is idempotent at Stripe and takes no idempotency key, and an answer of `404` is a deletion. With payments unconfigured but a customer recorded, the step is refused and retried rather than skipped, because finishing around it could leave a subscription charging an account that no longer exists. Stripe keeps its own record of payments already made. The webhook answers `received` for an event about a deleted customer, or one that reaches an account already deleted, so Stripe does not retry it for days.
 
 Register `/api/billing/stripe/webhook` for:
 

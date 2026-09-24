@@ -59,6 +59,13 @@ export interface AuthPackageV1 {
   storedIdentity?(userId: string): Promise<AuthStoredIdentityV1 | null>;
   /** The identities this Package has stored, newest first. */
   listStoredIdentities?(limit: number): Promise<AuthStoredIdentityV1[]>;
+  /**
+   * Forgets a User: the identity, every session it holds and every provider
+   * account linked to it, so nothing can sign in as that User again. Deleting
+   * the account is the one caller. Idempotent — an identity already gone is
+   * forgotten. A Package that stores nothing declares none.
+   */
+  deleteStoredIdentity?(userId: string): Promise<void>;
   /** `/api/auth/*`: whatever sign-in routes this Package serves there. */
   handler(request: Request): Promise<Response>;
   /** The identity these request headers carry, or nobody. */
@@ -93,7 +100,7 @@ export type AuthPackageIdentityV1 = Pick<
  */
 export type AuthPackageIdentityStoreV1 = Pick<
   AuthPackageV1,
-  "storedIdentity" | "listStoredIdentities"
+  "storedIdentity" | "listStoredIdentities" | "deleteStoredIdentity"
 >;
 
 /** What an auth Package is about to write, as the access authority reads it. */

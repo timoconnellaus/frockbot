@@ -417,7 +417,10 @@ async function mcpStub(request: Request, url: URL): Promise<Response> {
 export const COMPOSIO_STUB_ORIGIN = "https://backend.composio.dev";
 export const COMPOSIO_TEST_API_KEY = "workerd-composio-key";
 const composioAuthConfigs = new Map<string, string>();
-const composioAccounts = new Map<string, { toolkit: string; status: string }>();
+const composioAccounts = new Map<
+  string,
+  { toolkit: string; status: string; userId: string }
+>();
 const composioTriggers = new Map<
   string,
   { slug: string; accountId: string; userId: string }
@@ -465,7 +468,11 @@ async function composioStub(request: Request, url: URL): Promise<Response> {
       return Response.json({ error: "bad request" }, { status: 400 });
     }
     const id = `ca_${++composioAccountCounter}`;
-    composioAccounts.set(id, { toolkit, status: "INITIATED" });
+    composioAccounts.set(id, {
+      toolkit,
+      status: "INITIATED",
+      userId: body.user_id,
+    });
     // The sign-in the provider hands back carries the callback it was given,
     // so a suite in workerd can see the return page the gateway named without
     // reaching into this Node-side stub's state.
@@ -501,7 +508,11 @@ async function composioStub(request: Request, url: URL): Promise<Response> {
       return Response.json({ error: "bad request" }, { status: 400 });
     }
     const id = `ca_${++composioAccountCounter}`;
-    composioAccounts.set(id, { toolkit, status: "ACTIVE" });
+    composioAccounts.set(id, {
+      toolkit,
+      status: "ACTIVE",
+      userId: body.connection.user_id,
+    });
     return Response.json(
       {
         id,
@@ -512,6 +523,34 @@ async function composioStub(request: Request, url: URL): Promise<Response> {
       },
       { status: 201 },
     );
+  }
+  // What the provider holds for one User, as deleting an account asks.
+  if (path === "/connected_accounts" && request.method === "GET") {
+    const userId = url.searchParams.get("user_ids");
+    return Response.json({
+      items: [...composioAccounts]
+        .filter(([, stored]) => stored.userId === userId)
+        .map(([id, stored]) => ({
+          id,
+          status: stored.status,
+          toolkit: { slug: stored.toolkit },
+        })),
+      next_cursor: null,
+    });
+  }
+  if (path === "/trigger_instances/active" && request.method === "GET") {
+    const userId = url.searchParams.get("user_ids");
+    return Response.json({
+      items: [...composioTriggers]
+        .filter(([, stored]) => stored.userId === userId)
+        .map(([id, stored]) => ({
+          id,
+          trigger_name: stored.slug,
+          connected_account_id: stored.accountId,
+          user_id: stored.userId,
+        })),
+      next_cursor: null,
+    });
   }
   const account = /^\/connected_accounts\/([^/]+)$/.exec(path);
   if (account) {

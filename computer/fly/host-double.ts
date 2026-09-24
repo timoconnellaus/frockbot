@@ -24,6 +24,7 @@ import {
   type ComputerHostFileReadResultV1,
   type ComputerHostOpenResultV1,
   type ComputerHostProvisioningV1,
+  type ComputerHostTeardownResultV1,
   type ComputerHostViewerResultV1,
 } from "@frockbot/computer/host-protocol";
 import type { ComputerHostV1 } from "@frockbot/computer/core/host";
@@ -102,6 +103,10 @@ export class FakeComputerHost {
   /** Every `file/read` the host was asked for, in order. */
   readonly reads: Array<{ botId: string; path: string; effectId?: string }> =
     [];
+  /** Whether the Computer exists: a teardown ends it, the next `open` makes one. */
+  exists = true;
+  /** How many teardowns reached the host, including repeats. */
+  teardowns = 0;
 
   constructor(private runner: FakeComputerRunnerV1 = () => ({})) {}
 
@@ -127,6 +132,10 @@ export class FakeComputerHost {
       ): Promise<ComputerHostOpenResultV1> {
         options?.signal?.throwIfAborted();
         if (host.openFailure) throw host.openFailure;
+        if (!host.exists) {
+          host.exists = true;
+          host.generation += 1;
+        }
         for (const progress of host.openProgress) {
           await options?.onProgress?.(progress);
         }
@@ -241,6 +250,21 @@ export class FakeComputerHost {
                   Date.now() + maxAgeSeconds * 1_000,
                 ).toISOString(),
               }),
+        });
+      },
+
+      teardown(
+        options?: ComputerHostCallOptions,
+      ): Promise<ComputerHostTeardownResultV1> {
+        options?.signal?.throwIfAborted();
+        const deleted = host.exists;
+        host.teardowns += 1;
+        host.exists = false;
+        host.leases.clear();
+        return Promise.resolve({
+          version: 1,
+          effectId: options?.effectId ?? "effect-teardown",
+          deleted,
         });
       },
 
@@ -515,5 +539,6 @@ export function contractHostV1(userId: string, botId: string): ComputerHostV1 {
       host: double.factory,
       spriteName: "frockbot-contract",
     }),
+    double.factory,
   );
 }

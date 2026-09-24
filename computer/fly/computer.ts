@@ -16,6 +16,7 @@ import type {
   ComputerHostFileReadResultV1,
   ComputerHostOpenResultV1,
   ComputerHostProvisioningV1,
+  ComputerHostTeardownResultV1,
   ComputerHostViewerResultV1,
 } from "@frockbot/computer/host-protocol";
 import {
@@ -127,6 +128,10 @@ export interface ComputerHostSurfaceV1 {
     action: "open" | "renew" | "revoke",
     options?: ComputerHostCallOptions & { sessionId?: string },
   ): Promise<ComputerHostViewerResultV1>;
+  /** Destroys the whole Computer, whichever tenant the surface was made for. */
+  teardown?(
+    options?: ComputerHostCallOptions,
+  ): Promise<ComputerHostTeardownResultV1>;
 }
 
 /**

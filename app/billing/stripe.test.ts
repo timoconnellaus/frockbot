@@ -1,7 +1,12 @@
 import { Database } from "bun:sqlite";
 import { describe, expect, test } from "bun:test";
 import { BillingLedger, type BillingStorage } from "./ledger";
-import { AccountPayments, StripeClient, verifyStripeEvent } from "./stripe";
+import {
+  AccountPayments,
+  StripeClient,
+  deleteAccountCustomersV1,
+  verifyStripeEvent,
+} from "./stripe";
 
 function storage(database = new Database(":memory:")): BillingStorage {
   return {
@@ -562,5 +567,69 @@ describe("Stripe payment boundaries", () => {
     await expect(
       payments.webhook({ ...event, created: NOW / 1000 + 1 }),
     ).rejects.toThrow("Billing key reused with different data");
+  });
+});
+
+describe("deleting an account's customers", () => {
+  test("deletes the recorded customer and any the search finds, once each", async () => {
+    const calls: Array<{ method: string; url: string }> = [];
+    const stripe = new StripeClient(
+      config,
+      fakeFetch(async (url, init) => {
+        const method = init?.method ?? "GET";
+        calls.push({ method, url: String(url) });
+        if (method === "GET")
+          return Response.json({
+            data: [{ id: "cus_recorded" }, { id: "cus_orphan" }],
+          });
+        return String(url).endsWith("cus_orphan")
+          ? new Response("{}", { status: 404 })
+          : Response.json({ id: "cus_recorded", deleted: true });
+      }),
+    );
+    expect(
+      await deleteAccountCustomersV1(stripe, "user-1", "cus_recorded"),
+    ).toEqual({ deleted: 1 });
+    expect(calls[0]?.url).toContain("customers/search?query=");
+    expect(decodeURIComponent(calls[0]!.url)).toContain(
+      "metadata['frockbot_user_id']:'user-1'",
+    );
+    expect(calls.slice(1)).toEqual([
+      {
+        method: "DELETE",
+        url: "https://api.stripe.com/v1/customers/cus_recorded",
+      },
+      {
+        method: "DELETE",
+        url: "https://api.stripe.com/v1/customers/cus_orphan",
+      },
+    ]);
+  });
+
+  test("a refused delete is a failure the caller retries, not a deletion", async () => {
+    const stripe = new StripeClient(
+      config,
+      fakeFetch(async (_url, init) =>
+        (init?.method ?? "GET") === "GET"
+          ? Response.json({ data: [] })
+          : new Response("{}", { status: 500 }),
+      ),
+    );
+    await expect(
+      deleteAccountCustomersV1(stripe, "user-1", "cus_recorded"),
+    ).rejects.toThrow();
+  });
+
+  test("never interpolates an id Stripe's query language would have to escape", async () => {
+    const urls: string[] = [];
+    const stripe = new StripeClient(
+      config,
+      fakeFetch(async (url) => {
+        urls.push(String(url));
+        return Response.json({ id: "cus_recorded", deleted: true });
+      }),
+    );
+    await deleteAccountCustomersV1(stripe, "a' OR 'b", "cus_recorded");
+    expect(urls).toEqual(["https://api.stripe.com/v1/customers/cus_recorded"]);
   });
 });

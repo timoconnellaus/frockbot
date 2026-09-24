@@ -489,7 +489,10 @@ export class FakeSpritesClient implements SpritesClientHandle {
 
   async deleteSprite(name: string): Promise<void> {
     this.deleted.push(name);
-    this.sprites.delete(name);
+    // The API answers 404 for a name it does not hold, as `getSprite` does.
+    if (!this.sprites.delete(name)) {
+      throw new FakeApiError(404, `no such sprite: ${name}`);
+    }
   }
 
   async listAllSprites(prefix?: string): Promise<{ name: string }[]> {

@@ -23,6 +23,7 @@ import {
   decodeComputerHostOpenResultV1,
   decodeComputerHostProblemV1,
   decodeComputerHostServiceResultV1,
+  decodeComputerHostTeardownResultV1,
   type ComputerHostExecFrameV1,
   type ComputerHostOpenFrameV1,
   type ComputerHostOperationV1,
@@ -2240,6 +2241,85 @@ describe("services", () => {
     expect(
       decodeComputerHostProblemV1(await response.json()).message,
     ).toContain("not a Computer-provider-declared service");
+  });
+});
+
+describe("teardown", () => {
+  test("destroys the User's Computer, and a repeat finds it already gone", async () => {
+    const { client, host } = provisioned();
+    const name = host.spriteNameFor("user-1");
+    // The host has learned the Computer, the way any Turn leaves it.
+    expect(
+      (await host.handle(request({ kind: "service", name: "cryptominer" })))
+        .status,
+    ).toBe(400);
+
+    const first = decodeComputerHostTeardownResultV1(
+      await (await host.handle(request({ kind: "teardown" }))).json(),
+    );
+    expect(first).toEqual({ version: 1, effectId: "effect-1", deleted: true });
+    expect(client.sprites.has(name)).toBe(false);
+
+    const again = decodeComputerHostTeardownResultV1(
+      await (await host.handle(request({ kind: "teardown" }))).json(),
+    );
+    expect(again.deleted).toBe(false);
+    expect(client.deleted).toEqual([name, name]);
+  });
+
+  test("derives the name without having opened the Computer first", async () => {
+    const client = new FakeSpritesClient();
+    const host = hostWith(client);
+    const name = host.spriteNameFor("user-2");
+    client.sprites.set(name, new FakeSprite(name));
+    const response = await host.handle(
+      request({ kind: "teardown" }, { identity: { userId: "user-2" } }),
+    );
+    expect(response.status).toBe(200);
+    expect(client.sprites.size).toBe(0);
+  });
+
+  test("forgets the Computer, so the next open provisions a new one", async () => {
+    const { client, host } = provisioned();
+    await host.handle(request({ kind: "teardown" }));
+    const lookups = client.lookups.length;
+    // The handle it cached is gone: this open looks the Computer up again
+    // and, finding none, creates one.
+    await host.handle(request({ kind: "open" })).catch(() => undefined);
+    expect(client.lookups.length).toBeGreaterThan(lookups);
+    expect(client.created).toEqual([host.spriteNameFor("user-1")]);
+  });
+
+  test("an open that outlives a teardown does not cache the Computer it opened", async () => {
+    const { client, host, sprite } = provisioned();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const lookup = client.getSprite.bind(client);
+    client.getSprite = async (name) => {
+      await gate;
+      return lookup(name);
+    };
+    const opening = host.handle(request({ kind: "open" }));
+    await host.handle(request({ kind: "teardown" }));
+    // The machine the open was reaching is gone, but the open still holds it.
+    client.sprites.set(sprite.name, sprite);
+    release();
+    await opening;
+    const cached = (host as unknown as { computers: Map<string, unknown> })
+      .computers;
+    expect(cached.has("user-1")).toBe(false);
+  });
+
+  test("an unexpected provider failure is a failure, not a teardown", async () => {
+    const { client, host } = provisioned();
+    client.deleteSprite = async () => {
+      throw new FakeApiError(500, "provider down");
+    };
+    const response = await host.handle(request({ kind: "teardown" }));
+    expect(response.status).toBe(502);
+    expect(decodeComputerHostProblemV1(await response.json()).retryable).toBe(
+      true,
+    );
   });
 });
 

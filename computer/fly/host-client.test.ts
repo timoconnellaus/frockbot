@@ -203,6 +203,22 @@ describe("FlyHostTransportV1 envelope", () => {
     expect(calls[0]?.body.credentialRef).toBe("broker:lease:xyz");
   });
 
+  test("a teardown posts the bare envelope to its own route", async () => {
+    const { fetcher, calls } = recorder(() =>
+      Response.json({ version: 1, effectId: "effect-1", deleted: true }),
+    );
+    const result = await client(fetcher).teardown({ effectId: "effect-1" });
+    expect(result.deleted).toBe(true);
+    expect(calls[0]?.pathname).toBe(COMPUTER_HOST_ROUTES.teardown);
+    expect(calls[0]?.body).toEqual({
+      version: 1,
+      effectId: "effect-1",
+      identity: { userId: "user-1" },
+      tenant: { botId: "bot-1" },
+      credentialRef: "computer:user:user-1",
+    });
+  });
+
   test("forTenant keeps the Computer and changes only the Bot", async () => {
     const { fetcher, calls } = recorder(() =>
       Response.json({ version: 1, effectId: "effect-1", cancelled: false }),

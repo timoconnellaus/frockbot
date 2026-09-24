@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createFlockBotBackendContribution } from "./bot.js";
+import { createFlockBotBackendContribution, isBotTombstoneV1 } from "./bot.js";
 import {
   FlockConflictError,
   FlockDecodeError,
@@ -507,5 +507,22 @@ describe("a Bot's voice record", () => {
     expect(
       await contribution(storage).read(registration, "user-1"),
     ).toMatchObject({ revision: 0 });
+  });
+});
+
+describe("the tombstone", () => {
+  test("is a deleted lifecycle, and nothing else", async () => {
+    const storage = new MemoryStorage();
+    expect(await isBotTombstoneV1(storage)).toBe(false);
+    const lifecycle = { schemaVersion: 1, botId: "b", revision: 1 };
+    await storage.put("flock:lifecycle:v1", { ...lifecycle, status: "active" });
+    expect(await isBotTombstoneV1(storage)).toBe(false);
+    await storage.put("flock:lifecycle:v1", {
+      ...lifecycle,
+      status: "deleted",
+    });
+    expect(await isBotTombstoneV1(storage)).toBe(true);
+    await storage.put("flock:lifecycle:v1", { status: "deleted" });
+    expect(await isBotTombstoneV1(storage)).toBe(false);
   });
 });

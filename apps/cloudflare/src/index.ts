@@ -2319,6 +2319,24 @@ export default {
             env.USER_CONFIGURATIONS.get(
               env.USER_CONFIGURATIONS.idFromName(userId),
             ).registerPush({ userId, registration }),
+          deletion: {
+            deleteAccount: async (userId, command) =>
+              rpcJsonSnapshotV1(
+                await env.USER_CONFIGURATIONS.get(
+                  env.USER_CONFIGURATIONS.idFromName(userId),
+                ).beginAccountDeletion({
+                  schemaVersion: 1,
+                  userId,
+                  ...command,
+                }),
+              ),
+            deleteComputer: async (userId, commandId) =>
+              rpcJsonSnapshotV1(
+                await env.USER_CONFIGURATIONS.get(
+                  env.USER_CONFIGURATIONS.idFromName(userId),
+                ).deleteComputer({ schemaVersion: 1, userId, commandId }),
+              ),
+          },
           auth: AUTH_PACKAGE_V1.create(env, {
             mayCreateIdentity: (candidate) => mayCreateIdentity(env, candidate),
           }),

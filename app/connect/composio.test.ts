@@ -373,6 +373,27 @@ describe("the provider client", () => {
     );
   });
 
+  test("lists what the provider holds for one User, across pages", async () => {
+    const { client: c, recorded } = client(({ url }) =>
+      url.includes("cursor=next")
+        ? Response.json({ items: [{ id: "ca_2" }], next_cursor: null })
+        : Response.json({ items: [{ id: "ca_1" }], next_cursor: "next" }),
+    );
+    expect(await c.listConnectedAccountIds("user-1")).toEqual(["ca_1", "ca_2"]);
+    expect(recorded[0]?.url).toContain("/connected_accounts?");
+    expect(recorded[0]?.url).toContain("user_ids=user-1");
+
+    const triggers = client(() =>
+      Response.json({ items: [{ id: "ti_1", uuid: "u" }], next_cursor: null }),
+    );
+    expect(await triggers.client.listTriggerInstanceIds("user-1")).toEqual([
+      "ti_1",
+    ]);
+    // A disabled instance is still the User's, and still has to go.
+    expect(triggers.recorded[0]?.url).toContain("show_disabled=true");
+    expect(triggers.recorded[0]?.url).toContain("user_ids=user-1");
+  });
+
   test("bounds a listing by its cursor chain", async () => {
     const { client: c } = client(() =>
       Response.json({ items: [], next_cursor: "same" }),

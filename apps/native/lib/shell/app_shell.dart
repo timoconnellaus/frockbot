@@ -47,6 +47,7 @@ import '../routines/runs.dart';
 import '../search/controller.dart';
 import '../search/archived_conversation.dart';
 import '../search/overlay.dart';
+import '../settings/account_deletion.dart';
 import '../settings/billing.dart';
 import '../settings/credit.dart';
 import '../settings/bot_quick_writes.dart';
@@ -3409,6 +3410,24 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               icon: Icons.settings_outlined,
               title: 'Personal details',
               page: _settingsPage,
+            ),
+            ProfileSection(
+              id: SettingsIds.profileDelete,
+              icon: Icons.delete_outline,
+              title: 'Delete',
+              page: () => DeletionPage(
+                api: widget.api,
+                // Nothing of the account is left to show, so this device
+                // signs out the way the Sign out row does.
+                onAccountDeleted: () async {
+                  unawaited(appBadge.clear());
+                  try {
+                    await push.logout();
+                  } finally {
+                    await widget.onSignOut();
+                  }
+                },
+              ),
             ),
           ]),
           ProfileGroup('Bots', [

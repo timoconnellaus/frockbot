@@ -53,6 +53,13 @@ import { shellQuote } from "./shell.js";
 const encoder = new TextEncoder();
 
 /**
+ * The tenant a teardown's envelope names. Every route's envelope carries one,
+ * and a teardown answers to no Bot, so this names the operation instead of a
+ * tenant; the host ignores it.
+ */
+const COMPUTER_TEARDOWN_TENANT_V1 = { botId: "teardown" } as const;
+
+/**
  * The durable roots this provider guarantees, laid out to match GrokBot's
  * box: `HOME=/home/box`, durable application data under `agent-data`, per-Bot
  * state under `agents/<key>`, and User-shared memory beside it.
@@ -624,6 +631,28 @@ export class FlyComputerHostV1 implements ComputerHostV1 {
       this.computers.set(key, computer);
     }
     return computer;
+  }
+
+  /**
+   * Destroys the User's Computer through the host, which holds the only
+   * credential that can. Idempotent there: a Computer already gone answers as
+   * torn down. The cached handle goes too, so the next `open` provisions a new
+   * Computer rather than trusting what this one knew about the old.
+   */
+  async teardown(identity: ComputerIdentityV1): Promise<void> {
+    const key = computerIdentityKeyV1(identity);
+    const surface = this.host?.(
+      { userId: identity.userId },
+      COMPUTER_TEARDOWN_TENANT_V1,
+    );
+    if (!surface?.teardown) {
+      throw new ComputerError(
+        "capability-unavailable",
+        "This deployment has no Computer host to tear a Computer down",
+      );
+    }
+    await surface.teardown();
+    this.computers.delete(key);
   }
 
   open(

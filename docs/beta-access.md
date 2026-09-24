@@ -21,7 +21,9 @@ The authority applies these checks in order:
 3. An account with no record is admitted if an email invitation matches its **verified** email. The invitation is spent in the same transaction, unless the mode is `closed`, which keeps it for later.
 4. Otherwise the mode decides. `open` activates the account. `invite-only` refuses it as `invitation-required`, and `closed` refuses it as `admission-closed`.
 
-Admission itself only ever writes `active` over no record or over `invited`. It never lifts a pause, end or block. Every account admission decision and write happens inside one synchronous storage transaction in the one object, so a sign-in and an admin change cannot interleave. Admin mode and account writes are compare-and-swap on the record's revision, and admission advances that revision too. An admin who acts on a stale read gets a `409`; nothing is silently overwritten.
+Admission itself only ever writes `active` over no record or over `invited`. It never lifts a pause, end or block.
+
+Deleting an account is the one writer besides admission and an admin. Its first step writes `ended` (`updatedBy: "account-deletion"`) over whatever the record said, or over none, so the account's other devices are refused while its data is destroyed; its last step, once the sign-in identity and its sessions are gone, deletes the record and any invitation still waiting under the account's address. Signing in with the same Google account afterwards is a new identity with a new User id, admitted by the mode like any other. Every account admission decision and write happens inside one synchronous storage transaction in the one object, so a sign-in and an admin change cannot interleave. Admin mode and account writes are compare-and-swap on the record's revision, and admission advances that revision too. An admin who acts on a stale read gets a `409`; nothing is silently overwritten.
 
 A provisioned User, an existing better-auth identity or a live session are not access. An account with none of the above is refused however long it has existed.
 

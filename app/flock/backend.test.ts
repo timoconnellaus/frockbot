@@ -58,6 +58,41 @@ describe("Flock gateway Contribution", () => {
     });
   });
 
+  test("a deleted account's Bot list answers that it is gone", async () => {
+    const gone = () =>
+      Promise.reject({
+        name: "AccountDeletedError",
+        message: "This account has been deleted.",
+      });
+    const contribution = createFlockBackendContribution({
+      listBots: gone,
+      readVoice: gone,
+      updateVoice: gone,
+      readLook: gone,
+      updateLook: gone,
+      createBot: gone,
+      listBotLifecycles: gone,
+      readFlockBootstrap: gone,
+      executeBotLifecycle: gone,
+      readAvatar: gone,
+      updateAvatar: gone,
+      listBotIdentities: gone,
+      listBotUnread: gone,
+      listBotNotifications: gone,
+      executeBotUnreadCommand: gone,
+    });
+    const response = await contribution.route(
+      request("/api/bots"),
+      new URL("https://bot.example/api/bots"),
+      { userId: "user-1", client: "browser" },
+    );
+    expect(response?.status).toBe(410);
+    expect(await response?.json<unknown>()).toMatchObject({
+      code: "account-deleted",
+      definitive: true,
+    });
+  });
+
   test("routes exact authenticated create/read/update DTOs", async () => {
     const contribution = createFlockBackendContribution({
       listBots: () =>

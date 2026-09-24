@@ -22,6 +22,7 @@ import {
   decodeComputerHostProblemV1,
   decodeComputerHostRequestV1,
   decodeComputerHostServiceResultV1,
+  decodeComputerHostTeardownResultV1,
   decodeComputerHostViewerResultV1,
   decodeComputerPathV1,
   encodeComputerHostExecFrameV1,
@@ -354,6 +355,28 @@ describe("control, viewer, service, cancel", () => {
         action: "renew",
       }),
     ).toThrow(/renew requires a session id/);
+  });
+
+  test("a teardown carries the envelope and nothing else", () => {
+    const decoded = decodeComputerHostRequestV1(
+      "teardown",
+      request({ kind: "teardown" }),
+    );
+    expect(decoded.identity).toEqual({ userId: "user-1" });
+    expect(decoded.operation).toEqual({ kind: "teardown" });
+    expect(() =>
+      decodeComputerHostRequestV1("teardown", {
+        ...request({ kind: "teardown" }),
+        path: "/",
+      }),
+    ).toThrow(/unknown field/);
+    expect(
+      decodeComputerHostTeardownResultV1({
+        version: 1,
+        effectId: "effect-1",
+        deleted: false,
+      }).deleted,
+    ).toBe(false);
   });
 
   test("a cancel names its effect through the envelope alone", () => {

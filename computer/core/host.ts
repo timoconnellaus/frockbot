@@ -594,14 +594,13 @@ export interface ComputerHostV1 {
     options?: ComputerOperationOptions,
   ): Promise<ComputerHostSessionV1>;
   /**
-   * Destroys the User's Computer and everything on it.
+   * Destroys the User's Computer and everything on it: its files and its
+   * browser logins. Idempotent — a Computer already gone is torn down — and
+   * the next `open` provisions a new, empty one.
    *
-   * Named, and optional, because there is nothing to call it yet: known issue
-   * 27 records that no reaper and no deletion surface exists, and that the
-   * retention decision has not been made. Naming it here is what keeps that
-   * decision from being a host rewrite when it lands — a Computer holds the
-   * User's files and browser logins, so whoever calls this is deleting real
-   * data on a schedule someone chose.
+   * Only the User asks for this: "Delete my Computer", and deleting the
+   * account. Nothing reaps a Computer on a schedule. Optional because a host
+   * may have no way to destroy one; those two surfaces then say so.
    */
   teardown?(identity: ComputerIdentityV1): Promise<void>;
 }

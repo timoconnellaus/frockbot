@@ -197,6 +197,15 @@ export interface ComputerHostCancelOperationV1 {
   kind: "cancel";
 }
 
+/**
+ * Destroys the User's Computer and everything on it. It answers to no Bot:
+ * the envelope still names a tenant, as every route's does, and the host
+ * ignores it. Idempotent — a Computer that is already gone is torn down.
+ */
+export interface ComputerHostTeardownOperationV1 {
+  kind: "teardown";
+}
+
 export type ComputerHostOperationV1 =
   | ComputerHostOpenOperationV1
   | ComputerHostExecOperationV1
@@ -208,7 +217,8 @@ export type ComputerHostOperationV1 =
   | ComputerHostControlOperationV1
   | ComputerHostViewerOperationV1
   | ComputerHostServiceOperationV1
-  | ComputerHostCancelOperationV1;
+  | ComputerHostCancelOperationV1
+  | ComputerHostTeardownOperationV1;
 
 export interface ComputerHostRequestV1 extends ComputerHostEnvelopeV1 {
   operation: ComputerHostOperationV1;
@@ -229,6 +239,7 @@ export const COMPUTER_HOST_ROUTES = {
   viewer: "/v1/computer/viewer",
   service: "/v1/computer/service",
   cancel: "/v1/computer/cancel",
+  teardown: "/v1/computer/teardown",
 } as const satisfies Record<ComputerHostOperationKindV1, string>;
 
 const KIND_BY_ROUTE = new Map<string, ComputerHostOperationKindV1>(
@@ -379,6 +390,13 @@ export interface ComputerHostCancelResultV1 {
   effectId: string;
   /** False when the host held no in-flight effect under that identity. */
   cancelled: boolean;
+}
+
+export interface ComputerHostTeardownResultV1 {
+  version: typeof COMPUTER_HOST_PROTOCOL_VERSION;
+  effectId: string;
+  /** False when there was no Computer left to destroy. */
+  deleted: boolean;
 }
 
 /**
@@ -633,6 +651,7 @@ function decodeOperation(
           : { stream: boolean(value.stream, "Computer open stream") }),
       };
     case "cancel":
+    case "teardown":
       return { kind };
     case "exec":
       return {
@@ -768,6 +787,7 @@ const OPERATION_FIELDS: Record<ComputerHostOperationKindV1, readonly string[]> =
     viewer: ["action", "sessionId"],
     service: ["name"],
     cancel: [],
+    teardown: [],
   };
 
 /** Decodes one request body already known to address `kind`. */
@@ -1210,6 +1230,18 @@ export function decodeComputerHostCancelResultV1(
     version: COMPUTER_HOST_PROTOCOL_VERSION,
     effectId: value.effectId as string,
     cancelled: boolean(value.cancelled, `${label} cancellation`),
+  };
+}
+
+export function decodeComputerHostTeardownResultV1(
+  input: unknown,
+): ComputerHostTeardownResultV1 {
+  const label = "Computer host teardown result";
+  const value = resultEnvelope(input, ["deleted"], label);
+  return {
+    version: COMPUTER_HOST_PROTOCOL_VERSION,
+    effectId: value.effectId as string,
+    deleted: boolean(value.deleted, `${label} deletion`),
   };
 }
 

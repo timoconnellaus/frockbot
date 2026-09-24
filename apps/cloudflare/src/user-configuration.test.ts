@@ -401,7 +401,11 @@ describe("UserConfiguration Connection routing", () => {
       },
     };
     const bound = identity("user-1");
-    const configuration = new UserConfiguration(bound.ctx({}), bound.env);
+    // The object reads its own storage first, to refuse a deleting account.
+    const configuration = new UserConfiguration(
+      bound.ctx(new MemoryStorage()),
+      bound.env,
+    );
     Reflect.set(
       configuration,
       "mounted",

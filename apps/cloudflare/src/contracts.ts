@@ -759,6 +759,17 @@ export interface BotConfigurationBinding {
 
 export interface GatewayDependencies {
   registerPush?(userId: string, registration: unknown): Promise<unknown>;
+  /**
+   * The two things a person may delete outright: their account and their
+   * Computer. The gateway checks the confirmation; these only carry it out.
+   */
+  deletion?: {
+    deleteAccount(
+      userId: string,
+      command: { commandId: string; email?: string },
+    ): Promise<unknown>;
+    deleteComputer(userId: string, commandId: string): Promise<unknown>;
+  };
   /** Explicit Slice 2 prototype; absent until signed-target qualification. */
   nativeAuth?: import("./native-auth.js").NativeAuth;
   loader: WorkerLoader;
