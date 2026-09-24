@@ -101,6 +101,24 @@ class FakeTransport implements ChatTransport {
   }
 }
 
+/// A transport that holds each send's POST open on its own, so a second
+/// message can be sent while the first is still being delivered.
+class HeldSendTransport extends FakeTransport {
+  HeldSendTransport(super.store);
+  final answers = <String, Completer<void>>{};
+  List<Map<String, dynamic>> rows = [];
+  @override
+  Future<Map<String, dynamic>> page(String botId, {String? before}) async => {
+    'runs': rows,
+    'page': {'truncated': false},
+  };
+  @override
+  Future<void> send(String botId, String id, String text, {String? retryOf}) {
+    calls.add('send:$id');
+    return (answers[id] = Completer<void>()).future;
+  }
+}
+
 class PagedTransport extends FakeTransport {
   PagedTransport(super.store);
   Map<String, dynamic> row(int number) => {
@@ -871,6 +889,117 @@ void main() {
     await first;
     await second;
     expect(controller.sending, isFalse);
+    controller.dispose();
+  });
+
+  /// "first" is sent while the Bot is idle and "second" while its POST is
+  /// still open. Nothing about delivering either one may move them: the
+  /// thread reads in the order the person sent, and the row a message is
+  /// drawn in when it is sent is the row it stays in.
+  testWidgets('two quick sends stay in the order they were sent', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final transport = HeldSendTransport(store);
+    var next = 0;
+    final controller = ChatController(
+      transport: transport,
+      store: store,
+      userId: 'user-1',
+      botId: 'bot-1',
+      nextId: () => 'send-${next += 1}',
+    );
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ChatPane(controller: controller, onReconnect: () async {}),
+        ),
+      ),
+    );
+    double top(String text) => tester.getTopLeft(find.text(text)).dy;
+    Element firstRow() =>
+        tester.element(find.byKey(const ValueKey('row:send-1:user')).first);
+
+    unawaited(controller.send('first'));
+    await tester.pump();
+    unawaited(controller.send('second'));
+    await tester.pump();
+    expect(top('first'), lessThan(top('second')));
+    final drawn = firstRow();
+
+    // The first POST answers before the transcript carries either message.
+    transport.answers['send-1']!.complete();
+    await tester.pump();
+    await tester.pump();
+    expect(controller.pending.map((send) => send.id), ['send-2']);
+    expect(top('first'), lessThan(top('second')));
+    expect(firstRow(), same(drawn));
+
+    // The transcript carries the first, stamped by a server whose clock runs
+    // well ahead of this device's. The second is still this device's alone.
+    transport.rows = [
+      {
+        'runId': 'send-1',
+        'admittedAt': '2099-01-01T00:00:00.000Z',
+        'input': 'first',
+        'status': 'running',
+        'events': <Object>[],
+      },
+    ];
+    await controller.refresh();
+    await tester.pump();
+    expect(top('first'), lessThan(top('second')));
+    expect(firstRow(), same(drawn));
+
+    transport.answers['send-2']!.complete();
+    await tester.pump();
+    await tester.pumpWidget(const SizedBox());
+    controller.dispose();
+  });
+
+  /// A lone message is drawn under the history it follows, whatever this
+  /// device's clock says about the server's stamps.
+  testWidgets('an unconfirmed message sits under history stamped ahead of it', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final transport = HeldSendTransport(store)
+      ..rows = [
+        {
+          'runId': 'earlier',
+          'admittedAt': '2099-01-01T00:00:00.000Z',
+          'input': 'from before',
+          'status': 'completed',
+          'events': <Object>[],
+        },
+      ];
+    final controller = ChatController(
+      transport: transport,
+      store: store,
+      userId: 'user-1',
+      botId: 'bot-1',
+      nextId: () => 'send-1',
+    );
+    await controller.initialize();
+    await tester.pumpWidget(
+      MaterialApp(
+        home: Scaffold(
+          body: ChatPane(controller: controller, onReconnect: () async {}),
+        ),
+      ),
+    );
+    double top(String text) => tester.getTopLeft(find.text(text)).dy;
+
+    unawaited(controller.send('just now'));
+    await tester.pump();
+    expect(top('from before'), lessThan(top('just now')));
+
+    transport.answers['send-1']!.complete();
+    await tester.pump();
+    await tester.pump();
+    expect(top('from before'), lessThan(top('just now')));
+    await tester.pumpWidget(const SizedBox());
     controller.dispose();
   });
 

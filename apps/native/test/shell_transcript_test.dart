@@ -731,6 +731,50 @@ void main() {
         ['user: stamped', 'user: unstamped'],
       );
     });
+
+    /*
+     * "first" was sent while the Bot was idle and is still unconfirmed;
+     * "second" followed while that POST was open, and this device drew its
+     * Turn with its own clock. The durable history was stamped by a server
+     * whose clock runs ahead of the device's.
+     */
+    test('keeps what this device sent under history, in the order sent', () {
+      final lines = [
+        ...projectRuns([
+          run(
+            runId: 'run-a',
+            input: 'from before',
+            admittedAt: '2099-01-01T00:00:00.000Z',
+            sentText: answer,
+          ),
+          {
+            ...run(
+              runId: 'send-2',
+              input: 'second',
+              admittedAt: '2026-09-05T12:19:00.000Z',
+              status: 'running',
+              queued: true,
+            ),
+            'localOrder': 1,
+          },
+        ]),
+        unconfirmedLine('send-1', 'first', localOrder: 0),
+      ];
+
+      expect(thread(lines), [
+        'user: from before',
+        'assistant: $answer',
+        'user: first',
+        'user: second',
+      ]);
+      // Confirmation draws the same row, not a new one.
+      expect(
+        lines.last.id,
+        projectRuns([run(runId: 'send-1', input: 'first', status: 'running')])
+            .first
+            .id,
+      );
+    });
   });
 
   group('what a Turn is projected as', () {

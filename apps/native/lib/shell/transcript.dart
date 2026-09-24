@@ -25,9 +25,10 @@ class TranscriptView extends StatefulWidget {
   final List<TranscriptLine> lines;
 
   /// The message the person has sent but the backend has not confirmed, as
-  /// [unconfirmedLine] draws it. It is drawn at the end, because there is
-  /// nothing durable to order it by yet, and offers no message actions: there
-  /// is no Turn yet to open or to mark unread from.
+  /// [unconfirmedLine] draws it. It is ordered with the other messages sent
+  /// from here that the transcript does not carry yet (see [orderTranscript]),
+  /// and offers no message actions: there is no Turn yet to open or to mark
+  /// unread from.
   final TranscriptLine? pending;
   final bool loading;
 
@@ -334,10 +335,10 @@ class _TranscriptViewState extends State<TranscriptView> {
   Widget build(BuildContext context) {
     WidgetsBinding.instance.addPostFrameCallback((_) => _reportRead());
     final now = DateTime.now();
-    final ordered = orderTranscript(
-      widget.lines,
-      now.toUtc().toIso8601String(),
-    );
+    final ordered = orderTranscript([
+      ...widget.lines,
+      ?widget.pending,
+    ], now.toUtc().toIso8601String());
     _newestSendId(ordered);
     final target = widget.focusRunId;
     // Oldest match: a Turn is a user line and then its reply, and the mark
@@ -357,10 +358,6 @@ class _TranscriptViewState extends State<TranscriptView> {
     // newest first.
     final slots = <_ThreadSlot>[];
     slots.add(const _ThreadSlot('tail', _SlotKind.tail));
-    final pending = widget.pending;
-    if (pending != null) {
-      slots.add(_ThreadSlot('row:${pending.id}', _SlotKind.line, pending));
-    }
     var anyLine = false;
     for (final line in ordered.reversed) {
       if (!_draws(line)) continue;
@@ -380,7 +377,7 @@ class _TranscriptViewState extends State<TranscriptView> {
         if (slot.kind == _SlotKind.line) slot.line!.id,
     };
     probes.removeWhere((id, _) => !drawn.contains(id));
-    if (!anyLine && pending == null) {
+    if (!anyLine) {
       _slots = const [];
       _rowHeights.clear();
       return loading

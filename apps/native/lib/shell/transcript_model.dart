@@ -160,6 +160,11 @@ class TranscriptLine {
   final List<PluginModelCall> pluginCalls;
   final Exchange? exchange;
   final VoiceCallSection? voiceCall;
+
+  /// Set on the message of a Turn this device drew before the durable
+  /// transcript carried it: where it falls among the others sent from here.
+  /// See [orderTranscript].
+  final int? localOrder;
   const TranscriptLine({
     required this.id,
     required this.runId,
@@ -177,6 +182,7 @@ class TranscriptLine {
     this.pluginCalls = const [],
     this.exchange,
     this.voiceCall,
+    this.localOrder,
   });
 
   bool get empty =>
@@ -206,6 +212,7 @@ class TranscriptLine {
     pluginCalls: pluginCalls,
     exchange: exchange,
     voiceCall: voiceCall,
+    localOrder: localOrder,
   );
 }
 
@@ -256,12 +263,17 @@ Map<String, String> turnAnchors(List<TranscriptLine> lines) {
 /// A message the backend has not confirmed yet, drawn as the line its run
 /// will project and under the same id, so the confirmation changes nothing on
 /// screen: the message looks received the moment it is sent.
-TranscriptLine unconfirmedLine(String runId, String text) => TranscriptLine(
+TranscriptLine unconfirmedLine(
+  String runId,
+  String text, {
+  required int localOrder,
+}) => TranscriptLine(
   id: '$runId:user',
   runId: runId,
   role: LineRole.user,
   text: text,
   status: LineStatus.completed,
+  localOrder: localOrder,
 );
 
 /// The thread, in the order it is drawn.
@@ -271,18 +283,37 @@ TranscriptLine unconfirmedLine(String runId, String text) => TranscriptLine(
 /// The sort is stable on list order, which is the durable order the projection
 /// maintains. A line belonging to no Turn — a system announcement — still
 /// sorts by its own time; nothing here reorders a Turn's own lines.
+///
+/// A Turn this device drew before the durable transcript carried it goes
+/// after every durable line, in the order it was sent from here. It has no
+/// admitted time yet, and this device's clock says nothing against the
+/// server's: stamped by it, a lone message could land above the reply it
+/// follows, and two quick sends could trade places as each was confirmed.
 List<TranscriptLine> orderTranscript(List<TranscriptLine> lines, String now) {
   final anchors = turnAnchors(lines);
+  final local = <String, int>{
+    for (final line in lines) line.runId: ?line.localOrder,
+  };
   String keyOf(TranscriptLine line) =>
       (line.role == LineRole.system
           ? line.at
           : anchors[line.runId] ?? line.at) ??
       now;
+  int? localOf(TranscriptLine line) =>
+      line.role == LineRole.system ? null : local[line.runId];
   final indexed = [
     for (var index = 0; index < lines.length; index++) (index, lines[index]),
   ];
   indexed.sort((left, right) {
-    final compared = keyOf(left.$2).compareTo(keyOf(right.$2));
+    final l = localOf(left.$2);
+    final r = localOf(right.$2);
+    final compared = l == null && r == null
+        ? keyOf(left.$2).compareTo(keyOf(right.$2))
+        : l == null
+        ? -1
+        : r == null
+        ? 1
+        : l - r;
     return compared != 0 ? compared : left.$1 - right.$1;
   });
   return dedupeCardSendsV1([for (final entry in indexed) entry.$2]);
@@ -704,6 +735,7 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
               ? null
               : failure?.action,
           failureMessageId: failed ? '$currentId:failed' : null,
+          localOrder: current['localOrder'] as int?,
         ),
       );
     }

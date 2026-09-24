@@ -381,7 +381,11 @@ class _ChatPaneState extends State<ChatPane> {
           : StarterSuggestions(starters: widget.starters, onSelect: _prefill),
       lines: [...runs, ...projectAnnouncements(c.announcements)],
       pending: switch (c.visiblePending) {
-        final send? => unconfirmedLine(send.id, send.text),
+        final send? => unconfirmedLine(
+          send.id,
+          send.text,
+          localOrder: c.localOrderOf(send.id),
+        ),
         null => null,
       },
       loading: c.loading,
