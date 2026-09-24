@@ -270,7 +270,9 @@ function identityVarsV1(
 ): Record<string, string> {
   if (worker !== "app") return {};
   const vars: Record<string, string> = {};
-  if (profile.nativeAuth) vars.NATIVE_SLICE_2_AUTH = profile.nativeAuth;
+  if (profile.nativeAuth) {
+    vars.NATIVE_SLICE_2_AUTH = profile.nativeAuth.join(",");
+  }
   if (profile.aiGateway?.id) vars.FROCK_AI_GATEWAY_ID = profile.aiGateway.id;
   if (profile.aiGateway) vars.FROCK_AI_ACCOUNT_ID = profile.aiGateway.accountId;
   if (profile.aiGateway?.autoRoute) {

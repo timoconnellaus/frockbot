@@ -21,15 +21,12 @@ function base64(bytes: ArrayBuffer): string {
   return btoa(String.fromCharCode(...new Uint8Array(bytes)));
 }
 
-test("a browser session completes native start, authorization and exchange", async () => {
+/** A Google-created User and the browser cookie its session is signed into. */
+async function browserUser(email: string) {
   const auth = createAuth(env);
   const adapter = (await auth.$context).internalAdapter;
   const user = await adapter.createUser(
-    {
-      name: "Native sign-in tester",
-      email: `native-${crypto.randomUUID()}@test.invalid`,
-      emailVerified: true,
-    },
+    { name: "Native sign-in tester", email, emailVerified: true },
     { method: "oauth", oauth: { providerId: "google" } },
   );
   const session = await adapter.createSession(user.id);
@@ -44,9 +41,18 @@ test("a browser session completes native start, authorization and exchange", asy
   const signature = base64(
     await crypto.subtle.sign("HMAC", key, encoder.encode(session.token)),
   );
-  const browserHeaders = {
-    cookie: `__Secure-better-auth.session_token=${encodeURIComponent(`${session.token}.${signature}`)}`,
+  return {
+    user,
+    headers: {
+      cookie: `__Secure-better-auth.session_token=${encodeURIComponent(`${session.token}.${signature}`)}`,
+    },
   };
+}
+
+test("a signed-in browser is asked before native authorization issues a code, and only its own press is taken", async () => {
+  const email = `native-${crypto.randomUUID()}@test.invalid`;
+  const { user, headers: browserHeaders } = await browserUser(email);
+  const encoder = new TextEncoder();
   const authority = env.DEPLOYMENT_POLICY.getByName(
     DEPLOYMENT_POLICY_SINGLETON_NAME,
   );
@@ -103,11 +109,63 @@ test("a browser session completes native start, authorization and exchange", asy
   });
   expect(start.status).toBe(200);
   const view = decodeProtocol("AuthStartView", await start.json());
-  const authorized = await SELF.fetch(view.authorizationUrl, {
-    headers: browserHeaders,
-    redirect: "manual",
-  });
-  expect(authorized.status).toBe(302);
+  // The browser is signed in, and still no code leaves without a press: the
+  // authorization and the page a fresh sign-in completes on both ask.
+  let consent = "";
+  for (const url of [
+    view.authorizationUrl,
+    view.authorizationUrl.replace("/native/authorize?", "/native/complete?"),
+  ]) {
+    const page = await SELF.fetch(url, {
+      headers: browserHeaders,
+      redirect: "manual",
+    });
+    expect(page.status).toBe(200);
+    expect(page.headers.get("location")).toBeNull();
+    expect(page.headers.get("x-frame-options")).toBe("DENY");
+    expect(page.headers.get("content-security-policy")).toContain(
+      "frame-ancestors 'none'",
+    );
+    const html = await page.text();
+    expect(html).toContain(
+      "Sign in to the FrockBot app on this Android device?",
+    );
+    expect(html).toContain(email);
+    expect(html).not.toContain("code=");
+    consent = /name="consent" value="([A-Za-z0-9_.-]+)"/.exec(html)![1]!;
+  }
+  const press = (headers: Record<string, string>) =>
+    SELF.fetch(`${ORIGIN}/native/authorize`, {
+      method: "POST",
+      headers: {
+        "content-type": "application/x-www-form-urlencoded",
+        ...headers,
+      },
+      body: new URLSearchParams({ consent }).toString(),
+      redirect: "manual",
+    });
+  const sameOrigin = { origin: ORIGIN, "sec-fetch-site": "same-origin" };
+  // A form on another site, a post that names no origin, another User's
+  // browser and no browser session are all refused, and spend nothing.
+  expect(
+    (
+      await press({
+        ...browserHeaders,
+        origin: "https://evil.test",
+        "sec-fetch-site": "cross-site",
+      })
+    ).status,
+  ).toBe(403);
+  expect((await press(browserHeaders)).status).toBe(403);
+  const someoneElse = await browserUser(
+    `native-${crypto.randomUUID()}@test.invalid`,
+  );
+  expect((await press({ ...someoneElse.headers, ...sameOrigin })).status).toBe(
+    403,
+  );
+  expect((await press(sameOrigin)).status).toBe(401);
+  const authorized = await press({ ...browserHeaders, ...sameOrigin });
+  expect(authorized.status).toBe(303);
   const destination = new URL(authorized.headers.get("location")!);
   expect(destination.origin + destination.pathname).toBe(NATIVE_RETURN_ANDROID);
   expect(destination.searchParams.get("state")).toBe(state);

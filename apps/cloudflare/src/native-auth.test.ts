@@ -5,6 +5,7 @@ import {
   decodeProtocol,
 } from "@frockbot/core/protocol-schemas";
 import { describe, expect, test } from "bun:test";
+import { readFileSync } from "node:fs";
 import {
   createNativeAuth,
   readNativeJsonBody,
@@ -73,8 +74,10 @@ function fixture(overrides: Partial<NativeAuthOptions> = {}) {
         }),
       getSession: async (headers) =>
         headers.get("cookie") === "test=signed-in"
-          ? { user: { id: "user-1" } }
-          : null,
+          ? { user: { id: "user-1", email: "owner@example.com" } }
+          : headers.get("cookie") === "test=someone-else"
+            ? { user: { id: "user-2", email: "other@example.com" } }
+            : null,
       profile: async (userId) =>
         userId === "user-1" ? { email: "owner@example.com" } : null,
     },
@@ -82,6 +85,36 @@ function fixture(overrides: Partial<NativeAuthOptions> = {}) {
       nativeSessionOperation(storage, input, time),
     ...overrides,
   });
+  /**
+   * The consent page's press, as a browser sends it from that page: its own
+   * origin, and the browser's cookie.
+   */
+  function press(
+    consent: string,
+    headers: Record<string, string> = SAME_ORIGIN,
+    cookie = "test=signed-in",
+  ) {
+    return auth.route(
+      new Request(`${NATIVE_ORIGIN}/native/authorize`, {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          cookie,
+          ...headers,
+        },
+        body: new URLSearchParams({ consent }).toString(),
+      }),
+    );
+  }
+  /** Opens the authorization in a signed-in browser: a page, never a code. */
+  async function consentPage(authorizationUrl: string) {
+    const page = await auth.route(
+      new Request(authorizationUrl, { headers: { cookie: "test=signed-in" } }),
+    );
+    expect(page?.status).toBe(200);
+    expect(page?.headers.get("location")).toBeNull();
+    return consentOf(await page!.text());
+  }
   function request(
     path: string,
     data?: unknown,
@@ -105,12 +138,8 @@ function fixture(overrides: Partial<NativeAuthOptions> = {}) {
     const response = await auth.route(request("/api/auth/native/start", start));
     expect(response?.status).toBe(200);
     const view = decodeProtocol("AuthStartView", await response!.json());
-    const returned = await auth.route(
-      new Request(view.authorizationUrl, {
-        headers: { cookie: "test=signed-in" },
-      }),
-    );
-    expect(returned?.status).toBe(302);
+    const returned = await press(await consentPage(view.authorizationUrl));
+    expect(returned?.status).toBe(303);
     const destination = new URL(returned!.headers.get("location")!);
     expect(destination.origin + destination.pathname).toBe(
       NATIVE_RETURN_ANDROID,
@@ -129,6 +158,8 @@ function fixture(overrides: Partial<NativeAuthOptions> = {}) {
     request,
     start,
     authorize,
+    press,
+    consentPage,
     values,
     storage,
     now: () => time,
@@ -139,6 +170,19 @@ function fixture(overrides: Partial<NativeAuthOptions> = {}) {
 }
 
 const SECRET = "test-only-secret-that-is-not-a-credential";
+
+/** What a browser sends with a form post from a page on this origin. */
+const SAME_ORIGIN = {
+  origin: NATIVE_ORIGIN,
+  "sec-fetch-site": "same-origin",
+};
+
+/** The consent the page's button would post. */
+function consentOf(page: string): string {
+  const consent = /name="consent" value="([A-Za-z0-9_.-]+)"/.exec(page)?.[1];
+  if (!consent) throw new Error("The page carries no consent");
+  return consent;
+}
 
 /**
  * A bearer as the Worker signs one, so a test can hold a session that was
@@ -558,6 +602,243 @@ describe("native system browser exchange", () => {
   });
 });
 
+describe("consent before code", () => {
+  // Anyone can start a sign-in with their own PKCE values — an app that
+  // claims `frockbot://` on a Mac or an iPhone can — and open the
+  // authorization in the person's browser. A browser that is already signed
+  // in must never hand that app a code without the person's press.
+  async function started(
+    f: ReturnType<typeof fixture>,
+    returnUri = NATIVE_RETURN_ANDROID,
+  ) {
+    const response = await f.auth.route(
+      f.request("/api/auth/native/start", { ...f.start, returnUri }),
+    );
+    expect(response?.status).toBe(200);
+    return decodeProtocol("AuthStartView", await response!.json())
+      .authorizationUrl;
+  }
+  const apple = () =>
+    fixture({
+      returnUris: nativeReturnUris("android,macos,ios", NATIVE_ORIGIN),
+    });
+
+  test("a signed-in browser is asked, on a page that cannot be framed, and is never handed a code by itself", async () => {
+    const f = apple();
+    const authorizationUrl = await started(f, NATIVE_RETURN_MACOS);
+    for (const url of [
+      authorizationUrl,
+      // Where a fresh Google sign-in lands: a GET any page can open, so it is
+      // asked exactly the same.
+      authorizationUrl.replace("/native/authorize?", "/native/complete?"),
+    ]) {
+      const page = await f.auth.route(
+        new Request(url, { headers: { cookie: "test=signed-in" } }),
+      );
+      expect(page?.status).toBe(200);
+      expect(page?.headers.get("location")).toBeNull();
+      expect(page?.headers.get("content-type")).toContain("text/html");
+      expect(page?.headers.get("cache-control")).toBe("no-store");
+      expect(page?.headers.get("x-frame-options")).toBe("DENY");
+      const policy = page?.headers.get("content-security-policy") ?? "";
+      expect(policy).toContain("frame-ancestors 'none'");
+      expect(policy).toContain("form-action 'self';");
+      expect(policy).not.toContain("script-src");
+      // Its post must carry its Origin, which a no-referrer page sends as null.
+      expect(page?.headers.get("referrer-policy")).toBe("same-origin");
+      const html = await page!.text();
+      expect(html).toContain("Sign in to the FrockBot app on this Mac?");
+      expect(html).toContain("owner@example.com");
+      expect(html).toContain(
+        `<form method="post" action="${NATIVE_ORIGIN}/native/authorize">`,
+      );
+      expect(html).not.toContain("<script");
+      expect(html).not.toContain("code=");
+      expect(html).not.toContain(NATIVE_APPLE_SCHEME + "://");
+    }
+    expect(f.values.size).toBe(0);
+    const iphone = await f.auth.route(
+      new Request(await started(f, NATIVE_RETURN_IOS), {
+        headers: { cookie: "test=signed-in" },
+      }),
+    );
+    expect(await iphone!.text()).toContain(
+      "Sign in to the FrockBot app on this iPhone?",
+    );
+
+    // The press is what issues the code, for the app's own return and state.
+    const pressed = await f.press(await f.consentPage(authorizationUrl));
+    expect(pressed?.status).toBe(303);
+    expect(pressed?.headers.get("cache-control")).toBe("no-store");
+    const destination = new URL(pressed!.headers.get("location")!);
+    expect(destination.origin + destination.pathname).toBe(NATIVE_RETURN_MACOS);
+    expect([...destination.searchParams.keys()]).toEqual(["code", "state"]);
+    expect(destination.searchParams.get("state")).toBe(state);
+    const exchanged = await f.auth.route(
+      f.request("/api/auth/native/exchange", {
+        schemaVersion: 1,
+        commandId: "exchange-1",
+        code: destination.searchParams.get("code"),
+        state,
+        returnUri: NATIVE_RETURN_MACOS,
+        codeVerifier: verifier,
+      }),
+    );
+    expect(exchanged?.status).toBe(200);
+  });
+
+  test.each([
+    ["neither Origin nor Fetch Metadata", {}],
+    ["a cross-site form", { "sec-fetch-site": "cross-site" }],
+    ["a sibling site", { "sec-fetch-site": "same-site" }],
+    ["a typed or bookmarked request", { "sec-fetch-site": "none" }],
+    ["another origin", { origin: "https://evil.test" }],
+    ["an opaque origin", { origin: "null" }],
+    [
+      "another origin claiming the same site",
+      { origin: "https://evil.test", "sec-fetch-site": "same-origin" },
+    ],
+    [
+      "this origin from a cross-site context",
+      { origin: NATIVE_ORIGIN, "sec-fetch-site": "cross-site" },
+    ],
+  ])("a press from %s is refused", async (_, headers) => {
+    const f = fixture();
+    const consent = await f.consentPage(await started(f));
+    const refused = await f.press(consent, headers);
+    expect(refused?.status).toBe(403);
+    expect(refused?.headers.get("location")).toBeNull();
+    // A refusal spends nothing: the page's own press still works.
+    expect((await f.press(consent))?.status).toBe(303);
+  });
+
+  test.each([
+    ["Origin alone", { origin: NATIVE_ORIGIN }],
+    ["Fetch Metadata alone", { "sec-fetch-site": "same-origin" }],
+  ])(
+    "a browser that sends %s from the page is let through",
+    async (_, headers) => {
+      const f = fixture();
+      const consent = await f.consentPage(await started(f));
+      expect((await f.press(consent, headers))?.status).toBe(303);
+    },
+  );
+
+  test("the press is bound to this browser's User and to one live authorization", async () => {
+    const f = fixture();
+    const authorizationUrl = await started(f);
+    const consent = await f.consentPage(authorizationUrl);
+    const token = new URL(authorizationUrl).searchParams.get("request")!;
+    // Another User's browser, or none, cannot spend it.
+    expect(
+      (await f.press(consent, SAME_ORIGIN, "test=someone-else"))?.status,
+    ).toBe(403);
+    expect((await f.press(consent, SAME_ORIGIN, ""))?.status).toBe(401);
+    // Only the consent the page carries is a press: not the authorization
+    // URL's own request, not a code, not an altered consent.
+    const pressed = await f.press(consent);
+    const code = new URL(pressed!.headers.get("location")!).searchParams.get(
+      "code",
+    )!;
+    for (const forged of [token, code, tamper(consent, -8), `${consent}x`, ""])
+      expect((await f.press(forged))?.status).toBe(400);
+    // And a consent is never a code.
+    expect(
+      (
+        await f.auth.route(
+          f.request("/api/auth/native/exchange", {
+            schemaVersion: 1,
+            commandId: "exchange-1",
+            code: consent,
+            state,
+            returnUri: NATIVE_RETURN_ANDROID,
+            codeVerifier: verifier,
+          }),
+        )
+      )?.status,
+    ).toBe(400);
+    // One field, named once, or nothing.
+    for (const body of [
+      new URLSearchParams({ consent, request: token }),
+      new URLSearchParams([
+        ["consent", consent],
+        ["consent", consent],
+      ]),
+      new URLSearchParams({ approve: consent }),
+    ]) {
+      const response = await f.auth.route(
+        new Request(`${NATIVE_ORIGIN}/native/authorize`, {
+          method: "POST",
+          headers: {
+            "content-type": "application/x-www-form-urlencoded",
+            cookie: "test=signed-in",
+            ...SAME_ORIGIN,
+          },
+          body: body.toString(),
+        }),
+      );
+      expect(response?.status).toBe(400);
+    }
+    // It lives only as long as the authorization it was drawn for.
+    f.advance(300_001);
+    expect((await f.press(consent))?.status).toBe(400);
+    expect(f.values.size).toBe(0);
+  });
+
+  test("a consent drawn for one authorization issues that authorization's code, never another's", async () => {
+    const f = fixture();
+    const mine = await f.consentPage(await started(f));
+    const other = await f.auth.route(
+      f.request("/api/auth/native/start", {
+        ...f.start,
+        commandId: "sign-in-2",
+        state: "c".repeat(64),
+      }),
+    );
+    expect(other?.status).toBe(200);
+    const pressed = await f.press(mine);
+    const destination = new URL(pressed!.headers.get("location")!);
+    expect(destination.searchParams.get("state")).toBe(state);
+    expect(
+      (
+        await f.auth.route(
+          f.request("/api/auth/native/exchange", {
+            schemaVersion: 1,
+            commandId: "exchange-1",
+            code: destination.searchParams.get("code"),
+            state: "c".repeat(64),
+            returnUri: NATIVE_RETURN_ANDROID,
+            codeVerifier: verifier,
+          }),
+        )
+      )?.status,
+    ).toBe(400);
+  });
+
+  test("the development build's return is named, and its post may reach the development scheme", async () => {
+    const f = fixture({
+      returnUris: [NATIVE_RETURN_ANDROID, NATIVE_RETURN_DEVELOPMENT],
+    });
+    const page = await f.auth.route(
+      new Request(await started(f, NATIVE_RETURN_DEVELOPMENT), {
+        headers: { cookie: "test=signed-in" },
+      }),
+    );
+    expect(page?.headers.get("content-security-policy")).toContain(
+      "form-action 'self' frockbot-dev:;",
+    );
+    const html = await page!.text();
+    expect(html).toContain(
+      "Sign in to the FrockBot development build on this device?",
+    );
+    const pressed = await f.press(consentOf(html));
+    expect(pressed?.status).toBe(303);
+    expect(pressed?.headers.get("location")).toStartWith(
+      `${NATIVE_RETURN_DEVELOPMENT}?code=`,
+    );
+  });
+});
+
 test("a trailing slash on the deployment origin names the same return URIs", () => {
   expect(nativeReturnUris("android,macos", `${NATIVE_ORIGIN}/`)).toEqual(
     nativeReturnUris("android,macos", NATIVE_ORIGIN),
@@ -568,12 +849,18 @@ test("deployment targets are an exact fail-closed switch", () => {
   expect(nativeReturnUris("android", NATIVE_ORIGIN)).toEqual([
     NATIVE_RETURN_ANDROID,
   ]);
-  expect(nativeReturnUris("android,macos", NATIVE_ORIGIN)).toEqual([
+  // A FrockBot Dev return is served only where it is named.
+  expect(nativeReturnUris("android,macos,ios", NATIVE_ORIGIN)).toEqual([
     NATIVE_RETURN_ANDROID,
     NATIVE_RETURN_MACOS,
+    NATIVE_RETURN_IOS,
+  ]);
+  expect(nativeReturnUris("macos-dev", NATIVE_ORIGIN)).toEqual([
     NATIVE_RETURN_MACOS_DEV,
   ]);
-  expect(nativeReturnUris("android,macos,ios", NATIVE_ORIGIN)).toEqual([
+  expect(
+    nativeReturnUris("ios-dev,ios,macos-dev,macos,android", NATIVE_ORIGIN),
+  ).toEqual([
     NATIVE_RETURN_ANDROID,
     NATIVE_RETURN_MACOS,
     NATIVE_RETURN_MACOS_DEV,
@@ -584,14 +871,54 @@ test("deployment targets are an exact fail-closed switch", () => {
     undefined,
     "",
     "true",
-    "macos",
-    "ios",
+    "android,",
+    ",android",
+    "Android",
     "android, macos",
-    "android,ios",
-    "android,ios,macos",
     "android,macos, ios",
+    "android,android",
+    "android,windows",
+    "android,macos,ios,development",
   ])
     expect(nativeReturnUris(value, NATIVE_ORIGIN)).toEqual([]);
+});
+
+test("the hosted profile serves the FrockBot Dev Mac and no FrockBot Dev iPhone", async () => {
+  const profile = JSON.parse(
+    readFileSync(`${import.meta.dir}/../../../deployments/hosted.json`, "utf8"),
+  ) as { nativeAuth: string[] };
+  // The Worker reads the list as the generator writes it.
+  const hosted = nativeReturnUris(profile.nativeAuth.join(","), NATIVE_ORIGIN);
+  expect(hosted).toEqual([
+    NATIVE_RETURN_ANDROID,
+    NATIVE_RETURN_MACOS,
+    NATIVE_RETURN_MACOS_DEV,
+    NATIVE_RETURN_IOS,
+  ]);
+  const f = fixture({ returnUris: hosted });
+  expect(
+    (
+      await f.auth.route(
+        f.request("/api/auth/native/start", {
+          ...f.start,
+          returnUri: NATIVE_RETURN_IOS_DEV,
+        }),
+      )
+    )?.status,
+  ).toBe(400);
+  expect(
+    (await f.auth.route(f.request("/native/return/ios-dev")))?.status,
+  ).toBe(404);
+  expect(
+    (
+      await f.auth.route(
+        f.request("/api/auth/native/start", {
+          ...f.start,
+          returnUri: NATIVE_RETURN_MACOS_DEV,
+        }),
+      )
+    )?.status,
+  ).toBe(200);
 });
 
 function gateway(nativeAuth?: ReturnType<typeof createNativeAuth>) {
@@ -705,7 +1032,7 @@ test("gateway serves public associations and exact returns without loading the a
   // The iPhone app comes back the way the Mac app does, on the same scheme:
   // no device holds both. Its FrockBot Dev build has its own page and scheme.
   const apple = fixture({
-    returnUris: nativeReturnUris("android,macos,ios", NATIVE_ORIGIN),
+    returnUris: nativeReturnUris("android,macos,ios,ios-dev", NATIVE_ORIGIN),
   });
   const iosReturn = await gateway(apple.auth).fetch(
     apple.request("/native/return/ios?code=code-9f3a&state=state-7c1d"),
@@ -1233,7 +1560,9 @@ test("verified return associations name the existing Android signer and the Appl
   // The FrockBot Dev returns are never claimed: Safari would offer them to
   // the released app.
   expect(
-    JSON.parse(await (await association("android,macos,ios"))!.text()),
+    JSON.parse(
+      await (await association("android,macos,macos-dev,ios,ios-dev"))!.text(),
+    ),
   ).toEqual({
     applinks: {
       details: [
