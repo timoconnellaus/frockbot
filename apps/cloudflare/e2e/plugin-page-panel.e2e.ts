@@ -58,11 +58,13 @@ async function installPanelRoutes(
       // Scored Bot runs the Plugin.
       const runs = botId.startsWith("scored-");
       if (url.pathname.endsWith("/plugins")) {
-        const command = route.request().postDataJSON() as Record<
-          string,
-          unknown
-        >;
-        if (command.kind !== "plugin-tool") return route.fallback();
+        // The Plugins list is a GET on the same path: only a page's tool call
+        // is the spec's to answer.
+        const command =
+          route.request().method() === "POST"
+            ? (route.request().postDataJSON() as Record<string, unknown> | null)
+            : null;
+        if (command?.kind !== "plugin-tool") return route.fallback();
         toolCommands.push(command);
         score += 1;
         await route.fulfill({
