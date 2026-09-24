@@ -2069,6 +2069,21 @@
     }
   },
   {
+    "name": "PanelPage without state invalid",
+    "schema": "PanelPage",
+    "value": {
+      "url": "https://bot.example/plugin-pages/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.html"
+    }
+  },
+  {
+    "name": "PanelPage array state invalid",
+    "schema": "PanelPage",
+    "value": {
+      "url": "https://bot.example/p.html",
+      "state": [1]
+    }
+  },
+  {
     "name": "PanelDoor empty label invalid",
     "schema": "PanelDoor",
     "value": {
