@@ -160,9 +160,9 @@ export async function run(
 /**
  * Durably accepts a composer command and returns before the Turn finishes.
  *
- * The same preparation `run` does — compaction yield, then the User's
- * Composition — and then only the admission. Execution is the authority's
- * drive and its recovery alarm.
+ * The same preparation `run` does — taking the session log from compaction, then
+ * the User's Composition — and then only the admission. Execution is the
+ * authority's drive and its recovery alarm.
  */
 export async function admit(
   state: ShellBotStateV1,
