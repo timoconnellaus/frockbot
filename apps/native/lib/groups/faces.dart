@@ -96,10 +96,14 @@ class GroupAvatars extends StatelessWidget {
           ),
           child: Padding(
             padding: EdgeInsets.all(size * 0.08),
-            child: Image.asset(
-              'assets/characters/${_known(face.characterId)}.png',
-              fit: BoxFit.contain,
-              excludeFromSemantics: true,
+            // The artboard at rest, not the checked-in still: the still only
+            // comes in the character's catalogue colour.
+            child: CharacterAvatar(
+              size: size * 0.84,
+              botId: face.botId,
+              characterId: face.characterId,
+              primary: face.primary,
+              motion: CharacterMotion.still,
             ),
           ),
         ),
@@ -136,11 +140,6 @@ class GroupAvatars extends StatelessWidget {
       child: working ? WorkingSheen(child: stack) : stack,
     );
   }
-
-  static String _known(String characterId) =>
-      characterCatalogV1.containsKey(characterId)
-      ? characterId
-      : defaultCharacterIdV1;
 }
 
 class _Disc extends StatelessWidget {
