@@ -718,9 +718,8 @@ export async function agentRuntime(
           }
         : {}),
       packageSettings,
-      // Only the account half is taken: a platform-paid tool names the Bot
-      // and Session from its own call when it charges, and one runs only
-      // inside an admitted Turn.
+      // Only the account is taken from it: a platform-paid tool names the
+      // Bot and Session from its own call when it charges.
       ...(state.env.BILLING
         ? {
             billing: state.env.BILLING(
