@@ -109,6 +109,20 @@ page with the worker. The same checks apply as elsewhere:
 The page is served by the artifact route that exists. `ui.<host>` must survive
 every later cleanup of Applet leftovers.
 
+> Amended 2026-09-24. It did not survive: #775 removed `ui.<host>` and its
+> route the day this was written, and Tim chose not to bring a second origin
+> back. A page is served from the app's own origin at
+> `/plugin-pages/<sha256>.html`, anonymous, stored under the same key in the
+> artifact bucket. The origin is only where the bytes come from, never what
+> they run as: every response carries CSP `sandbox allow-scripts`, so the
+> document has an opaque origin however it is opened, framed or not, and the
+> frame's own `sandbox` says the same again. The app document frames that one
+> path of its own origin and nothing else of it. There is no deployment
+> setting, so a self-hosted install has pages too. The first slice serves
+> every page with no network at all (`connect-src` names only the Insights
+> beacon); a page reaching its Plugin's approved hosts comes with the policy
+> that names them.
+
 ### The frame
 
 Every placement draws the page in `HostFrameView`, as an untrusted page:

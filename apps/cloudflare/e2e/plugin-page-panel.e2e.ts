@@ -1,9 +1,11 @@
 // A Plugin's own page in the conversation panel (ADR 0036), at desktop and
 // phone widths. The panel read, the tool route and the stored page are
-// intercepted — this suite has no build service to publish a real one — and
-// everything that hosts and talks to the page is the production client: the
-// canvas, the sandboxed frame, and the bridge the page's bytes carry.
+// intercepted — this suite has no build service to publish a real one — but
+// the page is answered with the Worker's own policy, sandbox and all, and
+// everything that hosts and talks to it is the production client: the canvas,
+// the sandboxed frame, and the bridge the page's bytes carry.
 import { withPluginPageBridgeV1 } from "@frockbot/core/contracts";
+import { PLUGIN_PAGE_CSP_V1 } from "../src/plugin-page-route.ts";
 import type { Locator, Page, TestInfo } from "@playwright/test";
 import {
   test,
@@ -44,7 +46,8 @@ async function installPanelRoutes(
   testInfo: TestInfo,
   baseURL: string | undefined,
 ): Promise<{ toolCommands: Record<string, unknown>[] }> {
-  const artifactOrigin = `http://ui.localhost:${new URL(baseURL ?? "http://127.0.0.1:8787").port}`;
+  // Pages are served from the app's own origin, under `/plugin-pages/`.
+  const appOrigin = new URL(baseURL ?? "http://127.0.0.1:8787").origin;
   const toolCommands: Record<string, unknown>[] = [];
   let score = 1;
   let focused = false;
@@ -111,7 +114,7 @@ async function installPanelRoutes(
                 ...(focused
                   ? {
                       page: {
-                        url: `${artifactOrigin}/packages/${CONTENT_HASH}.html`,
+                        url: `${appOrigin}/plugin-pages/${CONTENT_HASH}.html`,
                         state: { score },
                       },
                     }
@@ -129,15 +132,15 @@ async function installPanelRoutes(
     },
   );
   await page.route(
-    `${artifactOrigin}/packages/${CONTENT_HASH}.html`,
+    `${appOrigin}/plugin-pages/${CONTENT_HASH}.html`,
     async (route) => {
       await route.fulfill({
         status: 200,
         headers: {
           "content-type": "text/html; charset=utf-8",
-          "content-security-policy":
-            "default-src 'none'; script-src 'unsafe-inline'; style-src 'unsafe-inline'; img-src data:; base-uri 'none'; form-action 'none'",
-          "cache-control": "public, max-age=31536000, immutable",
+          "content-security-policy": PLUGIN_PAGE_CSP_V1,
+          "x-content-type-options": "nosniff",
+          "cache-control": "public, max-age=31536000, immutable, no-transform",
         },
         body: pageHtml(),
       });
@@ -145,7 +148,7 @@ async function installPanelRoutes(
   );
   testInfo.annotations.push({
     type: "plugin-page-origin",
-    description: artifactOrigin,
+    description: appOrigin,
   });
   return { toolCommands };
 }

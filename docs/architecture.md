@@ -557,7 +557,7 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
   the computers a Bot may reach, plus the pairing code the host holds
 - `TemplatesPage` — `lib/templates/page.dart`: the same host twice, a tab
   apiece — what this Bot is packed into, and what this account has imported
-- `PanelCanvas` — `lib/panels/canvas.dart`: the conversation panel for this Bot. A host tab strip over the focused Plugin's `ViewDocument`, in the right column on a wide window and a pushed page on a phone. The bag, the Session focus and the `bot.nav` doors come from `GET /api/bots/:bot/panels/open`. Empty bag: the region is not offered
+- `PanelCanvas` — `lib/panels/canvas.dart`: the conversation panel for this Bot. A host tab strip over the focused Plugin's `ViewDocument` or its own page, in the right column on a wide window and a pushed page on a phone. The bag, the Session focus and the `bot.nav` doors come from `GET /api/bots/:bot/panels/open`. Empty bag: the region is not offered
 - `ComputerCard` → `ComputerViewerPage` — `lib/computer/card.dart`: the Bot's
   screen, live or as its last capture, and the full-window viewer it opens
 - `ViewSamplePage` — `lib/view/sample_page.dart:117`, reachable only from a `--dart-define=FROCKBOT_DEV_AUTH=true` build
@@ -1012,9 +1012,11 @@ A Plugin may render a host-drawn `ViewDocument` in two open slots beside `settin
 
 The selected tab is a Session pointer on the Bot Durable Object (`core/durable/panels.ts`). Absent or `{ pluginId: null }` closes the region. A tab press, a nav press and the first-party `panel_focus` tool write the same record. `panel_focus` mounts on a Turn only when the bag is non-empty. If the focused surface leaves the bag, the pointer clears and the region closes.
 
-`GET /api/bots/:bot/panels/open` answers `PanelOpenView`: the bag, the focus, the focused document and the doors. `GET` and `POST /api/bots/:bot/panels/focus` read and write the pointer. Both slots render as the Bot whose page they are on; `renderView` already carries `botId`.
+`GET /api/bots/:bot/panels/open` answers `PanelOpenView`: the bag, the focus, the focused document or page, and the doors. `GET` and `POST /api/bots/:bot/panels/focus` read and write the pointer. Both slots render as the Bot whose page they are on; `renderView` already carries `botId`.
 
-The Applet product is gone: no `AppletState`, no `applet_*` tools, no account `applets` switch, no `send_to_user` type `applet`, no Composition `applets[]`. `apps/applet-build` still builds Plugins. The Package page went with it: no `/api/bots/:bot/package-ui` catalog, no `packages/<hash>.html` object and no `ui.<host>` origin to serve one from, so the app frames no page but the Computer viewer. Disposable storage is dropped once per User and Bot under `maintenance:plugin-panels:2026-09-21` (`apps/cloudflare/src/plugin-panels-cleanup.ts`). Migration `deleted_classes` includes `AppletState`.
+**A panel may be the Plugin's own page** ([ADR 0036](adr/0036-plugin-html-surfaces.md)). A `conversation.panel` view that names `page` returns state instead of a tree. `plugin_check` and `plugin_publish` refuse a named page the source lacks; publish injects the bridge (`PLUGIN_PAGE_HELPER_JS_V1`, `core/contracts/plugin-page.ts`) first in `<head>`, stores the bytes under `plugin-pages/<sha256>.html` in the artifact bucket, and records `pages` on the Composition member, so the generation hash covers them. The panel read answers `page: {url, state}`, and the gateway serves the page anonymously at that path on the app origin (`apps/cloudflare/src/plugin-page-route.ts`) under CSP `sandbox allow-scripts` with nothing to load or connect to, so it never runs as the app. The app document frames `/plugin-pages/` of its own origin and the Computer viewer, nothing else. `PluginPageFrame` (`apps/native/lib/panels/plugin_page.dart`) answers the page's `hello` with its state and theme tokens, runs the Plugin's own tools it calls through the `plugin-tool` command, and posts each new state after a read, over the host frame's `onMessage` and `outbox`.
+
+The Applet product is gone: no `AppletState`, no `applet_*` tools, no account `applets` switch, no `send_to_user` type `applet`, no Composition `applets[]`. `apps/applet-build` still builds Plugins. The Package page went with it: no `/api/bots/:bot/package-ui` catalog and no `ui.<host>` origin. Disposable storage is dropped once per User and Bot under `maintenance:plugin-panels:2026-09-21` (`apps/cloudflare/src/plugin-panels-cleanup.ts`). Migration `deleted_classes` includes `AppletState`.
 
 ---
 

@@ -136,9 +136,17 @@ function appHtml(
 </html>`;
 }
 
-/** The Computer host's viewer origins, as `frame-src` sources. */
-const viewerFrameSources =
-  COMPUTER_HOST_CAPABILITIES_V1.viewerFrameOrigins.join(" ") || "'none'";
+/**
+ * What the app frames: a Plugin's pages, which are served from this origin
+ * but only under `/plugin-pages/` and each sandboxed by its own policy, and
+ * the Computer host's viewer origins.
+ */
+function frameSources(applicationUrl: URL): string {
+  return [
+    `${applicationUrl.origin}/plugin-pages/`,
+    ...COMPUTER_HOST_CAPABILITIES_V1.viewerFrameOrigins,
+  ].join(" ");
+}
 
 function withSecurityHeaders(
   response: Response,
@@ -149,7 +157,7 @@ function withSecurityHeaders(
   secured.headers.set("referrer-policy", "no-referrer");
   secured.headers.set(
     "content-security-policy",
-    // The expanded Computer viewer is the one thing the app frames.
+    // The app frames a Plugin's pages and the expanded Computer viewer.
     //
     // Cloudflare Insights is injected into every response by the zone itself,
     // above this Worker, so the page loads it whether or not the policy allows
@@ -166,7 +174,7 @@ function withSecurityHeaders(
     // `base-uri 'self'` rather than `'none'` because the document sets a
     // `<base href>` of its own to the content-addressed directory every engine
     // URL is relative to.
-    `default-src 'self'; script-src 'self' 'wasm-unsafe-eval' ${INSIGHTS_SCRIPT_ORIGIN}; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self' ${INSIGHTS_REPORT_ORIGIN} ${applicationUrl.protocol === "https:" ? "wss:" : "ws:"}//${applicationUrl.host}; frame-src ${viewerFrameSources}; frame-ancestors 'none'; base-uri 'self'`,
+    `default-src 'self'; script-src 'self' 'wasm-unsafe-eval' ${INSIGHTS_SCRIPT_ORIGIN}; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob:; connect-src 'self' ${INSIGHTS_REPORT_ORIGIN} ${applicationUrl.protocol === "https:" ? "wss:" : "ws:"}//${applicationUrl.host}; frame-src ${frameSources(applicationUrl)}; frame-ancestors 'none'; base-uri 'self'`,
   );
   return secured;
 }

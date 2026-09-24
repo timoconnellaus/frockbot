@@ -6,7 +6,13 @@
 // firing — and the outcome of that activation lands on the User's record, not
 // the Bot's.
 import { env } from "cloudflare:workers";
-import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import {
+  createExecutionContext,
+  runDurableObjectAlarm,
+  runInDurableObject,
+  waitOnExecutionContext,
+} from "cloudflare:test";
+import worker from "../src/index.ts";
 import { describe, expect, test, vi } from "vitest";
 import { provisionBot, provisionSiblingBot } from "./provision-bot.ts";
 import { hydratedStoredRunsV1 } from "./session-log-probe.ts";
@@ -16,6 +22,7 @@ import {
   ISOLATE_CONTRACT_VERSION,
   decodePluginDescriptorV1,
   pluginCardToolNameV1,
+  pluginPageKeyV1,
   withPluginPageBridgeV1,
 } from "@frockbot/core/contracts";
 import {
@@ -2452,7 +2459,7 @@ export const views = {
       `packages/${contentHash}.mjs`,
       SCORE_SOURCE,
     );
-    await env.APPLICATION_ARTIFACTS.put(`packages/${pageHash}.html`, PAGE);
+    await env.APPLICATION_ARTIFACTS.put(pluginPageKeyV1(pageHash), PAGE);
     const createdAt = "2026-09-24T05:00:00.000Z";
     const members: CompositionMemberV1[] = [
       {
@@ -2512,22 +2519,36 @@ export const views = {
       }),
     ).toMatchObject({ status: "applied" });
 
-    const ORIGIN = "https://ui.bot.example.com";
-    const open = (artifactOrigin?: string) =>
+    const ORIGIN = "https://bot.example.com";
+    const open = () =>
       bot(identity).openFocusedPanel({
         schemaVersion: 1,
         ...identity,
-        ...(artifactOrigin ? { artifactOrigin } : {}),
+        appOrigin: ORIGIN,
       });
-    // The page, where the artifact host serves it, with the state its view
-    // returned for this Bot — and no document beside it.
-    const first = await open(ORIGIN);
+    // The page, where the app serves it, with the state its view returned for
+    // this Bot — and no document beside it.
+    const first = await open();
     expect(first.page).toEqual({
-      url: `${ORIGIN}/packages/${pageHash}.html`,
+      url: `${ORIGIN}/plugin-pages/${pageHash}.html`,
       state: { score: 0, bot: "bot-1" },
     });
     expect(first.document).toBeUndefined();
     expect(first.failure).toBeUndefined();
+
+    // The Worker serves those bytes to anyone who names them, sandboxed.
+    const context = createExecutionContext();
+    const served = await worker.fetch(
+      new Request(first.page!.url),
+      env as unknown as Parameters<typeof worker.fetch>[1],
+      context,
+    );
+    await waitOnExecutionContext(context);
+    expect(served.status).toBe(200);
+    expect(await served.text()).toBe(PAGE);
+    expect(served.headers.get("content-security-policy")).toMatch(
+      /^sandbox allow-scripts;/,
+    );
 
     // A tool the page calls runs outside any Turn, and the next read hands the
     // page what it left behind.
@@ -2545,15 +2566,9 @@ export const views = {
         },
       }),
     ).toEqual({ status: "ran", content: "score is 1", isError: false });
-    expect((await open(ORIGIN)).page?.state).toEqual({
+    expect((await open()).page?.state).toEqual({
       score: 1,
       bot: "bot-1",
-    });
-
-    // A deployment with no page host says so rather than drawing nothing.
-    expect(await open()).toMatchObject({
-      failure:
-        "This deployment has no page host, so this panel can't be shown.",
     });
   });
 

@@ -51,6 +51,7 @@ import {
   type VoiceTimingV1,
 } from "@frockbot/app/voice/diagnostics";
 import { createDebugRoute } from "./debug.js";
+import { isPluginPagePathV1, servePluginPageV1 } from "./plugin-page-route.js";
 import {
   drainedAnswerV1,
   forwardingBodyV1,
@@ -782,6 +783,7 @@ export function createGateway(
               schemaVersion: 1,
               userId,
               botId,
+              appOrigin: url.origin,
             }),
           { headers: { "cache-control": "no-store" } },
         );
@@ -805,6 +807,7 @@ export function createGateway(
             schemaVersion: 1,
             userId,
             botId,
+            appOrigin: url.origin,
           });
           return Response.json(
             {
@@ -1034,6 +1037,16 @@ export function createGateway(
       url = new URL(request.url);
     } catch {
       return jsonError(400, "invalid request URL");
+    }
+
+    // Anonymous and ahead of everything: a Plugin page is fetched by a
+    // credentialless frame, and its own CSP is its whole posture.
+    if (isPluginPagePathV1(url.pathname)) {
+      return servePluginPageV1(
+        request,
+        url,
+        dependencies.artifacts.loadPluginPage?.bind(dependencies.artifacts),
+      );
     }
 
     const origin = allowedClientOrigin(

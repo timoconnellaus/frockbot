@@ -17,6 +17,7 @@ import {
 import type { BotIdentity } from "@frockbot/core/durable";
 import {
   pluginPageStateV1,
+  pluginPageUrlV1,
   type PluginWorkerViewResultV1,
 } from "@frockbot/core/contracts";
 import { pluginMountOrderV1 } from "@frockbot/frock-compose";
@@ -287,15 +288,14 @@ function toolsOfV1(roster: BotPluginRosterV1, pluginId: string): string[] {
 }
 
 /**
- * The focused surface's page, when its view names one: the stored page's URL
- * on the artifact host and the state the view returned. A deployment with no
- * artifact host cannot serve a page, and says so rather than drawing nothing.
+ * The focused surface's page, when its view names one: where the app serves
+ * the stored page, and the state the view returned.
  */
 export function focusedPanelPageV1(
   roster: BotPluginRosterV1,
   focused: { pluginId: string; surfaceId: string },
   answer: PluginWorkerViewResultV1 | undefined,
-  artifactOrigin: string | undefined,
+  appOrigin: string,
 ): { page?: PanelOpenViewV1["page"]; failure?: string } | undefined {
   const member = roster.members.find(
     (candidate) => candidate.packageId === focused.pluginId,
@@ -308,12 +308,6 @@ export function focusedPanelPageV1(
   if (!member || path === undefined) return undefined;
   const stored = member.pages?.find((page) => page.path === path);
   if (!stored) return { failure: "This plugin's page was not published." };
-  if (!artifactOrigin) {
-    return {
-      failure:
-        "This deployment has no page host, so this panel can't be shown.",
-    };
-  }
   if (!answer || answer.status === "drop") {
     return {
       failure: `This plugin could not show its page${answer?.reason ? `: ${answer.reason.slice(0, 400)}` : "."}`,
@@ -327,7 +321,7 @@ export function focusedPanelPageV1(
   }
   return {
     page: {
-      url: `${artifactOrigin}/packages/${stored.contentHash}.html`,
+      url: pluginPageUrlV1(appOrigin, stored.contentHash),
       state: state.state,
     },
   };
@@ -371,8 +365,8 @@ function doorViewV1(
 export async function openFocusedPanelV1(
   state: ShellBotStateV1,
   identity: BotIdentity,
-  /** Where pages are served; absent when this deployment has no page host. */
-  artifactOrigin?: string,
+  /** The app origin the canvas read arrived on, which serves the pages. */
+  appOrigin: string,
 ): Promise<PanelOpenViewV1> {
   const roster = await readBotPluginRosterV1(state, identity);
   const sources = panelSourcesFromRosterV1(roster);
@@ -415,7 +409,7 @@ export async function openFocusedPanelV1(
     const answer = answered.get(
       surfaceKeyV1(focused.pluginId, focused.surfaceId),
     );
-    const page = focusedPanelPageV1(roster, focused, answer, artifactOrigin);
+    const page = focusedPanelPageV1(roster, focused, answer, appOrigin);
     if (page) {
       if (page.page) opened.page = page.page;
       if (page.failure) opened.failure = page.failure.slice(0, 500);

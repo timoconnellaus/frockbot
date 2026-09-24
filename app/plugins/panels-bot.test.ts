@@ -152,11 +152,11 @@ describe("a conversation panel that is a page", () => {
       roster,
       focused,
       rendered,
-      "https://ui.bot.example.com",
+      "https://bot.example.com",
     );
     expect(answer).toEqual({
       page: {
-        url: `https://ui.bot.example.com/packages/${PAGE_HASH}.html`,
+        url: `https://bot.example.com/plugin-pages/${PAGE_HASH}.html`,
         state: { a4: 440 },
       },
     });
@@ -177,22 +177,18 @@ describe("a conversation panel that is a page", () => {
         roster,
         { pluginId: "tuner", surfaceId: "notes" },
         rendered,
-        "https://ui.bot.example.com",
+        "https://bot.example.com",
       ),
     ).toBeUndefined();
   });
 
   test("says why in words when it cannot be shown", () => {
-    expect(focusedPanelPageV1(roster, focused, rendered, undefined)).toEqual({
-      failure:
-        "This deployment has no page host, so this panel can't be shown.",
-    });
     expect(
       focusedPanelPageV1(
         roster,
         focused,
         { schemaVersion: 1, status: "drop", reason: "state unreadable" },
-        "https://ui.bot.example.com",
+        "https://bot.example.com",
       ),
     ).toEqual({
       failure: "This plugin could not show its page: state unreadable",
@@ -206,7 +202,7 @@ describe("a conversation panel that is a page", () => {
           status: "rendered",
           document: { big: "x".repeat(70_000) },
         },
-        "https://ui.bot.example.com",
+        "https://bot.example.com",
       )?.failure,
     ).toContain("larger than");
     expect(
@@ -214,7 +210,7 @@ describe("a conversation panel that is a page", () => {
         { ...roster, members: [{ ...tuner, pages: undefined }] },
         focused,
         rendered,
-        "https://ui.bot.example.com",
+        "https://bot.example.com",
       ),
     ).toEqual({ failure: "This plugin's page was not published." });
   });

@@ -2,10 +2,13 @@
 // returning a `ViewDocument` (ADR 0036).
 //
 // The page is untrusted code that runs on the person's device. It is served
-// from the anonymous artifact origin under an opaque origin, holds no
-// credential, and reaches the host only through the postMessage bridge below.
-// The bridge is injected at publish, so the bytes the content hash names are
-// the bytes that run, and a Bot never has to copy a helper correctly.
+// from the app's own origin under `/plugin-pages/`, but never runs as it: the
+// response's CSP `sandbox` gives the document an opaque origin however it is
+// opened, and the frame's `sandbox` attribute says the same again. It holds no
+// credential, may connect nowhere, and reaches the host only through the
+// postMessage bridge below. The bridge is injected at publish, so the bytes the
+// content hash names are the bytes that run, and a Bot never has to copy a
+// helper correctly.
 
 /** A page file in a Plugin's source: one level of directories at most. */
 export const PLUGIN_PAGE_PATH_V1 =
@@ -16,6 +19,24 @@ export const MAX_PLUGIN_PAGE_BYTES_V1 = 512 * 1_024;
 
 /** What a page view's function may hand its page as state. */
 export const MAX_PLUGIN_PAGE_STATE_BYTES_V1 = 65_536;
+
+/** Where a stored page lives in the artifact bucket. */
+export function pluginPageKeyV1(contentHash: string): string {
+  if (!/^[0-9a-f]{64}$/.test(contentHash)) {
+    throw new Error("plugin page contentHash is invalid");
+  }
+  return `plugin-pages/${contentHash}.html`;
+}
+
+/** The app-origin path a stored page is served at. */
+export const PLUGIN_PAGE_ROUTE_V1 = /^\/plugin-pages\/([0-9a-f]{64})\.html$/;
+
+export function pluginPageUrlV1(
+  appOrigin: string,
+  contentHash: string,
+): string {
+  return `${appOrigin}/${pluginPageKeyV1(contentHash)}`;
+}
 
 /** One page a Composition member carries, by the path its views name. */
 export interface PluginPageArtifactV1 {

@@ -1450,11 +1450,11 @@ export class BotState
 
   /** The canvas's one read: this Bot's panel bag, doors, and focused page. */
   async openFocusedPanel(input: unknown) {
-    const request = decodeRpcEnvelopeV1(
-      input,
-      { userId: rpcIdentifier, botId: rpcBotId },
-      { artifactOrigin: rpcOrigin },
-    );
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      appOrigin: rpcOrigin,
+    });
     const identity = {
       userId: request.userId as string,
       botId: request.botId as string,
@@ -1464,7 +1464,7 @@ export class BotState
     return openFocusedPanelV1(
       shell.state,
       identity,
-      request.artifactOrigin as string | undefined,
+      request.appOrigin as string,
     );
   }
 
