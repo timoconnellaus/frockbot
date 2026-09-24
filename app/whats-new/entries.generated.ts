@@ -26,6 +26,7 @@ import entry_release_version from "./entries/release-version.ts";
 import entry_replies_as_written from "./entries/replies-as-written.ts";
 import entry_steering from "./entries/steering.ts";
 import entry_stop_command from "./entries/stop-command.ts";
+import entry_telegram from "./entries/telegram.ts";
 import entry_unread_keeps_up from "./entries/unread-keeps-up.ts";
 import entry_voice_answers_after_tools from "./entries/voice-answers-after-tools.ts";
 import entry_voice_call_card from "./entries/voice-call-card.ts";
@@ -64,6 +65,7 @@ export const WHATS_NEW_ENTRY_FILES_V1 = [
   entry_replies_as_written,
   entry_steering,
   entry_stop_command,
+  entry_telegram,
   entry_unread_keeps_up,
   entry_voice_answers_after_tools,
   entry_voice_call_card,
