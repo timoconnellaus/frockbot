@@ -1,5 +1,6 @@
 import type { PackageDefinitionV1 } from "@frockbot/core/contracts";
 import type { CredentialLeaseV1 } from "@frockbot/core/connection";
+import type { AccountUsage } from "@frockbot/app/billing/model";
 import type {
   BotExecutionPlanV1,
   ConnectionView,
@@ -225,6 +226,11 @@ export interface ShellEnabledRuntimeHostV1 {
     capability: EnabledCapabilityV1,
     effectId: string,
   ): Promise<void>;
+  /**
+   * The account's usage ledger, where this deployment bills. Absent, nothing
+   * an enabled Contribution spends is metered.
+   */
+  billing?: AccountUsage;
 }
 
 /** What the Shell hands the application to mount this Turn's model provider. */

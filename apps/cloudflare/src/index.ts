@@ -319,6 +319,8 @@ interface Env {
    * deployment-wide events door.
    */
   COMPOSIO_WEBHOOK_SECRET?: string;
+  /** The platform's web search key. Absent, a Bot has no `web_search`. */
+  BRAVE_SEARCH_API_KEY?: string;
   /**
    * Signs every machine token and pairing code. Absent closes the registered
    * machine door: pairing, enrollment and every machine route answer 503

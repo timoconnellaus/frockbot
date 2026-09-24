@@ -189,20 +189,6 @@ describe("Ollama endpoint contract", () => {
     ]);
   });
 
-  test("declares the search ceiling as a User-level Package setting", () => {
-    // The ceiling belongs to the User, not to one Connection: it is the same
-    // answer whichever account the search runs through, so it is Package-level
-    // and every Connection of this Package obeys it.
-    expect(providerOllamaCloudDefinitionV1.settings).toMatchObject([
-      {
-        id: "web-search-max-results",
-        schemaVersion: 1,
-        scopes: ["user"],
-        schema: { type: "integer", minimum: 1, maximum: 10 },
-      },
-    ]);
-  });
-
   test("decodes an endpoint root and refuses an unusable one", () => {
     expect(decodeOllamaApiBaseUrl("https://ollama.com/")).toBe(
       "https://ollama.com",

@@ -46,6 +46,10 @@ GEMINI_API_KEY=replace-with-a-google-ai-studio-api-key
 # and the Connectors rows for apps say so.
 COMPOSIO_API_KEY=replace-with-composio-project-api-key
 
+# Web search: a Brave Search API key. Absent, a Bot has no web_search and
+# web_fetch still works.
+# BRAVE_SEARCH_API_KEY=replace-with-brave-search-api-key
+
 # Billing: use Stripe TEST mode locally. Never commit live values.
 # STRIPE_SECRET_KEY is the switch: leave it unset and billing stays off.
 # A localhost BETTER_AUTH_URL never bills, even with a key.

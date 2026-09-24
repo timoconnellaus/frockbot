@@ -788,6 +788,9 @@ jobs:
           # Connected apps. Optional: staging without them simply cannot
           # connect an app.
           COMPOSIO_API_KEY: ${{ secrets.COMPOSIO_API_KEY }}
+          # Platform web search. Optional: staging without it has no
+          # `web_search`.
+          BRAVE_SEARCH_API_KEY: ${{ secrets.BRAVE_SEARCH_API_KEY }}
           # Hosted turn supervision. Optional: staging without it leaves
           # the chooser unavailable.
           JEV_API_KEY: ${{ secrets.JEV_API_KEY }}
@@ -818,6 +821,7 @@ jobs:
             'GEMINI_API_KEY',
             'COMPOSIO_API_KEY',
             'COMPOSIO_WEBHOOK_SECRET',
+            'BRAVE_SEARCH_API_KEY',
             'JEV_API_KEY',
           ].filter((name) => process.env[name]);
           console.log(

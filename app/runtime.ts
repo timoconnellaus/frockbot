@@ -89,10 +89,15 @@ import {
   type SubagentsRuntimeHostV1,
 } from "@frockbot/app/subagents/agent";
 export type { SubagentsRuntimeHostV1 } from "@frockbot/app/subagents/agent";
-import { createConfiguredOllamaWebSearchRuntimeContribution } from "@frockbot/providers/ollama-cloud/web-search";
-// The Web Package contributes `web_fetch`: no Connection, no provider, and no
-// Computer — it works while the User's Computer is hibernated.
+// The Web Package contributes `web_fetch` and `web_search`: no Connection and
+// no Computer — both work while the User's Computer is hibernated.
 import { createConfiguredWebFetchRuntimeContribution } from "@frockbot/app/web/agent";
+import {
+  BRAVE_SEARCH_API_KEY_SECRET_V1,
+  createConfiguredWebSearchRuntimeContribution,
+} from "@frockbot/app/web/brave";
+import { createSearchMeterV1 } from "@frockbot/app/billing/search";
+import type { AccountUsage } from "@frockbot/app/billing/model";
 import {
   createMemoryRuntimeFeature,
   type MemoryRuntimeHostV1,
@@ -204,6 +209,12 @@ type EnabledRuntimeContributionFactory = (config: {
     connectionId: string;
     generation?: string;
   }): Promise<boolean>;
+  /**
+   * The account's usage ledger, where this deployment bills. A Contribution
+   * that spends the platform's money charges it here; absent, nothing it
+   * spends is metered.
+   */
+  billing?: AccountUsage;
 }) => FoundationFeature | undefined | Promise<FoundationFeature | undefined>;
 
 const enabledRuntimeContributionFactories = new Map<
@@ -278,54 +289,19 @@ const enabledRuntimeContributionFactories = new Map<
   ],
   [
     "web",
-    ({ capability, fetch: outbound }) =>
+    ({ capability, fetch: outbound, readSecret, billing }) =>
       createConfiguredWebFetchRuntimeContribution({
         capability,
         ...(outbound ? { fetch: outbound } : {}),
-      }),
-  ],
-  [
-    "provider-ollama-cloud",
-    ({
-      capability,
-      userId,
-      connection,
-      leaseCredential,
-      settleCredential,
-      fetch: outbound,
-      packageSettings,
-    }) => {
-      // `web_search` is authorized by its own enabled Capability and its own
-      // Connection generation; a Bot whose model runs elsewhere still holds it.
-      if (
-        !connection?.generation ||
-        !capability.connectionId ||
-        !leaseCredential ||
-        !settleCredential
-      ) {
-        return undefined;
-      }
-      return createConfiguredOllamaWebSearchRuntimeContribution({
+      }) ??
+      createConfiguredWebSearchRuntimeContribution({
         capability,
-        accountId: userId,
-        connectionId: capability.connectionId,
-        connectionGeneration: connection.generation,
-        // Every inbound value is decoded at its seam: the provider Package
-        // validates the endpoint root before it composes a request URL.
-        ...(typeof connection.settings?.apiBaseUrl === "string"
-          ? { apiBaseUrl: connection.settings.apiBaseUrl }
-          : {}),
-        // The Package-level ceiling this User set on `web_search`. Already
-        // schema-checked against the manifest, so it is a number in range or
-        // it is absent.
-        ...(typeof packageSettings["web-search-max-results"] === "number"
-          ? { maxResults: packageSettings["web-search-max-results"] }
-          : {}),
-        leaseCredential,
-        settleCredential,
+        apiKey: readSecret(BRAVE_SEARCH_API_KEY_SECRET_V1),
+        // Search is the platform's to pay for, so where the deployment bills
+        // the account is charged per search.
+        ...(billing ? { meter: createSearchMeterV1(billing) } : {}),
         ...(outbound ? { fetch: outbound } : {}),
-      });
-    },
+      }),
   ],
 ]);
 
@@ -650,6 +626,7 @@ export async function createFoundationEnabledRuntimePackages(
       ...(host.permitConnection
         ? { permitConnection: host.permitConnection }
         : {}),
+      ...(host.billing ? { billing: host.billing } : {}),
     });
     if (!plugin) continue;
     result.push({ id: packageId, feature: plugin });

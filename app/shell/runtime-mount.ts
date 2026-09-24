@@ -718,6 +718,17 @@ export async function agentRuntime(
           }
         : {}),
       packageSettings,
+      // Only the account is taken from it: a platform-paid tool names the
+      // Bot and Session from its own call when it charges.
+      ...(state.env.BILLING
+        ? {
+            billing: state.env.BILLING(
+              identity.userId,
+              identity.botId,
+              turn?.sessionId ?? "",
+            ).account,
+          }
+        : {}),
       // Enabled Contributions reach the network through the same
       // outbound seam the model provider uses, so a deployment that stubs
       // it stubs every one of them.

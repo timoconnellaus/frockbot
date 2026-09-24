@@ -25,8 +25,6 @@ import {
 
 useApplicationArtifact();
 
-const PACKAGE_ID = "provider-ollama-cloud";
-const SETTING_ID = "web-search-max-results";
 const IMAGE_PACKAGE_ID = "image";
 /** One of the models `image.model`'s manifest enum offers, and not the default. */
 const CHOSEN_IMAGE_MODEL = "@cf/bytedance/stable-diffusion-xl-lightning";
@@ -53,14 +51,13 @@ async function setPackageSettings(
   userId: string,
   commandId: string,
   values: Record<string, unknown>,
-  packageId: string = PACKAGE_ID,
 ): Promise<Response> {
   return postAsUser(userId, "/api/settings", {
     schemaVersion: 1,
     type: "user/set-package-settings",
     commandId,
     expectedRevision: (await userSettings(userId)).revision,
-    packageId,
+    packageId: IMAGE_PACKAGE_ID,
     values,
   });
 }
@@ -94,90 +91,6 @@ async function imageModelCalls(): Promise<Array<{ model: string }>> {
   return probe.runCalls();
 }
 
-/** Enable the Ollama Package and Connection account-wide. */
-async function grantWebSearch(userId: string, botId: string): Promise<void> {
-  await provisionThroughGateway({ userId, botId });
-}
-
-async function searchResults(
-  userId: string,
-  botId: string,
-  commandId: string,
-  maxResults: number,
-): Promise<unknown[]> {
-  const turn = (await expectOkJson(
-    await postAsUser(userId, `/api/bots/${botId}/turns`, {
-      schemaVersion: 1,
-      commandId,
-      text: frockbotToolCallPrompt("web_search", {
-        query: "frockbot parity",
-        max_results: maxResults,
-      }),
-    }),
-  )) as ClientTurn;
-  const result = turn.events.find((event) => event.type === "tool/result") as
-    { content: string; isError: boolean } | undefined;
-  expect(result, "the Turn produced no tool result").toBeDefined();
-  expect(result!.isError, result!.content).toBe(false);
-  return (JSON.parse(result!.content) as { results: unknown[] }).results;
-}
-
-describe("a Package-level setting value reaching a Turn", () => {
-  it("caps web_search at the value the User stored on the Package", async () => {
-    const userId = freshUserId("package-settings");
-    const botId = "configured-bot";
-    await grantWebSearch(userId, botId);
-
-    // Unset, the Package is on its own default and the model's request stands.
-    expect(
-      await searchResults(userId, botId, "search-default", 3),
-    ).toHaveLength(3);
-
-    await expectOkJson(
-      await setPackageSettings(userId, `set-${botId}`, { [SETTING_ID]: 1 }),
-    );
-    // The value is projected onto the installation row the client reads back.
-    const stored = (await userSettings(userId)).packages.find(
-      (pkg) => pkg.packageId === PACKAGE_ID,
-    );
-    expect(stored?.values).toEqual({ [SETTING_ID]: 1 });
-
-    // The next admitted Turn resolves its Composition against the new durable
-    // state, so the tool runs under the User's ceiling without a redeploy.
-    expect(await searchResults(userId, botId, "search-capped", 3)).toHaveLength(
-      1,
-    );
-  });
-
-  it("refuses a value the Package's schema does not allow, with the reason", async () => {
-    const userId = freshUserId("package-settings-invalid");
-    const botId = "refusing-bot";
-    await grantWebSearch(userId, botId);
-
-    const refused = await setPackageSettings(userId, `bad-${botId}`, {
-      [SETTING_ID]: 99,
-    });
-    expect(refused.status).toBe(400);
-    expect((await expectJson(refused)) as { error: string }).toMatchObject({
-      error: expect.stringContaining("is above 10"),
-    });
-
-    const unknown = await setPackageSettings(userId, `unknown-${botId}`, {
-      "not-a-setting": "x",
-    });
-    expect(unknown.status).toBe(400);
-    expect((await expectJson(unknown)) as { error: string }).toMatchObject({
-      error: expect.stringContaining("not declared by this Package"),
-    });
-
-    // Neither refusal wrote anything, and neither moved the revision.
-    const settings = await userSettings(userId);
-    expect(
-      settings.packages.find((pkg) => pkg.packageId === PACKAGE_ID)?.values,
-    ).toBeUndefined();
-  });
-});
-
 describe("the Image Package's `image.model` setting", () => {
   it("runs generate_image on the model the User chose from the enum", async () => {
     const userId = freshUserId("image-model-setting");
@@ -186,13 +99,15 @@ describe("the Image Package's `image.model` setting", () => {
     await installPackage(userId, `install-image-${botId}`, IMAGE_PACKAGE_ID);
 
     await expectOkJson(
-      await setPackageSettings(
-        userId,
-        `set-image-model-${botId}`,
-        { model: CHOSEN_IMAGE_MODEL },
-        IMAGE_PACKAGE_ID,
-      ),
+      await setPackageSettings(userId, `set-image-model-${botId}`, {
+        model: CHOSEN_IMAGE_MODEL,
+      }),
     );
+    // The value is projected onto the installation row the client reads back.
+    const stored = (await userSettings(userId)).packages.find(
+      (pkg) => pkg.packageId === IMAGE_PACKAGE_ID,
+    );
+    expect(stored?.values).toEqual({ model: CHOSEN_IMAGE_MODEL });
 
     const before = (await imageModelCalls()).length;
     const turn = (await expectOkJson(
@@ -216,19 +131,35 @@ describe("the Image Package's `image.model` setting", () => {
     expect(calls.at(-1)).toMatchObject({ model: CHOSEN_IMAGE_MODEL });
   });
 
-  it("refuses a model that is not on the manifest's enum", async () => {
+  it("refuses a value the Package's schema does not allow, with the reason", async () => {
     const userId = freshUserId("image-model-invalid");
     await installPackage(userId, `install-image-${userId}`, IMAGE_PACKAGE_ID);
+    const revision = (await userSettings(userId)).revision;
 
     const refused = await setPackageSettings(
       userId,
       `bad-image-model-${userId}`,
       { model: "@cf/not/a-model" },
-      IMAGE_PACKAGE_ID,
     );
     expect(refused.status).toBe(400);
     expect((await expectJson(refused)) as { error: string }).toMatchObject({
       error: expect.stringContaining("is not one of"),
     });
+
+    const unknown = await setPackageSettings(userId, `unknown-${userId}`, {
+      "not-a-setting": "x",
+    });
+    expect(unknown.status).toBe(400);
+    expect((await expectJson(unknown)) as { error: string }).toMatchObject({
+      error: expect.stringContaining("not declared by this Package"),
+    });
+
+    // Neither refusal wrote anything, and neither moved the revision.
+    const settings = await userSettings(userId);
+    expect(
+      settings.packages.find((pkg) => pkg.packageId === IMAGE_PACKAGE_ID)
+        ?.values,
+    ).toBeUndefined();
+    expect(settings.revision).toBe(revision);
   });
 });

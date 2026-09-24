@@ -451,5 +451,41 @@ describe("foundation application", () => {
       },
     );
     expect(freshBotRuntime.map((pkg) => pkg.id)).toEqual(["web"]);
+
+    // Search is the same Package's second tool, and the deployment's key is
+    // what switches it on: without one only `web_fetch` mounts.
+    const searchPlan = {
+      schemaVersion: 1 as const,
+      botId: "fresh",
+      revision: 0,
+      capabilities: [
+        webCapability,
+        { ...webCapability, capabilityId: "web-search" },
+      ],
+    };
+    const host = {
+      userId: "user-1",
+      authorizeConnection: () =>
+        Promise.reject(
+          new Error("connection-less Web Capability must not authorize"),
+        ),
+    };
+    expect(
+      (
+        await createFoundationEnabledRuntimePackages(searchPlan, {
+          ...host,
+          readSecret: () => undefined,
+        })
+      ).map((pkg) => pkg.id),
+    ).toEqual(["web"]);
+    expect(
+      (
+        await createFoundationEnabledRuntimePackages(searchPlan, {
+          ...host,
+          readSecret: (name) =>
+            name === "BRAVE_SEARCH_API_KEY" ? "brave-key" : undefined,
+        })
+      ).map((pkg) => pkg.id),
+    ).toEqual(["web", "web"]);
   });
 });

@@ -14,7 +14,6 @@
     "./ollama-cloud/definition": "./ollama-cloud/definition.ts",
     "./ollama-cloud/runtime": "./ollama-cloud/runtime.ts",
     "./ollama-cloud/user": "./ollama-cloud/user.ts",
-    "./ollama-cloud/web-search": "./ollama-cloud/web-search.ts",
     "./foundation": "./foundation/index.ts",
     "./foundation/runtime": "./foundation/runtime.ts",
     "./model-connections/user": "./model-connections/user.ts",

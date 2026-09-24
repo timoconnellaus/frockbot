@@ -242,7 +242,7 @@ function boundedUtf8(value: string, maximum: number): string {
  * that was cut off, so the model can ask for more rather than assume it saw
  * everything.
  */
-async function readBoundedBody(
+export async function readBoundedBodyV1(
   response: Response,
   maximum: number,
 ): Promise<{ bytes: Uint8Array; truncated: boolean }> {
@@ -403,7 +403,7 @@ export async function executeWebFetchV1(
   }
   let body: { bytes: Uint8Array; truncated: boolean };
   try {
-    body = await readBoundedBody(response, request.maxBytes);
+    body = await readBoundedBodyV1(response, request.maxBytes);
   } catch (error) {
     return refusal(
       "web-fetch-failed",

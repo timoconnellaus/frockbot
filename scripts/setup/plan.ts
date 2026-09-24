@@ -456,6 +456,12 @@ export const HUMAN_SECRETS_V1: readonly HumanSecretV1[] = [
     workers: ["app"],
   },
   {
+    name: "BRAVE_SEARCH_API_KEY",
+    enables: "web search: a Bot that searches the public web",
+    where: "https://api-dashboard.search.brave.com — a Search plan's API key",
+    workers: ["app"],
+  },
+  {
     name: "DEBUG_TOKEN",
     enables: "the read-only /api/debug operator surface",
     workers: ["app"],

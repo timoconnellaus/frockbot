@@ -58,7 +58,7 @@ function contribution(storage = new MemoryStorage()) {
         version: "0.0.1",
         settings: [
           {
-            id: "web-search-max-results",
+            id: "max-results",
             schemaVersion: 1,
             scopes: ["user"],
             schema: { type: "integer", minimum: 1, maximum: 10 },
@@ -965,6 +965,52 @@ describe("uninstall", () => {
     ]);
   });
 
+  test("drops the setting values its row carried, so a reinstall starts clean", async () => {
+    const settings = contribution();
+    await installOllama(settings, "user-1");
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/set-package-settings",
+        commandId: "set-before-uninstall",
+        expectedRevision: 1,
+        packageId: "provider-ollama-cloud",
+        values: { label: "work" },
+      },
+    });
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/uninstall-package",
+        commandId: "uninstall-with-values",
+        expectedRevision: 2,
+        packageId: "provider-ollama-cloud",
+      },
+    });
+    await settings.executeConfiguration({
+      schemaVersion: 1,
+      userId: "user-1",
+      command: {
+        schemaVersion: 1,
+        type: "user/install-package",
+        commandId: "reinstall",
+        expectedRevision: 3,
+        packageId: "provider-ollama-cloud",
+        version: "0.0.1",
+      },
+    });
+
+    const view = await settings.readSnapshot();
+    expect(view.packages).toEqual([
+      expect.not.objectContaining({ values: expect.anything() }),
+    ]);
+    expect(view.packages[0]?.packageId).toBe("provider-ollama-cloud");
+  });
+
   test("refuses to uninstall a Package that is not installed", async () => {
     const settings = contribution();
 
@@ -999,7 +1045,7 @@ describe("Package-level setting values", () => {
         commandId: "set-both",
         expectedRevision: 1,
         packageId: "provider-ollama-cloud",
-        values: { "web-search-max-results": 2, label: "work" },
+        values: { "max-results": 2, label: "work" },
       },
     });
     await settings.executeConfiguration({
@@ -1011,7 +1057,7 @@ describe("Package-level setting values", () => {
         commandId: "set-one",
         expectedRevision: 2,
         packageId: "provider-ollama-cloud",
-        values: { "web-search-max-results": 5 },
+        values: { "max-results": 5 },
       },
     });
 
@@ -1019,7 +1065,7 @@ describe("Package-level setting values", () => {
     // The projection the client reads *is* the store: one bag, one shape.
     expect(view.packages[0]).toMatchObject({
       packageId: "provider-ollama-cloud",
-      values: { "web-search-max-results": 5, label: "work" },
+      values: { "max-results": 5, label: "work" },
     });
   });
 
@@ -1035,7 +1081,7 @@ describe("Package-level setting values", () => {
         commandId: "set-before-unset",
         expectedRevision: 1,
         packageId: "provider-ollama-cloud",
-        values: { "web-search-max-results": 4 },
+        values: { "max-results": 4 },
       },
     });
 
@@ -1048,7 +1094,7 @@ describe("Package-level setting values", () => {
         commandId: "unset-value",
         expectedRevision: 2,
         packageId: "provider-ollama-cloud",
-        unset: ["web-search-max-results"],
+        unset: ["max-results"],
       },
     });
     expect((await settings.read("user-1")).packages[0]?.values).toBeUndefined();
@@ -1079,7 +1125,7 @@ describe("Package-level setting values", () => {
       commandId: "set-once",
       expectedRevision: 1,
       packageId: "provider-ollama-cloud",
-      values: { "web-search-max-results": 4 },
+      values: { "max-results": 4 },
     };
 
     const first = await settings.executeConfiguration({
@@ -1109,7 +1155,7 @@ describe("Package-level setting values", () => {
         commandId: "set-once",
         expectedRevision: 1,
         packageId: "provider-ollama-cloud",
-        values: { "web-search-max-results": 4 },
+        values: { "max-results": 4 },
       },
     });
 
@@ -1123,7 +1169,7 @@ describe("Package-level setting values", () => {
           commandId: "set-once",
           expectedRevision: 1,
           packageId: "provider-ollama-cloud",
-          values: { "web-search-max-results": 6 },
+          values: { "max-results": 6 },
         },
       }),
     ).rejects.toThrow(/reused for a different command/);
@@ -1143,7 +1189,7 @@ describe("Package-level setting values", () => {
           commandId: "set-out-of-range",
           expectedRevision: 1,
           packageId: "provider-ollama-cloud",
-          values: { "web-search-max-results": 99 },
+          values: { "max-results": 99 },
         },
       }),
     ).rejects.toThrow(/is above 10/);
@@ -1183,7 +1229,7 @@ describe("Package-level setting values", () => {
           commandId: "set-uninstalled",
           expectedRevision: 0,
           packageId: "provider-ollama-cloud",
-          values: { "web-search-max-results": 2 },
+          values: { "max-results": 2 },
         },
       }),
     ).rejects.toThrow(/is not installed/);
@@ -1201,7 +1247,7 @@ describe("Package-level setting values", () => {
         commandId: "set-before-uninstall",
         expectedRevision: 1,
         packageId: "provider-ollama-cloud",
-        values: { "web-search-max-results": 2 },
+        values: { "max-results": 2 },
       },
     });
 

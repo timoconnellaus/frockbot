@@ -67,7 +67,8 @@ export const FIRST_PARTY_TOGGLEABLE_PLUGINS_V1: readonly {
   {
     packageId: "web",
     displayName: "Web",
-    description: "Read public web pages to help answer your questions.",
+    description:
+      "Search the web and read public pages to help answer your questions.",
   },
   {
     packageId: "routines",

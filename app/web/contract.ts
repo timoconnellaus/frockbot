@@ -7,9 +7,8 @@
 // provider can satisfy it unchanged — the two-provider check the constitution
 // applies to the model interface.
 //
-// This module holds no transport. `providers/ollama-cloud` implements
-// {@link WebSearchV1} over `POST {apiBaseUrl}/api/web_search`; this Package
-// never imports it.
+// This module holds no transport. `./brave` implements {@link WebSearchV1}
+// over Brave's Web Search API; nothing here imports it.
 import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import type {
   ToolDefinition,
@@ -49,23 +48,26 @@ export interface WebSearchRequestV1 {
 }
 
 /**
- * What one search runs under: the durable effect identity of the tool call and
- * its cancellation signal. Both are kernel vocabulary, not provider
- * vocabulary — a provider that needs a per-call credential lease keys it on
- * `effectId`, and one that needs neither ignores both. The `effectId` is
- * unique across the User's account: see {@link webSearchEffectIdV1}.
+ * What one search runs under: the durable effect identity of the tool call,
+ * the Bot and Session it runs in, and its cancellation signal. All of it is
+ * kernel vocabulary, not provider vocabulary — a provider that charges per
+ * call keys the charge on `effectId` and names the Bot and Session on it. The
+ * `effectId` is unique across the User's account: see
+ * {@link webSearchEffectIdV1}.
  */
 export interface WebSearchExecutionV1 {
   effectId: string;
+  botId: string;
+  sessionId: string;
   signal: AbortSignal;
 }
 
 /**
  * The effect identity one search runs under. A tool call's own `effectId`
- * restarts in every Session and repeats across Bots, while a credential lease
- * is keyed across the whole account, so the Bot and the Session are part of
- * it. A Session's turn counter never restarts, so this is still one identity
- * per durable call, and a re-dispatched call runs under the same one.
+ * restarts in every Session and repeats across Bots, while a charge is keyed
+ * across the whole account, so the Bot and the Session are part of it. A
+ * Session's turn counter never restarts, so this is still one identity per
+ * durable call, and a re-dispatched call runs under the same one.
  */
 export async function webSearchEffectIdV1(
   context: Pick<ToolExecutionContext, "botId" | "sessionId" | "effectId">,
@@ -159,8 +161,7 @@ export function decodeWebSearchResponseV1(
     results.push({
       title: title.slice(0, 300),
       url,
-      // Ollama names the field `content`; the contract names it `snippet`.
-      snippet: boundedSnippet(row.snippet ?? row.content ?? row.description),
+      snippet: boundedSnippet(row.snippet),
     });
   }
   return { query: request.query, results };
@@ -181,7 +182,9 @@ export function encodeWebSearchResultV1(response: WebSearchResponseV1): string {
  * Package contributes the same tool by supplying transport alone.
  *
  * `idempotent: true`: a search is read-only, so recovery after eviction
- * re-runs it rather than reconciling a recorded effect.
+ * re-runs it rather than reconciling a recorded effect. A provider that
+ * charges for the call keys the charge on the effect id, so the re-run is not
+ * billed twice.
  */
 export function createWebSearchToolDefinitionV1(
   provider: WebSearchV1,
@@ -220,6 +223,8 @@ export function createWebSearchToolDefinitionV1(
       try {
         const response = await provider.search(request, {
           effectId: await webSearchEffectIdV1(context),
+          botId: context.botId,
+          sessionId: context.sessionId,
           signal: context.signal,
         });
         return { content: encodeWebSearchResultV1(response), isError: false };

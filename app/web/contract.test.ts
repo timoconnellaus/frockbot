@@ -15,7 +15,7 @@ describe("webSearchEffectIdV1", () => {
   });
 
   test("differs for the same effect in another Session or another Bot", async () => {
-    // A credential lease is keyed across the whole account, and a tool
+    // A charge is keyed across the whole account, and a tool
     // call's effect id restarts in every Session and repeats across Bots.
     const id = await webSearchEffectIdV1(CALL);
     expect(

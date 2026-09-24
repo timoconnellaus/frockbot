@@ -244,7 +244,9 @@ describe("first-party features a Bot may switch", () => {
       botId: "bot-1",
       revision: 3,
       capabilities: [
-        { packageId: "web", capabilityId: "web-read", kind: "tool" as const },
+        { packageId: "web", capabilityId: "web-fetch", kind: "tool" as const },
+        // One switch covers both of the Web Package's tools.
+        { packageId: "web", capabilityId: "web-search", kind: "tool" as const },
         {
           packageId: "image",
           capabilityId: "image-gen",
