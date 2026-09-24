@@ -26,14 +26,6 @@
     }
   },
   {
-    "name": "RunVia Telegram carrying a chat id",
-    "schema": "RunVia",
-    "value": {
-      "kind": "telegram",
-      "chatId": "4242"
-    }
-  },
-  {
     "name": "Digest wrong shape",
     "schema": "Digest",
     "value": null

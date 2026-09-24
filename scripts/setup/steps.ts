@@ -591,7 +591,6 @@ const MINTED_WORKER_MAP_V1: readonly {
   { name: "ROUTINE_HOOK_SECRET", workers: ["app"] },
   { name: "MACHINE_TOKEN_SECRET", workers: ["app"] },
   { name: "NATIVE_TOKEN_SECRET", workers: ["app"] },
-  { name: "TELEGRAM_WEBHOOK_SECRET", workers: ["app"] },
 ];
 
 /* ── 6. Access ──────────────────────────────────────────────────────────── */

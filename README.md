@@ -29,7 +29,6 @@ Optional keys. Each is asked for once and each can be skipped with Enter; a skip
 | `COMPOSIO_WEBHOOK_SECRET` | Routines that fire on a connected-app event                        |
 | `BRAVE_SEARCH_API_KEY`    | web search: a Bot that searches the public web                     |
 | `DEBUG_TOKEN`             | the read-only `/api/debug` operator surface                        |
-| `TELEGRAM_BOT_TOKEN`      | talking to your Bots from Telegram, through a bot of your own      |
 
 No model key is needed. Frock AI runs on the account's own `AI` binding, where Auto resolves to a concrete Workers AI chat model, so a deployment with no configuration at all still picks a model for a User who chose none.
 
@@ -79,7 +78,7 @@ In your Cloudflare account:
 - **Two Cloudflare Access applications** on the app's hostname: Allow on the hostname itself — the document, the client, sign-out and the native sign-in flow, and the policy that is the allowlist — and Bypass on `/api`, so API requests reach the Worker, which authenticates every one of them itself from the Access cookie a browser sends or the bearer a phone exchanged.
 - **No D1.** The Access auth Package stores nothing.
 
-It mints seven secrets and sets them with the deploy: `CREDENTIAL_KEYRING`, `COMPUTER_HOST_TOKEN`, `APPLET_BUILD_TOKEN`, `ROUTINE_HOOK_SECRET`, `MACHINE_TOKEN_SECRET`, `NATIVE_TOKEN_SECRET` and `TELEGRAM_WEBHOOK_SECRET`. They are recorded in `.deployment/simple/secrets.env`, git-ignored and mode 0600, and that is the only copy: they encrypt and sign durable state — stored Connection credentials, issued Routine webhook keys, paired machines — so back the file up. A run whose record is intact mints nothing a second time.
+It mints six secrets and sets them with the deploy: `CREDENTIAL_KEYRING`, `COMPUTER_HOST_TOKEN`, `APPLET_BUILD_TOKEN`, `ROUTINE_HOOK_SECRET`, `MACHINE_TOKEN_SECRET` and `NATIVE_TOKEN_SECRET`. They are recorded in `.deployment/simple/secrets.env`, git-ignored and mode 0600, and that is the only copy: they encrypt and sign durable state — stored Connection credentials, issued Routine webhook keys, paired machines — so back the file up. A run whose record is intact mints nothing a second time.
 
 ### What you do by hand
 
@@ -427,31 +426,27 @@ The tracked Wrangler files declare Cloudflare's `AI` binding for production and 
 
 Configure these GitHub `production` environment values:
 
-| Type     | Name                      | Purpose                                                                                                               |
-| -------- | ------------------------- | --------------------------------------------------------------------------------------------------------------------- |
-| Secret   | `CLOUDFLARE_API_TOKEN`    | Cloudflare token permitted to edit Workers, D1, and R2 for the target account                                         |
-| Secret   | `CLOUDFLARE_ACCOUNT_ID`   | Cloudflare account containing the production resources                                                                |
-| Variable | `BETTER_AUTH_URL`         | Set to `https://bot.frockbot.com`                                                                                     |
-| Secret   | `BETTER_AUTH_SECRET`      | Better Auth secret with at least 32 random characters                                                                 |
-| Secret   | `GOOGLE_CLIENT_ID`        | Google Web application OAuth client ID                                                                                |
-| Secret   | `GOOGLE_CLIENT_SECRET`    | Google Web application OAuth client secret                                                                            |
-| Secret   | `FROCKBOT_ADMIN_EMAILS`   | Comma-separated owner emails allowed to administer deployment policy (optional; warns)                                |
-| Secret   | `SPRITES_TOKEN`           | Fly Sprites token used only by the backend Computer provider                                                          |
-| Secret   | `COMPUTER_HOST_TOKEN`     | Shared secret the app Worker presents to the Computer host; generate it                                               |
-| Secret   | `CREDENTIAL_KEYRING`      | Versioned AES-GCM keyring for per-User Connection credentials                                                         |
-| Secret   | `ROUTINE_HOOK_SECRET`     | HMAC secret every Routine webhook key is signed with; generate it                                                     |
-| Secret   | `MACHINE_TOKEN_SECRET`    | HMAC secret every registered-machine token and pairing code is signed with; generate it                               |
-| Secret   | `FCM_SERVICE_ACCOUNT`     | Firebase service-account JSON authorizing Android push delivery; see [`docs/notifications.md`](docs/notifications.md) |
-| Secret   | `TELEGRAM_BOT_TOKEN`      | The deployment's Telegram bot, from BotFather (optional; absent, Telegram is off)                                     |
-| Secret   | `TELEGRAM_WEBHOOK_SECRET` | What Telegram echoes on every webhook call; generate it (optional, with the token)                                    |
+| Type     | Name                    | Purpose                                                                                                               |
+| -------- | ----------------------- | --------------------------------------------------------------------------------------------------------------------- |
+| Secret   | `CLOUDFLARE_API_TOKEN`  | Cloudflare token permitted to edit Workers, D1, and R2 for the target account                                         |
+| Secret   | `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account containing the production resources                                                                |
+| Variable | `BETTER_AUTH_URL`       | Set to `https://bot.frockbot.com`                                                                                     |
+| Secret   | `BETTER_AUTH_SECRET`    | Better Auth secret with at least 32 random characters                                                                 |
+| Secret   | `GOOGLE_CLIENT_ID`      | Google Web application OAuth client ID                                                                                |
+| Secret   | `GOOGLE_CLIENT_SECRET`  | Google Web application OAuth client secret                                                                            |
+| Secret   | `FROCKBOT_ADMIN_EMAILS` | Comma-separated owner emails allowed to administer deployment policy (optional; warns)                                |
+| Secret   | `SPRITES_TOKEN`         | Fly Sprites token used only by the backend Computer provider                                                          |
+| Secret   | `COMPUTER_HOST_TOKEN`   | Shared secret the app Worker presents to the Computer host; generate it                                               |
+| Secret   | `CREDENTIAL_KEYRING`    | Versioned AES-GCM keyring for per-User Connection credentials                                                         |
+| Secret   | `ROUTINE_HOOK_SECRET`   | HMAC secret every Routine webhook key is signed with; generate it                                                     |
+| Secret   | `MACHINE_TOKEN_SECRET`  | HMAC secret every registered-machine token and pairing code is signed with; generate it                               |
+| Secret   | `FCM_SERVICE_ACCOUNT`   | Firebase service-account JSON authorizing Android push delivery; see [`docs/notifications.md`](docs/notifications.md) |
 
 Admission is closed by default. Set `FROCKBOT_ADMIN_EMAILS` to one or more comma-separated email addresses in the GitHub `production` environment; those identities are always admitted and may open the operator surface. Administration itself is not in the app: it is the [admin portal](#the-admin-portal) at `admin.frockbot.com`, and the same list says who may use it. Every other account needs access from the beta-access authority, and having signed in before is not access; see [`docs/beta-access.md`](docs/beta-access.md), including the release step that retired the signups switch.
 
 `ROUTINE_HOOK_SECRET` is generated too, once, with `openssl rand -hex 32` — `./scripts/setup-production.sh` does it if the secret is absent and preserves it if it is not. Every Routine webhook key is `HMAC-SHA256` over its own claims under this secret, and the gateway verifies that signature before any Durable Object is addressed. Rotating it invalidates every webhook key already handed out, which each Routine's owner then has to re-mint; without it set, the delivery route answers `503` and a webhook Routine is recorded without a key rather than given one nothing could verify.
 
 `MACHINE_TOKEN_SECRET` is generated the same way and on the same terms. Every registered machine's token and every pairing code is `HMAC-SHA256` over its own claims under this secret, verified at the edge before any Durable Object is addressed. Rotating it un-enrols every registered machine, which then has to be paired again; without it set, enrollment and every machine route answer `503` rather than admitting a caller nothing could verify.
-
-`TELEGRAM_BOT_TOKEN` comes from [BotFather](https://t.me/BotFather) (`/newbot`), one bot per deployment: pointing two deployments at one bot would have each take the other's webhook. `TELEGRAM_WEBHOOK_SECRET` is generated with `openssl rand -hex 32`. Nothing else is set up: the first time someone presses Link Telegram, the app points the bot's webhook at `/api/telegram/webhook` with that secret, and the webhook refuses any call that does not echo it before any Durable Object is addressed. Rotating the secret needs one more link press to re-register the webhook.
 
 `COMPUTER_HOST_TOKEN` is not obtained from anywhere — generate it, once, with `openssl rand -hex 32`, and add it as a GitHub `production` secret. It is checked inside the container as well as at the host Worker, because the service binding is not the only route to that port. Rotating it means redeploying both Workers together.
 

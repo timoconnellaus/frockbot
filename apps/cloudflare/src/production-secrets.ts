@@ -234,18 +234,6 @@ export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1
       degraded:
         "turn supervision, the routine-event rejector and dictation tidy review are unavailable",
     },
-    {
-      name: "TELEGRAM_BOT_TOKEN",
-      why: "The deployment's Telegram bot, from BotFather: people link it to talk to their Bots from Telegram.",
-      degraded:
-        "Telegram is off: the Telegram page says it is not set up, and the webhook answers 404",
-    },
-    {
-      name: "TELEGRAM_WEBHOOK_SECRET",
-      why: "What Telegram echoes on every webhook call; 32 or more of A-Z, a-z, 0-9, _ and -. The webhook's only credential.",
-      degraded:
-        "Telegram is off: the Telegram page says it is not set up, and the webhook answers 404",
-    },
   ];
 
 /**

@@ -24,7 +24,6 @@ import {
   BRAVE_TEST_API_KEY,
   COMPOSIO_TEST_API_KEY,
   createOutboundService,
-  TELEGRAM_TEST_BOT_TOKEN,
   TEST_CREDENTIAL_KEYRING,
 } from "./test/harness/miniflare.ts";
 import {
@@ -136,10 +135,6 @@ export default defineConfig({
           // mint the token a machine presents and forge one that must be
           // refused.
           MACHINE_TOKEN_SECRET: "workerd-machine-token-secret-0123456789ab",
-          // The deployment's Telegram bot, answered by the outbound stub, and
-          // the secret a test presents on the webhook as Telegram would.
-          TELEGRAM_BOT_TOKEN: TELEGRAM_TEST_BOT_TOKEN,
-          TELEGRAM_WEBHOOK_SECRET: "workerd-telegram-webhook-secret-0123456789",
         },
         // Deliberately absent, and why:
         //

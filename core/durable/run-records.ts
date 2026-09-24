@@ -183,24 +183,7 @@ export interface StoredRunInputDeliveryOriginV1 {
   inputId: string;
 }
 
-/**
- * The person speaking to the Bot from Telegram rather than from the app.
- *
- * The one origin that is still the person: it runs on the user lane as an
- * ordinary chat Turn, steers like a typed message, and is drawn as their own
- * bubble. What the origin adds is where the words came from, so the thread can
- * say so. `messageId` is Telegram's id for the message in its chat, which is
- * also what the run id is derived from, so a redelivered update is one Turn.
- */
-export interface StoredRunTelegramOriginV1 {
-  kind: "telegram";
-  messageId: string;
-}
-
-/**
- * What produced a Turn, when it was not a person typing in the app: work the
- * Bot or another caller started, or the person writing from another app.
- */
+/** What produced a Turn, when it was not a person speaking to the Bot. */
 export type StoredRunOriginV1 =
   | StoredRunRoutineOriginV1
   | StoredRunRoutineDeliveryOriginV1
@@ -209,8 +192,7 @@ export type StoredRunOriginV1 =
   | StoredRunHandoffOriginV1
   | StoredRunBotOriginV1
   | StoredRunVoiceOriginV1
-  | StoredRunGroupOriginV1
-  | StoredRunTelegramOriginV1;
+  | StoredRunGroupOriginV1;
 
 /**
  * How deep a hand-off chain may go. One: a Turn a person or a Routine started
@@ -686,16 +668,6 @@ function decodeStoredRunOrigin(
       voiceTurnId: candidate.voiceTurnId,
       requestId: candidate.requestId,
     };
-  }
-  if (candidate.kind === "telegram") {
-    requireExactOriginFields(candidate, ["kind", "messageId"], runId);
-    if (
-      !boundedString(candidate.messageId, 32) ||
-      !/^[0-9]+$/.test(candidate.messageId)
-    ) {
-      throw new Error(`run "${runId}" has an invalid admission origin id`);
-    }
-    return { kind: "telegram", messageId: candidate.messageId };
   }
   if (candidate.kind === "routine-delivery") {
     requireExactOriginFields(candidate, ["kind", "wakeRunId"], runId);

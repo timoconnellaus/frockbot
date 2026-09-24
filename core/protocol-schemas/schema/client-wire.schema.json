@@ -45,16 +45,6 @@
           },
           "required": ["kind"],
           "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "kind": {
-              "const": "telegram"
-            }
-          },
-          "required": ["kind"],
-          "additionalProperties": false
         }
       ]
     },

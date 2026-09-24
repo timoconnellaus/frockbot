@@ -37,7 +37,6 @@ interface ComputerTestEnv {
   ROUTINE_HOOK_SECRET: string;
   COMPOSIO_API_KEY: string;
   MACHINE_TOKEN_SECRET: string;
-  TELEGRAM_WEBHOOK_SECRET: string;
   USER_CONFIGURATIONS: DurableObjectNamespace<UserConfiguration>;
   DEPLOYMENT_POLICY: DurableObjectNamespace<DeploymentPolicy>;
   VOICE_ASSISTANTS: DurableObjectNamespace<WorkerdVoiceAssistant>;

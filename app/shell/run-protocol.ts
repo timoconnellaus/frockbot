@@ -140,14 +140,8 @@ export interface ClientRun {
    * settles, so the thread never draws both.
    */
   partialText?: string;
-  /**
-   * Where the message came from: a caller on the agent lane, or the person
-   * writing from Telegram.
-   */
-  via?:
-    | { kind: "bot"; name: string; botId: string }
-    | { kind: "voice" }
-    | { kind: "telegram" };
+  /** Source marker for a message admitted on the agent lane. */
+  via?: { kind: "bot"; name: string; botId: string } | { kind: "voice" };
 }
 
 const MAX_RUN_ID_LENGTH = 128;
@@ -359,10 +353,7 @@ export interface ClientRunV1 {
   queued?: true;
   partialText?: string;
   outcome?: ClientRunOutcomeV1;
-  via?:
-    | { kind: "bot"; name: string; botId: string }
-    | { kind: "voice" }
-    | { kind: "telegram" };
+  via?: { kind: "bot"; name: string; botId: string } | { kind: "voice" };
   /**
    * Where the person's message landed, when it arrived while another Turn was
    * running: that Turn, and the position its Session log had reached. Set
@@ -1212,8 +1203,7 @@ export function projectClientRunV1(
   // Who asked, for the two agent-lane callers. The voice marker deliberately
   // carries nothing else: a call id and a spoken turn id name durable voice
   // state, and the transcript has no use for either — what it needs to draw is
-  // that this exchange was spoken, not typed. Telegram is the person too, so
-  // its marker is no counterpart: it says where their own message came from.
+  // that this exchange was spoken, not typed.
   const via =
     origin?.kind === "bot"
       ? {
@@ -1223,9 +1213,7 @@ export function projectClientRunV1(
         }
       : origin?.kind === "voice"
         ? { kind: "voice" as const }
-        : origin?.kind === "telegram"
-          ? { kind: "telegram" as const }
-          : undefined;
+        : undefined;
   return {
     // Every attempt carries its message identity, independently of paging.
     schemaVersion: 4,
@@ -2039,10 +2027,6 @@ function decodeRun(value: unknown): ClientRun {
       // cannot use and a decoder would still have to bound.
       exactKeys(candidate, ["kind"], "run.via");
       via = { kind: "voice" };
-    } else if (candidate.kind === "telegram") {
-      // The person, writing from Telegram: nothing to name but where.
-      exactKeys(candidate, ["kind"], "run.via");
-      via = { kind: "telegram" };
     } else {
       throw new Error("run.via.kind is invalid");
     }

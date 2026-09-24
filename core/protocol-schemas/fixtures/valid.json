@@ -26,13 +26,6 @@
     }
   },
   {
-    "name": "RunVia the person writing from Telegram",
-    "schema": "RunVia",
-    "value": {
-      "kind": "telegram"
-    }
-  },
-  {
     "name": "Digest valid",
     "schema": "Digest",
     "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
