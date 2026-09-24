@@ -14,6 +14,7 @@ import '../shell/semantics.dart';
 import '../theme/frock_theme.dart';
 import '../view/surface.dart';
 import 'client.dart';
+import 'plugin_page.dart';
 
 const panelCanvasPollV1 = Duration(seconds: 6);
 
@@ -62,6 +63,26 @@ class PanelCanvasController extends ChangeNotifier
 
   @override
   wire.ViewDocument? get document => opened?.document;
+
+  /// The focused surface when it is the Plugin's own page (ADR 0036).
+  wire.PanelPage? get page => opened?.page;
+
+  /// A page's tool call. The panel is read again after it, so the page is
+  /// handed whatever state the call left behind.
+  Future<PluginPageToolAnswerV1> runPageTool(
+    String pluginId,
+    String tool,
+    String arguments,
+  ) async {
+    final answer = await panels.runPageTool(
+      botId,
+      pluginId: pluginId,
+      tool: tool,
+      arguments: arguments,
+    );
+    unawaited(poll());
+    return answer;
+  }
 
   @override
   void adoptCachedDocument(wire.ViewDocument cached) {}
@@ -212,31 +233,65 @@ class PanelCanvas extends StatelessWidget {
             Expanded(
               child: controller.loading
                   ? const FrockSkeleton()
-                  : ViewSurfacePage(
-                      title:
-                          controller.bag
-                              .where(
-                                (tab) =>
-                                    tab.pluginId.value ==
-                                        controller.focusedPluginId &&
-                                    tab.surfaceId.value ==
-                                        controller.focusedSurfaceId,
-                              )
-                              .map((tab) => tab.label)
-                              .firstOrNull ??
-                          'Panel',
-                      controller: controller,
-                      store: store,
-                      userId: userId,
-                      documentId: 'conversation-panel',
-                      refreshId: 'conversation-panel-refresh',
-                      chrome: false,
-                      onClose: onClose,
-                    ),
+                  : _page(context) ??
+                        ViewSurfacePage(
+                          title:
+                              controller.bag
+                                  .where(
+                                    (tab) =>
+                                        tab.pluginId.value ==
+                                            controller.focusedPluginId &&
+                                        tab.surfaceId.value ==
+                                            controller.focusedSurfaceId,
+                                  )
+                                  .map((tab) => tab.label)
+                                  .firstOrNull ??
+                              'Panel',
+                          controller: controller,
+                          store: store,
+                          userId: userId,
+                          documentId: 'conversation-panel',
+                          refreshId: 'conversation-panel-refresh',
+                          chrome: false,
+                          onClose: onClose,
+                        ),
             ),
           ],
         );
       },
+    );
+  }
+
+  /// A focused page is drawn in its own frame, keyed by its URL alone, so a
+  /// read that only brings new state reaches the running page rather than
+  /// loading it again.
+  Widget? _page(BuildContext context) {
+    final page = controller.page;
+    final pluginId = controller.focusedPluginId;
+    final surfaceId = controller.focusedSurfaceId;
+    if (page == null || pluginId == null || surfaceId == null) return null;
+    final label =
+        controller.bag
+            .where(
+              (tab) =>
+                  tab.pluginId.value == pluginId &&
+                  tab.surfaceId.value == surfaceId,
+            )
+            .map((tab) => tab.label)
+            .firstOrNull ??
+        'Panel';
+    return identified(
+      'conversation-panel-page',
+      PluginPageFrame(
+        url: page.url,
+        state: page.state,
+        pluginId: pluginId,
+        botId: controller.botId,
+        surfaceId: surfaceId,
+        label: label,
+        runTool: (tool, arguments) =>
+            controller.runPageTool(pluginId, tool, arguments),
+      ),
     );
   }
 

@@ -3,9 +3,9 @@
 /// Two implementations, one seam. In the browser the frame is a platform view
 /// over an iframe under the `sandbox` attribute `host_frame_web.dart` sets; on
 /// the phone it is a WebView with every one of those guarantees set by hand.
-/// Both take the same two things — the URL and whether the document keeps its
-/// own origin — because everything above this line is about which page is
-/// shown, never about how.
+/// Both take the same things — the URL, whether the document keeps its own
+/// origin, and the page's messages both ways — because everything above this
+/// line is about which page is shown, never about how.
 library;
 
 import 'package:flutter/material.dart';
@@ -20,6 +20,14 @@ class HostFrame extends StatelessWidget {
   final String label;
   final BorderRadius borderRadius;
 
+  /// What the page posted, decoded from JSON and proved to have come from this
+  /// frame. The host decides what any of it means.
+  final ValueChanged<Map<String, Object?>>? onMessage;
+
+  /// Messages for the page, posted once each after the document has loaded;
+  /// one sent before that waits for it.
+  final Stream<Map<String, Object?>>? outbox;
+
   /// The frame is remade rather than reused when this changes: a new
   /// generation, or a new viewer session, is a new document.
   final String identity;
@@ -29,6 +37,8 @@ class HostFrame extends StatelessWidget {
     required this.label,
     required this.identity,
     this.allowSameOrigin = false,
+    this.onMessage,
+    this.outbox,
     this.borderRadius = const BorderRadius.all(Radius.circular(12)),
   });
 
@@ -42,6 +52,8 @@ class HostFrame extends StatelessWidget {
         url: url,
         label: label,
         allowSameOrigin: allowSameOrigin,
+        onMessage: onMessage,
+        outbox: outbox,
       ),
     ),
   );

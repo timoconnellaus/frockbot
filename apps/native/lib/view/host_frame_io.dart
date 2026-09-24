@@ -8,6 +8,7 @@
 library;
 
 import 'dart:async';
+import 'dart:convert';
 
 import 'package:flutter/foundation.dart'
     show TargetPlatform, defaultTargetPlatform;
@@ -23,11 +24,15 @@ class HostFrameView extends StatefulWidget {
   /// pages, which is the phone's equivalent of omitting `allow-same-origin`.
   final bool allowSameOrigin;
   final String label;
+  final ValueChanged<Map<String, Object?>>? onMessage;
+  final Stream<Map<String, Object?>>? outbox;
   const HostFrameView({
     super.key,
     required this.url,
     required this.label,
     this.allowSameOrigin = false,
+    this.onMessage,
+    this.outbox,
   });
 
   @override
@@ -37,10 +42,17 @@ class HostFrameView extends StatefulWidget {
 class _HostFrameViewState extends State<HostFrameView> {
   WebViewController? _web;
   int _epoch = 0;
+  bool _loaded = false;
+  StreamSubscription<Map<String, Object?>>? _outbox;
+  final _waiting = <Map<String, Object?>>[];
+
+  /// The channel a page's messages arrive on; one WebView carries one page.
+  static const _channel = 'frockbotHostFrame';
 
   @override
   void initState() {
     super.initState();
+    _outbox = widget.outbox?.listen(_send);
     unawaited(_open());
   }
 
@@ -50,8 +62,54 @@ class _HostFrameViewState extends State<HostFrameView> {
     if (old.url != widget.url) unawaited(_open());
   }
 
+  void _send(Map<String, Object?> message) {
+    final web = _web;
+    if (_loaded && web != null) {
+      unawaited(_post(web, _epoch, message));
+    } else if (_waiting.length < 64) {
+      _waiting.add(message);
+    }
+  }
+
+  /// The page is the top document in a WebView, so it is its own `parent`.
+  /// The host's message is dispatched as an untrusted event from the page's
+  /// own window — the one the page's listener accepts — which is also what
+  /// keeps it from being forwarded back as if the page had said it.
+  Future<void> _post(
+    WebViewController web,
+    int epoch,
+    Map<String, Object?> message,
+  ) async {
+    if (epoch != _epoch) return;
+    try {
+      await web.runJavaScript(
+        'window.dispatchEvent(new MessageEvent("message", '
+        '{data: ${jsonEncode(message)}, source: window}))',
+      );
+    } catch (_) {
+      // A page that has gone missed nothing it could still read.
+    }
+  }
+
+  /// Forwards what the page posts to its parent. Only a trusted event is the
+  /// page's own `postMessage`; the host's deliveries are synthetic.
+  Future<void> _forward(WebViewController web, int epoch) async {
+    if (widget.onMessage == null || epoch != _epoch) return;
+    try {
+      await web.runJavaScript('''
+window.addEventListener("message", (event) => {
+  if (!event.isTrusted || !event.data || typeof event.data !== "object") return;
+  try { $_channel.postMessage(JSON.stringify(event.data)); } catch (_) {}
+});
+''');
+    } catch (_) {
+      // A page the listener cannot reach has said nothing.
+    }
+  }
+
   Future<void> _open() async {
     final epoch = ++_epoch;
+    _loaded = false;
     if (mounted) setState(() => _web = null);
     try {
       final params = defaultTargetPlatform == TargetPlatform.macOS
@@ -79,6 +137,22 @@ class _HostFrameViewState extends State<HostFrameView> {
         await webkit.setAllowsBackForwardNavigationGestures(false);
         await webkit.setAllowsLinkPreview(false);
       }
+      if (widget.onMessage != null) {
+        await web.addJavaScriptChannel(
+          _channel,
+          onMessageReceived: (message) {
+            if (epoch != _epoch) return;
+            try {
+              final decoded = jsonDecode(message.message);
+              if (decoded is Map) {
+                widget.onMessage!(decoded.cast<String, Object?>());
+              }
+            } catch (_) {
+              // A page that says something unreadable has said nothing.
+            }
+          },
+        );
+      }
       await web.setNavigationDelegate(
         NavigationDelegate(
           // One document, named by the host. Anything else — a link the page
@@ -88,6 +162,16 @@ class _HostFrameViewState extends State<HostFrameView> {
               ? NavigationDecision.navigate
               : NavigationDecision.prevent,
           onHttpAuthRequest: (request) => request.onCancel(),
+          onPageFinished: (url) async {
+            if (url != widget.url || epoch != _epoch) return;
+            await _forward(web, epoch);
+            _loaded = true;
+            final waiting = [..._waiting];
+            _waiting.clear();
+            for (final message in waiting) {
+              await _post(web, epoch, message);
+            }
+          },
         ),
       );
       if (!mounted || epoch != _epoch) return;
@@ -103,6 +187,7 @@ class _HostFrameViewState extends State<HostFrameView> {
   @override
   void dispose() {
     ++_epoch;
+    unawaited(_outbox?.cancel());
     super.dispose();
   }
 
