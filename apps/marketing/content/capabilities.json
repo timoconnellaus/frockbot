@@ -319,25 +319,6 @@
       }
     },
     {
-      "id": "sidebar-section",
-      "type": "slot",
-      "category": "Navigation and pages",
-      "name": "Sidebar section",
-      "description": "A block in the Bot list.",
-      "scope": "device",
-      "platforms": {
-        "web": "planned",
-        "android": "planned",
-        "iphone": "planned",
-        "macos": "planned",
-        "windows": "planned",
-        "linux": "planned",
-        "apple-watch": "not-applicable",
-        "wear-os": "not-applicable",
-        "browser-extension": "not-applicable"
-      }
-    },
-    {
       "id": "bot-list-badge",
       "type": "slot",
       "category": "Navigation and pages",
