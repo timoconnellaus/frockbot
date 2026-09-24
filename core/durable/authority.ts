@@ -1052,6 +1052,7 @@ export class BotDurableAuthority<Snapshot> {
           sessionId: run.sessionId,
           acceptedAt: run.acceptedAt,
           text: run.input,
+          ...(run.attachments ? { attachments: run.attachments } : {}),
           ...(run.retryOf ? { retryOf: run.retryOf } : {}),
           // Recovery re-mounts on the recorded turn type, so the resumed Turn
           // sees the same trimmed catalog the evicted one did.
@@ -1243,6 +1244,9 @@ export class BotDurableAuthority<Snapshot> {
         sessionId: command.sessionId,
         acceptedAt: command.acceptedAt,
         input: command.text,
+        ...(command.attachments && command.attachments.length > 0
+          ? { attachments: structuredClone(command.attachments) }
+          : {}),
         events: [],
         eventRange: { startSeq: 0, endSeq: 0 },
         effectAdmissions: [],
@@ -1960,6 +1964,13 @@ export class BotDurableAuthority<Snapshot> {
           storedRunLaneV1(retryTarget) !== "user" ||
           retryTarget.admission?.origin !== undefined ||
           retryTarget.input !== command.text ||
+          // A retry is the same message, and the files are part of it.
+          (retryTarget.attachments ?? [])
+            .map((item) => item.uploadId)
+            .join(",") !==
+            (command.attachments ?? [])
+              .map((item) => item.uploadId)
+              .join(",") ||
           (command.turnType ?? "chat") !== "chat" ||
           (command.lane ?? "user") !== "user" ||
           command.origin !== undefined ||
@@ -2051,6 +2062,9 @@ export class BotDurableAuthority<Snapshot> {
         sessionId: command.sessionId,
         acceptedAt: command.acceptedAt,
         input: command.text,
+        ...(command.attachments && command.attachments.length > 0
+          ? { attachments: structuredClone(command.attachments) }
+          : {}),
         ...(retryTarget
           ? {
               retryOf: retryTarget.runId,
@@ -2360,6 +2374,7 @@ export class BotDurableAuthority<Snapshot> {
       sessionId: run.sessionId,
       acceptedAt: run.acceptedAt,
       text: run.input,
+      ...(run.attachments ? { attachments: run.attachments } : {}),
       ...(run.retryOf ? { retryOf: run.retryOf } : {}),
       turnType: storedRunTurnTypeV1(run),
       lane: storedRunLaneV1(run),

@@ -8,6 +8,7 @@ import {
   LoopHookListV1,
   mountRuntimeFeaturesV1,
   type FirstPartyCardDrawsV1,
+  type ModelAttachmentResolverV1,
   type PersistSessionEvents,
   type RuntimeFeatureV1,
   type SessionEvent,
@@ -98,6 +99,8 @@ export interface RuntimeModelSelection {
 
 export interface FoundationRuntimeOptions {
   billing?: ModelBilling;
+  /** Fills in attachment bytes and text for each dispatch; absent, none are. */
+  attachments?: ModelAttachmentResolverV1;
   botId?: string;
   agentId?: string;
   sessionId?: string;
@@ -155,8 +158,8 @@ export async function createFoundationRuntime(
   });
   const systemPrompt = new SystemPromptRegistry(hooks);
   const llm = options.billing
-    ? new BilledLlmRegistry(hooks, options.billing)
-    : new LlmRegistry(hooks);
+    ? new BilledLlmRegistry(hooks, options.billing, options.attachments)
+    : new LlmRegistry(hooks, options.attachments);
   const tools = new ToolRegistry(hooks, systemPrompt);
   const services: FoundationRuntimeServices = {
     sessions,

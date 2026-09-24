@@ -3,6 +3,7 @@ import type {
   LoopAgentInputV1,
   LoopAgentRuntimeV1,
   LoopRequestErrorDecisionV1,
+  MessageAttachmentV1,
   Session,
   SessionEvent,
   SkillRefV1,
@@ -97,10 +98,15 @@ export interface AgentInput extends LoopAgentInputV1 {
   skills?: SkillRefV1[];
 }
 
-/** What `Agent.send` accepts: bare text, or text with invoked Skills. */
+/** What `Agent.send` accepts: bare text, or text with Skills and files. */
 export interface AgentSendV1 {
   text: string;
   skills?: readonly SkillRefV1[];
+  /**
+   * The files the person attached, as references. A message may be files
+   * alone, so `text` may be empty when these are present.
+   */
+  attachments?: readonly MessageAttachmentV1[];
 }
 
 export type PreStepDecision =

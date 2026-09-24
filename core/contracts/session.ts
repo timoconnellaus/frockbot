@@ -245,7 +245,13 @@ export function normalizedMessagesV1(
       continue;
     }
     if (event.type === "user/message") {
-      messages.push({ role: "user", content: event.text });
+      messages.push({
+        role: "user",
+        content: event.text,
+        ...(event.attachments && event.attachments.length > 0
+          ? { attachments: event.attachments.map((item) => ({ ...item })) }
+          : {}),
+      });
     } else if (event.type === "assistant/message") {
       messages.push({
         role: "assistant",

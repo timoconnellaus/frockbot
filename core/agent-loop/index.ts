@@ -10,6 +10,7 @@ import {
 } from "./agent.js";
 import {
   type CompositionPinV1,
+  decodeMessageAttachmentsV1,
   decodeSkillRefsV1,
   expandToolCallOccurrencesV1,
   type LoopStepContinuationV1,
@@ -156,20 +157,31 @@ class LoopAgent implements Agent, LoopRuntime {
   send(request: string | AgentSendV1): string {
     if (this.#disposeRequested)
       throw new Error(`agent "${this.id}" is disposing`);
-    const sent = typeof request === "string" ? { text: request } : request;
+    const sent: AgentSendV1 =
+      typeof request === "string" ? { text: request } : request;
     const normalized = sent.text.trim();
-    if (!normalized) throw new Error("agent input is empty");
     // Decoded here rather than trusted: `send` is the kernel's inbound seam
-    // for an input, and an invoked Skill is durable state the moment
-    // `input/queued` is appended.
+    // for an input, and an invoked Skill or an attached file is durable state
+    // the moment `input/queued` is appended.
     const skills =
       sent.skills === undefined
         ? undefined
         : decodeSkillRefsV1([...sent.skills], "agent input skills");
+    const attachments =
+      sent.attachments === undefined || sent.attachments.length === 0
+        ? undefined
+        : decodeMessageAttachmentsV1(
+            [...sent.attachments],
+            "agent input attachments",
+            true,
+          );
+    // A message may be files alone, never nothing at all.
+    if (!normalized && !attachments) throw new Error("agent input is empty");
     const input: AgentInput = {
       messageId: crypto.randomUUID(),
       text: normalized,
       ...(skills && skills.length > 0 ? { skills } : {}),
+      ...(attachments ? { attachments } : {}),
     };
     this.session.append({ type: "input/queued", ...input });
     this.#inbox.push(input);
@@ -527,6 +539,9 @@ class LoopAgent implements Agent, LoopRuntime {
               step,
               messageId: admitted.messageId,
               text: admitted.text,
+              ...(admitted.attachments && admitted.attachments.length > 0
+                ? { attachments: admitted.attachments }
+                : {}),
             });
           }
 

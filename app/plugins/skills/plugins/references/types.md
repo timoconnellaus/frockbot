@@ -590,9 +590,26 @@ export interface ModelReplayState {
   content: string;
 }
 
+/**
+ * A file the person attached to their message, named by its upload rather
+ * than carried: a hook sees the reference, never the bytes.
+ */
+export interface MessageAttachment {
+  kind: "image" | "document";
+  /** The SHA-256 of the file's bytes, lowercase hex. */
+  uploadId: string;
+  name: string;
+  mediaType: string;
+  bytes: number;
+  /** An image's bytes, resolved for one model request. Never durable. */
+  dataBase64?: string;
+  /** A document's text excerpt, resolved for one model request. Never durable. */
+  text?: string;
+}
+
 /** One message in a model request. */
 export type ModelMessage =
-  | { role: "user"; content: string }
+  | { role: "user"; content: string; attachments?: MessageAttachment[] }
   | {
       role: "assistant";
       content: string;

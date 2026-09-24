@@ -204,6 +204,13 @@ class FrockAiProvider implements LlmProvider {
     const plan = planOpenAICompatibleRequestV1(request, {
       structuredOutput: auto ? "json_schema" : "none",
       responseFormatDialect: "workers-ai",
+      // Auto's gateway route serves a model that reads images. A schema
+      // request is pinned to a text model instead, and the `AI` binding path
+      // has no route at all, so neither is sent one.
+      acceptsImages:
+        auto &&
+        this.config.autoRoute !== null &&
+        request.responseFormat === undefined,
     });
     if (plan.note) yield { type: "response-format-note", note: plan.note };
     const { model: _model, ...body } = plan.body;

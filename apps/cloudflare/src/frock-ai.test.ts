@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   compatChatCompletionsUrlV1,
   createFrockAiGatewayHostV1,
+  FROCK_AI_IMAGE_INPUT_TOKENS_V1,
 } from "./frock-ai.js";
 import { FrockAiTransportErrorV1 } from "@frockbot/providers/frock-ai/runtime";
 import {
@@ -515,5 +516,65 @@ describe("Frock AI Gateway host, billing", () => {
       }),
     ).rejects.toThrow("exceeds its prepaid model limit");
     expect(calls).toHaveLength(1);
+  });
+});
+
+describe("Frock AI prepaid limits, images", () => {
+  function limitedHost(inputTokens: number) {
+    const sent: Record<string, unknown>[] = [];
+    const host = createFrockAiGatewayHostV1(unusedBinding(), {
+      gatewayId: "frock-test",
+      autoRoute: "flock-test-auto",
+      accountId: ACCOUNT_ID,
+      token: TOKEN,
+      billingLimits: async () => ({
+        "@frock/auto": { inputTokens, outputTokens: 4_096 },
+      }),
+      fetch: ((_url: string, init: RequestInit) => {
+        sent.push(JSON.parse(String(init.body)) as Record<string, unknown>);
+        return Promise.resolve(new Response("data: [DONE]\n\n"));
+      }) as unknown as typeof fetch,
+    });
+    return { host, sent };
+  }
+
+  const picture = (base64: string) => ({
+    messages: [
+      {
+        role: "user",
+        content: [
+          { type: "text", text: "What is this?" },
+          {
+            type: "image_url",
+            image_url: { url: `data:image/jpeg;base64,${base64}` },
+          },
+        ],
+      },
+    ],
+  });
+
+  test("an image counts as its allowance, not as its base64", async () => {
+    // A megabyte of base64 is far past the limit as bytes, and one image
+    // allowance is well inside it.
+    const { host, sent } = limitedHost(FROCK_AI_IMAGE_INPUT_TOKENS_V1 + 2_000);
+    await host.runChatCompletion(
+      "dynamic/flock-test-auto",
+      picture("A".repeat(1_000_000)),
+    );
+    expect(sent).toHaveLength(1);
+    expect(sent[0]!.max_tokens).toBe(4_096);
+  });
+
+  test("a request whose images take it past the reservation is refused", async () => {
+    const { host, sent } = limitedHost(FROCK_AI_IMAGE_INPUT_TOKENS_V1 + 2_000);
+    const body = picture("AAAA");
+    (body.messages[0]!.content as unknown[]).push({
+      type: "image_url",
+      image_url: { url: "data:image/jpeg;base64,AAAA" },
+    });
+    await expect(
+      host.runChatCompletion("dynamic/flock-test-auto", body),
+    ).rejects.toBeInstanceOf(FrockAiTransportErrorV1);
+    expect(sent).toHaveLength(0);
   });
 });

@@ -6,8 +6,10 @@ import {
   decodeBotStateCursorV1,
 } from "@frockbot/core/protocol";
 import {
+  decodeMessageAttachmentsV1,
   decodeSendToUserPayloadV1,
   decodeSkillRefV1,
+  decodeUploadRefsV1,
 } from "@frockbot/core/contracts";
 import {
   decodeClientNotificationAcknowledgementCommandV1,
@@ -80,6 +82,9 @@ const existing: Record<string, (value: unknown) => unknown> = {
   },
   SendPayload: decodeSendToUserPayloadV1,
   SkillRef: decodeSkillRefV1,
+  UploadRef: (value) => decodeUploadRefsV1([value]),
+  Attachment: (value) =>
+    decodeMessageAttachmentsV1([value], "attachment", true),
   NotificationList: decodeClientNotificationListV1,
   NotificationAck: decodeClientNotificationAcknowledgementCommandV1,
   Acknowledgement: decodeClientNotificationAcknowledgementV1,

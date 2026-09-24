@@ -222,11 +222,33 @@ export type FlockReceipt = {
 export type SkillRef =
   | { schemaVersion: 1; source: "bot" | "user" | "managed"; slug: string }
   | { schemaVersion: 1; source: "plugin"; pluginId: string; slug: string };
+export type Attachment = {
+  uploadId: Digest;
+  kind: "image" | "document";
+  name: string;
+  mediaType:
+    | "image/png"
+    | "image/jpeg"
+    | "image/webp"
+    | "image/gif"
+    | "application/pdf"
+    | "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    | "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+    | "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    | "text/csv"
+    | "text/plain"
+    | "text/markdown"
+    | "application/json";
+  bytes: number;
+};
+export type UploadRef = { uploadId: Digest };
+export type UploadReceipt = { schemaVersion: 1; upload: Attachment };
 export type TurnCommand = {
   schemaVersion: 1;
   commandId: Identifier;
   text: string;
   skills?: Array<SkillRef>;
+  attachments?: Array<UploadRef>;
   supersedes?: { runId?: Identifier };
   retryOf?: Identifier;
 };
@@ -395,6 +417,7 @@ export type Run =
       runId: Identifier;
       admittedAt: Instant;
       input: string;
+      attachments?: Array<Attachment>;
       status: "running";
       events: Array<RunEvent>;
       stopRequestedAt?: Instant;
@@ -413,6 +436,7 @@ export type Run =
       runId: Identifier;
       admittedAt: Instant;
       input: string;
+      attachments?: Array<Attachment>;
       status: "completed";
       events: Array<RunEvent>;
       stopRequestedAt?: Instant;
@@ -430,6 +454,7 @@ export type Run =
       runId: Identifier;
       admittedAt: Instant;
       input: string;
+      attachments?: Array<Attachment>;
       status: "failed";
       events: Array<RunEvent>;
       stopRequestedAt?: Instant;
@@ -447,6 +472,7 @@ export type Run =
       runId: Identifier;
       admittedAt: Instant;
       input: string;
+      attachments?: Array<Attachment>;
       status: "cancelled";
       events: Array<RunEvent>;
       stopRequestedAt: Instant;
@@ -1167,6 +1193,9 @@ export interface ProtocolTypes {
   BotLookCommand: BotLookCommand;
   FlockReceipt: FlockReceipt;
   SkillRef: SkillRef;
+  Attachment: Attachment;
+  UploadRef: UploadRef;
+  UploadReceipt: UploadReceipt;
   TurnCommand: TurnCommand;
   StopCommand: StopCommand;
   RunFenceCommand: RunFenceCommand;

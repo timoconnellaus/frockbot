@@ -36,6 +36,10 @@ import { decodeNormalizedModelRequestV1 } from "./types.js";
 import type { Session } from "./session.js";
 import { decodeSkillRefsV1, type SkillRefV1 } from "./skills.js";
 import {
+  decodeMessageAttachmentsV1,
+  type MessageAttachmentV1,
+} from "./message-attachments.js";
+import {
   decodeThemeDocumentV1,
   type BotLookV1,
   type ThemeDocumentV1,
@@ -72,6 +76,8 @@ export interface LoopAgentInputV1 {
   messageId: string;
   text: string;
   skills?: SkillRefV1[];
+  /** References to the files the person attached; never their bytes. */
+  attachments?: MessageAttachmentV1[];
 }
 
 export type LoopPreStepDecisionV1 =
@@ -363,7 +369,12 @@ function decodeHookInputs(value: unknown, label: string): LoopAgentInputV1[] {
   return value.map((input, index) => {
     const itemLabel = `${label}[${index}]`;
     const item = hookRecord(input, itemLabel);
-    hookExactKeys(item, ["messageId", "text"], ["skills"], itemLabel);
+    hookExactKeys(
+      item,
+      ["messageId", "text"],
+      ["skills", "attachments"],
+      itemLabel,
+    );
     const skills = item.skills;
     if (skills !== undefined && !Array.isArray(skills)) {
       throw new Error(`${itemLabel}.skills must be an array`);
@@ -372,10 +383,19 @@ function decodeHookInputs(value: unknown, label: string): LoopAgentInputV1[] {
       skills === undefined
         ? undefined
         : decodeSkillRefsV1(skills, `${itemLabel}.skills`);
+    const attachments =
+      item.attachments === undefined
+        ? undefined
+        : decodeMessageAttachmentsV1(
+            item.attachments,
+            `${itemLabel}.attachments`,
+            true,
+          );
     return {
       messageId: hookString(item.messageId, `${itemLabel}.messageId`, 256),
       text: hookString(item.text, `${itemLabel}.text`, 1_000_000, true),
       ...(decodedSkills === undefined ? {} : { skills: decodedSkills }),
+      ...(attachments === undefined ? {} : { attachments }),
     };
   });
 }

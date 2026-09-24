@@ -174,6 +174,69 @@ describe("Bot-state channel committed updates", () => {
     expect(JSON.parse(sent[1]!).kind).toBe("message");
   });
 
+  test("a Run's files reach a protocol 3 socket and are left off an older one", () => {
+    const sent = new Map<string, string[]>();
+    const socket = (name: string, protocol?: number) => {
+      sent.set(name, []);
+      let lastSent = "0";
+      return {
+        deserializeAttachment: () => ({
+          schemaVersion: 1,
+          userId: "user-1",
+          botId: "scout",
+          epoch: "1",
+          lastSent,
+          ...(protocol === undefined ? {} : { protocol }),
+        }),
+        serializeAttachment: (value: { lastSent: string }) => {
+          lastSent = value.lastSent;
+        },
+        send: (frame: string) => sent.get(name)!.push(frame),
+        close: () => undefined,
+      };
+    };
+    const state = {
+      storage: new ChannelStorage(),
+      getWebSockets: () => [socket("current", 3), socket("installed")],
+    } as unknown as DurableObjectState;
+    const photo = {
+      kind: "image",
+      uploadId: "a".repeat(64),
+      name: "beach.jpg",
+      mediaType: "image/jpeg",
+      bytes: 482_113,
+    };
+    new BotStateChannel(state).broadcastCommitted([
+      {
+        schemaVersion: 1,
+        epoch: 1,
+        cursor: 1,
+        kind: "run",
+        entityId: "run-1",
+        revision: 1,
+        payload: {
+          run: {
+            schemaVersion: 4,
+            runId: "run-1",
+            admittedAt: "2026-09-24T00:00:00.000Z",
+            messageRunId: "run-1",
+            messageAdmittedAt: "2026-09-24T00:00:00.000Z",
+            canRetry: false,
+            input: "",
+            attachments: [photo],
+            status: "running",
+            events: [],
+          },
+        },
+      } as never,
+    ]);
+    const runOf = (name: string) =>
+      (JSON.parse(sent.get(name)![0]!) as { payload: { run: object } }).payload
+        .run;
+    expect(runOf("current")).toMatchObject({ attachments: [photo] });
+    expect(runOf("installed")).not.toHaveProperty("attachments");
+  });
+
   test("duplicate delivery is skipped by the observer cursor", async () => {
     const { channel, sent } = attachedChannel();
     await channel.computerStorage.put("computer:one", 1);

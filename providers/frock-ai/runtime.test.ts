@@ -450,6 +450,57 @@ describe("Frock AI runtime Contribution", () => {
     await root.dispose();
   });
 
+  test("shows Auto's route an attached image, and names it to anything else", async () => {
+    const bodies: Record<string, unknown>[] = [];
+    const withPicture: NormalizedModelRequest = {
+      ...request,
+      messages: [
+        {
+          role: "user",
+          content: "What is this?",
+          attachments: [
+            {
+              kind: "image",
+              uploadId: "a".repeat(64),
+              name: "beach.jpg",
+              mediaType: "image/jpeg",
+              bytes: 3,
+              dataBase64: "AAAA",
+            },
+          ],
+        },
+      ],
+    };
+    const send = async (config: ReturnType<typeof runtimeConfig>) => {
+      const root = createAgentRuntimeHarness();
+      await root.mount(createFrockAiFeature(config));
+      for await (const event of root.llm.stream(
+        withPicture,
+        new AbortController().signal,
+      )) {
+        void event;
+      }
+      await root.dispose();
+    };
+    const answer = (_model: string, body: Record<string, unknown>) => {
+      bodies.push(body);
+      return Promise.resolve(
+        sse(
+          'data: {"choices":[{"delta":{"content":"a beach"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+        ),
+      );
+    };
+    await send(runtimeConfig(answer));
+    // The `AI` binding path has no route, and pins a text model for Auto.
+    await send({ ...runtimeConfig(answer), autoRoute: null });
+
+    expect(JSON.stringify(bodies[0])).toContain("data:image/jpeg;base64,AAAA");
+    expect(JSON.stringify(bodies[1])).not.toContain("AAAA");
+    expect(JSON.stringify(bodies[1])).toContain(
+      "This model cannot see images.",
+    );
+  });
+
   test("refuses a request outside its pinned Connection generation", async () => {
     let calls = 0;
     const root = createAgentRuntimeHarness();

@@ -644,6 +644,70 @@ describe("an admitted Turn re-mounts on its recorded turn type", () => {
   });
 });
 
+describe("a message's files are part of its durable record", () => {
+  const photo = {
+    kind: "image" as const,
+    uploadId: "a".repeat(64),
+    name: "beach.jpg",
+    mediaType: "image/jpeg",
+    bytes: 482_113,
+  };
+
+  test("the files are part of the command's identity", () => {
+    const words = botTurnCommandFingerprintV1(command("run-1"));
+    const withFile = botTurnCommandFingerprintV1({
+      ...command("run-1"),
+      attachments: [photo],
+    });
+    expect(withFile).toStartWith("bot-turn-command-v2:");
+    expect(withFile).toContain(photo.uploadId);
+    expect(withFile).not.toBe(words);
+  });
+
+  test("files alone are a stored message; an empty one without them is not", () => {
+    expect(
+      codec.require(legacyRun({ input: "", attachments: [photo] })).attachments,
+    ).toEqual([photo]);
+    expect(() => codec.require(legacyRun({ input: "" }))).toThrow(
+      /no valid input/,
+    );
+    expect(() =>
+      codec.require(
+        legacyRun({ attachments: [{ ...photo, dataBase64: "AAAA" }] }),
+      ),
+    ).toThrow(/invalid attachments/);
+  });
+
+  test("an admitted Turn keeps its files, and re-mounts with them after eviction", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage);
+    await probe.authority.run({
+      ...command("run-1"),
+      text: "",
+      attachments: [photo],
+    });
+
+    const stored = storage.values.get("run:run-1") as StoredRunV1<undefined>;
+    expect(stored.attachments).toEqual([photo]);
+    expect(probe.observed[0]?.command.attachments).toEqual([photo]);
+
+    storage.values.set("run:run-1", {
+      ...stored,
+      status: "running",
+      phase: "executing",
+      responseText: undefined,
+      eventRange: { startSeq: 0, endSeq: 0 },
+    });
+    storage.values.set("active-run", "run-1");
+    storage.values.set("identity", { userId: "user-1", botId: "primary" });
+    await new SessionEventLog(storage).rewrite("user-1:primary", []);
+
+    const resumed = createAuthority(storage);
+    await resumed.authority.recoverActiveRun();
+    expect(resumed.observed.at(-1)?.command.attachments).toEqual([photo]);
+  });
+});
+
 describe("admission does not wait for the previous Turn", () => {
   test("a new command is durable while the previous provider call is unresolved", async () => {
     const storage = new MemoryStorage();

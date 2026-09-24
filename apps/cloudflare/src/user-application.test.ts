@@ -1203,3 +1203,119 @@ test("the public turn route forwards a retry target under its fresh command id",
     }),
   ]);
 });
+
+describe("a message's files through the turn routes", () => {
+  const photo = {
+    kind: "image" as const,
+    uploadId: "a".repeat(64),
+    name: "beach.jpg",
+    mediaType: "image/jpeg",
+    bytes: 482_113,
+  };
+  const env = (binding: UserBotStateBinding) => ({
+    BOT_STATE: binding,
+    DEPLOYMENT: { userId: "alice", applicationHash: "foundation-v1" },
+  });
+
+  test("the send route forwards the refs, and files alone are a message", async () => {
+    const calls: unknown[] = [];
+    const binding = rpcBindingFor({} as BotStateBinding);
+    binding.admitRun = async (request) => {
+      calls.push(request);
+      return { schemaVersion: 1, runId: request.command.runId };
+    };
+    const response = await createUserApplication()(
+      new Request("https://app.example/api/bots/primary/turns", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          commandId: "command-1",
+          text: "",
+          attachments: [{ uploadId: photo.uploadId }],
+        }),
+      }),
+      env(binding),
+    );
+    expect(response.status).toBe(202);
+    expect(calls).toEqual([
+      expect.objectContaining({
+        command: expect.objectContaining({
+          text: "",
+          attachments: [{ uploadId: photo.uploadId }],
+        }),
+      }),
+    ]);
+  });
+
+  test("a file the Bot does not hold is refused with the person's sentence", async () => {
+    const binding = rpcBindingFor({} as BotStateBinding);
+    binding.admitRun = async () => {
+      const error = new Error(
+        "One of the attached files is no longer available. Attach it again and send.",
+      );
+      error.name = "UploadNotFoundError";
+      throw error;
+    };
+    const response = await createUserApplication()(
+      new Request("https://app.example/api/bots/primary/turns", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          schemaVersion: 1,
+          commandId: "command-1",
+          text: "look",
+          attachments: [{ uploadId: photo.uploadId }],
+        }),
+      }),
+      env(binding),
+    );
+    expect(response.status).toBe(422);
+    expect(await response.json()).toEqual({
+      error:
+        "One of the attached files is no longer available. Attach it again and send.",
+    });
+  });
+
+  test("a page keeps a Run's files for protocol 3 and leaves them off for 2", async () => {
+    const run = {
+      schemaVersion: 4 as const,
+      runId: "run-1",
+      admittedAt: "2026-09-24T00:00:00.000Z",
+      messageRunId: "run-1",
+      messageAdmittedAt: "2026-09-24T00:00:00.000Z",
+      canRetry: false,
+      input: "",
+      attachments: [photo],
+      status: "running" as const,
+      events: [],
+    };
+    const binding = rpcBindingFor({} as BotStateBinding);
+    binding.listRuns = async () => ({
+      schemaVersion: 1,
+      runs: [run],
+      page: { truncated: false },
+    });
+    const read = async (protocolVersion?: number) =>
+      (await (
+        await createUserApplication()(
+          new Request("https://app.example/api/bots/primary/turns", {
+            headers:
+              protocolVersion === undefined
+                ? {}
+                : {
+                    "x-frockbot-client": JSON.stringify({
+                      schemaVersion: 1,
+                      protocolVersion,
+                      catalogs: [],
+                    }),
+                  },
+          }),
+          env(binding),
+        )
+      ).json()) as { runs: Record<string, unknown>[] };
+    expect((await read(3)).runs[0]!.attachments).toEqual([photo]);
+    expect((await read(2)).runs[0]).not.toHaveProperty("attachments");
+    expect((await read()).runs[0]).not.toHaveProperty("attachments");
+  });
+});

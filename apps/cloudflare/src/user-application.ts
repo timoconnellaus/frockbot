@@ -16,8 +16,11 @@ import {
   decodeClientRunLookupQueryV1,
   decodeClientRunListQueryV1,
   parseExchangeCounterpartParamV1,
+  clientProtocolOfV1,
   decodeClientRunStopCommandV1,
   decodeClientTurnCommandV1,
+  RUN_ATTACHMENTS_PROTOCOL_V1,
+  withoutRunAttachmentsV1,
   type ClientRunLookupQueryV1,
   type ClientRunStopCommandV1,
   type ClientTurnCommandV1,
@@ -708,6 +711,13 @@ function createUserApplicationRoute() {
         Boolean(turnMatch || lookupMatch || questionsMatch),
     );
     if (missingBot) return missingBot;
+    // An installed client older than protocol 3 refuses a Run it does not
+    // know every field of, so the files are left off what it is sent.
+    const forClient = <T>(value: T): T =>
+      clientProtocolOfV1(request.headers.get("x-frockbot-client")) >=
+      RUN_ATTACHMENTS_PROTOCOL_V1
+        ? value
+        : withoutRunAttachmentsV1(value);
 
     if (skillsMatch) {
       // Read-only, and named refs only: the popover learns which Skills exist
@@ -787,11 +797,13 @@ function createUserApplicationRoute() {
       }
       try {
         return Response.json(
-          await env.BOT_STATE.fenceRunAdmission({
-            schemaVersion: 1,
-            botId,
-            query,
-          }),
+          forClient(
+            await env.BOT_STATE.fenceRunAdmission({
+              schemaVersion: 1,
+              botId,
+              query,
+            }),
+          ),
         );
       } catch (error) {
         return botFailure(error, "admission fence failed");
@@ -817,7 +829,9 @@ function createUserApplicationRoute() {
       }
       try {
         return Response.json(
-          await env.BOT_STATE.stopRun({ schemaVersion: 1, botId, command }),
+          forClient(
+            await env.BOT_STATE.stopRun({ schemaVersion: 1, botId, command }),
+          ),
         );
       } catch (error) {
         return jsonError(
@@ -876,7 +890,9 @@ function createUserApplicationRoute() {
       }
       try {
         return Response.json(
-          await env.BOT_STATE.lookupRun({ schemaVersion: 1, botId, query }),
+          forClient(
+            await env.BOT_STATE.lookupRun({ schemaVersion: 1, botId, query }),
+          ),
         );
       } catch (error) {
         return botFailure(error, "run lookup failed");
@@ -911,7 +927,9 @@ function createUserApplicationRoute() {
       }
       try {
         return Response.json(
-          await env.BOT_STATE.listRuns({ schemaVersion: 1, botId, query }),
+          forClient(
+            await env.BOT_STATE.listRuns({ schemaVersion: 1, botId, query }),
+          ),
         );
       } catch (error) {
         // A stored run the current codec refuses is a visible failure with
@@ -958,6 +976,11 @@ function createUserApplicationRoute() {
             // so what a Turn runs on is still whatever the instruction root
             // holds at the generation the Turn resolves.
             ...(turnCommand.skills ? { skills: turnCommand.skills } : {}),
+            // Refs again: the bytes were admitted by the upload route, and
+            // the Bot resolves each name against its own uploads.
+            ...(turnCommand.attachments
+              ? { attachments: turnCommand.attachments }
+              : {}),
           },
         }),
         { status: 202 },

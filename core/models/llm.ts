@@ -3,6 +3,7 @@ import {
   type LoopHookListV1,
   type LlmProvider,
   type LlmStreamEvent,
+  type ModelAttachmentResolverV1,
   type ModelInvocation,
   type NormalizedModelRequest,
   type JsonSchemaResponseFormatV1,
@@ -14,7 +15,10 @@ import {
 export class LlmRegistry implements ModelInvocation {
   private providers = new Map<string, LlmProvider>();
 
-  constructor(private readonly hooks: LoopHookListV1) {}
+  constructor(
+    private readonly hooks: LoopHookListV1,
+    private readonly attachments?: ModelAttachmentResolverV1,
+  ) {}
 
   register(provider: LlmProvider): () => void {
     if (this.providers.has(provider.id)) {
@@ -45,10 +49,42 @@ export class LlmRegistry implements ModelInvocation {
       throw new LlmEffectNotStartedError(
         `LLM provider "${request.provider}" is unavailable`,
       );
-    const events = this.hooks.modelStream(request, signal, () =>
-      provider.stream(request, signal),
-    );
+    const resolver = this.attachments;
+    const events = resolver
+      ? this.resolvedStream(resolver, provider, request, signal)
+      : this.hooks.modelStream(request, signal, () =>
+          provider.stream(request, signal),
+        );
     return this.validatedStream(request, events);
+  }
+
+  /**
+   * The provider sees the request with its attachments filled in; the loop
+   * journaled it without them, and still holds that one.
+   */
+  private async *resolvedStream(
+    resolver: ModelAttachmentResolverV1,
+    provider: LlmProvider,
+    request: NormalizedModelRequest,
+    signal: AbortSignal,
+  ): AsyncIterable<LlmStreamEvent> {
+    let resolved: NormalizedModelRequest;
+    try {
+      resolved = await resolver.resolve(request, signal);
+    } catch (error) {
+      signal.throwIfAborted();
+      // Nothing was sent: a read that failed before the provider was asked
+      // is a call that never started, and saying so keeps the Turn out of
+      // an uncertain outcome it would otherwise park on.
+      throw new LlmEffectNotStartedError(
+        `The files attached to this conversation could not be read: ${
+          error instanceof Error ? error.message : String(error)
+        }`,
+      );
+    }
+    yield* this.hooks.modelStream(resolved, signal, () =>
+      provider.stream(resolved, signal),
+    );
   }
 
   private async *validatedStream(

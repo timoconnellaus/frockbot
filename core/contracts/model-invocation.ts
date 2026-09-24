@@ -192,6 +192,23 @@ export interface LlmProvider {
   ): AsyncIterable<LlmStreamEvent>;
 }
 
+/**
+ * Fills in, for one dispatch, what a request's attachments name: an image's
+ * bytes, a document's text.
+ *
+ * It runs after the request is journaled and before a provider sees it, so
+ * nothing it adds is ever durable, and a re-dispatch after an eviction
+ * resolves the same content-addressed bytes again. A resolver that cannot
+ * read something leaves that attachment as a reference, which every adapter
+ * names rather than drops.
+ */
+export interface ModelAttachmentResolverV1 {
+  resolve(
+    request: NormalizedModelRequest,
+    signal: AbortSignal,
+  ): Promise<NormalizedModelRequest>;
+}
+
 /** The kernel-declared model invocation interface. Implemented by a Package. */
 export interface ModelInvocation {
   stream(

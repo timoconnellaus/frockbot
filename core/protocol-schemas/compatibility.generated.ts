@@ -2,7 +2,7 @@
 export const CLIENT_COMPATIBILITY = {
   schemaVersion: 1,
   protocolMin: 2,
-  protocolMax: 2,
+  protocolMax: 3,
   catalogs: [],
 } as const;
 export const SUPPORTED_PROTOCOL_MIN = CLIENT_COMPATIBILITY.protocolMin;
