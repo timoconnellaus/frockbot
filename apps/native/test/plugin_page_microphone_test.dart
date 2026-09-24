@@ -8,12 +8,15 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:frockbot_native/client/transport.dart';
+import 'package:frockbot_native/panels/client.dart';
 import 'package:frockbot_native/panels/page_microphone.dart';
 import 'package:frockbot_native/panels/plugin_page.dart';
 import 'package:frockbot_native/voice/capture.dart';
 import 'package:frockbot_native/voice/mic_ownership.dart';
 
 import 'voice_fakes.dart';
+import 'widget_test.dart' show MemoryStore;
 
 /// A microphone the test opens, feeds and takes away.
 class FakePageMicrophone implements PluginPageMicrophone {
@@ -127,9 +130,41 @@ void main() {
     });
   });
 
+  test('a use is reported in the route\'s words, to the millisecond', () async {
+    final api = ReportingApi();
+    await PanelsApi(api).reportDeviceUse(
+      'bot-1',
+      pluginId: 'tuner',
+      surfaceId: 'tuner',
+      device: 'android',
+      use: PluginPageDeviceUseV1(
+        useId: 'nAbCdEf_1234',
+        ability: 'microphone',
+        // A native clock's microseconds, which the route does not take.
+        startedAt: DateTime.utc(2026, 9, 24, 5, 0, 0, 0, 123),
+        endedAt: DateTime.utc(2026, 9, 24, 5, 2, 14, 7, 999),
+        ending: PluginPageDeviceEndingV1.taken,
+      ),
+    );
+    expect(api.sent.single.$1, '/api/bots/bot-1/panels/device-use');
+    expect(api.sent.single.$2, {
+      'schemaVersion': 1,
+      'useId': 'nAbCdEf_1234',
+      'pluginId': 'tuner',
+      'surfaceId': 'tuner',
+      'ability': 'microphone',
+      'device': 'android',
+      'startedAt': '2026-09-24T05:00:00.000Z',
+      'endedAt': '2026-09-24T05:02:14.007Z',
+      'ending': 'taken',
+    });
+  });
+
   group('PluginPageFrame and the microphone', () {
     late ValueChanged<Map<String, Object?>> say;
     late List<Map<String, Object?>> heard;
+    late List<PluginPageDeviceUseV1> uses;
+    var clock = DateTime.utc(2026, 9, 24, 5);
 
     Widget frame(
       FakePageMicrophone microphone, {
@@ -147,6 +182,8 @@ void main() {
               const PluginPageToolAnswerV1.ran('ok'),
           abilities: abilities,
           microphone: microphone,
+          onDeviceUse: uses.add,
+          now: () => clock,
           frameBuilder:
               (
                 context, {
@@ -170,7 +207,11 @@ void main() {
       'open': true,
     };
 
-    setUp(() => heard = []);
+    setUp(() {
+      heard = [];
+      uses = [];
+      clock = DateTime.utc(2026, 9, 24, 5);
+    });
 
     testWidgets('streams what it hears, under a sign with a Stop', (
       tester,
@@ -198,11 +239,22 @@ void main() {
         'pcm': base64Encode([0, 0x40]),
       });
 
+      expect(uses, isEmpty);
+      clock = clock.add(const Duration(minutes: 2, seconds: 14));
       await tester.tap(find.text('Stop'));
       await tester.pumpAndSettle();
       expect(microphone.closes, 1);
       expect(heard.last['status'], 'closed');
       expect(heard.last['reason'], 'You stopped the microphone.');
+      // One use, for the audit: what, how long, and how it ended.
+      expect(uses, hasLength(1));
+      expect(uses.single.ability, 'microphone');
+      expect(uses.single.ending, PluginPageDeviceEndingV1.stopped);
+      expect(
+        uses.single.endedAt.difference(uses.single.startedAt),
+        const Duration(minutes: 2, seconds: 14),
+      );
+      expect(uses.single.useId, isNotEmpty);
       expect(find.text('Tuner is using the microphone'), findsNothing);
       // The bar came and went around one page, never a reloaded one.
       expect(framesMounted, 1);
@@ -214,6 +266,7 @@ void main() {
       say(ask);
       await tester.pumpAndSettle();
       expect(microphone.opens, 0);
+      expect(uses, isEmpty);
       expect(heard.single['status'], 'closed');
       expect(
         heard.single['reason'],
@@ -245,6 +298,8 @@ void main() {
       await tester.pumpAndSettle();
       expect(heard.last['reason'], 'Voice took the microphone.');
       expect(taken.closes, 1);
+      // A refusal was never a use; being taken ended one.
+      expect(uses.map((use) => use.ending), [PluginPageDeviceEndingV1.taken]);
     });
 
     testWidgets('closes when the app goes away or the page leaves', (
@@ -265,8 +320,30 @@ void main() {
       await tester.pumpWidget(const MaterialApp(home: SizedBox()));
       await tester.pumpAndSettle();
       expect(microphone.closes, 2);
+      expect(uses.map((use) => use.ending), [
+        PluginPageDeviceEndingV1.background,
+        PluginPageDeviceEndingV1.left,
+      ]);
+      expect(uses.first.useId, isNot(uses.last.useId));
     });
   });
+}
+
+/// Records what the client sends, and answers as the route does.
+class ReportingApi extends NativeApi {
+  final sent = <(String, Object?)>[];
+  ReportingApi() : super(MemoryStore());
+
+  @override
+  Future<Object?> request(
+    String path, {
+    Object? body,
+    int limit = 512000,
+    bool authenticated = true,
+  }) async {
+    sent.add((path, body));
+    return {'status': 'recorded'};
+  }
 }
 
 /// Stands in for the host frame: records what the host posts to the page.

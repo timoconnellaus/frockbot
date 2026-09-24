@@ -40,6 +40,8 @@ const MAX_TOOL_NAME_LENGTH = 128;
 const DIGEST_PATTERN = /^[0-9a-f]{64}$/;
 const OCCURRENCE_PATTERN =
   /^tool:([1-9][0-9]{0,8}):([1-9][0-9]{0,8}):([0-9]{1,9})(?:\.[0-9]{1,9})?$/;
+/** `device:<useId>`, the id the client minted when the use began. */
+const DEVICE_OCCURRENCE_PATTERN = /^device:[A-Za-z0-9][A-Za-z0-9_-]{7,63}$/;
 
 export class AuditDecodeError extends Error {
   constructor(message: string) {
@@ -56,7 +58,8 @@ export class AuditDecodeError extends Error {
  * outlive the Turn). The kind is declared now so the table does not change
  * shape when they land.
  */
-export type AuditKindV1 = "shell" | "browser" | "mcp" | "file" | "process";
+export type AuditKindV1 =
+  "shell" | "browser" | "mcp" | "file" | "process" | "device";
 
 export const AUDIT_KINDS_V1: readonly AuditKindV1[] = [
   "shell",
@@ -64,6 +67,7 @@ export const AUDIT_KINDS_V1: readonly AuditKindV1[] = [
   "mcp",
   "file",
   "process",
+  "device",
 ];
 
 /**
@@ -101,6 +105,12 @@ export const AUDIT_TARGET_WORKSPACE_V1 = "workspace";
 export const AUDIT_TARGET_MACHINE_PREFIX_V1 = "machine:";
 /** A remote MCP server, `remote:<host>`. */
 export const AUDIT_TARGET_REMOTE_PREFIX_V1 = "remote:";
+/**
+ * The person's device a Plugin's page used an ability on, `device:<kind>` —
+ * `web`, `android`, `ios`, `macos` and the like, until devices have ids of
+ * their own (ADR 0035).
+ */
+export const AUDIT_TARGET_DEVICE_PREFIX_V1 = "device:";
 
 /**
  * One audited effect. Idempotent on `(botId, runId, occurrenceId)`.
@@ -115,9 +125,11 @@ export const AUDIT_TARGET_REMOTE_PREFIX_V1 = "remote:";
 export interface AuditEntryV1 {
   schemaVersion: 1;
   botId: string;
+  /** A `device` use happened in no run: its run id is its occurrence id. */
   runId: string;
-  /** `tool:<turn>:<step>:<ordinal>`. */
+  /** `tool:<turn>:<step>:<ordinal>`, or `device:<useId>` for a `device` use. */
   occurrenceId: string;
+  /** 0, with step and ordinal, for a `device` use, which no Turn issued. */
   turn: number;
   step: number;
   ordinal: number;
@@ -274,7 +286,7 @@ export function decodeAuditOccurrenceIdV1(value: unknown): {
   };
 }
 
-/** Whether a string is one of the three target shapes this schema allows. */
+/** Whether a string is one of the target shapes this schema allows. */
 export function isAuditTargetV1(value: string): boolean {
   if (value === AUDIT_TARGET_COMPUTER_V1) return true;
   if (value === AUDIT_TARGET_WORKSPACE_V1) return true;
@@ -284,6 +296,9 @@ export function isAuditTargetV1(value: string): boolean {
   }
   if (value.startsWith(AUDIT_TARGET_REMOTE_PREFIX_V1)) {
     return /^remote:[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$/.test(value);
+  }
+  if (value.startsWith(AUDIT_TARGET_DEVICE_PREFIX_V1)) {
+    return /^device:[a-z][a-z0-9-]{0,31}$/.test(value);
   }
   return false;
 }
@@ -341,13 +356,32 @@ export function decodeAuditEntryV1(input: unknown): AuditEntryV1 {
     MAX_ID_LENGTH,
     "audit entry",
   );
-  const coordinates = decodeAuditOccurrenceIdV1(occurrenceId);
+  const kind = auditKind(entry.kind, "audit entry");
+  const device = kind === "device";
+  // A device use was no Turn's: it has no coordinates to place it by, and
+  // saying 0 rather than inventing a Turn keeps "View activity details" off it.
+  if (device) {
+    if (
+      !DEVICE_OCCURRENCE_PATTERN.test(occurrenceId) ||
+      entry.runId !== occurrenceId
+    ) {
+      throw new AuditDecodeError(
+        "audit entry for a device use must be keyed by its use id",
+      );
+    }
+  }
+  const coordinates = device
+    ? { turn: 0, step: 0, ordinal: 0 }
+    : decodeAuditOccurrenceIdV1(occurrenceId);
   const at = text(entry, "at", MAX_TIMESTAMP_LENGTH, "audit entry");
   if (!Number.isFinite(Date.parse(at))) {
     throw new AuditDecodeError("audit entry.at must be a timestamp");
   }
   const target = text(entry, "target", MAX_TARGET_LENGTH, "audit entry");
-  if (!isAuditTargetV1(target)) {
+  if (
+    !isAuditTargetV1(target) ||
+    device !== target.startsWith(AUDIT_TARGET_DEVICE_PREFIX_V1)
+  ) {
     throw new AuditDecodeError(`audit entry.target "${target}" is invalid`);
   }
   const argumentDigest = text(entry, "argumentDigest", 64, "audit entry");
@@ -357,9 +391,9 @@ export function decodeAuditEntryV1(input: unknown): AuditEntryV1 {
   // The coordinates are carried as well as encoded so a reader need not parse
   // the id, and checked against it so the two can never disagree.
   if (
-    integer(entry, "turn", { min: 1, max: 1e9 }, "audit entry") !==
+    integer(entry, "turn", { min: device ? 0 : 1, max: 1e9 }, "audit entry") !==
       coordinates.turn ||
-    integer(entry, "step", { min: 1, max: 1e9 }, "audit entry") !==
+    integer(entry, "step", { min: device ? 0 : 1, max: 1e9 }, "audit entry") !==
       coordinates.step ||
     integer(entry, "ordinal", { min: 0, max: 1e9 }, "audit entry") !==
       coordinates.ordinal
@@ -378,7 +412,7 @@ export function decodeAuditEntryV1(input: unknown): AuditEntryV1 {
     ordinal: coordinates.ordinal,
     effectId: identifier(entry, "effectId", "audit entry"),
     at,
-    kind: auditKind(entry.kind, "audit entry"),
+    kind,
     target,
     toolName: text(entry, "toolName", MAX_TOOL_NAME_LENGTH, "audit entry"),
     argumentDigest,

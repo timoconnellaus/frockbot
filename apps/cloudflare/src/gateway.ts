@@ -6,6 +6,7 @@ import {
   decodeBotPluginsCommandV1,
 } from "@frockbot/app/plugins/page";
 import { decodePanelFocusCommandV1 } from "@frockbot/app/plugins/panels";
+import { decodeDeviceUseCommandV1 } from "@frockbot/app/audit";
 import { accessEmailV1 } from "@frockbot/app/admin/shared";
 import {
   admissionRefusedResponse,
@@ -845,6 +846,43 @@ export function createGateway(
           return jsonError(400, result.failure);
         }
         return Response.json(result.focus, {
+          headers: { "cache-control": "no-store" },
+        });
+      } catch (error) {
+        if (error instanceof ConfigurationDecodeError) {
+          return jsonError(400, "invalid bot id");
+        }
+        return jsonError(503, "Panels are temporarily unavailable.");
+      }
+    }
+
+    const botPanelsDeviceUseMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/panels\/device-use$/,
+    );
+    if (botPanelsDeviceUseMatch) {
+      if (request.method !== "POST") {
+        return jsonError(405, "method not allowed");
+      }
+      try {
+        const botId = decodeBotPathSegment(botPanelsDeviceUseMatch[1]);
+        let use;
+        try {
+          use = decodeDeviceUseCommandV1(await request.json());
+        } catch (error) {
+          return jsonError(
+            400,
+            error instanceof Error && !(error instanceof SyntaxError)
+              ? error.message
+              : "invalid device use",
+          );
+        }
+        const result = await dependencies
+          .botConfigurationFor(userId, botId)
+          .recordPanelDeviceUse({ schemaVersion: 1, userId, botId, use });
+        if (result.status === "refused") {
+          return jsonError(400, result.reason);
+        }
+        return Response.json(result, {
           headers: { "cache-control": "no-store" },
         });
       } catch (error) {

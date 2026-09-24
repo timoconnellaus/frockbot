@@ -127,8 +127,9 @@ every later cleanup of Applet leftovers.
 > ability is declared as `"device": {"abilities": ["microphone"]}` beside
 > the `device` grant, and only on a Plugin with a page. A page is the
 > weakest owner of the microphone: it gets it only when nobody holds it, and
-> dictation or a call takes it back. No audit row is written yet; the
-> host-drawn bar and its Stop are how a person sees and ends it.
+> dictation or a call takes it back. Until devices have ids of their own
+> (ADR 0035), the audit row names the kind of device the use was on — `web`,
+> `android`, `macos` — rather than the Device.
 
 ### The frame
 

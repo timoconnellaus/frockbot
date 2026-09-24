@@ -308,7 +308,12 @@ import {
 import {
   AuditOutboxV1,
   auditEntriesFromStoredRunV1,
+  auditEntryForDeviceUseV1,
+  decodeDeviceUseV1,
+  DEVICE_USE_PAGE_DONE_V1,
+  DeviceUseLogV1,
   type AuditSinkV1,
+  type DeviceUseV1,
 } from "@frockbot/app/audit";
 import {
   createBotAuditEntryPageV1,
@@ -379,6 +384,7 @@ import { executeBotPluginToolV1 } from "@frockbot/app/plugins/views-bot";
 import {
   applyPanelFocusV1,
   openFocusedPanelV1,
+  panelDeviceUserV1,
   readFocusedPanelV1,
 } from "@frockbot/app/plugins/panels-bot";
 import { cleanBotAppletsV1 } from "./plugin-panels-cleanup.js";
@@ -1486,6 +1492,44 @@ export class BotState
     );
   }
 
+  /**
+   * Records a Plugin page's use of a device ability once the client that
+   * opened it says it has ended. Kept here first, so a rebuild reproduces the
+   * row, then queued like any other; a retry of the same use is one row.
+   */
+  async recordPanelDeviceUse(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      use: rpcDecoded(decodeDeviceUseV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    const use = request.use as DeviceUseV1;
+    const user = await panelDeviceUserV1(shell.state, identity, use);
+    if ("refused" in user) {
+      return { status: "refused" as const, reason: user.refused };
+    }
+    const entry = await auditEntryForDeviceUseV1(
+      identity.botId,
+      use,
+      user.displayName,
+    );
+    await new DeviceUseLogV1(this.ctx.storage).record(entry);
+    if (this.backendEnv.AUDIT_SINK) {
+      // Appended even for a retry: the outbox and the table are both keyed
+      // by the use, so a second append is one row, and a first append lost
+      // between the two writes is not.
+      await this.auditOutbox().append([entry]);
+      await this.drainAuditOutbox();
+    }
+    return { status: "recorded" as const };
+  }
+
   async setFocusedPanel(input: unknown) {
     const request = decodeRpcEnvelopeV1(
       input,
@@ -2362,9 +2406,24 @@ export class BotState
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
     const cursor = request.cursor as string | undefined;
+    // Device uses come from no run, so this object's own record of them is
+    // the first page; the runs follow from their start.
+    if (cursor === undefined) {
+      const devices = await new DeviceUseLogV1(this.ctx.storage).entries();
+      if (devices.length > 0) {
+        return {
+          schemaVersion: 1 as const,
+          botId: identity.botId,
+          entries: devices,
+          nextCursor: DEVICE_USE_PAGE_DONE_V1,
+        };
+      }
+    }
     return createBotAuditEntryPageV1(
       identity.botId,
-      await shell.listRunEventPage(cursor),
+      await shell.listRunEventPage(
+        cursor === DEVICE_USE_PAGE_DONE_V1 ? undefined : cursor,
+      ),
     );
   }
 

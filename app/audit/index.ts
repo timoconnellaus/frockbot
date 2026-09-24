@@ -23,3 +23,15 @@ export {
   type AuditSqlV1,
   type AuditSqlValueV1,
 } from "./store.js";
+export {
+  auditEntryForDeviceUseV1,
+  decodeDeviceUseCommandV1,
+  decodeDeviceUseV1,
+  DEVICE_USE_PAGE_DONE_V1,
+  DEVICE_USE_ENDINGS_V1,
+  DEVICE_USE_LOG_KEY_V1,
+  DEVICE_USE_LOG_MAX_V1,
+  DeviceUseLogV1,
+  type DeviceUseEndingV1,
+  type DeviceUseV1,
+} from "./device.js";

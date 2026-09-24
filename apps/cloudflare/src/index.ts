@@ -560,6 +560,7 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
     executeBotPluginTool: (request) => rpc.executeBotPluginTool(request),
     openFocusedPanel: (request) => rpc.openFocusedPanel(request),
     setFocusedPanel: (request) => rpc.setFocusedPanel(request),
+    recordPanelDeviceUse: (request) => rpc.recordPanelDeviceUse(request),
     listRoutines: (request) => rpc.listRoutines(request),
     readRoutinesFrame: (request) => rpc.readRoutinesFrame(request),
     listTasks: (request) => rpc.listTasks(request),

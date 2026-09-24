@@ -468,3 +468,47 @@ export function omittedPanelNoticesV1(
   }
   return notices;
 }
+
+/**
+ * The name a device use is recorded under, when this Bot's Composition holds
+ * the Plugin, the surface is one of its pages, and its descriptor declares the
+ * ability. Whether it is still switched on is not asked: the use happened.
+ */
+export function panelDeviceUserFromRosterV1(
+  roster: BotPluginRosterV1,
+  use: { pluginId: string; surfaceId: string; ability: string },
+): { displayName: string } | { refused: string } {
+  const member = roster.members.find(
+    (candidate) => candidate.packageId === use.pluginId,
+  );
+  const page = member?.descriptor.views?.some(
+    (view) =>
+      view.slot === "conversation.panel" &&
+      view.surfaceId === use.surfaceId &&
+      view.page !== undefined,
+  );
+  if (!member || !page) {
+    return { refused: `"${use.pluginId}" has no page "${use.surfaceId}".` };
+  }
+  if (
+    !member.descriptor.device?.abilities.some(
+      (ability) => ability === use.ability,
+    )
+  ) {
+    return {
+      refused: `"${use.pluginId}" was not allowed the ${use.ability}.`,
+    };
+  }
+  return { displayName: member.descriptor.displayName };
+}
+
+export async function panelDeviceUserV1(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+  use: { pluginId: string; surfaceId: string; ability: string },
+): Promise<{ displayName: string } | { refused: string }> {
+  return panelDeviceUserFromRosterV1(
+    await readBotPluginRosterV1(state, identity),
+    use,
+  );
+}

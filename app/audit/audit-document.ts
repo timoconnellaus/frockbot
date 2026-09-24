@@ -23,6 +23,7 @@ import {
   AUDIT_TARGET_COMPUTER_V1,
   AUDIT_TARGET_MACHINE_PREFIX_V1,
   AUDIT_TARGET_REMOTE_PREFIX_V1,
+  AUDIT_TARGET_DEVICE_PREFIX_V1,
   AUDIT_TARGET_WORKSPACE_V1,
   type AuditEntryV1,
   type AuditIndexStateV1,
@@ -64,6 +65,18 @@ const KIND_LABELS: Record<AuditKindV1, string> = {
   mcp: "Connected services",
   file: "Files",
   process: "Processes",
+  device: "Device",
+};
+
+/** The device kinds a client reports, in the words the person uses. */
+const DEVICE_LABELS: Record<string, string> = {
+  // Not "Browser", which is the Browser kind's filter.
+  web: "Web browser",
+  android: "Android",
+  ios: "iPhone",
+  macos: "Mac",
+  windows: "Windows",
+  linux: "Linux",
 };
 const IDENTIFIER: ActionValueSchema = { type: "string", maxLength: 128 };
 const KIND: ActionValueSchema = {
@@ -90,7 +103,21 @@ export function auditTargetLabelV1(target: string): string {
   if (target.startsWith(AUDIT_TARGET_REMOTE_PREFIX_V1)) {
     return target.slice(AUDIT_TARGET_REMOTE_PREFIX_V1.length);
   }
+  if (target.startsWith(AUDIT_TARGET_DEVICE_PREFIX_V1)) {
+    const device = target.slice(AUDIT_TARGET_DEVICE_PREFIX_V1.length);
+    return DEVICE_LABELS[device] ?? device;
+  }
   return target;
+}
+
+/** How long a device use lasted, the way a person says it. */
+function lastedV1(ms: number): string {
+  const seconds = Math.round(ms / 1_000);
+  if (seconds < 60) return `${seconds} s`;
+  const minutes = Math.floor(seconds / 60);
+  return seconds % 60 === 0
+    ? `${minutes} min`
+    : `${minutes} min ${seconds % 60} s`;
 }
 
 /**
@@ -178,7 +205,13 @@ function entryNode(
     entry.toolName,
     auditTargetLabelV1(entry.target),
     auditMomentV1(entry.at),
-    ...(entry.durationMs === undefined ? [] : [`${entry.durationMs} ms`]),
+    ...(entry.durationMs === undefined
+      ? []
+      : [
+          entry.kind === "device"
+            ? lastedV1(entry.durationMs)
+            : `${entry.durationMs} ms`,
+        ]),
   ].join(" · ");
   return {
     type: "group",
@@ -194,11 +227,16 @@ function entryNode(
             },
           ]
         : []),
-      press("open-run", "View activity details", {
-        kind: "open-run",
-        runId: entry.runId,
-        botId: entry.botId,
-      }),
+      // A device use was no Turn's, so there is no activity to open.
+      ...(entry.kind === "device"
+        ? []
+        : [
+            press("open-run", "View activity details", {
+              kind: "open-run",
+              runId: entry.runId,
+              botId: entry.botId,
+            }),
+          ]),
     ],
   };
 }
@@ -213,7 +251,7 @@ export function auditDocumentV1(frame: AuditFrameV1): ViewDocument {
     ),
     {
       type: "text",
-      text: `${frame.botId ? "This Bot" : "All your Bots"} · Recorded computer actions, connected service calls and file changes. Command details aren’t stored.`,
+      text: `${frame.botId ? "This Bot" : "All your Bots"} · Recorded computer actions, connected service calls, file changes and microphone use. Command details aren’t stored.`,
     },
     // One action per kind rather than a `list`: a `list` row carries no input,
     // so a row could not say which kind it means, and the whole of a filter is
