@@ -468,6 +468,29 @@ abstract final class MachineIds {
   static const pairingDismiss = 'machine-pairing-dismiss';
 }
 
+/// Email: one Bot's inbound address, and the addresses allowed to write to it.
+abstract final class EmailIds {
+  static const settingsRow = 'bot-email';
+  static const page = 'bot-email-page';
+  static const unavailable = 'bot-email-unavailable';
+  static const address = 'bot-email-address';
+  static const create = 'bot-email-create';
+  static const copy = 'bot-email-copy';
+  static const rotate = 'bot-email-rotate';
+  static const rotateConfirm = 'bot-email-rotate-confirm';
+  static const remove = 'bot-email-remove';
+  static const removeConfirm = 'bot-email-remove-confirm';
+  static const senderField = 'bot-email-sender-field';
+  static const senderAdd = 'bot-email-sender-add';
+  static const check = 'bot-email-check';
+  static String sender(String address) => 'bot-email-sender-$address';
+  static String senderRemove(String address) =>
+      'bot-email-sender-remove-$address';
+  static String senderRenew(String address) =>
+      'bot-email-sender-renew-$address';
+  static String code(String address) => 'bot-email-code-$address';
+}
+
 /// Audit: every effect a Bot performed, and what the log can and cannot say.
 abstract final class AuditIds {
   static const document = 'audit-document';

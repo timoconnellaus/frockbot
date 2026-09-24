@@ -588,6 +588,28 @@ describe("client run protocol v1", () => {
     ).toEqual({ kind: "voice" });
   });
 
+  test("marks the person's message as emailed, never naming the message", () => {
+    const written = {
+      ...storedRun([]),
+      admission: {
+        schemaVersion: 1 as const,
+        turnType: "chat" as const,
+        origin: { kind: "email" as const, messageId: "abc@mail.example.com" },
+      },
+    };
+
+    const projected = projectClientRunV1(written);
+    expect(projected.via).toEqual({ kind: "email" });
+    expect(isProtocolValue("Run", projected)).toBe(true);
+    expect(
+      decodeClientRunListV1({
+        schemaVersion: 1,
+        runs: [projected],
+        page: { truncated: false },
+      })[0]?.via,
+    ).toEqual({ kind: "email" });
+  });
+
   test("refuses a voice origin marker carrying a Bot's fields", () => {
     const [degraded] = decodeClientRunListV1({
       schemaVersion: 1,

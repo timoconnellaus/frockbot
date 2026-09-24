@@ -593,13 +593,41 @@ class _TranscriptViewState extends State<TranscriptView> {
       return _Announcement(text: line.text);
     }
     if (line.role == LineRole.user) {
+      // Where the person wrote it, when that was not here.
+      final caption = switch (line.via) {
+        'email' => 'via email',
+        _ => null,
+      };
       final words = line.text.isEmpty
           ? null
           : _bubble(
               id: line.id,
               mine: true,
               time: _stamped[line.id],
-              child: Text(line.text),
+              child: caption != null
+                  ? Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(line.text),
+                        const SizedBox(height: 4),
+                        // In the bubble's own ink, quieter: whatever colour the
+                        // person's bubble is, the caption stays readable on it.
+                        Builder(
+                          builder: (context) => Text(
+                            caption,
+                            style: Theme.of(context).textTheme.labelSmall
+                                ?.copyWith(
+                                  color: DefaultTextStyle.of(context)
+                                      .style
+                                      .color
+                                      ?.withValues(alpha: 0.72),
+                                ),
+                          ),
+                        ),
+                      ],
+                    )
+                  : Text(line.text),
             );
       // The files go above the words, outside the bubble: a picture is its
       // own thing to look at, not a line of text.

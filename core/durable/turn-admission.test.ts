@@ -319,6 +319,32 @@ describe("the admission record names what produced the Turn", () => {
     );
   });
 
+  test("an email origin is the person's own chat Turn, keyed by the Message-ID", () => {
+    const withOrigin = (origin: unknown) =>
+      legacyRun({
+        admission: { schemaVersion: 1, turnType: "chat", origin },
+      } as never);
+    const origin: StoredRunOriginV1 = {
+      kind: "email",
+      messageId: "CAF=abc123@mail.gmail.com",
+    };
+    const decoded = codec.require(withOrigin(origin));
+
+    expect(decoded.admission?.origin).toEqual(origin);
+    expect(storedRunLaneV1(decoded)).toBe("user");
+    expect(storedRunIsDeliveryV1(decoded)).toBe(false);
+    expect(codec.require(structuredClone(decoded))).toEqual(decoded);
+
+    expect(() =>
+      codec.require(withOrigin({ ...origin, from: "tim@example.com" })),
+    ).toThrow(/invalid admission origin fields/);
+    for (const messageId of ["<a@b>", "has space@b", "", "x".repeat(251)]) {
+      expect(() => codec.require(withOrigin({ ...origin, messageId }))).toThrow(
+        /invalid admission origin id/,
+      );
+    }
+  });
+
   test("a voice origin cannot borrow another origin's fields", () => {
     const withOrigin = (origin: unknown) =>
       legacyRun({

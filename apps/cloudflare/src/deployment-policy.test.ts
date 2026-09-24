@@ -44,6 +44,11 @@ class MemoryStorage {
       this.values.set(key, structuredClone(value));
     },
     delete: (key: string): boolean => this.values.delete(key),
+    list: <T>({ prefix }: { prefix: string }): Iterable<[string, T]> =>
+      [...this.values.entries()]
+        .filter(([key]) => key.startsWith(prefix))
+        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
+        .map(([key, value]) => [key, structuredClone(value) as T]),
   };
 
   transactionSync<T>(callback: () => T): T {
@@ -536,5 +541,48 @@ describe("hosted model rates", () => {
     await expect(again.readModelRates({ schemaVersion: 2 })).rejects.toThrow(
       "schemaVersion is invalid",
     );
+  });
+});
+
+describe("the inbound email directory", () => {
+  const first = "a".repeat(64);
+  const second = "b".repeat(64);
+
+  test("names a Bot by its token's digest until the address rotates, and forgets a deleted account's", async () => {
+    const { policy } = authority();
+    const resolve = (tokenDigest: string) =>
+      policy.resolveInboundEmailAddress({ schemaVersion: 1, tokenDigest });
+    await policy.registerInboundEmailAddress({
+      schemaVersion: 1,
+      userId: "alice",
+      botId: "fox",
+      tokenDigest: first,
+    });
+    expect(await resolve(first)).toEqual({
+      schemaVersion: 1,
+      recipient: { userId: "alice", botId: "fox" },
+    });
+    await policy.registerInboundEmailAddress({
+      schemaVersion: 1,
+      userId: "alice",
+      botId: "fox",
+      tokenDigest: second,
+    });
+    expect(await resolve(first)).toEqual({ schemaVersion: 1, recipient: null });
+    await policy.forgetAccount({ schemaVersion: 1, userId: "alice" });
+    expect(await resolve(second)).toEqual({
+      schemaVersion: 1,
+      recipient: null,
+    });
+  });
+
+  test("refuses a token that is not a digest", async () => {
+    const { policy } = authority();
+    await expect(
+      policy.resolveInboundEmailAddress({
+        schemaVersion: 1,
+        tokenDigest: "abcdefghijklmnopqrstuvwxyz",
+      }),
+    ).rejects.toThrow();
   });
 });

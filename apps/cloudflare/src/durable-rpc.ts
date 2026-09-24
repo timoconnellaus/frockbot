@@ -9,6 +9,7 @@ import { decodeRunIdV1 } from "@frockbot/app/shell/backend-contracts";
 import {
   decodeStoredRunCauseV1,
   type StoredRunCauseV1,
+  type StoredRunEmailOriginV1,
   type StoredRunGroupOriginV1,
 } from "@frockbot/core/durable";
 import {
@@ -630,6 +631,66 @@ export function decodeBotAgentRunRpcV1(
     botId: request.botId as string,
     command,
   };
+}
+
+export interface DecodedBotEmailTurnRpcV1 {
+  schemaVersion: 1;
+  userId: string;
+  botId: string;
+  command: {
+    runId: string;
+    sessionId: string;
+    acceptedAt: string;
+    text: string;
+    /** Refs only: the Bot resolves each against its own uploads. */
+    attachments?: UploadRefV1[];
+    origin: StoredRunEmailOriginV1;
+  };
+}
+
+/**
+ * Internal-only email admission: the person, writing from one of their
+ * confirmed mailboxes, into this Bot's own conversation. Its own door so that
+ * the one caller able to name an `email` origin is the Worker's `email()`
+ * handler, after the User object accepted the sender; the HTTP Turn decoder
+ * cannot name it.
+ */
+export function decodeBotEmailTurnRpcV1(
+  input: unknown,
+): DecodedBotEmailTurnRpcV1 {
+  const request = decodeRpcEnvelopeV1(input, {
+    userId: rpcIdentifier,
+    botId: rpcBotId,
+    command: rpcObject(
+      {
+        runId: rpcPattern(/^em-[0-9a-f]{64}$/, 67),
+        sessionId: rpcString(257),
+        acceptedAt: rpcString(64),
+        text: rpcTurnText(32_000),
+        origin: rpcObject({
+          kind: rpcPattern(/^email$/, 5),
+          messageId: rpcPattern(/^[\x21-\x3b\x3d\x3f-\x7e]{1,250}$/, 250),
+        }),
+      },
+      {
+        attachments: (value, label) => decodeUploadRefsV1(value, label),
+      },
+    ),
+  });
+  const userId = request.userId as string;
+  const botId = request.botId as string;
+  const command = request.command as DecodedBotEmailTurnRpcV1["command"];
+  requireTurnCommandContentV1(command);
+  if (command.sessionId !== `${userId}:${botId}`) {
+    throw new Error("email RPC request.command.sessionId is invalid");
+  }
+  if (!Number.isFinite(Date.parse(command.acceptedAt))) {
+    throw new Error("email RPC request.command.acceptedAt is invalid");
+  }
+  if (new TextEncoder().encode(command.text).byteLength > 32_000) {
+    throw new Error("email RPC request.command.text is invalid");
+  }
+  return { schemaVersion: 1, userId, botId, command };
 }
 
 export interface DecodedBotGroupTurnRpcV1 {

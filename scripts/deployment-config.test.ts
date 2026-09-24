@@ -375,6 +375,28 @@ describe("the generator", () => {
     );
   });
 
+  test("gives the app Worker the inbound email domain the profile names", () => {
+    const hosted = generateWorkerConfigV1("app", {
+      profile: loadProfileV1("hosted"),
+    });
+    expect((hosted.config.vars as Config).INBOUND_EMAIL_DOMAIN).toBeUndefined();
+    const profile = {
+      ...loadProfileV1("hosted"),
+      inboundEmail: { domain: "in.frockbot.com" },
+    };
+    validateProfileV1(profile, "a profile");
+    const app = generateWorkerConfigV1("app", { profile });
+    expect((app.config.vars as Config).INBOUND_EMAIL_DOMAIN).toBe(
+      "in.frockbot.com",
+    );
+    expect(() =>
+      validateProfileV1(
+        { ...profile, inboundEmail: { domain: "not a domain" } },
+        "a profile",
+      ),
+    ).toThrow(/inboundEmail/);
+  });
+
   test("aliases the sign-in Package the profile builds", () => {
     // The whole of how a deployment chooses its auth Package: the tracked source
     // resolves `#auth-package` to the better-auth chooser, and this alias is what

@@ -448,6 +448,8 @@ Admission is closed by default. Set `FROCKBOT_ADMIN_EMAILS` to one or more comma
 
 `MACHINE_TOKEN_SECRET` is generated the same way and on the same terms. Every registered machine's token and every pairing code is `HMAC-SHA256` over its own claims under this secret, verified at the edge before any Durable Object is addressed. Rotating it un-enrols every registered machine, which then has to be paired again; without it set, enrollment and every machine route answer `503` rather than admitting a caller nothing could verify.
 
+Email your Bot needs no secret: it is on when the deployment profile names `inboundEmail.domain` and that domain's Email Routing catch-all sends to the app Worker. The steps are in [`scripts/deployment-config/README.md`](scripts/deployment-config/README.md#inbound-email).
+
 `COMPUTER_HOST_TOKEN` is not obtained from anywhere — generate it, once, with `openssl rand -hex 32`, and add it as a GitHub `production` secret. It is checked inside the container as well as at the host Worker, because the service binding is not the only route to that port. Rotating it means redeploying both Workers together.
 
 `./scripts/setup-production.sh` is this profile's wizard: it creates the scoped Cloudflare token, configures the Google OAuth web client, and saves the generated platform secrets as GitHub `production` environment values. It creates no Cloudflare resource, and it is not `bun run setup`, which installs the simple profile into a deployer's own account. Run it, then add `FROCKBOT_ADMIN_EMAILS` to the `production` environment and verify the completed configuration.

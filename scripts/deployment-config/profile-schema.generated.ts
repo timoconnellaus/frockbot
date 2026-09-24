@@ -162,6 +162,18 @@ export const DEPLOYMENT_PROFILE_SCHEMA_V1 = {
         },
       },
     },
+    inboundEmail: {
+      description:
+        "Email your Bot. The domain whose Email Routing catch-all sends every message to the app Worker's `email()` handler; each Bot's address is a random token at it. It becomes the app Worker's `INBOUND_EMAIL_DOMAIN` var. Absent, no Bot has an address and the Bot's Email page says email is not set up. The routing rule itself is set up in Cloudflare by hand: see `scripts/deployment-config/README.md`.",
+      type: "object",
+      additionalProperties: false,
+      required: ["domain"],
+      properties: {
+        domain: {
+          $ref: "#/$defs/hostname",
+        },
+      },
+    },
     nativeAuth: {
       description:
         "The native returns this deployment serves: `android`, the released Mac and iPhone apps (`macos`, `ios`), and the FrockBot Dev builds (`macos-dev`, `ios-dev`), each named only where such a build signs in. Nothing is implied by another entry. Absent, the deployment offers no native sign-in at all.",

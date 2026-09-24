@@ -282,6 +282,9 @@ function identityVarsV1(
     vars.ACCESS_TEAM_DOMAIN = profile.access.teamDomain;
     vars.ACCESS_AUD = profile.access.aud;
   }
+  if (profile.inboundEmail) {
+    vars.INBOUND_EMAIL_DOMAIN = profile.inboundEmail.domain;
+  }
   return vars;
 }
 

@@ -87,7 +87,8 @@ The tracked file, with identity applied:
 The identity vars the app Worker gains: `NATIVE_SLICE_2_AUTH` (the profile's
 `nativeAuth` list, comma-joined),
 `FROCK_AI_GATEWAY_ID`, `FROCK_AI_ACCOUNT_ID`, `FROCK_AI_AUTO_ROUTE`, and `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` when the profile
-builds the Access auth Package. `FROCK_AI_ACCOUNT_ID` is what selects the compat
+builds the Access auth Package, and `INBOUND_EMAIL_DOMAIN` when the profile
+names `inboundEmail` (below). `FROCK_AI_ACCOUNT_ID` is what selects the compat
 HTTP transport, the only one that accepts a `dynamic/<route>` model
 (cloudflare/ai#617); a profile with no `aiGateway` takes the `AI` binding, where
 Auto resolves to a concrete Workers AI model instead.
@@ -106,6 +107,40 @@ Some fields keep a placeholder rather than nothing: wrangler's validator refuses
 `adminEmails` is in the schema and in no generated config. It is the
 `FROCKBOT_ADMIN_EMAILS` secret the installer sets; the hosted deployment already
 carries it as a repository secret, which is why `hosted.json` omits it.
+
+## Inbound email
+
+Email your Bot is off until a profile names a domain for it:
+
+```json
+"inboundEmail": { "domain": "in.frockbot.com" }
+```
+
+That becomes the app Worker's `INBOUND_EMAIL_DOMAIN` var, and each Bot's
+address is a random token at it (`docs/architecture.md`, "By email"). The
+generator writes the var; the mail itself is routed in Cloudflare, by hand,
+once per deployment:
+
+1. Use a domain, or a subdomain, that receives no other mail — every address
+   at it is a Bot's. A subdomain of the app's zone (`in.frockbot.com`) is the
+   simple choice.
+2. In the Cloudflare dashboard, open that zone → **Email** → **Email
+   Routing** and enable it for the domain (for a subdomain, add it under
+   **Settings → Subdomains**). Cloudflare adds the MX and SPF records it asks
+   for; accept them. No destination address is needed.
+3. Under **Routing rules**, set the **Catch-all address** to **Send to a
+   Worker** and choose the app Worker (`frockbot-cloudflare` for the hosted
+   profile), then enable the catch-all.
+4. Add `inboundEmail` to the profile, and deploy. Until this deploy lands,
+   the Worker has no domain and refuses every message it is handed.
+5. Check it: in the app, open a Bot's settings → Email → Create address, and
+   send it a message from your sign-in address. The Worker logs one
+   `inbound-email` line per message with its outcome; a `rejected` with code
+   `unauthenticated` means the message carried no DMARC verdict the Worker
+   believes (`docs/known-issues.md` 51).
+
+Removing `inboundEmail` turns email off again: every message is refused, and
+the addresses already made start working again when it comes back.
 
 ## The equivalence gate
 

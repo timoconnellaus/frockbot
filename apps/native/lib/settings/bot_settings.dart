@@ -4,6 +4,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 
 import '../client/transport.dart';
+import '../email/page.dart';
 import '../flock/avatar.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
@@ -998,6 +999,9 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                         onTap: open,
                       ),
                     ),
+                  // Writing to this Bot from a mailbox: its own page, which
+                  // reads the address when it opens.
+                  botEmailRow(context, api: state.api, botId: state.botId),
                 ],
               ),
               if (widget.dangerZone case final Widget zone) ...[

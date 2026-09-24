@@ -90,6 +90,8 @@ test("Settings is one level under the Bot page, in one card grammar", async ({
   // the model row is always there.
   await expect(sem(page, "bot-settings-plugins")).toBeVisible();
   await expect(sem(page, "bot-model")).toBeVisible();
+  // Email is a door too: the row reads nothing until its page opens.
+  await expect(sem(page, "bot-email")).toBeVisible();
   // Two rows rather than a tinted panel of two different button shapes.
   await expect(sem(page, "flock-danger-zone")).toBeVisible();
   await expect(sem(page, "flock-archive-bot")).toBeVisible();

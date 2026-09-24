@@ -45,6 +45,16 @@
           },
           "required": ["kind"],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "kind": {
+              "const": "email"
+            }
+          },
+          "required": ["kind"],
+          "additionalProperties": false
         }
       ]
     },

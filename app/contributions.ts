@@ -65,6 +65,10 @@ import {
   backendContribution as mcpGatewayContribution,
   type McpGatewayHost,
 } from "@frockbot/app/mcp/backend";
+import {
+  backendContribution as inboundEmailGatewayContribution,
+  type InboundEmailGatewayHostV1,
+} from "@frockbot/app/email/backend";
 
 import {
   userContribution as settingsUserContribution,
@@ -135,6 +139,7 @@ export {
   subagentsGatewayContribution,
   machineGatewayContribution,
   mcpGatewayContribution,
+  inboundEmailGatewayContribution,
   settingsUserContribution,
   credentialsUserContribution,
   connectUserContribution,
@@ -224,6 +229,7 @@ export type FoundationGatewayHost = {
   SubagentsGatewayHost &
   MachineGatewayHostV1 &
   McpGatewayHost &
+  InboundEmailGatewayHostV1 &
   SearchGatewayHost &
   AuditGatewayHost;
 
@@ -301,6 +307,7 @@ export const backendDescriptorsV1: readonly AnyBackendDescriptor[] = [
   subagentsGatewayContribution,
   machineGatewayContribution,
   mcpGatewayContribution,
+  inboundEmailGatewayContribution,
   settingsUserContribution,
   credentialsUserContribution,
   connectUserContribution,

@@ -210,7 +210,26 @@ export interface StoredRunInputDeliveryOriginV1 {
   inputId: string;
 }
 
-/** What produced a Turn, when it was not a person speaking to the Bot. */
+/**
+ * The person writing to the Bot's inbound address from one of their confirmed
+ * mailboxes rather than from the app.
+ *
+ * The one origin that is still the person: it runs on the user lane as an
+ * ordinary chat Turn, steers like a typed message, and is drawn as their own
+ * bubble. What the origin adds is where the words came from, so the thread can
+ * say so. `messageId` is the message's Message-ID without its angle brackets;
+ * the run id is derived from it and the recipient, so a redelivered message is
+ * one Turn.
+ */
+export interface StoredRunEmailOriginV1 {
+  kind: "email";
+  messageId: string;
+}
+
+/**
+ * What produced a Turn, when it was not a person typing in the app: work the
+ * Bot or another caller started, or the person writing by email.
+ */
 export type StoredRunOriginV1 =
   | StoredRunRoutineOriginV1
   | StoredRunRoutineDeliveryOriginV1
@@ -219,7 +238,8 @@ export type StoredRunOriginV1 =
   | StoredRunHandoffOriginV1
   | StoredRunBotOriginV1
   | StoredRunVoiceOriginV1
-  | StoredRunGroupOriginV1;
+  | StoredRunGroupOriginV1
+  | StoredRunEmailOriginV1;
 
 /**
  * How deep a hand-off chain may go. One: a Turn a person or a Routine started
@@ -762,6 +782,16 @@ function decodeStoredRunOrigin(
       voiceTurnId: candidate.voiceTurnId,
       requestId: candidate.requestId,
     };
+  }
+  if (candidate.kind === "email") {
+    requireExactOriginFields(candidate, ["kind", "messageId"], runId);
+    if (
+      !boundedString(candidate.messageId, 250) ||
+      !/^[\x21-\x3b\x3d\x3f-\x7e]+$/.test(candidate.messageId)
+    ) {
+      throw new Error(`run "${runId}" has an invalid admission origin id`);
+    }
+    return { kind: "email", messageId: candidate.messageId };
   }
   if (candidate.kind === "routine-delivery") {
     requireExactOriginFields(candidate, ["kind", "wakeRunId"], runId);

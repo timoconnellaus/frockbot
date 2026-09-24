@@ -135,6 +135,9 @@ export default defineConfig({
           // mint the token a machine presents and forge one that must be
           // refused.
           MACHINE_TOKEN_SECRET: "workerd-machine-token-secret-0123456789ab",
+          // The domain `email.integration.ts` addresses its messages to, as
+          // Email Routing would hand them to `email()`.
+          INBOUND_EMAIL_DOMAIN: "in.frock.test",
         },
         // Deliberately absent, and why:
         //
