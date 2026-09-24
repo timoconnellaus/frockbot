@@ -62,32 +62,54 @@ describe("detached compaction", () => {
   test("writes through the last Turn's Session until a Turn is admitted", async () => {
     const session = `session-${crypto.randomUUID()}`;
     const work = compactionWorkV1(session);
+    const turn1 = sessionNamed("turn-1");
+    const turn2 = sessionNamed("turn-2");
     const writers: string[] = [];
-    const write = () =>
-      work.write(async (owner) => {
+    const write = (through: Session) =>
+      work.write(through, async (owner) => {
         writers.push(owner.id);
       });
 
     // Before any Turn has ended there is no owner to write through.
-    expect(await write()).toBe(false);
-    work.adopt(sessionNamed("turn-1"));
-    expect(await write()).toBe(true);
+    expect(await write(turn1)).toBe(false);
+    work.adopt(turn1);
+    expect(await write(turn1)).toBe(true);
     // A Turn takes the log: nothing is written beside it.
     await admitTurnToSessionLogV1(session);
-    expect(await write()).toBe(false);
+    expect(await write(turn1)).toBe(false);
     // That Turn ends and owns the log in turn.
-    work.adopt(sessionNamed("turn-2"));
-    expect(await write()).toBe(true);
+    work.adopt(turn2);
+    expect(await write(turn2)).toBe(true);
     expect(writers).toEqual(["turn-1", "turn-2"]);
+  });
+
+  test("a run started by an earlier Turn writes nothing once a later Turn has ended", async () => {
+    const session = `session-${crypto.randomUUID()}`;
+    const work = compactionWorkV1(session);
+    const turn1 = sessionNamed("turn-1");
+    const turn2 = sessionNamed("turn-2");
+    work.adopt(turn1);
+    await admitTurnToSessionLogV1(session);
+    work.adopt(turn2);
+    // The earlier run's summariser calls are checked against its own
+    // Session, so nothing it writes may land through the later one.
+    const writers: string[] = [];
+    expect(
+      await work.write(turn1, async (owner) => {
+        writers.push(owner.id);
+      }),
+    ).toBe(false);
+    expect(writers).toEqual([]);
   });
 
   test("an admission waits out a write already under way, and only that", async () => {
     const session = `session-${crypto.randomUUID()}`;
     const work = compactionWorkV1(session);
-    work.adopt(sessionNamed("turn-1"));
+    const turn1 = sessionNamed("turn-1");
+    work.adopt(turn1);
     const flushing = gate();
     const order: string[] = [];
-    const writing = work.write(async () => {
+    const writing = work.write(turn1, async () => {
       await flushing.promise;
       order.push("write");
     });

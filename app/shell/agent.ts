@@ -734,7 +734,7 @@ export const shellAgentFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
         const log: CompactionLogV1 = {
           journal: session.activeRunJournal,
           append: (event) =>
-            work.write(async (owner) => {
+            work.write(session, async (owner) => {
               owner.append(event);
               await owner.flush();
             }),

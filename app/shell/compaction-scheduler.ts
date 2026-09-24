@@ -20,8 +20,10 @@
 // quickly. What admission must still guarantee is one writer on the session
 // log — each Turn's Session numbers events from its own counter. So admission
 // takes the log: the summariser runs on, and an outcome that arrives while a
-// Turn holds the log is parked, then written by the next Turn end, before that
-// Turn assesses anything. A Turn therefore always starts from whatever summary
+// Turn holds the log, or after a later Turn has ended, is parked, then written
+// by the next Turn end, before that Turn assesses anything. A run writes only
+// through the Session of the Turn that started it, because that Turn's
+// Composition is the one its summariser calls are checked against. A Turn therefore always starts from whatever summary
 // had landed by the end of the Turn before it.
 //
 // Keyed by session id and held for the lifetime of the isolate, because that is
@@ -86,15 +88,25 @@ class CompactionWork {
   }
 
   /**
-   * Writes through the Session that owns the log, if no Turn has been
-   * admitted since it ended. `false` means a Turn holds the log.
+   * Writes through `session` if it is the Session of the last Turn to end and
+   * no Turn has been admitted since. `false` means another Turn holds the log,
+   * or has ended since and carries the work on through its own Composition.
    */
-  async write(append: (session: Session) => Promise<void>): Promise<boolean> {
+  async write(
+    session: Session,
+    append: (session: Session) => Promise<void>,
+  ): Promise<boolean> {
     const owner = this.#owner;
-    if (!owner || owner.admissions !== this.#admissions) return false;
+    if (
+      !owner ||
+      owner.session !== session ||
+      owner.admissions !== this.#admissions
+    ) {
+      return false;
+    }
     // Checked and begun in one tick, so an admission that arrives now waits
     // for this write rather than racing it.
-    const writing = append(owner.session);
+    const writing = append(session);
     this.#writing = writing.catch(() => {});
     await writing;
     return true;
