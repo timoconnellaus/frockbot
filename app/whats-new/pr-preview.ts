@@ -17,7 +17,7 @@ export function whatsNewPullRequestCommentV1(
     MARKER_V1,
     "## What’s New preview",
     "",
-    "Stills and copy this pull request ships. The same list is `PREVIEW.md`.",
+    "Stills and copy this pull request ships, newest first.",
     "",
   ];
   for (const entry of WHATS_NEW_ENTRIES_V1) {

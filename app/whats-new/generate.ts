@@ -1,25 +1,44 @@
 /**
- * Writes `PREVIEW.md` and `media.generated.ts` from `entries.ts` and `media/`.
- * The Worker embeds the stills; it has no filesystem.
+ * Writes `entries.generated.ts` and `media.generated.ts` from `entries/` and
+ * `media/`. The Worker has no filesystem, so it imports every entry and
+ * embeds every still. Both lists are alphabetical, never newest first, so
+ * two pull requests that each add an entry change different lines.
  */
 import { readdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { WHATS_NEW_MEDIA_MAX_BYTES_V1 } from "./media.ts";
-import {
-  WHATS_NEW_PREVIEW_PATH_V1,
-  whatsNewPreviewMarkdownV1,
-} from "./preview.ts";
 
+const entriesDirectory = fileURLToPath(new URL("./entries", import.meta.url));
 const mediaDirectory = fileURLToPath(new URL("./media", import.meta.url));
-const generatedPath = fileURLToPath(
+const entriesPath = fileURLToPath(
+  new URL("./entries.generated.ts", import.meta.url),
+);
+const mediaPath = fileURLToPath(
   new URL("./media.generated.ts", import.meta.url),
 );
 
+/** The ids under `entries/`: each file is named for the entry it declares. */
+export function whatsNewEntryIdsOnDiskV1(): string[] {
+  return readdirSync(entriesDirectory)
+    .filter((name) => name.endsWith(".ts"))
+    .map((name) => name.slice(0, -".ts".length))
+    .sort();
+}
+
+export function whatsNewEntriesIndexSourceV1(ids: readonly string[]): string {
+  const binding = (id: string) => `entry_${id.replaceAll("-", "_")}`;
+  const imports = ids.map(
+    (id) => `import ${binding(id)} from "./entries/${id}.ts";`,
+  );
+  const rows = ids.map((id) => `  ${binding(id)},`);
+  return `/** Every entry under \`entries/\`, alphabetically. \`generate.ts\` writes it; \`entries.ts\` orders it. */\n${imports.join("\n")}\n\nexport const WHATS_NEW_ENTRY_FILES_V1 = [\n${rows.join("\n")}\n];\n`;
+}
+
 export function writeWhatsNewGeneratedFilesV1(): void {
   writeFileSync(
-    fileURLToPath(WHATS_NEW_PREVIEW_PATH_V1),
-    whatsNewPreviewMarkdownV1(),
+    entriesPath,
+    whatsNewEntriesIndexSourceV1(whatsNewEntryIdsOnDiskV1()),
   );
 
   const files = readdirSync(mediaDirectory)
@@ -35,7 +54,7 @@ export function writeWhatsNewGeneratedFilesV1(): void {
     return `  ${JSON.stringify(file)}:\n    ${JSON.stringify(Buffer.from(bytes).toString("base64"))},`;
   });
   writeFileSync(
-    generatedPath,
+    mediaPath,
     `/** Bytes for each What’s New still, so the Worker does not need the filesystem. */\nexport const WHATS_NEW_MEDIA_V1: Readonly<Record<string, string>> = {\n${rows.join("\n")}\n};\n`,
   );
 }

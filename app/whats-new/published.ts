@@ -4,9 +4,11 @@
  * runs it on a full clone just before it bundles the Worker. The committed
  * file stays empty, so everywhere else every entry says “New”.
  *
- * An id ships with the earliest production tag whose `entries.ts` declares
- * it. Tags are cut through the API as lightweight refs, so the only date one
- * carries is its commit’s.
+ * An id ships with the earliest production tag that declares it: a file
+ * under `entries/` named for the id, or, in a tag cut before the entries
+ * moved into files, a row in `entries.ts`. Old tags never change, so both are
+ * read. Tags are cut through the API as lightweight refs, so the only date
+ * one carries is its commit’s.
  */
 import { spawnSync } from "node:child_process";
 import { writeFileSync } from "node:fs";
@@ -17,17 +19,28 @@ import {
 } from "./dates.ts";
 import { WHATS_NEW_ENTRIES_V1 } from "./entries.ts";
 
-const ENTRIES_PATH_V1 = "app/whats-new/entries.ts";
+const ENTRIES_DIRECTORY_V1 = "app/whats-new/entries/";
+const ENTRIES_LIST_PATH_V1 = "app/whats-new/entries.ts";
 const ENTRY_ID_LINE_V1 = /^\s+id: "([a-z0-9][a-z0-9-]{0,63})",$/gm;
+const ENTRY_FILE_V1 =
+  /^app\/whats-new\/entries\/([a-z0-9][a-z0-9-]{0,63})\.ts$/;
 
 const publishedPath = fileURLToPath(
   new URL("./published.generated.ts", import.meta.url),
 );
 const here = fileURLToPath(new URL(".", import.meta.url));
 
-/** The ids one revision of `entries.ts` declares. */
+/** The ids a pre-split revision of `entries.ts` declares, one row each. */
 export function whatsNewIdsInSourceV1(source: string): string[] {
   return Array.from(source.matchAll(ENTRY_ID_LINE_V1), (match) => match[1]!);
+}
+
+/** The ids a revision's `entries/` holds, from `git ls-tree --name-only`. */
+export function whatsNewIdsInTreeV1(listing: string): string[] {
+  return listing
+    .split("\n")
+    .map((path) => ENTRY_FILE_V1.exec(path.trim())?.[1])
+    .filter((id): id is string => id !== undefined);
 }
 
 /**
@@ -96,9 +109,14 @@ if (import.meta.main) {
     );
   }
   const ids = WHATS_NEW_ENTRIES_V1.map((entry) => entry.id);
-  const days = whatsNewPublishedDaysV1(ids, tagDatesInCheckout(), (tag) =>
-    whatsNewIdsInSourceV1(git(["show", `${tag}:${ENTRIES_PATH_V1}`]) ?? ""),
-  );
+  const days = whatsNewPublishedDaysV1(ids, tagDatesInCheckout(), (tag) => [
+    ...whatsNewIdsInTreeV1(
+      git(["ls-tree", "--name-only", tag, "--", ENTRIES_DIRECTORY_V1]) ?? "",
+    ),
+    ...whatsNewIdsInSourceV1(
+      git(["show", `${tag}:${ENTRIES_LIST_PATH_V1}`]) ?? "",
+    ),
+  ]);
   writeFileSync(publishedPath, whatsNewPublishedSourceV1(days));
   const dated = Object.keys(days).length;
   if (dated === 0) {
