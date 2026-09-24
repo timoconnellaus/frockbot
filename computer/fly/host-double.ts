@@ -64,14 +64,17 @@ export interface FakeComputerRunV1 {
 
 export type FakeComputerRunnerV1 = (
   script: string,
+  stdin?: Uint8Array,
 ) => FakeComputerRunV1 | Promise<FakeComputerRunV1>;
 
 /** One script the host was asked to run, in order. */
 export interface FakeComputerCommandV1 {
   botId: string;
   script: string;
-  /** The environment the command was handed, which the host puts on stdin. */
+  /** The environment the command was handed, which the host exports. */
   env?: Record<string, string>;
+  /** What the host writes after the script, for the command to read. */
+  stdin?: Uint8Array;
   /** The envelope's effect id, when the caller named one. */
   effectId?: string;
   timeoutMs?: number;
@@ -179,6 +182,9 @@ export class FakeComputerHost {
           botId,
           script: command.script,
           ...(command.env === undefined ? {} : { env: { ...command.env } }),
+          ...(command.stdin === undefined
+            ? {}
+            : { stdin: command.stdin.slice() }),
           ...(options?.effectId ? { effectId: options.effectId } : {}),
           ...(command.timeoutMs === undefined
             ? {}
@@ -189,7 +195,7 @@ export class FakeComputerHost {
         });
         const refused = host.assert(command.script);
         if (refused) return refused;
-        const run = await host.runner(command.script);
+        const run = await host.runner(command.script, command.stdin);
         return {
           effectId: options?.effectId ?? "effect-exec",
           exitCode: run.exitCode ?? 0,
@@ -536,13 +542,13 @@ export class FakeWorkspaceDisk {
  */
 /**
  * What `browser.mjs` would answer, for the contract suite: one page whose
- * only field is "Password", and the helper's own origin rule for a secret.
- * The value is never in the script, so this never sees it either.
+ * only field is "Password", and the helper's own rules for a secret — it
+ * comes on the helper's stdin or not at all, and only on its origin.
  */
 export class FakeBrowserPage {
   url = "about:blank";
 
-  run(script: string): FakeComputerRunV1 | undefined {
+  run(script: string, stdin?: Uint8Array): FakeComputerRunV1 | undefined {
     const encoded = /browser\.mjs "\$PORT" '([A-Za-z0-9_-]+)'/.exec(
       script,
     )?.[1];
@@ -563,7 +569,8 @@ export class FakeBrowserPage {
       } catch {
         // `about:blank` has no origin to match.
       }
-      if (origin !== action.origin) {
+      // The helper refuses on the same line when it was handed no value.
+      if (!stdin?.byteLength || origin !== action.origin) {
         return {
           exitCode: 65,
           stdout: JSON.stringify({ refused: "origin", origin }),
@@ -589,7 +596,7 @@ export function contractHostV1(userId: string, botId: string): ComputerHostV1 {
   const png = new Uint8Array(64);
   png.set([137, 80, 78, 71, 13, 10, 26, 10], 0);
   let recording = false;
-  const double = new FakeComputerHost((script) => {
+  const double = new FakeComputerHost((script, stdin) => {
     if (script.includes(`${DEMONSTRATION_SCRIPT} record`)) {
       // The start script's own fence: the named owner must hold the
       // desktop lease, as the lease file on a real Computer would say.
@@ -624,7 +631,7 @@ export function contractHostV1(userId: string, botId: string): ComputerHostV1 {
     if (script.includes("__FROCKBOT_EXIT__")) {
       return { stdout: "contract\n__FROCKBOT_EXIT__0\n" };
     }
-    return browser.run(script) ?? disk.run(script);
+    return browser.run(script, stdin) ?? disk.run(script);
   });
   double.files.set(`${BOTS_ROOT}/${computerBotKey(botId)}/screenshot.png`, png);
   return new FlyComputerHostV1(

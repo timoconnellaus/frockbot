@@ -73,10 +73,10 @@ const requestCard: PluginCard = {
         id: "note",
         component: "Callout",
         tone: "neutral",
-        title: "Your Bot never sees it",
+        title: "Kept out of the chat",
         text: payment
-          ? "It is kept in your account, not the conversation. Each time your Bot fills it into a page, you approve that page first. Delete it any time in Settings."
-          : "It is kept in your account, not the conversation, and your Bot can only type it into the site above. Delete it any time in Settings.",
+          ? "It is saved to your account, not the conversation, and your Bot is given a reference instead of the value. You approve each page before it is filled in. Delete it any time in Settings."
+          : "It is saved to your account, not the conversation, and your Bot is given a reference instead of the value. It fills it into the site above, and asks you before any other. Delete it any time in Settings.",
       },
     ]);
   },

@@ -84,7 +84,7 @@ export function secretsDocumentV1(
       children: [
         {
           type: "text",
-          text: "Passwords, card numbers and other secrets you typed on a Bot’s card. They are kept in your account, not in any conversation. A Bot never sees one: it can only have it typed into a web page — without asking on the site it was saved for, and only with your approval anywhere else or when it is a payment detail.",
+          text: "Passwords, card numbers and other secrets you typed on a Bot’s card. They are kept in your account, not in any conversation. A Bot is given a reference, never the value, and can have it typed into a web page — without asking on the site it was saved for, and only with your approval anywhere else or when it is a payment detail. Once typed, the page holds it like anything else you type there.",
         },
         ...(view.secrets.length === 0
           ? [status("You have no saved secrets.")]

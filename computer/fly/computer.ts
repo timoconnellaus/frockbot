@@ -29,7 +29,6 @@ import {
   BIN_ROOT,
   BOTS_ROOT,
   BOUNDED_LOG_SCRIPT,
-  BROWSER_SECRET_ENV_V1,
   COMPUTER_CDP_PORT,
   CONTROL_SCRIPT,
   DATA_ROOT,
@@ -1384,24 +1383,30 @@ export class FlyComputer {
   ): Promise<string> {
     const host = await this.readyHost(layout, signal);
     const encoded = Buffer.from(JSON.stringify(action)).toString("base64url");
-    const script = [
+    // The Bot key, because one browser now serves every Bot of the User and
+    // the helper has to know whose window to act in.
+    const helper = `node ${RUNTIME_ROOT}/browser.mjs "$PORT" ${shellQuote(encoded)} ${shellQuote(layout.key)}`;
+    const prelude = [
       this.agentControlGuard(layout),
       `PORT=$(cat ${layout.runtimeDir}/cdp-port)`,
-      // The Bot key, because one browser now serves every Bot of the User and
-      // the helper has to know whose window to act in.
-      `node ${RUNTIME_ROOT}/browser.mjs "$PORT" ${shellQuote(encoded)} ${shellQuote(layout.key)}`,
-    ].join("\n");
-    // A saved secret travels in the command's environment, which the host
-    // compiles into the stdin document and never onto a command line, and
-    // the helper answers without echoing it. A failure is told in fixed
-    // words: the helper's own diagnostics are not trusted to leave it out.
+    ];
+    // A saved secret reaches the helper as the stdin bash has not read: the
+    // host writes it after the script, the prelude reads from /dev/null so
+    // nothing before the helper can take it, and `exec` hands the rest of
+    // stdin to the helper so bash never reads it as a command. It is never in
+    // an environment or a command line, which anything on the Computer could
+    // read in /proc while the helper runs. A failure is told in fixed words:
+    // the helper's own diagnostics are not trusted to leave it out.
     if (secret !== undefined) {
+      const script = ["{", ...prelude, "} </dev/null", `exec ${helper}`].join(
+        "\n",
+      );
       let outcome: ComputerHostExecOutcomeV1;
       try {
         outcome = await host.exec(
           {
             script,
-            env: { [BROWSER_SECRET_ENV_V1]: secret },
+            stdin: new TextEncoder().encode(secret),
             timeoutMs: TIMEOUTS.browser,
             maxOutputBytes: MAX_OUTPUT,
           },
@@ -1430,7 +1435,7 @@ export class FlyComputer {
     }
     const outcome = await this.execute(
       host,
-      script,
+      [...prelude, helper].join("\n"),
       {
         signal,
         effectId,

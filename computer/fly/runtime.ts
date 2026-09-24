@@ -673,11 +673,20 @@ export const BROWSER_SURVEY_ACTION = "eyJhY3Rpb24iOiJzdXJ2ZXkifQ";
 export const TARGET_ID_FILE = "target-id";
 
 /**
- * Where `browser.mjs` finds a saved secret's value for one `fill-secret`: its
- * own environment, which the host compiles into the command's stdin document
- * and never onto a command line. Read once and removed before anything runs.
+ * How `browser.mjs` takes a saved secret's value for one `fill-secret`: the
+ * whole of its own stdin, read to the end.
+ *
+ * Not its environment and not its argv: both are readable in `/proc/<pid>` by
+ * anything else running on the Computer for as long as the helper runs, and an
+ * environment is inherited by every child. The exec document hands the helper
+ * the stdin bash has not read yet (`FlyComputer.browserForAgent`), so the value
+ * is only ever in a pipe and in this one process's memory.
  */
-export const BROWSER_SECRET_ENV_V1 = "FROCKBOT_FILL_SECRET";
+export const BROWSER_SECRET_STDIN_READER_V1 = `async function readSecretFromStdin() {
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(chunk);
+  return Buffer.concat(chunks).toString("utf8");
+}`;
 
 /**
  * Gives one Bot its window on the shared screen, and pins it to its slot.
@@ -990,6 +999,8 @@ const botKey = process.argv[4] ?? "";
 const botDir = (key) => \`\${BOTS_ROOT}/\${key}\`;
 const targetPath = (key) => \`\${botDir(key)}/\${TARGET_ID_FILE}\`;
 
+${BROWSER_SECRET_STDIN_READER_V1}
+
 function slotOf(key) {
   const raw = readFileSync(\`\${botDir(key)}/slot\`, "utf8").trim();
   if (!/^\\d+$/.test(raw)) throw new Error(\`Bot "\${key}" holds no desktop slot\`);
@@ -1167,14 +1178,13 @@ if (action.action === "identity") {
   }));
   await done(identity);
 }
-// A saved secret, typed into one field. The value arrives in this process's
-// environment and is removed from it at once; it is never printed. The answer
-// carries no snapshot, because a snapshot of a filled form is the value, and a
-// refusal says what kind it was and nothing the browser said — a browser's own
-// error is the one place the value could be echoed back.
+// A saved secret, typed into one field. The value arrives on this process's
+// stdin and is never printed. The answer carries no snapshot, because a
+// snapshot of a filled form is the value, and a refusal says what kind it was
+// and nothing the browser said — a browser's own error is the one place the
+// value could be echoed back.
 if (action.action === "fill-secret") {
-  const value = process.env.${BROWSER_SECRET_ENV_V1} ?? "";
-  delete process.env.${BROWSER_SECRET_ENV_V1};
+  const value = await readSecretFromStdin();
   const refuse = async (refused, extra = {}) => {
     console.log(JSON.stringify({ refused, ...extra }));
     await browser.close().catch(() => {});

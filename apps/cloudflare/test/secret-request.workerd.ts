@@ -335,13 +335,20 @@ describe("a secret typed on a Bot's card", () => {
       (run) => run.runId === "fill-secret",
     );
     expect(filled?.status).toBe("completed");
-    // The Computer is the one place the value goes, and it arrives in the
-    // command's environment rather than its script.
+    // The Computer is the one place the value goes, and it arrives as the
+    // helper's stdin: never in an environment the Computer would export, and
+    // never in the script.
     const exec = (await computerCalls()).find((call) =>
       call.script?.includes(action),
     );
-    expect(exec?.env).toEqual({ FROCKBOT_FILL_SECRET: VALUE });
+    expect(exec?.env).toBeUndefined();
+    expect(
+      Buffer.from(exec?.stdinBase64 ?? "", "base64").toString("utf8"),
+    ).toBe(VALUE);
     expect(exec?.script).not.toContain(VALUE);
+    for (const call of await computerCalls()) {
+      expect(JSON.stringify(call.env ?? {})).not.toContain(VALUE);
+    }
 
     // The Turn's tool call, its result, the model request after it, and the
     // audit row of the call are all durable now — and none carries it.

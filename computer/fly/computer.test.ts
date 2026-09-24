@@ -2,12 +2,16 @@
 
 import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
+import { existsSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import type { ComputerConnectionProgressV1 } from "@frockbot/computer/core/host";
 import { COMPUTER_UNCONFIGURED_MESSAGE_V1 } from "@frockbot/computer/core";
 import {
   BOTS_ROOT,
-  BROWSER_SECRET_ENV_V1,
+  BROWSER_SECRET_STDIN_READER_V1,
   DESKTOP_GUI_LEASE_KEY,
+  RUNTIME_ROOT,
 } from "./runtime.js";
 import {
   computerBotKey,
@@ -705,7 +709,7 @@ describe("a saved secret typed by the Fly Computer", () => {
     return { host, computer };
   }
 
-  test("hands the value over in the environment and never in the script", async () => {
+  test("hands the value over on the helper's stdin, never in an environment or a script", async () => {
     const { host, computer } = await session(() => ({
       stdout: JSON.stringify({
         filled: true,
@@ -728,7 +732,13 @@ describe("a saved secret typed by the Fly Computer", () => {
     const fill = host.commands.find((command) =>
       command.script.includes("browser.mjs"),
     )!;
-    expect(fill.env).toEqual({ [BROWSER_SECRET_ENV_V1]: SECRET });
+    expect(fill.env).toBeUndefined();
+    expect(new TextDecoder().decode(fill.stdin)).toBe(SECRET);
+    // Nothing before the helper can read stdin, and the helper replaces bash,
+    // so no shell is left to read the value as a command.
+    const lines = fill.script.split("\n");
+    expect(lines).toContain("} </dev/null");
+    expect(lines.at(-1)).toStartWith(`exec node ${RUNTIME_ROOT}/browser.mjs `);
     // The action the helper reads names the origin it must be on, and
     // nothing a script carries — a command line, a log — carries the value.
     const encoded = /browser\.mjs "\$PORT" '([A-Za-z0-9_-]+)'/.exec(
@@ -743,8 +753,87 @@ describe("a saved secret typed by the Fly Computer", () => {
     });
     for (const command of host.commands) {
       expect(command.script).not.toContain(SECRET);
+      expect(JSON.stringify(command.env ?? {})).not.toContain(SECRET);
     }
     expect(JSON.stringify(filled)).not.toContain(SECRET);
+  });
+
+  test("real bash hands the helper exactly the value, and runs none of it", async () => {
+    // Valid shell across two lines: a document that let bash read the value
+    // would run it, and these files would say so.
+    const value = `${SECRET} "quoted"; touch pwned\n$(touch pwned-too)`;
+    const { host, computer } = await session(() => ({
+      stdout: JSON.stringify({ filled: true, snapshot: "" }),
+    }));
+    await computer.browser!.perform(
+      {
+        type: "fill-secret",
+        label: "Password",
+        origin: "https://shop.example",
+        value,
+      },
+      { signal: signal() },
+    );
+    const fill = host.commands.find((command) =>
+      command.script.includes("browser.mjs"),
+    )!;
+
+    // The document the host would run, with the Computer's runtime root moved
+    // somewhere writable. The guard stands in for anything before the helper
+    // that reads stdin; the helper is the real reader and reports what it got.
+    async function runDocument(helper: string) {
+      const root = mkdtempSync(join(tmpdir(), "frockbot-fill-"));
+      writeFileSync(
+        join(root, "control.sh"),
+        `#!/bin/bash\ncat > ${JSON.stringify(join(root, "guard-read"))}\n`,
+        { mode: 0o755 },
+      );
+      writeFileSync(join(root, "browser.mjs"), helper);
+      const script = fill.script
+        .replaceAll(RUNTIME_ROOT, root)
+        .replace(/\bnode (?=\S*browser\.mjs )/, `${process.execPath} `);
+      // Streamed, as the host streams a command's stdin to the Computer: a
+      // seekable stdin is a different case, and not the one that runs there.
+      const run = Bun.spawn(["bash", "-s"], {
+        cwd: root,
+        stdin: "pipe",
+        stdout: "pipe",
+        stderr: "pipe",
+        env: { PATH: process.env.PATH ?? "" },
+      });
+      run.stdin.write(`${script}\n`);
+      run.stdin.write(fill.stdin!);
+      await run.stdin.end();
+      const [stdout, stderr, status] = await Promise.all([
+        new Response(run.stdout).text(),
+        new Response(run.stderr).text(),
+        run.exited,
+      ]);
+      expect(readFileSync(join(root, "guard-read"), "utf8")).toBe("");
+      expect(existsSync(join(root, "pwned"))).toBe(false);
+      expect(existsSync(join(root, "pwned-too"))).toBe(false);
+      expect(stderr).not.toContain(SECRET);
+      return { stdout, status };
+    }
+
+    const read = await runDocument(`${BROWSER_SECRET_STDIN_READER_V1}
+const value = await readSecretFromStdin();
+console.log(JSON.stringify({ value, argv: process.argv, env: process.env }));
+`);
+    expect(read.status).toBe(0);
+    const said = JSON.parse(read.stdout.trim()) as {
+      value: string;
+      argv: string[];
+      env: Record<string, string>;
+    };
+    expect(said.value).toBe(value);
+    expect(JSON.stringify(said.argv)).not.toContain(SECRET);
+    expect(JSON.stringify(said.env)).not.toContain(SECRET);
+
+    // A helper that dies before it reads leaves the value unread in the pipe,
+    // not in front of a shell that would run it.
+    const died = await runDocument("process.exit(69);\n");
+    expect(died.status).toBe(69);
   });
 
   test("a refusal is told in fixed words, whatever the helper printed", async () => {

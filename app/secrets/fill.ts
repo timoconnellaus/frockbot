@@ -211,10 +211,10 @@ export function createBotSecretFillSeamV1(host: {
           approvalId,
           action: `Fill your saved “${secret.label}” into “${request.field}” on ${origin}`,
           rationale: payment
-            ? "It is a payment detail, so your Bot asks before every use. It types it into that field on that site only, and never sees it."
+            ? "It is a payment detail, so your Bot asks before every use. It types it into that field on that site only, without the value being put in the conversation."
             : secret.origin === undefined
-              ? "It was saved without a site, so your Bot asks before each use. It types it into that field on that site only, and never sees it."
-              : `It was saved for ${secret.origin}, and this page is on another site. Your Bot types it into that field on that site only, and never sees it.`,
+              ? "It was saved without a site, so your Bot asks before each use. It types it into that field on that site only, without the value being put in the conversation."
+              : `It was saved for ${secret.origin}, and this page is on another site. Your Bot types it into that field on that site only, without the value being put in the conversation.`,
           risk: payment ? "high" : "medium",
           expiresInSeconds: SECRET_FILL_APPROVAL_SECONDS_V1,
         },

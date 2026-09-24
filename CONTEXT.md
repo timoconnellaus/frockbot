@@ -255,7 +255,7 @@ A durable pending decision the User answers: what the Bot proposes to do, its ri
 _Avoid_: Permission, consent prompt, confirmation
 
 **Saved secret**:
-A password, card number or other secret a User typed into the host-drawn field on a Bot's secret-request card, sealed in that User's credential store under the name the Bot asked with and the site it is for. A Bot knows only its reference (`secret-…`) and can only have it typed into a web page: on its own site without asking, and under a fresh Approval of that page and field anywhere else or whenever it is a payment detail. Listed and deleted in Settings.
+A password, card number or other secret a User typed into the host-drawn field on a Bot's secret-request card, sealed in that User's credential store under the name the Bot asked with and the site it is for. A Bot is given only its reference (`secret-…`), never the value, and can have it typed into a web page: on its own site without asking, and under a fresh Approval of that page and field anywhere else or whenever it is a payment detail. Listed and deleted in Settings.
 _Avoid_: Credential (a Connection's), vault item, password
 
 **Compaction**:

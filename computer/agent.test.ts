@@ -487,7 +487,7 @@ describe("computer_browser filling a saved secret", () => {
     return { harness, host, opened, released };
   }
 
-  test("types the value the Bot never sees, and says only that it did", async () => {
+  test("types a value the Bot is never given, and says only that it did", async () => {
     const { harness, host, opened, released } = await mountFill(async () => ({
       status: "granted",
       origin: "https://shop.example",

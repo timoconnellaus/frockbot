@@ -17,7 +17,7 @@ Keep a form to a few fields. Every field is a thing the person has to read.
 a form reaches you and the conversation. Ask for a secret with a
 `send_to_user` `secret-request` instead: the person types it into a field the
 host draws, it is kept in their account, and you get a reference you can fill
-into a web page without ever seeing the value (`frock.md`, `SecretField`).
+into a web page; you are never given the value (`frock.md`, `SecretField`).
 
 ## How an input carries its value
 
