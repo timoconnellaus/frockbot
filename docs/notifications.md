@@ -24,8 +24,6 @@ A short-lived device presence record can defer a push while another device is re
 
 Each User holds a bounded device registry. Tokens rotate under a stable installation ID; logout unregisters the device and clears local notification state. Read signals have a 24-hour delivery lifetime, and app resume reconciles read state again. Push messages carry stable message cursors; Android ignores duplicates and already-read messages and does not re-alert for an older out-of-order message.
 
-A Bot the User's linked Telegram chat talks to also owes that chat each visible message, and the same transaction that mints the message writes it to a Telegram outbox beside the push outbox — the whole text, not the alert's preview, and never a voice answer. The same drain empties both. A send from a Turn the person started in Telegram counts as unread but wakes no device, as a voice answer does: they are reading it in Telegram. Each Telegram message is recorded before it is sent and never repeated after an unclear outcome, like a push ([architecture](architecture.md#from-telegram)).
-
 The server records an external attempt before calling FCM. A known service rejection is retried with backoff. An ambiguous network outcome or interrupted attempt is recorded as uncertain and is not blindly repeated; the message remains available in the conversation. Delivery receipt cursors are bounded to one per Bot/device/update kind. Push is an alert transport, never message history authority.
 
 ## Application icon badge

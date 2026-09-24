@@ -55,7 +55,6 @@ import '../settings/bot_settings.dart';
 import '../settings/look_settings.dart';
 import '../settings/page.dart';
 import '../settings/voice_settings.dart';
-import '../telegram/page.dart';
 import '../templates/page.dart';
 import '../theme/document.dart';
 import '../theme/controls.dart';
@@ -3187,7 +3186,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             'Connections and services',
           ),
           const SearchAction('machines', 'Your computers', 'Account'),
-          const SearchAction('telegram', 'Telegram', 'Account'),
           if (selected != null)
             const SearchAction('routines', 'Routines', 'Current chat'),
         ],
@@ -3218,8 +3216,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           _openMarketplace();
         case 'machines':
           _openAccount(MachineIds.profileEntry, () => _push(_machinesPage()));
-        case 'telegram':
-          _openAccount(TelegramIds.profileEntry, () => _push(_telegramPage()));
         case 'routines':
           _openPanel('routines');
       }
@@ -3332,9 +3328,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Widget _machinesPage() =>
       MachinesPage(api: widget.api, store: widget.store, userId: widget.userId);
 
-  Widget _telegramPage() =>
-      TelegramPage(api: widget.api, store: widget.store, userId: widget.userId);
-
   /// An account destination reached from search: on a phone its page over
   /// the list; wider, You with it open, so the rest are a press away.
   void _openAccount(String section, VoidCallback phone) {
@@ -3417,12 +3410,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               icon: Icons.settings_outlined,
               title: 'Personal details',
               page: _settingsPage,
-            ),
-            ProfileSection(
-              id: TelegramIds.profileEntry,
-              icon: Icons.send_outlined,
-              title: 'Telegram',
-              page: _telegramPage,
             ),
             ProfileSection(
               id: SettingsIds.profileDelete,

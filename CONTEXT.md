@@ -46,10 +46,6 @@ _Avoid_: DM, room, channel, thread
 : A conversation between the User and two to eight of their Bots. Every message reaches every member, and a member asked to reply — by an @mention, or by Jev judging the message is theirs — runs a Turn in its own Bot under the group's Session, whose sends are posted to the group. Its members share its Memory.
 _Avoid_: Channel, room, project, team
 
-**Channel**
-: An outside messaging app a User talks to their Bots from — Telegram today. The deployment runs the app's bot; the User links their own account once with a one-time code and picks which Bot the chat talks to. What arrives is the person speaking: an ordinary user-lane Turn in that Bot's conversation, its origin naming the channel. What the Bot says in that conversation goes back through an outbox, at most once per message.
-_Avoid_: Connector, integration, bridge; and never a Group Chat, which is the User's own Bots
-
 **Hand-off**
 : A Turn a Bot admitted on its own `agent` lane with the `subagent` tool, so the Turn that asked could answer the person straight away. It is an ordinary Turn of that Bot — its own tools, its own Session — and it speaks for itself with `send_to_user` rather than answering a caller; its origin names the run that handed it over and how deep the chain is. One level only, and a chat Turn may hand off four times.
 _Avoid_: Background job, async task, child agent (that is the Subagents Package's `Task`)

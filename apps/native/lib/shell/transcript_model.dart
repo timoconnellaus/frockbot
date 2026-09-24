@@ -184,11 +184,6 @@ class TranscriptLine {
 
   /// The files the person attached to their message.
   final List<MessageAttachment> attachments;
-
-  /// Where the person's message was written, when it was not in the app:
-  /// `telegram`. Their own words either way, so it is a caption under their
-  /// bubble, never an exchange marker.
-  final String? via;
   const TranscriptLine({
     required this.id,
     required this.runId,
@@ -210,7 +205,6 @@ class TranscriptLine {
     this.voiceCall,
     this.localOrder,
     this.attachments = const [],
-    this.via,
   });
 
   /// A send still being written: drawn where its message will land and
@@ -249,7 +243,6 @@ class TranscriptLine {
     voiceCall: voiceCall,
     localOrder: localOrder,
     attachments: attachments,
-    via: via,
   );
 }
 
@@ -869,10 +862,6 @@ List<TranscriptLine> projectRuns(
           attachments: current['attachments'] == null
               ? files
               : MessageAttachment.decodeList(current['attachments']),
-          via: switch (run['via']) {
-            {'kind': 'telegram'} => 'telegram',
-            _ => null,
-          },
         ),
       );
     }

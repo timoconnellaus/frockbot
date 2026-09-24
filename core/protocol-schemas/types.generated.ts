@@ -2,9 +2,7 @@
 export type Identifier = string;
 export type BotId = string;
 export type RunVia =
-  | { kind: "bot"; name: string; botId: BotId }
-  | { kind: "voice" }
-  | { kind: "telegram" };
+  { kind: "bot"; name: string; botId: BotId } | { kind: "voice" };
 export type Digest = string;
 export type Instant = string;
 export type HttpsUrl = string;
