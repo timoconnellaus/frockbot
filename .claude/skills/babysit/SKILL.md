@@ -1,6 +1,6 @@
 ---
 name: babysit
-description: Own FrockBot's delivery pipeline once a pull request is open — keep main green, merge ready pull requests, and see each release reach production. Use when the user runs /babysit or /loop /babysit, says "babysit", "manage the PRs", "merge what's ready", "is main green", "why is main red", or asks whether a change has shipped.
+description: Own FrockBot's delivery pipeline once a pull request is open — keep main green, merge ready pull requests, and see each release reach production. Use when the user says "babysit", "babysit this", "babysit the PRs", "manage the PRs", "merge what's ready", "is main green", "why is main red", asks whether a change has shipped, or runs /babysit or /loop /babysit.
 ---
 
 # Babysit
@@ -14,6 +14,15 @@ desktop session runs it on a self-paced schedule, overnight included.
 Merging is shipping. A green `main` tags itself and deploys
 `bot.frockbot.com` about twenty minutes later with nobody in between, so
 treat every merge as a production deploy.
+
+## Starting
+
+"Babysit this" means keep babysitting, not look once. Unless this turn is
+already a `/loop /babysit` firing, invoke the `loop` skill with `/babysit`
+yourself — nobody should have to type the slash commands — and it runs the
+first tick and paces the rest. Run a single tick without the loop only for a
+question that wants one answer: "is main green?", "has #812 shipped?". Stop
+the loop when Tim says so.
 
 ## A tick
 
