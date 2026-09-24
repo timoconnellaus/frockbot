@@ -8,7 +8,8 @@
  * (`--no-web-resources-cdn`) so the app origin's `script-src 'self'` stays
  * true and the engine is never fetched from gstatic. Rive Native's WebAssembly
  * runtime is staged here for the same reason and named by
- * `RIVE_NATIVE_WASM_HOST`; see `stageRiveWasm`.
+ * `RIVE_NATIVE_WASM_HOST`; see `stageRiveWasm`. So are the engine's fallback
+ * fonts, which it otherwise fetches from gstatic; see `stageFallbackFonts`.
  *
  * Everything is staged under `_flutter/<buildHash>/`, so every URL the
  * document names is content-addressed and can be served `immutable`. The
@@ -21,6 +22,7 @@ import {
   mkdir,
   readdir,
   readFile,
+  rename,
   rm,
   stat,
   writeFile,
@@ -160,6 +162,109 @@ async function stageRiveWasm(expected: string): Promise<string> {
     });
   }
   return `/rive/${expected}/`;
+}
+
+/**
+ * The Noto faces the engine falls back to, served from this origin.
+ *
+ * When the app's own fonts lack a glyph — "♯" in a chat message is enough —
+ * the engine fetches a Noto face that has it from `fontFallbackBaseUrl`, which
+ * defaults to fonts.gstatic.com. The app document's `connect-src 'self'`
+ * refuses that, so the glyph was never drawn. `web/flutter_bootstrap.js`
+ * points the engine at `fallback-fonts/` beside the build instead, and this
+ * stages every file the engine's own fallback table can ask for there: which
+ * one a message needs is not knowable ahead of time, and the whole table is
+ * about 22 MB. The table is read from the SDK doing the build, so a Flutter
+ * upgrade that rolls the fonts rolls these with it.
+ *
+ * Each file's gstatic path carries its version, so a download is cached
+ * outside `dist/` and fetched once per version rather than once per build.
+ */
+const FALLBACK_FONTS = "fallback-fonts";
+const FALLBACK_FONT_ORIGIN = "https://fonts.gstatic.com/s/";
+const fallbackFontCache = resolve(
+  root,
+  "node_modules/.cache/flutter-fallback-fonts",
+);
+
+async function fallbackFontPaths(): Promise<string[]> {
+  const version = JSON.parse(
+    Bun.spawnSync({
+      cmd: ["flutter", "--version", "--machine"],
+      cwd: nativeRoot,
+    }).stdout.toString(),
+  ) as { flutterRoot?: string };
+  if (!version.flutterRoot) {
+    throw new Error("`flutter --version --machine` names no flutterRoot.");
+  }
+  const table = await readFile(
+    resolve(
+      version.flutterRoot,
+      "bin/cache/flutter_web_sdk/lib/_engine/engine/font_fallback_data.dart",
+    ),
+    "utf8",
+  );
+  const paths = [
+    ...new Set(
+      [
+        ...table.matchAll(/'([a-z0-9]+\/v\d+\/[\w.-]+\.(?:woff2|ttf|otf))'/gu),
+      ].map((match) => match[1]!),
+    ),
+  ].sort();
+  // A table this build cannot read would stage nothing and quietly put every
+  // fallback glyph back to undrawn.
+  if (paths.length < 100) {
+    throw new Error(
+      `Read only ${paths.length} fallback fonts from the Flutter web SDK; ` +
+        "its font_fallback_data.dart has changed shape.",
+    );
+  }
+  return paths;
+}
+
+async function downloadFallbackFont(path: string): Promise<void> {
+  const cached = resolve(fallbackFontCache, path);
+  if (await stat(cached).catch(() => undefined)) return;
+  for (let attempt = 1; ; attempt++) {
+    try {
+      const response = await fetch(`${FALLBACK_FONT_ORIGIN}${path}`);
+      if (!response.ok) throw new Error(`HTTP ${response.status}`);
+      const body = new Uint8Array(await response.arrayBuffer());
+      await mkdir(resolve(cached, ".."), { recursive: true });
+      // Written aside and renamed, so an interrupted build never leaves a
+      // truncated font the next one would take as cached.
+      await writeFile(`${cached}.partial`, body);
+      await rename(`${cached}.partial`, cached);
+      return;
+    } catch (error) {
+      if (attempt >= 3) {
+        throw new Error(
+          `Could not fetch fallback font ${path}: ${String(error)}`,
+        );
+      }
+    }
+  }
+}
+
+/** Copy the fallback fonts into the payload, and answer their staged paths. */
+async function stageFallbackFonts(payload: string): Promise<string[]> {
+  const paths = await fallbackFontPaths();
+  const queue = [...paths];
+  await Promise.all(
+    Array.from({ length: 16 }, async () => {
+      for (let path = queue.pop(); path; path = queue.pop()) {
+        await downloadFallbackFont(path);
+      }
+    }),
+  );
+  for (const path of paths) {
+    await cp(
+      resolve(fallbackFontCache, path),
+      resolve(payload, FALLBACK_FONTS, path),
+      { force: true, recursive: true },
+    );
+  }
+  return paths.map((path) => `${FALLBACK_FONTS}/${path}`);
 }
 
 /**
@@ -313,6 +418,19 @@ if (entry.includes("cdn.jsdelivr.net")) {
       "`script-src 'self'` refuses. RIVE_NATIVE_WASM_HOST did not take.",
   );
 }
+// Same for the fallback fonts: a bootstrap that stopped naming them leaves
+// the engine on its gstatic default, which `connect-src 'self'` refuses.
+const bootstrap = await readFile(
+  resolve(flutterOut, "flutter_bootstrap.js"),
+  "utf8",
+);
+if (!bootstrap.includes("fontFallbackBaseUrl")) {
+  throw new Error(
+    "The built flutter_bootstrap.js sets no fontFallbackBaseUrl, so the " +
+      "engine would fetch fallback fonts from gstatic. Did " +
+      "apps/native/web/flutter_bootstrap.js stop being the template?",
+  );
+}
 
 const digest = createHash("sha256");
 for (const path of files) {
@@ -336,6 +454,7 @@ for (const path of files) {
   });
 }
 
+const fallbackFonts = await stageFallbackFonts(payload);
 const riveHost = await stageRiveWasm(riveVersion);
 
 // Every URL under either prefix carries a version — the build hash, or Rive's
@@ -348,10 +467,10 @@ await writeFile(
 );
 await writeFile(
   resolve(root, "dist/flutter-web.json"),
-  `${JSON.stringify({ schemaVersion: 1, buildHash, sourceHash: fingerprint, files }, null, 2)}\n`,
+  `${JSON.stringify({ schemaVersion: 1, buildHash, sourceHash: fingerprint, files: [...files, ...fallbackFonts] }, null, 2)}\n`,
 );
 
 process.stdout.write(
-  `Built the Flutter web client at /${payloadPrefix}/${buildHash}/ (${files.length} files)\n` +
+  `Built the Flutter web client at /${payloadPrefix}/${buildHash}/ (${files.length} files, ${fallbackFonts.length} fallback fonts)\n` +
     `Staged Rive Native's wasm runtime at ${riveHost}\n`,
 );

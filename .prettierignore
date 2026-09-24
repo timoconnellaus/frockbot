@@ -38,3 +38,6 @@ app/shell/client/voice-prototype/
 # Generated archify diagrams. Formatting would rewrite the generator's bytes.
 docs/research/memory-proposal/*.html
 docs/research/startup-maps/*.html
+
+# A Flutter template: its `{{…}}` placeholders are not JavaScript until the build fills them.
+apps/native/web/flutter_bootstrap.js
