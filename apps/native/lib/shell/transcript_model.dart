@@ -143,6 +143,14 @@ class TranscriptLine {
 
   /// When the line happened, ISO-8601, when the projection knows.
   final String? at;
+
+  /// Where in its Turn's Session log a send or a message to another Bot was
+  /// said, when the wire says.
+  final int? seq;
+
+  /// For the person's message that arrived while another Turn was running:
+  /// that Turn, and the [seq] its log had reached. See [placeLandedMessages].
+  final ({String runId, int seq})? landedAt;
   final LineStatus status;
 
   /// True once a durable Stop has been accepted for this Turn. The person is
@@ -174,6 +182,8 @@ class TranscriptLine {
     required this.text,
     required this.status,
     this.at,
+    this.seq,
+    this.landedAt,
     this.stopRequested = false,
     this.notice,
     this.retry,
@@ -204,6 +214,8 @@ class TranscriptLine {
     text: text,
     status: status,
     at: at,
+    seq: seq,
+    landedAt: landedAt,
     stopRequested: stopRequested,
     notice: notice,
     retry: retry,
@@ -284,7 +296,9 @@ TranscriptLine unconfirmedLine(
 /// projection sorts to the bottom rather than jumping above durable history.
 /// The sort is stable on list order, which is the durable order the projection
 /// maintains. A line belonging to no Turn — a system announcement — still
-/// sorts by its own time; nothing here reorders a Turn's own lines.
+/// sorts by its own time; nothing here reorders a Turn's own lines. The one
+/// line that moves is the person's message that arrived while an earlier Turn
+/// was still running: see [placeLandedMessages].
 ///
 /// A Turn this device drew before the durable transcript carried it goes
 /// after every durable line, in the order it was sent from here. It has no
@@ -318,7 +332,45 @@ List<TranscriptLine> orderTranscript(List<TranscriptLine> lines, String now) {
         : l - r;
     return compared != 0 ? compared : left.$1 - right.$1;
   });
-  return dedupeCardSendsV1([for (final entry in indexed) entry.$2]);
+  return dedupeCardSendsV1(
+    placeLandedMessages([for (final entry in indexed) entry.$2]),
+  );
+}
+
+/// The person's message is drawn where it landed, as in any chat: after what
+/// the Bot had already said, above what the Turn it arrived during went on to
+/// say. Its own reply still follows that Turn, because that is when the Bot
+/// read it.
+///
+/// [ordered] is the thread with every Turn in one piece. A landed message
+/// moves up past the lines of the Turn it arrived during that were said at or
+/// after its landing — positions in that Turn's own log, so a Routine firing
+/// counting in a log of its own never compares — and never above a message
+/// the person sent before it.
+List<TranscriptLine> placeLandedMessages(List<TranscriptLine> ordered) {
+  final placed = <TranscriptLine>[];
+  for (final line in ordered) {
+    final landed = line.landedAt;
+    var at = -1;
+    if (landed != null) {
+      final from =
+          placed.lastIndexWhere((earlier) => earlier.role == LineRole.user) + 1;
+      for (var index = from; index < placed.length; index++) {
+        final earlier = placed[index];
+        if (earlier.runId == landed.runId &&
+            (earlier.seq ?? -1) >= landed.seq) {
+          at = index;
+          break;
+        }
+      }
+    }
+    if (at < 0) {
+      placed.add(line);
+    } else {
+      placed.insert(at, line);
+    }
+  }
+  return placed;
 }
 
 /// One Card, one place in the thread.
@@ -606,6 +658,7 @@ List<TranscriptLine> _spokenLines(
           role: LineRole.assistant,
           text: '',
           at: at,
+          seq: (event['seq'] as num?)?.toInt(),
           readAt: run['admittedAt'] as String?,
           status: LineStatus.completed,
           sends: [
@@ -631,6 +684,7 @@ List<TranscriptLine> _spokenLines(
           role: LineRole.assistant,
           text: '',
           at: at,
+          seq: (event['seq'] as num?)?.toInt(),
           status: LineStatus.completed,
           exchange: Exchange(
             id: '$runId:exchange:$callId',
@@ -728,6 +782,13 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
           role: LineRole.user,
           text: current['input'] as String? ?? input,
           at: admittedAt,
+          landedAt: switch (current['landedAt']) {
+            {'runId': final String runId, 'seq': final num seq} => (
+              runId: runId,
+              seq: seq.toInt(),
+            ),
+            _ => null,
+          },
           readAt: current['admittedAt'] as String?,
           status: failed ? LineStatus.error : LineStatus.completed,
           notice: failure?.notice,

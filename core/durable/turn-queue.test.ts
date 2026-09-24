@@ -349,6 +349,60 @@ describe("a message sent while a Turn runs", () => {
     expect(storage.values.get("active-run")).toBeUndefined();
   });
 
+  test("remembers where in the Session the message landed", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage);
+
+    const first = probe.authority.run(command("run-1", "first"));
+    await probe.handle("run-1").started;
+    const second = probe.authority.run(command("run-2", "second"));
+    await admitted();
+    probe.handle("run-1").finish();
+    await first;
+    await probe.handle("run-2").started;
+    probe.handle("run-2").finish();
+    await second;
+
+    const log = await new SessionEventLog(storage).read("user-1:primary");
+    const landed = storedRun(storage, "run-2").landedAt;
+    if (!landed) throw new Error("the waiting message has no place");
+    expect(landed.runId).toBe("run-1");
+    // What the first Turn had said sits below where the message landed, and
+    // what it did after the message arrived sits at or above it.
+    const said = log.find((event) => event.type === "assistant/message");
+    const ended = log.find((event) => event.type === "turn/end");
+    expect(said!.seq).toBeLessThan(landed.seq);
+    expect(ended!.seq).toBeGreaterThanOrEqual(landed.seq);
+    // A message sent while nothing ran is simply where its Turn starts.
+    expect(storedRun(storage, "run-1").landedAt).toBeUndefined();
+  });
+
+  test("lands in the log of the Turn it waited behind", async () => {
+    const storage = new MemoryStorage();
+    const probe = createAuthority(storage);
+
+    // A Turn in a Session of its own, as a Routine firing keeps.
+    const first = probe.authority.run(
+      command("run-1", "first", { sessionId: "user-1:elsewhere" }),
+    );
+    await probe.handle("run-1").started;
+    const second = probe.authority.run(command("run-2", "second"));
+    await admitted();
+
+    const elsewhere = await new SessionEventLog(storage).read(
+      "user-1:elsewhere",
+    );
+    expect(storedRun(storage, "run-2").landedAt).toEqual({
+      runId: "run-1",
+      seq: elsewhere.at(-1)!.seq + 1,
+    });
+    probe.handle("run-1").finish();
+    await first;
+    await probe.handle("run-2").started;
+    probe.handle("run-2").finish();
+    await second;
+  });
+
   test("the next Turn starts from everything the one before it did", async () => {
     const storage = new MemoryStorage();
     const probe = createAuthority(storage);

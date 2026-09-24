@@ -2378,5 +2378,32 @@
       "readThrough": 2,
       "working": []
     }
+  },
+  {
+    "name": "RunEvent rejects a negative send position",
+    "schema": "RunEvent",
+    "value": {
+      "type": "send/to-user",
+      "payload": { "type": "text", "text": "Here is the plan." },
+      "ordinal": 1,
+      "seq": -1
+    }
+  },
+  {
+    "name": "Run rejects a negative landing position",
+    "schema": "Run",
+    "value": {
+      "schemaVersion": 4,
+      "runId": "run-2",
+      "admittedAt": "2026-09-24T00:00:10.000Z",
+      "messageRunId": "run-2",
+      "messageAdmittedAt": "2026-09-24T00:00:10.000Z",
+      "input": "Keep it cheap.",
+      "status": "running",
+      "queued": true,
+      "events": [],
+      "canRetry": false,
+      "landedAt": { "runId": "run-1", "seq": -1 }
+    }
   }
 ]

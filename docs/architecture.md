@@ -564,12 +564,14 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
   screen, live or as its last capture, and the full-window viewer it opens
 - `ViewSamplePage` — `lib/view/sample_page.dart:117`, reachable only from a `--dart-define=FROCKBOT_DEV_AUTH=true` build
 
-The thread's rules were ported from the Vue shell without change and with its
-tests, and are unchanged since: a Turn is ordered as a unit by its own user
-message's stamp (`transcript_model.dart`), a message the person sends is drawn
-at full strength from the moment it is sent, a draft belongs to the Bot it was typed
-for and survives a refusal (`composer.dart`), and readiness and the draft are
-separate questions so Try again works with an empty composer.
+The thread's rules: a Turn is ordered as a unit by its own user message's
+stamp, except that a message sent while an earlier Turn was running is drawn
+where it landed — after what that Turn had already said, above what it said
+next — by the Session positions the wire carries (`transcript_model.dart`); a
+message the person sends is drawn at full strength from the moment it is sent;
+a draft belongs to the Bot it was typed for and survives a refusal
+(`composer.dart`); and readiness and the draft are separate questions so Try
+again works with an empty composer.
 
 Transport is REST over `package:http` behind a conditional import (`lib/client/transport.dart`, `transport_io.dart`, `transport_web.dart`). `--dart-define=FROCKBOT_ORIGIN` names the gateway; left unset it is `https://bot.frockbot.com` on the phone, which has no origin of its own, and `window.location.origin` in the browser, which is served by the gateway it talks to and may be on any port. There is one read-only WebSocket at `/api/bots/{botId}/state-channel` (`:167`) with a strict `cursor + 1` contiguity rule (`lib/client/state_channel.dart:83-99`), a 4096-byte frame cap and 1–30 s backoff.
 

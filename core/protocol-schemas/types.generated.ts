@@ -327,7 +327,12 @@ export type SendPayload =
     }
   | { type: "card"; surfaceId: Identifier; messages: Array<A2uiAgentMessage> };
 export type RunEvent =
-  | { type: "send/to-user"; payload: SendPayload; ordinal: number }
+  | {
+      type: "send/to-user";
+      payload: SendPayload;
+      ordinal: number;
+      seq?: number;
+    }
   | {
       type: "tool/call";
       call: {
@@ -351,7 +356,13 @@ export type RunEvent =
     }
   | { type: "run/events-truncated"; omittedInteractions: number }
   | { type: "reply/to-caller"; caller: "voice" | "bot"; text: string }
-  | { type: "message/to-bot"; callId: string; botId: BotId; text: string }
+  | {
+      type: "message/to-bot";
+      callId: string;
+      botId: BotId;
+      text: string;
+      seq?: number;
+    }
   | { type: "wake/parent"; message: string }
   | {
       type: "computer/sync";
@@ -395,6 +406,7 @@ export type Run =
       retryOf?: Identifier;
       retriedBy?: Identifier;
       canRetry?: boolean;
+      landedAt?: { runId: Identifier; seq: number };
     }
   | {
       schemaVersion: 1 | 2 | 3 | 4;
@@ -411,6 +423,7 @@ export type Run =
       retryOf?: Identifier;
       retriedBy?: Identifier;
       canRetry?: boolean;
+      landedAt?: { runId: Identifier; seq: number };
     }
   | {
       schemaVersion: 1 | 2 | 3 | 4;
@@ -427,6 +440,7 @@ export type Run =
       retryOf?: Identifier;
       retriedBy?: Identifier;
       canRetry?: boolean;
+      landedAt?: { runId: Identifier; seq: number };
     }
   | {
       schemaVersion: 1 | 2 | 3 | 4;
@@ -443,6 +457,7 @@ export type Run =
       retryOf?: Identifier;
       retriedBy?: Identifier;
       canRetry?: boolean;
+      landedAt?: { runId: Identifier; seq: number };
     };
 export type Announcement =
   | {
@@ -489,7 +504,12 @@ export type ConversationMessageUpdate = {
   runId: Identifier;
   sessionId: string;
   occurrenceId: string;
-  event: { type: "send/to-user"; payload: SendPayload; ordinal: number };
+  event: {
+    type: "send/to-user";
+    payload: SendPayload;
+    ordinal: number;
+    seq?: number;
+  };
 };
 export type StateFrame =
   | {

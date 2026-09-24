@@ -2,6 +2,11 @@ import { afterEach, describe, expect, test } from "bun:test";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import {
+  CLIENT_PROTOCOL_VERSION,
+  SUPPORTED_PROTOCOL_MAX,
+  SUPPORTED_PROTOCOL_MIN,
+} from "../core/protocol-schemas/compatibility.generated.js";
 import { readNativeMetadata } from "./native-metadata.ts";
 
 const roots: string[] = [];
@@ -44,10 +49,10 @@ test("a build outside a release is named by the pubspec placeholder", async () =
       version: "0.0.0+1",
     },
     hostedOrigin: "https://example.frockbot.test",
-    clientProtocol: 1,
+    clientProtocol: CLIENT_PROTOCOL_VERSION,
     compatibility: {
-      protocolMin: 1,
-      protocolMax: 1,
+      protocolMin: SUPPORTED_PROTOCOL_MIN,
+      protocolMax: SUPPORTED_PROTOCOL_MAX,
     },
   });
 });

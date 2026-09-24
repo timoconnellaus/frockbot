@@ -211,6 +211,22 @@ describe("retrying one visible message under a fresh execution identity", () => 
     ).rejects.toThrow(/idempotency key/);
   });
 
+  test("a retry keeps the place its message landed", async () => {
+    const storage = new MemoryStorage();
+    const p = probe(storage, { fail: new Set(["first"]) });
+    await p.authority.run(command("first"));
+    // The first attempt was sent while another Turn was still running.
+    await storage.put("run:first", {
+      ...(storage.values.get("run:first") as object),
+      landedAt: { runId: "earlier", seq: 3 },
+    });
+    await p.authority.run(command("second", "first"));
+    expect(record(storage, "second").landedAt).toEqual({
+      runId: "earlier",
+      seq: 3,
+    });
+  });
+
   test("two devices cannot both retry the same failed attempt", async () => {
     const storage = new MemoryStorage();
     const p = probe(storage, { fail: new Set(["first"]) });

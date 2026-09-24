@@ -1,4 +1,9 @@
-import { decodeProtocol } from "@frockbot/core/protocol-schemas";
+import {
+  CLIENT_PROTOCOL_VERSION,
+  SUPPORTED_PROTOCOL_MAX,
+  SUPPORTED_PROTOCOL_MIN,
+  decodeProtocol,
+} from "@frockbot/core/protocol-schemas";
 import { describe, expect, test } from "bun:test";
 import {
   createNativeAuth,
@@ -25,7 +30,7 @@ import {
 
 const hello = {
   schemaVersion: 1,
-  protocolVersion: 1,
+  protocolVersion: CLIENT_PROTOCOL_VERSION,
   nativeVersion: "0.7.163",
   catalogs: [],
 };
@@ -348,8 +353,8 @@ describe("native system browser exchange", () => {
     const session = decodeProtocol("AuthSessionView", await response!.json());
     for (const value of [
       "",
-      JSON.stringify({ ...hello, protocolVersion: 0 }),
-      JSON.stringify({ ...hello, protocolVersion: 2 }),
+      JSON.stringify({ ...hello, protocolVersion: SUPPORTED_PROTOCOL_MIN - 1 }),
+      JSON.stringify({ ...hello, protocolVersion: SUPPORTED_PROTOCOL_MAX + 1 }),
     ]) {
       const result = await g.auth.authenticate(
         g.request("/api/bots/bot-1/state-channel", undefined, {
@@ -366,7 +371,11 @@ describe("native system browser exchange", () => {
     // The phone's real case: the sign-in was issued to an app on a protocol
     // this deployment no longer serves, numbered before the release tag was
     // the version, and the app has since updated itself.
-    const historical = { ...hello, protocolVersion: 2, nativeVersion: "1.1.0" };
+    const historical = {
+      ...hello,
+      protocolVersion: SUPPORTED_PROTOCOL_MIN - 1,
+      nativeVersion: "1.1.0",
+    };
     const expires = f.now() + 7 * 86400_000;
     const token = await mintSessionToken({
       userId: "user-1",
@@ -1035,7 +1044,7 @@ describe("beta access on the native door", () => {
     const hello = {
       "x-frockbot-client": JSON.stringify({
         schemaVersion: 1,
-        protocolVersion: 1,
+        protocolVersion: CLIENT_PROTOCOL_VERSION,
         nativeVersion: "0.7.163",
         catalogs: [],
       }),
@@ -1377,7 +1386,7 @@ test("a device that signed out gives its slot back", () => {
   const now = Date.UTC(2026, 8, 8);
   const hello = {
     schemaVersion: 1 as const,
-    protocolVersion: 1 as const,
+    protocolVersion: CLIENT_PROTOCOL_VERSION,
     nativeVersion: "0.7.163",
     catalogs: [],
   };
