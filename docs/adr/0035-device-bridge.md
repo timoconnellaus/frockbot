@@ -3,8 +3,9 @@
 Status: proposed, 2026-09-24. Numbered after ADR 0034; nothing on `main` or in
 an open pull request holds 0035. Decisions are Tim's from the 2026-09-24
 discussion: the scenarios below, device abilities approved once per account,
-shell commands decided by Jev, and the Bot list staying trust chrome. The
-shapes below are the proposal that discussion asked for.
+shell commands decided by Jev, and the Bot list opening to Plugins under host
+rules ([ADR 0034](0034-plugin-panels.md), amended the same day). The shapes
+below are the proposal that discussion asked for.
 
 ## Context
 
@@ -260,8 +261,9 @@ widget kit.
 
 The menu bar item itself is host chrome: the Bots, their status and the host's
 own quick actions. A Plugin's `device.menubar` view is one section inside it.
-The Bot list stays trust chrome here as everywhere
-([ADR 0034](0034-plugin-panels.md)), so no Plugin draws a Bot row.
+The Bots listed there follow ADR 0034's Bot-list rules: the host draws each
+Bot's name, avatar and status in their usual places, and a Plugin may add a
+`bot.badge` beside them but never draws a Bot's row.
 
 ### Approvals from the lock screen
 
@@ -361,8 +363,6 @@ folds into Device, and its terms go.
   Bluetooth observation, widget and tile hosts, a menu bar item, and the Mac
   helper's `exec`.
 - The browser extension is a new deployable.
-- The marketing capability reference loses its "Sidebar section" row. The Bot
-  list stays trust chrome.
 
 ## Order
 

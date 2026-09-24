@@ -166,6 +166,14 @@ _Avoid_: Applet, widget, iframe
 A Plugin `bot.nav` view: a door on this Bot's page, with Settings / Routines / Plugins. A press focuses that Plugin's conversation panel.
 _Avoid_: Sidebar entry, Bot list row
 
+**Bot badge**:
+A Plugin `bot.badge` view: a count, a short label or a host icon on a Bot's row in the Bot list, drawn by the host after that Bot's name, avatar and status marks and never over them ([ADR 0034](docs/adr/0034-plugin-panels.md), amended 2026-09-24).
+_Avoid_: Status, indicator (those are the host's)
+
+**Sidebar section**:
+A Plugin `sidebar.sections` view: a host-drawn block in the Bot list, beneath the row of the Bot it renders as, headed with the Plugin's name.
+_Avoid_: Sidebar entry, Bot list row
+
 **Panel focus**:
 The Session's selected conversation-panel tab, `{ pluginId, surfaceId }`, or closed. Written by a tab click, a bot-nav press, or the Bot's `panel_focus` tool. The cloud is the authority.
 _Avoid_: Active applet, selected gadget
