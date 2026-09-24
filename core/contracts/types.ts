@@ -818,24 +818,6 @@ export interface SessionEventMap {
     height: number;
   };
   /**
-   * One run of the durable-root sync between the Computer's Workspace and
-   * object storage, on a Turn that had the Computer open.
-   *
-   * "Connections to the Computer are expected to drop on every pause; every
-   * Computer client reconnects and resumes rather than treating a dropped
-   * connection as failure." A sync that could not run is therefore an
-   * `unavailable` outcome recorded here, never a thrown error and never a
-   * failed Turn — and a sync that did run leaves what it moved in durable
-   * state, so a missing pull is visible rather than silent.
-   *
-   * `reason` is why the sync ran: `open` before the Turn's first Computer tool
-   * call, `signal` when the on-Computer watcher reported a change mid-Turn,
-   * `turn-end` after a Turn that used the Computer, and `publish` for the one
-   * sanctioned reconciliation outside that policy — a single declared root
-   * pulled and pushed so an Applet publish can read the artifact `applet
-   * build` left on the Computer.
-   */
-  /**
    * A background process on the Computer changed hands: it was launched,
    * looked at, read, or ended. Recorded so a Turn's durable history says what
    * became of a process that outlived it — including `unknown`, which is a
@@ -872,9 +854,24 @@ export interface SessionEventMap {
     ownerId?: string;
     expiresAt?: string;
   };
+  /**
+   * One run of the durable-root sync between the Computer's Workspace and
+   * object storage, on a Turn that had the Computer open.
+   *
+   * "Connections to the Computer are expected to drop on every pause; every
+   * Computer client reconnects and resumes rather than treating a dropped
+   * connection as failure." A sync that could not run is therefore an
+   * `unavailable` outcome recorded here, never a thrown error and never a
+   * failed Turn — and a sync that did run leaves what it moved in durable
+   * state, so a missing pull is visible rather than silent.
+   *
+   * `reason` is why the sync ran: `open` before the Turn's first Computer tool
+   * call, `signal` when the on-Computer watcher reported a change mid-Turn,
+   * and `turn-end` after a Turn that used the Computer.
+   */
   "computer/sync": {
     turn: number;
-    reason: "open" | "signal" | "turn-end" | "publish";
+    reason: "open" | "signal" | "turn-end";
     status: "ok" | "degraded" | "unavailable" | "refused" | "skipped";
     detail: string;
     pulled: number;
@@ -2640,11 +2637,7 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
         "session event",
       );
       turn();
-      if (
-        !["open", "signal", "turn-end", "publish"].includes(
-          event.reason as string,
-        )
-      ) {
+      if (!["open", "signal", "turn-end"].includes(event.reason as string)) {
         throw new Error("session event.reason is invalid");
       }
       if (

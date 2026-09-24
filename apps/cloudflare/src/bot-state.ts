@@ -382,6 +382,7 @@ import {
   readFocusedPanelV1,
 } from "@frockbot/app/plugins/panels-bot";
 import { cleanBotAppletsV1 } from "./plugin-panels-cleanup.js";
+import { cleanPackagePageShapesV1 } from "./package-page-shapes-cleanup.js";
 import {
   groupOriginOfRunV1,
   groupTurnStateOfRunV1,
@@ -623,6 +624,9 @@ export class BotState
       await cleanBotAppletsV1(this.ctx.storage);
       // Before anything decodes a run: a `superseded` record no longer parses.
       await cleanSupersedeStateV1(this.ctx.storage);
+      // Before anything decodes a run or an event: a `directTool` run and a
+      // `publish` sync no longer parse.
+      await cleanPackagePageShapesV1(this.ctx.storage);
       await cleanProjectEventsV1(this.ctx.storage);
       await cleanUnpreparedRunsV1(this.ctx.storage);
       await cleanUndecodableSkillIndexesV1(this.ctx.storage);

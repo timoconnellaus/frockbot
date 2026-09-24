@@ -511,14 +511,6 @@ export async function executeTurn(
   };
   state.turn.set(active);
   try {
-    const directTool = input.command.directTool;
-    if (directTool) {
-      // No first-party package pages remain after the Applets deletion
-      // (ADR 0034). Any surviving direct-tool replay is refused.
-      throw new Error(
-        `Package "${directTool.packageId}" did not declare tool "${directTool.name}" for its pages`,
-      );
-    }
     const ordinaryInput = await turnInputTextV1(state, input.command);
     if (ordinaryInput === undefined) {
       return { runId: input.command.runId, text: "", events: [] };

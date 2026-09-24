@@ -286,8 +286,6 @@ export interface StoredRunV1<Snapshot = unknown> {
   previousEventCount: number;
   /** Absent ⇒ the run was admitted as a `chat` Turn. */
   admission?: StoredRunAdmissionV1;
-  /** An ordinary admitted Turn whose only action is one caller-selected tool. */
-  directTool?: DirectToolCommandV1;
 }
 
 export interface StoredRunLandingV1 {
@@ -331,12 +329,6 @@ export function storedRunRecordV2<Snapshot>(
           endSeq: run.previousEventCount + events.length,
         };
   return { ...record, eventRange };
-}
-
-export interface DirectToolCommandV1 {
-  packageId: string;
-  name: string;
-  input: unknown;
 }
 
 /** The subagent role a stored run re-mounts under, if any. */
@@ -460,7 +452,6 @@ const STORED_RUN_OPTIONAL_KEYS = [
   "failure",
   "stopRequestedAt",
   "admission",
-  "directTool",
   "retryOf",
   "retriedBy",
   "messageRunId",
@@ -511,42 +502,6 @@ export function boundedRunFailureV1(failure: string): string {
     kept = kept.slice(0, Math.max(0, Math.floor(kept.length * 0.9) - 1));
   }
   return `${kept}${ellipsis}`;
-}
-
-function decodeDirectToolCommandV1(value: unknown): DirectToolCommandV1 {
-  if (!value || typeof value !== "object" || Array.isArray(value)) {
-    throw new Error("stored run has invalid direct tool command");
-  }
-  const candidate = value as Record<PropertyKey, unknown>;
-  const fields = ["packageId", "name", "input"];
-  if (
-    Reflect.ownKeys(candidate).length !== fields.length ||
-    Object.keys(candidate).length !== fields.length ||
-    !fields.every((field) => Object.hasOwn(candidate, field)) ||
-    !boundedString(candidate.packageId, 64) ||
-    !boundedString(candidate.name, 64) ||
-    !/^[a-z][a-z0-9_]{0,63}$/.test(candidate.name)
-  ) {
-    throw new Error("stored run has invalid direct tool command fields");
-  }
-  let input: unknown;
-  try {
-    const encoded = JSON.stringify(candidate.input);
-    if (
-      encoded === undefined ||
-      UTF8_ENCODER.encode(encoded).byteLength > 64_000
-    ) {
-      throw new Error("invalid input");
-    }
-    input = JSON.parse(encoded) as unknown;
-  } catch {
-    throw new Error("stored run has invalid direct tool input");
-  }
-  return {
-    packageId: candidate.packageId,
-    name: candidate.name,
-    input,
-  };
 }
 
 /**
@@ -1141,9 +1096,6 @@ function requireStoredRunRecordV1<Snapshot>(
     ...(candidate.admission === undefined
       ? {}
       : { admission: decodeStoredRunAdmission(candidate.admission, runId) }),
-    ...(candidate.directTool === undefined
-      ? {}
-      : { directTool: decodeDirectToolCommandV1(candidate.directTool) }),
   };
 }
 
@@ -1175,7 +1127,6 @@ export interface BotTurnCommand {
    * command, so it must not collide on an idempotency record.
    */
   skills?: SkillRefV1[];
-  directTool?: DirectToolCommandV1;
   /**
    * The lane this command asks to be admitted on. Absent means the lane its
    * turn type defaults to.
@@ -1201,7 +1152,6 @@ export function botTurnCommandFingerprintV1(
     command.origin !== undefined ||
     command.subagentRole !== undefined ||
     skills.length > 0 ||
-    command.directTool !== undefined ||
     lane !== defaultRunLaneV1(turnType) ||
     command.retryOf !== undefined
   ) {
@@ -1216,7 +1166,6 @@ export function botTurnCommandFingerprintV1(
       ...(command.origin ? { origin: command.origin } : {}),
       ...(command.retryOf ? { retryOf: command.retryOf } : {}),
       ...(skills.length > 0 ? { skills: skills.map(formatSkillRefV1) } : {}),
-      ...(command.directTool ? { directTool: command.directTool } : {}),
     })}`;
   }
   return `bot-turn-command-v1:${JSON.stringify({
