@@ -354,7 +354,11 @@ class ShellLayout extends StatelessWidget {
                 ),
               ),
             Positioned.fill(
-              child: _Scrim(open: drawnPanel, onDismiss: onDismiss),
+              child: _Scrim(
+                open: drawnPanel,
+                drawerWidth: min(shellRightPanelWidth, constraints.maxWidth),
+                onDismiss: onDismiss,
+              ),
             ),
             if (panel != null && tier == ShellTier.dual)
               _withPanelTheme(
@@ -513,8 +517,13 @@ class _Drawer extends StatelessWidget {
 
 class _Scrim extends StatelessWidget {
   final bool open;
+  final double drawerWidth;
   final VoidCallback onDismiss;
-  const _Scrim({required this.open, required this.onDismiss});
+  const _Scrim({
+    required this.open,
+    required this.drawerWidth,
+    required this.onDismiss,
+  });
 
   @override
   Widget build(BuildContext context) => IgnorePointer(
@@ -522,23 +531,33 @@ class _Scrim extends StatelessWidget {
     child: AnimatedOpacity(
       opacity: open ? 1 : 0,
       duration: FrockTheme.motion(context),
-      child: identified(
-        ShellIds.scrim,
-        Semantics(
-          label: 'Close',
-          button: true,
-          child: GestureDetector(
-            onTap: onDismiss,
-            behavior: HitTestBehavior.opaque,
-            // Sized by the fill above rather than by a child. A `ColoredBox`
-            // with no child takes the smallest size its constraints allow, and
-            // a `Stack`'s non-positioned children are loosely constrained — so
-            // an unpositioned scrim is 0x0: it never dims anything, never takes
-            // a tap, and is dropped from the accessibility tree for having no
-            // area. Tapping the conversation beside an open drawer did nothing.
-            child: ColoredBox(color: Colors.black.withValues(alpha: 0.45)),
+      child: Stack(
+        fit: StackFit.expand,
+        children: [
+          ColoredBox(color: Colors.black.withValues(alpha: 0.45)),
+          // Close stops at the drawer's edge. A browser hit-tests the
+          // accessibility tree, laid over the scene, and a platform view's own
+          // node takes no pointer: a Close spanning the drawer took every
+          // click meant for a Plugin's page drawn in it.
+          Positioned(
+            left: 0,
+            top: 0,
+            bottom: 0,
+            right: drawerWidth,
+            child: identified(
+              ShellIds.scrim,
+              Semantics(
+                label: 'Close',
+                button: true,
+                child: GestureDetector(
+                  onTap: onDismiss,
+                  behavior: HitTestBehavior.opaque,
+                  child: const SizedBox.expand(),
+                ),
+              ),
+            ),
           ),
-        ),
+        ],
       ),
     ),
   );
