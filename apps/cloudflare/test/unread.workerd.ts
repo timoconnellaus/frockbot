@@ -67,10 +67,14 @@ function unreadRpc(name: string): UnreadRpc {
 
 /**
  * Puts a settled run back where a Turn still in flight holds it: `running`,
- * with its Turn not yet ended in its Session's log, so the liveness rule reads
- * it as working.
+ * with its Turn not yet ended in its Session's log — or, as `queued`, where
+ * one waiting its turn does.
  */
-async function reopen(name: string, runId: string): Promise<void> {
+async function reopen(
+  name: string,
+  runId: string,
+  phase: "executing" | "queued" = "executing",
+): Promise<void> {
   await runInDurableObject(bot(name), async (_instance, state) => {
     const key = `run:${runId}`;
     const stored = (await state.storage.get(key)) as Parameters<
@@ -82,7 +86,7 @@ async function reopen(name: string, runId: string): Promise<void> {
       key,
       stored,
       run.events.filter((event) => event.type !== "turn/end"),
-      { status: "running", phase: "executing" },
+      { status: "running", phase },
     );
   });
 }
@@ -602,7 +606,8 @@ describe("per-Bot unread in Workerd", () => {
     });
     expect(await working()).toBe(false);
 
-    // A chat Turn queued behind it: newest, live, and still not running.
+    // A chat Turn queued behind it: the newest Turn, and the chat draws it
+    // waiting rather than working.
     await markActive(name, undefined);
     await bot(name).run({
       ...identity,
@@ -614,14 +619,21 @@ describe("per-Bot unread in Workerd", () => {
       },
     });
     expect(await newestRunId(name)).toBe("run-2");
-    await reopen(name, "run-2");
+    await reopen(name, "run-2", "queued");
     await markActive(name, firing);
     expect(await storedRun(name, "run-2")).toMatchObject({
       status: "running",
+      phase: "queued",
     });
     expect(await working()).toBe(false);
 
+    // Between the firing settling and the queued Turn starting, nothing holds
+    // the Bot and the newest Turn is still waiting.
+    await markActive(name, undefined);
+    expect(await working()).toBe(false);
+
     // Its turn comes: now the chat shows it running, and so does the row.
+    await reopen(name, "run-2");
     await markActive(name, "run-2");
     expect(await working()).toBe(true);
   });

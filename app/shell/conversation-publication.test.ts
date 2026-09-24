@@ -62,7 +62,12 @@ describe("visiblePublicationsV1", () => {
         },
       },
     } as unknown as StoredRunV1<BotSettingsViewV1>;
-    for (const cause of ["admission", "events", "terminal"] as const) {
+    for (const cause of [
+      "admission",
+      "promotion",
+      "events",
+      "terminal",
+    ] as const) {
       expect(
         visiblePublicationsV1({ cause, run: grouped, events: [send] }),
       ).toEqual([]);

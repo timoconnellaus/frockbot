@@ -746,6 +746,62 @@ describe("admission does not wait for the previous Turn", () => {
     expect(seen[1]).toMatchObject({ turnType: "chat", lane: "agent", origin });
   });
 
+  // A watching chat patches a run's status from publication alone, so the
+  // Turn it drew queued at admission has to be told when it starts.
+  test("a queued Turn publishes its status when it is promoted", async () => {
+    const storage = new MemoryStorage();
+    let release: (() => void) | undefined;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const delivered: ConversationUpdateV1[] = [];
+    let started = 0;
+    const authority = new BotDurableAuthority<undefined>({
+      state: { storage } as unknown as DurableObjectState,
+      codec,
+      hooks: {
+        resolveAdmissionSnapshot: () => Promise.resolve(undefined),
+        bootstrapComposition: () => bootstrap(),
+        admittedSnapshot: () => Promise.resolve(undefined),
+        executeTurn: async (input) => {
+          started += 1;
+          if (input.command.runId === "run-1") await gate;
+          return { runId: input.command.runId, text: "ok", events: [] };
+        },
+        notification: () => undefined,
+        scheduledDeadlines: () => Promise.resolve([]),
+        scheduledWorkInFlight: () => false,
+        deferScheduledWork: () => Promise.resolve(),
+        settleScheduledWork: () => Promise.resolve(),
+        deliverPublication: async (pending) => {
+          delivered.push(...pending);
+        },
+      },
+    });
+    const first = authority.run(command("run-1"));
+    for (let attempt = 0; attempt < 20 && started === 0; attempt += 1) {
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+    expect(await authority.admit(command("run-2"))).toMatchObject({
+      disposition: "queued",
+    });
+    release?.();
+    await first;
+    await authority.whenDriverSettled();
+    await authority.drainCommittedPublication();
+
+    const phases = delivered
+      .filter(
+        (update) =>
+          update.kind === "run-status" &&
+          (update.payload as { runId?: string }).runId === "run-2",
+      )
+      .map((update) => (update.payload as { phase: string }).phase);
+    expect(phases[0]).toBe("queued");
+    expect(phases).toContain("admitted");
+    expect(phases.indexOf("admitted")).toBeLessThan(phases.length - 1);
+  });
+
   test("eviction after admission and before the kick still runs on the alarm", async () => {
     const storage = new MemoryStorage();
     const started = new BotDurableAuthority<undefined>({
