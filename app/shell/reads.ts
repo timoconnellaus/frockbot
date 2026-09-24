@@ -99,29 +99,68 @@ export async function appendAnnouncement(
 }
 
 /**
- * Whether the Bot's newest admitted run is still going.
+ * Whether the Bot is working in its own chat: the working mark on its sidebar
+ * row, so somebody in another conversation can see a reply coming rather than
+ * reading a quiet row as a stalled one.
  *
- * The sidebar draws this as an activity ring, so somebody in another
- * conversation can see a Bot working rather than reading a quiet row as a
- * stalled one. It is the newest run only: a Bot admits one Turn at a time,
- * so an older run that is somehow still marked running is a reconciliation
- * problem and not something a ring should report. A read that fails is no
- * ring — liveness is never worth failing a sidebar poll for.
+ * The open chat draws its working mark from the Turn its transcript shows
+ * running, so the row answers by the transcript's rule or the two disagree
+ * about one Bot. That is the active Turn, not the newest one: a message sent
+ * while the Bot is busy is indexed at once but waits, and the chat draws it
+ * queued. A Turn the chat does not show — a silent Routine firing, a member's
+ * group Turn — is the Bot's work but not the chat's, so it lights nothing here
+ * either.
  *
- * The record's `status` is not the test and never was. `resolveRunWorking`
+ * The record's `status` is necessary and not sufficient. `resolveRunWorking`
  * holds the rule — running, inside the Turn deadline, and a Turn the log has
- * not already closed — and only reports it. A stale record is settled by the
- * alarm's repair index, not by somebody opening the sidebar.
+ * not already closed — and only reports it; a stale record is settled by the
+ * alarm's repair index, not by somebody opening the sidebar. A read that fails
+ * is no mark: liveness is never worth failing a sidebar poll for.
  */
-export async function runWorkingV1(
+export async function chatWorkingV1(
   state: ShellBotStateV1,
-  runId: string | undefined,
+  newestRunId: string | undefined,
 ): Promise<boolean> {
+  const runId = (await state.authority.readActiveRunId()) ?? newestRunId;
+  if (runId === undefined) return false;
+  // The header first: it is the record without its journal, and every Bot is
+  // asked on every sidebar poll while almost none of them is running.
+  const header = await state.authority.readRunHeaderForDisplay(runId);
+  if (!header?.readable || header.run.status !== "running") return false;
   try {
-    return await state.authority.resolveRunWorking(runId);
+    if (!(await state.authority.resolveRunWorking(runId))) return false;
   } catch {
     return false;
   }
+  const conversationId = await state.authority.readConversationSessionId();
+  if (!inConversationV1(header.run, conversationId)) return false;
+  // An automation Turn is in the chat only once it has spoken, and the marker
+  // written beside its message is that fact.
+  if (header.run.admission?.turnType === "automation") {
+    return (
+      (await state.ctx.storage.get(sentAutomationRunKeyV1(runId))) !== undefined
+    );
+  }
+  return isVisibleRunV1(header.run);
+}
+
+/**
+ * Whether a run belongs to the Bot's continuous chat rather than to a
+ * Routine's or a child's Session. A record nobody can decode has no
+ * trustworthy session id, and a transcript that hid it would be back to
+ * silently losing the Turn: an unknown session belongs to the conversation
+ * being read.
+ */
+function inConversationV1(
+  run: { sessionId?: string; admission?: { turnType?: string } },
+  conversationId: string | undefined,
+): boolean {
+  return (
+    run.admission?.turnType === "automation" ||
+    conversationId === undefined ||
+    run.sessionId === undefined ||
+    run.sessionId === conversationId
+  );
 }
 
 /**
@@ -200,17 +239,10 @@ export async function listRuns(
   // Only the Bot’s continuous chat belongs in the transcript. Routine and
   // child sessions remain in the durable log and their own projections.
   const conversationId = await state.authority.readConversationSessionId();
-  // A record nobody can decode has no trustworthy session id, and a
-  // transcript that hid it would be back to silently losing the Turn. An
-  // unknown session belongs to the conversation being read.
   const inConversation = (run: {
     sessionId?: string;
     admission?: { turnType?: string };
-  }) =>
-    run.admission?.turnType === "automation" ||
-    conversationId === undefined ||
-    run.sessionId === undefined ||
-    run.sessionId === conversationId;
+  }) => inConversationV1(run, conversationId);
   // The exchange view's read: only the Turns that crossed to or from one
   // counterpart. Inbound is on the admission; outbound is a `bot_message`
   // call in the journal, so a filtered scan hydrates what it inspects. The
@@ -255,16 +287,6 @@ export async function listRuns(
     limit: CLIENT_RUN_PAGE_LIMIT + 1,
     ...(query.before ? { before: query.before } : {}),
   });
-  // The open chat draws its own activity ring from whichever run this page
-  // projects as `running`, so it owes the same liveness rule the sidebar row
-  // does — and from the same helper, or the two surfaces disagree about the
-  // same Bot. Only the newest run and the active marker are asked: a Turn
-  // further back cannot be the one anybody is waiting on, and a transcript
-  // read is not the place to walk a Bot's whole history looking for
-  // leftovers.
-  if (!query.before) {
-    await runWorkingV1(state, activeRunId ?? candidates[0]?.runId);
-  }
   // Announcements share the newest page's wire envelope with its Turns. Read
   // them once and budget them during selection; adding them only after the
   // page was full could push an otherwise valid transcript over the limit and

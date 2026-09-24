@@ -15,9 +15,17 @@
 // case below turns it off through the settings command and reads the view back
 // — the intent is suppressed, the unread cursor still advances.
 import { env } from "cloudflare:workers";
-import { evictDurableObject, runInDurableObject } from "cloudflare:test";
+import {
+  evictDurableObject,
+  runDurableObjectAlarm,
+  runInDurableObject,
+} from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 import { provisionBot } from "./provision-bot.ts";
+import {
+  hydrateStoredRunEventsV1,
+  rewindStoredRunEventsV1,
+} from "./session-log-probe.ts";
 
 interface UnreadRpc {
   readUnread(input: unknown): Promise<{
@@ -29,6 +37,7 @@ interface UnreadRpc {
     notificationsEnabled: boolean;
     lastActivityCursor?: string;
     lastMessage?: { text: string; at: string; role: "assistant" | "user" };
+    working?: boolean;
   }>;
   executeUnreadCommand(input: unknown): Promise<{
     status: string;
@@ -43,6 +52,7 @@ interface UnreadRpc {
   listRuns(input: unknown): Promise<{ runs: unknown[] }>;
   readConfiguration(input: unknown): Promise<{ revision: number }>;
   executeConfiguration(input: unknown): Promise<unknown>;
+  executeRoutineCommand(input: unknown): Promise<{ status: string }>;
 }
 
 function bot(name: string) {
@@ -53,6 +63,57 @@ function unreadRpc(name: string): UnreadRpc {
   // SAFETY: the generated stub type for the Bot RPCs is too deep for the
   // compiler to instantiate here; this names only the methods this test calls.
   return bot(name) as unknown as UnreadRpc;
+}
+
+/**
+ * Puts a settled run back where a Turn still in flight holds it: `running`,
+ * with its Turn not yet ended in its Session's log, so the liveness rule reads
+ * it as working.
+ */
+async function reopen(name: string, runId: string): Promise<void> {
+  await runInDurableObject(bot(name), async (_instance, state) => {
+    const key = `run:${runId}`;
+    const stored = (await state.storage.get(key)) as Parameters<
+      typeof rewindStoredRunEventsV1
+    >[2];
+    const run = await hydrateStoredRunEventsV1(state.storage, stored);
+    await rewindStoredRunEventsV1(
+      state.storage,
+      key,
+      stored,
+      run.events.filter((event) => event.type !== "turn/end"),
+      { status: "running", phase: "executing" },
+    );
+  });
+}
+
+/** Names the Turn occupying the Bot, or clears it. */
+async function markActive(
+  name: string,
+  runId: string | undefined,
+): Promise<void> {
+  await runInDurableObject(bot(name), async (_instance, state) => {
+    if (runId === undefined) await state.storage.delete("active-run");
+    else await state.storage.put("active-run", runId);
+  });
+}
+
+async function storedRun(name: string, runId: string): Promise<unknown> {
+  return runInDurableObject(bot(name), (_instance, state) =>
+    state.storage.get(`run:${runId}`),
+  );
+}
+
+/** The newest Turn in the Bot's run index. */
+async function newestRunId(name: string): Promise<string | undefined> {
+  return runInDurableObject(bot(name), async (_instance, state) => {
+    const newest = await state.storage.list<string>({
+      prefix: "run-index:",
+      reverse: true,
+      limit: 1,
+    });
+    return [...newest.values()][0];
+  });
 }
 
 describe("per-Bot unread in Workerd", () => {
@@ -472,5 +533,96 @@ describe("per-Bot unread in Workerd", () => {
     expect(after).toMatchObject({ count: 1 });
     expect(after.lastActivityCursor).toBe(before.lastActivityCursor);
     expect(after.lastMessage).toEqual(before.lastMessage);
+  });
+
+  // A row's working mark is the chat's, and the open chat draws it for the
+  // Turn its transcript shows running. A Routine firing runs in its own
+  // Session and shows nothing; a message sent while it runs is the newest
+  // Turn but waits behind it, and the chat draws that one queued.
+  test("the row's working mark follows the Turn the chat shows running", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      schemaVersion: 1 as const,
+      userId: `unread-working-user-${suffix}`,
+      botId: `unread-working-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    const name = `${identity.userId}:${identity.botId}`;
+    const working = async () =>
+      (await unreadRpc(name).readUnread(identity)).working ?? false;
+
+    await bot(name).run({
+      ...identity,
+      command: {
+        runId: "run-1",
+        sessionId: name,
+        acceptedAt: new Date().toISOString(),
+        text: "hello",
+      },
+    });
+    expect(
+      await unreadRpc(name).executeRoutineCommand({
+        ...identity,
+        command: {
+          schemaVersion: 1,
+          botId: identity.botId,
+          type: "routine/create",
+          commandId: `create-${suffix}`,
+          routineId: "triage",
+          name: "Inbox triage",
+          prompt: "Check the inbox.",
+          trigger: { kind: "webhook" },
+        },
+      }),
+    ).toMatchObject({ status: "applied" });
+    expect(
+      await unreadRpc(name).executeRoutineCommand({
+        ...identity,
+        command: {
+          schemaVersion: 1,
+          botId: identity.botId,
+          type: "routine/run",
+          commandId: `run-${suffix}`,
+          routineId: "triage",
+        },
+      }),
+    ).toMatchObject({ status: "fired" });
+    // The firing is a durable record the alarm drains, not a timer.
+    await evictDurableObject(bot(name));
+    await runDurableObjectAlarm(bot(name));
+
+    // A silent firing in flight, and the newest Turn the Bot has.
+    const firing = (await newestRunId(name))!;
+    await reopen(name, firing);
+    await markActive(name, firing);
+    expect(await storedRun(name, firing)).toMatchObject({
+      status: "running",
+      sessionId: "routine:triage",
+      admission: { turnType: "automation" },
+    });
+    expect(await working()).toBe(false);
+
+    // A chat Turn queued behind it: newest, live, and still not running.
+    await markActive(name, undefined);
+    await bot(name).run({
+      ...identity,
+      command: {
+        runId: "run-2",
+        sessionId: name,
+        acceptedAt: new Date().toISOString(),
+        text: "still there?",
+      },
+    });
+    expect(await newestRunId(name)).toBe("run-2");
+    await reopen(name, "run-2");
+    await markActive(name, firing);
+    expect(await storedRun(name, "run-2")).toMatchObject({
+      status: "running",
+    });
+    expect(await working()).toBe(false);
+
+    // Its turn comes: now the chat shows it running, and so does the row.
+    await markActive(name, "run-2");
+    expect(await working()).toBe(true);
   });
 });
