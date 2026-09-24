@@ -520,7 +520,7 @@ function compactionStateFromHead(
   const summary = head?.compaction;
   return {
     failures: head?.compactionFailures ?? 0,
-    lastFailureThroughTurn: head?.lastFailureThroughTurn ?? 0,
+    lastFailureTurn: head?.lastFailureThroughTurn ?? 0,
     ...(head?.unsettledCompaction
       ? { unsettled: head.unsettledCompaction }
       : {}),

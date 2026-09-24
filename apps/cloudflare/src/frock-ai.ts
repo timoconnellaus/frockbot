@@ -140,11 +140,24 @@ function gatewayBillingLimitsV1(
 } {
   const byGatewayModel = new Map<string, FrockAiBillingLimitV1>();
   for (const [model, limit] of Object.entries(limits)) {
+    let gatewayModel: string;
     try {
-      byGatewayModel.set(gatewayModelForFrockIdV1(model, autoRoute), limit);
+      gatewayModel = gatewayModelForFrockIdV1(model, autoRoute);
     } catch {
       // A priced id this deployment cannot send is never requested.
+      continue;
     }
+    // Two ids sent as one gateway model are held to the tighter bound.
+    const shared = byGatewayModel.get(gatewayModel);
+    byGatewayModel.set(
+      gatewayModel,
+      shared
+        ? {
+            inputTokens: Math.min(shared.inputTokens, limit.inputTokens),
+            outputTokens: Math.min(shared.outputTokens, limit.outputTokens),
+          }
+        : limit,
+    );
   }
   const all = Object.values(limits);
   return {

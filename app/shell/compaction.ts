@@ -54,11 +54,12 @@ export const PRUNED_TOOL_RESULT_V1 = "[pruned]";
 export const PRUNE_MIN_RESULT_CHARS_V1 = 200;
 
 /**
- * Most transcript one summariser call reads. A backlog larger than this is
- * summarised oldest first, one bounded call at a time, each folding in the
- * summary before it.
+ * Most transcript one summariser call reads, in UTF-8 bytes once
+ * JSON-encoded — the measure the gateway's prepaid bound applies. A backlog
+ * larger than this is summarised oldest first, one bounded call at a time,
+ * each folding in the summary before it.
  */
-export const COMPACTION_INPUT_MAX_CHARS_V1 = 80_000;
+export const COMPACTION_INPUT_MAX_BYTES_V1 = 80_000;
 
 /** Longest a tool result may be in a summariser's transcript. */
 export const COMPACTION_TOOL_RESULT_MAX_CHARS_V1 = 2_000;
@@ -100,8 +101,8 @@ export interface CompactionStateV1 {
   unsettled?: { effectId: string; throughTurn: number };
   /** Consecutive failures since the last completed compaction. */
   failures: number;
-  /** The Turn the newest failure covered, for backoff. */
-  lastFailureThroughTurn: number;
+  /** The Turn the newest failure was recorded in, for backoff. */
+  lastFailureTurn: number;
 }
 
 export function compactionStateV1(
@@ -110,8 +111,13 @@ export function compactionStateV1(
   let compaction: CompactionV1 | undefined;
   let unsettled: { effectId: string; throughTurn: number } | undefined;
   let failures = 0;
-  let lastFailureThroughTurn = 0;
+  let lastFailureTurn = 0;
+  let latestTurn = 0;
   for (const event of events) {
+    if (event.type === "turn/start") {
+      latestTurn = Math.max(latestTurn, event.turn);
+      continue;
+    }
     if (event.type === "conversation/compaction-intent") {
       unsettled = { effectId: event.effectId, throughTurn: event.throughTurn };
       continue;
@@ -131,20 +137,20 @@ export function compactionStateV1(
         };
       }
       failures = 0;
-      lastFailureThroughTurn = 0;
+      lastFailureTurn = 0;
       continue;
     }
     if (event.type === "conversation/compaction-failed") {
       if (unsettled?.effectId === event.effectId) unsettled = undefined;
       failures += 1;
-      lastFailureThroughTurn = event.throughTurn;
+      lastFailureTurn = latestTurn;
     }
   }
   return {
     ...(compaction ? { compaction } : {}),
     ...(unsettled ? { unsettled } : {}),
     failures,
-    lastFailureThroughTurn,
+    lastFailureTurn,
   };
 }
 
@@ -253,7 +259,7 @@ export function assessCompactionV1(input: {
       2 ** (input.state.failures - 1),
       COMPACTION_MAX_BACKOFF_TURNS_V1,
     );
-    if (input.currentTurn - input.state.lastFailureThroughTurn < wait) {
+    if (input.currentTurn - input.state.lastFailureTurn < wait) {
       return { ...base, skipped: "backing-off" };
     }
   }
@@ -313,6 +319,27 @@ export function compactionTranscriptV1(
     .join("\n");
 }
 
+/** A text's size as a request body carries it: UTF-8, JSON-escaped. */
+export function compactionInputBytesV1(text: string): number {
+  return new TextEncoder().encode(JSON.stringify(text)).length;
+}
+
+/** The longest beginning of `text` within `maxBytes`. */
+function boundedPrefixV1(text: string, maxBytes: number): string {
+  if (compactionInputBytesV1(text) <= maxBytes) return text;
+  let low = 0;
+  let high = text.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (compactionInputBytesV1(text.slice(0, middle)) <= maxBytes) {
+      low = middle;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return `${text.slice(0, low)} …[truncated]`;
+}
+
 /** The one user message a summariser request carries. */
 export function compactionRequestMessagesV1(input: {
   messages: readonly LlmMessage[];
@@ -330,10 +357,7 @@ export function compactionRequestMessagesV1(input: {
     : "";
   const transcript = compactionTranscriptV1(input.messages);
   // A single Turn can outgrow the cap on its own; its beginning is kept.
-  const bounded =
-    transcript.length > COMPACTION_INPUT_MAX_CHARS_V1
-      ? `${transcript.slice(0, COMPACTION_INPUT_MAX_CHARS_V1)} …[truncated]`
-      : transcript;
+  const bounded = boundedPrefixV1(transcript, COMPACTION_INPUT_MAX_BYTES_V1);
   return [
     {
       role: "user",
@@ -500,7 +524,9 @@ export async function runCompactionV1(
     messages: input.window.messages,
     turns: input.window.turns,
     throughTurn: assessment.throughTurn,
-    previousChars: state.compaction?.summary.length ?? 0,
+    previousBytes: state.compaction
+      ? compactionInputBytesV1(state.compaction.summary)
+      : 0,
   });
   if (covered.length === 0) return { kind: "skipped", assessment };
   const effectId = input.newEffectId();
@@ -567,10 +593,10 @@ export function compactionSliceV1(input: {
   messages: readonly LlmMessage[];
   turns: readonly number[];
   throughTurn: number;
-  previousChars: number;
+  previousBytes: number;
 }): { throughTurn: number; covered: LlmMessage[] } {
   const covered: LlmMessage[] = [];
-  let spent = input.previousChars;
+  let spent = input.previousBytes;
   let through = 0;
   let index = 0;
   while (index < input.messages.length) {
@@ -579,10 +605,10 @@ export function compactionSliceV1(input: {
     let end = index;
     while (end < input.messages.length && input.turns[end] === turn) end += 1;
     const messages = input.messages.slice(index, end);
-    const chars = compactionTranscriptV1(messages).length;
-    if (through > 0 && spent + chars > COMPACTION_INPUT_MAX_CHARS_V1) break;
+    const bytes = compactionInputBytesV1(compactionTranscriptV1(messages));
+    if (through > 0 && spent + bytes > COMPACTION_INPUT_MAX_BYTES_V1) break;
     covered.push(...messages);
-    spent += chars;
+    spent += bytes;
     through = turn;
     index = end;
   }

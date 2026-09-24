@@ -183,9 +183,11 @@ export function reduceWorkingContextAppendV1(input: {
     lines: input.voice.lines.map((line) => ({ ...line })),
   };
   const dirty = new Set<number>();
+  let latestTurn = head.nextTurn - 1;
 
   for (const event of input.events) {
     if (event.type === "turn/start") {
+      latestTurn = Math.max(latestTurn, event.turn);
       const turn = ensure(turns, head.sessionId, event.turn, event.seq);
       turn.index.startSeq = Math.min(turn.index.startSeq, event.seq);
       turn.index.endSeq = event.seq + 1;
@@ -302,7 +304,7 @@ export function reduceWorkingContextAppendV1(input: {
         delete head.unsettledCompaction;
       }
       head.compactionFailures += 1;
-      head.lastFailureThroughTurn = event.throughTurn;
+      head.lastFailureThroughTurn = latestTurn;
       continue;
     }
     if (event.type === "conversation/compacted") {

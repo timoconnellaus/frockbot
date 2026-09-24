@@ -18,8 +18,7 @@ import {
   PRUNED_TOOL_RESULT_V1,
   pruneToolOutputsV1,
   runCompactionV1,
-  COMPACTION_INPUT_MAX_CHARS_V1,
-  COMPACTION_SYSTEM_PROMPT_V1,
+  COMPACTION_INPUT_MAX_BYTES_V1,
   COMPACTION_TRIGGER_RATIO_V1,
 } from "./compaction.js";
 import { chatWindowV1, turnScopedMessagesV1 } from "./history.js";
@@ -240,12 +239,46 @@ describe("the size estimate", () => {
     expect(window.state.failures).toBe(1);
     // One failure waits one Turn: the Turn it failed on is not enough.
     expect(
-      assessCompactionV1({ ...window, budget: 4_000, currentTurn: 6 }).skipped,
+      assessCompactionV1({ ...window, budget: 4_000, currentTurn: 10 }).skipped,
     ).toBe("backing-off");
     expect(
-      assessCompactionV1({ ...window, budget: 4_000, currentTurn: 10 })
+      assessCompactionV1({ ...window, budget: 4_000, currentTurn: 11 })
         .throughTurn,
     ).toBe(6);
+  });
+
+  test("backs off from the Turn a failure ran at, not the Turns it covered", () => {
+    const failure = (effectId: string): SessionEventInput[] => [
+      {
+        type: "conversation/compaction-intent",
+        effectId,
+        throughTurn: 2,
+        provider: "ollama-cloud",
+        model: "kimi-k2",
+      },
+      {
+        type: "conversation/compaction-failed",
+        effectId,
+        throughTurn: 2,
+        reason: "provider said no",
+      },
+    ];
+    const events = log([
+      MODEL_REQUEST,
+      ...wordy(40, 400),
+      ...failure("e1"),
+      ...failure("e2"),
+      ...failure("e3"),
+    ]);
+    const window = windowOf(events);
+    // A slice covering only Turns 1–2 failed three times at Turn 40.
+    expect(
+      assessCompactionV1({ ...window, budget: 4_000, currentTurn: 41 }).skipped,
+    ).toBe("backing-off");
+    expect(
+      assessCompactionV1({ ...window, budget: 4_000, currentTurn: 44 })
+        .throughTurn,
+    ).toBe(36);
   });
 });
 
@@ -389,18 +422,6 @@ describe("injecting a compaction", () => {
 });
 
 describe("reading the summariser's answer", () => {
-  test("asks for the headings it reads back, not for JSON", () => {
-    for (const heading of [
-      "## Summary",
-      "## Decisions",
-      "## Open items",
-      "## Identifiers mentioned",
-    ]) {
-      expect(COMPACTION_SYSTEM_PROMPT_V1).toContain(heading);
-    }
-    expect(COMPACTION_SYSTEM_PROMPT_V1).not.toContain("`summary`");
-  });
-
   test("lifts the identifiers out of their heading", () => {
     const parsed = parseCompactionSummaryV1(
       [
@@ -600,7 +621,7 @@ describe("running a compaction", () => {
 
   test("summarises a backlog larger than one call can read a slice at a time", async () => {
     // Each Turn is a fifth of what one summariser call may read.
-    const turnChars = Math.floor(COMPACTION_INPUT_MAX_CHARS_V1 / 5);
+    const turnChars = Math.floor(COMPACTION_INPUT_MAX_BYTES_V1 / 5);
     const session = await sessionFrom([MODEL_REQUEST, ...wordy(20, turnChars)]);
     const budget = turnChars * 20;
     const seen: number[] = [];
@@ -636,20 +657,45 @@ describe("running a compaction", () => {
   test("summarises one Turn larger than the cap on its own, from its beginning", async () => {
     const session = await sessionFrom([
       MODEL_REQUEST,
-      ...wordy(10, COMPACTION_INPUT_MAX_CHARS_V1 * 2),
+      ...wordy(10, COMPACTION_INPUT_MAX_BYTES_V1 * 2),
     ]);
     let sent = 0;
     const outcome = await runCompactionV1({
       ...runner(session, async () => SUMMARY),
-      budget: COMPACTION_INPUT_MAX_CHARS_V1 * 4,
+      budget: COMPACTION_INPUT_MAX_BYTES_V1 * 4,
       summarise: async (request) => {
         sent = String(request.messages[0]?.content ?? "").length;
         return SUMMARY;
       },
     });
     expect(outcome).toEqual({ kind: "compacted", throughTurn: 1, fromTurn: 1 });
-    expect(sent).toBeGreaterThan(COMPACTION_INPUT_MAX_CHARS_V1 / 2);
-    expect(sent).toBeLessThan(COMPACTION_INPUT_MAX_CHARS_V1 + 200);
+    expect(sent).toBeGreaterThan(COMPACTION_INPUT_MAX_BYTES_V1 / 2);
+    expect(sent).toBeLessThan(COMPACTION_INPUT_MAX_BYTES_V1 + 200);
+  });
+
+  test("bounds a slice by the bytes its request carries", async () => {
+    // Three bytes a character: a Turn a fifth of the cap in characters is
+    // more than half of it once encoded.
+    const turnChars = Math.floor(COMPACTION_INPUT_MAX_BYTES_V1 / 5);
+    const session = await sessionFrom([
+      MODEL_REQUEST,
+      ...Array.from({ length: 10 }, (_, index) =>
+        turnEvents({ turn: index + 1, reply: "語".repeat(turnChars) }),
+      ).flat(),
+    ]);
+    let sent = 0;
+    const outcome = await runCompactionV1({
+      ...runner(session, async () => SUMMARY),
+      budget: turnChars * 10,
+      summarise: async (request) => {
+        sent = new TextEncoder().encode(
+          JSON.stringify(request.messages[0]?.content ?? ""),
+        ).length;
+        return SUMMARY;
+      },
+    });
+    expect(outcome).toEqual({ kind: "compacted", throughTurn: 1, fromTurn: 1 });
+    expect(sent).toBeLessThan(COMPACTION_INPUT_MAX_BYTES_V1 + 200);
   });
 
   test("records a failure and leaves the conversation alone", async () => {

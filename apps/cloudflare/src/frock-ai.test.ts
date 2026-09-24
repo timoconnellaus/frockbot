@@ -366,6 +366,19 @@ describe("Frock AI prepaid limits", () => {
     expect(sent).toHaveLength(1);
   });
 
+  test("holds two ids sent as one binding model to the tighter bound", async () => {
+    const { ai } = gatewayHost(() => new Response("data: [DONE]\n\n"));
+    const host = createFrockAiGatewayHostV1(ai, {
+      billingLimits: {
+        "@frock/auto": { inputTokens: 2_000, outputTokens: 500 },
+        "@frock/structured": { inputTokens: 200_000, outputTokens: 4_000 },
+      },
+    });
+    await expect(
+      host.runChatCompletion(FROCK_AI_BINDING_AUTO_MODEL, long),
+    ).rejects.toThrow("exceeds its prepaid model limit");
+  });
+
   test("holds a model with no bound of its own to the smallest", async () => {
     const sent: Record<string, unknown>[] = [];
     await expect(
