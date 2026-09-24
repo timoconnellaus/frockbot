@@ -65,15 +65,15 @@ Identity lives in `deployments/<name>.json`, validated against `deployments/prof
 
 Five classes in the app Worker, exported from `apps/cloudflare/src/index.ts`. `core/durable` defines no Durable Object class; it is the storage and authority library `BotState` delegates to. Four are hand-rolled; `VoiceAssistant` is the one Cloudflare Agents SDK class.
 
-### `BotState` — `apps/cloudflare/src/bot-state.ts:535`
+### `BotState` — `apps/cloudflare/src/bot-state.ts:524`
 
-- Binding `BOT_STATES`; id `idFromName("<userId>:<botId>")` (`apps/cloudflare/src/index.ts:539`, `:644`).
+- Binding `BOT_STATES`; id `idFromName("<userId>:<botId>")` (`apps/cloudflare/src/index.ts:532`, `:634`).
 - Authoritative for all Bot-scoped state: identity, runs, admission fences, the pending and agent-lane queues, the session event log, notifications, conversations, its Plugin enable map, Workspace file generations and conflicts, the memory vector purge journal. Its `composition:` records are a mirror of the User's Composition, not an authority over it (§5). Keys are enumerated in `core/durable/storage-keys.ts`.
 - Bot-scoped state is key-value — `ctx.storage.get/put/list/delete/transaction`. SQLite holds the Bot's Memory: `createBotMemoryEngineV1` (`apps/cloudflare/src/memory-records.ts`) hands `ctx.storage.sql` to the Memory engine (`app/memory/engine.ts`), which owns the `bot` scope's tables (`app/memory/schema.ts`) — items, their FTS5 index, jobs and vector index intents. The class issues no `sql.exec` of its own.
-- Roughly 100 RPC methods (`bot-state.ts:1332-3486`), each taking `input: unknown` and decoding through an envelope decoder. They include `run`/`runAgent`, the `isolate*` loopback surface, Composition reads and reverts, routines, tasks, approvals, notifications, `debugSnapshot` and `fenceRunAdmission`.
+- Roughly 100 RPC methods (`bot-state.ts:1321-3453`), each taking `input: unknown` and decoding through an envelope decoder. They include `run`/`runAgent`, the `isolate*` loopback surface, Composition reads and reverts, routines, tasks, approvals, notifications, `debugSnapshot` and `fenceRunAdmission`.
 - `alarm()` drains the push-notification outbox first. While the Bot is being deleted it then runs one page of the Memory vector purge and finishes the teardown when the purge completes; otherwise it runs the mounted contribution's alarm, then drains the audit and voice-reply outboxes.
 - `GET /api/bots/:bot/cards` answers the newest Cards that fit one listing — `truncated` says some did not — `GET /api/bots/:bot/cards/:surfaceId` answers one Card by its id whatever the listing's byte budget cut (404 when this Bot never drew it), and `POST` to the listing path is one renderer action — `{surfaceId, revision, event:{name, context}, dataModel?, commandId?}` — routed by the kernel, never by the Card: `approval/<approvalId>` goes to `decideApproval` and cannot name a decision the kernel never recorded, `plugin/<pluginId>/<action>` is a `cardAction` RPC on the Plugin worker whose returned messages fold into the card, and anything else becomes the Bot's next user-lane pending input, keyed on the client's `commandId` when it sent one — so a retried post is the same press — and on a minted id when it did not, and opens an input-delivery Turn (below) so the Bot answers the press without the person having to type. A handler's `input` opens none: that press was answered on the card and costs no Turn. A stale revision is a 409. A card write is a transcript write, so `shell:card:` joins the keys `bot-state-channel` invalidates `runs` for.
-- `fetch()` at `:3553` serves one path: the state-channel WebSocket upgrade. Sockets use the hibernation API — `state.acceptWebSocket(server, [CHANNEL_TAG])` (`apps/cloudflare/src/bot-state-channel.ts:473`), with `webSocketMessage/Close/Error` forwarded from `bot-state.ts:3580-3603`.
+- `fetch()` at `:3520` serves one path: the state-channel WebSocket upgrade. Sockets use the hibernation API — `state.acceptWebSocket(server, [CHANNEL_TAG])` (`apps/cloudflare/src/bot-state-channel.ts:473`), with `webSocketMessage/Close/Error` forwarded from `bot-state.ts:3547-3570`.
 
 ### `UserConfiguration` — `apps/cloudflare/src/user-configuration.ts:255`
 
@@ -87,7 +87,7 @@ Five classes in the app Worker, exported from `apps/cloudflare/src/index.ts`. `c
 
 ### `DeploymentPolicy` — `apps/cloudflare/src/deployment-policy.ts`
 
-- Binding `DEPLOYMENT_POLICY`; singleton `getByName("frockbot-deployment-policy")` (`apps/cloudflare/src/index.ts:704`).
+- Binding `DEPLOYMENT_POLICY`; singleton `getByName("frockbot-deployment-policy")` (`apps/cloudflare/src/index.ts:694`).
 - Owns deployment admission, account access and email invitations. The authority contract and scoped release cleanup are in [`beta-access.md`](beta-access.md); storage keys and RPCs are defined in `apps/cloudflare/src/deployment-policy.ts`. No fetch, no alarm.
 - Storage is key-value through the synchronous `ctx.storage.kv` API inside `transactionSync`, which only SQLite-backed storage provides. It creates no tables.
 
@@ -125,11 +125,11 @@ The composer's dictation relay (`apps/cloudflare/src/voice-dictation.ts`) is not
 
 2. **Gateway.** `apps/cloudflare/src/gateway.ts`, the Worker's `fetch`. Order of dispatch in `createGateway`: client-compatibility refusal, native-auth routes, `/api/auth/*` to the auth Package, `/sign-out` to the auth Package, the debug route, public Package routes, then identity resolution — native bearer token, development identity, or the auth Package's session — then the [beta-access admission check](beta-access.md#where-it-is-asked), then authenticated Package backend contributions.
 
-3. **Per-user application isolate.** Unmatched requests fall through to `routeUserApplication` (`:612`). It resolves the user's `applicationHash`, then `dependencies.loader.get(workerId, ...)` loads that artifact from R2 into a Worker Loader isolate whose `env` holds `BOT_STATE` — a Durable Object stub already scoped to the user — plus `DEPLOYMENT` (`:633-646`). The client's `x-frockbot-user-id` header is deleted before forwarding (`:650`); the gateway sets `x-frockbot-deployment`, `x-frockbot-auth-session-v1` and `x-frockbot-is-admin-v1` itself. Authorization is established here and passed downward as capability; nothing below re-verifies it.
+3. **Per-user application isolate.** Unmatched requests fall through to `routeUserApplication` (`:187`). It resolves the user's `applicationHash`, then `dependencies.loader.get(workerId, ...)` loads that artifact from R2 into a Worker Loader isolate whose `env` holds `BOT_STATE` — a Durable Object stub already scoped to the user — plus `DEPLOYMENT` (`:209-222`). The client's `x-frockbot-user-id` header is deleted before forwarding (`:225`); the gateway sets `x-frockbot-deployment`, `x-frockbot-auth-session-v1` and `x-frockbot-is-admin-v1` itself. Authorization is established here and passed downward as capability; nothing below re-verifies it.
 
-4. **Application.** `apps/cloudflare/src/user-application.ts:719` matches the turn route; `:1093` calls `env.BOT_STATE.admitRun({schemaVersion, botId, command: {runId: commandId, sessionId: "<userId>:<botId>", acceptedAt, text, skills?, retryOf?}})` and answers 202 with the receipt. A message sent while a Turn runs is admitted into the user queue, and a chat Turn on the user lane ends at its next step boundary to let it run ([Steering](../CONTEXT.md)); the `supersedes` field installed apps still send is accepted and dropped. The session id is derived server-side. The command decoder accepts exact keys only, so a client cannot name a turn type; an absent turn type means `chat`.
+4. **Application.** `apps/cloudflare/src/user-application.ts:653` matches the turn route; `:940` calls `env.BOT_STATE.admitRun({schemaVersion, botId, command: {runId: commandId, sessionId: "<userId>:<botId>", acceptedAt, text, skills?, retryOf?}})` and answers 202 with the receipt. A message sent while a Turn runs is admitted into the user queue, and a chat Turn on the user lane ends at its next step boundary to let it run ([Steering](../CONTEXT.md)); the `supersedes` field installed apps still send is accepted and dropped. The session id is derived server-side. The command decoder accepts exact keys only, so a client cannot name a turn type; an absent turn type means `chat`.
 
-5. **Bot Durable Object.** `apps/cloudflare/src/bot-state.ts:1168` `run()` decodes the envelope, materializes the identity and calls `shell.run(...)`.
+5. **Bot Durable Object.** `apps/cloudflare/src/bot-state.ts:2001` `run()` decodes the envelope, materializes the identity and calls `shell.run(...)`.
 
 6. **Shell.** `app/shell/turn.ts:151` `run()` yields any in-flight compaction, then delegates to `admitTurnV1`, which mirrors the User's Composition and calls `BotDurableAuthority.run` (`core/durable/authority.ts:293`): recover whatever the object holds, check for a settled replay, then `acceptRun`. An accepted run executes inline; otherwise it is durably queued — one user-lane slot, FIFO agent lane — and promoted by `runQueuedRun` (`:332`).
 
@@ -141,7 +141,7 @@ The composer's dictation relay (`apps/cloudflare/src/voice-dictation.ts`) is not
 
 10. **Tools.** `ctx.tools.prepare` then `ctx.tools.executePrepared`.
 
-11. **Return.** The POST returns the settled turn. Live updates arrive on a separate WebSocket, `GET /api/bots/{botId}/state-channel?version=1&cursor=N` (`apps/cloudflare/src/gateway.ts:894`). That channel carries invalidation notices, not content; the client re-reads over REST. Notices are coalesced and throttled per interval (`apps/cloudflare/src/bot-state-channel.ts:245-265`).
+11. **Return.** The POST returns the settled turn. Live updates arrive on a separate WebSocket, `GET /api/bots/{botId}/state-channel?version=1&cursor=N` (`apps/cloudflare/src/gateway.ts:502`). That channel carries invalidation notices, not content; the client re-reads over REST. Notices are coalesced and throttled per interval (`apps/cloudflare/src/bot-state-channel.ts:245-265`).
 
 ---
 
@@ -369,7 +369,7 @@ an asset directory that answered `/` or invented an index would answer for it.
 copy, loaded by a plain GET. No request for the client's own bytes ever
 reaches the gateway.
 
-The document is `appHtml()` (`apps/cloudflare/src/user-application.ts:117`).
+The document is `appHtml()` (`apps/cloudflare/src/user-application.ts:101`).
 `build-artifact.ts` defines `__FROCKBOT_FLUTTER_BUILD__` from `flutter-web.json`
 and `__FROCKBOT_CLIENT_ICON__` from the brand icon; those two are all the
 artifact carries of the client. The page is a
@@ -380,7 +380,7 @@ changes when the client does.
 
 Identity is handed over in the document. A browser's session is a cookie it
 cannot read, so the Worker stamps the account onto `<body>` —
-`HOSTED_EMBEDDED_BODY_ATTRIBUTES_V1` (`user-application.ts:111`):
+`HOSTED_EMBEDDED_BODY_ATTRIBUTES_V1` (`user-application.ts:103`):
 `data-frockbot-user-id`, `data-frockbot-auth-mode`, `data-frockbot-is-admin` —
 and `bootstrapUserIdV1()` (`apps/native/lib/client/identity_web.dart`) reads
 them on the first frame, so `restore()` (`apps/native/lib/main.dart:117`) paints
@@ -388,7 +388,7 @@ the shell instead of flashing the sign-in door at someone who is already signed 
 The `/api/identity` read still happens; the attributes are what it confirms.
 `identity_io.dart` returns null, because the phone is handed no document.
 
-The app origin's policy is `withSecurityHeaders` (`user-application.ts:147`).
+The app origin's policy is `withSecurityHeaders` (`user-application.ts:143`).
 Two relaxations belong to the engine and neither is avoidable:
 `script-src 'wasm-unsafe-eval'`, because CanvasKit instantiates WebAssembly, and
 `style-src 'unsafe-inline'`, because the engine injects a `<style>` element to
@@ -1093,14 +1093,14 @@ Bindings are declared in `apps/cloudflare/wrangler.jsonc`.
 
 | Binding                       | Kind               | Contents                                                                                                                                                                                                                                                                                                                                                         |
 | ----------------------------- | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `USER_APPLICATIONS` (:28)     | Worker Loader      | The per-user foundation application artifact, loaded by the gateway (`apps/cloudflare/src/index.ts:2421`)                                                                                                                                                                                                                                                        |
+| `USER_APPLICATIONS` (:28)     | Worker Loader      | The per-user foundation application artifact, loaded by the gateway (`apps/cloudflare/src/index.ts:2357`)                                                                                                                                                                                                                                                        |
 | `BOT_PACKAGES` (:34)          | Worker Loader      | The per-User Plugin worker, whose `globalOutbound` is the `PluginEgress` loopback, or disabled when no enabled Plugin declared network (`app/isolates/bot.ts:150-184`)                                                                                                                                                                                           |
 | `COMPUTER_HOST` (:45)         | Service            | `frockbot-computer-host` (`apps/cloudflare/src/computer-host.ts:61-67`)                                                                                                                                                                                                                                                                                          |
 | `APPLET_BUILD` (:53)          | Service            | `frockbot-applet-build`, the Plugin build service in `apps/applet-build`: it type-checks, lints, bundles and boots a Plugin's source and returns the artifacts (`app/plugins/authoring-bot.ts:52-60`)                                                                                                                                                            |
 | `APPLICATION_ARTIFACTS` (:59) | R2                 | Content-addressed: application artifacts (`applications/<hash>.mjs`, uploaded by the release workflows), Plugin artifacts (`packages/<hash>.mjs`, written by Plugin authoring in `app/plugins/authoring-bot.ts` and read hash-verified by `createR2PackageArtifactStore` in `app/isolates/capabilities.ts`) and exported Bot templates (`templates/<hash>.json`) |
-| `MEMORY_FILES` (:62)          | R2                 | Memory and workspace file bodies (`apps/cloudflare/src/workspace.ts:131`, `:206`)                                                                                                                                                                                                                                                                                |
+| `MEMORY_FILES` (:62)          | R2                 | Memory and workspace file bodies (`apps/cloudflare/src/workspace.ts:130`, `:186`)                                                                                                                                                                                                                                                                                |
 | `AUTH_DB` (:67)               | D1 `frockbot-auth` | better-auth only                                                                                                                                                                                                                                                                                                                                                 |
-| `MEMORY_INDEX` (:73)          | Vectorize          | Memory embeddings: upserted and deleted by the Memory drain (`app/memory/processing.ts`), deleted with the Bot (`bot-state.ts:1225-1260`), queried for semantic recall (`bot-state.ts:1148-1160`, `app/memory/semantic.ts`)                                                                                                                                      |
+| `MEMORY_INDEX` (:73)          | Vectorize          | Memory embeddings: upserted and deleted by the Memory drain (`app/memory/processing.ts`), deleted with the Bot (`bot-state.ts:1214-1249`), queried for semantic recall (`bot-state.ts:1137-1149`, `app/memory/semantic.ts`)                                                                                                                                      |
 | `AI` (:78)                    | Workers AI         | Frock AI gateway transport and image generation                                                                                                                                                                                                                                                                                                                  |
 | `BOT_STATES` (:83)            | Durable Object     | `BotState` (§2)                                                                                                                                                                                                                                                                                                                                                  |
 | `USER_CONFIGURATIONS` (:87)   | Durable Object     | `UserConfiguration` (§2)                                                                                                                                                                                                                                                                                                                                         |
@@ -1149,7 +1149,7 @@ The singleton `DeploymentPolicy` owns beta access. [`beta-access.md`](beta-acces
 
 An account's features are its `UserFeaturesV1` record (`app/admin/shared.ts`), held by the User Durable Object under `user:features:v1` and read and written by RPCs that never pin the identity, so an admin can set it for an account that has no access without admitting that account. It carries the account's two Plugin fields (ADR 0026): `pluginAuthoring`, the admin-held gate on a Bot writing Plugins, and `plugins`, the admin-gated seeded Plugins opened for this account that §5 reconciles into its Composition. A record written without them reads as closed and none opened. `AdminEntrypoint` lists accounts from the Better Auth `user` table and writes one account's features; the operator surface writes the same record under the deployment's debug token, which is how a deployment with no portal turns them on. Each account's features are read from its own User Durable Object, so one failed read marks that account `{ unavailable: true }` in `AdminUserListViewV1` rather than failing the list or reporting the default: the portal shows that account as unreadable and never as off, and every other account stays usable.
 
-`ALLOW_DEVELOPMENT_AUTH` enables an identity bypass: `?as_user=` is accepted and persisted as the `frockbot_dev_user` cookie (`gateway.ts:342-362`, `:673-681`). Its admission exception is described in [`beta-access.md`](beta-access.md#where-it-is-asked). `admin-identities.ts:20-21` treats the id `development` as admin unconditionally, and `:27` treats any development identity as admin when `FROCKBOT_ADMIN_EMAILS` is empty.
+`ALLOW_DEVELOPMENT_AUTH` enables an identity bypass: `?as_user=` is accepted and persisted as the `frockbot_dev_user` cookie (`gateway.ts:115-136`, `:250-256`). Its admission exception is described in [`beta-access.md`](beta-access.md#where-it-is-asked). `admin-identities.ts:20-21` treats the id `development` as admin unconditionally, and `:27` treats any development identity as admin when `FROCKBOT_ADMIN_EMAILS` is empty.
 
 ---
 
