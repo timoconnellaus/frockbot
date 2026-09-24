@@ -78,6 +78,48 @@ async function callEcho(userId: string, botId: string, commandId: string) {
   };
 }
 
+/**
+ * Starts a sign-in to the server `userId` added, approves it at the stub
+ * authorization server, and answers where the server sent the browser back.
+ */
+async function signInReturn(
+  userId: string,
+  connectionId: string,
+  commandId: string,
+  returnClient?: string,
+): Promise<URL> {
+  const start = (await expectOkJson(
+    await postAsUser(
+      userId,
+      `/api/plugins/mcp/connections/${connectionId}/authorize`,
+      {
+        schemaVersion: 1,
+        type: "connection/start",
+        commandId,
+        connectionTypeId: "mcp-server",
+        ...(returnClient ? { returnClient } : {}),
+      },
+    ),
+  )) as { status: string; redirectUrl: string };
+  expect(start.status).toBe("authorization-required");
+  expect(new URL(start.redirectUrl).origin).toBe(MCP_AUTH_STUB_ORIGIN);
+  // The authorization server approves at once and sends the browser back.
+  const approved = await fetch(start.redirectUrl, { redirect: "manual" });
+  return new URL(approved.headers.get("location")!);
+}
+
+async function addSignInServer(userId: string, commandId: string) {
+  expect(
+    await expectOkJson(await addServer(userId, commandId, "/oauth/mcp")),
+  ).toMatchObject({ status: "failed" });
+  const [pending] = await servers(userId);
+  expect(pending).toMatchObject({
+    state: "failed",
+    authorization: { kind: "grant" },
+  });
+  return pending!.connectionId;
+}
+
 describe("MCP servers", () => {
   it("offers a server by address on the Connectors surface", async () => {
     const userId = freshUserId("mcp-row");
@@ -211,43 +253,37 @@ describe("MCP servers", () => {
     const userId = freshUserId("mcp-oauth");
     const botId = "oauth-bot";
     await provisionThroughGateway({ userId, botId });
-    expect(
-      await expectOkJson(await addServer(userId, "add-oauth", "/oauth/mcp")),
-    ).toMatchObject({ status: "failed" });
-    const [pending] = await servers(userId);
-    expect(pending).toMatchObject({
-      state: "failed",
-      authorization: { kind: "grant" },
-    });
-
-    const start = (await expectOkJson(
-      await postAsUser(
-        userId,
-        `/api/plugins/mcp/connections/${pending!.connectionId}/authorize`,
-        {
-          schemaVersion: 1,
-          type: "connection/start",
-          commandId: "sign-in",
-          connectionTypeId: "mcp-server",
-        },
-      ),
-    )) as { status: string; redirectUrl: string };
-    expect(start.status).toBe("authorization-required");
-    expect(new URL(start.redirectUrl).origin).toBe(MCP_AUTH_STUB_ORIGIN);
-
-    // The authorization server approves at once and sends the browser back.
-    const approved = await fetch(start.redirectUrl, { redirect: "manual" });
-    const back = new URL(approved.headers.get("location")!);
+    const connectionId = await addSignInServer(userId, "add-oauth");
+    const back = await signInReturn(userId, connectionId, "sign-in");
     expect(back.pathname).toBe("/api/mcp/oauth/callback");
+    const callback = `${back.pathname}${back.search}`;
 
     // A state FrockBot did not sign is refused before anything is asked.
     const forged = new URL(back);
     forged.searchParams.set("state", "forged");
     expect(await (await SELF.fetch(forged)).text()).toContain("expired");
-    expect((await servers(userId))[0]?.state).toBe("failed");
 
-    // The browser that comes back carries no session; the state is enough.
-    expect(await (await SELF.fetch(back)).text()).toContain("Signed in");
+    // Whoever else the link reaches trades nothing: a browser signed in to
+    // no account, or to another one — the victim of a link someone else
+    // started, who has just signed in to the server as themselves.
+    const victim = freshUserId("mcp-oauth-victim");
+    await provisionThroughGateway({ userId: victim, botId: "victim-bot" });
+    for (const elsewhere of [
+      await SELF.fetch(back),
+      await asUser(victim, callback),
+    ]) {
+      expect(elsewhere.status).toBe(200);
+      expect(await elsewhere.text()).toContain(
+        "Finish signing in from FrockBot",
+      );
+    }
+    expect((await servers(userId))[0]?.state).toBe("failed");
+    expect(await servers(victim)).toEqual([]);
+
+    // The browser of the account that started it finishes it.
+    expect(await (await asUser(userId, callback)).text()).toContain(
+      "Signed in",
+    );
     const [ready] = await servers(userId);
     expect(ready).toMatchObject({
       state: "ready",
@@ -280,5 +316,55 @@ describe("MCP servers", () => {
     expect(revoked.some((token) => token.startsWith("oauth-refresh-"))).toBe(
       true,
     );
+  });
+
+  it("finishes an app's sign-in only under the session that started it", async () => {
+    const userId = freshUserId("mcp-oauth-app");
+    await provisionThroughGateway({ userId, botId: "app-bot" });
+    const connectionId = await addSignInServer(userId, "add-app");
+    const back = await signInReturn(userId, connectionId, "app-in", "android");
+    expect(back.pathname).toBe("/api/mcp/oauth/callback/android");
+
+    // The app's browser holds no session: its page trades nothing and hands
+    // the answer to the app through the app's own return link.
+    const page = await SELF.fetch(back, { redirect: "manual" });
+    expect(page.status).toBe(303);
+    const link = new URL(page.headers.get("location")!);
+    expect(link.pathname).toBe("/api/connect/callback/android");
+    expect((await servers(userId))[0]?.state).toBe("failed");
+
+    // The app sends it back under its own session.
+    const answer = {
+      schemaVersion: 1,
+      state: link.searchParams.get("mcp_state"),
+      code: link.searchParams.get("mcp_code"),
+      ...(link.searchParams.has("mcp_iss")
+        ? { iss: link.searchParams.get("mcp_iss") }
+        : {}),
+    };
+    const victim = freshUserId("mcp-oauth-app-victim");
+    await provisionThroughGateway({ userId: victim, botId: "victim-bot" });
+    const refused = await postAsUser(victim, "/api/mcp/oauth/complete", answer);
+    expect(refused.status).toBe(403);
+    expect((await servers(userId))[0]?.state).toBe("failed");
+    expect(
+      (
+        await SELF.fetch(new URL("/api/mcp/oauth/complete", back), {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify(answer),
+        })
+      ).status,
+    ).toBe(401);
+
+    expect(
+      await expectOkJson(
+        await postAsUser(userId, "/api/mcp/oauth/complete", answer),
+      ),
+    ).toEqual({ schemaVersion: 1, status: "ready", connectionId });
+    expect((await servers(userId))[0]).toMatchObject({
+      state: "ready",
+      authorization: { kind: "grant" },
+    });
   });
 });

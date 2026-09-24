@@ -113,7 +113,15 @@ export interface BackendRouteContribution {
   publicRoute?(
     request: Request,
     url: URL,
-    context: { userId?: string; client: "browser" | "desktop" },
+    context: {
+      userId?: string;
+      client: "browser" | "desktop";
+      /**
+       * The User the request's own session is, once admitted, or `undefined`
+       * — asked only by a public route that must act for nobody else.
+       */
+      sessionUserId?: () => Promise<string | undefined>;
+    },
   ): Promise<Response | undefined>;
   route(
     request: Request,

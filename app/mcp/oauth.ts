@@ -38,6 +38,8 @@ import {
 
 /** Where an authorization server sends the person back. */
 export const MCP_OAUTH_CALLBACK_PATH = "/api/mcp/oauth/callback";
+/** Where an app hands back a sign-in it was given, under its own session. */
+export const MCP_OAUTH_COMPLETE_PATH = "/api/mcp/oauth/complete";
 /** FrockBot's client metadata document, its `client_id` where one is taken. */
 export const MCP_OAUTH_CLIENT_PATH = "/api/mcp/oauth/client";
 /** How long a person has to finish signing in. */
@@ -121,6 +123,35 @@ export function mcpOAuthReturnClientV1(
       (client) => pathname === mcpOAuthCallbackPathV1(client),
     ) ?? null
   );
+}
+
+/**
+ * The parameters of an authorization response FrockBot reads. On an app's
+ * return link each travels as `mcp_<name>`, which keeps it apart from
+ * anything a connected app's own return carries.
+ */
+export const MCP_RETURN_PARAMETERS_V1 = [
+  "state",
+  "code",
+  "iss",
+  "error",
+] as const;
+
+/**
+ * What an app is handed from a server's answer: those parameters under their
+ * `mcp_` names, and nothing else. `from` is the callback itself, or a return
+ * link that already carries them.
+ */
+export function mcpReturnHandOffV1(
+  from: URL,
+  prefixed: boolean,
+): URLSearchParams {
+  const handOff = new URLSearchParams();
+  for (const name of MCP_RETURN_PARAMETERS_V1) {
+    const value = from.searchParams.get(prefixed ? `mcp_${name}` : name);
+    if (value !== null) handOff.set(`mcp_${name}`, value);
+  }
+  return handOff;
 }
 
 /**

@@ -162,12 +162,17 @@ export interface BackendRouteContribution {
    * A route the gateway dispatches *before* it authenticates anyone: the
    * connected-app return page a sign-in redirects a sessionless browser to,
    * and the provider's signed events door. A `publicRoute` takes no identity
-   * from the request; what it trusts, it verifies itself.
+   * from the request; what it trusts, it verifies itself. One that may act
+   * only for the browser's own session asks for it with `sessionUserId`.
    */
   publicRoute?(
     request: Request,
     url: URL,
-    context: { userId?: string; client?: "browser" | "desktop" },
+    context: {
+      userId?: string;
+      client?: "browser" | "desktop";
+      sessionUserId?: () => Promise<string | undefined>;
+    },
   ): Promise<Response | undefined>;
   route(
     request: Request,

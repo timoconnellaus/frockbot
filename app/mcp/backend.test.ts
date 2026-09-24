@@ -154,29 +154,46 @@ describe("the MCP sign-in routes", () => {
     expect(executed).toEqual([]);
   });
 
-  test("the callback completes the sign-in its state names, and hands back to the app", async () => {
+  // Mallory starts a sign-in on her own account and sends Tim its link. Tim
+  // signs in to the server, and the server sends his browser back with a code
+  // and Mallory's state. That code is traded for nobody.
+  test("the callback trades a code only for the browser of the User who started it", async () => {
     const { routes, executed } = harness((command) =>
       receipt(command, {
         oauth: { attemptId: "cx-1", status: "ready" },
       }),
     );
     const state = await signMcpOAuthStateV1(keyring, {
-      userId: "tim",
+      userId: "mallory",
       connectionId: "connection-1",
       attemptId: "cx-1",
       expiresAt: now + 60_000,
     });
     const url = new URL(
-      `${ORIGIN}/api/mcp/oauth/callback/android?code=c&state=${state}`,
+      `${ORIGIN}/api/mcp/oauth/callback?code=c&state=${state}&iss=https%3A%2F%2Fauth.example.test`,
     );
-    const response = await routes.publicRoute(new Request(url), url);
-    expect(response?.status).toBe(303);
-    expect(response?.headers.get("location")).toBe(
-      `${ORIGIN}/api/connect/callback/android`,
-    );
+    for (const session of [undefined, "tim"]) {
+      const page = await routes.publicRoute(new Request(url), url, {
+        sessionUserId: async () => session,
+      });
+      expect(page?.status).toBe(200);
+      expect(await page?.text()).toContain("Finish signing in from FrockBot");
+    }
+    const sessionless = await routes.publicRoute(new Request(url), url);
+    expect(await sessionless?.text()).toContain("nothing was connected");
+    expect(executed).toEqual([]);
+
+    const page = await routes.publicRoute(new Request(url), url, {
+      sessionUserId: async () => "mallory",
+    });
+    expect(await page?.text()).toContain("Signed in");
+    const traded = new URL(`${ORIGIN}/api/mcp/oauth/callback`);
+    traded.searchParams.set("state", state);
+    traded.searchParams.set("code", "c");
+    traded.searchParams.set("iss", "https://auth.example.test");
     expect(executed).toEqual([
       {
-        userId: "tim",
+        userId: "mallory",
         command: {
           schemaVersion: 1,
           type: "connection/oauth",
@@ -185,15 +202,94 @@ describe("the MCP sign-in routes", () => {
           packageId: "mcp",
           action: "complete",
           connectionId: "connection-1",
-          code: url.href,
+          code: traded.href,
         },
       },
     ]);
-    const browser = new URL(
-      `${ORIGIN}/api/mcp/oauth/callback?code=c&state=${state}`,
+  });
+
+  test("an app's return page hands the answer to the app, and trades nothing", async () => {
+    const { routes, executed } = harness((command) => receipt(command));
+    const state = await signMcpOAuthStateV1(keyring, {
+      userId: "tim",
+      connectionId: "connection-1",
+      attemptId: "cx-1",
+      expiresAt: now + 60_000,
+    });
+    const url = new URL(
+      `${ORIGIN}/api/mcp/oauth/callback/android?code=c%2B1&state=${state}&extra=x`,
     );
-    const page = await routes.publicRoute(new Request(browser), browser);
-    expect(await page?.text()).toContain("Signed in");
+    const response = await routes.publicRoute(new Request(url), url, {
+      sessionUserId: async () => "tim",
+    });
+    expect(response?.status).toBe(303);
+    const location = new URL(response?.headers.get("location") ?? "");
+    expect(location.origin + location.pathname).toBe(
+      `${ORIGIN}/api/connect/callback/android`,
+    );
+    expect([...location.searchParams]).toEqual([
+      ["mcp_state", state],
+      ["mcp_code", "c+1"],
+    ]);
+    expect(executed).toEqual([]);
+  });
+
+  test("an app finishes a sign-in under its own session, and only its own", async () => {
+    const { routes, executed } = harness((command) =>
+      receipt(command, {
+        oauth: { attemptId: "cx-1", status: "ready" },
+      }),
+    );
+    const state = await signMcpOAuthStateV1(keyring, {
+      userId: "mallory",
+      connectionId: "connection-1",
+      attemptId: "cx-1",
+      expiresAt: now + 60_000,
+    });
+    const url = new URL(`${ORIGIN}/api/mcp/oauth/complete`);
+    const post = (body: unknown) =>
+      new Request(url, { method: "POST", body: JSON.stringify(body) });
+    const answer = { schemaVersion: 1, state, code: "c" };
+
+    expect((await routes.route(post(answer), url, {}))?.status).toBe(401);
+    const elsewhere = await routes.route(post(answer), url, { userId: "tim" });
+    expect(elsewhere?.status).toBe(403);
+    expect(await bodyOf(elsewhere)).toEqual({
+      error:
+        "This sign-in was started from another FrockBot account, so nothing was connected.",
+    });
+    for (const invalid of [
+      { ...answer, schemaVersion: 2 },
+      { ...answer, code: 1 },
+      { ...answer, code: "c".repeat(5_000) },
+      { ...answer, state: "forged.state" },
+      { schemaVersion: 1, code: "c" },
+    ]) {
+      const refused = await routes.route(post(invalid), url, {
+        userId: "mallory",
+      });
+      expect(refused?.status).toBe(400);
+    }
+    expect(executed).toEqual([]);
+
+    const finished = await routes.route(post(answer), url, {
+      userId: "mallory",
+    });
+    expect(await bodyOf(finished)).toEqual({
+      schemaVersion: 1,
+      status: "ready",
+      connectionId: "connection-1",
+    });
+    expect(executed.map(({ userId, command }) => [userId, command])).toEqual([
+      [
+        "mallory",
+        expect.objectContaining({
+          commandId: "mcp-return-cx-1",
+          action: "complete",
+          code: `${ORIGIN}/api/mcp/oauth/callback?state=${state}&code=c`,
+        }),
+      ],
+    ]);
   });
 
   test("serves FrockBot's client metadata document", async () => {
