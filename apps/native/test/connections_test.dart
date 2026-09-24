@@ -169,6 +169,37 @@ Map<String, Object?> twoWayFrame({bool installed = true}) => {
   ],
 };
 
+/// What the server answers a Marketplace read with: [frame]'s rows searched
+/// and filtered by the read's own query string, as `connectionsFrame` does.
+Map<String, Object?> served(Map<String, Object?> frame, String path) {
+  final uri = Uri.parse(path);
+  expect(uri.path, '/api/settings/connections');
+  expect(uri.queryParameters['catalog'], '1');
+  final needle = (uri.queryParameters['q'] ?? '').trim().toLowerCase();
+  final kinds =
+      uri.queryParameters['kinds']?.split(',') ?? const ['model', 'connector'];
+  final installed = uri.queryParameters['installed'] == '1';
+  return {
+    ...frame,
+    'providers': [
+      for (final row
+          in (frame['providers'] as List).cast<Map<String, Object?>>())
+        if (kinds.contains(row['kind']) &&
+            (!installed ||
+                (row['kind'] == 'model'
+                    ? row['installed'] == true
+                    : (row['connected'] as int) > 0)) &&
+            [
+              row['displayName'],
+              row['description'],
+              row['kind'],
+              row['packageId'],
+            ].whereType<String>().join(' ').toLowerCase().contains(needle))
+          row,
+    ],
+  };
+}
+
 Widget page(
   SettingsApi api,
   MemoryStore store, {
@@ -762,12 +793,14 @@ void main() {
     final sent = <Map<String, Object?>>[];
     var state = 'not-installed';
     var revision = 1;
-    var catalogReads = 0;
+    final reads = <String>[];
     final api = SettingsApi(store, (path, body) async {
       if (body == null) {
-        expect(path, '/api/settings/connections?catalog=1');
-        catalogReads++;
-        return catalogFrame(revision: revision, deepSeekState: state);
+        reads.add(path);
+        return served(
+          catalogFrame(revision: revision, deepSeekState: state),
+          path,
+        );
       }
       expect(path, '/api/settings');
       final command = (body as Map).cast<String, Object?>();
@@ -790,26 +823,35 @@ void main() {
       ),
     );
     await tester.pumpAndSettle();
+    expect(reads, ['/api/settings/connections?catalog=1']);
     expect(find.text('DeepSeek'), findsOneWidget);
     expect(find.text('Gmail'), findsOneWidget);
     expect(find.text('Add'), findsOneWidget);
 
+    // The search is the server's, asked for once typing pauses.
+    await tester.enterText(find.byType(TextField), 'dee');
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 200));
     await tester.enterText(find.byType(TextField), 'deep');
     await tester.pump();
+    await tester.pump(const Duration(milliseconds: 300));
+    await tester.pumpAndSettle();
+    expect(reads.skip(1), ['/api/settings/connections?catalog=1&q=deep']);
     expect(find.text('DeepSeek'), findsOneWidget);
     expect(find.text('Gmail'), findsNothing);
 
+    // A kind box is read at once, with the search as it stands.
     await tester.enterText(find.byType(TextField), '');
-    await tester.pump();
     await tester.tap(find.text('Connectors'));
     await tester.pumpAndSettle();
+    expect(reads.last, '/api/settings/connections?catalog=1&kinds=model');
     expect(find.text('DeepSeek'), findsOneWidget);
     expect(find.text('Gmail'), findsNothing);
 
-    final readsBeforeRefresh = catalogReads;
+    final readsBeforeRefresh = reads.length;
     await tester.tap(find.byTooltip('Refresh marketplace'));
     await tester.pumpAndSettle();
-    expect(catalogReads, greaterThan(readsBeforeRefresh));
+    expect(reads.length, greaterThan(readsBeforeRefresh));
 
     await tester.tap(find.text('Add'));
     await tester.pumpAndSettle();
@@ -921,7 +963,7 @@ void main() {
     final store = MemoryStore();
     final api = SettingsApi(
       store,
-      (_, _) async => catalogFrame(deepSeekKey: true),
+      (path, _) async => served(catalogFrame(deepSeekKey: true), path),
     );
     await tester.pumpWidget(
       MaterialApp(
@@ -990,8 +1032,10 @@ void main() {
     var revision = 1;
     final api = SettingsApi(store, (path, body) async {
       if (body == null) {
-        expect(path, '/api/settings/connections?catalog=1');
-        return catalogFrame(revision: revision, deepSeekState: state);
+        return served(
+          catalogFrame(revision: revision, deepSeekState: state),
+          path,
+        );
       }
       expect(path, '/api/settings');
       final command = (body as Map).cast<String, Object?>();
@@ -1053,6 +1097,88 @@ void main() {
     await tester.pumpAndSettle();
     expect(sent.last['type'], 'user/uninstall-package');
     expect(find.text('DeepSeek'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('Marketplace reads its next page as the list reaches its end', (
+    tester,
+  ) async {
+    tester.view.physicalSize = const Size(1280, 900);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.resetPhysicalSize);
+    addTearDown(tester.view.resetDevicePixelRatio);
+    final store = MemoryStore();
+    final reads = <String>[];
+    var outage = true;
+    const apps = 55;
+    final api = SettingsApi(store, (path, body) async {
+      reads.add(path);
+      final query = Uri.parse(path).queryParameters;
+      final cursor = int.parse(query['cursor'] ?? '0');
+      final limit = int.parse(query['limit'] ?? '50');
+      if (cursor > 0 && outage) {
+        outage = false;
+        throw StateError('synthetic backend outage');
+      }
+      final end = cursor + limit < apps ? cursor + limit : apps;
+      return {
+        'schemaVersion': 1,
+        'ownerId': 'tim',
+        'revision': 1,
+        'accounts': <Object>[],
+        'providers': [
+          for (var i = cursor; i < end; i++)
+            {
+              'packageId': 'connect',
+              'connectionTypeId': 'connect-app-$i',
+              'displayName': 'App $i',
+              'kind': 'connector',
+              'authorization': 'grant',
+              'connected': 0,
+              'mayConnect': true,
+              'installed': true,
+              'description': 'App number $i.',
+            },
+        ],
+        if (end < apps) 'nextCursor': end,
+      };
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: MarketplacePage(api: api, store: store, userId: 'tim'),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(reads, ['/api/settings/connections?catalog=1']);
+    final list = find
+        .descendant(
+          of: find.byType(CustomScrollView),
+          matching: find.byType(Scrollable),
+        )
+        .first;
+
+    // The end of the list asks for the next page; one that fails waits for a
+    // press rather than asking again on every frame.
+    await tester.scrollUntilVisible(
+      find.text('Couldn’t load more. Try again'),
+      600,
+      scrollable: list,
+    );
+    await tester.pumpAndSettle();
+    expect(reads.skip(1), ['/api/settings/connections?catalog=1&cursor=50']);
+    await tester.tap(find.text('Couldn’t load more. Try again'));
+    await tester.pumpAndSettle();
+    await tester.scrollUntilVisible(find.text('App 54'), 600, scrollable: list);
+    expect(reads.last, '/api/settings/connections?catalog=1&cursor=50');
+    expect(find.text('Couldn’t load more. Try again'), findsNothing);
+
+    // A read that settles a press keeps every card already drawn, so the list
+    // keeps its place.
+    await tester.tap(find.byTooltip('Refresh marketplace'));
+    await tester.pumpAndSettle();
+    expect(reads.last, '/api/settings/connections?catalog=1&limit=55');
+    expect(find.text('App 54'), findsOneWidget);
     expect(tester.takeException(), isNull);
   });
 

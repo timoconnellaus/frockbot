@@ -504,8 +504,16 @@ class MemoryConfiguration
   async readSettingsOptions(): Promise<never> {
     throw new Error("No settings-options fixture");
   }
-  async readConnectionsFrame(): Promise<never> {
-    throw new Error("Connections frame not configured in this fixture");
+  readonly connectionsReads: unknown[] = [];
+  async readConnectionsFrame(request: unknown) {
+    this.connectionsReads.push(request);
+    return {
+      schemaVersion: 1 as const,
+      ownerId: "alice",
+      revision: 0,
+      accounts: [],
+      providers: [],
+    };
   }
   async readBotPluginsFrame(): Promise<never> {
     throw new Error("Bot plugins frame not configured in this fixture");
@@ -1640,6 +1648,41 @@ describe("Cloudflare user application gateway", () => {
     );
 
     expect(response.status).toBe(400);
+  });
+
+  test("decodes a Marketplace read before it reaches the User", async () => {
+    const { gateway, configurations, configurationRoutes } =
+      createTestGateway();
+    for (const search of ["cursor=-1", "limit=0", "kinds=plugin"]) {
+      const refused = await gateway(
+        request(`/api/settings/connections?catalog=1&${search}`, "alice"),
+      );
+      expect(refused.status).toBe(400);
+    }
+    expect(configurationRoutes).toEqual([]);
+
+    const configuration = new MemoryConfiguration();
+    configurations.set("alice", configuration);
+    for (const path of [
+      "/api/settings/connections",
+      "/api/settings/connections?catalog=1&q=mail&kinds=connector&installed=1&cursor=50",
+    ]) {
+      expect((await gateway(request(path, "alice"))).status).toBe(200);
+    }
+    expect(configuration.connectionsReads).toEqual([
+      { schemaVersion: 1, userId: "alice" },
+      {
+        schemaVersion: 1,
+        userId: "alice",
+        catalog: {
+          query: "mail",
+          kinds: ["connector"],
+          installed: true,
+          cursor: 50,
+          limit: 50,
+        },
+      },
+    ]);
   });
 
   test("rejects invalid encoded Bot settings paths before configuration lookup", async () => {

@@ -52,10 +52,11 @@ class ConnectionsPage extends StatefulWidget {
   final bool chrome;
 
   /// The Marketplace storefront: every model and connector, including ones
-  /// nobody has added yet. Manage provider stays on the installed-only read.
+  /// nobody has added yet, read a page at a time as the person scrolls.
+  /// Manage provider stays on the installed-only read.
   final bool catalog;
 
-  /// Marketplace search, matched against name and description.
+  /// Marketplace search, matched by the server against name and description.
   final String query;
 
   /// Marketplace kind checkboxes. Ignored when [catalog] is off.
@@ -95,8 +96,29 @@ class _ConnectionsPageState extends State<ConnectionsPage>
     with
         WidgetsBindingObserver,
         AutomaticKeepAliveClientMixin<ConnectionsPage> {
+  /// Cards in a Marketplace page, as the server counts them.
+  static const catalogPage = 50;
+
   wire.ConnectionsFrame? frame;
   bool loading = false;
+
+  /// The Marketplace rows read so far, every page in order. The server
+  /// searches and filters them; the client only draws what it was sent.
+  List<Map<String, Object?>> catalogRows = const [];
+
+  /// Where the next Marketplace page starts, while there is one.
+  int? nextCursor;
+
+  /// Cards a full read covers: one page, or every card already drawn, so a
+  /// read that settles a press keeps the list where it was.
+  int window = catalogPage;
+
+  bool loadingMore = false;
+  bool moreFailed = false;
+
+  /// Bumped by every full read, so a page asked for before it is dropped.
+  int generation = 0;
+  Timer? searchDebounce;
 
   /// The row whose command is in flight, if one is. One command at a time,
   /// but only the row that was pressed shows it: the rest stay as they are,
@@ -139,9 +161,34 @@ class _ConnectionsPageState extends State<ConnectionsPage>
 
   @override
   void dispose() {
+    searchDebounce?.cancel();
     connectReturns.removeListener(_returned);
     WidgetsBinding.instance.removeObserver(this);
     super.dispose();
+  }
+
+  /// A new search, kind box or half is a new list from its first page. The
+  /// search waits for typing to pause; a box or a half is read at once, and
+  /// its old rows go, since they would be drawn as the wrong half.
+  @override
+  void didUpdateWidget(ConnectionsPage old) {
+    super.didUpdateWidget(old);
+    if (!widget.catalog) return;
+    if (old.showModels != widget.showModels ||
+        old.showConnectors != widget.showConnectors ||
+        old.installed != widget.installed) {
+      catalogRows = const [];
+      nextCursor = null;
+      window = catalogPage;
+      unawaited(load());
+    } else if (old.query != widget.query) {
+      window = catalogPage;
+      searchDebounce?.cancel();
+      searchDebounce = Timer(
+        const Duration(milliseconds: 300),
+        () => unawaited(load()),
+      );
+    }
   }
 
   /// A person comes back from the app's own sign-in: the read settles what
@@ -155,13 +202,40 @@ class _ConnectionsPageState extends State<ConnectionsPage>
   /// its own scheme: the same read, without waiting on the window to resume.
   void _returned() => unawaited(load());
 
+  /// The Marketplace read for the current search, boxes and half, starting
+  /// at [cursor]. The ordinary read carries no query.
+  String _path({int cursor = 0, int limit = catalogPage}) {
+    if (!widget.catalog) return '/api/settings/connections';
+    final query = widget.query.trim();
+    final kinds = [
+      if (widget.showModels) 'model',
+      if (widget.showConnectors) 'connector',
+    ];
+    return Uri(
+      path: '/api/settings/connections',
+      queryParameters: {
+        'catalog': '1',
+        if (query.isNotEmpty)
+          'q': query.length > 100 ? query.substring(0, 100) : query,
+        if (kinds.length < 2) 'kinds': kinds.join(','),
+        if (widget.installed) 'installed': '1',
+        if (cursor > 0) 'cursor': '$cursor',
+        if (limit != catalogPage) 'limit': '$limit',
+      },
+    ).toString();
+  }
+
   Future<void> load() async {
+    searchDebounce?.cancel();
     if (loading) {
       reread = true;
       return;
     }
+    generation++;
     setState(() {
       loading = true;
+      loadingMore = false;
+      moreFailed = false;
       loadFailure = null;
     });
     try {
@@ -169,15 +243,16 @@ class _ConnectionsPageState extends State<ConnectionsPage>
         reread = false;
         try {
           final next = wire.ConnectionsFrame.fromJson(
-            await widget.api.request(
-              widget.catalog
-                  ? '/api/settings/connections?catalog=1'
-                  : '/api/settings/connections',
-            ),
+            await widget.api.request(_path(limit: window)),
           );
           if (!mounted) return;
+          // Something asked for a newer read while this one was out: this
+          // answer is already stale, so the next one is drawn instead.
+          if (reread) continue;
           setState(() {
             frame = next;
+            catalogRows = next.providers;
+            nextCursor = next.nextCursor;
             loadFailure = null;
           });
         } catch (_) {
@@ -286,35 +361,49 @@ class _ConnectionsPageState extends State<ConnectionsPage>
     if (!opened) throw const FormatException('Browser unavailable');
   }
 
+  /// The next Marketplace page, once the list is scrolled to its end.
+  Future<void> _more() async {
+    final cursor = nextCursor;
+    if (cursor == null || loading || loadingMore || moreFailed) return;
+    final ticket = generation;
+    setState(() => loadingMore = true);
+    try {
+      final next = wire.ConnectionsFrame.fromJson(
+        await widget.api.request(_path(cursor: cursor)),
+      );
+      if (!mounted || ticket != generation) return;
+      setState(() {
+        frame = next;
+        catalogRows = [...catalogRows, ...next.providers];
+        nextCursor = next.nextCursor;
+        window = cards.length;
+        loadingMore = false;
+      });
+    } catch (_) {
+      if (!mounted || ticket != generation) return;
+      setState(() {
+        loadingMore = false;
+        moreFailed = true;
+      });
+    }
+  }
+
+  void _retryMore() {
+    setState(() => moreFailed = false);
+    unawaited(_more());
+  }
+
   List<Map<String, Object?>> get providers {
-    final all = frame?.providers ?? const [];
-    final needle = widget.query.trim().toLowerCase();
-    return all.where((provider) {
-      if (widget.packageId != null &&
-          provider['packageId'] != widget.packageId) {
-        return false;
-      }
-      if (widget.catalog) {
-        if (provider['kind'] == 'model'
-            ? !widget.showModels
-            : !widget.showConnectors) {
-          return false;
-        }
-        if (widget.installed && !_isInstalled(provider)) {
-          return false;
-        }
-      } else if (provider['kind'] != kind) {
-        return false;
-      }
-      if (needle.isEmpty) return true;
-      final haystack = [
-        provider['displayName'],
-        provider['description'],
-        provider['kind'],
-        provider['packageId'],
-      ].whereType<String>().join(' ').toLowerCase();
-      return haystack.contains(needle);
-    }).toList();
+    // The Marketplace is searched and filtered where it is read.
+    if (widget.catalog) return catalogRows;
+    return (frame?.providers ?? const [])
+        .where(
+          (provider) =>
+              provider['kind'] == kind &&
+              (widget.packageId == null ||
+                  provider['packageId'] == widget.packageId),
+        )
+        .toList();
   }
 
   /// A model is added when its Package is, whatever keys it still holds; a
@@ -610,6 +699,12 @@ class _ConnectionsPageState extends State<ConnectionsPage>
     );
   }
 
+  Widget _moreRow() => _MoreRow(
+    failed: moreFailed,
+    onShown: () => unawaited(_more()),
+    onRetry: _retryMore,
+  );
+
   Widget _installedScroll(
     ThemeData theme,
     wire.ConnectionsFrame frame,
@@ -654,7 +749,8 @@ class _ConnectionsPageState extends State<ConnectionsPage>
             },
           ),
         ),
-        if (rows.isEmpty)
+        if (nextCursor != null && widget.catalog) _moreRow(),
+        if (rows.isEmpty && !loading)
           _Centered(
             child: Padding(
               padding: const EdgeInsets.all(24),
@@ -694,6 +790,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
         const gap = 8.0;
         final extras = showMac ? 1 : 0;
         final count = rows.length + extras;
+        final lines = (count / columns).ceil();
         return CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
@@ -709,17 +806,21 @@ class _ConnectionsPageState extends State<ConnectionsPage>
             if (count == 0)
               SliverFillRemaining(
                 hasScrollBody: false,
-                child: _Centered(
-                  child: Padding(
-                    padding: const EdgeInsets.all(24),
-                    child: Text(
-                      widget.query.trim().isEmpty
-                          ? 'Nothing matches this filter.'
-                          : 'No matches. Try a different name.',
-                      style: theme.textTheme.bodyMedium,
-                    ),
-                  ),
-                ),
+                // A new half or kind is read with its old rows gone, and is
+                // not empty until the read says so.
+                child: loading
+                    ? const SizedBox.shrink()
+                    : _Centered(
+                        child: Padding(
+                          padding: const EdgeInsets.all(24),
+                          child: Text(
+                            widget.query.trim().isEmpty
+                                ? 'Nothing matches this filter.'
+                                : 'No matches. Try a different name.',
+                            style: theme.textTheme.bodyMedium,
+                          ),
+                        ),
+                      ),
               )
             else
               SliverPadding(
@@ -738,8 +839,9 @@ class _ConnectionsPageState extends State<ConnectionsPage>
                       // opens in place to take a key or show its accounts,
                       // and a grid cell would clip what it opened to.
                       sliver: SliverList.builder(
-                        itemCount: (count / columns).ceil(),
+                        itemCount: lines + (nextCursor == null ? 0 : 1),
                         itemBuilder: (context, row) {
+                          if (row == lines) return _moreRow();
                           Widget card(int index) => showMac && index == 0
                               ? _MacMessagesRow(page: widget)
                               : _providerCard(
@@ -905,6 +1007,44 @@ class _Row extends StatelessWidget {
               child: below,
             ),
         ],
+      ),
+    );
+  }
+}
+
+/// The end of what the Marketplace has read so far. The next page is asked
+/// for as this comes into view; a page that failed waits for a press.
+class _MoreRow extends StatelessWidget {
+  final bool failed;
+  final VoidCallback onShown;
+  final VoidCallback onRetry;
+  const _MoreRow({
+    required this.failed,
+    required this.onShown,
+    required this.onRetry,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    if (failed) {
+      return Padding(
+        padding: const EdgeInsets.all(8),
+        child: Center(
+          child: TextButton(
+            onPressed: onRetry,
+            child: const Text('Couldn’t load more. Try again'),
+          ),
+        ),
+      );
+    }
+    WidgetsBinding.instance.addPostFrameCallback((_) => onShown());
+    return const Padding(
+      padding: EdgeInsets.all(16),
+      child: Center(
+        child: SizedBox.square(
+          dimension: 24,
+          child: CircularProgressIndicator(strokeWidth: 2),
+        ),
       ),
     );
   }

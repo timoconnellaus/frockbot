@@ -1644,6 +1644,18 @@
     }
   },
   {
+    "name": "ConnectionsFrame refuses a next page before the first card",
+    "schema": "ConnectionsFrame",
+    "value": {
+      "schemaVersion": 1,
+      "ownerId": "tim",
+      "revision": 1,
+      "accounts": [],
+      "providers": [],
+      "nextCursor": 0
+    }
+  },
+  {
     "name": "NotificationDirectory rejects credential metadata",
     "schema": "NotificationDirectory",
     "value": {

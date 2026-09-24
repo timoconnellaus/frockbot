@@ -4,6 +4,7 @@ import { isProtocolValue } from "@frockbot/core/protocol-schemas";
 import {
   applicationSettingsFrame,
   applicationSettingsCommand,
+  connectionsCatalogQueryV1,
   connectionsFrame,
   modelSettingsOptions,
   modelsSettingsFrame,
@@ -67,6 +68,10 @@ const query = {
   revision: 8,
   query: "",
 };
+/** A Marketplace read, as the route decodes it from `?catalog=1&…`. */
+const catalogQuery = (search = "") =>
+  connectionsCatalogQueryV1(new URLSearchParams(`catalog=1&${search}`))!;
+const everything = catalogQuery("limit=2000");
 
 test("large catalogs page completely, search beyond the first page, and fence revision changes", () => {
   const user = settings();
@@ -410,7 +415,7 @@ test("the Marketplace catalog lists uninstalled models and installed connectors"
     [],
   );
   const catalog = connectionsFrame("tim", user, [together, gmail], {
-    catalog: true,
+    catalog: everything,
   });
   expect(catalog.providers.map((row) => row.displayName)).toEqual([
     "Gmail",
@@ -442,7 +447,7 @@ test("the Marketplace catalog lists uninstalled models and installed connectors"
         connectionTypes: [...(gmail.connectionTypes ?? [])].reverse(),
       },
     ],
-    { catalog: true },
+    { catalog: everything },
   );
   expect(declared.providers.map((row) => row.displayName)).toEqual([
     "Slack",
@@ -478,7 +483,7 @@ test("a model provider that takes a key or a sign-in is named once, for itself",
     ],
   };
   const rows = connectionsFrame("tim", user, [openRouter], {
-    catalog: true,
+    catalog: everything,
   }).providers;
   // One row per way in, so each keeps its own command and accounts, and both
   // carry the provider's own name and one description: a client draws them
@@ -498,7 +503,7 @@ test("a model provider that takes a key or a sign-in is named once, for itself",
     "tim",
     user,
     [{ ...openRouter, connectionTypes: [openRouter.connectionTypes![1]!] }],
-    { catalog: true },
+    { catalog: everything },
   ).providers[0]!;
   expect(signInOnly.description).toBe("Use OpenRouter models by signing in.");
 });
@@ -506,12 +511,165 @@ test("a model provider that takes a key or a sign-in is named once, for itself",
 test("a model removed with a key left behind is offered again, not shown as added", () => {
   const user = settings();
   user.packages[0]!.state = "disabled";
-  const row = connectionsFrame("tim", user, [provider], { catalog: true })
+  const row = connectionsFrame("tim", user, [provider], { catalog: everything })
     .providers[0]!;
   // The key is still there, but the provider is not: Add is what brings it
   // back, so the row says it is not installed rather than connected.
   expect(row).toMatchObject({ connected: 1, installed: false });
   expect(row.mayConnect).toBe(false);
+});
+
+test("the Marketplace is searched, filtered and paged where it is read", () => {
+  const user = settings();
+  user.packages.push({
+    packageId: "connect",
+    version: "1.0.0",
+    state: "installed",
+  });
+  user.connections.push({
+    connectionId: "app-7",
+    packageId: "connect",
+    connectionTypeId: "connect-app-7",
+    displayName: "App 7",
+    state: "ready",
+    providerType: "connect",
+    safeMetadata: {},
+  });
+  const apps: AvailableUserPackage = {
+    packageId: "connect",
+    version: "1.0.0",
+    displayName: "Connected apps",
+    connectionTypes: Array.from({ length: 60 }, (_, i) => ({
+      id: `connect-app-${i}`,
+      displayName: `App ${i}`,
+      description: i === 42 ? "Sends invoices." : `App number ${i}.`,
+      allowMultiple: true,
+      authorization: { kind: "grant" as const },
+      capabilities: [`app-${i}-tools`],
+    })),
+  };
+  const openRouter: AvailableUserPackage = {
+    ...provider,
+    packageId: "provider-openrouter",
+    displayName: "OpenRouter",
+    connectionTypes: [
+      {
+        id: "openrouter-account",
+        displayName: "OpenRouter account",
+        allowMultiple: true,
+        authorization: { kind: "api-key" },
+        capabilities: ["models"],
+      },
+      {
+        id: "openrouter-oauth",
+        displayName: "OpenRouter sign-in",
+        allowMultiple: true,
+        authorization: { kind: "grant" },
+        capabilities: ["models"],
+      },
+    ],
+  };
+  const together: AvailableUserPackage = {
+    ...provider,
+    packageId: "provider-together",
+    displayName: "Together",
+  };
+  const read = (
+    search: string,
+    options: { unmountable?: readonly string[] } = {},
+  ) =>
+    connectionsFrame("tim", user, [apps, openRouter, together, provider], {
+      catalog: catalogQuery(search),
+      ...options,
+    });
+  const names = (search: string) =>
+    read(search).providers.map((row) => row.displayName);
+
+  // A page is fifty cards, and says where the next one starts.
+  const first = read("");
+  expect(first.providers.map((row) => row.displayName)).toEqual(
+    Array.from({ length: 50 }, (_, i) => `App ${i}`),
+  );
+  expect(first.nextCursor).toBe(50);
+  // Every page carries every account, so a card on any page can list its own.
+  expect(first.accounts.map((account) => account.id)).toEqual([
+    "work",
+    "app-7",
+  ]);
+  const last = read("cursor=50");
+  expect(last.providers.map((row) => row.displayName)).toEqual([
+    ...Array.from({ length: 10 }, (_, i) => `App ${i + 50}`),
+    "Example AI",
+    "OpenRouter",
+    "OpenRouter",
+    "Together",
+  ]);
+  expect(last.nextCursor).toBeUndefined();
+  // A model provider's ways in are one card, so a page never ends between
+  // them; the cursor counts cards.
+  const window = read("limit=62");
+  expect(window.providers.slice(-3).map((row) => row.connectionTypeId)).toEqual(
+    ["account", "openrouter-account", "openrouter-oauth"],
+  );
+  expect(window.nextCursor).toBe(62);
+  expect(names("cursor=62")).toEqual(["Together"]);
+
+  // Search reaches every page, by name, description, kind or Package.
+  expect(names("q=invoices")).toEqual(["App 42"]);
+  expect(names("q=%20OPENROUTER%20")).toEqual(["OpenRouter", "OpenRouter"]);
+  expect(names("q=provider-together")).toEqual(["Together"]);
+  expect(names("q=nothing-like-it")).toEqual([]);
+
+  expect(names("kinds=model")).toEqual([
+    "Example AI",
+    "OpenRouter",
+    "OpenRouter",
+    "Together",
+  ]);
+  expect(read("kinds=").providers).toEqual([]);
+  expect(read("kinds=").nextCursor).toBeUndefined();
+  // Installed is the models that are added and the apps with an account.
+  expect(names("installed=1")).toEqual(["App 7", "Example AI"]);
+
+  // A Package this deployment cannot run is offered only while an account
+  // still holds it.
+  expect(
+    read("kinds=model", {
+      unmountable: ["provider", "provider-together"],
+    }).providers.map((row) => row.displayName),
+  ).toEqual(["Example AI", "OpenRouter", "OpenRouter"]);
+});
+
+test("a Marketplace read is decoded from its query string, and refused when malformed", () => {
+  expect(connectionsCatalogQueryV1(new URLSearchParams(""))).toBeUndefined();
+  expect(catalogQuery()).toEqual({
+    query: "",
+    kinds: ["model", "connector"],
+    installed: false,
+    cursor: 0,
+    limit: 50,
+  });
+  expect(
+    catalogQuery("q=mail&kinds=connector,connector&installed=1&cursor=50"),
+  ).toEqual({
+    query: "mail",
+    kinds: ["connector"],
+    installed: true,
+    cursor: 50,
+    limit: 50,
+  });
+  for (const malformed of [
+    "cursor=-1",
+    "cursor=1.5",
+    "cursor=abc",
+    "cursor=",
+    "limit=0",
+    "limit=2001",
+    "kinds=plugin",
+    `q=${"a".repeat(101)}`,
+  ]) {
+    expect(() => catalogQuery(malformed)).toThrow("Marketplace");
+  }
 });
 
 test("a provider section's one action names the next step", () => {

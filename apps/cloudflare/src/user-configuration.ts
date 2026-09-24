@@ -111,6 +111,11 @@ import {
   DEPLOYMENT_PLUGIN_CATALOG_V1,
   marketplacePluginPackageIdsV1,
 } from "@frockbot/app/plugins/catalog";
+import {
+  CONNECTIONS_CATALOG_QUERY_MAX_V1,
+  CONNECTIONS_FRAME_PROVIDERS_MAX_V1,
+  type ConnectionsCatalogQueryV1,
+} from "@frockbot/app/settings/frame";
 import { cleanUndecodableSkillIndexesV1 } from "./skill-index-cleanup.js";
 import { cleanUndecodableConnectCatalogsV1 } from "@frockbot/app/connect/account-catalog";
 import { reseedInstructionRootV1 } from "@frockbot/app/skills/reseed";
@@ -176,6 +181,7 @@ import type { BotAuditRpc } from "./audit.js";
 import type { WorkerLoader } from "./contracts.js";
 import {
   decodeRpcEnvelopeV1,
+  rpcArray,
   rpcBotId,
   rpcBoolean,
   rpcDecoded,
@@ -188,6 +194,7 @@ import {
   rpcDecodedValue,
   rpcJsonRecord,
   rpcJsonSnapshotV1,
+  rpcObject,
 } from "./durable-rpc.js";
 import { loggedEntryV1 } from "./entry-boundary.js";
 import {
@@ -825,26 +832,30 @@ export class UserConfiguration
   }
 
   async readConnectionsFrame(input: unknown) {
+    const count = (minimum: number) =>
+      rpcInteger({ minimum, maximum: CONNECTIONS_FRAME_PROVIDERS_MAX_V1 });
     const request = decodeRpcEnvelopeV1(
       input,
       { userId: rpcIdentifier },
-      { catalog: rpcBoolean },
+      {
+        catalog: rpcObject({
+          query: rpcText(CONNECTIONS_CATALOG_QUERY_MAX_V1),
+          kinds: rpcArray(rpcEnum(["model", "connector"]), 2),
+          installed: rpcBoolean,
+          cursor: count(0),
+          limit: count(1),
+        }),
+      },
     );
     await this.assertUserIdentity(request.userId as string);
-    const frame = await (
-      await this.settingsContribution()
-    ).readConnectionsFrame(request.userId as string, request.catalog === true);
-    if (request.catalog !== true || this.env.BOT_PACKAGES) return frame;
-    // A provider served by a Plugin is not an offer on a deployment with no
-    // worker loader to mount it: adding it would choose a model no Turn can run.
-    const pluginServed = new Set(marketplacePluginPackageIdsV1());
-    return {
-      ...frame,
-      providers: frame.providers.filter(
-        (provider) =>
-          !pluginServed.has(provider.packageId) || provider.connected > 0,
-      ),
-    };
+    return (await this.settingsContribution()).readConnectionsFrame(
+      request.userId as string,
+      request.catalog as ConnectionsCatalogQueryV1 | undefined,
+      // A provider served by a Plugin is not an offer on a deployment with no
+      // worker loader to mount it: adding it would choose a model no Turn can
+      // run.
+      this.env.BOT_PACKAGES ? [] : marketplacePluginPackageIdsV1(),
+    );
   }
 
   // The User's Composition (ADR 0026): the installed Plugin set, its

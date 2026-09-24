@@ -499,7 +499,7 @@ export interface UserConfigurationBinding {
   readConnectionsFrame(request: {
     schemaVersion: 1;
     userId: string;
-    catalog?: boolean;
+    catalog?: import("@frockbot/app/settings/frame").ConnectionsCatalogQueryV1;
   }): Promise<ConnectionsFrame>;
   readSettingsFrame(
     request: UserConfigurationReadRpcV1 & { home: "application" | "models" },
