@@ -103,14 +103,15 @@ function sends(page: Page): Locator {
 /**
  * What each of those bubbles says.
  *
- * A bubble's node carries the avatar's own label as well as the words, so the
- * text of a reply from the Bot reads "Bot\npong". The label is who is
- * speaking, which every bubble in the thread has in common; what is asserted
- * here is what was said.
+ * A bubble's node carries the avatar's own label as well as the words, and the
+ * first bubble of a speaker's run carries its time above both, so the text of
+ * a reply from the Bot reads "Bot\npong" or "6:20 am\nBot\npong". The time
+ * is when, and the label is who is speaking; what is asserted here is what was
+ * said.
  */
 async function sendTexts(page: Page): Promise<string[]> {
   return (await sends(page).allTextContents()).map((text) =>
-    text.replace(/^Bot\s*/, "").trim(),
+    text.replace(/^(?:[^\n]*\d{2} [ap]m\n)?Bot\s*/, "").trim(),
   );
 }
 
@@ -152,7 +153,10 @@ async function threadOrder(page: Page): Promise<string[]> {
       .map((node) => ({
         id: node.getAttribute("flt-semantics-identifier") ?? "",
         top: node.getBoundingClientRect().top,
-        text: (node.textContent ?? "").replace(/^Bot\n/, "").trim(),
+        // The words alone, as `sendTexts` reads them.
+        text: (node.textContent ?? "")
+          .replace(/^(?:[^\n]*\d{2} [ap]m\n)?Bot\n/, "")
+          .trim(),
       }))
       .filter((line) => line.id.endsWith(":user") || line.id.includes(":send:"))
       .sort((left, right) => left.top - right.top)
