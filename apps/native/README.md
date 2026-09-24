@@ -159,7 +159,7 @@ The phone holds a PKCE bearer token in the platform keystore and sends it as a h
 
 ## Backend and auth
 
-Production enables Android and macOS sign-in with `NATIVE_SLICE_2_AUTH=android,macos`. Wait for the orchestrator’s release and HTTP 200 from the association endpoint before device auth. The `acceptance` block of [`qualification.json`](qualification.json) records how far that rollout got. The anonymous fallback bootstrap is on `https://ui.bot.frockbot.com`.
+Production enables Android and macOS sign-in with `NATIVE_SLICE_2_AUTH=android,macos`. Wait for the orchestrator’s release and HTTP 200 from the association endpoint before device auth. The `acceptance` block of [`qualification.json`](qualification.json) records how far that rollout got.
 
 The app persists PKCE state/verifier before opening the system browser. The gateway uses the existing Better Auth Google web client, returns to an exact HTTPS app link, and exchanges the single-use code under the User Durable Object. The seven-day native session is OS-protected and bound to its client's protocol and catalog hello; the app's own version is compatibility, so updating to another supported version keeps the sign-in, while a version the deployment no longer serves is a 426 telling the person to update. Logout revokes it. A session that expires or is revoked ends the same way from the app's side: a 401 on any request the app authenticated with its own bearer — the sign-in exchange routes aside, where a refusal is of that exchange rather than of a session — forgets that session, in memory first and then in the keystore, and returns to the sign-in door carrying the refusal's own sentence, rather than leaving the cached shell open as if the phone were offline. Send and Stop persist stable ids before dispatch; uncertain sends use lookup then an admission fence; the Bot state channel advances a protected cursor only after the corresponding projection is applied. Disconnect/disposal does not cancel work.
 
@@ -167,16 +167,16 @@ The app persists PKCE state/verifier before opening the system browser. The gate
 
 A plugin renders by returning a `ViewDocument`, which `lib/view/` draws with the host's own widgets: six node types, no markup and no third-party renderer. The budgets — 512 nodes, depth 16, 262,144 bytes — are checked before the first widget is built, and a document past any of them becomes a host-owned unavailable region rather than a partial view. `embed` names a host region; the host decides what goes in it. A development build reaches `View sample` from You to look at the renderer before any plugin produces a document.
 
-The Applet fallback never loads the authenticated app or receives its native session. A trusted anonymous bootstrap identifies the exact sandboxed child frame and current navigation epoch. A two-minute User/Applet/generation-scoped viewer token travels only after handshake and uses the WebSocket subprotocol, never a URL. Existing artifacts need rebuilding with the updated Applet SDK handshake. The native host confirms external links before opening the system browser. WebKit's pinned source override selects a nonpersistent store because the public plugin API does not expose it; see its vendor README.
+The native host confirms external links before opening the system browser. WebKit's pinned source override selects a nonpersistent store because the public plugin API does not expose it; see its vendor README.
 
-Physical cookie/token/bridge/network isolation, real Applet publication and persisted mutation while the Computer stays hibernated, viewer lifetime fencing, and release budgets remain promotion gates. A sandbox attribute or passing unit test is not OS isolation evidence.
+Physical cookie/token/bridge/network isolation, viewer lifetime fencing, and release budgets remain promotion gates. A sandbox attribute or passing unit test is not OS isolation evidence.
 
 ## Acceptance tooling
 
 ```sh
 scripts/native-acceptance.sh inventory
 scripts/native-acceptance.sh install --replace-production
-scripts/native-acceptance.sh flow --bot-name 'Fixture Bot' --applet-name 'Fixture Counter'
+scripts/native-acceptance.sh flow --bot-name 'Fixture Bot'
 scripts/native-acceptance.sh measure
 ```
 

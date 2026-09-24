@@ -36,15 +36,15 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 16. ~~**The dynamic Package system has no dynamic member.**~~ **Fixed.** Bot authoring landed with [ADR 0026](adr/0026-plugins.md) step 7: a Bot publishes a Plugin, the User approves the card, and the generation the User Durable Object records carries a member with an `artifact` ([architecture.md, "Built-in versus dynamic"](architecture.md#built-in-versus-dynamic)). The deployment catalog is no longer empty either: step 6 seeds the `email` Plugin ([architecture.md, §5 Composition](architecture.md#5-composition)).
 
-17. **Applet members carry a `provenance: PackageProvenanceV1` field** (`core/durable/composition/generation.ts`) whose variants describe Packages, two lines below a comment stating that an Applet is not a Package member.
+17. ~~**Applet members carry a `provenance: PackageProvenanceV1` field**~~ **Gone.** Applet members left the Composition with the Applet product ([ADR 0034](adr/0034-plugin-panels.md)).
 
 18. **A first-party Package's installation row still carries a `version`.** Its definition has none — a first-party Package's version is the deploy — so every row carries the single `FOUNDATION_PACKAGE_VERSION_V1` constant and every version comparison in the configuration resolvers is a tautology. The field survives because it is durable User state; removing it belongs with step 7.
 
-19. **`AppletCapabilities.invokeModel()` is a stub.** It always returns `{status: "unavailable"}` with `TODO(model access)` (`apps/cloudflare/src/applet-state.ts:207-226`), while `APPLET_CAPABILITY_NAMES_V1` (`:67`) advertises it.
+19. ~~**`AppletCapabilities.invokeModel()` is a stub.**~~ **Gone.** `AppletState` and its capabilities were deleted with the Applet product ([ADR 0034](adr/0034-plugin-panels.md)).
 
-20. **Applet capabilities are unreachable from authored code.** The SDK's `Applet extends DurableObject<unknown>` and never surfaces `env.CAPABILITIES` or `env.IDENTITY`. The alarm mechanism (`scheduleAlarm`, `AppletFacetStub.onAlarm`) has no SDK API.
+20. ~~**Applet capabilities are unreachable from authored code.**~~ **Gone.** The Applet runtime the SDK targeted was deleted ([ADR 0034](adr/0034-plugin-panels.md)); the SDK now serves Plugin authors.
 
-21. **Applet `canWrite` is inert.** _Verified._ `applet-sdk/src/server/applet.ts:287-293` reads `x-applet-viewer` and `x-applet-can-write`, defaulting to `canWrite: true`; neither the gateway nor `AppletState` ever sets them. Not an active hole — Applets are account-wide with no cross-User sharing, so every viewer is the owner and `true` is the right answer today. The defect is that an Applet author can write `if (!peer.viewer.canWrite)` and that guard can never fire. Either derive it from the viewer token or drop the concept until sharing exists; shipping a knob nothing populates is the thing to avoid.
+21. ~~**Applet `canWrite` is inert.**~~ **Gone.** The Applet viewer and its `canWrite` flag were deleted with the Applet product ([ADR 0034](adr/0034-plugin-panels.md)).
 
 22. ~~**`apps/cloudflare/src/native-fallback.ts:1` hardcodes `ARTIFACT_ORIGIN`**, so staging cannot serve the native Applet page.~~ **Gone with step 9.** The bootstrap page, its gateway route, the `/api/native/applets/:id/bootstrap` route and the `FallbackBootstrap` wire type are deleted: the phone frames the Applet's own page on the origin the `/api/applets/:id/ui` read names, which is derived from the request rather than hardcoded.
 
@@ -78,7 +78,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 37. ~~**`release.yml` publishes test fixtures to npm.** All of `packages/*` is published by flipping `private: false`, including `plugin-testkit`.~~ **Fixed.** The app cut moved the test doubles into `app/testkit`, and step 9 deleted `packages/` altogether with the Vue client the last two libraries in it served. See 43 for what publishes now.
 
-38. **`APPLET_STATES` is typed inconsistently.** It is optional in `UserConfigurationEnv` (`apps/cloudflare/src/user-configuration.ts:210`, guarded at `:1826`) but non-optional and dereferenced unguarded in the gateway (`apps/cloudflare/src/index.ts:1060`, `:2339`).
+38. ~~**`APPLET_STATES` is typed inconsistently.**~~ **Gone.** `APPLET_STATES` was deleted with `AppletState`; migration `deleted_classes` removes the class ([ADR 0034](adr/0034-plugin-panels.md)).
 
 39. ~~**Voice dictation is not eviction-safe.**~~ **Gone.** Voice is removed.
 
@@ -88,7 +88,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 42. ~~**An auto-merged pull request never deploys to staging.**~~ **Fixed.** Auto-merge is gone; a maintainer's merge is a real push to `main`, and `main.yml` deploys staging from it. The related trap — a tag created with `GITHUB_TOKEN` fires no `push` event — is handled by `main.yml` starting `release.yml` through `workflow_dispatch`, the one trigger that token may raise.
 
-43. ~~**The npm publish step fails every release for packages npm does not trust.**~~ **Fixed.** `release.yml` published every directory under `packages/`, so a package whose trusted publisher was not configured on npmjs.com failed the token exchange with an `E404` and reddened a release whose production deploy had already succeeded — the worst shape for a signal, because it trains you to ignore it. Publication is now opt-in through `frockbot.npm` in a package's own manifest, and exactly one package declares it: `@frockbot/applet-sdk`, published for Applet authors rather than for anything this repository installs. It has no `@frockbot` dependencies, so it publishes alone. Nothing else has a consumer off this repository.
+43. ~~**The npm publish step fails every release for packages npm does not trust.**~~ **Fixed.** `release.yml` published every directory under `packages/`, so a package whose trusted publisher was not configured on npmjs.com failed the token exchange with an `E404` and reddened a release whose production deploy had already succeeded — the worst shape for a signal, because it trains you to ignore it. Publication is now opt-in through `frockbot.npm` in a package's own manifest, and exactly one package declares it: `@frockbot/applet-sdk`, published for Plugin authors rather than for anything this repository installs. It has no `@frockbot` dependencies, so it publishes alone. Nothing else has a consumer off this repository.
 
 44. **`chat.e2e.ts` "a send the server refuses for size keeps the draft and says why" is intermittently flaky.** It failed once in the full browser suite and passed immediately on its own, and passed in the four other full runs on 2026-09-06/07. The suite runs `fullyParallel: false` with one worker, so this is timing under load rather than interference. Not yet diagnosed; recorded so a red shard is not assumed to be a regression.
 

@@ -837,11 +837,10 @@ connectionId, triggerType }` on a Routine, an instance at the provider, and
   the wider `PendingBotInputV1`; row 53's approval decisions now produce its
   `approval` variant through `enqueuePendingBotInputV1`, inside the caller's own
   transaction — a second producer, never a second queue.
-- **21** — all three halves are landed. **Managed** Skills are seven
+- **21** — all three halves are landed. **Managed** Skills are six
   first-party directories compiled into the Skills Package
   (`app/skills/managed.ts`): `add-connector`, `export-bot-template`,
-  `import-bot-template` and `write-skill`, plus `applets`, `plugins` and
-  `a2ui`. GrokBot's `learn-from-demonstration` is not shipped — row 54 is
+  `import-bot-template` and `write-skill`, plus `plugins` and `a2ui`. GrokBot's `learn-from-demonstration` is not shipped — row 54 is
   not started, and a recipe for a teach-queue this product does not have
   would be a lie. They are read-only in the strongest sense — there is no write path to an
   artifact at all, so `skill_write{scope:"managed"}` is refused with GrokBot's
@@ -1175,8 +1174,8 @@ than a silent absence. Row 44 is the only one.
   entry.
 - **51** — landed in the GrokBot-aligned right panel. Its default content is
   the Bot page: the selected Bot's Computer card with a status line under it,
-  the last Routine firings with All Routines under them, its running Applets,
-  and the doors its Packages declare. The panel header's only Bot action is the
+  the last Routine firings with All Routines under them, and the doors its
+  Packages declare. The panel header's only Bot action is the
   settings cog, and Settings is a sub-page of that panel with a back chevron of
   its own. The separate Bot info surface and Clock card were retired, and so
   were the Advanced expander and the Members sentence that lived in it: Title is
