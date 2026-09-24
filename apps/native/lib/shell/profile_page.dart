@@ -305,7 +305,7 @@ class _ProfilePageState extends State<ProfilePage> {
             icon: item.icon,
             title: item.title,
             chevron: false,
-            color: selected ? scheme.primary : null,
+            color: selected ? scheme.onPrimary : null,
             onTap: () => unawaited(_press(item.id)),
           ),
         ),
@@ -333,10 +333,8 @@ class _NavItem extends StatelessWidget {
     return Padding(
       padding: const EdgeInsets.only(bottom: 2),
       child: Material(
-        color: selected
-            ? scheme.primary.withValues(alpha: 0.14)
-            : Colors.transparent,
-        borderRadius: BorderRadius.circular(9),
+        color: selected ? scheme.primary : Colors.transparent,
+        borderRadius: BorderRadius.circular(FrockTheme.radiusRow),
         clipBehavior: Clip.antiAlias,
         child: child,
       ),

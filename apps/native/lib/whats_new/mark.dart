@@ -5,7 +5,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../shell/semantics.dart';
-import '../theme/frock_theme.dart';
+import '../theme/controls.dart';
 
 class WhatsNewUnreadMark extends StatelessWidget {
   const WhatsNewUnreadMark({super.key});
@@ -15,14 +15,7 @@ class WhatsNewUnreadMark extends StatelessWidget {
     WhatsNewIds.unread,
     Semantics(
       label: 'Unread',
-      child: Container(
-        width: 8,
-        height: 8,
-        decoration: const BoxDecoration(
-          color: FrockTheme.accent,
-          shape: BoxShape.circle,
-        ),
-      ),
+      child: StatusDot(color: Theme.of(context).colorScheme.primary),
     ),
   );
 }

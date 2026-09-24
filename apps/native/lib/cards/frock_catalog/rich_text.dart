@@ -156,10 +156,7 @@ final frockQuote = CatalogItem(
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Container(
-            width: 2,
-            color: theme.colorScheme.primary.withValues(alpha: 0.5),
-          ),
+          Container(width: 2, color: theme.colorScheme.primary),
           const SizedBox(width: 10),
           Expanded(
             child: Column(

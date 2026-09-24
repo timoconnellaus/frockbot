@@ -411,15 +411,13 @@ describe("homepage product depictions", () => {
           .map((rule) => rule.declarations),
       ) as Record<string, string>;
 
-    expect(declarations(":root")["--product-window"]).toBe("#18161a");
+    expect(declarations(":root")["--product-window"]).toBe("#15151e");
     expect(declarations("body").background).toBe("var(--paper)");
     expect(declarations(".workspace").background).toBe("var(--product-window)");
     expect(declarations(".workspace aside").background).toBe(
       "var(--product-sidebar)",
     );
-    expect(declarations(".bot-row.active").background).toBe(
-      "var(--product-raised)",
-    );
+    expect(declarations(".bot-row.active").background).toBe("var(--pink)");
     expect(declarations(".workspace-thread").background).toBe(
       "var(--product-thread)",
     );
@@ -427,7 +425,7 @@ describe("homepage product depictions", () => {
       "var(--product-sidebar)",
     );
     expect(declarations(".workspace-bubble-user").background).toBe(
-      "var(--pink)",
+      "var(--product-mine)",
     );
   });
 });

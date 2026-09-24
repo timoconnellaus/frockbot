@@ -56,6 +56,7 @@ import '../settings/page.dart';
 import '../settings/voice_settings.dart';
 import '../templates/page.dart';
 import '../theme/document.dart';
+import '../theme/controls.dart';
 import '../theme/frock_theme.dart';
 import '../update/app_version.dart';
 import '../view/sample_page.dart';
@@ -81,6 +82,7 @@ import 'bot_actions.dart';
 import 'bot_page.dart';
 import 'chat_pane.dart';
 import 'chat_header.dart';
+import 'chat_icons.dart';
 import 'desktop_layout.dart';
 import 'hot_panel.dart';
 import 'lifecycle.dart';
@@ -1683,7 +1685,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           _panelHeader(bot, key),
-          const Divider(height: 1),
           Expanded(child: body),
         ],
       ),
@@ -1704,113 +1705,70 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// thing in it, and closing empties the stack — reopening the panel is
   /// opening the Bot page, never whatever was last read three Bots ago.
   Widget _panelHeader(wire.BotRegistration bot, String? key) {
-    return Builder(
-      builder: (context) {
-        final theme = Theme.of(context);
-        final botId = bot.botId.value;
-        final backId = panelBackIdentifierV1(
-          panelKey: key,
-          routinesEditorOpen:
-              key == 'routines' && routinesPanel?.tryLeaveEditor != null,
-        );
-        return DesktopWindowDragRegion(
-          child: SizedBox(
-            height: 52,
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(key == null ? 16 : 8, 0, 8, 0),
-              child: Row(
-                children: [
-                  if (key == null) ...[
-                    CharacterAvatar(
-                      size: 28,
-                      botId: botId,
-                      characterId: _background(botId),
-                      primary: _primary(botId),
-                      motion: CharacterMotion.quiet,
-                      working: _workingRunId != null,
-                    ),
-                    const SizedBox(width: 10),
-                  ] else
-                    KeyedSubtree(
-                      // Flutter Web keeps the first identifier a Semantics
-                      // node published. Remount when the press changes meaning
-                      // so the editor's id is what a spec actually sees.
-                      key: ValueKey(backId),
-                      child: identified(
-                        backId,
-                        IconButton(
-                          tooltip: 'Back',
-                          onPressed: () => unawaited(_popPanel()),
-                          style: _panelControl(theme),
-                          icon: const Icon(Icons.chevron_left_rounded),
-                        ),
-                      ),
-                    ),
-                  Expanded(
-                    child: Column(
-                      mainAxisAlignment: MainAxisAlignment.center,
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        // A heading of its own, rather than a leaf the engine merges
-                        // into the row beside it: what the panel is showing is the
-                        // one thing a reader needs read out first.
-                        Semantics(
-                          header: true,
-                          child: Text(
-                            key == null
-                                ? _name(bot)
-                                : _panelTitle(key) ?? _name(bot),
-                            style: theme.textTheme.titleSmall?.copyWith(
-                              fontSize: 14,
-                              fontWeight: FontWeight.w600,
-                            ),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                  if (key == null)
-                    identified(
-                      SettingsIds.botPageSettings,
-                      IconButton(
-                        tooltip: 'Bot settings',
-                        onPressed: () => _openPanel('bot-settings', push: true),
-                        style: _panelControl(theme),
-                        icon: const Icon(Icons.settings_outlined),
-                      ),
-                    ),
-                  identified(
-                    ShellIds.rightPanelClose,
-                    IconButton(
-                      tooltip: 'Close the panel',
-                      onPressed: () => setState(() {
-                        panelOpen = false;
-                        panelCollapsed = true;
-                        panelStack.clear();
-                      }),
-                      style: _panelControl(theme),
-                      icon: const Icon(Icons.close_rounded),
-                    ),
-                  ),
-                ],
+    final botId = bot.botId.value;
+    final backId = panelBackIdentifierV1(
+      panelKey: key,
+      routinesEditorOpen:
+          key == 'routines' && routinesPanel?.tryLeaveEditor != null,
+    );
+    return PanelHeader(
+      leading: key == null
+          ? CharacterAvatar(
+              size: 32,
+              botId: botId,
+              characterId: _background(botId),
+              primary: _primary(botId),
+              motion: CharacterMotion.quiet,
+              working: _workingRunId != null,
+            )
+          : KeyedSubtree(
+              // Flutter Web keeps the first identifier a Semantics node
+              // published. Remount when the press changes meaning so the
+              // editor's id is what a spec actually sees.
+              key: ValueKey(backId),
+              child: identified(
+                backId,
+                FrockIconButton(
+                  tooltip: 'Back',
+                  onPressed: () => unawaited(_popPanel()),
+                  extent: chatControlExtent,
+                  iconSize: chatIconSize,
+                  icon: const Icon(Icons.chevron_left_rounded),
+                ),
               ),
             ),
+      // A heading of its own, rather than a leaf the engine merges into the
+      // row beside it: what the panel is showing is the one thing a reader
+      // needs read out first.
+      title: Semantics(
+        header: true,
+        child: Text(key == null ? _name(bot) : _panelTitle(key) ?? _name(bot)),
+      ),
+      actions: [
+        if (key == null)
+          identified(
+            SettingsIds.botPageSettings,
+            headerAction(
+              tooltip: 'Bot settings',
+              onPressed: () => _openPanel('bot-settings', push: true),
+              icon: const Icon(Icons.settings_outlined),
+            ),
           ),
-        );
-      },
+        identified(
+          ShellIds.rightPanelClose,
+          headerAction(
+            tooltip: 'Close the panel',
+            onPressed: () => setState(() {
+              panelOpen = false;
+              panelCollapsed = true;
+              panelStack.clear();
+            }),
+            icon: const Icon(Icons.close_rounded),
+          ),
+        ),
+      ],
     );
   }
-
-  ButtonStyle _panelControl(ThemeData theme) => IconButton.styleFrom(
-    foregroundColor: theme.colorScheme.onSurfaceVariant,
-    iconSize: 18,
-    minimumSize: const Size(32, 32),
-    fixedSize: const Size(32, 32),
-    padding: EdgeInsets.zero,
-    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-  );
 
   /// What the panel calls the sub-page it is showing.
   String? _panelTitle(String key) {
@@ -2857,9 +2815,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       List<Widget> below = const [],
     }) => ChatHeader(
       name: _name(bot!),
+      subtitle: profiles[bot.botId.value]?.title,
+      working: _workingRunId != null,
       companion: companion,
       below: below,
       connection: _selectedConnection,
+      onSearch: single ? null : () => unawaited(_openSearch()),
+      onActions: () => unawaited(_botActions(bot.botId.value)),
       textScale: MediaQuery.textScalerOf(context).scale(14) / 14,
       // A phone's bar is Back and the panel switch. A desk opens the Bot
       // page and the Computer from the column beside the thread, so the
@@ -3150,6 +3112,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       phone: single,
       onBack: single ? _openBack : null,
       onOpenMembers: () => _openGroupMembers(groupId),
+      onSearch: single ? null : () => unawaited(_openSearch()),
+      onActions: () => unawaited(_groupActions(groupId)),
       onOpenExchange: _openGroupExchange,
       onUndo: (event, previous) => unawaited(_undoGroupChange(event, previous)),
       archived: group.archived,

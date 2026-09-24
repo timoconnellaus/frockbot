@@ -18,6 +18,7 @@ import '../shell/semantics.dart';
 import '../shell/desktop_layout.dart';
 import '../shell/transcript_model.dart';
 import '../theme/states.dart';
+import '../theme/time.dart';
 
 /// One automation run as the Work view reads it.
 ///
@@ -55,31 +56,11 @@ TranscriptLine routineRunLineV1(Map<String, Object?> detail) {
   );
 }
 
-/// The house order's own month names. A moment reads as a moment — "8 Sep
-/// 2026, 6:23am" — never as the wire it arrived on.
-const _months = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-];
-
 /// A durable moment in this device's own zone, in the house order.
 String routineRunMomentV1(String? iso) {
-  final at = iso == null ? null : DateTime.tryParse(iso)?.toLocal();
+  final at = localInstant(iso);
   if (at == null) return iso ?? '';
-  final hour = at.hour % 12 == 0 ? 12 : at.hour % 12;
-  final minute = at.minute.toString().padLeft(2, '0');
-  return '${at.day} ${_months[at.month - 1]} ${at.year}, '
-      '$hour:$minute${at.hour < 12 ? 'am' : 'pm'}';
+  return momentLabel(at);
 }
 
 /// The firings of one Routine, newest last, as the authority recorded them.

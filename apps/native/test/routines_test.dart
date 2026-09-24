@@ -51,7 +51,7 @@ Map<String, Object?> routinesDocument({
 Map<String, Object?> routinesDetailDocument({
   String name = 'Morning brief',
   String prompt = 'Summarise overnight email.',
-  String timing = 'Every day at 9:00am · Australia/Sydney',
+  String timing = 'Every day at 9:00 am · Australia/Sydney',
   String? config,
   bool webhook = false,
   int? hookKeyVersion,

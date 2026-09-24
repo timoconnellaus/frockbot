@@ -450,9 +450,9 @@ void main() {
     final week = DateTime(2026, 9, 12, 12, 0).toUtc().toIso8601String();
     expect(formatExchangeTime(week, clock), 'Sat 12:00 pm');
     final older = DateTime(2026, 9, 4, 8, 31).toUtc().toIso8601String();
-    expect(formatExchangeTime(older, clock), 'Fri, Sep 4 8:31 am');
+    expect(formatExchangeTime(older, clock), 'Fri 4 Sep, 8:31 am');
     final lastYear = DateTime(2025, 12, 24, 17, 0).toUtc().toIso8601String();
-    expect(formatExchangeTime(lastYear, clock), 'Dec 24, 2025 5:00 pm');
+    expect(formatExchangeTime(lastYear, clock), '24 Dec 2025, 5:00 pm');
     expect(formatExchangeTime(null), '');
   });
 

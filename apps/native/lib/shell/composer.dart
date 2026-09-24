@@ -16,6 +16,7 @@ import 'package:flutter/services.dart';
 import '../acceptance_metrics.dart';
 import '../orientation.dart' show isNativeMobile;
 import '../theme/caret.dart';
+import '../theme/controls.dart';
 import '../theme/frock_theme.dart';
 import '../voice/dictation.dart';
 import '../voice/motion.dart';
@@ -78,6 +79,52 @@ double composerControlExtent(double fieldHeight) =>
 
 /// The glyph inside one of those controls, at half its circle.
 double composerControlIconSize(double extent) => (extent / 2).roundToDouble();
+
+/// The field's frame, shared by every composer: the raised ground, the round
+/// ends, and a line that turns to the accent while the field has focus.
+class ComposerFieldFrame extends StatelessWidget {
+  final bool focused;
+  final Widget child;
+  const ComposerFieldFrame({
+    super.key,
+    required this.focused,
+    required this.child,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return AnimatedContainer(
+      duration: FrockTheme.motion(context, voiceEnterDuration),
+      curve: Curves.easeOutCubic,
+      decoration: BoxDecoration(
+        color: scheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(FrockTheme.radiusField),
+        border: Border.all(
+          color: focused ? scheme.primary : FrockTheme.hairline(scheme),
+        ),
+      ),
+      child: child,
+    );
+  }
+}
+
+/// Send, in the accent, in the field's corner.
+Widget composerSendButton({
+  Key? key,
+  required double extent,
+  required VoidCallback? onPressed,
+}) => FrockIconButton(
+  key: key,
+  kind: FrockIconButtonKind.filled,
+  round: true,
+  tooltip: 'Send',
+  onPressed: onPressed,
+  extent: extent,
+  padded: true,
+  iconSize: composerControlIconSize(extent),
+  icon: const ChatIcon(ChatIconKind.send),
+);
 
 /// An [AnimatedSwitcher] layout where the outgoing child is only a picture:
 /// it stays visible for the cross-fade but cannot be pressed, and a screen
@@ -346,26 +393,67 @@ class _ComposerState extends State<Composer> {
     final active = widget.voiceActive && !closing;
     return identified(
       VoiceIds.composerVoice,
-      IconButton(
+      FrockIconButton(
         key: const ValueKey('composer-voice'),
+        kind: FrockIconButtonKind.outlined,
+        round: true,
         tooltip: active ? 'End voice' : 'Talk to this Bot',
         onPressed: closing ? null : widget.onVoice,
-        style: IconButton.styleFrom(
-          minimumSize: Size.square(extent),
-          fixedSize: Size.square(extent),
-          padding: EdgeInsets.zero,
-          iconSize: composerControlIconSize(extent),
-          shape: const CircleBorder(),
-          foregroundColor: closing
-              ? theme.disabledColor
-              : active
-              ? theme.colorScheme.primary
-              : theme.colorScheme.onSurfaceVariant,
-        ),
+        extent: extent,
+        iconSize: composerControlIconSize(extent),
+        color: active ? theme.colorScheme.primary : null,
         icon: const Icon(Icons.graphic_eq_rounded),
       ),
     );
   }
+
+  /// Opens the Skill menu, as typing `/` would, and closes it again.
+  void _toggleSkills() {
+    final skills = widget.skills;
+    if (skills == null) return;
+    final value = widget.editor.value;
+    final text = value.text;
+    final caret = value.selection.isValid
+        ? value.selection.baseOffset
+        : text.length;
+    if (skills.open) {
+      final replaced = skills.takeTrigger(text, caret);
+      if (replaced != null) {
+        widget.editor.value = TextEditingValue(
+          text: replaced.text,
+          selection: TextSelection.collapsed(offset: replaced.caret),
+        );
+        widget.onChanged(replaced.text);
+      }
+      skills.close();
+      return;
+    }
+    final before = text.substring(0, caret);
+    final gap = before.isNotEmpty && !RegExp(r'\s$').hasMatch(before);
+    final trigger = gap ? ' /' : '/';
+    final next = '$before$trigger${text.substring(caret)}';
+    widget.editor.value = TextEditingValue(
+      text: next,
+      selection: TextSelection.collapsed(offset: caret + trigger.length),
+    );
+    widget.onChanged(next);
+    _refreshPopover();
+    widget.focus.requestFocus();
+  }
+
+  Widget _plusButton(BuildContext context, double extent) => identified(
+    ShellIds.composerPlus,
+    FrockIconButton(
+      key: const ValueKey('composer-plus'),
+      kind: FrockIconButtonKind.outlined,
+      round: true,
+      tooltip: 'Use a Skill',
+      onPressed: widget.dictating ? null : _toggleSkills,
+      extent: extent,
+      iconSize: composerControlIconSize(extent),
+      icon: const Icon(Icons.add_rounded),
+    ),
+  );
 
   /// The one action in the field's corner. [dictating] is passed rather than
   /// read, because the draft's own corner keeps the draft's action even while
@@ -377,7 +465,6 @@ class _ComposerState extends State<Composer> {
     required bool canSend,
     required double extent,
   }) {
-    final theme = Theme.of(context);
     return KeyedSubtree(
       key: ValueKey(
         dictating
@@ -389,20 +476,18 @@ class _ComposerState extends State<Composer> {
       child: dictating
           ? identified(
               VoiceIds.composerDictationStop,
-              IconButton.filled(
+              FrockIconButton(
                 key: const ValueKey('dictation-stop'),
+                kind: FrockIconButtonKind.filled,
+                round: true,
                 tooltip: widget.dictationState.finishing
                     ? 'Finishing dictation'
                     : 'Stop dictation',
                 onPressed: widget.dictationState.finishing
                     ? null
                     : widget.onStopDictation,
-                style: IconButton.styleFrom(
-                  shape: const CircleBorder(),
-                  minimumSize: Size.square(extent),
-                  fixedSize: Size.square(extent),
-                  padding: EdgeInsets.zero,
-                ),
+                extent: extent,
+                padded: true,
                 icon: voiceIconTransition(
                   context,
                   widget.dictationState.finishing
@@ -428,45 +513,24 @@ class _ComposerState extends State<Composer> {
           : dictatable
           ? identified(
               VoiceIds.composerDictate,
-              IconButton.filled(
+              FrockIconButton(
                 key: const ValueKey('dictate'),
+                kind: FrockIconButtonKind.tonal,
+                round: true,
                 tooltip: 'Dictate message',
                 onPressed: widget.onDictate,
-                style: IconButton.styleFrom(
-                  minimumSize: Size.square(extent),
-                  fixedSize: Size.square(extent),
-                  padding: EdgeInsets.zero,
-                  iconSize: composerControlIconSize(extent),
-                  backgroundColor: theme.colorScheme.onSurface.withValues(
-                    alpha: 0.08,
-                  ),
-                  foregroundColor: theme.colorScheme.onSurface,
-                  shape: const CircleBorder(),
-                ),
+                extent: extent,
+                padded: true,
+                iconSize: composerControlIconSize(extent),
                 icon: const ChatIcon(ChatIconKind.mic),
               ),
             )
           : identified(
               ShellIds.sendButton,
-              IconButton.filled(
+              composerSendButton(
                 key: const ValueKey('send'),
-                tooltip: 'Send',
+                extent: extent,
                 onPressed: canSend ? _send : null,
-                style: IconButton.styleFrom(
-                  minimumSize: Size.square(extent),
-                  fixedSize: Size.square(extent),
-                  padding: EdgeInsets.zero,
-                  iconSize: composerControlIconSize(extent),
-                  shape: const CircleBorder(),
-                  // The app's icon buttons draw in the text colour; the
-                  // filled send button draws in the accent's own ink.
-                  foregroundColor: theme.colorScheme.onPrimary,
-                  disabledBackgroundColor: theme.colorScheme.onSurface
-                      .withValues(alpha: 0.06),
-                  disabledForegroundColor: theme.colorScheme.onSurfaceVariant
-                      .withValues(alpha: 0.5),
-                ),
-                icon: const ChatIcon(ChatIconKind.send),
               ),
             ),
     );
@@ -561,6 +625,13 @@ class _ComposerState extends State<Composer> {
           child: Row(
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
+              if (skills != null) ...[
+                SizedBox(
+                  height: oneLine,
+                  child: Center(child: _plusButton(context, oneLine - 4)),
+                ),
+                const SizedBox(width: 8),
+              ],
               Expanded(
                 // The draft keeps its place in the layout even while it is
                 // covered. A capture is exactly the size of the field it
@@ -584,16 +655,13 @@ class _ComposerState extends State<Composer> {
               // is the same target whatever the draft is doing, so the thumb
               // can find it without looking and the field beside it never
               // changes width under a capture.
-              if (widget.onVoice != null)
+              if (widget.onVoice != null) ...[
+                const SizedBox(width: 8),
                 SizedBox(
                   height: oneLine,
-                  child: Center(
-                    child: _voiceButton(
-                      context,
-                      composerControlExtent(oneLine),
-                    ),
-                  ),
+                  child: Center(child: _voiceButton(context, oneLine - 4)),
                 ),
+              ],
             ],
           ),
         ),
@@ -603,6 +671,7 @@ class _ComposerState extends State<Composer> {
             child: Text(
               '${turnTextRemaining(text)} characters left',
               style: theme.textTheme.bodySmall?.copyWith(
+                fontFeatures: FrockTheme.tabularFigures,
                 color: turnTextTooLong(text) ? theme.colorScheme.error : null,
               ),
             ),
@@ -629,14 +698,9 @@ class _ComposerState extends State<Composer> {
     return Container(
       key: const ValueKey('dictation-pill'),
       decoration: BoxDecoration(
-        color: Color.alphaBlend(
-          theme.colorScheme.primary.withValues(alpha: 0.07),
-          theme.colorScheme.surfaceContainerHighest,
-        ),
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: theme.colorScheme.primary.withValues(alpha: 0.5),
-        ),
+        color: theme.colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(FrockTheme.radiusField),
+        border: Border.all(color: theme.colorScheme.primary),
       ),
       child: Row(
         children: [
@@ -739,21 +803,8 @@ class _ComposerState extends State<Composer> {
       fontWeight: FontWeight.w400,
     );
     final skills = widget.skills;
-    return AnimatedContainer(
-      duration: FrockTheme.motion(context, voiceEnterDuration),
-      curve: Curves.easeOutCubic,
-      decoration: BoxDecoration(
-        color: theme.colorScheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(22),
-        border: Border.all(
-          color: widget.focus.hasFocus
-              ? Color.alphaBlend(
-                  theme.colorScheme.primary.withValues(alpha: 0.55),
-                  theme.colorScheme.outlineVariant,
-                )
-              : FrockTheme.hairline(theme.colorScheme),
-        ),
-      ),
+    return ComposerFieldFrame(
+      focused: widget.focus.hasFocus,
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
@@ -860,19 +911,16 @@ class _ComposerState extends State<Composer> {
     final theme = Theme.of(context);
     return identified(
       VoiceIds.composerDictationDiscard,
-      IconButton(
+      FrockIconButton(
         key: const ValueKey('dictation-discard'),
+        kind: FrockIconButtonKind.tonal,
+        round: true,
         tooltip: 'Discard dictation',
         onPressed: widget.onDiscardDictation,
-        style: IconButton.styleFrom(
-          minimumSize: Size.square(extent),
-          fixedSize: Size.square(extent),
-          padding: EdgeInsets.zero,
-          iconSize: composerControlIconSize(extent),
-          shape: const CircleBorder(),
-          backgroundColor: theme.colorScheme.onSurface.withValues(alpha: 0.08),
-          foregroundColor: theme.colorScheme.onSurfaceVariant,
-        ),
+        extent: extent,
+        padded: true,
+        iconSize: composerControlIconSize(extent),
+        color: theme.colorScheme.onSurfaceVariant,
         icon: const Icon(Icons.delete_outline_rounded),
       ),
     );

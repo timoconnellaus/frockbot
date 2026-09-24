@@ -52,7 +52,7 @@ test("an entry says what happened, where and when, and opens its Turn", () => {
     (node) => node.type === "text" && node.text.startsWith("Completed"),
   );
   expect(facts?.type === "text" && facts.text).toBe(
-    "Completed · shell_exec · Hosted Computer · 3 Sep 2026, 11:00pm UTC · 42 ms",
+    "Completed · shell_exec · Hosted Computer · 3 Sep 2026, 11:00 pm UTC · 42 ms",
   );
   const open = nodes.find(
     (node) => node.type === "action" && node.actionId === "open-run",

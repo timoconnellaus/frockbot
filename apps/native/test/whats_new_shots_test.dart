@@ -117,10 +117,10 @@ Future<void> _save(WidgetTester tester, String name) async {
 }
 
 void main() {
-  testWidgets('the megaphone beside the profile, with the unread mark', (
+  testWidgets('What’s New on the list’s foot, with the unread mark', (
     tester,
   ) async {
-    tester.view.physicalSize = const Size(576, 400);
+    tester.view.physicalSize = const Size(576, 1000);
     tester.view.devicePixelRatio = 2;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);

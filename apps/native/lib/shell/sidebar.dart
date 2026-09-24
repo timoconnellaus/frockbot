@@ -23,7 +23,10 @@ import 'package:flutter_slidable/flutter_slidable.dart';
 import '../flock/avatar.dart';
 import '../groups/faces.dart';
 import '../protocol/client_wire.generated.dart' as wire;
+import '../theme/controls.dart';
 import '../theme/frock_theme.dart';
+import '../theme/rows.dart';
+import '../theme/time.dart';
 import '../update/desktop_update.dart';
 import '../whats_new/mark.dart';
 import 'chat_icons.dart';
@@ -215,9 +218,7 @@ String formatSidebarMessageTime(String at, [DateTime? clock]) {
   final today = DateTime(now.year, now.month, now.day);
   final tomorrow = today.add(const Duration(days: 1));
   if (!message.isBefore(today) && message.isBefore(tomorrow)) {
-    final hour = message.hour % 12 == 0 ? 12 : message.hour % 12;
-    final minute = message.minute.toString().padLeft(2, '0');
-    return '$hour:$minute ${message.hour < 12 ? 'am' : 'pm'}';
+    return clockLabel(message);
   }
   if (!message.isBefore(today.subtract(const Duration(days: 6))) &&
       message.isBefore(tomorrow)) {
@@ -232,7 +233,7 @@ String formatSidebarMessageTime(String at, [DateTime? clock]) {
     ];
     return days[message.weekday - 1];
   }
-  return '${message.month}/${message.day}';
+  return dateLabel(message, now: now);
 }
 
 /// A Group Chat as the list draws it: among the Bots, labelled, pinned,
@@ -447,92 +448,44 @@ class ShellSidebar extends StatelessWidget {
       0,
       (total, entry) => total + _entryUnread(entry),
     );
-    // A phone's rows are cards a shade lighter than the ground they sit on,
-    // so the thing a thumb slides is a thing and not a stripe of the page.
-    // The ground itself is the app's page surface: the list does not get a
-    // lighter backdrop than every other screen just to frame its own rows.
-    final ground = phone ? sidebarGroundColor(theme.colorScheme) : null;
+    // The list stands on the chrome's surface, a step off the thread's ground,
+    // so the column reads as the frame the conversation sits in. A phone's
+    // rows are cards a shade lighter again, so the thing a thumb slides is a
+    // thing and not a stripe of the page.
+    final ground = sidebarGroundColor(theme.colorScheme);
+    final foot = phone
+        ? null
+        : _Foot(
+            onMarketplace: onMarketplace,
+            onSettings: onProfile,
+            onWhatsNew: onWhatsNew,
+            whatsNewUnread: whatsNewUnread,
+          );
+    // A window too short to keep the foot in view and still show a few rows
+    // scrolls the foot with the list instead of pinning it.
+    final pinFoot =
+        MediaQuery.sizeOf(context).height >= sidebarPinnedFootHeight;
     final column = Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         _Header(
+          phone: phone,
           onCreateBot: onCreateBot,
           onCreateGroup: onCreateGroup,
           onSearch: phone ? onSearch : null,
           onProfile: onProfile,
           profileName: profileName,
           profileImageUrl: profileImageUrl,
-          onWhatsNew: onWhatsNew,
+          onWhatsNew: phone ? onWhatsNew : null,
           whatsNewUnread: whatsNewUnread,
           onMarketplace: phone ? onMarketplace : null,
         ),
         if (!phone)
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 4, 12, 14),
+            padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
             child: identified(
               ShellIds.sidebarSearch,
-              Material(
-                color: Theme.of(context).colorScheme.surfaceContainerHigh,
-                borderRadius: BorderRadius.circular(11),
-                child: InkWell(
-                  onTap: onSearch,
-                  borderRadius: BorderRadius.circular(11),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 12,
-                      vertical: 11,
-                    ),
-                    child: Row(
-                      children: [
-                        Icon(
-                          Icons.search_rounded,
-                          size: chatIconSize,
-                          color: Theme.of(context).colorScheme.onSurfaceVariant,
-                        ),
-                        const SizedBox(width: 8),
-                        Expanded(
-                          child: Text(
-                            'Search',
-                            style: TextStyle(
-                              color: Theme.of(context)
-                                  .colorScheme
-                                  .onSurfaceVariant,
-                            ),
-                          ),
-                        ),
-                        Semantics(
-                          label:
-                              Theme.of(context).platform == TargetPlatform.macOS
-                              ? 'Command K'
-                              : 'Control K',
-                          excludeSemantics: true,
-                          child: Row(
-                            mainAxisSize: MainAxisSize.min,
-                            children: [
-                              if (Theme.of(context).platform ==
-                                  TargetPlatform.macOS)
-                                Icon(
-                                  Icons.keyboard_command_key,
-                                  size: 13,
-                                  color: Theme.of(context)
-                                      .colorScheme
-                                      .onSurfaceVariant,
-                                ),
-                              Text(
-                                Theme.of(context).platform ==
-                                        TargetPlatform.macOS
-                                    ? 'K'
-                                    : 'Ctrl+K',
-                                style: Theme.of(context).textTheme.labelSmall,
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
+              _SearchField(onSearch: onSearch),
             ),
           ),
         Expanded(
@@ -657,14 +610,15 @@ class ShellSidebar extends StatelessWidget {
                       ],
                     ),
                   ),
+                if (foot != null && !pinFoot) foot,
               ],
             ),
           ),
         ),
-        if (!phone) _Foot(onMarketplace: onMarketplace),
+        if (foot != null && pinFoot) foot,
       ],
     );
-    return ground == null ? column : ColoredBox(color: ground, child: column);
+    return ColoredBox(color: ground, child: column);
   }
 
   /// One row. In a [group] it can be dragged to another place or another
@@ -1328,10 +1282,13 @@ class _RowControl extends StatelessWidget {
   }
 }
 
-/// A phone list's ground: the app's own page surface, unlightened. The list
+/// The list's ground: the chrome's surface, unlightened. On a phone the list
 /// is a page like every other page here, so it is the rows that are told
 /// apart from it rather than the page that is told apart from the app.
 Color sidebarGroundColor(ColorScheme scheme) => scheme.surface;
+
+/// The shortest window whose Bot list keeps its foot pinned under the rows.
+const double sidebarPinnedFootHeight = 480;
 
 /// A phone list's row: the surface, a shade lighter than the ground, so what
 /// a thumb slides is visibly the thing that moves — lifted off the page the
@@ -1557,7 +1514,7 @@ class _SwipeActionState extends State<_SwipeAction> {
     final theme = Theme.of(context);
     final scheme = theme.colorScheme;
     final lit = widget.accent || _past;
-    final ink = lit ? scheme.primary : scheme.onSurfaceVariant;
+    final ink = lit ? scheme.onPrimary : scheme.onSurfaceVariant;
     // The pane lays its actions out as a Flex, so this stays its direct
     // child and the name goes inside.
     final identifier = widget.identifier;
@@ -1567,9 +1524,7 @@ class _SwipeActionState extends State<_SwipeAction> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 160),
         curve: Curves.easeOut,
-        color: lit
-            ? scheme.primary.withValues(alpha: _past ? 0.28 : 0.16)
-            : sidebarSwipeTrackColor(scheme),
+        color: lit ? scheme.primary : sidebarSwipeTrackColor(scheme),
         child: named(
           Material(
             type: MaterialType.transparency,
@@ -1697,6 +1652,16 @@ class _BotRowState extends State<_BotRow> {
     final time = widget.time;
     final trailing = widget.trailing;
     final showControl = widget.control != null && (_hovered || _focused);
+    // The row being read wears the accent at full strength, and its words
+    // turn to the accent's own ink.
+    final lit = selected && !widget.card;
+    final ink = theme.colorScheme.onPrimary;
+    final nameStyle = lit
+        ? widget.nameStyle?.copyWith(color: ink)
+        : widget.nameStyle;
+    final previewStyle = lit
+        ? widget.previewStyle?.copyWith(color: ink.withValues(alpha: 0.82))
+        : widget.previewStyle;
     final row = Semantics(
       container: true,
       identifier: widget.identifier,
@@ -1705,8 +1670,8 @@ class _BotRowState extends State<_BotRow> {
       child: Material(
         color: widget.card
             ? sidebarCardColor(theme.colorScheme)
-            : selected
-            ? theme.colorScheme.onSurface.withValues(alpha: 0.06)
+            : lit
+            ? theme.colorScheme.primary
             : Colors.transparent,
         borderRadius: const BorderRadius.all(sidebarCardRadius),
         child: InkWell(
@@ -1740,7 +1705,7 @@ class _BotRowState extends State<_BotRow> {
                                 widget.name,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: widget.nameStyle,
+                                style: nameStyle,
                               ),
                             ),
                             // The control itself sits over this space,
@@ -1753,8 +1718,11 @@ class _BotRowState extends State<_BotRow> {
                                 stamp,
                                 style: theme.textTheme.bodySmall?.copyWith(
                                   fontSize: 11.5,
-                                  color: theme.colorScheme.onSurfaceVariant
-                                      .withValues(alpha: 0.9),
+                                  fontFeatures: FrockTheme.tabularFigures,
+                                  color: lit
+                                      ? ink.withValues(alpha: 0.82)
+                                      : theme.colorScheme.onSurfaceVariant
+                                            .withValues(alpha: 0.9),
                                 ),
                               ),
                             ],
@@ -1768,12 +1736,17 @@ class _BotRowState extends State<_BotRow> {
                                 widget.preview,
                                 maxLines: 1,
                                 overflow: TextOverflow.ellipsis,
-                                style: widget.previewStyle,
+                                style: previewStyle,
                               ),
                             ),
                             if (trailing case final Widget end) ...[
                               const SizedBox(width: 8),
-                              end,
+                              lit
+                                  ? IconTheme.merge(
+                                      data: IconThemeData(color: ink),
+                                      child: end,
+                                    )
+                                  : end,
                             ],
                           ],
                         ),
@@ -1816,23 +1789,28 @@ class _BotRowState extends State<_BotRow> {
   }
 }
 
-/// The list's own controls, GrokBot's: you, search, and a new Bot — with
-/// What’s New beside you, and on a phone the Marketplace too.
+/// The list's own controls: you, and a new Bot or Group Chat. On a phone the
+/// header also carries What’s New, the Marketplace and search, which a wider
+/// layout names in the column's search field and foot.
 ///
 /// Voice is not here: a call addresses one Bot, so it is started from that
 /// Bot's composer and nowhere else (ADR 0029).
 ///
-/// Everything about the account is behind the first one; everything about one
-/// Bot is on that Bot's page. The list itself carries no title — the rows say
-/// what it is.
+/// Everything about the account is behind you; everything about one Bot is on
+/// that Bot's page. The list itself carries no title — the rows say what it
+/// is.
 class _Header extends StatelessWidget {
+  final bool phone;
   final VoidCallback onCreateBot;
   final VoidCallback? onCreateGroup;
   final VoidCallback? onSearch;
   final VoidCallback onProfile;
   final String? profileName;
   final String? profileImageUrl;
-  final VoidCallback onWhatsNew;
+
+  /// What’s New, where the header is the place for it; null where the
+  /// column's foot names it instead.
+  final VoidCallback? onWhatsNew;
   final bool whatsNewUnread;
 
   /// The Marketplace, where the header is the place for it; null where the
@@ -1840,6 +1818,7 @@ class _Header extends StatelessWidget {
   final VoidCallback? onMarketplace;
 
   const _Header({
+    required this.phone,
     required this.onCreateBot,
     this.onCreateGroup,
     required this.onSearch,
@@ -1853,59 +1832,63 @@ class _Header extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
     final desktopUpdates = DesktopUpdateScope.maybeOf(context);
-    // Quiet controls: a glyph and nothing round it until it is pressed. The
-    // one exception is the new-Bot button, which is the row's one invitation
-    // and wears the accent.
-    final quiet = IconButton.styleFrom(
-      foregroundColor: scheme.onSurfaceVariant,
-      minimumSize: Size.square(chatControlExtent),
-      fixedSize: Size.square(chatControlExtent),
-      padding: EdgeInsets.zero,
-      iconSize: chatIconSize,
-      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
-    );
-    final active = quiet.copyWith(
-      foregroundColor: WidgetStatePropertyAll(scheme.primary),
-      backgroundColor: WidgetStatePropertyAll(
-        scheme.primary.withValues(alpha: 0.14),
+    final name = profileName?.trim() ?? '';
+    Widget quiet(String id, String tooltip, Widget icon, VoidCallback onTap) =>
+        identified(
+          id,
+          FrockIconButton(
+            tooltip: tooltip,
+            onPressed: onTap,
+            extent: chatControlExtent,
+            iconSize: chatIconSize,
+            icon: icon,
+          ),
+        );
+    final you = identified(
+      ShellIds.sidebarProfile,
+      _You(
+        name: name,
+        imageUrl: profileImageUrl,
+        greeting: !phone,
+        onTap: onProfile,
       ),
     );
+    // A desktop app replaces itself to update, and says so beside the
+    // account; it draws nothing while there is nothing to do.
+    final update = desktopUpdates == null
+        ? null
+        : Padding(
+            padding: const EdgeInsets.only(left: 6, right: 4),
+            child: DesktopUpdateButton(controller: desktopUpdates),
+          );
     return DesktopWindowDragRegion(
       child: Padding(
         padding: EdgeInsets.fromLTRB(
           12,
-          desktopTitleBarless ? desktopSidebarTrafficLightClearance : 10,
-          10,
-          desktopTitleBarless ? 10 : 6,
+          desktopTitleBarless ? desktopSidebarTrafficLightClearance : 12,
+          12,
+          desktopTitleBarless ? 12 : 10,
         ),
         child: Row(
           children: [
-            identified(
-              ShellIds.sidebarProfile,
-              IconButton(
-                tooltip: 'You',
-                onPressed: onProfile,
-                style: quiet,
-                icon: PersonAvatar(
-                  name: profileName?.trim().isNotEmpty == true
-                      ? profileName!
-                      : 'You',
-                  imageUrl: profileImageUrl,
-                  size: 32,
+            if (phone)
+              you
+            else
+              Expanded(
+                child: Row(
+                  children: [
+                    Flexible(child: you),
+                    ?update,
+                  ],
                 ),
               ),
-            ),
-            const SizedBox(width: 2),
-            identified(
-              ShellIds.sidebarWhatsNew,
-              IconButton(
-                tooltip: 'What’s New',
-                onPressed: onWhatsNew,
-                style: quiet,
-                icon: Stack(
+            if (onWhatsNew case final VoidCallback open) ...[
+              const SizedBox(width: 2),
+              quiet(
+                ShellIds.sidebarWhatsNew,
+                'What’s New',
+                Stack(
                   clipBehavior: Clip.none,
                   children: [
                     const Icon(Icons.campaign_outlined),
@@ -1917,65 +1900,54 @@ class _Header extends StatelessWidget {
                       ),
                   ],
                 ),
+                open,
               ),
-            ),
+            ],
             if (onMarketplace case final VoidCallback open) ...[
               const SizedBox(width: 2),
-              identified(
+              quiet(
                 ShellIds.sidebarMarketplace,
-                IconButton(
-                  tooltip: 'Marketplace',
-                  onPressed: open,
-                  style: quiet,
-                  icon: const Icon(Icons.storefront_outlined),
-                ),
+                'Marketplace',
+                const Icon(Icons.storefront_outlined),
+                open,
               ),
             ],
-            // A desktop app replaces itself to update, and says so beside the
-            // account; the row's slack is where it speaks, and it draws nothing
-            // while there is nothing to do.
-            Expanded(
-              child: Align(
-                alignment: Alignment.centerLeft,
-                child: desktopUpdates == null
-                    ? const SizedBox.shrink()
-                    : Padding(
-                        padding: const EdgeInsets.only(left: 6, right: 4),
-                        child: DesktopUpdateButton(controller: desktopUpdates),
-                      ),
-              ),
-            ),
-            const SizedBox(width: 2),
-            if (onSearch != null)
-              identified(
-                ShellIds.sidebarSearch,
-                IconButton(
-                  tooltip: 'Search',
-                  onPressed: onSearch,
-                  style: quiet,
-                  icon: const Icon(Icons.search_rounded),
+            if (phone)
+              Expanded(
+                child: Align(
+                  alignment: Alignment.centerLeft,
+                  child: update ?? const SizedBox.shrink(),
                 ),
               ),
+            if (onSearch case final VoidCallback open) ...[
+              const SizedBox(width: 2),
+              quiet(
+                ShellIds.sidebarSearch,
+                'Search',
+                const Icon(Icons.search_rounded),
+                open,
+              ),
+            ],
             if (onCreateGroup case final VoidCallback start) ...[
               const SizedBox(width: 2),
-              identified(
+              quiet(
                 GroupIds.create,
-                IconButton(
-                  tooltip: 'New Group Chat',
-                  onPressed: start,
-                  style: quiet,
-                  icon: const Icon(Icons.group_add_outlined),
-                ),
+                'New Group Chat',
+                const Icon(Icons.group_add_outlined),
+                start,
               ),
             ],
-            const SizedBox(width: 2),
+            const SizedBox(width: 6),
+            // The row's one invitation, in the accent.
             identified(
               ShellIds.sidebarCreateBot,
-              IconButton(
+              FrockIconButton(
+                kind: FrockIconButtonKind.filled,
                 tooltip: 'Add a Bot',
                 onPressed: onCreateBot,
-                style: active,
-                icon: const Icon(Icons.add_rounded),
+                extent: chatControlExtent + 4,
+                iconSize: chatIconSize,
+                icon: const Icon(Icons.edit_outlined),
               ),
             ),
           ],
@@ -1985,66 +1957,213 @@ class _Header extends StatelessWidget {
   }
 }
 
-/// The foot of the column on a wider layout: the Marketplace, named.
-///
-/// A row rather than an icon because the column has the width for a word, and
-/// a word is what makes a door someone has never opened worth opening.
-class _Foot extends StatelessWidget {
-  final VoidCallback onMarketplace;
-  const _Foot({required this.onMarketplace});
+/// The person at the top of the list: their face, and on a wide layout a
+/// greeting and their first name. The whole of it is the way to the account.
+class _You extends StatelessWidget {
+  final String name;
+  final String? imageUrl;
+  final bool greeting;
+  final VoidCallback onTap;
+  const _You({
+    required this.name,
+    required this.imageUrl,
+    required this.greeting,
+    required this.onTap,
+  });
+
+  static String _salutation(DateTime now) => now.hour < 12
+      ? 'Good morning'
+      : now.hour < 18
+      ? 'Good afternoon'
+      : 'Good evening';
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.stretch,
-      mainAxisSize: MainAxisSize.min,
-      children: [
-        const Divider(height: 1),
-        Padding(
-          padding: const EdgeInsets.fromLTRB(8, 6, 8, 8),
-          child: identified(
-            ShellIds.sidebarMarketplace,
-            InkWell(
-              onTap: onMarketplace,
-              borderRadius: BorderRadius.circular(10),
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 9, 12, 9),
-                child: Row(
-                  children: [
-                    Icon(
-                      Icons.storefront_outlined,
-                      size: chatIconSize,
-                      color: theme.colorScheme.onSurfaceVariant,
-                    ),
-                    const SizedBox(width: 11),
-                    Expanded(
-                      child: Text(
-                        'Marketplace',
-                        // The foot is a door, not a heading: normal weight,
-                        // the same as the words in the list above it.
-                        style: theme.textTheme.bodyMedium?.copyWith(
-                          fontWeight: FontWeight.w400,
-                          letterSpacing: -0.1,
+    final first = name.split(RegExp(r'\s+')).first;
+    final face = PersonAvatar(
+      name: name.isEmpty ? 'You' : name,
+      imageUrl: imageUrl,
+      size: greeting ? 38 : 32,
+    );
+    return Tooltip(
+      message: 'You',
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(FrockTheme.radiusControl),
+        child: Padding(
+          padding: EdgeInsets.all(greeting ? 4 : 6),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              face,
+              if (greeting) ...[
+                const SizedBox(width: 10),
+                Flexible(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        _salutation(DateTime.now()),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: theme.colorScheme.onSurfaceVariant,
                         ),
                       ),
-                    ),
-                    Icon(
-                      Icons.chevron_right_rounded,
-                      size: 20,
-                      color: theme.colorScheme.onSurfaceVariant.withValues(
-                        alpha: 0.6,
+                      Text(
+                        first.isEmpty ? 'You' : first,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: theme.textTheme.titleMedium,
                       ),
-                    ),
-                  ],
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The desktop list's search: a field-shaped door to the search palette, with
+/// its shortcut written on a key.
+class _SearchField extends StatelessWidget {
+  final VoidCallback onSearch;
+  const _SearchField({required this.onSearch});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final scheme = theme.colorScheme;
+    final mac = theme.platform == TargetPlatform.macOS;
+    final radius = BorderRadius.circular(FrockTheme.radiusControl);
+    return Material(
+      color: theme.scaffoldBackgroundColor,
+      shape: RoundedRectangleBorder(
+        borderRadius: radius,
+        side: BorderSide(color: FrockTheme.hairline(scheme)),
+      ),
+      child: InkWell(
+        onTap: onSearch,
+        borderRadius: radius,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 10, 8, 10),
+          child: Row(
+            children: [
+              Icon(
+                Icons.search_rounded,
+                size: chatIconSize,
+                color: scheme.onSurfaceVariant,
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Search conversations…',
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: theme.textTheme.bodyMedium?.copyWith(
+                    color: scheme.onSurfaceVariant,
+                  ),
                 ),
               ),
-            ),
+              Semantics(
+                label: mac ? 'Command K' : 'Control K',
+                excludeSemantics: true,
+                child: Container(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 6,
+                    vertical: 3,
+                  ),
+                  decoration: BoxDecoration(
+                    borderRadius: BorderRadius.circular(6),
+                    border: Border.all(color: FrockTheme.hairline(scheme)),
+                  ),
+                  child: Row(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      if (mac)
+                        Icon(
+                          Icons.keyboard_command_key,
+                          size: 12,
+                          color: scheme.onSurfaceVariant,
+                        ),
+                      Text(
+                        mac ? 'K' : 'Ctrl+K',
+                        style: theme.textTheme.labelSmall?.copyWith(
+                          color: scheme.onSurfaceVariant,
+                          letterSpacing: 0,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// The foot of the column on a wider layout: the doors that are not a
+/// conversation, named, on one card.
+///
+/// Rows rather than icons because the column has the width for a word, and a
+/// word is what makes a door someone has never opened worth opening.
+class _Foot extends StatelessWidget {
+  final VoidCallback onMarketplace;
+  final VoidCallback onSettings;
+  final VoidCallback onWhatsNew;
+  final bool whatsNewUnread;
+  const _Foot({
+    required this.onMarketplace,
+    required this.onSettings,
+    required this.onWhatsNew,
+    required this.whatsNewUnread,
+  });
+
+  @override
+  Widget build(BuildContext context) => Padding(
+    padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+    child: FrockRowGroup(
+      indent: 14,
+      rows: [
+        identified(
+          ShellIds.sidebarMarketplace,
+          FrockRow(
+            icon: Icons.storefront_outlined,
+            title: 'Marketplace',
+            onTap: onMarketplace,
+          ),
+        ),
+        identified(
+          ShellIds.sidebarSettings,
+          FrockRow(
+            icon: Icons.settings_outlined,
+            title: 'Settings',
+            chevron: false,
+            onTap: onSettings,
+          ),
+        ),
+        identified(
+          ShellIds.sidebarWhatsNew,
+          FrockRow(
+            icon: Icons.campaign_outlined,
+            title: 'What’s New',
+            chevron: false,
+            trailing: whatsNewUnread ? const WhatsNewUnreadMark() : null,
+            onTap: onWhatsNew,
           ),
         ),
       ],
-    );
-  }
+    ),
+  );
 }
 
 class _PinnedTile extends StatefulWidget {
@@ -2079,10 +2198,8 @@ class _PinnedTileState extends State<_PinnedTile> {
       child: CharacterHoverScope(
         hovered: hovered,
         child: Material(
-          color: widget.active
-              ? theme.colorScheme.onSurface.withValues(alpha: 0.06)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(10),
+          color: widget.active ? theme.colorScheme.primary : Colors.transparent,
+          borderRadius: BorderRadius.circular(FrockTheme.radiusRow),
           child: InkWell(
             onTap: widget.onTap,
             onLongPress: widget.onActions == null
@@ -2107,17 +2224,10 @@ class _PinnedTileState extends State<_PinnedTile> {
                         Positioned(
                           right: -3,
                           top: -3,
-                          child: Container(
-                            width: 12,
-                            height: 12,
-                            decoration: BoxDecoration(
-                              color: theme.colorScheme.primary,
-                              shape: BoxShape.circle,
-                              border: Border.all(
-                                color: theme.colorScheme.surface,
-                                width: 2,
-                              ),
-                            ),
+                          child: StatusDot(
+                            color: theme.colorScheme.primary,
+                            size: 12,
+                            ring: theme.colorScheme.surface,
                           ),
                         ),
                     ],
@@ -2132,9 +2242,11 @@ class _PinnedTileState extends State<_PinnedTile> {
                       fontWeight: widget.unread
                           ? FontWeight.w600
                           : FontWeight.w500,
-                      color: theme.colorScheme.onSurface.withValues(
-                        alpha: widget.unread ? 1 : 0.85,
-                      ),
+                      color: widget.active
+                          ? theme.colorScheme.onPrimary
+                          : theme.colorScheme.onSurface.withValues(
+                              alpha: widget.unread ? 1 : 0.85,
+                            ),
                     ),
                   ),
                 ],

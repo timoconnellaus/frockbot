@@ -19,7 +19,7 @@ import '../flock/avatar.dart';
 import '../shell/desktop_layout.dart';
 import '../shell/semantics.dart';
 import '../theme/caret.dart';
-import '../theme/frock_theme.dart';
+import '../theme/controls.dart';
 import '../theme/rows.dart';
 import '../voice/appearance.dart';
 import 'bot_settings.dart';
@@ -362,8 +362,11 @@ class _BotVoicePageState extends State<BotVoicePage> {
     FrockRow(
       title: title,
       chevron: false,
-      trailing: _Segmented(
-        options: options,
+      trailing: FrockSegmented(
+        options: [
+          for (final option in options)
+            (slug: option.slug, label: option.label),
+        ],
         selected: selected,
         label: title,
         onChosen: onChosen,
@@ -434,70 +437,6 @@ class _BotVoicePageState extends State<BotVoicePage> {
 }
 
 /// Three or four options at the end of a row, one of them on.
-class _Segmented extends StatelessWidget {
-  final List<VoicePresetV1> options;
-  final String? selected;
-  final String label;
-  final void Function(String) onChosen;
-  const _Segmented({
-    required this.options,
-    required this.selected,
-    required this.label,
-    required this.onChosen,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(2),
-      decoration: BoxDecoration(
-        color: scheme.onSurface.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(FrockTheme.radiusControl),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (final option in options)
-            Semantics(
-              button: true,
-              selected: option.slug == selected,
-              label: '$label: ${option.label}',
-              child: ExcludeSemantics(
-                child: InkWell(
-                  onTap: () => onChosen(option.slug),
-                  borderRadius: BorderRadius.circular(9),
-                  child: Container(
-                    height: 30,
-                    alignment: Alignment.center,
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    decoration: BoxDecoration(
-                      color: option.slug == selected
-                          ? scheme.primary.withValues(alpha: 0.18)
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(9),
-                    ),
-                    child: Text(
-                      option.label,
-                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                        fontSize: 12.5,
-                        color: option.slug == selected
-                            ? scheme.primary
-                            : scheme.onSurfaceVariant,
-                        fontWeight: option.slug == selected
-                            ? FontWeight.w600
-                            : FontWeight.w400,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
-        ],
-      ),
-    );
-  }
-}
 
 typedef VoicePickerOptionV1 = ({String slug, String label, String? detail});
 

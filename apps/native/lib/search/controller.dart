@@ -8,6 +8,7 @@ import 'package:flutter/foundation.dart';
 
 import '../client/transport.dart';
 import '../groups/faces.dart';
+import '../theme/time.dart';
 
 const searchMaxQueryLengthV1 = 200;
 const searchDebounce = Duration(milliseconds: 200);
@@ -499,8 +500,8 @@ class BotSearchController extends ChangeNotifier {
 }
 
 String _date(String at) {
-  final parsed = DateTime.tryParse(at)?.toLocal();
-  return parsed == null ? at : '${parsed.day}/${parsed.month}/${parsed.year}';
+  final parsed = localInstant(at);
+  return parsed == null ? at : dateLabel(parsed, year: true);
 }
 
 String _schedule(Map routine) {
@@ -511,19 +512,69 @@ String _schedule(Map routine) {
         : 'On ${trigger['trigger'] ?? 'a Plugin trigger'}';
   }
   final schedule = routine['schedule'] as String? ?? '';
-  // The common daily and weekday cases read naturally. More complex schedules
-  // retain the server's expression, so their meaning is never guessed.
-  final parts = schedule.trim().split(RegExp(r'\s+'));
-  if (parts.length == 5 && parts[2] == '*' && parts[3] == '*') {
-    final minute = int.tryParse(parts[0]);
-    final hour = int.tryParse(parts[1]);
-    if (minute != null &&
-        hour != null &&
-        (parts[4] == '*' || parts[4] == '1-5')) {
-      final time =
-          '${hour % 12 == 0 ? 12 : hour % 12}:${minute.toString().padLeft(2, '0')} ${hour < 12 ? 'AM' : 'PM'}';
-      return '${parts[4] == '*' ? 'Daily' : 'Weekdays'} at $time';
-    }
+  return schedule.isEmpty ? 'Scheduled' : describeRoutineSchedule(schedule);
+}
+
+/// A schedule in words, as the Routines list says it: a mirror of the
+/// server's `describeRoutineScheduleV1` (`app/routines/cron.ts`). A pattern
+/// it cannot say is "Custom schedule", never the cron itself.
+String describeRoutineSchedule(String schedule) {
+  final value = schedule.trim().toLowerCase();
+  const aliases = {
+    '@hourly': 'Every hour',
+    '@daily': 'Every day at 12:00 am',
+    '@midnight': 'Every day at 12:00 am',
+    '@weekly': 'Every Sunday at 12:00 am',
+    '@monthly': 'On day 1 of every month at 12:00 am',
+    '@yearly': 'Every 1 January at 12:00 am',
+    '@annually': 'Every 1 January at 12:00 am',
+  };
+  if (aliases[value] case final String said) return said;
+  final interval = RegExp(r'^@every\s+(\d+)\s*([mhd])$').firstMatch(value);
+  if (interval != null) {
+    final count = interval.group(1)!;
+    final unit = switch (interval.group(2)) {
+      'm' => 'minute',
+      'h' => 'hour',
+      _ => 'day',
+    };
+    return 'Every $count $unit${count == '1' ? '' : 's'}';
   }
-  return schedule.isEmpty ? 'Scheduled' : schedule;
+  final fields = value.split(RegExp(r'\s+'));
+  if (fields.length != 5) return 'Custom schedule';
+  final minute = int.tryParse(fields[0]);
+  final hour = int.tryParse(fields[1]);
+  final [_, _, day, month, weekday] = fields;
+  if (minute == null ||
+      hour == null ||
+      !RegExp(r'^\d+$').hasMatch(fields[0]) ||
+      !RegExp(r'^\d+$').hasMatch(fields[1]) ||
+      minute > 59 ||
+      hour > 23 ||
+      month != '*') {
+    return 'Custom schedule';
+  }
+  final time = clockLabel(DateTime(2000, 1, 1, hour, minute));
+  if (day == '*' && weekday == '*') return 'Every day at $time';
+  if (day == '*' && weekday == '1-5') return 'Every weekday at $time';
+  const weekdays = [
+    'Sunday',
+    'Monday',
+    'Tuesday',
+    'Wednesday',
+    'Thursday',
+    'Friday',
+    'Saturday',
+  ];
+  if (day == '*' && RegExp(r'^[0-6]$').hasMatch(weekday)) {
+    return 'Every ${weekdays[int.parse(weekday)]} at $time';
+  }
+  final date = int.tryParse(day);
+  if (date != null &&
+      RegExp(r'^\d+$').hasMatch(day) &&
+      weekday == '*' &&
+      date <= 28) {
+    return 'On day $date of every month at $time';
+  }
+  return 'Custom schedule';
 }

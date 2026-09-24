@@ -38,7 +38,7 @@ Widget host(
 );
 
 void main() {
-  test('pixel ink at 88 is the silhouette, not the canvas', () {
+  test('pixel ink at the companion\'s size is the silhouette', () {
     final box = characterCatalogV1['pixel']!.ink.boxForHeight(
       chatCompanionSize,
     );
@@ -195,7 +195,7 @@ void main() {
   );
 
   testWidgets(
-    'the overlay fades the thread and puts the panel switch on the right',
+    'the band holds the companion, the name, and the panel switch at the right',
     (tester) async {
       tester.view.physicalSize = const Size(1200, 900);
       tester.view.devicePixelRatio = 1;
@@ -216,15 +216,17 @@ void main() {
         ),
       );
       await tester.pump();
-      expect(find.byKey(const ValueKey('chat-header-fade')), findsOneWidget);
-      expect(
-        tester.getSize(find.byKey(const ValueKey('chat-header-fade'))).height,
-        chatHeaderFadeHeight,
-      );
+      expect(find.byKey(const ValueKey('chat-header-band')), findsOneWidget);
       final companion = find.bySemanticsLabel('Bot is ready');
+      // A desk's band is one height whatever it holds, so a column beside
+      // it can meet its line; the companion sits in the middle of it.
       expect(
-        tester.getTopLeft(companion).dy,
-        chatHeaderChromeTop - chatHeaderCompanionLift,
+        tester.getSize(find.byKey(const ValueKey('chat-header-band'))).height,
+        chatHeaderBandHeight,
+      );
+      expect(
+        tester.getCenter(companion).dy,
+        closeTo(chatHeaderBandHeight / 2, 0.5),
       );
       expect(tester.getTopLeft(companion).dx, chatHeaderChromeSide);
       expect(tester.getSize(companion).height, chatCompanionSize);
@@ -234,19 +236,11 @@ void main() {
         tester.getTopLeft(find.text('Pixel')).dx,
         greaterThan(tester.getTopRight(companion).dx),
       );
-      expect(
-        tester.getTopLeft(find.text('Pixel')).dy,
-        closeTo(chatHeaderChromeTop + chatHeaderChromeDrop + 12, 0.5),
-      );
       expect(find.byTooltip('Computer'), findsNothing);
-      expect(
-        tester.getTopRight(find.byTooltip('Show the panel')).dx,
-        closeTo(1200 - chatHeaderChromeSide, 0.5),
-      );
-      expect(
-        tester.getTopLeft(find.byTooltip('Show the panel')).dy,
-        chatHeaderChromeTop + chatHeaderChromeDrop,
-      );
+      final panel = tester.getRect(find.byTooltip('Show the panel'));
+      expect(panel.right, closeTo(1200 - chatHeaderChromeSide, 0.5));
+      // One row: the companion and the switch share a centre line.
+      expect(panel.center.dy, closeTo(tester.getCenter(companion).dy, 0.5));
       expect(find.byType(AppBar), findsNothing);
     },
   );
@@ -322,14 +316,10 @@ void main() {
         await tester.tap(byIdentifier(ShellIds.sidebarToggle));
         await tester.tap(byIdentifier(ShellIds.rightPanelToggle));
         expect(opened, ['Bots', 'Panel']);
-        expect(
-          tester.getTopLeft(byIdentifier(ShellIds.sidebarToggle)).dy,
-          chatHeaderChromeTop,
-        );
-        expect(
-          tester.getTopLeft(find.byTooltip('Show the panel')).dy,
-          chatHeaderChromeTop,
-        );
+        final back = tester.getRect(byIdentifier(ShellIds.sidebarToggle));
+        final panel = tester.getRect(find.byTooltip('Show the panel'));
+        expect(back.top, greaterThanOrEqualTo(chatHeaderPhoneChromeTop));
+        expect(panel.center.dy, closeTo(back.center.dy, 0.5));
       },
     );
   }
@@ -375,21 +365,12 @@ void main() {
     expect(find.byTooltip('Open Rosemary'), findsNothing);
     expect(
       tester.getTopLeft(name).dx,
-      closeTo(tester.getTopRight(companion).dx + 10, 0.5),
+      closeTo(tester.getTopRight(companion).dx + 12, 0.5),
     );
+    // The name is centred against the companion, not hung from its top.
     expect(
-      tester.getTopLeft(name).dy,
-      greaterThan(tester.getTopLeft(companion).dy),
-    );
-    expect(
-      tester.getTopLeft(name).dy,
-      closeTo(
-        tester.getTopLeft(companion).dy +
-            chatHeaderCompanionLift +
-            chatHeaderChromeDrop +
-            12,
-        0.5,
-      ),
+      tester.getCenter(name).dy,
+      closeTo(tester.getCenter(companion).dy, 0.5),
     );
     expect(
       tester.getTopRight(name).dx,
@@ -426,7 +407,7 @@ void main() {
     expect(find.byTooltip('Computer'), findsNothing);
     expect(
       tester.getTopLeft(name).dx,
-      closeTo(tester.getTopRight(companion).dx + 10, 0.5),
+      closeTo(tester.getTopRight(companion).dx + 12, 0.5),
     );
     final back = tester.getRect(find.byTooltip('Your Bots'));
     final panel = tester.getRect(find.byTooltip('Show the panel'));
@@ -537,8 +518,8 @@ void main() {
         );
         await tester.pump();
         expect(
-          tester.getTopLeft(find.byTooltip('Show the panel')).dy,
-          chatHeaderChromeTop + chatHeaderChromeDrop,
+          tester.getCenter(find.byTooltip('Show the panel')).dy,
+          closeTo(chatHeaderBandHeight / 2, 0.5),
         );
         expect(
           tester.getTopLeft(find.byTooltip('Show the panel')).dy,
@@ -568,7 +549,7 @@ void main() {
         await tester.pump();
         expect(
           tester.getTopLeft(byIdentifier(ShellIds.sidebarToggle)).dy,
-          chatHeaderChromeTop + desktopTitleBarBand,
+          chatHeaderPhoneChromeTop + desktopTitleBarBand,
         );
         expect(
           tester.getTopLeft(byIdentifier(ShellIds.sidebarToggle)).dx,
@@ -668,6 +649,57 @@ void main() {
       }
     },
   );
+
+  testWidgets('a column\'s header is the band\'s height, so their lines meet', (
+    tester,
+  ) async {
+    debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+    try {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: Scaffold(
+            body: Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(
+                  child: ChatHeader(
+                    name: 'Bob',
+                    subtitle: 'Helpful, friendly, and gets things done.',
+                    connection: ConnectionState.connected,
+                    onTogglePanel: () {},
+                    companion: const SizedBox.square(
+                      dimension: chatCompanionSize,
+                    ),
+                  ),
+                ),
+                SizedBox(
+                  width: 380,
+                  child: PanelHeader(
+                    title: const Text('Settings'),
+                    actions: [
+                      headerAction(
+                        tooltip: 'Close the panel',
+                        onPressed: () {},
+                        icon: const Icon(Icons.close_rounded),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+      await tester.pump();
+      expect(
+        tester.getSize(find.byType(PanelHeader)).height,
+        tester.getSize(find.byKey(const ValueKey('chat-header-band'))).height,
+      );
+    } finally {
+      debugDefaultTargetPlatformOverride = null;
+    }
+  });
 
   testWidgets('a phone header has no stadium around its buttons', (
     tester,

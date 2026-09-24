@@ -81,7 +81,7 @@ const KIND: ActionValueSchema = {
 };
 
 /**
- * A durable moment in the house order — "4 Sep 2026, 9:00am" — read in the
+ * A durable moment in the house order — "4 Sep 2026, 9:00 am" — read in the
  * zone it belongs to. A schedule is meant in the day the person who wrote it
  * is living in, so a Routine's own zone is the one its firings are read in.
  */
@@ -115,7 +115,7 @@ export function routineMomentV1(iso: string, timeZone: string): string {
   const number = (type: string) => String(Number(of(type)));
   return `${number("day")} ${MONTHS[Number(of("month")) - 1] ?? ""} ${of(
     "year",
-  )}, ${number("hour")}:${of("minute")}${of("dayPeriod")
+  )}, ${number("hour")}:${of("minute")} ${of("dayPeriod")
     .toLowerCase()
     .replace(/\s/gu, "")}`;
 }

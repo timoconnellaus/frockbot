@@ -14,18 +14,22 @@ import 'package:flutter/services.dart';
 import '../client/chat_controller.dart' show ConnectionState;
 import '../flock/avatar.dart';
 import '../shell/chat_header.dart';
-import '../shell/chat_icons.dart';
 import '../shell/composer.dart'
     show
+        ComposerFieldFrame,
         composerControlExtent,
         composerControlIconSize,
         composerFieldPadding,
+        composerSendButton,
         enterSends;
 import '../shell/markdown.dart';
 import '../shell/semantics.dart';
 import '../theme/caret.dart';
+import '../theme/controls.dart';
 import '../theme/frock_theme.dart';
 import '../theme/states.dart';
+import '../theme/thread.dart';
+import '../theme/time.dart';
 import 'faces.dart';
 import 'lines.dart';
 import 'model.dart';
@@ -50,6 +54,12 @@ class GroupChatPane extends StatefulWidget {
   final VoidCallback? onBack;
   final VoidCallback onOpenMembers;
 
+  /// Searches the conversations, from the header, as a Bot's header does.
+  final VoidCallback? onSearch;
+
+  /// The group's actions — the same menu its row in the list opens.
+  final VoidCallback? onActions;
+
   /// Opens the view-only chat behind a message a member sent a Bot outside.
   final void Function(String botId, String toBotId)? onOpenExchange;
 
@@ -71,6 +81,8 @@ class GroupChatPane extends StatefulWidget {
     required this.phone,
     required this.onOpenMembers,
     required this.onReconnect,
+    this.onSearch,
+    this.onActions,
     this.onBack,
     this.onOpenExchange,
     this.onUndo,
@@ -287,21 +299,24 @@ class _GroupChatPaneState extends State<GroupChatPane> {
     final faces = [for (final member in _members) _faceOf(member.botId)];
     final header = ChatHeader(
       name: widget.name,
+      subtitle: _members.isEmpty
+          ? null
+          : [for (final member in _members) member.name].join(', '),
+      working: c.working.isNotEmpty,
       phone: widget.phone,
       onBack: widget.onBack,
+      onSearch: widget.onSearch,
+      onActions: widget.onActions,
       onMembers: widget.onOpenMembers,
       connection: c.connection,
       textScale: MediaQuery.textScalerOf(context).scale(14) / 14,
       companion: faces.isEmpty
           ? null
-          : Padding(
-              padding: EdgeInsets.only(top: widget.phone ? 0 : 14),
-              child: GroupAvatars(
-                faces: faces,
-                size: widget.phone ? 34 : 44,
-                ring: Theme.of(context).scaffoldBackgroundColor,
-                working: c.working.isNotEmpty,
-              ),
+          : GroupAvatars(
+              faces: faces,
+              size: widget.phone ? 32 : 40,
+              ring: Theme.of(context).colorScheme.surface,
+              working: c.working.isNotEmpty,
             ),
       below: notices,
     );
@@ -309,54 +324,50 @@ class _GroupChatPaneState extends State<GroupChatPane> {
       GroupIds.pane,
       Column(
         children: [
+          header,
           Expanded(
-            child: Stack(
+            child: Column(
               children: [
-                Column(
-                  children: [
-                    Expanded(
-                      child: Center(
-                        child: ConstrainedBox(
-                          constraints: const BoxConstraints(maxWidth: 860),
-                          child: _thread(context),
+                Expanded(
+                  child: Center(
+                    child: ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 860),
+                      child: _thread(context),
+                    ),
+                  ),
+                ),
+                if (c.error != null)
+                  Padding(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 16,
+                      vertical: 8,
+                    ),
+                    child: Text(
+                      c.error!,
+                      style: TextStyle(
+                        color: Theme.of(context).colorScheme.error,
+                      ),
+                    ),
+                  ),
+                if (_note != null)
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(20, 4, 20, 2),
+                    child: Align(
+                      alignment: AlignmentDirectional.centerStart,
+                      child: identified(
+                        GroupIds.note,
+                        Text(
+                          _note!,
+                          style: Theme.of(context).textTheme.bodySmall
+                              ?.copyWith(
+                                color: Theme.of(context)
+                                    .colorScheme
+                                    .onSurfaceVariant,
+                              ),
                         ),
                       ),
                     ),
-                    if (c.error != null)
-                      Padding(
-                        padding: const EdgeInsets.symmetric(
-                          horizontal: 16,
-                          vertical: 8,
-                        ),
-                        child: Text(
-                          c.error!,
-                          style: TextStyle(
-                            color: Theme.of(context).colorScheme.error,
-                          ),
-                        ),
-                      ),
-                    if (_note != null)
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 4, 20, 2),
-                        child: Align(
-                          alignment: AlignmentDirectional.centerStart,
-                          child: identified(
-                            GroupIds.note,
-                            Text(
-                              _note!,
-                              style: Theme.of(context).textTheme.bodySmall
-                                  ?.copyWith(
-                                    color: Theme.of(context)
-                                        .colorScheme
-                                        .onSurfaceVariant,
-                                  ),
-                            ),
-                          ),
-                        ),
-                      ),
-                  ],
-                ),
-                Positioned.fill(child: header),
+                  ),
               ],
             ),
           ),
@@ -398,6 +409,7 @@ class _GroupChatPaneState extends State<GroupChatPane> {
         previousName = body.name;
       }
     }
+    _stamps(messages);
     final unreadAfter = _unreadAfter;
     for (var index = messages.length - 1; index >= 0; index--) {
       final message = messages[index];
@@ -412,7 +424,7 @@ class _GroupChatPaneState extends State<GroupChatPane> {
           message.seq > unreadAfter &&
           !message.fromUser &&
           (previous == null || previous.seq <= unreadAfter)) {
-        rows.add(const _UnreadDivider(key: ValueKey('group-unread')));
+        rows.add(const UnreadDivider(key: ValueKey('group-unread')));
       }
     }
     if (c.hasEarlier) {
@@ -420,17 +432,11 @@ class _GroupChatPaneState extends State<GroupChatPane> {
         Padding(
           key: const ValueKey('group-earlier'),
           padding: const EdgeInsets.symmetric(vertical: 8),
-          child: Center(
-            child: identified(
-              GroupIds.earlier,
-              TextButton(
-                onPressed: c.loadingEarlier
-                    ? null
-                    : () => unawaited(c.loadEarlier()),
-                child: Text(
-                  c.loadingEarlier ? 'Loading…' : 'Load earlier messages',
-                ),
-              ),
+          child: identified(
+            GroupIds.earlier,
+            EarlierMessages(
+              onPressed: () => unawaited(c.loadEarlier()),
+              loading: c.loadingEarlier,
             ),
           ),
         ),
@@ -467,26 +473,46 @@ class _GroupChatPaneState extends State<GroupChatPane> {
     );
   }
 
+  /// The time each text is written with, and whether its sender is named
+  /// over it: both once per speaker's run, the time again after five
+  /// minutes, as in a Bot's own thread.
+  Map<String, String> _stamped = const {};
+  Set<String> _named = const {};
+
+  void _stamps(List<GroupMessage> messages) {
+    final now = DateTime.now();
+    final stamped = <String, String>{};
+    final named = <String>{};
+    String? speaker;
+    DateTime? last;
+    for (final message in messages) {
+      if (message.body is! GroupText) {
+        speaker = null;
+        continue;
+      }
+      final who = message.botId ?? '';
+      if (who != speaker) named.add(message.messageId);
+      final at = localInstant(message.at);
+      if (at != null &&
+          (who != speaker ||
+              last == null ||
+              at.difference(last).inMinutes >= 5)) {
+        stamped[message.messageId] = messageTimeLabel(at, now);
+        last = at;
+      }
+      speaker = who;
+    }
+    _stamped = stamped;
+    _named = named;
+  }
+
   Widget _empty(BuildContext context) {
-    final theme = Theme.of(context);
     final names = [for (final member in _members) member.name];
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(32, 32, 32, 32),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text('Say hello to the group', style: theme.textTheme.headlineSmall),
-          const SizedBox(height: 8),
-          Text(
-            names.isEmpty
-                ? 'Everyone here reads every message. Use @ to ask someone in particular.'
-                : '${names.join(', ')} read every message here. Use @ to ask someone in particular.',
-            style: theme.textTheme.bodyMedium?.copyWith(
-              color: theme.colorScheme.onSurfaceVariant,
-            ),
-          ),
-        ],
-      ),
+    return EmptyThread(
+      title: 'Say hello to the group',
+      detail: names.isEmpty
+          ? 'Everyone here reads every message. Use @ to ask someone in particular.'
+          : '${names.join(', ')} read every message here. Use @ to ask someone in particular.',
     );
   }
 
@@ -512,12 +538,11 @@ class _GroupChatPaneState extends State<GroupChatPane> {
         .copyWith(color: theme.extension<FrockLook>()?.bubbleInk(mine: true));
     return identified(
       GroupIds.message(message.messageId),
-      _Bubble(
+      MessageBubble(
         mine: true,
-        child: Semantics(
-          label: 'You',
-          child: Text.rich(_withMentions(context, body, base), style: base),
-        ),
+        time: _stamped[message.messageId],
+        semanticsLabel: 'You',
+        child: Text.rich(_withMentions(context, body, base), style: base),
       ),
     );
   }
@@ -592,26 +617,17 @@ class _GroupChatPaneState extends State<GroupChatPane> {
       return TextSpan(children: spans);
     }
 
+    final named = _named.contains(message.messageId);
     return identified(
       GroupIds.message(message.messageId),
       Padding(
-        padding: const EdgeInsets.only(top: 6),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Padding(
-              padding: const EdgeInsets.fromLTRB(18, 0, 16, 0),
-              child: BotBadge(face: face),
-            ),
-            _Bubble(
-              mine: false,
-              child: Semantics(
-                label: face.name,
-                child: ShellMarkdown(text: body.text, decorate: decorate),
-              ),
-            ),
-          ],
+        padding: EdgeInsets.only(top: named ? 6 : 0),
+        child: MessageBubble(
+          mine: false,
+          label: named ? BotBadge(face: face) : null,
+          time: _stamped[message.messageId],
+          semanticsLabel: face.name,
+          child: ShellMarkdown(text: body.text, decorate: decorate),
         ),
       ),
     );
@@ -626,29 +642,8 @@ class _GroupChatPaneState extends State<GroupChatPane> {
     final theme = Theme.of(context);
     final text = groupEventText(event, message.botId, _nameOf);
     final muted = theme.colorScheme.onSurfaceVariant;
-    final action = theme.textTheme.labelMedium?.copyWith(
-      color: theme.colorScheme.primary,
-      fontWeight: FontWeight.w600,
-    );
     Widget link(String id, String label, IconData icon, VoidCallback onTap) =>
-        identified(
-          id,
-          InkWell(
-            borderRadius: BorderRadius.circular(8),
-            onTap: onTap,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, size: 15, color: theme.colorScheme.primary),
-                  const SizedBox(width: 4),
-                  Text(label, style: action),
-                ],
-              ),
-            ),
-          ),
-        );
+        identified(id, ThreadLink(icon: icon, label: label, onTap: onTap));
     switch (event.type) {
       case 'turn-failed':
         final botId = event.botId;
@@ -689,53 +684,21 @@ class _GroupChatPaneState extends State<GroupChatPane> {
         final botId = event.botId;
         final toBotId = event.toBotId;
         final open = widget.onOpenExchange;
-        return Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
-          child: Center(
-            child: identified(
-              GroupIds.exchange(message.messageId),
-              Material(
-                color: Colors.transparent,
-                borderRadius: BorderRadius.circular(999),
-                child: InkWell(
-                  borderRadius: BorderRadius.circular(999),
-                  onTap: open == null || botId == null || toBotId == null
-                      ? null
-                      : () => open(botId, toBotId),
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(
-                      horizontal: 10,
-                      vertical: 4,
-                    ),
-                    child: Wrap(
-                      crossAxisAlignment: WrapCrossAlignment.center,
-                      spacing: 6,
-                      runSpacing: 2,
-                      children: [
-                        if (botId != null)
-                          BotBadge(face: _faceOf(botId), small: true),
-                        Text(
-                          'messaged',
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: muted.withValues(alpha: 0.8),
-                          ),
-                        ),
-                        if (toBotId != null)
-                          GroupAvatars(faces: [_faceOf(toBotId)], size: 18),
-                        Text(
-                          toBotId == null ? 'a Bot' : _nameOf(toBotId),
-                          style: theme.textTheme.bodySmall?.copyWith(
-                            color: muted,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-              ),
+        return ThreadMarker(
+          identifier: GroupIds.exchange(message.messageId),
+          onTap: open == null || botId == null || toBotId == null
+              ? null
+              : () => open(botId, toBotId),
+          children: [
+            if (botId != null) BotBadge(face: _faceOf(botId), small: true),
+            Text('messaged', style: ThreadMarker.quiet(theme)),
+            if (toBotId != null)
+              GroupAvatars(faces: [_faceOf(toBotId)], size: 18),
+            Text(
+              toBotId == null ? 'a Bot' : _nameOf(toBotId),
+              style: ThreadMarker.named(theme),
             ),
-          ),
+          ],
         );
     }
     final undo = widget.onUndo;
@@ -796,7 +759,7 @@ class _GroupChatPaneState extends State<GroupChatPane> {
         crossAxisAlignment: CrossAxisAlignment.end,
         mainAxisSize: MainAxisSize.min,
         children: [
-          _Bubble(mine: true, child: Text(pending.text, style: base)),
+          MessageBubble(mine: true, child: Text(pending.text, style: base)),
           if (pending.failed)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
@@ -901,41 +864,23 @@ class _GroupChatPaneState extends State<GroupChatPane> {
     final button = stoppable
         ? identified(
             GroupIds.stop,
-            IconButton.filled(
+            FrockIconButton(
+              kind: FrockIconButtonKind.filled,
+              round: true,
               tooltip: 'Stop everyone',
               onPressed: c.stopping
                   ? null
                   : () => unawaited(_stop(const GroupStopAll())),
-              style: IconButton.styleFrom(
-                minimumSize: Size.square(extent),
-                fixedSize: Size.square(extent),
-                padding: EdgeInsets.zero,
-                iconSize: composerControlIconSize(extent),
-                shape: const CircleBorder(),
-                foregroundColor: theme.colorScheme.onPrimary,
-              ),
+              extent: extent,
+              iconSize: composerControlIconSize(extent),
               icon: const Icon(Icons.stop_rounded),
             ),
           )
         : identified(
             GroupIds.send,
-            IconButton.filled(
-              tooltip: 'Send',
+            composerSendButton(
+              extent: extent,
               onPressed: empty || !c.ready ? null : () => unawaited(_send()),
-              style: IconButton.styleFrom(
-                minimumSize: Size.square(extent),
-                fixedSize: Size.square(extent),
-                padding: EdgeInsets.zero,
-                iconSize: composerControlIconSize(extent),
-                shape: const CircleBorder(),
-                foregroundColor: theme.colorScheme.onPrimary,
-                disabledBackgroundColor: theme.colorScheme.onSurface.withValues(
-                  alpha: 0.06,
-                ),
-                disabledForegroundColor: theme.colorScheme.onSurfaceVariant
-                    .withValues(alpha: 0.5),
-              ),
-              icon: const ChatIcon(ChatIconKind.send),
             ),
           );
     return SafeArea(
@@ -952,20 +897,8 @@ class _GroupChatPaneState extends State<GroupChatPane> {
               faceOf: _faceOf,
               onChoose: _choose,
             ),
-          AnimatedContainer(
-            duration: FrockTheme.motion(context),
-            decoration: BoxDecoration(
-              color: theme.colorScheme.surfaceContainerHighest,
-              borderRadius: BorderRadius.circular(22),
-              border: Border.all(
-                color: focus.hasFocus
-                    ? Color.alphaBlend(
-                        theme.colorScheme.primary.withValues(alpha: 0.55),
-                        theme.colorScheme.outlineVariant,
-                      )
-                    : FrockTheme.hairline(theme.colorScheme),
-              ),
-            ),
+          ComposerFieldFrame(
+            focused: focus.hasFocus,
             child: Row(
               crossAxisAlignment: CrossAxisAlignment.end,
               children: [
@@ -1064,78 +997,6 @@ class _GroupChatPaneState extends State<GroupChatPane> {
     scroll.dispose();
     _noteTimer?.cancel();
     super.dispose();
-  }
-}
-
-class _Bubble extends StatelessWidget {
-  final bool mine;
-  final Widget child;
-  const _Bubble({required this.mine, required this.child});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return Row(
-      mainAxisAlignment: mine ? MainAxisAlignment.end : MainAxisAlignment.start,
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        Flexible(
-          child: Container(
-            constraints: const BoxConstraints(maxWidth: 720),
-            margin: EdgeInsets.fromLTRB(mine ? 64 : 16, 4, 16, 5),
-            padding: const EdgeInsets.symmetric(horizontal: 13, vertical: 9),
-            decoration: BoxDecoration(
-              color:
-                  theme.extension<FrockLook>()?.bubbleFill(mine: mine) ??
-                  (mine
-                      ? Color.alphaBlend(
-                          theme.colorScheme.primary.withValues(alpha: 0.2),
-                          theme.colorScheme.surfaceContainerHighest,
-                        )
-                      : theme.colorScheme.surfaceContainerHighest),
-              borderRadius: BorderRadius.only(
-                topLeft: const Radius.circular(18),
-                topRight: const Radius.circular(18),
-                bottomLeft: Radius.circular(mine ? 18 : 4),
-                bottomRight: Radius.circular(mine ? 4 : 18),
-              ),
-            ),
-            child: DefaultTextStyle.merge(
-              style: FrockTheme.message(theme).copyWith(
-                color: theme.extension<FrockLook>()?.bubbleInk(mine: mine),
-              ),
-              child: child,
-            ),
-          ),
-        ),
-      ],
-    );
-  }
-}
-
-class _UnreadDivider extends StatelessWidget {
-  const _UnreadDivider({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final colour = theme.colorScheme.primary.withValues(alpha: 0.7);
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 8),
-      child: Row(
-        children: [
-          Expanded(child: Divider(color: colour, height: 1)),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 8),
-            child: Text(
-              'Unread from here',
-              style: theme.textTheme.labelSmall?.copyWith(color: colour),
-            ),
-          ),
-          Expanded(child: Divider(color: colour, height: 1)),
-        ],
-      ),
-    );
   }
 }
 

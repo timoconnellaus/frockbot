@@ -76,15 +76,16 @@
     --paper: #fff;
     --muted: #6d6974;
     --line: #e7e0d9;
-    --product-window: #18161a;
-    --product-thread: #18161a;
-    --product-sidebar: #111013;
-    --product-raised: #242127;
-    --product-text: #f9f3e7;
-    --product-muted: #aba49c;
-    --product-subtle: #8f887f;
-    --product-border: #35313a;
-    --product-border-strong: #6f6962;
+    --product-window: #15151e;
+    --product-thread: #15151e;
+    --product-sidebar: #181824;
+    --product-raised: #1f202e;
+    --product-mine: #41414e;
+    --product-text: #f1f1f6;
+    --product-muted: #a0a2b6;
+    --product-subtle: #7f8297;
+    --product-border: #2c2d3d;
+    --product-border-strong: #666779;
     --container: 1280px;
   }
 
@@ -586,8 +587,8 @@
     color: var(--product-muted);
   }
   .bot-row.active {
-    background: var(--product-raised);
-    color: var(--product-text);
+    background: var(--pink);
+    color: #fff;
     font-weight: 700;
   }
   .bot-row img {
@@ -642,7 +643,7 @@
     margin: 0;
     padding: 8px 10px;
     border: 1px solid var(--product-border);
-    border-radius: 12px 12px 12px 4px;
+    border-radius: 12px;
     background: var(--product-raised);
     color: var(--product-text);
     font-size: 0.62rem;
@@ -650,17 +651,15 @@
   }
   .workspace-bubble-user {
     align-self: flex-end;
-    border-color: var(--pink);
-    border-radius: 12px 12px 4px;
-    background: var(--pink);
-    color: #fff;
+    border-color: var(--product-mine);
+    background: var(--product-mine);
   }
   .workspace-composer {
     min-height: 38px;
     display: flex;
     align-items: center;
     padding-left: 5px;
-    border: 1px solid var(--product-border-strong);
+    border: 1px solid var(--product-border);
     border-radius: 999px;
     background: var(--product-raised);
     color: var(--product-subtle);

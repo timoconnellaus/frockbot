@@ -11,6 +11,7 @@ import '../shell/chat_pane.dart' show RunPage;
 import '../shell/desktop_layout.dart';
 import '../shell/semantics.dart';
 import '../shell/transcript.dart';
+import '../theme/thread.dart';
 import 'controller.dart';
 
 class ArchivedConversationPage extends StatefulWidget {
@@ -132,9 +133,9 @@ class _ArchivedConversationPageState extends State<ArchivedConversationPage> {
                 if (runs.isEmpty && announcements.isEmpty && before != null)
                   identified(
                     ShellIds.transcriptEarlier,
-                    TextButton(
-                      onPressed: loading ? null : () => load(older: true),
-                      child: const Text('Load earlier messages'),
+                    EarlierMessages(
+                      onPressed: () => load(older: true),
+                      loading: loading,
                     ),
                   ),
                 if (error != null)

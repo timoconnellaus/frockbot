@@ -12,8 +12,8 @@ library;
 import 'package:flutter/material.dart';
 import 'package:genui/genui.dart';
 
+import '../../shell/person_avatar.dart';
 import '../../theme/frock_theme.dart';
-import '../../theme/initials.dart';
 import 'common.dart';
 import 'core.dart';
 import 'tone.dart';
@@ -206,8 +206,8 @@ final frockIdentityRow = CatalogItem(
         BoundString(
           dataContext: itemContext.dataContext,
           value: data['name'],
-          builder: (context, name) => FrockAvatarView(
-            initials: frockString(data['initials']) ?? name ?? '',
+          builder: (context, name) => PersonAvatar(
+            name: frockString(data['initials']) ?? name ?? '',
             // Anything but https was refused before the card was drawn
             // (`admitCardV1`), so this is a guard against a record that never
             // went through the seam rather than a second policy.
@@ -246,52 +246,6 @@ final frockIdentityRow = CatalogItem(
     );
   },
 );
-
-/// The avatar an `IdentityRow` draws: an image when there is one, and the
-/// initials the app draws everywhere else when there is not.
-class FrockAvatarView extends StatelessWidget {
-  final String initials;
-  final String? imageUrl;
-  const FrockAvatarView({super.key, required this.initials, this.imageUrl});
-
-  String get _letters => personInitialsV1(initials);
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return ClipOval(
-      child: Container(
-        width: 32,
-        height: 32,
-        color: theme.colorScheme.primary.withValues(alpha: 0.16),
-        alignment: Alignment.center,
-        child: imageUrl == null
-            ? Text(
-                _letters,
-                style: theme.textTheme.labelMedium?.copyWith(
-                  color: theme.colorScheme.primary,
-                  fontWeight: FontWeight.w600,
-                ),
-              )
-            : Image.network(
-                imageUrl!,
-                width: 32,
-                height: 32,
-                fit: BoxFit.cover,
-                // An avatar that will not load is not worth a broken frame:
-                // the card falls back to the letters it would have drawn.
-                errorBuilder: (context, error, stack) => Text(
-                  _letters,
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: theme.colorScheme.primary,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-              ),
-      ),
-    );
-  }
-}
 
 /// The family, in the order the catalog declares it.
 final List<CatalogItem> frockStructureItemsV1 = List.unmodifiable([

@@ -1,8 +1,8 @@
-/// The person's face: a photo when we have one, otherwise their initials.
+/// The person's face: a photo when we have one, otherwise their initials on
+/// the accent.
 ///
-/// Cards already draw this (`FrockAvatarView`). The shell uses the same
-/// letters, so a call, the sidebar and a card never disagree about who
-/// someone is.
+/// The sidebar, a call and a card all draw this one, so they never disagree
+/// about who someone is.
 library;
 
 import 'package:flutter/material.dart';
@@ -47,7 +47,7 @@ class PersonAvatar extends StatelessWidget {
       child: Container(
         width: size,
         height: size,
-        color: theme.colorScheme.primary.withValues(alpha: 0.16),
+        color: theme.colorScheme.primary,
         alignment: Alignment.center,
         child: photo == null
             ? _initials(theme)
@@ -74,7 +74,7 @@ class PersonAvatar extends StatelessWidget {
   Widget _initials(ThemeData theme) => Text(
     _letters,
     style: theme.textTheme.labelMedium?.copyWith(
-      color: theme.colorScheme.primary,
+      color: theme.colorScheme.onPrimary,
       fontWeight: FontWeight.w600,
       fontSize: size * 0.38,
       letterSpacing: -0.2,

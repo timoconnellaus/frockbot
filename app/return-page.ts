@@ -61,26 +61,26 @@ ${page.script}
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="referrer" content="no-referrer">
 <meta name="color-scheme" content="dark light">
-<meta name="theme-color" content="#18161a">
+<meta name="theme-color" content="#15151e">
 <title>${escape(page.title)}</title>
 <style nonce="${nonce}">
   :root {
-    --window: #18161a; --raised: #242127; --border: #35313a;
-    --text: #f9f3e7; --muted: #aba49c; --accent: #d92d71; --accent-hover: #de4b83;
-    --glow: rgba(217, 45, 113, .22); --shadow: rgba(0, 0, 0, .45);
+    --window: #15151e; --raised: #1f202e; --border: #2c2d3d;
+    --text: #f1f1f6; --muted: #a0a2b6; --accent: #d92d71; --accent-hover: #de4b83;
+    --shadow: rgba(0, 0, 0, .45);
   }
   @media (prefers-color-scheme: light) {
     :root {
-      --window: #fbf6ec; --raised: #ffffff; --border: #e8ddcd;
-      --text: #151416; --muted: #6b645b; --accent: #d3266d; --accent-hover: #b9205e;
-      --glow: rgba(211, 38, 109, .14); --shadow: rgba(21, 20, 22, .12);
+      --window: #f5f6f9; --raised: #ffffff; --border: #dfe1e8;
+      --text: #15151e; --muted: #5c5f70; --accent: #d3266d; --accent-hover: #b9205e;
+      --shadow: rgba(21, 20, 22, .12);
     }
   }
   * { box-sizing: border-box; }
   html, body { height: 100%; }
   body {
     margin: 0; display: grid; grid-template-columns: minmax(0, 1fr); place-items: center; padding: 24px;
-    background: var(--window) radial-gradient(60rem 30rem at 50% -10%, var(--glow), transparent 70%);
+    background: var(--window);
     color: var(--text);
     font: 16px/1.55 -apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", Roboto, Manrope, sans-serif;
     -webkit-font-smoothing: antialiased;

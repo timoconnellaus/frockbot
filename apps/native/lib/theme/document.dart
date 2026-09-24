@@ -16,6 +16,8 @@ enum ThemeTypeface { manrope, inter }
 
 enum BotBubble { plain, raised }
 
+/// The person's bubble: the accent itself, or `tint`, a grey a step lighter
+/// than the Bot's.
 enum MeBubble { accent, tint }
 
 class ThemeSurfaces {
@@ -146,12 +148,12 @@ class ThemeDocument {
 
 const inkTokens = ThemeTokens(
   surfaces: ThemeSurfaces(
-    window: Color(0xff18161a),
-    surface: Color(0xff111013),
-    raised: Color(0xff242127),
-    text: Color(0xfff9f3e7),
-    muted: Color(0xffaba49c),
-    line: Color(0xff35313a),
+    window: Color(0xff15151e),
+    surface: Color(0xff181824),
+    raised: Color(0xff1f202e),
+    text: Color(0xfff1f1f6),
+    muted: Color(0xffa0a2b6),
+    line: Color(0xff2c2d3d),
     accent: Color(0xffd92d71),
     onAccent: Color(0xffffffff),
   ),
@@ -162,12 +164,12 @@ const inkTokens = ThemeTokens(
 
 const paperTokens = ThemeTokens(
   surfaces: ThemeSurfaces(
-    window: Color(0xfffbf6ec),
+    window: Color(0xfff5f6f9),
     surface: Color(0xffffffff),
-    raised: Color(0xfff4ecdf),
-    text: Color(0xff151416),
-    muted: Color(0xff6b645b),
-    line: Color(0xffe8ddcd),
+    raised: Color(0xffeceef3),
+    text: Color(0xff15151e),
+    muted: Color(0xff5c5f70),
+    line: Color(0xffdfe1e8),
     accent: Color(0xffd3266d),
     onAccent: Color(0xffffffff),
   ),
@@ -178,12 +180,12 @@ const paperTokens = ThemeTokens(
 
 const studioTokens = ThemeTokens(
   surfaces: ThemeSurfaces(
-    window: Color(0xfffbf6ec),
+    window: Color(0xfff5f6f9),
     surface: Color(0xffffffff),
-    raised: Color(0xfff4ecdf),
-    text: Color(0xff151416),
-    muted: Color(0xff6b645b),
-    line: Color(0xffe8ddcd),
+    raised: Color(0xffeceef3),
+    text: Color(0xff15151e),
+    muted: Color(0xff5c5f70),
+    line: Color(0xffdfe1e8),
     accent: Color(0xffd3266d),
     onAccent: Color(0xffffffff),
   ),
