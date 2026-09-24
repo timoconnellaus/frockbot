@@ -68,14 +68,86 @@ describe("push device registry", () => {
         activeBotId: "primary",
       }),
     ).toEqual({ deviceId: "phone-1", token: TOKEN_A, activeBotId: "primary" });
+    expect(
+      decodePushRegistration({
+        deviceId: "iphone-1",
+        token: TOKEN_A,
+        platform: "ios",
+      }),
+    ).toEqual({ deviceId: "iphone-1", token: TOKEN_A, platform: "ios" });
     for (const invalid of [
       {},
       { deviceId: "phone-1", token: "short" },
       { deviceId: "phone-1", activeBotId: "not valid" },
       { deviceId: "phone-1", remove: "yes" },
       { deviceId: "phone-1", token: TOKEN_A, authority: "other-user" },
+      { deviceId: "phone-1", token: TOKEN_A, platform: "macos" },
+      // A platform describes a token; a presence update carries neither.
+      { deviceId: "phone-1", platform: "ios" },
     ])
       expect(() => decodePushRegistration(invalid)).toThrow();
+  });
+
+  test("the platform is the token's: kept by a presence update, replaced with the token", async () => {
+    const durable = storage();
+    const now = Date.now();
+    await registerPushDevice(
+      durable,
+      { deviceId: "iphone-1", token: TOKEN_A, platform: "ios" },
+      now - 2_000,
+    );
+    await registerPushDevice(
+      durable,
+      { deviceId: "iphone-1", activeBotId: "primary" },
+      now - 1_000,
+    );
+    expect(await durable.get<PushDevice>("push:device:iphone-1")).toEqual({
+      deviceId: "iphone-1",
+      token: TOKEN_A,
+      platform: "ios",
+      activeBotId: "primary",
+      updatedAt: now - 1_000,
+    });
+    await registerPushDevice(
+      durable,
+      { deviceId: "iphone-1", token: TOKEN_B },
+      now,
+    );
+    expect(await durable.get<PushDevice>("push:device:iphone-1")).toEqual({
+      deviceId: "iphone-1",
+      token: TOKEN_B,
+      updatedAt: now,
+    });
+  });
+
+  test("delivery names each token's platform", async () => {
+    const durable = storage();
+    const now = Date.now();
+    await registerPushDevice(
+      durable,
+      { deviceId: "iphone-1", token: TOKEN_A, platform: "ios" },
+      now,
+    );
+    await registerPushDevice(
+      durable,
+      { deviceId: "phone-1", token: TOKEN_B, platform: "android" },
+      now,
+    );
+    const targets: Array<{ token: string; platform?: string }> = [];
+    await deliverPush(
+      durable,
+      "user-1",
+      message(),
+      SECRET,
+      async (_secret, target) => {
+        targets.push(target);
+        return "sent";
+      },
+    );
+    expect(targets).toEqual([
+      { token: TOKEN_A, platform: "ios" },
+      { token: TOKEN_B, platform: "android" },
+    ]);
   });
 
   test("token refresh replaces one installation and removal deletes it", async () => {
@@ -137,7 +209,7 @@ describe("push device registry", () => {
       "user-1",
       message(),
       SECRET,
-      async (_secret, token) => {
+      async (_secret, { token }) => {
         sends.push(token);
         return "sent";
       },
@@ -193,7 +265,7 @@ describe("push dispatch", () => {
 
     const sender = async (
       _secret: string,
-      token: string,
+      { token }: { token: string },
       data: Record<string, string>,
       notify: boolean,
     ) => {
@@ -272,7 +344,7 @@ describe("push dispatch", () => {
     const sends: Array<Record<string, string>> = [];
     const sender = async (
       _secret: string,
-      _token: string,
+      _target: { token: string },
       data: Record<string, string>,
     ) => {
       sends.push(data);
@@ -364,7 +436,7 @@ describe("push dispatch", () => {
     });
     const sender = async (
       _secret: string,
-      _token: string,
+      _target: { token: string },
       data: Record<string, string>,
     ) => {
       if (data.cursor.endsWith("01")) await oldBlocked;
@@ -443,7 +515,9 @@ describe("Firebase access tokens", () => {
     }) as unknown as typeof fetch;
 
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      expect(await sendFcm(secret, TOKEN_A, {}, true, request)).toBe("sent");
+      expect(await sendFcm(secret, { token: TOKEN_A }, {}, true, request)).toBe(
+        "sent",
+      );
     }
 
     expect(calls.filter((url) => url.includes("oauth2"))).toHaveLength(1);
@@ -475,11 +549,105 @@ describe("Firebase access tokens", () => {
     }) as unknown as typeof fetch;
 
     await expect(
-      sendFcm(secret, TOKEN_A, {}, true, request),
+      sendFcm(secret, { token: TOKEN_A }, {}, true, request),
     ).rejects.toBeInstanceOf(RetryablePushError);
-    expect(await sendFcm(secret, TOKEN_A, {}, true, request)).toBe("sent");
+    expect(await sendFcm(secret, { token: TOKEN_A }, {}, true, request)).toBe(
+      "sent",
+    );
 
     expect(minted).toHaveLength(2);
+  });
+});
+
+describe("Firebase messages", () => {
+  async function sent(
+    target: { token: string; platform?: "android" | "ios" },
+    data: Record<string, string>,
+    notify: boolean,
+  ): Promise<Record<string, unknown>> {
+    const secret = await serviceAccount(
+      `${target.platform ?? "none"}-${notify}@frock-bot.iam.example`,
+    );
+    let body: { message: Record<string, unknown> } | undefined;
+    const request = (async (url: string, init?: RequestInit) => {
+      if (String(url).includes("oauth2"))
+        return new Response(
+          JSON.stringify({ access_token: "ya29.message", expires_in: 3600 }),
+          { status: 200 },
+        );
+      body = JSON.parse(String(init?.body));
+      return new Response(null, { status: 200 });
+    }) as unknown as typeof fetch;
+    expect(await sendFcm(secret, target, data, notify, request)).toBe("sent");
+    return body!.message;
+  }
+  const data = {
+    userId: "user-1",
+    botId: "primary",
+    cursor: "message-00000000000000000001",
+    kind: "message",
+    title: "Primary",
+    body: "Hello",
+    notify: "true",
+  };
+
+  test("an Android token gets the data message and nothing for APNs", async () => {
+    const message = await sent(
+      { token: TOKEN_A, platform: "android" },
+      data,
+      true,
+    );
+    expect(message.data).toEqual(data);
+    expect(message.android).toEqual({ priority: "HIGH", ttl: "86400s" });
+    expect(message.apns).toBeUndefined();
+    expect((await sent({ token: TOKEN_A }, data, true)).apns).toBeUndefined();
+  });
+
+  test("an iPhone token is told what to draw, threaded by conversation", async () => {
+    const alert = await sent({ token: TOKEN_A, platform: "ios" }, data, true);
+    expect(alert.data).toEqual(data);
+    expect(alert.apns).toMatchObject({
+      headers: { "apns-priority": "10", "apns-push-type": "alert" },
+      payload: {
+        aps: {
+          alert: { title: "Primary", body: "Hello" },
+          sound: "default",
+          "thread-id": "primary",
+        },
+      },
+    });
+    const expiration = Number(
+      (alert.apns as { headers: Record<string, string> }).headers[
+        "apns-expiration"
+      ],
+    );
+    expect(expiration - Date.now() / 1000).toBeGreaterThan(86_000);
+    const group = await sent(
+      { token: TOKEN_A, platform: "ios" },
+      { ...data, groupId: "g-0123456789abcdef0123", title: "", body: "" },
+      true,
+    );
+    expect(group.apns).toMatchObject({
+      payload: {
+        aps: {
+          alert: { title: "FrockBot", body: "New message" },
+          "thread-id": "group:g-0123456789abcdef0123",
+        },
+      },
+    });
+  });
+
+  test("an iPhone told nothing is sent a background push, never an alert", async () => {
+    const quiet = await sent(
+      { token: TOKEN_A, platform: "ios" },
+      { ...data, kind: "read", notify: "false" },
+      false,
+    );
+    expect(quiet.apns).toMatchObject({
+      headers: { "apns-priority": "5", "apns-push-type": "background" },
+      payload: { aps: { "content-available": 1 } },
+    });
+    expect(JSON.stringify(quiet.apns)).not.toContain("alert");
   });
 });
 

@@ -96,6 +96,11 @@ custom user driver that shows nothing itself and reports to Flutter over
   opens the store; it has no downloading, preparing or restarting states for
   a full update.
 - Rollout uses App Store phased release; TestFlight is the staging track.
+- Where this stands: the Runner (`apps/native/ios`) configures the engine
+  restart a patch applies through (`RestartAppPlugin.configureEngineRestart`
+  in `AppDelegate.swift`, for the implicit engine's plugins and the app's own
+  channels alike). No iOS release or patch has been cut, the new-engine path
+  is unqualified, and `scripts/native-update.py` is Android-only.
 
 ## Windows — Velopack (planned)
 

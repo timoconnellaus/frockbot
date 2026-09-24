@@ -248,11 +248,28 @@ describe("the Connected apps gateway routes", () => {
     expect(mac!.headers.get("content-security-policy")).toMatch(
       /script-src 'nonce-[0-9a-f-]{36}'/,
     );
+    // The iPhone app hands over the way the Mac app does, each build on its
+    // own scheme.
+    for (const [client, scheme] of [
+      ["ios", "frockbot"],
+      ["ios-dev", "frockbot-dev"],
+    ]) {
+      const url = `https://bot.frockbot.com/api/connect/callback/${client}?status=success&connectedAccountId=ca_1`;
+      const page = await (await backend.publicRoute!(
+        new Request(url),
+        new URL(url),
+        {},
+      ))!.text();
+      expect(page).toContain(
+        `${scheme}://bot.frockbot.com/api/connect/callback/${client}"`,
+      );
+      expect(page).not.toContain("ca_1");
+    }
     // Not a page of ours.
     expect(
       await backend.publicRoute!(
-        new Request("https://bot.frockbot.com/api/connect/callback/ios"),
-        new URL("https://bot.frockbot.com/api/connect/callback/ios"),
+        new Request("https://bot.frockbot.com/api/connect/callback/windows"),
+        new URL("https://bot.frockbot.com/api/connect/callback/windows"),
         {},
       ),
     ).toBeUndefined();

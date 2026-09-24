@@ -165,7 +165,7 @@ export const DEPLOYMENT_PROFILE_SCHEMA_V1 = {
     nativeAuth: {
       description:
         "Which signed clients may receive a sign-in. Absent, the deployment offers no native sign-in at all.",
-      enum: ["android", "android,macos"],
+      enum: ["android", "android,macos", "android,macos,ios"],
     },
     resources: {
       description:

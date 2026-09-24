@@ -11,17 +11,19 @@ import 'package:flutter/foundation.dart'
 import 'package:url_launcher/url_launcher.dart';
 
 import '../client/desktop_build.dart';
+import '../client/ios_build.dart';
 import '../client/transport.dart';
 import 'document.dart';
 
 /// Which return page this app can come back through once a hosted door
-/// closes: the verified link on Android, the app's scheme on a Mac. A browser
-/// tab, and any other platform, is told to return by hand.
+/// closes: the verified link on Android, the app's scheme on a Mac or an
+/// iPhone. A browser tab, and any other platform, is told to return by hand.
 String? get connectReturnClientV1 {
   if (kIsWeb) return null;
   return switch (defaultTargetPlatform) {
     TargetPlatform.android => 'android',
     TargetPlatform.macOS => macosReturnSegmentV1,
+    TargetPlatform.iOS => iosReturnSegmentV1,
     _ => null,
   };
 }

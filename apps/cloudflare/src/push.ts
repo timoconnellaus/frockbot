@@ -1,9 +1,19 @@
 import { isPublicIdentifier } from "@frockbot/core/configuration";
 import { withDeadlineV1 } from "@frockbot/core/deadline";
 
+/**
+ * Which app holds an FCM token. An iPhone's token reaches APNs, which draws
+ * the alert itself and needs an `apns` block to say what to draw; an Android
+ * app draws its own from the data alone.
+ */
+export type PushPlatformV1 = "android" | "ios";
+const PUSH_PLATFORMS_V1: readonly PushPlatformV1[] = ["android", "ios"];
+
 export interface PushDevice {
   deviceId: string;
   token?: string;
+  /** Set with the token it describes. */
+  platform?: PushPlatformV1;
   activeBotId?: string;
   updatedAt: number;
 }
@@ -23,6 +33,7 @@ export interface PushUpdate {
 export interface PushRegistration {
   deviceId: string;
   token?: string;
+  platform?: PushPlatformV1;
   activeBotId?: string;
   remove?: boolean;
 }
@@ -36,7 +47,10 @@ export function decodePushRegistration(input: unknown): PushRegistration {
   const value = input as Record<string, unknown>;
   if (
     Object.keys(value).some(
-      (key) => !["deviceId", "token", "activeBotId", "remove"].includes(key),
+      (key) =>
+        !["deviceId", "token", "platform", "activeBotId", "remove"].includes(
+          key,
+        ),
     ) ||
     !isPublicIdentifier(value.deviceId)
   )
@@ -48,6 +62,13 @@ export function decodePushRegistration(input: unknown): PushRegistration {
       value.token.length > 4096)
   )
     throw new Error("Invalid push token");
+  // A platform describes a token, so it never arrives without one.
+  if (
+    value.platform !== undefined &&
+    (value.token === undefined ||
+      !PUSH_PLATFORMS_V1.includes(value.platform as PushPlatformV1))
+  )
+    throw new Error("Invalid push platform");
   if (value.activeBotId !== undefined && !isPublicIdentifier(value.activeBotId))
     throw new Error("Invalid active Bot");
   if (value.remove !== undefined && typeof value.remove !== "boolean")
@@ -83,10 +104,15 @@ export async function registerPushDevice(
   // registered rather than erasing the only address the Bot can reach. Every
   // other field is stated afresh: an omitted `activeBotId` means this device
   // is no longer reading anything, and merging it would suppress its alerts.
-  const token = value.token ?? devices.get(key)?.token;
+  // The platform is the token's, so it is kept or replaced with it.
+  const previous = devices.get(key);
+  const token = value.token ?? previous?.token;
+  const platform =
+    value.token === undefined ? previous?.platform : value.platform;
   await storage.put(key, {
     deviceId: value.deviceId,
     ...(token === undefined ? {} : { token }),
+    ...(platform === undefined ? {} : { platform }),
     ...(value.activeBotId === undefined
       ? {}
       : { activeBotId: value.activeBotId }),
@@ -216,9 +242,54 @@ async function accessToken(
   return access.access_token;
 }
 
+/** Read signals, like the Android `ttl`, stop being worth delivering after a day. */
+const DELIVERY_LIFETIME_S = 86_400;
+
+/**
+ * What APNs draws on an iPhone. A suspended app cannot draw an alert from
+ * data, so a message to be told arrives as the alert itself, threaded per
+ * conversation the way Android keeps one notification per Bot. Everything
+ * else — a read on another device, a message not to be told — is a background
+ * push that wakes the app if iOS allows it, and that iOS may hold back.
+ */
+function apnsMessage(
+  data: Record<string, string>,
+  notify: boolean,
+): Record<string, unknown> {
+  const expiration = String(
+    Math.floor(Date.now() / 1000) + DELIVERY_LIFETIME_S,
+  );
+  if (!notify)
+    return {
+      headers: {
+        "apns-priority": "5",
+        "apns-push-type": "background",
+        "apns-expiration": expiration,
+      },
+      payload: { aps: { "content-available": 1 } },
+    };
+  return {
+    headers: {
+      "apns-priority": "10",
+      "apns-push-type": "alert",
+      "apns-expiration": expiration,
+    },
+    payload: {
+      aps: {
+        alert: {
+          title: data.title || "FrockBot",
+          body: data.body || "New message",
+        },
+        sound: "default",
+        "thread-id": data.groupId ? `group:${data.groupId}` : data.botId,
+      },
+    },
+  };
+}
+
 export async function sendFcm(
   secret: string,
-  token: string,
+  target: { token: string; platform?: PushPlatformV1 },
   data: Record<string, string>,
   notify: boolean,
   request: typeof fetch = fetch,
@@ -238,9 +309,15 @@ export async function sendFcm(
         },
         body: JSON.stringify({
           message: {
-            token,
+            token: target.token,
             data,
-            android: { priority: notify ? "HIGH" : "NORMAL", ttl: "86400s" },
+            android: {
+              priority: notify ? "HIGH" : "NORMAL",
+              ttl: `${DELIVERY_LIFETIME_S}s`,
+            },
+            ...(target.platform === "ios"
+              ? { apns: apnsMessage(data, notify) }
+              : {}),
           },
         }),
         signal: deadline.signal,
@@ -352,7 +429,10 @@ export async function deliverPush(
     try {
       const result = await sender(
         secret,
-        device.token,
+        {
+          token: device.token,
+          ...(device.platform ? { platform: device.platform } : {}),
+        },
         {
           userId,
           botId: update.botId,

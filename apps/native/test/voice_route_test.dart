@@ -6,6 +6,8 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, debugDefaultTargetPlatformOverride;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/voice/assistant.dart';
 import 'package:frockbot_native/voice/capture.dart';
@@ -72,6 +74,23 @@ class _Harness {
 }
 
 void main() {
+  test('the phones are told where the sound goes, and nothing else is', () {
+    TestWidgetsFlutterBinding.ensureInitialized();
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    for (final (platform, told) in [
+      (TargetPlatform.android, true),
+      (TargetPlatform.iOS, true),
+      (TargetPlatform.macOS, false),
+    ]) {
+      debugDefaultTargetPlatformOverride = platform;
+      expect(
+        VoiceAudioRoute.forPlatform(),
+        told ? isA<PlatformVoiceAudioRoute>() : isA<NoVoiceAudioRoute>(),
+        reason: platform.name,
+      );
+    }
+  });
+
   test('the session is begun before the microphone opens', () async {
     final h = _Harness();
     await h.open();

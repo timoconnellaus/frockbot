@@ -11,7 +11,9 @@
 //
 // Only the development build selects `AppIconDev`
 // (`apps/native/macos/Runner/Configs/AppInfo.xcconfig`); release builds keep
-// `AppIcon` untouched.
+// `AppIcon` untouched. The iPhone's FrockBot Dev build
+// (`apps/native/ios/Runner/Configs/AppInfo.xcconfig`) gets the same ribbon over
+// its own icon, which `swift scripts/native-app-icon.swift` writes first.
 import AppKit
 import Foundation
 
@@ -50,25 +52,28 @@ func bitmap(_ pixels: Int, draw: (CGRect) -> Void) -> NSBitmapImageRep {
 // The full-size composite: the released artwork with a near-black ribbon and
 // amber "DEV" across its lower quarter. The dark band against the pink ground
 // stays distinct even at 16 px, where the lettering is no longer legible.
-let composite = bitmap(1024) { frame in
-  master.draw(in: frame, from: .zero, operation: .copy, fraction: 1)
-  let band = CGRect(x: 0, y: 0, width: frame.width, height: frame.height * 0.26)
-  NSColor(srgbRed: 0.07, green: 0.07, blue: 0.08, alpha: 1).setFill()
-  band.fill()
-  NSColor(srgbRed: 1.0, green: 0.76, blue: 0.0, alpha: 1).setFill()
-  CGRect(x: 0, y: band.maxY, width: frame.width, height: frame.height * 0.018).fill()
-  let style = NSMutableParagraphStyle()
-  style.alignment = .center
-  let attributes: [NSAttributedString.Key: Any] = [
-    .font: NSFont.systemFont(ofSize: band.height * 0.72, weight: .black),
-    .foregroundColor: NSColor(srgbRed: 1.0, green: 0.76, blue: 0.0, alpha: 1),
-    .kern: band.height * 0.06,
-    .paragraphStyle: style,
-  ]
-  let text = NSAttributedString(string: "DEV", attributes: attributes)
-  let height = text.size().height
-  text.draw(in: CGRect(x: 0, y: band.midY - height / 2, width: frame.width, height: height))
+func ribboned(_ master: NSImage) -> NSBitmapImageRep {
+  bitmap(1024) { frame in
+    master.draw(in: frame, from: .zero, operation: .copy, fraction: 1)
+    let band = CGRect(x: 0, y: 0, width: frame.width, height: frame.height * 0.26)
+    NSColor(srgbRed: 0.07, green: 0.07, blue: 0.08, alpha: 1).setFill()
+    band.fill()
+    NSColor(srgbRed: 1.0, green: 0.76, blue: 0.0, alpha: 1).setFill()
+    CGRect(x: 0, y: band.maxY, width: frame.width, height: frame.height * 0.018).fill()
+    let style = NSMutableParagraphStyle()
+    style.alignment = .center
+    let attributes: [NSAttributedString.Key: Any] = [
+      .font: NSFont.systemFont(ofSize: band.height * 0.72, weight: .black),
+      .foregroundColor: NSColor(srgbRed: 1.0, green: 0.76, blue: 0.0, alpha: 1),
+      .kern: band.height * 0.06,
+      .paragraphStyle: style,
+    ]
+    let text = NSAttributedString(string: "DEV", attributes: attributes)
+    let height = text.size().height
+    text.draw(in: CGRect(x: 0, y: band.midY - height / 2, width: frame.width, height: height))
+  }
 }
+let composite = ribboned(master)
 let compositeImage = NSImage(size: NSSize(width: 1024, height: 1024))
 compositeImage.addRepresentation(composite)
 
@@ -113,3 +118,32 @@ do {
   fail("Could not write Contents.json: \(error)")
 }
 print("Wrote \(written.count) images to \(target.path)")
+
+// The iPhone's: one 1024 px image, and like its released icon, no alpha
+// channel, which App Store Connect refuses.
+let iosAssets = root.appendingPathComponent("apps/native/ios/Runner/Assets.xcassets")
+let iosSource = iosAssets.appendingPathComponent("AppIcon.appiconset")
+let iosTarget = iosAssets.appendingPathComponent("AppIconDev.appiconset")
+guard let iosMaster = NSImage(contentsOf: iosSource.appendingPathComponent("app_icon_1024.png"))
+else { fail("Could not read \(iosSource.path)/app_icon_1024.png") }
+guard
+  let image = ribboned(iosMaster).cgImage,
+  let space = CGColorSpace(name: CGColorSpace.sRGB),
+  let context = CGContext(
+    data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0,
+    space: space, bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue)
+else { fail("Could not flatten the iPhone icon") }
+context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+guard let flat = context.makeImage(),
+  let iosPng = NSBitmapImageRep(cgImage: flat).representation(using: .png, properties: [:])
+else { fail("Could not encode the iPhone icon") }
+do {
+  try? fileManager.removeItem(at: iosTarget)
+  try fileManager.createDirectory(at: iosTarget, withIntermediateDirectories: true)
+  try iosPng.write(to: iosTarget.appendingPathComponent("app_icon_1024.png"))
+  try Data(contentsOf: iosSource.appendingPathComponent("Contents.json"))
+    .write(to: iosTarget.appendingPathComponent("Contents.json"))
+} catch {
+  fail("Could not write \(iosTarget.path): \(error)")
+}
+print("Wrote the iPhone icon to \(iosTarget.path)")

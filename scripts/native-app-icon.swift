@@ -128,6 +128,32 @@ for (density, legacy, foreground) in densities {
   write(adaptiveForeground(foreground), to: directory.appendingPathComponent("ic_launcher_foreground.png"))
 }
 
+// iOS masks the corners itself and App Store Connect refuses an icon with an
+// alpha channel, so the iPhone's one 1024 px icon is the full-bleed maskable
+// drawing redrawn without one. `swift scripts/mac-dev-icon.swift` ribbons it
+// for FrockBot Dev.
+func writeOpaque(_ rep: NSBitmapImageRep, to url: URL) {
+  guard
+    let image = rep.cgImage,
+    let space = CGColorSpace(name: CGColorSpace.sRGB),
+    let context = CGContext(
+      data: nil,
+      width: image.width,
+      height: image.height,
+      bitsPerComponent: 8,
+      bytesPerRow: 0,
+      space: space,
+      bitmapInfo: CGImageAlphaInfo.noneSkipLast.rawValue
+    )
+  else { fail("Could not flatten \(url.lastPathComponent)") }
+  context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+  guard let flat = context.makeImage() else { fail("Could not flatten \(url.lastPathComponent)") }
+  write(NSBitmapImageRep(cgImage: flat), to: url)
+}
+
+let ios = native.appendingPathComponent("ios/Runner/Assets.xcassets/AppIcon.appiconset")
+writeOpaque(maskableIcon(1024), to: ios.appendingPathComponent("app_icon_1024.png"))
+
 let web = native.appendingPathComponent("web")
 write(fullIcon(32), to: web.appendingPathComponent("favicon.png"))
 write(fullIcon(192), to: web.appendingPathComponent("icons/Icon-192.png"))
@@ -135,4 +161,4 @@ write(fullIcon(512), to: web.appendingPathComponent("icons/Icon-512.png"))
 write(maskableIcon(192), to: web.appendingPathComponent("icons/Icon-maskable-192.png"))
 write(maskableIcon(512), to: web.appendingPathComponent("icons/Icon-maskable-512.png"))
 
-print("Generated Pixel app icons for macOS, Android, and web")
+print("Generated Pixel app icons for macOS, iOS, Android, and web")

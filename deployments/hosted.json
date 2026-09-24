@@ -25,5 +25,5 @@
     "id": "flock",
     "autoRoute": "flock-auto"
   },
-  "nativeAuth": "android,macos"
+  "nativeAuth": "android,macos,ios"
 }

@@ -28,6 +28,22 @@ import type {
 } from "./native-sessions.js";
 
 /**
+ * Each signed app's return page under `/native/return/`: Android's verified
+ * App Link, and the page each Apple build's browser return hands over on its
+ * own scheme. `macos-dev` and `ios-dev` are the FrockBot Dev builds, separate
+ * apps installed beside the released ones.
+ */
+export type NativeReturnPlatformV1 =
+  "android" | "macos" | "macos-dev" | "ios" | "ios-dev";
+const NATIVE_RETURN_PLATFORMS: readonly NativeReturnPlatformV1[] = [
+  "android",
+  "macos",
+  "macos-dev",
+  "ios",
+  "ios-dev",
+];
+
+/**
  * Where a signed app receives its sign-in: a path on the deployment's own
  * origin. No deployment is named here — the origin is the one the Worker was
  * given, so a second deployment's App Links are its own
@@ -35,7 +51,7 @@ import type {
  */
 export function nativeReturnUriV1(
   origin: string,
-  platform: "android" | "macos" | "macos-dev",
+  platform: NativeReturnPlatformV1,
 ): string {
   return `${new URL(origin).origin}/native/return/${platform}`;
 }
@@ -46,22 +62,36 @@ export function nativeReturnUriV1(
  */
 export const NATIVE_RETURN_DEVELOPMENT = "frockbot-dev://native/return/android";
 /**
- * The Mac app's custom scheme. A Universal Link only reaches the app from
+ * The Apple apps' custom scheme. A Universal Link only reaches the app from
  * Safari, and only on a user's own click; Chrome and Firefox never dispatch
- * one, and Google's completion redirect is not a click. The return page hands
- * the same code and state to this scheme, which every browser can open. The
- * code is useless without the PKCE verifier the app never shares.
+ * one, and Google's completion redirect is not a click — on an iPhone as on a
+ * Mac. The return page hands the same code and state to this scheme, which
+ * every browser can open. The code is useless without the PKCE verifier the
+ * app never shares.
  */
-export const NATIVE_MACOS_SCHEME = "frockbot";
+export const NATIVE_APPLE_SCHEME = "frockbot";
 /**
- * The local "FrockBot Dev" Mac build's scheme (`bun run update:desktop`). It
- * is a separate app beside the released one, with its own bundle identifier,
- * so its sign-in comes back through its own `/native/return/macos-dev` page:
- * handed to `frockbot://`, the released app would take the code, or macOS
- * would open the wrong copy. Not in the Apple association, so Safari never
- * offers it to the released app as a Universal Link either.
+ * The FrockBot Dev builds' scheme (`bun run update:desktop` on a Mac, a
+ * `FROCKBOT_IOS_DEV` build on an iPhone). Each is a separate app beside the
+ * released one, with its own bundle identifier, so its sign-in comes back
+ * through its own `-dev` page: handed to `frockbot://`, the released app would
+ * take the code, or the system would open the wrong copy. Not in the Apple
+ * association, so Safari never offers it to the released app as a Universal
+ * Link either.
  */
-export const NATIVE_MACOS_DEV_SCHEME = "frockbot-dev";
+export const NATIVE_APPLE_DEV_SCHEME = "frockbot-dev";
+/** The scheme each Apple return page hands over on; Android needs none. */
+const NATIVE_RETURN_SCHEMES: Record<
+  Exclude<NativeReturnPlatformV1, "android">,
+  string
+> = {
+  macos: NATIVE_APPLE_SCHEME,
+  "macos-dev": NATIVE_APPLE_DEV_SCHEME,
+  ios: NATIVE_APPLE_SCHEME,
+  "ios-dev": NATIVE_APPLE_DEV_SCHEME,
+};
+/** The returns the Apple association claims: the released apps' own. */
+const APPLE_ASSOCIATED_RETURNS = ["macos", "ios"] as const;
 const PREFIX = "frockbot-native.";
 const encoder = new TextEncoder();
 const NO_STORE = AUTH_NO_STORE_HEADERS_V1;
@@ -71,15 +101,15 @@ export function nativeReturnUris(
   flag: string | undefined,
   origin: string,
 ): readonly string[] {
-  if (flag === "android") return [nativeReturnUriV1(origin, "android")];
-  if (flag === "android,macos") {
-    return [
-      nativeReturnUriV1(origin, "android"),
-      nativeReturnUriV1(origin, "macos"),
-      nativeReturnUriV1(origin, "macos-dev"),
-    ];
-  }
-  return [];
+  const platforms: readonly NativeReturnPlatformV1[] =
+    flag === "android"
+      ? ["android"]
+      : flag === "android,macos"
+        ? ["android", "macos", "macos-dev"]
+        : flag === "android,macos,ios"
+          ? NATIVE_RETURN_PLATFORMS
+          : [];
+  return platforms.map((platform) => nativeReturnUriV1(origin, platform));
 }
 
 /** The request origin with a fully qualified (trailing-dot) host normalised. */
@@ -485,13 +515,19 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
           url.pathname === "/.well-known/apple-app-site-association" &&
           request.method === "GET"
         ) {
+          // Only the Apple returns this deployment serves: a path it answers
+          // 404 for is never offered to an app as a verified link.
+          const components = APPLE_ASSOCIATED_RETURNS.filter((platform) =>
+            options.returnUris.includes(nativeReturnUriV1(origin, platform)),
+          ).map((platform) => ({ "/": `/native/return/${platform}` }));
+          if (components.length === 0) return error(404);
           return Response.json(
             {
               applinks: {
                 details: [
                   {
                     appIDs: ["Q444L76529.com.frockbot.mobile"],
-                    components: [{ "/": "/native/return/macos" }],
+                    components,
                   },
                 ],
               },
@@ -706,14 +742,10 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
           request.method === "GET"
         ) {
           const page = url.origin + url.pathname;
-          return nativeReturnPage(
-            page === nativeReturnUriV1(origin, "macos")
-              ? "macos"
-              : page === nativeReturnUriV1(origin, "macos-dev")
-                ? "macos-dev"
-                : "android",
-            origin,
+          const platform = NATIVE_RETURN_PLATFORMS.find(
+            (candidate) => nativeReturnUriV1(origin, candidate) === page,
           );
+          if (platform) return nativeReturnPage(platform, origin);
         }
         return error(404);
       } catch {
@@ -724,29 +756,26 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
 }
 
 /**
- * The page Google's completion lands on in the user's browser. On the Mac it
- * carries the code and state across to the app on its custom scheme,
- * forwarding only those two query parameters and never reflecting them into
- * markup. On Android the verified App Link has already opened the app; this
- * page is what remains in the browser, and what a user sees if it did not.
+ * The page Google's completion lands on in the user's browser. On a Mac or an
+ * iPhone it carries the code and state across to the app on its custom
+ * scheme, forwarding only those two query parameters and never reflecting
+ * them into markup. On Android the verified App Link has already opened the
+ * app; this page is what remains in the browser, and what a user sees if it
+ * did not.
  */
 function nativeReturnPage(
-  platform: "macos" | "macos-dev" | "android",
+  platform: NativeReturnPlatformV1,
   origin: string,
 ): Response {
-  const macos = platform !== "android";
-  const returnUri = new URL(
-    nativeReturnUriV1(origin, platform === "macos-dev" ? "macos-dev" : "macos"),
-  );
-  const scheme =
-    platform === "macos-dev" ? NATIVE_MACOS_DEV_SCHEME : NATIVE_MACOS_SCHEME;
-  const target = macos
-    ? `${scheme}://${returnUri.host}${returnUri.pathname}`
-    : undefined;
+  const returnUri = new URL(nativeReturnUriV1(origin, platform));
+  const target =
+    platform === "android"
+      ? undefined
+      : `${NATIVE_RETURN_SCHEMES[platform]}://${returnUri.host}${returnUri.pathname}`;
   return returnPageV1({
     title: "Return to FrockBot",
     heading: "Return to FrockBot to finish signing in",
-    lead: macos
+    lead: target
       ? "Your browser is handing you over to the FrockBot app. Once it opens, you can close this tab."
       : "Head back to the FrockBot app to finish signing in. You can close this page.",
     footnote:

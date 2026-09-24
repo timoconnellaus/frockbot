@@ -21,8 +21,16 @@ class PushController {
     this.activity, {
     this.channel = const MethodChannel('frockbot/push'),
   });
-  bool get android =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.android;
+
+  /// The phones: each draws alerts the platform delivers while Dart is stopped.
+  bool get mobile =>
+      !kIsWeb &&
+      (defaultTargetPlatform == TargetPlatform.android ||
+          defaultTargetPlatform == TargetPlatform.iOS);
+
+  /// Which app holds [token], so the cloud knows what it has to tell APNs.
+  String get platform =>
+      defaultTargetPlatform == TargetPlatform.iOS ? 'ios' : 'android';
   final windowFocus = WindowFocus();
   bool platformReady = false;
   String? deviceId;
@@ -52,7 +60,7 @@ class PushController {
     deviceId ??= randomId();
     await store.write('push-device', deviceId!);
     if (disposed) return;
-    if (android) {
+    if (mobile) {
       channel.setMethodCallHandler((call) async {
         if (disposed) return;
         if (call.method == 'token') {
@@ -72,8 +80,11 @@ class PushController {
         }
       });
       try {
+        // The origin is what a tapped alert opens: an iPhone builds that link
+        // itself, from the deployment this build talks to.
         token = await channel.invokeMethod<String>('configure', {
           'userId': userId,
+          'origin': hostedOrigin,
         });
         platformReady = true;
         focused =
@@ -86,9 +97,13 @@ class PushController {
         }
       } on MissingPluginException {
         platformReady = false;
-      } on PlatformException {
-        activity.error =
-            'Couldn’t enable notifications. Try reopening the app.';
+      } on PlatformException catch (error) {
+        // A build carrying no Firebase registration — a development build —
+        // has no push to enable, and reopening the app would not change that.
+        if (error.code != 'unconfigured') {
+          activity.error =
+              'Couldn’t enable notifications. Try reopening the app.';
+        }
       }
     }
     if (disposed) return;
@@ -123,6 +138,7 @@ class PushController {
     final body = <String, Object>{
       'deviceId': deviceId!,
       'token': ?token,
+      if (token != null) 'platform': platform,
       if (focused && readingBot != null && !remove) 'activeBotId': readingBot!,
       if (remove) 'remove': true,
     };
@@ -187,6 +203,6 @@ class PushController {
     disposed = true;
     windowFocus.dispose();
     timer?.cancel();
-    if (android) channel.setMethodCallHandler(null);
+    if (mobile) channel.setMethodCallHandler(null);
   }
 }

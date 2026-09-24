@@ -9,10 +9,12 @@
 /// the session the way a VoIP app does and then says where the sound goes: a
 /// headset if one is worn, the loudspeaker otherwise.
 ///
-/// Only Android needs telling. macOS routes on its own and the browser has no
-/// say, so those get [NoVoiceAudioRoute], and every controller takes the
-/// interface so a test can prove the session is begun before the microphone
-/// opens and ended after it closes.
+/// Only the phones need telling: Android through its audio manager, an iPhone
+/// through its audio session's voice-chat mode, both over the same channel.
+/// macOS routes on its own and the browser has no say, so those get
+/// [NoVoiceAudioRoute], and every controller takes the interface so a test can
+/// prove the session is begun before the microphone opens and ended after it
+/// closes.
 library;
 
 import 'dart:async';
@@ -53,9 +55,11 @@ abstract interface class VoiceAudioRoute {
   /// bytes, or null where it has no opinion.
   Future<int?> minimumCaptureBuffer(int sampleRate);
 
-  /// The route for this platform: Android is told, everyone else is not.
+  /// The route for this platform: the phones are told, everyone else is not.
   static VoiceAudioRoute forPlatform() =>
-      !kIsWeb && defaultTargetPlatform == TargetPlatform.android
+      !kIsWeb &&
+          (defaultTargetPlatform == TargetPlatform.android ||
+              defaultTargetPlatform == TargetPlatform.iOS)
       ? PlatformVoiceAudioRoute()
       : NoVoiceAudioRoute();
 }
@@ -82,7 +86,7 @@ class NoVoiceAudioRoute implements VoiceAudioRoute {
   Future<int?> minimumCaptureBuffer(int sampleRate) async => null;
 }
 
-/// The Android session over `com.frockbot/audio-route`.
+/// The phone's session over `com.frockbot/audio-route`.
 class PlatformVoiceAudioRoute implements VoiceAudioRoute {
   static const channel = MethodChannel('com.frockbot/audio-route');
   final ValueNotifier<VoiceRouteKind?> _route = ValueNotifier(null);

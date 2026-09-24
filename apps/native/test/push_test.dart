@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/activity/controller.dart';
 import 'package:frockbot_native/activity/push.dart';
+import 'package:frockbot_native/client/transport.dart' show hostedOrigin;
 import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
 
 import 'settings_test.dart' show SettingsApi;
@@ -70,6 +71,7 @@ void main() {
         predicate<Map<String, dynamic>>(
           (row) =>
               row['token'] == 'token-12345678901234567890' &&
+              row['platform'] == 'android' &&
               row['activeBotId'] == 'alpha',
         ),
       ),
@@ -82,6 +84,98 @@ void main() {
     TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
         .setMockMethodCallHandler(channel, null);
   });
+
+  test(
+    'an iPhone registers its token as one APNs must be told what to draw',
+    () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      final channel = const MethodChannel('frockbot/push');
+      final bridge = <MethodCall>[];
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            bridge.add(call);
+            if (call.method == 'configure') return 'token-12345678901234567890';
+            if (call.method == 'focus') return true;
+            return null;
+          });
+      final store = MemoryStore();
+      final registrations = <Map<String, dynamic>>[];
+      final api = SettingsApi(store, (path, body) async {
+        registrations.add(Map<String, dynamic>.from(body as Map));
+        return {'ok': true};
+      });
+      final activity = ActivityController(api);
+      final push = PushController(
+        api,
+        store,
+        'tim',
+        activity,
+        channel: channel,
+      );
+
+      await push.start();
+
+      // A tapped alert opens this deployment's own link, which the iPhone
+      // builds natively from the origin it was given.
+      expect(bridge.first.method, 'configure');
+      expect(bridge.first.arguments, {'userId': 'tim', 'origin': hostedOrigin});
+      expect(push.platformReady, isTrue);
+      expect(registrations.last['token'], 'token-12345678901234567890');
+      expect(registrations.last['platform'], 'ios');
+
+      push.dispose();
+      activity.dispose();
+      api.close();
+      debugDefaultTargetPlatformOverride = null;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+    },
+  );
+
+  test(
+    'a build with no Firebase registration has no push, and says nothing',
+    () async {
+      debugDefaultTargetPlatformOverride = TargetPlatform.iOS;
+      final channel = const MethodChannel('frockbot/push');
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, (call) async {
+            if (call.method == 'configure') {
+              throw PlatformException(code: 'unconfigured');
+            }
+            return null;
+          });
+      final store = MemoryStore();
+      final registrations = <Map<String, dynamic>>[];
+      final api = SettingsApi(store, (path, body) async {
+        registrations.add(Map<String, dynamic>.from(body as Map));
+        return {'ok': true};
+      });
+      final activity = ActivityController(api);
+      final push = PushController(
+        api,
+        store,
+        'tim',
+        activity,
+        channel: channel,
+      );
+
+      await push.start();
+
+      expect(push.platformReady, isFalse);
+      expect(activity.error, isNull);
+      // Presence still registers: another device's alert waits while this one
+      // is reading.
+      expect(registrations.single.containsKey('token'), isFalse);
+      expect(registrations.single.containsKey('platform'), isFalse);
+
+      push.dispose();
+      activity.dispose();
+      api.close();
+      debugDefaultTargetPlatformOverride = null;
+      TestDefaultBinaryMessengerBinding.instance.defaultBinaryMessenger
+          .setMockMethodCallHandler(channel, null);
+    },
+  );
 
   test(
     'disposing during platform configuration starts no registration heartbeat',
