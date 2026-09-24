@@ -9,7 +9,6 @@
 // eviction re-runs it rather than reading back a result. So the charge is
 // keyed by the search's own durable effect id, and a re-run under the same
 // id finds the reservation it already made instead of reserving again.
-import { BILLING_PLAN } from "./ledger.js";
 import type { AccountUsage } from "./model.js";
 
 export const SEARCH_TARIFF = {
@@ -17,6 +16,14 @@ export const SEARCH_TARIFF = {
   microsPerSearch: 10_000,
   usdPerSearch: 0.01,
 } as const;
+
+/**
+ * The `pricing_version` a search reservation records. The tariff is its own
+ * price list, apart from the plan and the hosted model rate table, so a
+ * change to either never rewrites what a past search was charged under. A
+ * new tariff is a new version.
+ */
+export const SEARCH_PRICING_VERSION = "search-2026-09-24";
 
 export const SEARCH_RATE_DESCRIPTION = "Web search · US$0.01 per search";
 
@@ -56,7 +63,7 @@ export function createSearchMeterV1(account: AccountUsage): SearchMeterV1 {
         botId: search.botId,
         sessionId: search.sessionId,
         description: SEARCH_RATE_DESCRIPTION,
-        pricingVersion: BILLING_PLAN.pricingVersion,
+        pricingVersion: SEARCH_PRICING_VERSION,
         unitRates: { microsPerSearch: SEARCH_TARIFF.microsPerSearch },
       });
       // An earlier run under this id already charged or released it. This

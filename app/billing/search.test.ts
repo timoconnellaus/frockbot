@@ -6,7 +6,11 @@ import {
   type BillingStorage,
 } from "./ledger";
 import type { AccountUsage } from "./model";
-import { createSearchMeterV1, SEARCH_TARIFF } from "./search";
+import {
+  createSearchMeterV1,
+  SEARCH_PRICING_VERSION,
+  SEARCH_TARIFF,
+} from "./search";
 
 function storage(database = new Database(":memory:")): BillingStorage {
   return {
@@ -58,6 +62,7 @@ function operation(ledger: BillingLedger) {
     botId: string;
     sessionId: string;
     reservedMicros: number;
+    pricingVersion: string;
     unitRates: Record<string, number>;
     settlement: { costMicros: number; chargeMicros: number } | null;
   };
@@ -85,6 +90,8 @@ describe("the search meter", () => {
       botId: "bot-1",
       sessionId: "session-1",
       reservedMicros: 10_000,
+      // Its own price list: neither the plan's version nor a model table's.
+      pricingVersion: SEARCH_PRICING_VERSION,
       unitRates: { microsPerSearch: 10_000 },
     });
     await charge.charge();
