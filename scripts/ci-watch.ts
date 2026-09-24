@@ -139,7 +139,11 @@ export async function pullRequestReport(
     };
   }
 
-  const checks = checksOf(value.statusCheckRollup);
+  // `main-health` reports `main`, not this pull request (see
+  // `scripts/main-health.ts`), so it is read apart from the rest.
+  const all = checksOf(value.statusCheckRollup);
+  const health = all.find((check) => check.name === "main-health");
+  const checks = all.filter((check) => check !== health);
   const failed = checks.filter(
     (check) => check.complete && FAILING_CONCLUSIONS.has(check.conclusion),
   );
@@ -170,12 +174,16 @@ export async function pullRequestReport(
     };
   }
 
-  // Every check passed and the pull request is still open. Merging is a
-  // maintainer's click — there is no auto-merge — so for the session that
-  // opened it this is the terminal state: its work is done and green.
+  // Every check passed and the pull request is still open. Merging belongs
+  // to the babysitter (`.claude/skills/babysit/SKILL.md`) — there is no
+  // auto-merge — so for the session that opened it this is the terminal
+  // state: its work is done and green, even while a red `main` holds it.
+  const held = health?.complete && FAILING_CONCLUSIONS.has(health.conclusion);
   return {
     status: "passed",
-    summary: `#${pullRequest} is green and ready for a maintainer to merge`,
+    summary: held
+      ? `#${pullRequest} is green; main is red, so it merges once main is green again`
+      : `#${pullRequest} is green; the babysitter merges it`,
     detail: [url],
   };
 }
