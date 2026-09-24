@@ -40,9 +40,24 @@ export const PLUGIN_GRANTS_V1 = [
   "memory",
   "workspace",
   "computer",
+  "device",
 ] as const;
 
 export type PluginGrantV1 = (typeof PLUGIN_GRANTS_V1)[number];
+
+/**
+ * What the `device` grant may name (ADR 0035): abilities the host opens on the
+ * person's device for a Plugin's page, never the page itself. Only the local
+ * tier, and only what a client draws today.
+ */
+export const PLUGIN_DEVICE_ABILITIES_V1 = ["microphone"] as const;
+
+export type PluginDeviceAbilityV1 = (typeof PLUGIN_DEVICE_ABILITIES_V1)[number];
+
+/** The shape of the `device` grant: the abilities the User approves. */
+export interface PluginDeviceV1 {
+  abilities: PluginDeviceAbilityV1[];
+}
 
 /** Where a plugin may render. Trust chrome is never a slot. */
 export const PLUGIN_SLOTS_V1 = [
@@ -167,6 +182,8 @@ export interface PluginDescriptorV1 {
   grants: PluginGrantV1[];
   /** Present exactly when `grants` holds `http`. */
   network?: PluginNetworkV1;
+  /** Present exactly when `grants` holds `device`. */
+  device?: PluginDeviceV1;
   /** A JSON Schema for the plugin's per-Bot settings; never a secret. */
   settingsSchema?: Record<string, unknown>;
   provides?: PluginServiceV1[];
@@ -675,6 +692,7 @@ export function decodePluginDescriptorV1(
     ],
     [
       "network",
+      "device",
       "settingsSchema",
       "provides",
       "consumes",
@@ -721,6 +739,25 @@ export function decodePluginDescriptorV1(
   if ((network !== undefined) !== grants.includes("http")) {
     throw new Error(
       `${label}.network is present exactly when the http grant is declared`,
+    );
+  }
+  let device: PluginDeviceV1 | undefined;
+  if (value.device !== undefined) {
+    const shape = record(value.device, `${label}.device`);
+    exactKeys(shape, ["abilities"], [], `${label}.device`);
+    const abilities = vocabulary(
+      shape.abilities,
+      PLUGIN_DEVICE_ABILITIES_V1,
+      `${label}.device.abilities`,
+    );
+    if (abilities.length === 0) {
+      throw new Error(`${label}.device.abilities names no ability`);
+    }
+    device = { abilities };
+  }
+  if ((device !== undefined) !== grants.includes("device")) {
+    throw new Error(
+      `${label}.device is present exactly when the device grant is declared`,
     );
   }
   const settingsSchema =
@@ -817,6 +854,13 @@ export function decodePluginDescriptorV1(
       }
     }
   }
+  // A device ability is opened by the host for a page, so a Plugin with no
+  // page has nothing to open one for.
+  if (device && !views?.some((view) => view.page !== undefined)) {
+    throw new Error(
+      `${label}.device needs a conversation.panel view that names a page`,
+    );
+  }
   return {
     id,
     displayName: boundedString(value.displayName, `${label}.displayName`, 128),
@@ -830,6 +874,7 @@ export function decodePluginDescriptorV1(
     ),
     grants,
     ...(network === undefined ? {} : { network }),
+    ...(device === undefined ? {} : { device }),
     ...(settingsSchema === undefined ? {} : { settingsSchema }),
     ...(provides === undefined ? {} : { provides }),
     ...(consumes === undefined ? {} : { consumes }),

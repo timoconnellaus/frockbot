@@ -171,6 +171,29 @@ describe("a conversation panel that is a page", () => {
     ).toBe(true);
   });
 
+  test("names the device abilities the User approved for it, and no others", () => {
+    const hearing = {
+      ...tuner,
+      descriptor: {
+        ...tuner.descriptor,
+        grants: ["device"],
+        device: { abilities: ["microphone"] },
+      },
+    } as unknown as CompositionMemberV1;
+    expect(
+      focusedPanelPageV1(
+        { ...roster, members: [hearing] },
+        focused,
+        rendered,
+        "https://bot.example.com",
+      )?.page?.abilities,
+    ).toEqual(["microphone"]);
+    expect(
+      focusedPanelPageV1(roster, focused, rendered, "https://bot.example.com")
+        ?.page,
+    ).not.toHaveProperty("abilities");
+  });
+
   test("is not a page when the focused view names none", () => {
     expect(
       focusedPanelPageV1(

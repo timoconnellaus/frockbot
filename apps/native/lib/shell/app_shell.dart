@@ -16,6 +16,7 @@ import '../activity/badge.dart';
 import '../activity/controller.dart';
 import '../activity/push.dart';
 import '../panels/canvas.dart';
+import '../panels/page_microphone.dart';
 import '../audit/page.dart';
 import '../client/auth.dart' show developmentAuth;
 import '../client/document_cache.dart';
@@ -286,6 +287,14 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// One capture for both features. The microphone has one owner at a time,
   /// which [microphone] enforces, so there is one device object.
   VoiceCapture? voiceCapture;
+
+  /// The same capture, lent to a Plugin's page by the ownership rules.
+  late final _pageMicrophone = ShellPageMicrophone(
+    ownership: microphone,
+    capture: () => voiceCapture ??= RecordVoiceCapture(
+      minimumBuffer: audioRoute.minimumCaptureBuffer,
+    ),
+  );
   AssistantSessionController? voiceSession;
 
   /// The call's audio session on this platform, held from before the
@@ -1319,6 +1328,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         store: widget.store,
         userId: widget.userId,
         onClose: _closeCanvas,
+        microphone: _pageMicrophone,
       ),
       label: 'Panel',
     );
@@ -2230,6 +2240,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               controller: panelCanvas!,
               store: widget.store,
               userId: widget.userId,
+              microphone: _pageMicrophone,
             ),
           ),
         ),

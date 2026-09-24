@@ -4066,6 +4066,14 @@
           "additionalProperties": {
             "$ref": "#/$defs/Json"
           }
+        },
+        "abilities": {
+          "type": "array",
+          "maxItems": 1,
+          "uniqueItems": true,
+          "items": {
+            "enum": ["microphone"]
+          }
         }
       },
       "required": ["url", "state"],

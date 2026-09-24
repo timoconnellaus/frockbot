@@ -10,9 +10,12 @@ library;
 
 import 'dart:async';
 import 'dart:convert';
+import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 
+import '../shell/lifecycle.dart';
+import '../shell/semantics.dart';
 import '../theme/frock_theme.dart';
 import '../view/host_frame.dart';
 
@@ -30,6 +33,13 @@ sealed class PluginPageMessageV1 {
 
 class PluginPageHelloV1 extends PluginPageMessageV1 {
   const PluginPageHelloV1();
+}
+
+/// The page asks the host to open or close a device ability for it.
+class PluginPageDeviceV1 extends PluginPageMessageV1 {
+  final String ability;
+  final bool open;
+  const PluginPageDeviceV1(this.ability, this.open);
 }
 
 class PluginPageCallV1 extends PluginPageMessageV1 {
@@ -62,9 +72,60 @@ PluginPageMessageV1? decodePluginPageMessageV1(Map<String, Object?> message) {
         return null;
       }
       return PluginPageCallV1(callId, tool, input.cast<String, Object?>());
+    case 'device':
+      final open = message['open'];
+      if (keys.join(',') != 'ability,frockbotPage,open,type' ||
+          message['ability'] != 'microphone' ||
+          open is! bool) {
+        return null;
+      }
+      return PluginPageDeviceV1('microphone', open);
   }
   return null;
 }
+
+/// The rate and frame the host captures at for a page: 16 kHz mono PCM16 in
+/// 40 ms frames, which is under two kilobytes a message in base64.
+const pluginPageMicrophoneRateV1 = 16000;
+const pluginPageMicrophoneFrameV1 = Duration(milliseconds: 40);
+
+/// The microphone as a page gets it: opened by the host, never by the page.
+abstract interface class PluginPageMicrophone {
+  /// Opens it and answers the PCM16 frames, or throws
+  /// [PluginPageMicrophoneRefused] with the sentence the page is told.
+  /// [taken] runs when dictation or a call takes the microphone back.
+  Future<Stream<Uint8List>> open({required Future<void> Function() taken});
+  Future<void> close();
+}
+
+class PluginPageMicrophoneRefused implements Exception {
+  final String reason;
+  const PluginPageMicrophoneRefused(this.reason);
+  @override
+  String toString() => reason;
+}
+
+Map<String, Object?> pluginPageMicrophoneOpenMessageV1() => {
+  'frockbotPage': pluginPageBridgeVersionV1,
+  'type': 'device',
+  'ability': 'microphone',
+  'status': 'open',
+  'sampleRate': pluginPageMicrophoneRateV1,
+};
+
+Map<String, Object?> pluginPageMicrophoneClosedMessageV1(String reason) => {
+  'frockbotPage': pluginPageBridgeVersionV1,
+  'type': 'device',
+  'ability': 'microphone',
+  'status': 'closed',
+  'reason': reason,
+};
+
+Map<String, Object?> pluginPageAudioMessageV1(Uint8List pcm) => {
+  'frockbotPage': pluginPageBridgeVersionV1,
+  'type': 'audio',
+  'pcm': base64Encode(pcm),
+};
 
 /// What one tool call came to: its text, or the reason it did not run.
 class PluginPageToolAnswerV1 {
@@ -122,6 +183,9 @@ Future<Map<String, Object?>?> pluginPageAnswerV1(
   switch (message) {
     case PluginPageHelloV1():
       return init();
+    case PluginPageDeviceV1():
+      // The frame owns the device; it is never a request/answer exchange.
+      return null;
     case PluginPageCallV1(:final callId, :final tool, :final input):
       final arguments = jsonEncode(input);
       if (utf8.encode(arguments).length > pluginPageArgumentsMaxBytesV1) {
@@ -207,6 +271,12 @@ class PluginPageFrame extends StatefulWidget {
   /// The tab's label: what the frame is called to a screen reader.
   final String label;
   final PluginPageToolRunnerV1 runTool;
+
+  /// The device abilities the User approved for this Plugin's page.
+  final List<String> abilities;
+
+  /// Absent where this client cannot open one for a page.
+  final PluginPageMicrophone? microphone;
   final PluginPageFrameBuilderV1 frameBuilder;
   const PluginPageFrame({
     super.key,
@@ -217,6 +287,8 @@ class PluginPageFrame extends StatefulWidget {
     required this.surfaceId,
     required this.label,
     required this.runTool,
+    this.abilities = const [],
+    this.microphone,
     this.frameBuilder = _hostFrame,
   });
 
@@ -224,9 +296,27 @@ class PluginPageFrame extends StatefulWidget {
   State<PluginPageFrame> createState() => _PluginPageFrameState();
 }
 
-class _PluginPageFrameState extends State<PluginPageFrame> {
+class _PluginPageFrameState extends State<PluginPageFrame>
+    with WidgetsBindingObserver {
   final _outbox = StreamController<Map<String, Object?>>.broadcast();
   bool _greeted = false;
+
+  /// Set while the host holds the microphone for this page.
+  StreamSubscription<Uint8List>? _hearing;
+  bool _opening = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (appIsAwayV1(state)) {
+      unawaited(_closeMicrophone('FrockBot went to the background.'));
+    }
+  }
 
   @override
   void didUpdateWidget(PluginPageFrame old) {
@@ -234,6 +324,7 @@ class _PluginPageFrameState extends State<PluginPageFrame> {
     // A new URL is a new document, which will say hello again.
     if (old.url != widget.url) {
       _greeted = false;
+      unawaited(_closeMicrophone(null));
       return;
     }
     if (_greeted && jsonEncode(old.state) != jsonEncode(widget.state)) {
@@ -249,6 +340,14 @@ class _PluginPageFrameState extends State<PluginPageFrame> {
     final message = decodePluginPageMessageV1(raw);
     if (message == null) return;
     if (message is PluginPageHelloV1) _greeted = true;
+    if (message is PluginPageDeviceV1) {
+      if (message.open) {
+        await _openMicrophone();
+      } else {
+        await _closeMicrophone(null);
+      }
+      return;
+    }
     final themeTokens = pluginPageThemeTokensV1(context);
     final answer = await pluginPageAnswerV1(
       message,
@@ -264,15 +363,87 @@ class _PluginPageFrameState extends State<PluginPageFrame> {
     if (answer != null && mounted) _post(answer);
   }
 
+  /// Only an ability the User approved on the Plugin's card, only through the
+  /// host, and never twice.
+  Future<void> _openMicrophone() async {
+    if (_hearing != null || _opening) return;
+    final microphone = widget.microphone;
+    if (!widget.abilities.contains('microphone')) {
+      _post(
+        pluginPageMicrophoneClosedMessageV1(
+          'This Plugin was not allowed the microphone.',
+        ),
+      );
+      return;
+    }
+    if (microphone == null) {
+      _post(
+        pluginPageMicrophoneClosedMessageV1(
+          'The microphone can’t be opened here.',
+        ),
+      );
+      return;
+    }
+    _opening = true;
+    try {
+      final frames = await microphone.open(
+        taken: () => _closeMicrophone('Voice took the microphone.'),
+      );
+      if (!mounted) {
+        await microphone.close();
+        return;
+      }
+      setState(() {
+        _hearing = frames.listen(
+          (pcm) => _post(pluginPageAudioMessageV1(pcm)),
+          onError: (Object _) =>
+              unawaited(_closeMicrophone('The microphone stopped working.')),
+        );
+      });
+      _post(pluginPageMicrophoneOpenMessageV1());
+    } on PluginPageMicrophoneRefused catch (refused) {
+      _post(pluginPageMicrophoneClosedMessageV1(refused.reason));
+    } catch (_) {
+      _post(
+        pluginPageMicrophoneClosedMessageV1(
+          'FrockBot couldn’t open the microphone.',
+        ),
+      );
+    } finally {
+      _opening = false;
+    }
+  }
+
+  /// Gives the microphone back. [reason] is what the page is told; null when
+  /// the page asked, or has gone, and there is nobody to tell.
+  Future<void> _closeMicrophone(String? reason) async {
+    final hearing = _hearing;
+    if (hearing == null) return;
+    _hearing = null;
+    if (mounted) setState(() {});
+    // Closing the microphone ends the stream; nothing waits on the cancel.
+    unawaited(hearing.cancel());
+    await widget.microphone?.close();
+    if (reason != null) _post(pluginPageMicrophoneClosedMessageV1(reason));
+  }
+
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    // Nobody is left to tell and nothing is left to redraw.
+    final hearing = _hearing;
+    _hearing = null;
+    if (hearing != null) {
+      unawaited(hearing.cancel());
+      unawaited(widget.microphone?.close() ?? Future<void>.value());
+    }
     unawaited(_outbox.close());
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return widget.frameBuilder(
+    final frame = widget.frameBuilder(
       context,
       url: widget.url,
       label: widget.label,
@@ -280,6 +451,66 @@ class _PluginPageFrameState extends State<PluginPageFrame> {
           'plugin-page:${widget.pluginId}:${widget.surfaceId}:${widget.url}',
       onMessage: (message) => unawaited(_onMessage(message)),
       outbox: _outbox.stream,
+    );
+    // One shape whether or not the bar is up, and the frame keyed, so the bar
+    // coming and going never remounts the frame — which would load the page
+    // again and lose it.
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        if (_hearing != null)
+          _MicrophoneInUse(
+            label: widget.label,
+            onStop: () =>
+                unawaited(_closeMicrophone('You stopped the microphone.')),
+          ),
+        Expanded(key: const ValueKey('plugin-page-frame'), child: frame),
+      ],
+    );
+  }
+}
+
+/// Host chrome, never the page's: who is listening, and the way to stop it.
+class _MicrophoneInUse extends StatelessWidget {
+  final String label;
+  final VoidCallback onStop;
+  const _MicrophoneInUse({required this.label, required this.onStop});
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return identified(
+      'plugin-page-microphone',
+      Material(
+        color: scheme.primaryContainer,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 4, 4, 4),
+          child: Row(
+            children: [
+              Icon(Icons.mic, size: 18, color: scheme.onPrimaryContainer),
+              const SizedBox(width: 8),
+              Expanded(
+                child: Text(
+                  '$label is using the microphone',
+                  style: TextStyle(color: scheme.onPrimaryContainer),
+                  overflow: TextOverflow.ellipsis,
+                ),
+              ),
+              identified(
+                'plugin-page-microphone-stop',
+                TextButton(
+                  onPressed: onStop,
+                  style: TextButton.styleFrom(
+                    foregroundColor: scheme.onPrimaryContainer,
+                    textStyle: const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                  child: const Text('Stop'),
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

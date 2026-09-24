@@ -1,7 +1,7 @@
 # Grants
 
 `grants` is what the module may use, from `storage`, `http`, `schedule`,
-`ai`, `files`, `memory`, `workspace`, `computer`.
+`ai`, `files`, `memory`, `workspace`, `computer`, `device`.
 
 `ctx` always names the User, the Bot and the Session, this Plugin's
 `packageId`, `deadlineMs`, `bindings`, `capabilities.list()`,
@@ -40,6 +40,11 @@ botId }`, `{ kind: "user-instructions" }`, or `{ kind:
 "package-declared", packageId, rootId }`. Writes take
   `expectedGenerationId` (null for create). Deletes take the generation
   you last read.
+
+`device` is for your page, not the module: `"device": { "abilities":
+["microphone"] }` lets the host open the microphone for a page a
+`conversation.panel` view names, and needs such a view. It opens nothing on
+`ctx`. See `microphone.md`.
 
 `files` and `computer` are declared to the authority and open nothing on
 `ctx` today: name them only when the User is granting that reach, not

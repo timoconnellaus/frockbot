@@ -306,6 +306,43 @@ describe("a Plugin intent", () => {
   });
 });
 
+describe("what a card says about a page that listens", () => {
+  const listening = (grants: string[], extra: Record<string, unknown> = {}) =>
+    decodePluginDescriptorV1({
+      id: "tuner",
+      displayName: "Tuner",
+      version: "1",
+      contractVersion: 7,
+      tools: [],
+      hooks: [],
+      grants,
+      device: { abilities: ["microphone"] },
+      views: [
+        { slot: "conversation.panel", surfaceId: "tuner", page: "tuner.html" },
+      ],
+      contextKeys: ["user", "bot", "session"],
+      ...extra,
+    });
+
+  test("says the page can use the microphone, with a Stop, and where it goes", () => {
+    const descriptor = listening(["device"]);
+    const action = pluginApprovalActionV1({ descriptor }, "Run");
+    expect(action).toContain("draws its own web page");
+    expect(action).toContain(
+      "Its page can use your microphone while you have it open",
+    );
+    expect(action).toContain("reaches only this Plugin's own tools");
+    expect(pluginApprovalRiskV1({ descriptor })).toBe("medium");
+  });
+
+  test("is high when the Plugin that hears can also reach the network", () => {
+    const descriptor = listening(["http", "device"], {
+      network: { hosts: ["api.example.com"] },
+    });
+    expect(pluginApprovalRiskV1({ descriptor })).toBe("high");
+  });
+});
+
 describe("what a card says about a declared model provider", () => {
   /** The deployment's own DeepSeek artifact, as the catalog ships it. */
   function claimedMember(contentHash: string, id = "deepseek") {

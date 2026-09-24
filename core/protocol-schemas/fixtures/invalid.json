@@ -2076,6 +2076,15 @@
     }
   },
   {
+    "name": "PanelPage unknown ability invalid",
+    "schema": "PanelPage",
+    "value": {
+      "url": "https://bot.example/p.html",
+      "state": {},
+      "abilities": ["shell"]
+    }
+  },
+  {
     "name": "PanelPage array state invalid",
     "schema": "PanelPage",
     "value": {

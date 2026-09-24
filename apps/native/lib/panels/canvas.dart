@@ -208,12 +208,16 @@ class PanelCanvas extends StatelessWidget {
   final LocalStore store;
   final String userId;
   final VoidCallback? onClose;
+
+  /// What a Plugin's page may be lent, when the User approved it.
+  final PluginPageMicrophone? microphone;
   const PanelCanvas({
     super.key,
     required this.controller,
     required this.store,
     required this.userId,
     this.onClose,
+    this.microphone,
   });
 
   @override
@@ -291,6 +295,8 @@ class PanelCanvas extends StatelessWidget {
         label: label,
         runTool: (tool, arguments) =>
             controller.runPageTool(pluginId, tool, arguments),
+        abilities: page.abilities ?? const [],
+        microphone: microphone,
       ),
     );
   }

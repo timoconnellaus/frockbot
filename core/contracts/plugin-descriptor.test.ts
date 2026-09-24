@@ -214,6 +214,51 @@ describe("a panel view that names a page", () => {
   });
 });
 
+describe("the device grant", () => {
+  const PAGE_VIEW = {
+    slot: "conversation.panel",
+    surfaceId: "tuner",
+    page: "tuner.html",
+  };
+
+  test("names the abilities the host may open for the Plugin's page", () => {
+    const decoded = decodePluginDescriptorV1({
+      ...base,
+      grants: ["device"],
+      device: { abilities: ["microphone"] },
+      views: [PAGE_VIEW],
+    });
+    expect(decoded.grants).toEqual(["device"]);
+    expect(decoded.device).toEqual({ abilities: ["microphone"] });
+  });
+
+  test("is present exactly when granted, and names only what a client opens", () => {
+    for (const shape of [
+      { grants: ["device"] },
+      { grants: [], device: { abilities: ["microphone"] } },
+      { grants: ["device"], device: { abilities: [] } },
+      { grants: ["device"], device: { abilities: ["camera"] } },
+      { grants: ["device"], device: { abilities: ["shell"] } },
+      { grants: ["device"], device: { abilities: ["microphone"], extra: 1 } },
+    ]) {
+      expect(() =>
+        decodePluginDescriptorV1({ ...base, ...shape, views: [PAGE_VIEW] }),
+      ).toThrow();
+    }
+  });
+
+  test("needs a page to open an ability for", () => {
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        grants: ["device"],
+        device: { abilities: ["microphone"] },
+        views: [{ slot: "conversation.panel", surfaceId: "tuner" }],
+      }),
+    ).toThrow(/names a page/);
+  });
+});
+
 describe("a plugin's hooks and contract", () => {
   test("orders hooks by the vocabulary and refuses an unopened event", () => {
     expect(

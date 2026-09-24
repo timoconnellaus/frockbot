@@ -54,6 +54,11 @@ enum VoiceCaptureProfile {
   /// device with the smallest buffer the platform allows, because how fast
   /// the meter follows a word is how fast the audio reaches it.
   call,
+
+  /// A Plugin page listening to sound rather than speech — a tuner. Every
+  /// cleanup is off, because noise suppression and automatic gain treat a
+  /// held note as noise to remove.
+  instrument,
 }
 
 abstract interface class VoiceCapture {
@@ -179,6 +184,23 @@ RecordConfig voiceRecordConfigV1({
       // reads a whole buffer at a time, so the buffer is the latency.
       streamBufferSize: streamBufferSize,
     ),
+    VoiceCaptureProfile.instrument => RecordConfig(
+      encoder: AudioEncoder.pcm16bits,
+      numChannels: 1,
+      sampleRate: sampleRate,
+      echoCancel: false,
+      noiseSuppress: false,
+      autoGain: false,
+      // The recognition source is the one Android keeps free of automatic
+      // gain and noise suppression on every device; `unprocessed` is not
+      // offered everywhere.
+      androidConfig: const AndroidRecordConfig(
+        audioSource: AndroidAudioSource.voiceRecognition,
+        audioManagerMode: AudioManagerMode.modeNormal,
+        manageBluetooth: false,
+      ),
+      streamBufferSize: streamBufferSize,
+    ),
   };
 }
 
@@ -226,9 +248,9 @@ class RecordVoiceCapture implements VoiceCapture {
           profile: profile,
           platform: defaultTargetPlatform,
           sampleRate: sampleRate,
-          streamBufferSize: profile == VoiceCaptureProfile.call
-              ? await _callBuffer(sampleRate, frameBytes)
-              : null,
+          streamBufferSize: profile == VoiceCaptureProfile.dictation
+              ? null
+              : await _callBuffer(sampleRate, frameBytes),
         ),
       );
     } on Object {

@@ -139,6 +139,8 @@ const OPEN_PLUGIN_GRANTS_V1: readonly PluginGrantV1[] = [
   "memory",
   "workspace",
   "storage",
+  // Opened by the client for a page, never by the worker (ADR 0035).
+  "device",
 ];
 
 /**

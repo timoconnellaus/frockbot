@@ -76,7 +76,23 @@ export type PluginPageHostMessageV1 =
       callId: string;
       ok: false;
       error: string;
-    };
+    }
+  | {
+      frockbotPage: 1;
+      type: "device";
+      ability: "microphone";
+      status: "open";
+      sampleRate: number;
+    }
+  | {
+      frockbotPage: 1;
+      type: "device";
+      ability: "microphone";
+      status: "closed";
+      reason: string;
+    }
+  /** One frame of 16-bit little-endian mono PCM, base64. */
+  | { frockbotPage: 1; type: "audio"; pcm: string };
 
 export type PluginPagePageMessageV1 =
   | { frockbotPage: 1; type: "hello" }
@@ -86,7 +102,8 @@ export type PluginPagePageMessageV1 =
       callId: string;
       tool: string;
       input: Record<string, unknown>;
-    };
+    }
+  | { frockbotPage: 1; type: "device"; ability: "microphone"; open: boolean };
 
 /**
  * The page side of the bridge, as `window.frockbot`:
@@ -98,12 +115,120 @@ export type PluginPagePageMessageV1 =
  *   returns its unsubscribe.
  * - `callTool(name, input)` runs one of this Plugin's own tools and resolves
  *   with its text, or rejects with the host's reason.
+ * - `openMicrophone(onSamples, onClosed)` asks the host for the microphone
+ *   (ADR 0036). It resolves with `{sampleRate, close}` once the host has
+ *   opened it, then hands each frame to `onSamples` as a `Float32Array` of
+ *   -1..1 mono samples; it rejects with the host's reason when refused, and
+ *   `onClosed(reason)` hears the host close it — the person's Stop, the page
+ *   leaving the screen, another use of the microphone.
  *
  * Only messages from `parent` are read. In a phone WebView the page is its own
  * parent and the host delivers with `window.postMessage`, so the one check
  * serves both renderers.
  */
-export const PLUGIN_PAGE_HELPER_JS_V1 = `(()=>{const V=1,rec=v=>v!==null&&typeof v==='object'&&!Array.isArray(v),S=new Set(),C=new Map();let n=0,current={},ok,fail;const ready=new Promise((r,j)=>{ok=r;fail=j}),post=m=>parent.postMessage(Object.assign({frockbotPage:V},m),'*');addEventListener('message',e=>{if(e.source!==parent)return;const m=e.data;if(!rec(m)||m.frockbotPage!==V)return;if(m.type==='init'&&rec(m.themeTokens)&&rec(m.state)){for(const [k,v] of Object.entries(m.themeTokens))if(typeof v==='string')document.documentElement.style.setProperty('--frockbot-'+k,v);current=m.state;ok({pluginId:m.pluginId,botId:m.botId,surfaceId:m.surfaceId,themeTokens:m.themeTokens,state:m.state});return}if(m.type==='state'&&rec(m.state)){current=m.state;for(const fn of S)fn(current);return}if(m.type==='result'&&typeof m.callId==='string'){const c=C.get(m.callId);if(!c)return;C.delete(m.callId);clearTimeout(c.t);m.ok===true?c.r(String(m.output)):c.j(new Error(String(m.error)))}});window.frockbot={ready,get state(){return current},onState(fn){S.add(fn);return()=>S.delete(fn)},callTool(tool,input={}){const callId='c'+(++n);return new Promise((r,j)=>{const t=setTimeout(()=>{C.delete(callId);j(new Error('The tool call timed out'))},60000);C.set(callId,{r,j,t});post({type:'callTool',callId,tool,input})})}};post({type:'hello'});setTimeout(()=>fail(new Error('FrockBot page init timed out')),10000)})();`;
+export const PLUGIN_PAGE_HELPER_JS_V1 = `(() => {
+  const V = 1;
+  const rec = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+  const listeners = new Set();
+  const calls = new Map();
+  let n = 0;
+  let current = {};
+  let ok;
+  let fail;
+  let mic = null;
+  const ready = new Promise((resolve, reject) => {
+    ok = resolve;
+    fail = reject;
+  });
+  const post = (m) => parent.postMessage(Object.assign({ frockbotPage: V }, m), "*");
+  const pcm = (text) => {
+    const bytes = Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
+    const view = new DataView(bytes.buffer);
+    const samples = new Float32Array(bytes.length >> 1);
+    for (let i = 0; i < samples.length; i++) samples[i] = view.getInt16(i * 2, true) / 32768;
+    return samples;
+  };
+  addEventListener("message", (e) => {
+    if (e.source !== parent) return;
+    const m = e.data;
+    if (!rec(m) || m.frockbotPage !== V) return;
+    if (m.type === "init" && rec(m.themeTokens) && rec(m.state)) {
+      for (const [k, v] of Object.entries(m.themeTokens)) {
+        if (typeof v === "string") document.documentElement.style.setProperty("--frockbot-" + k, v);
+      }
+      current = m.state;
+      ok({ pluginId: m.pluginId, botId: m.botId, surfaceId: m.surfaceId, themeTokens: m.themeTokens, state: m.state });
+      return;
+    }
+    if (m.type === "state" && rec(m.state)) {
+      current = m.state;
+      for (const fn of listeners) fn(current);
+      return;
+    }
+    if (m.type === "result" && typeof m.callId === "string") {
+      const call = calls.get(m.callId);
+      if (!call) return;
+      calls.delete(m.callId);
+      clearTimeout(call.timer);
+      if (m.ok === true) call.resolve(String(m.output));
+      else call.reject(new Error(String(m.error)));
+      return;
+    }
+    if (m.type === "device" && m.ability === "microphone" && mic) {
+      if (m.status === "open" && mic.pending) {
+        const opened = mic.pending;
+        mic.pending = null;
+        opened.resolve({ sampleRate: m.sampleRate, close: () => frockbot.closeMicrophone() });
+      } else if (m.status === "closed") {
+        const ended = mic;
+        mic = null;
+        const reason = typeof m.reason === "string" ? m.reason : "The microphone was closed.";
+        if (ended.pending) ended.pending.reject(new Error(reason));
+        else if (ended.onClosed) ended.onClosed(reason);
+      }
+      return;
+    }
+    if (m.type === "audio" && typeof m.pcm === "string" && mic && !mic.pending) {
+      mic.onSamples(pcm(m.pcm));
+    }
+  });
+  const frockbot = {
+    ready,
+    get state() {
+      return current;
+    },
+    onState(fn) {
+      listeners.add(fn);
+      return () => listeners.delete(fn);
+    },
+    callTool(tool, input = {}) {
+      const callId = "c" + ++n;
+      return new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          calls.delete(callId);
+          reject(new Error("The tool call timed out"));
+        }, 60000);
+        calls.set(callId, { resolve, reject, timer });
+        post({ type: "callTool", callId, tool, input });
+      });
+    },
+    openMicrophone(onSamples, onClosed) {
+      if (mic) return Promise.reject(new Error("The microphone is already open."));
+      return new Promise((resolve, reject) => {
+        mic = { onSamples, onClosed, pending: { resolve, reject } };
+        post({ type: "device", ability: "microphone", open: true });
+      });
+    },
+    closeMicrophone() {
+      if (!mic) return;
+      mic = null;
+      post({ type: "device", ability: "microphone", open: false });
+    },
+  };
+  window.frockbot = frockbot;
+  post({ type: "hello" });
+  setTimeout(() => fail(new Error("FrockBot page init timed out")), 10000);
+})();`;
 
 const HEAD = /<head(?:\s[^>]*)?>/i;
 const HTML = /<html(?:\s[^>]*)?>/i;
@@ -137,6 +262,19 @@ export function decodePluginPageMessageV1(
   const keys = Object.keys(value).sort().join(",");
   if (value.type === "hello" && keys === "frockbotPage,type") {
     return { frockbotPage: 1, type: "hello" };
+  }
+  if (
+    value.type === "device" &&
+    keys === "ability,frockbotPage,open,type" &&
+    value.ability === "microphone" &&
+    typeof value.open === "boolean"
+  ) {
+    return {
+      frockbotPage: 1,
+      type: "device",
+      ability: "microphone",
+      open: value.open,
+    };
   }
   if (
     value.type === "callTool" &&
