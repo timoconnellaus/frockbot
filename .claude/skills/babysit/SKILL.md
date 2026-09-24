@@ -6,10 +6,11 @@ description: Own FrockBot's delivery pipeline once a pull request is open — ke
 # Babysit
 
 An authoring session's job ends when its pull request is open and its own
-checks are green. From there this skill owns everything: the merge, `main`,
-the release tag and production. It is the only thing that merges. One run is
-a **tick**; a tick is safe to repeat, so `/loop /babysit` in one dedicated
-desktop session runs it on a self-paced schedule, overnight included.
+checks are green. From there a babysitter owns everything: the merge, `main`,
+the release tag and production. Babysitters are the only thing that merges,
+and any number can run at once — one per authoring session, plus one
+watching everything. One run is a **tick**; a tick is safe to repeat, so
+`/loop /babysit` runs it on a self-paced schedule, overnight included.
 
 Merging is shipping. A green `main` tags itself and deploys
 `bot.frockbot.com` about twenty minutes later with nobody in between, so
@@ -18,11 +19,24 @@ treat every merge as a production deploy.
 ## Starting
 
 "Babysit this" means keep babysitting, not look once. Unless this turn is
-already a `/loop /babysit` firing, invoke the `loop` skill with `/babysit`
-yourself — nobody should have to type the slash commands — and it runs the
-first tick and paces the rest. Run a single tick without the loop only for a
-question that wants one answer: "is main green?", "has #812 shipped?". Stop
-the loop when Tim says so.
+already a `/loop` firing, invoke the `loop` skill yourself — nobody should
+have to type the slash commands — and it runs the first tick and paces the
+rest. Run a single tick without the loop only for a question that wants one
+answer: "is main green?", "has #812 shipped?".
+
+**Scope.** "Babysit this", in a session that opened pull requests, watches
+those: loop `/babysit #812` (every number the session opened), and each tick
+snapshots with `--pr 812`. A scoped babysitter merges and repairs only its
+own pull requests, follows each through to production, and stops its loop
+once every one has shipped or closed — the snapshot's `landed` lines say
+which. "Babysit", "babysit the PRs" or "babysit everything" watches every
+open pull request and never stops by itself; stop it when Tim says so.
+
+**Together.** Two babysitters merging is harmless: `--match-head-commit`
+and the ruleset refuse a second merge, and a refused merge means take a new
+snapshot. What must not happen twice is a repair, so a red `main` is claimed
+(below), and an idle pull request is taken over only after saying so on it
+and only with `--force-with-lease`.
 
 ## A tick
 
@@ -49,7 +63,17 @@ displaced before it started is passed over.
 **Red — stop the line.** Only a pull request labelled `fix-main`, or a
 revert, may merge until `main` is green; the snapshot marks every other
 green pull request `held`, and the `main-health` status makes GitHub
-refuse those merges for everyone else too. Then, in order:
+refuse those merges for everyone else too.
+
+**Claim the repair first.** The snapshot's `repair claimed` line is an open
+issue labelled `main-red`. If there is one, another babysitter owns the
+repair: hold, and do nothing below unless the claim has been silent for 30
+minutes, in which case comment that you are taking it over. If there is
+none, open one — `gh issue create --label main-red --title "main red since
+<time>: <failed jobs>"`, body naming the run — then check again that yours
+is the oldest open `main-red` issue; if another was opened first, close
+yours and hold. The owner comments what it finds and does, and closes the
+issue once `main` is green. Then, in order:
 
 1. **Read the failure.** `gh run view <id> --log-failed > <scratch>/main-<id>.log`
    and grep it: Playwright `✘`/`›` lines and the numbered summary, vitest
@@ -137,8 +161,9 @@ The snapshot gives each open pull request an action:
 Dependabot pull requests go through the same actions; a bump that breaks
 `Check` in a way that isn't a one-line fix goes to Tim.
 
-The labels are `hold` (leave it alone), `fix-main` (repairs a red `main`)
-and `flaky` (issues). If one is missing, create it with `gh label create`.
+The labels are `hold` (leave it alone), `fix-main` (repairs a red `main`),
+`flaky` (issues) and `main-red` (the repair claim). If one is missing,
+create it with `gh label create`.
 
 ## Boundaries
 

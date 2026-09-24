@@ -24,6 +24,9 @@ function fakeGitHub(state: {
   required?: string[];
   headCommitDate?: string;
   releaseRuns?: unknown[];
+  issues?: unknown[];
+  prViews?: Record<string, unknown>;
+  compareStatus?: string;
 }): GitHubJson & { calls: string[][] } {
   const calls: string[][] = [];
   const gh = (args: readonly string[]) => {
@@ -46,9 +49,15 @@ function fakeGitHub(state: {
         jobs: state.jobs[`${args[2]}${attempt}`] ?? [],
       });
     }
+    if (command === "issue") return Promise.resolve(state.issues ?? []);
+    if (command === "pr" && sub === "view")
+      return Promise.resolve(state.prViews?.[String(args[2])] ?? {});
     if (command === "pr") return Promise.resolve(state.pullRequests ?? []);
     if (path.includes("/compare/"))
-      return Promise.resolve({ commits: state.compare ?? [] });
+      return Promise.resolve({
+        commits: state.compare ?? [],
+        status: state.compareStatus ?? "diverged",
+      });
     if (path.endsWith("/rules/branches/main"))
       return Promise.resolve([
         { type: "deletion" },
@@ -536,6 +545,13 @@ describe("format", () => {
         },
       },
       pullRequests: [],
+      repairClaim: {
+        issue: 7,
+        url: "u7",
+        title: "main red since 04:00",
+        createdAt: "2026-09-24T04:00:00Z",
+      },
+      landings: [],
     });
     expect(text).toContain("main   RED for 2h30m");
     expect(text).toContain(
@@ -544,5 +560,96 @@ describe("format", () => {
     expect(text).toContain("#770  Fix the composer");
     expect(text).toContain("prod   v0.7.191 released and production deployed");
     expect(text).toContain("PRs    none open");
+    expect(text).toContain("repair claimed: #7 main red since 04:00");
+  });
+});
+
+describe("many babysitters at once", () => {
+  const now = Date.parse("2026-09-24T12:00:00Z");
+  const green = [
+    { name: "Check", status: "COMPLETED", conclusion: "SUCCESS" },
+    { name: "Flutter", status: "COMPLETED", conclusion: "SUCCESS" },
+  ];
+  const openPr = (number: number) => ({
+    number,
+    title: `PR ${number}`,
+    url: `https://example.test/${number}`,
+    isDraft: false,
+    labels: [],
+    headRefName: `claude/${number}`,
+    headRefOid: `head${number}`,
+    baseRefName: "main",
+    mergeable: "MERGEABLE",
+    statusCheckRollup: green,
+    author: { login: "timoconnellaus" },
+  });
+  const base = {
+    mainRuns: [
+      {
+        databaseId: 1,
+        headSha: "sha1",
+        status: "completed",
+        conclusion: "success",
+        createdAt: "2026-09-24T01:00:00Z",
+        url: "u",
+        event: "push",
+      },
+    ],
+    tags: [[{ ref: "refs/tags/v0.1.0" }]],
+    releaseRuns: [],
+  };
+
+  test("a scoped babysitter sees only the pull requests it watches", async () => {
+    const value = await snapshot(
+      fakeGitHub({ ...base, pullRequests: [openPr(800), openPr(801)] }),
+      now,
+      [801],
+    );
+    expect(value.pullRequests.map((pr) => pr.number)).toEqual([801]);
+  });
+
+  test("a watched pull request that merged reports whether it has shipped", async () => {
+    const value = await snapshot(
+      fakeGitHub({
+        ...base,
+        pullRequests: [],
+        prViews: {
+          "801": { state: "MERGED", mergeCommit: { oid: "m801" } },
+          "802": { state: "CLOSED", mergeCommit: null },
+        },
+      }),
+      now,
+      [801, 802],
+    );
+    // No release run for the tag: production is not deployed, so nothing
+    // has shipped yet.
+    expect(value.landings).toEqual([
+      { pullRequest: 801, state: "merged", mergeSha: "m801", shippedIn: null },
+      { pullRequest: 802, state: "closed", mergeSha: "", shippedIn: null },
+    ]);
+  });
+
+  test("the oldest open main-red issue is the claim on repairing main", async () => {
+    const value = await snapshot(
+      fakeGitHub({
+        ...base,
+        issues: [
+          {
+            number: 9,
+            url: "u9",
+            title: "later",
+            createdAt: "2026-09-24T02:00:00Z",
+          },
+          {
+            number: 7,
+            url: "u7",
+            title: "first",
+            createdAt: "2026-09-24T01:00:00Z",
+          },
+        ],
+      }),
+      now,
+    );
+    expect(value.repairClaim).toMatchObject({ issue: 7, title: "first" });
   });
 });
