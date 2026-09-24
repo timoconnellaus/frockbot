@@ -112,6 +112,8 @@ export interface ClientRun {
   retryOf?: string;
   retriedBy?: string;
   canRetry?: boolean;
+  /** See `ClientRunV1.landedAt`. */
+  landedAt?: ClientRunLandingV1;
   input: string;
   events: ClientTurnEvent[];
   status: "running" | "completed" | "failed" | "cancelled";
@@ -246,6 +248,8 @@ export type ClientRunEventV1 =
       callId: string;
       botId: string;
       text: string;
+      /** Where in its Turn's Session log it was said; see `ClientRunV1.landedAt`. */
+      seq?: number;
     }
   | {
       type: "tool/result";
@@ -258,6 +262,11 @@ export type ClientRunEventV1 =
       type: "send/to-user";
       payload: SendToUserPayloadV1;
       ordinal: number;
+      /**
+       * Where in its Turn's Session log it was sent; see `ClientRunV1.landedAt`.
+       * Absent only on the marker an unreadable record still owes.
+       */
+      seq?: number;
     }
   | {
       type: "reply/to-caller";
@@ -331,6 +340,19 @@ export interface ClientRunV1 {
   partialText?: string;
   outcome?: ClientRunOutcomeV1;
   via?: { kind: "bot"; name: string; botId: string } | { kind: "voice" };
+  /**
+   * Where the person's message landed, when it arrived while another Turn was
+   * running: that Turn, and the position its Session log had reached. Set
+   * against the `seq` of that Turn's sends, it puts the message where it
+   * landed in the thread: after what the Bot had already said, above what it
+   * said next.
+   */
+  landedAt?: ClientRunLandingV1;
+}
+
+export interface ClientRunLandingV1 {
+  runId: string;
+  seq: number;
 }
 
 export interface ClientRunPageV1 {
@@ -760,6 +782,7 @@ function projectionUnits(
             callId: `tool-${callCount}`,
             botId: toBot.botId,
             text: truncateWireString(toBot.text, MAX_EVENT_CONTENT_BYTES),
+            seq: event.seq,
           }
         : {
             type: "tool/call",
@@ -808,7 +831,12 @@ function projectionUnits(
     } else if (event.type === "send/to-user") {
       units.push({
         events: [
-          { type: "send/to-user", payload: event.payload, ordinal: sendCount },
+          {
+            type: "send/to-user",
+            payload: event.payload,
+            ordinal: sendCount,
+            seq: event.seq,
+          },
         ],
         droppable: true,
       });
@@ -1143,6 +1171,14 @@ export function projectClientRunV1(
       : {}),
     ...(outcome ? { outcome } : {}),
     ...(via ? { via } : {}),
+    ...(run.landedAt
+      ? {
+          landedAt: {
+            runId: truncate(run.landedAt.runId, MAX_RUN_ID_LENGTH),
+            seq: run.landedAt.seq,
+          },
+        }
+      : {}),
   };
 }
 
@@ -1502,6 +1538,19 @@ function status(value: unknown): ClientRunStatusV1 {
   return value;
 }
 
+function sessionPosition(
+  value: Record<string, unknown>,
+  field: string,
+  label: string,
+): number | undefined {
+  const position = value[field];
+  if (position === undefined) return undefined;
+  if (!Number.isSafeInteger(position) || (position as number) < 0) {
+    throw new Error(`${label}.${field} must be a non-negative safe integer`);
+  }
+  return position as number;
+}
+
 function decodeEvent(value: unknown): ClientRunEventV1 | undefined {
   const event = record(value, "run event");
   if (event.type === "run/events-truncated") {
@@ -1550,7 +1599,8 @@ function decodeEvent(value: unknown): ClientRunEventV1 | undefined {
     };
   }
   if (event.type === "message/to-bot") {
-    exactKeys(event, ["type", "callId", "botId", "text"], "run event");
+    exactKeys(event, ["type", "callId", "botId", "text", "seq"], "run event");
+    const seq = sessionPosition(event, "seq", "run event");
     return {
       type: "message/to-bot",
       callId: publicEventId(
@@ -1559,6 +1609,7 @@ function decodeEvent(value: unknown): ClientRunEventV1 | undefined {
       ),
       botId: string(event, "botId", 128, "run event"),
       text: wireString(event, "text", MAX_EVENT_CONTENT_BYTES, "run event"),
+      ...(seq === undefined ? {} : { seq }),
     };
   }
   if (event.type === "tool/result") {
@@ -1582,17 +1633,19 @@ function decodeEvent(value: unknown): ClientRunEventV1 | undefined {
     };
   }
   if (event.type === "send/to-user") {
-    exactKeys(event, ["type", "payload", "ordinal"], "run event");
+    exactKeys(event, ["type", "payload", "ordinal", "seq"], "run event");
     const ordinal = event.ordinal;
     if (!Number.isSafeInteger(ordinal) || (ordinal as number) < 0) {
       throw new Error("run event.ordinal must be a non-negative safe integer");
     }
+    const seq = sessionPosition(event, "seq", "run event");
     return {
       type: "send/to-user",
       payload: decodeSendToUserPayloadV1(event.payload, "run event.payload", {
         kernelMinted: true,
       }),
       ordinal: ordinal as number,
+      ...(seq === undefined ? {} : { seq }),
     };
   }
   if (event.type === "reply/to-caller") {
@@ -1856,6 +1909,7 @@ function decodeRun(value: unknown): ClientRun {
       "retryOf",
       "retriedBy",
       "canRetry",
+      "landedAt",
     ],
     "run",
   );
@@ -1992,10 +2046,24 @@ function decodeRun(value: unknown): ClientRun {
     }
     partialText = wireString(run, "partialText", MAX_OUTCOME_BYTES, "run");
   }
+  let landedAt: ClientRunLandingV1 | undefined;
+  if (run.landedAt !== undefined) {
+    const landing = record(run.landedAt, "run.landedAt");
+    exactKeys(landing, ["runId", "seq"], "run.landedAt");
+    const seq = sessionPosition(landing, "seq", "run.landedAt");
+    if (seq === undefined) throw new Error("run.landedAt.seq is required");
+    landedAt = {
+      runId: decodeRunIdV1(
+        string(landing, "runId", MAX_RUN_ID_LENGTH, "run.landedAt"),
+      ),
+      seq,
+    };
+  }
   return {
     runId,
     admittedAt,
     ...lineage,
+    ...(landedAt ? { landedAt } : {}),
     input: wireString(run, "input", MAX_INPUT_BYTES, "run"),
     status: runStatus,
     events: decodeEvents(run.events),

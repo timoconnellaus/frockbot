@@ -214,6 +214,7 @@ describe("turn admission through the gateway and the Bot", () => {
       // message this Turn produced (`<runId>:send:<ordinal>`) and how a read
       // it sends back names the same one.
       ordinal: 0,
+      seq: expect.any(Number),
       payload: {
         type: "widget",
         widget: { prompt: "Which day?", options: ["Tuesday", "Thursday"] },

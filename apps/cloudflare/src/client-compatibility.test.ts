@@ -1,5 +1,10 @@
 import { expect, test } from "bun:test";
-import { CLIENT_COMPATIBILITY } from "@frockbot/core/protocol-schemas";
+import {
+  CLIENT_COMPATIBILITY,
+  CLIENT_PROTOCOL_VERSION,
+  SUPPORTED_PROTOCOL_MAX,
+  SUPPORTED_PROTOCOL_MIN,
+} from "@frockbot/core/protocol-schemas";
 import {
   CLIENT_HELLO_HEADER,
   UPDATE_APP_MESSAGE,
@@ -8,7 +13,7 @@ import {
 
 const hello = {
   schemaVersion: 1,
-  protocolVersion: 1,
+  protocolVersion: CLIENT_PROTOCOL_VERSION,
   nativeVersion: "0.7.163",
   catalogs: [],
 };
@@ -38,7 +43,8 @@ test("unsupported or malformed clients get plain update copy before routing", as
     { ...hello, nativeVersion: "1.2" },
     { ...hello, nativeVersion: "0.7.163\n" },
     { ...hello, nativeVersion: "0.7.163-" },
-    { ...hello, protocolVersion: 2 },
+    { ...hello, protocolVersion: SUPPORTED_PROTOCOL_MAX + 1 },
+    { ...hello, protocolVersion: SUPPORTED_PROTOCOL_MIN - 1 },
     { ...hello, protocolVersion: 0 },
     { ...hello, nativeVersion: "99999999999999999.0.0" },
     "{",

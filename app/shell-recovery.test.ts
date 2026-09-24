@@ -280,6 +280,7 @@ describe("Bot recovery on this application", () => {
         },
       },
       ordinal: 0,
+      seq: expect.any(Number),
     });
     expect(second.events.some((event) => event.type === "send/to-user")).toBe(
       true,

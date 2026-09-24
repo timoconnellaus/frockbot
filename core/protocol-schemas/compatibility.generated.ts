@@ -1,8 +1,8 @@
 // Generated from client-wire.schema.json. Do not edit.
 export const CLIENT_COMPATIBILITY = {
   schemaVersion: 1,
-  protocolMin: 1,
-  protocolMax: 1,
+  protocolMin: 2,
+  protocolMax: 2,
   catalogs: [],
 } as const;
 export const SUPPORTED_PROTOCOL_MIN = CLIENT_COMPATIBILITY.protocolMin;
