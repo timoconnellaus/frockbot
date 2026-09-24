@@ -30,8 +30,53 @@ import {
   type ApprovalListViewV1,
   type ApprovalRecordV1,
 } from "@frockbot/app/shell/approvals";
+import {
+  cardApprovalBindingKeyV1,
+  decodeCardApprovalRecordV1,
+  type CardDecisionWordingV1,
+} from "@frockbot/app/shell/cards";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import { openInputDeliveryTurnV1 } from "../shell/input-delivery.js";
+
+/**
+ * What a person changed on a Plugin's card before approving it, as the
+ * Plugin that drew the card restated it.
+ *
+ * The decision a card asks for is bound to the digest of the values it was
+ * drawn with (`shell:card-approval:`). A card the person can edit is decided
+ * about the values they left in it, so the binding is moved to the digest of
+ * those — and the Approval's words with it — in the same transaction that
+ * records the decision. There is no instant at which the person has approved
+ * one message while the binding still names another.
+ */
+export interface ApprovalRevisionV1 {
+  pluginId: string;
+  surfaceId: string;
+  /**
+   * The digest the binding held when the Plugin was asked. A binding that has
+   * moved since was moved by somebody else's answer, and this one is refused
+   * rather than written over it.
+   */
+  from: string;
+  /** The digest of what the decision covers now. */
+  digest: string;
+  /** The words the Approval is recorded with from now on. */
+  wording: CardDecisionWordingV1;
+}
+
+/**
+ * The card's binding moved between the Plugin restating the edit and the
+ * decision landing, so the edit no longer describes the card being decided.
+ * Nothing is written.
+ */
+export class ApprovalRevisionConflictError extends Error {
+  constructor(approvalId: string) {
+    super(
+      `approval "${approvalId}" is no longer bound to the values that were edited`,
+    );
+    this.name = "ApprovalRevisionConflictError";
+  }
+}
 
 /**
  * Every pending approval this Bot's alarm now owes an expiry, expired in one
@@ -72,6 +117,7 @@ async function settleApproval(
   approvalId: string,
   decision: "approved" | "denied" | "expired",
   decidedBy: "user" | "expiry",
+  revision?: ApprovalRevisionV1,
 ): Promise<{
   approval: ApprovalRecordV1;
   status: "recorded" | "replayed";
@@ -91,8 +137,12 @@ async function settleApproval(
     if (approval.decision !== "pending") {
       return { approval, status: "replayed" as const };
     }
+    const asked =
+      revision === undefined
+        ? approval
+        : await reviseApprovalV1(transaction, approval, revision);
     const decided: ApprovalRecordV1 = {
-      ...approval,
+      ...asked,
       decision,
       decidedAt: at,
       decidedBy,
@@ -138,6 +188,44 @@ async function settleApproval(
 }
 
 /**
+ * Moves one card's binding onto the values the person edited it to, and
+ * answers the Approval as it now reads. Refuses, writing nothing, when the
+ * binding no longer holds this decision or no longer holds what the Plugin
+ * was asked to revise.
+ */
+async function reviseApprovalV1(
+  transaction: {
+    get<T>(key: string): Promise<T | undefined>;
+    put(key: string, value: unknown): Promise<void>;
+  },
+  approval: ApprovalRecordV1,
+  revision: ApprovalRevisionV1,
+): Promise<ApprovalRecordV1> {
+  const key = cardApprovalBindingKeyV1(revision.pluginId, revision.surfaceId);
+  const binding = decodeCardApprovalRecordV1(
+    await transaction.get<unknown>(key),
+  );
+  if (
+    !binding?.approvalIds.includes(approval.approvalId) ||
+    binding.digest !== revision.from
+  ) {
+    throw new ApprovalRevisionConflictError(approval.approvalId);
+  }
+  if (binding.digest !== revision.digest) {
+    await transaction.put(key, { ...binding, digest: revision.digest });
+  }
+  const { rationale: _drawn, ...unworded } = approval;
+  return {
+    ...unworded,
+    action: revision.wording.action,
+    risk: revision.wording.risk,
+    ...(revision.wording.rationale === undefined
+      ? {}
+      : { rationale: revision.wording.rationale }),
+  };
+}
+
+/**
  * The Bot's approvals, newest first. Decided cards are carried beside the
  * pending ones so the card in the transcript can say what was decided rather
  * than going quiet the moment somebody answers it.
@@ -172,12 +260,18 @@ export async function listApprovals(
 /**
  * One decision, from a person. The durable write happens before this answers,
  * so the 200 is a statement about state and not about intent.
+ *
+ * `revision` is what they changed on the card they decided it on, when they
+ * changed something (`app/cards/bot.ts`). It is applied only by the write that
+ * records the decision: a replay reads back the answer already given, about
+ * the values it was given for.
  */
 export async function decideApproval(
   state: ShellBotStateV1,
   identity: BotIdentity,
   approvalId: string,
   command: ApprovalDecisionCommandV1,
+  revision?: ApprovalRevisionV1,
 ): Promise<ApprovalDecisionReceiptV1> {
   await state.authority.validateIdentity(identity);
   const settled = await settleApproval(
@@ -185,6 +279,7 @@ export async function decideApproval(
     approvalId,
     command.decision,
     "user",
+    revision,
   );
   // Only the write that decided it dispatches — a second click answers
   // `replayed` and reaches no laptop — and only `approved` does. An expiry

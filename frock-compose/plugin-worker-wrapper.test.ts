@@ -49,6 +49,9 @@ const decodeTriggerInvocation = new Function(
 const decodeCardActionInvocation = new Function(
   `${BOT_ISOLATE_INVOCATION_SOURCE}\nreturn decodeCardActionInvocation;`,
 )() as Decode;
+const decodeReviseCardInvocation = new Function(
+  `${BOT_ISOLATE_INVOCATION_SOURCE}\nreturn decodeReviseCardInvocation;`,
+)() as (value: unknown) => Record<string, unknown>;
 const decodeRenderCardInvocation = new Function(
   `${BOT_ISOLATE_INVOCATION_SOURCE}\nreturn decodeRenderCardInvocation;`,
 )() as Decode;
@@ -1110,11 +1113,16 @@ type CardRun = (
   messages?: unknown[];
   input?: string;
   covers?: Record<string, unknown>;
+  decision?: Record<string, unknown>;
 }>;
 
-const { runRenderCard, runCardAction } = new Function(
-  `${BOT_ISOLATE_DEADLINE_SOURCE}\n${BOT_ISOLATE_INVOCATION_SOURCE}\n${BOT_ISOLATE_ERROR_TEXT_SOURCE}\n${BOT_ISOLATE_CARD_SOURCE}\nreturn { runRenderCard, runCardAction };`,
-)() as { runRenderCard: CardRun; runCardAction: CardRun };
+const { runRenderCard, runCardAction, runReviseCard } = new Function(
+  `${BOT_ISOLATE_DEADLINE_SOURCE}\n${BOT_ISOLATE_INVOCATION_SOURCE}\n${BOT_ISOLATE_ERROR_TEXT_SOURCE}\n${BOT_ISOLATE_CARD_SOURCE}\nreturn { runRenderCard, runCardAction, runReviseCard };`,
+)() as {
+  runRenderCard: CardRun;
+  runCardAction: CardRun;
+  runReviseCard: CardRun;
+};
 
 describe("the generated wrapper's card handlers", () => {
   const messages = [{ version: "v1.0", createSurface: { surfaceId: "s-1" } }];
@@ -1554,6 +1562,138 @@ describe("the generated wrapper's card handlers", () => {
         "mail",
       ),
     ).toThrow(/must be a function/);
+  });
+
+  function reviseInvocation(overrides: Record<string, unknown> = {}) {
+    return {
+      schemaVersion: 1,
+      pluginId: "mail",
+      cardId: "draft",
+      surfaceId: "mail-draft-1",
+      dataModel: { subject: "Edited" },
+      record: { subject: "Drawn" },
+      botId: "bot-1",
+      sessionId: "user-1:bot-1",
+      runId: "card-action:mail-draft-1:1",
+      turnId: "card-action:mail-draft-1:1",
+      generationId: "gen-1",
+      deadlineMs: 1_000,
+      ...overrides,
+    };
+  }
+
+  const decision = { action: "Send it", risk: "medium" };
+
+  test("an edited card is put to its revise, which restates what the decision covers", async () => {
+    const edits: unknown[] = [];
+    expect(
+      await runReviseCard(
+        reviseInvocation(),
+        () =>
+          cardPlugin({
+            render: () => messages,
+            revise: (edit: unknown) => {
+              edits.push(edit);
+              return {
+                covers: { subject: "Edited" },
+                decision,
+                messages,
+              };
+            },
+          }),
+        contextFor,
+      ),
+    ).toEqual({
+      schemaVersion: 1,
+      status: "revised",
+      covers: { subject: "Edited" },
+      decision,
+      messages,
+    });
+    expect(edits).toEqual([
+      {
+        cardId: "draft",
+        surfaceId: "mail-draft-1",
+        dataModel: { subject: "Edited" },
+        record: { subject: "Drawn" },
+      },
+    ]);
+  });
+
+  // A card that never said it takes edits is decided as it was drawn: its
+  // fields are the person's answer, and saying so costs the Plugin nothing.
+  test("a card with no revise is unchanged, not a failure", async () => {
+    expect(
+      await runReviseCard(
+        reviseInvocation(),
+        () => cardPlugin({ render: () => messages }),
+        contextFor,
+      ),
+    ).toEqual({ schemaVersion: 1, status: "unchanged" });
+  });
+
+  test("a refused edit is deliberate; a revision naming nothing, a throw and an overrun are not", async () => {
+    expect(
+      await runReviseCard(
+        reviseInvocation(),
+        () =>
+          cardPlugin({
+            render: () => messages,
+            revise: () => ({ drop: true, reason: "not an address" }),
+          }),
+        contextFor,
+      ),
+    ).toEqual({
+      schemaVersion: 1,
+      status: "drop",
+      deliberate: true,
+      reason: "not an address",
+    });
+    for (const revise of [
+      () => ({ covers: { subject: "Edited" } }),
+      () => ({ decision }),
+      () => undefined,
+      () => {
+        throw new Error("no draft today");
+      },
+    ]) {
+      const answer = await runReviseCard(
+        reviseInvocation(),
+        () => cardPlugin({ render: () => messages, revise }),
+        contextFor,
+      );
+      expect(answer.status).toBe("drop");
+      expect(answer.deliberate).toBeUndefined();
+    }
+    const late = await runReviseCard(
+      reviseInvocation({ deadlineMs: 25 }),
+      () => cardPlugin({ render: () => messages, revise: never }),
+      contextFor,
+    );
+    expect(late.status).toBe("drop");
+    expect(late.reason).toMatch(/exceeded its deadline of 25ms/);
+  });
+
+  test("a revise must be a function, and its invocation is decoded on the way in", () => {
+    expect(() =>
+      declarations.declaredCards(
+        { cards: { draft: { render: () => undefined, revise: "yes" } } },
+        "mail",
+      ),
+    ).toThrow(/revise must be a function/);
+    expect(decodeReviseCardInvocation(reviseInvocation())).toMatchObject({
+      dataModel: { subject: "Edited" },
+    });
+    expect(() =>
+      decodeReviseCardInvocation(reviseInvocation({ dataModel: [] })),
+    ).toThrow(/data model is invalid/);
+    const { record: _record, ...recordless } = reviseInvocation();
+    expect(() => decodeReviseCardInvocation(recordless)).toThrow(
+      /invalid fields/,
+    );
+    expect(() =>
+      decodeReviseCardInvocation(reviseInvocation({ action: "send" })),
+    ).toThrow(/invalid fields/);
   });
 
   test("a render invocation is decoded on the way in", () => {

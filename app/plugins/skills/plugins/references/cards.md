@@ -89,6 +89,19 @@ export const cards: Record<string, PluginCard> = {
   the draft you are holding, not the values the Bot passed to the card tool,
   which you may have ignored. A draw that asks for a decision and declares no
   `covers`, or no `decision`, is refused rather than recorded.
+- A card the person may edit before deciding — a draft's recipients, its
+  subject — binds its fields into the data model (a `TextField` whose `value`
+  is `{ "path": "/subject" }`) and creates its surface with
+  `sendDataModel: true`. When they change a field and approve, the kernel
+  calls your card's `revise({ cardId, surfaceId, dataModel, record }, ctx)`
+  before recording the decision. Answer `{ covers, decision, messages? }`:
+  what the decision now covers, in what words, and optionally an
+  `updateDataModel` settling the card onto those values. The kernel binds the
+  Approval to that `covers`, so store what you will act on — your tool later
+  acts on exactly it. Return `{ drop: true, reason }` to refuse the edit: the
+  person reads the reason and nothing is decided. A card with no `revise` is
+  decided as it was drawn, whatever its fields hold, and nothing is asked of
+  you when nothing changed or the person declined.
 - `actions` are your own handlers, one per name declared in `plugin.json` and
   reached as `plugin/<pluginId>/<action>` from a component's `action` property.
   A press runs the handler with the Bot's authority and redraws the card — it

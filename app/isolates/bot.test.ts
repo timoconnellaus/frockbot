@@ -445,6 +445,33 @@ describe("one email, sent for the Bot that asked", () => {
     });
   });
 
+  // A send nobody can vouch for may have reached its recipients, so the
+  // decision stays spent: trying again could deliver the mail twice.
+  test("a send whose outcome is unknown spends the decision", async () => {
+    const subject = sending({
+      [approvalKeyV1("ap-1")]: approval(),
+      ...(await binding()),
+    });
+    let attempts = 0;
+    subject.state.env.EMAIL_SENDER = {
+      send: () => {
+        attempts += 1;
+        return Promise.resolve({
+          status: "unknown" as const,
+          reason: "the message may have been sent: internal",
+        });
+      },
+    } as never;
+    const request = call(requestValues());
+    expect(await isolateEmail(subject.state, request)).toMatchObject({
+      status: "unknown",
+    });
+    const replayed = await isolateEmail(subject.state, request);
+    expect(replayed).toMatchObject({ status: "unavailable" });
+    expect((replayed as { reason: string }).reason).toMatch(/already sent/);
+    expect(attempts).toBe(1);
+  });
+
   // The two causes are different facts about the deployment, and a person
   // told the wrong one is told this Bot cannot send mail when it can.
   test("admission and a missing sender are told apart", async () => {

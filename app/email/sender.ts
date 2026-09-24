@@ -5,11 +5,12 @@
 // one place a message actually leaves. Cloudflare Email Service is this
 // deployment's choice (2026-09-15), reached through a `send_email` binding;
 // a deployment that has bound none sends nothing and says so, which is what
-// the email card then draws on its face.
+// the email Plugin then tells the Bot in so many words.
 //
-// The message is composed here rather than by the caller so every header a
-// person could forge — the sender, the reply relationship, the line breaks —
-// is written by code that already knows it is untrusted input.
+// The binding's structured `send` composes the message itself — the headers,
+// the encoding, the `Message-ID` — so nothing a draft says is ever written
+// into a raw header here. One call is one message to every recipient, which
+// the provider accepts or refuses whole.
 
 /** One message, as the kernel accepts it. Addresses are already validated. */
 export interface EmailSendRequestV1 {
@@ -21,174 +22,130 @@ export interface EmailSendRequestV1 {
 }
 
 /**
- * A send is reported by what actually left. One envelope out is a send, and a
- * send is never retried — so a provider that refused recipient two after
- * accepting recipient one answers `sent` and names the second in
- * `undelivered`, rather than an `unavailable` a caller would try again and
- * deliver twice. `unavailable` means nothing left at all.
+ * What one send came to. `unavailable` means nothing left and the caller may
+ * try again once the reason is fixed. `unknown` means the provider may have
+ * accepted it: the call failed in a way that does not say, so it is never
+ * tried again — a retry could deliver the message twice.
  */
 export type EmailSendOutcomeV1 =
-  | { status: "sent"; messageId: string; undelivered?: string[] }
-  | { status: "unavailable"; reason: string };
+  | { status: "sent"; messageId: string }
+  | { status: "unavailable"; reason: string }
+  | { status: "unknown"; reason: string };
 
 /** The deployment's sender. Structural, so no Package is imported to send. */
 export interface EmailSenderV1 {
   send(request: EmailSendRequestV1): Promise<EmailSendOutcomeV1>;
 }
 
-/** What the platform's `send_email` binding takes, structurally. */
+/**
+ * The message builder form of the platform's `send_email` binding,
+ * structurally: `SendEmail.send(EmailMessageBuilder)` in
+ * `@cloudflare/workers-types`, narrowed to what a note to a person uses.
+ */
 export interface EmailBindingV1 {
-  send(message: unknown): Promise<void>;
+  send(message: {
+    from: string;
+    to: string[];
+    cc?: string[];
+    subject: string;
+    text: string;
+    headers?: Record<string, string>;
+  }): Promise<{ messageId: string }>;
 }
 
 /**
- * A `Message-Id` for one send, in the sender's own domain. The id is what an
- * answer quotes in `In-Reply-To`, so it is minted here and returned to the
- * caller rather than left to the provider.
+ * The codes Email Service refuses a message with before accepting any of it
+ * (developers.cloudflare.com/email-service/api/send-emails/workers-api/, read
+ * 2026-09-24). Every other failure — `E_DELIVERY_FAILED`,
+ * `E_INTERNAL_SERVER_ERROR`, a thrown error with no code, a dropped
+ * connection — does not say whether the message left, so it is `unknown`.
  */
-export function emailMessageIdV1(from: string): string {
-  const domain = from.slice(from.lastIndexOf("@") + 1);
-  return `<${crypto.randomUUID()}@${domain}>`;
-}
+const REFUSED_BEFORE_SENDING_V1: ReadonlySet<string> = new Set([
+  "E_VALIDATION_ERROR",
+  "E_FIELD_MISSING",
+  "E_TOO_MANY_RECIPIENTS",
+  "E_TOO_MANY_ATTACHMENTS",
+  "E_SENDER_NOT_VERIFIED",
+  "E_RECIPIENT_NOT_ALLOWED",
+  // Only thrown while dropping suppressed recipients is off, when the whole
+  // message is refused rather than sent to the rest.
+  "E_RECIPIENT_SUPPRESSED",
+  "E_SENDER_DOMAIN_NOT_AVAILABLE",
+  "E_CONTENT_TOO_LARGE",
+  "E_RATE_LIMIT_EXCEEDED",
+  "E_DAILY_LIMIT_EXCEEDED",
+  "E_HEADER_NOT_ALLOWED",
+  "E_HEADER_USE_API_FIELD",
+  "E_HEADER_VALUE_INVALID",
+  "E_HEADER_VALUE_TOO_LONG",
+  "E_HEADER_NAME_INVALID",
+  "E_HEADERS_TOO_LARGE",
+  "E_HEADERS_TOO_MANY",
+]);
 
-/** One header, from a value already sanitised and folded. */
-function headerLine(name: string, value: string): string {
-  return `${name}: ${value}`;
-}
-
-/** Anything that could start another header, removed. */
-function headerValue(value: string): string {
-  return value.replace(/[\r\n]+/g, " ");
-}
-
-/**
- * A header value as RFC 2047 encoded-words: UTF-8, Base64, split so that no
- * word passes the 75-octet limit and no multi-byte character is cut in half,
- * and folded onto continuation lines so no header line approaches 998.
- */
-function encodedWords(value: string): string {
-  const bytes = new TextEncoder().encode(value);
-  const words: string[] = [];
-  for (let start = 0; start < bytes.length;) {
-    let end = Math.min(start + 45, bytes.length);
-    while (end < bytes.length && (bytes[end]! & 0xc0) === 0x80) end -= 1;
-    let binary = "";
-    for (const byte of bytes.subarray(start, end))
-      binary += String.fromCharCode(byte);
-    words.push(`=?utf-8?B?${btoa(binary)}?=`);
-    start = end;
-  }
-  return words.join("\r\n ");
-}
-
-/**
- * Text in a header: left exactly as it is while it is plain ASCII, so the
- * common message is the bytes it always was, and encoded when it is not —
- * a header is not covered by the body's `charset`, and a recipient's client
- * reading raw UTF-8 there shows mojibake rather than what was written.
- */
-function headerText(value: string): string {
-  const sanitised = headerValue(value);
-  return /^[\x20-\x7e\t]*$/.test(sanitised)
-    ? sanitised
-    : encodedWords(sanitised);
-}
-
-/**
- * An address list. Every address is ASCII by the validators in front of this
- * seam, which forbid whitespace and angle brackets, so each is emitted as the
- * bare address it is — there is no display name for free text to reach.
- */
-function headerAddressList(values: string[]): string {
-  return values.map(headerValue).join(", ");
-}
-
-/**
- * The RFC 5322 message one request becomes: plain text, UTF-8, no
- * attachments. A Card's draft is a note to a person.
- */
-export function composeEmailMessageV1(
-  request: EmailSendRequestV1,
-  from: { address: string; messageId: string },
-): string {
-  const headers = [
-    headerLine("From", headerValue(from.address)),
-    headerLine("To", headerAddressList(request.to)),
-    ...(request.cc && request.cc.length > 0
-      ? [headerLine("Cc", headerAddressList(request.cc))]
-      : []),
-    headerLine("Subject", headerText(request.subject)),
-    headerLine("Message-ID", headerValue(from.messageId)),
-    ...(request.inReplyTo === undefined
-      ? []
-      : [
-          headerLine("In-Reply-To", headerValue(request.inReplyTo)),
-          headerLine("References", headerValue(request.inReplyTo)),
-        ]),
-    headerLine("Date", new Date().toUTCString()),
-    "MIME-Version: 1.0",
-    'Content-Type: text/plain; charset="utf-8"',
-    "Content-Transfer-Encoding: 8bit",
-  ];
-  return `${headers.join("\r\n")}\r\n\r\n${request.body.replace(/\r?\n/g, "\r\n")}\r\n`;
+/** The platform's words for a failure, and its code when it gave one. */
+function failureOf(error: unknown): { code?: string; message: string } {
+  const code =
+    typeof error === "object" && error !== null && "code" in error
+      ? (error as { code?: unknown }).code
+      : undefined;
+  return {
+    ...(typeof code === "string" ? { code } : {}),
+    message: error instanceof Error ? error.message : String(error),
+  };
 }
 
 /**
  * The deployment's sender, when it has one: a `send_email` binding and the
  * address it sends from. Absent either, there is no sender — never a partial
  * one that fails at the moment a person presses Send.
- *
- * `EmailMessage` is imported only when a message is actually sent, and only
- * on a deployment that bound a sender: a static import of a platform module
- * this Worker may not have is a Worker that does not start.
  */
 export function createBindingEmailSenderV1(env: {
   SEND_EMAIL?: EmailBindingV1;
   EMAIL_SENDER_ADDRESS?: string;
 }): EmailSenderV1 | undefined {
   const binding = env.SEND_EMAIL;
-  const address = env.EMAIL_SENDER_ADDRESS;
+  const address = env.EMAIL_SENDER_ADDRESS?.trim();
   if (!binding || !address) return undefined;
   return {
     async send(request) {
-      const messageId = emailMessageIdV1(address);
-      const raw = composeEmailMessageV1(request, { address, messageId });
-      const recipients = [...request.to, ...(request.cc ?? [])];
-      const undelivered: string[] = [];
-      let delivered = 0;
-      let reason = "the message could not be sent";
       try {
-        const { EmailMessage } = (await import("cloudflare:email")) as {
-          EmailMessage: new (from: string, to: string, raw: string) => unknown;
-        };
-        // One message per recipient: the binding takes a single envelope
-        // recipient. Progress is recorded as it goes, because once one
-        // envelope has left the caller must never be told to try again.
-        for (const recipient of recipients) {
-          try {
-            await binding.send(new EmailMessage(address, recipient, raw));
-            delivered += 1;
-          } catch (error) {
-            undelivered.push(recipient);
-            reason = `the message could not be sent: ${
-              error instanceof Error ? error.message : String(error)
-            }`;
-          }
-        }
+        const { messageId } = await binding.send({
+          from: address,
+          to: request.to,
+          ...(request.cc && request.cc.length > 0 ? { cc: request.cc } : {}),
+          subject: request.subject,
+          text: request.body,
+          // The reply relationship is the one thing a draft says that
+          // becomes a header, and the kernel has already refused a value
+          // carrying a line break.
+          ...(request.inReplyTo === undefined
+            ? {}
+            : {
+                headers: {
+                  "In-Reply-To": request.inReplyTo,
+                  References: request.inReplyTo,
+                },
+              }),
+        });
+        return { status: "sent", messageId };
       } catch (error) {
+        const failure = failureOf(error);
+        const said = `${failure.code === undefined ? "" : `${failure.code}: `}${failure.message}`;
+        if (
+          failure.code !== undefined &&
+          REFUSED_BEFORE_SENDING_V1.has(failure.code)
+        ) {
+          return {
+            status: "unavailable",
+            reason: `the message was not sent: ${said}`,
+          };
+        }
         return {
-          status: "unavailable",
-          reason: `the message could not be sent: ${
-            error instanceof Error ? error.message : String(error)
-          }`,
+          status: "unknown",
+          reason: `the message may have been sent: ${said}`,
         };
       }
-      if (delivered === 0) return { status: "unavailable", reason };
-      return {
-        status: "sent",
-        messageId,
-        ...(undelivered.length > 0 ? { undelivered } : {}),
-      };
     },
   };
 }

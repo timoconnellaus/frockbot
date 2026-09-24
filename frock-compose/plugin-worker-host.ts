@@ -20,6 +20,7 @@ import {
   decodePluginWorkerTriggerResultV1,
   decodePluginWorkerCardActionResultV1,
   decodePluginWorkerRenderCardResultV1,
+  decodePluginWorkerReviseCardResultV1,
   decodePluginWorkerViewResultV1,
   isolateToolSchemaV1,
   ISOLATE_CONTRACT_VERSION,
@@ -51,6 +52,8 @@ import {
   type PluginWorkerCardActionInvocationV1,
   type PluginWorkerCardActionResultV1,
   type PluginWorkerRenderCardInvocationV1,
+  type PluginWorkerReviseCardInvocationV1,
+  type PluginWorkerReviseCardResultV1,
   type PluginWorkerViewInvocationV1,
   type PluginWorkerViewResultV1,
   type ToolDefinition,
@@ -499,6 +502,15 @@ export interface ActivePluginWorker {
     invocation: PluginWorkerCardActionInvocationV1,
   ): Promise<PluginWorkerCardActionResultV1>;
   /**
+   * Puts a card a person edited and approved back to the Plugin that drew
+   * it, which restates what the decision now covers. Gated like a press; a
+   * Plugin that cannot be reached is a drop, and the kernel decides nothing
+   * on edits nobody could restate.
+   */
+  reviseCard(
+    invocation: PluginWorkerReviseCardInvocationV1,
+  ): Promise<PluginWorkerReviseCardResultV1>;
+  /**
    * Draws one of a Plugin's declared cards outside the Bot's tool registry.
    *
    * The Shell's send seam is the caller: the five first-party payload members
@@ -830,6 +842,12 @@ export class PluginWorkerHost {
               }),
             cardAction: (invocation: PluginWorkerCardActionInvocationV1) =>
               Promise.resolve<PluginWorkerCardActionResultV1>({
+                schemaVersion: 1,
+                status: "drop",
+                reason: `plugin "${invocation.pluginId}" did not mount in this generation`,
+              }),
+            reviseCard: (invocation: PluginWorkerReviseCardInvocationV1) =>
+              Promise.resolve<PluginWorkerReviseCardResultV1>({
                 schemaVersion: 1,
                 status: "drop",
                 reason: `plugin "${invocation.pluginId}" did not mount in this generation`,
@@ -1188,6 +1206,41 @@ export class PluginWorkerHost {
               return decodePluginWorkerCardActionResultV1(
                 raw,
                 `plugin "${invocation.pluginId}" card action result`,
+              );
+            } catch (error) {
+              return drop(errorMessage(error));
+            }
+          },
+          reviseCard: async (
+            invocation: PluginWorkerReviseCardInvocationV1,
+          ): Promise<PluginWorkerReviseCardResultV1> => {
+            const drop = (reason: string): PluginWorkerReviseCardResultV1 => ({
+              schemaVersion: 1,
+              status: "drop",
+              reason: reason.slice(0, MAX_FAILURE_REASON_V1),
+            });
+            if (disposed) {
+              return drop(
+                "the plugin worker for this generation is no longer mounted",
+              );
+            }
+            if (!live.has(invocation.pluginId)) {
+              return drop(
+                `plugin "${invocation.pluginId}" did not mount in this generation`,
+              );
+            }
+            const deadlineMs = Math.min(
+              invocation.deadlineMs,
+              ISOLATE_MAX_DEADLINE_MS - PLUGIN_WORKER_HOOK_RACE_MARGIN_MS,
+            );
+            try {
+              const raw = await raceDeadline(
+                () => entrypoint.reviseCard({ ...invocation, deadlineMs }),
+                deadlineMs + PLUGIN_WORKER_HOOK_RACE_MARGIN_MS,
+              );
+              return decodePluginWorkerReviseCardResultV1(
+                raw,
+                `plugin "${invocation.pluginId}" revise card result`,
               );
             } catch (error) {
               return drop(errorMessage(error));

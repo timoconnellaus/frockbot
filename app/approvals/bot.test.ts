@@ -13,7 +13,12 @@ import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import { createMemoryRoutineStorageV1 } from "../routines/testing.js";
 import { INPUT_DELIVERY_CUE_V1 } from "../routines/inbox.js";
 import { inputDeliveryRunIdV1 } from "../shell/input-delivery.js";
-import { decideApproval, expireDueApprovals } from "./bot.js";
+import { cardApprovalBindingKeyV1 } from "@frockbot/app/shell/cards";
+import {
+  ApprovalRevisionConflictError,
+  decideApproval,
+  expireDueApprovals,
+} from "./bot.js";
 
 const IDENTITY = { userId: "user-1", botId: "bot-1" };
 
@@ -169,5 +174,103 @@ describe("the Turn a decision opens", () => {
     expect(first.admitted[0]?.runId).toBe(await approvalRunId("ask-1", "ap-1"));
     expect(later.admitted[0]?.runId).toBe(await approvalRunId("ask-2", "ap-1"));
     expect(first.admitted[0]?.runId).not.toBe(later.admitted[0]?.runId);
+  });
+});
+
+/**
+ * What a person changed on a Plugin's card before approving it (ADR 0030,
+ * amended 2026-09-24). The binding the card's decision is held to moves to
+ * the edited values in the transaction that records the decision, and not
+ * one write earlier or later.
+ */
+describe("a decision on an edited card", () => {
+  const SURFACE = "email_draft.0123456789abcdef";
+
+  async function bound(digest = "digest-drawn") {
+    const subject = await harness([pending("ap-1")]);
+    await subject.storage.put(cardApprovalBindingKeyV1("email", SURFACE), {
+      schemaVersion: 1,
+      pluginId: "email",
+      surfaceId: SURFACE,
+      digest,
+      approvalIds: ["ap-1"],
+      createdAt: "2026-09-23T10:00:00.000Z",
+    });
+    return subject;
+  }
+
+  const revision = {
+    pluginId: "email",
+    surfaceId: SURFACE,
+    from: "digest-drawn",
+    digest: "digest-edited",
+    wording: {
+      action: "Send an email to ana@example.com — Their subject",
+      risk: "medium" as const,
+    },
+  };
+
+  test("binds the decision to what the person sent, in the words it now says", async () => {
+    const { state, storage } = await bound();
+    const receipt = await decideApproval(
+      state,
+      IDENTITY,
+      "ap-1",
+      { schemaVersion: 1, decision: "approved" },
+      revision,
+    );
+    expect(receipt).toMatchObject({
+      status: "recorded",
+      approval: {
+        decision: "approved",
+        action: "Send an email to ana@example.com — Their subject",
+      },
+    });
+    expect(
+      await storage.get(cardApprovalBindingKeyV1("email", SURFACE)),
+    ).toMatchObject({ digest: "digest-edited", approvalIds: ["ap-1"] });
+  });
+
+  test("a binding that moved since the Plugin was asked refuses, writing nothing", async () => {
+    const { state, storage, admitted } = await bound("digest-someone-else");
+    await expect(
+      decideApproval(
+        state,
+        IDENTITY,
+        "ap-1",
+        { schemaVersion: 1, decision: "approved" },
+        revision,
+      ),
+    ).rejects.toBeInstanceOf(ApprovalRevisionConflictError);
+    expect(await storage.get(approvalKeyV1("ap-1"))).toMatchObject({
+      decision: "pending",
+      action: "Send the email",
+    });
+    expect(
+      await storage.get(cardApprovalBindingKeyV1("email", SURFACE)),
+    ).toMatchObject({ digest: "digest-someone-else" });
+    expect(admitted).toEqual([]);
+  });
+
+  test("an answer already given is read back, and the edit moves nothing", async () => {
+    const { state, storage } = await bound();
+    await decideApproval(state, IDENTITY, "ap-1", {
+      schemaVersion: 1,
+      decision: "approved",
+    });
+    const replayed = await decideApproval(
+      state,
+      IDENTITY,
+      "ap-1",
+      { schemaVersion: 1, decision: "approved" },
+      revision,
+    );
+    expect(replayed).toMatchObject({
+      status: "replayed",
+      approval: { action: "Send the email" },
+    });
+    expect(
+      await storage.get(cardApprovalBindingKeyV1("email", SURFACE)),
+    ).toMatchObject({ digest: "digest-drawn" });
   });
 });

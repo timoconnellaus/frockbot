@@ -19,7 +19,10 @@ member per grant the descriptor declares that actually opens a handle:
   plain-text message for this Bot. You hold no credential and name no
   provider. The request names `approvalId` and `surfaceId` of a card
   decision that covers this exact message; one decision sends at most one
-  message. A deployment that has bound no sender answers unavailable. An
+  message, to every recipient at once. A deployment that has bound no sender
+  answers unavailable, and so does a message the provider refused: nothing
+  left, and the decision is still good. `unknown` means it may have left —
+  the decision is spent, and you must never send it again. An
   `http` grant with `"network": { "hosts": [] }` still opens email and
   opens no `fetch` host.
 - `ctx.schedule` (`schedule`) — `{ callId, input }`. `input` is a

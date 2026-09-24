@@ -8,6 +8,7 @@ import entry_committed_chat from "./entries/committed-chat.ts";
 import entry_connect_app_card from "./entries/connect-app-card.ts";
 import entry_connected_apps_1400 from "./entries/connected-apps-1400.ts";
 import entry_delete_account from "./entries/delete-account.ts";
+import entry_edit_email_drafts from "./entries/edit-email-drafts.ts";
 import entry_flock_palette from "./entries/flock-palette.ts";
 import entry_group_chats from "./entries/group-chats.ts";
 import entry_header_align from "./entries/header-align.ts";
@@ -47,6 +48,7 @@ export const WHATS_NEW_ENTRY_FILES_V1 = [
   entry_connect_app_card,
   entry_connected_apps_1400,
   entry_delete_account,
+  entry_edit_email_drafts,
   entry_flock_palette,
   entry_group_chats,
   entry_header_align,

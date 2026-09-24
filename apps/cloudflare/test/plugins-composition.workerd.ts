@@ -32,6 +32,7 @@ import {
   verifyRoutineHookTokenV1,
 } from "@frockbot/app/routines/hook";
 import { decodePendingBotInputV1 } from "@frockbot/app/routines/inbox";
+import { cardValuesDigestV1 } from "@frockbot/app/shell/cards";
 import {
   compositionArtifactSetHashV1,
   compositionGenerationIdV1,
@@ -149,6 +150,7 @@ interface BotRpc {
       surfaceId: string;
       revision: number;
       components: Array<Record<string, unknown>>;
+      dataModel: Record<string, unknown>;
     };
   }>;
   listCompositionGenerations(input: unknown): Promise<{
@@ -3061,6 +3063,178 @@ export const cards = {
     expect(
       (await bot(identity).listCards({ schemaVersion: 1, ...identity })).cards,
     ).toHaveLength(1);
+  });
+
+  // ADR 0030, amended 2026-09-24: a card whose fields the person edits is
+  // decided about what they left there. The Plugin restates the edit, and the
+  // kernel moves the decision's binding onto it in the transaction that
+  // records the decision — so a capability claiming it later is held to what
+  // the person sent, not to the draft they changed.
+  test("a person's edit to a Plugin's card is what their Send decides", async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    const identity = { userId, botId: "bot-1" };
+    await provisionBot(identity);
+    await turn(identity, "run-0");
+
+    const EDIT_PLUGIN_ID = "probe-edit";
+    const EDIT_PLUGIN_SOURCE = `
+export const tools = [];
+export async function execute(tool) {
+  throw new Error("unknown tool " + tool);
+}
+function drawn(surfaceId, subject) {
+  return [
+    {
+      version: "v1.0",
+      createSurface: {
+        surfaceId,
+        sendDataModel: true,
+        dataModel: { subject },
+        components: [
+          { id: "root", component: "Column", children: ["subject", "actions"] },
+          { id: "subject", component: "TextField", label: "Subject", value: { path: "/subject" } },
+          { id: "actions", component: "ApprovalActions", approvalId: "pending", approveLabel: "Send", declineLabel: "Discard" },
+        ],
+      },
+    },
+  ];
+}
+export const cards = {
+  draft: {
+    render: async function (payload, ctx) {
+      await ctx.storage.put({ key: "subject:" + payload.surfaceId, value: payload.data.subject });
+      return {
+        messages: drawn(payload.surfaceId, payload.data.subject),
+        covers: { subject: payload.data.subject },
+        decision: { action: "Send: " + payload.data.subject, risk: "medium" },
+      };
+    },
+    revise: async function (edit, ctx) {
+      const subject = String(edit.dataModel.subject ?? "").trim();
+      if (subject.length === 0) return { drop: true, reason: "a draft needs a subject" };
+      await ctx.storage.put({ key: "subject:" + edit.surfaceId, value: subject });
+      return {
+        covers: { subject },
+        decision: { action: "Send: " + subject, risk: "medium" },
+        messages: [{ version: "v1.0", updateDataModel: { surfaceId: edit.surfaceId, value: { subject } } }],
+      };
+    },
+  },
+};
+`;
+    const descriptor = decodePluginDescriptorV1({
+      id: EDIT_PLUGIN_ID,
+      displayName: "Edit probe",
+      version: "0.0.1",
+      contractVersion: ISOLATE_CONTRACT_VERSION,
+      tools: [],
+      hooks: [],
+      grants: ["storage"],
+      cards: [
+        {
+          id: "draft",
+          displayName: "Draft",
+          description: "Shows a draft the person may edit before sending.",
+          dataSchema: {
+            type: "object",
+            properties: { subject: { type: "string" } },
+            required: ["subject"],
+            additionalProperties: false,
+          },
+          actions: [],
+        },
+      ],
+      contextKeys: ["user", "bot", "session"],
+    });
+    await pinGeneration(userId, [
+      { id: EDIT_PLUGIN_ID, source: EDIT_PLUGIN_SOURCE, descriptor },
+    ]);
+    await switchPlugin(identity, EDIT_PLUGIN_ID, true);
+    const tool = pluginCardToolNameV1(EDIT_PLUGIN_ID, "draft");
+    await callPluginToolRaw(identity, "run-edit-1", EDIT_PLUGIN_ID, tool, {
+      data: { subject: "Drawn" },
+    });
+    await callPluginToolRaw(identity, "run-edit-2", EDIT_PLUGIN_ID, tool, {
+      data: { subject: "Left alone" },
+    });
+
+    const cards = (
+      await bot(identity).listCards({ schemaVersion: 1, ...identity })
+    ).cards;
+    const cardFor = (subject: string) =>
+      cards.find((card) => card.dataModel.subject === subject)!;
+    const edited = cardFor("Drawn");
+    const untouched = cardFor("Left alone");
+    const approvalOf = (card: typeof edited) =>
+      String(card.components.find((part) => part.id === "actions")?.approvalId);
+    const send = (card: typeof edited, subject: string, revision?: number) =>
+      bot(identity).cardAction({
+        schemaVersion: 1,
+        ...identity,
+        command: {
+          schemaVersion: 1,
+          surfaceId: card.surfaceId,
+          revision: revision ?? card.revision,
+          commandId: crypto.randomUUID(),
+          event: {
+            name: `approval/${approvalOf(card)}`,
+            context: { decision: "approved" },
+          },
+          dataModel: { subject },
+        },
+      });
+    const approvals = async () =>
+      new Map(
+        (
+          await bot(identity).listApprovals({ schemaVersion: 1, ...identity })
+        ).approvals.map((approval) => [approval.approvalId, approval]),
+      );
+    const bindingOf = (card: typeof edited) =>
+      runInDurableObject(
+        env.BOT_STATES.getByName(`${userId}:bot-1`),
+        (_instance, state) =>
+          state.storage.get<{ digest: string }>(
+            `shell:card-approval:${EDIT_PLUGIN_ID}:${card.surfaceId}`,
+          ),
+      );
+    const drawnDigest = (await bindingOf(edited))!.digest;
+    expect(drawnDigest).toBe(await cardValuesDigestV1({ subject: "Drawn" }));
+
+    // An edit the Plugin refuses decides nothing, and the person reads why.
+    const refused = await send(edited, "   ");
+    expect(refused.routed).toBe("approval");
+    expect(refused.failure).toMatch(/a draft needs a subject/);
+    expect((await approvals()).get(approvalOf(edited))?.decision).toBe(
+      "pending",
+    );
+    expect((await bindingOf(edited))!.digest).toBe(drawnDigest);
+
+    // Their words are the decision: the binding now digests what they sent,
+    // the Approval says it, and the card holds it for every device.
+    const sent = await send(edited, "Edited");
+    expect(sent.failure).toBeUndefined();
+    expect(sent.card.dataModel).toEqual({ subject: "Edited" });
+    expect(sent.card.revision).toBeGreaterThan(edited.revision);
+    const decided = (await approvals()).get(approvalOf(edited));
+    expect(decided).toMatchObject({
+      decision: "approved",
+      action: "Send: Edited",
+    });
+    expect((await bindingOf(edited))!.digest).toBe(
+      await cardValuesDigestV1({ subject: "Edited" }),
+    );
+
+    // A Send over fields left as they were asks the Plugin nothing and
+    // decides exactly what was drawn.
+    const plain = await send(untouched, "Left alone");
+    expect(plain.failure).toBeUndefined();
+    expect((await approvals()).get(approvalOf(untouched))).toMatchObject({
+      decision: "approved",
+      action: "Send: Left alone",
+    });
+    expect((await bindingOf(untouched))!.digest).toBe(
+      await cardValuesDigestV1({ subject: "Left alone" }),
+    );
   });
 
   test("a Plugin whose module does not parse leaves the page and its switch standing", async () => {

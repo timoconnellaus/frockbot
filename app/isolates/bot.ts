@@ -964,8 +964,10 @@ export async function isolateEmail(
   if (claim.status !== "claimed") return claim.failure;
   const outcome = await sender.send(message);
   // Nothing left, so nothing was spent: the decision is still good and the
-  // Bot may try again once the deployment can send.
-  if (outcome.status !== "sent") {
+  // Bot may try again once the deployment can send. An outcome nobody can
+  // vouch for keeps the claim: the decision may have sent its message, and
+  // it sends at most one.
+  if (outcome.status === "unavailable") {
     await state.ctx.storage.delete(cardApprovalUseKeyV1(approvalId));
   }
   return outcome;

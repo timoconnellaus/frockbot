@@ -304,7 +304,7 @@ export type IsolateWorkspaceOutcomeV1 =
  * the credential that sends mail: the deployment's own sender does, the
  * message leaves attributed to the Bot that asked, and the plugin learns only
  * whether it went. A deployment that has bound no sender answers unavailable,
- * which is what a card then says on its face.
+ * which the Plugin then tells the Bot in so many words.
  */
 export interface IsolateEmailRequestV1 {
   /**
@@ -328,12 +328,16 @@ export interface IsolateEmailRequestV1 {
 }
 
 /**
- * `undelivered` names the addresses the provider refused after at least one
- * envelope had already left. The message went, so it is a send and never
- * a failure a caller could retry — retrying would send it twice.
+ * One message is one send: every recipient rides the one message the
+ * provider accepts or refuses whole. `unavailable` means nothing left, so the
+ * decision that authorized it is still good. `unknown` means the provider may
+ * have accepted it — the call failed in a way that does not say — so the
+ * decision is spent and the send is never tried again: a second try could
+ * deliver the mail twice.
  */
 export type IsolateEmailOutcomeV1 =
-  | { status: "sent"; messageId: string; undelivered?: string[] }
+  | { status: "sent"; messageId: string }
+  | { status: "unknown"; reason: string }
   | IsolateCapabilityFailureV1;
 
 /** What one message may carry. A note to a person, not a mailing. */

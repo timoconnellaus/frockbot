@@ -419,6 +419,42 @@ describe("the generator", () => {
     }
   });
 
+  test("binds a sender allowed to send from the profile's one address", () => {
+    const profile = {
+      ...loadProfileV1("hosted"),
+      email: { senderAddress: "bot@frockbot.com" },
+    };
+    expect(() => validateProfileV1(profile, "hosted")).not.toThrow();
+    const app = generateWorkerConfigV1("app", { profile });
+    expect(app.config.send_email).toEqual([
+      {
+        name: "SEND_EMAIL",
+        allowed_sender_addresses: ["bot@frockbot.com"],
+      },
+    ]);
+    expect((app.config.vars as Config).EMAIL_SENDER_ADDRESS).toBe(
+      "bot@frockbot.com",
+    );
+    // The app Worker is the only one that sends.
+    const portal = generateWorkerConfigV1("adminPortal", { profile });
+    expect(portal.config.send_email).toBeUndefined();
+    // And a profile that names no sender binds none: the deployment sends no
+    // email and says so, which is what hosted and staging do today.
+    const unset = generateWorkerConfigV1("app", {
+      profile: loadProfileV1("hosted"),
+    });
+    expect(unset.config.send_email).toBeUndefined();
+    expect(unset.config.vars as Config).not.toHaveProperty(
+      "EMAIL_SENDER_ADDRESS",
+    );
+    expect(() =>
+      validateProfileV1(
+        { ...profile, email: { senderAddress: "not an address" } },
+        "hosted",
+      ),
+    ).toThrow();
+  });
+
   test("names the artifact the deployment uploaded, not the placeholder", () => {
     // A Worker whose `DEFAULT_APPLICATION_HASH` still says `foundation-v1` looks
     // in R2 for an object nobody put there.
