@@ -138,6 +138,28 @@ void main() {
     expect(find.text('+2'), findsOneWidget);
   });
 
+  testWidgets('a face wears the Bot\'s own colour', (tester) async {
+    await tester.pumpWidget(
+      const MaterialApp(
+        home: Center(
+          child: GroupAvatars(
+            faces: [
+              GroupFace(
+                botId: 'bob',
+                name: 'Bob',
+                characterId: 'pixel',
+                primary: '#22aa44',
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+    final avatar = tester.widget<CharacterAvatar>(find.byType(CharacterAvatar));
+    expect(avatar.primary, '#22aa44');
+    expect(avatar.characterId, 'pixel');
+  });
+
   group('the pane', () {
     late MemoryStore store;
     late GroupApi native;
