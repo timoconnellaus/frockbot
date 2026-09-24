@@ -77,7 +77,7 @@ Load one with `skill_load` — `{"path": "managed/plugins", "reference": "module
 - `sections.md` — a settings.sections view on the Plugin's card.
 - `panels.md` — `conversation.panel` and `bot.nav`, and `panel_focus`.
 - `pages.md` — a panel that is your own HTML page, and its bridge.
-- `microphone.md` — a page that listens, with the whole guitar tuner FrockBot ships.
+- `microphone.md` — a page that listens, with a whole guitar tuner.
 - `cards.md` — declaring a card, drawing it, approvals and actions.
 - `limits.md` — what you cannot do, and what a publish never is.
 - `troubleshooting.md` — check, publish, mount and health failures.

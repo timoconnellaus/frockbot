@@ -206,8 +206,7 @@ function memberShipsFromCatalogV1(
   return (
     member.packageId === plugin.pluginId &&
     canonicalJson(member.artifact) === canonicalJson(plugin.artifact) &&
-    canonicalJson(member.descriptor) === canonicalJson(plugin.descriptor) &&
-    canonicalJson(member.pages ?? null) === canonicalJson(plugin.pages ?? null)
+    canonicalJson(member.descriptor) === canonicalJson(plugin.descriptor)
   );
 }
 

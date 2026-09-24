@@ -40,18 +40,12 @@ says so.
 
 ## A guitar tuner, whole
 
-FrockBot ships a Tuner Plugin, off until the person switches it on for a Bot
-on its Plugins page. When someone just wants to tune, point them at it. Write
-your own when they want something it does not do — another temperament, a
-ukulele's strings, a drone to tune against. This is how the built-in one is
-made, under an id of your own: `tuner` is the deployment's.
-
 `plugin.json`:
 
 ```json
 {
-  "id": "guitar-tuner",
-  "displayName": "Guitar tuner",
+  "id": "tuner",
+  "displayName": "Tuner",
   "version": "1.0.0",
   "contractVersion": 7,
   "tools": [],

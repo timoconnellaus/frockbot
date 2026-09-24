@@ -6,7 +6,6 @@ import {
   decodeBotPluginsCommandV1,
 } from "@frockbot/app/plugins/page";
 import { decodePanelFocusCommandV1 } from "@frockbot/app/plugins/panels";
-import { seededPluginPageV1 } from "@frockbot/app/plugins/catalog";
 import { accessEmailV1 } from "@frockbot/app/admin/shared";
 import {
   admissionRefusedResponse,
@@ -1043,15 +1042,10 @@ export function createGateway(
     // Anonymous and ahead of everything: a Plugin page is fetched by a
     // credentialless frame, and its own CSP is its whole posture.
     if (isPluginPagePathV1(url.pathname)) {
-      const stored = dependencies.artifacts.loadPluginPage?.bind(
-        dependencies.artifacts,
-      );
-      // A seeded Plugin's page travels in the bundle; a Bot's is in R2.
       return servePluginPageV1(
         request,
         url,
-        async (contentHash) =>
-          seededPluginPageV1(contentHash) ?? (await stored?.(contentHash)),
+        dependencies.artifacts.loadPluginPage?.bind(dependencies.artifacts),
       );
     }
 
