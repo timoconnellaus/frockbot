@@ -218,7 +218,8 @@ export class ComposioClient {
   /**
    * How one app signs in, created once per project: the provider's own OAuth
    * app, or a custom config for a scheme that needs nothing of ours — the
-   * person supplies the key on the hosted page, or there is nothing to supply.
+   * person supplies the key, or their own developer app, on the hosted page,
+   * or there is nothing to supply.
    */
   async createAuthConfig(
     toolkitSlug: string,

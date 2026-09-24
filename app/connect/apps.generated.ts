@@ -580,6 +580,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "API_KEY",
   ],
   [
+    "azure_monitor_activity_log",
+    "Azure Monitor Activity Log",
+    "Query Azure Monitor Activity Log events and retrieve category metadata for one subscription using delegated Microsoft OAuth.",
+    "OAUTH2",
+  ],
+  [
     "backendless",
     "Backendless",
     "Backendless is a comprehensive backend-as-a-service (BaaS) platform providing scalable backend functionality for mobile and web applications, including user authentication,…",
@@ -791,10 +797,22 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "API_KEY",
   ],
   [
+    "bitwarden",
+    "Bitwarden",
+    "Bitwarden is a secure password management solution providing encrypted vaults, cross-platform sync, and enterprise-grade security tools for storing and sharing credentials.",
+    "S2S_OAUTH2",
+  ],
+  [
     "blackbaud",
     "Blackbaud",
     "Blackbaud offers cloud-based software for nonprofits, schools, and healthcare institutions, supporting fundraising, financial management, and donor engagement in mission-driven…",
     "managed",
+  ],
+  [
+    "blackboard",
+    "Blackboard",
+    "Anthology Adopt powered by Pendo allows institutions to gain insights on Blackboard Learn usage and take action through in-app messages, digital walkthrough guides, and tooltips.",
+    "OAUTH2",
   ],
   [
     "bland_ai",
@@ -959,6 +977,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "managed",
   ],
   [
+    "box_mcp",
+    "Box MCP",
+    "Search, retrieve, analyze, and manage enterprise content stored in Box through Box's hosted MCP server.",
+    "OAUTH2",
+  ],
+  [
     "boxhero",
     "Boxhero",
     "BoxHero is a cloud-based inventory management solution designed for small to medium-sized businesses, offering real-time updates, barcode scanning, team collaboration, and…",
@@ -1016,6 +1040,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "brevo",
     "Brevo",
     "Brevo (formerly Sendinblue) is an all-in-one email and SMS marketing platform that provides transactional messaging, marketing automation, contact management, and CRM tools to…",
+    "API_KEY",
+  ],
+  [
+    "brex",
+    "Brex",
+    "Brex provides corporate credit cards, spend management, and financial tools tailored for startups and tech businesses to optimize cash flow, accounting, and growth.",
     "API_KEY",
   ],
   [
@@ -1077,6 +1107,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "Bubble",
     "Bubble is a visual programming language and a PaaS developed by Bubble Group.",
     "API_KEY",
+  ],
+  [
+    "buffer",
+    "Buffer",
+    "Buffer is a social media management platform for planning, creating, scheduling, and publishing content across connected channels.",
+    "OAUTH2",
   ],
   [
     "bug_recorder",
@@ -1524,6 +1560,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "API_KEY",
   ],
   [
+    "clio_manage",
+    "Clio Manage",
+    "Clio Manage legal practice management for US, EU, Canada, and Australia accounts.",
+    "OAUTH2",
+  ],
+  [
     "clockify",
     "Clockify",
     "Clockify is a free time tracking software that allows individuals and teams to track work hours across projects.",
@@ -1704,6 +1746,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "API_KEY",
   ],
   [
+    "commerce_layer",
+    "Commerce Layer",
+    "Commerce Layer provides transactional commerce and analytics APIs for managing orders, inventory, pricing, customers, fulfillment, and related ecommerce operations.",
+    "S2S_OAUTH2",
+  ],
+  [
     "common_room_mcp",
     "Common Room MCP",
     "Common Room MCP connects agents to an authorized Common Room instance for catalog and go-to-market community intelligence workflows.",
@@ -1770,10 +1818,22 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "DCR_OAUTH",
   ],
   [
+    "constant_contact",
+    "Constant Contact",
+    "Email marketing and automation platform for small businesses.",
+    "OAUTH2",
+  ],
+  [
     "contactout",
     "ContactOut",
     "ContactOut provides professional profile enrichment, contact discovery, people and company search, email verification, usage reporting, and campaign management APIs.",
     "API_KEY",
+  ],
+  [
+    "contacts_plus",
+    "Contacts+",
+    "Contacts+ provides OAuth-secured access to personal account, contact, and tag data.",
+    "OAUTH2",
   ],
   [
     "contentdrips",
@@ -1882,6 +1942,18 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "Countdown API",
     "Countdown API provides real-time eBay product data, including product details, customer reviews, seller feedback, and search results, enabling businesses and developers to…",
     "API_KEY",
+  ],
+  [
+    "coupa",
+    "Coupa",
+    "Coupa provides a comprehensive business spend management platform with procurement, invoicing, and expense capabilities.",
+    "OAUTH2",
+  ],
+  [
+    "cradl_ai",
+    "Cradl AI",
+    "Cradl AI is an API-first platform for building and operating AI-powered document extraction workflows.",
+    "S2S_OAUTH2",
   ],
   [
     "craft_mcp",
@@ -2008,6 +2080,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "Cutt.ly",
     "Cutt.ly is a URL shortening service that allows users to shorten, manage, and analyze URLs.",
     "API_KEY",
+  ],
+  [
+    "d2lbrightspace",
+    "D2L Brightspace",
+    "D2L Brightspace is a learning management system that provides a comprehensive suite of tools for educators to create, manage, and deliver online courses and learning experiences.",
+    "OAUTH2",
   ],
   [
     "dadata_ru",
@@ -2160,6 +2238,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "DEV Community",
     "DEV Community (dev.to) is a community of software developers where you can publish articles, engage with others, and build your online presence.",
     "API_KEY",
+  ],
+  [
+    "dev_cycle",
+    "DevCycle",
+    "DevCycle is a feature management platform for creating, targeting, releasing, and monitoring feature flags across applications.",
+    "S2S_OAUTH2",
   ],
   [
     "devin_mcp",
@@ -2366,6 +2450,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "API_KEY",
   ],
   [
+    "docusign",
+    "DocuSign",
+    "DocuSign provides eSignature and digital agreement solutions, enabling businesses to send, sign, track, and manage documents electronically.",
+    "OAUTH2",
+  ],
+  [
     "domotz_mcp",
     "Domotz MCP",
     "Domotz MCP lets agents inspect and manage authorized network-monitoring data, devices, alerts, sites, and IT operations through Domotz.",
@@ -2523,6 +2613,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "API_KEY",
   ],
   [
+    "egnyte",
+    "Egnyte",
+    "Egnyte is a cloud-based content collaboration platform that enables secure file sharing, storage, and governance for businesses.",
+    "OAUTH2",
+  ],
+  [
     "elai",
     "Elai",
     "Elai is an AI video generation platform for creating, personalizing, translating, and rendering presenter-led videos from text, templates, and uploaded media.",
@@ -2648,6 +2744,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "EODHD APIs",
     "EODHD APIs provide comprehensive financial data, including historical stock market data, live stock prices, fundamental data, and more, accessible via REST and WebSocket APIs.",
     "API_KEY",
+  ],
+  [
+    "epic_games",
+    "Epic Games",
+    "Epic Games is a video game developer and publisher known for titles like Fortnite and the Unreal Engine, offering an online store and platform.",
+    "OAUTH2",
   ],
   [
     "era_context_mcp",
@@ -3155,6 +3257,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "API_KEY",
   ],
   [
+    "gagelist",
+    "Gagelist",
+    "GageList is a user-friendly calibration management platform that simplifies the integration process with intuitive interfaces and straightforward APIs, enabling seamless…",
+    "S2S_OAUTH2",
+  ],
+  [
     "gamma",
     "Gamma",
     "Gamma helps create beautiful, interactive content and presentations using AI.",
@@ -3372,6 +3480,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "API_KEY",
   ],
   [
+    "google_admin",
+    "Google Admin",
+    "Google Admin Console for managing Google Workspace users, groups, and organizational units.",
+    "OAUTH2",
+  ],
+  [
     "googleads",
     "Google Ads",
     "Google Ads, is an online advertising platform developed by Google, where advertisers bid to display brief advertisements, service offerings, product listings, and videos to web…",
@@ -3396,6 +3510,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "managed",
   ],
   [
+    "google_chat",
+    "Google Chat",
+    "Google Chat API integration for messaging and collaboration in Google Workspace.",
+    "OAUTH2",
+  ],
+  [
     "google_classroom",
     "Google Classroom",
     "Google Classroom is a free web service developed by Google for schools that aims to simplify creating, distributing, and grading assignments.",
@@ -3406,6 +3526,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "Google Cloud Vision",
     "Google Cloud Vision API enables developers to integrate vision detection features into applications, including image labeling, face and landmark detection, optical character…",
     "API_KEY",
+  ],
+  [
+    "google_data_studio",
+    "Google Data Studio",
+    "Google Data Studio is Google's business intelligence platform for creating dashboards and reports; its Asset API searches organizational assets and manages their sharing…",
+    "OAUTH2",
   ],
   [
     "googledocs",
@@ -3460,6 +3586,18 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "Google Tasks",
     "Google Tasks provides a simple to-do list and task management system integrated into Gmail and Google Calendar for quick and easy tracking.",
     "managed",
+  ],
+  [
+    "googlecontacts",
+    "Googlecontacts",
+    "Access and manage Google Contacts data via the Google People API.",
+    "OAUTH2",
+  ],
+  [
+    "googleforms",
+    "Googleforms",
+    "Google Forms is a survey administration software that allows users to create and share online forms and surveys.",
+    "OAUTH2",
   ],
   [
     "gorgias",
@@ -3564,6 +3702,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "managed",
   ],
   [
+    "gusto",
+    "Gusto",
+    "Modern payroll, benefits, and HR management platform for small and medium businesses.",
+    "OAUTH2",
+  ],
+  [
     "habitica",
     "Habitica",
     "Habitica is an open-source task management application that gamifies productivity by turning tasks into role-playing game elements.",
@@ -3643,6 +3787,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "API_KEY",
   ],
   [
+    "help_scout",
+    "Help Scout",
+    "Help Scout provides customer support software with shared inbox, knowledge base, and customer management tools.",
+    "OAUTH2",
+  ],
+  [
     "helpdesk",
     "Helpdesk",
     "HelpDesk is a ticketing system designed to streamline customer support by organizing and managing inquiries efficiently.",
@@ -3701,6 +3851,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "Highergov",
     "HigherGov is a market intelligence platform providing comprehensive data on U.S.",
     "API_KEY",
+  ],
+  [
+    "highlevel",
+    "Highlevel",
+    "HighLevel provides a marketing automation and CRM platform for agencies, featuring funnels, appointment scheduling, two-way texting, and other tools to drive client success.",
+    "OAUTH2",
   ],
   [
     "highlevel_mcp",
@@ -4297,6 +4453,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "API_KEY",
   ],
   [
+    "kommo",
+    "Kommo",
+    "Kommo CRM is a platform for managing customer relationships, sales pipelines, and business processes.",
+    "OAUTH2",
+  ],
+  [
     "kommunicate",
     "Kommunicate",
     "Kommunicate is a customer support platform for managing conversations, users, messages, and agent assignments across human and AI support workflows.",
@@ -4449,6 +4611,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "API_KEY",
   ],
   [
+    "lever",
+    "Lever",
+    "Lever is an applicant tracking system combining sourcing, CRM functionalities, and analytics, helping companies scale recruiting efforts with a collaborative approach.",
+    "API_KEY",
+  ],
+  [
     "leverly",
     "Leverly",
     "Leverly is a platform that integrates with various applications to automate workflows and processes.",
@@ -4459,6 +4627,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "Lexoffice",
     "Lexoffice is a cloud-based accounting software designed for freelancers and small businesses, offering invoicing, expense management, and integration with banks.",
     "API_KEY",
+  ],
+  [
+    "lightspeed",
+    "Lightspeed Retail X-Series",
+    "Read retailer configuration, products, customers, and sales from Lightspeed Retail X-Series across independently connected retailer accounts.",
+    "OAUTH2",
   ],
   [
     "lilt_mcp",
@@ -4501,6 +4675,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "LinkedIn",
     "LinkedIn is a professional networking platform enabling job seekers, companies, and thought leaders to connect, share content, and discover business opportunities.",
     "managed",
+  ],
+  [
+    "linkedin_ads",
+    "Linkedin Ads",
+    "LinkedIn Marketing and Advertising API for managing ad campaigns, analytics, and organization social content.",
+    "OAUTH2",
   ],
   [
     "linkhut",
@@ -4906,10 +5086,28 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "API_KEY",
   ],
   [
+    "onenote",
+    "Microsoft OneNote",
+    "Digital notebook for capturing and organizing notes, drawings, and information.",
+    "OAUTH2",
+  ],
+  [
+    "microsoft_power_bi",
+    "Microsoft Power Bi",
+    "Microsoft Power BI is a business analytics service that provides interactive visualizations and business intelligence capabilities with an interface simple enough for end users…",
+    "OAUTH2",
+  ],
+  [
     "microsoft_teams",
     "Microsoft Teams",
     "Microsoft Teams integrates chat, video meetings, and file storage within Microsoft 365, providing virtual collaboration and communication for distributed teams.",
     "managed",
+  ],
+  [
+    "microsoft_todo",
+    "Microsoft To Do",
+    "Microsoft To Do is a cloud-based task management application that lets users create, organize, and track task lists, tasks, checklist items, and reminders across devices via…",
+    "OAUTH2",
   ],
   [
     "midpage_mcp",
@@ -5193,6 +5391,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "Netlify MCP",
     "Deploy, inspect, and manage Netlify sites, builds, environment configuration, and development workflows through Netlify's hosted MCP server.",
     "DCR_OAUTH",
+  ],
+  [
+    "netsuite",
+    "Netsuite",
+    "NetSuite by Oracle is a cloud-based ERP suite that combines accounting, CRM, e-commerce, and inventory management for comprehensive business oversight.",
+    "OAUTH2",
   ],
   [
     "neuronwriter",
@@ -5706,6 +5910,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "API_KEY",
   ],
   [
+    "paypal",
+    "Paypal",
+    "Online payment system that allows money transfers and serves as an electronic alternative to traditional payment methods.",
+    "S2S_OAUTH2",
+  ],
+  [
     "paystack",
     "Paystack",
     "Nigerian financial technology company that offers payment processing services to businesses in Africa.",
@@ -5812,6 +6022,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "Persona",
     "Persona offers identity infrastructure that allows you to craft personalized and automated verification solutions so you can better understand & protect users.",
     "API_KEY",
+  ],
+  [
+    "personio",
+    "Personio",
+    "Read Personio people, employment, attendance, absence, project, document, and employee-attribute data.",
+    "S2S_OAUTH2",
   ],
   [
     "pexels",
@@ -6319,6 +6535,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "API_KEY",
   ],
   [
+    "railway_mcp",
+    "Railway MCP",
+    "Create, inspect, deploy, and manage Railway projects, services, environments, variables, and deployments through Railway's hosted MCP server.",
+    "OAUTH2",
+  ],
+  [
     "raindrop",
     "Raindrop.io",
     "Raindrop.io is a bookmark manager for organizing, searching, tagging, highlighting, sharing, importing, and exporting saved web content.",
@@ -6329,6 +6551,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "Raisely",
     "Raisely is a fundraising platform that enables organizations to create and manage online fundraising campaigns.",
     "API_KEY",
+  ],
+  [
+    "ramp",
+    "Ramp",
+    "Ramp is a platform that helps you manage your finances, track your income and expenses, and get insights into your business.",
+    "OAUTH2",
   ],
   [
     "ramp_mcp",
@@ -6425,6 +6653,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "Refiner",
     "Refiner is a customer feedback and survey tool designed to help businesses collect and analyze user insights.",
     "API_KEY",
+  ],
+  [
+    "reloadly",
+    "Reloadly",
+    "Reloadly Gift Cards Sandbox provides a safe test environment for browsing gift card products, inspecting transactions, and testing gift card orders without using production…",
+    "S2S_OAUTH2",
   ],
   [
     "remarkety",
@@ -6644,6 +6878,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "managed",
   ],
   [
+    "salesforce_service_cloud",
+    "Salesforce Service Cloud",
+    "Salesforce Service Cloud is a customer service platform providing case management, knowledge base, omnichannel support, and service automation to deliver exceptional customer…",
+    "OAUTH2",
+  ],
+  [
     "salesmate",
     "Salesmate",
     "Salesmate is an AI-powered CRM platform designed to help businesses engage leads, close deals faster, nurture relationships, and provide seamless support through a unified,…",
@@ -6660,6 +6900,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "Sanity",
     "Sanity is a headless CMS platform that provides structured content storage and APIs for modern applications.",
     "API_KEY",
+  ],
+  [
+    "sap_successfactors",
+    "SAP SuccessFactors",
+    "Cloud-based human capital management software covering Employee Central, Recruiting, Performance & Goals, Learning, Compensation, and more.",
+    "SAML",
   ],
   [
     "saperly",
@@ -6969,6 +7215,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "managed",
   ],
   [
+    "sharepoint_graph",
+    "SharePoint Graph",
+    "SharePoint Graph uses Microsoft Graph to access SharePoint sites, lists, list items, document libraries, files, folders, and sharing capabilities.",
+    "OAUTH2",
+  ],
+  [
     "shipday",
     "Shipday",
     "Making Local Deliveries Easy Globally - Powering Local E-commerce.",
@@ -7172,10 +7424,22 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "API_KEY",
   ],
   [
+    "snapchat",
+    "Snapchat",
+    "Snapchat Marketing API and Ads Manager integration for creating and managing ad campaigns, analyzing performance metrics, and accessing business accounts.",
+    "OAUTH2",
+  ],
+  [
     "sncf",
     "SNCF",
     "Access SNCF passenger-information data for train journeys, stations, schedules, service status, and transport-network discovery.",
     "API_KEY",
+  ],
+  [
+    "snowflake",
+    "Snowflake",
+    "Snowflake is a cloud-based data warehouse offering elastic scaling, secure data sharing, and SQL analytics across multiple cloud environments.",
+    "OAUTH2",
   ],
   [
     "snowflake_basic",
@@ -7194,6 +7458,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "Solcast",
     "Solar resource assessment and forecasting data for irradiance and PV power, globally.",
     "API_KEY",
+  ],
+  [
+    "soundcloud",
+    "SoundCloud",
+    "SoundCloud API provides access to a wide range of SoundCloud features for playing, uploading, and managing sounds.",
+    "OAUTH2",
   ],
   [
     "sourcegraph",
@@ -7225,6 +7495,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "Spondyr",
     "Spondyr is a correspondence template management and distribution platform that enables developers to quickly integrate template-driven content delivery via API, supporting…",
     "API_KEY",
+  ],
+  [
+    "spotify",
+    "Spotify",
+    "Spotify is a digital music and podcast streaming service with millions of tracks, personalized playlists, and social sharing features.",
+    "OAUTH2",
   ],
   [
     "spotlightr",
@@ -7638,6 +7914,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
   ],
   ["tidy", "Tidy", "TIDY helps to maintain a clean house.", "API_KEY"],
   [
+    "tiktok",
+    "Tiktok",
+    "TikTok short-form video platform + creation tools + social sharing.",
+    "OAUTH2",
+  ],
+  [
     "tiktok_ads",
     "TikTok Ads",
     "Use TikTok API for Business actions to read advertisers, campaigns, ad groups, ads, audiences, creatives, catalogs, Business Centers, balances, billing, and transactions;…",
@@ -7848,6 +8130,7 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "Twitch is a live streaming platform popular with gamers, creators, and communities, offering real-time interaction and monetization through subscriptions and donations.",
     "managed",
   ],
+  ["twitter", "Twitter", "Twitter, Inc.", "OAUTH2"],
   [
     "twittershots",
     "TwitterShots",
@@ -8036,6 +8319,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "NO_AUTH",
   ],
   [
+    "vibe",
+    "Vibe",
+    "Vibe is a streaming TV advertising platform for managing advertisers, audiences, campaigns, creatives, strategies, and reporting.",
+    "OAUTH2",
+  ],
+  [
     "vibe_prospecting_mcp",
     "Vibe Prospecting MCP",
     "Vibe Prospecting MCP lets agents find, sample, enrich, and export businesses and prospects using Explorium's B2B data and natural-language targeting.",
@@ -8046,6 +8335,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "VideoDB",
     "VideoDB is a video infrastructure platform for storing, searching, understanding, editing, and generating video, audio, and image content.",
     "API_KEY",
+  ],
+  [
+    "vimeo",
+    "Vimeo",
+    "Vimeo is a video platform for hosting, managing, sharing, and interacting with video content and account resources.",
+    "OAUTH2",
   ],
   [
     "viral_loops",
@@ -8181,6 +8476,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
   ],
   ["whop", "Whop", "Making everyone an internet entrepreneur.", "API_KEY"],
   [
+    "wild_apricot",
+    "WildApricot",
+    "WildApricot is an association management platform for administering contacts, memberships, events, finances, email, and online stores.",
+    "S2S_OAUTH2",
+  ],
+  [
     "windsor_ai",
     "Windsor.ai",
     "Windsor.ai connects marketing and business data sources for analytics, reporting, account management, and supported write actions.",
@@ -8253,10 +8554,22 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "API_KEY",
   ],
   [
+    "wordpress_com",
+    "WordPress.com",
+    "Manage WordPress.com and Jetpack-connected sites, content, media, comments, Reader data, statistics, and supported platform features through the centralized WordPress.com API.",
+    "OAUTH2",
+  ],
+  [
     "workable",
     "Workable",
     "Workable is an all-in-one HR software platform that streamlines hiring, employee data management, time tracking, and payroll.",
     "API_KEY",
+  ],
+  [
+    "workday",
+    "Workday",
+    "Workday is a cloud-based enterprise resource planning (ERP) software that provides comprehensive solutions for human capital management, financial management, and analytics.",
+    "OAUTH2",
   ],
   [
     "workday_raas",
@@ -8301,6 +8614,12 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "API_KEY",
   ],
   ["xata", "Xata", "Think data, not databases.", "API_KEY"],
+  [
+    "xero",
+    "Xero",
+    "Xero is a cloud-based accounting software for small businesses, providing invoicing, bank reconciliation, bookkeeping, and financial reporting in real time.",
+    "OAUTH2",
+  ],
   [
     "y_gy",
     "Y gy",
@@ -8445,6 +8764,18 @@ export const CONNECT_GENERATED_APPS_V1: readonly ConnectGeneratedAppV1[] = [
     "Zoom",
     "Zoom is a video conferencing and online meeting platform featuring breakout rooms, screen sharing, and integrations with various enterprise tools.",
     "managed",
+  ],
+  [
+    "zoom_chat",
+    "Zoom Team Chat",
+    "Zoom Team Chat is Zoom's persistent messaging product: channels, direct messages, threads, reactions, file sharing, reminders and shared spaces, all accessible through the Zoom…",
+    "OAUTH2",
+  ],
+  [
+    "zoominfo",
+    "Zoominfo",
+    "ZoomInfo is a go-to-market intelligence platform that provides AI-powered B2B data and sales intelligence to help GTM teams find in-market buyers, build pipeline, and close…",
+    "OAUTH2",
   ],
   ["zulip", "Zulip", "Chat for distributed teams.", "BASIC"],
   [

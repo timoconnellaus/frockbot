@@ -178,6 +178,7 @@ describe("the provider client", () => {
     );
     await c.createAuthConfig("gmail", "FrockBot Gmail", "managed");
     await c.createAuthConfig("freshdesk", "FrockBot Freshdesk", "API_KEY");
+    await c.createAuthConfig("xero", "FrockBot Xero", "OAUTH2");
     expect(
       await c.createOpenAccount({ userId: "tim", authConfigId: "ac_1" }),
     ).toBe("ca_9");
@@ -193,10 +194,17 @@ describe("the provider client", () => {
       authScheme: "API_KEY",
       name: "FrockBot Freshdesk",
     });
-    expect(new URL(recorded[2]!.url).pathname).toBe(
+    // The person's own developer app is asked for on the hosted page, so the
+    // config carries no client id or secret of ours.
+    expect(bodies[2].auth_config).toEqual({
+      type: "use_custom_auth",
+      authScheme: "OAUTH2",
+      name: "FrockBot Xero",
+    });
+    expect(new URL(recorded[3]!.url).pathname).toBe(
       "/api/v3.1/connected_accounts",
     );
-    expect(bodies[2]).toEqual({
+    expect(bodies[3]).toEqual({
       auth_config: { id: "ac_1" },
       connection: {
         user_id: "tim",

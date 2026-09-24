@@ -8,10 +8,10 @@
 //
 // An app is in when the provider's hosted page can finish its sign-in with
 // nothing of ours: an OAuth app the provider runs, dynamic client
-// registration, a key, token or password the person types on that page, or
-// no sign-in at all. An app that needs an OAuth app or a developer credential
-// of our own is left out, and so are AI model providers — models are chosen
-// in Models, not connected as apps.
+// registration, a key, token or password the person types on that page, the
+// person's own developer app — the page asks for its client id and secret and
+// says how to register one — or no sign-in at all. AI model providers are left
+// out: models are chosen in Models, not connected as apps.
 //
 // Run with no arguments to fetch the provider's data, or `--source <file>`
 // to read a saved copy. Nothing fetches this at build time.
@@ -25,6 +25,14 @@ const SOURCE_URL = "https://docs.composio.dev/data/toolkits.json";
 
 /** How an app signs in, in the order a scheme is preferred when it has several. */
 const KEY_SCHEMES = ["API_KEY", "BEARER_TOKEN", "BASIC"] as const;
+
+/**
+ * Schemes whose setup needs something only the person has: their own
+ * developer app's client id and secret, or a company's signing key. The
+ * hosted page asks for it, so these are offered after any way in that asks
+ * for less.
+ */
+const OWN_APP_SCHEMES = ["OAUTH2", "OAUTH1", "S2S_OAUTH2", "SAML"] as const;
 
 /** Model providers, wherever the provider files them. */
 const AI_PROVIDER_CATEGORIES = new Set(["ai models"]);
@@ -95,7 +103,12 @@ interface SourceApp {
   }[];
 }
 
-type Auth = "managed" | "DCR_OAUTH" | "NO_AUTH" | (typeof KEY_SCHEMES)[number];
+type Auth =
+  | "managed"
+  | "DCR_OAUTH"
+  | "NO_AUTH"
+  | (typeof KEY_SCHEMES)[number]
+  | (typeof OWN_APP_SCHEMES)[number];
 
 function authOf(app: SourceApp): Auth | undefined {
   const schemes = app.authSchemes ?? [];
@@ -103,8 +116,7 @@ function authOf(app: SourceApp): Auth | undefined {
   if (managed.includes("OAUTH2") || managed.includes("OAUTH1")) {
     return "managed";
   }
-  // A scheme whose auth config needs a value of ours at creation — a client
-  // id, a developer key — cannot be offered from a shared deployment.
+  // A scheme that needs nothing at setup asks the person for the least.
   const needsNothing = (mode: string) => {
     const detail = app.authConfigDetails?.find((entry) => entry.mode === mode);
     return (
@@ -116,8 +128,13 @@ function authOf(app: SourceApp): Auth | undefined {
     return "DCR_OAUTH";
   }
   if (schemes.includes("NO_AUTH")) return "NO_AUTH";
-  return KEY_SCHEMES.find(
+  const key = KEY_SCHEMES.find(
     (scheme) => schemes.includes(scheme) && needsNothing(scheme),
+  );
+  if (key) return key;
+  // Whatever else the setup needs, the person supplies on the hosted page.
+  return [...KEY_SCHEMES, "DCR_OAUTH" as const, ...OWN_APP_SCHEMES].find(
+    (scheme) => schemes.includes(scheme),
   );
 }
 

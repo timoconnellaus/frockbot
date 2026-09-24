@@ -49,6 +49,11 @@ describe("the connected-app catalog", () => {
     }
   });
 
+  test("offers an app whose sign-in asks for the person's own developer app", () => {
+    expect(connectToolkitV1("xero")?.auth).toBe("OAUTH2");
+    expect(connectToolkitV1("paypal")?.auth).toBe("S2S_OAUTH2");
+  });
+
   test("offers no AI model provider as an app", () => {
     for (const slug of ["openai", "anthropic_administrator", "hugging_face"]) {
       expect(connectToolkitV1(slug)).toBeUndefined();

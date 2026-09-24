@@ -1,15 +1,15 @@
 // The apps a User can connect, and the identifiers they carry through the
 // Package definition, the Connectors surface and a Bot's tool namespaces.
 //
-// Every app the provider's hosted sign-in can finish with nothing of ours —
-// its own OAuth app, dynamic client registration, a key, token or password
-// the person types on the provider's page, or no sign-in at all — is here,
-// generated into `apps.generated.ts` by `scripts/generate-connect-catalog.ts`.
-// AI model providers are not: models are chosen in Models. The featured apps
-// below lead the list in our own words; the rest follow alphabetically in the
-// provider's. The provider behind every one of them is invisible plumbing —
-// no copy anywhere names it, and a Bot sees "gmail", never a vendor's name
-// for Gmail.
+// Every app the provider's hosted sign-in can finish with nothing of ours — its
+// own OAuth app, dynamic client registration, a key, token or password the
+// person types on the provider's page, the person's own developer app, or no
+// sign-in at all — is here, generated into `apps.generated.ts` by
+// `scripts/generate-connect-catalog.ts`. AI model providers are not: models are
+// chosen in Models. The featured apps below lead the list in our own words; the
+// rest follow alphabetically in the provider's. The provider behind every one
+// of them is invisible plumbing — no copy anywhere names it, and a Bot sees
+// "gmail", never a vendor's name for Gmail.
 import { CONNECT_GENERATED_APPS_V1 } from "./apps.generated.js";
 
 /**
@@ -20,10 +20,22 @@ import { CONNECT_GENERATED_APPS_V1 } from "./apps.generated.js";
  * - `DCR_OAUTH`: OAuth whose client registers itself.
  * - `API_KEY`, `BEARER_TOKEN`, `BASIC`: a credential the person types on the
  *   provider's page; it never passes through this deployment.
+ * - `OAUTH2`, `OAUTH1`, `S2S_OAUTH2`, `SAML`: the same, for the person's own
+ *   developer app — the page asks for its client id and secret, or a
+ *   company's signing key, and says how to register one.
  * - `NO_AUTH`: nothing to sign in to.
  */
 export type ConnectAuthV1 =
-  "managed" | "DCR_OAUTH" | "NO_AUTH" | "API_KEY" | "BEARER_TOKEN" | "BASIC";
+  | "managed"
+  | "DCR_OAUTH"
+  | "NO_AUTH"
+  | "API_KEY"
+  | "BEARER_TOKEN"
+  | "BASIC"
+  | "OAUTH2"
+  | "OAUTH1"
+  | "S2S_OAUTH2"
+  | "SAML";
 
 /** One generated row: `[slug, name, description, auth]`. */
 export type ConnectGeneratedAppV1 = readonly [
