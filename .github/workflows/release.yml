@@ -628,7 +628,7 @@ jobs:
           const fs = require('node:fs');
           const path = require('node:path');
 
-          // The Applets SDK is the only published workspace: `packages/` is
+          // The Plugin SDK is the only published workspace: `packages/` is
           // gone, and nothing else in this repository has a consumer off it.
           const directories = [path.join('applets', 'sdk')];
 
@@ -1844,7 +1844,7 @@ jobs:
             -c ../../.deployment/hosted/computer-host/wrangler.jsonc \
             --secrets-file "$secrets_file"
 
-      - name: Deploy Applet build service
+      - name: Deploy Plugin build service
         # The app's APPLET_BUILD service binding names this Worker, so it must
         # exist before the app version can be created. Wrangler builds and
         # pushes the container image here, which needs Docker — the hosted

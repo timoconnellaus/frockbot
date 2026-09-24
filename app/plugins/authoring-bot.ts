@@ -16,11 +16,11 @@ import {
   type CompositionMemberV1,
 } from "@frockbot/core/durable";
 import {
-  APPLET_BUILD_ROUTE,
   APPLET_BUILD_TOKEN_HEADER,
-  decodeAppletBuildProblemV1,
-  decodeAppletBuildResponseV1,
-  encodeAppletBuildRequestV1,
+  PLUGIN_BUILD_ROUTE,
+  decodePluginBuildProblemV1,
+  decodePluginBuildResponseV1,
+  encodePluginBuildRequestV1,
 } from "@frockbot/applets/build-contract";
 import type { PluginBuildServiceV1 } from "@frockbot/app/plugins/authoring";
 import {
@@ -58,13 +58,13 @@ function pluginBuildService(
   return {
     async build(request) {
       const response = await fetcher.fetch(
-        new Request(`https://applet-build.internal${APPLET_BUILD_ROUTE}`, {
+        new Request(`https://applet-build.internal${PLUGIN_BUILD_ROUTE}`, {
           method: "POST",
           headers: {
             "content-type": "application/json",
             [APPLET_BUILD_TOKEN_HEADER]: token,
           },
-          body: JSON.stringify(encodeAppletBuildRequestV1(request)),
+          body: JSON.stringify(encodePluginBuildRequestV1(request)),
         }),
       );
       let body: unknown;
@@ -76,10 +76,10 @@ function pluginBuildService(
         );
       }
       if (!response.ok) {
-        const problem = decodeAppletBuildProblemV1(body);
+        const problem = decodePluginBuildProblemV1(body);
         throw new Error(`${problem.code}: ${problem.message}`);
       }
-      return decodeAppletBuildResponseV1(body);
+      return decodePluginBuildResponseV1(body);
     },
   };
 }

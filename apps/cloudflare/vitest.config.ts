@@ -29,9 +29,9 @@ import {
 const computerHost = createComputerHostFake();
 
 // The build service as well, for the same reason: a build needs a container
-// this pool cannot start. Binding it is what makes `applet_check` and
-// `plugin_check` reach the source-reading half at all — without a binding the
-// hosts answer "the build service is unavailable" and read nothing.
+// this pool cannot start. Binding it is what makes `plugin_check` reach the
+// source-reading half at all — without a binding the host answers "the build
+// service is unavailable" and reads nothing.
 const appletBuild = createAppletBuildFake();
 
 // better-auth's D1 schema, so `auth-schema.workerd.ts` can boot the real

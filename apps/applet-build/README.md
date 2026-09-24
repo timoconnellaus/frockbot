@@ -20,13 +20,11 @@ descriptor → typecheck → bundle → describe
 One route, `POST /build`, defined in [`@frockbot/applets/build-contract`](../../applets/build-contract.ts) and imported by both sides:
 
 ```
-{ version: 1, effectId, kind: "plugin", id, mode: "check" | "build", files: [{ path, text }] }
+{ version: 1, effectId, id, mode: "check" | "build", files: [{ path, text }] }
 → { status: "built", manifest, module }         // one ESM module and what it exports
 | { status: "built" }                           // a passing check
 | { status: "failed", stage, diagnostics }      // stage names where it stopped
 ```
-
-The contract still decodes `kind: "applet"`; the container answers it with a `descriptor` failure.
 
 A Plugin is `plugin.ts` beside `plugin.json`, built by `runPluginBuildV1` into one module with no imports. Its manifest — tools, hooks, services, triggers, views, cards and model providers — is read by running the bundle in Miniflare with no outbound network, never by importing it into the container's own process, which holds the service token. The container does not decode `plugin.json` beyond its `id`: the app Worker holds the descriptor decoder and refuses a publish whose descriptor and manifest disagree. `container/build.ts` decodes the manifest before it believes it and holds the module and the manifest to the ceilings a publish stores.
 

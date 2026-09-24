@@ -1,19 +1,18 @@
 // A Bot writing a Plugin (ADR 0026): the authority behind the `plugin_*`
 // tools, pure over the seams the Bot Durable Object hands it.
 //
-// Source lives in the User's Workspace, builds go through the Applet build
-// service in its Plugin mode, and a publish ends in an *intent* and an
-// approval card rather than in a running Plugin: nothing here widens what
-// the Bot may do. What the User approves is applied by `bot.ts`, after the
-// decision commits.
+// Source lives in the User's Workspace, builds go through the Plugin build
+// service, and a publish ends in an *intent* and an approval card rather than
+// in a running Plugin: nothing here widens what the Bot may do. What the User
+// approves is applied by `bot.ts`, after the decision commits.
 import {
-  APPLET_BUILD_PROTOCOL_VERSION,
-  decodeAppletSourcePathV1,
+  PLUGIN_BUILD_PROTOCOL_VERSION,
+  decodePluginSourcePathV1,
   isPluginBuiltResponseV1,
-  type AppletBuildRequestV1,
-  type AppletBuildResponseV1,
-  type AppletBuildSourceFileV1,
   type PluginBuildManifestV1,
+  type PluginBuildRequestV1,
+  type PluginBuildResponseV1,
+  type PluginBuildSourceFileV1,
 } from "@frockbot/applets/build-contract";
 import {
   createAuthoringSourceRepositoryV1,
@@ -32,7 +31,7 @@ import type {
 } from "@frockbot/core/durable";
 /** The build service, as the plugin authoring host calls it. */
 export interface PluginBuildServiceV1 {
-  build(request: AppletBuildRequestV1): Promise<AppletBuildResponseV1>;
+  build(request: PluginBuildRequestV1): Promise<PluginBuildResponseV1>;
 }
 
 import {
@@ -217,7 +216,7 @@ export function requirePluginSourcePathV1(input: unknown): string {
     throw new Error("path is required");
   }
   try {
-    return decodeAppletSourcePathV1(input);
+    return decodePluginSourcePathV1(input);
   } catch (error) {
     throw new Error(
       `path is invalid: ${error instanceof Error ? error.message : String(error)}`,
@@ -368,7 +367,7 @@ export function createPluginAuthoringHostV1(
     mode: "check" | "build",
     effectId: string,
   ): Promise<
-    | { response: AppletBuildResponseV1; files: AppletBuildSourceFileV1[] }
+    | { response: PluginBuildResponseV1; files: PluginBuildSourceFileV1[] }
     | { failure: string; diagnostics?: string[] }
   > {
     const service = seams.buildService;
@@ -380,15 +379,14 @@ export function createPluginAuthoringHostV1(
     }
     const source = await sourceRepository.readBuildSource(pluginId);
     if ("failure" in source) return source;
-    const request: AppletBuildRequestV1 = {
-      version: APPLET_BUILD_PROTOCOL_VERSION,
+    const request: PluginBuildRequestV1 = {
+      version: PLUGIN_BUILD_PROTOCOL_VERSION,
       effectId,
-      kind: "plugin",
       id: pluginId,
       mode,
       files: source.files,
     };
-    let response: AppletBuildResponseV1;
+    let response: PluginBuildResponseV1;
     try {
       response = await service.build(request);
     } catch (error) {
@@ -409,7 +407,7 @@ export function createPluginAuthoringHostV1(
 
   function descriptorOf(
     pluginId: string,
-    files: readonly AppletBuildSourceFileV1[],
+    files: readonly PluginBuildSourceFileV1[],
   ): PluginDescriptorV1 | { failure: string } {
     const file = files.find((candidate) => candidate.path === "plugin.json");
     if (!file) return { failure: "plugin.json is missing" };

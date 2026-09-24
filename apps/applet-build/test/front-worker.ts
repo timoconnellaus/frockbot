@@ -8,13 +8,13 @@
  * the forward rather than on the router's intentions.
  */
 import { APPLET_BUILD_TOKEN_HEADER } from "@frockbot/applets/build-contract";
-import { routeAppletBuildRequestV1 } from "../src/router.ts";
+import { routePluginBuildRequestV1 } from "../src/router.ts";
 
 export const FRONT_WORKER_TOKEN = "workerd-shared-token";
 
 export default {
   fetch(request: Request): Promise<Response> {
-    return routeAppletBuildRequestV1(
+    return routePluginBuildRequestV1(
       request,
       { hostToken: FRONT_WORKER_TOKEN, shards: 2 },
       (shard) => ({

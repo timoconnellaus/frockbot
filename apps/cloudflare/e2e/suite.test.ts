@@ -1,4 +1,6 @@
 import { describe, expect, test } from "bun:test";
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import {
   appletBuildRequested,
   e2eSuite,
@@ -29,12 +31,18 @@ describe("the browser suite selected for a runner", () => {
     );
   });
 
-  test("the publication runner owns both real build journeys and nothing else", () => {
+  test("the publication runner owns the real build journeys and nothing else", () => {
     expect(e2eSuite({ FROCKBOT_E2E_SUITE: "publication" })).toBe("publication");
     expect(e2eTestSelection("publication")).toEqual({
       testMatch: publicationSpecFiles.map((file) => `**/${file}`),
     });
     expect(suiteNeedsAppletBuild("publication")).toBe(true);
+  });
+
+  test("every publication journey it names is a spec that exists", () => {
+    for (const file of publicationSpecFiles) {
+      expect(existsSync(join(import.meta.dir, file)), file).toBe(true);
+    }
   });
 
   test("a misspelled suite fails instead of silently dropping coverage", () => {

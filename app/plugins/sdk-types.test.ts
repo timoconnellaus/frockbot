@@ -153,7 +153,7 @@ describe("the Plugin SDK declarations", () => {
   });
 });
 
-describe("the Applet build contract", () => {
+describe("the Plugin build contract", () => {
   test("serves exactly the kernel's hook events, in the kernel's order", () => {
     expect([...PLUGIN_BUILD_HOOK_EVENTS_V1]).toEqual([
       ...BOT_ISOLATE_HOOK_EVENTS_V1,

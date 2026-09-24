@@ -63,10 +63,10 @@ jobs:
       - name: Test Computer host runtime
         run: bun run --filter @frockbot/computer-host test:workerd
 
-      - name: Test Applet build service
+      - name: Test Plugin build service
         run: bun run --filter @frockbot/applet-build test
 
-      - name: Test Applet build service runtime
+      - name: Test Plugin build service runtime
         run: bun run --filter @frockbot/applet-build test:workerd
 
   # The Flutter client's own analysis and tests. `apps/native` is the phone

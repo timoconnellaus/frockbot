@@ -18,15 +18,15 @@ import { dirname, join } from "node:path";
 
 import { runPluginBuildV1 } from "@frockbot/applet-sdk/build/plugin";
 import {
-  APPLET_BUILD_LIMITS,
+  PLUGIN_BUILD_LIMITS,
   decodePluginBuildManifestV1,
-  type AppletBuildRequestV1,
-  type AppletBuildResponseV1,
   type PluginBuildManifestV1,
+  type PluginBuildRequestV1,
+  type PluginBuildResponseV1,
 } from "@frockbot/applets/build-contract";
 
-async function materialize(request: AppletBuildRequestV1): Promise<string> {
-  const directory = await mkdtemp(join(tmpdir(), "applet-build-"));
+async function materialize(request: PluginBuildRequestV1): Promise<string> {
+  const directory = await mkdtemp(join(tmpdir(), "plugin-build-"));
   for (const file of request.files) {
     const path = join(directory, file.path);
     await mkdir(dirname(path), { recursive: true });
@@ -42,8 +42,8 @@ async function materialize(request: AppletBuildRequestV1): Promise<string> {
  */
 async function buildPlugin(
   directory: string,
-  request: AppletBuildRequestV1,
-): Promise<AppletBuildResponseV1> {
+  request: PluginBuildRequestV1,
+): Promise<PluginBuildResponseV1> {
   const outcome = await runPluginBuildV1(directory, {
     mode: request.mode,
     id: request.id,
@@ -54,7 +54,7 @@ async function buildPlugin(
       stage: outcome.stage,
       diagnostics: outcome.diagnostics.slice(
         0,
-        APPLET_BUILD_LIMITS.diagnostics,
+        PLUGIN_BUILD_LIMITS.diagnostics,
       ),
     };
   }
@@ -80,11 +80,11 @@ async function buildPlugin(
     };
   }
   const checks: [string, number, number][] = [
-    ["module.js", outcome.module.length, APPLET_BUILD_LIMITS.moduleBytes],
+    ["module.js", outcome.module.length, PLUGIN_BUILD_LIMITS.moduleBytes],
     [
       "manifest.json",
       JSON.stringify(manifest).length,
-      APPLET_BUILD_LIMITS.manifestBytes,
+      PLUGIN_BUILD_LIMITS.manifestBytes,
     ],
   ];
   const diagnostics = checks
@@ -102,25 +102,9 @@ async function buildPlugin(
   return { status: "built", manifest, module: outcome.module };
 }
 
-export async function buildAppletRequestV1(
-  request: AppletBuildRequestV1,
-): Promise<AppletBuildResponseV1> {
-  if (request.kind !== "plugin") {
-    return {
-      status: "failed",
-      stage: "descriptor",
-      diagnostics: [
-        {
-          file: "build",
-          line: 1,
-          column: 1,
-          message:
-            "Only plugin builds are supported; Applets have been removed (ADR 0034).",
-          severity: "error",
-        },
-      ],
-    };
-  }
+export async function buildPluginRequestV1(
+  request: PluginBuildRequestV1,
+): Promise<PluginBuildResponseV1> {
   const directory = await materialize(request);
   try {
     return await buildPlugin(directory, request);

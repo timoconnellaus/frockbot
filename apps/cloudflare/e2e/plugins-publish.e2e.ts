@@ -5,11 +5,11 @@
 // Nothing here is faked and nothing is seeded. `plugin_create` writes the
 // SDK scaffold into the Plugin's source root through the Turn's own
 // Workspace surface, `plugin_check` and `plugin_publish` post that source to
-// the real `apps/applet-build` service in its Plugin mode, the app Worker
-// hash-verifies and stores the module, and the publish ends in an approval
-// card on the Turn's log. Pressing Approve is what makes the Plugin run: the
-// next Turn calls its tool through the Plugin worker, and the answer comes
-// off the Turn's durable log.
+// the real `apps/applet-build` service, the app Worker hash-verifies and
+// stores the module, and the publish ends in an approval card on the Turn's
+// log. Pressing Approve is what makes the Plugin run: the next Turn calls its
+// tool through the Plugin worker, and the answer comes off the Turn's durable
+// log.
 //
 // The build needs Docker. When it is not running this spec fails saying so,
 // rather than passing without having built anything.

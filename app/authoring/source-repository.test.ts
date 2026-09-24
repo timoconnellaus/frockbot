@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { APPLET_BUILD_LIMITS } from "@frockbot/applets/build-contract";
+import { PLUGIN_BUILD_LIMITS } from "@frockbot/applets/build-contract";
 import type {
   WorkspaceFailureStatusV1,
   WorkspaceFilesV1,
@@ -202,7 +202,7 @@ describe("Bot-authored source repositories", () => {
 
       const countStore = workspace(adapter.root);
       const prefix = adapter.sourcePath(adapter.artifactId);
-      for (let index = 0; index <= APPLET_BUILD_LIMITS.files; index += 1) {
+      for (let index = 0; index <= PLUGIN_BUILD_LIMITS.files; index += 1) {
         countStore.set(`${prefix}${index}.ts`, "x");
       }
       expect(
@@ -210,30 +210,30 @@ describe("Bot-authored source repositories", () => {
           .repository(countStore.api, USER)
           .readBuildSource(adapter.artifactId),
       ).toEqual({
-        failure: `${adapter.artifactId} has more than ${APPLET_BUILD_LIMITS.files} source files; the build service takes no more.`,
+        failure: `${adapter.artifactId} has more than ${PLUGIN_BUILD_LIMITS.files} source files; the build service takes no more.`,
       });
 
       const sizeStore = workspace(adapter.root);
       sizeStore.set(
         `${prefix}large.ts`,
-        "x".repeat(APPLET_BUILD_LIMITS.fileText + 1),
+        "x".repeat(PLUGIN_BUILD_LIMITS.fileText + 1),
       );
       expect(
         await adapter
           .repository(sizeStore.api, USER)
           .readBuildSource(adapter.artifactId),
       ).toEqual({
-        failure: `${adapter.artifactId}'s source is over the ${APPLET_BUILD_LIMITS.sourceBytes}-byte ceiling the build service accepts.`,
+        failure: `${adapter.artifactId}'s source is over the ${PLUGIN_BUILD_LIMITS.sourceBytes}-byte ceiling the build service accepts.`,
       });
 
       const aggregateStore = workspace(adapter.root);
       aggregateStore.set(
         `${prefix}first.ts`,
-        "x".repeat(APPLET_BUILD_LIMITS.fileText),
+        "x".repeat(PLUGIN_BUILD_LIMITS.fileText),
       );
       aggregateStore.set(
         `${prefix}second.ts`,
-        "x".repeat(APPLET_BUILD_LIMITS.fileText),
+        "x".repeat(PLUGIN_BUILD_LIMITS.fileText),
       );
       aggregateStore.set(`${prefix}third.ts`, "x");
       expect(
@@ -241,17 +241,17 @@ describe("Bot-authored source repositories", () => {
           .repository(aggregateStore.api, USER)
           .readBuildSource(adapter.artifactId),
       ).toEqual({
-        failure: `${adapter.artifactId}'s source is over the ${APPLET_BUILD_LIMITS.sourceBytes}-byte ceiling the build service accepts.`,
+        failure: `${adapter.artifactId}'s source is over the ${PLUGIN_BUILD_LIMITS.sourceBytes}-byte ceiling the build service accepts.`,
       });
 
       const exactStore = workspace(adapter.root);
       exactStore.set(
         `${prefix}first.ts`,
-        "x".repeat(APPLET_BUILD_LIMITS.fileText),
+        "x".repeat(PLUGIN_BUILD_LIMITS.fileText),
       );
       exactStore.set(
         `${prefix}second.ts`,
-        "x".repeat(APPLET_BUILD_LIMITS.fileText),
+        "x".repeat(PLUGIN_BUILD_LIMITS.fileText),
       );
       const exact = await adapter
         .repository(exactStore.api, USER)
@@ -259,8 +259,8 @@ describe("Bot-authored source repositories", () => {
       expect("files" in exact).toBe(true);
       if ("files" in exact) {
         expect(exact.files.map((file) => file.text.length)).toEqual([
-          APPLET_BUILD_LIMITS.fileText,
-          APPLET_BUILD_LIMITS.fileText,
+          PLUGIN_BUILD_LIMITS.fileText,
+          PLUGIN_BUILD_LIMITS.fileText,
         ]);
       }
     });

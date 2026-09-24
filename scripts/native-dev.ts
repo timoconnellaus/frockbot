@@ -19,7 +19,7 @@
  *   - With `SPRITES_TOKEN`, the Computer host — a real Computer — under its own
  *     `wrangler dev`, because a service binding resolves only through the dev
  *     registry.
- *   - With Docker running, the Applet build service the same way. Both are
+ *   - With Docker running, the Plugin build service the same way. Both are
  *     Cloudflare Containers, so `wrangler dev` builds and runs their images
  *     locally; without Docker the binding reads `[not connected]`.
  *   - The emulator borrows the host's loopback through `adb reverse`. The app
@@ -174,7 +174,7 @@ function ensureDevVars(): Map<string, string> {
     }
   }
 
-  // The Applet build service shares one token with the app Worker the same
+  // The Plugin build service shares one token with the app Worker the same
   // way. It has no upstream credential of its own, so unlike the Computer host
   // there is nothing to gate it on: it is minted whenever the stack starts.
   let buildToken = vars.get("APPLET_BUILD_TOKEN");
@@ -352,7 +352,7 @@ async function serve(
       ],
       appletBuildRoot,
     );
-    build = `the Applet build service on :${appletBuildPort}`;
+    build = `the Plugin build service on :${appletBuildPort}`;
   } else {
     warn("Docker is not running, so APPLET_BUILD reads [not connected]");
   }
@@ -435,7 +435,7 @@ async function serve(
   if (docker) {
     // The first start builds the container image; later ones are seconds.
     await waitFor(
-      `the Applet build service on :${appletBuildPort}`,
+      `the Plugin build service on :${appletBuildPort}`,
       async () =>
         (await fetch(`http://127.0.0.1:${appletBuildPort}/healthz`)).status > 0,
       600_000,
@@ -965,14 +965,14 @@ function status(
     `  Computer host  http://127.0.0.1:${computerHostPort}   (pid ${pid("computer-host")})`,
   );
   console.log(
-    `  Applet build   http://127.0.0.1:${appletBuildPort}   (pid ${pid("applet-build")})`,
+    `  Plugin build   http://127.0.0.1:${appletBuildPort}   (pid ${pid("applet-build")})`,
   );
   console.log(`  Emulator       ${emulatorSerial() ?? "not running"}`);
   console.log(`  State          ${stateDir}`);
   console.log(`  Logs           ${logDir}`);
   if (extra.model) console.log(`  Model          ${extra.model}`);
   if (extra.computer) console.log(`  Computer       ${extra.computer}`);
-  if (extra.build) console.log(`  Applet builds  ${extra.build}`);
+  if (extra.build) console.log(`  Plugin builds  ${extra.build}`);
   console.log();
   say("the app is signed in as the `development` User, an admin here.");
   console.log(

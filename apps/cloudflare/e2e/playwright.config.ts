@@ -153,7 +153,7 @@ export default defineConfig<object, E2EOptions>({
     // seeded into R2 and loaded. The harness additionally waits for
     // `/app-manifest` under a real identity before it reports ready.
     url: `${baseURL}/favicon.ico`,
-    // The Applet build service is a container app, and `wrangler dev` builds
+    // The Plugin build service is a container app, and `wrangler dev` builds
     // its image on start. That is minutes on a cold Docker cache and seconds
     // afterwards, and it happens before the app Worker is up.
     timeout: webServerStartupMs,

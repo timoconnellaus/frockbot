@@ -321,15 +321,15 @@ jobs:
     # Twenty was one crash short: a shard that lost `wrangler dev` twice and
     # then spent two four-minute test timeouts was cancelled at the limit,
     # and a cancelled job uploads nothing, so the cause was gone with it.
-    # Publication's Playwright budget is forty-five minutes — the
-    # container-ready startup it allows plus both journeys at fifteen each,
-    # one after the other — so the job has to outlast that with time left for
-    # checkout, install, Flutter setup, reporters and diagnostic uploads.
-    timeout-minutes: 60
+    # Publication's Playwright budget is thirty minutes — the container-ready
+    # startup it allows plus its journey's fifteen — so the job has to outlast
+    # that with time left for checkout, install, Flutter setup, reporters and
+    # diagnostic uploads.
+    timeout-minutes: 45
 
-    # Four runners share the ordinary corpus. The two real publication journeys
-    # have a fifth lane because they alone need the Applet build container; the
-    # core runners no longer cold-start a real build they never call. Every lane
+    # Four runners share the ordinary corpus. The real publication journey has
+    # a fifth lane because it alone needs the Plugin build container; the core
+    # runners no longer cold-start a real build they never call. Every lane
     # still has its own ports, persist directory and production-path harness.
     strategy:
       fail-fast: false

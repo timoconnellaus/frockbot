@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import type {
-  AppletBuildRequestV1,
-  AppletBuildResponseV1,
+  PluginBuildRequestV1,
+  PluginBuildResponseV1,
 } from "@frockbot/applets/build-contract";
 import {
   decodePluginDescriptorV1,
@@ -146,11 +146,11 @@ const MODULE = "export const tools = [];\nexport const execute = () => 'x';\n";
 
 /** A build service that answers with a real module and honest hashes. */
 function buildsCleanly(
-  calls: AppletBuildRequestV1[] = [],
-  answer?: (request: AppletBuildRequestV1) => Promise<AppletBuildResponseV1>,
+  calls: PluginBuildRequestV1[] = [],
+  answer?: (request: PluginBuildRequestV1) => Promise<PluginBuildResponseV1>,
 ) {
   return {
-    async build(request: AppletBuildRequestV1): Promise<AppletBuildResponseV1> {
+    async build(request: PluginBuildRequestV1): Promise<PluginBuildResponseV1> {
       calls.push(request);
       if (answer) return answer(request);
       if (request.mode === "check") return { status: "built" };
@@ -201,7 +201,7 @@ function harness(
   const storage = new Map<string, unknown>();
   const artifacts = new Map<string, string>();
   const settings = new Map<string, Record<string, unknown>>();
-  const calls: AppletBuildRequestV1[] = [];
+  const calls: PluginBuildRequestV1[] = [];
   const host = createPluginAuthoringHostV1({
     userId: USER,
     botId: "bot-1",
@@ -317,7 +317,6 @@ describe("checking and publishing", () => {
       status: "checked",
     });
     expect(calls[0]).toMatchObject({
-      kind: "plugin",
       id: "notes",
       mode: "check",
       effectId: "tool:1:1:0",
