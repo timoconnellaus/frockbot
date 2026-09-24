@@ -222,16 +222,18 @@ export interface StartConnectionCommandV1 {
   nativeReturnNonce?: string;
   /**
    * The app the person is pressing from, when it is one a hosted flow can
-   * hand back to: the verified link on Android, the custom scheme on a Mac
-   * (`macos-dev` for the local FrockBot Dev build, which has its own scheme).
-   * A browser tab names nothing and is told to return by hand.
+   * hand back to: the verified link on Android, the custom scheme on a Mac or
+   * an iPhone (`macos-dev` and `ios-dev` for the FrockBot Dev builds, which
+   * have their own scheme). A browser tab names nothing and is told to return
+   * by hand.
    */
   returnClient?: ConnectionReturnClientV1;
 }
 
-export type ConnectionReturnClientV1 = "android" | "macos" | "macos-dev";
+export type ConnectionReturnClientV1 =
+  "android" | "macos" | "macos-dev" | "ios" | "ios-dev";
 export const CONNECTION_RETURN_CLIENTS_V1: readonly ConnectionReturnClientV1[] =
-  ["android", "macos", "macos-dev"];
+  ["android", "macos", "macos-dev", "ios", "ios-dev"];
 
 export interface RevokeConnectionCommandV1 {
   schemaVersion: 1;

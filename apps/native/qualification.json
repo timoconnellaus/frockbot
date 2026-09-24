@@ -27,6 +27,11 @@
       "releaseBuild": "passed",
       "verifiedSignIn": "blocked-matching-provisioning-profile"
     },
+    "ios": {
+      "releaseBuild": "unsigned-advisory-ci-only",
+      "signedBuild": "awaiting-team-signing-firebase-apns-and-app-store-connect",
+      "device": "not-run"
+    },
     "fullBudgets": "unqualified",
     "settingsModels": {
       "backendAndRenderers": "passed-paired-owner-and-recovery-scenarios",

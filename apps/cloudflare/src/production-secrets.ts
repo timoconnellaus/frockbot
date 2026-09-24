@@ -246,7 +246,7 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] 
   [
     {
       name: "NATIVE_SLICE_2_AUTH",
-      why: "Native sign-in targets; production enables Android and macOS.",
+      why: "Native sign-in targets; production enables Android, macOS and iOS.",
     },
     {
       name: "DEFAULT_APPLICATION_HASH",

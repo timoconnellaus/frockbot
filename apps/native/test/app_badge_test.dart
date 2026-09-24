@@ -83,8 +83,7 @@ class _ShellApi extends NativeApi {
     String botId, {
     String? cursor,
     String? epoch,
-  }) async =>
-      throw const FormatException('offline fixture');
+  }) async => throw const FormatException('offline fixture');
 }
 
 Map<String, Object?> registration(String botId, String name) => {
@@ -276,6 +275,45 @@ void main() {
         null,
         null,
       ]);
+    });
+
+    test('an iPhone icon takes the number unsaturated, less the focused Bot, and clears to zero', () async {
+      final calls = record('com.frockbot/badge');
+      final sync = AppBadgeSync(const IconBadgePresenter());
+      sync.update(
+        appBadgeFor(
+          unread: directory([
+            view('alpha', count: 99, capped: true),
+            view('beta', count: 40),
+            view('gamma', count: 3),
+          ]),
+          botIds: ['alpha', 'beta', 'gamma'],
+          focusedBotId: 'gamma',
+        ),
+      );
+      await sync.clear();
+      expect(calls.map((call) => call.arguments), [
+        {'count': 140},
+        {'count': 0},
+      ]);
+    });
+
+    test('each platform draws through its own adapter', () {
+      addTearDown(() => debugDefaultTargetPlatformOverride = null);
+      for (final (platform, presenter) in [
+        (TargetPlatform.macOS, DockBadgePresenter),
+        (TargetPlatform.android, LauncherBadgePresenter),
+        (TargetPlatform.iOS, IconBadgePresenter),
+      ]) {
+        debugDefaultTargetPlatformOverride = platform;
+        expect(
+          appBadgePresenterFor(pushReady: () => true).runtimeType,
+          presenter,
+          reason: platform.name,
+        );
+      }
+      debugDefaultTargetPlatformOverride = TargetPlatform.linux;
+      expect(appBadgePresenterFor(pushReady: () => true), isNull);
     });
 
     test('startup keeps the old badge until every Bot is known, then suppresses only the focused Bot', () async {

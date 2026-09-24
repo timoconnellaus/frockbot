@@ -113,7 +113,7 @@
     },
     "nativeAuth": {
       "description": "Which signed clients may receive a sign-in. Absent, the deployment offers no native sign-in at all.",
-      "enum": ["android", "android,macos"]
+      "enum": ["android", "android,macos", "android,macos,ios"]
     },
     "resources": {
       "description": "Names that carry identity. Each is derived from `prefix` when absent.",

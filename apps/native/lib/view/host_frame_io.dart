@@ -112,7 +112,9 @@ window.addEventListener("message", (event) => {
     _loaded = false;
     if (mounted) setState(() => _web = null);
     try {
-      final params = defaultTargetPlatform == TargetPlatform.macOS
+      final params =
+          defaultTargetPlatform == TargetPlatform.macOS ||
+              defaultTargetPlatform == TargetPlatform.iOS
           ? WebKitWebViewControllerCreationParams(
               mediaTypesRequiringUserAction: {
                 PlaybackMediaTypes.audio,

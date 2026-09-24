@@ -133,13 +133,15 @@ async function deliverConnectEvent(
 }
 
 /**
- * The Mac app's custom schemes; the same ones its sign-in return uses. The
- * local FrockBot Dev build is a separate app with its own, so a Connect it
+ * The Apple apps' custom schemes; the same ones their sign-in returns use.
+ * The FrockBot Dev builds are separate apps with their own, so a Connect one
  * started never opens the released app.
  */
-const MACOS_SCHEMES = {
+const APPLE_SCHEMES = {
   macos: "frockbot",
   "macos-dev": "frockbot-dev",
+  ios: "frockbot",
+  "ios-dev": "frockbot-dev",
 } as const;
 
 /**
@@ -148,9 +150,10 @@ const MACOS_SCHEMES = {
  *
  * Which way back depends on the page they were sent to. On Android the
  * verified App Link has already opened the app by the time this renders, and
- * the page is what the browser keeps. On a Mac no browser but Safari opens a
- * Universal Link from a redirect, so the page hands over on the app's scheme
- * with nothing from the query attached. A browser tab is told to return.
+ * the page is what the browser keeps. On a Mac or an iPhone no browser but
+ * Safari opens a Universal Link from a redirect, so the page hands over on the
+ * app's scheme with nothing from the query attached. A browser tab is told to
+ * return.
  */
 export function connectCallbackPageV1(
   client: ConnectionReturnClientV1 | undefined,
@@ -159,8 +162,8 @@ export function connectCallbackPageV1(
   const heading = "Back to FrockBot";
   const footnote =
     "FrockBot shows whether the app connected. If it did not, connect it again from the Marketplace.";
-  if (client === "macos" || client === "macos-dev") {
-    const target = `${MACOS_SCHEMES[client]}://${new URL(origin).host}${connectCallbackPathV1(client)}`;
+  if (client !== undefined && client !== "android") {
+    const target = `${APPLE_SCHEMES[client]}://${new URL(origin).host}${connectCallbackPathV1(client)}`;
     return returnPageV1({
       title: "Back to FrockBot",
       heading,

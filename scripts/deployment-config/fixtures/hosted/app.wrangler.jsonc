@@ -150,7 +150,7 @@
   ],
   "vars": {
     // Native sign-in returns for the Android and signed macOS apps.
-    "NATIVE_SLICE_2_AUTH": "android,macos",
+    "NATIVE_SLICE_2_AUTH": "android,macos,ios",
     "DEFAULT_APPLICATION_HASH": "foundation-v1",
     // The provider is Frock AI; these two values are the *Cloudflare dashboard*
     // resource names, which are still spelled `flock`. Renaming them there is a

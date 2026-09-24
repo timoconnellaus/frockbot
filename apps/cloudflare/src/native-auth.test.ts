@@ -9,8 +9,8 @@ import {
   createNativeAuth,
   readNativeJsonBody,
   NATIVE_RETURN_DEVELOPMENT,
-  NATIVE_MACOS_DEV_SCHEME,
-  NATIVE_MACOS_SCHEME,
+  NATIVE_APPLE_DEV_SCHEME,
+  NATIVE_APPLE_SCHEME,
   nativeReturnUris,
   nativeReturnUriV1,
   type NativeAuthOptions,
@@ -44,6 +44,8 @@ const NATIVE_ORIGIN = "https://bot.frockbot.com";
 const NATIVE_RETURN_ANDROID = nativeReturnUriV1(NATIVE_ORIGIN, "android");
 const NATIVE_RETURN_MACOS = nativeReturnUriV1(NATIVE_ORIGIN, "macos");
 const NATIVE_RETURN_MACOS_DEV = nativeReturnUriV1(NATIVE_ORIGIN, "macos-dev");
+const NATIVE_RETURN_IOS = nativeReturnUriV1(NATIVE_ORIGIN, "ios");
+const NATIVE_RETURN_IOS_DEV = nativeReturnUriV1(NATIVE_ORIGIN, "ios-dev");
 
 function fixture(overrides: Partial<NativeAuthOptions> = {}) {
   let time = Date.parse("2026-09-05T01:00:00Z");
@@ -571,13 +573,23 @@ test("deployment targets are an exact fail-closed switch", () => {
     NATIVE_RETURN_MACOS,
     NATIVE_RETURN_MACOS_DEV,
   ]);
+  expect(nativeReturnUris("android,macos,ios", NATIVE_ORIGIN)).toEqual([
+    NATIVE_RETURN_ANDROID,
+    NATIVE_RETURN_MACOS,
+    NATIVE_RETURN_MACOS_DEV,
+    NATIVE_RETURN_IOS,
+    NATIVE_RETURN_IOS_DEV,
+  ]);
   for (const value of [
     undefined,
     "",
     "true",
     "macos",
+    "ios",
     "android, macos",
     "android,ios",
+    "android,ios,macos",
+    "android,macos, ios",
   ])
     expect(nativeReturnUris(value, NATIVE_ORIGIN)).toEqual([]);
 });
@@ -607,13 +619,16 @@ function gateway(nativeAuth?: ReturnType<typeof createNativeAuth>) {
 }
 
 test("gateway serves public associations and exact returns without loading the application; disabled routes never fall through", async () => {
-  const f = fixture();
+  const f = fixture({
+    returnUris: [NATIVE_RETURN_ANDROID, NATIVE_RETURN_IOS],
+  });
   const enabled = gateway(f.auth);
   const disabled = gateway();
   for (const path of [
     "/.well-known/assetlinks.json",
     "/.well-known/apple-app-site-association",
     "/native/return/android",
+    "/native/return/ios",
   ]) {
     const response = await enabled.fetch(f.request(path));
     expect(response.status).toBe(200);
@@ -648,23 +663,23 @@ test("gateway serves public associations and exact returns without loading the a
   );
   const page = await macReturn.text();
   expect(page).toContain(
-    `${NATIVE_MACOS_SCHEME}://bot.frockbot.com/native/return/macos`,
+    `${NATIVE_APPLE_SCHEME}://bot.frockbot.com/native/return/macos`,
   );
   expect(page).not.toContain("code-9f3a");
   expect(page).not.toContain("state-7c1d");
   // The local FrockBot Dev build is a separate app with its own scheme: its
   // page must never hand the code to the released app's scheme, nor the
   // released app's page to the dev build's.
-  expect(page).not.toContain(`${NATIVE_MACOS_DEV_SCHEME}://`);
+  expect(page).not.toContain(`${NATIVE_APPLE_DEV_SCHEME}://`);
   const devReturn = await gateway(mac.auth).fetch(
     mac.request("/native/return/macos-dev?code=code-9f3a&state=state-7c1d"),
   );
   expect(devReturn.status).toBe(200);
   const devPage = await devReturn.text();
   expect(devPage).toContain(
-    `${NATIVE_MACOS_DEV_SCHEME}://bot.frockbot.com/native/return/macos-dev`,
+    `${NATIVE_APPLE_DEV_SCHEME}://bot.frockbot.com/native/return/macos-dev`,
   );
-  expect(devPage).not.toContain(`${NATIVE_MACOS_SCHEME}://`);
+  expect(devPage).not.toContain(`${NATIVE_APPLE_SCHEME}://`);
   expect(devPage).not.toContain("code-9f3a");
   // Android's verified App Link already opened the app; the page it leaves
   // behind is the same branded page, carrying no script and no scheme link.
@@ -680,9 +695,42 @@ test("gateway serves public associations and exact returns without loading the a
   const androidPage = await androidReturn.text();
   expect(androidPage).toContain("Return to FrockBot to finish signing in");
   expect(androidPage).not.toContain("<script");
-  expect(androidPage).not.toContain(`${NATIVE_MACOS_SCHEME}://`);
+  expect(androidPage).not.toContain(`${NATIVE_APPLE_SCHEME}://`);
   expect(androidPage).not.toContain("code-9f3a");
   expect(androidPage).not.toContain("state-7c1d");
+  // A deployment that names no iPhone target serves no iPhone page.
+  expect(
+    (await gateway(mac.auth).fetch(mac.request("/native/return/ios"))).status,
+  ).toBe(404);
+  // The iPhone app comes back the way the Mac app does, on the same scheme:
+  // no device holds both. Its FrockBot Dev build has its own page and scheme.
+  const apple = fixture({
+    returnUris: nativeReturnUris("android,macos,ios", NATIVE_ORIGIN),
+  });
+  const iosReturn = await gateway(apple.auth).fetch(
+    apple.request("/native/return/ios?code=code-9f3a&state=state-7c1d"),
+  );
+  expect(iosReturn.status).toBe(200);
+  expect(iosReturn.headers.get("content-security-policy")).toMatch(
+    /script-src 'nonce-[0-9a-f-]{36}'/,
+  );
+  const iosPage = await iosReturn.text();
+  expect(iosPage).toContain(
+    `${NATIVE_APPLE_SCHEME}://bot.frockbot.com/native/return/ios"`,
+  );
+  expect(iosPage).not.toContain(`${NATIVE_APPLE_DEV_SCHEME}://`);
+  expect(iosPage).not.toContain("/native/return/macos");
+  expect(iosPage).not.toContain("code-9f3a");
+  const iosDevPage = await (
+    await gateway(apple.auth).fetch(
+      apple.request("/native/return/ios-dev?code=code-9f3a&state=state-7c1d"),
+    )
+  ).text();
+  expect(iosDevPage).toContain(
+    `${NATIVE_APPLE_DEV_SCHEME}://bot.frockbot.com/native/return/ios-dev`,
+  );
+  expect(iosDevPage).not.toContain(`${NATIVE_APPLE_SCHEME}://`);
+  expect(iosDevPage).not.toContain("state-7c1d");
   for (const target of [
     NATIVE_RETURN_MACOS,
     NATIVE_RETURN_MACOS_DEV,
@@ -1172,16 +1220,48 @@ test("ambiguous browser callbacks are refused before identity resolution", async
   }
 });
 
-test("verified return associations name the existing Android signer and exact macOS path", async () => {
+test("verified return associations name the existing Android signer and the Apple returns the deployment serves", async () => {
+  const association = async (flag: string) => {
+    const f = fixture({ returnUris: nativeReturnUris(flag, NATIVE_ORIGIN) });
+    return f.auth.route(f.request("/.well-known/apple-app-site-association"));
+  };
   const f = fixture();
   const android = await f.auth.route(f.request("/.well-known/assetlinks.json"));
-  const apple = await f.auth.route(
-    f.request("/.well-known/apple-app-site-association"),
-  );
   expect(await android!.text()).toContain(
     "61:E6:47:9F:9C:57:55:15:4C:1F:93:9C:DE:48:E8:A7:57:EF:F3:13:6E:54:ED:1D:DA:5F:61:E7:8B:3C:1E:37",
   );
-  expect(await apple!.text()).toContain("Q444L76529.com.frockbot.mobile");
+  // The FrockBot Dev returns are never claimed: Safari would offer them to
+  // the released app.
+  expect(
+    JSON.parse(await (await association("android,macos,ios"))!.text()),
+  ).toEqual({
+    applinks: {
+      details: [
+        {
+          appIDs: ["Q444L76529.com.frockbot.mobile"],
+          components: [
+            { "/": "/native/return/macos" },
+            { "/": "/native/return/ios" },
+          ],
+        },
+      ],
+    },
+  });
+  expect(
+    JSON.parse(await (await association("android,macos"))!.text()),
+  ).toEqual({
+    applinks: {
+      details: [
+        {
+          appIDs: ["Q444L76529.com.frockbot.mobile"],
+          components: [{ "/": "/native/return/macos" }],
+        },
+      ],
+    },
+  });
+  // No Apple app signs in to an Android-only deployment, so no path is
+  // offered to one as a link that would reach a 404.
+  expect((await association("android"))!.status).toBe(404);
 });
 
 function tamper(value: string, at: number): string {

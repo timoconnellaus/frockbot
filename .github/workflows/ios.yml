@@ -1,0 +1,88 @@
+name: iOS
+
+# The iPhone Runner's Swift, its plugins and its pods compile only on a Mac.
+# This builds them unsigned on every change that can move them; signing,
+# TestFlight and the App Store need the team's own credentials
+# (apps/native/README.md, "iOS").
+on:
+  pull_request:
+    paths:
+      - "apps/native/ios/**"
+      - "apps/native/pubspec.yaml"
+      - "apps/native/pubspec.lock"
+      - "apps/native/vendor/**"
+      - "scripts/native-app-icon.swift"
+      - "scripts/mac-dev-icon.swift"
+      - ".github/workflows/ios.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: iOS build (advisory)
+    runs-on: macos-15
+    # Separate advisory job; it is not a required branch-protection check.
+    continue-on-error: true
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
+        with:
+          flutter-version: 3.47.0
+          channel: stable
+          cache: true
+      # They write the iPhone's icons, and are run by hand on a Mac.
+      - name: Type-check the icon scripts
+        run: |
+          swiftc -typecheck scripts/native-app-icon.swift
+          swiftc -typecheck scripts/mac-dev-icon.swift
+      # Plain `pub get`, as `mac-release.yml` resolves it: `--enforce-lockfile`
+      # fails on a freshly downloaded SDK's own workspace.
+      - run: flutter pub get
+        working-directory: apps/native
+      - name: Build the released identity without signing
+        working-directory: apps/native
+        shell: bash
+        run: |
+          set -euo pipefail
+          xcodebuild -version
+          # The client carries no host of its own; `deployments/hosted.json` is
+          # where the hosted origin is written (ADR 0028).
+          origin="https://$(python3 -c '
+          import json, pathlib
+          profile = json.loads(pathlib.Path("../../deployments/hosted.json").read_text())
+          print(profile["workers"]["app"]["hostnames"][0], end="")
+          ')"
+          flutter build ios --release --no-codesign --no-pub \
+            --dart-define=FROCKBOT_ORIGIN="$origin"
+      - name: Check the released identity and the FrockBot Dev switch
+        working-directory: apps/native
+        shell: bash
+        run: |
+          set -euo pipefail
+          plist=build/ios/iphoneos/Runner.app/Info.plist
+          read_plist() { /usr/libexec/PlistBuddy -c "Print :$1" "$plist"; }
+          test "$(read_plist CFBundleIdentifier)" = com.frockbot.mobile
+          test "$(read_plist CFBundleDisplayName)" = FrockBot
+          test "$(read_plist CFBundleURLTypes:0:CFBundleURLSchemes:0)" = frockbot
+          # The development identity is the same project with one switch
+          # flipped; its settings are read rather than paying for a second build.
+          dev="$(xcodebuild -workspace ios/Runner.xcworkspace -scheme Runner \
+            -configuration Release -showBuildSettings FROCKBOT_IOS_DEV=YES 2>/dev/null)"
+          grep -q ' PRODUCT_BUNDLE_IDENTIFIER = com.frockbot.mobile.dev$' <<<"$dev"
+          grep -q ' FROCKBOT_URL_SCHEME = frockbot-dev$' <<<"$dev"
+          grep -q ' ASSETCATALOG_COMPILER_APPICON_NAME = AppIconDev$' <<<"$dev"
+      # CocoaPods writes its integration into the Xcode project on its first
+      # `pod install`, which no Linux checkout can run. The log shows what it
+      # wrote, so a change that moves it can be committed from here.
+      - name: Show what the build wrote into the project
+        if: always()
+        shell: bash
+        run: |
+          git status --short apps/native/ios
+          git diff -- apps/native/ios
+          if [ -f apps/native/ios/Podfile.lock ]; then cat apps/native/ios/Podfile.lock; fi

@@ -52,7 +52,7 @@ A profile is which auth Package is built in, which secrets exist, which workflow
 | identity store   | D1 `AUTH_DB` and a session cookie                                       | none; the Access token is the identity                         |
 | admission        | the `DeploymentPolicy` authority, administered from the admin portal    | the Access policy, which is the allowlist                      |
 | billing          | `STRIPE_SECRET_KEY` set                                                 | never asked for                                                |
-| native sign-in   | `NATIVE_SLICE_2_AUTH=android,macos`                                     | no targets named, so none                                      |
+| native sign-in   | `NATIVE_SLICE_2_AUTH=android,macos,ios`                                 | no targets named, so none                                      |
 | deployables      | five Workers                                                            | three: the app, the Computer host, the Plugin build service    |
 | container images | built from the Dockerfiles by `release.yml`                             | pulled from Docker Hub for the release tag                     |
 | workflows        | `check.yml`, `main.yml`, `release.yml`                                  | none; a deployer runs the installer                            |
@@ -326,8 +326,8 @@ The first seeded Plugin is `email`, `default-off`: a `draft` card over `{to, cc?
 ## 6. Clients
 
 There is one client. `apps/native` is a Flutter app; built for the browser it is
-what `bot.frockbot.com` serves, and built for Android or macOS it is the same
-Dart on a device. The two differ only at four conditional-import seams — the
+what `bot.frockbot.com` serves, and built for Android, macOS or iOS it is the
+same Dart on a device. The two differ only at four conditional-import seams — the
 HTTP client and the state-channel socket, the credential, the sign-in door and
 the durable store — so what differs between the two is the platform's doing,
 never the product's.
@@ -679,11 +679,11 @@ the row's `kind`. The requests a press becomes live in
 `lib/connections/document.dart`: a Connection command goes to
 `/api/connections`, a revocation to the Package's own route, and a hosted grant
 is a `connection/start` whose answer is a URL the app opens after checking it.
-That start names the app's own `returnClient` — `android`, `macos`, or `macos-dev` from the local FrockBot Dev Mac build, and
+That start names the app's own `returnClient` — `android`, `macos`, `ios`, or `macos-dev` and `ios-dev` from the FrockBot Dev builds, and
 nothing from a browser tab or any other platform — so the door sends the person
 back through the page that reopens the app: the verified App Link the manifest
 claims at `/api/connect/callback/android`, or the same page handed to the
-`frockbot://` scheme on a Mac (`frockbot-dev://` and `/macos-dev` for FrockBot Dev). `main.dart` recognises exactly this build's two links
+`frockbot://` scheme on a Mac or an iPhone (`frockbot-dev://` and the `-dev` segment for FrockBot Dev). `main.dart` recognises exactly this build's three links
 (`isConnectReturnV1`) and bumps `connectReturns`, which the page reads its
 frame again on rather than waiting for a lifecycle resume; nothing on the link
 is read, since the next settings read is what settles the Connection. While a
@@ -1013,7 +1013,7 @@ Web search is not a model provider either. `web_search` is the platform-owned `w
 
 **One Package, one Connection Type per app.** `connectDefinitionV1` (`app/connect/definition.ts`) is built from `catalog.ts`, declaring for each app a `connect-<app>` Connection Type (`authorization.kind: "grant"`, `allowMultiple`) and a `connect-<app>-tools` Capability bound to it. The list is every app — some 1,500 — the provider's hosted page can sign in with nothing of ours, generated into `apps.generated.ts` by `scripts/generate-connect-catalog.ts` from the provider's public app data, each with how it signs in (`ConnectAuthV1`): an OAuth app the provider runs (`managed`), dynamic client registration (`DCR_OAUTH`), a key, token or password the person types on the provider's page (`API_KEY`, `BEARER_TOKEN`, `BASIC`), the person's own developer app, whose client id and secret that page asks for with the steps to register one (`OAUTH2`, `OAUTH1`, `S2S_OAUTH2`, `SAML`), or nothing at all (`NO_AUTH`). AI model providers are left out; they are chosen in Models. The featured apps lead the list in our own words; the rest follow alphabetically in the provider's. The Connectors frame names a row by the type when a Package declares more than one (`settings-frame.ts`), so each app is its own row beside a model provider's accounts, with nothing above it; the Marketplace frame pages through every row — connectors first in the order the Package declares them, then model providers by name — and the ordinary connections read carries an app only once it has an account. Enablement is account-wide as every Connection is: connect once, every Bot holds it.
 
-**The hosted grant** (`user.ts`, `backend.ts`). Connect is the Connectors surface's existing `authorize` press: `POST /api/plugins/connect/connections` carries `connection/start`, which the gateway turns into a `connection/oauth` command (`action: "start"`, with the `connectionTypeId` that command grew for this) on the User Durable Object. There the Contribution finds or creates the app's auth config — the provider's own OAuth app, or a custom config for the app's scheme, which asks nothing of us: the person types any key on the provider's hosted page, so it never passes through this deployment — mints a sign-in link for this User with `/api/connect/callback` as its return — under the client's own segment (`android`, `macos`, or `macos-dev` for the local FrockBot Dev build) when the start command named one in `returnClient`, so the Android app's verified App Link opens the app on the redirect and the Mac page hands over on that build's scheme (`frockbot`, or `frockbot-dev` for FrockBot Dev), as the sign-in return does — writes the Connection in `authorizing` with the connected-account id, namespace and app in its safe metadata, and answers the link, which the client opens in the system browser. An app with nothing to sign in to has no page: its account is created live, the Connection settles to `ready` in the same command, and the gateway answers `status: "ready"`, which the client takes without opening a browser. The return page is a `publicRoute` drawn by the shared `app/return-page.ts` template that says to come back and touches no object: an anonymous redirect must never address a Durable Object. The origin of the return is always the deployment's own; the command names only which page. Settling is a `registerConfigurationReadBootstrap`: before every settings read, each `authorizing` Connection is asked about at most every three seconds and moved to `ready` (with a fresh generation) or `failed` (with a line for the person); a sign-in nobody finishes fails after thirty minutes. Disconnect deletes the account upstream with `revoke_on_delete` and retires the Connection. Start and disconnect are keyed by their command id and replayed from the stored receipt.
+**The hosted grant** (`user.ts`, `backend.ts`). Connect is the Connectors surface's existing `authorize` press: `POST /api/plugins/connect/connections` carries `connection/start`, which the gateway turns into a `connection/oauth` command (`action: "start"`, with the `connectionTypeId` that command grew for this) on the User Durable Object. There the Contribution finds or creates the app's auth config — the provider's own OAuth app, or a custom config for the app's scheme, which asks nothing of us: the person types any key on the provider's hosted page, so it never passes through this deployment — mints a sign-in link for this User with `/api/connect/callback` as its return — under the client's own segment (`android`, `macos`, `ios`, or `macos-dev` and `ios-dev` for the FrockBot Dev builds) when the start command named one in `returnClient`, so the Android app's verified App Link opens the app on the redirect and the Mac and iPhone pages hand over on that build's scheme (`frockbot`, or `frockbot-dev` for FrockBot Dev), as the sign-in return does — writes the Connection in `authorizing` with the connected-account id, namespace and app in its safe metadata, and answers the link, which the client opens in the system browser. An app with nothing to sign in to has no page: its account is created live, the Connection settles to `ready` in the same command, and the gateway answers `status: "ready"`, which the client takes without opening a browser. The return page is a `publicRoute` drawn by the shared `app/return-page.ts` template that says to come back and touches no object: an anonymous redirect must never address a Durable Object. The origin of the return is always the deployment's own; the command names only which page. Settling is a `registerConfigurationReadBootstrap`: before every settings read, each `authorizing` Connection is asked about at most every three seconds and moved to `ready` (with a fresh generation) or `failed` (with a line for the person); a sign-in nobody finishes fails after thirty minutes. Disconnect deletes the account upstream with `revoke_on_delete` and retires the Connection. Start and disconnect are keyed by their command id and replayed from the stored receipt.
 
 **Tools** (`agent.ts`, `account-catalog.ts`). For each enabled Capability the runtime host has authorized against a `ready` Connection, `createConfiguredConnectRuntimeContribution` mounts one Tool Namespace named for the app — the toolkit slug, `gmail-2` for a second account — carrying every tool the app has, up to several hundred. The User Durable Object keeps each Connection's account catalog: a directory of every tool's name and description, and the schemas in chunks each well under a Durable Object value, refreshed hourly by its alarm. The namespace lists the directory and resolves one tool at a time (`resolveTool` on the namespace registration): reading a tool's schema or calling it asks the User object for that tool alone, and the Turn pins it through `pinToolCatalog` under the Connection and the tool, so a remount keeps the exact schema it first used. A namespace of more than fifty tools is counted rather than named in the prompt and the bare catalog, and searched by pattern. Nothing is in the prompt for an app nobody connected. A call is `call_dynamic_tool` on that namespace; execution posts to the provider with the deployment key and the account id off the Connection's safe metadata, so no credential is ever leased, opened or logged. A tool-level refusal is an error the model can act on; a transport failure after dispatch says the outcome is unknown and not to repeat it, because the provider offers no idempotency key. A catalog that cannot be read refuses the one tool asked for with a line saying so rather than failing the Turn.
 
@@ -1175,7 +1175,7 @@ Session storage is D1 `AUTH_DB`. There is no `cookieCache` and no `secondaryStor
 
 1. `POST /api/auth/native/start` (unauthenticated) mints an HMAC-signed 5-minute claim; `returnUri` is checked against a deployment-fixed allowlist (`nativeReturnUris` in `apps/cloudflare/src/native-auth.ts`).
 2. The app opens `/native/authorize` in the external browser. That route asks the auth Package who the browser is and otherwise hands it the sign-in step with a return to `/native/complete` — Google on the hosted build; on an Access build the route sits behind Access and always arrives identified.
-3. Completion 302s to the Android App Link `bot.frockbot.com/native/return/android?code=&state=`, or on the Mac to `bot.frockbot.com/native/return/macos` (`/native/return/macos-dev` for the local FrockBot Dev build, which hands over on `frockbot-dev://` so the released app never takes its code). That page hands the same `code` and `state` to the app's `frockbot://` scheme (`nativeReturnPage`, drawn by the shared `app/return-page.ts` template under a per-response script nonce), because only Safari dispatches a Universal Link and only on the user's own click; the app checks the host and path of a scheme return exactly as it checks the verified link (`NativeSignIn.canonical`), and the exchange still names the https return URI.
+3. Completion 302s to the Android App Link `bot.frockbot.com/native/return/android?code=&state=`, on the Mac to `bot.frockbot.com/native/return/macos`, or on an iPhone to `bot.frockbot.com/native/return/ios` (`/native/return/macos-dev` and `/native/return/ios-dev` for the FrockBot Dev builds, which hand over on `frockbot-dev://` so the released app never takes their code). That page hands the same `code` and `state` to the app's `frockbot://` scheme (`nativeReturnPage`, drawn by the shared `app/return-page.ts` template under a per-response script nonce), because only Safari dispatches a Universal Link and only on the user's own click; the app checks the host and path of a scheme return exactly as it checks the verified link (`NativeSignIn.canonical`), and the exchange still names the https return URI.
 4. `POST /api/auth/native/exchange` verifies `SHA-256(verifier)`, the state, the return URI and a byte-exact ClientHello, asks the beta-access authority, commits in the User Durable Object, and returns `Bearer frockbot-native.<claims>.<sig>` with a 7-day lifetime.
 
 The token is stored in the platform keystore through `flutter_secure_storage` (`apps/native/lib/client/store.dart:38`).
@@ -1262,6 +1262,7 @@ Seven workflows live in `.github/workflows/`:
   stills on the pull request.
 - `native.yml` — manual-only native qualification.
 - `mac-release.yml` — the Mac desktop app's own qualification and tag.
+- `ios.yml` — an advisory unsigned iPhone build.
 
 Branch protection is recorded in
 [local validation](local-validation.md#github-configuration): the `main`
@@ -1295,5 +1296,14 @@ tests, and an unsigned `scripts/mac-release.py` build. On a tag,
 `draft` creates a draft GitHub release only; the signed, notarized archive is
 built and uploaded by hand. Mac tags ship independently of the `v*.*.*` cloud
 release. See [the Mac release guide](../apps/native/macos/README.md).
+
+### `.github/workflows/ios.yml`
+
+On pull requests touching the iPhone Runner, the client's native dependencies
+or the icon scripts, an advisory job on macOS type-checks the icon scripts,
+builds the released identity with `flutter build ios --no-codesign`, checks
+the built bundle's identifier, name and scheme, and reads the FrockBot Dev
+switch's build settings. It signs, archives and uploads nothing: those need
+the team's Apple credentials ([`apps/native/README.md`](../apps/native/README.md#ios)).
 
 ---

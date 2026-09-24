@@ -81,6 +81,14 @@ class AppBadge {
     for (final entry in bots.entries) entry.key: entry.value.launcherCount,
   };
 
+  /// The number an iPhone icon shows, which iOS draws without saturating:
+  /// the sum of each counting Bot's best launcher number.
+  int get iconCount => bots.entries.fold(
+    0,
+    (sum, entry) =>
+        sum + (suppressed.contains(entry.key) ? 0 : entry.value.launcherCount),
+  );
+
   @override
   bool operator ==(Object other) =>
       identical(this, other) ||
@@ -163,6 +171,27 @@ class DockBadgePresenter implements AppBadgePresenter {
   bool get needsRefreshWhileAway => true;
 }
 
+/// The iPhone's home-screen icon: a number the app sets on the same channel
+/// the dock uses, drawn by `ios/Runner/FrockBotChannels.swift`.
+class IconBadgePresenter implements AppBadgePresenter {
+  final MethodChannel channel;
+  const IconBadgePresenter({
+    this.channel = const MethodChannel('com.frockbot/badge'),
+  });
+
+  @override
+  Future<void> show(AppBadge badge) =>
+      channel.invokeMethod<void>('set', {'count': badge.iconCount});
+
+  @override
+  Future<void> clear() => channel.invokeMethod<void>('set', {'count': 0});
+
+  /// A suspended app runs nothing to refresh it with; iOS keeps the last
+  /// number it was given, and the next foreground reconciles it.
+  @override
+  bool get needsRefreshWhileAway => false;
+}
+
 /// Android launchers badge from active notifications, which the platform owns.
 ///
 /// Reconciliation policy: docs/notifications.md#application-icon-badge.
@@ -202,6 +231,7 @@ AppBadgePresenter? appBadgePresenterFor({required bool Function() pushReady}) {
   return switch (defaultTargetPlatform) {
     TargetPlatform.macOS => const DockBadgePresenter(),
     TargetPlatform.android => LauncherBadgePresenter(ready: pushReady),
+    TargetPlatform.iOS => const IconBadgePresenter(),
     _ => null,
   };
 }

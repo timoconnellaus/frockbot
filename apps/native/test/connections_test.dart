@@ -1,9 +1,12 @@
 import 'dart:async';
 
+import 'package:flutter/foundation.dart'
+    show debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/connections/document.dart';
+import 'package:frockbot_native/connections/door.dart';
 import 'package:frockbot_native/connections/page.dart';
 import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
@@ -537,12 +540,26 @@ void main() {
     await tester.pumpAndSettle();
   });
 
+  test('each app names its own return page, and a browser tab none', () {
+    addTearDown(() => debugDefaultTargetPlatformOverride = null);
+    for (final (platform, client) in [
+      (TargetPlatform.android, 'android'),
+      (TargetPlatform.macOS, 'macos'),
+      (TargetPlatform.iOS, 'ios'),
+      (TargetPlatform.linux, null),
+    ]) {
+      debugDefaultTargetPlatformOverride = platform;
+      expect(connectReturnClientV1, client, reason: platform.name);
+    }
+  });
+
   test(
-    'a return link is one of this app\'s two return pages, and nothing else',
+    'a return link is one of this app\'s three return pages, and nothing else',
     () {
       for (final link in [
         'https://bot.frockbot.com/api/connect/callback/android?status=success',
         'frockbot://bot.frockbot.com/api/connect/callback/macos',
+        'frockbot://bot.frockbot.com/api/connect/callback/ios',
       ]) {
         expect(isConnectReturnV1(Uri.parse(link)), isTrue, reason: link);
       }
@@ -552,11 +569,15 @@ void main() {
         // Each client's page only on the scheme that page hands over on.
         'frockbot://bot.frockbot.com/api/connect/callback/android',
         'https://bot.frockbot.com/api/connect/callback/macos',
-        // The local FrockBot Dev Mac build's page belongs to that app alone.
+        // The FrockBot Dev builds' pages belong to those apps alone.
         'frockbot-dev://bot.frockbot.com/api/connect/callback/macos-dev',
         'frockbot://bot.frockbot.com/api/connect/callback/macos-dev',
-        // Anything else under the callback path.
+        'frockbot-dev://bot.frockbot.com/api/connect/callback/ios-dev',
+        'frockbot://bot.frockbot.com/api/connect/callback/ios-dev',
+        // The iPhone's page is handed over on its scheme, never claimed.
         'https://bot.frockbot.com/api/connect/callback/ios',
+        // Anything else under the callback path.
+        'frockbot://bot.frockbot.com/api/connect/callback/windows',
         'https://bot.frockbot.com/api/connect/callback/android/extra',
         'https://bot.frockbot.com/native/return/android?code=1&state=2',
         'https://bot.frockbot.com/?bot=primary',

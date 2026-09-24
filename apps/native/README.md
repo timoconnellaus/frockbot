@@ -1,6 +1,6 @@
 # FrockBot client
 
-The one FrockBot client, over the existing cloud commands. Its web build is what `bot.frockbot.com` serves, staged into the app Worker's static assets by `apps/cloudflare/build-flutter-web.ts`. The Android and macOS builds are unqualified: they do not claim Slice 2 acceptance, and [`qualification.json`](qualification.json) records the evidence and what is still missing.
+The one FrockBot client, over the existing cloud commands. Its web build is what `bot.frockbot.com` serves, staged into the app Worker's static assets by `apps/cloudflare/build-flutter-web.ts`. The Android, macOS and iOS builds are unqualified: they do not claim Slice 2 acceptance, and [`qualification.json`](qualification.json) records the evidence and what is still missing.
 
 Use Flutter **3.47.0 / Dart 3.13.0**, framework `4cf24164269a5ebf0c16a028a00727d0e77bbb05`, from `/Users/tim/repos/flutter/bin/flutter`. Do not upgrade it. `pubspec.lock` pins WebView **4.14.1**, Android WebView adapter **4.14.1**, WebKit adapter **3.26.1**, and secure storage **11.0.0**.
 
@@ -19,7 +19,7 @@ On this task's restricted Mac, the SDK cache could not be written. An APFS clone
 
 Voice-originated Bot work, like a message from another Bot, is a centred **Message from Voice** marker in the thread that opens the view-only exchange chat; the marker says queued, stopped or couldn’t answer from durable Bot state and never infers Played from a completed Bot Turn. The convention and its wire reads are in [docs/architecture.md](../../docs/architecture.md). Explicit `send_to_user` messages remain ordinary messages.
 
-The native speaker uses `com.frockbot/pcm`: Android receipts follow the AudioTrack playback head, and macOS receipts use AVAudioPlayerNode's `dataPlayedBack` callback. Dart reports whether the speaker is still playing (`voice/speech`) from those device receipts, which is what tells the object the call is not a quiet moment for a Bot answer. Silent samples still count as pending audio. Interrupts, discarded audio, device failures and closed/replaced calls clear the pending set. The browser retains its existing unavailable PCM playback behaviour and cannot acknowledge audio it did not play.
+The native speaker uses `com.frockbot/pcm`: Android receipts follow the AudioTrack playback head, and macOS and iOS receipts use AVAudioPlayerNode's `dataPlayedBack` callback. Dart reports whether the speaker is still playing (`voice/speech`) from those device receipts, which is what tells the object the call is not a quiet moment for a Bot answer. Silent samples still count as pending audio. Interrupts, discarded audio, device failures and closed/replaced calls clear the pending set. The browser retains its existing unavailable PCM playback behaviour and cannot acknowledge audio it did not play.
 
 This speaker changes Android native code and removes a native plugin dependency. Its first Android delivery therefore requires a **full enabling APK**, through the release procedure below; it cannot ship as a Dart-only patch. Building or reviewing a PR does not publish or install that APK.
 
@@ -44,9 +44,10 @@ resume. The restart itself checkpoints the local document and then asks `restart
 for an Android process restart or an iOS Flutter-engine replacement. Introducing
 that native plugin requires a full Shorebird release before this flow can be
 delivered; later Dart-only changes to the flow may be patches against that
-baseline. This repository still has no iOS Runner, so an eventual iOS target
-must configure `RestartAppPlugin.configureEngineRestart` in its AppDelegate
-and qualify the new-engine path before claiming iOS delivery.
+baseline. The iOS Runner configures `RestartAppPlugin.configureEngineRestart`
+in its AppDelegate, registering the app's own channels on the new engine as
+well as the plugins; the new-engine path stays unqualified until an iOS
+release and a patch against it have been cut and run.
 
 The Shorebird CLI (1.6.120, logged in to Tim's account) comes from `NATIVE_SHOREBIRD` or `PATH`. The script fails rather than falling back to stock Flutter: a stock build carries no patch key and can never be patched. Shorebird builds with its own Flutter `3.47.0`; the stock development pin above is unchanged. The Android SDK needs command-line tools with `apkanalyzer` even for an APK artifact, plus build-tools: the script inspects the built APK with the newest `aapt`/`apksigner` under `ANDROID_HOME`, and names the missing tool rather than guessing when there are none. Gradle takes the version floor from `FROCKBOT_ANDROID_VERSION_FLOOR` and the production application ID from `FROCKBOT_ANDROID_RELEASE_IDENTITY`, both of which the script sets for every release and patch build.
 
@@ -125,9 +126,44 @@ The release build writes the feed URL and public key into `Info.plist` through t
 
 Configure before the first tag that carries Sparkle: a repository **variable** `SPARKLE_ED_PUBLIC_KEY` and a repository **secret** `SPARKLE_ED_PRIVATE_KEY`. Create them once with Sparkle's `generate_keys` (from the Sparkle release archive), export the private key with `generate_keys -x`, and keep an offline copy: every installed app trusts only that public key, so losing the private key means users must reinstall from the website. The existing `CLOUDFLARE_API_TOKEN` must be able to read R2 objects as well as write them. The cross-platform plan and the release policy are in [`docs/app-updates.md`](../../docs/app-updates.md).
 
-The app uses Apple team `Q444L76529`, bundle `com.frockbot.mobile`, the default protected Keychain group, and the exact associated return domain. Local updates install FrockBot Dev under an Apple Development identity, with the Xcode-managed profile `-allowProvisioningUpdates` creates or renews (above); public releases require the Developer ID equivalents above. Public builds use Hardened Runtime and secure timestamps. Run the updater for native-client and minimum-supported-version changes. Android-only APK releases and Shorebird patches do not need a desktop rebuild. A `CODE_SIGNING_ALLOWED=NO` build plus ad-hoc local signing proves only renderer compilation/launch, never verified links or production credential protection. iOS is not a target in this slice.
+The app uses Apple team `Q444L76529`, bundle `com.frockbot.mobile`, the default protected Keychain group, and the exact associated return domain. Local updates install FrockBot Dev under an Apple Development identity, with the Xcode-managed profile `-allowProvisioningUpdates` creates or renews (above); public releases require the Developer ID equivalents above. Public builds use Hardened Runtime and secure timestamps. Run the updater for native-client and minimum-supported-version changes. Android-only APK releases and Shorebird patches do not need a desktop rebuild. A `CODE_SIGNING_ALLOWED=NO` build plus ad-hoc local signing proves only renderer compilation/launch, never verified links or production credential protection.
 
-The main Mac app is distributed directly rather than through the Mac App Store, with Messages built into Registered machines; the website links a download only once a signed, notarized release is published. Build, signing, notarization and associated-domain requirements are in [the Mac release guide](macos/README.md). The bundle remains `com.frockbot.mobile`; public distribution requires Developer ID signing and a matching profile. Development builds do not prove verified sign-in or distribution readiness. iOS is not a target in this slice.
+The main Mac app is distributed directly rather than through the Mac App Store, with Messages built into Registered machines; the website links a download only once a signed, notarized release is published. Build, signing, notarization and associated-domain requirements are in [the Mac release guide](macos/README.md). The bundle remains `com.frockbot.mobile`; public distribution requires Developer ID signing and a matching profile. Development builds do not prove verified sign-in or distribution readiness.
+
+## iOS
+
+`ios/` is the iPhone app: bundle `com.frockbot.mobile` (the Mac app's), iPhone only, iOS 15 and later, on Flutter's UIScene lifecycle, with plugins as Swift packages and CocoaPods for the two that come no other way — `vad_plus`, which has no Swift package, and Firebase. `.github/workflows/ios.yml` builds it unsigned on a macOS runner for every change that can move it. Nothing in this repository has built, signed or run it on a phone, so none of it is qualified.
+
+What it carries:
+
+- **Sign-in and Connect** come back the way the Mac's do. The return pages are `/native/return/ios` and `/api/connect/callback/ios`, which hand the code over on `frockbot://`, because a Universal Link reaches the app only from Safari and only on the person's own click; the app checks a scheme return's host and path exactly as it checks the verified link (`NativeSignIn.canonical`). The association (`/.well-known/apple-app-site-association`) names `/native/return/ios` beside the Mac's path.
+- **Channels** (`ios/Runner/FrockBotChannels.swift`). `com.frockbot/pcm` is the Mac's AVAudioPlayerNode speaker. `com.frockbot/audio-route` holds a call's audio session in voice-chat mode, on the loudspeaker unless a headset is worn, and reports route changes and interruptions as Android does. `com.frockbot/badge` sets the icon's number. Android's `com.frockbot.mobile/display` has no iPhone counterpart, because Flutter's own system UI calls cover it; the Mac's window, Messages and Sparkle channels stay the Mac's.
+- **Push** (`ios/Runner/PushNotifications.swift`) answers the Android app's `frockbot/push` channel with Firebase's own iOS SDK. The token registers with `platform: "ios"`, iOS draws the alerts the cloud sends it as APNs alerts, and a tap opens the conversation's link through `app_links`. How it behaves is in [notifications](../../docs/notifications.md).
+- **Updates.** `AppDelegate.swift` configures the engine restart a Shorebird patch applies through ([above](#shorebird-releases-and-patches)). `scripts/native-update.py` is Android-only.
+
+One app, two identities, as on the Mac. The switch is `FROCKBOT_IOS_DEV` in `ios/Runner/Configs/AppInfo.xcconfig`: unset, a build is `FrockBot`, `com.frockbot.mobile`, `frockbot` and `AppIcon`; `YES` makes it `FrockBot Dev`, `com.frockbot.mobile.dev`, `frockbot-dev` and `AppIconDev`, with no Firebase registration. The Dart half is `--dart-define=FROCKBOT_IOS_DEV=true` (`lib/client/ios_build.dart`), which returns sign-in and Connect through `/native/return/ios-dev` and `/api/connect/callback/ios-dev`. Flutter hands environment variables prefixed `FLUTTER_XCODE_` to Xcode as build settings, so a build for your own phone is:
+
+```sh
+cd apps/native
+flutter pub get
+# The origin is deployments/hosted.json's.
+FLUTTER_XCODE_FROCKBOT_IOS_DEV=YES flutter run --release \
+  --dart-define=FROCKBOT_IOS_DEV=true \
+  --dart-define=FROCKBOT_ORIGIN=https://bot.frockbot.com
+```
+
+Build FrockBot Dev whenever you build by hand. It installs beside a TestFlight or App Store copy instead of replacing it, and a stock build carries no Shorebird engine, so one installed over the released app ends that install's patches. The icons come from `swift scripts/native-app-icon.swift`, then `swift scripts/mac-dev-icon.swift` for the ribboned FrockBot Dev one; an iPhone icon carries no alpha channel.
+
+### What needs the Apple account
+
+Signing, push and distribution need team `Q444L76529`'s own credentials, so none of this is done or stood in for here. In order:
+
+1. **Identifiers.** In Certificates, Identifiers & Profiles, open the App ID `com.frockbot.mobile` (the Mac app's) and enable **Push Notifications** beside the Associated Domains it already has. Xcode's automatic signing handles `com.frockbot.mobile.dev` and registers your iPhone the first time it builds for it.
+2. **APNs key.** Under Keys, create a key with **Apple Push Notifications service (APNs)** enabled and download its `.p8`, which Apple offers once. Keep it offline: it never enters the repository or a Worker secret.
+3. **Firebase.** In project `frock-bot`, add an iOS app with bundle ID `com.frockbot.mobile`, download its `GoogleService-Info.plist` and commit it as `apps/native/ios/Runner/GoogleService-Info.plist`. Like `android/app/google-services.json` it is public app configuration, and the Runner's `Firebase configuration` build phase copies it into the released identity only. Then, under Project settings → Cloud Messaging → Apple app configuration, upload the `.p8` with its Key ID and team `Q444L76529`. The server's `FCM_SERVICE_ACCOUNT` needs nothing new.
+4. **First build on the Mac.** Run the FrockBot Dev command above with Xcode signed in to the team. The first `pod install` writes CocoaPods' integration into `ios/Runner.xcodeproj` and creates `ios/Podfile.lock`; commit both (`ios.yml`'s log shows the same diff). On the phone, check that sign-in comes back through `frockbot-dev://`, that a voice call takes the loudspeaker and then a headset, and — with the released identity — a notification, its tap, and a read on another device clearing it.
+5. **App Store Connect.** Create an iOS app record for bundle `com.frockbot.mobile` with the name, SKU and primary language you want. Fill in the privacy answers: the microphone, notifications, and the Google account a person signs in with. Answer the export-compliance question for an app whose only encryption is HTTPS.
+6. **TestFlight.** From `apps/native`, `shorebird release ios --flutter-version=3.47.0 --build-name=<version> --build-number=<n> --public-key-path=shorebird-public-key.pem -- --dart-define=FROCKBOT_ORIGIN=https://bot.frockbot.com` builds the released identity against the same Shorebird app and patch key as Android, signed with an Apple Distribution identity Xcode can manage. Upload the `.ipa` it writes under `build/ios/ipa/` with Transporter or `xcrun altool --upload-app`, and add yourself as an internal tester. TestFlight is the staging track ([app updates](../../docs/app-updates.md)); a release workflow job, like Android's, comes once this has worked by hand.
 
 ## Search
 
@@ -159,7 +195,7 @@ The phone holds a PKCE bearer token in the platform keystore and sends it as a h
 
 ## Backend and auth
 
-Production enables Android and macOS sign-in with `NATIVE_SLICE_2_AUTH=android,macos`. Wait for the orchestrator’s release and HTTP 200 from the association endpoint before device auth. The `acceptance` block of [`qualification.json`](qualification.json) records how far that rollout got.
+Production enables Android, macOS and iOS sign-in with `NATIVE_SLICE_2_AUTH=android,macos,ios`. Wait for the orchestrator’s release and HTTP 200 from the association endpoint before device auth. The `acceptance` block of [`qualification.json`](qualification.json) records how far that rollout got.
 
 The app persists PKCE state/verifier before opening the system browser. The gateway uses the existing Better Auth Google web client, returns to an exact HTTPS app link, and exchanges the single-use code under the User Durable Object. The seven-day native session is OS-protected and bound to its client's protocol and catalog hello; the app's own version is compatibility, so updating to another supported version keeps the sign-in, while a version the deployment no longer serves is a 426 telling the person to update. Logout revokes it. A session that expires or is revoked ends the same way from the app's side: a 401 on any request the app authenticated with its own bearer — the sign-in exchange routes aside, where a refusal is of that exchange rather than of a session — forgets that session, in memory first and then in the keystore, and returns to the sign-in door carrying the refusal's own sentence, rather than leaving the cached shell open as if the phone were offline. Send and Stop persist stable ids before dispatch; uncertain sends use lookup then an admission fence; the Bot state channel advances a protected cursor only after the corresponding projection is applied. Disconnect/disposal does not cancel work.
 

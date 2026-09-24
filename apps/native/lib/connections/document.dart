@@ -19,6 +19,7 @@ library;
 import 'package:flutter/foundation.dart' show ValueNotifier;
 
 import '../client/desktop_build.dart';
+import '../client/ios_build.dart';
 
 /// The action kinds a Connectors press can mean.
 const connectionActionKindsV1 = <String>{
@@ -210,8 +211,9 @@ Map<String, Object?> mcpServerActionV1({
 /// The `connection/start` command that opens a provider's hosted door.
 ///
 /// `returnClient` names which return page this app can come back through
-/// once the door closes: `android` for the verified link, `macos` (or
-/// `macos-dev` from the local FrockBot Dev build) for the app's scheme. A browser tab names none and is told to return by hand.
+/// once the door closes: `android` for the verified link, `macos` or `ios`
+/// (`macos-dev` or `ios-dev` from a FrockBot Dev build) for the app's scheme.
+/// A browser tab names none and is told to return by hand.
 ConnectionRequestV1 startConnectionRequestV1(Map<String, Object?> command) {
   final input = _input(command);
   final packageId = _string(input, 'packageId');
@@ -233,15 +235,19 @@ ConnectionRequestV1 startConnectionRequestV1(Map<String, Object?> command) {
 const connectReturnPathV1 = '/api/connect/callback';
 
 /// Whether a link the app was opened with is a hosted door closing. There
-/// are exactly two such links: the verified App Link under this app's own
+/// are exactly three such links: the verified App Link under this app's own
 /// segment on Android, and the same page handed over on the app's scheme on
-/// a Mac. Nothing on the link is read — the next settings read is what
-/// settles the Connection.
-bool isConnectReturnV1(Uri uri) => switch (uri.scheme) {
-  'https' => uri.path == '$connectReturnPathV1/android',
-  macosSchemeV1 => uri.path == '$connectReturnPathV1/$macosReturnSegmentV1',
-  _ => false,
-};
+/// a Mac or an iPhone. Nothing on the link is read — the next settings read
+/// is what settles the Connection.
+///
+/// The Mac and iPhone apps share a scheme, so each link is its scheme and its
+/// segment together, never the scheme alone.
+bool isConnectReturnV1(Uri uri) =>
+    (uri.scheme == 'https' && uri.path == '$connectReturnPathV1/android') ||
+    (uri.scheme == macosSchemeV1 &&
+        uri.path == '$connectReturnPathV1/$macosReturnSegmentV1') ||
+    (uri.scheme == iosSchemeV1 &&
+        uri.path == '$connectReturnPathV1/$iosReturnSegmentV1');
 
 /// Bumped each time a hosted door closes into the app, so the page that
 /// opened it reads its frame again without waiting on a lifecycle resume.
