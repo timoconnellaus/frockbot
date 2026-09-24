@@ -18,10 +18,16 @@ import {
   PRUNED_TOOL_RESULT_V1,
   pruneToolOutputsV1,
   runCompactionV1,
+  applyParkedCompactionV1,
+  sessionCompactionLogV1,
+  storedParkedCompactionV1,
+  type CompactionLogV1,
+  type ParkedCompactionV1,
   COMPACTION_INPUT_MAX_BYTES_V1,
   COMPACTION_TRIGGER_RATIO_V1,
 } from "./compaction.js";
 import { chatWindowV1, turnScopedMessagesV1 } from "./history.js";
+import { MemoryStorage } from "@frockbot/core/durable/testing";
 
 const SESSION_ID = "user-1:bot-1";
 
@@ -475,7 +481,7 @@ describe("running a compaction", () => {
     currentTurn = 10,
   ) {
     return {
-      session,
+      log: sessionCompactionLogV1(session),
       window: chatWindowV1(session.activeRunJournal, session.deriveMessages()),
       budget: 4_000,
       currentTurn,
@@ -750,6 +756,206 @@ describe("running a compaction", () => {
       fromTurn: 1,
       throughTurn: 10,
     });
+  });
+});
+
+describe("a Turn that takes the log mid-summary", () => {
+  const roots: AgentRuntimeHarness[] = [];
+  afterEach(() => {
+    for (const root of roots.splice(0)) void root.dispose();
+  });
+
+  async function sessionFrom(inputs: SessionEventInput[]) {
+    const root = createAgentRuntimeHarness({
+      sessions: { initialSessions: { [SESSION_ID]: log(inputs) } },
+    });
+    roots.push(root);
+    return root.sessions.create(SESSION_ID);
+  }
+
+  /** A log a Turn can take: `take()` makes every later append refuse. */
+  function takeableLog(session: Awaited<ReturnType<typeof sessionFrom>>) {
+    const owned = sessionCompactionLogV1(session);
+    let taken = false;
+    let parked: ParkedCompactionV1 | undefined;
+    const store = {
+      read: async () => parked,
+      write: async (outcome: ParkedCompactionV1) => {
+        parked = outcome;
+      },
+      clear: async () => {
+        parked = undefined;
+      },
+    };
+    const log: CompactionLogV1 = {
+      journal: owned.journal,
+      append: async (event) => (taken ? false : owned.append(event)),
+      park: store.write,
+    };
+    return {
+      log,
+      store,
+      take: () => {
+        taken = true;
+      },
+      release: () => {
+        taken = false;
+      },
+      parked: () => parked,
+    };
+  }
+
+  const SUMMARY = "## Summary\nA long talk.\n## Identifiers mentioned\n- id-7";
+
+  function runner(
+    session: Awaited<ReturnType<typeof sessionFrom>>,
+    log: CompactionLogV1,
+    summarise: () => Promise<string>,
+  ) {
+    return {
+      log,
+      window: chatWindowV1(session.activeRunJournal, session.deriveMessages()),
+      budget: 4_000,
+      currentTurn: 10,
+      newEffectId: () => "effect-1",
+      summarise,
+    };
+  }
+
+  test("keeps summarising and parks the outcome instead of writing beside the Turn", async () => {
+    const session = await sessionFrom([MODEL_REQUEST, ...wordy(10, 400)]);
+    const handle = takeableLog(session);
+    const outcome = await runCompactionV1(
+      runner(session, handle.log, async () => {
+        // The next Turn is admitted while the summariser is still working.
+        handle.take();
+        return SUMMARY;
+      }),
+    );
+    expect(outcome).toEqual({ kind: "parked", throughTurn: 6 });
+    expect(handle.parked()).toMatchObject({
+      type: "conversation/compacted",
+      effectId: "effect-1",
+      fromTurn: 1,
+      throughTurn: 6,
+    });
+    // Nothing was written after the Turn took the log: the intent is there,
+    // its outcome is not.
+    expect(
+      session.activeRunJournal.some(
+        (event) => event.type === "conversation/compacted",
+      ),
+    ).toBe(false);
+  });
+
+  test("the next Turn end writes the parked summary in place of the open intent", async () => {
+    const session = await sessionFrom([MODEL_REQUEST, ...wordy(10, 400)]);
+    const handle = takeableLog(session);
+    await runCompactionV1(
+      runner(session, handle.log, async () => {
+        handle.take();
+        return SUMMARY;
+      }),
+    );
+    handle.release();
+    const applied = await applyParkedCompactionV1({
+      log: handle.log,
+      parked: handle.store,
+      state: compactionStateV1(session.activeRunJournal),
+    });
+    expect(applied).toBe("applied");
+    expect(handle.parked()).toBeUndefined();
+    const state = compactionStateV1(session.activeRunJournal);
+    expect(state.unsettled).toBeUndefined();
+    expect(state.compaction).toMatchObject({ fromTurn: 1, throughTurn: 6 });
+    // Applied once: a second pass finds nothing.
+    expect(
+      await applyParkedCompactionV1({
+        log: handle.log,
+        parked: handle.store,
+        state,
+      }),
+    ).toBe("none");
+  });
+
+  test("a parked outcome waits while a Turn still holds the log", async () => {
+    const session = await sessionFrom([MODEL_REQUEST, ...wordy(10, 400)]);
+    const handle = takeableLog(session);
+    await runCompactionV1(
+      runner(session, handle.log, async () => {
+        handle.take();
+        return SUMMARY;
+      }),
+    );
+    expect(
+      await applyParkedCompactionV1({
+        log: handle.log,
+        parked: handle.store,
+        state: compactionStateV1(session.activeRunJournal),
+      }),
+    ).toBe("yielded");
+    expect(handle.parked()).toBeDefined();
+  });
+
+  test("drops a parked outcome whose intent is no longer the open one", async () => {
+    const session = await sessionFrom([MODEL_REQUEST, ...wordy(10, 400)]);
+    const handle = takeableLog(session);
+    await handle.store.write({
+      type: "conversation/compacted",
+      effectId: "long-gone",
+      fromTurn: 1,
+      throughTurn: 6,
+      summary: "stale",
+      identifiers: [],
+      provider: "flock-ai",
+      model: "@frock/structured",
+    });
+    expect(
+      await applyParkedCompactionV1({
+        log: handle.log,
+        parked: handle.store,
+        state: compactionStateV1(session.activeRunJournal),
+      }),
+    ).toBe("dropped");
+    expect(handle.parked()).toBeUndefined();
+  });
+
+  test("begins nothing when a Turn took the log before the intent", async () => {
+    const session = await sessionFrom([MODEL_REQUEST, ...wordy(10, 400)]);
+    const handle = takeableLog(session);
+    handle.take();
+    let calls = 0;
+    const outcome = await runCompactionV1(
+      runner(session, handle.log, async () => {
+        calls += 1;
+        return SUMMARY;
+      }),
+    );
+    expect(outcome).toEqual({ kind: "yielded" });
+    expect(calls).toBe(0);
+  });
+
+  test("a parked outcome survives in the Bot's storage, and nothing unreadable comes back", async () => {
+    const storage = new MemoryStorage();
+    const store = storedParkedCompactionV1(storage, SESSION_ID);
+    const outcome: ParkedCompactionV1 = {
+      type: "conversation/compaction-failed",
+      effectId: "effect-9",
+      throughTurn: 4,
+      reason: "The summariser ran past its deadline.",
+    };
+    await store.write(outcome);
+    // A fresh store over the same storage: the object was evicted between.
+    expect(await storedParkedCompactionV1(storage, SESSION_ID).read()).toEqual(
+      outcome,
+    );
+    await store.clear();
+    expect(await store.read()).toBeUndefined();
+    await storage.put(`compaction-parked:${SESSION_ID}`, { type: "nonsense" });
+    expect(await store.read()).toBeUndefined();
+    expect(
+      await storage.get(`compaction-parked:${SESSION_ID}`),
+    ).toBeUndefined();
   });
 });
 

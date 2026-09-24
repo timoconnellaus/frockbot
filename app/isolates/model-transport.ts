@@ -33,7 +33,10 @@ import type { BotIdentity } from "@frockbot/core/durable";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import { userConfigurationV1 } from "@frockbot/app/settings/bot";
 import { compactionModelV1 } from "../shell/compaction.js";
-import { compactionInFlightV1 } from "../shell/compaction-scheduler.js";
+import {
+  compactionInFlightV1,
+  compactionScopeV1,
+} from "../shell/compaction-scheduler.js";
 import { activeIsolateTurn } from "./authority.js";
 import type {
   ModelDispatchHandleV1,
@@ -438,7 +441,7 @@ export async function isolateModelTransport(
         "this summariser call already has an outcome and is not sent again",
       );
     }
-    if (!compactionInFlightV1(session.id)) {
+    if (!compactionInFlightV1(session.id, compactionScopeV1(session))) {
       dispatch.refusal = { httpStatus: 0, classification: "permanent" };
       return refused("the summariser that asked for this call is not running");
     }

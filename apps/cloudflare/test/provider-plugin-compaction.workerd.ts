@@ -160,8 +160,8 @@ test("a Bot on a provider Plugin is compacted durably by the platform summariser
     // before admitting another message, which intentionally aborts summaries.
     // Await the scheduler in the object's context, without timing sleeps or
     // making the production Turn wait for compaction.
-    await runInDurableObject(bot(identity), () =>
-      whenCompactionSettledV1(sessionId),
+    await runInDurableObject(bot(identity), (_bot, state) =>
+      whenCompactionSettledV1(sessionId, state),
     );
   };
 

@@ -1,19 +1,13 @@
-// A compaction that outlives the Turn, and yields to the next one.
+// A compaction that outlives the Turn, keeps running past the next admission,
+// and never writes beside it.
 import { describe, expect, test } from "bun:test";
+import type { Session } from "@frockbot/core/contracts";
 import {
+  admitTurnToSessionLogV1,
   compactionInFlightV1,
   compactionWorkV1,
   whenCompactionSettledV1,
-  yieldCompactionWorkV1,
 } from "./compaction-scheduler.js";
-
-function stall(signal: AbortSignal): Promise<never> {
-  return new Promise((_resolve, reject) => {
-    signal.addEventListener("abort", () => reject(signal.reason), {
-      once: true,
-    });
-  });
-}
 
 /** A promise and the function that settles it, for ordering without timers. */
 function gate(): { promise: Promise<void>; open: () => void } {
@@ -24,42 +18,107 @@ function gate(): { promise: Promise<void>; open: () => void } {
   return { promise, open };
 }
 
+/** Stands in for a Turn's Session; the scheduler only hands it back. */
+function sessionNamed(name: string): Session {
+  return { id: name } as unknown as Session;
+}
+
 describe("detached compaction", () => {
   test("starting it does not wait for it", async () => {
     const session = `session-${crypto.randomUUID()}`;
     let finished = false;
-    const running = gate();
+    const release = gate();
     const started = Date.now();
-    compactionWorkV1(session).start(async (signal) => {
-      running.open();
-      await stall(signal).catch(() => {});
+    compactionWorkV1(session).start(async () => {
+      await release.promise;
       finished = true;
     });
     // The claim the defect got wrong: control is back immediately.
     expect(Date.now() - started).toBeLessThan(50);
     expect(finished).toBe(false);
     expect(compactionInFlightV1(session)).toBe(true);
-    await running.promise;
-    await yieldCompactionWorkV1(session);
+    release.open();
+    await whenCompactionSettledV1(session);
     expect(finished).toBe(true);
   });
 
-  test("a newly admitted Turn aborts it rather than queueing behind it", async () => {
+  test("a newly admitted Turn leaves the summariser running", async () => {
     const session = `session-${crypto.randomUUID()}`;
-    let reason: unknown;
-    const running = gate();
-    compactionWorkV1(session).start(async (signal) => {
-      running.open();
-      try {
-        await stall(signal);
-      } catch (error) {
-        reason = error;
-      }
+    const release = gate();
+    let finished = false;
+    compactionWorkV1(session).start(async () => {
+      await release.promise;
+      finished = true;
     });
-    await running.promise;
-    await yieldCompactionWorkV1(session);
-    expect(compactionInFlightV1(session)).toBe(false);
-    expect(String((reason as Error).message)).toContain("yielded");
+    // Admission returns at once: the summariser is not aborted, and nothing
+    // is waited for but a write under way.
+    await admitTurnToSessionLogV1(session);
+    expect(compactionInFlightV1(session)).toBe(true);
+    release.open();
+    await whenCompactionSettledV1(session);
+    expect(finished).toBe(true);
+  });
+
+  test("writes through the last Turn's Session until a Turn is admitted", async () => {
+    const session = `session-${crypto.randomUUID()}`;
+    const work = compactionWorkV1(session);
+    const turn1 = sessionNamed("turn-1");
+    const turn2 = sessionNamed("turn-2");
+    const writers: string[] = [];
+    const write = (through: Session) =>
+      work.write(through, async (owner) => {
+        writers.push(owner.id);
+      });
+
+    // Before any Turn has ended there is no owner to write through.
+    expect(await write(turn1)).toBe(false);
+    work.adopt(turn1);
+    expect(await write(turn1)).toBe(true);
+    // A Turn takes the log: nothing is written beside it.
+    await admitTurnToSessionLogV1(session);
+    expect(await write(turn1)).toBe(false);
+    // That Turn ends and owns the log in turn.
+    work.adopt(turn2);
+    expect(await write(turn2)).toBe(true);
+    expect(writers).toEqual(["turn-1", "turn-2"]);
+  });
+
+  test("a run started by an earlier Turn writes nothing once a later Turn has ended", async () => {
+    const session = `session-${crypto.randomUUID()}`;
+    const work = compactionWorkV1(session);
+    const turn1 = sessionNamed("turn-1");
+    const turn2 = sessionNamed("turn-2");
+    work.adopt(turn1);
+    await admitTurnToSessionLogV1(session);
+    work.adopt(turn2);
+    // The earlier run's summariser calls are checked against its own
+    // Session, so nothing it writes may land through the later one.
+    const writers: string[] = [];
+    expect(
+      await work.write(turn1, async (owner) => {
+        writers.push(owner.id);
+      }),
+    ).toBe(false);
+    expect(writers).toEqual([]);
+  });
+
+  test("an admission waits out a write already under way, and only that", async () => {
+    const session = `session-${crypto.randomUUID()}`;
+    const work = compactionWorkV1(session);
+    const turn1 = sessionNamed("turn-1");
+    work.adopt(turn1);
+    const flushing = gate();
+    const order: string[] = [];
+    const writing = work.write(turn1, async () => {
+      await flushing.promise;
+      order.push("write");
+    });
+    const admitted = admitTurnToSessionLogV1(session).then(() => {
+      order.push("admitted");
+    });
+    flushing.open();
+    await Promise.all([writing, admitted]);
+    expect(order).toEqual(["write", "admitted"]);
   });
 
   test("a failure is nobody's problem, and never leaves work in flight", async () => {
@@ -83,14 +142,16 @@ describe("detached compaction", () => {
     compactionWorkV1(session).start(async () => {
       order.push("second:start");
     });
+    expect(compactionInFlightV1(session)).toBe(true);
     release.open();
     await whenCompactionSettledV1(session);
     expect(order).toEqual(["first:start", "first:end", "second:start"]);
+    expect(compactionInFlightV1(session)).toBe(false);
   });
 
-  test("yielding costs nothing when no compaction is running", async () => {
+  test("admission costs nothing when no compaction is running", async () => {
     await expect(
-      yieldCompactionWorkV1(`session-${crypto.randomUUID()}`),
+      admitTurnToSessionLogV1(`session-${crypto.randomUUID()}`),
     ).resolves.toBeUndefined();
   });
 });

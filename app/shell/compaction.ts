@@ -24,8 +24,10 @@ import {
   COMPACTION_SUMMARY_MAX_LENGTH,
   type LlmMessage,
   type ModelBindingSnapshot,
+  decodeSessionEvent,
   type Session,
   type SessionEvent,
+  type SessionEventInput,
 } from "@frockbot/core/contracts";
 
 /**
@@ -434,11 +436,132 @@ export function compactionModelV1(
 export type CompactionOutcomeV1 =
   | { kind: "skipped"; assessment: CompactionAssessmentV1 }
   | { kind: "compacted"; throughTurn: number; fromTurn: number }
-  | { kind: "failed"; throughTurn: number; reason: string };
+  | { kind: "failed"; throughTurn: number; reason: string }
+  /** A Turn took the log before anything was begun. */
+  | { kind: "yielded" }
+  /** The outcome arrived while a Turn held the log; the next Turn end writes it. */
+  | { kind: "parked"; throughTurn: number };
+
+/** A summariser's outcome, waiting for the log. */
+export type ParkedCompactionV1 = Extract<
+  SessionEventInput,
+  { type: "conversation/compacted" | "conversation/compaction-failed" }
+>;
+
+/** Where a parked outcome waits. Durable in a Bot, in memory in a test. */
+export interface ParkedCompactionStoreV1 {
+  read(): Promise<ParkedCompactionV1 | undefined>;
+  write(outcome: ParkedCompactionV1): Promise<void>;
+  clear(): Promise<void>;
+}
+
+/** The session log as one compaction run may use it. */
+export interface CompactionLogV1 {
+  /** The Turn's own journal, for the model a summary falls back to. */
+  journal: readonly SessionEvent[];
+  /** Appends and flushes one event; `false` when a Turn holds the log. */
+  append(event: SessionEventInput): Promise<boolean>;
+  /** Keeps an outcome that could not be written. */
+  park(outcome: ParkedCompactionV1): Promise<void>;
+}
+
+/** A log this run alone writes, so every append lands. */
+export function sessionCompactionLogV1(
+  session: Session,
+  parked?: ParkedCompactionStoreV1,
+): CompactionLogV1 {
+  return {
+    journal: session.activeRunJournal,
+    append: async (event) => {
+      session.append(event);
+      await session.flush();
+      return true;
+    },
+    park: async (outcome) => {
+      if (!parked) throw new Error("this log has nowhere to park an outcome");
+      await parked.write(outcome);
+    },
+  };
+}
+
+/**
+ * Writes an outcome parked while a Turn held the log, before anything else
+ * reads the log's compaction state. One whose intent is no longer the open one
+ * — already written before a crash cleared the store, or superseded — is
+ * dropped, so this is safe to repeat.
+ */
+export async function applyParkedCompactionV1(input: {
+  log: CompactionLogV1;
+  parked: ParkedCompactionStoreV1;
+  state: CompactionStateV1;
+}): Promise<"none" | "applied" | "dropped" | "yielded"> {
+  const outcome = await input.parked.read();
+  if (!outcome) return "none";
+  const current = input.state.compaction?.throughTurn ?? 0;
+  if (
+    input.state.unsettled?.effectId !== outcome.effectId ||
+    (outcome.type === "conversation/compacted" && outcome.throughTurn < current)
+  ) {
+    await input.parked.clear();
+    return "dropped";
+  }
+  if (!(await input.log.append(outcome))) return "yielded";
+  await input.parked.clear();
+  return "applied";
+}
+
+/** The storage key a conversation's parked outcome waits under. */
+export function parkedCompactionKeyV1(sessionId: string): string {
+  return `compaction-parked:${sessionId}`;
+}
+
+/**
+ * A parked outcome in the Bot's own storage, so a summary that landed while a
+ * Turn ran survives the object being evicted before the next Turn ends.
+ */
+export function storedParkedCompactionV1(
+  storage: {
+    get(key: string): Promise<unknown>;
+    put(key: string, value: unknown): Promise<void>;
+    delete(key: string): Promise<boolean>;
+  },
+  sessionId: string,
+): ParkedCompactionStoreV1 {
+  const key = parkedCompactionKeyV1(sessionId);
+  return {
+    read: async () => {
+      const value = await storage.get(key);
+      if (value === undefined) return undefined;
+      try {
+        // Decoded as the event it will become, so nothing unreadable is
+        // ever appended to the log.
+        const event = decodeSessionEvent({
+          ...(value as object),
+          seq: 0,
+          timestamp: new Date(0).toISOString(),
+        });
+        if (
+          event.type === "conversation/compacted" ||
+          event.type === "conversation/compaction-failed"
+        ) {
+          return value as ParkedCompactionV1;
+        }
+      } catch {
+        // Unreadable: dropped below.
+      }
+      await storage.delete(key);
+      return undefined;
+    },
+    write: (outcome) => storage.put(key, outcome),
+    clear: async () => {
+      await storage.delete(key);
+    },
+  };
+}
 
 export interface CompactionRunnerV1 {
-  /** The whole log, and the append surface the events are written to. */
-  session: Session;
+  /** Where the run's events are written, while it may write them. */
+  log: CompactionLogV1;
   /** The chat-only window the next request would carry, already narrowed. */
   window: {
     messages: readonly LlmMessage[];
@@ -480,27 +603,29 @@ export interface CompactionRunnerV1 {
  * cannot double-write: an unsettled intent left by a previous attempt is
  * settled as a failure first, the range is refused if a `conversation/compacted`
  * already covers it, and the Durable Object is single-threaded between the
- * check and the append. Failure is never fatal — the request that follows is
- * exactly the request that would have been assembled without it.
+ * check and the append. A Turn admitted meanwhile holds the log, so the outcome
+ * is parked for the next Turn end rather than written beside it. Failure is
+ * never fatal — the request that follows is exactly the request that would have
+ * been assembled without it.
  */
 export async function runCompactionV1(
   input: CompactionRunnerV1,
 ): Promise<CompactionOutcomeV1> {
-  const session = input.session;
+  const log = input.log;
   const state = input.window.state;
   if (state.unsettled) {
-    // A restart or a newly admitted Turn interrupted an attempt. Its outcome
-    // is unknowable, so it is settled as a failure — and then tried again
-    // now, because an interruption says nothing about whether the next
-    // attempt will work. Deploys interrupt often enough that waiting out a
-    // backoff for each one left conversations uncompacted for days.
-    session.append({
+    // A restart interrupted an attempt. Its outcome is unknowable, so it is
+    // settled as a failure — and then tried again now, because an
+    // interruption says nothing about whether the next attempt will work.
+    // Deploys interrupt often enough that waiting out a backoff for each one
+    // left conversations uncompacted for days.
+    const settled = await log.append({
       type: "conversation/compaction-failed",
       effectId: state.unsettled.effectId,
       throughTurn: state.unsettled.throughTurn,
       reason: "Interrupted before a summary was recorded.",
     });
-    await input.session.flush();
+    if (!settled) return { kind: "yielded" };
   }
   const assessment = assessCompactionV1({
     messages: input.window.messages,
@@ -517,8 +642,7 @@ export async function runCompactionV1(
     return { kind: "skipped", assessment };
   }
   const { fromTurn } = assessment;
-  const binding =
-    input.model ?? compactionModelV1(input.session.activeRunJournal);
+  const binding = input.model ?? compactionModelV1(log.journal);
   if (!binding) return { kind: "skipped", assessment };
   const { throughTurn, covered } = compactionSliceV1({
     messages: input.window.messages,
@@ -530,20 +654,23 @@ export async function runCompactionV1(
   });
   if (covered.length === 0) return { kind: "skipped", assessment };
   const effectId = input.newEffectId();
-  // Intent before the effect: a summariser call is billed model spend.
-  session.append({
+  // Intent before the effect: a summariser call is billed model spend. A
+  // Turn that took the log first means nothing is begun.
+  const intended = await log.append({
     type: "conversation/compaction-intent",
     effectId,
     throughTurn,
     provider: binding.provider,
     model: binding.model,
   });
-  await input.session.flush();
+  if (!intended) return { kind: "yielded" };
   const controller = new AbortController();
   const deadline = setTimeout(
     () => controller.abort(new Error("The summariser ran past its deadline.")),
     input.deadlineMs ?? COMPACTION_DEADLINE_MS_V1,
   );
+  let outcome: ParkedCompactionV1;
+  let result: CompactionOutcomeV1;
   try {
     const text = await input.summarise({
       ...binding,
@@ -557,7 +684,7 @@ export async function runCompactionV1(
     });
     const parsed = parseCompactionSummaryV1(text);
     if (!parsed) throw new Error("The summariser returned nothing usable.");
-    session.append({
+    outcome = {
       type: "conversation/compacted",
       effectId,
       fromTurn,
@@ -566,22 +693,23 @@ export async function runCompactionV1(
       identifiers: parsed.identifiers,
       provider: binding.provider,
       model: binding.model,
-    });
-    await input.session.flush();
-    return { kind: "compacted", throughTurn, fromTurn };
+    };
+    result = { kind: "compacted", throughTurn, fromTurn };
   } catch (error) {
     const reason = compactionFailureReasonV1(error);
-    session.append({
+    outcome = {
       type: "conversation/compaction-failed",
       effectId,
       throughTurn,
       reason,
-    });
-    await input.session.flush();
-    return { kind: "failed", throughTurn, reason };
+    };
+    result = { kind: "failed", throughTurn, reason };
   } finally {
     clearTimeout(deadline);
   }
+  if (await log.append(outcome)) return result;
+  await log.park(outcome);
+  return { kind: "parked", throughTurn };
 }
 
 /**

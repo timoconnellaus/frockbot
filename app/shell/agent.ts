@@ -26,10 +26,13 @@ import {
 } from "./history.js";
 import { assembleJournalContextV1 } from "./working-context.js";
 import {
+  applyParkedCompactionV1,
   COMPACTION_MAX_SLICES_PER_RUN_V1,
+  type CompactionLogV1,
+  type ParkedCompactionStoreV1,
   runCompactionV1,
 } from "./compaction.js";
-import { compactionWorkV1 } from "./compaction-scheduler.js";
+import { compactionScopeV1, compactionWorkV1 } from "./compaction-scheduler.js";
 import { conversationDeliveryHooksV1 } from "./delivery.js";
 import { shellDefinitionV1 } from "./definition.js";
 import { drawFirstPartyCardV1 } from "./first-party-cards.js";
@@ -717,25 +720,49 @@ export const shellAgentFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
     runtime.hooks.add({
       turnStopping: async (agent, turn) => {
         const session = agent.session;
+        const work = compactionWorkV1(session.id, compactionScopeV1(session));
+        // The log is free until the next admission, so an outcome that lands
+        // before then is written straight through this Turn's Session.
+        work.adopt(session);
         const types = turnTypesByTurnV1(session.activeRunJournal);
         if ((types.get(turn) ?? "chat") !== "chat") return;
+        const parked =
+          (
+            session.workingContextSelector as
+              { parkedCompaction?: ParkedCompactionStoreV1 } | undefined
+          )?.parkedCompaction ?? work.memoryParking;
+        const log: CompactionLogV1 = {
+          journal: session.activeRunJournal,
+          append: (event) =>
+            work.write(session, async (owner) => {
+              owner.append(event);
+              await owner.flush();
+            }),
+          park: (outcome) => parked.write(outcome),
+        };
         // The platform's summary model when a provider offers one, so a
         // conversation is compacted whatever model the Bot is on.
         const summaryModel = runtime.llm
           .list()
           .find((provider) => provider.summaryModel);
-        compactionWorkV1(session.id).start(async (signal) => {
+        work.start(async () => {
+          // Whatever landed while this Turn ran is written first, so the
+          // assessment below reads the summary as it now stands.
+          const applied = await applyParkedCompactionV1({
+            log,
+            parked,
+            state: (await compactionWindowV1(session, turn)).state,
+          });
+          if (applied === "yielded") return;
           // A backlog is summarised a bounded slice at a time; keep going
-          // until it is covered, the next Turn takes the log back, or a
-          // slice fails.
+          // until it is covered, a Turn takes the log, or a slice fails.
           for (
             let slice = 0;
             slice < COMPACTION_MAX_SLICES_PER_RUN_V1;
             slice++
           ) {
-            if (signal.aborted) return;
             const outcome = await runCompactionV1({
-              session,
+              log,
               window: await compactionWindowV1(session, turn),
               budget: CHAT_HISTORY_BUDGET_CHARS_V1,
               currentTurn: turn,
@@ -750,10 +777,6 @@ export const shellAgentFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
                 : {}),
               newEffectId: () => `compaction-${crypto.randomUUID()}`,
               summarise: async (request) => {
-                // Two deadlines, one call: the compaction's own, and the
-                // abort a newly admitted Turn raises when it takes the log
-                // back.
-                const cancelled = AbortSignal.any([request.signal, signal]);
                 try {
                   let text = "";
                   let truncated = false;
@@ -773,7 +796,7 @@ export const shellAgentFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
                         ? { modelBinding: request.modelBinding }
                         : {}),
                     },
-                    cancelled,
+                    request.signal,
                   )) {
                     if (event.type === "text-delta") text += event.text;
                     if (event.type === "finish") {

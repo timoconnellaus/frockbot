@@ -22,7 +22,7 @@ import {
 } from "@frockbot/app/composition/bot";
 import { INPUT_DELIVERY_CUE_V1 } from "@frockbot/app/routines/inbox";
 import type { ShellBotStateV1 } from "./backend-state.js";
-import { yieldCompactionWorkV1 } from "./compaction-scheduler.js";
+import { admitTurnToSessionLogV1 } from "./compaction-scheduler.js";
 
 /**
  * The run id of the Turn one input opens. Derived from what makes the input
@@ -61,7 +61,7 @@ export async function openInputDeliveryTurnV1(
   try {
     if (await inputDeliveryWaiting(state)) return;
     const sessionId = botConversationBaseSessionIdV1(identity);
-    await yieldCompactionWorkV1(sessionId);
+    await admitTurnToSessionLogV1(sessionId, state.ctx);
     // An approved Plugin joined the User's Composition a moment ago, and the
     // pin this Turn takes has to be that generation for the Plugin to run in
     // the Turn that says it is ready.

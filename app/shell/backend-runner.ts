@@ -15,6 +15,7 @@ import {
 import type { BotTurnCommand, BotTurnCompletion } from "./backend-contracts.js";
 import {
   compactionInFlightV1,
+  compactionScopeV1,
   whenCompactionSettledV1,
 } from "./compaction-scheduler.js";
 
@@ -167,10 +168,11 @@ export async function executeBotTurn(
     // Composition's model binding — so the Composition outlives the Turn too,
     // and only by as long as the compaction does. Awaiting the disposal here
     // would put the summariser back in the latency path, which is the whole
-    // defect. The next admission aborts anything still running, so this can
-    // never stack up.
-    if (compactionInFlightV1(command.sessionId)) {
-      void whenCompactionSettledV1(command.sessionId).then(
+    // defect. Compactions run one at a time, each bounded by its deadline, so
+    // these can only stack as deep as that queue.
+    const scope = compactionScopeV1(runtime.agent.agent.session);
+    if (compactionInFlightV1(command.sessionId, scope)) {
+      void whenCompactionSettledV1(command.sessionId, scope).then(
         () => composition.dispose(),
         () => composition.dispose(),
       );
