@@ -2322,13 +2322,17 @@ export default {
               rpcJsonSnapshotV1(
                 await env.USER_CONFIGURATIONS.get(
                   env.USER_CONFIGURATIONS.idFromName(userId),
-                ).beginAccountDeletion({ userId, ...command }),
+                ).beginAccountDeletion({
+                  schemaVersion: 1,
+                  userId,
+                  ...command,
+                }),
               ),
             deleteComputer: async (userId, commandId) =>
               rpcJsonSnapshotV1(
                 await env.USER_CONFIGURATIONS.get(
                   env.USER_CONFIGURATIONS.idFromName(userId),
-                ).deleteComputer({ userId, commandId }),
+                ).deleteComputer({ schemaVersion: 1, userId, commandId }),
               ),
           },
           auth: AUTH_PACKAGE_V1.create(env, {

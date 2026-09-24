@@ -148,6 +148,22 @@ function errorResponse(error: unknown): Response {
       { status: 409 },
     );
   }
+  // The Bot list is the first thing a client reads, so a deleted account is
+  // told it is gone here rather than shown a server fault.
+  if (
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    error.name === "AccountDeletedError"
+  )
+    return Response.json(
+      {
+        error: error instanceof Error ? error.message : "Account deleted",
+        code: "account-deleted",
+        definitive: true,
+      },
+      { status: 410 },
+    );
   return Response.json(
     { error: error instanceof Error ? error.message : "Flock request failed" },
     { status: 500 },
