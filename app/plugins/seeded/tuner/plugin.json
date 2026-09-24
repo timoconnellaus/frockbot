@@ -1,0 +1,21 @@
+{
+  "id": "tuner",
+  "displayName": "Tuner",
+  "version": "1.0.0",
+  "contractVersion": 7,
+  "tools": [],
+  "hooks": [],
+  "grants": ["device"],
+  "device": {
+    "abilities": ["microphone"]
+  },
+  "views": [
+    {
+      "slot": "conversation.panel",
+      "surfaceId": "tuner",
+      "label": "Tuner",
+      "page": "tuner.html"
+    }
+  ],
+  "contextKeys": ["user", "bot", "session"]
+}

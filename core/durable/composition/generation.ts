@@ -369,7 +369,7 @@ export function decodeCompositionMemberV1(
 }
 
 /** Exactly one stored page for every page a view names, and no other. */
-function decodeMemberPagesV1(
+export function decodeMemberPagesV1(
   input: unknown,
   descriptor: PluginDescriptorV1,
   label: string,

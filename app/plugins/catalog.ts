@@ -17,9 +17,11 @@ import {
   decodePluginDescriptorV1,
   type PluginDescriptorV1,
 } from "@frockbot/core/contracts";
-import type {
-  ArtifactRefV1,
-  CompositionMemberV1,
+import type { PluginPageArtifactV1 } from "@frockbot/core/contracts";
+import {
+  decodeMemberPagesV1,
+  type ArtifactRefV1,
+  type CompositionMemberV1,
 } from "@frockbot/core/durable";
 import type { PluginServedProviderClaimV1 } from "@frockbot/frock-compose";
 import { PLUGIN_SERVED_PROVIDERS_V1 } from "@frockbot/providers/catalog/definition";
@@ -50,6 +52,8 @@ export interface SeededPluginV1 {
   seed: PluginSeedStateV1;
   artifact: ArtifactRefV1;
   descriptor: PluginDescriptorV1;
+  /** The pages its views name, as built; the HTML travels in the bundle. */
+  pages?: readonly PluginPageArtifactV1[];
 }
 
 /**
@@ -125,7 +129,9 @@ export function decodeSeededPluginV1(
   label = "seeded plugin",
 ): SeededPluginV1 {
   const value = record(input, label);
-  const keys = Object.keys(value).sort();
+  const keys = Object.keys(value)
+    .filter((key) => key !== "pages")
+    .sort();
   if (
     keys.join(",") !==
     [
@@ -158,6 +164,7 @@ export function decodeSeededPluginV1(
   if (descriptor.id !== pluginId) {
     throw new Error(`${label}.descriptor does not name the Plugin`);
   }
+  const pages = decodeMemberPagesV1(value.pages, descriptor, `${label}.pages`);
   const artifact = record(value.artifact, `${label}.artifact`);
   const contentHash = boundedString(
     artifact.contentHash,
@@ -194,6 +201,7 @@ export function decodeSeededPluginV1(
       ),
     },
     descriptor,
+    ...(pages === undefined ? {} : { pages }),
   };
 }
 
@@ -286,6 +294,15 @@ const SEEDED_PLUGIN_WORDS_V1: Record<string, SeededPluginWordsV1> = {
     // of you is not something every Bot should start with.
     seed: "default-off",
   },
+  // The first Plugin with a page of its own that hears the microphone (ADR
+  // 0036). Off until switched on, because switching it on is the approval:
+  // the row says what the page may hear before the switch is there to flip.
+  tuner: {
+    displayName: "Tuner",
+    description:
+      "Tunes a guitar or any string by ear, listening through your microphone while its panel is open. Shows the note and how far off it is. Off until you switch it on.",
+    seed: "default-off",
+  },
 };
 
 /**
@@ -326,8 +343,31 @@ export const DEPLOYMENT_PLUGIN_CATALOG_V1: readonly SeededPluginV1[] =
         bundlerVersion: artifact.bundlerVersion,
       },
       descriptor: artifact.descriptor,
+      ...(artifact.pages === undefined
+        ? {}
+        : {
+            pages: artifact.pages.map(({ path, contentHash, size }) => ({
+              path,
+              contentHash,
+              size,
+            })),
+          }),
     }),
   );
+
+/**
+ * A seeded Plugin's page by its content hash. A seeded page has no publisher
+ * to put it in R2, so it travels in the bundle beside its module.
+ */
+export function seededPluginPageV1(contentHash: string): string | undefined {
+  for (const artifact of SEEDED_PLUGIN_ARTIFACTS_V1) {
+    const page = artifact.pages?.find(
+      (candidate) => candidate.contentHash === contentHash,
+    );
+    if (page) return page.html;
+  }
+  return undefined;
+}
 
 /**
  * Package ids an account can install from the Marketplace.
@@ -421,6 +461,7 @@ export function installedMemberV1(
     },
     artifact: plugin.artifact,
     descriptor: plugin.descriptor,
+    ...(plugin.pages === undefined ? {} : { pages: [...plugin.pages] }),
   };
 }
 
@@ -442,6 +483,7 @@ export function seededMemberV1(
     },
     artifact: plugin.artifact,
     descriptor: plugin.descriptor,
+    ...(plugin.pages === undefined ? {} : { pages: [...plugin.pages] }),
   };
 }
 

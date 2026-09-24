@@ -47,7 +47,7 @@ function cardSwitch(page: Page, title: string): Locator {
 // rows at or near the viewport, and the engine drops a row back out as the list
 // moves without reliably putting it back, so scrolling a long list is not
 // something to rest assertions on. The height is what this page holds: the
-// five first-party features and the deployment's seeded Plugin under the
+// five first-party features and the deployment's seeded Plugins under the
 // page's header, all of them in the tree at 3000px. More rows are a taller
 // window here, not a scroll.
 test.use({ viewport: { width: 1280, height: 3000 } });
