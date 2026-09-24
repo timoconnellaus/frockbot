@@ -137,7 +137,7 @@ async function prepareTurnAdmission(
 ): Promise<void> {
   // Before the authority reads the session log, so a compaction detached
   // from the previous Turn has finished any write and writes nothing more.
-  await admitTurnToSessionLogV1(command.sessionId);
+  await admitTurnToSessionLogV1(command.sessionId, state.ctx);
   await syncCompositionFromUser(state, {
     userId: command.userId,
     botId: command.botId,
@@ -268,7 +268,7 @@ export async function executeTurn(
   // This Turn takes the session log. A compaction detached from the previous
   // Turn keeps summarising and parks its outcome for this Turn's end, so this
   // Turn is the only writer and waits for nothing but a write under way.
-  await admitTurnToSessionLogV1(input.command.sessionId);
+  await admitTurnToSessionLogV1(input.command.sessionId, state.ctx);
   if (input.preparedInputs === undefined) {
     throw new Error("this Turn has no admitted preparation");
   }
@@ -412,6 +412,7 @@ export async function executeTurn(
               state.ctx.storage,
               input.command.sessionId,
             ),
+            compactionScope: state.ctx,
           },
         ),
         billing: state.env.BILLING?.(

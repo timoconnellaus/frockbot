@@ -26,9 +26,12 @@
 // Composition is the one its summariser calls are checked against. A Turn therefore always starts from whatever summary
 // had landed by the end of the Turn before it.
 //
-// Keyed by session id and held for the lifetime of the isolate, because that is
-// exactly the scope the work has: a Durable Object holds one conversation, and
-// work detached from one Turn has to be findable from the next.
+// Keyed by session id within the Durable Object instance that runs it, because
+// that is exactly the scope the work has: work detached from one Turn has to be
+// findable from the next, and nothing outlives the instance it ran in. An
+// instance that is reset while the isolate lives on leaves its summariser bound
+// to a dead actor, never settling; the next instance starts with no queue, and
+// reconciliation settles the intent it left as interrupted.
 import type { Session } from "@frockbot/core/contracts";
 import type {
   ParkedCompactionStoreV1,
@@ -129,14 +132,35 @@ class CompactionWork {
   }
 }
 
-const work = new Map<string, CompactionWork>();
+/** The scope of a runtime that is not a Durable Object instance. */
+const isolateScope = {};
+const work = new WeakMap<object, Map<string, CompactionWork>>();
+
+/**
+ * The Durable Object instance a Session's Turn ran in, as the Turn's working
+ * context selector names it.
+ */
+export function compactionScopeV1(session: Session): object {
+  return (
+    (session.workingContextSelector as { compactionScope?: object } | undefined)
+      ?.compactionScope ?? isolateScope
+  );
+}
 
 /** The detached compaction for one conversation, created on first use. */
-export function compactionWorkV1(sessionId: string): CompactionWork {
-  const existing = work.get(sessionId);
+export function compactionWorkV1(
+  sessionId: string,
+  scope: object = isolateScope,
+): CompactionWork {
+  let scoped = work.get(scope);
+  if (!scoped) {
+    scoped = new Map();
+    work.set(scope, scoped);
+  }
+  const existing = scoped.get(sessionId);
   if (existing) return existing;
   const created = new CompactionWork();
-  work.set(sessionId, created);
+  scoped.set(sessionId, created);
   return created;
 }
 
@@ -146,18 +170,23 @@ export function compactionWorkV1(sessionId: string): CompactionWork {
  */
 export async function admitTurnToSessionLogV1(
   sessionId: string,
+  scope: object = isolateScope,
 ): Promise<void> {
-  await compactionWorkV1(sessionId).admitTurn();
+  await compactionWorkV1(sessionId, scope).admitTurn();
 }
 
 /** Whether a conversation has a compaction still running. */
-export function compactionInFlightV1(sessionId: string): boolean {
-  return work.get(sessionId)?.inFlight ?? false;
+export function compactionInFlightV1(
+  sessionId: string,
+  scope: object = isolateScope,
+): boolean {
+  return work.get(scope)?.get(sessionId)?.inFlight ?? false;
 }
 
 /** Awaits a detached compaction. Tests and shutdown only. */
 export async function whenCompactionSettledV1(
   sessionId: string,
+  scope: object = isolateScope,
 ): Promise<void> {
-  await work.get(sessionId)?.whenSettled();
+  await work.get(scope)?.get(sessionId)?.whenSettled();
 }

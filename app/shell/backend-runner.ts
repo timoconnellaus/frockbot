@@ -15,6 +15,7 @@ import {
 import type { BotTurnCommand, BotTurnCompletion } from "./backend-contracts.js";
 import {
   compactionInFlightV1,
+  compactionScopeV1,
   whenCompactionSettledV1,
 } from "./compaction-scheduler.js";
 
@@ -169,8 +170,9 @@ export async function executeBotTurn(
     // would put the summariser back in the latency path, which is the whole
     // defect. Compactions run one at a time, each bounded by its deadline, so
     // these can only stack as deep as that queue.
-    if (compactionInFlightV1(command.sessionId)) {
-      void whenCompactionSettledV1(command.sessionId).then(
+    const scope = compactionScopeV1(runtime.agent.agent.session);
+    if (compactionInFlightV1(command.sessionId, scope)) {
+      void whenCompactionSettledV1(command.sessionId, scope).then(
         () => composition.dispose(),
         () => composition.dispose(),
       );

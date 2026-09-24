@@ -61,7 +61,7 @@ export async function openInputDeliveryTurnV1(
   try {
     if (await inputDeliveryWaiting(state)) return;
     const sessionId = botConversationBaseSessionIdV1(identity);
-    await admitTurnToSessionLogV1(sessionId);
+    await admitTurnToSessionLogV1(sessionId, state.ctx);
     // An approved Plugin joined the User's Composition a moment ago, and the
     // pin this Turn takes has to be that generation for the Plugin to run in
     // the Turn that says it is ready.

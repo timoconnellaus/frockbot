@@ -32,7 +32,10 @@ import {
   type ParkedCompactionStoreV1,
   runCompactionV1,
 } from "./compaction.js";
-import { compactionWorkV1 } from "./compaction-scheduler.js";
+import {
+  compactionScopeV1,
+  compactionWorkV1,
+} from "./compaction-scheduler.js";
 import { conversationDeliveryHooksV1 } from "./delivery.js";
 import { shellDefinitionV1 } from "./definition.js";
 import { drawFirstPartyCardV1 } from "./first-party-cards.js";
@@ -720,7 +723,7 @@ export const shellAgentFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
     runtime.hooks.add({
       turnStopping: async (agent, turn) => {
         const session = agent.session;
-        const work = compactionWorkV1(session.id);
+        const work = compactionWorkV1(session.id, compactionScopeV1(session));
         // The log is free until the next admission, so an outcome that lands
         // before then is written straight through this Turn's Session.
         work.adopt(session);
