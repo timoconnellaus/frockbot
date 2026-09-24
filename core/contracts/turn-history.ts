@@ -8,7 +8,7 @@
 // derived message belongs to, and which Turn is currently open.
 //
 import { expandToolCallOccurrencesV1 } from "./batch.js";
-import type { SessionEvent } from "./types.js";
+import type { LlmMessage, SessionEvent } from "./types.js";
 
 /** The event types `Session.deriveMessages` turns into a message, in order. */
 const MESSAGE_EVENT_TYPES = new Set([
@@ -80,4 +80,55 @@ export function messageTurnsV1(events: readonly SessionEvent[]): number[] {
 export function currentTurnV1(events: readonly SessionEvent[]): number {
   const started = events.findLast((event) => event.type === "turn/start");
   return started?.type === "turn/start" ? started.turn : 0;
+}
+
+export const UNRUN_TOOL_CALL_RESULT_V1 =
+  "Not run: the Turn ended before this call started.";
+
+/**
+ * The messages with every assistant tool call answered.
+ *
+ * A Turn interrupted while the first of several parallel calls ran closes only
+ * the calls that started, so its later calls stay in the history with no
+ * result. Some providers refuse the whole request for that, and the history is
+ * durable: every later Turn of the Bot failed the same way. Each unanswered
+ * call gets an error result at the end of its tool block. Returns the same
+ * array when nothing is missing.
+ */
+export function answerEveryToolCallV1(
+  messages: readonly LlmMessage[],
+): readonly LlmMessage[] {
+  let answered: LlmMessage[] | undefined;
+  let index = 0;
+  while (index < messages.length) {
+    const message = messages[index]!;
+    index += 1;
+    if (message.role !== "assistant" || message.toolCalls.length === 0) {
+      answered?.push(message);
+      continue;
+    }
+    const block: LlmMessage[] = [message];
+    const results = new Set<string>();
+    while (index < messages.length && messages[index]!.role === "tool") {
+      const result = messages[index]! as Extract<LlmMessage, { role: "tool" }>;
+      results.add(result.callId);
+      block.push(result);
+      index += 1;
+    }
+    const missing = message.toolCalls.filter((call) => !results.has(call.id));
+    if (missing.length > 0) {
+      answered ??= messages.slice(0, index - block.length);
+      for (const call of missing) {
+        block.push({
+          role: "tool",
+          callId: call.id,
+          name: call.name,
+          content: UNRUN_TOOL_CALL_RESULT_V1,
+          isError: true,
+        });
+      }
+    }
+    answered?.push(...block);
+  }
+  return answered ?? messages;
 }

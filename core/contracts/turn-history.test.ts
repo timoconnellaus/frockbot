@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { currentTurnV1, messageTurnsV1 } from "./turn-history.js";
-import type { SessionEvent } from "./types.js";
+import {
+  answerEveryToolCallV1,
+  currentTurnV1,
+  messageTurnsV1,
+  UNRUN_TOOL_CALL_RESULT_V1,
+} from "./turn-history.js";
+import type { LlmMessage, SessionEvent } from "./types.js";
 
 const events: SessionEvent[] = [
   {
@@ -50,5 +55,50 @@ describe("turn history", () => {
     expect(messageTurnsV1(events)).toEqual([1, 1, 2]);
     expect(currentTurnV1(events)).toBe(2);
     expect(currentTurnV1([])).toBe(0);
+  });
+});
+
+describe("answering every tool call", () => {
+  const interrupted: LlmMessage[] = [
+    { role: "user", content: "change the theme" },
+    {
+      role: "assistant",
+      content: "",
+      toolCalls: [
+        { id: "call-ran", name: "computer_exec", input: {} },
+        { id: "call-never-ran", name: "computer_exec", input: {} },
+      ],
+    },
+    {
+      role: "tool",
+      callId: "call-ran",
+      name: "computer_exec",
+      content: "Interrupted before a durable result was recorded.",
+      isError: true,
+    },
+    { role: "user", content: "can you build a tuner" },
+  ];
+
+  test("answers a parallel call an interrupted Turn never started", () => {
+    expect(answerEveryToolCallV1(interrupted)).toEqual([
+      interrupted[0]!,
+      interrupted[1]!,
+      interrupted[2]!,
+      {
+        role: "tool",
+        callId: "call-never-ran",
+        name: "computer_exec",
+        content: UNRUN_TOOL_CALL_RESULT_V1,
+        isError: true,
+      },
+      interrupted[3]!,
+    ]);
+  });
+
+  test("returns the same messages when every call is answered", () => {
+    const complete = interrupted.filter(
+      (message) => message.role !== "assistant",
+    );
+    expect(answerEveryToolCallV1(complete)).toBe(complete);
   });
 });
