@@ -209,6 +209,31 @@ void main() {
       expect(line.text, '');
       expect(line.attachments, [_photo, _report]);
     });
+
+    test('the reply being written is drawn under the files it answers', () {
+      final lines = projectRuns(
+        [
+          {
+            'runId': 'run-1',
+            'admittedAt': '2026-09-24T00:00:00.000Z',
+            'input': 'What is in these?',
+            'attachments': [_photo.toJson(), _report.toJson()],
+            'status': 'running',
+            'events': <Object>[],
+          },
+        ],
+        replyDrafts: {
+          'run-1': (ordinal: 0, parts: ['The photo shows']),
+        },
+      );
+      final user = lines.firstWhere((line) => line.role == LineRole.user);
+      expect(user.text, 'What is in these?');
+      expect(user.attachments, [_photo, _report]);
+      final draft = lines.singleWhere((line) => line.isDraft);
+      expect(draft.id, 'run-1:send:0');
+      expect(draft.attachments, isEmpty);
+      expect(lines.indexOf(draft), greaterThan(lines.indexOf(user)));
+    });
   });
 
   group('the tray', () {
