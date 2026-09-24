@@ -111,11 +111,12 @@ export async function appendAnnouncement(
  * group Turn — is the Bot's work but not the chat's, so it lights nothing here
  * either.
  *
- * The record's `status` is necessary and not sufficient. `resolveRunWorking`
- * holds the rule — running, inside the Turn deadline, and a Turn the log has
- * not already closed — and only reports it; a stale record is settled by the
- * alarm's repair index, not by somebody opening the sidebar. A read that fails
- * is no mark: liveness is never worth failing a sidebar poll for.
+ * Both read the same fields of the same record — `running`, and not waiting
+ * its turn — and nothing else. A Turn that stopped without settling is made
+ * true durably rather than hidden by one surface: recovery settles or resumes
+ * the active Turn on its next alarm, and the repair index settles any other
+ * record at its deadline, so the row and the chat change together. An
+ * unreadable record is drawn as a failed Turn, so it is no mark here.
  */
 export async function chatWorkingV1(
   state: ShellBotStateV1,
@@ -123,13 +124,14 @@ export async function chatWorkingV1(
 ): Promise<boolean> {
   const runId = (await state.authority.readActiveRunId()) ?? newestRunId;
   if (runId === undefined) return false;
-  // The header first: it is the record without its journal, and every Bot is
-  // asked on every sidebar poll while almost none of them is running.
+  // The header, not the run: every Bot is asked on every sidebar poll, and
+  // nothing here needs the journal.
   const header = await state.authority.readRunHeaderForDisplay(runId);
-  if (!header?.readable || header.run.status !== "running") return false;
-  try {
-    if (!(await state.authority.resolveRunWorking(runId))) return false;
-  } catch {
+  if (
+    !header?.readable ||
+    header.run.status !== "running" ||
+    header.run.phase === "queued"
+  ) {
     return false;
   }
   const conversationId = await state.authority.readConversationSessionId();

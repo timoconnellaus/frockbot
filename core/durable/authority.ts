@@ -1555,54 +1555,15 @@ export class BotDurableAuthority<Snapshot> {
   }
 
   /**
-   * Whether a run is still working, settling its record when it is not.
-   *
-   * This is the only honest answer to "is this Bot busy", and both readers that
-   * ask — the sidebar's activity ring and the transcript's running Turn — go
-   * through here. `status === "running"` alone is a claim the record makes and
-   * nothing renews: a Turn that died mid-answer never wrote its own
-   * settlement, so idle Bots wore a pulsing ring for hours.
-   * {@link runLivenessV1} holds the rule; this adds the two things a pure rule
-   * cannot have.
-   *
-   * The first is the fence. A run this object is executing right now is alive
-   * by direct observation, whatever the durable record and the log look like
-   * mid-flush, and it is never judged or touched. The object is
-   * single-threaded, so `executingRunId` is exact for the run in this isolate,
-   * and a run executing in some *other* isolate cannot be at issue: the durable
-   * `active-run` marker admits one Turn at a time, and a record older than the
-   * Turn deadline is past the point where any isolate is still holding it.
-   *
-   * The second is the repair. A read that finds a dead record settles it rather
-   * than merely hiding it, so the ring goes out for every other reader too and
-   * the next message inherits a closed Turn instead of repairing one. The
-   * settlement is `failStoredRun`, exactly as recovery's is, which closes the
-   * open Turn in the log on the way and routes a run carrying a durable Stop
-   * intent to the outcome that intent already decided. It is
-   * idempotent — a second caller finds a terminal record and settles nothing —
-   * and the run-record write it commits is what publishes the `runs`
-   * invalidation the watching clients re-read on.
-   */
-  async resolveRunWorking(runId: string | undefined): Promise<boolean> {
-    if (runId === undefined) return false;
-    if (runId === this.executingRunId) return true;
-    const run = await this.readRun(runId);
-    if (!run || run.status !== "running") return false;
-    const sessionEvents = await new SessionEventLog(
-      this.ctx.storage,
-    ).readInlineEventsOfTypes(run.sessionId, SESSION_TURN_END_TYPES);
-    // A read reports the committed record. Settling a stale Turn is the
-    // alarm's repair index, not a side effect of drawing the activity ring.
-    return runLivenessV1({ run, sessionEvents }).working;
-  }
-
-  /**
    * Settles one run whose record says `running` and whose Turn is over.
    *
-   * The verdict is taken again inside the transaction, against the record and
-   * the log as they are committed there, so a Turn that settled itself between
-   * the read above and this write is left exactly as it settled — and so is one
-   * that started executing in this object in the meantime.
+   * The verdict is taken inside the transaction, against the record and the
+   * log as they are committed there, so a Turn that settled itself since the
+   * repair came due is left exactly as it settled — and so is one that started
+   * executing in this object in the meantime. The settlement is
+   * `failStoredRun`, exactly as recovery's is, which closes the open Turn in
+   * the log on the way, and its run-record write is what publishes the `runs`
+   * invalidation watching clients re-read on.
    */
   private async settleStaleRun(runId: string): Promise<void> {
     await this.ctx.storage.transaction(async (transaction) => {

@@ -67,8 +67,7 @@ function unreadRpc(name: string): UnreadRpc {
 
 /**
  * Puts a settled run back where a Turn still in flight holds it: `running`,
- * with its Turn not yet ended in its Session's log, so the liveness rule reads
- * it as working.
+ * with its Turn not yet ended in its Session's log.
  */
 async function reopen(name: string, runId: string): Promise<void> {
   await runInDurableObject(bot(name), async (_instance, state) => {

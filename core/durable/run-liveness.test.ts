@@ -1,20 +1,17 @@
-// An idle Bot wearing the activity ring.
+// A record that says `running` over a Turn that is over.
 //
-// The sidebar's `working` flag was `readRun(newest).status === "running"`, and
-// nothing ever renews that field: a Turn that died mid-answer — a Worker torn
-// down, one of the "turn N started while turn N-1 is open" wedges — leaves a
-// record saying `running` for ever. Production had Bots that had been quiet for
-// hours pulsing as though they were mid-sentence.
-//
-// Liveness is three conditions, not one, and a reader that finds a record
-// failing them settles it rather than merely declining to draw a ring.
+// Nothing but a settlement moves a record off `running`, so a Turn that died
+// mid-answer — a Worker torn down, one of the "turn N started while turn N-1
+// is open" wedges — would say `running` for ever. Liveness is three
+// conditions, not one, and a record failing them is settled durably: by
+// recovery when it is the active Turn, by the alarm's repair index otherwise.
+// Reads report the record as it stands, so every surface changes together.
 import { describe, expect, test } from "bun:test";
 import {
   bootstrapGeneration,
   type CompositionGenerationV1,
 } from "./composition/generation.js";
 import {
-  Session,
   type SessionEvent,
   TURN_DEADLINE_MS_V1,
 } from "@frockbot/core/contracts";
@@ -29,10 +26,7 @@ import {
   STALE_RUNNING_RUN_FAILURE_V1,
   STALE_RUNNING_RUN_GRACE_MS_V1,
 } from "./run-liveness.ts";
-import {
-  SessionEventLog,
-  sessionEventPayloadPrefixV1,
-} from "./session-event-log.ts";
+import { SessionEventLog } from "./session-event-log.ts";
 import {
   ACTIVE_RUN_KEY,
   IDENTITY_KEY,
@@ -223,30 +217,13 @@ const longAgo = new Date(
   Date.now() - TURN_DEADLINE_MS_V1 - STALE_RUNNING_RUN_GRACE_MS_V1 - 60_000,
 ).toISOString();
 
-describe("liveness is reported by the read and repaired by the alarm", () => {
-  test("reports a fresh Turn as working and touches nothing", async () => {
-    const { storage, authority } = await seed({
-      acceptedAt: new Date().toISOString(),
-      events: openTurn,
-      log: openTurn,
-    });
-    expect(await authority.resolveRunWorking("run-1")).toBe(true);
-    expect(
-      (await storage.get<StoredRunV1<undefined>>(`${RUN_PREFIX}run-1`))?.status,
-    ).toBe("running");
-    expect(await storage.get<string>(ACTIVE_RUN_KEY)).toBe("run-1");
-  });
-
-  test("a read reports a deadline miss and the alarm settles it", async () => {
+describe("a stale record is settled by the alarm or recovery, never by a read", () => {
+  test("the alarm settles a deadline miss", async () => {
     const { storage, authority } = await seed({
       acceptedAt: longAgo,
       events: openTurn,
       log: openTurn,
     });
-    expect(await authority.resolveRunWorking("run-1")).toBe(false);
-    expect(
-      (await storage.get<StoredRunV1<undefined>>(`${RUN_PREFIX}run-1`))?.status,
-    ).toBe("running");
     const due = Date.now() - 1_000;
     await storage.put({
       [repairRunKey("run-1")]: due,
@@ -264,29 +241,24 @@ describe("liveness is reported by the read and repaired by the alarm", () => {
     expect(log.some((entry) => entry.type === "turn/end")).toBe(true);
   });
 
-  test("a read reports a closed Turn and recovery settles it", async () => {
+  test("recovery settles a closed Turn", async () => {
     const { storage, authority } = await seed({
       acceptedAt: new Date().toISOString(),
       events: openTurn,
       log: closedTurn,
     });
-    expect(await authority.resolveRunWorking("run-1")).toBe(false);
-    expect(
-      (await storage.get<StoredRunV1<undefined>>(`${RUN_PREFIX}run-1`))?.status,
-    ).toBe("running");
     await authority.recoverActiveRun();
     expect(
       (await storage.get<StoredRunV1<undefined>>(`${RUN_PREFIX}run-1`))?.status,
     ).toBe("failed");
   });
 
-  test("is idempotent: the read never settles, and a second alarm does not rewrite", async () => {
+  test("a second alarm does not rewrite what the first settled", async () => {
     const { storage, authority } = await seed({
       acceptedAt: longAgo,
       events: openTurn,
       log: openTurn,
     });
-    expect(await authority.resolveRunWorking("run-1")).toBe(false);
     const due = Date.now() - 1_000;
     await storage.put({
       [repairRunKey("run-1")]: due,
@@ -297,79 +269,9 @@ describe("liveness is reported by the read and repaired by the alarm", () => {
     const first = await storage.get<StoredRunV1<undefined>>(
       `${RUN_PREFIX}run-1`,
     );
-    expect(await authority.resolveRunWorking("run-1")).toBe(false);
     await authority.alarm();
     expect(
       await storage.get<StoredRunV1<undefined>>(`${RUN_PREFIX}run-1`),
     ).toEqual(first!);
-  });
-
-  test("no run is no ring", async () => {
-    const { authority } = await seed({
-      acceptedAt: longAgo,
-      events: openTurn,
-      log: openTurn,
-    });
-    expect(await authority.resolveRunWorking(undefined)).toBe(false);
-    expect(await authority.resolveRunWorking("run-missing")).toBe(false);
-  });
-
-  test("judges a paged log without hydrating model-request payloads", async () => {
-    const storage = new MemoryStorage();
-    const conversation = new Session("user-1:primary");
-    for (let turn = 1; turn <= 8; turn += 1) {
-      conversation.appendBatch([
-        { type: "turn/start", turn },
-        {
-          type: "model/request",
-          turn,
-          step: 1,
-          request: {
-            requestId: `request-${turn}`,
-            provider: "fake",
-            model: "large-context",
-            system: "s".repeat(80_000),
-            messages: [],
-            tools: [],
-          },
-        },
-        { type: "turn/end", turn, outcome: "completed" },
-      ]);
-    }
-    conversation.appendBatch([
-      { type: "turn/start", turn: 9 },
-      { type: "step/start", turn: 9, step: 1 },
-    ]);
-    const log = [...conversation.activeRunJournal];
-    await new SessionEventLog(storage).rewrite("user-1:primary", log);
-    const stored = run({
-      acceptedAt: new Date().toISOString(),
-      events: log.slice(-2),
-      previousEventCount: log.length - 2,
-    });
-    await storage.put({
-      [`${RUN_PREFIX}${stored.runId}`]: stored,
-      [runIndexKey(stored.acceptedAt, stored.runId)]: stored.runId,
-      [ACTIVE_RUN_KEY]: stored.runId,
-      [IDENTITY_KEY]: { userId: "user-1", botId: "primary" },
-    });
-    const authority = new BotDurableAuthority<undefined>({
-      state: { storage } as unknown as DurableObjectState,
-      codec,
-      hooks,
-    });
-    const reads: string[] = [];
-    const get = storage.get.bind(storage);
-    storage.get = <T>(key: string): Promise<T | undefined> => {
-      reads.push(key);
-      return get<T>(key);
-    };
-
-    expect(await authority.resolveRunWorking("run-1")).toBe(true);
-    expect(
-      reads.filter((key) =>
-        key.startsWith(sessionEventPayloadPrefixV1("user-1:primary")),
-      ),
-    ).toEqual([]);
   });
 });
