@@ -247,6 +247,14 @@ export interface StoredRunV1<Snapshot = unknown> {
   /** Self-contained identity and time even when the first attempt is off-page. */
   messageRunId?: string;
   messageAdmittedAt?: string;
+  /**
+   * Where the person's message landed, when it arrived while another Turn was
+   * running: that Turn, and the position its own Session log had reached. The
+   * thread draws the message there — after what that Turn had already said,
+   * above what it said next — rather than after everything it went on to say.
+   * A retry carries its message's landing, as it carries the message's time.
+   */
+  landedAt?: StoredRunLandingV1;
   events: SessionEvent[];
   /**
    * Inclusive/exclusive coordinates of this Turn in the authoritative Session
@@ -280,6 +288,11 @@ export interface StoredRunV1<Snapshot = unknown> {
   admission?: StoredRunAdmissionV1;
   /** An ordinary admitted Turn whose only action is one caller-selected tool. */
   directTool?: DirectToolCommandV1;
+}
+
+export interface StoredRunLandingV1 {
+  runId: string;
+  seq: number;
 }
 
 export interface StoredRunEventRangeV1 {
@@ -452,6 +465,7 @@ const STORED_RUN_OPTIONAL_KEYS = [
   "retriedBy",
   "messageRunId",
   "messageAdmittedAt",
+  "landedAt",
   "mountedCompositionGenerationId",
   "preparedInputs",
 ] as const;
@@ -1016,6 +1030,27 @@ function requireStoredRunRecordV1<Snapshot>(
   } else {
     lineage.messageAdmittedAt = candidate.messageAdmittedAt;
   }
+  let landedAt: StoredRunLandingV1 | undefined;
+  if (candidate.landedAt !== undefined) {
+    const landing = candidate.landedAt as Record<string, unknown> | null;
+    if (
+      !landing ||
+      typeof landing !== "object" ||
+      Object.keys(landing).some((key) => key !== "runId" && key !== "seq") ||
+      !boundedString(landing.runId, 128) ||
+      !Number.isSafeInteger(landing.seq) ||
+      (landing.seq as number) < 0
+    ) {
+      throw new Error(`run "${runId}" has an invalid landing`);
+    }
+    landedAt = {
+      runId: options.decodeRunId(landing.runId),
+      seq: landing.seq as number,
+    };
+    if (landedAt.runId === runId) {
+      throw new Error(`run "${runId}" cannot have landed during itself`);
+    }
+  }
   if (candidate.retriedBy !== undefined && status !== "failed") {
     throw new Error(`run "${runId}" has a successor but is not failed`);
   }
@@ -1078,6 +1113,7 @@ function requireStoredRunRecordV1<Snapshot>(
     acceptedAt: candidate.acceptedAt,
     input: candidate.input,
     ...lineage,
+    ...(landedAt ? { landedAt } : {}),
     events,
     ...(eventRange ? { eventRange } : {}),
     effectAdmissions,

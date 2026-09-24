@@ -92,6 +92,7 @@ export function visiblePublicationsV1(input: {
             type: "send/to-user",
             payload: event.payload,
             ordinal: sendOrdinal(input.run.events, event.occurrenceId),
+            seq: event.seq,
           },
         },
       });

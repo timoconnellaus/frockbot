@@ -16,8 +16,8 @@ DOCUMENT = {
     "release": "0.7.163",
     "app": {"versionName": "0.7.163", "buildNumber": 1, "version": "0.7.163+1"},
     "hostedOrigin": "https://bot.frockbot.test",
-    "clientProtocol": 1,
-    "compatibility": {"protocolMin": 1, "protocolMax": 1},
+    "clientProtocol": 2,
+    "compatibility": {"protocolMin": 2, "protocolMax": 2},
 }
 
 
@@ -28,7 +28,7 @@ class NativeMetadataTest(unittest.TestCase):
         self.assertEqual(metadata.version_name, "0.7.163")
         self.assertEqual(metadata.build_number, 1)
         self.assertEqual(metadata.hosted_origin, "https://bot.frockbot.test")
-        self.assertEqual(metadata.client_protocol, 1)
+        self.assertEqual(metadata.client_protocol, 2)
 
     def test_rejects_malformed_command_output(self):
         for document in (

@@ -607,6 +607,236 @@ void main() {
   });
 
   group('the order a thread is drawn in', () {
+    Map<String, Object?> sent(String text, int ordinal, int seq) => {
+      'type': 'send/to-user',
+      'payload': {'type': 'text', 'text': text},
+      'ordinal': ordinal,
+      'seq': seq,
+    };
+
+    // A message sent while the Bot works lands where it was sent, as in any
+    // chat. The answer the running Turn went on to give is drawn under it,
+    // though the Bot read the message only after giving that answer.
+    test('draws a message sent mid-Turn where it landed', () {
+      final lines = projectRuns([
+        run(
+          runId: 'run-a',
+          input: 'Plan the launch.',
+          admittedAt: '2026-09-05T12:19:00.000Z',
+          events: [sent('On it.', 0, 3), sent('Here is the plan.', 1, 9)],
+        ),
+        {
+          ...run(
+            runId: 'run-b',
+            input: 'Keep it under ten thousand.',
+            admittedAt: '2026-09-05T12:19:20.000Z',
+            events: [sent('Trimmed it to nine.', 0, 14)],
+          ),
+          'landedAt': {'runId': 'run-a', 'seq': 6},
+        },
+      ]);
+
+      expect(thread(lines), [
+        'user: Plan the launch.',
+        'assistant: On it.',
+        'user: Keep it under ten thousand.',
+        'assistant: Here is the plan.',
+        'assistant: Trimmed it to nine.',
+      ]);
+    });
+
+    test('keeps two messages sent mid-Turn in the order they landed', () {
+      final lines = projectRuns([
+        run(
+          runId: 'run-a',
+          input: 'Plan the launch.',
+          admittedAt: '2026-09-05T12:19:00.000Z',
+          events: [sent('On it.', 0, 3), sent('Here is the plan.', 1, 9)],
+        ),
+        {
+          ...run(
+            runId: 'run-b',
+            input: 'Keep it cheap.',
+            admittedAt: '2026-09-05T12:19:10.000Z',
+            status: 'running',
+            queued: true,
+          ),
+          'landedAt': {'runId': 'run-a', 'seq': 5},
+        },
+        {
+          ...run(
+            runId: 'run-c',
+            input: 'And quick.',
+            admittedAt: '2026-09-05T12:19:12.000Z',
+            status: 'running',
+            queued: true,
+          ),
+          'landedAt': {'runId': 'run-a', 'seq': 7},
+        },
+      ]);
+
+      expect(thread(lines), [
+        'user: Plan the launch.',
+        'assistant: On it.',
+        'user: Keep it cheap.',
+        'user: And quick.',
+        'assistant: Here is the plan.',
+      ]);
+    });
+
+    // Nothing is committed while the model thinks, so two messages sent
+    // during one call land at the same place: they keep the order they were
+    // sent in.
+    test('two messages that landed at the same place keep their order', () {
+      final lines = projectRuns([
+        run(
+          runId: 'run-a',
+          input: 'Plan the launch.',
+          admittedAt: '2026-09-05T12:19:00.000Z',
+          events: [sent('On it.', 0, 3), sent('Here is the plan.', 1, 9)],
+        ),
+        for (final (id, words, at) in [
+          ('run-b', 'Keep it cheap.', '2026-09-05T12:19:10.000Z'),
+          ('run-c', 'And quick.', '2026-09-05T12:19:12.000Z'),
+        ])
+          {
+            ...run(
+              runId: id,
+              input: words,
+              admittedAt: at,
+              status: 'running',
+              queued: true,
+            ),
+            'landedAt': {'runId': 'run-a', 'seq': 6},
+          },
+      ]);
+
+      expect(thread(lines), [
+        'user: Plan the launch.',
+        'assistant: On it.',
+        'user: Keep it cheap.',
+        'user: And quick.',
+        'assistant: Here is the plan.',
+      ]);
+    });
+
+    // A Routine firing counts in a log of its own, so its positions say
+    // nothing about where a message sent during another Turn landed.
+    test('a firing earlier in the thread is not measured against', () {
+      final lines = projectRuns([
+        run(
+          runId: 'run-digest',
+          admittedAt: '2026-09-05T09:00:00.000Z',
+          events: [sent('Morning digest.', 0, 40)],
+        ),
+        run(
+          runId: 'run-a',
+          input: 'Plan the launch.',
+          admittedAt: '2026-09-05T12:19:00.000Z',
+          events: [sent('On it.', 0, 3), sent('Here is the plan.', 1, 9)],
+        ),
+        {
+          ...run(
+            runId: 'run-b',
+            input: 'Keep it cheap.',
+            admittedAt: '2026-09-05T12:19:10.000Z',
+            status: 'running',
+            queued: true,
+          ),
+          'landedAt': {'runId': 'run-a', 'seq': 6},
+        },
+      ]);
+
+      expect(thread(lines), [
+        'assistant: Morning digest.',
+        'user: Plan the launch.',
+        'assistant: On it.',
+        'user: Keep it cheap.',
+        'assistant: Here is the plan.',
+      ]);
+    });
+
+    // A retry of an older message answers where that message was. A message
+    // that lands while it runs still never climbs above what the person had
+    // already said after it.
+    test('a message never lands above one sent before it', () {
+      final lines = projectRuns([
+        {
+          ...run(
+            runId: 'venue-1',
+            input: 'Book the venue.',
+            admittedAt: '2026-09-05T12:00:00.000Z',
+            status: 'failed',
+            failure: 'This Bot couldn’t finish its reply.',
+          ),
+          'canRetry': false,
+          'retriedBy': 'venue-2',
+        },
+        run(
+          runId: 'invite',
+          input: 'Draft the invite.',
+          admittedAt: '2026-09-05T12:05:00.000Z',
+          sentText: 'Drafted.',
+        ),
+        {
+          ...run(
+            runId: 'venue-2',
+            input: 'Book the venue.',
+            admittedAt: '2026-09-05T12:10:00.000Z',
+            status: 'running',
+            events: [sent('Booked it.', 0, 20)],
+          ),
+          'retryOf': 'venue-1',
+          'messageRunId': 'venue-1',
+          'messageAdmittedAt': '2026-09-05T12:00:00.000Z',
+        },
+        {
+          ...run(
+            runId: 'budget',
+            input: 'Under two thousand, please.',
+            admittedAt: '2026-09-05T12:11:00.000Z',
+            status: 'running',
+            queued: true,
+          ),
+          'landedAt': {'runId': 'venue-2', 'seq': 15},
+        },
+      ]);
+
+      final drawn = thread(lines);
+      expect(
+        drawn.indexOf('assistant: Booked it.'),
+        lessThan(drawn.indexOf('user: Draft the invite.')),
+      );
+      expect(drawn.last, 'user: Under two thousand, please.');
+    });
+
+    test('a message that landed after the Turn had spoken stays under it', () {
+      final lines = projectRuns([
+        run(
+          runId: 'run-a',
+          input: 'Plan the launch.',
+          admittedAt: '2026-09-05T12:19:00.000Z',
+          events: [sent('Here is the plan.', 0, 3)],
+        ),
+        {
+          ...run(
+            runId: 'run-b',
+            input: 'Thanks.',
+            admittedAt: '2026-09-05T12:19:20.000Z',
+            status: 'running',
+            queued: true,
+          ),
+          'landedAt': {'runId': 'run-a', 'seq': 4},
+        },
+      ]);
+
+      expect(thread(lines), [
+        'user: Plan the launch.',
+        'assistant: Here is the plan.',
+        'user: Thanks.',
+      ]);
+    });
+
     /*
      * The production sweep: a message is sent, and while its reply is
      * streaming two more are sent. Each Turn is admitted a moment after the

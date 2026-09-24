@@ -1994,6 +1994,25 @@ export class BotDurableAuthority<Snapshot> {
       // made every admission pay for every retained model request, and a
       // truncated copy of that archive is not a Session seed.
       const seeded = await readSessionCursorV1(transaction, command.sessionId);
+      // Where a message sent while a Turn runs landed, in that Turn's own
+      // Session: a Routine firing keeps a log of its own. Every event the Turn
+      // has committed sits below the cursor, everything it says from here on
+      // at or above it, and a send is committed the moment it is made.
+      const running = activeRunId
+        ? this.codec.optional(
+            await transaction.get<unknown>(`${RUN_PREFIX}${activeRunId}`),
+          )
+        : undefined;
+      const landedAt = running
+        ? {
+            runId: running.runId,
+            seq:
+              running.sessionId === command.sessionId
+                ? seeded.cursor.nextSeq
+                : (await readSessionCursorV1(transaction, running.sessionId))
+                    .cursor.nextSeq,
+          }
+        : undefined;
       const admittedSettings = await this.hooks.admittedSnapshot(
         transaction,
         settings,
@@ -2018,6 +2037,13 @@ export class BotDurableAuthority<Snapshot> {
                 retryTarget.messageAdmittedAt ?? retryTarget.acceptedAt,
             }
           : {}),
+        ...(retryTarget
+          ? retryTarget.landedAt
+            ? { landedAt: structuredClone(retryTarget.landedAt) }
+            : {}
+          : landedAt
+            ? { landedAt }
+            : {}),
         events: [],
         effectAdmissions: [],
         status: "running",

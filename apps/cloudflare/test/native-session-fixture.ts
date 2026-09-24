@@ -1,5 +1,8 @@
 import { env } from "cloudflare:test";
-import { decodeProtocol } from "@frockbot/core/protocol-schemas";
+import {
+  CLIENT_PROTOCOL_VERSION,
+  decodeProtocol,
+} from "@frockbot/core/protocol-schemas";
 import { decodeAccountAdmissionDecisionV1 } from "@frockbot/app/admin/shared";
 import { DEPLOYMENT_POLICY_SINGLETON_NAME } from "../src/deployment-policy.ts";
 import { createNativeAuth, nativeReturnUriV1 } from "../src/native-auth.ts";
@@ -84,7 +87,7 @@ export async function nativeHeaders(userId: string) {
   });
   const hello = {
     schemaVersion: 1,
-    protocolVersion: 1,
+    protocolVersion: CLIENT_PROTOCOL_VERSION,
     nativeVersion: "0.7.163",
     catalogs: [],
   };

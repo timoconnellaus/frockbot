@@ -104,7 +104,7 @@
     "schema": "ClientHello",
     "value": {
       "schemaVersion": 1,
-      "protocolVersion": 1,
+      "protocolVersion": 2,
       "nativeVersion": "1.2.0",
       "catalogs": []
     }
@@ -114,8 +114,8 @@
     "schema": "CompatibilityView",
     "value": {
       "schemaVersion": 1,
-      "protocolMin": 1,
-      "protocolMax": 1,
+      "protocolMin": 2,
+      "protocolMax": 2,
       "catalogs": []
     }
   },
@@ -2766,6 +2766,59 @@
       "head": 4,
       "readThrough": 2,
       "working": ["xero"]
+    }
+  },
+  {
+    "name": "RunEvent send carries its Session position",
+    "schema": "RunEvent",
+    "value": {
+      "type": "send/to-user",
+      "payload": { "type": "text", "text": "Here is the plan." },
+      "ordinal": 1,
+      "seq": 9
+    }
+  },
+  {
+    "name": "RunEvent message to a Bot carries its Session position",
+    "schema": "RunEvent",
+    "value": {
+      "type": "message/to-bot",
+      "callId": "tool-2",
+      "botId": "xero-books",
+      "text": "What is overdue?",
+      "seq": 12
+    }
+  },
+  {
+    "name": "Run V4 message that landed while another Turn ran",
+    "schema": "Run",
+    "value": {
+      "schemaVersion": 4,
+      "runId": "run-2",
+      "admittedAt": "2026-09-24T00:00:10.000Z",
+      "messageRunId": "run-2",
+      "messageAdmittedAt": "2026-09-24T00:00:10.000Z",
+      "input": "Keep it cheap.",
+      "status": "running",
+      "queued": true,
+      "events": [],
+      "canRetry": false,
+      "landedAt": { "runId": "run-1", "seq": 6 }
+    }
+  },
+  {
+    "name": "ConversationMessageUpdate send carries its Session position",
+    "schema": "ConversationMessageUpdate",
+    "value": {
+      "runId": "command-1",
+      "sessionId": "user-1:scout",
+      "occurrenceId": "occ-2",
+      "event": {
+        "type": "send/to-user",
+        "payload": { "type": "text", "text": "Here is the plan." },
+        "ordinal": 1,
+        "seq": 9
+      }
     }
   }
 ]

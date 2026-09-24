@@ -51,7 +51,7 @@ _Avoid_: Channel, room, project, team
 _Avoid_: Background job, async task, child agent (that is the Subagents Package's `Task`)
 
 **Steering**:
-A user message sent mid-turn reaching the running chat turn at its next step boundary. The turn finishes the step it is in — its model response and every tool call it made — and then ends `completed`; the message runs next, with everything that turn did in its context and a pending input saying the work was unfinished. The bot decides what to do with it. Nothing in flight is cut off or sent again, and only `/stop` cancels a turn. Not Jev's acknowledgement steering, which shapes a turn's first reply.
+A user message sent mid-turn reaching the running chat turn at its next step boundary. The turn finishes the step it is in — its model response and every tool call it made — and then ends `completed`; the message runs next, with everything that turn did in its context and a pending input saying the work was unfinished. The bot decides what to do with it. Nothing in flight is cut off or sent again, and only `/stop` cancels a turn. The thread draws the message where it landed: after what the bot had already said, above what the running turn went on to say before it yielded. Not Jev's acknowledgement steering, which shapes a turn's first reply.
 _Avoid_: Supersede, interrupt, barge-in
 
 **Package**:

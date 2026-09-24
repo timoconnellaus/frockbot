@@ -1,5 +1,6 @@
 import { env, runInDurableObject } from "cloudflare:test";
 import { expect, it } from "vitest";
+import { CLIENT_PROTOCOL_VERSION } from "@frockbot/core/protocol-schemas";
 import { freshUserId } from "./fixtures.ts";
 
 it("the User owner persists native issuance and revocation, refusing other User scope and replay", async () => {
@@ -15,7 +16,7 @@ it("the User owner persists native issuance and revocation, refusing other User 
     expiresAt: Date.now() + 60_000,
     hello: {
       schemaVersion: 1,
-      protocolVersion: 1,
+      protocolVersion: CLIENT_PROTOCOL_VERSION,
       nativeVersion: "1.1.0",
       catalogs: [],
     },

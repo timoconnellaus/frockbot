@@ -1553,6 +1553,11 @@
             "ordinal": {
               "type": "integer",
               "minimum": 0
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
             }
           },
           "required": ["type", "payload", "ordinal"],
@@ -1718,6 +1723,11 @@
               "type": "string",
               "minLength": 1,
               "maxLength": 32000
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
             }
           },
           "required": ["type", "callId", "botId", "text"],
@@ -1942,6 +1952,21 @@
             },
             "canRetry": {
               "type": "boolean"
+            },
+            "landedAt": {
+              "type": "object",
+              "properties": {
+                "runId": {
+                  "$ref": "#/$defs/Identifier"
+                },
+                "seq": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": ["runId", "seq"],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -2158,6 +2183,21 @@
             },
             "canRetry": {
               "type": "boolean"
+            },
+            "landedAt": {
+              "type": "object",
+              "properties": {
+                "runId": {
+                  "$ref": "#/$defs/Identifier"
+                },
+                "seq": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": ["runId", "seq"],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -2380,6 +2420,21 @@
             },
             "canRetry": {
               "type": "boolean"
+            },
+            "landedAt": {
+              "type": "object",
+              "properties": {
+                "runId": {
+                  "$ref": "#/$defs/Identifier"
+                },
+                "seq": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": ["runId", "seq"],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -2602,6 +2657,21 @@
             },
             "canRetry": {
               "type": "boolean"
+            },
+            "landedAt": {
+              "type": "object",
+              "properties": {
+                "runId": {
+                  "$ref": "#/$defs/Identifier"
+                },
+                "seq": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 9007199254740991
+                }
+              },
+              "required": ["runId", "seq"],
+              "additionalProperties": false
             }
           },
           "required": [
@@ -2973,6 +3043,11 @@
             "ordinal": {
               "type": "integer",
               "minimum": 0
+            },
+            "seq": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
             }
           },
           "required": ["type", "payload", "ordinal"],
@@ -5982,8 +6057,8 @@
     }
   },
   "x-frockbot-compatibility": {
-    "protocolMin": 1,
-    "protocolMax": 1,
+    "protocolMin": 2,
+    "protocolMax": 2,
     "catalogs": []
   },
   "x-frockbot-state-channel": {

@@ -261,6 +261,7 @@ describe("client run protocol v1", () => {
         callId: "tool-1",
         botId: "researcher",
         text: "What is overdue?",
+        seq: 0,
       },
       {
         type: "tool/result",
@@ -1421,6 +1422,8 @@ describe("client run protocol v1", () => {
       type: "send/to-user",
       payload: { type: "text", text: "The Routine could not run." },
       ordinal: 0,
+      // Placed right after the last thing the run journalled.
+      seq: 512,
     });
     expect(projected.events[0]).toMatchObject({
       type: "run/events-truncated",
@@ -1567,6 +1570,7 @@ describe("client run protocol v1", () => {
         type: "send/to-user",
         payload: { type: "text", text: "On it." },
         ordinal: 0,
+        seq: 10,
       },
       { type: "tool/call", call: { id: "tool-1", name: "lookup" } },
       {
@@ -1582,6 +1586,7 @@ describe("client run protocol v1", () => {
           widget: { prompt: "Which day?", options: ["Tue", "Thu"] },
         },
         ordinal: 1,
+        seq: 13,
       },
       { type: "wake/parent", message: "Paid." },
     ]);
@@ -1592,6 +1597,21 @@ describe("client run protocol v1", () => {
         page: { truncated: false },
       })[0]?.events,
     ).toEqual(projected.events);
+  });
+
+  test("says where a message sent mid-Turn landed", () => {
+    const run = storedRun([]);
+    expect(projectClientRunV1(run).landedAt).toBeUndefined();
+    const landing = { runId: "run-ahead", seq: 6 };
+    const landed = projectClientRunV1({ ...run, landedAt: landing });
+    expect(landed.landedAt).toEqual(landing);
+    expect(
+      decodeClientRunListV1({
+        schemaVersion: 1,
+        runs: [landed],
+        page: { truncated: false },
+      })[0]?.landedAt,
+    ).toEqual(landing);
   });
 
   test("truncates sends alongside tool interactions, oldest first", () => {
@@ -1620,6 +1640,7 @@ describe("client run protocol v1", () => {
       type: "send/to-user",
       payload: { type: "text", text: "send-599" },
       ordinal: 599,
+      seq: 599,
     });
     // The ordinal names the durable send, so a read of the newest message is
     // still `<runId>:send:599` after 89 earlier sends were dropped — its
