@@ -239,7 +239,8 @@ export interface PluginModelReplayStateV1 {
 /**
  * A heartbeat: the Plugin is reading real upstream bytes that are none of the
  * kernel's business — a reasoning model's thinking, or an argument fragment
- * that is not yet a tool call. It carries nothing and reaches no one: the
+ * it cannot yet name a call for (one it can is a `tool-input-delta`). It
+ * carries nothing and reaches no one: the
  * host uses it to know the answer is still coming, so an answer that is
  * streaming thought is not cut off by a silence deadline, and an answer that
  * has genuinely gone quiet still is. Emitting one is the Plugin's statement
@@ -501,6 +502,12 @@ export function decodePluginModelEventLineV1(
   // kernel's own bound keeps a single line from being a megabyte of prose.
   if (event.type === "text-delta" && event.text.length > MAX_DELTA_CHARS_V1) {
     throw new Error(`${label}.text exceeds its bound`);
+  }
+  if (
+    event.type === "tool-input-delta" &&
+    event.delta.length > MAX_DELTA_CHARS_V1
+  ) {
+    throw new Error(`${label}.delta exceeds its bound`);
   }
   return event;
 }

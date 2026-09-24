@@ -209,6 +209,15 @@ export interface LlmUsageV1 {
 export type LlmStreamEvent =
   | { type: "provider-state"; state: ModelReplayStateV1 }
   | { type: "text-delta"; text: string }
+  /**
+   * A fragment of one tool call's argument text, while the model is still
+   * writing it: `id` is the call's, `name` the tool as far as it is known, and
+   * the fragments of one `id` concatenate to its JSON arguments so far. The
+   * call still arrives whole as a `tool-call`, and that is the only thing the
+   * loop acts on. A delta is a preview — nothing journals, replays or decides
+   * on one — but it is output the model produced, so it counts as partial data.
+   */
+  | { type: "tool-input-delta"; id: string; name: string; delta: string }
   | { type: "tool-call"; call: ToolCall }
   | { type: "usage"; usage: LlmUsageV1 }
   | { type: "response-format-note"; note: ResponseFormatNoteV1 }
@@ -1417,6 +1426,12 @@ export function decodeLlmStreamEventV1(
       // A delta may be empty: a provider that streams a tool call only still
       // opens with a delta event carrying no text.
       eventString(event.text, `${label}.text`, true);
+      break;
+    case "tool-input-delta":
+      requireEventKeys(event, ["type", "id", "name", "delta"], label);
+      eventString(event.id, `${label}.id`);
+      eventString(event.name, `${label}.name`);
+      eventString(event.delta, `${label}.delta`, true);
       break;
     case "tool-call":
       requireEventKeys(event, ["type", "call"], label);

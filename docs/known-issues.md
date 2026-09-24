@@ -70,7 +70,7 @@ at the cited location. Items the re-orientation already removes are marked; see
 
 33. **Frock AI's catalog is one model plus Auto** (`providers/frock-ai/catalog.ts:49-56`).
 
-34. **Tool calls never stream incrementally** (`providers/openai-compatible/index.ts:696-708`), so a long tool-argument generation displays nothing until `finish`.
+34. ~~**Tool calls never stream incrementally.**~~ **Fixed.** The OpenAI-compatible adapter (Frock AI included) and the catalog bridge pass a call's argument fragments on as `tool-input-delta` events, and the Bot draws the `send_to_user` text being written as a reply draft ([architecture.md, "Reply drafts"](architecture.md#reply-drafts--appshellreply-draftts)). Still whole at the end: the seeded DeepSeek Plugin, which reads its own wire and reports argument fragments only as `progress`, and Bedrock's path through the catalog.
 
 35. **Manifest schema versions are inconsistent**: `core/models` and `providers/foundation` declare `schemaVersion: 2`; the other providers declare `4`.
 

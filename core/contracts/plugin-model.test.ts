@@ -176,6 +176,39 @@ describe("one event of a Plugin's answer", () => {
     ).toThrow(/text/);
   });
 
+  test("decodes a tool call's arguments as they are written, exactly", () => {
+    expect(
+      decodePluginModelEventLineV1(
+        '{"type":"tool-input-delta","id":"call-1","name":"send_to_user","delta":"{\\"pay"}',
+      ),
+    ).toEqual({
+      type: "tool-input-delta",
+      id: "call-1",
+      name: "send_to_user",
+      delta: '{"pay',
+    });
+    expect(() =>
+      decodePluginModelEventLineV1(
+        '{"type":"tool-input-delta","id":"call-1","delta":"x"}',
+      ),
+    ).toThrow(/invalid fields/);
+    expect(() =>
+      decodePluginModelEventLineV1(
+        '{"type":"tool-input-delta","id":"","name":"send_to_user","delta":"x"}',
+      ),
+    ).toThrow(/id/);
+    expect(() =>
+      decodePluginModelEventLineV1(
+        JSON.stringify({
+          type: "tool-input-delta",
+          id: "call-1",
+          name: "send_to_user",
+          delta: "x".repeat(1_000_001),
+        }),
+      ),
+    ).toThrow(/delta exceeds its bound/);
+  });
+
   test("refuses a finish reason the kernel does not have", () => {
     expect(() =>
       decodePluginModelEventLineV1('{"type":"finish","reason":"whatever"}'),

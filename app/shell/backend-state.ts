@@ -21,6 +21,7 @@ import {
 } from "@frockbot/app/subagents/durable-binding";
 import { PluginModelDispatchRegistryV1 } from "@frockbot/app/isolates/model-dispatch";
 import type { ShellMountedComposition } from "./backend-composition.js";
+import type { ReplyDraftV1 } from "./reply-draft.js";
 import { storedRunCodecV1 } from "./backend-contracts.js";
 import type { NativeAiBindingV1 } from "./backend-image.js";
 import type { EmailSenderV1 } from "@frockbot/app/email/sender";
@@ -133,6 +134,12 @@ export interface ShellBotBackendHost extends ShellApplicationV1 {
   deliverPublication?(
     updates: readonly import("@frockbot/core/durable").ConversationUpdateV1[],
   ): Promise<void>;
+  /**
+   * The reply a running Turn is writing, for whoever is watching now. Nothing
+   * is stored: an observer that is not attached misses it, and the message
+   * that follows is the durable record.
+   */
+  deliverReplyDraft?(draft: ReplyDraftV1): void;
   /**
    * A run reached a durable terminal state. Search and audit ride this,
    * because the composer no longer waits for the Turn to finish.
@@ -323,6 +330,7 @@ export class ShellBotStateV1 {
   readonly messagesCommitted: () => void;
   readonly lifecycleAdmission: ShellBotBackendHost["assertLifecycleActive"];
   readonly invalidateComputerProjectionFile: ShellBotBackendHost["invalidateComputerProjectionFile"];
+  readonly deliverReplyDraft: ShellBotBackendHost["deliverReplyDraft"];
   /** This deployment's Computer host, handed in by the shell. */
   readonly computerHost: ShellComputerHostFactoryV1 | undefined;
   readonly hostScheduled: HostScheduledWorkV1;
@@ -358,6 +366,7 @@ export class ShellBotStateV1 {
     this.messagesCommitted = () => host.messagesCommitted?.();
     this.invalidateComputerProjectionFile =
       host.invalidateComputerProjectionFile;
+    this.deliverReplyDraft = host.deliverReplyDraft;
     this.computerHost = host.computerHost;
     this.hostScheduled = {
       deadlines: host.scheduledDeadlines,

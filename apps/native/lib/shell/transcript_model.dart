@@ -61,6 +61,11 @@ class PluginModelCall {
 
 enum LineRole { user, assistant, system }
 
+/// The reply a running Turn is writing, as its state channel drew it: one
+/// text per send its step is writing, the first landing at [ordinal] among
+/// the run's sends. An empty part is a send with nothing to draw yet.
+typedef ReplyDraft = ({int ordinal, List<String> parts});
+
 /// `streaming` is a Turn in flight; `aborted` is one that was stopped; `error`
 /// is one that broke.
 enum LineStatus { streaming, completed, aborted, error }
@@ -196,6 +201,10 @@ class TranscriptLine {
     this.voiceCall,
     this.localOrder,
   });
+
+  /// A send still being written: drawn where its message will land and
+  /// under the id it will have, so the message replaces it in place.
+  bool get isDraft => status == LineStatus.streaming && sends.isNotEmpty;
 
   bool get empty =>
       text.isEmpty &&
@@ -357,8 +366,10 @@ List<TranscriptLine> placeLandedMessages(List<TranscriptLine> ordered) {
           placed.lastIndexWhere((earlier) => earlier.role == LineRole.user) + 1;
       for (var index = from; index < placed.length; index++) {
         final earlier = placed[index];
+        // A draft has no place in the log yet. It is being written now, so
+        // whatever has landed in its Turn landed before it.
         if (earlier.runId == landed.runId &&
-            (earlier.seq ?? -1) >= landed.seq) {
+            (earlier.isDraft || (earlier.seq ?? -1) >= landed.seq)) {
           at = index;
           break;
         }
@@ -715,6 +726,37 @@ List<TranscriptLine> _spokenLines(
   return lines;
 }
 
+/// The parts of a Turn's draft whose messages it has not sent yet.
+List<TranscriptLine> _draftLines(
+  Map<String, dynamic> run,
+  List<Object?> events,
+  ReplyDraft draft,
+) {
+  final runId = run['runId'] as String;
+  final sent = {
+    for (final event in events)
+      if (event is Map && event['type'] == 'send/to-user') event['ordinal'],
+  };
+  return [
+    for (final (index, part) in draft.parts.indexed)
+      if (part.isNotEmpty && !sent.contains(draft.ordinal + index))
+        TranscriptLine(
+          id: '$runId:send:${draft.ordinal + index}',
+          runId: runId,
+          role: LineRole.assistant,
+          text: '',
+          at:
+              run['messageAdmittedAt'] as String? ??
+              run['admittedAt'] as String?,
+          readAt: run['admittedAt'] as String?,
+          status: LineStatus.streaming,
+          sends: [
+            SendPayloadLine({'type': 'text', 'text': part}),
+          ],
+        ),
+  ];
+}
+
 /// Projects durable runs into the lines the thread draws.
 ///
 /// One line per `send_to_user` in the order the Bot sent them, then the Turn's
@@ -725,7 +767,13 @@ List<TranscriptLine> _spokenLines(
 /// A Turn another party asked for — a Bot, or the voice session — opens with
 /// an exchange marker in place of a user bubble: nobody typed it, and the
 /// request and its answer are read on the exchange view, not in the thread.
-List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
+///
+/// A running Turn's [replyDrafts] are drawn after what it has sent, each part
+/// as the line its message will be, until that message is in the run.
+List<TranscriptLine> projectRuns(
+  List<Map<String, dynamic>> runs, {
+  Map<String, ReplyDraft> replyDrafts = const {},
+}) {
   final latest = <String, Map<String, dynamic>>{};
   for (final run in runs) {
     final messageId = run['messageRunId'] as String? ?? run['runId'] as String;
@@ -804,6 +852,10 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
     }
     final spoken = _spokenLines(run, events);
     lines.addAll(spoken);
+    final draft = replyDrafts[runId];
+    if (draft != null && status == 'running') {
+      lines.addAll(_draftLines(run, events, draft));
+    }
     final sends = [for (final line in spoken) ...line.sends];
     final tools = _toolsFrom(events);
     final pluginCalls = _pluginCallsFrom(events);

@@ -130,6 +130,15 @@ class BotStateChannel {
 
   Future<void> _accept(Map<String, dynamic> frame) async {
     final type = frame['type'] as String;
+    if (type == 'state/draft') {
+      // Not on the cursor: a draft is a preview of a message that will be.
+      // It is queued with the committed frames all the same, so it can never
+      // be drawn after the message that replaces it.
+      _pending.add(frame);
+      _dirty = true;
+      _flush();
+      return;
+    }
     final cursor = frame['cursor'] as String;
     final epoch = frame['epoch'] as String?;
     if (type == 'state/part') {

@@ -469,6 +469,70 @@ void main() {
     }
   });
 
+  testWidgets('a draft is a bubble that its message then fills in place', (
+    tester,
+  ) async {
+    final newest = <String?>[];
+    Widget thread(String text, LineStatus status) => MaterialApp(
+      home: Scaffold(
+        body: TranscriptView(
+          lines: [
+            line(
+              runId: 'run-a',
+              role: LineRole.user,
+              text: 'Plan it',
+              at: '2026-09-05T12:19:00.000Z',
+            ),
+            TranscriptLine(
+              id: 'run-a:send:0',
+              runId: 'run-a',
+              role: LineRole.assistant,
+              text: '',
+              at: '2026-09-05T12:19:00.000Z',
+              status: status,
+              sends: [
+                SendPayloadLine({'type': 'text', 'text': text}),
+              ],
+            ),
+          ],
+          loading: false,
+          hasEarlier: false,
+          onRefresh: ({older = false}) async {},
+          onOpenRun: (_) {},
+          onReadLatest: (message, _) => newest.add(message),
+          storageKey: 'draft-test',
+        ),
+      ),
+    );
+
+    await tester.pumpWidget(thread('Here is the pl', LineStatus.streaming));
+    await tester.pump(const Duration(seconds: 1));
+    final bubble = find.byKey(const ValueKey('run-a:send:0'));
+    expect(bubble, findsOneWidget);
+    expect(
+      find.descendant(
+        of: bubble,
+        matching: find.textContaining('Here is the pl', findRichText: true),
+      ),
+      findsWidgets,
+    );
+    // Nothing has been delivered yet, so there is nothing to have read.
+    expect(newest.whereType<String>(), isEmpty);
+    final drawn = tester.element(bubble);
+
+    await tester.pumpWidget(thread('Here is the plan.', LineStatus.completed));
+    await tester.pump(const Duration(seconds: 1));
+    expect(
+      find.descendant(
+        of: bubble,
+        matching: find.textContaining('Here is the plan.', findRichText: true),
+      ),
+      findsWidgets,
+    );
+    expect(tester.element(bubble), same(drawn));
+    expect(newest.last, 'run-a:send:0');
+  });
+
   test('names each send by the ordinal the cloud minted, not its position', () {
     // A Turn that outgrew the wire budget arrives with its earliest sends
     // dropped and a truncation marker in their place. The read the cloud can
@@ -643,6 +707,78 @@ void main() {
         'assistant: Here is the plan.',
         'assistant: Trimmed it to nine.',
       ]);
+    });
+
+    // The reply being written is said now, so a message that has already
+    // landed sits above it — where it will still be once the reply is sent.
+    test('draws a message sent mid-Turn above the reply being written', () {
+      List<TranscriptLine> project({required bool sent}) => projectRuns(
+        [
+          run(
+            runId: 'run-a',
+            input: 'Plan the launch.',
+            status: 'running',
+            events: [
+              {
+                'type': 'send/to-user',
+                'payload': {'type': 'text', 'text': 'On it.'},
+                'ordinal': 0,
+                'seq': 3,
+              },
+              if (sent)
+                {
+                  'type': 'send/to-user',
+                  'payload': {'type': 'text', 'text': 'Here is the plan.'},
+                  'ordinal': 1,
+                  'seq': 9,
+                },
+            ],
+          ),
+          {
+            ...run(
+              runId: 'run-b',
+              input: 'Keep it cheap.',
+              admittedAt: '2026-09-05T12:19:10.000Z',
+              status: 'running',
+              queued: true,
+            ),
+            'landedAt': {'runId': 'run-a', 'seq': 6},
+          },
+        ],
+        replyDrafts: {
+          'run-a': (ordinal: 1, parts: ['Here is the pl']),
+        },
+      );
+
+      final writing = project(sent: false);
+      expect(thread(writing), [
+        'user: Plan the launch.',
+        'assistant: On it.',
+        'user: Keep it cheap.',
+        'assistant: Here is the pl',
+      ]);
+      final draft = writing.singleWhere((line) => line.isDraft);
+      expect(draft.id, 'run-a:send:1');
+
+      final sent = project(sent: true);
+      expect(thread(sent), [
+        'user: Plan the launch.',
+        'assistant: On it.',
+        'user: Keep it cheap.',
+        'assistant: Here is the plan.',
+      ]);
+      expect(sent.where((line) => line.isDraft), isEmpty);
+      expect(sent.map((line) => line.id), contains('run-a:send:1'));
+    });
+
+    test('a settled Turn draws no draft', () {
+      final lines = projectRuns(
+        [run(runId: 'run-a', input: 'Hi', sentText: 'Hello.')],
+        replyDrafts: {
+          'run-a': (ordinal: 1, parts: ['Left over']),
+        },
+      );
+      expect(thread(lines), ['user: Hi', 'assistant: Hello.']);
     });
 
     test('keeps two messages sent mid-Turn in the order they landed', () {

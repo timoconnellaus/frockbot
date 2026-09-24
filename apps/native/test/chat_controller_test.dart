@@ -460,4 +460,129 @@ void main() {
     expect(controller.invalidations.value, 1);
     controller.dispose();
   });
+
+  group('the reply a running Turn is writing', () {
+    Map<String, dynamic> draft(int ordinal, List<String> parts) => {
+      'schemaVersion': 1,
+      'type': 'state/draft',
+      'runId': 'run-1',
+      'ordinal': ordinal,
+      'parts': parts,
+    };
+
+    Map<String, dynamic> message(int ordinal, String text, int cursor) => {
+      'schemaVersion': 1,
+      'type': 'state/update',
+      'epoch': '1',
+      'cursor': '$cursor',
+      'kind': 'message',
+      'entityId': 'msg:s:run-1:occ-$ordinal',
+      'revision': 1,
+      'payload': {
+        'runId': 'run-1',
+        'sessionId': 's',
+        'occurrenceId': 'occ-$ordinal',
+        'event': {
+          'type': 'send/to-user',
+          'payload': {'type': 'text', 'text': text},
+          'ordinal': ordinal,
+        },
+      },
+    };
+
+    Future<ChatController> running(MemoryStore store) async {
+      final controller = ChatController(
+        transport: RecordingTransport(),
+        store: store,
+        userId: 'user-1',
+        botId: 'bot-1',
+      );
+      await controller.initialize(liveChannel: true);
+      controller.connection = ConnectionState.connected;
+      await controller.applyFrame({
+        'type': 'state/update',
+        'epoch': '1',
+        'cursor': '1',
+        'kind': 'run-status',
+        'entityId': 'run:run-1',
+        'revision': 1,
+        'payload': {'run': run(runId: 'run-1')},
+      });
+      return controller;
+    }
+
+    List<String> said(ChatController controller) => [
+      for (final line in projectRuns(
+        controller.runs,
+        replyDrafts: controller.replyDrafts,
+      ))
+        for (final send in line.sends)
+          '${line.id}${line.isDraft ? ' (draft)' : ''}: ${send.payload?['text']}',
+    ];
+
+    test('is drawn where its message will be, which then replaces it', () async {
+      final store = MemoryStore();
+      final controller = await running(store);
+      final cached = store.values[pageCacheKey('user-1', 'bot-1')];
+
+      await controller.applyFrame(draft(0, ['Hel']));
+      await controller.applyFrame(draft(0, ['Hello the']));
+      expect(said(controller), ['run-1:send:0 (draft): Hello the']);
+      // A draft moves no cursor and writes nothing down.
+      expect(controller.publicationCursor, '1');
+      expect(store.values[pageCacheKey('user-1', 'bot-1')], cached);
+
+      await controller.applyFrame(message(0, 'Hello there.', 2));
+      expect(said(controller), ['run-1:send:0: Hello there.']);
+      controller.dispose();
+    });
+
+    test('a batch draws each send it is writing, in order', () async {
+      final controller = await running(MemoryStore());
+      await controller.applyFrame(message(0, 'On it.', 2));
+      await controller.applyFrame(draft(1, ['', 'Second', 'Thi']));
+      expect(said(controller), [
+        'run-1:send:0: On it.',
+        'run-1:send:2 (draft): Second',
+        'run-1:send:3 (draft): Thi',
+      ]);
+      await controller.applyFrame(message(1, '[card]', 3));
+      await controller.applyFrame(message(2, 'Second', 4));
+      expect(said(controller), [
+        'run-1:send:0: On it.',
+        'run-1:send:1: [card]',
+        'run-1:send:2: Second',
+        'run-1:send:3 (draft): Thi',
+      ]);
+      controller.dispose();
+    });
+
+    test('an empty draft, a settled Turn or a dropped socket clears it', () async {
+      final controller = await running(MemoryStore());
+      await controller.applyFrame(draft(0, ['Maybe']));
+      await controller.applyFrame(draft(0, []));
+      expect(controller.replyDrafts, isEmpty);
+
+      await controller.applyFrame(draft(0, ['Maybe']));
+      controller.connection = ConnectionState.disconnected;
+      expect(controller.replyDrafts, isEmpty);
+
+      controller.connection = ConnectionState.connected;
+      await controller.applyFrame(draft(0, ['Maybe']));
+      await controller.applyFrame({
+        'type': 'state/update',
+        'epoch': '1',
+        'cursor': '2',
+        'kind': 'run-status',
+        'entityId': 'run:run-1',
+        'revision': 2,
+        'payload': {
+          'run': {...run(runId: 'run-1'), 'status': 'completed'},
+        },
+      });
+      expect(controller.replyDrafts, isEmpty);
+      expect(said(controller), isEmpty);
+      controller.dispose();
+    });
+  });
 }

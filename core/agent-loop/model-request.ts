@@ -10,6 +10,7 @@ import {
   type ToolCall,
   validateSettledToolOccurrenceJournal,
 } from "@frockbot/core/contracts";
+import type { ToolInputDispatchV1, ToolInputWatchV1 } from "./agent.js";
 import { EffectAdmissionFencedError, modelFailureMessage } from "./errors.js";
 import { nextModelRetryV1 } from "./retry-policy.js";
 import type { LoopRuntime, ModelResponse } from "./runtime.js";
@@ -231,6 +232,45 @@ export async function requestModelV1(
   }
 }
 
+/**
+ * The Agent's tool-input watcher for one dispatch, fenced off from the Turn.
+ *
+ * What it is shown is a preview for the person watching, so it may fail in
+ * any way it likes without costing the Turn anything: a throw is swallowed
+ * here and that dispatch shows it nothing more.
+ */
+function watchToolInputV1(
+  runtime: LoopRuntime,
+  dispatch: ToolInputDispatchV1,
+): ToolInputWatchV1 | undefined {
+  let watch: ToolInputWatchV1 | undefined;
+  try {
+    watch = runtime.options.watchToolInput?.(dispatch);
+  } catch {
+    return undefined;
+  }
+  if (!watch) return undefined;
+  const opened = watch;
+  let broken = false;
+  return {
+    delta(call, fragment) {
+      if (broken) return;
+      try {
+        opened.delta(call, fragment);
+      } catch {
+        broken = true;
+      }
+    },
+    end() {
+      try {
+        opened.end();
+      } catch {
+        // Nothing depends on a watcher's ending.
+      }
+    },
+  };
+}
+
 export async function consumeStreamV1(
   runtime: LoopRuntime,
   request: NormalizedModelRequest,
@@ -246,9 +286,19 @@ export async function consumeStreamV1(
     | Extract<LlmStreamEvent, { type: "structured-output-failure" }>["failure"]
     | undefined;
   const startedAt = Date.now();
+  const watch = watchToolInputV1(runtime, {
+    requestId: request.requestId,
+    turn,
+    step,
+    journal: runtime.session.activeRunJournal,
+  });
   try {
     for await (const event of runtime.services.llm.stream(request, signal)) {
       signal.throwIfAborted();
+      if (event.type === "tool-input-delta") {
+        watch?.delta({ id: event.id, name: event.name }, event.delta);
+        continue;
+      }
       if (event.type === "provider-state") {
         requireModelReplayStateV1(event.state);
         if (
@@ -296,6 +346,8 @@ export async function consumeStreamV1(
       );
     }
     throw error;
+  } finally {
+    watch?.end();
   }
   recordModelUsageV1(
     runtime,

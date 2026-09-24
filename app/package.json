@@ -233,6 +233,7 @@
     "./shell/notification-id": "./shell/notification-id.ts",
     "./shell/prepared-inputs": "./shell/prepared-inputs.ts",
     "./shell/reads": "./shell/reads.ts",
+    "./shell/reply-draft": "./shell/reply-draft.ts",
     "./shell/reply-to-caller": "./shell/reply-to-caller.ts",
     "./shell/run-cursor": "./shell/run-cursor.ts",
     "./shell/run-failure-copy": "./shell/run-failure-copy.ts",

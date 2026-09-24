@@ -1,8 +1,10 @@
 import 'dart:async';
+import 'dart:collection';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 
+import '../shell/transcript_model.dart' show ReplyDraft;
 import 'page_cache.dart';
 import 'transport.dart';
 
@@ -110,7 +112,25 @@ class ChatController extends ChangeNotifier {
   bool checking = false;
   bool loading = false;
   bool _disposed = false;
-  ConnectionState connection = ConnectionState.initializing;
+
+  ConnectionState get connection => _connection;
+  ConnectionState _connection = ConnectionState.initializing;
+
+  /// A reply draft is only as current as the socket that drew it, so a
+  /// socket that drops takes its drafts with it. After a reconnect the next
+  /// frame draws whatever is still being written.
+  set connection(ConnectionState value) {
+    _connection = value;
+    if (value != ConnectionState.connected) _replyDrafts.clear();
+  }
+
+  /// The reply each running Turn is writing, by run, as the state channel
+  /// last drew it. Never persisted and never read back: the message each
+  /// part becomes is the record, and a draft lives only as long as the
+  /// socket that brought it.
+  Map<String, ReplyDraft> get replyDrafts =>
+      UnmodifiableMapView(_replyDrafts);
+  final Map<String, ReplyDraft> _replyDrafts = {};
 
   /// The conversation's own announcements — a rename, a compaction — as the
   /// newest page carried them. They belong to the Session rather than to a
@@ -445,6 +465,7 @@ class ChatController extends ChangeNotifier {
     // channel has already settled it. Putting that page back would light the
     // working indicator again, and nothing in the live log would clear it.
     if (existing != null && _settledRun(existing) && !_settledRun(run)) return;
+    if (_settledRun(run)) _replyDrafts.remove(id);
     _cachedRunIds.remove(id);
     _optimisticRunIds.remove(id);
     _runs[id] = existing == null || _settledRun(run)
@@ -599,6 +620,12 @@ class ChatController extends ChangeNotifier {
     if (_disposed) return;
     final type = frame['type'] as String?;
     final generation = _syncGeneration;
+    if (type == 'state/draft') {
+      // Nothing to persist: a draft moves no cursor and is never read back.
+      _applyDraft(frame);
+      changed();
+      return;
+    }
     if (type == 'state/snapshot') {
       _syncGeneration += 1;
       _applySnapshot(frame);
@@ -613,10 +640,28 @@ class ChatController extends ChangeNotifier {
     if (pending.isNotEmpty && !sending) await checkDelivery();
   }
 
+  /// A frame carries the whole of what its run is writing, so it replaces the
+  /// last one outright; an empty one is a step that moved on.
+  void _applyDraft(Map<String, dynamic> frame) {
+    final runId = frame['runId'];
+    final ordinal = frame['ordinal'];
+    final parts = frame['parts'];
+    if (runId is! String || ordinal is! int || parts is! List) return;
+    if (parts.isEmpty) {
+      _replyDrafts.remove(runId);
+      return;
+    }
+    _replyDrafts[runId] = (
+      ordinal: ordinal,
+      parts: List.unmodifiable([for (final part in parts) '$part']),
+    );
+  }
+
   void _applySnapshot(Map<String, dynamic> frame) {
     final conversation = Map<String, dynamic>.from(
       frame['conversation'] as Map,
     );
+    _replyDrafts.clear();
     for (final id in _cachedRunIds) {
       _runs.remove(id);
     }

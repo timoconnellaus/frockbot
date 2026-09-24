@@ -259,3 +259,64 @@ describe("Bot-state channel committed updates", () => {
     expect(planHandshakeV1(head, 7, 2)).toBe("epoch");
   });
 });
+
+describe("Bot-state channel reply drafts", () => {
+  function taggedChannel() {
+    const sent: { drafts: string[]; plain: string[] } = {
+      drafts: [],
+      plain: [],
+    };
+    const sockets = {
+      drafts: { send: (frame: string) => sent.drafts.push(frame) },
+      plain: { send: (frame: string) => sent.plain.push(frame) },
+    };
+    const storage = new ChannelStorage();
+    const state = {
+      storage,
+      getWebSockets: (tag?: string) =>
+        tag === "bot-state-v1-drafts"
+          ? [sockets.drafts]
+          : [sockets.drafts, sockets.plain],
+    } as unknown as DurableObjectState;
+    return { channel: new BotStateChannel(state), sent, storage };
+  }
+
+  test("reach only an observer that asked for them, and write nothing", async () => {
+    const { channel, sent, storage } = taggedChannel();
+    channel.broadcastDraft({
+      runId: "run-1",
+      ordinal: 2,
+      parts: ["", "Half a rep"],
+    });
+    expect(sent.plain).toEqual([]);
+    expect(sent.drafts.map((frame) => JSON.parse(frame) as unknown)).toEqual([
+      {
+        schemaVersion: 1,
+        type: "state/draft",
+        runId: "run-1",
+        ordinal: 2,
+        parts: ["", "Half a rep"],
+      },
+    ]);
+    expect(await readPublicationHeadV1(storage)).toEqual(
+      emptyPublicationHeadV1(),
+    );
+  });
+
+  test("one too large for a frame is not sent, so the draft stops growing", () => {
+    const { channel, sent } = taggedChannel();
+    channel.broadcastDraft({
+      runId: "run-1",
+      ordinal: 0,
+      parts: ["☃".repeat(30_000)],
+    });
+    expect(sent.drafts).toEqual([]);
+  });
+
+  test("a silenced channel draws nothing", () => {
+    const { channel, sent } = taggedChannel();
+    channel.silence();
+    channel.broadcastDraft({ runId: "run-1", ordinal: 0, parts: ["Hi"] });
+    expect(sent.drafts).toEqual([]);
+  });
+});

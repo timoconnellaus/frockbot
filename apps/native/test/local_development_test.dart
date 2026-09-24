@@ -50,6 +50,8 @@ void main() {
         expect(request.headers.value('x-frockbot-client'), isNotNull);
         seen.add(request.uri.path);
         if (WebSocketTransformer.isUpgradeRequest(request)) {
+          // An observer that draws the reply as it is written says so.
+          expect(request.uri.queryParameters['drafts'], '1');
           final socket = await WebSocketTransformer.upgrade(request);
           await socket.close();
         } else {

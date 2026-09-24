@@ -24,6 +24,9 @@ import 'widget_test.dart' show MemoryStore;
 const _out = String.fromEnvironment('CHAT_SHOTS');
 const _tag = String.fromEnvironment('CHAT_SHOTS_TAG', defaultValue: 'shot');
 
+/// Device pixels per logical pixel; a What's New still is cut from a 4x frame.
+const _scale = int.fromEnvironment('CHAT_SHOTS_SCALE', defaultValue: 2);
+
 final _boundary = GlobalKey();
 
 Future<void> _loadFonts() async {
@@ -45,7 +48,7 @@ Future<void> _capture(WidgetTester tester, String name) async {
     final image =
         await (_boundary.currentContext!.findRenderObject()!
                 as RenderRepaintBoundary)
-            .toImage(pixelRatio: 2);
+            .toImage(pixelRatio: _scale.toDouble());
     final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
     await File('$_out/$_tag-$name.png')
         .writeAsBytes(bytes!.buffer.asUint8List());
@@ -59,7 +62,7 @@ Future<void> _frame(WidgetTester tester, String name) async {
     final image =
         await (_boundary.currentContext!.findRenderObject()!
                 as RenderRepaintBoundary)
-            .toImage(pixelRatio: 2);
+            .toImage(pixelRatio: _scale.toDouble());
     final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
     await File('$_out/$_tag-$name.png')
         .writeAsBytes(bytes!.buffer.asUint8List());
@@ -173,6 +176,7 @@ Future<void> _scene(
   int frames = 0,
   ConnectionState connection = ConnectionState.connected,
   bool outOfCredit = false,
+  List<Map<String, dynamic>> draftFrames = const [],
 }) async {
   tester.view.physicalSize = Size(width, height);
   tester.view.devicePixelRatio = 1;
@@ -189,6 +193,9 @@ Future<void> _scene(
   );
   await c.initialize();
   c.connection = connection;
+  for (final draft in draftFrames) {
+    await c.applyFrame(draft);
+  }
   final skills =
       SkillMenuController(api: SilentApi(VoidStore()), botId: 'bot-1')
         ..catalog = [
@@ -306,6 +313,36 @@ void main() {
           'Draft the investor update from those notes',
           status: 'running',
         ),
+      ],
+    );
+  }, skip: _out.isEmpty);
+
+  testWidgets('writing', (tester) async {
+    await _scene(
+      tester,
+      'writing',
+      width: 430,
+      height: 932,
+      runs: [
+        ..._history,
+        _turn(
+          'run-2',
+          '2026-09-23T01:02:00Z',
+          'Draft the investor update from those notes',
+          status: 'running',
+        ),
+      ],
+      draftFrames: [
+        {
+          'schemaVersion': 1,
+          'type': 'state/draft',
+          'runId': 'run-2',
+          'ordinal': 0,
+          'parts': [
+            'Revenue grew 18% on last quarter, led by the enterprise tier. '
+                'Runway is 14 months once the bridge clo',
+          ],
+        },
       ],
     );
   }, skip: _out.isEmpty);

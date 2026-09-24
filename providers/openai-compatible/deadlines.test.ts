@@ -111,6 +111,67 @@ describe("a model response that stalls mid-answer", () => {
   });
 });
 
+describe("a model writing a long tool call", () => {
+  test("is not silent while its arguments arrive", async () => {
+    const clock = manualClock();
+    let push: ((chunk: string) => void) | undefined;
+    let close: (() => void) | undefined;
+    const body = new ReadableStream<Uint8Array>({
+      start(controller) {
+        push = (chunk) => controller.enqueue(new TextEncoder().encode(chunk));
+        close = () => controller.close();
+      },
+    });
+    const provider = new OpenAICompatibleProvider({
+      baseUrl: "https://models.example",
+      deadlines: { firstByteMs: 10_000, idleMs: 10_000 },
+      schedule: clock.schedule,
+      fetch: () => Promise.resolve(new Response(body, { status: 200 })),
+    });
+
+    const events: { type: string }[] = [];
+    const streaming = (async () => {
+      for await (const event of provider.stream(
+        request,
+        new AbortController().signal,
+      )) {
+        events.push(event);
+      }
+    })();
+
+    // A reply written as a tool call's arguments, a fragment at a time and
+    // for longer than either allowance: each fragment is the model talking.
+    push?.(
+      'data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call-1","function":{"name":"send_to_user","arguments":"{\\"payload\\":"}}]}}]}\n\n',
+    );
+    for (const fragment of [
+      '{\\"type\\":\\"text\\",',
+      '\\"text\\":\\"Hi\\"}}',
+    ]) {
+      await settle();
+      clock.advance(9_000);
+      push?.(
+        `data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"${fragment}"}}]}}]}\n\n`,
+      );
+    }
+    await settle();
+    clock.advance(9_000);
+    push?.(
+      'data: {"choices":[{"delta":{},"finish_reason":"tool_calls"}]}\n\ndata: [DONE]\n\n',
+    );
+    close?.();
+
+    await streaming;
+    expect(events.map((event) => event.type)).toEqual([
+      "tool-input-delta",
+      "tool-input-delta",
+      "tool-input-delta",
+      "tool-call",
+      "finish",
+    ]);
+  });
+});
+
 describe("a model request that finishes", () => {
   test("leaves no timer armed", async () => {
     const clock = manualClock();

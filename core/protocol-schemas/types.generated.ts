@@ -550,6 +550,13 @@ export type StateFrame =
       type: "state/ready";
       epoch: ObserverCursor;
       cursor: ObserverCursor;
+    }
+  | {
+      schemaVersion: 1;
+      type: "state/draft";
+      runId: Identifier;
+      ordinal: number;
+      parts: Array<string>;
     };
 export type ObserverState = {
   schemaVersion: 1;

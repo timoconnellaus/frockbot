@@ -837,6 +837,9 @@ export class BotState
               this.stateChannel.broadcastCommitted(updates);
               return Promise.resolve();
             },
+            deliverReplyDraft: (draft) => {
+              this.stateChannel.broadcastDraft(draft);
+            },
             runSettled: (runId) => {
               this.nudgeGroup(runId);
               return this.projectSettled(requireShell(), runId);

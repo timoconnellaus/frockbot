@@ -1000,6 +1000,41 @@
     }
   },
   {
+    "name": "reply draft on a cursor",
+    "schema": "StateFrame",
+    "value": {
+      "schemaVersion": 1,
+      "type": "state/draft",
+      "epoch": "1",
+      "cursor": "4",
+      "runId": "command-1",
+      "ordinal": 0,
+      "parts": ["Hi"]
+    }
+  },
+  {
+    "name": "reply draft with a negative ordinal",
+    "schema": "StateFrame",
+    "value": {
+      "schemaVersion": 1,
+      "type": "state/draft",
+      "runId": "command-1",
+      "ordinal": -1,
+      "parts": ["Hi"]
+    }
+  },
+  {
+    "name": "reply draft part that is not text",
+    "schema": "StateFrame",
+    "value": {
+      "schemaVersion": 1,
+      "type": "state/draft",
+      "runId": "command-1",
+      "ordinal": 0,
+      "parts": [{ "type": "text", "text": "Hi" }]
+    }
+  },
+  {
     "name": "empty turn text",
     "schema": "TurnCommand",
     "value": {

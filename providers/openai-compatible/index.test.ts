@@ -229,6 +229,20 @@ describe("OpenAICompatibleProvider", () => {
     expect(capturedIdempotencyKey).toBeNull();
     expect(events).toEqual([
       { type: "text-delta", text: "Checking " },
+      // The arguments as they arrive, named as far as the name has arrived;
+      // the call itself is only whole once the stream is.
+      {
+        type: "tool-input-delta",
+        id: "call-1",
+        name: "current_",
+        delta: '{"zone":',
+      },
+      {
+        type: "tool-input-delta",
+        id: "call-1",
+        name: "current_time",
+        delta: '"UTC"}',
+      },
       {
         type: "usage",
         usage: { inputTokens: 40, outputTokens: 9, cachedInputTokens: 10 },

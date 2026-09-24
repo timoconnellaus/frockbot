@@ -202,8 +202,11 @@ export class BilledLlmRegistry extends LlmRegistry {
     let partialData = false;
     try {
       for await (const event of next()) {
+        // A tool call's arguments streaming is the model writing, as much as
+        // text is: a stream that fails part-way through one was billable.
         if (
           event.type === "text-delta" ||
+          event.type === "tool-input-delta" ||
           event.type === "tool-call" ||
           event.type === "usage"
         )

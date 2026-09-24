@@ -69,6 +69,7 @@ import {
 } from "./backend-composition.js";
 import { compositionFailureTurnTextV1 } from "./backend-composition-input.js";
 import { createCardApprovalStoreV1 } from "./cards.js";
+import { createReplyDraftWatchV1 } from "./reply-draft.js";
 import {
   botStopCommandFingerprintV1,
   requireStoredRunV1,
@@ -340,6 +341,21 @@ export async function executeTurn(
     `You are ${settings.profile.name}.`,
     settings.profile.description,
   ].filter((part): part is string => Boolean(part?.trim()));
+  // The reply this Turn is writing, drawn in its Bot's thread while it is
+  // written. One watcher for the Turn, whichever generation mounts: a group
+  // Turn speaks in the group's thread, and only a Turn the thread shows has a
+  // reply to draw there.
+  const turnType = input.command.turnType ?? "chat";
+  const deliverReplyDraft = state.deliverReplyDraft;
+  const watchToolInput =
+    deliverReplyDraft &&
+    input.command.origin?.kind !== "group" &&
+    (turnType === "chat" || turnType === "agent")
+      ? createReplyDraftWatchV1({
+          runId: input.command.runId,
+          publish: deliverReplyDraft,
+        })
+      : undefined;
   // The pin, never the current generation: activation takes effect at the
   // next admitted Turn, and an in-flight Turn completes on what it pinned.
   // The isolate bindings follow the generation actually being mounted, so a
@@ -450,6 +466,7 @@ export async function executeTurn(
                 state.ctx.storage.get(key),
               )
             : state.authority.userMessageWaiting(input.command.runId),
+        ...(watchToolInput ? { watchToolInput } : {}),
         // A model provider Plugin this Bot's selection runs (ADR 0032): the
         // provider contribution registers here, and the credential lease it
         // takes is settled where the loop settles the outcome.

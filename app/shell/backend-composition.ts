@@ -10,7 +10,10 @@ import {
   type FoundationRuntime,
   type RuntimeModelSelection,
 } from "@frockbot/app/agent-runtime";
-import type { AgentEffectAdmission } from "@frockbot/core/agent-loop/agent";
+import type {
+  AgentEffectAdmission,
+  AgentOptions,
+} from "@frockbot/core/agent-loop/agent";
 import type {
   SessionSeedV1,
   WorkingContextSelectorV1,
@@ -165,6 +168,11 @@ export interface ShellCompositionMountOptions {
    */
   userMessageWaiting?(): Promise<boolean>;
   /**
+   * Shown each dispatch's tool calls while the model writes them, so the
+   * reply can be drawn before it is sent. Never journaled.
+   */
+  watchToolInput?: AgentOptions["watchToolInput"];
+  /**
    * The turn type the admitted Turn runs on; the mounted Agent trims its tool
    * catalog to it. Absent ⇒ `chat`.
    */
@@ -244,6 +252,9 @@ export function createShellCompositionHost(
           : {}),
         ...(options.userMessageWaiting
           ? { userMessageWaiting: options.userMessageWaiting }
+          : {}),
+        ...(options.watchToolInput
+          ? { watchToolInput: options.watchToolInput }
           : {}),
         agentPackages: options.agentPackages,
         modelSelection: options.modelSelection,

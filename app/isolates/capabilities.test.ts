@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
-import type {
-  IsolateConnectionV1,
-  LlmStreamEvent,
-  NormalizedModelRequest,
+import {
+  decodeIsolateModelEventV1,
+  type IsolateConnectionV1,
+  type LlmStreamEvent,
+  type NormalizedModelRequest,
 } from "@frockbot/core/contracts";
 import {
   createIsolateCapabilityHost,
@@ -332,6 +333,38 @@ describe("the isolate model request record", () => {
       connectionId: "connection-1",
       connectionGeneration: "generation-1",
     });
+  });
+});
+
+describe("model events crossing into Bot code", () => {
+  test("a tool call's arguments as they are written stay on this side", async () => {
+    const stream = isolateModelEventStreamV1(
+      (async function* (): AsyncIterable<LlmStreamEvent> {
+        yield {
+          type: "tool-input-delta",
+          id: "call-1",
+          name: "lookup",
+          delta: '{"q":',
+        };
+        yield {
+          type: "tool-input-delta",
+          id: "call-1",
+          name: "lookup",
+          delta: '"x"}',
+        };
+        yield {
+          type: "tool-call",
+          call: { id: "call-1", name: "lookup", input: { q: "x" } },
+        };
+        yield { type: "finish", reason: "tool-calls" };
+      })(),
+    );
+    const text = await new Response(stream).text();
+    const lines = text
+      .trim()
+      .split("\n")
+      .map((line) => decodeIsolateModelEventV1(JSON.parse(line)));
+    expect(lines.map((event) => event.type)).toEqual(["tool-call", "finish"]);
   });
 });
 

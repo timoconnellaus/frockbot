@@ -333,6 +333,37 @@ describe("model billing", () => {
     expect(account.settlements).toEqual([]);
   });
 
+  test("a provider failure part-way through a tool call's arguments is not free", async () => {
+    const account = new UsageSpy();
+    const llm = new BilledLlmRegistry(new LoopHookListV1(), {
+      account,
+      rates: { "model-a": rate },
+      botId: "bot-1",
+      sessionId: "session-1",
+    });
+    llm.register({
+      id: "flock-ai",
+      async *stream() {
+        yield {
+          type: "tool-input-delta",
+          id: "call-1",
+          name: "send_to_user",
+          delta: '{"payload":{"type":"text","text":"Half a rep',
+        };
+        throw new ModelProviderFailureError({
+          classification: "transient",
+          reason: "stream failed mid-call",
+        });
+      },
+    });
+    await expect(collect(llm)).rejects.toBeInstanceOf(
+      ModelProviderFailureError,
+    );
+    // The model wrote output, so the reservation waits for reconciliation
+    // rather than settling as a call that cost nothing.
+    expect(account.settlements).toEqual([]);
+  });
+
   test("counts cached input at its discounted rate and validates provider reports", () => {
     expect(
       modelCost(
