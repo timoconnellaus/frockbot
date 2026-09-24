@@ -167,8 +167,8 @@ export async function executeBotTurn(
     // Composition's model binding — so the Composition outlives the Turn too,
     // and only by as long as the compaction does. Awaiting the disposal here
     // would put the summariser back in the latency path, which is the whole
-    // defect. The next admission aborts anything still running, so this can
-    // never stack up.
+    // defect. Compactions run one at a time, each bounded by its deadline, so
+    // these can only stack as deep as that queue.
     if (compactionInFlightV1(command.sessionId)) {
       void whenCompactionSettledV1(command.sessionId).then(
         () => composition.dispose(),

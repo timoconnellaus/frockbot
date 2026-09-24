@@ -131,7 +131,7 @@ The composer's dictation relay (`apps/cloudflare/src/voice-dictation.ts`) is not
 
 5. **Bot Durable Object.** `apps/cloudflare/src/bot-state.ts:2001` `run()` decodes the envelope, materializes the identity and calls `shell.run(...)`.
 
-6. **Shell.** `app/shell/turn.ts:151` `run()` yields any in-flight compaction, then delegates to `admitTurnV1`, which mirrors the User's Composition and calls `BotDurableAuthority.run` (`core/durable/authority.ts:293`): recover whatever the object holds, check for a settled replay, then `acceptRun`. An accepted run executes inline; otherwise it is durably queued — one user-lane slot, FIFO agent lane — and promoted by `runQueuedRun` (`:332`).
+6. **Shell.** `app/shell/turn.ts:151` `run()` takes the session log from any in-flight compaction — which keeps summarising and parks its outcome for the next Turn end rather than writing beside this Turn — then delegates to `admitTurnV1`, which mirrors the User's Composition and calls `BotDurableAuthority.run` (`core/durable/authority.ts:293`): recover whatever the object holds, check for a settled replay, then `acceptRun`. An accepted run executes inline; otherwise it is durably queued — one user-lane slot, FIFO agent lane — and promoted by `runQueuedRun` (`:332`).
 
 7. **Mount.** `activateCompositionV1` reads the pin and builds the Turn's runtime through `createShellCompositionHost` (`app/shell/backend-composition.ts:274`).
 

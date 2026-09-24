@@ -192,8 +192,9 @@ describe("conversation compaction in Workerd", () => {
   // The defect this replaces: `agent/turn-stopping` is a hook the agent loop
   // awaits inside `#runTurn`'s `finally`, so a 40-second summariser held the
   // run's terminal record, the `runs` broadcast, and the HTTP response. The
-  // summariser here hangs for five seconds; nothing a person does may notice.
-  test("a stalled summariser delays neither the Turn it follows nor the next one", async () => {
+  // summariser here hangs for five seconds; nothing a person does may notice,
+  // and the summary it was writing still lands.
+  test("a stalled summariser delays neither the Turn it follows nor the next one, and still lands", async () => {
     const suffix = crypto.randomUUID();
     const identity = {
       schemaVersion: 1 as const,
@@ -240,14 +241,41 @@ describe("conversation compaction in Workerd", () => {
     for (const duration of durations) {
       expect(duration).toBeLessThan(median + 2_000);
     }
-    // …and the summariser really did hang: every attempt yielded to the Turn
-    // behind it rather than holding it, so none of them recorded a summary.
+    // …and the summariser was not thrown away for it. It kept running past
+    // the Turns admitted behind it, parked its summary rather than writing
+    // beside them, and a later Turn end wrote it in.
+    await runInDurableObject(stub, () => whenCompactionSettledV1(name));
+    await turn(13);
+    await runInDurableObject(stub, () => whenCompactionSettledV1(name));
+    const settled = await stub.durableSessionEvents();
+    const compacted = settled.filter(
+      (event) => event.type === "conversation/compacted",
+    );
+    expect(compacted.length).toBeGreaterThan(0);
+    // At least one summary was begun before a Turn was admitted and written
+    // after it: the case that used to be aborted.
+    const spanning = compacted.filter((landed) => {
+      if (landed.type !== "conversation/compacted") return false;
+      const intent = settled.find(
+        (event) =>
+          event.type === "conversation/compaction-intent" &&
+          event.effectId === landed.effectId,
+      );
+      return settled.some(
+        (event) =>
+          event.type === "turn/start" &&
+          intent !== undefined &&
+          event.seq > intent.seq &&
+          event.seq < landed.seq,
+      );
+    });
+    expect(spanning.length).toBeGreaterThan(0);
     expect(
-      events.filter((event) => event.type === "conversation/compacted"),
+      settled.filter(
+        (event) =>
+          event.type === "conversation/compaction-failed" &&
+          event.reason.includes("Interrupted"),
+      ),
     ).toHaveLength(0);
-    expect(
-      events.filter((event) => event.type === "conversation/compaction-failed")
-        .length,
-    ).toBeGreaterThan(0);
   });
 });

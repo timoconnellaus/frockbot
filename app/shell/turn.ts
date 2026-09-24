@@ -79,7 +79,8 @@ import {
 import { latestModelRequestJournalState } from "./backend-recovery.js";
 import { executeBotTurn } from "./backend-runner.js";
 import type { ShellBotStateV1 } from "./backend-state.js";
-import { yieldCompactionWorkV1 } from "./compaction-scheduler.js";
+import { admitTurnToSessionLogV1 } from "./compaction-scheduler.js";
+import { storedParkedCompactionV1 } from "./compaction.js";
 import { notificationIdV1 } from "./notification-id.js";
 import { agentRuntime } from "./runtime-mount.js";
 import {
@@ -135,8 +136,8 @@ async function prepareTurnAdmission(
   command: OwnedBotTurnCommand,
 ): Promise<void> {
   // Before the authority reads the session log, so a compaction detached
-  // from the previous Turn has already handed the log back.
-  await yieldCompactionWorkV1(command.sessionId);
+  // from the previous Turn has finished any write and writes nothing more.
+  await admitTurnToSessionLogV1(command.sessionId);
   await syncCompositionFromUser(state, {
     userId: command.userId,
     botId: command.botId,
@@ -264,10 +265,10 @@ export async function executeTurn(
   state: ShellBotStateV1,
   input: BotTurnExecutionInput<BotSettingsViewV1>,
 ): Promise<BotTurnCompletion> {
-  // A compaction detached from the previous Turn yields to this one rather
-  // than holding it. Free when none is running, and an abort when one is, so
-  // this Turn is the only writer of the session log.
-  await yieldCompactionWorkV1(input.command.sessionId);
+  // This Turn takes the session log. A compaction detached from the previous
+  // Turn keeps summarising and parks its outcome for this Turn's end, so this
+  // Turn is the only writer and waits for nothing but a write under way.
+  await admitTurnToSessionLogV1(input.command.sessionId);
   if (input.preparedInputs === undefined) {
     throw new Error("this Turn has no admitted preparation");
   }
@@ -407,6 +408,10 @@ export async function executeTurn(
                 typeof storedCompactionWindowV1
               >[1]["currentMessages"];
             }) => storedCompactionWindowV1(state.ctx.storage, window),
+            parkedCompaction: storedParkedCompactionV1(
+              state.ctx.storage,
+              input.command.sessionId,
+            ),
           },
         ),
         billing: state.env.BILLING?.(
