@@ -1,6 +1,6 @@
 ---
 name: Write a Skill
-description: Use this when you are writing or updating a Skill — a recipe you or another of your User's Bots will follow later.
+description: Use this when you are writing or updating a Skill — a recipe you or another of your User's Bots will follow later — including when the User sends you a demonstration they recorded on the Computer to learn from.
 ---
 
 # Write a Skill
@@ -24,9 +24,10 @@ read on demand with `skill_load`. Mentioning a Skill is not running it.
 The Skill is visible on your next Turn, not this one. Do not claim to have
 followed it in the Turn that wrote it.
 
-There is no teach-queue, no screen-recording intake, and no "learn from
-demonstration" path. A walkthrough in this conversation is something you
-turn into a Skill with `skill_write`, or it is not a Skill yet.
+A message carrying `demonstration-<id>.json` is the User showing you a task
+on the Computer: load `demonstration.md` before you do anything else with it.
+A walkthrough typed into this conversation is something you turn into a
+Skill with `skill_write`, or it is not a Skill yet.
 
 ## References
 
@@ -35,6 +36,7 @@ Load one with `skill_load` — `{"path": "managed/write-skill", "reference": "fo
 - `format.md` — the `SKILL.md` shape `skill_write` will render.
 - `references.md` — how to add files beside the Skill, and how they load.
 - `scope.md` — bot versus user, and the two scopes that refuse.
+- `demonstration.md` — learning a Skill from a recording the User sent.
 
 Every reply is a `send_to_user` call: use disposition:"continue" while you
 still have more to say or do, and disposition:"finish" on the send that ends

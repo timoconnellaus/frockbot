@@ -17,6 +17,7 @@ import {
   subagentTimestamp,
   SubagentDecodeError,
   TASK_MESSAGE_MAX_V1,
+  TASK_ATTACHMENT_LIMIT_V1,
   TASK_PROMPT_MAX_BYTES_V1,
   TASK_TYPES_V1,
   decodeTaskModelV1,
@@ -30,6 +31,10 @@ import {
   taskSessionIdV1,
 } from "@frockbot/app/subagents/storage-keys";
 import type { BotIdentity } from "@frockbot/core/durable";
+import {
+  decodeMessageAttachmentsV1,
+  type MessageAttachmentV1,
+} from "@frockbot/core/contracts";
 import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import { rpcJsonSnapshotV1, rpcRecordV1 } from "@frockbot/app/durable-rpc";
 
@@ -59,6 +64,11 @@ export interface SubagentTaskContextV1 {
   compositionGenerationId: string;
   model: TaskModelV1;
   prompt: string;
+  /**
+   * The files the parent handed the task: uploads its Bot holds, which the
+   * child's Turn carries as its own message's attachments.
+   */
+  attachments?: MessageAttachmentV1[];
   sessionId: string;
   status: "queued" | "running" | "settled";
   acceptedAt: string;
@@ -70,6 +80,30 @@ function record(value: unknown, label: string): Record<string, unknown> {
     throw new SubagentDecodeError(`${label} must be an object`);
   }
   return value as Record<string, unknown>;
+}
+
+/** A task's files: references only, never bytes or text, at most four. */
+function taskAttachments(
+  value: unknown,
+  label: string,
+): { attachments?: MessageAttachmentV1[] } {
+  if (value === undefined) return {};
+  let attachments: MessageAttachmentV1[];
+  try {
+    attachments = decodeMessageAttachmentsV1(
+      value,
+      `${label}.attachments`,
+      true,
+    );
+  } catch (error) {
+    throw new SubagentDecodeError(
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+  if (attachments.length > TASK_ATTACHMENT_LIMIT_V1) {
+    throw new SubagentDecodeError(`${label}.attachments has too many files`);
+  }
+  return { attachments };
 }
 
 export function decodeSubagentParentV1(
@@ -100,6 +134,8 @@ export interface SubagentRunTaskRequestV1 {
   compositionGenerationId: string;
   model: TaskModelV1;
   prompt: string;
+  /** The files the child's Turn carries, resolved by the parent. */
+  attachments?: MessageAttachmentV1[];
   /**
    * The Session the child Turn runs on. Absent on a first dispatch, where it
    * is the task's own; present on a resume, where it is the *resumed* task's,
@@ -117,7 +153,7 @@ export function decodeSubagentRunTaskRequestV1(
   subagentExactKeys(
     candidate,
     ["taskId", "type", "parent", "compositionGenerationId", "model", "prompt"],
-    ["sessionId"],
+    ["sessionId", "attachments"],
     label,
   );
   if (!isTaskIdV1(candidate.taskId)) {
@@ -144,6 +180,7 @@ export function decodeSubagentRunTaskRequestV1(
     ),
     model: decodeTaskModelV1(candidate.model, `${label}.model`),
     prompt,
+    ...taskAttachments(candidate.attachments, label),
     ...(candidate.sessionId === undefined
       ? {}
       : {
@@ -168,6 +205,7 @@ export function subagentTaskContextV1(
     compositionGenerationId: request.compositionGenerationId,
     model: request.model,
     prompt: request.prompt,
+    ...(request.attachments ? { attachments: request.attachments } : {}),
     sessionId: request.sessionId ?? taskSessionIdV1(request.taskId),
     status: "queued",
     acceptedAt,
@@ -193,7 +231,7 @@ export function decodeSubagentTaskContextV1(
       "status",
       "acceptedAt",
     ],
-    ["outcome"],
+    ["outcome", "attachments"],
     label,
   );
   if (candidate.schemaVersion !== 1) {
@@ -227,6 +265,7 @@ export function decodeSubagentTaskContextV1(
       TASK_PROMPT_MAX_BYTES_V1,
       `${label}.prompt`,
     ),
+    ...taskAttachments(candidate.attachments, label),
     sessionId: subagentText(candidate.sessionId, 256, `${label}.sessionId`),
     status: candidate.status,
     acceptedAt: subagentTimestamp(candidate.acceptedAt, `${label}.acceptedAt`),

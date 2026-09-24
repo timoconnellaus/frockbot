@@ -16,6 +16,7 @@ import {
   type RoutinePendingWakeV1,
 } from "@frockbot/app/routines/inbox";
 import { readBotSettingsV1 } from "@frockbot/app/settings/bot";
+import { findBotUploadsV1 } from "@frockbot/app/uploads/bot";
 import type {
   SubagentCheckOutcomeV1,
   SubagentDispatchOutcomeV1,
@@ -273,6 +274,16 @@ async function dispatchSubagentTask(
         "this deployment cannot address a Subagent Durable Object, so no subagent can be dispatched",
     };
   }
+  // The files handed to the task are uploads this Bot holds, named the way
+  // the conversation shows them. Resolved before anything is admitted, so a
+  // task is never dispatched to look at a file it cannot have.
+  const files = await findBotUploadsV1(state.ctx.storage, request.attachments);
+  if (files.status === "missing") {
+    return {
+      status: "refused",
+      reason: `no file "${files.entry}" is attached to this conversation; name an attached file by its name or its upload id`,
+    };
+  }
   const taskId = await subagentTaskIdV1(turn.runId, request.effectId);
   const admission = await state.tasks.admit({
     taskId,
@@ -378,6 +389,7 @@ async function dispatchSubagentTask(
     compositionGenerationId,
     model: admission.record.model,
     prompt: request.prompt,
+    ...(files.attachments.length > 0 ? { attachments: files.attachments } : {}),
     ...(anchorTaskId === taskId
       ? {}
       : { sessionId: admission.record.childSessionId }),
@@ -958,6 +970,9 @@ export async function runOwedSubagentTurns(
         sessionId: context.sessionId,
         acceptedAt: new Date().toISOString(),
         text: context.prompt,
+        // The files the parent handed over, as this Turn's own message's:
+        // the child reads them exactly as the conversation did.
+        ...(context.attachments ? { attachments: context.attachments } : {}),
         turnType: "subagent",
         // The role is the task's type. It is the second ceiling on the
         // child's catalog: a `browserUse` child is never offered

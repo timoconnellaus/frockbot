@@ -94,7 +94,7 @@ function requiredTokensFor(slug: string): readonly string[] {
     case "import-bot-template":
       return ["cannot import"];
     case "write-skill":
-      return ["skill_write", "skill_load", "reference"];
+      return ["skill_write", "skill_load", "reference", "demonstration_delete"];
     case "plugins":
       return [
         ...PLUGIN_AUTHORING_TOOL_NAMES_V1,

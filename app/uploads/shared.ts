@@ -12,6 +12,7 @@ import {
   isUploadIdV1,
   messageAttachmentKindV1,
   PPTX_MEDIA_TYPE_V1,
+  UPLOAD_ACCOUNT_QUOTA_BYTES_V1,
   XLSX_MEDIA_TYPE_V1,
   type MessageAttachmentKindV1,
   type MessageAttachmentV1,
@@ -137,6 +138,9 @@ export function uploadAttachmentV1(
     bytes: upload.bytes,
   };
 }
+
+/** What a person is told when their files fill the account's upload space. */
+export const UPLOAD_QUOTA_FULL_MESSAGE_V1 = `Your files use all ${UPLOAD_ACCOUNT_QUOTA_BYTES_V1 / 1024 ** 3} GB of upload space. Delete a Bot you no longer need to make room.`;
 
 /** What the upload route answers, and what the composer holds until Send. */
 export interface UploadReceiptV1 {

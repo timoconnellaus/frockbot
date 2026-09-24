@@ -3,6 +3,7 @@ import {
   ComputerProtocolDecodeError,
   decodeComputerCommandResponse,
   decodeComputerProjectionV1,
+  type ComputerDemonstrationViewV1,
   type ComputerProgressViewV1,
   type ComputerProjectionV1,
 } from "./protocol.js";
@@ -110,5 +111,58 @@ describe("Computer command acceptance", () => {
       status: "accepted",
       admittedAt: "2026-09-03T00:00:00.000Z",
     });
+  });
+});
+
+describe("Computer demonstration", () => {
+  const ready: Extract<ComputerDemonstrationViewV1, { status: "ready" }> = {
+    version: 1,
+    id: "0123456789abcdef",
+    status: "ready",
+    startedAt: "2026-09-24T10:00:00.000Z",
+    steps: 12,
+    attachments: [
+      {
+        kind: "document",
+        uploadId: "a".repeat(64),
+        name: "demonstration-0123456789abcdef.json",
+        mediaType: "application/json",
+        bytes: 2_048,
+      },
+    ],
+  };
+
+  test("projects a recording and a kept one exactly", () => {
+    const recording = {
+      version: 1,
+      id: "0123456789abcdef",
+      status: "recording",
+      startedAt: "2026-09-24T10:00:00.000Z",
+      endsAt: "2026-09-24T10:10:00.000Z",
+    } as const;
+    expect(
+      decodeComputerProjectionV1({ ...projection, demonstration: recording })
+        .demonstration,
+    ).toEqual(recording);
+    expect(
+      decodeComputerProjectionV1({ ...projection, demonstration: ready })
+        .demonstration,
+    ).toEqual(ready);
+  });
+
+  test("refuses a shape that is neither, or an attachment carrying its contents", () => {
+    for (const demonstration of [
+      { ...ready, status: "sent" },
+      { ...ready, endsAt: "2026-09-24T10:10:00.000Z" },
+      {
+        ...ready,
+        attachments: [{ ...ready.attachments[0], text: "the log itself" }],
+      },
+      { ...ready, steps: 0 },
+    ]) {
+      expect(() =>
+        decodeComputerProjectionV1({ ...projection, demonstration }),
+      ).toThrow(ComputerProtocolDecodeError);
+    }
   });
 });

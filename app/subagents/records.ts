@@ -105,7 +105,7 @@ export const TASK_ID_MAX_V1 = 128;
 export const TASK_SUMMARY_MAX_V1 = 8_000;
 /** Longest one queued `task_message` payload may be. */
 export const TASK_MESSAGE_MAX_V1 = 8_000;
-export const TASK_ATTACHMENT_PATH_MAX_V1 = 512;
+export const TASK_ATTACHMENT_NAME_MAX_V1 = 512;
 
 export class SubagentDecodeError extends Error {
   override readonly name = "SubagentDecodeError";
@@ -376,6 +376,10 @@ export interface TaskRecordV1 {
   status: TaskStatusV1;
   dispatch: TaskDispatchV1;
   childSessionId: string;
+  /**
+   * The files the dispatch named — attached to the conversation, by name or
+   * upload id — which the child's Turn carried as its own message's.
+   */
   attachments: string[];
   resumedFrom?: string;
   createdAt: string;
@@ -455,7 +459,7 @@ function decodeTaskAttachmentsV1(value: unknown, label: string): string[] {
     );
   }
   return value.map((entry, index) =>
-    subagentText(entry, TASK_ATTACHMENT_PATH_MAX_V1, `${label}[${index}]`),
+    subagentText(entry, TASK_ATTACHMENT_NAME_MAX_V1, `${label}[${index}]`),
   );
 }
 

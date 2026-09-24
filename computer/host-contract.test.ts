@@ -237,6 +237,40 @@ for (const build of HOSTS) {
       });
     });
 
+    test("records only the lease holder's demonstration, and hands it back once", async () => {
+      const session = await open();
+      expect(session.demonstration).toBeDefined();
+      expect(session.control).toBeDefined();
+
+      // Nobody holds the desktop: there is no person whose work to record.
+      await expect(
+        session.demonstration!.start({ ownerId: "human-1", seconds: 60 }),
+      ).rejects.toThrow();
+
+      const lease = await session.control!.acquire({
+        scope: "desktop-gui",
+        ownerId: "human-1",
+      });
+      // Somebody else is not the person holding it.
+      await expect(
+        session.demonstration!.start({ ownerId: "human-2", seconds: 60 }),
+      ).rejects.toThrow();
+      await session.demonstration!.start({ ownerId: "human-1", seconds: 60 });
+      await session.control!.release(lease, {
+        scope: "desktop-gui",
+        ownerId: "human-1",
+      });
+
+      // Read back after control is released, which is one way a recording
+      // ends; and read once.
+      const capture = await session.demonstration!.stop();
+      expect(capture).toBeDefined();
+      expect(Array.isArray(capture!.steps)).toBe(true);
+      expect(Date.parse(capture!.startedAt)).not.toBeNaN();
+      expect(Date.parse(capture!.stoppedAt)).not.toBeNaN();
+      expect(await session.demonstration!.stop()).toBeUndefined();
+    });
+
     test("tears the Computer down idempotently, where it offers teardown", async () => {
       if (!host.teardown) {
         // Optional by declaration: a host that cannot destroy a Computer is

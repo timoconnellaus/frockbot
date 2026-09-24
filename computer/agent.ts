@@ -159,6 +159,88 @@ export interface ComputerAgentPluginConfig {
   frames?: ComputerFrameSinkV1;
   /** The Package's clock. Tests set it; production takes `Date.now`. */
   now?: () => number;
+  /**
+   * The demonstrations the person sent this Bot, in the Bot Durable Object
+   * that keeps them. Supplied to the Bot's own conversational Turn only;
+   * absent, and `demonstration_delete` is not offered.
+   */
+  demonstrations?: ComputerDemonstrationDeletionV1;
+}
+
+/** Deleting one demonstration the person sent this Bot. */
+export interface ComputerDemonstrationDeletionV1 {
+  delete(demonstrationId: string): Promise<"deleted" | "missing">;
+}
+
+const DEMONSTRATION_ID = /^[0-9a-f]{16}$/;
+
+/**
+ * `demonstration_delete`: the Bot's half of "the recording is deleted once
+ * its Skill is saved or turned down" (parity row 54). The person can discard
+ * one they have not sent, and every recording is deleted a week after it
+ * stopped whatever happens; this is how the Bot lets go of one sooner.
+ */
+export function createDemonstrationDeleteToolV1(
+  demonstrations: ComputerDemonstrationDeletionV1,
+): ToolDefinition {
+  const decode = (input: unknown): string | undefined => {
+    if (!input || typeof input !== "object" || Array.isArray(input)) {
+      return undefined;
+    }
+    const value = input as Record<string, unknown>;
+    if (Object.keys(value).some((key) => key !== "demonstrationId")) {
+      return undefined;
+    }
+    return typeof value.demonstrationId === "string" &&
+      DEMONSTRATION_ID.test(value.demonstrationId.trim())
+      ? value.demonstrationId.trim()
+      : undefined;
+  };
+  return {
+    name: "demonstration_delete",
+    namespace: "frockbot",
+    // The Bot's own conversation, where the person's decision on the draft
+    // arrives. A subagent drafts; it does not decide what happens to the
+    // person's recording.
+    admission: { turnTypes: ["chat"] },
+    idempotent: true,
+    description: [
+      "Delete a demonstration the person recorded on the Computer and sent you: its log and its screenshots.",
+      "Call it once the Skill you drafted from it is saved, or once they turned the draft down.",
+      "Name it by the `demonstration` id at the top of its log, the file demonstration-<id>.json.",
+    ].join(" "),
+    inputSchema: {
+      type: "object",
+      properties: {
+        demonstrationId: {
+          type: "string",
+          description:
+            "The 16-character id from the log's `demonstration` field.",
+        },
+      },
+      required: ["demonstrationId"],
+      additionalProperties: false,
+    },
+    validate: (input: unknown) => decode(input) !== undefined,
+    execute: async (input: unknown) => {
+      const demonstrationId = decode(input);
+      if (!demonstrationId) {
+        return {
+          content:
+            "demonstration_delete was refused: demonstrationId must be the 16-character id from the log",
+          isError: true,
+        };
+      }
+      const outcome = await demonstrations.delete(demonstrationId);
+      return {
+        content:
+          outcome === "deleted"
+            ? `Deleted demonstration ${demonstrationId}: its log and screenshots are gone. The conversation still says they were attached.`
+            : `There is no demonstration ${demonstrationId} to delete: it was already deleted, or it is not one the person sent you.`,
+        isError: false,
+      };
+    },
+  };
 }
 
 export const HUMAN_CONTROL_PROMPT_LINE =
@@ -1867,7 +1949,15 @@ export function createComputerAgentFeature(
       }
     };
 
+    const demonstrations = config.demonstrations;
     return [
+      ...(demonstrations
+        ? [
+            runtime.tools.register(
+              createDemonstrationDeleteToolV1(demonstrations),
+            ),
+          ]
+        : []),
       runtime.tools.register(timed(execTool)),
       ...(writer ? [runtime.tools.register(timed(screenshotTool))] : []),
       runtime.tools.register(timed(doctorTool)),

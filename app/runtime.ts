@@ -576,6 +576,9 @@ export function createFoundationHostedRuntimePackages(
           ? { projectionFiles: host.computerProjectionFiles }
           : {}),
         ...(host.computerFrames ? { frames: host.computerFrames } : {}),
+        ...(host.computerDemonstrations
+          ? { demonstrations: host.computerDemonstrations }
+          : {}),
       }),
     ),
   ];

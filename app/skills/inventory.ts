@@ -2,10 +2,12 @@
 // the generator both walk. Adding a slug here without a directory (or the
 // other way around) fails `scripts/check-managed-skills.ts`.
 //
-// `learn-from-demonstration` is not among them: GrokBot's teach-queue,
-// capture UI and `watchVideo` path are not started here (parity row 54), so
-// a recipe that names them would teach a procedure the Bot cannot run.
-// `write-skill` is the FrockBot path: `skill_write` plus references.
+// `learn-from-demonstration` is not among them: GrokBot's recipe claims a
+// video from a teach-queue, which this product does not have. A
+// demonstration here arrives as a message carrying its log and screenshots
+// (parity row 54), and `write-skill`'s `demonstration.md` reference is the
+// FrockBot path: draft, ask on an approval card, `skill_write`, then
+// `demonstration_delete`.
 
 export const MANAGED_SKILL_AUTHORSHIPS_V1 = [
   {

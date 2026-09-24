@@ -201,10 +201,11 @@ import {
 import { loggedEntryV1 } from "./entry-boundary.js";
 import {
   releaseBotUploadQuotaV1,
+  releaseUploadQuotaV1,
   reserveUploadQuotaV1,
   type UploadQuotaAnswerV1,
 } from "@frockbot/app/uploads/quota";
-import { UPLOAD_MAX_BYTES_V1 } from "@frockbot/core/contracts";
+import { isUploadIdV1, UPLOAD_MAX_BYTES_V1 } from "@frockbot/core/contracts";
 import {
   GroupChatUserStoreV1,
   type GroupChatChangeV1,
@@ -516,6 +517,36 @@ export class UserConfiguration
         botId: request.botId as string,
         uploadId: request.uploadId as string,
         bytes: request.bytes as number,
+      }),
+    );
+  }
+
+  /**
+   * Gives back the space of uploads one Bot deleted while it lives on — a
+   * demonstration the person sent it, once its Skill is decided. Idempotent.
+   * It works on a deleting account too: giving space back starts nothing.
+   */
+  async releaseUploadQuota(input: unknown): Promise<{ released: number }> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      uploadIds: rpcDecoded((value) => {
+        if (
+          !Array.isArray(value) ||
+          value.length === 0 ||
+          value.length > 16 ||
+          !value.every((entry) => isUploadIdV1(entry))
+        ) {
+          throw new Error("uploadIds must name one to sixteen uploads");
+        }
+        return value as string[];
+      }),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return this.ctx.storage.transaction((transaction) =>
+      releaseUploadQuotaV1(transaction, {
+        botId: request.botId as string,
+        uploadIds: request.uploadIds as string[],
       }),
     );
   }

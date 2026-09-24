@@ -2,6 +2,10 @@
 // Durable Object seams. It contains projections and commands only: notably,
 // the viewer URL is present solely on a read projection and never on a command
 // receipt, so an idempotency record cannot become durable secret storage.
+import {
+  decodeMessageAttachmentsV1,
+  type MessageAttachmentV1,
+} from "@frockbot/core/contracts";
 
 export const COMPUTER_COMMAND_TYPES = [
   "connect",
@@ -11,6 +15,9 @@ export const COMPUTER_COMMAND_TYPES = [
   "refreshViewer",
   "closeViewer",
   "runDoctor",
+  "startDemonstration",
+  "stopDemonstration",
+  "discardDemonstration",
 ] as const;
 
 export type ComputerCommandTypeV1 = (typeof COMPUTER_COMMAND_TYPES)[number];
@@ -47,6 +54,31 @@ export interface ComputerScreenshotViewV1 {
   contentHash: string;
   url: string;
 }
+
+/**
+ * What the person is recording, or has recorded and not yet sent (parity row
+ * 54). A recording runs while they hold control; once it stops it is kept as
+ * the files a message carries — the step log and a few screenshots — and
+ * `attachments` is what the client sends them by. A demonstration that has
+ * been sent, or discarded, is no longer projected.
+ */
+export type ComputerDemonstrationViewV1 =
+  | {
+      version: 1;
+      id: string;
+      status: "recording";
+      startedAt: string;
+      /** When the recording stops by itself. */
+      endsAt: string;
+    }
+  | {
+      version: 1;
+      id: string;
+      status: "ready";
+      startedAt: string;
+      steps: number;
+      attachments: MessageAttachmentV1[];
+    };
 
 export interface ComputerDoctorCheckViewV1 {
   version: 1;
@@ -142,6 +174,7 @@ export interface ComputerProjectionV1 {
   controlLease?: ComputerControlLeaseViewV1;
   screenshots: ComputerScreenshotViewV1[];
   doctor?: ComputerDoctorViewV1;
+  demonstration?: ComputerDemonstrationViewV1;
 }
 
 export type ComputerCommandReceiptV1 =
@@ -516,6 +549,74 @@ function decodeDoctorV1(value: unknown): ComputerDoctorViewV1 {
   };
 }
 
+export function decodeComputerDemonstrationViewV1(
+  value: unknown,
+): ComputerDemonstrationViewV1 {
+  const candidate = record(value, "Computer demonstration");
+  if (candidate.status === "recording") {
+    exactKeys(
+      candidate,
+      ["version", "id", "status", "startedAt", "endsAt"],
+      [],
+      "Computer demonstration",
+    );
+  } else if (candidate.status === "ready") {
+    exactKeys(
+      candidate,
+      ["version", "id", "status", "startedAt", "steps", "attachments"],
+      [],
+      "Computer demonstration",
+    );
+  } else {
+    throw new ComputerProtocolDecodeError(
+      "Computer demonstration status is invalid",
+    );
+  }
+  if (candidate.version !== 1) {
+    throw new ComputerProtocolDecodeError(
+      "Computer demonstration version is unsupported",
+    );
+  }
+  const common = {
+    version: 1 as const,
+    id: text(candidate.id, "Computer demonstration id"),
+    startedAt: timestamp(
+      candidate.startedAt,
+      "Computer demonstration startedAt",
+    ),
+  };
+  if (candidate.status === "recording") {
+    return {
+      ...common,
+      status: "recording",
+      endsAt: timestamp(candidate.endsAt, "Computer demonstration endsAt"),
+    };
+  }
+  let attachments: MessageAttachmentV1[];
+  try {
+    attachments = decodeMessageAttachmentsV1(
+      candidate.attachments,
+      "Computer demonstration attachments",
+      true,
+    );
+  } catch (error) {
+    throw new ComputerProtocolDecodeError(
+      error instanceof Error ? error.message : String(error),
+    );
+  }
+  return {
+    ...common,
+    status: "ready",
+    steps: boundedInteger(
+      candidate.steps,
+      1,
+      10_000,
+      "Computer demonstration steps",
+    ),
+    attachments,
+  };
+}
+
 export function decodeComputerProjectionV1(
   value: unknown,
 ): ComputerProjectionV1 {
@@ -523,7 +624,7 @@ export function decodeComputerProjectionV1(
   exactKeys(
     candidate,
     ["version", "botId", "providerLabel", "phase", "message", "screenshots"],
-    ["viewerSession", "controlLease", "doctor", "progress"],
+    ["viewerSession", "controlLease", "doctor", "progress", "demonstration"],
     "Computer projection",
   );
   if (candidate.version !== 1 || !Array.isArray(candidate.screenshots)) {
@@ -551,6 +652,13 @@ export function decodeComputerProjectionV1(
     ...(candidate.doctor === undefined
       ? {}
       : { doctor: decodeDoctorV1(candidate.doctor) }),
+    ...(candidate.demonstration === undefined
+      ? {}
+      : {
+          demonstration: decodeComputerDemonstrationViewV1(
+            candidate.demonstration,
+          ),
+        }),
   };
 }
 

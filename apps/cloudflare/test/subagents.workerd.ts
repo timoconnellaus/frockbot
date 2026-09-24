@@ -81,7 +81,11 @@ async function tasks(identity: Identity): Promise<TaskListViewV1> {
 async function dispatch(
   identity: Identity,
   runId: string,
-  calls: ReadonlyArray<{ description: string; prompt: string }>,
+  calls: ReadonlyArray<{
+    description: string;
+    prompt: string;
+    attachments?: string[];
+  }>,
 ): Promise<{ runId: string; events: unknown[] }> {
   return rpc(identity).run({
     schemaVersion: 1,
@@ -325,5 +329,65 @@ describe("subagent dispatch across two Durable Objects", () => {
         (event) => event.type === "tool/result" && event.isError !== true,
       ),
     ).toHaveLength(2); // Task, then its explicit user-facing result.
+  });
+
+  test("the files a dispatch names reach the child's Turn as its own message's", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `sub-files-${suffix}`,
+      botId: `sub-files-bot-${suffix}`,
+    };
+    await provisionBot(identity);
+    // One file this Bot was given, as the upload route leaves it.
+    const uploadId = "d".repeat(64);
+    const upload = {
+      schemaVersion: 1,
+      uploadId,
+      kind: "document",
+      name: "demonstration-0123456789abcdef.json",
+      mediaType: "application/json",
+      bytes: 2,
+      uploadedAt: "2026-09-24T00:00:00.000Z",
+      textChars: 2,
+    } as const;
+    await (
+      bot(identity) as unknown as {
+        recordUploadV1(input: unknown): Promise<unknown>;
+      }
+    ).recordUploadV1({ schemaVersion: 1, ...identity, upload });
+
+    // A name nothing was attached under dispatches nothing.
+    await dispatch(identity, "dispatch-files-missing", [
+      {
+        description: "Watch it",
+        prompt: "Describe the steps.",
+        attachments: ["never-attached.json"],
+      },
+    ]);
+    expect((await tasks(identity)).tasks).toEqual([]);
+
+    await dispatch(identity, "dispatch-files", [
+      {
+        description: "Draft a Skill",
+        prompt: "Draft a Skill from the demonstration.",
+        attachments: [upload.name],
+      },
+    ]);
+    const task = (await tasks(identity)).tasks[0]!;
+    await settleTask(identity, task.taskId);
+
+    const [childRun] = await storedRuns(child(identity, task.taskId));
+    expect(childRun).toMatchObject({
+      status: "completed",
+      attachments: [
+        {
+          kind: "document",
+          uploadId,
+          name: upload.name,
+          mediaType: "application/json",
+          bytes: 2,
+        },
+      ],
+    });
   });
 });

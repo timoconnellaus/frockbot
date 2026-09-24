@@ -30,9 +30,11 @@ import {
 } from "@frockbot/computer/core";
 import {
   computerSyncSummaryV1,
+  decodeComputerDemonstrationStepsV1,
   type ComputerBackgroundStateV1,
   type ComputerControlLease,
   type ComputerControlRequestV1,
+  type ComputerDemonstrationCaptureV1,
   type ComputerDoctorReportV1,
   type ComputerExecRequest,
   type ComputerExecResult,
@@ -260,6 +262,15 @@ export interface FakeComputerHostOptionsV1 {
   sync?: boolean;
   /** Offer `presence`. Defaults to true. */
   presence?: boolean;
+  /**
+   * What the next demonstration `stop` hands back. The steps are the
+   * Computer's own words and pass the same step decoder a real host's do, so
+   * a suite can prove that a step carrying a typed value never survives.
+   */
+  demonstration?: {
+    steps: unknown[];
+    screenshots?: { afterStep: number; bytes: Uint8Array }[];
+  };
 }
 
 /** One User's Computer on this host: everything that survives a `close`. */
@@ -273,6 +284,11 @@ export class FakeComputerV1 {
   readonly processes = new Map<
     string,
     ComputerBackgroundStateV1 & { pid: number; logPath: string; cwd: string }
+  >();
+  /** The demonstration each tenant is recording, by Bot. */
+  readonly demonstrations = new Map<
+    string,
+    { ownerId: string; startedAt: string }
   >();
   generation = 1;
   private sequence = 0;
@@ -556,6 +572,48 @@ export class FakeComputerHostV1 implements ComputerHostV1 {
             computer.leases.delete(key);
           }
           return Promise.resolve();
+        },
+      },
+      demonstration: {
+        start: (request) => {
+          host.calls.push(`demonstration:start:${botId}`);
+          // The same fence a real host keeps: only the person holding the
+          // User-wide lease records, because what is recorded is theirs.
+          if (computer.leases.get("desktop-gui")?.id !== request.ownerId) {
+            return Promise.reject(
+              new ComputerError(
+                "conflict",
+                "Only the person holding control of this Computer can record it",
+              ),
+            );
+          }
+          computer.demonstrations.set(botId, {
+            ownerId: request.ownerId,
+            startedAt: "2026-01-01T00:00:00.000Z",
+          });
+          return Promise.resolve();
+        },
+        stop: (): Promise<ComputerDemonstrationCaptureV1 | undefined> => {
+          host.calls.push(`demonstration:stop:${botId}`);
+          const running = computer.demonstrations.get(botId);
+          computer.demonstrations.delete(botId);
+          if (!running) return Promise.resolve(undefined);
+          const scripted = host.options.demonstration ?? { steps: [] };
+          const { steps, dropped } = decodeComputerDemonstrationStepsV1(
+            scripted.steps,
+          );
+          return Promise.resolve({
+            startedAt: running.startedAt,
+            stoppedAt: "2026-01-01T00:01:00.000Z",
+            stoppedBecause: "stopped",
+            steps,
+            screenshots: (scripted.screenshots ?? []).map((shot) => ({
+              afterStep: shot.afterStep,
+              bytes: shot.bytes,
+              mediaType: "image/jpeg" as const,
+            })),
+            dropped,
+          });
         },
       },
       ...(this.options.sync
