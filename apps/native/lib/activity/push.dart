@@ -22,7 +22,7 @@ class PushController {
     this.channel = const MethodChannel('frockbot/push'),
   });
 
-  /// The phones: each draws alerts the platform delivers while Dart is stopped.
+  /// The phones, where push reaches the person while Dart is stopped.
   bool get mobile =>
       !kIsWeb &&
       (defaultTargetPlatform == TargetPlatform.android ||

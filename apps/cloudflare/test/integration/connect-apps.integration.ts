@@ -214,6 +214,16 @@ describe("Connected apps", () => {
       "unsafe-inline",
     );
 
+    // The iPhone's page hands over on its scheme the same way.
+    const ios = await SELF.fetch(
+      `${ORIGIN}/api/connect/callback/ios?status=success&connectedAccountId=ca_9`,
+    );
+    const iosPage = await ios.text();
+    expect(iosPage).toContain(
+      "frockbot://bot.frockbot.com/api/connect/callback/ios",
+    );
+    expect(iosPage).not.toContain("ca_9");
+
     // A browser tab is given the way back by hand.
     const plain = await SELF.fetch(`${ORIGIN}/api/connect/callback`);
     const plainPage = await plain.text();
@@ -222,7 +232,7 @@ describe("Connected apps", () => {
 
     // Nothing else under the callback path is a page of ours, and the pages
     // that exist are read, never posted to.
-    const notOurs = await SELF.fetch(`${ORIGIN}/api/connect/callback/ios`);
+    const notOurs = await SELF.fetch(`${ORIGIN}/api/connect/callback/windows`);
     // Not a public page: it never reaches the return page at all, it hits
     // the gateway's door like any other unknown path.
     expect(notOurs.status).toBe(401);
@@ -236,7 +246,7 @@ describe("Connected apps", () => {
     ).toBe(405);
     // A client naming a return page that is not ours is refused outright.
     expect(
-      (await startApp(userId, "start-ios", "gmail", "ios")).status,
+      (await startApp(userId, "start-windows", "gmail", "windows")).status,
     ).toBeGreaterThanOrEqual(400);
   });
 

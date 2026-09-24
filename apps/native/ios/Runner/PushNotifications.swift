@@ -24,10 +24,10 @@ final class PushNotifications: NSObject, MessagingDelegate {
   private override init() {
     super.init()
     let center = NotificationCenter.default
-    center.addObserver(
+    _ = center.addObserver(
       forName: UIApplication.didBecomeActiveNotification, object: nil, queue: .main
     ) { [weak self] _ in self?.channel?.invokeMethod("focus", arguments: true) }
-    center.addObserver(
+    _ = center.addObserver(
       forName: UIApplication.willResignActiveNotification, object: nil, queue: .main
     ) { [weak self] _ in self?.channel?.invokeMethod("focus", arguments: false) }
   }
