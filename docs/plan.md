@@ -12,10 +12,10 @@ This document is the plan to reach the architecture described in [`architecture.
 | Clients          | Vue + Flutter + a third UI language              | Flutter, plus web sign-in and marketing |
 | Agent loop       | 1,785 lines, provider I/O and durability braided | ~300-line durable loop over the AI SDK  |
 | Plugin runtime   | cordis, 158 import sites                         | frock-compose                           |
-| Applet authoring | on the User's Computer, via Miniflare            | a cloud build service                   |
-| Untrusted code   | every package treated as untrusted               | Bot-authored code and Applets only      |
+| Plugin authoring | on the User's Computer, via Miniflare            | a cloud build service                   |
+| Untrusted code   | every package treated as untrusted               | Plugins only                            |
 
-The seven modules: `core`, `app`, `frock-compose`, `providers`, `computer`, `applets`, `native`.
+The seven modules: `core`, `app`, `frock-compose`, `providers`, `computer`, `applets`, `native`. `applets` keeps its name but holds the Plugin SDK and its build contract.
 
 ## Decisions
 
@@ -24,8 +24,8 @@ Settled, and not to be relitigated without a reason that is new:
 - **Bot-authored packages stay.** Self-modification is the product, so the loader, generations and grants survive — scoped to untrusted code rather than applied to everything.
 - **A tenant is a User.** One Plugin worker per account. A Bot authoring a Plugin installs it for that User; which Bots run it is the Bot's own enable map ([ADR 0026](adr/0026-plugins.md)).
 - **The base has no DI container.** Ordinary imports. This is what stops the collapse from quietly undoing itself.
-- **The Computer stays, as a Package.** One provider-neutral `ComputerHost` interface with Fly behind it, so another host can be substituted. It leaves the Applet authoring path entirely. The chosen next host is the five-User DigitalOcean Kubernetes pilot in [`kubernetes-computer-host-plan.md`](kubernetes-computer-host-plan.md), with a gated Hetzner expansion path.
-- **Applets follow cloudflare-os.** Source in object storage, built by a cloud service, mounted from an immutable artifact into a Durable Object facet. The runtime is already correct; only authoring moves.
+- **The Computer stays, as a Package.** One provider-neutral `ComputerHost` interface with Fly behind it, so another host can be substituted. It is off the Plugin authoring path entirely. The chosen next host is the five-User DigitalOcean Kubernetes pilot in [`kubernetes-computer-host-plan.md`](kubernetes-computer-host-plan.md), with a gated Hetzner expansion path.
+- **Plugins build in the cloud.** Source goes to a build service, and the result is mounted from an immutable, content-addressed artifact into the User's Plugin worker.
 - **Providers go through the AI SDK.** Request translation, streaming, tool-call accumulation and usage reporting are bought, not written, behind one narrow `ModelProvider` interface.
 - **At-most-once by idempotency key.** Forensic reconciliation of dispatched effects is removed.
 - **Multi-bot stays.** A single default avatar for now; the wearable system is deferred, not deleted.
@@ -68,7 +68,7 @@ Frock Compose was the last module to be cut. `frock-compose/` is one flat worksp
 
 **8. Applets off the Computer.** _Done._ `apps/applet-build` is a fifth deployable: no routes, an `APPLET_BUILD` service binding, a `node:24-slim` container with no egress running the SDK's own five-stage pipeline over source posted inline, answering with diagnostics or with a content-addressed artifact the app Worker hash-verifies and stores. The Bot authors through `applet_*` tools, and `applet_publish` builds from the Workspace prefix rather than from a Sprite.
 
-The Computer is out of the loop entirely. Applets declares no durable root to it, so nothing is mirrored onto a Sprite; the `applets` provisioning phase, the `applet` PATH shim, the unpinned `@frockbot/applet-sdk@latest` install, the two doctor checks and the `applet dev` preview-tab branch are gone, and provisioning is five phases. The SDK lost its CLI and its `bin` with them — the service is the only thing that builds an Applet — and the end-to-end Workspace seed door went the same way, its last caller having been the `dist/` seeding a publish no longer reads. The last cut was 488 insertions against 1,807 deletions; the step as a whole is 7,354 insertions against 2,543 deletions, and what it bought was a build service and a Computer with no Applet-shaped operation left in it. Shape: [`architecture.md` §9](architecture.md#9-applets).
+The Computer is out of the loop entirely. Applets declares no durable root to it, so nothing is mirrored onto a Sprite; the `applets` provisioning phase, the `applet` PATH shim, the unpinned `@frockbot/applet-sdk@latest` install, the two doctor checks and the `applet dev` preview-tab branch are gone, and provisioning is five phases. The SDK lost its CLI and its `bin` with them — the service is the only thing that builds an Applet — and the end-to-end Workspace seed door went the same way, its last caller having been the `dist/` seeding a publish no longer reads. The last cut was 488 insertions against 1,807 deletions; the step as a whole is 7,354 insertions against 2,543 deletions, and what it bought was a build service and a Computer with no Applet-shaped operation left in it. Shape: [`architecture.md` §9](architecture.md#9-plugin-panels).
 
 **9. Flutter to parity, Vue out.** _Done._ The long pole. One Flutter client, on the phone and on the web — `bot.frockbot.com` is an app behind sign-in, so Flutter Web's first-load cost buys one codebase instead of two. Each surface ported, then its Vue original deleted in the same change. Includes the ViewNode renderer — six node types — which replaces the third UI language as the way a plugin renders.
 
@@ -313,9 +313,9 @@ Extend the existing Bot observer socket to carry server-owned, committed convers
 
 Verify with controlled inputs that a committed send renders without a transcript GET, private output causes no transcript/card refresh burst, only the changed card reloads, and initial synchronization performs no redundant page read. Cover rollback, disconnect, eviction between commitment and publication, replay duplicates/gaps, retention reset, snapshot/live races, cache persistence failure, multiple ordered sends, announcements, terminal outcomes and rich payload limits. Delivery must neither lose nor duplicate committed visible messages. These are correctness and dependency checks; no implementation has started and no further startup benchmarking is requested.
 
-## Next: Plugin panels, Applets out
+## Plugin panels, Applets out
 
-Applets fold into Plugins by deletion, not by renaming the facet. A Plugin may put a host-drawn `ViewDocument` in `conversation.panel` (tabbed page beside the chat) and `bot.nav` (a door on this Bot). The Bot shows a tab with `panel_focus`. The Applet runtime, tools, canvas and account feature go. Decisions and cuts: [ADR 0034](adr/0034-plugin-panels.md).
+_Done._ Applets folded into Plugins by deletion, not by renaming the facet. A Plugin may put a host-drawn `ViewDocument` in `conversation.panel` (tabbed page beside the chat) and `bot.nav` (a door on this Bot). The Bot shows a tab with `panel_focus`. The Applet runtime, tools, canvas and account feature are gone. Decisions and cuts: [ADR 0034](adr/0034-plugin-panels.md); shape: [`architecture.md` §9](architecture.md#9-plugin-panels).
 
 ## Not now
 

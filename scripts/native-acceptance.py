@@ -3,7 +3,7 @@
 inventory: wait for Pixel, read package version, pull installed APK and signer.
 install: inventory + release build with greater versionCode + same-signer -r.
   Stock Flutter, so it ends the phone's patch channel: --replace-production.
-flow: supervised system-browser auth, named Bot, send/Stop/reconnect/Applet.
+flow: supervised system-browser auth, named Bot, send/Stop/reconnect.
 measure: 30 cold/warm activity launches and 20 resume cycles, memory/raw gfxinfo.
 
 Activity TotalTime is NOT the first editable Flutter frame. gfxinfo is NOT a
@@ -189,9 +189,9 @@ def tap(label, timeout=120):
     raise RuntimeError(f"Control not found: {label}. No succeeding step was inferred.")
 
 
-def flow(bot_name, applet_name):
-    if not bot_name or not applet_name:
-        raise RuntimeError("flow requires --bot-name and --applet-name from the acceptance fixture")
+def flow(bot_name):
+    if not bot_name:
+        raise RuntimeError("flow requires --bot-name from the acceptance fixture")
     wait_device()
     adb("shell", "am", "start", "-W", "-n", PACKAGE + "/.MainActivity")
     if any(n.get("text") == "Continue with Google" or n.get("content-desc") == "Continue with Google" for n in snapshot().iter("node")):
@@ -208,13 +208,10 @@ def flow(bot_name, applet_name):
     adb("shell", "am", "force-stop", PACKAGE)
     adb("shell", "am", "start", "-W", "-n", PACKAGE + "/.MainActivity")
     tap("Reconnect", timeout=10) if any(n.get("content-desc") == "Reconnect" for n in snapshot().iter("node")) else None
-    tap("Your Applets")
-    tap(applet_name)
     write("flow.json", {"navigationStepsCompleted": True,
                         "durableReceiptCorrelation": "pending backend evidence",
-                        "appletMutationPersistence": "pending real facet mutation and reconnect",
                         "computerHibernated": "pending backend evidence"})
-    print("Navigation completed. Facet persistence and durable receipt correlation are separate required proofs.")
+    print("Navigation completed. Durable receipt correlation is a separate required proof.")
 
 
 def parse_metrics(raw):
@@ -282,21 +279,20 @@ def measure():
     write("flutter-resume-metrics.json", capture_metrics())
     write("measurement-status.json", {"threeFiveMinuteRuns": False, "flutterReleaseFrameTrace": False,
                                       "inputToPaintTrace": False, "firstEditableFrame30Launches": False,
-                                      "applet20OpenCloseCycles": False, "exitCriteriaMet": False})
-    print("Raw OS measurements saved. Required Flutter/IME/Applet traces are NOT implied by activity timing.")
+                                      "exitCriteriaMet": False})
+    print("Raw OS measurements saved. Required Flutter/IME traces are NOT implied by activity timing.")
 
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("action", choices=["inventory", "install", "flow", "measure"])
     parser.add_argument("--bot-name")
-    parser.add_argument("--applet-name")
     parser.add_argument("--replace-production", action="store_true",
                         help="Required by `install`: replace the phone's production app with this stock build.")
     args = parser.parse_args()
     try:
         {"inventory": inventory, "install": lambda: install(args.replace_production),
-         "flow": lambda: flow(args.bot_name, args.applet_name), "measure": measure}[args.action]()
+         "flow": lambda: flow(args.bot_name), "measure": measure}[args.action]()
     except KeyboardInterrupt:
         print("Device acceptance paused; no missing check is marked passed.")
         raise SystemExit(130)
