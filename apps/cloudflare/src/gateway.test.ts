@@ -516,6 +516,15 @@ class MemoryConfiguration
   async setFocusedPanel(): Promise<never> {
     throw new Error("Panels not configured in this fixture");
   }
+  readonly deviceUses: unknown[] = [];
+  async recordPanelDeviceUse(request: {
+    use: { pluginId: string };
+  }): Promise<{ status: "recorded" } | { status: "refused"; reason: string }> {
+    this.deviceUses.push(request);
+    return request.use.pluginId === "stranger"
+      ? { status: "refused", reason: '"stranger" has no page "tuner".' }
+      : { status: "recorded" };
+  }
 
   async readSettingsFrame(): Promise<SettingsFrame> {
     throw new Error("Settings frame not configured in this fixture");
@@ -1338,6 +1347,44 @@ describe("Cloudflare user application gateway", () => {
     expect(() =>
       applicationDeploymentId({ userId: "../alice", applicationHash: "valid" }),
     ).toThrow("invalid user id");
+  });
+
+  test("a page's device use is recorded for the audit, once decoded, and refused words are said", async () => {
+    const { gateway, configurations } = createTestGateway();
+    const use = {
+      schemaVersion: 1,
+      useId: "nAbCdEf_1234",
+      pluginId: "tuner",
+      surfaceId: "tuner",
+      ability: "microphone",
+      device: "web",
+      startedAt: "2026-09-24T05:00:00.000Z",
+      endedAt: "2026-09-24T05:02:14.000Z",
+      ending: "stopped",
+    };
+    const post = (body: unknown) =>
+      gateway(
+        request("/api/bots/bot-1/panels/device-use", "alice", {
+          method: "POST",
+          body: JSON.stringify(body),
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    const recorded = await post(use);
+    expect(recorded.status).toBe(200);
+    expect((await recorded.json()) as unknown).toEqual({ status: "recorded" });
+    const { schemaVersion: _, ...decoded } = use;
+    expect(configurations.get("alice")?.deviceUses).toEqual([
+      { schemaVersion: 1, userId: "alice", botId: "bot-1", use: decoded },
+    ]);
+    expect((await post({ ...use, ability: "camera" })).status).toBe(400);
+    const refused = await post({ ...use, pluginId: "stranger" });
+    expect(refused.status).toBe(400);
+    expect(await refused.text()).toContain("has no page");
+    expect(
+      (await gateway(request("/api/bots/bot-1/panels/device-use", "alice")))
+        .status,
+    ).toBe(405);
   });
 
   test("names the application on every answer the loaded app gives", async () => {

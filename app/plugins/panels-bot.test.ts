@@ -3,6 +3,7 @@ import { isProtocolValue } from "@frockbot/core/protocol-schemas";
 import type { CompositionMemberV1 } from "@frockbot/core/durable";
 import {
   focusedPanelPageV1,
+  panelDeviceUserFromRosterV1,
   panelDocumentIdV1,
   surfaceDocumentV1,
 } from "./panels-bot.js";
@@ -192,6 +193,44 @@ describe("a conversation panel that is a page", () => {
       focusedPanelPageV1(roster, focused, rendered, "https://bot.example.com")
         ?.page,
     ).not.toHaveProperty("abilities");
+  });
+
+  test("records a device use only for a page of a Plugin allowed that ability", () => {
+    const hearing = {
+      ...tuner,
+      descriptor: {
+        ...tuner.descriptor,
+        grants: ["device"],
+        device: { abilities: ["microphone"] },
+      },
+    } as unknown as CompositionMemberV1;
+    const use = {
+      pluginId: "tuner",
+      surfaceId: "tuner",
+      ability: "microphone",
+    };
+    // Switched off since is still the use it was.
+    expect(
+      panelDeviceUserFromRosterV1(
+        { ...roster, members: [hearing], enabled: [] },
+        use,
+      ),
+    ).toEqual({ displayName: "Tuner" });
+    expect(panelDeviceUserFromRosterV1(roster, use)).toEqual({
+      refused: '"tuner" was not allowed the microphone.',
+    });
+    expect(
+      panelDeviceUserFromRosterV1(
+        { ...roster, members: [hearing] },
+        { ...use, surfaceId: "notes" },
+      ),
+    ).toEqual({ refused: '"tuner" has no page "notes".' });
+    expect(
+      panelDeviceUserFromRosterV1(
+        { ...roster, members: [hearing] },
+        { ...use, pluginId: "stranger" },
+      ),
+    ).toEqual({ refused: '"stranger" has no page "tuner".' });
   });
 
   test("is not a page when the focused view names none", () => {

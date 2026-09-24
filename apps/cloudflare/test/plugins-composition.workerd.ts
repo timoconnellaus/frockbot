@@ -6,6 +6,7 @@
 // firing — and the outcome of that activation lands on the User's record, not
 // the Bot's.
 import { env } from "cloudflare:workers";
+import type { AuditEntryV1 } from "@frockbot/app/audit";
 import {
   createExecutionContext,
   runDurableObjectAlarm,
@@ -124,6 +125,9 @@ interface FeaturesRpc {
 interface BotRpc {
   run(command: unknown): Promise<{ runId: string }>;
   setFocusedPanel(input: unknown): Promise<{ status: string }>;
+  recordPanelDeviceUse(
+    input: unknown,
+  ): Promise<{ status: string; reason?: string }>;
   openFocusedPanel(input: unknown): Promise<{
     focus: { pluginId: string | null; surfaceId?: string };
     document?: unknown;
@@ -265,6 +269,15 @@ async function runEvents(
       }>(state.storage),
   );
   return runs.find((candidate) => candidate.runId === runId)?.events ?? [];
+}
+
+interface AuditReadRpc {
+  readAuditEntries(input: unknown): Promise<{ entries: AuditEntryV1[] }>;
+  rebuildAuditIndex(input: unknown): Promise<{ status: string }>;
+}
+
+function audit(userId: string): AuditReadRpc {
+  return env.USER_CONFIGURATIONS.getByName(userId) as unknown as AuditReadRpc;
 }
 
 function bot(identity: { userId: string; botId: string }): BotRpc {
@@ -2570,6 +2583,148 @@ export const views = {
       score: 1,
       bot: "bot-1",
     });
+  });
+
+  // ADR 0036: a page's use of the microphone, reported by the client that
+  // opened it, is one row in the User's audit, and a rebuild keeps it.
+  test("a page's microphone use is one audit row the User reads, and a rebuild keeps it", async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    const identity = { userId, botId: "bot-1" };
+    await provisionBot(identity);
+    await turn(identity, "run-0");
+    const bootstrap = (
+      await user(userId).readComposition({ schemaVersion: 1, userId })
+    ).current;
+    const STROBE_ID = "strobe";
+    const SOURCE = `export const tools = [];
+export async function execute() {
+  throw new Error("no tools");
+}
+export const views = { strobe: async () => ({}) };
+`;
+    const PAGE = withPluginPageBridgeV1(
+      "<!doctype html><html><head></head><body>strobe</body></html>",
+    );
+    const descriptor = decodePluginDescriptorV1({
+      id: STROBE_ID,
+      displayName: "Strobe",
+      version: "0.0.1",
+      contractVersion: ISOLATE_CONTRACT_VERSION,
+      tools: [],
+      hooks: [],
+      grants: ["device"],
+      device: { abilities: ["microphone"] },
+      views: [
+        {
+          slot: "conversation.panel",
+          surfaceId: "strobe",
+          page: "strobe.html",
+        },
+      ],
+      contextKeys: ["user", "bot", "session"],
+    });
+    const contentHash = await sha256Hex(SOURCE);
+    const pageHash = await sha256Hex(PAGE);
+    await env.APPLICATION_ARTIFACTS.put(`packages/${contentHash}.mjs`, SOURCE);
+    await env.APPLICATION_ARTIFACTS.put(pluginPageKeyV1(pageHash), PAGE);
+    const createdAt = "2026-09-24T05:00:00.000Z";
+    const members: CompositionMemberV1[] = [
+      {
+        packageId: STROBE_ID,
+        version: "0.0.1",
+        descriptor,
+        provenance: {
+          kind: "bot",
+          packageId: STROBE_ID,
+          version: "0.0.1",
+          botId: "bot-1",
+          sessionId: `${userId}:bot-1`,
+          turnId: "run-0",
+          runId: "run-0",
+          authoredAt: createdAt,
+        },
+        artifact: {
+          contentHash,
+          size: SOURCE.length,
+          mediaType: "application/javascript",
+          bundlerVersion: "probe-seed",
+        },
+        pages: [
+          { path: "strobe.html", contentHash: pageHash, size: PAGE.length },
+        ],
+      },
+    ];
+    const artifactSetHash = await compositionArtifactSetHashV1(members);
+    await user(userId).proposeComposition({
+      schemaVersion: 1,
+      userId,
+      generation: {
+        schemaVersion: 1,
+        generationId: compositionGenerationIdV1(createdAt, artifactSetHash),
+        artifactSetHash,
+        parentGenerationId: bootstrap.generationId,
+        createdAt,
+        origin: {
+          kind: "bot-authored",
+          runId: "run-0",
+          sessionId: `${userId}:bot-1`,
+          turnId: "run-0",
+        },
+        members,
+        status: "pending",
+      },
+      pin: true,
+      expectedCurrentGenerationId: bootstrap.generationId,
+    });
+    await switchPlugin(identity, STROBE_ID, true);
+
+    const use = {
+      useId: "nAbCdEf_1234",
+      pluginId: STROBE_ID,
+      surfaceId: "strobe",
+      ability: "microphone",
+      device: "web",
+      startedAt: "2026-09-24T05:00:00.000Z",
+      endedAt: "2026-09-24T05:02:14.000Z",
+      ending: "stopped",
+    };
+    const record = (reported: Record<string, unknown>) =>
+      bot(identity).recordPanelDeviceUse({
+        schemaVersion: 1,
+        ...identity,
+        use: reported,
+      });
+    expect(await record(use)).toEqual({ status: "recorded" });
+    // A client that retries is still one use.
+    expect(await record(use)).toEqual({ status: "recorded" });
+    expect(
+      await record({ ...use, useId: "nOtHeR_5678", surfaceId: "nope" }),
+    ).toEqual({ status: "refused", reason: '"strobe" has no page "nope".' });
+
+    const read = () =>
+      audit(userId).readAuditEntries({
+        schemaVersion: 1,
+        userId,
+        kind: "device",
+      });
+    const recorded = await read();
+    expect(recorded.entries).toHaveLength(1);
+    expect(recorded.entries[0]).toMatchObject({
+      botId: "bot-1",
+      kind: "device",
+      target: "device:web",
+      toolName: "microphone",
+      preview: "Strobe used the microphone",
+      outcome: "ok",
+      durationMs: 134_000,
+      turn: 0,
+    });
+
+    // No run holds it, and a rebuild still reproduces it from the Bot.
+    expect(
+      await audit(userId).rebuildAuditIndex({ schemaVersion: 1, userId }),
+    ).toMatchObject({ status: "rebuilt" });
+    expect((await read()).entries).toEqual(recorded.entries);
   });
 
   // ADR 0030 step 6: a Plugin that declares a card is offered one tool per

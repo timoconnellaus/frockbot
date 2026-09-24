@@ -910,7 +910,7 @@ export type AuditPage = {
     ordinal: number;
     effectId: string;
     at: Instant;
-    kind: "shell" | "browser" | "mcp" | "file" | "process";
+    kind: "shell" | "browser" | "mcp" | "file" | "process" | "device";
     target: string;
     toolName: string;
     argumentDigest: Digest;

@@ -67,6 +67,24 @@ class PanelCanvasController extends ChangeNotifier
   /// The focused surface when it is the Plugin's own page (ADR 0036).
   wire.PanelPage? get page => opened?.page;
 
+  /// A page's use of a device ability, reported for the audit. Best effort:
+  /// a report that does not land costs a row, never the page.
+  Future<void> reportDeviceUse(
+    String pluginId,
+    String surfaceId,
+    PluginPageDeviceUseV1 use,
+  ) async {
+    try {
+      await panels.reportDeviceUse(
+        botId,
+        pluginId: pluginId,
+        surfaceId: surfaceId,
+        device: pluginPageDeviceKindV1(),
+        use: use,
+      );
+    } catch (_) {}
+  }
+
   /// A page's tool call. The panel is read again after it, so the page is
   /// handed whatever state the call left behind.
   Future<PluginPageToolAnswerV1> runPageTool(
@@ -297,6 +315,8 @@ class PanelCanvas extends StatelessWidget {
             controller.runPageTool(pluginId, tool, arguments),
         abilities: page.abilities ?? const [],
         microphone: microphone,
+        onDeviceUse: (use) =>
+            unawaited(controller.reportDeviceUse(pluginId, surfaceId, use)),
       ),
     );
   }

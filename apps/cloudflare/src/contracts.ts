@@ -644,6 +644,12 @@ export interface BotConfigurationBinding {
       }
     | { status: "error"; failure: string }
   >;
+  recordPanelDeviceUse(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    use: import("@frockbot/app/audit").DeviceUseV1;
+  }): Promise<{ status: "recorded" } | { status: "refused"; reason: string }>;
   listCompositionGenerations(request: {
     schemaVersion: 1;
     userId: string;

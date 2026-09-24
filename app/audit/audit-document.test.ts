@@ -94,6 +94,7 @@ test("the kind in force is the primary filter, and every kind is offered", () =>
     "Connected services",
     "Files",
     "Processes",
+    "Device",
   ]);
   const primary = filters.filter(
     (node) => node.type === "action" && node.style === "primary",
@@ -204,4 +205,48 @@ test("a full account-wide history page with unknown outcomes remains renderable"
     }),
   );
   expect(walk(document.root).length).toBeLessThanOrEqual(512);
+});
+
+test("a device use says which Plugin listened, on what, for how long, and opens no Turn", () => {
+  const device: AuditEntryV1 = {
+    ...shell,
+    runId: "device:nAbCdEf_1234",
+    occurrenceId: "device:nAbCdEf_1234",
+    turn: 0,
+    step: 0,
+    ordinal: 0,
+    effectId: "nAbCdEf_1234",
+    kind: "device",
+    target: "device:android",
+    toolName: "microphone",
+    preview: "Tuner used the microphone",
+    durationMs: 134_000,
+  };
+  const nodes = walk(auditDocumentV1(frame({ entries: [device] })).root);
+  expect(
+    nodes.some(
+      (node) =>
+        node.type === "group" && node.title === "Tuner used the microphone",
+    ),
+  ).toBe(true);
+  const facts = nodes.find(
+    (node) => node.type === "text" && node.text.startsWith("Completed"),
+  );
+  expect(facts?.type === "text" && facts.text).toBe(
+    "Completed · microphone · Android · 3 Sep 2026, 11:00 pm UTC · 2 min 14 s",
+  );
+  expect(
+    nodes.some(
+      (node) => node.type === "action" && node.actionId === "open-run",
+    ),
+  ).toBe(false);
+  expect(auditTargetLabelV1("device:web")).toBe("Web browser");
+  expect(
+    nodes.some(
+      (node) =>
+        node.type === "action" &&
+        node.actionId === "filter-kind" &&
+        node.label === "Device",
+    ),
+  ).toBe(true);
 });

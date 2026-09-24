@@ -84,9 +84,19 @@ function tunerPage(): string {
 async function installTunerRoutes(
   page: Page,
   baseURL: string | undefined,
-): Promise<void> {
+): Promise<{ uses: Record<string, unknown>[] }> {
   const appOrigin = new URL(baseURL ?? "http://127.0.0.1:8787").origin;
   let focused = false;
+  // The use the host reports once it ends, for the person's audit. This
+  // Plugin is the spec's, not the Bot's, so the Bot would refuse to record it.
+  const uses: Record<string, unknown>[] = [];
+  await page.route(/\/api\/bots\/[^/]+\/panels\/device-use$/, async (route) => {
+    uses.push(route.request().postDataJSON() as Record<string, unknown>);
+    await route.fulfill({
+      contentType: "application/json",
+      body: JSON.stringify({ status: "recorded" }),
+    });
+  });
   await page.route(
     /\/api\/bots\/[^/]+\/panels\/(open|focus)$/,
     async (route) => {
@@ -159,6 +169,7 @@ async function installTunerRoutes(
       });
     },
   );
+  return { uses };
 }
 
 test("a Plugin's tuner hears the microphone through the host, and the host stops it", async ({
@@ -166,7 +177,7 @@ test("a Plugin's tuner hears the microphone through the host, and the host stops
   userId,
   baseURL,
 }, testInfo) => {
-  await installTunerRoutes(page, baseURL);
+  const { uses } = await installTunerRoutes(page, baseURL);
   await page.setViewportSize({ width: 1351, height: 831 });
   await openApplication(page, userId);
   await createBot(page, "Tuned");
@@ -208,4 +219,20 @@ test("a Plugin's tuner hears the microphone through the host, and the host stops
   expect(
     Number(await tuner.locator("#status").getAttribute("data-frames")),
   ).toBe(heard);
+
+  // And the use is reported once, for the audit: which Plugin, what, where,
+  // how it ended, and when.
+  await expect.poll(() => uses.length).toBe(1);
+  expect(uses[0]).toMatchObject({
+    schemaVersion: 1,
+    pluginId: PLUGIN_ID,
+    surfaceId: PLUGIN_ID,
+    ability: "microphone",
+    device: "web",
+    ending: "stopped",
+  });
+  const lasted =
+    Date.parse(String(uses[0]!.endedAt)) -
+    Date.parse(String(uses[0]!.startedAt));
+  expect(lasted).toBeGreaterThan(0);
 });

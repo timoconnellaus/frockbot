@@ -12,8 +12,10 @@ import 'dart:async';
 import 'dart:convert';
 import 'dart:typed_data';
 
+import 'package:flutter/foundation.dart' show defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 
+import '../client/transport.dart' show randomId;
 import '../shell/lifecycle.dart';
 import '../shell/semantics.dart';
 import '../theme/frock_theme.dart';
@@ -261,6 +263,32 @@ Widget _hostFrame(
   borderRadius: BorderRadius.zero,
 );
 
+/// How the host ended a use of a device ability, as its audit row says it.
+enum PluginPageDeviceEndingV1 { stopped, left, background, taken, failed }
+
+/// One use of a device ability by a Plugin's page, once it has ended: the
+/// host opened it, so the host is the one to say it happened (ADR 0036).
+class PluginPageDeviceUseV1 {
+  final String useId;
+  final String ability;
+  final DateTime startedAt;
+  final DateTime endedAt;
+  final PluginPageDeviceEndingV1 ending;
+  const PluginPageDeviceUseV1({
+    required this.useId,
+    required this.ability,
+    required this.startedAt,
+    required this.endedAt,
+    required this.ending,
+  });
+}
+
+typedef PluginPageDeviceUseReporterV1 = void Function(PluginPageDeviceUseV1);
+
+/// What kind of device this client is, as an audit row names it.
+String pluginPageDeviceKindV1() =>
+    kIsWeb ? 'web' : defaultTargetPlatform.name.toLowerCase();
+
 class PluginPageFrame extends StatefulWidget {
   final String url;
   final Map<String, Object?> state;
@@ -277,6 +305,10 @@ class PluginPageFrame extends StatefulWidget {
 
   /// Absent where this client cannot open one for a page.
   final PluginPageMicrophone? microphone;
+
+  /// Told once each use has ended, whichever way it ended.
+  final PluginPageDeviceUseReporterV1? onDeviceUse;
+  final DateTime Function() now;
   final PluginPageFrameBuilderV1 frameBuilder;
   const PluginPageFrame({
     super.key,
@@ -289,6 +321,8 @@ class PluginPageFrame extends StatefulWidget {
     required this.runTool,
     this.abilities = const [],
     this.microphone,
+    this.onDeviceUse,
+    this.now = DateTime.now,
     this.frameBuilder = _hostFrame,
   });
 
@@ -305,6 +339,9 @@ class _PluginPageFrameState extends State<PluginPageFrame>
   StreamSubscription<Uint8List>? _hearing;
   bool _opening = false;
 
+  /// The use in progress: its id and when it began.
+  ({String useId, DateTime startedAt})? _use;
+
   @override
   void initState() {
     super.initState();
@@ -314,7 +351,12 @@ class _PluginPageFrameState extends State<PluginPageFrame>
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (appIsAwayV1(state)) {
-      unawaited(_closeMicrophone('FrockBot went to the background.'));
+      unawaited(
+        _closeMicrophone(
+          'FrockBot went to the background.',
+          PluginPageDeviceEndingV1.background,
+        ),
+      );
     }
   }
 
@@ -324,7 +366,7 @@ class _PluginPageFrameState extends State<PluginPageFrame>
     // A new URL is a new document, which will say hello again.
     if (old.url != widget.url) {
       _greeted = false;
-      unawaited(_closeMicrophone(null));
+      unawaited(_closeMicrophone(null, PluginPageDeviceEndingV1.left));
       return;
     }
     if (_greeted && jsonEncode(old.state) != jsonEncode(widget.state)) {
@@ -344,7 +386,7 @@ class _PluginPageFrameState extends State<PluginPageFrame>
       if (message.open) {
         await _openMicrophone();
       } else {
-        await _closeMicrophone(null);
+        await _closeMicrophone(null, PluginPageDeviceEndingV1.stopped);
       }
       return;
     }
@@ -387,17 +429,25 @@ class _PluginPageFrameState extends State<PluginPageFrame>
     _opening = true;
     try {
       final frames = await microphone.open(
-        taken: () => _closeMicrophone('Voice took the microphone.'),
+        taken: () => _closeMicrophone(
+          'Voice took the microphone.',
+          PluginPageDeviceEndingV1.taken,
+        ),
       );
       if (!mounted) {
         await microphone.close();
         return;
       }
       setState(() {
+        _use = (useId: randomId(), startedAt: widget.now());
         _hearing = frames.listen(
           (pcm) => _post(pluginPageAudioMessageV1(pcm)),
-          onError: (Object _) =>
-              unawaited(_closeMicrophone('The microphone stopped working.')),
+          onError: (Object _) => unawaited(
+            _closeMicrophone(
+              'The microphone stopped working.',
+              PluginPageDeviceEndingV1.failed,
+            ),
+          ),
         );
       });
       _post(pluginPageMicrophoneOpenMessageV1());
@@ -416,15 +466,35 @@ class _PluginPageFrameState extends State<PluginPageFrame>
 
   /// Gives the microphone back. [reason] is what the page is told; null when
   /// the page asked, or has gone, and there is nobody to tell.
-  Future<void> _closeMicrophone(String? reason) async {
+  Future<void> _closeMicrophone(
+    String? reason,
+    PluginPageDeviceEndingV1 ending,
+  ) async {
     final hearing = _hearing;
     if (hearing == null) return;
     _hearing = null;
+    _ended(ending);
     if (mounted) setState(() {});
     // Closing the microphone ends the stream; nothing waits on the cancel.
     unawaited(hearing.cancel());
     await widget.microphone?.close();
     if (reason != null) _post(pluginPageMicrophoneClosedMessageV1(reason));
+  }
+
+  /// Says a use happened, once, however it ended.
+  void _ended(PluginPageDeviceEndingV1 ending) {
+    final use = _use;
+    _use = null;
+    if (use == null) return;
+    widget.onDeviceUse?.call(
+      PluginPageDeviceUseV1(
+        useId: use.useId,
+        ability: 'microphone',
+        startedAt: use.startedAt,
+        endedAt: widget.now(),
+        ending: ending,
+      ),
+    );
   }
 
   @override
@@ -434,6 +504,7 @@ class _PluginPageFrameState extends State<PluginPageFrame>
     final hearing = _hearing;
     _hearing = null;
     if (hearing != null) {
+      _ended(PluginPageDeviceEndingV1.left);
       unawaited(hearing.cancel());
       unawaited(widget.microphone?.close() ?? Future<void>.value());
     }
@@ -461,8 +532,12 @@ class _PluginPageFrameState extends State<PluginPageFrame>
         if (_hearing != null)
           _MicrophoneInUse(
             label: widget.label,
-            onStop: () =>
-                unawaited(_closeMicrophone('You stopped the microphone.')),
+            onStop: () => unawaited(
+              _closeMicrophone(
+                'You stopped the microphone.',
+                PluginPageDeviceEndingV1.stopped,
+              ),
+            ),
           ),
         Expanded(key: const ValueKey('plugin-page-frame'), child: frame),
       ],

@@ -4868,12 +4868,12 @@
               },
               "turn": {
                 "type": "integer",
-                "minimum": 1,
+                "minimum": 0,
                 "maximum": 1000000000
               },
               "step": {
                 "type": "integer",
-                "minimum": 1,
+                "minimum": 0,
                 "maximum": 1000000000
               },
               "ordinal": {
@@ -4890,7 +4890,7 @@
                 "$ref": "#/$defs/Instant"
               },
               "kind": {
-                "enum": ["shell", "browser", "mcp", "file", "process"]
+                "enum": ["shell", "browser", "mcp", "file", "process", "device"]
               },
               "target": {
                 "type": "string",

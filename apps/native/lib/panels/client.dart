@@ -4,7 +4,7 @@ library;
 import '../client/transport.dart';
 import '../plugins/page.dart' show pluginToolReceiptV1;
 import '../protocol/client_wire.generated.dart' as wire;
-import 'plugin_page.dart' show PluginPageToolAnswerV1;
+import 'plugin_page.dart' show PluginPageDeviceUseV1, PluginPageToolAnswerV1;
 
 class PanelsApi {
   final NativeApi api;
@@ -73,4 +73,36 @@ class PanelsApi {
       return PluginPageToolAnswerV1.refused(failure.message);
     }
   }
+
+  /// Tells the Bot a page's use of a device ability has ended, for the
+  /// person's audit. Keyed by the use, so a retry is one row.
+  Future<void> reportDeviceUse(
+    String botId, {
+    required String pluginId,
+    required String surfaceId,
+    required String device,
+    required PluginPageDeviceUseV1 use,
+  }) async {
+    await api.request(
+      '/api/bots/${Uri.encodeComponent(botId)}/panels/device-use',
+      body: {
+        'schemaVersion': 1,
+        'useId': use.useId,
+        'pluginId': pluginId,
+        'surfaceId': surfaceId,
+        'ability': use.ability,
+        'device': device,
+        'startedAt': _instant(use.startedAt),
+        'endedAt': _instant(use.endedAt),
+        'ending': use.ending.name,
+      },
+    );
+  }
+
+  /// The wire's instant: UTC to the millisecond. A native clock carries
+  /// microseconds, which `toIso8601String` would write as six digits.
+  static String _instant(DateTime at) => DateTime.fromMillisecondsSinceEpoch(
+    at.millisecondsSinceEpoch,
+    isUtc: true,
+  ).toIso8601String();
 }
