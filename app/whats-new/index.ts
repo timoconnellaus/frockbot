@@ -29,6 +29,6 @@ export {
   whatsNewMediaBytesV1,
   whatsNewMediaFileV1,
 } from "./media.js";
-// Preview lives in `preview.ts` and is Node-only: it builds a file URL from
-// `import.meta.url`. Re-exporting it here pulled that into the Worker bundle
-// and workerd died at boot with `Invalid URL string`.
+// `generate.ts` and `published.ts` are Node-only: they build file URLs from
+// `import.meta.url`. Re-exporting a module like that here once pulled it into
+// the Worker bundle, and workerd died at boot with `Invalid URL string`.

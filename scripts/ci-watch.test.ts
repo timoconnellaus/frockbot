@@ -114,7 +114,24 @@ describe("pull request leg", () => {
       128,
     );
     expect(report.status).toBe("passed");
-    expect(report.summary).toContain("ready for a maintainer to merge");
+    expect(report.summary).toContain("the babysitter merges it");
+  });
+
+  test("a red main-health holds a green pull request without failing it", async () => {
+    const report = await pullRequestReport(
+      fakeGitHub({
+        pr: {
+          state: "OPEN",
+          statusCheckRollup: [
+            { name: "Check", status: "COMPLETED", conclusion: "SUCCESS" },
+            { context: "main-health", state: "FAILURE" },
+          ],
+        },
+      }),
+      128,
+    );
+    expect(report.status).toBe("passed");
+    expect(report.summary).toContain("main is red");
   });
 
   test("reads a legacy status context, which carries no status field", async () => {

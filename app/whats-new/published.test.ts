@@ -3,8 +3,11 @@ import { readFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { WHATS_NEW_ENTRIES_V1 } from "./entries.ts";
 import { whatsNewPublishedAtV1 } from "./feed.ts";
+import { whatsNewEntryIdsOnDiskV1 } from "./generate.ts";
 import {
+  whatsNewIdsAtV1,
   whatsNewIdsInSourceV1,
+  whatsNewIdsInTreeV1,
   whatsNewPublishedDaysV1,
   whatsNewPublishedSourceV1,
 } from "./published.ts";
@@ -13,10 +16,38 @@ const read = (path: string) =>
   readFileSync(fileURLToPath(new URL(path, import.meta.url)), "utf8");
 
 describe("What’s New ship dates", () => {
-  test("reads every id the catalog declares from its source", () => {
-    expect(whatsNewIdsInSourceV1(read("./entries.ts"))).toEqual(
-      WHATS_NEW_ENTRIES_V1.map((entry) => entry.id),
+  test("reads every id the catalog declares from the tree", () => {
+    const listing = whatsNewEntryIdsOnDiskV1()
+      .map((id) => `app/whats-new/entries/${id}.ts`)
+      .join("\n");
+    expect(whatsNewIdsInTreeV1(`${listing}\n`).sort()).toEqual(
+      WHATS_NEW_ENTRIES_V1.map((entry) => entry.id).sort(),
     );
+  });
+
+  test("reads a real revision's entry files through git", () => {
+    // HEAD is committed history, so this holds even in a shallow checkout.
+    // `whats-new` has shipped, and a shipped id is never removed.
+    const ids = whatsNewIdsAtV1("HEAD");
+    expect(ids).toContain("whats-new");
+    expect(ids.every((id) => whatsNewEntryIdsOnDiskV1().includes(id))).toBe(
+      true,
+    );
+  });
+
+  test("still reads a tag cut before the entries moved into files", () => {
+    const before = [
+      "export const WHATS_NEW_ENTRIES_V1 = [",
+      "  {",
+      '    id: "group-chats",',
+      '    title: "Group Chats",',
+      "  },",
+      "  {",
+      '    id: "whats-new",',
+      "  },",
+      "];",
+    ].join("\n");
+    expect(whatsNewIdsInSourceV1(before)).toEqual(["group-chats", "whats-new"]);
   });
 
   test("an id ships with the earliest production tag that declares it", () => {

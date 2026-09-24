@@ -120,11 +120,16 @@ The pipeline depends on three settings outside the repository. Each is what
 holds a stage back; without it GitHub has nothing to wait for.
 
 - **The `main` ruleset** requires the `Check` and `Flutter` status checks, the
-  two jobs of `check.yml`; it forbids deletion and force-pushes, and requires a
-  pull request. "Require branches to be up to
-  date" is off: it made every landed pull request invalidate every other one,
-  and `main.yml` checks the merge commit itself. Auto-merge is not enabled on
-  the repository; a maintainer merges. GitHub's merge queue, which would check
+  two jobs of `check.yml`, and the `main-health` commit status; it forbids
+  deletion and force-pushes, and requires a pull request. `main-health` is set
+  on every open pull request by `main-health.yml` whenever `main.yml` settles
+  or the pull request changes: green while `main` is green, red while it is
+  red, and always green on a pull request labelled `fix-main` or a revert. It
+  is what stops a merge onto a red `main` for every tool and every person.
+  "Require branches to be up to date" is off: it made every landed pull
+  request invalidate every other one, and `main.yml` checks the merge commit
+  itself. Auto-merge is not enabled on the repository; the babysitter merges
+  (`.claude/skills/babysit/SKILL.md`). GitHub's merge queue, which would check
   the combination before landing it, is offered only on organization-owned
   repositories, so this one has none.
 - **The `production` environment** carries no protection rule. `release.yml`'s

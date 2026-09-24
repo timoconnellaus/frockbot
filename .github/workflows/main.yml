@@ -18,8 +18,9 @@ name: Main
 # `release.yml` for it. Nothing waits for a person after that: the
 # `production` environment carries no protection rule, so a green `main`
 # reaches production on its own — see `README.md` → Releases. Red here
-# blocks nobody's merge; it blocks the deploy, and the fix is the next pull
-# request.
+# blocks the deploy and stops the line: `main-health.yml` turns every open
+# pull request's `main-health` status red, so only a repair or a revert can
+# merge until a run here passes again.
 #
 # Staging is opt-in because it does not exist yet: the `staging` environment
 # holds no Cloudflare token and no Google client, and a release must not wait

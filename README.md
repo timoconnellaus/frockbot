@@ -302,11 +302,11 @@ Everything from here to [Security model](#security-model) is the hosted profile 
 
 ### Releases
 
-Merging integrates; tagging ships. The pipeline has four stages, and a person decides at one of them:
+Merging integrates; tagging ships. The pipeline has four stages, and the only decision in it is the merge:
 
 1. **Pull request** — `check.yml` runs the fast tier (format, typecheck, unit tests, the two small package suites) in a couple of minutes. It needs no secret, so a fork's pull request runs it too. Its two jobs, `Check` and `Flutter`, are the status checks the `main` ruleset requires.
-2. **Merge** — a maintainer clicks merge. There is no auto-merge: a green pull request waits for a person. A branch need not be rebased first; the ruleset does not require it to be up to date, because at this merge rate that was a rebase-and-rerun loop. (GitHub's merge queue would prove the combination before landing it, but it is only offered on organization-owned repositories.)
-3. **`main`** — `main.yml` runs what a landed change owes, on the merge commit itself: the fast tier again plus the marketing and admin-portal bundles, and — unless the `Scope` job finds that nothing since the last release tag could have affected them — the Flutter suite, the Cloudflare workerd and integration suites, the application build, and the browser suite across five runners. The excused set is narrow and fails safe; [`docs/architecture.md`](docs/architecture.md#workflows) has the rule. Green deploys staging when the repository variable `DEPLOY_STAGING` is `true` (it is unset until the `staging` environment is configured), cuts the next patch tag on that revision, and starts `release.yml` for it. Red ships nothing, and the fix is the next pull request. A push that touches only `docs/**` and root Markdown starts no run.
+2. **Merge** — the babysitter ([`.claude/skills/babysit/SKILL.md`](.claude/skills/babysit/SKILL.md), run as `/loop /babysit` in one session) is the only merger: it squash-merges a green, non-draft pull request without the `hold` label, and only while `main` is green. The `main-health` status, required by the ruleset and kept by `scripts/main-health.ts`, makes GitHub refuse any other merge onto a red `main` except a pull request labelled `fix-main` or a revert. There is no auto-merge. A branch need not be rebased first; the ruleset does not require it to be up to date, because at this merge rate that was a rebase-and-rerun loop. (GitHub's merge queue would prove the combination before landing it, but it is only offered on organization-owned repositories.)
+3. **`main`** — `main.yml` runs what a landed change owes, on the merge commit itself: the fast tier again plus the marketing and admin-portal bundles, and — unless the `Scope` job finds that nothing since the last release tag could have affected them — the Flutter suite, the Cloudflare workerd and integration suites, the application build, and the browser suite across five runners. The excused set is narrow and fails safe; [`docs/architecture.md`](docs/architecture.md#workflows) has the rule. Green deploys staging when the repository variable `DEPLOY_STAGING` is `true` (it is unset until the `staging` environment is configured), cuts the next patch tag on that revision, and starts `release.yml` for it. Red ships nothing and stops the line: the babysitter attributes the break to the pull requests that landed since the last green run, reruns a flake once, and fixes or reverts the culprit. A push that touches only `docs/**` and root Markdown starts no run.
 4. **Production** — `release.yml` verifies the tag, then deploys bot.frockbot.com and frockbot.com, and only then publishes `applets/sdk` to npm and creates the GitHub release. The deploy jobs name the `production` environment, but it carries no protection rule, so nothing waits for a person: a green `main` reaches production on its own. The decision that ships a change is the merge in stage 2 — treat it as such, because it is the last one. To put a human back in the path, add a required reviewer to the `production` environment; every deploy job then parks until the run is approved, at the current rate a dozen or more times a day.
 
 Pushing a valid SemVer tag by hand — `v0.8.0` for a minor bump, `v0.8.0-rc.1` for a prerelease — runs the same release workflow; the automatic cut continues from whatever tag is highest. Build metadata such as `+build.1` is rejected because npm does not accept it in package versions. Prereleases use npm's `next` dist-tag rather than `latest`. Application workspaces remain private.
@@ -316,12 +316,14 @@ Two jobs exist for the other profile rather than for this one, and neither is on
 Neither leg is finished when it starts, so `scripts/ci-watch.ts` watches each to a terminal state and reduces it to an exit code — `0` green or landed, `1` failed, `2` still pending:
 
 ```
-bun scripts/ci-watch.ts pr 128           # polls until green and ready to merge, or names the red check
+bun scripts/ci-watch.ts pr 128           # polls until its own checks are green, or names the red check
 bun scripts/ci-watch.ts release v0.2.0   # polls until production deployed
 bun scripts/ci-watch.ts pr 128 --once    # report now and exit, for a caller that paces itself
 ```
 
-It names the quiet failures rather than waiting them out: a release whose packages published while `Deploy marketing site and admin portal` failed, or one that completed without ever running the deploy jobs. A release parked for an approval — which only happens if the `production` environment is given a required reviewer — is reported as waiting, not failed.
+`bun scripts/babysit.ts` is the view across all of it at once — `main`'s health and the suspects for a break, what production runs, and the next action for each open pull request — and is what the babysitter reads every tick.
+
+`ci-watch` names the quiet failures rather than waiting them out: a release whose packages published while `Deploy marketing site and admin portal` failed, or one that completed without ever running the deploy jobs. A release parked for an approval — which only happens if the `production` environment is given a required reviewer — is reported as waiting, not failed.
 
 #### Android patches
 

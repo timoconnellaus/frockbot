@@ -1,0 +1,71 @@
+name: Main health
+
+# Keeps a `main-health` commit status on every open pull request: green while
+# `main` is green, red while it is red, except on a pull request that repairs
+# `main` (labelled `fix-main`, or a revert), which is always green. Required by
+# the `main` ruleset, it is what stops a merge onto a red `main` for every
+# session and every person, not only the ones that read AGENTS.md. The rule is
+# `scripts/main-health.ts`, because a rule worth testing cannot live in a
+# workflow expression.
+#
+# `pull_request_target`, not `pull_request`: the job has to write a status,
+# including on a fork's pull request, and it must run `main`'s copy of the
+# script — a pull request that could run its own could mark itself healthy.
+# So the checkout below is the base branch, and nothing from the pull request
+# is ever checked out or run.
+
+on:
+  workflow_run:
+    workflows: [Main]
+    types: [completed]
+    branches: [main]
+  pull_request_target: # zizmor: ignore[dangerous-triggers] runs only the base branch's script
+    types:
+      [
+        opened,
+        reopened,
+        synchronize,
+        ready_for_review,
+        labeled,
+        unlabeled,
+        edited,
+      ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+  pull-requests: read
+  statuses: write
+
+concurrency:
+  group: main-health-${{ github.event.pull_request.number || 'all' }}
+  cancel-in-progress: true
+
+jobs:
+  status:
+    name: Set main-health
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+
+    steps:
+      - name: Check out the base branch
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # The script imports nothing outside the repository, so there is no
+      # install step: the status lands seconds after `main` settles.
+      - name: Set up Bun
+        uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
+        with:
+          bun-version: 1.4.2
+
+      # Unquoted on purpose: a `workflow_run` has no pull request, so the
+      # argument vanishes and every open pull request is updated.
+      - name: Set main-health
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          PULL_REQUEST: ${{ github.event.pull_request.number }}
+        run: bun scripts/main-health.ts $PULL_REQUEST

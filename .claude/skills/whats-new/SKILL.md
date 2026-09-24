@@ -9,7 +9,7 @@ A curated in-app list of what production shipped. Not GitHub release notes
 and not Sparkle notes. Dates come from the first production tag, not the
 pull request. The still is reviewed on the PR.
 
-Adding an entry is ordinary catalog work: one row, maybe a WebP, then
+Adding an entry is ordinary catalog work: one file, maybe a WebP, then
 generate. Do not rebuild the feed or the unread mark to add one.
 
 ## When to add an entry
@@ -18,15 +18,16 @@ Add one in the **same PR as the feature** when it is a new thing a person
 using the installed app would care about. Noticing a change is not enough:
 it has to be new.
 
-One entry per feature. Prepend it to `WHATS_NEW_ENTRIES_V1`
-(newest first).
+One entry per feature, one file per entry. Nothing is prepended anywhere:
+the feed orders itself by each entry’s `added`, so two pull requests that
+each add an entry do not collide.
 
 Skip bug fixes, tweaks, polish, refactors, docs, infra, tests, and anything
 that is not user-visible.
 
 ## Add or edit
 
-Unreleased (no production `vX.Y.Z` tag contains the id yet): edit the row
+Unreleased (no production `vX.Y.Z` tag contains the id yet): edit the file
 in place.
 
 Shipped: leave the id alone. A new thing is a new id. Fix a typo if the
@@ -35,27 +36,32 @@ copy is wrong; do not rewrite what already shipped.
 `id` is a stable slug (`^[a-z0-9][a-z0-9-]{0,63}$`). Renaming one is a new
 entry; reusing one inherits the earlier tag’s date. Do not set
 `publishedAt` — the first `vX.Y.Z` tag that contains the id is the day, and
-until then the row says “New”.
+until then the entry says “New”.
 
-A new entry’s `kind` is `feature`.
+A new entry’s `kind` is `feature`. `added` is the UTC instant you write it
+(`date -u +%Y-%m-%dT%H:%M:%SZ`): it orders the feed and never ships. It is
+not a ship day, which only a production tag supplies.
 
 1. Put a WebP in `app/whats-new/media/<id>.webp` when the entry has a
    picture. Slug filename, under 200 KiB. Same-origin only — not a Flutter
    asset, not a CDN.
-2. Prepend the entry to `WHATS_NEW_ENTRIES_V1` in `app/whats-new/entries.ts`:
+2. Write `app/whats-new/entries/<id>.ts`, named for the id:
 
    ```ts
-   {
+   import type { WhatsNewEntryFileV1 } from "../entry.ts";
+
+   export default {
      id: "search",
+     added: "2026-09-24T03:15:00Z",
      title: "Search across every Bot",
      summary: "Find a conversation, a file, or a person.",
      kind: "feature",
      image: { file: "search.webp", alt: "Search results across Bots." },
-   }
+   } satisfies WhatsNewEntryFileV1;
    ```
 
-3. Generate the review surface and the Worker embed. Do not hand-edit
-   `PREVIEW.md` or `media.generated.ts`.
+3. Generate the entry index and the Worker embed. Do not hand-edit
+   `entries.generated.ts` or `media.generated.ts`.
 
    ```bash
    bun app/whats-new/generate.ts
@@ -114,14 +120,14 @@ Capture from the real UI or a browser render with the product font.
 Flutter widget-test screenshots use Ahem — they are not the still. Do not
 photograph a monitor. Do not invent UI.
 
-The pull request is the review. `PREVIEW.md` links the still. A PR that
-touches `app/whats-new/**` posts (or updates) a sticky comment with the
-stills from the branch head. Put the picture in the PR body too.
+The pull request is the review. A PR that touches `app/whats-new/**` posts
+(or updates) a sticky comment with the copy and stills from the branch head.
+Put the picture in the PR body too.
 
 ## What not to do
 
 - Do not invent a merge day or a ship day.
 - Do not bake stills into Flutter assets (that forces a full Android APK).
 - Do not point `src` at an external host. CSP is same-origin.
-- Do not hand-edit `PREVIEW.md` or `media.generated.ts`.
+- Do not hand-edit `entries.generated.ts` or `media.generated.ts`.
 - Do not ship a still whose type is soft, or UI that is not in the product.

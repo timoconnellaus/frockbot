@@ -1,185 +1,60 @@
 import { describe, expect, test } from "bun:test";
-import { WHATS_NEW_ENTRIES_V1 } from "./entries.ts";
+import { orderWhatsNewEntriesV1, WHATS_NEW_ENTRIES_V1 } from "./entries.ts";
 import { projectWhatsNewEntryV1, whatsNewFeedV1 } from "./feed.ts";
 import { whatsNewMediaBytesV1 } from "./media.ts";
 
 describe("What’s New feed", () => {
-  test("newest first, and What’s New stays in the list", () => {
+  test("newest first by when each entry was written", () => {
     const feed = whatsNewFeedV1();
     expect(feed.schemaVersion).toBe(1);
-    expect(feed.entries[0]).toMatchObject({
-      id: "connected-apps-1400",
-      title: "More than 1,400 apps to connect",
-      kind: "feature",
-      image: { src: "/whats-new/connected-apps.webp" },
+    expect(feed.entries.map((entry) => entry.id)).toEqual(
+      WHATS_NEW_ENTRIES_V1.map((entry) => entry.id),
+    );
+    for (const [index, entry] of WHATS_NEW_ENTRIES_V1.entries()) {
+      expect(entry.added, entry.id).toMatch(
+        /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/,
+      );
+      const next = WHATS_NEW_ENTRIES_V1[index + 1];
+      if (next) expect(entry.added >= next.added, entry.id).toBe(true);
+    }
+  });
+
+  test("an entry written later sorts first; a tie falls back to the id", () => {
+    const entry = (id: string, added: string) => ({
+      id,
+      added,
+      title: "T",
+      summary: "S",
+      kind: "fix" as const,
     });
-    expect(feed.entries[1]).toMatchObject({
-      id: "group-chats",
-      title: "Group Chats",
-      kind: "feature",
-      image: { src: "/whats-new/group-chats.webp" },
-    });
-    expect(feed.entries[2]).toMatchObject({
-      id: "voice-answers-after-tools",
-      title: "Calls answer without a false error",
-      kind: "fix",
-    });
-    expect(feed.entries[3]).toMatchObject({
-      id: "unread-keeps-up",
-      title: "Unread that keeps up",
-      kind: "fix",
-    });
-    expect(feed.entries[4]).toMatchObject({
-      id: "voice-smooth-playback",
-      title: "Voice replies play smoothly",
-      kind: "fix",
-    });
-    expect(feed.entries[5]).toMatchObject({
-      id: "steering",
-      title: "A message sent mid-reply steers the Bot",
-      kind: "improvement",
-      image: { src: "/whats-new/steering.webp" },
-    });
-    expect(feed.entries[6]).toMatchObject({
-      id: "paused-call-colour",
-      title: "A paused call keeps the Bot’s colour",
-      kind: "fix",
-    });
-    expect(feed.entries[7]).toMatchObject({
-      id: "release-version",
-      title: "Profile names the release",
-      kind: "fix",
-    });
-    expect(feed.entries[8]).toMatchObject({
-      id: "notices-under-header",
-      title: "Chat notices sit under the header",
-      kind: "fix",
-      image: {
-        src: "/whats-new/notices-under-header.webp",
-      },
-    });
-    expect(feed.entries[9]).toMatchObject({
-      id: "whats-new-reading",
-      title: "What’s New, easier to read",
-      kind: "improvement",
-      image: {
-        src: "/whats-new/whats-new-reading.webp",
-        alt: "What’s New with two changes in one card under New, the unread one marked with a pink dot.",
-      },
-    });
-    expect(feed.entries[10]).toMatchObject({
-      id: "working-bot",
-      title: "A working Bot sits at the end of the thread",
-      kind: "improvement",
-      image: {
-        src: "/whats-new/working-bot.webp",
-        alt: "The end of a phone chat with Fox: after “Messaged Dog”, Fox sits under a passing sheen with Dog beside it, above the composer.",
-      },
-    });
-    expect(feed.entries[11]).toMatchObject({
-      id: "stop-command",
-      title: "Stop is /stop",
-      kind: "improvement",
-      summary:
-        "The Stop button is gone from the chat. /stop ends what the Bot is doing.",
-    });
-    expect(feed.entries[12]).toMatchObject({
-      id: "mac-window-place",
-      title: "The Mac window keeps its place",
-      kind: "fix",
-    });
-    expect(feed.entries[13]).toMatchObject({
-      id: "avatar-colour-flash",
-      title: "Avatars open in their own colour",
-      kind: "fix",
-    });
-    expect(feed.entries[14]).toMatchObject({
-      id: "flock-palette",
-      title: "Colours from the characters",
-      kind: "improvement",
-      image: {
-        src: "/whats-new/flock-palette.webp",
-        alt: "A dark chat with Pixel: warm cream text, your messages in a pink tint, and a bright pink send button.",
-      },
-    });
-    expect(feed.entries[15]).toMatchObject({
-      id: "one-card-per-provider",
-      title: "One card per model provider",
-      kind: "improvement",
-    });
-    expect(feed.entries[16]).toMatchObject({
-      id: "add-a-model",
-      title: "Add a model in one go",
-      kind: "improvement",
-    });
-    expect(feed.entries[17]).toMatchObject({
-      id: "plugins-per-bot",
-      title: "Plugins live with each Bot",
-      kind: "improvement",
-    });
-    expect(feed.entries[18]).toMatchObject({
-      id: "plugin-theme-refused",
-      title: "A refused plugin theme is reported",
-      kind: "fix",
-    });
-    expect(feed.entries[19]).toMatchObject({
-      id: "voice-opening",
-      title: "The first words of a call are kept",
-      kind: "improvement",
-    });
-    expect(feed.entries[20]).toMatchObject({
-      id: "committed-chat",
-      title: "Replies land as they are sent",
-      kind: "improvement",
-    });
-    expect(feed.entries[21]).toMatchObject({
-      id: "voice-call-card",
-      title: "A live call is a card",
-      kind: "improvement",
-      image: {
-        src: "/whats-new/voice-call-card.webp",
-        alt: "A phone chat with the live call in a card under the header: the Bot, the wave, and you, with mute and hang-up on the row below.",
-      },
-    });
-    expect(feed.entries[22]).toMatchObject({
-      id: "header-align",
-      title: "Chat header lines up",
-      kind: "fix",
-    });
-    expect(feed.entries[23]).toMatchObject({
-      id: "quiet-delivery",
-      title: "Sends acknowledge immediately",
-      kind: "fix",
-      summary:
-        "A message is accepted as soon as it is saved. A long reply no longer looks like the send failed.",
-    });
-    expect(feed.entries[24]).toMatchObject({
-      id: "chat-scroll",
-      title: "Earlier messages stay in reach",
-      kind: "fix",
-    });
-    expect(feed.entries[25]).toMatchObject({
-      id: "marketplace-installed",
-      title: "Installed in the Marketplace",
-      kind: "improvement",
-    });
-    expect(feed.entries[26]).toMatchObject({
-      id: "chat-type",
-      title: "Easier reading in chat",
-      kind: "improvement",
-      image: {
-        src: "/whats-new/chat-type.webp",
-        alt: "A Bot message in Inter, with air between list items.",
-      },
-    });
+    expect(
+      orderWhatsNewEntriesV1([
+        entry("b", "2026-09-01T00:00:00Z"),
+        entry("c", "2026-09-02T00:00:00Z"),
+        entry("a", "2026-09-01T00:00:00Z"),
+      ]).map((value) => value.id),
+    ).toEqual(["c", "a", "b"]);
+  });
+
+  test("the feed carries each entry’s copy and still, and never its added instant", () => {
+    const feed = whatsNewFeedV1();
     const shipped = feed.entries.find((entry) => entry.id === "whats-new");
-    expect(shipped).toMatchObject({
+    expect(shipped).toEqual({
       id: "whats-new",
       title: "What’s New in the app",
-      kind: "feature",
       summary: "What landed in each release.",
+      kind: "feature",
+      image: {
+        src: "/whats-new/whats-new.webp",
+        alt: "The What’s New page, with this feature as its first entry.",
+      },
     });
-    expect(feed.entries[10]?.publishedAt).toBeUndefined();
+    expect(
+      feed.entries.find((entry) => entry.id === "voice-answers-after-tools"),
+    ).toMatchObject({ kind: "fix" });
+    expect(feed.entries.every((entry) => entry.publishedAt === undefined)).toBe(
+      true,
+    );
   });
 
   test("a known production day is attached without inventing one", () => {
