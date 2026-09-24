@@ -76,6 +76,24 @@ export const rpcIdentifier: RpcValueDecoder = (value, label) => {
   return value;
 };
 
+/** An http(s) origin and nothing else: no path, query or credentials. */
+export const rpcOrigin: RpcValueDecoder = (value, label) => {
+  if (typeof value === "string" && value.length <= 256) {
+    try {
+      const url = new URL(value);
+      if (
+        (url.protocol === "https:" || url.protocol === "http:") &&
+        url.origin === value
+      ) {
+        return value;
+      }
+    } catch {
+      // Falls through to the refusal below.
+    }
+  }
+  throw new Error(`${label} must be an http(s) origin`);
+};
+
 export const rpcBotId: RpcValueDecoder = (value, label) => {
   try {
     return decodeBotIdV1(value);

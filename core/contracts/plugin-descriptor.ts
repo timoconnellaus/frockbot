@@ -27,6 +27,7 @@ import {
   type PluginModelProviderV1,
 } from "./plugin-model.js";
 import { PLUGIN_CARD_ACTION_NAME_PATTERN_V1 } from "./plugin-card-contract.js";
+import { PLUGIN_PAGE_PATH_V1 } from "./plugin-page.js";
 import { exactKeysV1, recordV1 } from "./records.js";
 
 /** Authority a plugin may hold. */
@@ -69,15 +70,21 @@ export interface PluginToolV1 {
 
 /**
  * One view a plugin offers in a slot. The plugin returns a `ViewDocument` for
- * `surfaceId` and the host renders it with the host's own widgets; the plugin
- * ships no markup. `label` is the tab or door the host draws. `opens` is only
- * on `bot.nav`: a press focuses that `conversation.panel` surface (ADR 0034).
+ * `surfaceId` and the host renders it with the host's own widgets. `label` is
+ * the tab or door the host draws. `opens` is only on `bot.nav`: a press
+ * focuses that `conversation.panel` surface (ADR 0034).
+ *
+ * `page` is only on `conversation.panel`: the HTML file in the plugin's source
+ * the host draws in its sandboxed frame instead, when the surface is its own
+ * drawing or interaction (ADR 0036). The view's function then returns the
+ * page's state rather than a document.
  */
 export interface PluginViewV1 {
   slot: PluginSlotV1;
   surfaceId: string;
   label?: string;
   opens?: string;
+  page?: string;
 }
 
 /**
@@ -301,7 +308,7 @@ function decodePluginToolV1(input: unknown, label: string): PluginToolV1 {
 
 function decodePluginViewV1(input: unknown, label: string): PluginViewV1 {
   const value = record(input, label);
-  exactKeys(value, ["slot", "surfaceId"], ["label", "opens"], label);
+  exactKeys(value, ["slot", "surfaceId"], ["label", "opens", "page"], label);
   const surfaceId = boundedString(value.surfaceId, `${label}.surfaceId`, 128);
   if (!PLUGIN_SURFACE_ID.test(surfaceId)) {
     throw new Error(`${label}.surfaceId is invalid`);
@@ -324,6 +331,18 @@ function decodePluginViewV1(input: unknown, label: string): PluginViewV1 {
       throw new Error(`${label}.opens is only valid on bot.nav`);
     }
     decoded.opens = opens;
+  }
+  if (value.page !== undefined) {
+    const page = boundedString(value.page, `${label}.page`, 140);
+    if (!PLUGIN_PAGE_PATH_V1.test(page)) {
+      throw new Error(
+        `${label}.page must be an .html file in the plugin's source, such as "page.html"`,
+      );
+    }
+    if (slot !== "conversation.panel") {
+      throw new Error(`${label}.page is only valid on conversation.panel`);
+    }
+    decoded.page = page;
   }
   return decoded;
 }

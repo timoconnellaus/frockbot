@@ -1,6 +1,11 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { isProtocolValue } from "@frockbot/core/protocol-schemas";
-import { panelDocumentIdV1, surfaceDocumentV1 } from "./panels-bot.js";
+import type { CompositionMemberV1 } from "@frockbot/core/durable";
+import {
+  focusedPanelPageV1,
+  panelDocumentIdV1,
+  surfaceDocumentV1,
+} from "./panels-bot.js";
 import { pluginPageV1 } from "./views.js";
 
 // The tree a Bot wrote for its first panel, which the wire used to refuse.
@@ -106,5 +111,111 @@ describe("a conversation panel's document", () => {
         failure,
       }),
     ).toBe(true);
+  });
+});
+
+describe("a conversation panel that is a page", () => {
+  const PAGE_HASH = "b".repeat(64);
+  const tuner = {
+    packageId: "tuner",
+    version: "1",
+    descriptor: {
+      id: "tuner",
+      displayName: "Tuner",
+      version: "1",
+      contractVersion: 7,
+      tools: [],
+      hooks: [],
+      grants: [],
+      contextKeys: ["user", "bot", "session"],
+      views: [
+        { slot: "conversation.panel", surfaceId: "tuner", page: "tuner.html" },
+        { slot: "conversation.panel", surfaceId: "notes", label: "Notes" },
+      ],
+    },
+    pages: [{ path: "tuner.html", contentHash: PAGE_HASH, size: 10 }],
+  } as unknown as CompositionMemberV1;
+  const roster = {
+    generationId: "gen-1",
+    members: [tuner],
+    enabled: ["tuner"],
+  };
+  const focused = { pluginId: "tuner", surfaceId: "tuner" };
+  const rendered = {
+    schemaVersion: 1 as const,
+    status: "rendered" as const,
+    document: { a4: 440 },
+  };
+
+  test("reaches the client as the page's URL and its state", () => {
+    const answer = focusedPanelPageV1(
+      roster,
+      focused,
+      rendered,
+      "https://ui.bot.example.com",
+    );
+    expect(answer).toEqual({
+      page: {
+        url: `https://ui.bot.example.com/packages/${PAGE_HASH}.html`,
+        state: { a4: 440 },
+      },
+    });
+    expect(
+      isProtocolValue("PanelOpenView", {
+        schemaVersion: 1,
+        bag: [],
+        focus: focused,
+        page: answer?.page,
+        doors: [],
+      }),
+    ).toBe(true);
+  });
+
+  test("is not a page when the focused view names none", () => {
+    expect(
+      focusedPanelPageV1(
+        roster,
+        { pluginId: "tuner", surfaceId: "notes" },
+        rendered,
+        "https://ui.bot.example.com",
+      ),
+    ).toBeUndefined();
+  });
+
+  test("says why in words when it cannot be shown", () => {
+    expect(focusedPanelPageV1(roster, focused, rendered, undefined)).toEqual({
+      failure:
+        "This deployment has no page host, so this panel can't be shown.",
+    });
+    expect(
+      focusedPanelPageV1(
+        roster,
+        focused,
+        { schemaVersion: 1, status: "drop", reason: "state unreadable" },
+        "https://ui.bot.example.com",
+      ),
+    ).toEqual({
+      failure: "This plugin could not show its page: state unreadable",
+    });
+    expect(
+      focusedPanelPageV1(
+        roster,
+        focused,
+        {
+          schemaVersion: 1,
+          status: "rendered",
+          document: { big: "x".repeat(70_000) },
+        },
+        "https://ui.bot.example.com",
+      )?.failure,
+    ).toContain("larger than");
+    expect(
+      focusedPanelPageV1(
+        { ...roster, members: [{ ...tuner, pages: undefined }] },
+        focused,
+        rendered,
+        "https://ui.bot.example.com",
+      ),
+    ).toEqual({ failure: "This plugin's page was not published." });
   });
 });

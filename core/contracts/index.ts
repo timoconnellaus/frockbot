@@ -15,6 +15,7 @@ export * from "./package-definition.js";
 export * from "./plugin-card-contract.js";
 export * from "./plugin-descriptor.js";
 export * from "./plugin-model.js";
+export * from "./plugin-page.js";
 export * from "./plugin-worker.js";
 export * from "./prompt-assembly.js";
 export * from "./remote.js";

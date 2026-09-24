@@ -121,6 +121,11 @@ export async function pluginAuthoringRuntimeHost(
           httpMetadata: { contentType: "application/javascript" },
         });
       },
+      putPackageUiArtifact: async (contentHash, html) => {
+        await bucket.put(`packages/${contentHash}.html`, html, {
+          httpMetadata: { contentType: "text/html; charset=utf-8" },
+        });
+      },
     },
     composition: {
       current: () => currentUserCompositionV1(state, identity),

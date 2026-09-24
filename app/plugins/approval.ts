@@ -344,6 +344,13 @@ export function pluginApprovalActionV1(
       parts.push("This Plugin can change how this Bot looks.");
     }
   }
+  // A page is the Plugin's own code running on the person's devices, so the
+  // card says so and says how little it can reach from there.
+  if ((descriptor.views ?? []).some((view) => view.page !== undefined)) {
+    parts.push(
+      "It draws its own web page in the conversation panel, on your devices, with no network access and nothing of this Bot's but its own tools.",
+    );
+  }
   // A model provider contribution runs when a Bot's model names it, which is
   // not the switch this card asks about — so the card says what it serves and
   // what choosing it means.
@@ -400,5 +407,8 @@ export function pluginApprovalRiskV1(
   if (descriptor.network && "open" in descriptor.network) return "high";
   if (descriptor.grants.includes("http")) return "high";
   if (descriptor.hooks.length > 0) return "medium";
+  if ((descriptor.views ?? []).some((view) => view.page !== undefined)) {
+    return "medium";
+  }
   return "low";
 }

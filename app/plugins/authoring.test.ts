@@ -5,6 +5,7 @@ import type {
 } from "@frockbot/applets/build-contract";
 import {
   decodePluginDescriptorV1,
+  PLUGIN_PAGE_HELPER_JS_V1,
   servedPluginContractVersionsV1,
   type WorkspaceFilesV1,
   type WorkspacePathV1,
@@ -211,6 +212,9 @@ function harness(
     artifacts: {
       putPackageArtifact: async (hash, module) => {
         artifacts.set(hash, module);
+      },
+      putPackageUiArtifact: async (hash, html) => {
+        artifacts.set(hash, html);
       },
     },
     composition: { current: async () => generation(options.members) },
@@ -464,7 +468,10 @@ describe("checking and publishing", () => {
       botId: "bot-1",
       turn: TURN,
       workspace: workspaceFiles(source),
-      artifacts: { putPackageArtifact: async () => {} },
+      artifacts: {
+        putPackageArtifact: async () => {},
+        putPackageUiArtifact: async () => {},
+      },
       composition: { current: async () => generation() },
       storage: {
         get: <T>(key: string) =>
@@ -642,5 +649,97 @@ describe("enabling, disabling and settings", () => {
     expect(
       await host.writeSettings({ pluginId: "weather", values: {} }),
     ).toMatchObject({ status: "refused" });
+  });
+});
+
+describe("a Plugin with a page", () => {
+  const PAGE =
+    "<!doctype html><html><head><title>Tuner</title></head><body>tune</body></html>";
+  const withPage = {
+    "notes/plugin.json": JSON.stringify({
+      ...JSON.parse(DESCRIPTOR_JSON),
+      views: [
+        { slot: "conversation.panel", surfaceId: "tuner", page: "tuner.html" },
+      ],
+    }),
+    "notes/plugin.ts": MODULE,
+    "notes/tuner.html": PAGE,
+  };
+  const buildsTheView = () =>
+    buildsCleanly([], async (request) =>
+      request.mode === "check"
+        ? { status: "built" }
+        : {
+            status: "built",
+            manifest: {
+              contract: 1,
+              tools: [
+                { name: "note_count", description: "Count.", inputSchema: {} },
+                { name: "note_add", description: "Add.", inputSchema: {} },
+              ],
+              hooks: [],
+              services: [],
+              triggers: [],
+              views: ["tuner"],
+              cards: [],
+              modelProviders: [],
+              hashes: { module: await sha256Hex(MODULE) },
+            },
+            module: MODULE,
+          },
+    );
+
+  test("a publish stores the page with its bridge and names it on the member", async () => {
+    const { host, storage, artifacts } = harness({
+      source: withPage,
+      build: buildsTheView(),
+    });
+    const result = await host.publish({ pluginId: "notes" }, "tool:9:1:0");
+    expect(result.status).toBe("pending-approval");
+    if (result.status !== "pending-approval") return;
+    const stored = [...artifacts].find(([, text]) => text.includes("tune"));
+    expect(stored).toBeDefined();
+    const [hash, html] = stored!;
+    // The bytes the hash names are the bytes that run, bridge first in <head>.
+    expect(hash).toBe(await sha256Hex(html));
+    expect(html).toBe(
+      `<!doctype html><html><head><script>${PLUGIN_PAGE_HELPER_JS_V1}</script><title>Tuner</title></head><body>tune</body></html>`,
+    );
+    const intent = decodePluginIntentRecordV1(
+      storage.get(pluginIntentKeyV1(result.ask.approvalId)),
+    );
+    if (intent.action.kind !== "publish") throw new Error("not a publish");
+    expect(intent.action.member.pages).toEqual([
+      {
+        path: "tuner.html",
+        contentHash: hash,
+        size: new TextEncoder().encode(html).byteLength,
+      },
+    ]);
+    // A page is the Plugin's code on the person's devices: the card says so.
+    expect(result.ask.action).toContain("draws its own web page");
+    expect(result.ask.risk).toBe("medium");
+  });
+
+  test("a check and a publish refuse a page the source does not have", async () => {
+    const { ["notes/tuner.html"]: _page, ...missing } = withPage;
+    const { host, artifacts, storage } = harness({
+      source: missing,
+      build: buildsTheView(),
+    });
+    expect(await host.check({ pluginId: "notes" }, "tool:9:2:0")).toMatchObject(
+      {
+        status: "failed",
+        reason: expect.stringContaining('names the page "tuner.html"'),
+      },
+    );
+    expect(
+      await host.publish({ pluginId: "notes" }, "tool:9:3:0"),
+    ).toMatchObject({
+      status: "failed",
+      reason: expect.stringContaining('names the page "tuner.html"'),
+    });
+    expect(artifacts.size).toBe(0);
+    expect(storage.size).toBe(0);
   });
 });

@@ -8,16 +8,17 @@ description: Use this whenever you are creating or changing a Plugin — code of
 A Plugin is your own code, running inside the kernel beside you. It can offer
 you tools, wrap your loop, keep a key-value store for this Bot, ship Skills
 the catalog lists as `plugin/<pluginId>/<slug>`, draw cards, expose a
-settings section, fill the page beside the conversation, put a door on this
-Bot, receive webhooks, share typed services with other Plugins,
+settings section, fill the page beside the conversation — with a page of its
+own when it needs one — put a door on this Bot, receive webhooks, share typed services with other Plugins,
 and — when this deployment's catalog opens the claim — serve a model
 provider. You write it in TypeScript with the `plugin_*` tools, check it,
 publish it, and the User approves it in the conversation. Nothing you
 publish runs until they do.
 
 Two files are yours: `plugin.ts` (the module) and `plugin.json` (the
-descriptor). Nothing else. Skills, cards, settings, panels and providers
-live in those two files, not as extra paths.
+descriptor). Skills, cards, settings, panels and providers live in those two
+files, not as extra paths. The one other file is an HTML page a
+`conversation.panel` view names (`pages.md`).
 
 ## The loop
 
@@ -75,6 +76,7 @@ Load one with `skill_load` — `{"path": "managed/plugins", "reference": "module
 - `triggers.md` — inbound deliveries and `routine_manage`.
 - `sections.md` — a settings.sections view on the Plugin's card.
 - `panels.md` — `conversation.panel` and `bot.nav`, and `panel_focus`.
+- `pages.md` — a panel that is your own HTML page, and its bridge.
 - `cards.md` — declaring a card, drawing it, approvals and actions.
 - `limits.md` — what you cannot do, and what a publish never is.
 - `troubleshooting.md` — check, publish, mount and health failures.

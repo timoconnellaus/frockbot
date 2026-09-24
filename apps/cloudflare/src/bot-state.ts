@@ -354,6 +354,7 @@ import {
   rpcInteger,
   rpcJsonSnapshotV1,
   rpcObject,
+  rpcOrigin,
   rpcPattern,
   rpcPluginIdOrNull,
   rpcString,
@@ -1449,17 +1450,22 @@ export class BotState
 
   /** The canvas's one read: this Bot's panel bag, doors, and focused page. */
   async openFocusedPanel(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-    });
+    const request = decodeRpcEnvelopeV1(
+      input,
+      { userId: rpcIdentifier, botId: rpcBotId },
+      { artifactOrigin: rpcOrigin },
+    );
     const identity = {
       userId: request.userId as string,
       botId: request.botId as string,
     };
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return openFocusedPanelV1(shell.state, identity);
+    return openFocusedPanelV1(
+      shell.state,
+      identity,
+      request.artifactOrigin as string | undefined,
+    );
   }
 
   async readFocusedPanel(input: unknown) {

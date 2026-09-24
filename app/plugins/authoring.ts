@@ -20,7 +20,10 @@ import {
 } from "@frockbot/app/authoring/source-repository";
 import {
   decodePluginDescriptorV1,
+  MAX_PLUGIN_PAGE_BYTES_V1,
+  withPluginPageBridgeV1,
   type PluginDescriptorV1,
+  type PluginPageArtifactV1,
   type SendToUserApprovalRiskV1,
   type WorkspaceFilesV1,
 } from "@frockbot/core/contracts";
@@ -129,6 +132,8 @@ export interface PluginAuthoringSeamsV1 {
   buildService?: PluginBuildServiceV1;
   artifacts: {
     putPackageArtifact(contentHash: string, module: string): Promise<void>;
+    /** A Plugin page, bridge included, under the hash of its bytes. */
+    putPackageUiArtifact(contentHash: string, html: string): Promise<void>;
   };
   composition: { current(): Promise<CompositionGenerationV1> };
   /** The Bot's own storage: its enable map and its intents. */
@@ -284,6 +289,53 @@ export function pluginManifestDisagreementV1(
 }
 
 /**
+ * The pages a descriptor's views name, read from the source and made into the
+ * bytes that are stored: the bridge helper injected, so the hash names what
+ * runs. Answers the first missing or oversized page in words a Bot can act on.
+ */
+export async function pluginPagesFromSourceV1(
+  descriptor: PluginDescriptorV1,
+  files: readonly PluginBuildSourceFileV1[],
+): Promise<
+  | { pages: { artifact: PluginPageArtifactV1; html: string }[] }
+  | { failure: string }
+> {
+  const paths = [
+    ...new Set(
+      (descriptor.views ?? []).flatMap((view) =>
+        view.page === undefined ? [] : [view.page],
+      ),
+    ),
+  ];
+  const pages: { artifact: PluginPageArtifactV1; html: string }[] = [];
+  for (const path of paths) {
+    const file = files.find((candidate) => candidate.path === path);
+    if (!file) {
+      return {
+        failure: `plugin.json names the page "${path}" but there is no such file; write it with plugin_write_file`,
+      };
+    }
+    if (
+      new TextEncoder().encode(file.text).byteLength > MAX_PLUGIN_PAGE_BYTES_V1
+    ) {
+      return {
+        failure: `the page "${path}" is larger than ${MAX_PLUGIN_PAGE_BYTES_V1} bytes`,
+      };
+    }
+    const html = withPluginPageBridgeV1(file.text);
+    pages.push({
+      artifact: {
+        path,
+        contentHash: await sha256Hex(html),
+        size: new TextEncoder().encode(html).byteLength,
+      },
+      html,
+    });
+  }
+  return { pages };
+}
+
+/**
  * The Bot's own switch: a disable the Bot decided, or an approval the User
  * gave, is not a stale page, so it is fenced on the revision read just
  * before it and a lost race is re-read rather than refused. Three losses in
@@ -325,7 +377,11 @@ export function pluginAuthoringSourceRepositoryV1(
     sourceFilePath: (pluginId, path) =>
       pluginSourceFilePathV1(userId, pluginId, path),
     sourceMediaType: (path) =>
-      path.endsWith(".json") ? "application/json" : "text/typescript",
+      path.endsWith(".json")
+        ? "application/json"
+        : path.endsWith(".html")
+          ? "text/html"
+          : "text/typescript",
     emptySourceFailure: (pluginId) =>
       `${pluginId} has no source. Call plugin_create, or write plugin.ts and plugin.json with plugin_write_file.`,
     textDecoder: TEXT,
@@ -554,6 +610,10 @@ export function createPluginAuthoringHostV1(
           diagnostics: [],
         };
       }
+      const pages = await pluginPagesFromSourceV1(descriptor, built.files);
+      if ("failure" in pages) {
+        return { status: "failed", reason: pages.failure, diagnostics: [] };
+      }
       return { status: "checked" };
     },
 
@@ -585,7 +645,15 @@ export function createPluginAuthoringHostV1(
           "the build service's manifest does not match the module it returned",
         );
       }
+      const pages = await pluginPagesFromSourceV1(descriptor, built.files);
+      if ("failure" in pages) return fail(pages.failure);
       await seams.artifacts.putPackageArtifact(contentHash, module);
+      for (const page of pages.pages) {
+        await seams.artifacts.putPackageUiArtifact(
+          page.artifact.contentHash,
+          page.html,
+        );
+      }
       const authoredAt = now().toISOString();
       const member: CompositionMemberV1 = {
         packageId: pluginId,
@@ -607,6 +675,9 @@ export function createPluginAuthoringHostV1(
           bundlerVersion: PLUGIN_BUNDLER_VERSION_V1,
         },
         descriptor,
+        ...(pages.pages.length === 0
+          ? {}
+          : { pages: pages.pages.map((page) => page.artifact) }),
       };
       const asked = await ask(
         effectId,

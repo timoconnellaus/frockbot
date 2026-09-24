@@ -640,6 +640,8 @@ export interface BotConfigurationBinding {
     schemaVersion: 1;
     userId: string;
     botId: string;
+    /** Where Plugin pages are served; absent when no page host is configured. */
+    artifactOrigin?: string;
   }): Promise<import("@frockbot/app/plugins/panels-bot").PanelOpenViewV1>;
   setFocusedPanel(request: {
     schemaVersion: 1;
