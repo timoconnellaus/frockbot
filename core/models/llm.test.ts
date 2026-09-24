@@ -59,7 +59,7 @@ describe("the model registry's attachment resolver", () => {
       id: "fake",
       async *stream(request) {
         seen.push(request);
-        yield { type: "finish", reason: "stop" } as LlmStreamEvent;
+        yield { type: "finish", reason: "completed" } as LlmStreamEvent;
       },
     });
     await drain(registry.stream(REQUEST, new AbortController().signal));
@@ -85,7 +85,7 @@ describe("the model registry's attachment resolver", () => {
       id: "fake",
       async *stream() {
         called = true;
-        yield { type: "finish", reason: "stop" } as LlmStreamEvent;
+        yield { type: "finish", reason: "completed" } as LlmStreamEvent;
       },
     });
     await expect(

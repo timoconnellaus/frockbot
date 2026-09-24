@@ -471,7 +471,7 @@ describe("Frock AI runtime Contribution", () => {
         },
       ],
     };
-    const send = async (config: ReturnType<typeof runtimeConfig>) => {
+    const send = async (config: Parameters<typeof createFrockAiFeature>[0]) => {
       const root = createAgentRuntimeHarness();
       await root.mount(createFrockAiFeature(config));
       for await (const event of root.llm.stream(

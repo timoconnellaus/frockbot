@@ -113,7 +113,7 @@ describe("the upload route", () => {
     );
     expect(response?.status).toBe(201);
     const uploadId = await sha256Hex(JPEG);
-    expect(await response!.json()).toEqual({
+    expect(await response!.json<unknown>()).toEqual({
       schemaVersion: 1,
       upload: {
         uploadId,
@@ -191,7 +191,7 @@ describe("the upload route", () => {
       context,
     );
     expect(response?.status).toBe(413);
-    expect(await response!.json()).toEqual({
+    expect(await response!.json<unknown>()).toEqual({
       error: "That file is larger than 20 MB.",
     });
   });

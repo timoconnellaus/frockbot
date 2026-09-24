@@ -1271,7 +1271,7 @@ describe("a message's files through the turn routes", () => {
       env(binding),
     );
     expect(response.status).toBe(422);
-    expect(await response.json()).toEqual({
+    expect(await response.json<unknown>()).toEqual({
       error:
         "One of the attached files is no longer available. Attach it again and send.",
     });
