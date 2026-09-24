@@ -772,10 +772,13 @@ sub-page onto it, the header grows a back chevron (`right-panel-back`) and names
 what it is showing, and the close empties the stack. A Bot switch empties it too.
 On a phone the same keys push routes instead, which is the same idea drawn
 twice.
-Bot messages have no avatar or tool-count row, and the thread draws no working
-row: the Bot's companion in the conversation header takes the working pose and wears
-the typing badge while a Turn runs, and the thread only says something when a
-Stop is being waited on or a Turn is queued behind the one it displaced.
+Bot messages have no avatar or tool-count row. While a Turn runs the Bot stands
+at the end of its thread, where its reply will land, and it works the same way
+everywhere it is drawn: in the conversation header, in the sidebar and there,
+the drawing holds still and one light crosses it in step. Working belongs to
+the conversation, so a Bot answering in a group chat lights that group and not
+its own row. The thread only says something in words when a Stop is being
+waited on or a Turn is queued behind the one it displaced.
 A message that crossed to or from a counterpart — another of the User's Bots,
 or the voice session — is one centred marker in the thread, "Messaged Codex
 Watch" or "Message from Xero Books", wearing the counterpart's own character

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:frockbot_native/flock/avatar.dart';
 import 'package:frockbot_native/groups/api.dart';
 import 'package:frockbot_native/groups/faces.dart';
 import 'package:frockbot_native/groups/lines.dart';
@@ -285,6 +286,21 @@ void main() {
         find.byKey(const ValueKey('group-working-general')),
         findsOneWidget,
       );
+      // Each wears the working light, and so do the faces in the header.
+      expect(
+        find.descendant(
+          of: find.byKey(const ValueKey('group-working-xero')),
+          matching: find.byType(WorkingSheen),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: find.byType(GroupAvatars),
+          matching: find.byType(WorkingSheen),
+        ),
+        findsOneWidget,
+      );
       // With someone working and nothing typed, the button stops them all.
       expect(byIdentifier(GroupIds.stop), findsOneWidget);
     });
@@ -324,13 +340,38 @@ void main() {
     SidebarGroupChat chat({
       SidebarProfile profile = const SidebarProfile(),
       int unread = 0,
+      bool working = false,
     }) => SidebarGroupChat(
       groupId: groupId,
       name: 'Books',
       faces: [faces['general']!, faces['xero']!],
       profile: profile,
       unread: unread,
+      working: working,
     );
+
+    testWidgets('a Bot at work in a group lights the group, not its own row', (
+      tester,
+    ) async {
+      // Xero is answering in the group; its own chat is quiet. The light is
+      // where the typing is: on the group's row, and not on Xero's.
+      await tester.pumpWidget(sidebar(groups: [chat(working: true)]));
+      expect(
+        find.descendant(
+          of: byIdentifier(GroupIds.row(groupId)),
+          matching: find.byType(WorkingSheen),
+        ),
+        findsOneWidget,
+      );
+      expect(
+        find.descendant(
+          of: byIdentifier(ShellIds.sidebarBot('xero')),
+          matching: find.byType(WorkingSheen),
+        ),
+        findsNothing,
+      );
+      expect(find.byType(WorkingSheen), findsOneWidget);
+    });
 
     testWidgets('a group is a row among the Bots, in its order', (
       tester,

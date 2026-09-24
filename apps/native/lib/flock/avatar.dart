@@ -451,10 +451,13 @@ class CharacterAvatar extends StatefulWidget {
   /// field in those frames cost the first keystroke typed into it.
   final ValueListenable<bool>? hold;
 
-  /// The Bot is working. Every surface draws that one way — the drawing held
-  /// in place, the eyes ahead, and [WorkingSheen]'s light crossing it — so a
-  /// working Bot looks the same in the sidebar, in the header and at the end
-  /// of its thread, whatever [activity] and [motion] each passes.
+  /// The Bot is working in the conversation this surface stands for. Every
+  /// surface draws that one way — the drawing held in place, the eyes ahead,
+  /// and [WorkingSheen]'s light crossing it — so a working Bot looks the same
+  /// in the sidebar, in the header and at the end of its thread, whatever
+  /// [activity] and [motion] each passes. It is about the conversation, not
+  /// the Bot: a Bot answering in a group lights the group, and its own row
+  /// and its own chat stay at rest.
   final bool working;
   final String? semanticsLabel;
 

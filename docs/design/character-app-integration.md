@@ -39,8 +39,10 @@ still need to be established.
   any of them, and the gaze the conversation pane feeds its companion. A
   working Bot looks the same everywhere: the drawing held, the eyes ahead,
   and one light crossing the silhouette on the frame clock, so every copy
-  shines at the same moment. A group's faces wear the same light as one
-  picture. Pickers and previews name no Bot and keep a presence of their own.
+  shines at the same moment. Working belongs to a conversation, not to the
+  Bot: a Bot answering in a group chat lights the group's row and its own
+  place at the end of that thread, while its own row and chat stay at rest.
+  A group's faces wear the same light as one picture. Pickers and previews name no Bot and keep a presence of their own.
 - Realtime voice sends `asked`, `answering` and `finished` delegation events.
   The consulted Bot rises into the voice footer, changes activity while its
   answer is read, then settles away.
