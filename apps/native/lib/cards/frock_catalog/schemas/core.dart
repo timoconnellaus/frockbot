@@ -1,5 +1,5 @@
-/// The first family: the card's own state, its facts, its body, its decision
-/// and what it settles into (ADR 0030 step 4).
+/// The first family: the card's own state, its facts, its body, its decision,
+/// the app it offers to connect and what it settles into (ADR 0030 step 4).
 ///
 /// The schemas are JSON in a raw string for the reason
 /// `../schemas.dart` gives: `scripts/generate-frock-catalog.ts` lifts the
@@ -86,6 +86,35 @@ const frockCoreSchemasJsonV1 = r'''
       }
     },
     "required": ["approvalId"]
+  },
+  "ConnectApp": {
+    "type": "object",
+    "description": "An app from the Marketplace the person can connect: its logo, its name and a Connect button that opens the app's own sign-in. Name the app and nothing else; the host fills in the rest from its own catalog and draws the button, so a card can never say one app and connect another. A press never reaches you: the person signs in on the app's page, and the app's tools reach you on a later Turn.",
+    "properties": {
+      "app": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 100,
+        "description": "The app: its Marketplace id, e.g. 'gmail' or 'googlecalendar', or its name, e.g. 'Google Calendar'. An app the Marketplace does not carry is refused when the card is sent, and the refusal names the closest ones it does."
+      },
+      "name": {
+        "type": "string",
+        "description": "Written by the host from its own catalog. Whatever a card puts here is replaced."
+      },
+      "description": {
+        "type": "string",
+        "description": "Written by the host from its own catalog. Whatever a card puts here is replaced."
+      },
+      "packageId": {
+        "type": "string",
+        "description": "Written by the host from its own catalog. Whatever a card puts here is replaced."
+      },
+      "connectionTypeId": {
+        "type": "string",
+        "description": "Written by the host from its own catalog. Whatever a card puts here is replaced."
+      }
+    },
+    "required": ["app"]
   },
   "Receipt": {
     "type": "object",

@@ -28,6 +28,13 @@ final Map<String, Map<String, Object?>> minimalFrockComponents = {
   },
   'CollapsibleText': {'text': 'A body of the draft.'},
   'ApprovalActions': {'approvalId': 'ap-1'},
+  'ConnectApp': {
+    'app': 'gmail',
+    'name': 'Gmail',
+    'description': 'Read, search, label and send email in a Gmail account.',
+    'packageId': 'connect',
+    'connectionTypeId': 'connect-gmail',
+  },
   'Receipt': {'title': 'Following up', 'status': 'Sent'},
   'CardHeader': {'title': 'September invoices', 'status': 'Action needed'},
   'SectionHeader': {'title': 'Line items', 'caption': '4'},

@@ -520,3 +520,52 @@ export function connectToolkitV1(slug: string): ConnectToolkitV1 | undefined {
 export const CONNECT_FEATURED_SLUGS_V1: readonly string[] = FEATURED.map(
   ([slug]) => slug,
 );
+
+/** An app's id or name, as a person or a Bot might write either. */
+function looseV1(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]/gu, "");
+}
+
+/** Most near misses a lookup names. */
+const CLOSEST_MAX_V1 = 5;
+
+/**
+ * The app a Bot named, by its id or by its name, or the closest the catalog
+ * carries when none is that app.
+ *
+ * "gmail", "Google Calendar" and "google_calendar" each name one app, so a
+ * Bot never has to have learned the provider's spelling. The near misses are
+ * in the catalog's own order — the featured apps first — because that is the
+ * order a person would scan them in too.
+ */
+export function findConnectToolkitV1(
+  named: string,
+): { toolkit: ConnectToolkitV1 } | { closest: ConnectToolkitV1[] } {
+  const exact = BY_SLUG.get(named.trim());
+  if (exact) return { toolkit: exact };
+  const wanted = looseV1(named);
+  if (wanted === "") return { closest: [] };
+  const same = CONNECT_TOOLKITS_V1.find(
+    (toolkit) =>
+      looseV1(toolkit.slug) === wanted || looseV1(toolkit.name) === wanted,
+  );
+  if (same) return { toolkit: same };
+  const words = named
+    .toLowerCase()
+    .split(/[^a-z0-9]+/u)
+    .filter((word) => word.length >= 3);
+  const closest: ConnectToolkitV1[] = [];
+  for (const toolkit of CONNECT_TOOLKITS_V1) {
+    const name = looseV1(toolkit.name);
+    const slug = looseV1(toolkit.slug);
+    if (
+      name.includes(wanted) ||
+      slug.includes(wanted) ||
+      words.some((word) => name.includes(word) || slug.includes(word))
+    ) {
+      closest.push(toolkit);
+      if (closest.length === CLOSEST_MAX_V1) break;
+    }
+  }
+  return { closest };
+}

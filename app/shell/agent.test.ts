@@ -241,6 +241,71 @@ describe("send_to_user", () => {
     }
   });
 
+  test("records a card's ConnectApp bound to the app it connects, and refuses one it cannot", async () => {
+    const mounted = await mount();
+    const offer = (app: string) =>
+      call(SEND_TO_USER_TOOL_V1, {
+        disposition: "continue",
+        payload: {
+          type: "card",
+          surfaceId: "offer",
+          messages: [
+            {
+              version: "v1.0",
+              createSurface: {
+                surfaceId: "offer",
+                components: [
+                  { id: "root", component: "ConnectApp", app, name: "Slack" },
+                ],
+              },
+            },
+          ],
+        },
+      });
+    try {
+      const refused = await invoke(mounted, "chat", offer("nowhere-app"));
+      expect(refused.isError).toBe(true);
+      expect(refused.content).toContain(
+        `no app "nowhere-app" is in the Marketplace`,
+      );
+      expect(
+        mounted.session.activeRunJournal.some(
+          (event) => event.type === "send/to-user",
+        ),
+      ).toBe(false);
+
+      const sent = await invoke(mounted, "chat", offer("Gmail"));
+      expect(sent.isError).toBe(false);
+      expect(
+        mounted.session.activeRunJournal.find(
+          (event) => event.type === "send/to-user",
+        ),
+      ).toMatchObject({
+        payload: {
+          type: "card",
+          messages: [
+            {
+              createSurface: {
+                components: [
+                  {
+                    id: "root",
+                    component: "ConnectApp",
+                    app: "gmail",
+                    name: "Gmail",
+                    packageId: "connect",
+                    connectionTypeId: "connect-gmail",
+                  },
+                ],
+              },
+            },
+          ],
+        },
+      });
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
   test("widgets and approvals end the Turn even when marked as interim", async () => {
     const mounted = await mount();
     try {

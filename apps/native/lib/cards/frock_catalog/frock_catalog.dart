@@ -58,7 +58,7 @@ export 'tone.dart';
 /// `ImageGallery` beside something in a `Row` — a composition the Skill
 /// invites — and the card would fail to draw at all.
 ///
-/// So every one of them is flexible, here rather than 23 times. The fit
+/// So every one of them is flexible, here rather than 24 times. The fit
 /// `genui` gives an implicit weight is `FlexFit.loose`, which is what makes
 /// this safe in both axes: a `Row` hands the child a width it may use and a
 /// `Column` still lets it be exactly as tall as it wants to be.

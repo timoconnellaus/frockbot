@@ -72,6 +72,7 @@ abstract final class ShellIds {
   static const exchangeViewClose = 'exchange-view-close';
   static String approve(String approvalId) => 'approval-approve-$approvalId';
   static String deny(String approvalId) => 'approval-deny-$approvalId';
+  static String connectApp(String app) => 'connect-app-$app';
   static String skillOption(String ref) => 'skill-option-$ref';
   static String skillChip(String ref) => 'skill-chip-$ref';
   static String slot(String name) => 'shell-slot-$name';

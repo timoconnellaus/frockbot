@@ -217,7 +217,7 @@ Load one with `skill_load` — `{"path": "managed/a2ui", "reference": "forms.md"
 - `actions.md` — `Button`, the action shape, `sendDataModel`, and the kernel's
   action namespaces.
 - `frock.md` — FrockBot's own core components: `StatusPill`, `KeyValueRows`,
-  `CollapsibleText`, `ApprovalActions`, `Receipt`.
+  `CollapsibleText`, `ApprovalActions`, `ConnectApp`, `Receipt`.
 - `structure.md` — the frame: `CardHeader`, `SectionHeader`, `Callout`,
   `IdentityRow`.
 - `data.md` — numbers and rows: `MetricTile`, `ProgressBar`, `DataTable`,

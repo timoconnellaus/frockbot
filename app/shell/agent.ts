@@ -35,6 +35,8 @@ import { compactionWorkV1 } from "./compaction-scheduler.js";
 import { conversationDeliveryHooksV1 } from "./delivery.js";
 import { shellDefinitionV1 } from "./definition.js";
 import { drawFirstPartyCardV1 } from "./first-party-cards.js";
+import { bindCardConnectAppsV1, CardDecodeError } from "./cards.js";
+import { connectCardAppV1 } from "@frockbot/app/connect/card";
 
 export const SEND_TO_USER_TOOL_V1 = "send_to_user";
 export const WAKE_PARENT_TOOL_V1 = "wake_parent";
@@ -119,6 +121,19 @@ export async function recordSendToUserV1(
       status: "refused",
       reason: error instanceof Error ? error.message : String(error),
     };
+  }
+  // Every card reaches the log through here, whoever drew it, so this is
+  // where a `ConnectApp` is bound to the app it will really connect.
+  if (payload.type === "card") {
+    try {
+      payload = {
+        ...payload,
+        messages: bindCardConnectAppsV1(payload.messages, connectCardAppV1),
+      };
+    } catch (error) {
+      if (!(error instanceof CardDecodeError)) throw error;
+      return { status: "refused", reason: error.message };
+    }
   }
   if (
     !session.activeRunJournal.some(
