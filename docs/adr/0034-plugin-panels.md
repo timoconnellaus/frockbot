@@ -60,6 +60,45 @@ Still closed, until a host region draws them: `composer.toolbar`,
 `message.actions`, `bot.profile`. A descriptor naming a closed slot is refused
 at resolve, as today.
 
+> Amended 2026-09-24. The Bot list opens to Plugins. Closing all of it was
+> blunter than the guarantee needs, and customising the interface around the
+> conversation is the point of Plugins. What a person trusts in the list is
+> each Bot's name and avatar, the host's status marks (working, waiting for an
+> approval, failed) and approvals. A Plugin that cannot fake or hide those may
+> draw beside them. Two slots join the vocabulary, closed until the host draws
+> them:
+>
+> - `bot.badge`: a small mark on a Bot's row.
+> - `sidebar.sections`: a block in the Bot list, beneath the row of the Bot it
+>   belongs to.
+>
+> The host holds four rules:
+>
+> 1. **Host-drawn only.** A badge is a count, a label of at most 12 characters
+>    or an icon from the host's set, in a tone from the theme. A section uses
+>    the section vocabulary and budget: `text`, `group`, `list` and `action`,
+>    64 nodes, depth 8. Neither may contain a page
+>    ([ADR 0036](0036-plugin-html-surfaces.md)) or an `embed`, because only
+>    content the host draws is content the host can stop looking like its own
+>    marks.
+> 2. **Identity and status keep their places.** The host draws each Bot's
+>    name, avatar and status marks where they always are. A Plugin's badge sits
+>    after them. Nothing a Plugin sends covers, replaces or reorders them, and
+>    the icons and tones offered to Plugins leave out the ones status uses. The
+>    order of the Bot list stays the host's.
+> 3. **Bot-scoped.** Both render as the Bot whose row they are on, for each
+>    Bot that runs the Plugin, as `bot.nav` does. A section carries the
+>    Plugin's name in a header it cannot cover. No block belongs to no Bot,
+>    because such a block would have no Bot to render as.
+> 4. **Capped.** A row shows at most two Plugin badges, and a Bot at most
+>    three sections, in mount order. Extras are omitted with a notice on the
+>    Plugin's card, as the panel bag's are.
+>
+> Pressing a badge or a section's control focuses the Plugin's panel, as a
+> `bot.nav` press does, or calls one of its tools outside a Turn, as a
+> `plugin-tool` action does. Both redraw on the same state-channel notice that
+> redraws a panel.
+
 One Plugin may declare views in any mix of the open slots. They run in the
 same module, against the same per-Bot storage and the same tools. There is no
 second server and no per-surface isolate.
@@ -149,6 +188,10 @@ host-drawn door from `label` / `displayName`. The page is otherwise
 unreachable when the region is closed. The host does not let the Plugin draw
 the Bot list.
 
+> Amended 2026-09-24. A Plugin still never draws a Bot's row. It may put a
+> badge on one or a section beneath it, under the rules in
+> [Two new slots](#two-new-slots).
+
 ### Bot-scoped, always
 
 `conversation.panel` and `bot.nav` render as the Bot whose page they are on.
@@ -173,6 +216,12 @@ stays Cards ([ADR 0030](0030-a2ui-cards.md)), not an applet chat card.
 - **Slots** name `conversation.panel` and `bot.nav` beside the three that
   stay closed and `settings.sections`. Trust chrome is still never a slot.
   `sidebar.entries` leaves the list.
+
+  > Amended 2026-09-24. **Slots** also name `bot.badge` and
+  > `sidebar.sections`, closed until the host draws them. In the Bot list,
+  > trust chrome is each Bot's name, avatar and status marks. A Plugin draws
+  > beside them and never over them.
+
 - **Extension points** do not gain a new kind. These are slots, not a second
   untrusted runtime.
 - **Untrusted code gets an isolate** drops the Applet sentence. Only the
