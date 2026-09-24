@@ -453,11 +453,11 @@ class _GroupChatPaneState extends State<GroupChatPane> {
           child: ListView(
             controller: scroll,
             reverse: true,
-            padding: EdgeInsets.fromLTRB(
+            padding: const EdgeInsets.fromLTRB(
               0,
               chatHeaderThreadPadding,
               0,
-              widget.phone ? chatHeaderThreadPadding + 56 : 120,
+              12,
             ),
             keyboardDismissBehavior: ScrollViewKeyboardDismissBehavior.onDrag,
             children: rows,
@@ -796,10 +796,7 @@ class _GroupChatPaneState extends State<GroupChatPane> {
         crossAxisAlignment: CrossAxisAlignment.end,
         mainAxisSize: MainAxisSize.min,
         children: [
-          Opacity(
-            opacity: 0.55,
-            child: _Bubble(mine: true, child: Text(pending.text, style: base)),
-          ),
+          _Bubble(mine: true, child: Text(pending.text, style: base)),
           if (pending.failed)
             Padding(
               padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),

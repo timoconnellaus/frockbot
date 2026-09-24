@@ -380,7 +380,10 @@ class _ChatPaneState extends State<ChatPane> {
           ? null
           : StarterSuggestions(starters: widget.starters, onSelect: _prefill),
       lines: [...runs, ...projectAnnouncements(c.announcements)],
-      pendingText: c.visiblePendingText,
+      pending: switch (c.visiblePending) {
+        final send? => unconfirmedLine(send.id, send.text),
+        null => null,
+      },
       loading: c.loading,
       hasEarlier: c.before != null,
       storageKey: 'history-${c.botId}',

@@ -240,6 +240,42 @@ void main() {
       },
     );
 
+    test('a send the thread confirms first is drawn once, not twice', () async {
+      final controller = thread();
+      await controller.initialize();
+      final posted = Completer<Object?>();
+      answer = (path, body) {
+        if (path == '/api/groups/$groupId/messages') return posted.future;
+        if (path == '/api/groups/$groupId/messages?after=2&limit=100') {
+          return page([
+            {...text(3, 'pay it.'), 'messageId': 'u-cmd-1'},
+          ]);
+        }
+        if (path == '/api/groups/$groupId/messages?after=3&limit=100') {
+          return page([]);
+        }
+        throw StateError('unexpected $path');
+      };
+      final sending = controller.send('pay it.');
+      await Future<void>.delayed(Duration.zero);
+      expect(controller.pending.single.commandId, 'cmd-1');
+
+      // The channel reads the message in before the post has answered.
+      controller.applyState(const GroupState(3, 2, []));
+      await controller.catchUp();
+      expect(controller.pending, isEmpty);
+      expect(controller.messages.last.messageId, 'u-cmd-1');
+      final saved = jsonDecode(store.values[controller.key]!) as Map;
+      expect(saved['pending'], isEmpty);
+
+      // An answer lost on the way back says nothing against a message the
+      // thread already holds.
+      posted.completeError(const RequestFailure('Couldn’t reach FrockBot.'));
+      await sending;
+      expect(controller.pending, isEmpty);
+      expect(controller.error, isNull);
+    });
+
     test(
       'a refused send goes back to the draft; a lost one waits to go again',
       () async {

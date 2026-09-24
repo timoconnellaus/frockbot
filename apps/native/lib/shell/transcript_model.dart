@@ -143,10 +143,6 @@ class TranscriptLine {
   final String? at;
   final LineStatus status;
 
-  /// True while this line's Turn is admitted but has not started, because the
-  /// person sent it while the Bot was still on the previous one.
-  final bool pending;
-
   /// True once a durable Stop has been accepted for this Turn. The person is
   /// waiting on a settlement they asked for, and the row says so.
   final bool stopRequested;
@@ -171,7 +167,6 @@ class TranscriptLine {
     required this.text,
     required this.status,
     this.at,
-    this.pending = false,
     this.stopRequested = false,
     this.notice,
     this.retry,
@@ -201,7 +196,6 @@ class TranscriptLine {
     text: text,
     status: status,
     at: at,
-    pending: pending,
     stopRequested: stopRequested,
     notice: notice,
     retry: retry,
@@ -258,6 +252,17 @@ Map<String, String> turnAnchors(List<TranscriptLine> lines) {
   }
   return anchors;
 }
+
+/// A message the backend has not confirmed yet, drawn as the line its run
+/// will project and under the same id, so the confirmation changes nothing on
+/// screen: the message looks received the moment it is sent.
+TranscriptLine unconfirmedLine(String runId, String text) => TranscriptLine(
+  id: '$runId:user',
+  runId: runId,
+  role: LineRole.user,
+  text: text,
+  status: LineStatus.completed,
+);
 
 /// The thread, in the order it is drawn.
 ///
@@ -653,7 +658,6 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
     final runId = run['runId'] as String;
     final events = (run['events'] as List?) ?? const [];
     final status = run['status'] as String?;
-    final queued = run['queued'] == true;
     final admittedAt =
         run['messageAdmittedAt'] as String? ?? run['admittedAt'] as String?;
     final messageId = run['messageRunId'] as String? ?? runId;
@@ -693,9 +697,6 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
           at: admittedAt,
           readAt: current['admittedAt'] as String?,
           status: failed ? LineStatus.error : LineStatus.completed,
-          pending:
-              current['status'] == 'running' &&
-              (current['queued'] == true || current['retryOf'] != null),
           notice: failure?.notice,
           retry:
               failure?.action == LineRetry.resendTurn &&
@@ -736,11 +737,6 @@ List<TranscriptLine> projectRuns(List<Map<String, dynamic>> runs) {
             at: admittedAt,
             readAt: run['admittedAt'] as String?,
             status: LineStatus.streaming,
-            // A Turn that has not started shows nothing of its own: the greyed
-            // user message is the whole of what the thread says about it, and
-            // the Bot working ahead of it is at the end of the thread. A queued
-            // exchange says so on its marker instead.
-            pending: queued && inbound == null,
             stopRequested: run['stopRequestedAt'] != null,
             tools: tools,
             pluginCalls: pluginCalls,

@@ -64,7 +64,6 @@ TranscriptLine line({
   String text = '',
   String? at,
   LineStatus status = LineStatus.completed,
-  bool pending = false,
 }) => TranscriptLine(
   id: '$runId:${role.name}',
   runId: runId,
@@ -72,7 +71,6 @@ TranscriptLine line({
   text: text,
   at: at,
   status: status,
-  pending: pending,
 );
 
 /// Whether [finder] overlaps the thread viewport. A row the cache has built
@@ -861,13 +859,12 @@ void main() {
       expect(line.retry, isNull);
     });
 
-    test('greys a Turn admitted behind the one still running', () {
+    test('a Turn admitted behind the one still running says nothing yet', () {
       final lines = projectRuns([
         run(runId: 'run-a', input: 'next', status: 'running', queued: true),
       ]);
 
-      expect(lines.first.pending, isTrue);
-      expect(lines.last.pending, isTrue);
+      expect(lines.first.text, 'next');
       expect(lines.last.empty, isTrue);
     });
 

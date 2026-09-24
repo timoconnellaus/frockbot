@@ -275,6 +275,8 @@ export class GroupChat extends DurableObject<GroupChatEnv> {
       const context = await this.context(userId, groupId);
       const outcome = await this.transaction((log) =>
         log.post({
+          // The app matches its unconfirmed send to this id, so the message
+          // is drawn once whether the post or the channel brings it back.
           messageId: `u-${command.commandId}`,
           author: { kind: "user" },
           text: command.text,

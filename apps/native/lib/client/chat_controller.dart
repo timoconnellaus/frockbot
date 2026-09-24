@@ -164,13 +164,13 @@ class ChatController extends ChangeNotifier {
   /// "Check message status" once the client has given up confirming it.
   bool get stoppable => runningRunId != null;
 
-  /// The words of a submission the transcript does not carry yet, so the
-  /// person sees what they wrote while it is being delivered. The newest, when
-  /// several are in flight: it is the one they are watching for.
-  String? get visiblePendingText {
+  /// A submission the transcript does not carry yet, so the person sees what
+  /// they wrote while it is being delivered. The newest, when several are in
+  /// flight: it is the one they are watching for.
+  PendingSend? get visiblePending {
     for (final submission in pending.reversed) {
       if (submission.retryOf == null && !_runs.containsKey(submission.id)) {
-        return submission.text;
+        return submission;
       }
     }
     return null;
@@ -820,9 +820,9 @@ class ChatController extends ChangeNotifier {
     // Read before the new submission joins the list.
     final waitsBehind = activeRunId != null;
     pending = [...pending, submission];
-    // A message sent while the Bot works joins the thread at once, greyed and
-    // queued until the Bot reads it. The receipt does not say whether it
-    // queued, so this row stands until the transcript replaces it.
+    // A message sent while the Bot works joins the thread at once, queued
+    // until the Bot reads it. The receipt does not say whether it queued, so
+    // this row stands until the transcript replaces it.
     if (waitsBehind || submission.retryOf != null) {
       _putOptimisticRun(submission, queued: waitsBehind);
     }

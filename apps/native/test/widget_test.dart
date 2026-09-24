@@ -750,7 +750,7 @@ void main() {
     await controller.invalidate();
     await tester.pump();
     expect(bubbles(), findsNWidgets(2));
-    expect(controller.visiblePendingText, 'Hello');
+    expect(controller.visiblePending?.text, 'Hello');
     expect(transport.calls, ['send:send-1']);
 
     // A new draft may even repeat the submitted text.
@@ -759,7 +759,7 @@ void main() {
     await controller.invalidate();
     await tester.pump(const Duration(seconds: 1));
     expect(bubbles(), findsNWidgets(2));
-    expect(controller.visiblePendingText, isNull);
+    expect(controller.visiblePending, isNull);
     expect(draft(), 'Hello');
     expect(transport.calls, ['send:send-1']);
 
@@ -771,6 +771,60 @@ void main() {
     await tester.pumpWidget(const SizedBox());
     controller.dispose();
   });
+
+  // A sent message looks received at once: it is never drawn faded, and the
+  // server confirming it redraws nothing.
+  testWidgets(
+    'a sent message is drawn as received, and confirming it changes nothing',
+    (tester) async {
+      final store = MemoryStore();
+      final transport = FakeTransport(store);
+      final controller = ChatController(
+        transport: transport,
+        store: store,
+        userId: 'user-1',
+        botId: 'bot-1',
+        nextId: () => 'send-1',
+      );
+      await controller.initialize();
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: ChatPane(controller: controller, onReconnect: () async {}),
+          ),
+        ),
+      );
+      await tester.enterText(find.byKey(const ValueKey('composer')), 'Hello');
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('send')));
+      await tester.pump();
+      await tester.pump(const Duration(seconds: 1));
+      final entrance = find.ancestor(
+        of: find.text('Hello'),
+        matching: find.byType(TweenAnimationBuilder<double>),
+      );
+      double opacity() => tester
+          .widget<Opacity>(
+            find.descendant(of: entrance, matching: find.byType(Opacity)).first,
+          )
+          .opacity;
+      expect(controller.visiblePending?.text, 'Hello');
+      expect(opacity(), 1);
+      final drawn = tester.state(entrance);
+
+      transport.observed = running();
+      transport.completion.complete();
+      for (var frame = 0; controller.visiblePending != null; frame++) {
+        expect(frame, lessThan(10));
+        await tester.pump();
+      }
+      // The confirmed line is the same row, so its entrance does not play again.
+      expect(tester.state(entrance), same(drawn));
+      expect(opacity(), 1);
+      await tester.pumpWidget(const SizedBox());
+      controller.dispose();
+    },
+  );
 
   /// The composer never closes over a running Turn.
   ///
