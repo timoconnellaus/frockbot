@@ -113,8 +113,8 @@ export async function appendAnnouncement(
  *
  * Both read the same fields of the same record — `running`, and not waiting
  * its turn — and nothing else. A Turn that stopped without settling is made
- * true durably rather than hidden by one surface: recovery settles or resumes
- * the active Turn on its next alarm, and the repair index settles any other
+ * true durably rather than hidden by one surface: the active Turn is
+ * recovery's to settle or resume, and the repair index settles any other
  * record at its deadline, so the row and the chat change together. An
  * unreadable record is drawn as a failed Turn, so it is no mark here.
  */

@@ -197,7 +197,7 @@ export interface BotDurableAuthorityHooks<Snapshot> {
    * contributions are written in the same transaction as the source record.
    */
   visiblePublications?(input: {
-    cause: "admission" | "events" | "terminal";
+    cause: "admission" | "promotion" | "events" | "terminal";
     run: StoredRunV1<Snapshot>;
     events?: readonly SessionEvent[];
   }): Promise<PublicationContributionV1[]> | PublicationContributionV1[];
@@ -792,6 +792,13 @@ export class BotDurableAuthority<Snapshot> {
       await transaction.put({
         [key]: structuredClone(storedRunRecordV2(promoted)),
         [ACTIVE_RUN_KEY]: runId,
+      });
+      // A watching chat drew this Turn queued from its admission, and the
+      // status it patches is the one publication carries: without this it
+      // stays queued, with no working mark and no Stop, until it settles.
+      await this.commitVisible(transaction, {
+        cause: "promotion",
+        run: promoted,
       });
       if (lane === "agent" && firstPendingAgentEntry) {
         await transaction.delete(firstPendingAgentEntry[0]);
@@ -1496,7 +1503,8 @@ export class BotDurableAuthority<Snapshot> {
   /**
    * Inline Session events of the given types, without hydrating cut payloads.
    *
-   * Announcements and liveness only need a type, a seq, and a timestamp.
+   * Announcements and the stale-run repair only need a type, a seq, and a
+   * timestamp.
    * The exact model-request bytes stay on the audit path.
    */
   async readSessionInlineEventsOfTypes(
@@ -1635,7 +1643,7 @@ export class BotDurableAuthority<Snapshot> {
   private async commitVisible(
     transaction: DurableObjectTransaction,
     input: {
-      cause: "admission" | "events" | "terminal";
+      cause: "admission" | "promotion" | "events" | "terminal";
       run: StoredRunV1<Snapshot>;
       events?: readonly SessionEvent[];
     },

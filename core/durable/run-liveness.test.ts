@@ -241,16 +241,26 @@ describe("a stale record is settled by the alarm or recovery, never by a read", 
     expect(log.some((entry) => entry.type === "turn/end")).toBe(true);
   });
 
-  test("recovery settles a closed Turn", async () => {
+  // The Worker died after the Turn wrote its ending and before the record
+  // said so. Recovery settles what the journal already holds; the stub's
+  // refusal to execute is what a re-run would have hit.
+  test("recovery settles a Turn that ended before its record did", async () => {
+    const ended = [
+      ...openTurn,
+      event(2, "step/end", { turn: 1, step: 1, outcome: "completed" }),
+      event(3, "turn/end", { turn: 1, outcome: "completed" }),
+    ];
     const { storage, authority } = await seed({
       acceptedAt: new Date().toISOString(),
-      events: openTurn,
-      log: closedTurn,
+      events: ended,
+      log: ended,
     });
     await authority.recoverActiveRun();
-    expect(
-      (await storage.get<StoredRunV1<undefined>>(`${RUN_PREFIX}run-1`))?.status,
-    ).toBe("failed");
+    const settled = await storage.get<StoredRunV1<undefined>>(
+      `${RUN_PREFIX}run-1`,
+    );
+    expect(settled?.status).toBe("completed");
+    expect(await storage.get<string>(ACTIVE_RUN_KEY)).toBeUndefined();
   });
 
   test("a second alarm does not rewrite what the first settled", async () => {

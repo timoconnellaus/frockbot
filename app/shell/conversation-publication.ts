@@ -19,7 +19,8 @@ import {
 } from "./run-protocol.js";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 
-export type VisiblePublicationCauseV1 = "admission" | "events" | "terminal";
+export type VisiblePublicationCauseV1 =
+  "admission" | "promotion" | "events" | "terminal";
 
 function sendOrdinal(
   events: readonly SessionEvent[],
@@ -69,11 +70,11 @@ export function visiblePublicationsV1(input: {
   const contributions: PublicationContributionV1[] = [];
   // What a group Turn sends is the group's, read back by its own object.
   if (input.run.admission?.origin?.kind === "group") return contributions;
-  if (input.cause === "admission" || input.cause === "terminal") {
+  if (input.cause !== "events") {
     const status = runStatusContribution(input.run);
     if (status) contributions.push(status);
+    return contributions;
   }
-  if (input.cause !== "events") return contributions;
   const batch = input.events ?? [];
   for (const event of batch) {
     if (event.type === "send/to-user") {

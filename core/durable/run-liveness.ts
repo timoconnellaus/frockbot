@@ -24,7 +24,7 @@ export const STALE_RUNNING_RUN_FAILURE_V1 =
   "This Turn stopped without finishing and was settled when nothing was left to finish it. Try sending it again.";
 
 export interface RunLivenessV1 {
-  /** Whether the run may be shown as working — the activity ring's whole rule. */
+  /** Whether the run can still be a Turn somebody is running. */
   readonly working: boolean;
   /**
    * Whether the record claims to be running and demonstrably is not, so the
@@ -52,12 +52,11 @@ function openedTurnSeqV1(events: readonly SessionEvent[]): number | undefined {
 /**
  * Whether a run is honestly still working.
  *
- * `status === "running"` was the whole test, and it is not one: a record is
- * only ever moved off `running` by the settlement its own Turn performs, so
- * every way a Turn can stop without settling — a Worker torn down mid-answer,
- * the "turn N started while turn N-1 is open" wedges — left a record that says
- * `running` for ever. The sidebar drew an activity ring off that field, so
- * Bots that had been idle for hours pulsed as though they were mid-sentence.
+ * `status === "running"` is not the test: a record is only ever moved off
+ * `running` by a settlement, so every way a Turn can stop without settling —
+ * a Worker torn down mid-answer, the "turn N started while turn N-1 is open"
+ * wedges — leaves a record that says `running` until something settles it.
+ * This rule is how the repair index decides a record it comes to is over.
  *
  * Three conditions, all of which must hold:
  *
@@ -76,8 +75,8 @@ function openedTurnSeqV1(events: readonly SessionEvent[]): number | undefined {
  * alone: there is no Turn in the log to call closed, and the previous Turn's
  * `turn/end` says nothing about this one.
  *
- * Pure, and deliberately so: it is consulted on a read path, on a settlement
- * path, and in tests, and all three have to reach the same verdict.
+ * Pure, and deliberately so: the settlement consults it inside its
+ * transaction, and the tests reach the same verdict without one.
  */
 export function runLivenessV1(input: {
   run:
