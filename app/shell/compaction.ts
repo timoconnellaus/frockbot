@@ -26,7 +26,6 @@ import {
   type ModelBindingSnapshot,
   type Session,
   type SessionEvent,
-  type StructuredOutputSchemaV1,
 } from "@frockbot/core/contracts";
 
 /**
@@ -53,6 +52,20 @@ export const PRUNED_TOOL_RESULT_V1 = "[pruned]";
 
 /** Longest a pruned tool result may be before it is worth pruning at all. */
 export const PRUNE_MIN_RESULT_CHARS_V1 = 200;
+
+/**
+ * Most transcript one summariser call reads, in UTF-8 bytes once
+ * JSON-encoded — the measure the gateway's prepaid bound applies. A backlog
+ * larger than this is summarised oldest first, one bounded call at a time,
+ * each folding in the summary before it.
+ */
+export const COMPACTION_INPUT_MAX_BYTES_V1 = 80_000;
+
+/** Longest a tool result may be in a summariser's transcript. */
+export const COMPACTION_TOOL_RESULT_MAX_CHARS_V1 = 2_000;
+
+/** Most slices one detached compaction summarises before it stops. */
+export const COMPACTION_MAX_SLICES_PER_RUN_V1 = 8;
 
 /** Time one summariser call is allowed. */
 export const COMPACTION_DEADLINE_MS_V1 = 60_000;
@@ -88,8 +101,8 @@ export interface CompactionStateV1 {
   unsettled?: { effectId: string; throughTurn: number };
   /** Consecutive failures since the last completed compaction. */
   failures: number;
-  /** The Turn the newest failure covered, for backoff. */
-  lastFailureThroughTurn: number;
+  /** The Turn the newest failure was recorded in, for backoff. */
+  lastFailureTurn: number;
 }
 
 export function compactionStateV1(
@@ -98,8 +111,13 @@ export function compactionStateV1(
   let compaction: CompactionV1 | undefined;
   let unsettled: { effectId: string; throughTurn: number } | undefined;
   let failures = 0;
-  let lastFailureThroughTurn = 0;
+  let lastFailureTurn = 0;
+  let latestTurn = 0;
   for (const event of events) {
+    if (event.type === "turn/start") {
+      latestTurn = Math.max(latestTurn, event.turn);
+      continue;
+    }
     if (event.type === "conversation/compaction-intent") {
       unsettled = { effectId: event.effectId, throughTurn: event.throughTurn };
       continue;
@@ -119,20 +137,20 @@ export function compactionStateV1(
         };
       }
       failures = 0;
-      lastFailureThroughTurn = 0;
+      lastFailureTurn = 0;
       continue;
     }
     if (event.type === "conversation/compaction-failed") {
       if (unsettled?.effectId === event.effectId) unsettled = undefined;
       failures += 1;
-      lastFailureThroughTurn = event.throughTurn;
+      lastFailureTurn = latestTurn;
     }
   }
   return {
     ...(compaction ? { compaction } : {}),
     ...(unsettled ? { unsettled } : {}),
     failures,
-    lastFailureThroughTurn,
+    lastFailureTurn,
   };
 }
 
@@ -241,7 +259,7 @@ export function assessCompactionV1(input: {
       2 ** (input.state.failures - 1),
       COMPACTION_MAX_BACKOFF_TURNS_V1,
     );
-    if (input.currentTurn - input.state.lastFailureThroughTurn < wait) {
+    if (input.currentTurn - input.state.lastFailureTurn < wait) {
       return { ...base, skipped: "backing-off" };
     }
   }
@@ -267,53 +285,15 @@ export const COMPACTION_SYSTEM_PROMPT_V1 = [
   "",
   "CRITICAL: You MUST preserve ALL opaque identifiers exactly as they appear. That includes UUIDs, hashes, full URLs with their query parameters, file and Workspace paths, Package ids, Plugin ids, Bot ids, Session ids, tool call ids, model names and version strings. Do NOT paraphrase, abbreviate, or generalise an identifier. Copy it exactly.",
   "",
-  "Put the gist in `summary`, decisions and their reasons in `decisions`, pending work in `openItems`, and every opaque identifier copied exactly in `identifiers`. Keep only the latest decision where one superseded another.",
+  "Answer in Markdown with exactly these four headings, in this order:",
+  "## Summary — the gist, as prose.",
+  "## Decisions — one bullet per decision and its reason. Keep only the latest where one superseded another.",
+  "## Open items — one bullet per piece of pending work.",
+  "## Identifiers mentioned — one bullet per opaque identifier, copied exactly.",
+  'Write "- none" under a heading with nothing to list.',
   "",
   "Leave out pleasantries, repetition, and superseded detail. Do not invent anything that is not in the transcript. Do not address the user.",
 ].join("\n");
-
-export interface CompactionSummaryPayloadV1 {
-  summary: string;
-  decisions: string[];
-  openItems: string[];
-  identifiers: string[];
-}
-
-/** The actual production consumer of the shared structured-output seam. */
-export const COMPACTION_RESPONSE_SCHEMA_V1 = {
-  type: "object",
-  properties: {
-    summary: { type: "string" },
-    decisions: { type: "array", items: { type: "string" } },
-    openItems: { type: "array", items: { type: "string" } },
-    identifiers: { type: "array", items: { type: "string" } },
-  },
-  required: ["summary", "decisions", "openItems", "identifiers"],
-  additionalProperties: false,
-} as const satisfies StructuredOutputSchemaV1;
-
-/** Keeps the durable summary format readable while model I/O stays typed. */
-export function renderCompactionSummaryV1(
-  payload: CompactionSummaryPayloadV1,
-): string {
-  const bullets = (values: readonly string[]) =>
-    values.length > 0
-      ? values.map((value) => `- ${value}`).join("\n")
-      : "- none";
-  return [
-    "## Summary",
-    payload.summary,
-    "",
-    "## Decisions",
-    bullets(payload.decisions),
-    "",
-    "## Open items",
-    bullets(payload.openItems),
-    "",
-    "## Identifiers mentioned",
-    bullets(payload.identifiers),
-  ].join("\n");
-}
 
 /** The transcript one summariser call is given, flattened to plain text. */
 export function compactionTranscriptV1(
@@ -323,7 +303,11 @@ export function compactionTranscriptV1(
     .map((message) => {
       if (message.role === "user") return `USER: ${message.content}`;
       if (message.role === "tool") {
-        return `[tool-result ${message.name}${message.isError ? " (error)" : ""}: ${message.content}]`;
+        const content =
+          message.content.length > COMPACTION_TOOL_RESULT_MAX_CHARS_V1
+            ? `${message.content.slice(0, COMPACTION_TOOL_RESULT_MAX_CHARS_V1)} …[truncated]`
+            : message.content;
+        return `[tool-result ${message.name}${message.isError ? " (error)" : ""}: ${content}]`;
       }
       const calls = message.toolCalls
         .map(
@@ -333,6 +317,27 @@ export function compactionTranscriptV1(
       return `ASSISTANT: ${message.content}${calls ? ` ${calls}` : ""}`;
     })
     .join("\n");
+}
+
+/** A text's size as a request body carries it: UTF-8, JSON-escaped. */
+export function compactionInputBytesV1(text: string): number {
+  return new TextEncoder().encode(JSON.stringify(text)).length;
+}
+
+/** The longest beginning of `text` within `maxBytes`. */
+function boundedPrefixV1(text: string, maxBytes: number): string {
+  if (compactionInputBytesV1(text) <= maxBytes) return text;
+  let low = 0;
+  let high = text.length;
+  while (low < high) {
+    const middle = Math.ceil((low + high) / 2);
+    if (compactionInputBytesV1(text.slice(0, middle)) <= maxBytes) {
+      low = middle;
+    } else {
+      high = middle - 1;
+    }
+  }
+  return `${text.slice(0, low)} …[truncated]`;
 }
 
 /** The one user message a summariser request carries. */
@@ -350,10 +355,13 @@ export function compactionRequestMessagesV1(input: {
         "",
       ].join("\n")
     : "";
+  const transcript = compactionTranscriptV1(input.messages);
+  // A single Turn can outgrow the cap on its own; its beginning is kept.
+  const bounded = boundedPrefixV1(transcript, COMPACTION_INPUT_MAX_BYTES_V1);
   return [
     {
       role: "user",
-      content: `${preamble}--- transcript to summarise ---\n${compactionTranscriptV1(input.messages)}\n--- end transcript ---`,
+      content: `${preamble}--- transcript to summarise ---\n${bounded}\n--- end transcript ---`,
     },
   ];
 }
@@ -440,9 +448,14 @@ export interface CompactionRunnerV1 {
   };
   budget: number;
   currentTurn: number;
+  /**
+   * The model the summary runs on. Absent, it runs on the model the Turn's
+   * own last request used.
+   */
+  model?: CompactionModelV1;
   newEffectId(): string;
   /**
-   * One bounded summariser call on the Bot's own model binding.
+   * One bounded summariser call on the summary model.
    *
    * `effectId` is the id the intent above was recorded under, and it is the
    * id the call must be dispatched under: it is what makes a summariser call
@@ -476,8 +489,11 @@ export async function runCompactionV1(
   const session = input.session;
   const state = input.window.state;
   if (state.unsettled) {
-    // A restart interrupted an attempt. Its outcome is unknowable, so it is
-    // settled as a failure and backoff schedules the retry.
+    // A restart or a newly admitted Turn interrupted an attempt. Its outcome
+    // is unknowable, so it is settled as a failure — and then tried again
+    // now, because an interruption says nothing about whether the next
+    // attempt will work. Deploys interrupt often enough that waiting out a
+    // backoff for each one left conversations uncompacted for days.
     session.append({
       type: "conversation/compaction-failed",
       effectId: state.unsettled.effectId,
@@ -485,11 +501,6 @@ export async function runCompactionV1(
       reason: "Interrupted before a summary was recorded.",
     });
     await input.session.flush();
-    return {
-      kind: "failed",
-      throughTurn: state.unsettled.throughTurn,
-      reason: "interrupted",
-    };
   }
   const assessment = assessCompactionV1({
     messages: input.window.messages,
@@ -505,13 +516,18 @@ export async function runCompactionV1(
   ) {
     return { kind: "skipped", assessment };
   }
-  const { throughTurn, fromTurn } = assessment;
-  const binding = compactionModelV1(input.session.activeRunJournal);
+  const { fromTurn } = assessment;
+  const binding =
+    input.model ?? compactionModelV1(input.session.activeRunJournal);
   if (!binding) return { kind: "skipped", assessment };
-  const covered: LlmMessage[] = [];
-  for (const [index, message] of input.window.messages.entries()) {
-    if (input.window.turns[index]! <= throughTurn) covered.push(message);
-  }
+  const { throughTurn, covered } = compactionSliceV1({
+    messages: input.window.messages,
+    turns: input.window.turns,
+    throughTurn: assessment.throughTurn,
+    previousBytes: state.compaction
+      ? compactionInputBytesV1(state.compaction.summary)
+      : 0,
+  });
   if (covered.length === 0) return { kind: "skipped", assessment };
   const effectId = input.newEffectId();
   // Intent before the effect: a summariser call is billed model spend.
@@ -566,6 +582,37 @@ export async function runCompactionV1(
   } finally {
     clearTimeout(deadline);
   }
+}
+
+/**
+ * The oldest whole Turns, up to `throughTurn`, that one summariser call can
+ * read. Always at least one Turn, so a Turn larger than the cap is summarised
+ * from its truncated transcript rather than blocking every later one.
+ */
+export function compactionSliceV1(input: {
+  messages: readonly LlmMessage[];
+  turns: readonly number[];
+  throughTurn: number;
+  previousBytes: number;
+}): { throughTurn: number; covered: LlmMessage[] } {
+  const covered: LlmMessage[] = [];
+  let spent = input.previousBytes;
+  let through = 0;
+  let index = 0;
+  while (index < input.messages.length) {
+    const turn = input.turns[index]!;
+    if (turn > input.throughTurn) break;
+    let end = index;
+    while (end < input.messages.length && input.turns[end] === turn) end += 1;
+    const messages = input.messages.slice(index, end);
+    const bytes = compactionInputBytesV1(compactionTranscriptV1(messages));
+    if (through > 0 && spent + bytes > COMPACTION_INPUT_MAX_BYTES_V1) break;
+    covered.push(...messages);
+    spent += bytes;
+    through = turn;
+    index = end;
+  }
+  return { throughTurn: through, covered };
 }
 
 /** Truncates a failure description to what the event accepts. */

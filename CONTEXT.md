@@ -247,5 +247,5 @@ A durable pending decision the User answers: what the Bot proposes to do, its ri
 _Avoid_: Permission, consent prompt, confirmation
 
 **Compaction**:
-The durable summary of a conversation's earliest turns, computed once when the assembled history grows past its budget and replayed into every later request in their place. It covers a prefix of the conversation, so a later one supersedes it; the turns it covers are still in the log and still readable.
+The durable summary of a conversation's earliest turns, computed once when the assembled history grows past its budget and replayed into every later request in their place. It covers a prefix of the conversation, so a later one supersedes it; the turns it covers are still in the log and still readable. It runs on the platform's summary model whatever model the Bot is on, one bounded slice of the oldest turns per call.
 _Avoid_: Truncation, trimming, context window management

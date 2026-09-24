@@ -36,6 +36,7 @@ import { historyCharsV1, type CompactionStateV1 } from "./compaction.js";
 import { CHAT_HISTORY_BUDGET_CHARS_V1, type ChatWindowV1 } from "./history.js";
 import {
   chooseWorkingTurnsV1,
+  turnOpeningMessagesV1,
   emptyVoiceExcerptV1,
   reduceWorkingContextAppendV1,
   renderWorkingContextV1,
@@ -519,7 +520,7 @@ function compactionStateFromHead(
   const summary = head?.compaction;
   return {
     failures: head?.compactionFailures ?? 0,
-    lastFailureThroughTurn: head?.lastFailureThroughTurn ?? 0,
+    lastFailureTurn: head?.lastFailureThroughTurn ?? 0,
     ...(head?.unsettledCompaction
       ? { unsettled: head.unsettledCompaction }
       : {}),
@@ -689,6 +690,9 @@ export async function selectStoredWorkingContextV1(
       currentTurn: request.currentTurn,
       currentTurnType: request.currentTurnType,
       currentChars: historyCharsV1(request.currentMessages),
+      openingChars: historyCharsV1(
+        turnOpeningMessagesV1(request.currentMessages),
+      ),
       budget,
     });
     const oldestLoaded = metas[metas.length - 1];

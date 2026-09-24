@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   decodeSessionEvent,
+  emptyConversationHeadV1,
   type SessionEventInput,
 } from "@frockbot/core/contracts";
 import { MemoryStorage } from "@frockbot/core/durable/testing";
@@ -10,7 +11,11 @@ import {
   selectStoredWorkingContextV1,
   WorkingContextUnavailableError,
 } from "./working-context-store.js";
-import { assembleJournalContextV1 } from "./working-context.js";
+import {
+  assembleJournalContextV1,
+  chooseWorkingTurnsV1,
+  TURN_GROWTH_CEILING_V1,
+} from "./working-context.js";
 
 const SESSION = "user:bot";
 
@@ -318,5 +323,44 @@ describe("working context projection", () => {
         ? assistant.providerState
         : undefined,
     ).toMatchObject({ content: JSON.stringify({ replay: 1 }) });
+  });
+});
+
+describe("history for one Turn", () => {
+  const head = {
+    ...emptyConversationHeadV1("user-1:bot-1"),
+    messageBearingChatTurns: 10,
+  };
+  // Ten older Turns of 10k characters each, newest first.
+  const turns = Array.from({ length: 10 }, (_, index) => ({
+    turn: 10 - index,
+    turnType: "chat" as const,
+    fullChars: 10_000,
+    prunedChars: 10_000,
+    messageBearing: true,
+  }));
+  const choose = (currentChars: number) =>
+    chooseWorkingTurnsV1({
+      head,
+      turns,
+      currentTurn: 11,
+      currentTurnType: "chat",
+      currentChars,
+      openingChars: 1_000,
+      budget: 50_000,
+    });
+
+  test("is the same at every step, so each step hits the prompt cache", () => {
+    const first = choose(1_000);
+    // The Turn's own tool traffic grows; the history it carries does not move.
+    expect(choose(20_000)).toEqual(first);
+    expect(choose(45_000)).toEqual(first);
+    expect(first.kept).toEqual([10, 9, 8, 7]);
+  });
+
+  test("is chosen again once the Turn outgrows its ceiling", () => {
+    const first = choose(1_000);
+    const grown = choose(50_000 * TURN_GROWTH_CEILING_V1);
+    expect(grown.kept.length).toBeLessThan(first.kept.length);
   });
 });

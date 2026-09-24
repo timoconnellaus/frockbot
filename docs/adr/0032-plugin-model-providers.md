@@ -132,6 +132,10 @@ captured when the composition mounted — never one the Plugin named — and the
 composition is retained past the Turn for exactly this call. One summariser
 effect is one upstream call, and its lease is released where the call ends.
 
+Where the platform's summary model is mounted (a provider with a
+`summaryModel`, Frock AI in the Cloudflare app), compaction runs on it instead,
+so a provider Plugin serves this path only when no summary model is available.
+
 The ticket itself is per attempt and one-shot: minted when the attempt opens,
 spent by the call it is spent on, and it cannot be presented again. The
 dispatch owns the upstream call's abort, so an attempt that ends — its own

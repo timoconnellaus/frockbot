@@ -249,7 +249,7 @@ export interface ShellModelRuntimeHostV1 {
  *
  * The Shell knows which seams a Turn has and which Packages its plan enables;
  * it does not know which implementation a Package id resolves to. The
- * application supplies these three factories, which is the whole of what the
+ * application supplies these factories, which is the whole of what the
  * Shell needs from the application that composes it.
  */
 export interface ShellRuntimeFactoriesV1 {
@@ -268,6 +268,14 @@ export interface ShellRuntimeFactoriesV1 {
     binding: ResolvedModelBindingV1,
     host: ShellModelRuntimeHostV1,
   ): FoundationAgentPackage;
+  /**
+   * The platform's summariser, mounted beside the Bot's model so a Turn's
+   * conversation summary never depends on the model the Bot picked. Absent
+   * where the deployment has no platform model to summarise with.
+   */
+  summariser?(
+    host: ShellModelRuntimeHostV1,
+  ): FoundationAgentPackage | undefined;
 }
 
 /** The application's Packages, and the factories that mount them. */

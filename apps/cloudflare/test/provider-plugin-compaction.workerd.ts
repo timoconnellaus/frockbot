@@ -1,5 +1,6 @@
-// Provider Plugins must serve background compaction on the same admitted model
-// binding as ordinary Turns, with the durable compaction effect as its key.
+// A Bot on a provider Plugin is compacted by the platform's summariser, not by
+// its Plugin: the summary is durable, is written once, and never reaches the
+// Bot's own provider — not even after eviction and recovery.
 import { env } from "cloudflare:workers";
 import {
   evictDurableObject,
@@ -130,7 +131,7 @@ function say(index: number): string {
   return `Turn ${index} says: ${"detail ".repeat(13_000 / 7)}`;
 }
 
-test("a provider Plugin compacts a long conversation durably under the compaction effect's idempotency key", async () => {
+test("a Bot on a provider Plugin is compacted durably by the platform summariser", async () => {
   expect("STRIPE_SECRET_KEY" in env).toBe(false);
   const suffix = crypto.randomUUID();
   const identity = {
@@ -175,11 +176,11 @@ test("a provider Plugin compacts a long conversation durably under the compactio
   expect(compactions).toHaveLength(1);
   const compacted = compactions[0];
   if (compacted?.type !== "conversation/compacted") {
-    throw new Error("the provider Plugin did not persist its summary");
+    throw new Error("the platform summariser did not persist its summary");
   }
-  expect(compacted.provider).toBe("deepseek");
-  expect(compacted.model).toBe("deepseek-v4-pro");
-  expect(compacted.summary).toContain("DeepSeek durable summary");
+  expect(compacted.provider).toBe("flock-ai");
+  expect(compacted.model).toBe("@frock/structured");
+  expect(compacted.summary).toContain("Frock AI summary");
   expect(compacted.fromTurn).toBe(1);
   expect(compacted.throughTurn).toBeGreaterThan(0);
   expect(compacted.throughTurn).toBeLessThanOrEqual(7);
@@ -191,9 +192,10 @@ test("a provider Plugin compacts a long conversation durably under the compactio
   expect(intents).toHaveLength(1);
   expect(intents[0]!.seq).toBeLessThan(compacted.seq);
   const beforeEviction = await calls();
+  // The Bot's own provider never saw the summary request.
   expect(
     beforeEviction.filter((call) => call.idempotencyKey === compacted.effectId),
-  ).toHaveLength(1);
+  ).toHaveLength(0);
 
   // The summary is already durable. Eviction and recovery cannot resend its
   // model effect; neither the mounted provider nor its in-memory tickets
@@ -254,5 +256,5 @@ test("a provider Plugin compacts a long conversation durably under the compactio
     (await calls()).filter(
       (call) => call.idempotencyKey === compacted.effectId,
     ),
-  ).toHaveLength(1);
+  ).toHaveLength(0);
 });

@@ -188,68 +188,6 @@ interface WireMessage {
   tool_calls?: Array<{ function?: { name?: string } }>;
 }
 
-/**
- * The sentinel a conversation puts in its own Turns to make the compaction
- * summariser hang. It has to travel in the *conversation*, because the
- * summariser's request is composed by the product and carries the covered
- * Turns verbatim — which is exactly how the stub recognises one.
- */
-export const STALLED_SUMMARISER_SENTINEL = "STALL-SUMMARISER";
-
-/** How long this request should hang for, or 0 when it should not. */
-function summariserStallMs(body: unknown): number {
-  if (!body || typeof body !== "object") return 0;
-  const messages = (body as { messages?: unknown }).messages;
-  if (!Array.isArray(messages)) return 0;
-  const system = (messages as WireMessage[]).find(
-    (message) => message.role === "system",
-  );
-  const instruction = typeof system?.content === "string" ? system.content : "";
-  if (!instruction.startsWith("You are compressing the earlier part")) return 0;
-  return JSON.stringify(messages).includes(STALLED_SUMMARISER_SENTINEL)
-    ? 5_000
-    : 0;
-}
-
-function structuredCompactionStream(body: unknown): Response | undefined {
-  if (!body || typeof body !== "object") return undefined;
-  const messages = (body as { messages?: unknown }).messages;
-  if (!Array.isArray(messages)) return undefined;
-  const system = (messages as WireMessage[]).find(
-    (message) => message.role === "system",
-  );
-  const instruction = typeof system?.content === "string" ? system.content : "";
-  if (!instruction.includes("Return only JSON matching this schema exactly:")) {
-    return undefined;
-  }
-  const content = JSON.stringify({
-    summary: "Ollama summary",
-    decisions: [],
-    openItems: [],
-    identifiers: [],
-  });
-  return new Response(
-    `data: ${JSON.stringify({ choices: [{ delta: { content } }] })}\n\n` +
-      `data: ${JSON.stringify({ choices: [{ delta: {}, finish_reason: "stop" }] })}\n\n` +
-      "data: [DONE]\n\n",
-    { status: 200, headers: { "content-type": "text/event-stream" } },
-  );
-}
-
-function sleep(ms: number, signal?: AbortSignal | null): Promise<void> {
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(resolve, ms);
-    signal?.addEventListener(
-      "abort",
-      () => {
-        clearTimeout(timer);
-        reject(signal.reason ?? new Error("aborted"));
-      },
-      { once: true },
-    );
-  });
-}
-
 /** The scripted tool calls one request asks for, empty when it asks for none. */
 function scriptedToolCalls(
   body: unknown,
@@ -734,34 +672,10 @@ async function deepseekStub(request: Request, url: URL): Promise<Response> {
   }
   const userText = deepseekUserText(body);
   const headers = { "content-type": "text/event-stream" };
-  const messages =
-    body &&
-    typeof body === "object" &&
-    Array.isArray((body as { messages?: unknown }).messages)
-      ? (body as { messages: WireMessage[] }).messages
-      : [];
   if (userText.includes(DEEPSEEK_RATE_LIMIT_TRIGGER)) {
     // The provider stating, before doing any work, that it will not take this
     // call: the one refusal the kernel may plan a retry for.
     return Response.json({ error: "rate limited" }, { status: 429 });
-  }
-  const system = messages.find((message) => message.role === "system");
-  if (
-    typeof system?.content === "string" &&
-    system.content.startsWith("You are compressing the earlier part")
-  ) {
-    const content = JSON.stringify({
-      summary: "DeepSeek durable summary",
-      decisions: [],
-      openItems: [],
-      identifiers: [],
-    });
-    return new Response(
-      deepseekFrame({ content }) +
-        deepseekFrame({}, "stop") +
-        "data: [DONE]\n\n",
-      { status: 200, headers },
-    );
   }
   if (userText.includes(DEEPSEEK_CUT_TRIGGER)) {
     // An answer that stops mid-sentence: no stop reason and no end marker, the
@@ -981,10 +895,6 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
     } catch {
       body = undefined;
     }
-    const stall = summariserStallMs(body);
-    if (stall > 0) await sleep(stall, request.signal);
-    const compaction = structuredCompactionStream(body);
-    if (compaction) return compaction;
     const calls = scriptedToolCalls(body);
     if (calls.length > 0) return toolCallStream(calls);
     const wire = body as {

@@ -8,6 +8,7 @@ import {
   gatewayModelForFrockRequestV1,
   FROCK_AI_BINDING_AUTO_MODEL,
   FROCK_AI_STRUCTURED_MODEL,
+  FROCK_AI_SUMMARY_MODEL,
   normalizeFrockModelIdV1,
 } from "./catalog.js";
 
@@ -44,6 +45,19 @@ describe("Frock AI catalog", () => {
     expect(
       gatewayModelForFrockIdV1(FROCK_AI_DEFAULT_MODEL, "production-auto"),
     ).toBe("dynamic/production-auto");
+  });
+
+  test("sends the summary model to its own route, and never lists it", () => {
+    expect(gatewayModelForFrockIdV1(FROCK_AI_SUMMARY_MODEL)).toBe(
+      "dynamic/frock-structured",
+    );
+    // The binding carries no routes; its pinned Auto model has the context.
+    expect(gatewayModelForFrockIdV1(FROCK_AI_SUMMARY_MODEL, null)).toBe(
+      FROCK_AI_BINDING_AUTO_MODEL,
+    );
+    expect(
+      frockAiStaticCatalogV1().models.map((model) => model.providerModelId),
+    ).not.toContain(FROCK_AI_SUMMARY_MODEL);
   });
 
   test("pins Auto schema work to a Workers AI model that supports it", () => {

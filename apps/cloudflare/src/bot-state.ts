@@ -228,15 +228,15 @@ import type {
 import { decodeWorkspacePathV1 } from "@frockbot/core/contracts";
 
 function hostedModelLimits(raw?: string) {
-  const rates = Object.values(decodeModelRates(raw));
-  return {
-    inputTokens: rates.length
-      ? Math.min(...rates.map((rate) => rate.maximumInputTokens))
-      : 0,
-    outputTokens: rates.length
-      ? Math.min(...rates.map((rate) => rate.maximumOutputTokens))
-      : 0,
-  };
+  return Object.fromEntries(
+    Object.entries(decodeModelRates(raw)).map(([model, rate]) => [
+      model,
+      {
+        inputTokens: rate.maximumInputTokens,
+        outputTokens: rate.maximumOutputTokens,
+      },
+    ]),
+  );
 }
 
 /** Base64 without a Node Buffer: this object runs in workerd. */

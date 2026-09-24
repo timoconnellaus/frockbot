@@ -37,6 +37,12 @@ export interface AuxiliaryWorkerOptionsV1 {
 export const FAKE_PNG_BASE64 =
   "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg==";
 
+/**
+ * Carried into a conversation's own messages, it makes the summariser hang on
+ * that conversation and no other.
+ */
+export const STALLED_SUMMARISER_SENTINEL_V1 = "STALL-SUMMARISER";
+
 /** The service name both bindings point at. */
 export const FROCK_AI_FAKE_NAME = "frock-ai-fake";
 /** The RPC entrypoint the `AI` binding is wired to. */
@@ -53,12 +59,35 @@ const encoder = new TextEncoder();
 
 let calls = [];
 
+const STALL = ${JSON.stringify(STALLED_SUMMARISER_SENTINEL_V1)};
+
+function textStream(content) {
+  const payload =
+    'data: ' + JSON.stringify({choices: [{delta: {content}}]}) + '\\n\\n' +
+    'data: {"choices":[{"delta":{},"finish_reason":"stop"}]}\\n\\n' +
+    'data: [DONE]\\n\\n';
+  return new Response(new ReadableStream({
+    start(controller) {
+      controller.enqueue(encoder.encode(payload));
+      controller.close();
+    },
+  }));
+}
+
 class FakeGateway extends RpcTarget {
-  run(request) {
+  async run(request) {
     const query = request?.query ?? {};
     const messages = Array.isArray(query.messages) ? query.messages : [];
     const prompt = String(messages.at(-1)?.content ?? "");
     calls.push({ model: String(query.model ?? ""), prompt });
+    // The platform summariser: every Bot's conversation summary lands here.
+    const system = messages.find(message => message.role === "system");
+    if (String(system?.content ?? "").startsWith("You are compressing the earlier part")) {
+      if (JSON.stringify(messages).includes(STALL)) {
+        await new Promise(resolve => setTimeout(resolve, 5000));
+      }
+      return textStream("## Summary\\nFrock AI summary\\n\\n## Identifiers mentioned\\n- none");
+    }
     if (query.response_format?.type === "json_schema") {
       const content = JSON.stringify({
         summary: "Frock AI summary",

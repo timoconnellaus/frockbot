@@ -2,6 +2,10 @@ import { PLUGIN_SERVED_PROVIDER_IDS_V1 } from "@frockbot/providers/catalog/defin
 import { createGroupChatsRuntimeFeature } from "@frockbot/app/groups/agent";
 import { catalogProvidersV1 } from "@frockbot/providers/catalog/registry";
 import { createCatalogProviderFeatureV1 } from "@frockbot/providers/catalog/runtime";
+import {
+  FROCK_AI_CONNECTION_GENERATION,
+  FROCK_AI_CONNECTION_ID,
+} from "@frockbot/providers/frock-ai/catalog";
 import type { CredentialLeaseV1 } from "@frockbot/core/connection";
 import { createConfiguredConnectRuntimeContribution } from "@frockbot/app/connect/agent";
 import type {
@@ -59,7 +63,10 @@ import {
   createOllamaCloudFeature,
   ollamaChatBaseUrl,
 } from "@frockbot/providers/ollama-cloud/runtime";
-import { createFrockAiFeature } from "@frockbot/providers/frock-ai/runtime";
+import {
+  createFrockAiFeature,
+  createFrockAiSummaryFeature,
+} from "@frockbot/providers/frock-ai/runtime";
 import {
   createRoutinesRuntimeFeature,
   type RoutinesRuntimeHostV1,
@@ -656,8 +663,30 @@ export function createFoundationModelRuntimePackage(
 }
 
 /**
+ * Frock AI as every Turn's summariser. It needs no Connection of the User's:
+ * the ambient one is the platform's, and its calls are billed like any other
+ * hosted call.
+ */
+export function createFoundationSummariserRuntimePackage(
+  host: ShellModelRuntimeHostV1,
+): FoundationRuntimePackage | undefined {
+  if (host.frockAiAutoRoute === undefined || !host.runFrockAiChatCompletion) {
+    return undefined;
+  }
+  return {
+    id: "provider-flock-ai",
+    feature: createFrockAiSummaryFeature({
+      connectionId: FROCK_AI_CONNECTION_ID,
+      connectionGeneration: FROCK_AI_CONNECTION_GENERATION,
+      autoRoute: host.frockAiAutoRoute,
+      runChatCompletion: host.runFrockAiChatCompletion,
+    }),
+  };
+}
+
+/**
  * What this application hands the Shell's Bot Contribution: its Packages, and
- * the three factories that turn a Package id into a mounted feature. The Shell
+ * the factories that turn a Package id into a mounted feature. The Shell
  * reads no part of this application directly.
  */
 export const foundationShellApplicationV1: ShellApplicationV1 = {
@@ -668,5 +697,6 @@ export const foundationShellApplicationV1: ShellApplicationV1 = {
     hosted: createFoundationHostedRuntimePackages,
     enabled: createFoundationEnabledRuntimePackages,
     model: createFoundationModelRuntimePackage,
+    summariser: createFoundationSummariserRuntimePackage,
   },
 };

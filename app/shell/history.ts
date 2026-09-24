@@ -93,10 +93,12 @@ export const CHAT_HISTORY_BUDGET_CHARS_V1 = 150_000;
  *
  * It is said plainly, because a model that cannot see the beginning of a
  * conversation and is not told so will confidently answer as though it had.
+ * It names no count: this is the first message of the request, and a count
+ * that moved with every dropped Turn changed the whole prompt and missed the
+ * provider's cache on every step.
  */
-export function omittedHistoryNoticeV1(turns: number): string {
-  return `Earlier in this conversation there ${turns === 1 ? "was 1 Turn" : `were ${turns} Turns`} that are not included here. They are not summarised: if you need something from them, say so or search your memory rather than guessing.`;
-}
+export const OMITTED_HISTORY_NOTICE_V1 =
+  "Earlier Turns of this conversation are not included here. They are not summarised: if you need something from them, say so or search your memory rather than guessing.";
 
 /** The conversation's own messages, after any compaction already recorded. */
 export interface ChatWindowV1 {
