@@ -120,7 +120,7 @@ class _TranscriptViewState extends State<TranscriptView> {
   /// One key per line, so the newest message can be measured against the
   /// viewport. Keyed by line id and handed to every row rather than to the
   /// newest alone: a key that appeared and disappeared as the thread grew
-  /// would rebuild the row it left, and a live Applet card with it.
+  /// would rebuild the row it left, and a live Card with it.
   final Map<String, GlobalKey> probes = {};
   final ScrollController scroll = ScrollController();
 

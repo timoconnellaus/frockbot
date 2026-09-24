@@ -78,24 +78,6 @@ interface Storage extends FlockUserTransaction {
   delete(key: string): Promise<boolean>;
   setAlarm(timestamp: number | Date): Promise<void>;
 }
-/**
- * What else in the same object a Bot's lifecycle reaches. The application
- * supplies it — Applets are not the Flock's — and both halves run inside the
- * saga's own transactions, so a lifecycle and its consequence commit together.
- */
-export interface FlockLifecycleEffectsV1 {
-  /** At admission. Throws to refuse a command before any saga is recorded. */
-  admit(
-    storage: FlockUserTransaction,
-    command: BotLifecycleCommandV1,
-  ): Promise<void>;
-  /** In the transaction that settles an applied command. Must be replayable. */
-  settle(
-    storage: FlockUserTransaction,
-    command: BotLifecycleCommandV1,
-    lifecycle: BotLifecycleViewV1,
-  ): Promise<void>;
-}
 export interface FlockUserBackendHost {
   storage: Storage;
   now?: () => Date;
@@ -105,7 +87,6 @@ export interface FlockUserBackendHost {
     command: BotLifecycleCommandV1,
   ): Promise<BotLifecycleReceiptV1>;
   readBotLifecycle(userId: string, botId: string): Promise<BotLifecycleViewV1>;
-  lifecycleEffects?: FlockLifecycleEffectsV1;
 }
 
 interface StoredLifecycleSagaV1 {
@@ -587,7 +568,6 @@ export class FlockUserBackendContribution {
           `Bot lifecycle projection is missing for "${command.botId}"`,
         );
       const lifecycle = decodeBotLifecycleViewV1(lifecycleValue);
-      await this.host.lifecycleEffects?.admit(storage, command);
       const receipt = {
         schemaVersion: 1,
         commandId: command.commandId,
@@ -708,13 +688,6 @@ export class FlockUserBackendContribution {
       const currentSaga = decodeStoredLifecycleSagaV1(currentSagaValue);
       if (currentSaga.fingerprint !== saga.fingerprint)
         throw new FlockDecodeError(`command ID collision: ${commandId}`);
-      if (outcome!.status === "applied") {
-        await this.host.lifecycleEffects?.settle(
-          storage,
-          saga.command,
-          outcome!.lifecycle,
-        );
-      }
       if (outcome!.lifecycle.status === "deleted") {
         // The Bot has torn itself down, so the registration leaves the
         // directory in the same transaction that settles the receipt: the

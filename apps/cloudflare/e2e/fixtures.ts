@@ -567,11 +567,6 @@ export async function openApplication(
   ).toBeVisible({ timeout: SHELL_TIMEOUT_MS });
 }
 
-/** Find the Builder Bot provisioned for Applets browser specs. */
-export async function builderBotId(page: Page): Promise<string> {
-  return botIdByName(page, "Builder");
-}
-
 /** Resolve a Bot this account already holds, by the name the person sees. */
 export async function botIdByName(page: Page, name: string): Promise<string> {
   const response = await page.request.get("/api/bots");

@@ -293,13 +293,6 @@ abstract final class SettingsIds {
   /// One recent Routine run on the Bot page, which opens its run log.
   static String botPageRun(String entryId) => 'bot-page-run-$entryId';
 
-  /// The row under the running Applets, which opens the whole list.
-  static const botPageAppletsAll = 'bot-page-applets-all';
-
-  /// One running Applet on the Bot page. Not the Applet list's own row id:
-  /// the list is a page of its own and both can be on screen at once.
-  static String botPageApplet(String appletId) => 'bot-page-applet-$appletId';
-
   /// Settings' door to this Bot's Plugins, and to its model.
   static const botPlugins = 'bot-settings-plugins';
 
@@ -490,41 +483,6 @@ abstract final class SearchIds {
   /// hits gathered together.
   static String groupChat(String groupId) => 'search-chat-$groupId';
   static String hit(String runId) => 'search-hit-$runId';
-}
-
-/// Applets: what a Bot built, and what it is doing to it now.
-///
-/// The names follow what `applets.e2e.ts` and `applets-shell.e2e.ts` select on
-/// — the canvas region, its progress line, the App/Code toggle, one file
-/// button and the failure's retry — so both specs can be rewritten against
-/// Flutter Web with the same intent rather than re-derived from the widgets.
-/// The one door to the selected Bot's Applet list is the All Applets row on
-/// its page ([SettingsIds.botPageAppletsAll]): the list is the sidebar's
-/// Applets mode on a wide window and a page of its own on a phone.
-abstract final class AppletIds {
-  static const canvas = 'applet-canvas';
-  static const progress = 'applet-canvas-progress';
-  static const failure = 'applet-canvas-failure';
-  static const retry = 'applet-canvas-retry';
-  static const tabs = 'applet-canvas-tabs';
-  static const close = 'applet-canvas-close';
-  static const source = 'applet-canvas-source';
-  static const list = 'applet-list';
-  static const listBack = 'applet-list-back';
-  static const listRetry = 'applet-list-retry';
-
-  /// One Applet in the list, which opens it.
-  static String row(String appletId) => 'applet-row-$appletId';
-
-  /// Whether the Bot owns the Applet in that row or has it shared.
-  static String access(String appletId) => 'applet-access-$appletId';
-
-  /// The owner's delete, on rows the Bot owns and no others.
-  static String delete(String appletId) => 'applet-delete-$appletId';
-
-  /// A file button in the code view, by the path it opens. Paths carry dots
-  /// and slashes, which a selector reads perfectly well and a slug would lose.
-  static String file(String path) => 'applet-file-$path';
 }
 
 /// The Computer: whether it is there, what it is doing, and who is driving.

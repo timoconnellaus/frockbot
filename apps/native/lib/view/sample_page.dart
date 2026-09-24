@@ -32,7 +32,7 @@ const sampleViewDocumentV1 = <String, Object?>{
           'kind': 'select',
           'value': 'syd',
           'editable': true,
-          'hint': 'Where this Applet runs.',
+          'hint': 'Where this deploys to.',
           'choices': [
             {'label': 'Sydney', 'value': 'syd'},
             {'label': 'Frankfurt', 'value': 'fra'},
@@ -78,8 +78,8 @@ const sampleViewDocumentV1 = <String, Object?>{
       {
         'type': 'embed',
         'kind': 'frame',
-        'source': appletViewerFrameV1,
-        'label': 'Applet preview',
+        'source': computerViewerFrameV1,
+        'label': 'Computer preview',
       },
       {
         'type': 'action',

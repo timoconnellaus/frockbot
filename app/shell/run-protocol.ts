@@ -639,12 +639,6 @@ export function clientToolCallNameV1(call: {
   return `${namespace}/${toolName}`;
 }
 
-function appletAttribution(
-  _input: Record<string, unknown>,
-): string | undefined {
-  return undefined;
-}
-
 function dynamicToolCallInput(
   value: unknown,
 ): ClientDynamicToolCallInputV1 | undefined {
@@ -658,15 +652,13 @@ function dynamicToolCallInput(
   ) {
     return undefined;
   }
-  // The canvas needs attribution so another Applet's publish cannot advance
-  // its progress. Source, commands and all other first-party arguments stay
-  // inside the Bot; connected external tools retain their existing input.
+  // Source, commands and all other first-party arguments stay inside the Bot;
+  // connected external tools retain their existing input.
   const argumentsJson =
-    input.namespace === FROCKBOT_NAMESPACE_V1
-      ? appletAttribution(input)
-      : Object.hasOwn(input, "arguments")
-        ? JSON.stringify(input.arguments)
-        : undefined;
+    input.namespace !== FROCKBOT_NAMESPACE_V1 &&
+    Object.hasOwn(input, "arguments")
+      ? JSON.stringify(input.arguments)
+      : undefined;
   return {
     namespace: truncateWireString(input.namespace, MAX_EVENT_NAME_BYTES),
     toolName: truncateWireString(input.toolName, MAX_EVENT_NAME_BYTES),

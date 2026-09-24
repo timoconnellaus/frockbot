@@ -119,7 +119,7 @@ describe("the card payload", () => {
 });
 
 describe("the send payload codec", () => {
-  test("applet cards accept only an applet id, never a URL or credentials", () => {
+  test("refuses an applet payload, whatever it carries", () => {
     for (const payload of [
       { type: "applet", appletId: "https://evil.test" },
       { type: "applet", appletId: "alice.todo", token: "secret" },

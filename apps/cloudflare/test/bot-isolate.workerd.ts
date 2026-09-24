@@ -50,8 +50,8 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     // dispatch guard refused every call without `mcpDetails.description`,
     // while the discovery envelope, the namespace prompt block and the
     // `call_dynamic_tool` blurb all told the model to omit the field. The
-    // envelope offered was the envelope refused, so the Applets Package (which
-    // mounts here) could not be reached by chat at all.
+    // envelope offered was the envelope refused, so a Package that mounts here
+    // could not be reached by chat at all.
     const result = await stub.callTool({
       userId: "user-1",
       botId: "bot-1",

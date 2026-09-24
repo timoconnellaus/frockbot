@@ -171,7 +171,7 @@ test("the shell is usable on a phone", async ({
   // once there is something to send.
   await expectWithinViewport(page, "composer-dictate");
   // GrokBot's bar: the way back and the panel switch. Nothing else is a
-  // control up here; Routines, Applets and the Computer are on the Bot's page.
+  // control up here; Routines and the Computer are on the Bot's page.
   await expect(sem(page, "right-panel-toggle")).toBeVisible();
   await expect(page.getByRole("button", { name: "Routines" })).toHaveCount(0);
 

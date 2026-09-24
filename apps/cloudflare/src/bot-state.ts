@@ -239,14 +239,6 @@ function hostedModelLimits(raw?: string) {
   };
 }
 
-/*
- * Where an Applet's source lives.
- *
- * The Applets Package declares this root in its manifest (plan §7); these are
- * the ids that name it, restated here because the canvas's read is served from
- * the Bot Durable Object rather than from the Package's own module.
- */
-
 /** Base64 without a Node Buffer: this object runs in workerd. */
 function bytesToBase64(bytes: Uint8Array): string {
   let binary = "";
@@ -1187,9 +1179,9 @@ export class BotState
    * the session event log and its runs, the transcript and conversations, the
    * Bot's Memory and Skills generation ledger, Routines and their schedules,
    * Subagent tasks, approvals, notifications, unread and sidebar preview, the
-   * Package composition generations, the Applet mirror, and the state-channel
-   * log. Then the two object-store roots the Bot owns, which are the only
-   * Bot-scoped state that does not live in this object.
+   * Package composition generations, and the state-channel log. Then the two
+   * object-store roots the Bot owns, which are the only Bot-scoped state that
+   * does not live in this object.
    *
    * If Vectorize is not bound (local development and workerd by default), the
    * journal records that the derived cleanup was skipped before teardown.

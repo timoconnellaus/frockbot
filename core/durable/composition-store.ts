@@ -103,8 +103,8 @@ export class DurableCompositionStore implements CompositionStore {
         return pin;
       }
       // Records written while generations still listed first-party members
-      // do not decode. Nothing in them survives: the Applet set is re-read
-      // from the directory at the next Turn, and there was no other member.
+      // do not decode. Nothing in them survives, and there was no other
+      // member: the pin is rebuilt below.
       await this.clear();
     }
     this.verified = true;

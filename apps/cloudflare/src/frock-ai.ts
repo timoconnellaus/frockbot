@@ -27,7 +27,7 @@ export interface FrockAiGatewayHostV1 {
  * `TimeoutError: The operation was aborted due to timeout`, which the Agent
  * read as an *uncertain* model outcome and parked the run on — a `POST /turns`
  * answering 500 after 65s with "Couldn't reach the Bot" on screen. A step that
- * carries the applets SKILL.md plus the dynamic-tool schemas crosses a minute
+ * carries a large SKILL.md plus the dynamic-tool schemas crosses a minute
  * routinely, so 60s was not a slow gateway, it was the ordinary case.
  *
  * Two minutes now, matching `MODEL_FIRST_BYTE_DEADLINE_MS_V1` so the kernel's

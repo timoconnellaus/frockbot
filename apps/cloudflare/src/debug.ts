@@ -21,8 +21,8 @@ import { constantTimeEqualsV1 } from "@frockbot/core/crypto";
  * ownership check, admission/refusal handling and size limit. An account's
  * features write is the operator's half of administration: the admin portal is
  * the hosted deployment's surface for it (ADR 0028), and a deployment with no
- * portal — a self-hosted one, a test stack — turns Applets or Plugin authoring
- * on for an account from here, under the same deployment secret. Nothing here
+ * portal — a self-hosted one, a test stack — turns Plugin authoring on for an
+ * account from here, under the same deployment secret. Nothing here
  * can reconcile, cancel, or otherwise move an existing run.
  */
 export interface DebugGatewaySurface {

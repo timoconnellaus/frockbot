@@ -1,19 +1,17 @@
 // Bot-authored source, end to end through the tools that write it, in workerd.
 //
-// The Bot-authored Applet and Plugin hosts keep their source in the User's
-// durable Workspace root, and `applet_*` / `plugin_*` are the tools that read
-// and write it. This drives those tools against a real Bot Durable Object: a
+// The Bot-authored Plugin host keeps its source in the User's durable
+// Workspace root, and `plugin_*` are the tools that read and write it. This drives those tools against a real Bot Durable Object: a
 // real Turn calls them, the bytes land in the real R2-backed root, and the next
 // listing, read, check and R2 head read back what was written. Nothing is a
 // stand-in except the build service, which needs a container this pool cannot
 // start (`applet-build-fake.ts`), and even there the request the app posts is
 // read back off the wire.
 //
-// What it is for: both artifacts go through one shared source repository, and
-// this is the surface that says the consolidation preserved what each host's
-// callers observe — the media type each file is stored under, the order and
-// scope of a listing, the optimistic write, the exact text read back, and the
-// bounds a check refuses on.
+// What it is for: this is the surface that says what the host's callers
+// observe — the media type each file is stored under, the order and scope of a
+// listing, the optimistic write, the exact text read back, and the bounds a
+// check refuses on.
 import { env } from "cloudflare:workers";
 import { describe, expect, test } from "vitest";
 import { PLUGIN_BUILD_LIMITS } from "@frockbot/applets/build-contract";
@@ -98,7 +96,7 @@ async function tool(
   return result.content;
 }
 
-/** What `applet_files` and `plugin_files` list, in the order they list it. */
+/** What `plugin_files` lists, in the order it lists it. */
 function listedFiles(content: string): Array<{ path: string; size: number }> {
   const lines = content.split("\n").slice(1);
   return lines.map((line) => {

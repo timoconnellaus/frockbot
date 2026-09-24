@@ -8,7 +8,6 @@ enum ChatIconKind {
   routines,
   settings,
   plugins,
-  applet,
   panel,
   send,
   mic,
@@ -149,7 +148,7 @@ class _ChatIconPainter extends CustomPainter {
         path.lineTo(15, 21);
       case ChatIconKind.plugins:
         // A piece with two tabs: the square, and the knobs that make it a
-        // Plugin rather than an Applet's window.
+        // Plugin.
         path.moveTo(5, 7);
         path.lineTo(9, 7);
         path.arcToPoint(const Offset(13, 7), radius: const Radius.circular(2));
@@ -159,18 +158,6 @@ class _ChatIconPainter extends CustomPainter {
         path.lineTo(17, 19);
         path.lineTo(5, 19);
         path.close();
-      case ChatIconKind.applet:
-        canvas.drawRRect(
-          RRect.fromRectAndRadius(
-            const Rect.fromLTWH(4, 4, 16, 16),
-            const Radius.circular(1.5),
-          ),
-          paint,
-        );
-        path.moveTo(4, 10);
-        path.lineTo(20, 10);
-        path.moveTo(10, 10);
-        path.lineTo(10, 20);
     }
     canvas.drawPath(path, paint);
   }

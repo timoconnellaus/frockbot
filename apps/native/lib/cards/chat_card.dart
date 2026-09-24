@@ -1,13 +1,13 @@
 /// A Card in the transcript: the A2UI renderer, with the host around it.
 ///
-/// The card owns its own read and its own renderer, the way an Applet card
-/// owns its viewer. It reads the surface over REST when it mounts, re-reads it
-/// when the Bot's durable state is invalidated — a `shell:card:` record
-/// changing is one of the notices the state channel carries — and stays alive
-/// in the transcript, because a card is a live surface and not a picture of
-/// one. A later send naming the same surface updates the record, and this card
-/// redraws in place; the transcript never grows a second one (the dedupe lives
-/// in `transcript_model.dart`, where the thread's order is decided).
+/// The card owns its own read and its own renderer. It reads the surface over
+/// REST when it mounts, re-reads it when the Bot's durable state is invalidated
+/// — a `shell:card:` record changing is one of the notices the state channel
+/// carries — and stays alive in the transcript, because a card is a live
+/// surface and not a picture of one. A later send naming the same surface
+/// updates the record, and this card redraws in place; the transcript never
+/// grows a second one (the dedupe lives in `transcript_model.dart`, where the
+/// thread's order is decided).
 ///
 /// Three things are the host's and never the card's.
 ///

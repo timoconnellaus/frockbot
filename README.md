@@ -111,7 +111,7 @@ Nothing is gated. Every line of both profiles is in this repository, and a self-
 - **Billing.** Switched by `STRIPE_SECRET_KEY`, which the installer never asks for. Set one by hand and billing turns on.
 - **The Android and macOS release channel.** Shorebird patches and the Sparkle feed belong to the hosted deployment; both updaters are inert in a plain `flutter build`. The release's `frockbot.apk` is that hosted app, with the hosted origin baked in, so it is not your phone app. Build your own against your own origin ([`docs/app-updates.md`](docs/app-updates.md), [`apps/native/README.md`](apps/native/README.md)); the update control never appears.
 - **Native sign-in, for now.** The `assetlinks.json` and `apple-app-site-association` the Worker serves name the hosted app's package and signing fingerprint, so a client you build and sign yourself has no verified return path on your hostname — the profile therefore enables no native sign-in targets, and the web client is the client until that association is per-deployment.
-- **The admin portal.** There is nothing for it to administer here: with Access deciding admission there are no admission modes, access records or invitations. An account's features — Applets, Plugin authoring — are turned on from the operator surface instead, `POST /api/debug/users/<userId>/features` under the deployment's `DEBUG_TOKEN`.
+- **The admin portal.** There is nothing for it to administer here: with Access deciding admission there are no admission modes, access records or invitations. An account's features — Plugin authoring and the admin-gated seeded Plugins — are turned on from the operator surface instead, `POST /api/debug/users/<userId>/features` under the deployment's `DEBUG_TOKEN`.
 - **The marketing site.** `apps/marketing` is `frockbot.com` and is hosted-only.
 
 ## Getting started
@@ -144,7 +144,7 @@ FROCKBOT_LLM_BASE_URL="https://api.example.com/v1" \
 
 `FROCKBOT_LLM_API_KEY` is optional for local endpoints. `FROCKBOT_LLM_PROVIDER_ID` customizes the provider label.
 
-The left sidebar lists the authenticated User's Bots and switches the conversation. **Add a Bot** creates a Bot with a character, a name and the first thing to say to it; pressing the character in Bot settings opens the picker where its character and colour change. **Manage Bots** shows archived Bots and provides archive and restore controls without deleting their history or settings. A Bot's page — its Computer, its recent Routine firings, its running Applets and the doors its Packages declare — is the right panel at wide widths and a pushed page on the phone, opened from the Bot's name in the conversation bar; its settings are one level under it behind the gear, and the Bot's Plugins — what it could run and whether it does, one switch per row, each switch that Bot's own — are a row in those settings. The **Marketplace** opens from the Bot list as one searchable catalog of models and some 1,400 connected apps, from Gmail, Google Calendar and Slack to Shopify and Stripe. Checkboxes under the search box choose Models and Connectors; Installed is the same list limited to what has already been added, for configure and remove. Adding a model provider opens its key form, and a connected provider's card offers **Choose a model**. From the profile sheet, **Settings** owns the declared application settings and **Models** holds the account's default model and the providers already added; each Bot may choose its own model in its settings, and without a choice follows that default — Frock AI's Automatic until one is chosen. Built-in features such as Web and Routines are switched per Bot on that Bot's Plugins page; there is no account-wide switch for them. During an active Turn, **Stop** records cancellation intent; closing or switching clients does not stop backend work.
+The left sidebar lists the authenticated User's Bots and switches the conversation. **Add a Bot** creates a Bot with a character, a name and the first thing to say to it; pressing the character in Bot settings opens the picker where its character and colour change. **Manage Bots** shows archived Bots and provides archive and restore controls without deleting their history or settings. A Bot's page — its Computer, its recent Routine firings and the doors of its Plugin panels — is the right panel at wide widths and a pushed page on the phone, opened from the Bot's name in the conversation bar; its settings are one level under it behind the gear, and the Bot's Plugins — what it could run and whether it does, one switch per row, each switch that Bot's own — are a row in those settings. The **Marketplace** opens from the Bot list as one searchable catalog of models and some 1,400 connected apps, from Gmail, Google Calendar and Slack to Shopify and Stripe. Checkboxes under the search box choose Models and Connectors; Installed is the same list limited to what has already been added, for configure and remove. Adding a model provider opens its key form, and a connected provider's card offers **Choose a model**. From the profile sheet, **Settings** owns the declared application settings and **Models** holds the account's default model and the providers already added; each Bot may choose its own model in its settings, and without a choice follows that default — Frock AI's Automatic until one is chosen. Built-in features such as Web and Routines are switched per Bot on that Bot's Plugins page; there is no account-wide switch for them. During an active Turn, **Stop** records cancellation intent; closing or switching clients does not stop backend work.
 
 `@frockbot/providers/ollama-cloud` lets each User create multiple named Ollama Cloud Connections with their own write-only API keys. It is disabled until added from the Marketplace. The backend validates and encrypts each credential and discovers that Connection's model catalog; connecting it does not change the platform model. Rotation affects subsequent model effects while already-admitted effects retain their credential lease, and disconnect prevents new leases without cancelling admitted Turns.
 
@@ -495,11 +495,10 @@ The runtime's features and registries provide composition and lifecycle ownershi
 ```text
 app/              The product: `runtime.ts`, the Contribution tables, and one directory per feature
   admin/          The deployment's administrative operations, mounted by `AdminEntrypoint`
-  applets-host/   The app's side of Applets: the capability host, records, and the Bot's focus
   approvals/      Recording one approval decision inside the Bot Durable Object
   audit/          Audited-effect projection and the User's rebuildable audit table
   auth/           The two auth Packages behind `AuthPackageV1` — `better-auth/` and `access/` — and what they share
-  authoring/      The source persistence Bot-authored Applets and Plugins share, up to the build boundary
+  authoring/      The source persistence Bot-authored Plugins use, up to the build boundary
   billing/        The account's subscription, its metered usage ledger, the Stripe seam, and the billing page
   bot-template/   Bot template export, share records, and guarded import
   cards/          The Bot's half of Cards: an approval, a Plugin's own action, or conversation input
@@ -531,8 +530,8 @@ app/              The product: `runtime.ts`, the Contribution tables, and one di
   ui-theme/       The Appearance Package definition; it contributes no code
   voice/          Composer dictation and the account-wide voice assistant over the deployment's speech providers
   web/            web_search and a bounded, SSRF-classified web_fetch
-applets/          Applets: the seven applet_* tools, the source root, and the shell's pages
-  sdk/            Applet authoring SDK, component kit, linter, the Applet and Plugin build pipelines, and the declarations-only Plugin entry; published to npm
+applets/          The Plugin build contract the app and the build service share
+  sdk/            Plugin authoring SDK: the declarations-only Plugin entry and the build pipeline the build service runs; published to npm
 apps/
   admin-portal/     Hosted-only administrative Worker behind its own Access application
   applet-build/     Plugin build service Worker and its Node container

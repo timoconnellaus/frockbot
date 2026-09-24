@@ -200,8 +200,8 @@ export interface StandaloneIsolateCallV1 {
 }
 
 /**
- * The one resident Turn slot. Turn execution writes it; the Applets host and
- * the isolate grants read it, which is why it is a named accessor rather than
+ * The one resident Turn slot. Turn execution writes it and the isolate grants
+ * read it, which is why it is a named accessor rather than
  * a private field of the composing class. Standalone calls sit beside the
  * Turn, keyed by run: several may be in flight, none of them is the Turn.
  */

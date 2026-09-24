@@ -2,7 +2,7 @@
 // observable behaviour, driven through a real Bot Durable Object, real R2
 // Memory files and a real User Durable Object, with a scripted model.
 //
-// Five claims, each about a behaviour the turn-start latency work could have
+// Four claims, each about a behaviour the turn-start latency work could have
 // broken:
 //
 //  1. a fact written on an earlier Turn is injected into the next Turn's
@@ -14,10 +14,7 @@
 //  3. a Bot created mid-Turn by `bot_create` is named in the next step's
 //     `<teammates>` prompt section — the Turn-scoped flock memo is invalidated
 //     by the tool that made it stale;
-//  4. an admin moving the Applets switch between two Turns of a Bot that never
-//     left memory is seen by the second Turn — the account-features read is
-//     shared inside one mount and never cached on the Bot;
-//  5. a Bot whose Memory spans six files across two scopes still has every one
+//  4. a Bot whose Memory spans six files across two scopes still has every one
 //     of them in its injected block, in the order the render has always used —
 //     the tier and per-file reads now run in parallel under one shared bound.
 import { env } from "cloudflare:workers";

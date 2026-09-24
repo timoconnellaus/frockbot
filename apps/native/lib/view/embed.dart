@@ -5,7 +5,6 @@ import '../protocol/client_wire.generated.dart' as wire;
 /// The host regions a plugin may name. The plugin names a region; the host
 /// decides what goes in it, which is what keeps `embed` from becoming an
 /// escape hatch back into plugin-drawn chrome.
-const appletViewerFrameV1 = 'applet-viewer';
 const computerViewerFrameV1 = 'computer-viewer';
 
 typedef ViewFrameBuilder = Widget Function(BuildContext context, String label);
@@ -26,12 +25,12 @@ typedef ViewFieldBuilder = Widget Function(
 /// What a host has actually put in each named region, for the surface it is
 /// under.
 ///
-/// The Applet canvas and the Computer viewer are host chrome: they hold a
-/// scoped viewer credential, which is minted per reader and can never be in a
-/// document that may be read twice. So the region a plugin names is filled by
-/// whatever host surface is above it, and by nothing at all elsewhere — which
-/// is the same rule as before, with the reserved region as the default rather
-/// than as the only answer.
+/// The Computer viewer is host chrome: it holds a scoped viewer credential,
+/// which is minted per reader and can never be in a document that may be read
+/// twice. So the region a plugin names is filled by whatever host surface is
+/// above it, and by nothing at all elsewhere — which is the same rule as
+/// before, with the reserved region as the default rather than as the only
+/// answer.
 class HostViewFrames extends InheritedWidget {
   final Map<String, WidgetBuilder> frames;
   const HostViewFrames({super.key, required this.frames, required super.child});
@@ -57,16 +56,9 @@ Widget _hostFrame(
       : draw(context);
 }
 
-/// The two names a plugin may put an `embed` on. A name the host does not know
-/// draws the unavailable region — never the plugin's idea of either.
+/// The names a plugin may put an `embed` on. A name the host does not know
+/// draws the unavailable region — never the plugin's idea of one.
 final Map<String, ViewFrameBuilder> hostViewFramesV1 = Map.unmodifiable({
-  appletViewerFrameV1: (context, label) => _hostFrame(
-    context,
-    appletViewerFrameV1,
-    label,
-    Icons.widgets_outlined,
-    'The Applet viewer opens here.',
-  ),
   computerViewerFrameV1: (context, label) => _hostFrame(
     context,
     computerViewerFrameV1,
