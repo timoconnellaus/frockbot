@@ -76,13 +76,13 @@ jobs:
           grep -q ' PRODUCT_BUNDLE_IDENTIFIER = com.frockbot.mobile.dev$' <<<"$dev"
           grep -q ' FROCKBOT_URL_SCHEME = frockbot-dev$' <<<"$dev"
           grep -q ' ASSETCATALOG_COMPILER_APPICON_NAME = AppIconDev$' <<<"$dev"
-      # CocoaPods writes its integration into the Xcode project on its first
-      # `pod install`, which no Linux checkout can run. The log shows what it
-      # wrote, so a change that moves it can be committed from here.
+      # `pod install` writes its integration into the Xcode project and
+      # `Podfile.lock`, and no Linux checkout can run it. The committed ones
+      # came from this log; a change that moves them shows here, as a diff
+      # that can be committed from it.
       - name: Show what the build wrote into the project
         if: always()
         shell: bash
         run: |
           git status --short apps/native/ios
           git diff -- apps/native/ios
-          if [ -f apps/native/ios/Podfile.lock ]; then cat apps/native/ios/Podfile.lock; fi
