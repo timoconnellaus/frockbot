@@ -492,6 +492,43 @@ describe("indexing and degraded semantic status", () => {
     expect(engine.purgeScope(key)).toEqual({ items: 0 });
   });
 
+  test("lists every vector id it wrote or meant to, a page at a time", async () => {
+    const { engine, time } = engineOf(["user", "groupChat"]);
+    const member = auth({ joinedGroupChatIds: [SCHOOL] });
+    engine.write({
+      authority: member,
+      scope: GROUP,
+      content: "Assembly is on Friday.",
+      operationKey: "g1",
+    });
+    engine.write({
+      authority: member,
+      scope: USER,
+      content: "Tim drinks his tea black.",
+      operationKey: "u1",
+    });
+    // Before anything is indexed, the pending intents already name the ids a
+    // half-finished drain could have written.
+    for (let step = 0; step < 2; step += 1)
+      await drainDue(engine, time, {
+        embed: async (texts) => texts.map(() => [1, 0]),
+      });
+    const pending = engine.vectorIdsAfter(undefined, 10);
+    const vectors = fakeVectors();
+    for (let step = 0; step < 6; step += 1)
+      await drainDue(engine, time, {
+        embed: async (texts) => texts.map(() => [1, 0]),
+        vectors,
+      });
+    const written = engine.vectorIdsAfter(undefined, 10);
+    expect(vectors.upserts.length).toBeGreaterThan(0);
+    expect(vectors.upserts.every((id) => written.includes(id))).toBe(true);
+    expect(pending.every((id) => written.includes(id))).toBe(true);
+    const [first] = engine.vectorIdsAfter(undefined, 1);
+    expect(engine.vectorIdsAfter(first, 10)).toEqual(written.slice(1));
+    expect(engine.vectorIdsAfter(written.at(-1), 10)).toEqual([]);
+  });
+
   test("a delayed vector delete cannot resurrect a forgotten fact", async () => {
     const { engine, time } = engineOf();
     const authority = auth();

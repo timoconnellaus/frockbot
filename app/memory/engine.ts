@@ -1774,6 +1774,27 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
   }
 
   /**
+   * Every vector id this store has written or meant to write, in every scope,
+   * one page at a time after `cursor`. Deleting the account deletes these
+   * from the index directly, without the drain: an intent still pending may
+   * already have reached the index, so it is listed too.
+   */
+  vectorIdsAfter(cursor: string | undefined, limit: number): string[] {
+    this.open();
+    return this.#sql
+      .exec<{ vector_id: string }>(
+        `SELECT vector_id FROM memory_vector_ledger WHERE vector_id > ?
+         UNION SELECT vector_id FROM memory_index_intent WHERE vector_id > ?
+         ORDER BY vector_id LIMIT ?`,
+        cursor ?? "",
+        cursor ?? "",
+        limit,
+      )
+      .toArray()
+      .map((row) => row.vector_id);
+  }
+
+  /**
    * Deletes one scope's Memory whole — items, sources, derived views, jobs
    * and receipts — for a scope that no longer exists, such as a deleted Group
    * Chat's. Each vector written for it is queued for deletion, so the index

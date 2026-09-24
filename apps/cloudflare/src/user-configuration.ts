@@ -8,6 +8,7 @@ import {
 import { accountPayments, type BillingEnv } from "./billing.js";
 import { isPublicIdentifier } from "@frockbot/core/configuration";
 import {
+  accessEmailV1,
   decodeSetUserFeaturesRequestV1,
   decodeUserFeaturesReadRequestV1,
   decodeUserFeaturesV1,
@@ -210,13 +211,39 @@ import {
   type GroupChatCommandV1,
 } from "@frockbot/app/groups/shared";
 import type { BotUserConfigurationRpcTargetV1 } from "@frockbot/app/shell/durable-rpc-targets";
+import {
+  ACCOUNT_DELETED_KEY_V1,
+  ACCOUNT_DELETION_KEY_V1,
+  AccountDeletedError,
+  accountDeletionRetryDelayMsV1,
+  advanceAccountDeletionV1,
+  beginAccountDeletionV1,
+  readAccountDeletionV1,
+  type AccountDeletionRecordV1,
+  type AccountDeletionTombstoneV1,
+} from "@frockbot/app/account/deletion";
+import { sha256HexV1 } from "@frockbot/core/crypto";
+import {
+  runAccountDeletionStepV1,
+  type AccountDeletionEnvV1,
+  type AccountDeletionUserSeamsV1,
+} from "./account-deletion.js";
+import {
+  computerHostBindingV1,
+  createComputerHostV1,
+} from "./computer-host.js";
+import type { AuthPackageEnvironmentV1 } from "#auth-package";
+import type { VoiceAssistant } from "./voice-assistant.js";
 
 /** The durable key pinning the User this object was provisioned for. */
 const USER_IDENTITY_KEY = "user:identity";
 /** The durable key holding what an administrator turned on for this User. */
 const USER_FEATURES_KEY = "user:features:v1";
+/** One receipt per "Delete my Computer" press that destroyed a Computer. */
+const COMPUTER_TEARDOWN_RECEIPT_PREFIX = "computer:teardown:";
 
-interface UserConfigurationEnv extends BillingEnv {
+interface UserConfigurationEnv
+  extends BillingEnv, AccountDeletionEnvV1, AuthPackageEnvironmentV1 {
   FCM_SERVICE_ACCOUNT?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
   BETTER_AUTH_URL?: string;
@@ -267,6 +294,17 @@ export class UserConfiguration
     super(ctx, env);
     // Before any request or alarm can read retired stored shapes.
     this.ctx.blockConcurrencyWhile(async () => {
+      // A deleted account is its tombstone and nothing else: no cleanup may
+      // write a receipt back into it.
+      if (
+        (await this.ctx.storage.get<unknown>(ACCOUNT_DELETED_KEY_V1)) !==
+        undefined
+      )
+        return;
+      // A deleting one still reads its shapes, but reseeds no Skills into
+      // the bucket it is emptying and arms no alarm but the deletion's.
+      const deleting =
+        (await readAccountDeletionV1(this.ctx.storage)) !== undefined;
       await cleanUserAppletsV1(this.ctx.storage);
       await cleanUserAvatarTestState(this.ctx.storage);
       await cleanDirectoryProfileTestState(this.ctx.storage);
@@ -298,7 +336,7 @@ export class UserConfiguration
           ? { engine: createUserMemoryEngineV1(this.ctx.storage) }
           : {}),
       });
-      if (typeof userId === "string" && this.env.MEMORY_FILES) {
+      if (typeof userId === "string" && this.env.MEMORY_FILES && !deleting) {
         await reseedInstructionRootV1({
           storage: this.ctx.storage,
           bucket: createR2ObjectBucketV1(this.env.MEMORY_FILES),
@@ -322,7 +360,7 @@ export class UserConfiguration
           workspaceObjectPrefixV1({ kind: "user-memory", userId }),
         );
       }
-      if (durableObjectHasSqlV1(this.ctx.storage)) {
+      if (!deleting && durableObjectHasSqlV1(this.ctx.storage)) {
         const memoryDue = createUserMemoryEngineV1(
           this.ctx.storage,
         ).nextWakeupAt();
@@ -413,12 +451,14 @@ export class UserConfiguration
     command: { id: string; kind: "subscription" | "topup"; cents?: number };
   }) {
     await this.assertUserIdentity(input.userId);
+    await this.assertAccountOpen();
     return accountPayments(this.billing(), this.env, input.userId).checkout(
       input.command,
     );
   }
   async billingPortal(input: { userId: string; commandId: string }) {
     await this.assertUserIdentity(input.userId);
+    await this.assertAccountOpen();
     return accountPayments(this.billing(), this.env, input.userId).portal(
       input.commandId,
     );
@@ -434,6 +474,7 @@ export class UserConfiguration
   }
   async reserveUsage(input: { userId: string; reservation: UsageReservation }) {
     await this.assertUserIdentity(input.userId);
+    await this.assertAccountOpen();
     return this.billing().reserve(input.reservation);
   }
   async settleUsage(input: { userId: string; settlement: UsageSettlement }) {
@@ -447,6 +488,7 @@ export class UserConfiguration
 
   async registerPush(input: { userId: string; registration: unknown }) {
     await this.assertUserIdentity(input.userId);
+    await this.assertAccountOpen();
     await registerPushDevice(
       this.ctx.storage,
       decodePushRegistration(input.registration),
@@ -456,6 +498,7 @@ export class UserConfiguration
 
   async deliverPush(input: { userId: string; update: PushUpdate }) {
     await this.assertUserIdentity(input.userId);
+    await this.assertAccountOpen();
     if (
       !isPublicIdentifier(input.update.botId) ||
       !/^message-[0-9]{20}$/.test(input.update.cursor) ||
@@ -485,6 +528,7 @@ export class UserConfiguration
     });
     const userId = request.userId as string;
     await this.assertUserIdentity(userId);
+    await this.assertAccountOpen();
     await deliverPush(
       this.ctx.storage,
       userId,
@@ -507,7 +551,14 @@ export class UserConfiguration
       const operation = decodeNativeSessionOperation(input);
       if (operation.action === "issue") {
         await this.assertUserIdentity(operation.userId);
-      } else if ((await this.addressedUser(operation.userId)) === undefined) {
+        await this.assertAccountOpen();
+      } else if (
+        // Deleting the account signs every device out at once: a session
+        // that still read back could be admitted afresh once the access
+        // record is forgotten.
+        (await this.accountClosing()) ||
+        (await this.addressedUser(operation.userId)) === undefined
+      ) {
         return {
           schemaVersion: 1 as const,
           status: "ok" as const,
@@ -692,6 +743,10 @@ export class UserConfiguration
         "this User Durable Object is the authority for a different User",
       );
     }
+    // A deleted account is never provisioned again, whoever asks: a late
+    // webhook or a stray Bot call would otherwise pin a fresh identity and
+    // give it a General.
+    await this.assertNotDeleted();
     const pinned = await this.ctx.storage.get<string>(USER_IDENTITY_KEY);
     if (pinned !== undefined && pinned !== userId) {
       throw new Error(
@@ -702,6 +757,35 @@ export class UserConfiguration
       await this.ctx.storage.put(USER_IDENTITY_KEY, userId);
     }
     this.identity = userId;
+  }
+
+  private async assertNotDeleted(): Promise<void> {
+    if (
+      (await this.ctx.storage.get<unknown>(ACCOUNT_DELETED_KEY_V1)) !==
+      undefined
+    )
+      throw new AccountDeletedError();
+  }
+
+  /**
+   * Refuses work that would start something while the account is being
+   * deleted: a Turn, a spend, a Bot, a group, a connection, a payment, a push.
+   * Each would either reach something the deletion already removed or leave
+   * something behind it. The saga's own calls — a Bot reading its
+   * registration to tear itself down — do not come through here.
+   */
+  private async assertAccountOpen(): Promise<void> {
+    if (await this.accountClosing()) throw new AccountDeletedError();
+  }
+
+  /** Whether this account is being deleted, or has been. */
+  private async accountClosing(): Promise<boolean> {
+    return (
+      (await this.ctx.storage.get<unknown>(ACCOUNT_DELETION_KEY_V1)) !==
+        undefined ||
+      (await this.ctx.storage.get<unknown>(ACCOUNT_DELETED_KEY_V1)) !==
+        undefined
+    );
   }
 
   /**
@@ -778,6 +862,7 @@ export class UserConfiguration
         "this User Durable Object is the authority for a different User",
       );
     }
+    await this.assertNotDeleted();
     const pinned = await this.ctx.storage.get<string>(USER_IDENTITY_KEY);
     if (pinned !== undefined && pinned !== userId) {
       throw new Error(
@@ -785,6 +870,208 @@ export class UserConfiguration
       );
     }
     return pinned;
+  }
+
+  // --- Deleting the account ---------------------------------------------------
+  //
+  // The person confirmed, so everything they own goes now. The saga is
+  // `@frockbot/app/account/deletion`; its steps are `./account-deletion.ts`.
+
+  /**
+   * Starts deleting this account, or joins the deletion already under way.
+   *
+   * The record is written first, which closes this object to new work at
+   * once, and access is ended before the answer so the person's other devices
+   * are refused from their next request rather than from the alarm's. The
+   * rest runs on the alarm, which is set before anything else can fail.
+   */
+  async beginAccountDeletion(input: unknown) {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      { userId: rpcIdentifier, commandId: rpcIdentifier },
+      { email: rpcString(320) },
+    );
+    const userId = await this.assertUserIdentity(request.userId as string);
+    // Only an address the access authority would itself accept, or its last
+    // step could never forget the invitation kept under it.
+    const email = accessEmailV1(request.email);
+    const { record } = await beginAccountDeletionV1(this.ctx.storage, {
+      userId,
+      commandId: request.commandId as string,
+      ...(email === undefined ? {} : { email }),
+    });
+    await this.ctx.storage.setAlarm(Date.now());
+    try {
+      await runAccountDeletionStepV1(
+        this.env,
+        this.accountDeletionSeams(userId),
+        "access",
+        record,
+      );
+    } catch {
+      // The saga's own first step repeats it.
+    }
+    return {
+      schemaVersion: 1 as const,
+      status: "deleting" as const,
+      requestedAt: record.requestedAt,
+    };
+  }
+
+  /**
+   * "Delete my Computer": its files and browser logins go, and the next Bot
+   * that needs a Computer gets a new, empty one.
+   *
+   * Receipted by the command, so a retried press after a success never
+   * destroys the fresh Computer a Bot may have opened since. A press that
+   * failed wrote no receipt and can simply be pressed again: tearing down a
+   * Computer that is already gone is a teardown.
+   */
+  async deleteComputer(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      commandId: rpcIdentifier,
+    });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    await this.assertAccountOpen();
+    const receiptKey = `${COMPUTER_TEARDOWN_RECEIPT_PREFIX}${request.commandId as string}`;
+    if ((await this.ctx.storage.get<unknown>(receiptKey)) !== undefined)
+      return { schemaVersion: 1 as const, status: "deleted" as const };
+    const binding = computerHostBindingV1(this.env);
+    const host = binding ? createComputerHostV1(binding) : undefined;
+    if (!host?.teardown)
+      return { schemaVersion: 1 as const, status: "unavailable" as const };
+    await host.teardown({ userId });
+    await this.ctx.storage.put(receiptKey, {
+      schemaVersion: 1,
+      deletedAt: new Date().toISOString(),
+    });
+    return { schemaVersion: 1 as const, status: "deleted" as const };
+  }
+
+  #deletionPass: Promise<void> | undefined;
+
+  /**
+   * One pass of the deletion saga, and never two at once: a pass that finds
+   * another running waits for it rather than repeating its steps beside it.
+   */
+  private advanceAccountDeletion(): Promise<void> {
+    this.#deletionPass ??= this.#advanceAccountDeletion().finally(() => {
+      this.#deletionPass = undefined;
+    });
+    return this.#deletionPass;
+  }
+
+  /**
+   * The next alarm is armed before the pass, so a pass that dies half way —
+   * an eviction, a thrown step the entry boundary swallowed — is picked up
+   * again rather than stranding the account half deleted.
+   */
+  async #advanceAccountDeletion(): Promise<void> {
+    if (
+      (await this.ctx.storage.get<unknown>(ACCOUNT_DELETED_KEY_V1)) !==
+      undefined
+    ) {
+      await this.ctx.storage.deleteAlarm();
+      return;
+    }
+    await this.ctx.storage.setAlarm(Date.now() + 60_000);
+    const progress = await advanceAccountDeletionV1({
+      storage: this.ctx.storage,
+      run: (step, record: AccountDeletionRecordV1) =>
+        runAccountDeletionStepV1(
+          this.env,
+          this.accountDeletionSeams(record.userId),
+          step,
+          record,
+        ),
+      erase: (tombstone) => this.eraseAccount(tombstone),
+    });
+    const delay = accountDeletionRetryDelayMsV1(progress);
+    if (delay !== undefined)
+      await this.ctx.storage.setAlarm(Date.now() + delay);
+  }
+
+  /**
+   * The object's own storage, last: every key and every table, the alarm,
+   * then the tombstone. Nothing else runs in between, so no request can read
+   * or write the half-wiped object. What is in memory goes too, so nothing
+   * cached from before can write the account back.
+   */
+  private async eraseAccount(
+    tombstone: AccountDeletionTombstoneV1,
+  ): Promise<void> {
+    await this.ctx.blockConcurrencyWhile(async () => {
+      await this.ctx.storage.deleteAlarm();
+      await this.ctx.storage.deleteAll();
+      await this.ctx.storage.put(ACCOUNT_DELETED_KEY_V1, tombstone);
+    });
+    this.mounted = undefined;
+    this.identity = undefined;
+    this.bootstrapped = false;
+    this.#memoryEngine = undefined;
+  }
+
+  private accountDeletionSeams(userId: string): AccountDeletionUserSeamsV1 {
+    const sql = durableObjectHasSqlV1(this.ctx.storage);
+    return {
+      deleteGroupChats: async () => {
+        const store = this.groupChats();
+        for (const group of (await store.list()).groups) {
+          const result = await store.execute(
+            userId,
+            {
+              type: "group/delete",
+              commandId: `account-deletion-${group.groupId}`,
+              groupId: group.groupId,
+            },
+            { kind: "user" },
+          );
+          if (result.change) await this.carryGroupChange(userId, result.change);
+        }
+        return (await store.list()).groups.length === 0
+          ? { status: "complete" }
+          : { status: "pending" };
+      },
+      deleteBots: async () => {
+        const flock = await this.flockContribution();
+        // A lifecycle saga already retrying — an archive, a delete the person
+        // started — settles first; this Bot's delete joins on the next pass.
+        await flock.alarm();
+        for (const bot of (await flock.listBots()).bots) {
+          try {
+            await flock.executeLifecycle(userId, {
+              schemaVersion: 1,
+              type: "bot/delete",
+              commandId: `account-deletion-${(await sha256HexV1(bot.botId)).slice(0, 32)}`,
+              botId: bot.botId,
+            });
+          } catch {
+            // Another operation holds the Bot, or it left meanwhile. Either
+            // way the directory decides, on the next pass.
+          }
+        }
+        return (await flock.listBots()).bots.length === 0
+          ? { status: "complete" }
+          : { status: "pending" };
+      },
+      recordedPaymentCustomer: () =>
+        sql ? this.billing().get<string>("customer") : undefined,
+      vectorIdsAfter: (cursor, limit) =>
+        sql ? this.memoryEngine().vectorIdsAfter(cursor, limit) : [],
+      deleteIdentity: async () => {
+        const { AUTH_PACKAGE_V1 } = await import("#auth-package");
+        await AUTH_PACKAGE_V1.create(this.env).deleteStoredIdentity?.(userId);
+      },
+      eraseVoice: async () => {
+        const { getAgentByName } = await import("agents");
+        const voice = await getAgentByName(
+          this.env.VOICE_ASSISTANTS as DurableObjectNamespace<VoiceAssistant>,
+          userId,
+        );
+        await voice.eraseAccount({ schemaVersion: 1, userId });
+      },
+    };
   }
 
   // --- Account features ------------------------------------------------------
@@ -896,6 +1183,9 @@ export class UserConfiguration
   async prepareAccount(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
     const userId = await this.assertUserIdentity(request.userId as string);
+    // Every Turn of every Bot prepares here first, so this is where a
+    // deleting account stops starting Turns.
+    await this.assertAccountOpen();
     const features = decodeUserFeaturesV1(
       (await this.ctx.storage.get<unknown>(USER_FEATURES_KEY)) ??
         defaultUserFeaturesV1(),
@@ -1240,6 +1530,7 @@ export class UserConfiguration
       typeof decodeConnectionCommandV1
     >;
     const accountId = request.userId as string;
+    await this.assertAccountOpen();
     const packageId = await (
       await this.settingsContribution()
     ).resolveConnectionCommandOwner(accountId, command);
@@ -1273,6 +1564,7 @@ export class UserConfiguration
       },
     );
     const userId = await this.assertUserIdentity(request.userId as string);
+    await this.assertAccountOpen();
     return (await this.connectContribution()).upsertTrigger({
       userId,
       commandId: request.commandId as string,
@@ -1321,6 +1613,7 @@ export class UserConfiguration
       event: rpcDecodedValue,
     });
     const userId = request.userId as string;
+    if (await this.accountClosing()) return { status: "ignored" };
     const pinned = await this.addressedUser(userId);
     if (!pinned) return { status: "ignored" };
     const event = request.event as ConnectEventV1;
@@ -2019,6 +2312,13 @@ export class UserConfiguration
   }
 
   async #alarm() {
+    if (await this.accountClosing()) {
+      // A deleting account's alarm is the deletion's alone: a credential
+      // lease, a template import or a Memory drain run now would write to
+      // what the saga is removing — a vector upserted behind the purge.
+      await this.advanceAccountDeletion();
+      return;
+    }
     const contributions = await this.contributions();
     await contributions.credentials.expireLeases();
     for (const contribution of contributions.connections.values()) {
@@ -2158,6 +2458,7 @@ export class UserConfiguration
     );
     const userId = request.userId as string;
     await this.assertFlockIdentity(userId);
+    await this.assertAccountOpen();
     const actor: GroupActorV1 =
       typeof request.actorBotId === "string"
         ? { kind: "bot", botId: request.actorBotId }
@@ -2203,6 +2504,7 @@ export class UserConfiguration
       command: rpcDecoded(decodeCreateBotCommandV1),
     });
     await this.assertFlockIdentity(request.userId as string);
+    await this.assertAccountOpen();
     return (await this.flockContribution()).createBot(
       request.userId as string,
       request.command as ReturnType<typeof decodeCreateBotCommandV1>,
@@ -2221,6 +2523,8 @@ export class UserConfiguration
       command: rpcDecoded(decodeBotLifecycleCommandV1),
     });
     await this.assertFlockIdentity(request.userId as string);
+    // The deletion deletes every Bot itself; a restore racing it would not.
+    await this.assertAccountOpen();
     const command = request.command as ReturnType<
       typeof decodeBotLifecycleCommandV1
     >;

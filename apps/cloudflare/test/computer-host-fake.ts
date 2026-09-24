@@ -571,6 +571,22 @@ export function createComputerHostFake(
           effectId: value.effectId,
           cancelled: true,
         });
+      case "teardown": {
+        // The Computer goes with everything on it; a second teardown finds
+        // nothing, which the real host answers the same way.
+        const prefix = fileKey(value.identity.userId, "");
+        let deleted = false;
+        for (const key of [...state.files.keys()]) {
+          if (!key.startsWith(prefix)) continue;
+          state.files.delete(key);
+          deleted = true;
+        }
+        return Response.json({
+          version: 1,
+          effectId: value.effectId,
+          deleted,
+        });
+      }
     }
   }
 

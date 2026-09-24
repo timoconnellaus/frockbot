@@ -49,6 +49,7 @@ import {
   decodeComputerHostOpenResultV1,
   decodeComputerHostProblemV1,
   decodeComputerHostServiceResultV1,
+  decodeComputerHostTeardownResultV1,
   decodeComputerHostViewerResultV1,
   encodeComputerHostRequestV1,
   type ComputerHostCancelResultV1,
@@ -66,6 +67,7 @@ import {
   type ComputerHostOperationV1,
   type ComputerHostProvisioningV1,
   type ComputerHostServiceResultV1,
+  type ComputerHostTeardownResultV1,
   type ComputerHostViewerResultV1,
 } from "@frockbot/computer/host-protocol";
 
@@ -603,6 +605,20 @@ export class FlyHostTransportV1 {
       effectId,
       timeoutMs: options?.timeoutMs ?? CANCEL_TIMEOUT_MS,
     });
+  }
+
+  /**
+   * Destroys this User's Computer. The tenant this transport carries is
+   * ignored by the host: a teardown is the Computer's, not a Bot's.
+   */
+  teardown(
+    options?: ComputerHostCallOptions,
+  ): Promise<ComputerHostTeardownResultV1> {
+    return this.json(
+      { kind: "teardown" },
+      decodeComputerHostTeardownResultV1,
+      options,
+    );
   }
 
   // --- internals -----------------------------------------------------------

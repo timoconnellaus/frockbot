@@ -59,7 +59,31 @@ test("stores no identity, and signs nobody in, without a database", async () => 
   });
   expect(stub.storedIdentity).toBeUndefined();
   expect(stub.listStoredIdentities).toBeUndefined();
+  expect(stub.deleteStoredIdentity).toBeUndefined();
   expect(
     (await stub.handler(new Request("https://bot.example/api/auth/x"))).status,
   ).toBe(503);
+});
+
+test("forgets an identity with its sessions and linked accounts, in one batch", async () => {
+  const batches: Array<Array<{ sql: string; args: unknown[] }>> = [];
+  const database = {
+    prepare: (sql: string) => ({
+      bind: (...args: unknown[]) => ({ sql, args }),
+    }),
+    batch: async (statements: Array<{ sql: string; args: unknown[] }>) => {
+      batches.push(statements);
+      return [];
+    },
+  } as unknown as D1Database;
+  const store = BETTER_AUTH_PACKAGE_V1.create({ AUTH_DB: database });
+  await store.deleteStoredIdentity!("user-1");
+  // A session left behind would still sign the deleted User in.
+  expect(batches).toEqual([
+    [
+      { sql: 'delete from "session" where "userId" = ?', args: ["user-1"] },
+      { sql: 'delete from "account" where "userId" = ?', args: ["user-1"] },
+      { sql: 'delete from "user" where "id" = ?', args: ["user-1"] },
+    ],
+  ]);
 });

@@ -226,6 +226,60 @@ describe("DeploymentPolicy", () => {
     }
   });
 
+  test("deleting an account ends it first, and forgets it only at the end", async () => {
+    const { policy, storage } = authority();
+    await setMode(policy, "open");
+    expect(await policy.admitAccount(member("leaving"))).toMatchObject({
+      admitted: true,
+    });
+    await policy.inviteEmail({
+      schemaVersion: 1,
+      command: {
+        schemaVersion: 1,
+        type: "access/invite-email",
+        email: "leaving@example.com",
+      },
+      invitedBy: "owner-id",
+    });
+    const request = {
+      schemaVersion: 1,
+      userId: "leaving",
+      email: "Leaving@Example.com",
+    };
+    const ended = await policy.closeAccountForDeletion(request);
+    expect(ended).toMatchObject({
+      state: "ended",
+      revision: 2,
+      updatedBy: "account-deletion",
+    });
+    // Repeating the step is a read: the saga replays it after an eviction.
+    expect(await policy.closeAccountForDeletion(request)).toEqual(ended);
+    expect(await policy.admitAccount(member("leaving"))).toMatchObject({
+      admitted: false,
+      reason: "account-ended",
+    });
+    // An account with no record is closed the same way: an admin has none.
+    expect(
+      await policy.closeAccountForDeletion({
+        schemaVersion: 1,
+        userId: "no-record",
+      }),
+    ).toMatchObject({ state: "ended", revision: 1 });
+
+    await policy.forgetAccount(request);
+    await policy.forgetAccount(request);
+    expect(
+      (await policy.readAccountAccess({ schemaVersion: 1, userId: "leaving" }))
+        .access,
+    ).toBeNull();
+    expect(
+      [...storage.values.keys()].filter((key) => key.includes("leaving")),
+    ).toEqual([]);
+    await expect(
+      policy.closeAccountForDeletion({ schemaVersion: 1, userId: "" }),
+    ).rejects.toThrow();
+  });
+
   test("revoking an active account takes effect on its next admission", async () => {
     const { policy } = authority();
     await setMode(policy, "open");

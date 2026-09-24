@@ -263,6 +263,9 @@ abstract final class SettingsIds {
   static const profileModels = 'profile-models';
   static const profileBilling = 'profile-billing';
   static const profileManageBots = 'profile-manage-bots';
+
+  /// Deleting the Computer or the whole account.
+  static const profileDelete = 'profile-delete';
   static const profileSignOut = 'profile-sign-out';
   static const profileVersion = 'profile-version';
 

@@ -239,8 +239,8 @@ for (const build of HOSTS) {
 
     test("tears the Computer down idempotently, where it offers teardown", async () => {
       if (!host.teardown) {
-        // Optional by declaration: known issue 27 records that nothing calls
-        // it yet, so a host without one is conforming, not broken.
+        // Optional by declaration: a host that cannot destroy a Computer is
+        // conforming, and the surfaces that ask say so.
         expect(host.teardown).toBeUndefined();
         return;
       }

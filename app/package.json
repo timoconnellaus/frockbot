@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "exports": {
+    "./account/deletion": "./account/deletion.ts",
     "./admin": "./admin/index.ts",
     "./admin/definition": "./admin/definition.ts",
     "./admin/operations": "./admin/operations.ts",

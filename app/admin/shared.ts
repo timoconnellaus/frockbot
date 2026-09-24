@@ -41,8 +41,9 @@ export interface SetAdmissionModeRequestV1 {
 
 /**
  * `invited` may become `active` on its next sign-in unless admission is
- * closed. `paused`, `ended` and `blocked` are only ever set by an admin and
- * only ever left by an admin: admission never moves an account out of them.
+ * closed. `paused`, `ended` and `blocked` are set by an admin — and `ended` by
+ * the account's own deletion, until the record is forgotten with it — and
+ * admission never moves an account out of them.
  */
 export type AccountAccessStateV1 =
   "invited" | "active" | "paused" | "ended" | "blocked";
@@ -447,6 +448,47 @@ export function decodeAccountAccessReadRequestV1(input: unknown): {
       "account access read request.userId",
       512,
     ),
+  };
+}
+
+/**
+ * What deleting an account tells the access authority: the account, and the
+ * address an invitation for it would be kept under, when it has one.
+ */
+export interface AccountDeletionAccessRequestV1 {
+  schemaVersion: 1;
+  userId: string;
+  email?: string;
+}
+
+export function decodeAccountDeletionAccessRequestV1(
+  input: unknown,
+): AccountDeletionAccessRequestV1 {
+  const request = record(input, "account deletion access request");
+  exactKeys(
+    request,
+    ["schemaVersion", "userId"],
+    "account deletion access request",
+    ["email"],
+  );
+  if (request.schemaVersion !== 1) {
+    throw new Error("account deletion access request.schemaVersion is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    userId: boundedString(
+      request.userId,
+      "account deletion access request.userId",
+      512,
+    ),
+    ...(request.email === undefined
+      ? {}
+      : {
+          email: normalizeAccessEmailV1(
+            request.email,
+            "account deletion access request.email",
+          ),
+        }),
   };
 }
 

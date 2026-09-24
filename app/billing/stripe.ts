@@ -94,6 +94,73 @@ export class StripeClient {
       );
     return object(JSON.parse(body));
   }
+
+  /**
+   * Deletes one object. Stripe treats a DELETE as idempotent by definition
+   * and takes no idempotency key for one, so a retry after an unclear answer
+   * is safe: the object is either deleted now or already gone.
+   */
+  async remove(path: string): Promise<"deleted" | "absent"> {
+    const deadline = withDeadlineV1(20_000);
+    let response: Response;
+    try {
+      response = await this.request(`https://api.stripe.com/v1/${path}`, {
+        method: "DELETE",
+        headers: {
+          authorization: `Bearer ${this.config.secretKey}`,
+          "Stripe-Version": "2025-02-24.acacia",
+        },
+        signal: deadline.signal,
+      });
+      await boundedText(response);
+    } finally {
+      deadline.clear();
+    }
+    if (response.status === 404) return "absent";
+    if (!response.ok)
+      throw new BillingError(
+        "Stripe could not complete this request. Please try again.",
+        response.status === 429 ? 429 : 502,
+      );
+    return "deleted";
+  }
+}
+
+/**
+ * Deletes every Stripe customer that belongs to one User, which ends any
+ * subscription at once — Stripe cancels a deleted customer's subscriptions
+ * immediately, with no proration. Stripe keeps its own record of payments
+ * already made; that is Stripe's, not ours to erase.
+ *
+ * The customer the ledger recorded is deleted by id. Stripe is also searched
+ * by the `frockbot_user_id` the customer was created with, because a creation
+ * whose answer was lost leaves a customer the ledger never recorded. Search
+ * lags writes by up to a minute, which the recorded id covers.
+ */
+export async function deleteAccountCustomersV1(
+  stripe: StripeClient,
+  userId: string,
+  recorded: string | undefined,
+): Promise<{ deleted: number }> {
+  const ids = new Set<string>(recorded ? [stripeId(recorded)] : []);
+  // The id is interpolated into Stripe's query language; one that would need
+  // escaping is not an id this application issued.
+  if (/^[A-Za-z0-9_-]{1,128}$/.test(userId)) {
+    const query = encodeURIComponent(
+      `metadata['frockbot_user_id']:'${userId}'`,
+    );
+    const found = await stripe.call(
+      `customers/search?query=${query}&limit=100`,
+    );
+    if (!Array.isArray(found.data))
+      throw new BillingError("Invalid payment response", 502);
+    for (const customer of found.data) ids.add(stripeId(object(customer).id));
+  }
+  let deleted = 0;
+  for (const id of ids) {
+    if ((await stripe.remove(`customers/${id}`)) === "deleted") deleted += 1;
+  }
+  return { deleted };
 }
 
 export async function verifyStripeEvent(

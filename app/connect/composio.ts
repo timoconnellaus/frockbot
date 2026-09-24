@@ -318,6 +318,31 @@ export class ComposioClient {
     }
   }
 
+  /**
+   * Every account the provider holds for one User, in any state — including
+   * a sign-in that was started and never finished, which no Connection of
+   * ours names. Deleting an account asks the provider rather than trusting
+   * what this application recorded.
+   */
+  async listConnectedAccountIds(userId: string): Promise<string[]> {
+    const query = new URLSearchParams({ user_ids: userId, limit: "100" });
+    return (await this.pages(`/connected_accounts?${query}`)).map((value) =>
+      requiredString(asRecord(value), "id"),
+    );
+  }
+
+  /** Every trigger instance the provider holds for one User, disabled ones too. */
+  async listTriggerInstanceIds(userId: string): Promise<string[]> {
+    const query = new URLSearchParams({
+      user_ids: userId,
+      show_disabled: "true",
+      limit: "100",
+    });
+    return (await this.pages(`/trigger_instances/active?${query}`)).map(
+      (value) => requiredString(asRecord(value), "id"),
+    );
+  }
+
   /** Every current tool of one app: a Bot can reach all of them. */
   async listTools(toolkitSlug: string): Promise<ConnectToolV1[]> {
     const query = new URLSearchParams({

@@ -9,6 +9,14 @@ import { decodePanelFocusCommandV1 } from "@frockbot/app/plugins/panels";
 import { decodeDeviceUseCommandV1 } from "@frockbot/app/audit";
 import { accessEmailV1 } from "@frockbot/app/admin/shared";
 import {
+  ACCOUNT_DELETION_PATH_V1,
+  COMPUTER_DELETION_PATH_V1,
+  accountDeletionConfirmationV1,
+  accountDeletionConfirmedV1,
+  decodeAccountDeletionCommandV1,
+  decodeComputerDeletionCommandV1,
+} from "@frockbot/app/account/deletion";
+import {
   admissionRefusedResponse,
   admissionUnavailableResponse,
 } from "./account-admission.js";
@@ -280,6 +288,105 @@ export function deploymentAnsweredV1(
   return named;
 }
 
+const NO_STORE = { "cache-control": "no-store" } as const;
+
+function isAccountDeleted(error: unknown): boolean {
+  return (
+    typeof error === "object" &&
+    error !== null &&
+    "name" in error &&
+    error.name === "AccountDeletedError"
+  );
+}
+
+/**
+ * Deleting the account, and deleting the Computer.
+ *
+ * The account is deleted only against the phrase the person typed, checked
+ * here against the identity this request authenticated as — never one the
+ * body names. It answers 202 once the deletion is durably under way; the
+ * rest happens without them. An account whose deletion already began, or
+ * ended, answers as deleted, so a retried press is not an error.
+ */
+async function deletionRoute(
+  dependencies: GatewayDependencies,
+  request: Request,
+  url: URL,
+  identity: { userId: string; email: string | undefined },
+): Promise<Response> {
+  const deletion = dependencies.deletion;
+  if (!deletion) return jsonError(503, "Deleting is unavailable");
+  const confirmation = accountDeletionConfirmationV1({
+    userId: identity.userId,
+    ...(identity.email ? { email: identity.email } : {}),
+  });
+  if (url.pathname === ACCOUNT_DELETION_PATH_V1 && request.method === "GET") {
+    return Response.json(
+      { schemaVersion: 1, confirmation },
+      { headers: NO_STORE },
+    );
+  }
+  if (request.method !== "POST") return jsonError(405, "method not allowed");
+  let body: unknown;
+  try {
+    body = await readNativeJsonBody(request);
+  } catch {
+    return jsonError(400, "invalid request");
+  }
+  try {
+    if (url.pathname === COMPUTER_DELETION_PATH_V1) {
+      let command;
+      try {
+        command = decodeComputerDeletionCommandV1(body);
+      } catch {
+        return jsonError(400, "invalid request");
+      }
+      return Response.json(
+        await deletion.deleteComputer(identity.userId, command.commandId),
+        { headers: NO_STORE },
+      );
+    }
+    let command;
+    try {
+      command = decodeAccountDeletionCommandV1(body);
+    } catch {
+      return jsonError(400, "invalid request");
+    }
+    if (!accountDeletionConfirmedV1(confirmation, command.confirmation)) {
+      return Response.json(
+        {
+          error: `Type ${confirmation} to confirm.`,
+          code: "confirmation-mismatch",
+        },
+        { status: 409, headers: NO_STORE },
+      );
+    }
+    const email = accessEmailV1(identity.email);
+    return Response.json(
+      await deletion.deleteAccount(identity.userId, {
+        commandId: command.commandId,
+        ...(email === undefined ? {} : { email }),
+      }),
+      { status: 202, headers: NO_STORE },
+    );
+  } catch (error) {
+    if (isAccountDeleted(error)) {
+      return url.pathname === ACCOUNT_DELETION_PATH_V1
+        ? Response.json(
+            { schemaVersion: 1, status: "deleting" },
+            { status: 202, headers: NO_STORE },
+          )
+        : jsonError(410, "This account is being deleted.");
+    }
+    return jsonError(
+      502,
+      error instanceof Error && error.message
+        ? error.message
+        : "Deleting failed. Try again.",
+    );
+  }
+}
+
 export function createGateway(
   dependencies: GatewayDependencies,
   entryTiming?: VoiceTimingV1,
@@ -454,6 +561,18 @@ export function createGateway(
       } catch {
         return jsonError(400, "Push registration failed");
       }
+    }
+
+    if (
+      url.pathname === ACCOUNT_DELETION_PATH_V1 ||
+      url.pathname === COMPUTER_DELETION_PATH_V1
+    ) {
+      if (userId === PUBLIC_APPLICATION_USER_ID)
+        return jsonError(401, "authentication required");
+      return deletionRoute(dependencies, request, url, {
+        userId,
+        email: session?.user.email,
+      });
     }
 
     if (url.pathname === VOICE_CAPABILITIES_PATH_V1) {

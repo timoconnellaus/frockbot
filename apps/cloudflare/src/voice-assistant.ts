@@ -4230,6 +4230,53 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
   }
 
   /**
+   * Deleting the account: every call and every socket ends where it stands
+   * and all of this object's storage goes, alarm included.
+   *
+   * Nothing is finalized on the way out — no transcript is written into a
+   * Bot, no memory job runs, no meter settles — because everything those
+   * would write to is being deleted too. The live model session is closed
+   * first, since it is the one thing here that is spending while it is open.
+   * Repeating this finds an empty object and empties it again.
+   */
+  async eraseAccount(input: unknown): Promise<{ schemaVersion: 1 }> {
+    if (
+      typeof input !== "object" ||
+      input === null ||
+      (input as { schemaVersion?: unknown }).schemaVersion !== 1 ||
+      (input as { userId?: unknown }).userId !== this.name
+    ) {
+      throw new Error("voice erase request is invalid");
+    }
+    for (const attempt of this.#attempts.values()) {
+      attempt.cancelled = true;
+      attempt.abort.abort();
+      attempt.session?.close();
+      if (attempt.deadline) clearTimeout(attempt.deadline);
+    }
+    this.#attempts.clear();
+    this.#opening.clear();
+    for (const call of this.#calls.values()) {
+      if (call.idleTimer) clearTimeout(call.idleTimer);
+      this.clearSilenceGuard(call);
+      call.session?.close();
+      call.session = undefined;
+    }
+    this.#calls.clear();
+    this.#announcing.clear();
+    for (const connection of this.getConnections()) {
+      try {
+        connection.close(1000, "account deleted");
+      } catch {
+        // Already closing.
+      }
+    }
+    await this.ctx.storage.deleteAlarm();
+    await this.ctx.storage.deleteAll();
+    return { schemaVersion: 1 };
+  }
+
+  /**
    * The Bot saying an answer is recorded. Its own durable outbox drains into
    * this, so the wake-up costs one round trip from the settling transaction
    * rather than a poll interval. It does exactly what the scheduled look-up

@@ -957,6 +957,8 @@ export class ComputerHost {
         return this.viewer(request);
       case "service":
         return this.service(request);
+      case "teardown":
+        return this.teardown(request);
       case "cancel":
         throw new ComputerHostError(
           "invalid-request",
@@ -2715,6 +2717,40 @@ export class ComputerHost {
       effectId: request.effectId,
       name: operation.name,
       status,
+    });
+  }
+
+  // --- teardown ------------------------------------------------------------
+
+  /**
+   * Destroys the User's Computer and forgets everything this container had
+   * learned about it, so the next `open` provisions a new one rather than
+   * adopting a handle to a machine that no longer exists.
+   *
+   * The name is derived rather than read from a cached record: after a
+   * restart this container knows nothing, and the Computer still has to go.
+   * A Computer already gone is a completed teardown, which is what makes a
+   * retried call safe.
+   */
+  private async teardown(request: ComputerHostRequestV1): Promise<Response> {
+    const { userId } = request.identity;
+    const spriteName = this.spriteNameFor(userId);
+    let deleted = true;
+    try {
+      await this.client.deleteSprite(spriteName);
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+      deleted = false;
+    }
+    this.computers.delete(userId);
+    this.openings.delete(userId);
+    this.updates.delete(userId);
+    this.retired.delete(spriteName);
+    this.spriteHandles.delete(spriteName);
+    return Response.json({
+      version: 1,
+      effectId: request.effectId,
+      deleted,
     });
   }
 }

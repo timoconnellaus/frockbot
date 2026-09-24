@@ -158,6 +158,20 @@ function identityStoreV1(
         .all<StoredIdentityRowV1>();
       return (result.results ?? []).map(storedIdentityOfV1);
     },
+    // The schema cascades both dependent tables, and they are deleted by name
+    // anyway: a database that was created with foreign keys off would
+    // otherwise keep a live session for a User who no longer exists.
+    deleteStoredIdentity: async (userId) => {
+      await database.batch([
+        database
+          .prepare(`delete from "session" where "userId" = ?`)
+          .bind(userId),
+        database
+          .prepare(`delete from "account" where "userId" = ?`)
+          .bind(userId),
+        database.prepare(`delete from "user" where "id" = ?`).bind(userId),
+      ]);
+    },
   };
 }
 

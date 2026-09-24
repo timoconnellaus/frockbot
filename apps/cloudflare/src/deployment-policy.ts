@@ -1,6 +1,7 @@
 import {
   decodeAccountAccessReadRequestV1,
   decodeAccountAccessV1,
+  decodeAccountDeletionAccessRequestV1,
   decodeAdmissionIdentityV1,
   decodeDeploymentPolicyReadRequestV1,
   decodeDeploymentPolicyV1,
@@ -42,6 +43,8 @@ export const DEPLOYMENT_POLICY_SINGLETON_NAME = "frockbot-deployment-policy";
 
 /** Written by admission itself, so an audit can tell a sign-in from an admin. */
 export const ADMISSION_UPDATED_BY = "admission";
+/** Written when the account's own deletion ends its access. */
+export const DELETION_UPDATED_BY = "account-deletion";
 
 /** The signups-switch record this authority replaced; see `cleanRetiredDeploymentPolicyV1`. */
 export const RETIRED_SIGNUPS_POLICY_KEY = "deployment:policy:v1";
@@ -303,5 +306,50 @@ export class DeploymentPolicy extends DurableObject<Record<string, never>> {
 
   async reportUnpricedServedModel(input: unknown): Promise<void> {
     reportUnpricedServedModelV1(this.ctx.storage, input);
+  }
+
+  /**
+   * The first step of deleting an account: `ended`, whatever the record said
+   * and whether or not there was one, so no request of the account's starts
+   * anything while its data is being destroyed. Not a compare-and-swap — the
+   * person already confirmed, and an admin's concurrent write must not
+   * reopen an account mid-deletion. Repeating it changes nothing.
+   */
+  async closeAccountForDeletion(input: unknown): Promise<AccountAccessV1> {
+    const { userId } = decodeAccountDeletionAccessRequestV1(input);
+    return this.ctx.storage.transactionSync(() => {
+      const current = this.access(userId);
+      if (
+        current?.state === "ended" &&
+        current.updatedBy === DELETION_UPDATED_BY
+      )
+        return current;
+      const next: AccountAccessV1 = {
+        schemaVersion: 1,
+        userId,
+        state: "ended",
+        revision: nextRevision(current?.revision ?? 0, "account access"),
+        updatedAt: new Date().toISOString(),
+        updatedBy: DELETION_UPDATED_BY,
+      };
+      this.kv.put(ACCESS_PREFIX + userId, next);
+      return next;
+    });
+  }
+
+  /**
+   * The last trace of a deleted account here: its access record and any
+   * invitation still waiting under its address. Called only once the identity
+   * itself is gone, so no session is left that could be admitted afresh.
+   */
+  async forgetAccount(input: unknown): Promise<{ schemaVersion: 1 }> {
+    const request = decodeAccountDeletionAccessRequestV1(input);
+    this.ctx.storage.transactionSync(() => {
+      this.kv.delete(ACCESS_PREFIX + request.userId);
+      if (request.email !== undefined) {
+        this.kv.delete(INVITATION_PREFIX + request.email);
+      }
+    });
+    return { schemaVersion: 1 };
   }
 }

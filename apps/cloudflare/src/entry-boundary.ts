@@ -33,6 +33,8 @@ const ENTRY_STATUS_BY_ERROR_NAME_V1 = new Map<string, number>([
   // and no retry will bring it back. A caller that still holds the id — a
   // second tab, a queued Turn — is told the difference.
   ["BotDeletedError", 410],
+  // The same for the whole account, from the moment its deletion began.
+  ["AccountDeletedError", 410],
 ]);
 
 function errorName(error: unknown): string | undefined {
