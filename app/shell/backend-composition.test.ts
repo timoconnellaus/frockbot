@@ -28,6 +28,11 @@ import {
   createCardApprovalStoreV1,
   type CardApprovalStoreV1,
 } from "./cards.js";
+import {
+  createSecretRequestStoreV1,
+  type SecretRequestStoreV1,
+} from "@frockbot/app/secrets/bot";
+import { MemorySecretStorage } from "@frockbot/app/secrets/testing";
 
 const USER = "user-1";
 
@@ -280,6 +285,8 @@ describe("the Approvals a Plugin's Card asks for", () => {
     declaresNothing?: true;
     /** A draw that asks for a decision and says nothing about what it asks. */
     saysNothing?: true;
+    /** A draw of the field a secret is typed into, and no decision. */
+    secretField?: true;
   }): PluginWorkerEntrypoint {
     return {
       health: () =>
@@ -328,39 +335,71 @@ describe("the Approvals a Plugin's Card asks for", () => {
         surfaceId: string;
         data: Record<string, unknown>;
       }) =>
-        Promise.resolve({
-          schemaVersion: 1 as const,
-          status: "rendered" as const,
-          ...(options?.declaresNothing
-            ? {}
-            : { covers: options?.covers ?? invocation.data }),
-          ...(options?.saysNothing
-            ? {}
-            : {
-                decision: {
-                  action: "Send the draft",
-                  risk: "medium" as const,
-                },
-              }),
-          messages: [
-            {
-              version: "v1.0",
-              createSurface: {
-                surfaceId: invocation.surfaceId,
-                components: [
-                  { id: "root", component: "Column", children: ["actions"] },
+        Promise.resolve(
+          options?.secretField
+            ? {
+                schemaVersion: 1 as const,
+                status: "rendered" as const,
+                messages: [
                   {
-                    id: "actions",
-                    component: "ApprovalActions",
-                    approvalId: "not-the-kernels",
-                    approveLabel: "Send",
-                    declineLabel: "Discard",
+                    version: "v1.0",
+                    createSurface: {
+                      surfaceId: invocation.surfaceId,
+                      components: [
+                        {
+                          id: "root",
+                          component: "Column",
+                          children: ["field"],
+                        },
+                        {
+                          id: "field",
+                          component: "SecretField",
+                          requestId: "the-plugins-own",
+                          state: "saved",
+                        },
+                      ],
+                    },
+                  },
+                ],
+              }
+            : {
+                schemaVersion: 1 as const,
+                status: "rendered" as const,
+                ...(options?.declaresNothing
+                  ? {}
+                  : { covers: options?.covers ?? invocation.data }),
+                ...(options?.saysNothing
+                  ? {}
+                  : {
+                      decision: {
+                        action: "Send the draft",
+                        risk: "medium" as const,
+                      },
+                    }),
+                messages: [
+                  {
+                    version: "v1.0",
+                    createSurface: {
+                      surfaceId: invocation.surfaceId,
+                      components: [
+                        {
+                          id: "root",
+                          component: "Column",
+                          children: ["actions"],
+                        },
+                        {
+                          id: "actions",
+                          component: "ApprovalActions",
+                          approvalId: "not-the-kernels",
+                          approveLabel: "Send",
+                          declineLabel: "Discard",
+                        },
+                      ],
+                    },
                   },
                 ],
               },
-            },
-          ],
-        }),
+        ),
     } as unknown as PluginWorkerEntrypoint;
   }
 
@@ -414,6 +453,7 @@ describe("the Approvals a Plugin's Card asks for", () => {
     // Which of this Bot's Sessions draws. One Bot holds many — every Routine
     // gets its own — while its card and Approval records are Bot-wide.
     sessionId: string = `${USER}:bot-1`,
+    secretRequests?: SecretRequestStoreV1,
   ) {
     const generation = await cardGeneration();
     const { signal } = new AbortController();
@@ -424,6 +464,7 @@ describe("the Approvals a Plugin's Card asks for", () => {
       sessionEvents: [],
       admitEffect: () => Promise.resolve(true),
       cardApprovals: store,
+      ...(secretRequests === undefined ? {} : { secretRequests }),
       isolate: {
         userId: USER,
         runId: "run-1",
@@ -911,6 +952,102 @@ describe("the Approvals a Plugin's Card asks for", () => {
       expect(now).toHaveLength(2);
       expect(now[1]).not.toBe(minted[0]);
       expect(cardApprovalId(mounted)).toBe(now[1]!);
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
+  /** The components of every card the Turn's log carries, flattened. */
+  function cardComponentsOnLog(
+    mounted: ShellMountedComposition,
+  ): Record<string, unknown>[] {
+    const session = mounted.runtime.services.sessions.get(`${USER}:bot-1`);
+    return (session?.activeRunJournal ?? []).flatMap((event) => {
+      const payload = (
+        event as {
+          payload?: {
+            type?: string;
+            messages?: Array<{
+              createSurface?: { components?: Record<string, unknown>[] };
+            }>;
+          };
+        }
+      ).payload;
+      return payload?.type === "card"
+        ? (payload.messages ?? []).flatMap(
+            (message) => message.createSurface?.components ?? [],
+          )
+        : [];
+    });
+  }
+
+  test("a secret request's field is bound to a request recorded before the card is seen", async () => {
+    const { store } = cardApprovalStorage();
+    const requestStorage = new MemorySecretStorage();
+    const requests = createSecretRequestStoreV1(requestStorage);
+    const { mounted, signal } = await mountCards(
+      store,
+      { secretField: true },
+      `${USER}:bot-1`,
+      requests,
+    );
+    try {
+      const drawn = await mounted.runtime.services.firstPartyCards!.draw(
+        {
+          pluginId: CARD_PLUGIN,
+          cardId: "draft",
+          data: { subject: "Shop login" },
+          secretRequest: {
+            label: "Shop login",
+            prompt: "Your shop password",
+            origin: "https://shop.example",
+            payment: false,
+          },
+        },
+        {
+          botId: "bot-1",
+          agentId: "bot-1",
+          sessionId: `${USER}:bot-1`,
+          compositionGenerationId: "g",
+          effectId: "tool:1:1:0:card",
+          turnType: "chat",
+          signal,
+        },
+      );
+      expect(drawn.status).toBe("drawn");
+      const field = cardComponentsOnLog(mounted).find(
+        (component) => component.component === "SecretField",
+      )!;
+      // Whatever the Plugin wrote on it is the kernel's to overwrite.
+      expect(field.requestId).toMatch(/^secret-request-[0-9a-f]{32}$/);
+      expect(field).toMatchObject({ state: "waiting", payment: false });
+      const recorded = await requests.read(field.requestId as string);
+      expect(recorded).toMatchObject({
+        label: "Shop login",
+        origin: "https://shop.example",
+        payment: false,
+        state: "waiting",
+        fieldIds: ["field"],
+      });
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
+  test("a Plugin's own card may not carry the field a secret is typed into", async () => {
+    const { store } = cardApprovalStorage();
+    const requests = createSecretRequestStoreV1(new MemorySecretStorage());
+    const { mounted, draw } = await mountCards(
+      store,
+      { secretField: true },
+      `${USER}:bot-1`,
+      requests,
+    );
+    try {
+      const refused = await draw({ data: { subject: "Hello" } });
+      expect(refused).toMatchObject({ isError: true });
+      expect(String(refused.content)).toContain("SecretField");
+      expect(cardComponentsOnLog(mounted)).toEqual([]);
     } finally {
       await mounted.dispose();
     }

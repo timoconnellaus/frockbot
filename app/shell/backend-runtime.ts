@@ -143,6 +143,11 @@ export interface ShellHostedRuntimeHostV1 {
   computerDemonstrations?: NonNullable<
     ComputerAgentPluginConfig["demonstrations"]
   >;
+  /**
+   * The Bot's authority over its User's saved secrets, for one admitted Turn:
+   * whether a fill may go ahead, and the value for that one action.
+   */
+  computerSecrets?: NonNullable<ComputerAgentPluginConfig["secrets"]>;
   /** The `computerUse` task owner whose User-wide lease this child holds. */
   computerAgentControlOwnerId?: string;
   /**

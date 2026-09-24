@@ -9,18 +9,13 @@ import type {
  * Credential cards: the `secret-request` payload, drawn from the catalog (ADR
  * 0030 step 7).
  *
- * A secret never crosses this card, and there is nothing on it that could
- * take one. The card says what is wanted, what it will be stored as, and
- * where it is added; the value itself goes from the client to a Connection
- * write over an expiring lease, and is never in a data model the agent can
- * read back.
- *
- * The old bubble carried an "Open Settings" button. The Frock catalog has no
- * component that opens an in-app route — a card's only link handling is the
- * host's external opener, which admits `https` and nothing else — so the card
- * names the door in words rather than pretending to be it. A host-drawn
- * settings component is the follow-up; a button that did nothing would be
- * worse than this line.
+ * The card says what is wanted, what it will be saved as and where it may be
+ * used, and carries the one `SecretField` the person types it into. The field
+ * is the host's: the kernel binds it to the request it recorded for this send
+ * and overwrites whatever is written on it here, the client draws it masked,
+ * and what is typed goes from the client to the User's credential store. It
+ * is never in this card's data model, never in anything this Plugin is handed
+ * back, and never in anything the Bot reads — the Bot learns a reference.
  */
 
 export const tools: PluginTool[] = [];
@@ -46,34 +41,42 @@ const requestCard: PluginCard = {
         reason: "a credential request needs a prompt and a name",
       };
     }
+    const origin =
+      typeof data.origin === "string" && data.origin.length > 0
+        ? data.origin
+        : undefined;
+    const payment = data.payment === true;
+    const rows = [
+      { label: "Saved as", value: secretName },
+      {
+        label: "Used on",
+        value: origin ?? "Any site, with your approval each time",
+      },
+    ];
     return surface(surfaceId, [
       {
         id: "root",
         component: "Column",
-        children: ["header", "where", "warning"],
+        children: ["header", "facts", "field", "note"],
       },
       {
         id: "header",
         component: "CardHeader",
         title: prompt,
-        subtitle: "Needs a credential",
-        status: "Not set",
-        tone: "warning",
+        subtitle: payment ? "Payment detail" : "Secret",
       },
+      { id: "facts", component: "KeyValueRows", rows },
+      // Bound by the kernel to the request it recorded for this send; the
+      // values here are placeholders it overwrites.
+      { id: "field", component: "SecretField", requestId: "pending" },
       {
-        id: "where",
-        component: "KeyValueRows",
-        rows: [
-          { label: "Stored as", value: secretName },
-          { label: "Where", value: "Settings · Connections" },
-        ],
-      },
-      {
-        id: "warning",
+        id: "note",
         component: "Callout",
-        tone: "warning",
-        title: "Never in the conversation",
-        text: "Add it in Settings, where the value crosses as an expiring lease and no Bot ever reads it back. Anything typed in the thread is on the thread.",
+        tone: "neutral",
+        title: "Your Bot never sees it",
+        text: payment
+          ? "It is kept in your account, not the conversation. Each time your Bot fills it into a page, you approve that page first. Delete it any time in Settings."
+          : "It is kept in your account, not the conversation, and your Bot can only type it into the site above. Delete it any time in Settings.",
       },
     ]);
   },

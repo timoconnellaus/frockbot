@@ -35,6 +35,7 @@ final Map<String, Map<String, Object?>> minimalFrockComponents = {
     'packageId': 'connect',
     'connectionTypeId': 'connect-gmail',
   },
+  'SecretField': {'requestId': 'secret-request-1', 'state': 'waiting'},
   'Receipt': {'title': 'Following up', 'status': 'Sent'},
   'CardHeader': {'title': 'September invoices', 'status': 'Action needed'},
   'SectionHeader': {'title': 'Line items', 'caption': '4'},

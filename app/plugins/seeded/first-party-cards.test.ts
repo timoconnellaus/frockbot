@@ -250,7 +250,7 @@ describe("the five locked card Plugins", () => {
     expect(insecure.detail).toContain("http://files.example.com/a.txt");
   });
 
-  test("a credential request says where, and takes nothing", async () => {
+  test("a secret request carries one host field and no action", async () => {
     const components = componentsOf(
       (
         await drawV1({
@@ -264,9 +264,12 @@ describe("the five locked card Plugins", () => {
       "Column",
       "CardHeader",
       "KeyValueRows",
+      "SecretField",
       "Callout",
     ]);
-    // Nothing on this card can carry a value anywhere: no field, no action.
+    // The one field is the host's `SecretField`, which the kernel binds.
+    // Nothing is an action, and nothing is a form input whose value would
+    // land in the card's data model.
     for (const component of components) {
       const record = component as unknown as Record<string, unknown>;
       expect(record.action).toBeUndefined();
@@ -275,8 +278,8 @@ describe("the five locked card Plugins", () => {
     expect(
       (components[2] as unknown as Record<string, unknown>).rows,
     ).toMatchObject([
-      { label: "Stored as", value: "STRIPE_KEY" },
-      { label: "Where", value: "Settings · Connections" },
+      { label: "Saved as", value: "STRIPE_KEY" },
+      { label: "Used on", value: "Any site, with your approval each time" },
     ]);
   });
 

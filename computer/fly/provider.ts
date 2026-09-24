@@ -139,6 +139,15 @@ function browserAction(action: ComputerBrowserAction): BrowserAction {
         text: action.text,
         exact: action.exact,
       };
+    // The value is not part of the action: it is handed to the command apart
+    // from the action's own description, which is what lands in a script.
+    case "fill-secret":
+      return {
+        action: "fill-secret",
+        label: action.label,
+        exact: action.exact,
+        origin: action.origin,
+      };
     case "press":
       return { action: "press", key: action.key };
     case "wait":
@@ -506,6 +515,7 @@ function handle(
             browserAction(action),
             options?.signal ?? new AbortController().signal,
             options?.effectId,
+            action.type === "fill-secret" ? action.value : undefined,
           ),
         ),
     },

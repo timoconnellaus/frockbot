@@ -29,6 +29,11 @@ import {
 } from "@frockbot/app/shell/run-protocol";
 import { decodeApprovalDecisionCommandV1 } from "@frockbot/app/shell/approvals";
 import {
+  decodeSecretSubmitCommandV1,
+  isSecretRequestIdV1,
+  SecretDecodeError,
+} from "@frockbot/app/secrets/shared";
+import {
   decodeCardActionCommandV1,
   decodeCardSurfaceIdV1,
 } from "@frockbot/app/shell/cards";
@@ -654,6 +659,63 @@ function createUserApplicationRoute() {
         if (name === "ApprovalNotFoundError") return jsonError(404, message);
         if (name === "ApprovalDecodeError") return jsonError(400, message);
         return jsonError(500, message);
+      }
+    }
+
+    // A secret a person typed on a Bot's secret-request card. The body is
+    // decoded without ever being echoed, handed to the Bot that asked, and
+    // sealed by the User object before this answers; nothing here keeps,
+    // logs or repeats it, and a failure answers in fixed words.
+    const secretMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/secret-requests\/([^/]+)$/,
+    );
+    if (secretMatch) {
+      if (request.method !== "POST") {
+        return jsonError(405, "method not allowed");
+      }
+      let secretBotId: string;
+      let requestId: string;
+      let command;
+      try {
+        secretBotId = decodeBotIdV1(decodeURIComponent(secretMatch[1]!));
+        requestId = decodeURIComponent(secretMatch[2]!);
+        if (!isSecretRequestIdV1(requestId)) {
+          return jsonError(404, "That secret request was not found.");
+        }
+      } catch {
+        return jsonError(400, "invalid bot id");
+      }
+      const missing = await requireRegisteredBot(env, secretBotId);
+      if (missing) return missing;
+      try {
+        command = decodeSecretSubmitCommandV1(await request.json());
+      } catch (error) {
+        return jsonError(
+          400,
+          error instanceof SecretDecodeError
+            ? error.message
+            : "That secret couldn't be read.",
+        );
+      }
+      try {
+        return Response.json(
+          await env.BOT_STATE.submitSecret({
+            schemaVersion: 1,
+            botId: secretBotId,
+            requestId,
+            command,
+          }),
+          { headers: { "cache-control": "no-store" } },
+        );
+      } catch (error) {
+        const name = error instanceof Error ? error.name : "";
+        if (name === "SecretRequestNotFoundError") {
+          return jsonError(404, "That secret request was not found.");
+        }
+        if (name === "SecretLimitError" && error instanceof Error) {
+          return jsonError(409, error.message);
+        }
+        return jsonError(500, "The secret couldn't be saved. Try again.");
       }
     }
 

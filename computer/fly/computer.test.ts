@@ -4,10 +4,15 @@ import { describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import type { ComputerConnectionProgressV1 } from "@frockbot/computer/core/host";
 import { COMPUTER_UNCONFIGURED_MESSAGE_V1 } from "@frockbot/computer/core";
-import { BOTS_ROOT, DESKTOP_GUI_LEASE_KEY } from "./runtime.js";
+import {
+  BOTS_ROOT,
+  BROWSER_SECRET_ENV_V1,
+  DESKTOP_GUI_LEASE_KEY,
+} from "./runtime.js";
 import {
   computerBotKey,
   FlyComputer,
+  secretFillRefusalV1,
   type ComputerHostFactoryV1,
 } from "./computer.ts";
 import { FakeComputerHost, type FakeComputerRunV1 } from "./host-double.ts";
@@ -682,5 +687,95 @@ describe("Fly Sprite computer", () => {
     expect(renewed?.id).toBe(lease?.id);
     await computer.control?.release(lease!, undefined, { signal: signal() });
     expect(host.leases.size).toBe(0);
+  });
+});
+
+describe("a saved secret typed by the Fly Computer", () => {
+  const SECRET = "fly-secret-9f3a1c7e";
+
+  async function session(runner: (script: string) => FakeComputerRunV1) {
+    const host = new FakeComputerHost((script) =>
+      script.includes("browser.mjs") ? runner(script) : computerRunner(script),
+    );
+    const computer = await new FlyComputerHostV1(attach(host)).open(
+      { userId: "owner" },
+      { botId: "filler" },
+      { providerId: "computer-host", generation: 1 },
+    );
+    return { host, computer };
+  }
+
+  test("hands the value over in the environment and never in the script", async () => {
+    const { host, computer } = await session(() => ({
+      stdout: JSON.stringify({
+        filled: true,
+        url: "https://shop.example/login",
+        snapshot: "",
+      }),
+    }));
+
+    const filled = await computer.browser!.perform(
+      {
+        type: "fill-secret",
+        label: "Password",
+        origin: "https://shop.example",
+        value: SECRET,
+      },
+      { signal: signal(), effectId: "call-fill" },
+    );
+
+    expect(filled.accessibilitySnapshot).toBe("");
+    const fill = host.commands.find((command) =>
+      command.script.includes("browser.mjs"),
+    )!;
+    expect(fill.env).toEqual({ [BROWSER_SECRET_ENV_V1]: SECRET });
+    // The action the helper reads names the origin it must be on, and
+    // nothing a script carries — a command line, a log — carries the value.
+    const encoded = /browser\.mjs "\$PORT" '([A-Za-z0-9_-]+)'/.exec(
+      fill.script,
+    )![1]!;
+    expect(
+      JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")),
+    ).toEqual({
+      action: "fill-secret",
+      label: "Password",
+      origin: "https://shop.example",
+    });
+    for (const command of host.commands) {
+      expect(command.script).not.toContain(SECRET);
+    }
+    expect(JSON.stringify(filled)).not.toContain(SECRET);
+  });
+
+  test("a refusal is told in fixed words, whatever the helper printed", async () => {
+    const { computer } = await session(() => ({
+      exitCode: 65,
+      stdout: `${SECRET}\n${JSON.stringify({
+        refused: "origin",
+        origin: "https://other.example",
+      })}`,
+    }));
+
+    const refused = await computer
+      .browser!.perform(
+        {
+          type: "fill-secret",
+          label: "Password",
+          origin: "https://shop.example",
+          value: SECRET,
+        },
+        { signal: signal() },
+      )
+      .then(
+        () => undefined,
+        (error: unknown) => error as Error,
+      );
+
+    expect(refused?.message).toBe(
+      "Not filled: the page is on https://other.example, not the site this secret may be filled into.",
+    );
+    expect(secretFillRefusalV1("not json")).toBe(
+      "Not filled: the browser could not type into that field.",
+    );
   });
 });

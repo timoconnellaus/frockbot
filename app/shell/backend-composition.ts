@@ -53,11 +53,16 @@ import {
 import { recordSendToUserV1 } from "./agent.js";
 import {
   bindCardApprovalsV1,
+  bindCardSecretFieldsV1,
+  CardDecodeError,
   cardApprovalIdV1,
   cardApprovalSeedV1,
+  cardSecretFieldIdsV1,
   cardValuesDigestV1,
   type CardApprovalStoreV1,
 } from "./cards.js";
+import type { SecretRequestStoreV1 } from "@frockbot/app/secrets/bot";
+import { secretRequestIdV1 } from "@frockbot/app/secrets/shared";
 
 /**
  * The generation a Bot starts on: empty.
@@ -192,6 +197,13 @@ export interface ShellCompositionMountOptions {
    * refuses rather than sending under a decision nobody tied to it.
    */
   cardApprovals?: CardApprovalStoreV1;
+  /**
+   * Where a `secret-request` card's field is recorded as a request the
+   * person may answer. Absent, and no card may carry a `SecretField`: a
+   * field whose request was never recorded would take a password and go
+   * nowhere.
+   */
+  secretRequests?: SecretRequestStoreV1;
   /** Absent when the host cannot load isolates; isolate members then fail verify. */
   isolate?: ShellIsolateMountOptions;
   /**
@@ -479,9 +491,58 @@ export function createShellCompositionHost(
                       error instanceof Error ? error.message : String(error),
                   };
                 }
+                // The field a secret is typed into. Only the kernel's own draw
+                // of a `secret-request` may carry one, bound here to a request
+                // recorded before the card can be seen; on every other draw it
+                // refuses the card.
+                let messages = bound.messages;
+                const secret = send.secretRequest;
+                const requests = options.secretRequests;
+                try {
+                  if (secret === undefined) {
+                    bindCardSecretFieldsV1(messages, undefined);
+                  } else {
+                    if (!requests || !approvals) {
+                      throw new CardDecodeError(
+                        "this host records no secret requests, so no field for one can be drawn",
+                      );
+                    }
+                    const requestId = await secretRequestIdV1(
+                      await approvals.secret(),
+                      send.context.sessionId,
+                      send.context.effectId,
+                    );
+                    messages = bindCardSecretFieldsV1(messages, {
+                      requestId,
+                      payment: secret.payment,
+                    });
+                    await requests.record({
+                      schemaVersion: 1,
+                      requestId,
+                      surfaceId: send.surfaceId,
+                      fieldIds: cardSecretFieldIdsV1(messages),
+                      label: secret.label,
+                      prompt: secret.prompt,
+                      ...(secret.origin === undefined
+                        ? {}
+                        : { origin: secret.origin }),
+                      payment: secret.payment,
+                      sessionId: send.context.sessionId,
+                      runId: isolate.runId,
+                      createdAt: new Date().toISOString(),
+                      state: "waiting",
+                    });
+                  }
+                } catch (error) {
+                  if (!(error instanceof CardDecodeError)) throw error;
+                  return {
+                    status: "refused" as const,
+                    reason: error.message,
+                  };
+                }
                 const recorded = await recordSendToUserV1(
                   runtime.services.sessions,
-                  { ...payload, messages: bound.messages },
+                  { ...payload, messages },
                   {
                     sessionId: send.context.sessionId,
                     occurrenceId: send.context.effectId,
@@ -625,6 +686,9 @@ export function createShellCompositionHost(
                       ...(request.approvalIds === undefined
                         ? {}
                         : { approvalIds: request.approvalIds }),
+                      ...(request.secretRequest === undefined
+                        ? {}
+                        : { secretRequest: request.secretRequest }),
                     },
                     context,
                   )

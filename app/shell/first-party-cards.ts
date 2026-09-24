@@ -37,6 +37,17 @@ import {
   type ToolExecutionContext,
 } from "@frockbot/core/contracts";
 
+/**
+ * The terms a `secret-request` is asked under beyond its words: the site it
+ * is for, and whether it is a payment detail. They are the send tool's input
+ * and not the payload's, because the payload's shape is fixed on the wire the
+ * installed apps read; the request the kernel records is where they live.
+ */
+export interface SecretRequestTermsV1 {
+  origin?: string;
+  payment: boolean;
+}
+
 /** The locked Plugin, and the card of it, each old member is drawn by. */
 export const FIRST_PARTY_CARD_PLUGINS_V1 = {
   approval: { pluginId: "approvals", cardId: "decision" },
@@ -68,6 +79,7 @@ export function isFirstPartyCardMemberV1(
  */
 export function firstPartyCardDrawV1(
   payload: SendToUserPayloadV1,
+  terms?: SecretRequestTermsV1,
 ): FirstPartyCardDrawV1 | undefined {
   switch (payload.type) {
     case "approval":
@@ -110,11 +122,27 @@ export function firstPartyCardDrawV1(
             : { mediaType: payload.mediaType }),
         },
       };
-    case "secret-request":
+    case "secret-request": {
+      const payment = terms?.payment ?? false;
+      const origin = terms?.origin;
       return {
         ...FIRST_PARTY_CARD_PLUGINS_V1["secret-request"],
-        data: { prompt: payload.prompt, secretName: payload.secretName },
+        data: {
+          prompt: payload.prompt,
+          secretName: payload.secretName,
+          ...(origin === undefined ? {} : { origin }),
+          payment,
+        },
+        // What the kernel records the request under and binds the card's
+        // field to. The Plugin draws the card; it never names the request.
+        secretRequest: {
+          label: payload.secretName,
+          prompt: payload.prompt,
+          ...(origin === undefined ? {} : { origin }),
+          payment,
+        },
       };
+    }
     case "agent-card":
       return {
         ...FIRST_PARTY_CARD_PLUGINS_V1["agent-card"],
@@ -141,8 +169,9 @@ export async function drawFirstPartyCardV1(
   cards: FirstPartyCardDrawsV1 | undefined,
   payload: SendToUserPayloadV1,
   context: ToolExecutionContext,
+  terms?: SecretRequestTermsV1,
 ): Promise<{ surfaceId?: string }> {
-  const request = firstPartyCardDrawV1(payload);
+  const request = firstPartyCardDrawV1(payload, terms);
   if (!request || !cards) return {};
   try {
     const outcome = await cards.draw(request, {

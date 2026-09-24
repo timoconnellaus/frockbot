@@ -140,6 +140,16 @@ const APPROVAL_ID_PATTERN_V1 = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/;
  */
 export const CARD_APPROVAL_ID_PREFIX_V1 = "card-approval-";
 
+/**
+ * The namespace the kernel mints a saved secret's fill Approvals in.
+ *
+ * Reserved for the same reason as a Card's: filling a payment detail into a
+ * page is released by an approved record under this id, so a model that
+ * could ask for a decision under it in its own words could have a person
+ * approve something they were never shown.
+ */
+export const SECRET_FILL_APPROVAL_ID_PREFIX_V1 = "secret-fill-";
+
 /** What may waive the reserved prefix. */
 export interface DecodeSendToUserOptionsV1 {
   /**
@@ -368,6 +378,14 @@ export function decodeSendToUserPayloadV1(
       ) {
         throw new Error(
           `${label}.approvalId must not start with "${CARD_APPROVAL_ID_PREFIX_V1}": that namespace is the kernel's, for the decisions a Card asks for`,
+        );
+      }
+      if (
+        options.kernelMinted !== true &&
+        approvalId.startsWith(SECRET_FILL_APPROVAL_ID_PREFIX_V1)
+      ) {
+        throw new Error(
+          `${label}.approvalId must not start with "${SECRET_FILL_APPROVAL_ID_PREFIX_V1}": that namespace is the kernel's, for filling a saved secret into a page`,
         );
       }
       return {

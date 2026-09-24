@@ -1418,6 +1418,76 @@ function mapCardComponentsV1(
 }
 
 /**
+ * The Frock catalog component the host draws for a secret the person types:
+ * a masked field and a Save button whose value goes to the User's credential
+ * store, never into the card, its data model or anything a Bot reads.
+ */
+export const CARD_SECRET_FIELD_COMPONENT_V1 = "SecretField";
+
+/** What a `SecretField` asks for, as the kernel recorded the request. */
+export interface CardSecretFieldBindingV1 {
+  requestId: string;
+  payment: boolean;
+}
+
+/** The ids of the `SecretField` components a send carries, in order. */
+export function cardSecretFieldIdsV1(
+  messages: readonly A2uiAgentMessageV1[],
+): string[] {
+  const ids: string[] = [];
+  mapCardComponentsV1(messages, (component) => {
+    if (component.component === CARD_SECRET_FIELD_COMPONENT_V1) {
+      ids.push(component.id);
+    }
+    return component;
+  });
+  return ids;
+}
+
+/**
+ * Binds the one `SecretField` a secret-request card carries to the request
+ * the kernel recorded, or refuses the card.
+ *
+ * Trust chrome for a sharper reason than a decision: what a person types
+ * into this field is a password or a card number. So only the kernel's own
+ * draw of a `secret-request` may carry one — a Plugin's card, a handler's
+ * answer and a Bot's own card are refused whole rather than drawn with a
+ * field that goes nowhere, or somewhere they chose. Whatever the author
+ * wrote on the component is overwritten with the request, its payment class
+ * and the state the host draws it in.
+ */
+export function bindCardSecretFieldsV1(
+  messages: readonly A2uiAgentMessageV1[],
+  binding: CardSecretFieldBindingV1 | undefined,
+): A2uiAgentMessageV1[] {
+  const fields = cardSecretFieldIdsV1(messages);
+  if (binding === undefined) {
+    if (fields.length > 0) {
+      throw new CardDecodeError(
+        `a ${CARD_SECRET_FIELD_COMPONENT_V1} is drawn only by the host, on a secret request: ask with send_to_user type "secret-request"`,
+      );
+    }
+    return [...messages];
+  }
+  if (fields.length !== 1) {
+    throw new CardDecodeError(
+      `a secret request's card carries exactly one ${CARD_SECRET_FIELD_COMPONENT_V1}`,
+    );
+  }
+  return mapCardComponentsV1(messages, (component) =>
+    component.component === CARD_SECRET_FIELD_COMPONENT_V1
+      ? {
+          id: component.id,
+          component: CARD_SECRET_FIELD_COMPONENT_V1,
+          requestId: binding.requestId,
+          payment: binding.payment,
+          state: "waiting",
+        }
+      : component,
+  );
+}
+
+/**
  * The Frock catalog component the host draws to connect an app: its logo, its
  * name and a button that opens the app's own sign-in. The card names the app;
  * what the button connects is the kernel's.

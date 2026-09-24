@@ -71,6 +71,7 @@ import {
 } from "./backend-composition.js";
 import { compositionFailureTurnTextV1 } from "./backend-composition-input.js";
 import { createCardApprovalStoreV1 } from "./cards.js";
+import { createSecretRequestStoreV1 } from "@frockbot/app/secrets/bot";
 import { createReplyDraftWatchV1 } from "./reply-draft.js";
 import {
   botStopCommandFingerprintV1,
@@ -464,6 +465,9 @@ export async function executeTurn(
         // binding have to be read back together by the capability that
         // claims one.
         cardApprovals: createCardApprovalStoreV1(state.ctx.storage),
+        // Where a secret request's card field is recorded as a request the
+        // person may answer, in the same storage the save route reads.
+        secretRequests: createSecretRequestStoreV1(state.ctx.storage),
         // The turn type the run was admitted as; recovery reads it back from
         // the durable record, so a resumed Turn mounts the same catalog.
         turnType: input.command.turnType ?? "chat",

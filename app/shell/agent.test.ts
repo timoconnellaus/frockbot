@@ -5,6 +5,7 @@ import Ajv from "ajv";
 import {
   decodeSendToUserPayloadV1,
   SEND_TO_USER_PAYLOAD_TYPES_V1,
+  type FirstPartyCardDrawV1,
   type SendToUserPayloadV1,
   type Session,
   type ToolCall,
@@ -306,7 +307,7 @@ describe("send_to_user", () => {
     }
   });
 
-  test("widgets and approvals end the Turn even when marked as interim", async () => {
+  test("widgets, approvals and secret requests end the Turn even when marked as interim", async () => {
     const mounted = await mount();
     try {
       const widget = await invoke(
@@ -378,7 +379,8 @@ describe("send_to_user", () => {
       expect(approval.endsTurn).toBe(true);
       expect(attachment.endsTurn).toBeUndefined();
       expect(text.endsTurn).toBeUndefined();
-      expect(secret.endsTurn).toBeUndefined();
+      // A secret request waits on the person, as a question does.
+      expect(secret.endsTurn).toBe(true);
       expect(card.endsTurn).toBeUndefined();
       expect(
         mounted.session.activeRunJournal
@@ -626,6 +628,134 @@ describe("the conversation prompt section", () => {
       ).toBe(false);
 
       expect(description).toContain("only way to say anything the user sees");
+    } finally {
+      await mounted.dispose();
+    }
+  });
+});
+
+describe("a secret request", () => {
+  async function mountWithCards() {
+    const mounted = await mount();
+    const draws: FirstPartyCardDrawV1[] = [];
+    mounted.root.firstPartyCards = {
+      draw: async (request) => {
+        draws.push(request);
+        return { status: "drawn", surfaceId: "credentials_request.abc" };
+      },
+    };
+    return { mounted, draws };
+  }
+
+  test("carries its site and payment class to the card, and the log keeps the wire's shape", async () => {
+    const { mounted, draws } = await mountWithCards();
+    try {
+      const sent = await invoke(
+        mounted,
+        "chat",
+        call(SEND_TO_USER_TOOL_V1, {
+          disposition: "finish",
+          payload: {
+            type: "secret-request",
+            prompt: "Your shop password",
+            secretName: "Shop login",
+            origin: "https://shop.example/login",
+            payment: false,
+          },
+        }),
+      );
+      expect(sent).toMatchObject({ isError: false, endsTurn: true });
+      // The installed apps decode this payload with exact keys, so the log
+      // carries exactly the three it always has.
+      const send = mounted.session.activeRunJournal.find(
+        (event) => event.type === "send/to-user",
+      );
+      expect(send?.type === "send/to-user" && send.payload).toEqual({
+        type: "secret-request",
+        prompt: "Your shop password",
+        secretName: "Shop login",
+      });
+      expect(draws).toHaveLength(1);
+      expect(draws[0]).toMatchObject({
+        pluginId: "credentials",
+        cardId: "request",
+        data: {
+          prompt: "Your shop password",
+          secretName: "Shop login",
+          origin: "https://shop.example",
+          payment: false,
+        },
+        secretRequest: {
+          label: "Shop login",
+          origin: "https://shop.example",
+          payment: false,
+        },
+      });
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
+  test("refuses a site that is not an https address", async () => {
+    const { mounted, draws } = await mountWithCards();
+    try {
+      const refused = await invoke(
+        mounted,
+        "chat",
+        call(SEND_TO_USER_TOOL_V1, {
+          disposition: "finish",
+          payload: {
+            type: "secret-request",
+            prompt: "Your password",
+            secretName: "Login",
+            origin: "http://shop.example",
+          },
+        }),
+      );
+      expect(refused.isError).toBe(true);
+      expect(draws).toHaveLength(0);
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
+  test("a card the Bot writes may not carry the field a secret is typed into", async () => {
+    const { mounted } = await mountWithCards();
+    try {
+      const refused = await invoke(
+        mounted,
+        "chat",
+        call(SEND_TO_USER_TOOL_V1, {
+          disposition: "finish",
+          payload: {
+            type: "card",
+            surfaceId: "login-card",
+            messages: [
+              {
+                version: "v1.0",
+                createSurface: {
+                  surfaceId: "login-card",
+                  components: [
+                    { id: "root", component: "Column", children: ["field"] },
+                    {
+                      id: "field",
+                      component: "SecretField",
+                      requestId: `secret-request-${"0".repeat(32)}`,
+                    },
+                  ],
+                },
+              },
+            ],
+          },
+        }),
+      );
+      expect(refused.isError).toBe(true);
+      expect(refused.content).toContain("secret-request");
+      expect(
+        mounted.session.activeRunJournal.filter(
+          (event) => event.type === "send/to-user",
+        ),
+      ).toHaveLength(0);
     } finally {
       await mounted.dispose();
     }

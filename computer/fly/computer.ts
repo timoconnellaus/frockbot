@@ -29,6 +29,7 @@ import {
   BIN_ROOT,
   BOTS_ROOT,
   BOUNDED_LOG_SCRIPT,
+  BROWSER_SECRET_ENV_V1,
   COMPUTER_CDP_PORT,
   CONTROL_SCRIPT,
   DATA_ROOT,
@@ -242,9 +243,12 @@ export interface BrowserAction {
     | "close-origins"
     | "click"
     | "fill"
+    | "fill-secret"
     | "press"
     | "wait";
   url?: string;
+  /** `fill-secret`: the only origin the page may be on when it is typed. */
+  origin?: string;
   origins?: readonly string[];
   role?: string;
   name?: string;
@@ -253,6 +257,38 @@ export interface BrowserAction {
   key?: string;
   exact?: boolean;
   milliseconds?: number;
+}
+
+/**
+ * Why a secret fill was not made, in fixed words chosen from the helper's
+ * structured answer — never the helper's own text, which is the one place a
+ * browser could have echoed what it was asked to type.
+ */
+export function secretFillRefusalV1(output: string): string {
+  let answer: { refused?: unknown; origin?: unknown } = {};
+  try {
+    const parsed: unknown = JSON.parse(output.split("\n").at(-1) ?? "");
+    if (parsed && typeof parsed === "object") answer = parsed;
+  } catch {
+    // Anything unreadable is the generic refusal below.
+  }
+  const origin =
+    typeof answer.origin === "string" &&
+    /^https?:\/\/[^\s"]+$/.test(answer.origin)
+      ? answer.origin
+      : undefined;
+  switch (answer.refused) {
+    case "origin":
+      return `Not filled: the page is ${origin ? `on ${origin}` : "not on a web address"}, not the site this secret may be filled into.`;
+    case "no-field":
+      return "Not filled: no field on the page has that label. Take a snapshot and use the field's label as it reads there.";
+    case "many-fields":
+      return "Not filled: more than one field has that label. Use a more exact label, or set exact to true.";
+    case "not-fillable":
+      return "Not filled: the element with that label is not a field that can be typed into.";
+    default:
+      return "Not filled: the browser could not type into that field.";
+  }
 }
 
 export interface ComputerConnection {
@@ -414,8 +450,15 @@ export class FlyAgentComputer {
     action: BrowserAction,
     signal: AbortSignal,
     effectId?: string,
+    secret?: string,
   ): Promise<string> {
-    return this.computer.browserForAgent(this.layout, action, signal, effectId);
+    return this.computer.browserForAgent(
+      this.layout,
+      action,
+      signal,
+      effectId,
+      secret,
+    );
   }
 
   /** Captures this tenant's own desktop. */
@@ -1337,6 +1380,7 @@ export class FlyComputer {
     action: BrowserAction,
     signal: AbortSignal,
     effectId?: string,
+    secret?: string,
   ): Promise<string> {
     const host = await this.readyHost(layout, signal);
     const encoded = Buffer.from(JSON.stringify(action)).toString("base64url");
@@ -1347,6 +1391,43 @@ export class FlyComputer {
       // the helper has to know whose window to act in.
       `node ${RUNTIME_ROOT}/browser.mjs "$PORT" ${shellQuote(encoded)} ${shellQuote(layout.key)}`,
     ].join("\n");
+    // A saved secret travels in the command's environment, which the host
+    // compiles into the stdin document and never onto a command line, and
+    // the helper answers without echoing it. A failure is told in fixed
+    // words: the helper's own diagnostics are not trusted to leave it out.
+    if (secret !== undefined) {
+      let outcome: ComputerHostExecOutcomeV1;
+      try {
+        outcome = await host.exec(
+          {
+            script,
+            env: { [BROWSER_SECRET_ENV_V1]: secret },
+            timeoutMs: TIMEOUTS.browser,
+            maxOutputBytes: MAX_OUTPUT,
+          },
+          {
+            ...(signal ? { signal } : {}),
+            ...(effectId ? { effectId } : {}),
+          },
+        );
+      } catch (error) {
+        if (error instanceof ComputerError) throw error;
+        throw new Error("The browser could not be reached to fill the field");
+      }
+      if (outcome.exitCode === 73) {
+        throw new ComputerError(
+          "human-control-active",
+          "The user is controlling this Computer",
+        );
+      }
+      const said = outputText(outcome.stdout).trim();
+      const answer =
+        secret.length === 0 ? said : said.split(secret).join("[secret]");
+      if (outcome.exitCode !== 0) {
+        throw new ComputerError("invalid-request", secretFillRefusalV1(answer));
+      }
+      return clipped(answer);
+    }
     const outcome = await this.execute(
       host,
       script,

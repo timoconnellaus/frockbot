@@ -88,6 +88,13 @@ import {
   type CardViewV1,
 } from "@frockbot/app/shell/cards";
 import {
+  decodeSecretListViewV1,
+  decodeSecretSubmitCommandV1,
+  decodeSecretSubmitReceiptV1,
+  type SecretSubmitCommandV1,
+  type SecretSubmitReceiptV1,
+} from "@frockbot/app/secrets/shared";
+import {
   decodeCompositionCommandReceiptV1,
   decodeCompositionGenerationListViewV1,
   decodeCompositionGenerationViewV1,
@@ -479,6 +486,10 @@ interface BotStateRpc extends BotConfigurationBinding {
   listCards(): Promise<CardListViewV1>;
   readCard(surfaceId: string): Promise<CardViewV1>;
   cardAction(command: CardActionCommandV1): Promise<CardActionReceiptV1>;
+  submitSecret(
+    requestId: string,
+    command: SecretSubmitCommandV1,
+  ): Promise<unknown>;
   readUnread(): Promise<BotUnreadViewV1>;
   executeUnreadCommand(
     command: BotUnreadCommandV1,
@@ -672,6 +683,8 @@ function botStateStub(env: Env, userId: string, botId: string): BotStateRpc {
       rpc.readCard({ schemaVersion: 1, userId, botId, surfaceId }),
     cardAction: (command) =>
       rpc.cardAction({ schemaVersion: 1, userId, botId, command }),
+    submitSecret: (requestId, command) =>
+      rpc.submitSecret({ schemaVersion: 1, userId, botId, requestId, command }),
     readUnread: () => rpc.readUnread({ schemaVersion: 1, userId, botId }),
     executeUnreadCommand: (command) =>
       rpc.executeUnreadCommand({ schemaVersion: 1, userId, botId, command }),
@@ -719,6 +732,9 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     getBotRegistration: (request) => rpc.getBotRegistration(request),
     hasBot: (request) => rpc.hasBot(request),
     readConnectionsFrame: (request) => rpc.readConnectionsFrame(request),
+    listSecrets: async (request) =>
+      decodeSecretListViewV1(await rpc.listSecrets(request)),
+    deleteSecret: (request) => rpc.deleteSecret(request),
     readSettingsFrame: (request) => rpc.readSettingsFrame(request),
     readSettingsOptions: (request) => rpc.readSettingsOptions(request),
     changeSettings: (request) => rpc.changeSettings(request),
@@ -1234,6 +1250,28 @@ export class UserBotState extends WorkerEntrypoint<Env, UserScopedProps> {
         this.ctx.props.userId,
         request.botId as string,
       ).cardAction(request.command as CardActionCommandV1),
+    );
+  }
+
+  /**
+   * A value typed on a secret-request card. Passed through, never read: the
+   * Bot checks the request and the User object seals the value.
+   */
+  async submitSecret(input: unknown): Promise<SecretSubmitReceiptV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      botId: rpcBotId,
+      requestId: rpcPattern(/^secret-request-[0-9a-f]{32}$/, 128),
+      command: rpcDecoded(decodeSecretSubmitCommandV1),
+    });
+    return decodeSecretSubmitReceiptV1(
+      await botStateStub(
+        this.env,
+        this.ctx.props.userId,
+        request.botId as string,
+      ).submitSecret(
+        request.requestId as string,
+        request.command as SecretSubmitCommandV1,
+      ),
     );
   }
 

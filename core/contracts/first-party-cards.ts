@@ -30,6 +30,35 @@ export interface FirstPartyCardDrawV1 {
    * being asked to mint a second one over the same question.
    */
   approvalIds?: readonly string[];
+  /**
+   * What a `secret-request` asks the person to type, in the kernel's own
+   * words: the host binds the card's one `SecretField` to a request it
+   * records from these, and the value typed there goes to the User's
+   * credential store rather than into anything the card holds.
+   *
+   * Only the `secret-request` mapping carries this, and a draw that puts a
+   * `SecretField` on a card without it is refused: a Plugin, or a Bot's own
+   * card, cannot ask for a secret.
+   */
+  secretRequest?: FirstPartySecretRequestV1;
+}
+
+/** The terms a secret is asked for under, and later filled under. */
+export interface FirstPartySecretRequestV1 {
+  /** The name the Bot asked for it by; what the person sees in Settings. */
+  label: string;
+  /** Why the Bot wants it, as it asked. */
+  prompt: string;
+  /**
+   * The one site it may be filled into without asking again, as an origin.
+   * Absent, and every fill needs the person's approval.
+   */
+  origin?: string;
+  /**
+   * Card numbers, security codes and bank details. Every fill of one needs
+   * a fresh approval, whatever site it is for.
+   */
+  payment: boolean;
 }
 
 /** What the draw did. A refusal is a sentence, never a throw. */

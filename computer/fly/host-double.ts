@@ -70,6 +70,8 @@ export type FakeComputerRunnerV1 = (
 export interface FakeComputerCommandV1 {
   botId: string;
   script: string;
+  /** The environment the command was handed, which the host puts on stdin. */
+  env?: Record<string, string>;
   /** The envelope's effect id, when the caller named one. */
   effectId?: string;
   timeoutMs?: number;
@@ -176,6 +178,7 @@ export class FakeComputerHost {
         host.commands.push({
           botId,
           script: command.script,
+          ...(command.env === undefined ? {} : { env: { ...command.env } }),
           ...(options?.effectId ? { effectId: options.effectId } : {}),
           ...(command.timeoutMs === undefined
             ? {}
@@ -531,8 +534,58 @@ export class FakeWorkspaceDisk {
  * `scrot` prints beside the PNG a read brings back — and the contract suite is
  * the one file that must contain none of it. What the suite gets is a host.
  */
+/**
+ * What `browser.mjs` would answer, for the contract suite: one page whose
+ * only field is "Password", and the helper's own origin rule for a secret.
+ * The value is never in the script, so this never sees it either.
+ */
+export class FakeBrowserPage {
+  url = "about:blank";
+
+  run(script: string): FakeComputerRunV1 | undefined {
+    const encoded = /browser\.mjs "\$PORT" '([A-Za-z0-9_-]+)'/.exec(
+      script,
+    )?.[1];
+    if (!encoded) return undefined;
+    const action = JSON.parse(
+      Buffer.from(encoded, "base64url").toString("utf8"),
+    ) as { action: string; url?: string; origin?: string; label?: string };
+    const page = () => ({
+      url: this.url,
+      title: "Sign in",
+      snapshot: '- textbox "Password"',
+    });
+    if (action.action === "navigate" && action.url) this.url = action.url;
+    if (action.action === "fill-secret") {
+      let origin = "";
+      try {
+        origin = new URL(this.url).origin;
+      } catch {
+        // `about:blank` has no origin to match.
+      }
+      if (origin !== action.origin) {
+        return {
+          exitCode: 65,
+          stdout: JSON.stringify({ refused: "origin", origin }),
+        };
+      }
+      if (action.label !== "Password") {
+        return {
+          exitCode: 65,
+          stdout: JSON.stringify({ refused: "no-field" }),
+        };
+      }
+      return {
+        stdout: JSON.stringify({ filled: true, ...page(), snapshot: "" }),
+      };
+    }
+    return { stdout: JSON.stringify(page()) };
+  }
+}
+
 export function contractHostV1(userId: string, botId: string): ComputerHostV1 {
   const disk = new FakeWorkspaceDisk();
+  const browser = new FakeBrowserPage();
   const png = new Uint8Array(64);
   png.set([137, 80, 78, 71, 13, 10, 26, 10], 0);
   let recording = false;
@@ -571,7 +624,7 @@ export function contractHostV1(userId: string, botId: string): ComputerHostV1 {
     if (script.includes("__FROCKBOT_EXIT__")) {
       return { stdout: "contract\n__FROCKBOT_EXIT__0\n" };
     }
-    return disk.run(script);
+    return browser.run(script) ?? disk.run(script);
   });
   double.files.set(`${BOTS_ROOT}/${computerBotKey(botId)}/screenshot.png`, png);
   return new FlyComputerHostV1(

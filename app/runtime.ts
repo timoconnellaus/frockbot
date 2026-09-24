@@ -579,6 +579,7 @@ export function createFoundationHostedRuntimePackages(
         ...(host.computerDemonstrations
           ? { demonstrations: host.computerDemonstrations }
           : {}),
+        ...(host.computerSecrets ? { secrets: host.computerSecrets } : {}),
       }),
     ),
   ];

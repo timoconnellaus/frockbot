@@ -254,6 +254,10 @@ _Avoid_: Queued message, pending wake
 A durable pending decision the User answers: what the Bot proposes to do, its risk, and a deadline past which it expires. Recorded once — a replayed answer reads back the decision already stored — and never a grant of authority the Bot did not already hold.
 _Avoid_: Permission, consent prompt, confirmation
 
+**Saved secret**:
+A password, card number or other secret a User typed into the host-drawn field on a Bot's secret-request card, sealed in that User's credential store under the name the Bot asked with and the site it is for. A Bot knows only its reference (`secret-…`) and can only have it typed into a web page: on its own site without asking, and under a fresh Approval of that page and field anywhere else or whenever it is a payment detail. Listed and deleted in Settings.
+_Avoid_: Credential (a Connection's), vault item, password
+
 **Compaction**:
 The durable summary of a conversation's earliest turns, computed once when the assembled history grows past its budget and replayed into every later request in their place. It covers a prefix of the conversation, so a later one supersedes it; the turns it covers are still in the log and still readable. It runs on the platform's summary model whatever model the Bot is on, one bounded slice of the oldest turns per call.
 _Avoid_: Truncation, trimming, context window management

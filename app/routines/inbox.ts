@@ -284,13 +284,31 @@ export interface RoutinePendingCardActionV1 {
 /** The longest serialized context a card-action input carries. */
 export const CARD_ACTION_CONTEXT_MAX_V1 = 4_000;
 
+/**
+ * A secret the person typed on this Bot's secret-request card, waiting to be
+ * told to the Bot: its reference, the name it asked for it by, and the terms
+ * it may be filled under. Never the value, which only the User's credential
+ * store holds.
+ */
+export interface RoutinePendingSecretSavedV1 {
+  schemaVersion: 1;
+  kind: "secret-saved";
+  requestId: string;
+  secretId: string;
+  label: string;
+  payment: boolean;
+  origin?: string;
+  createdAt: string;
+}
+
 /** One durable input the Bot's next conversational Turn is owed. */
 export type PendingBotInputV1 =
   | RoutinePendingWakeV1
   | RoutinePendingApprovalV1
   | RoutinePendingMachineResultV1
   | RoutinePendingYieldedTurnV1
-  | RoutinePendingCardActionV1;
+  | RoutinePendingCardActionV1
+  | RoutinePendingSecretSavedV1;
 
 /** The id one pending input is keyed and de-duplicated by. */
 export function pendingBotInputIdV1(input: PendingBotInputV1): string {
@@ -304,6 +322,7 @@ export function pendingBotInputIdV1(input: PendingBotInputV1): string {
   // same press and a new id is a new press, and a minted one otherwise, where
   // every post is a press of its own.
   if (input.kind === "card-action") return `card-action:${input.pressId}`;
+  if (input.kind === "secret-saved") return `secret-saved:${input.requestId}`;
   return `machine-result:${input.commandId}`;
 }
 
@@ -488,6 +507,37 @@ export function decodePendingBotInputV1(
       createdAt: routineTimestamp(candidate.createdAt, `${label} createdAt`),
     };
   }
+  if (candidate.kind === "secret-saved") {
+    routineExactKeys(
+      candidate,
+      [
+        "schemaVersion",
+        "kind",
+        "requestId",
+        "secretId",
+        "label",
+        "payment",
+        "createdAt",
+      ],
+      ["origin"],
+      label,
+    );
+    if (typeof candidate.payment !== "boolean") {
+      throw new RoutineDecodeError(`${label} payment is invalid`);
+    }
+    return {
+      schemaVersion: 1,
+      kind: "secret-saved",
+      requestId: routineText(candidate.requestId, 128, `${label} requestId`),
+      secretId: routineText(candidate.secretId, 128, `${label} secretId`),
+      label: routineText(candidate.label, 128, `${label} label`),
+      payment: candidate.payment,
+      ...(candidate.origin === undefined
+        ? {}
+        : { origin: routineText(candidate.origin, 2_048, `${label} origin`) }),
+      createdAt: routineTimestamp(candidate.createdAt, `${label} createdAt`),
+    };
+  }
   if (candidate.kind === "yielded-turn") {
     routineExactKeys(
       candidate,
@@ -621,6 +671,11 @@ export function inputDeliveryGuidanceV1(
       "For a machine command that finished: tell them what matters in the result, or carry on with the work it was for. If you already told them that result, do not repeat it.",
     );
   }
+  if (kinds.has("secret-saved")) {
+    lines.push(
+      "For a secret they saved: carry on with what you asked for it for, filling it into the page by its reference. Do not ask them to type it again, and never ask for it in the conversation.",
+    );
+  }
   if (kinds.has("wake")) {
     lines.push(
       "For a hand-off from a Routine or a subagent: tell them what matters in it, leaving out what they already know.",
@@ -676,6 +731,19 @@ export function pendingBotInputPreambleV1(
       lines.push(
         `[Card] The person used "${input.name}" on the card "${input.surfaceId}". This is a press on a control, not something they said.`,
         ...(input.context === undefined ? [] : [input.context]),
+        "",
+      );
+      continue;
+    }
+    if (input.kind === "secret-saved") {
+      lines.push(
+        `[Secret] The person saved "${input.label}". Its reference is "${input.secretId}"; you cannot read its value, and nobody will show it to you.`,
+        `Fill it into a page with computer_browser {"action":"fill","label":"<the field's label>","secret":"${input.secretId}"}.` +
+          (input.payment
+            ? " It is a payment detail, so each fill asks the person to approve that page and field first."
+            : input.origin === undefined
+              ? " It names no site, so each fill asks the person to approve the page first."
+              : ` It fills on ${input.origin} without asking; anywhere else asks the person first.`),
         "",
       );
       continue;

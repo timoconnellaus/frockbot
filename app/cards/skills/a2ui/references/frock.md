@@ -5,10 +5,10 @@ catalogs the app draws; do not edit them by hand._
 
 ## When to use
 
-These six are the core of FrockBot's own catalog, drawn from the app's own
+These seven are the core of FrockBot's own catalog, drawn from the app's own
 theme, and they are what most cards are made of. Reach for them **before**
 composing the same thing out of `Row`s and `Text`s: they cost fewer
-components, they look like the rest of the app, and three of them do things
+components, they look like the rest of the app, and four of them do things
 the standard catalog cannot. The rest of the Frock catalog is five more
 references — `structure.md` for the frame, `data.md` for numbers and rows,
 `rich-text.md` for words, `media.md` for pictures, files and links, and
@@ -25,6 +25,8 @@ references — `structure.md` for the frame, `data.md` for numbers and rows,
 - **`ApprovalActions`** — the approve and decline controls for one Approval.
 - **`ConnectApp`** — an app from the Marketplace the person can connect, with
   its logo and a Connect button.
+- **`SecretField`** — the field a secret is typed into. The host's alone; you
+  never compose one.
 - **`Receipt`** — what a card settles into.
 
 ## `ApprovalActions` is bound, not composed
@@ -68,6 +70,16 @@ A press never reaches you. The person signs in on the app's own page, and the
 app's tools appear in your prompt on a later Turn. For the usual "want me to
 connect Gmail?" card, do not compose one: call `connectors_offer` from the
 `connectors` namespace, which draws this component with your reason above it.
+
+## `SecretField` is the host's alone
+
+The masked field a person types a password, card number or other secret into.
+You never compose one: a card of yours that carries a `SecretField` is refused.
+Ask with a `send_to_user` `secret-request` — `prompt`, `secretName`, and the
+site it is for in `origin` — and the host draws the card with the field on it,
+bound to a request the kernel records. What is typed goes to the person's
+account and never to the card or to you; once they save it you get a reference
+(`secret-…`) on a later Turn, and `computer_browser` fills it into a page.
 
 ## Settling
 
@@ -169,6 +181,24 @@ An app from the Marketplace the person can connect: its logo, its name and a Con
   "id": "root",
   "component": "ConnectApp",
   "app": "…app…"
+}
+```
+
+### `SecretField`
+
+The masked field a person types a password, card number or other secret into, with a Save button. Drawn only by the host on a secret request — ask with send_to_user type secret-request; a card you write that carries one is refused. What is typed goes to the person's account, never to the card or to you.
+
+| Property    | Type                 | Required | Binding | What it is                                                                                   |
+| ----------- | -------------------- | -------- | ------- | -------------------------------------------------------------------------------------------- |
+| `requestId` | string               | yes      | literal | Written by the host: the request the kernel recorded. Whatever a card puts here is replaced. |
+| `payment`   | boolean              | no       | literal | Written by the host: whether the request is for a payment detail.                            |
+| `state`     | `waiting` \| `saved` | no       | literal | Written by the host: whether the person has saved it yet.                                    |
+
+```json
+{
+  "id": "root",
+  "component": "SecretField",
+  "requestId": "…requestId…"
 }
 ```
 

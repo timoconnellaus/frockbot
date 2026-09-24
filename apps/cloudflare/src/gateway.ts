@@ -1,6 +1,7 @@
 import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { settingsDocumentV1 } from "@frockbot/app/settings/document";
 import { connectionsCatalogQueryV1 } from "@frockbot/app/settings/frame";
+import { secretsDocumentV1 } from "@frockbot/app/secrets/document";
 import {
   botPluginsDocumentV1,
   decodeBotPluginsCommandV1,
@@ -759,6 +760,42 @@ export function createGateway(
         });
       } catch {
         return jsonError(503, "Connections are temporarily unavailable.");
+      }
+    }
+
+    // The User's saved secrets, for Settings: what each is called and where
+    // it may be used, and a delete. Nothing here reads or answers a value.
+    const deleteSecretMatch = url.pathname.match(
+      /^\/api\/secrets\/(secret-[0-9a-f]{32})\/delete$/,
+    );
+    if (url.pathname === "/api/secrets" || deleteSecretMatch) {
+      const owner = dependencies.userConfigurationFor(userId);
+      try {
+        if (deleteSecretMatch) {
+          if (request.method !== "POST") {
+            return jsonError(405, "method not allowed");
+          }
+          return Response.json(
+            await owner.deleteSecret({
+              schemaVersion: 1,
+              userId,
+              secretId: deleteSecretMatch[1]!,
+            }),
+            { headers: { "cache-control": "no-store" } },
+          );
+        }
+        if (request.method !== "GET") {
+          return jsonError(405, "method not allowed");
+        }
+        const list = await owner.listSecrets({ schemaVersion: 1, userId });
+        return Response.json(
+          url.searchParams.get("as") === "document"
+            ? secretsDocumentV1(list)
+            : list,
+          { headers: { "cache-control": "no-store" } },
+        );
+      } catch {
+        return jsonError(503, "Saved secrets are temporarily unavailable.");
       }
     }
 

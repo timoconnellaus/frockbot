@@ -180,6 +180,11 @@ import {
 } from "@frockbot/app/settings/bot";
 import { decideApproval, listApprovals } from "@frockbot/app/approvals/bot";
 import { cardAction, listCards, readCardView } from "@frockbot/app/cards/bot";
+import { submitSecretV1 } from "@frockbot/app/secrets/bot";
+import {
+  decodeSecretSubmitCommandV1,
+  type SecretSubmitCommandV1,
+} from "@frockbot/app/secrets/shared";
 import {
   getCompositionGeneration,
   listCompositionGenerations,
@@ -2970,6 +2975,31 @@ export class BotState
       request.command as CardActionCommandV1,
     );
     return receipt;
+  }
+
+  /**
+   * A value a person typed on one of this Bot's secret-request cards. It is
+   * handed straight to the User Durable Object to seal and is never written
+   * here; what this object keeps is that the request was answered.
+   */
+  async submitSecret(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      requestId: rpcPattern(/^secret-request-[0-9a-f]{32}$/, 128),
+      command: rpcDecoded(decodeSecretSubmitCommandV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    return submitSecretV1(
+      shell.state,
+      identity,
+      request.requestId as string,
+      request.command as SecretSubmitCommandV1,
+    );
   }
 
   async listNotifications(input: unknown) {
