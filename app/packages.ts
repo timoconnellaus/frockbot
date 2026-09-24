@@ -21,6 +21,7 @@ import { customModelsDefinitionV1 } from "@frockbot/app/custom-models/definition
 import { flockDefinitionV1 } from "@frockbot/app/flock/definition";
 import { imageDefinitionV1 } from "@frockbot/app/image/definition";
 import { machineMessagesDefinitionV1 } from "@frockbot/app/machine-messages/definition";
+import { mcpDefinitionV1 } from "@frockbot/app/mcp/definition";
 import { catalogProviderDefinitionsV1 } from "@frockbot/providers/catalog/definition";
 import { providerFlockAiDefinitionV1 } from "@frockbot/providers/frock-ai/definition";
 import { providerOllamaCloudDefinitionV1 } from "@frockbot/providers/ollama-cloud/definition";
@@ -57,6 +58,7 @@ export const FOUNDATION_PACKAGE_CATALOG_V1 = indexPackageCatalogV1(
     customModelsDefinitionV1,
     routinesDefinitionV1,
     credentialsDefinitionV1,
+    mcpDefinitionV1,
     connectDefinitionV1,
     webDefinitionV1,
     voiceDefinitionV1,

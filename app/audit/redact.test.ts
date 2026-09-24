@@ -51,11 +51,11 @@ describe("the audit preview", () => {
     // A remote server's arguments are somebody else's schema; the preview
     // names the keys and never their values.
     expect(
-      auditPreviewV1("mcp", "mcp__example__echo", {
+      auditPreviewV1("mcp", "mcp-example/echo", {
         message: "Bearer abcdefghijklmnopqrstuvwx",
         chatId: 42,
       }),
-    ).toBe("mcp__example__echo (chatId, message)");
+    ).toBe("mcp-example/echo (chatId, message)");
   });
 
   test("is bounded and deterministic", () => {

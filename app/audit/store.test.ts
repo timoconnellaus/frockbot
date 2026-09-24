@@ -99,7 +99,7 @@ describe("the audit table", () => {
         at: "2026-08-31T00:00:02.000Z",
         kind: "mcp",
         target: "remote:mcp.example.test",
-        toolName: "mcp__example__echo",
+        toolName: "mcp-example/echo",
       }),
       entry({
         occurrenceId: "tool:1:1:2",
@@ -114,7 +114,7 @@ describe("the audit table", () => {
       table
         .query({ target: "remote:mcp.example.test" })
         .entries.map((row) => row.toolName),
-    ).toEqual(["mcp__example__echo"]);
+    ).toEqual(["mcp-example/echo"]);
     expect(table.query({ botId: "nobody" }).entries).toEqual([]);
 
     // Newest first, one at a time, and the cursor walks the rest.

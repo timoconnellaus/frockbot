@@ -8,6 +8,7 @@ import {
 } from "@frockbot/providers/frock-ai/catalog";
 import type { CredentialLeaseV1 } from "@frockbot/core/connection";
 import { createConfiguredConnectRuntimeContribution } from "@frockbot/app/connect/agent";
+import { createConfiguredMcpRuntimeContributionV1 } from "@frockbot/app/mcp/agent";
 import type {
   BotExecutionPlanV1,
   ConnectionView,
@@ -240,6 +241,38 @@ const enabledRuntimeContributionFactories = new Map<
               permitConnection: () => permitConnection(connection),
             }
           : {}),
+      }),
+  ],
+  [
+    "mcp",
+    ({
+      capability,
+      userId,
+      connection,
+      fetch: outbound,
+      pinToolCatalog,
+      readConnectToolCatalog,
+      permitConnection,
+      leaseCredential,
+      settleCredential,
+    }) =>
+      createConfiguredMcpRuntimeContributionV1({
+        capability,
+        userId,
+        ...(connection ? { connection } : {}),
+        ...(outbound ? { fetch: outbound } : {}),
+        ...(pinToolCatalog ? { pinToolCatalog } : {}),
+        ...(readConnectToolCatalog && connection
+          ? {
+              readCatalog: (toolName) =>
+                readConnectToolCatalog(connection, toolName),
+            }
+          : {}),
+        ...(permitConnection && connection
+          ? { permitConnection: () => permitConnection(connection) }
+          : {}),
+        ...(leaseCredential ? { leaseCredential } : {}),
+        ...(settleCredential ? { settleCredential } : {}),
       }),
   ],
   [

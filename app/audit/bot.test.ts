@@ -54,13 +54,18 @@ describe("projecting a settled run", () => {
         result("tool:1:1:0", { content: "02:00" }),
         call("tool:1:2:0", "computer_exec", { command: "ls -la" }),
         result("tool:1:2:0", { content: "a\nb" }),
-        call("tool:1:2:1", "mcp__example__echo", { message: "hi" }),
+        call("tool:1:2:1", "call_dynamic_tool", {
+          namespace: "mcp-example",
+          toolName: "echo",
+          arguments: { message: "hi" },
+          mcpDetails: { description: "Say hi back" },
+        }),
         result("tool:1:2:1", { content: "hi" }),
       ]),
     );
     expect(entries.map((entry) => entry.toolName)).toEqual([
       "computer_exec",
-      "mcp__example__echo",
+      "mcp-example/echo",
     ]);
     expect(entries[0]).toMatchObject({
       botId: "foreman",
@@ -84,7 +89,7 @@ describe("projecting a settled run", () => {
     });
     expect(entries[1]).toMatchObject({
       kind: "mcp",
-      target: "remote:example",
+      target: "remote:mcp-example",
     });
     // Everything the table accepts, the decoder accepts.
     for (const entry of entries) {

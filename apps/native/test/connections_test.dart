@@ -200,6 +200,53 @@ Map<String, Object?> served(Map<String, Object?> frame, String path) {
   };
 }
 
+/// The MCP server row as the server sends it: one keyed Connection Type whose
+/// address is a Connection setting, and any servers already added.
+Map<String, Object?> mcpFrame({
+  int revision = 1,
+  List<Map<String, Object?>> accounts = const [],
+}) => {
+  'schemaVersion': 1,
+  'ownerId': 'tim',
+  'revision': revision,
+  'modelInUse': 'Auto · Frock AI',
+  'accounts': [
+    for (final account in accounts)
+      {
+        'id': account['id'],
+        'label': account['label'],
+        'state': account['state'] ?? 'ready',
+        'packageId': 'mcp',
+        'connectionTypeId': 'mcp-server',
+        'kind': 'connector',
+        'authorization': account['authorization'] ?? 'none',
+        'detail': 'Ready',
+      },
+  ],
+  'providers': [
+    {
+      'packageId': 'mcp',
+      'connectionTypeId': 'mcp-server',
+      'displayName': 'MCP servers',
+      'kind': 'connector',
+      'authorization': 'api-key',
+      'connected': accounts.length,
+      'mayConnect': true,
+      'installed': true,
+      'description': 'Add any remote MCP server by its address. Its tools become your Bots\' tools.',
+      'settings': [
+        {
+          'id': 'url',
+          'label': 'Server address',
+          'kind': 'text',
+          'value': null,
+          'editable': true,
+        },
+      ],
+    },
+  ],
+};
+
 Widget page(
   SettingsApi api,
   MemoryStore store, {
@@ -1281,5 +1328,146 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.text('Turned off'), findsOneWidget);
     expect(manage('Gmail account').enabled, isTrue);
+  });
+  group('an MCP server', () {
+    test('with a token is a keyed Connection carrying its address', () {
+      final action = mcpServerActionV1(
+        commandId: 'c1',
+        index: 0,
+        connectionTypeId: 'mcp-server',
+        address: Uri.parse('https://mcp.linear.app/mcp'),
+        name: '',
+        token: 'synthetic-token',
+      );
+      expect(connectionRequestV1(action).body, {
+        'schemaVersion': 1,
+        'type': 'connection/create-api-key',
+        'commandId': 'c1',
+        'packageId': 'mcp',
+        'connectionTypeId': 'mcp-server',
+        'label': 'mcp.linear.app',
+        'apiKey': 'synthetic-token',
+        'settings': {'url': 'https://mcp.linear.app/mcp'},
+      });
+    });
+
+    test('without one is a plain Connection', () {
+      final action = mcpServerActionV1(
+        commandId: 'c2',
+        index: 3,
+        connectionTypeId: 'mcp-server',
+        address: Uri.parse('https://mcp.example.com/sse'),
+        name: ' Docs ',
+        token: '',
+      );
+      expect(connectionRequestV1(action).body, {
+        'schemaVersion': 1,
+        'type': 'connection/create',
+        'commandId': 'c2',
+        'packageId': 'mcp',
+        'connectionTypeId': 'mcp-server',
+        'label': 'Docs',
+        'settings': {'url': 'https://mcp.example.com/sse'},
+      });
+    });
+
+    test('refuses an address that is not https before anything is sent', () {
+      expect(mcpServerAddressV1('').problem, isNotNull);
+      expect(mcpServerAddressV1('mcp.example.com').problem, isNotNull);
+      expect(mcpServerAddressV1('http://mcp.example.com').problem, isNotNull);
+      expect(
+        mcpServerAddressV1(' https://mcp.example.com/mcp ').uri,
+        Uri.parse('https://mcp.example.com/mcp'),
+      );
+    });
+  });
+
+  testWidgets('an MCP server is added by its address, with no key asked for', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final sent = <Map<String, Object?>>[];
+    final api = SettingsApi(store, (path, body) async {
+      if (body == null) return mcpFrame();
+      sent.add((body as Map).cast<String, Object?>());
+      return {
+        'schemaVersion': 1,
+        'commandId': body['commandId'],
+        'connectionId': 'conn-1',
+        'status': 'applied',
+      };
+    });
+    await tester.pumpWidget(page(api, store));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Connect'));
+    await tester.pumpAndSettle();
+    expect(find.widgetWithText(TextField, 'API key'), findsNothing);
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Server address'),
+      'mcp.example.com',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Add server'));
+    await tester.pumpAndSettle();
+    expect(sent, isEmpty);
+    expect(find.textContaining('full https address'), findsOneWidget);
+    await tester.enterText(
+      find.widgetWithText(TextField, 'Server address'),
+      'https://mcp.example.com/mcp',
+    );
+    await tester.tap(find.widgetWithText(FilledButton, 'Add server'));
+    await tester.pumpAndSettle();
+    expect(sent.single, {
+      'schemaVersion': 1,
+      'type': 'connection/create',
+      'commandId': sent.single['commandId'],
+      'packageId': 'mcp',
+      'connectionTypeId': 'mcp-server',
+      'label': 'mcp.example.com',
+      'settings': {'url': 'https://mcp.example.com/mcp'},
+    });
+  });
+
+  testWidgets('an MCP server refreshes its tools and is removed, not revoked', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final sent = <Map<String, Object?>>[];
+    final api = SettingsApi(store, (path, body) async {
+      if (body == null) {
+        return mcpFrame(
+          accounts: [
+            {'id': 'conn-1', 'label': 'Linear'},
+          ],
+        );
+      }
+      sent.add({'path': path, ...(body as Map).cast<String, Object?>()});
+      return {
+        'schemaVersion': 1,
+        'commandId': body['commandId'],
+        'connectionId': 'conn-1',
+        'status': 'applied',
+      };
+    });
+    await tester.pumpWidget(page(api, store));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('MCP servers'));
+    await tester.pumpAndSettle();
+    expect(find.text('Add another server'), findsOneWidget);
+    await tester.tap(find.byTooltip('Manage Linear'));
+    await tester.pumpAndSettle();
+    expect(find.text('Refresh models'), findsNothing);
+    await tester.tap(find.text('Refresh tools'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byTooltip('Manage Linear'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('Remove'));
+    await tester.pumpAndSettle();
+    expect(sent.map((request) => request['type']), [
+      'connection/refresh-models',
+      'connection/disconnect',
+    ]);
+    expect(sent.map((request) => request['path']).toSet(), {
+      '/api/connections',
+    });
   });
 }

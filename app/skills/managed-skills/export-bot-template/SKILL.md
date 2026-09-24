@@ -9,8 +9,8 @@ A template is a shareable recipe of this Bot, not a backup and not a file you
 compose by hand.
 
 1. Call `bot_export_template`. It packs you into a private share: name,
-   description, your own Skills, your Routines' prompts, the Catalog Packages
-   your User installed, and public MCP server addresses.
+   description, your own Skills, your Routines' prompts and the Catalog
+   Packages your User installed.
 2. The tool stages the share and draws a card naming what was packed and what
    was scrubbed. Nothing is shared with anyone yet.
 3. Tell the User that only they can publish it, from this Bot's settings —

@@ -27,6 +27,8 @@ export {
 
 export { OLLAMA_BAD_API_KEY, OLLAMA_GOOD_API_KEY };
 export {
+  MCP_STUB_ORIGIN,
+  MCP_TEST_TOKEN,
   OLLAMA_FLAKY_API_KEY,
   OLLAMA_REVOKED_API_KEY,
 } from "../harness/miniflare.ts";

@@ -1867,14 +1867,29 @@ export class UserConfiguration
       { toolName: rpcString(256) },
     );
     const userId = await this.assertUserIdentity(request.userId as string);
-    return (await this.connectContribution()).readToolCatalog({
+    // A connected app and an MCP server each keep their own directory; the
+    // Package that owns the Connection is the one that answers for it.
+    const connection = await (
+      await this.settingsContribution()
+    ).getConnection(userId, request.connectionId as string);
+    const owner = connection
+      ? (await this.contributions()).connections.get(connection.packageId)
+      : undefined;
+    if (!owner?.readToolCatalog) {
+      return {
+        kind: "stale-contract",
+        message:
+          "stale-contract: This connection was removed. Its tools are gone for this Turn.",
+      };
+    }
+    return (await owner.readToolCatalog({
       userId,
       connectionId: request.connectionId as string,
       generation: request.generation as string,
       ...(typeof request.toolName === "string"
         ? { toolName: request.toolName }
         : {}),
-    });
+    })) as object;
   }
 
   async holdSkillIndex(input: unknown): Promise<void> {

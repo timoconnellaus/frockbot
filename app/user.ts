@@ -28,6 +28,7 @@ import {
   type SearchUserBackendHost,
 } from "@frockbot/app/search/user";
 import { type ConnectUserBackendContribution } from "@frockbot/app/connect/user";
+import { type McpUserBackendContribution } from "@frockbot/app/mcp/user";
 import { type OllamaCloudUserBackendContribution } from "@frockbot/providers/ollama-cloud/user";
 import { type FrockAiUserBackendContribution } from "@frockbot/providers/frock-ai/user";
 import {
@@ -51,6 +52,7 @@ import {
   frockAiUserContribution,
   flockUserContribution,
   machineUserContribution,
+  mcpUserContribution,
   ollamaCloudUserContribution,
   connectUserContribution,
   searchUserContribution,
@@ -93,6 +95,16 @@ export interface FoundationConnectionUserBackendContribution {
     connectionId: string;
     effectId: string;
   }): Promise<void>;
+  /**
+   * A Turn's read of this Connection's tool directory, or of one tool's
+   * schema. Absent on a Package whose Connections carry no tools.
+   */
+  readToolCatalog?(input: {
+    userId: string;
+    connectionId: string;
+    generation: string;
+    toolName?: string;
+  }): Promise<unknown>;
   alarm?(): Promise<void>;
 }
 
@@ -290,6 +302,14 @@ export async function createFoundationUserBackendContributions(host: {
       }
       return { storage: host.storage, keyring };
     },
+    get mcp() {
+      const settings = mountedContributions.get(settingsUserContribution);
+      const credentials = mountedContributions.get(credentialsUserContribution);
+      if (!settings || !credentials) {
+        throw new Error("MCP servers require Settings and Credentials");
+      }
+      return { storage: host.storage, settings, credentials };
+    },
     get connect() {
       const settings = mountedContributions.get(settingsUserContribution);
       if (!settings) {
@@ -373,6 +393,11 @@ export async function createFoundationUserBackendContributions(host: {
     get audit() {
       return {
         ...host.audit,
+        // An MCP call is audited against its server's namespace; the User's
+        // servers are what say which host that is.
+        readMcpHosts: async () =>
+          (await mountedContributions.get(mcpUserContribution)?.readHosts()) ??
+          new Map<string, string>(),
         readDirectory: async () => {
           const flock = requireFlock();
           const directory = await flock.listBots();
@@ -393,6 +418,7 @@ export async function createFoundationUserBackendContributions(host: {
     | UserSettingsBackendContribution
     | CredentialUserBackendContribution
     | ConnectUserBackendContribution
+    | McpUserBackendContribution
     | OllamaCloudUserBackendContribution
     | FrockAiUserBackendContribution
     | FlockUserBackendContribution

@@ -1221,6 +1221,9 @@ class _ProviderRowState extends State<_ProviderRow> {
   String _authorization(Map<String, Object?> way) =>
       way['authorization'] as String;
 
+  /// A remote MCP server: its own form, whatever its authorization says.
+  bool _mcp(Map<String, Object?> way) => way['packageId'] == mcpPackageIdV1;
+
   Map<String, Object?> _command(
     String kind,
     Map<String, Object?> input,
@@ -1239,6 +1242,13 @@ class _ProviderRowState extends State<_ProviderRow> {
   /// keyed provider opens its form, and one that needs nothing is simply
   /// turned on.
   void _take(Map<String, Object?> way) {
+    if (_mcp(way)) {
+      setState(() {
+        open = true;
+        adding = way['connectionTypeId'] as String;
+      });
+      return;
+    }
     switch (_authorization(way)) {
       case 'grant':
         unawaited(widget.send(_command('authorize', const {}, way)));
@@ -1443,6 +1453,39 @@ class _ProviderRowState extends State<_ProviderRow> {
             ),
           ),
         );
+    if (_mcp(way)) {
+      if (adding == id) {
+        return [
+          _McpServerForm(
+            index: widget.index,
+            busy: widget.busy,
+            onCancel: () => setState(() => adding = null),
+            onSubmit: (address, name, token) async {
+              await widget.send(
+                mcpServerActionV1(
+                  commandId: widget.commandId(),
+                  index: widget.index,
+                  connectionTypeId: id,
+                  address: address,
+                  name: name,
+                  token: token,
+                ),
+              );
+              if (mounted) setState(() => adding = null);
+            },
+          ),
+        ];
+      }
+      if (!hasAccounts && !choices) return const [];
+      return [
+        press(
+          'mcp-add-${widget.index}',
+          Icons.add_rounded,
+          'Add another server',
+          () => setState(() => adding = id),
+        ),
+      ];
+    }
     switch (_authorization(way)) {
       case 'api-key':
         if (adding == id) {
@@ -1583,10 +1626,18 @@ class _AccountRow extends StatelessWidget {
     final state = account['state'] as String;
     final authorization = account['authorization'] as String;
     final ambient = authorization == 'ambient-native';
+    final mcp = account['packageId'] == mcpPackageIdV1;
     final id = account['id'] as String;
     final failure = account['failure'] as String?;
     final items = <PopupMenuEntry<String>>[
-      if (models &&
+      // A server's tools are listed again on the hour; this asks now.
+      if (mcp && (state == 'ready' || state == 'disabled'))
+        const PopupMenuItem(
+          value: 'refresh-models',
+          child: Text('Refresh tools'),
+        ),
+      if (!mcp &&
+          models &&
           (authorization == 'api-key' || authorization == 'grant') &&
           state == 'ready')
         const PopupMenuItem(
@@ -1600,8 +1651,13 @@ class _AccountRow extends StatelessWidget {
         ),
       if (state != 'revoking')
         PopupMenuItem(
-          value: authorization == 'api-key' || models ? 'disconnect' : 'revoke',
-          child: Text('Disconnect', style: TextStyle(color: scheme.error)),
+          value: mcp || authorization == 'api-key' || models
+              ? 'disconnect'
+              : 'revoke',
+          child: Text(
+            mcp ? 'Remove' : 'Disconnect',
+            style: TextStyle(color: scheme.error),
+          ),
         ),
     ];
     return Padding(
@@ -1826,6 +1882,137 @@ class _ApiKeyFormState extends State<_ApiKeyForm> {
               FilledButton(
                 onPressed: widget.busy ? null : _submit,
                 child: Text(widget.submitLabel),
+              ),
+            ),
+            TextButton(
+              onPressed: widget.busy ? null : widget.onCancel,
+              child: const Text('Cancel'),
+            ),
+          ],
+        ),
+      ],
+    );
+  }
+}
+
+/// The form that adds a remote MCP server: where it is, what to call it, and
+/// a token only when the server asks for one. Like a key, the token exists
+/// only between a person typing it and the request that carries it.
+class _McpServerForm extends StatefulWidget {
+  final int index;
+  final bool busy;
+  final VoidCallback onCancel;
+  final Future<void> Function(Uri address, String name, String token) onSubmit;
+  const _McpServerForm({
+    required this.index,
+    required this.busy,
+    required this.onCancel,
+    required this.onSubmit,
+  });
+
+  @override
+  State<_McpServerForm> createState() => _McpServerFormState();
+}
+
+class _McpServerFormState extends State<_McpServerForm> {
+  final address = TextEditingController();
+  final name = TextEditingController();
+  final token = TextEditingController();
+  String? problem;
+
+  @override
+  void dispose() {
+    address.dispose();
+    name.dispose();
+    token.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    final checked = mcpServerAddressV1(address.text);
+    if (checked.uri == null) {
+      setState(() => problem = checked.problem);
+      return;
+    }
+    setState(() => problem = null);
+    await widget.onSubmit(checked.uri!, name.text, token.text.trim());
+    if (mounted) token.clear();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        const Divider(height: 24),
+        SteadyCaret(
+          child: TextField(
+            controller: address,
+            enabled: !widget.busy,
+            keyboardType: TextInputType.url,
+            autocorrect: false,
+            enableSuggestions: false,
+            decoration: InputDecoration(
+              labelText: 'Server address',
+              hintText: 'https://mcp.example.com/mcp',
+              errorText: problem,
+              errorMaxLines: 3,
+            ),
+            // What was wrong with the last address is not said about the next.
+            onChanged: (_) {
+              if (problem != null) setState(() => problem = null);
+            },
+            textInputAction: TextInputAction.next,
+          ),
+        ),
+        const SizedBox(height: 12),
+        SteadyCaret(
+          child: TextField(
+            controller: name,
+            enabled: !widget.busy,
+            decoration: const InputDecoration(
+              labelText: 'Name (optional)',
+              helperText: 'Leave blank to use the server’s address.',
+              counterText: '',
+            ),
+            maxLength: 120,
+            textInputAction: TextInputAction.next,
+          ),
+        ),
+        const SizedBox(height: 12),
+        SteadyCaret(
+          child: TextField(
+            controller: token,
+            enabled: !widget.busy,
+            obscureText: true,
+            autocorrect: false,
+            enableSuggestions: false,
+            decoration: const InputDecoration(
+              labelText: 'Access token (optional)',
+              helperText: 'Only if the server asks for one.',
+            ),
+            textInputAction: TextInputAction.done,
+            onSubmitted: (_) => _submit(),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Text(
+          'Every Bot you own can use this server’s tools. The token stays on the server and is never shown to your Bots.',
+          style: theme.textTheme.bodySmall?.copyWith(
+            color: theme.colorScheme.onSurfaceVariant,
+          ),
+        ),
+        const SizedBox(height: 12),
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            identified(
+              ConnectorIds.action('mcp-connect-${widget.index}'),
+              FilledButton(
+                onPressed: widget.busy ? null : _submit,
+                child: const Text('Add server'),
               ),
             ),
             TextButton(

@@ -10,7 +10,7 @@
 //  * the entry source, because entries are projections of runs the *Bot*
 //    Durable Object holds, and a rebuild must read them from that authority;
 //  * the MCP host map, because Connections are User-scoped state this object
-//    holds elsewhere — and resolving `remote:<slug>` to `remote:<host>` here,
+//    holds elsewhere — and resolving `remote:<namespace>` to `remote:<host>` here,
 //    on the one path both projection and rebuild take, is what stops the two
 //    disagreeing about what a row says.
 import {
@@ -41,10 +41,10 @@ export interface AuditUserBackendHost {
    */
   projectBotEntries(botId: string, cursor?: string): Promise<unknown>;
   /**
-   * `<mcp server slug> → <host>`, from this User's Connection registry.
+   * `<mcp server namespace> → <host>`, from this User's Connection registry.
    *
-   * Absent or incomplete is not a failure: an unresolved slug stays
-   * `remote:<slug>`, which is still a true statement about where the call
+   * Absent or incomplete is not a failure: an unresolved namespace stays
+   * `remote:<namespace>`, which is still a true statement about where the call
    * went, rather than a row that claims a host nobody can vouch for.
    */
   readMcpHosts?(): Promise<ReadonlyMap<string, string>>;
@@ -56,7 +56,7 @@ export interface AuditUserBackendHost {
 }
 
 /**
- * `remote:<slug>` resolved against the Connection registry.
+ * `remote:<namespace>` resolved against the Connection registry.
  *
  * Every other target passes through untouched: `computer` and `machine:<id>`
  * are complete as the classifier wrote them.
@@ -66,8 +66,8 @@ export function resolveAuditTargetV1(
   hosts: ReadonlyMap<string, string>,
 ): string {
   if (!target.startsWith(AUDIT_TARGET_REMOTE_PREFIX_V1)) return target;
-  const slug = target.slice(AUDIT_TARGET_REMOTE_PREFIX_V1.length);
-  const host = hosts.get(slug);
+  const namespace = target.slice(AUDIT_TARGET_REMOTE_PREFIX_V1.length);
+  const host = hosts.get(namespace);
   return host ? `${AUDIT_TARGET_REMOTE_PREFIX_V1}${host}` : target;
 }
 
@@ -89,7 +89,7 @@ export class AuditUserBackendContribution {
     try {
       return await this.host.readMcpHosts();
     } catch {
-      // A registry this object could not read leaves slugs unresolved, which
+      // A registry this object could not read leaves namespaces unresolved, which
       // is a less specific row and not a wrong one.
       return new Map();
     }

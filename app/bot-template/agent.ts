@@ -106,7 +106,7 @@ export async function stageCommandIdV1(
 const DESCRIPTION = [
   "Pack yourself into a shareable Bot template: a recipe, not a backup.",
   "It carries your name, description, your own Skills, your Routines' prompts,",
-  "the Catalog Packages your User installed, and public MCP server addresses.",
+  "and the Catalog Packages your User installed.",
   "It never carries Memory, credentials, Connections, your model,",
   "webhook keys, uploaded images, or anything from your Computer.",
   "The template is staged privately and shared with nobody:",

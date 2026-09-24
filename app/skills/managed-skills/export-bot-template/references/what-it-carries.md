@@ -8,12 +8,12 @@ It carries:
 - Skills under this Bot's own instruction root
 - Routines' prompts (not their run history)
 - Catalog Packages the User has installed
-- public MCP server addresses
 
 It never carries:
 
 - Memory
 - credentials, Connection ids, API keys, OAuth tokens
+- MCP servers the User added: each is a Connection
 - the model this Bot is bound to
 - webhook signing keys
 - uploaded images
