@@ -599,4 +599,27 @@ describe("the Telegram directory", () => {
       }),
     ).rejects.toThrow();
   });
+
+  test("a deleted account's Telegram account speaks for nobody", async () => {
+    const { policy } = authority();
+    await policy.offerTelegramLink({
+      schemaVersion: 1,
+      userId: "alice",
+      codeDigest: digest,
+      expiresAt: new Date(now + 60_000).toISOString(),
+    });
+    await policy.claimTelegramLink({
+      schemaVersion: 1,
+      codeDigest: digest,
+      telegramUserId: "4242",
+      now,
+    });
+    await policy.forgetAccount({ schemaVersion: 1, userId: "alice" });
+    expect(
+      await policy.resolveTelegramAccount({
+        schemaVersion: 1,
+        telegramUserId: "4242",
+      }),
+    ).toEqual({ schemaVersion: 1, userId: null });
+  });
 });

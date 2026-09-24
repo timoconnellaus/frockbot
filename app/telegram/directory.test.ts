@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   claimTelegramLinkV1,
   decodeTelegramClaimV1,
+  forgetTelegramUserV1,
   offerTelegramLinkV1,
   releaseTelegramAccountV1,
   resolveTelegramAccountV1,
@@ -141,5 +142,50 @@ describe("the Telegram directory", () => {
       releaseTelegramAccountV1(kv, { userId: "bob", telegramUserId: "42" }),
     ).toBe(true);
     expect(resolveTelegramAccountV1(kv, "42")).toBeUndefined();
+  });
+
+  test("a User links one account at a time", () => {
+    const kv = memoryKv();
+    for (const [letter, account] of [
+      ["a", "42"],
+      ["b", "43"],
+    ] as const) {
+      offerTelegramLinkV1(kv, {
+        userId: "alice",
+        codeDigest: digest(letter),
+        expiresAt: LATER,
+      });
+      claimTelegramLinkV1(kv, {
+        codeDigest: digest(letter),
+        telegramUserId: account,
+        now: NOW,
+      });
+    }
+    expect(resolveTelegramAccountV1(kv, "42")).toBeUndefined();
+    expect(resolveTelegramAccountV1(kv, "43")).toBe("alice");
+  });
+
+  test("a deleted account leaves nothing behind", () => {
+    const kv = memoryKv();
+    offerTelegramLinkV1(kv, {
+      userId: "alice",
+      codeDigest: digest("a"),
+      expiresAt: LATER,
+    });
+    claimTelegramLinkV1(kv, {
+      codeDigest: digest("a"),
+      telegramUserId: "42",
+      now: NOW,
+    });
+    offerTelegramLinkV1(kv, {
+      userId: "alice",
+      codeDigest: digest("b"),
+      expiresAt: LATER,
+    });
+    forgetTelegramUserV1(kv, "alice");
+    expect(kv.values.size).toBe(0);
+    // Repeating it, as a retried deletion step does, changes nothing.
+    forgetTelegramUserV1(kv, "alice");
+    expect(kv.values.size).toBe(0);
   });
 });

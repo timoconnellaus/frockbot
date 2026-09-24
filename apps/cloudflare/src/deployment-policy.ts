@@ -19,6 +19,7 @@ import {
 } from "@frockbot/app/admin/shared";
 import {
   claimTelegramLinkV1,
+  forgetTelegramUserV1,
   offerTelegramLinkV1,
   releaseTelegramAccountV1,
   resolveTelegramAccountV1,
@@ -431,8 +432,8 @@ export class DeploymentPolicy extends DurableObject<Record<string, never>> {
   }
 
   /**
-   * The last trace of a deleted account here: its access record and any
-   * invitation still waiting under its address. Called only once the identity
+   * The last trace of a deleted account here: its access record, any
+   * invitation still waiting under its address, and its Telegram entries. Called only once the identity
    * itself is gone, so no session is left that could be admitted afresh.
    */
   async forgetAccount(input: unknown): Promise<{ schemaVersion: 1 }> {
@@ -442,6 +443,7 @@ export class DeploymentPolicy extends DurableObject<Record<string, never>> {
       if (request.email !== undefined) {
         this.kv.delete(INVITATION_PREFIX + request.email);
       }
+      forgetTelegramUserV1(this.kv, request.userId);
     });
     return { schemaVersion: 1 };
   }

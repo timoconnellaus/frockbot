@@ -25,6 +25,11 @@ export interface TelegramDirectoryKvV1 {
 const CODE_PREFIX = "telegram:code:v1:";
 const PENDING_PREFIX = "telegram:pending:v1:";
 const ACCOUNT_PREFIX = "telegram:account:v1:";
+/**
+ * The account each User's entry is under, the other way round, so a User's
+ * entries can be found by User — which is how a deleted account is forgotten.
+ */
+const LINKED_PREFIX = "telegram:linked:v1:";
 
 interface StoredCodeV1 {
   schemaVersion: 1;
@@ -136,6 +141,22 @@ export function claimTelegramLinkV1(
   const before = storedAccount(kv.get(ACCOUNT_PREFIX + claim.telegramUserId));
   const previousUserId =
     before && before.userId !== code.userId ? before.userId : undefined;
+  if (
+    previousUserId &&
+    kv.get<string>(LINKED_PREFIX + previousUserId) === claim.telegramUserId
+  ) {
+    kv.delete(LINKED_PREFIX + previousUserId);
+  }
+  // A User links one account at a time: the one they linked before is no
+  // longer theirs here.
+  const replaced = kv.get<string>(LINKED_PREFIX + code.userId);
+  if (typeof replaced === "string" && replaced !== claim.telegramUserId) {
+    releaseTelegramAccountV1(kv, {
+      userId: code.userId,
+      telegramUserId: replaced,
+    });
+  }
+  kv.put(LINKED_PREFIX + code.userId, claim.telegramUserId);
   kv.put(ACCOUNT_PREFIX + claim.telegramUserId, {
     schemaVersion: 1,
     userId: code.userId,
@@ -172,5 +193,29 @@ export function releaseTelegramAccountV1(
   const key = ACCOUNT_PREFIX + release.telegramUserId;
   if (storedAccount(kv.get(key))?.userId !== release.userId) return false;
   kv.delete(key);
+  if (
+    kv.get<string>(LINKED_PREFIX + release.userId) === release.telegramUserId
+  ) {
+    kv.delete(LINKED_PREFIX + release.userId);
+  }
   return true;
+}
+
+/**
+ * Everything the directory holds for a User: their pending code and the
+ * account that speaks for them. Deleting an account ends here, so a deleted
+ * User's Telegram account is simply one nobody linked.
+ */
+export function forgetTelegramUserV1(
+  kv: TelegramDirectoryKvV1,
+  userId: string,
+): void {
+  const pending = kv.get<string>(PENDING_PREFIX + userId);
+  if (typeof pending === "string") kv.delete(CODE_PREFIX + pending);
+  kv.delete(PENDING_PREFIX + userId);
+  const linked = kv.get<string>(LINKED_PREFIX + userId);
+  if (typeof linked === "string") {
+    releaseTelegramAccountV1(kv, { userId, telegramUserId: linked });
+  }
+  kv.delete(LINKED_PREFIX + userId);
 }

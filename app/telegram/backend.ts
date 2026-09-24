@@ -341,6 +341,16 @@ async function webhook(
   try {
     return await onUpdate(host, body);
   } catch (error) {
+    // The account is being deleted: nothing it held will read this, and no
+    // redelivery would change that.
+    if (
+      typeof error === "object" &&
+      error !== null &&
+      "name" in error &&
+      error.name === "AccountDeletedError"
+    ) {
+      return handled();
+    }
     // The update is not admitted, so it is not acknowledged: Telegram delivers
     // it again. The reason goes to the log and never to the caller.
     console.error(

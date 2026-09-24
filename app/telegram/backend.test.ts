@@ -139,6 +139,19 @@ describe("the Telegram webhook", () => {
     ).toEqual([runId, runId]);
   });
 
+  test("an account being deleted drops the update rather than retrying it", async () => {
+    const deleted = Object.assign(new Error("This account has been deleted."), {
+      name: "AccountDeletedError",
+    });
+    const host = fakeHost(
+      { routeTelegramMessage: () => Promise.reject(deleted) },
+      { account: "alice" },
+    );
+    const answer = await deliver(host, update("hi"));
+    expect(answer.status).toBe(200);
+    expect(host.calls.map(([name]) => name)).not.toContain("admit");
+  });
+
   test("an update that could not be admitted is not acknowledged", async () => {
     const host = fakeHost(
       {},
