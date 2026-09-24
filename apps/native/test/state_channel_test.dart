@@ -270,4 +270,49 @@ void main() {
     channel.dispose();
     api.close();
   });
+
+  test('a draft is applied in order and moves no cursor', () async {
+    final store = MemoryStore();
+    final api = LiveSocketApi(store);
+    final applied = <Map<String, dynamic>>[];
+    final channel = BotStateChannel(
+      api: api,
+      store: store,
+      key: 'cursor/user-1/bot-1',
+      botId: 'bot-1',
+      apply: (frame) async => applied.add(frame),
+      resumeFrom: () => (epoch: '1', cursor: '1'),
+      status: (_) {},
+    );
+    await channel.connect();
+    final socket = api.opened.single;
+    socket.sendReady(cursor: '1', epoch: '1');
+    socket.sendUpdate({
+      'schemaVersion': 1,
+      'type': 'state/draft',
+      'runId': 'run-1',
+      'ordinal': 0,
+      'parts': ['Hel'],
+    });
+    // The committed frame after it still has to follow cursor 1 directly.
+    socket.sendUpdate({
+      'schemaVersion': 1,
+      'type': 'state/update',
+      'epoch': '1',
+      'cursor': '2',
+      'kind': 'computer',
+      'entityId': 'computer',
+      'revision': 2,
+      'payload': <String, Object?>{},
+    });
+    await settle();
+    expect(socket.closed, isFalse);
+    expect(
+      [for (final frame in applied) frame['type']],
+      ['state/draft', 'state/update'],
+    );
+    expect(applied.first['parts'], ['Hel']);
+    channel.dispose();
+    api.close();
+  });
 }

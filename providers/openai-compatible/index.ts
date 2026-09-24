@@ -946,6 +946,7 @@ async function* streamOpenAICompatibleBody(
   // own accumulator does not join; the raw chunks are where the pieces are.
   const toolIds = new Map<number, string>();
   const toolNames = new Map<string, string>();
+  const startedNames = new Map<string, string>();
   let sawChoice = false;
   let sawFinishReason = false;
   let rawFinishReason: string | undefined;
@@ -968,6 +969,22 @@ async function* streamOpenAICompatibleBody(
         accumulateToolNamesV1(delta?.tool_calls, toolIds, toolNames);
       } else if (part.type === "text-delta") {
         if (part.delta) yield { type: "text-delta", text: part.delta };
+      } else if (part.type === "tool-input-start") {
+        startedNames.set(part.id, part.toolName);
+      } else if (part.type === "tool-input-delta") {
+        // The call itself is only whole at the stream's flush. Its arguments
+        // are passed on as they arrive so the person can watch a reply being
+        // written; the raw chunk carrying this fragment was read first, so the
+        // joined name already includes any piece of it this chunk brought.
+        const name = toolNames.get(part.id) || startedNames.get(part.id);
+        if (name && part.delta) {
+          yield {
+            type: "tool-input-delta",
+            id: part.id,
+            name,
+            delta: part.delta,
+          };
+        }
       } else if (part.type === "tool-call") {
         toolCalls.push({
           id: part.toolCallId,

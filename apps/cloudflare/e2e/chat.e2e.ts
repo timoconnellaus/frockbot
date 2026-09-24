@@ -362,14 +362,13 @@ test("an explicit send appears while model text stays private", async () => {
     .toEqual([INTERIM_UPDATE, E2E_ASSISTANT_REPLY.replaceAll("**", "")]);
 });
 
-// One claim this file used to make is gone, and its absence is deliberate:
-// "a reply appears while the Bot is still writing it". The Flutter client
-// does not stream. `ChatController` has no poll of its own — `refresh()` runs
-// only when the state channel invalidates it — so a run's `partialText`,
-// which the wire does carry while a Turn is running, never reaches the
-// thread. The Turn's words appear when it settles or not at all. That is a
-// parity gap in the client rather than something a spec can phrase around,
-// and it wants its own change.
+// "A reply appears while the Bot is still writing it" is claimed below the
+// browser rather than here. The stub model writes each tool call in one chunk,
+// so a draft and the message that replaces it are one bubble a spec cannot
+// tell apart; the draft itself is pinned where it is made and where it is
+// drawn — a Turn's `state/draft` frame in `bot-state-channel.workerd.ts`, and
+// its bubble, filled in place by the message, in the Flutter client's
+// `chat_controller_test.dart` and `shell_transcript_test.dart`.
 
 // The thread's shape, not its plumbing: a reply the Bot delivered is drawn
 // once. The regression this pins was every block of an assistant Turn laying

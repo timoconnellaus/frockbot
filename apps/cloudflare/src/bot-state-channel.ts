@@ -19,12 +19,20 @@ import {
   type PublicationHeadV1,
 } from "@frockbot/core/durable";
 import { readConversationSnapshotV1 } from "@frockbot/app/shell/conversation-snapshot";
+import type { ReplyDraftV1 } from "@frockbot/app/shell/reply-draft";
 import type {
   ComputerBotStorage,
   ComputerBotTransaction,
 } from "@frockbot/computer/bot";
 
 const CHANNEL_TAG = "bot-state-v1";
+/**
+ * Sockets that asked for reply drafts with `drafts=1`. An observer built
+ * before drafts existed decodes every frame against a schema with no
+ * `state/draft` in it and would drop its socket on the first one, so a draft
+ * goes only where it was asked for.
+ */
+const DRAFT_TAG = "bot-state-v1-drafts";
 export const BOT_STATE_CHANNEL_INTERNAL_PATH = "/internal/bot-state-channel/v1";
 export const BOT_STATE_CHANNEL_RETENTION = PUBLICATION_REPLAY_MAX_EVENTS_V1;
 
@@ -76,7 +84,10 @@ function splitUtf8(text: string, maxBytes: number): string[] {
   return parts;
 }
 
-function framesFor(frame: StateFrame): string[] {
+/** A frame on the publication's cursor: every kind but a draft. */
+type CursoredFrameV1 = Exclude<StateFrame, { type: "state/draft" }>;
+
+function framesFor(frame: CursoredFrameV1): string[] {
   const encoded = encodeFrame(frame);
   if (utf8.encode(encoded).length <= STATE_FRAME_MAX_BYTES) return [encoded];
   if (frame.type === "state/ready" || frame.type === "state/part") {
@@ -125,7 +136,7 @@ export function planHandshakeV1(
   return "replay";
 }
 
-function updateFrame(update: ConversationUpdateV1): StateFrame {
+function updateFrame(update: ConversationUpdateV1): CursoredFrameV1 {
   return {
     schemaVersion: 1,
     type: "state/update",
@@ -337,6 +348,33 @@ export class BotStateChannel {
   }
 
   /**
+   * Shows the reply a running Turn is writing to every observer that asked
+   * for drafts. Nothing is appended: a draft has no cursor, a reconnect does
+   * not replay it, and the message it previews is the committed record. One
+   * too large for a single frame is not sent, so the draft stops growing
+   * there and the message still arrives whole.
+   */
+  broadcastDraft(draft: ReplyDraftV1): void {
+    if (this.silenced) return;
+    const encoded = encodeFrame({
+      schemaVersion: 1,
+      type: "state/draft",
+      runId: draft.runId,
+      ordinal: draft.ordinal,
+      parts: draft.parts,
+    });
+    if (utf8.encode(encoded).length > STATE_FRAME_MAX_BYTES) return;
+    for (const socket of this.state.getWebSockets(DRAFT_TAG)) {
+      try {
+        socket.send(encoded);
+      } catch {
+        // A socket that cannot take a preview fails its next committed frame
+        // too, and that path closes it.
+      }
+    }
+  }
+
+  /**
    * Append and broadcast one `computer` invalidation for a write the Bot made
    * outside this Durable Object's storage.
    *
@@ -425,6 +463,7 @@ export class BotStateChannel {
         { status: 400 },
       );
     }
+    const drafts = url.searchParams.get("drafts") === "1";
     const presentedCursor = url.searchParams.get("cursor");
     const presentedEpoch = url.searchParams.get("epoch");
     let cursor: number | undefined;
@@ -470,7 +509,10 @@ export class BotStateChannel {
 
       const pair = new WebSocketPair();
       const [client, server] = Object.values(pair);
-      this.state.acceptWebSocket(server, [CHANNEL_TAG]);
+      this.state.acceptWebSocket(
+        server,
+        drafts ? [CHANNEL_TAG, DRAFT_TAG] : [CHANNEL_TAG],
+      );
       server.serializeAttachment({
         schemaVersion: 1,
         ...identity,
@@ -497,10 +539,10 @@ export class BotStateChannel {
     conversation: Awaited<ReturnType<typeof readConversationSnapshotV1>>,
     cursor: number | undefined,
     epoch: number | undefined,
-  ): Promise<{ epoch: string; lastSent: string; frames: StateFrame[] }> {
+  ): Promise<{ epoch: string; lastSent: string; frames: CursoredFrameV1[] }> {
     const snapshot = (
       reason: "initial" | "gap" | "cursor-ahead" | "epoch",
-    ): StateFrame => ({
+    ): CursoredFrameV1 => ({
       schemaVersion: 1,
       type: "state/snapshot",
       epoch: String(head.epoch),
@@ -508,13 +550,13 @@ export class BotStateChannel {
       reason,
       conversation: conversation as ConversationProjection,
     });
-    const ready: StateFrame = {
+    const ready: CursoredFrameV1 = {
       schemaVersion: 1,
       type: "state/ready",
       epoch: String(head.epoch),
       cursor: String(head.lastCursor),
     };
-    const withReady = (frames: StateFrame[]) => ({
+    const withReady = (frames: CursoredFrameV1[]) => ({
       epoch: String(head.epoch),
       lastSent: String(head.lastCursor),
       frames: [...frames, ready],

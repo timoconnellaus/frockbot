@@ -202,6 +202,17 @@ export type PluginModelStreamEvent =
        */
       type: "progress";
     }
+  | {
+      /**
+       * A fragment of one tool call's JSON arguments while the model is still
+       * writing them. The same call must still arrive whole as a `tool-call`;
+       * this only lets the person watch a reply being written.
+       */
+      type: "tool-input-delta";
+      id: string;
+      name: string;
+      delta: string;
+    }
   | { type: "tool-call"; call: { id: string; name: string; input: unknown } }
   | {
       type: "usage";

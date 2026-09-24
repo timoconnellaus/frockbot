@@ -179,10 +179,12 @@ class _TranscriptViewState extends State<TranscriptView> {
   /// failed attempt is displayed on the message it was a retry of.
   String? _latestSendLineId;
 
-  /// The message id a line delivers, or null where it delivers none.
+  /// The message id a line delivers, or null where it delivers none. A draft
+  /// delivers nothing yet: reading it is not reading the message it becomes.
   String? _sendIdOf(TranscriptLine line) =>
       line.failureMessageId ??
       (line.role == LineRole.assistant &&
+              !line.isDraft &&
               (line.id.contains(':send:') ||
                   (line.id.endsWith(':failed') && line.notice != null))
           ? line.id
@@ -481,8 +483,12 @@ class _TranscriptViewState extends State<TranscriptView> {
         return const UnreadDivider();
       case _SlotKind.line:
         final line = slot.line!;
+        // A draft is not a message yet: there is nothing to copy that will
+        // not change, and nothing the server could mark read.
         final actions =
-            line.role == LineRole.system || identical(line, widget.pending)
+            line.role == LineRole.system ||
+                identical(line, widget.pending) ||
+                line.isDraft
             ? null
             : widget.onMessageActions;
         final row = GestureDetector(

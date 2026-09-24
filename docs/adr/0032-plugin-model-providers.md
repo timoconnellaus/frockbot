@@ -32,7 +32,9 @@ A Plugin may declare `modelProviders: [{ id, protocolVersion }]`. The kernel
 hands it a normalized model request — the same shape a Package's adapter
 receives, minus the Connection binding — and it answers with normalized stream
 events: `text-delta`, `tool-call`, `usage`, `provider-state`,
-`response-format-note`, `structured-output-failure`, `finish`, plus two
+`response-format-note`, `structured-output-failure`, `finish` — and, amended
+2026-09-24, `tool-input-delta`, a call's arguments as they are written, which
+the kernel shows only as a reply draft and never journals — plus two
 protocol-only events: a `provider-failure` that states a classification in the
 Plugin's words, and a `progress` heartbeat that only resets the host's silence
 allowance — the kernel never sees it. The protocol is versioned; the

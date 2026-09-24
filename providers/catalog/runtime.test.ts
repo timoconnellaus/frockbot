@@ -129,6 +129,44 @@ describe("catalog provider bridge", () => {
     });
   });
 
+  test("passes a tool call's arguments on as they are written", async () => {
+    const result = await collect(
+      decodeCatalogStreamV1(
+        events(
+          { type: "toolcall_start", contentIndex: 1, partial: response },
+          {
+            type: "toolcall_delta",
+            contentIndex: 1,
+            delta: '{"query":"no',
+            partial: response,
+          },
+          // Reasoning is not a tool call, whatever its index says.
+          {
+            type: "toolcall_delta",
+            contentIndex: 0,
+            delta: "x",
+            partial: response,
+          },
+          { type: "done", reason: "toolUse", message: response },
+        ),
+        request,
+      ),
+    );
+    expect(result[0]).toEqual({
+      type: "tool-input-delta",
+      id: "call-1",
+      name: "lookup",
+      delta: '{"query":"no',
+    });
+    expect(result.map((event) => event.type)).toEqual([
+      "tool-input-delta",
+      "provider-state",
+      "usage",
+      "tool-call",
+      "finish",
+    ]);
+  });
+
   test("preserves signed reasoning and calls through durable and isolate decoding", async () => {
     const result = await collect(
       decodeCatalogStreamV1(

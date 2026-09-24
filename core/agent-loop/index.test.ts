@@ -233,6 +233,119 @@ describe("a Turn a person's message is waiting behind", () => {
   });
 });
 
+describe("a tool call being written", () => {
+  function writingProvider(): LlmProvider {
+    return {
+      id: "writing",
+      async *stream() {
+        yield {
+          type: "tool-input-delta",
+          id: "provider-call",
+          name: "look",
+          delta: '{"about":',
+        };
+        yield {
+          type: "tool-input-delta",
+          id: "provider-call",
+          name: "look",
+          delta: '"it"}',
+        };
+        yield {
+          type: "tool-call",
+          call: { id: "provider-call", name: "look", input: { about: "it" } },
+        };
+        yield { type: "finish", reason: "tool-calls" };
+      },
+    };
+  }
+
+  const look: ToolDefinition = {
+    name: "look",
+    description: "Reads something.",
+    inputSchema: { type: "object" },
+    execute: () => Promise.resolve({ content: "seen", isError: false }),
+  };
+
+  test("is shown to the watcher and never journaled", async () => {
+    const provider = writingProvider();
+    const runtime = mountRuntime(provider, look);
+    const seen: string[] = [];
+    const handle = await runtime.loop.create({
+      ...allowEffectOptions,
+      botId: "bot-writing",
+      sessionId: "writing",
+      provider: provider.id,
+      model: "test-model",
+      userMessageWaiting: () => Promise.resolve(true),
+      watchToolInput: (dispatch) => {
+        seen.push(
+          `open ${dispatch.turn}:${dispatch.step} ${dispatch.journal.some((event) => event.type === "model/request")}`,
+        );
+        return {
+          delta: (call, fragment) =>
+            seen.push(`${call.id} ${call.name} ${fragment}`),
+          end: () => seen.push("end"),
+        };
+      },
+    });
+
+    handle.agent.send("look into it");
+    await handle.agent.whenIdle();
+
+    expect(seen).toEqual([
+      "open 1:1 true",
+      'provider-call look {"about":',
+      'provider-call look "it"}',
+      "end",
+    ]);
+    const journal = handle.agent.session.activeRunJournal;
+    expect(JSON.stringify(journal)).not.toContain('{\\"about\\":');
+    expect(journal.filter((event) => event.type === "tool/call")).toEqual([
+      expect.objectContaining({ name: "look", input: { about: "it" } }),
+    ]);
+    expect(journal.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "completed",
+    });
+  });
+
+  test("a watcher that throws costs the Turn nothing", async () => {
+    const provider = writingProvider();
+    const runtime = mountRuntime(provider, look);
+    let ended = 0;
+    const handle = await runtime.loop.create({
+      ...allowEffectOptions,
+      botId: "bot-writing",
+      sessionId: "writing-broken",
+      provider: provider.id,
+      model: "test-model",
+      userMessageWaiting: () => Promise.resolve(true),
+      watchToolInput: () => ({
+        delta: () => {
+          throw new Error("watcher broke");
+        },
+        end: () => {
+          ended += 1;
+          throw new Error("watcher broke again");
+        },
+      }),
+    });
+
+    handle.agent.send("look into it");
+    await handle.agent.whenIdle();
+
+    expect(ended).toBe(1);
+    const journal = handle.agent.session.activeRunJournal;
+    expect(journal.filter((event) => event.type === "tool/result")).toEqual([
+      expect.objectContaining({ content: "seen", isError: false }),
+    ]);
+    expect(journal.at(-1)).toMatchObject({
+      type: "turn/end",
+      outcome: "completed",
+    });
+  });
+});
+
 describe("AgentLoop", () => {
   test("journals one reported usage event for a model request", async () => {
     const provider: LlmProvider = {

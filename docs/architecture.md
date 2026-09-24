@@ -73,7 +73,7 @@ Five classes in the app Worker, exported from `apps/cloudflare/src/index.ts`. `c
 - Roughly 100 RPC methods (`bot-state.ts:1321-3453`), each taking `input: unknown` and decoding through an envelope decoder. They include `run`/`runAgent`, the `isolate*` loopback surface, Composition reads and reverts, routines, tasks, approvals, notifications, `debugSnapshot` and `fenceRunAdmission`.
 - `alarm()` drains the push-notification outbox first. While the Bot is being deleted it then runs one page of the Memory vector purge and finishes the teardown when the purge completes; otherwise it runs the mounted contribution's alarm, then drains the audit and voice-reply outboxes.
 - `GET /api/bots/:bot/cards` answers the newest Cards that fit one listing — `truncated` says some did not — `GET /api/bots/:bot/cards/:surfaceId` answers one Card by its id whatever the listing's byte budget cut (404 when this Bot never drew it), and `POST` to the listing path is one renderer action — `{surfaceId, revision, event:{name, context}, dataModel?, commandId?}` — routed by the kernel, never by the Card: `approval/<approvalId>` goes to `decideApproval` and cannot name a decision the kernel never recorded, `plugin/<pluginId>/<action>` is a `cardAction` RPC on the Plugin worker whose returned messages fold into the card, and anything else becomes the Bot's next user-lane pending input, keyed on the client's `commandId` when it sent one — so a retried post is the same press — and on a minted id when it did not, and opens an input-delivery Turn (below) so the Bot answers the press without the person having to type. A handler's `input` opens none: that press was answered on the card and costs no Turn. A stale revision is a 409. A card write is a transcript write, so `shell:card:` joins the keys `bot-state-channel` invalidates `runs` for.
-- `fetch()` at `:3520` serves one path: the state-channel WebSocket upgrade. Sockets use the hibernation API — `state.acceptWebSocket(server, [CHANNEL_TAG])` (`apps/cloudflare/src/bot-state-channel.ts:473`), with `webSocketMessage/Close/Error` forwarded from `bot-state.ts:3547-3570`.
+- `fetch()` at `:3520` serves one path: the state-channel WebSocket upgrade. Sockets use the hibernation API — `state.acceptWebSocket(server, tags)` (`apps/cloudflare/src/bot-state-channel.ts`), tagged `bot-state-v1` and, for an observer that asked with `drafts=1`, `bot-state-v1-drafts` as well — with `webSocketMessage/Close/Error` forwarded from `bot-state.ts`.
 
 ### `UserConfiguration` — `apps/cloudflare/src/user-configuration.ts:255`
 
@@ -141,7 +141,7 @@ The composer's dictation relay (`apps/cloudflare/src/voice-dictation.ts`) is not
 
 10. **Tools.** `ctx.tools.prepare` then `ctx.tools.executePrepared`.
 
-11. **Return.** The POST returns the settled turn. Live updates arrive on a separate WebSocket, `GET /api/bots/{botId}/state-channel?version=1&cursor=N` (`apps/cloudflare/src/gateway.ts:502`). That channel carries invalidation notices, not content; the client re-reads over REST. Notices are coalesced and throttled per interval (`apps/cloudflare/src/bot-state-channel.ts:245-265`).
+11. **Return.** The POST returns the settled turn. Live updates arrive on a separate WebSocket, `GET /api/bots/{botId}/state-channel?version=1&drafts=1&cursor=N` (`apps/cloudflare/src/gateway.ts`). It carries every committed publication on a contiguous cursor — each send with its payload, run status, announcements, card revisions, and Computer notices, the last coalesced per interval — and, to an observer that asked with `drafts=1`, the reply a running Turn is writing as `state/draft` frames that are never stored and have no cursor ([Reply drafts](#reply-drafts--appshellreply-draftts)).
 
 ---
 
@@ -205,7 +205,13 @@ On failure it flushes, releases the request id through `notifyModelOutcome`, and
 
 ### Stream consumption — `consumeStreamV1`
 
-Iterates `ctx.llm.stream(request, signal)`, accumulating text, tool calls and usage, journaling `assistant/chunk` per text delta. Usage is recorded per dispatch, on every path except a `ModelProviderFailureError` with no partial data, because the provider says no billable call occurred.
+Iterates `ctx.llm.stream(request, signal)`, accumulating text, tool calls and usage, journaling `assistant/chunk` per text delta. A `tool-input-delta` — a fragment of a call's arguments while the model is still writing them — goes to the Agent's `watchToolInput` watcher for that dispatch and nowhere else: it is never journaled, the call still arrives whole as a `tool-call`, and a watcher that throws is ignored. Usage is recorded per dispatch, on every path except a `ModelProviderFailureError` with no partial data, because the provider says no billable call occurred; billing (`app/billing/model.ts`) counts a tool-input delta as partial data, like text, because it is output the model produced.
+
+### Reply drafts — `app/shell/reply-draft.ts`
+
+The Bot's voice is `send_to_user`, and a send exists only once the step's model call has finished and the tool has run. A chat or agent Turn in the Bot's own thread (never a group Turn) mounts a watcher that reads the `text` of each `send_to_user` the model is writing — alone or declared inside a `batch` — out of its streamed arguments with a partial JSON reader, and publishes it at most every 100 ms and once more when the dispatch ends, through the Shell host's `deliverReplyDraft` to `BotStateChannel.broadcastDraft`. A draft is `{runId, ordinal, parts}`: one text per send the step is writing, in the order they will land, the first at `ordinal` among the run's sends (counted from the journal when the dispatch began). A part that is not text yet, or not text at all, is empty and still holds its place. The next dispatch clears whatever the last one drew, so a send the step never made does not outlive its step.
+
+Nothing about a draft is durable: it is not journaled, not published, not replayed to a reconnecting observer, and an eviction simply loses it. The Session reconstructs every model request exactly as before. A frame larger than one state frame is not sent, so the draft stops growing and the message still arrives whole; past 256 KiB of a dispatch's argument text the watcher stops reading. Which providers stream arguments decides which Bots draw a draft at all: the OpenAI-compatible adapter (Frock AI included) and the catalog bridge do, while the seeded DeepSeek Plugin and Bedrock deliver a call whole at the end, so the message simply appears as it always has.
 
 ### Tool execution — `executeToolsV1`
 
@@ -572,9 +578,14 @@ next — by the Session positions the wire carries (`transcript_model.dart`); a
 message the person sends is drawn at full strength from the moment it is sent;
 a draft belongs to the Bot it was typed for and survives a refusal
 (`composer.dart`); and readiness and the draft are separate questions so Try
-again works with an empty composer.
+again works with an empty composer. A running Turn's reply draft (`ChatController.drafts`,
+from `state/draft` frames) is drawn as the lines its messages will be, under the
+`<runId>:send:<ordinal>` ids they will have, so a message that lands replaces its
+draft in place; a draft has no message actions and is never reported as read, and
+it is dropped when its run settles, when a snapshot replaces the page, and when
+the socket drops.
 
-Transport is REST over `package:http` behind a conditional import (`lib/client/transport.dart`, `transport_io.dart`, `transport_web.dart`). `--dart-define=FROCKBOT_ORIGIN` names the gateway; left unset it is `https://bot.frockbot.com` on the phone, which has no origin of its own, and `window.location.origin` in the browser, which is served by the gateway it talks to and may be on any port. There is one read-only WebSocket at `/api/bots/{botId}/state-channel` (`:167`) with a strict `cursor + 1` contiguity rule (`lib/client/state_channel.dart:83-99`), a 4096-byte frame cap and 1–30 s backoff.
+Transport is REST over `package:http` behind a conditional import (`lib/client/transport.dart`, `transport_io.dart`, `transport_web.dart`). `--dart-define=FROCKBOT_ORIGIN` names the gateway; left unset it is `https://bot.frockbot.com` on the phone, which has no origin of its own, and `window.location.origin` in the browser, which is served by the gateway it talks to and may be on any port. There is one read-only WebSocket at `/api/bots/{botId}/state-channel` with a strict `cursor + 1` contiguity rule for committed frames (`lib/client/state_channel.dart`), a `state/draft` frame that sits outside the cursor but is queued with them so it is never applied after the message that replaces it, a 64 KiB frame cap and 1–30 s backoff. The client asks for drafts with `drafts=1`; a server that predates them ignores the parameter, and an installed client that never asks is never sent one — its generated `StateFrame` decoder has no `state/draft`, and an unknown frame drops its socket.
 
 On the phone, auth is PKCE in the system browser (`lib/client/auth.dart:17`), returning over an App Link validated in `accept()` (`:60`); the session token lives in `flutter_secure_storage`, and the directory, drafts, cached transcripts and cursors are plaintext JSON on disk (`lib/client/plain_store_io.dart:13`, `:100`). In the browser the same seams are the hosted better-auth Google redirect (`auth_web.dart`), a cookie the client never sees, and `localStorage` (`plain_store_web.dart`).
 
@@ -966,7 +977,7 @@ The renderer is `apps/native/lib/cards/`: `client.dart` (the two routes the clie
 
 `ctx.llm` is `LlmRegistry` — `core/models/llm.ts:15-40`. It is a `Map<providerId, LlmProvider>` that dispatches on `request.provider`, wraps the call in the `modelStream` hook, then validates structured output. The kernel-declared interfaces are `LlmProvider`, `ModelInvocation` and `ModelProviderRegistration` in `core/contracts/model-invocation.ts`.
 
-Stream events (`core/contracts/types.ts:158-166`): `text-delta`, `tool-call`, `usage`, `response-format-note`, `structured-output-failure`, `finish`.
+Stream events (`LlmStreamEvent`, `core/contracts/types.ts`): `provider-state`, `text-delta`, `tool-input-delta` (a call's arguments as they are written, which only a reply draft reads), `tool-call`, `usage`, `response-format-note`, `structured-output-failure`, `finish`.
 
 ### Selection
 

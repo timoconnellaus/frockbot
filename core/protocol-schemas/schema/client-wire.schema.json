@@ -3246,6 +3246,35 @@
           },
           "required": ["schemaVersion", "type", "epoch", "cursor"],
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "properties": {
+            "schemaVersion": {
+              "const": 1
+            },
+            "type": {
+              "const": "state/draft"
+            },
+            "runId": {
+              "$ref": "#/$defs/Identifier"
+            },
+            "ordinal": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 9007199254740991
+            },
+            "parts": {
+              "type": "array",
+              "items": {
+                "type": "string",
+                "maxLength": 32000
+              },
+              "maxItems": 25
+            }
+          },
+          "required": ["schemaVersion", "type", "runId", "ordinal", "parts"],
+          "additionalProperties": false
         }
       ]
     },

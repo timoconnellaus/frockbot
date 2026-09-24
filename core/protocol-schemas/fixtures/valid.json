@@ -1620,6 +1620,28 @@
     }
   },
   {
+    "name": "reply draft",
+    "schema": "StateFrame",
+    "value": {
+      "schemaVersion": 1,
+      "type": "state/draft",
+      "runId": "command-1",
+      "ordinal": 2,
+      "parts": ["", "Here is what I found so f"]
+    }
+  },
+  {
+    "name": "cleared reply draft",
+    "schema": "StateFrame",
+    "value": {
+      "schemaVersion": 1,
+      "type": "state/draft",
+      "runId": "command-1",
+      "ordinal": 0,
+      "parts": []
+    }
+  },
+  {
     "name": "installed app's ignored supersede",
     "schema": "TurnCommand",
     "value": {

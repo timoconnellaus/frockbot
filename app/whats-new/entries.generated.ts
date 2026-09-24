@@ -19,6 +19,7 @@ import entry_plugin_theme_refused from "./entries/plugin-theme-refused.ts";
 import entry_plugins_per_bot from "./entries/plugins-per-bot.ts";
 import entry_quiet_delivery from "./entries/quiet-delivery.ts";
 import entry_release_version from "./entries/release-version.ts";
+import entry_replies_as_written from "./entries/replies-as-written.ts";
 import entry_steering from "./entries/steering.ts";
 import entry_stop_command from "./entries/stop-command.ts";
 import entry_unread_keeps_up from "./entries/unread-keeps-up.ts";
@@ -51,6 +52,7 @@ export const WHATS_NEW_ENTRY_FILES_V1 = [
   entry_plugins_per_bot,
   entry_quiet_delivery,
   entry_release_version,
+  entry_replies_as_written,
   entry_steering,
   entry_stop_command,
   entry_unread_keeps_up,

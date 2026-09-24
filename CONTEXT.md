@@ -54,6 +54,10 @@ _Avoid_: Background job, async task, child agent (that is the Subagents Package'
 A user message sent mid-turn reaching the running chat turn at its next step boundary. The turn finishes the step it is in — its model response and every tool call it made — and then ends `completed`; the message runs next, with everything that turn did in its context and a pending input saying the work was unfinished. The bot decides what to do with it. Nothing in flight is cut off or sent again, and only `/stop` cancels a turn. The thread draws the message where it landed: after what the bot had already said, above what the running turn went on to say before it yielded. Not Jev's acknowledgement steering, which shapes a turn's first reply.
 _Avoid_: Supersede, interrupt, barge-in
 
+**Reply draft**:
+The words of a `send_to_user` the model is still writing, drawn in the thread where the message will land and replaced by it when it does. It is shown only to a client that is watching: never journaled, published or replayed, so an eviction or a dropped socket loses it and the message still arrives whole.
+_Avoid_: Partial text, streaming message, draft (that is the person's unsent composer text)
+
 **Package**:
 A swappable implementation chosen at build time, behind an interface: sign-in, the Computer host, model providers, storage. First-party Packages ship with the deploy and describe themselves with a static `PackageDefinitionV1`; only untrusted code carries a descriptor, an artifact and a generation.
 _Avoid_: Plugin, extension

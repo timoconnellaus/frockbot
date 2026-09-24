@@ -122,6 +122,16 @@ export async function* decodeCatalogStreamV1(
   for await (const event of events) {
     if (event.type === "text_delta")
       yield { type: "text-delta", text: event.delta };
+    if (event.type === "toolcall_delta" && event.delta) {
+      const block = event.partial.content[event.contentIndex];
+      if (block?.type === "toolCall" && block.id && block.name)
+        yield {
+          type: "tool-input-delta",
+          id: block.id,
+          name: block.name,
+          delta: event.delta,
+        };
+    }
     if (event.type === "error")
       throw new Error(event.error.errorMessage ?? "Model provider failed");
     if (event.type !== "done") continue;

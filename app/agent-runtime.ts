@@ -114,6 +114,8 @@ export interface FoundationRuntimeOptions {
   remainingEffectAdmissions?: AgentOptions["remainingEffectAdmissions"];
   /** Whether a person's message is waiting; the Turn yields at its next step. */
   userMessageWaiting?: AgentOptions["userMessageWaiting"];
+  /** Shown each dispatch's tool calls as they are written; never journaled. */
+  watchToolInput?: AgentOptions["watchToolInput"];
   modelSelection?: RuntimeModelSelection;
   /** The Composition generation this root is pinned to; defaults to bootstrap. */
   composition?: CompositionPinV1;
@@ -220,6 +222,9 @@ export async function createFoundationRuntime(
       : {}),
     ...(options.userMessageWaiting
       ? { userMessageWaiting: options.userMessageWaiting }
+      : {}),
+    ...(options.watchToolInput
+      ? { watchToolInput: options.watchToolInput }
       : {}),
     ...(options.turnType ? { turnType: options.turnType } : {}),
     ...(options.subagentRole ? { subagentRole: options.subagentRole } : {}),

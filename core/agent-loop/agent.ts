@@ -4,6 +4,7 @@ import type {
   LoopAgentRuntimeV1,
   LoopRequestErrorDecisionV1,
   Session,
+  SessionEvent,
   SkillRefV1,
   TurnTypeV1,
 } from "@frockbot/core/contracts";
@@ -13,6 +14,23 @@ export type AgentStatus = "idle" | "running" | "disposed";
 /** One exact new external effect whose durable intent is already journaled. */
 export type AgentEffectAdmission =
   { kind: "model"; effectId: string } | { kind: "tool"; effectId: string };
+
+/** One dispatch of a model request, as a tool-input watcher is shown it. */
+export interface ToolInputDispatchV1 {
+  requestId: string;
+  turn: number;
+  step: number;
+  /** What the active run had logged when the dispatch began. */
+  journal: readonly SessionEvent[];
+}
+
+/** What watches one dispatch's tool calls being written. */
+export interface ToolInputWatchV1 {
+  /** One fragment of call `id`'s JSON arguments, in the order written. */
+  delta(call: { id: string; name: string }, fragment: string): void;
+  /** The dispatch is over, whatever became of it. Called once. */
+  end(): void;
+}
 
 export interface AgentOptions {
   botId: string;
@@ -54,6 +72,16 @@ export interface AgentOptions {
    * Absent ⇒ the Turn never yields.
    */
   userMessageWaiting?(): Promise<boolean>;
+  /**
+   * A window onto the model writing its tool calls, one dispatch at a time.
+   *
+   * Nothing it is shown is journaled, and nothing it does reaches the loop:
+   * the durable log and every model request are exactly what they would be
+   * without it, and a Turn resumed after eviction shows it nothing until its
+   * next dispatch. A watcher that throws is ignored. Absent ⇒ the fragments go
+   * nowhere.
+   */
+  watchToolInput?(dispatch: ToolInputDispatchV1): ToolInputWatchV1 | undefined;
   modelBinding?: ModelBindingSnapshot;
 }
 

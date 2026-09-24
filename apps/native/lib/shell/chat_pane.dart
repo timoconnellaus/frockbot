@@ -369,7 +369,7 @@ class _ChatPaneState extends State<ChatPane> {
   }
 
   Widget _column(BuildContext context, ChatController c) {
-    final runs = projectRuns(c.runs);
+    final runs = projectRuns(c.runs, replyDrafts: c.replyDrafts);
     final working = c.activeRunId != null;
     // The Bots working on something this Turn asked them. The controller
     // counts one only once its answering Turn is running, not while the

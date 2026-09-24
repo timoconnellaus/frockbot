@@ -215,7 +215,13 @@ export function isolateModelEventStreamV1(
   return new ReadableStream<Uint8Array>({
     async pull(stream) {
       try {
-        const next = await iterator.next();
+        let next = await iterator.next();
+        // A tool call's arguments as they stream are for the person watching
+        // the conversation. Bot code reads the call whole, and the `ai`
+        // grant's vocabulary does not grow for a preview it has no use for.
+        while (!next.done && next.value.type === "tool-input-delta") {
+          next = await iterator.next();
+        }
         if (next.done) {
           stream.close();
           return;

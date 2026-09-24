@@ -13,6 +13,7 @@ import {
   BOT_STATE_CHANNEL_RETENTION,
 } from "../src/bot-state-channel.ts";
 import { provisionBot } from "./provision-bot.ts";
+import { toolCallTriggerPrompt } from "./harness/miniflare.ts";
 
 function bot(identity: { userId: string; botId: string }) {
   return env.BOT_STATES.getByName(`${identity.userId}:${identity.botId}`);
@@ -22,6 +23,7 @@ async function openSocket(
   identity: { userId: string; botId: string },
   cursor?: string,
   epoch?: string,
+  drafts = false,
 ): Promise<WebSocket> {
   const url = new URL(
     BOT_STATE_CHANNEL_INTERNAL_PATH,
@@ -30,6 +32,7 @@ async function openSocket(
   url.searchParams.set("version", "1");
   if (cursor !== undefined) url.searchParams.set("cursor", cursor);
   if (epoch !== undefined) url.searchParams.set("epoch", epoch);
+  if (drafts) url.searchParams.set("drafts", "1");
   const response = await bot(identity).fetch(
     new Request(url, {
       headers: {
@@ -67,6 +70,66 @@ function nextFrame(
       },
       { once: true },
     );
+  });
+}
+
+/** Frames up to and including the first `until` accepts. */
+function framesUntil(
+  socket: WebSocket,
+  until: (frame: ReturnType<typeof decodeBotStateChannelFrameV1>) => boolean,
+): Promise<ReturnType<typeof decodeBotStateChannelFrameV1>[]> {
+  return new Promise((resolve, reject) => {
+    const read: ReturnType<typeof decodeBotStateChannelFrameV1>[] = [];
+    const timeout = setTimeout(
+      () => reject(new Error("socket frames timed out")),
+      10_000,
+    );
+    const listener = (event: MessageEvent) => {
+      let frame: ReturnType<typeof decodeBotStateChannelFrameV1>;
+      try {
+        if (typeof event.data !== "string") throw new Error("non-text frame");
+        frame = decodeBotStateChannelFrameV1(event.data);
+      } catch (error) {
+        clearTimeout(timeout);
+        reject(error);
+        return;
+      }
+      read.push(frame);
+      if (!until(frame)) return;
+      clearTimeout(timeout);
+      socket.removeEventListener("message", listener);
+      resolve(read);
+    };
+    socket.addEventListener("message", listener);
+  });
+}
+
+/** The next `count` frames, read by one listener so none can slip past. */
+function frames(
+  socket: WebSocket,
+  count: number,
+): Promise<ReturnType<typeof decodeBotStateChannelFrameV1>[]> {
+  return new Promise((resolve, reject) => {
+    const read: ReturnType<typeof decodeBotStateChannelFrameV1>[] = [];
+    const timeout = setTimeout(
+      () => reject(new Error("socket frames timed out")),
+      5_000,
+    );
+    const listener = (event: MessageEvent) => {
+      try {
+        if (typeof event.data !== "string") throw new Error("non-text frame");
+        read.push(decodeBotStateChannelFrameV1(event.data));
+      } catch (error) {
+        clearTimeout(timeout);
+        reject(error);
+        return;
+      }
+      if (read.length < count) return;
+      clearTimeout(timeout);
+      socket.removeEventListener("message", listener);
+      resolve(read);
+    };
+    socket.addEventListener("message", listener);
   });
 }
 
@@ -206,5 +269,113 @@ describe("hibernatable Bot-state channel", () => {
         await stub.readComputerPresence({ schemaVersion: 1, ...identity }),
       ).phase,
     ).toBe("ready");
+  });
+
+  test("a reply draft reaches only the observer that asked, across hibernation", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `state-draft-user-${suffix}`,
+      botId: `state-draft-bot-${suffix}`,
+    };
+    await initialize(identity);
+    const stub = bot(identity);
+    const drafting = await openSocket(identity, undefined, undefined, true);
+    expect(await frames(drafting, 2)).toMatchObject([
+      { type: "state/snapshot" },
+      { type: "state/ready" },
+    ]);
+    const installed = await openSocket(identity);
+    expect(await frames(installed, 2)).toMatchObject([
+      { type: "state/snapshot" },
+      { type: "state/ready" },
+    ]);
+    await evictDurableObject(stub);
+
+    const drafted = frames(drafting, 2);
+    const committed = frames(installed, 1);
+    await runInDurableObject(stub, async (_instance, state) => {
+      const channel = new BotStateChannel(state);
+      channel.broadcastDraft({ runId: "run-1", ordinal: 0, parts: ["Hel"] });
+      await channel.computerStorage.put("computer:test:after", 1);
+    });
+    const [draft, update] = await drafted;
+    expect(draft).toEqual({
+      schemaVersion: 1,
+      type: "state/draft",
+      runId: "run-1",
+      ordinal: 0,
+      parts: ["Hel"],
+    });
+    // The draft appended nothing, so the committed write is the next cursor.
+    expect(update).toMatchObject({ type: "state/update", cursor: "1" });
+    // The observer that did not ask sees the committed write, and nothing
+    // before it: a draft would have failed its decoder.
+    expect(await committed).toEqual([
+      expect.objectContaining({ type: "state/update", kind: "computer" }),
+    ]);
+    drafting.close(1000, "done");
+    installed.close(1000, "done");
+  });
+});
+
+describe("a Turn's reply on the state channel", () => {
+  test("is drawn as a draft before the message that replaces it lands", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `state-reply-user-${suffix}`,
+      botId: `state-reply-bot-${suffix}`,
+    };
+    await initialize(identity);
+    const socket = await openSocket(identity, undefined, undefined, true);
+    expect(await frames(socket, 2)).toMatchObject([
+      { type: "state/snapshot" },
+      { type: "state/ready" },
+    ]);
+
+    const runId = `reply-draft-${suffix}`;
+    const seen = framesUntil(
+      socket,
+      (frame) => frame.type === "state/update" && frame.kind === "message",
+    );
+    await (
+      bot(identity) as unknown as { run(command: unknown): Promise<unknown> }
+    ).run({
+      schemaVersion: 1,
+      ...identity,
+      command: {
+        runId,
+        sessionId: `${identity.userId}:${identity.botId}`,
+        acceptedAt: new Date().toISOString(),
+        text: toolCallTriggerPrompt([
+          "send_to_user",
+          {
+            disposition: "finish",
+            payload: { type: "text", text: "Written while you watch." },
+          },
+        ]),
+      },
+    });
+
+    const received = await seen;
+    const drafts = received.filter((frame) => frame.type === "state/draft");
+    expect(drafts.at(-1)).toEqual({
+      schemaVersion: 1,
+      type: "state/draft",
+      runId,
+      ordinal: 0,
+      parts: ["Written while you watch."],
+    });
+    expect(received.at(-1)).toMatchObject({
+      type: "state/update",
+      kind: "message",
+      payload: {
+        runId,
+        event: {
+          ordinal: 0,
+          payload: { type: "text", text: "Written while you watch." },
+        },
+      },
+    });
+    socket.close(1000, "done");
   });
 });

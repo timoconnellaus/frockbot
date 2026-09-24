@@ -256,7 +256,15 @@ class NativeApi {
       // Plain HTTP only ever names the local stack.
       scheme: origin.scheme == 'http' ? 'ws' : 'wss',
       path: '/api/bots/$botId/state-channel',
-      queryParameters: {'version': '1', 'cursor': ?cursor, 'epoch': ?epoch},
+      // `drafts` asks for the reply a running Turn is writing. A server that
+      // predates drafts ignores it, and one that has them sends them only to
+      // a client that asked, so neither side has to know the other's age.
+      queryParameters: {
+        'version': '1',
+        'drafts': '1',
+        'cursor': ?cursor,
+        'epoch': ?epoch,
+      },
     );
     return connectSocketV1(uri, await headers());
   }

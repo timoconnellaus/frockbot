@@ -301,6 +301,12 @@ describe("Frock AI runtime Contribution", () => {
     expect(events).toEqual([
       { type: "text-delta", text: "Working" },
       {
+        type: "tool-input-delta",
+        id: "call-1",
+        name: "weather",
+        delta: '{"city":"Sydney"}',
+      },
+      {
         type: "usage",
         usage: {
           inputTokens: 18,
