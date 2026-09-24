@@ -73,7 +73,7 @@ describe("capability reference", () => {
         ]),
       ),
     ).toEqual({
-      slot: 40,
+      slot: 41,
       entry: 18,
       trigger: 25,
       handler: 14,
@@ -90,12 +90,12 @@ describe("capability reference", () => {
   test("renders every capability without JavaScript and cloud capabilities only once", async () => {
     const html = renderCapabilities(source);
     const rows = await elements(html, "[data-capability-row]");
-    expect(rows).toHaveLength(147);
+    expect(rows).toHaveLength(148);
     const groups = await elements(html, "details[data-capability-group]");
     expect(groups).toHaveLength(5);
     expect(
       new Set(rows.map((row) => row.attributes["aria-labelledby"])).size,
-    ).toBe(147);
+    ).toBe(148);
     expect(rows.every((row) => !Object.hasOwn(row.attributes, "hidden"))).toBe(
       true,
     );
@@ -118,14 +118,14 @@ describe("capability reference", () => {
     );
     const liveCount = await elements(html, "[data-capability-count]");
     expect(liveCount[0].attributes["aria-live"]).toBe("polite");
-    expect(liveCount[0].text).toContain("147 capabilities");
+    expect(liveCount[0].text).toContain("148 capabilities");
     const category = await elements(html, 'select[name="category"]');
     expect(category).toHaveLength(1);
     const comparisonRows = await elements(
       html,
       "[data-capability-comparison-row]",
     );
-    expect(comparisonRows).toHaveLength(147);
+    expect(comparisonRows).toHaveLength(148);
     const categoryHeadings = await elements(
       html,
       "[data-capability-category] h4",
@@ -302,6 +302,6 @@ describe("capability filters", () => {
     const matched = data.capabilities.filter((row) =>
       matchesCapability(filterRecord(row.id), filters),
     );
-    expect(matched).toHaveLength(147);
+    expect(matched).toHaveLength(148);
   });
 });
