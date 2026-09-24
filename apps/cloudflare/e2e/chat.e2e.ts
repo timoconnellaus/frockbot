@@ -103,14 +103,15 @@ function sends(page: Page): Locator {
 /**
  * What each of those bubbles says.
  *
- * A bubble's node carries the avatar's own label as well as the words, so the
- * text of a reply from the Bot reads "Bot\npong". The label is who is
- * speaking, which every bubble in the thread has in common; what is asserted
- * here is what was said.
+ * A bubble's node carries the avatar's own label as well as the words, and the
+ * first bubble of a speaker's run carries its time above both, so the text of
+ * a reply from the Bot reads "Bot\npong" or "6:20 am\nBot\npong". The time
+ * is when, and the label is who is speaking; what is asserted here is what was
+ * said.
  */
 async function sendTexts(page: Page): Promise<string[]> {
   return (await sends(page).allTextContents()).map((text) =>
-    text.replace(/^Bot\s*/, "").trim(),
+    text.replace(/^(?:[^\n]*\d{2} [ap]m\n)?Bot\s*/, "").trim(),
   );
 }
 
@@ -152,7 +153,10 @@ async function threadOrder(page: Page): Promise<string[]> {
       .map((node) => ({
         id: node.getAttribute("flt-semantics-identifier") ?? "",
         top: node.getBoundingClientRect().top,
-        text: (node.textContent ?? "").replace(/^Bot\n/, "").trim(),
+        // The words alone, as `sendTexts` reads them.
+        text: (node.textContent ?? "")
+          .replace(/^(?:[^\n]*\d{2} [ap]m\n)?Bot\n/, "")
+          .trim(),
       }))
       .filter((line) => line.id.endsWith(":user") || line.id.includes(":send:"))
       .sort((left, right) => left.top - right.top)
@@ -913,11 +917,19 @@ test("a conversation opens at its end, and switching back to it does not reload 
     },
   );
 
+  // Switched back by the row a person presses. By now the Bot list holds every
+  // Bot this file has made, more than the suite's window has room for, and a
+  // canvas has nothing for Playwright to scroll into view (see
+  // `provisionThroughUi`); so the window is tall for the press alone, and what
+  // is claimed below is claimed in the window the suite set.
+  const viewport = page.viewportSize();
+  await page.setViewportSize({ width: 1280, height: 1600 });
   await revealSidebar(page);
   await sem(page, "shell-sidebar")
     .locator('[flt-semantics-identifier^="sidebar-bot-"]')
     .filter({ hasText: "Long" })
     .click();
+  if (viewport) await page.setViewportSize(viewport);
 
   // Drawn from the client's own memory: the newest Turn is on screen while the
   // read that would have fetched it is still held open. Not "all six" — the

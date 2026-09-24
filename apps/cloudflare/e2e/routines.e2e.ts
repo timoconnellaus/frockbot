@@ -78,11 +78,11 @@ test("the list is not a form, and schedules stay human", async ({
   await expect(sem(page, "routine-create")).toHaveCount(0);
 
   // The moment reads as a moment, not as the wire: the house order, in the
-  // Routine's own zone rather than the browser's — 9:00am in UTC is 7:00pm in
+  // Routine's own zone rather than the browser's — 9:00 am in UTC is 7:00 pm in
   // Sydney, and this spec's browser is in Sydney.
   await expect(card).toHaveAttribute(
     "aria-label",
-    /Next \d{1,2} [A-Z][a-z]{2} \d{4}, 9:00am/u,
+    /Next \d{1,2} [A-Z][a-z]{2} \d{4}, 9:00 am/u,
   );
   await expect(card).not.toHaveAttribute("aria-label", /\d{2}:\d{2}:\d{2}/u);
 });
