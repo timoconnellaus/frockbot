@@ -126,11 +126,35 @@ export interface PullRequestState {
   idleMinutes: number | null;
 }
 
+/** The issue label that claims a red `main`'s repair for one babysitter. */
+export const MAIN_RED_LABEL = "main-red";
+
+/** A babysitter's claim on repairing a red `main`: an open `main-red` issue. */
+export interface RepairClaim {
+  issue: number;
+  url: string;
+  title: string;
+  createdAt: string;
+}
+
+/** Where a pull request a scoped babysitter watches has got to after merging. */
+export interface Landing {
+  pullRequest: number;
+  state: "merged" | "closed";
+  mergeSha: string;
+  /** The deployed release tag that contains the merge, once there is one. */
+  shippedIn: string | null;
+}
+
 export interface Snapshot {
   takenAt: string;
   main: MainState;
+  /** Set while another babysitter (or this one) owns repairing `main`. */
+  repairClaim: RepairClaim | null;
   production: { tag: string | null; report: WatchReport };
   pullRequests: PullRequestState[];
+  /** Scoped to `--pr`: the watched pull requests that are no longer open. */
+  landings: Landing[];
 }
 
 function record(value: unknown, what: string): Record<string, unknown> {
@@ -510,13 +534,86 @@ export async function latestReleaseTag(gh: GitHubJson): Promise<string | null> {
   return versions[versions.length - 1]?.tag ?? null;
 }
 
+export async function repairClaim(gh: GitHubJson): Promise<RepairClaim | null> {
+  const issues = list(
+    await gh([
+      "issue",
+      "list",
+      "--label",
+      MAIN_RED_LABEL,
+      "--state",
+      "open",
+      "--json",
+      "number,url,title,createdAt",
+    ]),
+  ).map((issue) => record(issue, "issue"));
+  const oldest = issues.sort((a, b) =>
+    text(a.createdAt).localeCompare(text(b.createdAt)),
+  )[0];
+  return oldest
+    ? {
+        issue: Number(oldest.number),
+        url: text(oldest.url),
+        title: text(oldest.title),
+        createdAt: text(oldest.createdAt),
+      }
+    : null;
+}
+
+/**
+ * Where each watched pull request that is no longer open has got to. A
+ * merge has shipped once the deployed release tag contains it.
+ */
+async function landings(
+  gh: GitHubJson,
+  watched: readonly number[],
+  open: readonly PullRequestState[],
+  tag: string | null,
+  production: WatchReport,
+): Promise<Landing[]> {
+  const result: Landing[] = [];
+  for (const number of watched) {
+    if (open.some((pr) => pr.number === number)) continue;
+    const value = record(
+      await gh(["pr", "view", String(number), "--json", "state,mergeCommit"]),
+      "pull request",
+    );
+    const mergeSha = text(record(value.mergeCommit ?? {}, "merge commit").oid);
+    if (text(value.state).toUpperCase() !== "MERGED" || !mergeSha) {
+      result.push({
+        pullRequest: number,
+        state: "closed",
+        mergeSha: "",
+        shippedIn: null,
+      });
+      continue;
+    }
+    let shippedIn: string | null = null;
+    if (tag && production.status === "passed") {
+      const comparison = record(
+        await gh(["api", `repos/{owner}/{repo}/compare/${mergeSha}...${tag}`]),
+        "comparison",
+      );
+      if (["ahead", "identical"].includes(text(comparison.status)))
+        shippedIn = tag;
+    }
+    result.push({ pullRequest: number, state: "merged", mergeSha, shippedIn });
+  }
+  return result;
+}
+
+/**
+ * `only` scopes the pull requests to the ones a babysitter was asked to
+ * watch; `main` and production are everyone's and are always read.
+ */
 export async function snapshot(
   gh: GitHubJson,
   now: number = Date.now(),
+  only: readonly number[] = [],
 ): Promise<Snapshot> {
   const main = await mainState(gh);
   const tag = await latestReleaseTag(gh);
-  const [production, pullRequests] = await Promise.all([
+  const [production, allPullRequests, claim] = await Promise.all([
     tag
       ? releaseReport(gh, tag)
       : Promise.resolve<WatchReport>({
@@ -524,12 +621,20 @@ export async function snapshot(
           summary: "no vX.Y.Z tag exists",
         }),
     pullRequestStates(gh, main.status, now),
+    repairClaim(gh),
   ]);
+  const pullRequests = only.length
+    ? allPullRequests.filter((pr) => only.includes(pr.number))
+    : allPullRequests;
   return {
     takenAt: new Date(now).toISOString(),
     main,
+    repairClaim: claim,
     production: { tag, report: production },
     pullRequests,
+    landings: only.length
+      ? await landings(gh, only, allPullRequests, tag, production)
+      : [],
   };
 }
 
@@ -577,11 +682,26 @@ export function formatSnapshot(value: Snapshot): string {
       `       running: run ${main.running.id} on ${short(main.running.sha)}`,
     );
 
+  if (value.repairClaim)
+    lines.push(
+      `       repair claimed: #${value.repairClaim.issue} ${value.repairClaim.title}`,
+    );
+
   const production = value.production;
   lines.push(
     `prod   ${production.report.status === "passed" ? "" : `${production.report.status.toUpperCase()}: `}${production.report.summary}`,
   );
 
+  for (const landing of value.landings)
+    lines.push(
+      `landed #${landing.pullRequest} ${
+        landing.state === "closed"
+          ? "closed without merging"
+          : landing.shippedIn
+            ? `shipped in ${landing.shippedIn}`
+            : `merged as ${landing.mergeSha.slice(0, 9)}, not deployed yet`
+      }`,
+    );
   if (value.pullRequests.length === 0) lines.push("PRs    none open");
   value.pullRequests.forEach((pr, index) => {
     const idle =
@@ -609,7 +729,11 @@ export async function ghJson(args: readonly string[]): Promise<unknown> {
 }
 
 if (import.meta.main) {
-  const value = await snapshot(ghJson);
+  const only = process.argv
+    .flatMap((arg, index, argv) => (arg === "--pr" ? [argv[index + 1]] : []))
+    .map(Number)
+    .filter((number) => Number.isInteger(number) && number > 0);
+  const value = await snapshot(ghJson, Date.now(), only);
   console.log(
     process.argv.includes("--json")
       ? JSON.stringify(value, null, 2)
