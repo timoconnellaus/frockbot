@@ -44,8 +44,13 @@ export interface AccountDeletionEnvV1 extends BillingEnv, ComputerHostEnvV1 {
 
 /** What only the User Durable Object can do, handed to the steps. */
 export interface AccountDeletionUserSeamsV1 {
-  /** Deletes every Group Chat through its own delete command. */
-  deleteGroupChats(): Promise<AccountDeletionStepOutcomeV1>;
+  /**
+   * Deletes every Group Chat through its own delete command: the first pass
+   * names them in the cursor, the next deletes those it names.
+   */
+  deleteGroupChats(
+    cursor: string | undefined,
+  ): Promise<AccountDeletionStepOutcomeV1>;
   /** Deletes every Bot through the Bot delete saga. */
   deleteBots(): Promise<AccountDeletionStepOutcomeV1>;
   /** The payment customer the ledger recorded, if it recorded one. */
@@ -199,7 +204,7 @@ export async function runAccountDeletionStepV1(
       if (env.VOICE_ASSISTANTS) await seams.eraseVoice();
       return COMPLETE;
     case "groups":
-      return seams.deleteGroupChats();
+      return seams.deleteGroupChats(record.cursor);
     case "bots":
       return seams.deleteBots();
     case "computer": {

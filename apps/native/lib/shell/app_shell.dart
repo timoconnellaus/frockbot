@@ -3421,8 +3421,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 // signs out the way the Sign out row does.
                 onAccountDeleted: () async {
                   unawaited(appBadge.clear());
-                  await push.logout();
-                  await widget.onSignOut();
+                  try {
+                    await push.logout();
+                  } finally {
+                    await widget.onSignOut();
+                  }
                 },
               ),
             ),

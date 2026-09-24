@@ -241,7 +241,7 @@ export function decodeAccountDeletionRecordV1(
     !boundedText(value.requestedAt, 64) ||
     (value.email !== undefined && !boundedText(value.email, 320)) ||
     !isStep(value.step) ||
-    (value.cursor !== undefined && !boundedText(value.cursor, 2_048)) ||
+    (value.cursor !== undefined && !boundedText(value.cursor, 4_096)) ||
     !Number.isSafeInteger(value.attempts) ||
     (value.attempts as number) < 0 ||
     (value.lastFailure !== undefined &&

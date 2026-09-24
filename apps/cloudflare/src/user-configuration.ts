@@ -204,6 +204,7 @@ import {
   type GroupChatUserStorageV1,
 } from "@frockbot/app/groups/user";
 import {
+  GroupChatNotFoundError,
   answerGroupRpcV1,
   decodeGroupChatCommandV1,
   groupChatObjectNameV1,
@@ -997,6 +998,11 @@ export class UserConfiguration
    * then the tombstone. Nothing else runs in between, so no request can read
    * or write the half-wiped object. What is in memory goes too, so nothing
    * cached from before can write the account back.
+   *
+   * The tombstone cannot be written before the wipe, which would take it
+   * too. An object that died between the two would be empty with nothing
+   * saying why — by then with no identity anyone could sign in as, no access
+   * record, and nothing external left to reach.
    */
   private async eraseAccount(
     tombstone: AccountDeletionTombstoneV1,
@@ -1015,23 +1021,41 @@ export class UserConfiguration
   private accountDeletionSeams(userId: string): AccountDeletionUserSeamsV1 {
     const sql = durableObjectHasSqlV1(this.ctx.storage);
     return {
-      deleteGroupChats: async () => {
+      deleteGroupChats: async (cursor) => {
         const store = this.groupChats();
-        for (const group of (await store.list()).groups) {
-          const result = await store.execute(
-            userId,
-            {
-              type: "group/delete",
-              commandId: `account-deletion-${group.groupId}`,
-              groupId: group.groupId,
-            },
-            { kind: "user" },
+        // The groups are named in the saga's cursor before any is deleted:
+        // a delete commits here before its group's own object is destroyed,
+        // and a retry that re-listed would no longer see the group whose
+        // object it still owes a destroy. Replaying the same command carries
+        // that destroy again.
+        if (cursor === undefined) {
+          const groupIds = (await store.list()).groups.map(
+            (group) => group.groupId,
           );
+          return groupIds.length === 0
+            ? { status: "complete" }
+            : { status: "pending", cursor: groupIds.join(",") };
+        }
+        for (const groupId of cursor.split(",")) {
+          let result;
+          try {
+            result = await store.execute(
+              userId,
+              {
+                type: "group/delete",
+                commandId: `account-deletion-${groupId}`,
+                groupId,
+              },
+              { kind: "user" },
+            );
+          } catch (error) {
+            // Deleted meanwhile by a command of its own, which carried it.
+            if (error instanceof GroupChatNotFoundError) continue;
+            throw error;
+          }
           if (result.change) await this.carryGroupChange(userId, result.change);
         }
-        return (await store.list()).groups.length === 0
-          ? { status: "complete" }
-          : { status: "pending" };
+        return { status: "complete" };
       },
       deleteBots: async () => {
         const flock = await this.flockContribution();

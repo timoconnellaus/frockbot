@@ -38,6 +38,7 @@ interface UserRpc {
   listBots(input: unknown): Promise<{ bots: Array<{ botId: string }> }>;
   createBot(input: unknown): Promise<unknown>;
   prepareAccount(input: unknown): Promise<unknown>;
+  executeGroupChatCommand(input: unknown): Promise<unknown>;
 }
 
 function user(userId: string) {
@@ -166,6 +167,18 @@ describe("deleting an account", () => {
       },
     });
     expect(turn.text).toBe("Ollama reply");
+    // And a Group Chat of the two.
+    expect(
+      await userRpc(userId).executeGroupChatCommand({
+        schemaVersion: 1,
+        userId,
+        command: {
+          type: "group/create",
+          commandId: `group-${suffix}`,
+          members: [botId, siblingId],
+        },
+      }),
+    ).toMatchObject({ ok: true, value: { status: "applied" } });
 
     // The sign-in identity, a session and a linked Google account.
     const now = new Date().toISOString();
