@@ -412,9 +412,12 @@
   .proof-list {
     min-height: 98px;
     display: flex;
+    flex-wrap: wrap;
+    align-content: center;
     align-items: center;
     justify-content: space-between;
-    gap: 22px;
+    gap: 12px 22px;
+    padding-block: 18px;
     font-size: 0.79rem;
     font-weight: 700;
     white-space: nowrap;
@@ -1752,6 +1755,18 @@
 }
 
 @layer responsive {
+  /* The label and six claims need about 1190px on one line, so below this
+     the label takes a line of its own until the scroller takes over. */
+  @media (max-width: 1280px) {
+    .proof-list {
+      justify-content: center;
+    }
+    .proof-list > strong {
+      flex-basis: 100%;
+      text-align: center;
+    }
+  }
+
   @media (max-width: 1100px) {
     .site-nav {
       gap: 20px;
@@ -1760,9 +1775,13 @@
       display: none;
     }
     .proof-list {
+      flex-wrap: nowrap;
       overflow-x: auto;
       justify-content: flex-start;
       padding-block: 26px;
+    }
+    .proof-list > strong {
+      flex-basis: auto;
     }
     .work-grid {
       grid-template-columns: 350px 1fr;
