@@ -364,7 +364,17 @@ describe("UserConfiguration Connection routing", () => {
           ...bound.env,
           ...env,
           CREDENTIAL_KEYRING: credentialKeyring,
-        }).readConnectionsFrame({ schemaVersion: 1, userId, catalog: true })
+        }).readConnectionsFrame({
+          schemaVersion: 1,
+          userId,
+          catalog: {
+            query: "",
+            kinds: ["model"],
+            installed: false,
+            cursor: 0,
+            limit: 50,
+          },
+        })
       ).providers.map((provider) => provider.packageId);
     expect(await catalog({})).not.toContain("provider-deepseek");
     const withLoader = await catalog({

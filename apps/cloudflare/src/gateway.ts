@@ -1,5 +1,6 @@
 import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { settingsDocumentV1 } from "@frockbot/app/settings/document";
+import { connectionsCatalogQueryV1 } from "@frockbot/app/settings/frame";
 import {
   botPluginsDocumentV1,
   decodeBotPluginsCommandV1,
@@ -763,15 +764,19 @@ export function createGateway(
 
     if (url.pathname === "/api/settings/connections") {
       if (request.method !== "GET") return jsonError(405, "method not allowed");
+      let catalog;
+      try {
+        catalog = connectionsCatalogQueryV1(url.searchParams);
+      } catch {
+        return jsonError(400, "Invalid Marketplace search");
+      }
       try {
         const frame = decodeProtocol(
           "ConnectionsFrame",
           await dependencies.userConfigurationFor(userId).readConnectionsFrame({
             schemaVersion: 1,
             userId,
-            ...(url.searchParams.get("catalog") === "1"
-              ? { catalog: true }
-              : {}),
+            ...(catalog ? { catalog } : {}),
           }),
         );
         return Response.json(frame, {

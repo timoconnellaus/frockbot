@@ -6,6 +6,7 @@ import {
   modelsSettingsFrame,
   modelsSettingsCommand,
   modelSettingsOptions,
+  type ConnectionsCatalogQueryV1,
 } from "./settings-frame.js";
 import {
   configurationCommandFingerprintV1,
@@ -708,12 +709,16 @@ export class UserSettingsBackendContribution {
       : previous;
   }
 
-  async readConnectionsFrame(userId: string, catalog = false) {
+  async readConnectionsFrame(
+    userId: string,
+    catalog?: ConnectionsCatalogQueryV1,
+    unmountable: readonly string[] = [],
+  ) {
     return connectionsFrame(
       userId,
       await this.readConfiguration({ schemaVersion: 1, userId }),
       this.host.availablePackages,
-      { catalog },
+      { ...(catalog ? { catalog } : {}), unmountable },
     );
   }
 

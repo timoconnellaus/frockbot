@@ -845,6 +845,7 @@ export type ConnectionsFrame = {
     icon?: Identifier;
   }>;
   modelInUse?: string;
+  nextCursor?: number;
 };
 export type NotificationDirectory = {
   schemaVersion: 1;

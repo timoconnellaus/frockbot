@@ -633,7 +633,72 @@ function modelProviderDescriptionV1(
 }
 
 /** Every model provider and every connectable app, with room to grow. */
-const CONNECTIONS_FRAME_PROVIDERS_MAX = 2_000;
+export const CONNECTIONS_FRAME_PROVIDERS_MAX_V1 = 2_000;
+
+/** Cards in a Marketplace page when the read does not ask for more. */
+export const CONNECTIONS_CATALOG_PAGE_V1 = 50;
+
+/** The longest Marketplace search, as the model picker's. */
+export const CONNECTIONS_CATALOG_QUERY_MAX_V1 = 100;
+
+export type ConnectionsCatalogKindV1 = "model" | "connector";
+
+/**
+ * One Marketplace read. The search, the kind boxes and the half are matched
+ * here, so a client holds the cards it drew rather than the whole catalog.
+ */
+export interface ConnectionsCatalogQueryV1 {
+  /** Matched against a row's name, description, kind and Package. */
+  query: string;
+  kinds: readonly ConnectionsCatalogKindV1[];
+  /** Installed: models that are added and apps with an account. */
+  installed: boolean;
+  /** Cards to skip: the `nextCursor` of the page before. */
+  cursor: number;
+  /**
+   * Cards wanted. A page, or every card already drawn when a press is
+   * settled, so the list keeps its place.
+   */
+  limit: number;
+}
+
+/**
+ * The Marketplace read a query string asks for: `catalog=1`, then `q`,
+ * `kinds` (a comma list, both when absent), `installed=1`, `cursor` and
+ * `limit`. Undefined when it asks for the ordinary read.
+ */
+export function connectionsCatalogQueryV1(
+  params: URLSearchParams,
+): ConnectionsCatalogQueryV1 | undefined {
+  if (params.get("catalog") !== "1") return undefined;
+  const count = (name: string, fallback: number, minimum: number) => {
+    const raw = params.get(name);
+    if (raw === null) return fallback;
+    const value = Number(raw);
+    if (
+      !/^\d+$/u.test(raw) ||
+      value < minimum ||
+      value > CONNECTIONS_FRAME_PROVIDERS_MAX_V1
+    )
+      throw new ConfigurationDecodeError(`Invalid Marketplace ${name}`);
+    return value;
+  };
+  const query = params.get("q") ?? "";
+  if (query.length > CONNECTIONS_CATALOG_QUERY_MAX_V1)
+    throw new ConfigurationDecodeError("Marketplace search is too long");
+  const kinds = params.get("kinds");
+  const chosen =
+    kinds === null ? ["model", "connector"] : kinds.split(",").filter(Boolean);
+  if (!chosen.every((kind) => kind === "model" || kind === "connector"))
+    throw new ConfigurationDecodeError("Invalid Marketplace kinds");
+  return {
+    query,
+    kinds: [...new Set(chosen as ConnectionsCatalogKindV1[])],
+    installed: params.get("installed") === "1",
+    cursor: count("cursor", 0, 0),
+    limit: count("limit", CONNECTIONS_CATALOG_PAGE_V1, 1),
+  };
+}
 
 /**
  * Connectors: every account a User holds, and every Package they could hold
@@ -647,20 +712,26 @@ const CONNECTIONS_FRAME_PROVIDERS_MAX = 2_000;
  * a line saying what that state means.
  *
  * `catalog` is the Marketplace storefront: every model and connector offer,
- * including Packages nobody has added yet. An uninstalled model row cannot
- * connect (`mayConnect: false`); Add installs the Package, then Connect
- * opens. The ordinary connections read stays installed-only, so Manage
- * provider and older clients do not grow a catalog they cannot add from.
+ * including Packages nobody has added yet, one page of cards at a time. An
+ * uninstalled model row cannot connect (`mayConnect: false`); Add installs the
+ * Package, then Connect opens. The ordinary connections read stays
+ * installed-only, so Manage provider does not grow a catalog it cannot add
+ * from. `unmountable` names Packages this deployment cannot run, offered only
+ * while an account still holds one.
  */
 export function connectionsFrame(
   userId: string,
   settings: UserSettingsViewV1,
   catalog: readonly AvailableUserPackage[],
-  options: { catalog?: boolean } = {},
+  options: {
+    catalog?: ConnectionsCatalogQueryV1;
+    unmountable?: readonly string[];
+  } = {},
 ): ConnectionsFrame {
-  const offerCatalog = options.catalog === true;
+  const offer = options.catalog;
+  const offerCatalog = offer !== undefined;
   const homes = new Map<string, "model" | "connector">();
-  const providers: ConnectionsFrame["providers"] = [];
+  let providers: ConnectionsFrame["providers"] = [];
   for (const item of catalog) {
     if (offerCatalog && item.platformOwned) continue;
     const home = packageConfigurationHomeV1(item);
@@ -744,10 +815,12 @@ export function connectionsFrame(
       });
     }
   }
-  // Connectors lead in the order their Package declares them — the apps
-  // people reach for first, then the rest — and model providers follow by
-  // name. A thousand apps sorted by name would open on ones nobody has heard of.
-  if (offerCatalog) {
+  let nextCursor: number | undefined;
+  if (offer) {
+    // Connectors lead in the order their Package declares them — the apps
+    // people reach for first, then the rest — and model providers follow by
+    // name. A thousand apps sorted by name would open on ones nobody has
+    // heard of.
     providers.sort((left, right) =>
       left.kind !== right.kind
         ? left.kind === "connector"
@@ -757,6 +830,39 @@ export function connectionsFrame(
           ? left.displayName.localeCompare(right.displayName)
           : 0,
     );
+    const needle = offer.query.trim().toLocaleLowerCase();
+    const unmountable = new Set(options.unmountable);
+    const cards: ConnectionsFrame["providers"][] = [];
+    for (const row of providers) {
+      if (!offer.kinds.includes(row.kind)) continue;
+      if (unmountable.has(row.packageId) && row.connected === 0) continue;
+      if (
+        offer.installed &&
+        !(row.kind === "model" ? row.installed : row.connected > 0)
+      )
+        continue;
+      if (
+        needle &&
+        ![row.displayName, row.description, row.kind, row.packageId]
+          .join(" ")
+          .toLocaleLowerCase()
+          .includes(needle)
+      )
+        continue;
+      // A page counts cards, not rows: a model provider's ways in are one
+      // card, and its rows sort together, so a page never ends between them.
+      const card = cards.at(-1);
+      if (
+        card?.[0]?.kind === "model" &&
+        row.kind === "model" &&
+        card[0].packageId === row.packageId
+      )
+        card.push(row);
+      else cards.push([row]);
+    }
+    providers = cards.slice(offer.cursor, offer.cursor + offer.limit).flat();
+    if (cards.length > offer.cursor + offer.limit)
+      nextCursor = offer.cursor + offer.limit;
   }
 
   const accounts: ConnectionsFrame["accounts"] = [];
@@ -791,7 +897,8 @@ export function connectionsFrame(
     ownerId: userId,
     revision: settings.revision,
     accounts,
-    providers: providers.slice(0, CONNECTIONS_FRAME_PROVIDERS_MAX),
+    providers: providers.slice(0, CONNECTIONS_FRAME_PROVIDERS_MAX_V1),
     modelInUse: modelInUseLineV1(settings, catalog),
+    ...(nextCursor === undefined ? {} : { nextCursor }),
   });
 }

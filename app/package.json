@@ -195,6 +195,7 @@
     "./settings/bot": "./settings/bot.ts",
     "./settings/definition": "./settings/definition.ts",
     "./settings/document": "./settings/settings-document.ts",
+    "./settings/frame": "./settings/settings-frame.ts",
     "./settings/shared": "./settings/shared.ts",
     "./settings/user": "./settings/user.ts",
     "./shell/agent": "./shell/agent.ts",

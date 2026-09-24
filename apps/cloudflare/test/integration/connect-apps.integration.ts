@@ -59,9 +59,7 @@ describe("Connected apps", () => {
   it("offers each app as its own Connectors row", async () => {
     const userId = freshUserId("connect-rows");
     await provisionThroughGateway({ userId, botId: "rows" });
-    const frame = (await expectOkJson(
-      await asUser(userId, "/api/settings/connections?catalog=1"),
-    )) as {
+    type Catalog = {
       providers: Array<{
         displayName: string;
         kind: string;
@@ -69,7 +67,17 @@ describe("Connected apps", () => {
         icon?: string;
         description?: string;
       }>;
+      nextCursor?: number;
     };
+    const read = async (search: string) =>
+      (await expectOkJson(
+        await asUser(userId, `/api/settings/connections?catalog=1${search}`),
+      )) as Catalog;
+    // The featured apps lead the first page, and the page says where the
+    // next one starts.
+    const frame = await read("");
+    expect(frame.providers).toHaveLength(50);
+    expect(frame.nextCursor).toBe(50);
     for (const name of ["Gmail", "Google Calendar", "GitHub", "Slack"]) {
       const row = frame.providers.find((p) => p.displayName === name);
       expect(row).toMatchObject({
@@ -83,9 +91,12 @@ describe("Connected apps", () => {
     expect(JSON.stringify(frame).toLowerCase()).not.toContain("composio");
     // Every app is in the Marketplace, and the model providers still are too.
     expect(
-      frame.providers.filter((p) => p.kind === "connector").length,
+      (await read("&kinds=connector&limit=2000")).providers.length,
     ).toBeGreaterThan(1_000);
-    expect(frame.providers.some((p) => p.kind === "model")).toBe(true);
+    expect((await read("&kinds=model")).providers.length).toBeGreaterThan(0);
+    expect(
+      (await read("&q=calendar")).providers.map((p) => p.displayName),
+    ).toContain("Google Calendar");
     // The ordinary read carries only the apps with an account.
     const ordinary = (await expectOkJson(
       await asUser(userId, "/api/settings/connections"),
