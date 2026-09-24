@@ -543,9 +543,11 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
   contained the entry, not the pull request: the tag deploy writes them into
   the Worker with `app/whats-new/published.ts`, so every other build serves
   the entries undated and they read “New”. A still is optional, one WebP
-  served at `/whats-new/<file>`, same origin. A pull request that touches
-  `app/whats-new/**` posts a comment with those stills from the branch head,
-  and `PREVIEW.md` links the same pictures so they can be reviewed there.
+  served at `/whats-new/<file>`, same origin. Each entry is its own file under
+  `app/whats-new/entries/`, ordered newest first by the instant it was
+  written, so pull requests that each add one do not collide. A pull request
+  that touches `app/whats-new/**` posts a comment with the copy and stills
+  from the branch head, so they can be reviewed there.
 - `SearchOverlay` — `lib/search/overlay.dart` over `lib/search/controller.dart`:
   the backend index across every Bot, debounced, with each of its four states
   named
@@ -1212,7 +1214,7 @@ See [local validation](local-validation.md) for commands and cache recovery.
 
 ### Workflows
 
-Five workflows live in `.github/workflows/`:
+Seven workflows live in `.github/workflows/`:
 
 - `check.yml` (`Check`, plus `Flutter`) — what a pull request owes: the fast
   tier (format, typecheck, `bun test`, the Computer host and Plugin build
@@ -1239,13 +1241,23 @@ Five workflows live in `.github/workflows/`:
   or been skipped, so a failed `Scope` — whose dependents all skip — cannot
   read as permission to ship.
 - `release.yml` — the production pipeline for a `v*.*.*` tag, below.
+- `main-health.yml` — keeps the `main-health` commit status on every open
+  pull request, from `scripts/main-health.ts`: green while `main` is green,
+  red while it is red, always green on a `fix-main` pull request or a revert.
+  The ruleset requires it, so nothing merges onto a red `main` but its repair.
+  It runs on `pull_request_target` so that it can write the status and runs
+  only the base branch's script, never the pull request's code.
+- `whats-new-preview.yml` — comments a pull request's What’s New copy and
+  stills on the pull request.
 - `native.yml` — manual-only native qualification.
 - `mac-release.yml` — the Mac desktop app's own qualification and tag.
 
 Branch protection is recorded in
 [local validation](local-validation.md#github-configuration): the `main`
 ruleset requires the checks it names, branch freshness is not required, and
-nothing approves a production deploy.
+nothing approves a production deploy. Merging belongs to the babysitter
+(`.claude/skills/babysit/SKILL.md`), which reads the whole pipeline through
+`scripts/babysit.ts`.
 
 ### `.github/workflows/release.yml`
 
