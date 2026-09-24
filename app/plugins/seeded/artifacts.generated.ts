@@ -150,6 +150,57 @@ export const SEEDED_PLUGIN_ARTIFACTS_V1: readonly SeededPluginArtifactV1[] = [
     ),
   },
   {
+    pluginId: "connectors",
+    contentHash:
+      "fb59b37d1e8692a25dd9dbd9fe72f8d1b656ad20a18b17bdb7ef09dd5b0586bd",
+    size: 1044,
+    bundlerVersion: "applet-build/plugin@1",
+    sourceHash:
+      "5fbfd462325c97083b30027e54ae94fb7f13cb502b4c9823048c77a2dceb1e2d",
+    descriptor: {
+      id: "connectors",
+      displayName: "Connector cards",
+      version: "1",
+      contractVersion: 7,
+      tools: [],
+      hooks: [],
+      grants: [],
+      cards: [
+        {
+          id: "offer",
+          displayName: "Connect an app",
+          description:
+            "Offer the person an app from the Marketplace you cannot reach yet, such as their Gmail or their calendar, with a button that connects it. Name the app by its Marketplace id or its name; an app the Marketplace does not carry is refused with the closest ones it does. They connect it themselves, and its tools reach you on a later Turn.",
+          dataSchema: {
+            type: "object",
+            properties: {
+              app: {
+                type: "string",
+                minLength: 1,
+                maxLength: 100,
+                description:
+                  'The app: its Marketplace id, e.g. "gmail" or "googlecalendar", or its name, e.g. "Google Calendar".',
+              },
+              reason: {
+                type: "string",
+                maxLength: 500,
+                description:
+                  'One sentence on what connecting it lets you do for them, e.g. "So I can check your inbox for the invoice."',
+              },
+            },
+            required: ["app"],
+            additionalProperties: false,
+          },
+          actions: [],
+        },
+      ],
+      contextKeys: ["user", "bot", "session"],
+    },
+    module: fromBase64V1(
+      "Ly8gcGx1Z2luLnRzCnZhciB0b29scyA9IFtdOwp2YXIgRlJPQ0tfQ0FUQUxPR19JRCA9ICJodHRwczovL2Zyb2NrYm90LmNvbS9hMnVpL2NhdGFsb2dzL2Zyb2NrL3YxLmpzb24iOwpmdW5jdGlvbiBzdXJmYWNlKHN1cmZhY2VJZCwgY29tcG9uZW50cykgewogIHJldHVybiBbCiAgICB7CiAgICAgIHZlcnNpb246ICJ2MS4wIiwKICAgICAgY3JlYXRlU3VyZmFjZTogeyBzdXJmYWNlSWQsIGNhdGFsb2dJZDogRlJPQ0tfQ0FUQUxPR19JRCwgY29tcG9uZW50cyB9CiAgICB9CiAgXTsKfQp2YXIgb2ZmZXJDYXJkID0gewogIHJlbmRlcih7IHN1cmZhY2VJZCwgZGF0YSB9KSB7CiAgICBjb25zdCBhcHAgPSBTdHJpbmcoZGF0YS5hcHAgPz8gIiIpLnRyaW0oKTsKICAgIGlmIChhcHAubGVuZ3RoID09PSAwKSB7CiAgICAgIHJldHVybiB7IGRyb3A6IHRydWUsIHJlYXNvbjogImEgY29ubmVjdG9yIG9mZmVyIG5lZWRzIGFuIGFwcCIgfTsKICAgIH0KICAgIGNvbnN0IHJlYXNvbiA9IHR5cGVvZiBkYXRhLnJlYXNvbiA9PT0gInN0cmluZyIgJiYgZGF0YS5yZWFzb24udHJpbSgpLmxlbmd0aCA+IDAgPyBkYXRhLnJlYXNvbi50cmltKCkgOiB2b2lkIDA7CiAgICByZXR1cm4gc3VyZmFjZShzdXJmYWNlSWQsIFsKICAgICAgewogICAgICAgIGlkOiAicm9vdCIsCiAgICAgICAgY29tcG9uZW50OiAiQ29sdW1uIiwKICAgICAgICBjaGlsZHJlbjogWy4uLnJlYXNvbiA/IFsicmVhc29uIl0gOiBbXSwgImNvbm5lY3QiXQogICAgICB9LAogICAgICAuLi5yZWFzb24gPyBbeyBpZDogInJlYXNvbiIsIGNvbXBvbmVudDogIk1hcmtkb3duIiwgdGV4dDogcmVhc29uIH1dIDogW10sCiAgICAgIHsgaWQ6ICJjb25uZWN0IiwgY29tcG9uZW50OiAiQ29ubmVjdEFwcCIsIGFwcCB9CiAgICBdKTsKICB9Cn07CnZhciBjYXJkcyA9IHsgb2ZmZXI6IG9mZmVyQ2FyZCB9Owp2YXIgZXhlY3V0ZSA9ICh0b29sKSA9PiB7CiAgdGhyb3cgbmV3IEVycm9yKGB1bmtub3duIHRvb2wgJHt0b29sfWApOwp9OwpleHBvcnQgewogIGNhcmRzLAogIGV4ZWN1dGUsCiAgdG9vbHMKfTsK",
+    ),
+  },
+  {
     pluginId: "credentials",
     contentHash:
       "1b4b616e0a511ec70b6ed5611521029b5bdff640f2ee049b7b6be019cf5c3192",

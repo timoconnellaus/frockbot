@@ -4,6 +4,7 @@ import entry_avatar_colour_flash from "./entries/avatar-colour-flash.ts";
 import entry_chat_scroll from "./entries/chat-scroll.ts";
 import entry_chat_type from "./entries/chat-type.ts";
 import entry_committed_chat from "./entries/committed-chat.ts";
+import entry_connect_app_card from "./entries/connect-app-card.ts";
 import entry_connected_apps_1400 from "./entries/connected-apps-1400.ts";
 import entry_flock_palette from "./entries/flock-palette.ts";
 import entry_group_chats from "./entries/group-chats.ts";
@@ -34,6 +35,7 @@ export const WHATS_NEW_ENTRY_FILES_V1 = [
   entry_chat_scroll,
   entry_chat_type,
   entry_committed_chat,
+  entry_connect_app_card,
   entry_connected_apps_1400,
   entry_flock_palette,
   entry_group_chats,

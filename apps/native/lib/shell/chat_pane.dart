@@ -19,6 +19,7 @@ import 'package:flutter/services.dart';
 
 import '../acceptance_metrics.dart';
 import '../cards/approvals.dart';
+import '../cards/connections.dart';
 import '../cards/chat_card.dart';
 import '../client/bot_sessions.dart';
 import '../client/chat_controller.dart';
@@ -28,6 +29,7 @@ import '../theme/frock_theme.dart';
 import '../theme/states.dart';
 import '../voice/dictation.dart';
 import 'approvals.dart';
+import 'connect_cards.dart';
 import 'chat_header.dart';
 import 'composer.dart';
 import 'desktop_layout.dart';
@@ -754,6 +756,9 @@ class _ConversationViewState extends State<ConversationView> {
     api: session.api,
     botId: session.botId,
   );
+  late final ConnectCardsController connections = ConnectCardsController(
+    api: session.api,
+  );
   late List<StarterSuggestionV1> starters = widget.general
       ? startersForV1(null)
       : const [];
@@ -806,36 +811,41 @@ class _ConversationViewState extends State<ConversationView> {
     // reads the Bot's own approvals projection (ADR 0030 step 7).
     child: CardApprovalsScope(
       approvals: approvals,
-      child: ChatPane(
-        background: widget.background,
-        primary: widget.primary,
-        overlay: widget.overlay,
-        starters: starters,
-        controller: session.controller,
-        botName: widget.botName,
-        onReconnect: session.channel.connect,
-        skills: skills,
-        onOpenRun: widget.onOpenRun,
-        onOpenExchange: widget.onOpenExchange,
-        backgroundOf: widget.backgroundOf,
-        primaryOf: widget.primaryOf,
-        nameOf: widget.nameOf,
-        onMessageActions: widget.onMessageActions,
-        unreadFromMessageId: widget.unreadFromMessageId,
-        onReadLatest: widget.onReadLatest,
-        outOfCredit: widget.outOfCredit,
-        onOpenBilling: widget.onOpenBilling,
-        onDictate: widget.onDictate,
-        onVoice: widget.onVoice,
-        voiceClosing: widget.voiceClosing,
-        voiceActive: widget.voiceActive,
-        onStopDictation: widget.onStopDictation,
-        onDiscardDictation: widget.onDiscardDictation,
-        dictationState: widget.dictationState,
-        canRevertDictation: widget.canRevertDictation,
-        onRevertDictation: widget.onRevertDictation,
-        dictationLevel: widget.dictationLevel,
-        dictationElapsed: widget.dictationElapsed,
+      // What `ConnectApp` reads to say an app is connected, and the door its
+      // button opens: the person's own, never an action the Bot receives.
+      child: CardConnectionsScope(
+        connections: connections,
+        child: ChatPane(
+          background: widget.background,
+          primary: widget.primary,
+          overlay: widget.overlay,
+          starters: starters,
+          controller: session.controller,
+          botName: widget.botName,
+          onReconnect: session.channel.connect,
+          skills: skills,
+          onOpenRun: widget.onOpenRun,
+          onOpenExchange: widget.onOpenExchange,
+          backgroundOf: widget.backgroundOf,
+          primaryOf: widget.primaryOf,
+          nameOf: widget.nameOf,
+          onMessageActions: widget.onMessageActions,
+          unreadFromMessageId: widget.unreadFromMessageId,
+          onReadLatest: widget.onReadLatest,
+          outOfCredit: widget.outOfCredit,
+          onOpenBilling: widget.onOpenBilling,
+          onDictate: widget.onDictate,
+          onVoice: widget.onVoice,
+          voiceClosing: widget.voiceClosing,
+          voiceActive: widget.voiceActive,
+          onStopDictation: widget.onStopDictation,
+          onDiscardDictation: widget.onDiscardDictation,
+          dictationState: widget.dictationState,
+          canRevertDictation: widget.canRevertDictation,
+          onRevertDictation: widget.onRevertDictation,
+          dictationLevel: widget.dictationLevel,
+          dictationElapsed: widget.dictationElapsed,
+        ),
       ),
     ),
   );
@@ -846,6 +856,7 @@ class _ConversationViewState extends State<ConversationView> {
     // lookup rather than a reconnection.
     session.controller.removeListener(_repaint);
     approvals.dispose();
+    connections.dispose();
     skills.dispose();
     super.dispose();
   }

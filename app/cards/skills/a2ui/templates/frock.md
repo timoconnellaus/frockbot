@@ -5,11 +5,11 @@ catalogs the app draws; do not edit them by hand._
 
 ## When to use
 
-These five are the core of FrockBot's own catalog, drawn from the app's own
+These six are the core of FrockBot's own catalog, drawn from the app's own
 theme, and they are what most cards are made of. Reach for them **before**
 composing the same thing out of `Row`s and `Text`s: they cost fewer
-components, they look like the rest of the app, and two of them do things the
-standard catalog cannot. The rest of the Frock catalog is five more
+components, they look like the rest of the app, and three of them do things
+the standard catalog cannot. The rest of the Frock catalog is five more
 references — `structure.md` for the frame, `data.md` for numbers and rows,
 `rich-text.md` for words, `media.md` for pictures, files and links, and
 `input.md` for the answers a card takes. Load the one you need.
@@ -23,11 +23,13 @@ references — `structure.md` for the frame, `data.md` for numbers and rows,
 - **`CollapsibleText`** — a body longer than the card: a draft, a quote, a
   summary. It starts collapsed so the controls stay visible.
 - **`ApprovalActions`** — the approve and decline controls for one Approval.
+- **`ConnectApp`** — an app from the Marketplace the person can connect, with
+  its logo and a Connect button.
 - **`Receipt`** — what a card settles into.
 
 ## `ApprovalActions` is bound, not composed
 
-This is the one component whose meaning is not the card's. You give it an
+Its meaning is not the card's. You give it an
 `approvalId`; the host draws both buttons, mints their action names as
 `approval/<approvalId>`, and the decision is recorded once, durably, by the
 kernel.
@@ -52,6 +54,21 @@ makes the buttons trustworthy.
 The approval send ends your Turn. The decision reaches you as input on a later
 Turn; that is when you update the card to its settled state.
 
+## `ConnectApp` names an app, and the host does the rest
+
+Give it `app` — the Marketplace id (`gmail`, `googlecalendar`) or the app's
+name (`Google Calendar`) — and nothing else. The kernel looks the app up in its
+own catalog when the card is sent and writes its name and ids onto the
+component, replacing anything you wrote there; an app the Marketplace does not
+carry is refused, and the refusal names the closest ones it does. The host
+draws the logo, the name and the button, so the button always connects the app
+it names.
+
+A press never reaches you. The person signs in on the app's own page, and the
+app's tools appear in your prompt on a later Turn. For the usual "want me to
+connect Gmail?" card, do not compose one: call `connectors_offer` from the
+`connectors` namespace, which draws this component with your reason above it.
+
 ## Settling
 
 A card never disappears when the thing is done. Replace the controls with a
@@ -62,4 +79,4 @@ one more `card` send naming the same `surfaceId`.
 
 ## Components
 
-<!-- components: StatusPill, KeyValueRows, CollapsibleText, ApprovalActions, Receipt -->
+<!-- components: StatusPill, KeyValueRows, CollapsibleText, ApprovalActions, ConnectApp, Receipt -->

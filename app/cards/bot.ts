@@ -37,7 +37,9 @@ import {
 } from "@frockbot/app/plugins/worker-bot";
 import { notePluginFailureV1 } from "@frockbot/app/plugins/health-bot";
 import { readPluginHealthV1 } from "@frockbot/app/plugins/health";
+import { connectCardAppV1 } from "@frockbot/app/connect/card";
 import {
+  bindCardConnectAppsV1,
   cardActionRouteV1,
   cardKeyV1,
   CARD_APPROVAL_COMPONENT_V1,
@@ -238,6 +240,17 @@ async function foldHandlerMessages(
     return {
       card: await readCard(state, surfaceId),
       failure: cardFailureV1("a card action may not ask for a decision"),
+    };
+  }
+  // A `ConnectApp` a handler draws is bound exactly as one a send draws, so
+  // an update can no more rename the app than the first draw could.
+  try {
+    messages = bindCardConnectAppsV1(messages, connectCardAppV1);
+  } catch (error) {
+    if (!(error instanceof CardDecodeError)) throw error;
+    return {
+      card: await readCard(state, surfaceId),
+      failure: cardFailureV1(error.message),
     };
   }
   const key = cardKeyV1(surfaceId);

@@ -126,6 +126,46 @@
       ],
       "unevaluatedProperties": false
     },
+    "ConnectApp": {
+      "type": "object",
+      "description": "An app from the Marketplace the person can connect: its logo, its name and a Connect button that opens the app's own sign-in. Name the app and nothing else; the host fills in the rest from its own catalog and draws the button, so a card can never say one app and connect another. A press never reaches you: the person signs in on the app's page, and the app's tools reach you on a later Turn.",
+      "allOf": [
+        {
+          "$ref": "https://a2ui.org/specification/v0_9/common_types.json#/$defs/ComponentCommon"
+        },
+        { "$ref": "#/$defs/CatalogComponentCommon" },
+        {
+          "type": "object",
+          "properties": {
+            "component": { "const": "ConnectApp" },
+            "app": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "description": "The app: its Marketplace id, e.g. 'gmail' or 'googlecalendar', or its name, e.g. 'Google Calendar'. An app the Marketplace does not carry is refused when the card is sent, and the refusal names the closest ones it does."
+            },
+            "name": {
+              "type": "string",
+              "description": "Written by the host from its own catalog. Whatever a card puts here is replaced."
+            },
+            "description": {
+              "type": "string",
+              "description": "Written by the host from its own catalog. Whatever a card puts here is replaced."
+            },
+            "packageId": {
+              "type": "string",
+              "description": "Written by the host from its own catalog. Whatever a card puts here is replaced."
+            },
+            "connectionTypeId": {
+              "type": "string",
+              "description": "Written by the host from its own catalog. Whatever a card puts here is replaced."
+            }
+          },
+          "required": ["component", "app"]
+        }
+      ],
+      "unevaluatedProperties": false
+    },
     "Receipt": {
       "type": "object",
       "description": "What a card settles into: its title, the pill saying what happened, and one line summarising it. Use it in place of the controls once the thing is done.",
@@ -911,6 +951,7 @@
         { "$ref": "#/components/KeyValueRows" },
         { "$ref": "#/components/CollapsibleText" },
         { "$ref": "#/components/ApprovalActions" },
+        { "$ref": "#/components/ConnectApp" },
         { "$ref": "#/components/Receipt" },
         { "$ref": "#/components/MetricTile" },
         { "$ref": "#/components/ProgressBar" },

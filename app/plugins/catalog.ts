@@ -245,6 +245,15 @@ const SEEDED_PLUGIN_WORDS_V1: Record<string, SeededPluginWordsV1> = {
       "Draws a file one of your Bots is handing you, with a way to open it. Always on.",
     seed: "locked",
   },
+  // Locked for the same reason: offering an app the Bot cannot reach is how
+  // it asks for more reach, and the only way it may. The button is host
+  // chrome and the connecting is the person's; the Plugin only lays it out.
+  connectors: {
+    displayName: "Connector cards",
+    description:
+      "Draws the card a Bot uses to offer an app it can’t reach yet, with a button that connects it. You sign in on the app’s own page; the Bot never can. Always on.",
+    seed: "locked",
+  },
   credentials: {
     displayName: "Credential cards",
     description:

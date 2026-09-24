@@ -1,0 +1,36 @@
+{
+  "id": "connectors",
+  "displayName": "Connector cards",
+  "version": "1",
+  "contractVersion": 7,
+  "tools": [],
+  "hooks": [],
+  "grants": [],
+  "cards": [
+    {
+      "id": "offer",
+      "displayName": "Connect an app",
+      "description": "Offer the person an app from the Marketplace you cannot reach yet, such as their Gmail or their calendar, with a button that connects it. Name the app by its Marketplace id or its name; an app the Marketplace does not carry is refused with the closest ones it does. They connect it themselves, and its tools reach you on a later Turn.",
+      "dataSchema": {
+        "type": "object",
+        "properties": {
+          "app": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "description": "The app: its Marketplace id, e.g. \"gmail\" or \"googlecalendar\", or its name, e.g. \"Google Calendar\"."
+          },
+          "reason": {
+            "type": "string",
+            "maxLength": 500,
+            "description": "One sentence on what connecting it lets you do for them, e.g. \"So I can check your inbox for the invoice.\""
+          }
+        },
+        "required": ["app"],
+        "additionalProperties": false
+      },
+      "actions": []
+    }
+  ],
+  "contextKeys": ["user", "bot", "session"]
+}

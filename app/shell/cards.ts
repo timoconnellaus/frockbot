@@ -1377,13 +1377,21 @@ export function bindCardApprovalsV1(
   mint: (index: number) => string,
 ): { messages: A2uiAgentMessageV1[]; approvalIds: string[] } {
   const approvalIds: string[] = [];
-  const bindComponent = (component: A2uiComponentV1): A2uiComponentV1 => {
+  const bound = mapCardComponentsV1(messages, (component) => {
     if (component.component !== CARD_APPROVAL_COMPONENT_V1) return component;
     const approvalId = mint(approvalIds.length);
     approvalIds.push(approvalId);
     return { ...component, approvalId };
-  };
-  const bound = messages.map((message) => {
+  });
+  return { messages: bound, approvalIds };
+}
+
+/** Every component a send carries, in order, rewritten by `bind`. */
+function mapCardComponentsV1(
+  messages: readonly A2uiAgentMessageV1[],
+  bind: (component: A2uiComponentV1) => A2uiComponentV1,
+): A2uiAgentMessageV1[] {
+  return messages.map((message) => {
     if ("createSurface" in message) {
       const components = message.createSurface.components;
       return components === undefined
@@ -1392,7 +1400,7 @@ export function bindCardApprovalsV1(
             ...message,
             createSurface: {
               ...message.createSurface,
-              components: components.map(bindComponent),
+              components: components.map(bind),
             },
           };
     }
@@ -1401,13 +1409,59 @@ export function bindCardApprovalsV1(
         ...message,
         updateComponents: {
           ...message.updateComponents,
-          components: message.updateComponents.components.map(bindComponent),
+          components: message.updateComponents.components.map(bind),
         },
       };
     }
     return message;
   });
-  return { messages: bound, approvalIds };
+}
+
+/**
+ * The Frock catalog component the host draws to connect an app: its logo, its
+ * name and a button that opens the app's own sign-in. The card names the app;
+ * what the button connects is the kernel's.
+ */
+export const CARD_CONNECT_APP_COMPONENT_V1 = "ConnectApp";
+
+/** One app a `ConnectApp` connects, as the kernel's own catalog knows it. */
+export interface CardConnectAppV1 {
+  app: string;
+  name: string;
+  description: string;
+  packageId: string;
+  connectionTypeId: string;
+}
+
+/**
+ * Binds every `ConnectApp` on a Card to the app the kernel's catalog says it
+ * is.
+ *
+ * The button starts a real grant, so the words beside it cannot be the
+ * card's: a card that could write "Gmail" over a button bound to another app
+ * would be asking the person to authorize something it had named falsely.
+ * Whatever an author wrote besides `app` is overwritten here, before the send
+ * is recorded, and an app the catalog does not carry refuses the send whole.
+ * `resolve` answers the app, or the sentence saying why there is none.
+ */
+export function bindCardConnectAppsV1(
+  messages: readonly A2uiAgentMessageV1[],
+  resolve: (app: string) => CardConnectAppV1 | string,
+): A2uiAgentMessageV1[] {
+  return mapCardComponentsV1(messages, (component) => {
+    if (component.component !== CARD_CONNECT_APP_COMPONENT_V1) {
+      return component;
+    }
+    const named = component.app;
+    if (typeof named !== "string" || named.trim() === "") {
+      throw new CardDecodeError(
+        `${CARD_CONNECT_APP_COMPONENT_V1} "${component.id}" must name an app`,
+      );
+    }
+    const resolved = resolve(named);
+    if (typeof resolved === "string") throw new CardDecodeError(resolved);
+    return { ...component, ...resolved };
+  });
 }
 
 /**

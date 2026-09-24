@@ -88,7 +88,7 @@ export function findingsForSkillV1(
 function requiredTokensFor(slug: string): readonly string[] {
   switch (slug) {
     case "add-connector":
-      return ["send_to_user", "Marketplace", "Connectors"];
+      return ["send_to_user", "Marketplace", "Connectors", "connectors_offer"];
     case "export-bot-template":
       return ["bot_export_template"];
     case "import-bot-template":

@@ -1,25 +1,29 @@
-/// The core family: the card's state, its facts, its body, its decision and
-/// what it settles into.
+/// The core family: the card's state, its facts, its body, its decision, the
+/// app it offers to connect, and what it settles into.
 ///
-/// Five components, the first family of ADR 0030's catalog. Each is a
+/// Six components, the first family of ADR 0030's catalog. Each is a
 /// `CatalogItem` whose `dataSchema` comes from `schemas.dart` — the schema is
 /// never written twice — and whose widget is ordinary app code in the app's
 /// theme. That is the whole of the protocol's security model on this side: a
 /// Card names a component and binds values to it, and what appears on the
 /// screen is code this build compiled in.
 ///
-/// `ApprovalActions` is the one with a rule of its own. The buttons are the
+/// `ApprovalActions` and `ConnectApp` have rules of their own. Both are trust
+/// chrome, a component only the host draws: `ApprovalActions`'s buttons are the
 /// host's, the labels are the only thing a card may choose, and the action
-/// names are minted here from the `approvalId` the kernel issued — a Plugin
-/// may compose the component into a card, and may never restyle it or name
-/// its own action. Trust chrome is a component only the host draws.
+/// names are minted here from the `approvalId` the kernel issued; `ConnectApp`
+/// draws what the kernel wrote onto it from its own catalog, and its button is
+/// the host's door rather than an action. A Plugin may compose either into a
+/// card, and may never restyle one or say what it does.
 library;
 
 import 'package:flutter/material.dart';
 import 'package:genui/genui.dart';
 
+import '../../connections/icon_tile.dart';
 import '../../shell/semantics.dart';
 import '../approvals.dart';
+import '../connections.dart';
 import '../press.dart';
 import 'common.dart';
 import 'tone.dart';
@@ -248,9 +252,8 @@ final frockApprovalActions = CatalogItem(
     final name = 'approval/$approvalId';
     final pending = CardPressScope.pendingOf(itemContext.buildContext);
     final frozen = pending != null;
-    final recorded = CardApprovalsScope.of(
-      itemContext.buildContext,
-    )?.approvalStateV1(approvalId);
+    final recorded = CardApprovalsScope.of(itemContext.buildContext)
+        ?.approvalStateV1(approvalId);
     final decided = _decidedLineV1(recorded?.decision ?? 'pending');
     if (decided != null) {
       return Text(
@@ -310,6 +313,142 @@ final frockApprovalActions = CatalogItem(
     );
   },
 );
+
+/// An app the person can connect: its mark, its name, and the door.
+///
+/// Everything drawn here but the button is the kernel's: it looked the app up
+/// in its own catalog when the card was sent and wrote the name, the
+/// description and the Connection Type onto the component over whatever the
+/// card said. So the button connects the app it names, and the press is the
+/// person's own — it opens the app's hosted sign-in through the host, like
+/// Connect in the Marketplace, and never goes to the Bot as an action.
+///
+/// Once the account holds a working Connection of this app the button gives
+/// way to a pill saying so, read from the account rather than the Card: the
+/// Card does not move when the person comes back from signing in.
+final frockConnectApp = CatalogItem(
+  name: 'ConnectApp',
+  dataSchema: frockSchemaOf('ConnectApp'),
+  widgetBuilder: (itemContext) {
+    final data = (itemContext.data as Map).cast<String, Object?>();
+    return FrockConnectAppView(
+      app: frockString(data['app']) ?? '',
+      name: frockString(data['name']),
+      description: frockString(data['description']),
+      packageId: frockString(data['packageId']),
+      connectionTypeId: frockString(data['connectionTypeId']),
+    );
+  },
+);
+
+/// The component itself, so a test can draw one without a surface.
+class FrockConnectAppView extends StatelessWidget {
+  final String app;
+  final String? name;
+  final String? description;
+  final String? packageId;
+  final String? connectionTypeId;
+  const FrockConnectAppView({
+    super.key,
+    required this.app,
+    this.name,
+    this.description,
+    this.packageId,
+    this.connectionTypeId,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final connections = CardConnectionsScope.of(context);
+    final typeId = connectionTypeId;
+    final state = typeId == null
+        ? null
+        : connections?.connectionStateV1(typeId);
+    final title = name ?? app;
+    final muted = theme.textTheme.bodySmall?.copyWith(
+      color: theme.colorScheme.onSurfaceVariant,
+    );
+    final connected = (state?.ready ?? 0) > 0;
+    // A card the kernel never bound — drawn in a preview, or by a build whose
+    // backend predates the binding — names no Connection Type, and a button
+    // that opened nothing would be worse than one that says it cannot.
+    final canConnect =
+        connections != null &&
+        packageId != null &&
+        typeId != null &&
+        !(state?.opening ?? false);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        Row(
+          children: [
+            ConnectorIconTile(asset: app, label: title),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    title,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: theme.textTheme.titleSmall,
+                  ),
+                  if (description != null)
+                    Text(
+                      description!,
+                      maxLines: 2,
+                      overflow: TextOverflow.ellipsis,
+                      style: muted,
+                    ),
+                ],
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 12),
+        if (connected)
+          FrockStatusPillView(label: 'Connected', tone: FrockTone.success)
+        else
+          identified(
+            ShellIds.connectApp(app),
+            FilledButton(
+              onPressed: canConnect
+                  ? () => connections.connectV1(
+                      packageId: packageId!,
+                      connectionTypeId: typeId,
+                    )
+                  : null,
+              child: Text(
+                (state?.opening ?? false) ? 'Opening…' : 'Connect $title',
+              ),
+            ),
+          ),
+        if (!connected && (state?.opened ?? false))
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              'Finish signing in on $title’s page, then come back here.',
+              style: muted,
+            ),
+          ),
+        if (!connected && state?.failure != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              state!.failure!,
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.error,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
 
 /// The settled state: a title, the pill, and one line saying what happened.
 final frockReceipt = CatalogItem(
@@ -372,5 +511,6 @@ final List<CatalogItem> frockCoreItemsV1 = List.unmodifiable([
   frockKeyValueRows,
   frockCollapsibleText,
   frockApprovalActions,
+  frockConnectApp,
   frockReceipt,
 ]);

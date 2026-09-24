@@ -1,11 +1,7 @@
 import 'dart:async';
 
-import 'package:flutter/foundation.dart'
-    show defaultTargetPlatform, kIsWeb, TargetPlatform;
 import 'package:flutter/material.dart';
-import 'package:url_launcher/url_launcher.dart';
 
-import '../client/desktop_build.dart';
 import '../client/transport.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../settings/page.dart';
@@ -15,6 +11,8 @@ import '../theme/caret.dart';
 import '../theme/frock_theme.dart';
 import '../theme/states.dart';
 import 'document.dart';
+import 'door.dart';
+import 'icon_tile.dart';
 
 /// Which half of the Marketplace is showing.
 enum MarketplaceSection { catalog, installed }
@@ -316,50 +314,12 @@ class _ConnectionsPageState extends State<ConnectionsPage>
     }
   }
 
-  /// Which return page this app can come back through once a hosted door
-  /// closes: the verified link on Android, the app's scheme on a Mac. A
-  /// browser tab, and any other platform, is told to return by hand.
-  static String? get returnClient {
-    if (kIsWeb) return null;
-    return switch (defaultTargetPlatform) {
-      TargetPlatform.android => 'android',
-      TargetPlatform.macOS => macosReturnSegmentV1,
-      _ => null,
-    };
-  }
-
   /// Starts a hosted grant and sends the person to it in the system browser.
-  /// The destination is checked before it is opened, so a tampered answer
-  /// cannot send them somewhere else wearing our name.
-  Future<void> _authorize(Map<String, Object?> command) async {
-    final client = returnClient;
-    final request = startConnectionRequestV1(
-      client == null
-          ? command
-          : {
-              ...command,
-              'input': {
-                ...(command['input'] as Map).cast<String, Object?>(),
-                'returnClient': client,
-              },
-            },
-    );
-    final answer =
-        ((await widget.api.request(request.path, body: request.body) as Map?) ??
-                const {})
-            .cast<String, Object?>();
-    if (answer['status'] == 'ready') return;
-    final url = answer['redirectUrl'];
-    if (url is! String) throw const FormatException('No authorization door');
-    final uri = Uri.parse(url);
-    if (uri.scheme != 'https' || uri.host.isEmpty || uri.userInfo.isNotEmpty) {
-      throw const FormatException('Invalid authorization destination');
-    }
-    final opened =
-        await (widget.openBrowser?.call(uri) ??
-            launchUrl(uri, mode: LaunchMode.externalApplication));
-    if (!opened) throw const FormatException('Browser unavailable');
-  }
+  Future<void> _authorize(Map<String, Object?> command) => openConnectionDoorV1(
+    widget.api,
+    command,
+    openBrowser: widget.openBrowser,
+  );
 
   /// The next Marketplace page, once the list is scrolled to its end.
   Future<void> _more() async {
@@ -1055,7 +1015,7 @@ class _MacMessagesRow extends StatelessWidget {
   const _MacMessagesRow({required this.page});
   @override
   Widget build(BuildContext context) => _Row(
-    mark: const _IconTile(icon: Icons.message_outlined),
+    mark: const ConnectorIconTile(icon: Icons.message_outlined),
     title: 'Messages on your Mac',
     subtitle: 'Allow access to Messages through a connected Mac',
     trailing: Icon(
@@ -1075,63 +1035,6 @@ class _MacMessagesRow extends StatelessWidget {
       ),
     ),
   );
-}
-
-/// The 40-point mark at the head of a row: the app's own logo when the
-/// deployment bundles one, otherwise a letter tile — never a broken image.
-class _IconTile extends StatelessWidget {
-  final String? asset;
-  final String? label;
-  final IconData icon;
-  const _IconTile({this.asset, this.label, this.icon = Icons.link_rounded});
-
-  String get _letter {
-    final source = (label ?? '').trim();
-    if (source.isEmpty) return '?';
-    return String.fromCharCode(source.runes.first).toUpperCase();
-  }
-
-  Widget _letterMark(ColorScheme scheme) {
-    return Text(
-      _letter,
-      style: TextStyle(
-        fontSize: 18,
-        fontWeight: FontWeight.w700,
-        height: 1,
-        color: scheme.onSurface,
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final scheme = Theme.of(context).colorScheme;
-    final hasAsset = asset != null;
-    final Widget mark = hasAsset
-        ? Image.asset(
-            'assets/connectors/$asset.png',
-            width: 26,
-            height: 26,
-            filterQuality: FilterQuality.medium,
-            errorBuilder: (_, _, _) => _letterMark(scheme),
-          )
-        : label != null
-        ? _letterMark(scheme)
-        : Icon(icon, size: 22, color: scheme.onSurface);
-    // Brand marks are drawn for a light ground, so the tile is one in both
-    // themes; a letter or glyph of our own takes the surface colour instead.
-    return Container(
-      width: 40,
-      height: 40,
-      decoration: BoxDecoration(
-        color: hasAsset ? Colors.white : scheme.surfaceContainerHighest,
-        borderRadius: BorderRadius.circular(10),
-        border: Border.all(color: scheme.outlineVariant),
-      ),
-      alignment: Alignment.center,
-      child: ExcludeSemantics(child: mark),
-    );
-  }
 }
 
 /// The small pill at the end of a row: the way in when nothing is
@@ -1501,7 +1404,7 @@ class _ProviderRowState extends State<_ProviderRow> {
     return identified(
       ConnectorIds.group(displayName),
       _Row(
-        mark: _IconTile(
+        mark: ConnectorIconTile(
           asset: provider['icon'] as String?,
           label: displayName,
           icon: widget.models
