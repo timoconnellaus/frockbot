@@ -794,6 +794,8 @@ export class ComputerHost {
    * does not fetch the same Sprite again.
    */
   private readonly spriteHandles = new Map<string, Promise<SpriteHandle>>();
+  /** Teardowns per User, so an open that outlived one does not cache its Computer. */
+  private readonly torn = new Map<string, number>();
 
   constructor(options: ComputerHostOptions) {
     this.client = options.client;
@@ -1347,6 +1349,7 @@ export class ComputerHost {
     }
     let pending = this.openings.get(userId);
     if (!pending) {
+      const torn = this.torn.get(userId) ?? 0;
       pending = this.provision(userId, onProgress)
         .then((record) => {
           // The progress belongs to the run, not to the Computer: the call
@@ -1357,7 +1360,11 @@ export class ComputerHost {
             inspection: _inspection,
             ...adopted
           } = record;
-          this.computers.set(userId, adopted);
+          // A teardown that landed while this ran destroyed what it opened;
+          // caching it would point every later call at a missing machine.
+          if ((this.torn.get(userId) ?? 0) === torn) {
+            this.computers.set(userId, adopted);
+          }
           return record;
         })
         .finally(() => {
@@ -2742,6 +2749,7 @@ export class ComputerHost {
       if (!isNotFound(error)) throw error;
       deleted = false;
     }
+    this.torn.set(userId, (this.torn.get(userId) ?? 0) + 1);
     this.computers.delete(userId);
     this.openings.delete(userId);
     this.updates.delete(userId);

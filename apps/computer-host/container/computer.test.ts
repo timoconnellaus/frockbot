@@ -2290,6 +2290,26 @@ describe("teardown", () => {
     expect(client.created).toEqual([host.spriteNameFor("user-1")]);
   });
 
+  test("an open that outlives a teardown does not cache the Computer it opened", async () => {
+    const { client, host, sprite } = provisioned();
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const lookup = client.getSprite.bind(client);
+    client.getSprite = async (name) => {
+      await gate;
+      return lookup(name);
+    };
+    const opening = host.handle(request({ kind: "open" }));
+    await host.handle(request({ kind: "teardown" }));
+    // The machine the open was reaching is gone, but the open still holds it.
+    client.sprites.set(sprite.name, sprite);
+    release();
+    await opening;
+    const cached = (host as unknown as { computers: Map<string, unknown> })
+      .computers;
+    expect(cached.has("user-1")).toBe(false);
+  });
+
   test("an unexpected provider failure is a failure, not a teardown", async () => {
     const { client, host } = provisioned();
     client.deleteSprite = async () => {
