@@ -452,12 +452,12 @@ export interface BotUnreadViewV1 {
   /**
    * Whether this Bot is working in its own chat right now.
    *
-   * The sidebar draws it as typing dots on the row's avatar, so somebody
-   * reading one conversation can see another Bot still working rather than
-   * assuming it stalled. A Turn the chat does not show, such as a Routine
-   * firing, is not counted: the open chat would show nothing happening.
-   * Optional: a view a client older than the Bot decodes, or one stored before
-   * this existed, simply draws no dots.
+   * The sidebar draws it as the working mark on the row's avatar, so
+   * somebody reading one conversation can see another Bot still working
+   * rather than assuming it stalled. A Turn the chat does not show, such as a
+   * Routine firing, is not counted: the open chat would show nothing
+   * happening. Optional: a view a client older than the Bot decodes, or one
+   * stored before this existed, simply draws no mark.
    */
   working?: boolean;
   /**
@@ -483,7 +483,7 @@ export function projectBotUnreadViewV1(
   state: UnreadStateV1,
   cursors: readonly string[],
   lastMessage?: SidebarMessagePreviewV1,
-  /** True while this Bot is working in its own chat. Drawn as the row's dots. */
+  /** True while this Bot is working in its own chat: the row's working mark. */
   working = false,
   notificationsEnabled = true,
 ): BotUnreadViewV1 {

@@ -87,7 +87,24 @@ async function reopen(name: string, runId: string): Promise<void> {
   });
 }
 
-/** The run the sidebar judges: the newest in the Bot's run index. */
+/** Names the Turn occupying the Bot, or clears it. */
+async function markActive(
+  name: string,
+  runId: string | undefined,
+): Promise<void> {
+  await runInDurableObject(bot(name), async (_instance, state) => {
+    if (runId === undefined) await state.storage.delete("active-run");
+    else await state.storage.put("active-run", runId);
+  });
+}
+
+async function storedRun(name: string, runId: string): Promise<unknown> {
+  return runInDurableObject(bot(name), (_instance, state) =>
+    state.storage.get(`run:${runId}`),
+  );
+}
+
+/** The newest Turn in the Bot's run index. */
 async function newestRunId(name: string): Promise<string | undefined> {
   return runInDurableObject(bot(name), async (_instance, state) => {
     const newest = await state.storage.list<string>({
@@ -518,11 +535,11 @@ describe("per-Bot unread in Workerd", () => {
     expect(after.lastMessage).toEqual(before.lastMessage);
   });
 
-  // The dots on a row are the chat's, and the open chat draws them only for a
-  // Turn its transcript shows. A Routine firing runs in its own Session and
-  // shows nothing, so the row that counted it lit up the moment the person
-  // switched to another Bot, over a chat where nothing was happening.
-  test("a Routine firing in flight puts no dots on the row; a chat Turn does", async () => {
+  // A row's working mark is the chat's, and the open chat draws it for the
+  // Turn its transcript shows running. A Routine firing runs in its own
+  // Session and shows nothing; a message sent while it runs is the newest
+  // Turn but waits behind it, and the chat draws that one queued.
+  test("the row's working mark follows the Turn the chat shows running", async () => {
     const suffix = crypto.randomUUID();
     const identity = {
       schemaVersion: 1 as const,
@@ -531,6 +548,8 @@ describe("per-Bot unread in Workerd", () => {
     };
     await provisionBot(identity);
     const name = `${identity.userId}:${identity.botId}`;
+    const working = async () =>
+      (await unreadRpc(name).readUnread(identity)).working ?? false;
 
     await bot(name).run({
       ...identity,
@@ -572,13 +591,19 @@ describe("per-Bot unread in Workerd", () => {
     await evictDurableObject(bot(name));
     await runDurableObjectAlarm(bot(name));
 
-    const firing = await newestRunId(name);
-    expect(firing).toBeDefined();
-    expect(firing).not.toBe("run-1");
-    await reopen(name, firing!);
-    expect((await unreadRpc(name).readUnread(identity)).working).toBeFalsy();
+    // A silent firing in flight, and the newest Turn the Bot has.
+    const firing = (await newestRunId(name))!;
+    await reopen(name, firing);
+    await markActive(name, firing);
+    expect(await storedRun(name, firing)).toMatchObject({
+      status: "running",
+      sessionId: "routine:triage",
+      admission: { turnType: "automation" },
+    });
+    expect(await working()).toBe(false);
 
-    // The same rewind on a chat Turn is what the row does draw.
+    // A chat Turn queued behind it: newest, live, and still not running.
+    await markActive(name, undefined);
     await bot(name).run({
       ...identity,
       command: {
@@ -590,6 +615,14 @@ describe("per-Bot unread in Workerd", () => {
     });
     expect(await newestRunId(name)).toBe("run-2");
     await reopen(name, "run-2");
-    expect((await unreadRpc(name).readUnread(identity)).working).toBe(true);
+    await markActive(name, firing);
+    expect(await storedRun(name, "run-2")).toMatchObject({
+      status: "running",
+    });
+    expect(await working()).toBe(false);
+
+    // Its turn comes: now the chat shows it running, and so does the row.
+    await markActive(name, "run-2");
+    expect(await working()).toBe(true);
   });
 });

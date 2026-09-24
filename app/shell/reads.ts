@@ -99,48 +99,39 @@ export async function appendAnnouncement(
 }
 
 /**
- * Whether the Bot's newest admitted run is still going.
- *
- * It is the newest run only: a Bot admits one Turn at a time, so an older run
- * that is somehow still marked running is a reconciliation problem and not
- * something a ring should report. A read that fails is no ring — liveness is
- * never worth failing a sidebar poll for.
- *
- * The record's `status` is not the test and never was. `resolveRunWorking`
- * holds the rule — running, inside the Turn deadline, and a Turn the log has
- * not already closed — and only reports it. A stale record is settled by the
- * alarm's repair index, not by somebody opening the sidebar.
- */
-export async function runWorkingV1(
-  state: ShellBotStateV1,
-  runId: string | undefined,
-): Promise<boolean> {
-  try {
-    return await state.authority.resolveRunWorking(runId);
-  } catch {
-    return false;
-  }
-}
-
-/**
- * Whether the Bot is working in its own chat: the typing dots on its sidebar
+ * Whether the Bot is working in its own chat: the working mark on its sidebar
  * row, so somebody in another conversation can see a reply coming rather than
  * reading a quiet row as a stalled one.
  *
- * The open chat draws its dots from the Turn its transcript shows running, so
- * the row answers by the transcript's rule or the two disagree about one Bot.
- * They did: a Routine firing in its own Session lit the row the moment the
- * person switched to another Bot, over a chat where nothing was happening. A
- * Turn the chat does not show — a silent firing, a member's group Turn — is
- * the Bot's work but not the chat's.
+ * The open chat draws its working mark from the Turn its transcript shows
+ * running, so the row answers by the transcript's rule or the two disagree
+ * about one Bot. That is the active Turn, not the newest one: a message sent
+ * while the Bot is busy is indexed at once but waits, and the chat draws it
+ * queued. A Turn the chat does not show — a silent Routine firing, a member's
+ * group Turn — is the Bot's work but not the chat's, so it lights nothing here
+ * either.
+ *
+ * The record's `status` is necessary and not sufficient. `resolveRunWorking`
+ * holds the rule — running, inside the Turn deadline, and a Turn the log has
+ * not already closed — and only reports it; a stale record is settled by the
+ * alarm's repair index, not by somebody opening the sidebar. A read that fails
+ * is no mark: liveness is never worth failing a sidebar poll for.
  */
 export async function chatWorkingV1(
   state: ShellBotStateV1,
-  runId: string | undefined,
+  newestRunId: string | undefined,
 ): Promise<boolean> {
-  if (runId === undefined || !(await runWorkingV1(state, runId))) return false;
+  const runId = (await state.authority.readActiveRunId()) ?? newestRunId;
+  if (runId === undefined) return false;
+  // The header first: it is the record without its journal, and every Bot is
+  // asked on every sidebar poll while almost none of them is running.
   const header = await state.authority.readRunHeaderForDisplay(runId);
-  if (!header) return false;
+  if (!header?.readable || header.run.status !== "running") return false;
+  try {
+    if (!(await state.authority.resolveRunWorking(runId))) return false;
+  } catch {
+    return false;
+  }
   const conversationId = await state.authority.readConversationSessionId();
   if (!inConversationV1(header.run, conversationId)) return false;
   // An automation Turn is in the chat only once it has spoken, and the marker
@@ -296,16 +287,6 @@ export async function listRuns(
     limit: CLIENT_RUN_PAGE_LIMIT + 1,
     ...(query.before ? { before: query.before } : {}),
   });
-  // The open chat draws its own activity ring from whichever run this page
-  // projects as `running`, so it owes the same liveness rule the sidebar row
-  // does — and from the same helper, or the two surfaces disagree about the
-  // same Bot. Only the newest run and the active marker are asked: a Turn
-  // further back cannot be the one anybody is waiting on, and a transcript
-  // read is not the place to walk a Bot's whole history looking for
-  // leftovers.
-  if (!query.before) {
-    await runWorkingV1(state, activeRunId ?? candidates[0]?.runId);
-  }
   // Announcements share the newest page's wire envelope with its Turns. Read
   // them once and budget them during selection; adding them only after the
   // page was full could push an otherwise valid transcript over the limit and
