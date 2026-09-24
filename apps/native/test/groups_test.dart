@@ -277,6 +277,67 @@ void main() {
     });
 
     test(
+      'a lost answer for a message that arrived takes its error with it',
+      () async {
+        final controller = thread();
+        await controller.initialize();
+        answer = (path, body) {
+          if (path == '/api/groups/$groupId/messages') {
+            throw const RequestFailure('Couldn’t reach FrockBot.');
+          }
+          if (path == '/api/groups/$groupId/messages?after=2&limit=100') {
+            return page([
+              {...text(3, 'pay it.'), 'messageId': 'u-cmd-1'},
+            ]);
+          }
+          if (path == '/api/groups/$groupId/messages?after=3&limit=100') {
+            return page([]);
+          }
+          throw StateError('unexpected $path');
+        };
+        await controller.send('pay it.');
+        expect(controller.pending.single.failed, isTrue);
+        expect(controller.error, 'Couldn’t reach FrockBot.');
+
+        controller.applyState(const GroupState(3, 2, []));
+        await controller.catchUp();
+        expect(controller.pending, isEmpty);
+        expect(controller.error, isNull);
+      },
+    );
+
+    test(
+      'reads what landed before a posted message the channel has not brought',
+      () async {
+        final controller = thread();
+        await controller.initialize();
+        answer = (path, body) {
+          if (path == '/api/groups/$groupId/messages') {
+            return {
+              'schemaVersion': 1,
+              'message': {...text(4, 'pay it.'), 'messageId': 'u-cmd-1'},
+            };
+          }
+          if (path == '/api/groups/$groupId/messages?after=2&limit=100') {
+            return page([
+              text(3, 'Paid the invoice.', botId: 'xero'),
+              {...text(4, 'pay it.'), 'messageId': 'u-cmd-1'},
+            ]);
+          }
+          if (path == '/api/groups/$groupId/messages?after=4&limit=100') {
+            return page([]);
+          }
+          throw StateError('unexpected $path');
+        };
+        await controller.send('pay it.');
+        // The channel now reports the head the post already reached.
+        controller.applyState(const GroupState(4, 2, []));
+        await controller.catchUp();
+        expect(controller.messages.map((m) => m.seq), [1, 2, 3, 4]);
+      },
+    );
+
+    test(
       'a refused send goes back to the draft; a lost one waits to go again',
       () async {
         final controller = thread();

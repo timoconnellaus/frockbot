@@ -786,11 +786,16 @@ void main() {
         botId: 'bot-1',
         nextId: () => 'send-1',
       );
+      final acted = <String>[];
       await controller.initialize();
       await tester.pumpWidget(
         MaterialApp(
           home: Scaffold(
-            body: ChatPane(controller: controller, onReconnect: () async {}),
+            body: ChatPane(
+              controller: controller,
+              onReconnect: () async {},
+              onMessageActions: (line, {position}) => acted.add(line.id),
+            ),
           ),
         ),
       );
@@ -811,6 +816,9 @@ void main() {
       expect(controller.visiblePending?.text, 'Hello');
       expect(opacity(), 1);
       final drawn = tester.state(entrance);
+      // Nothing to open or mark unread from before there is a Turn.
+      await tester.longPress(find.text('Hello'));
+      expect(acted, isEmpty);
 
       transport.observed = running();
       transport.completion.complete();
@@ -821,6 +829,8 @@ void main() {
       // The confirmed line is the same row, so its entrance does not play again.
       expect(tester.state(entrance), same(drawn));
       expect(opacity(), 1);
+      await tester.longPress(find.text('Hello'));
+      expect(acted, ['send-1:user']);
       await tester.pumpWidget(const SizedBox());
       controller.dispose();
     },

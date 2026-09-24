@@ -25,8 +25,9 @@ class TranscriptView extends StatefulWidget {
   final List<TranscriptLine> lines;
 
   /// The message the person has sent but the backend has not confirmed, as
-  /// [unconfirmedLine] draws it. It is drawn at the end, from this device's
-  /// clock, because there is nothing durable to order it by yet.
+  /// [unconfirmedLine] draws it. It is drawn at the end, because there is
+  /// nothing durable to order it by yet, and offers no message actions: there
+  /// is no Turn yet to open or to mark unread from.
   final TranscriptLine? pending;
   final bool loading;
 
@@ -516,19 +517,16 @@ class _TranscriptViewState extends State<TranscriptView> {
         );
       case _SlotKind.line:
         final line = slot.line!;
+        final actions =
+            line.role == LineRole.system || identical(line, widget.pending)
+            ? null
+            : widget.onMessageActions;
         final row = GestureDetector(
           key: ValueKey('row:${line.id}'),
-          onLongPress:
-              widget.onMessageActions == null || line.role == LineRole.system
+          onLongPress: actions == null ? null : () => actions(line),
+          onSecondaryTapUp: actions == null
               ? null
-              : () => widget.onMessageActions!(line),
-          onSecondaryTapUp:
-              widget.onMessageActions == null || line.role == LineRole.system
-              ? null
-              : (details) => widget.onMessageActions!(
-                  line,
-                  position: details.globalPosition,
-                ),
+              : (details) => actions(line, position: details.globalPosition),
           child: KeyedSubtree(
             key: probes.putIfAbsent(line.id, GlobalKey.new),
             child: _row(context, line)!,
@@ -585,9 +583,9 @@ class _TranscriptViewState extends State<TranscriptView> {
       );
     }
     if (line.status == LineStatus.streaming && line.empty) {
-      // A running Turn draws nothing in the thread, and neither does a
-      // message waiting behind it: the Bot at the end of the thread is the one
-      // that works, and it reads the waiting message at its next step. Only a
+      // A running Turn draws nothing in the thread, and neither does the Turn
+      // of a message waiting behind it: the Bot at the end of the thread is the
+      // one that works, and it reads the waiting message at its next step. Only a
       // Stop the person asked for and is now waiting on earns words.
       if (!line.stopRequested) return null;
       return Padding(
