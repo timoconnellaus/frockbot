@@ -4,10 +4,9 @@ on:
   push:
     tags:
       - "v*.*.*"
-  # `main.yml` cuts the next patch tag once staging is green and starts this
-  # workflow for it by name: a tag it creates with `GITHUB_TOKEN` raises no
-  # `push` event. Run it with `--ref <tag>`, so `GITHUB_REF_NAME` is the tag
-  # here exactly as it is for a tag pushed by hand.
+  # `main.yml` cuts the next patch tag with the release App's token, so its
+  # push lands here like a tag pushed by hand. Dispatch is for rerunning a
+  # release by hand: run it with `--ref <tag>`, so `GITHUB_REF_NAME` is the tag.
   workflow_dispatch:
 
 permissions:

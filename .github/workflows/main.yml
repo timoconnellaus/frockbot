@@ -847,9 +847,11 @@ jobs:
     # head is already tagged — a hand-cut release that then merged — there is
     # nothing to cut.
     #
-    # `release.yml` is started with `workflow run` rather than left to notice
-    # the tag: a tag created with `GITHUB_TOKEN` fires no `push` event, and
-    # `workflow_dispatch` is the one trigger that token may raise.
+    # The tag is created with the release GitHub App's token, not
+    # `GITHUB_TOKEN`: GitHub refuses a ref from `GITHUB_TOKEN` at a commit that
+    # changes a workflow file, and that token can never hold `workflows`. A tag
+    # from the App's token also fires `release.yml`'s own `push` trigger, so
+    # nothing here starts the release.
     #
     # Runs after a skipped staging deploy as well as a successful one, never
     # after a failed one: `!cancelled()` keeps the job eligible when
@@ -873,14 +875,21 @@ jobs:
       && (needs.deploy-staging.result == 'success' || needs.deploy-staging.result == 'skipped')
     runs-on: ubuntu-latest
     timeout-minutes: 5
-    permissions:
-      contents: write
-      actions: write
+    permissions: {}
 
     steps:
-      - name: Cut the next patch tag and start the release
+      - name: Mint the release App's token
+        id: app-token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          app-id: ${{ vars.RELEASE_APP_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-workflows: write
+
+      - name: Cut the next patch tag
         env:
-          GH_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
           GH_REPO: ${{ github.repository }}
           SHA: ${{ github.sha }}
         shell: bash
@@ -908,7 +917,4 @@ jobs:
           gh api -X POST "repos/$GH_REPO/git/refs" \
             -f ref="refs/tags/$tag" -f sha="$SHA" >/dev/null
           echo "created $tag at $SHA"
-
-          gh workflow run release.yml --ref "$tag"
-          echo "started release.yml for $tag"
-          echo "Cut \`$tag\` at \`$SHA\` and started the release; it deploys production on its own." >> "$GITHUB_STEP_SUMMARY"
+          echo "Cut \`$tag\` at \`$SHA\`; its push starts the release, which deploys production on its own." >> "$GITHUB_STEP_SUMMARY"
