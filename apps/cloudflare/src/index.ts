@@ -221,7 +221,7 @@ import {
 } from "./deployment-policy.js";
 import { ACCOUNT_ADMISSION_UNAVAILABLE_MESSAGE } from "./account-admission.js";
 import { RoutineHookError } from "@frockbot/app/routines/hook";
-import { telegramPlatformBotV1 } from "@frockbot/app/telegram/backend";
+import { telegramPlatformBotV1 } from "@frockbot/app/telegram/shared";
 import { decodeTelegramClaimV1 } from "@frockbot/app/telegram/directory";
 import {
   decodeTelegramRouteDecisionV1,

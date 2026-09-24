@@ -255,7 +255,7 @@ import {
   type TelegramUserHostV1,
 } from "@frockbot/app/telegram/user";
 import { telegramApiV1 } from "@frockbot/app/telegram/api";
-import { telegramPlatformBotV1 } from "@frockbot/app/telegram/backend";
+import { telegramPlatformBotV1 } from "@frockbot/app/telegram/shared";
 
 /** The durable key pinning the User this object was provisioned for. */
 const USER_IDENTITY_KEY = "user:identity";

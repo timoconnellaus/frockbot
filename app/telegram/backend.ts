@@ -42,6 +42,7 @@ import {
   type TelegramAccountV1,
   type TelegramInboundMessageV1,
   type TelegramLinkOfferV1,
+  type TelegramPlatformBotV1,
   type TelegramRouteDecisionV1,
   type TelegramStatusViewV1,
 } from "./shared.js";
@@ -55,35 +56,6 @@ import {
   TELEGRAM_NOT_LINKED_TEXT_V1,
   TELEGRAM_UNSUPPORTED_TEXT_V1,
 } from "./user.js";
-
-/** The deployment's platform bot. Both halves, or Telegram is off. */
-export interface TelegramPlatformBotV1 {
-  botToken: string;
-  /** What `setWebhook` registered and Telegram echoes on every update. */
-  webhookSecret: string;
-}
-
-/**
- * The platform bot from the Worker's settings, or nothing.
- *
- * The webhook secret is the webhook's whole credential, so a short one is no
- * credential: rather than register it, the deployment has no Telegram. Its
- * alphabet is the one Telegram accepts for `secret_token`.
- */
-export function telegramPlatformBotV1(settings: {
-  TELEGRAM_BOT_TOKEN?: string;
-  TELEGRAM_WEBHOOK_SECRET?: string;
-}): TelegramPlatformBotV1 | undefined {
-  const botToken = settings.TELEGRAM_BOT_TOKEN?.trim();
-  const webhookSecret = settings.TELEGRAM_WEBHOOK_SECRET?.trim();
-  if (!botToken || !/^[0-9]+:[A-Za-z0-9_-]{20,}$/.test(botToken)) {
-    return undefined;
-  }
-  if (!webhookSecret || !/^[A-Za-z0-9_-]{32,256}$/.test(webhookSecret)) {
-    return undefined;
-  }
-  return { botToken, webhookSecret };
-}
 
 export interface TelegramGatewayHostV1 {
   /** Absent: this deployment has no Telegram bot, and the surface says so. */

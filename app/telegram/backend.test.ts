@@ -2,11 +2,13 @@ import { describe, expect, test } from "bun:test";
 import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import {
   createTelegramBackendContribution,
-  telegramPlatformBotV1,
   telegramRunIdV1,
   type TelegramGatewayHostV1,
 } from "./backend.js";
-import type { TelegramRouteDecisionV1 } from "./shared.js";
+import {
+  telegramPlatformBotV1,
+  type TelegramRouteDecisionV1,
+} from "./shared.js";
 
 const SECRET = "s".repeat(40);
 const TOKEN = "123456:ABCDEFGHIJKLMNOPQRSTUVWXYZ012345";
