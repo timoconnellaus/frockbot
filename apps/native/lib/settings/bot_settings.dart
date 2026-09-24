@@ -1011,6 +1011,7 @@ class _BotSettingsViewState extends State<BotSettingsView> {
             children: [
               CharacterAvatar(
                 size: 76,
+                botId: state.botId,
                 characterId: widget.background,
                 primary: widget.primary,
                 // A preview at rest; the panel can stay open for an hour and

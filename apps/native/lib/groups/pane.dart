@@ -15,7 +15,6 @@ import '../client/chat_controller.dart' show ConnectionState;
 import '../flock/avatar.dart';
 import '../shell/chat_header.dart';
 import '../shell/chat_icons.dart';
-import '../shell/chat_pane.dart' show WorkingSheen, workingSheenSweep;
 import '../shell/composer.dart'
     show
         composerControlExtent,
@@ -301,6 +300,7 @@ class _GroupChatPaneState extends State<GroupChatPane> {
                 faces: faces,
                 size: widget.phone ? 34 : 44,
                 ring: Theme.of(context).scaffoldBackgroundColor,
+                working: c.working.isNotEmpty,
               ),
             ),
       below: notices,
@@ -834,11 +834,11 @@ class _GroupChatPaneState extends State<GroupChatPane> {
     );
   }
 
-  /// Each member whose group Turn is running, at the end of the thread under
-  /// the sheen, side by side. A Bot waiting its turn is not drawn.
+  /// Each member whose group Turn is running, at the end of the thread,
+  /// working as it is everywhere else it is drawn, side by side. A Bot
+  /// waiting its turn is not drawn.
   Widget _working(BuildContext context, List<String> working) {
     final names = [for (final botId in working) _nameOf(botId)];
-    const tempo = thinkingBadgeDefaultTempo;
     return identified(
       GroupIds.working,
       Semantics(
@@ -851,21 +851,17 @@ class _GroupChatPaneState extends State<GroupChatPane> {
             mainAxisSize: MainAxisSize.min,
             crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              for (var index = 0; index < working.length; index++)
+              for (final botId in working)
                 Padding(
-                  key: ValueKey('group-working-${working[index]}'),
+                  key: ValueKey('group-working-$botId'),
                   padding: const EdgeInsets.only(right: 6),
-                  child: WorkingSheen(
-                    tempo: tempo,
-                    lag: workingSheenSweep * 0.55 * index,
-                    child: CharacterAvatar(
-                      size: groupWorkingSize,
-                      characterId: _faceOf(working[index]).characterId,
-                      primary: _faceOf(working[index]).primary,
-                      cropToInk: true,
-                      motion: CharacterMotion.active,
-                      activity: CharacterActivity.working,
-                    ),
+                  child: CharacterAvatar(
+                    size: groupWorkingSize,
+                    botId: botId,
+                    characterId: _faceOf(botId).characterId,
+                    primary: _faceOf(botId).primary,
+                    cropToInk: true,
+                    working: true,
                   ),
                 ),
               if (MediaQuery.disableAnimationsOf(context)) ...[

@@ -710,12 +710,10 @@ class ShellSidebar extends StatelessWidget {
         name: _name(bot),
         avatar: CharacterAvatar(
           size: 40,
+          botId: _id(bot),
           characterId: bot.avatar.characterId,
           primary: bot.avatar.primary,
           motion: CharacterMotion.quiet,
-          activity: _working(bot)
-              ? CharacterActivity.working
-              : CharacterActivity.idle,
           working: _working(bot),
         ),
         active: _id(bot) == activeBotId,
@@ -891,12 +889,10 @@ class ShellSidebar extends StatelessWidget {
           maxHeight: sidebarRowAvatarSize,
           child: CharacterAvatar(
             size: sidebarRowAvatarSize,
+            botId: _id(bot),
             characterId: bot.avatar.characterId,
             primary: bot.avatar.primary,
             motion: CharacterMotion.quiet,
-            activity: _working(bot)
-                ? CharacterActivity.working
-                : CharacterActivity.idle,
             working: _working(bot),
           ),
         ),
@@ -954,9 +950,11 @@ class ShellSidebar extends StatelessWidget {
               name: _name(bot),
               avatar: CharacterAvatar(
                 size: 28,
+                botId: botId,
                 characterId: bot.avatar.characterId,
                 primary: bot.avatar.primary,
                 motion: CharacterMotion.quiet,
+                working: _working(bot),
               ),
             ),
             child: row,
@@ -2232,7 +2230,7 @@ class _NoBots extends StatelessWidget {
   );
 }
 
-/// A group's faces with the thinking badge over them while any member works.
+/// A group's faces, under the working light while any member works.
 class _GroupFaces extends StatelessWidget {
   final List<GroupFace> faces;
   final double size;
@@ -2246,27 +2244,13 @@ class _GroupFaces extends StatelessWidget {
   });
 
   @override
-  Widget build(BuildContext context) {
-    final stack = GroupAvatars(
+  Widget build(BuildContext context) => Center(
+    child: GroupAvatars(
       faces: faces,
       size: size,
       overlap: overlap,
       ring: Theme.of(context).colorScheme.surface,
-    );
-    if (!working) return Center(child: stack);
-    final badge = ThinkingBadge(height: (size * 0.45).clamp(10.0, 14.0));
-    return Center(
-      child: Stack(
-        clipBehavior: Clip.none,
-        children: [
-          stack,
-          Positioned(
-            right: -badge.height * 0.3,
-            top: -badge.height * 0.3,
-            child: badge,
-          ),
-        ],
-      ),
-    );
-  }
+      working: working,
+    ),
+  );
 }

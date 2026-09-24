@@ -1816,9 +1816,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   if (key == null) ...[
                     CharacterAvatar(
                       size: 28,
+                      botId: botId,
                       characterId: _background(botId),
                       primary: _primary(botId),
                       motion: CharacterMotion.quiet,
+                      working: _workingRunId != null,
                     ),
                     const SizedBox(width: 10),
                   ] else
@@ -2415,19 +2417,24 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// the corner, and the same scroll the panel's root draws.
   Widget _botPage(wire.BotRegistration bot) {
     final botId = bot.botId.value;
+    // A page pushed over the shell is not rebuilt with it, so the face in
+    // the bar hears the Turn from the conversation itself.
+    final chat = _selectedChat;
     return Scaffold(
       appBar: DesktopHeader(
         child: AppBar(
           titleSpacing: 0,
           title: ListenableBuilder(
-            listenable: avatarRevision,
+            listenable: Listenable.merge([avatarRevision, chat]),
             builder: (context, _) => Row(
               children: [
                 CharacterAvatar(
                   size: 28,
+                  botId: botId,
                   characterId: _background(botId),
                   primary: _primary(botId),
                   motion: CharacterMotion.quiet,
+                  working: chat?.activeRunId != null,
                 ),
                 const SizedBox(width: 10),
                 Flexible(

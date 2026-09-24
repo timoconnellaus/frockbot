@@ -1238,6 +1238,7 @@ class CounterpartAvatar extends StatelessWidget {
     if (!counterpart.isVoice) {
       return CharacterAvatar(
         size: size,
+        botId: counterpart.botId,
         characterId: background,
         primary: primary,
         motion: CharacterMotion.quiet,

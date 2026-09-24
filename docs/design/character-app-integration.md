@@ -32,8 +32,15 @@ still need to be established.
 - Product surfaces include sidebar rows and groups, the conversation companion
   in the header overlay, settings, search, recovery and sign-in. The header
   draws the character cropped to ink over a fade, with frosted name, Computer
-  and panel pills on the right, and the thread has no working row: the
-  companion is the working indicator and wears the typing badge.
+  and panel pills on the right. While a Turn runs the Bot also stands at the
+  end of its thread, where its reply will land.
+- One Bot drawn in several places moves as one. Avatars given the Bot's id
+  share a presence: one twitch schedule, one greeting when a pointer is over
+  any of them, and the gaze the conversation pane feeds its companion. A
+  working Bot looks the same everywhere: the drawing held, the eyes ahead,
+  and one light crossing the silhouette on the frame clock, so every copy
+  shines at the same moment. A group's faces wear the same light as one
+  picture. Pickers and previews name no Bot and keep a presence of their own.
 - Realtime voice sends `asked`, `answering` and `finished` delegation events.
   The consulted Bot rises into the voice footer, changes activity while its
   answer is read, then settles away.
@@ -43,24 +50,26 @@ still need to be established.
 
 ## Surface behaviour
 
-| Surface         | Motion                                                                                                                                                |
-| --------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Bot list        | Mostly still; independently timed twitch every 7–18 seconds                                                                                           |
-| Bot row hover   | The whole row triggers one restrained hello on desktop/web                                                                                            |
-| Chat header     | A quiet live artboard at rest, cropped to ink; the working pose and typing badge while a Turn runs. Existing Rive motion, not a bounce.               |
-| Mobile chat     | Same activity without pointer tracking; sits at the top of the thread under the status bar                                                            |
-| Chat gaze       | The eyes follow the pointer anywhere over the conversation pane, held still for 900 ms after a pointer down so the composer keeps its first keystroke |
-| Picker/settings | Animated preview of character and selected colour                                                                                                     |
-| Voice footer    | The delegated Bot by its character alone: rise/fade/scale handoff, thinking while asked, content while answering, success on finish                   |
+| Surface         | Motion                                                                                                                                                                                        |
+| --------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Bot list        | Mostly still; a twitch every 7–18 seconds, timed per Bot and shared by every avatar of it                                                                                                     |
+| Bot row hover   | The whole row triggers one restrained hello on desktop/web                                                                                                                                    |
+| Chat header     | A quiet live artboard at rest, cropped to ink; the working light while a Turn runs, in step with the sidebar and the end of the thread                                                        |
+| Mobile chat     | Same activity without pointer tracking; sits at the top of the thread under the status bar                                                                                                    |
+| Chat gaze       | The eyes follow the pointer anywhere over the conversation pane, held still for 900 ms after a pointer down so the composer keeps its first keystroke; the Bot's other avatars look with them |
+| Picker/settings | Animated preview of character and selected colour                                                                                                                                             |
+| Voice footer    | The delegated Bot by its character alone: rise/fade/scale handoff, thinking while asked, content while answering, success on finish                                                           |
 
 All motion yields to `MediaQuery.disableAnimationsOf`, `TickerMode` and the
-character's still mode. Widget tests use the checked-in neutral PNG because
+character's still mode. With less motion asked for, the working light holds
+still across the middle of the character rather than disappearing, so a
+working Bot still reads as working in the sidebar. Widget tests use the checked-in neutral PNG because
 Flutter's test renderer cannot host the Rive Native renderer; device and browser
 validation exercise the real `.riv` files.
 
 - `apps/native/lib/shell/transcript_model.dart`: turn status, pending state,
-  running tools, deliveries and errors. `run_view.dart` already maps live work
-  into a visual trail. Sidebar summaries expose less detail than an open chat.
+  running tools, deliveries and errors. `run_view.dart` draws a Turn's
+  receipts on the Work view. Sidebar summaries expose less detail than an open chat.
 - `apps/native/lib/shell/send_payload.dart`: pending approval records can supply
   an explicit needs-attention cue.
 - `apps/native/README.md`: one Flutter client serves web, Android and macOS;

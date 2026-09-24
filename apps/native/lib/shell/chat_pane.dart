@@ -44,112 +44,6 @@ const double threadCompanionSize = 52;
 /// A Bot this Turn has asked something, standing beside the one asking.
 const double askedCompanionSize = 34;
 
-/// How much of each cycle the sheen spends crossing; the rest is rest.
-const double workingSheenSweep = 0.35;
-
-/// While a Turn runs, a sheen crosses the character and rests for a beat: the
-/// light moves, the drawing does not. It is painted over the character's own
-/// pixels, so the live artboard and the still it falls back to shine alike.
-/// A person who asked for less motion gets no sheen, and the thread says
-/// "Working…" beside the character instead.
-class WorkingSheen extends StatefulWidget {
-  final Duration tempo;
-
-  /// How far behind the cycle this one's light runs, as a share of it, so a
-  /// sweep can cross one character and carry on into the next.
-  final double lag;
-  final Widget child;
-  const WorkingSheen({
-    super.key,
-    required this.tempo,
-    required this.child,
-    this.lag = 0,
-  });
-
-  @override
-  State<WorkingSheen> createState() => _WorkingSheenState();
-}
-
-class _WorkingSheenState extends State<WorkingSheen>
-    with SingleTickerProviderStateMixin {
-  late final AnimationController _cycle = AnimationController(
-    vsync: this,
-    duration: widget.tempo * 2,
-  );
-
-  @override
-  void didChangeDependencies() {
-    super.didChangeDependencies();
-    _run();
-  }
-
-  @override
-  void didUpdateWidget(WorkingSheen old) {
-    super.didUpdateWidget(old);
-    if (old.tempo != widget.tempo) {
-      _cycle.duration = widget.tempo * 2;
-      _run();
-    }
-  }
-
-  void _run() {
-    if (MediaQuery.disableAnimationsOf(context)) {
-      _cycle
-        ..stop()
-        ..value = 1;
-    } else {
-      _cycle.repeat();
-    }
-  }
-
-  @override
-  void dispose() {
-    _cycle.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) => AnimatedBuilder(
-    animation: _cycle,
-    child: widget.child,
-    // The mask stays in the tree at rest, with the light parked off the
-    // edge: swapping it in and out would rebuild the artboard every cycle.
-    builder: (context, child) {
-      final phase = (_cycle.value - widget.lag) % 1.0;
-      final crossed = MediaQuery.disableAnimationsOf(context)
-          ? 1.0
-          : (phase / workingSheenSweep).clamp(0.0, 1.0);
-      // Where the middle of the light is, in widths: from just off the left
-      // edge to just off the right.
-      final at = -0.3 + 1.6 * Curves.easeInOut.transform(crossed);
-      return ShaderMask(
-        blendMode: BlendMode.srcATop,
-        shaderCallback: (bounds) => LinearGradient(
-          begin: const Alignment(-1, -0.35),
-          end: const Alignment(1, 0.35),
-          colors: const [
-            Color(0x00FFFFFF),
-            Color(0xB3FFFFFF),
-            Color(0x00FFFFFF),
-          ],
-          stops: const [0.38, 0.5, 0.62],
-          transform: _SheenAt((at - 0.5) * bounds.width),
-        ).createShader(bounds),
-        child: child,
-      );
-    },
-  );
-}
-
-class _SheenAt extends GradientTransform {
-  final double dx;
-  const _SheenAt(this.dx);
-
-  @override
-  Matrix4 transform(Rect bounds, {TextDirection? textDirection}) =>
-      Matrix4.translationValues(dx, 0, 0);
-}
-
 /// Pops a Bot that has just been asked something in beside the one asking.
 class _Asked extends StatelessWidget {
   final Widget child;
@@ -476,19 +370,6 @@ class _ChatPaneState extends State<ChatPane> {
   Widget _column(BuildContext context, ChatController c) {
     final runs = projectRuns(c.runs);
     final working = c.activeRunId != null;
-    // The Turn the companion's badge is paced by: the assistant line of the
-    // Turn actually running, or none while the submission is being delivered.
-    // A Turn queued behind it has nothing to read a tempo from.
-    final runningLine = working
-        ? runs
-              .where(
-                (line) =>
-                    line.role == LineRole.assistant &&
-                    line.status == LineStatus.streaming &&
-                    line.runId == c.activeRunId,
-              )
-              .lastOrNull
-        : null;
     // The Bots working on something this Turn asked them. The controller
     // counts one only once its answering Turn is running, not while the
     // question waits in its queue.
@@ -503,7 +384,7 @@ class _ChatPaneState extends State<ChatPane> {
       loading: c.loading,
       hasEarlier: c.before != null,
       storageKey: 'history-${c.botId}',
-      tail: working ? _typing(runningLine, asking) : null,
+      tail: working ? _typing(c, asking) : null,
       focusRunId: c.focusRunId,
       onRefresh: _refresh,
       onOpenRun: widget.onOpenRun ?? (_) {},
@@ -610,7 +491,7 @@ class _ChatPaneState extends State<ChatPane> {
                     ),
                 ],
               ),
-              Positioned.fill(child: _chrome(_companion(), notices)),
+              Positioned.fill(child: _chrome(_companion(c, working), notices)),
             ],
           ),
         ),
@@ -648,9 +529,9 @@ class _ChatPaneState extends State<ChatPane> {
   }
 
   /// The Bot at the end of its own thread while a Turn runs, where its next
-  /// words will land. It works under a sheen, and a Bot it has asked
-  /// something stands beside it, working too, until it answers.
-  Widget _typing(TranscriptLine? line, List<String> asking) {
+  /// words will land, working as it is everywhere else it is drawn; a Bot it
+  /// has asked something stands beside it, working too, until it answers.
+  Widget _typing(ChatController c, List<String> asking) {
     final names = [
       for (final botId in asking) widget.nameOf?.call(botId) ?? 'another Bot',
     ];
@@ -662,61 +543,54 @@ class _ChatPaneState extends State<ChatPane> {
         label: names.isEmpty
             ? 'Working'
             : 'Working with ${names.join(' and ')}',
-        child: WorkingPace(
-          line: line,
-          builder: (context, tempo) => Row(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              WorkingSheen(
-                tempo: tempo,
+        child: Row(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.end,
+          children: [
+            CharacterAvatar(
+              size: threadCompanionSize,
+              botId: c.botId,
+              characterId: widget.background,
+              primary: widget.primary,
+              cropToInk: true,
+              working: true,
+            ),
+            for (final botId in asking)
+              _Asked(
+                key: ValueKey('asked:$botId'),
                 child: CharacterAvatar(
-                  size: threadCompanionSize,
-                  characterId: widget.background,
-                  primary: widget.primary,
+                  size: askedCompanionSize,
+                  botId: botId,
+                  characterId: widget.backgroundOf?.call(botId),
+                  primary: widget.primaryOf?.call(botId),
                   cropToInk: true,
-                  motion: CharacterMotion.active,
-                  activity: CharacterActivity.working,
+                  working: true,
                 ),
               ),
-              for (final botId in asking)
-                _Asked(
-                  key: ValueKey('asked:$botId'),
-                  child: WorkingSheen(
-                    tempo: tempo,
-                    lag: workingSheenSweep * 0.55,
-                    child: CharacterAvatar(
-                      size: askedCompanionSize,
-                      characterId: widget.backgroundOf?.call(botId),
-                      primary: widget.primaryOf?.call(botId),
-                      cropToInk: true,
-                      motion: CharacterMotion.active,
-                      activity: CharacterActivity.working,
-                    ),
-                  ),
+            if (MediaQuery.disableAnimationsOf(context)) ...[
+              const SizedBox(width: 10),
+              Text(
+                'Working…',
+                style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                  color: Theme.of(context).colorScheme.onSurfaceVariant,
                 ),
-              if (MediaQuery.disableAnimationsOf(context)) ...[
-                const SizedBox(width: 10),
-                Text(
-                  'Working…',
-                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                    color: Theme.of(context).colorScheme.onSurfaceVariant,
-                  ),
-                ),
-              ],
+              ),
             ],
-          ),
+          ],
         ),
       ),
     );
   }
 
-  /// The companion in the header, at rest.
-  Widget _companion() {
+  /// The companion in the header: at rest between Turns, and working while
+  /// one runs, exactly as the Bot does at the end of the thread and in the
+  /// sidebar.
+  Widget _companion(ChatController c, bool working) {
     final phone =
         shellTierForWidth(MediaQuery.sizeOf(context).width) == ShellTier.single;
     final avatar = CharacterAvatar(
       size: chatCompanionSizeFor(phone: phone),
+      botId: c.botId,
       characterId: widget.background,
       primary: widget.primary,
       gaze: gaze,
@@ -730,8 +604,8 @@ class _ChatPaneState extends State<ChatPane> {
       // pointer and no focus, so the field below it keeps its
       // keystrokes (errors.e2e, skill-menu.e2e).
       motion: CharacterMotion.quiet,
-      activity: CharacterActivity.idle,
-      semanticsLabel: 'Bot is ready',
+      working: working,
+      semanticsLabel: working ? 'Bot is working' : 'Bot is ready',
     );
     return KeyedSubtree(key: _companionKey, child: avatar);
   }
