@@ -255,7 +255,7 @@ A durable input the Bot's next conversational Turn is owed — a Routine hand-of
 _Avoid_: Queued message, pending wake
 
 **Approval**:
-A durable pending decision the User answers: what the Bot proposes to do, its risk, and a deadline past which it expires. Recorded once — a replayed answer reads back the decision already stored — and never a grant of authority the Bot did not already hold.
+A durable pending decision the User answers: what the Bot proposes to do, its risk, and a deadline past which it expires. Recorded once — a replayed answer reads back the decision already stored — and never a grant of authority the Bot did not already hold. Given on a card whose fields the User changed, it is a decision about what they left there, not about what the Bot proposed.
 _Avoid_: Permission, consent prompt, confirmation
 
 **Saved secret**:

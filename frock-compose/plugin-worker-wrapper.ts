@@ -307,6 +307,40 @@ function decodeRenderCardInvocation(value) {
   identityFields(value, "plugin worker render card invocation");
   return value;
 }
+var REVISE_CARD_INVOCATION_KEYS = [
+  "schemaVersion",
+  "pluginId",
+  "cardId",
+  "surfaceId",
+  "dataModel",
+  "record",
+  "botId",
+  "sessionId",
+  "runId",
+  "turnId",
+  "generationId",
+  "deadlineMs",
+];
+function decodeReviseCardInvocation(value) {
+  exactKeys(value, REVISE_CARD_INVOCATION_KEYS, "plugin worker revise card invocation");
+  if (value.schemaVersion !== 1) {
+    throw new Error("plugin worker revise card invocation schemaVersion is unsupported");
+  }
+  if (typeof value.pluginId !== "string" || !PLUGIN_ID.test(value.pluginId)) {
+    throw new Error("plugin worker revise card invocation pluginId is invalid");
+  }
+  if (typeof value.cardId !== "string" || !CARD_ID.test(value.cardId)) {
+    throw new Error("plugin worker revise card invocation cardId is invalid");
+  }
+  if (typeof value.surfaceId !== "string" || !SURFACE_ID.test(value.surfaceId)) {
+    throw new Error("plugin worker revise card invocation surfaceId is invalid");
+  }
+  if (!isRecord(value.dataModel) || !isRecord(value.record)) {
+    throw new Error("plugin worker revise card invocation data model is invalid");
+  }
+  identityFields(value, "plugin worker revise card invocation");
+  return value;
+}
 function decodeTriggerInvocation(value) {
   exactKeys(value, TRIGGER_INVOCATION_KEYS, "plugin worker trigger invocation");
   if (value.schemaVersion !== 1) {
@@ -864,6 +898,9 @@ function declaredCards(module, pluginId) {
     if (!isRecord(card) || typeof card.render !== "function") {
       throw new Error('plugin "' + pluginId + '" card "' + cardId + '" must export a render function');
     }
+    if (card.revise !== undefined && typeof card.revise !== "function") {
+      throw new Error('plugin "' + pluginId + '" card "' + cardId + '" revise must be a function');
+    }
     const actions = [];
     if (card.actions !== undefined) {
       if (!isRecord(card.actions)) {
@@ -1054,6 +1091,54 @@ async function runCardAction(invocation, resolve, contextFor) {
       );
     }, invocation.deadlineMs);
     return cardAnswer(value);
+  } catch (error) {
+    return { schemaVersion: 1, status: "drop", reason: errorText(error) };
+  }
+}
+
+async function runReviseCard(invocation, resolve, contextFor) {
+  try {
+    const plugin = resolve(invocation.pluginId);
+    const declared = plugin.cards.find(function (candidate) {
+      return candidate.id === invocation.cardId;
+    });
+    if (!declared) {
+      throw new Error('plugin "' + invocation.pluginId + '" did not declare card "' + invocation.cardId + '"');
+    }
+    const card = plugin.module.cards[invocation.cardId];
+    // A card that takes no edits is decided as it was drawn. Whatever its
+    // fields hold is the person's answer to the Bot, not a change to what
+    // the decision covers, and saying so costs the Plugin nothing.
+    if (typeof card.revise !== "function") {
+      return { schemaVersion: 1, status: "unchanged" };
+    }
+    const context = contextFor(invocation, plugin, invocation.deadlineMs);
+    const value = await withIsolateDeadline(function () {
+      return card.revise(
+        {
+          cardId: invocation.cardId,
+          surfaceId: invocation.surfaceId,
+          dataModel: invocation.dataModel,
+          record: invocation.record,
+        },
+        context,
+      );
+    }, invocation.deadlineMs);
+    if (isRecord(value) && value.drop === true) {
+      return Object.assign(
+        { schemaVersion: 1, status: "drop", deliberate: true },
+        typeof value.reason === "string" ? { reason: errorText(value.reason) } : {},
+      );
+    }
+    // A revision has to say what the decision now covers and in what words,
+    // or there is nothing the kernel could bind the person's Send to.
+    if (isRecord(value) && isRecord(value.covers) && isRecord(value.decision)) {
+      return Object.assign(
+        { schemaVersion: 1, status: "revised", covers: value.covers, decision: value.decision },
+        Array.isArray(value.messages) && value.messages.length > 0 ? { messages: value.messages } : {},
+      );
+    }
+    return { schemaVersion: 1, status: "drop", reason: "the card's revise named no covers or no decision" };
   } catch (error) {
     return { schemaVersion: 1, status: "drop", reason: errorText(error) };
   }
@@ -1327,6 +1412,29 @@ export default class extends WorkerEntrypoint {
     );
   }
 
+  /**
+   * One card a person edited and then approved: its Plugin restates what the
+   * decision now covers before the kernel records it.
+   */
+  async reviseCard(rawInvocation) {
+    let invocation;
+    try {
+      invocation = decodeReviseCardInvocation(rawInvocation);
+    } catch (error) {
+      return { schemaVersion: 1, status: "drop", reason: errorText(error) };
+    }
+    const env = this.env;
+    return runReviseCard(
+      invocation,
+      function (pluginId) {
+        return findPlugin(env, pluginId);
+      },
+      function (identity, plugin, deadlineMs) {
+        return narrowContext(env, identity, plugin, deadlineMs);
+      },
+    );
+  }
+
   async view(rawInvocation) {
     let invocation;
     try {
@@ -1353,7 +1461,7 @@ export default class extends WorkerEntrypoint {
  * Bumped with any change to the generated text; folded into the module-set
  * hash beside the contract version, so a wrapper change is a new worker.
  */
-export const PLUGIN_WORKER_INDEX_VERSION = "index-v10";
+export const PLUGIN_WORKER_INDEX_VERSION = "index-v11";
 
 /** The module map a Plugin worker mounts: the index and one module per Plugin. */
 export function pluginWorkerModuleMap(

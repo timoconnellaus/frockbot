@@ -82,12 +82,13 @@ The tracked file, with identity applied:
 | `services` with no target                 | the profile's own Worker names: the Computer host, the build service, and the app Worker the portal binds |
 | `vars` without identity                   | plus the identity vars below                                                                              |
 | `containers[].image` a Dockerfile path    | the published image, when the profile's `images.source` is `registry`                                     |
+| no `send_email`                           | the app Worker's `SEND_EMAIL` sender, when the profile names an `email` address (below)                   |
 | `env.development`, `env.e2e`              | dropped — a named environment in a deployed config is a second Worker                                     |
 
 The identity vars the app Worker gains: `NATIVE_SLICE_2_AUTH` (the profile's
 `nativeAuth` list, comma-joined),
-`FROCK_AI_GATEWAY_ID`, `FROCK_AI_ACCOUNT_ID`, `FROCK_AI_AUTO_ROUTE`, and `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` when the profile
-builds the Access auth Package, and `INBOUND_EMAIL_DOMAIN` when the profile
+`FROCK_AI_GATEWAY_ID`, `FROCK_AI_ACCOUNT_ID`, `FROCK_AI_AUTO_ROUTE`, `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` when the profile
+builds the Access auth Package, `EMAIL_SENDER_ADDRESS` when it names a sender, and `INBOUND_EMAIL_DOMAIN` when it
 names `inboundEmail` (below). `FROCK_AI_ACCOUNT_ID` is what selects the compat
 HTTP transport, the only one that accepts a `dynamic/<route>` model
 (cloudflare/ai#617); a profile with no `aiGateway` takes the `AI` binding, where
@@ -146,6 +147,56 @@ itself is routed in Cloudflare, by hand, once per deployment:
 
 Removing `inboundEmail` turns email off again: every message is refused, and
 the addresses start working again when it comes back.
+
+## Sending email
+
+The email Plugin's draft card sends through the deployment's own sender
+(`app/email/sender.ts`): Cloudflare Email Service, reached through a
+`send_email` binding. A profile turns it on with one field,
+
+```json
+"email": { "senderAddress": "bot@frockbot.com" }
+```
+
+and the generated app config gains the binding — allowed to send from that one
+address and no other — and the var the sender reads:
+
+```json
+"send_email": [{ "name": "SEND_EMAIL", "allowed_sender_addresses": ["bot@frockbot.com"] }],
+"vars": { "EMAIL_SENDER_ADDRESS": "bot@frockbot.com" }
+```
+
+A profile with no `email` binds nothing. That is `hosted` and `staging` today:
+the deployment sends no email, and a person who presses Send on a draft card
+gets the Bot telling them so in plain words, with the decision left unspent so
+the same card sends once there is a sender and the decision has not expired.
+
+What the profile's Cloudflare account needs first, as the dashboard has it on
+2026-09-24 ([Email Service][email-service]):
+
+1. **Workers Paid.** Sending to anyone but the account's own verified
+   destination addresses needs it: 3,000 messages a month are included, then
+   $0.35 per 1,000.
+2. **The sender's domain on Cloudflare DNS**, which `frockbot.com` is.
+3. **Compute › Email Service › Email Sending › Onboard Domain**, choosing that
+   domain. Cloudflare writes the records itself — MX, SPF and DKIM on the
+   `cf-bounce` subdomain, DMARC on `_dmarc.<domain>` — and the domain is ready
+   when the dashboard shows it verified, usually within minutes. Until then
+   every send is refused with `E_SENDER_NOT_VERIFIED`, which the sender reports
+   as "not sent" and never as "may have sent".
+4. **Optionally, Email Routing** for the sender address, so a reply to the
+   Bot's mail reaches a person. The sender never reads mail; without a route a
+   reply bounces.
+5. **The quota.** A new account starts on a conservative daily quota; the
+   Limit Increase Request Form raises it. A send past it is refused with
+   `E_DAILY_LIMIT_EXCEEDED`, and nothing leaves.
+
+Then add the field to the profile. For `hosted` that changes the generated app
+config, so the same commit updates `fixtures/hosted/app.wrangler.jsonc` — the
+equivalence gate below exists to make exactly that visible. The next tag's
+deploy binds the sender; nothing else is configured and no secret is involved.
+
+[email-service]: https://developers.cloudflare.com/email-service/get-started/send-emails/
 
 ## The equivalence gate
 

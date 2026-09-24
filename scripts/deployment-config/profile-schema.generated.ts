@@ -185,6 +185,18 @@ export const DEPLOYMENT_PROFILE_SCHEMA_V1 = {
         enum: ["android", "macos", "macos-dev", "ios", "ios-dev"],
       },
     },
+    email: {
+      description:
+        "The deployment's own outbound sender, Cloudflare Email Service. Present, the app Worker gains a `send_email` binding named `SEND_EMAIL`, allowed to send from this one address and no other, and the `EMAIL_SENDER_ADDRESS` var. Absent, the deployment sends no email and the email Plugin says so when a person presses Send. The address's domain must first be onboarded under Email Service > Email Sending in the Cloudflare dashboard (scripts/deployment-config/README.md).",
+      type: "object",
+      additionalProperties: false,
+      required: ["senderAddress"],
+      properties: {
+        senderAddress: {
+          $ref: "#/$defs/email",
+        },
+      },
+    },
     resources: {
       description:
         "Names that carry identity. Each is derived from `prefix` when absent.",

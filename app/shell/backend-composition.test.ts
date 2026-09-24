@@ -158,6 +158,11 @@ describe("a Plugin that the worker refuses", () => {
           status: "drop" as const,
           reason: "no card handlers",
         }),
+      reviseCard: () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          status: "unchanged" as const,
+        }),
       view: () =>
         Promise.resolve({ schemaVersion: 1, status: "drop" as const }),
       renderCard: () =>
@@ -323,6 +328,11 @@ describe("the Approvals a Plugin's Card asks for", () => {
           schemaVersion: 1 as const,
           status: "drop" as const,
           reason: "no card handlers",
+        }),
+      reviseCard: () =>
+        Promise.resolve({
+          schemaVersion: 1 as const,
+          status: "unchanged" as const,
         }),
       view: () =>
         Promise.resolve({ schemaVersion: 1, status: "drop" as const }),

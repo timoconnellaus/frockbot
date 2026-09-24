@@ -33,7 +33,7 @@
     {
       "id": "draft",
       "displayName": "Email draft",
-      "description": "Show the person an email you have drafted and ask them to send or discard it.",
+      "description": "Show the person an email you have drafted. They can edit it, then send or discard it.",
       "dataSchema": {
         "type": "object",
         "properties": {

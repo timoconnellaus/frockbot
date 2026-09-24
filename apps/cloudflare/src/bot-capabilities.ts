@@ -320,11 +320,23 @@ export class BotCapabilities extends WorkerEntrypoint<
         `this email was refused: ${error instanceof Error ? error.message : String(error)}`,
       );
     }
+    let scoped;
     try {
-      const { rpc, envelope } = this.scoped(scope, decoded);
-      return await rpc.isolateEmail(envelope);
+      scoped = this.scoped(scope, decoded);
     } catch {
       return unavailable("sending email is unavailable");
+    }
+    try {
+      return await scoped.rpc.isolateEmail(scoped.envelope);
+    } catch {
+      // The Durable Object may have claimed the decision and handed the
+      // message over before this call lost its answer. Saying `unavailable`
+      // would tell the Plugin to try again; one decision sends one message.
+      return {
+        status: "unknown",
+        reason:
+          "the message may have been sent: the answer from the sender was lost",
+      };
     }
   }
 

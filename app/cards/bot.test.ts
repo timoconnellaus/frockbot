@@ -10,11 +10,13 @@ import { a2uiByteLengthV1, A2UI_LIMITS_V1 } from "@frockbot/core/contracts";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import { approvalKeyV1 } from "@frockbot/app/shell/approvals";
 import {
+  cardApprovalBindingKeyV1,
   cardKeyV1,
   decodeCardActionReceiptV1,
   CARD_INDEX_KEY,
   CARD_PREFIX,
   CARD_REFUSAL_MAX_V1,
+  type CardActionCommandV1,
   type CardRecordV1,
 } from "@frockbot/app/shell/cards";
 import { CARD_ACTION_CONTEXT_MAX_V1 } from "@frockbot/app/routines/inbox";
@@ -391,6 +393,134 @@ describe("the three routes", () => {
     expect(admitted.map((command) => command.origin)).toEqual([
       { kind: "input-delivery", inputId: "ap-1" },
     ]);
+  });
+
+  /**
+   * A card the person can edit (ADR 0030, amended 2026-09-24): its surface
+   * asked for its data model, and its decision is bound to the values it was
+   * drawn with. What happens to a Send depends on whether anything changed.
+   */
+  describe("a Send on a card whose fields the person could edit", () => {
+    const pendingApproval = {
+      schemaVersion: 1,
+      approvalId: "ap-1",
+      runId: "run-1",
+      sessionId: "user-1:bot-1",
+      action: "Send the email",
+      risk: "medium",
+      createdAt: NOW,
+      expiresAt: "2099-01-01T00:00:00.000Z",
+      decision: "pending",
+      decidedBy: "pending",
+    };
+
+    function editable(bound = true) {
+      return new Map<string, unknown>([
+        [
+          cardKeyV1(SURFACE),
+          card({
+            dataModel: { to: "nick@example.com", subject: "Drawn" },
+            sendDataModel: true,
+          }),
+        ],
+        [approvalKeyV1("ap-1"), pendingApproval],
+        ...(bound
+          ? [
+              [
+                cardApprovalBindingKeyV1("email", SURFACE),
+                {
+                  schemaVersion: 1,
+                  pluginId: "email",
+                  surfaceId: SURFACE,
+                  digest: "digest-drawn",
+                  approvalIds: ["ap-1"],
+                  createdAt: NOW,
+                },
+              ] as const,
+            ]
+          : []),
+      ]);
+    }
+
+    function send(
+      dataModel: Record<string, string>,
+      decision = "approved",
+    ): CardActionCommandV1 {
+      return {
+        schemaVersion: 1,
+        surfaceId: SURFACE,
+        revision: 2,
+        event: { name: "approval/ap-1", context: { decision } },
+        dataModel,
+      };
+    }
+
+    test("fields left as they were decide without asking the Plugin", async () => {
+      const values = editable();
+      const { state } = harness(values);
+      const receipt = await cardAction(
+        state,
+        IDENTITY,
+        // Written back by the renderer in its own key order.
+        send({ subject: "Drawn", to: "nick@example.com" }),
+      );
+      expect(receipt.failure).toBeUndefined();
+      expect(values.get(approvalKeyV1("ap-1"))).toMatchObject({
+        decision: "approved",
+      });
+      expect(
+        values.get(cardApprovalBindingKeyV1("email", SURFACE)),
+      ).toMatchObject({ digest: "digest-drawn" });
+    });
+
+    // The draft they changed must never be sent in place of the one they
+    // wrote, so an edit the Plugin cannot be asked about decides nothing.
+    test("an edit nobody could restate decides nothing, and says so", async () => {
+      const values = editable();
+      const { state, admitted } = harness(values);
+      const receipt = await cardAction(
+        state,
+        IDENTITY,
+        send({ to: "nick@example.com", subject: "Edited" }),
+      );
+      expect(receipt.routed).toBe("approval");
+      expect(receipt.failure).toMatch(
+        /^your changes could not be applied, so nothing was decided: /,
+      );
+      expect(values.get(approvalKeyV1("ap-1"))).toMatchObject({
+        decision: "pending",
+      });
+      expect(admitted).toEqual([]);
+    });
+
+    test("a Discard sends nothing, so it is recorded without asking the Plugin", async () => {
+      const values = editable();
+      const { state } = harness(values);
+      const receipt = await cardAction(
+        state,
+        IDENTITY,
+        send({ to: "nick@example.com", subject: "Edited" }, "denied"),
+      );
+      expect(receipt.failure).toBeUndefined();
+      expect(values.get(approvalKeyV1("ap-1"))).toMatchObject({
+        decision: "denied",
+      });
+    });
+
+    // Only a decision bound to this surface's values has anything to move.
+    test("a decision the surface's binding does not hold is recorded as before", async () => {
+      const values = editable(false);
+      const { state } = harness(values);
+      const receipt = await cardAction(
+        state,
+        IDENTITY,
+        send({ to: "nick@example.com", subject: "Edited" }),
+      );
+      expect(receipt.failure).toBeUndefined();
+      expect(values.get(approvalKeyV1("ap-1"))).toMatchObject({
+        decision: "approved",
+      });
+    });
   });
 
   test("a Card cannot mint an approval the kernel never recorded", async () => {

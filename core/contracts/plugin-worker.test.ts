@@ -12,6 +12,7 @@ import {
   decodePluginWorkerTriggerInvocationV1,
   decodePluginWorkerTriggerResultV1,
   decodePluginWorkerRenderCardResultV1,
+  decodePluginWorkerReviseCardResultV1,
   decodePluginWorkerCardActionResultV1,
   MAX_PLUGIN_CARD_ACTION_INPUT_V1,
   MAX_PLUGIN_CARD_COVERS_BYTES_V1,
@@ -535,6 +536,91 @@ describe("what a render says its decision covers", () => {
         covers: { body: "x".repeat(MAX_PLUGIN_CARD_COVERS_BYTES_V1 + 1) },
       }),
     ).toThrow(/covers exceeds/);
+  });
+});
+
+describe("what a revise says an edited decision now covers", () => {
+  const messages = [
+    { version: "v1.0", updateDataModel: { surfaceId: "s", value: {} } },
+  ];
+  const decision = {
+    action: "Send an email to ana@example.com",
+    risk: "medium" as const,
+  };
+
+  test("a revision names its covers and its words, and may settle the face", () => {
+    expect(
+      decodePluginWorkerReviseCardResultV1({
+        schemaVersion: 1,
+        status: "revised",
+        covers: { to: ["ana@example.com"] },
+        decision,
+        messages,
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      status: "revised",
+      covers: { to: ["ana@example.com"] },
+      decision,
+      messages,
+    });
+    expect(
+      decodePluginWorkerReviseCardResultV1({
+        schemaVersion: 1,
+        status: "revised",
+        covers: { to: ["ana@example.com"] },
+        decision,
+      }),
+    ).not.toHaveProperty("messages");
+  });
+
+  // Nothing could be bound to a revision that says nothing, so the kernel
+  // would have no decision to record.
+  test("a revision missing its covers or its words is refused", () => {
+    expect(() =>
+      decodePluginWorkerReviseCardResultV1({
+        schemaVersion: 1,
+        status: "revised",
+        decision,
+      }),
+    ).toThrow();
+    expect(() =>
+      decodePluginWorkerReviseCardResultV1({
+        schemaVersion: 1,
+        status: "revised",
+        covers: {},
+        decision: { action: "Send", risk: "extreme" },
+      }),
+    ).toThrow(/risk/);
+  });
+
+  test("unchanged and a drop carry nothing else", () => {
+    expect(
+      decodePluginWorkerReviseCardResultV1({
+        schemaVersion: 1,
+        status: "unchanged",
+      }),
+    ).toEqual({ schemaVersion: 1, status: "unchanged" });
+    expect(() =>
+      decodePluginWorkerReviseCardResultV1({
+        schemaVersion: 1,
+        status: "unchanged",
+        covers: {},
+      }),
+    ).toThrow();
+    expect(
+      decodePluginWorkerReviseCardResultV1({
+        schemaVersion: 1,
+        status: "drop",
+        reason: "not an address",
+        deliberate: true,
+      }),
+    ).toEqual({
+      schemaVersion: 1,
+      status: "drop",
+      reason: "not an address",
+      deliberate: true,
+    });
   });
 });
 

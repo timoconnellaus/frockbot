@@ -410,7 +410,10 @@ export interface PluginContext {
   /**
    * The `http` grant, second half: the deployment's own sender, sending for
    * this Bot. The Plugin holds no credential and names no provider; a
-   * deployment that has bound no sender answers unavailable.
+   * deployment that has bound no sender answers unavailable. One call is one
+   * message to every recipient: `unavailable` means nothing left and the
+   * decision is still good, while `unknown` means it may have left — the
+   * decision is spent, and sending again could deliver it twice.
    */
   readonly email?: (request: {
     /**
@@ -432,7 +435,8 @@ export interface PluginContext {
     /** The `Message-Id` this answers, when it answers one. */
     inReplyTo?: string;
   }) => Promise<
-    | { status: "sent"; messageId: string; undelivered?: string[] }
+    | { status: "sent"; messageId: string }
+    | { status: "unknown"; reason: string }
     | CapabilityFailure
   >;
   /** The `schedule` grant: a durable Routine operation attributed to this call. */
@@ -907,6 +911,20 @@ export interface PluginCardPress {
   record?: { [key: string]: unknown };
 }
 
+/**
+ * What a card's `revise` is handed: the fields of a card the person edited
+ * and then approved, before the kernel records that decision.
+ */
+export interface PluginCardEdit {
+  /** The card the decided surface was drawn from. */
+  cardId: string;
+  surfaceId: string;
+  /** The surface's data model as the person left it when they pressed. */
+  dataModel: { [key: string]: unknown };
+  /** The Card's data model as the kernel stores it. */
+  record: { [key: string]: unknown };
+}
+
 /** A card handler's refusal: the Card is left exactly as it was. */
 export interface PluginCardDrop {
   drop: true;
@@ -948,6 +966,21 @@ export type PluginCardDraw =
   | void;
 
 /**
+ * What a card's `revise` answers with: what the decision now covers, the
+ * words it is recorded with, and optionally messages that settle the card's
+ * face onto those values — which, like a press's, may not ask for a
+ * decision. Return `{ drop: true, reason }` to refuse the edit: the person is
+ * told why, and nothing is decided.
+ */
+export type PluginCardRevision =
+  | {
+      covers: { [key: string]: unknown };
+      decision: PluginCardDecision;
+      messages?: CardMessage[];
+    }
+  | PluginCardDrop;
+
+/**
  * The words the decision a card asks for is recorded with. They are stated
  * here rather than on the `ApprovalActions` component because the Frock
  * catalog allows that component an `approvalId` and its two labels and
@@ -982,6 +1015,18 @@ export interface PluginCard {
       ctx: PluginContext,
     ) => Promise<PluginCardAnswer> | PluginCardAnswer
   >;
+  /**
+   * The person edited this card's fields and approved it. Say what the
+   * decision now covers: the kernel binds the Approval to those `covers`
+   * before it records the decision, so what you later act on has to be
+   * exactly them. A surface only sends its fields back when it was created
+   * with `sendDataModel: true`. A card with no `revise` is decided as it was
+   * drawn, whatever its fields hold.
+   */
+  revise?(
+    edit: PluginCardEdit,
+    ctx: PluginContext,
+  ): Promise<PluginCardRevision> | PluginCardRevision;
 }
 
 /**

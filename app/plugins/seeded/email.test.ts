@@ -35,6 +35,7 @@ const { cards, execute, tools } = (await import(modulePath)) as {
     string,
     {
       render(payload: unknown, ctx: unknown): Promise<unknown>;
+      revise(edit: unknown, ctx: unknown): Promise<unknown>;
       actions: Record<
         string,
         (press: unknown, ctx: unknown) => Promise<unknown>
@@ -63,7 +64,8 @@ const draft = {
 function context(
   options: {
     sent?:
-      | { status: "sent"; messageId: string; undelivered?: string[] }
+      | { status: "sent"; messageId: string }
+      | { status: "unknown"; reason: string }
       | { status: "unavailable"; reason: string };
   } = {},
 ) {
@@ -131,6 +133,21 @@ function decisionOf(answer: unknown): unknown {
   return (answer as { decision?: unknown }).decision;
 }
 
+/** The surface a render created: its data model and whether it asks for it back. */
+function createdOf(answer: unknown) {
+  const first = decodeA2uiAgentMessageV1(messagesOf(answer)[0]!, "message[0]");
+  if (!("createSurface" in first)) throw new Error("the card created nothing");
+  return first.createSurface;
+}
+
+/** What a person left in the card's fields, as the client posts it back. */
+function edited(
+  answer: unknown,
+  changes: Record<string, unknown>,
+): Record<string, unknown> {
+  return { ...createdOf(answer).dataModel, ...changes };
+}
+
 /** Every component a render answered with, decoded as the kernel decodes it. */
 function componentsOf(answer: unknown): A2uiComponentV1[] {
   const messages = messagesOf(answer).map((message, index) =>
@@ -159,21 +176,45 @@ describe("the email Plugin's draft card", () => {
     expect(components.map((component) => component.component)).toEqual([
       "Column",
       "StatusPill",
+      "TextField",
+      "TextField",
+      "TextField",
       "KeyValueRows",
-      "CollapsibleText",
+      "TextField",
       "ApprovalActions",
     ]);
     expect(named(components, "status")).toMatchObject({
       label: "Ready to send",
       tone: "ready",
     });
-    expect(named(components, "rows").rows).toEqual([
-      { label: "To", value: "nick@example.com" },
-      { label: "Cc", value: "sam@example.com" },
-      { label: "Subject", value: "Re: Following up" },
+    // Every header the person may change is a field bound into the data
+    // model, and the surface asks for that model back with the press.
+    for (const [id, label] of [
+      ["to", "To"],
+      ["cc", "Cc"],
+      ["subject", "Subject"],
+      ["body", "Message"],
+    ] as const) {
+      expect(named(components, id)).toMatchObject({
+        component: "TextField",
+        label,
+        value: { path: `/${id}` },
+      });
+    }
+    expect(named(components, "body")).toMatchObject({ variant: "longText" });
+    expect(createdOf(answer)).toMatchObject({
+      sendDataModel: true,
+      dataModel: {
+        to: "nick@example.com",
+        cc: "sam@example.com",
+        subject: "Re: Following up",
+        body: draft.body,
+      },
+    });
+    // The thread it answers is shown, never offered as a field.
+    expect(named(components, "thread").rows).toEqual([
       { label: "In reply to", value: "<earlier@example.com>" },
     ]);
-    expect(named(components, "body")).toMatchObject({ collapsedLines: 6 });
 
     // The Plugin writes a placeholder; the kernel binds the real Approval.
     const bound = bindCardApprovalsV1(
@@ -353,12 +394,11 @@ describe("the email Plugin's draft card", () => {
     expect(sends).toHaveLength(0);
   });
 
-  test("a partial send is still a send, named and never retried", async () => {
+  test("a send nobody can vouch for is never sent again, and settles as may-have-sent", async () => {
     const { ctx, sends } = context({
       sent: {
-        status: "sent",
-        messageId: "<sent@x.co>",
-        undelivered: ["sam@example.com"],
+        status: "unknown",
+        reason: "the message may have been sent: internal",
       },
     });
     await cards.draft.render({ surfaceId: SURFACE, data: draft }, ctx);
@@ -367,17 +407,28 @@ describe("the email Plugin's draft card", () => {
       { surfaceId: SURFACE, approvalId: APPROVAL },
       ctx,
     );
-    expect(said).toMatch(/did not reach sam@example.com/);
-    // The state was written even though one address was refused, so the
-    // second call answers "already sent" rather than delivering again.
+    expect(said).toMatch(/outcome is unknown/);
+    expect(said).toMatch(/do not send it again/);
+    // Written as if it left, so the second call answers rather than
+    // delivering the mail twice to whoever did receive it.
     expect(
       await execute(
         "email_send",
         { surfaceId: SURFACE, approvalId: APPROVAL },
         ctx,
       ),
-    ).toMatch(/Already sent/);
+    ).toMatch(/not sent again/);
     expect(sends).toHaveLength(1);
+    await expect(
+      execute("email_discard", { surfaceId: SURFACE }, ctx),
+    ).rejects.toThrow(/may already have been sent/);
+    const settled = componentsOf(
+      await cards.draft.render({ surfaceId: SURFACE, data: draft }, ctx),
+    );
+    expect(named(settled, "receipt")).toMatchObject({
+      status: "May have sent",
+      tone: "warning",
+    });
   });
 
   test("a redraw never changes what a pending decision covers", async () => {
@@ -394,9 +445,7 @@ describe("the email Plugin's draft card", () => {
     // not the values the Bot just sent — so the Approval the kernel binds is
     // about the message this card will actually send.
     expect(coversOf(answer)).toEqual(draft);
-    const redrawn = componentsOf(answer);
-    const rows = named(redrawn, "rows").rows as { value: string }[];
-    expect(rows[0]!.value).toBe("nick@example.com");
+    expect(createdOf(answer).dataModel?.to).toBe("nick@example.com");
     expect(decisionOf(answer)).toEqual({
       action: "Send an email to nick@example.com — Re: Following up",
       risk: "medium",
@@ -417,6 +466,169 @@ describe("the email Plugin's draft card", () => {
       surfaceId: string;
     };
     expect(message).toEqual(coversOf(answer) as Record<string, unknown>);
+  });
+});
+
+describe("the person's edits to a draft", () => {
+  test("become what the decision covers, and what is sent", async () => {
+    const { ctx, sends } = context();
+    const drawn = await cards.draft.render(
+      { surfaceId: SURFACE, data: draft },
+      ctx,
+    );
+    const revision = (await cards.draft.revise(
+      {
+        cardId: "draft",
+        surfaceId: SURFACE,
+        dataModel: edited(drawn, {
+          to: "nick@example.com; ana@example.com",
+          cc: "",
+          subject: "Re: Following up, properly",
+          body: "Their own words.",
+        }),
+        record: createdOf(drawn).dataModel,
+      },
+      ctx,
+    )) as {
+      covers: Record<string, unknown>;
+      decision: unknown;
+      messages: Record<string, unknown>[];
+    };
+    const theirs = {
+      to: ["nick@example.com", "ana@example.com"],
+      subject: "Re: Following up, properly",
+      body: "Their own words.",
+      // The thread it answers was not theirs to change.
+      inReplyTo: "<earlier@example.com>",
+    };
+    expect(revision.covers).toEqual(theirs);
+    expect(revision.decision).toEqual({
+      action:
+        "Send an email to nick@example.com, ana@example.com — Re: Following up, properly",
+      risk: "medium",
+    });
+    // The card is told what it now holds, spelled the way its fields are,
+    // and never asks for a decision of its own.
+    const [update] = revision.messages.map((message, index) =>
+      decodeA2uiAgentMessageV1(message, `message[${index}]`),
+    );
+    expect(update).toEqual({
+      version: "v1.0",
+      updateDataModel: {
+        surfaceId: SURFACE,
+        value: {
+          to: "nick@example.com, ana@example.com",
+          cc: "",
+          subject: "Re: Following up, properly",
+          body: "Their own words.",
+        },
+      },
+    });
+
+    // A redraw holds their draft, not the Bot's.
+    expect(
+      coversOf(
+        await cards.draft.render({ surfaceId: SURFACE, data: draft }, ctx),
+      ),
+    ).toEqual(theirs);
+
+    const said = await execute(
+      "email_send",
+      { surfaceId: SURFACE, approvalId: APPROVAL },
+      ctx,
+    );
+    expect(said).toMatch(/Sent to nick@example.com, ana@example.com/);
+    expect(said).toMatch(/The person edited the draft/);
+    const {
+      approvalId: _id,
+      surfaceId: _surface,
+      ...message
+    } = sends[0] as { approvalId: string; surfaceId: string };
+    // Exactly what the revision said the decision covers, which is what the
+    // kernel now compares the send against.
+    expect(message).toEqual(revision.covers);
+  });
+
+  test("an edit that could not be sent is refused before anything is decided", async () => {
+    for (const [changes, pattern] of [
+      [{ to: "nick at example.com" }, /is not an email address/],
+      [{ to: "" }, /at least one recipient/],
+      [{ subject: "  " }, /needs a subject/],
+      [{ body: " " }, /needs a message/],
+    ] as const) {
+      const { ctx, store } = context();
+      const drawn = await cards.draft.render(
+        { surfaceId: SURFACE, data: draft },
+        ctx,
+      );
+      const before = structuredClone(store.get(`card:${SURFACE}`));
+      const answer = await cards.draft.revise(
+        {
+          cardId: "draft",
+          surfaceId: SURFACE,
+          dataModel: edited(drawn, changes),
+          record: createdOf(drawn).dataModel,
+        },
+        ctx,
+      );
+      expect(answer).toMatchObject({ drop: true });
+      expect(String((answer as { reason: string }).reason)).toMatch(pattern);
+      // The draft the decision covers is left exactly as it was.
+      expect(store.get(`card:${SURFACE}`)).toEqual(before);
+    }
+  });
+
+  test("a settled email takes no edits", async () => {
+    const { ctx } = context();
+    const drawn = await cards.draft.render(
+      { surfaceId: SURFACE, data: draft },
+      ctx,
+    );
+    await execute("email_discard", { surfaceId: SURFACE }, ctx);
+    expect(
+      await cards.draft.revise(
+        {
+          cardId: "draft",
+          surfaceId: SURFACE,
+          dataModel: edited(drawn, { subject: "Too late" }),
+          record: createdOf(drawn).dataModel,
+        },
+        ctx,
+      ),
+    ).toEqual({ drop: true, reason: "this email has already been settled" });
+  });
+
+  // A Card's data model is at most 16,000 bytes, so a message longer than
+  // the budget leaves beside the headers is shown whole rather than offered
+  // as a field — and an edit to the headers sends it exactly as drawn.
+  test("a message too long to edit is shown whole and kept as drawn", async () => {
+    const { ctx } = context();
+    const long = { ...draft, body: "word ".repeat(4_000) };
+    const drawn = await cards.draft.render(
+      { surfaceId: SURFACE, data: long },
+      ctx,
+    );
+    expect(named(componentsOf(drawn), "body")).toMatchObject({
+      component: "CollapsibleText",
+      text: long.body,
+    });
+    expect(createdOf(drawn).dataModel).not.toHaveProperty("body");
+    expect(a2uiByteLengthV1(createdOf(drawn).dataModel ?? {})).toBeLessThan(
+      A2UI_LIMITS_V1.dataModelBytes,
+    );
+    const revision = (await cards.draft.revise(
+      {
+        cardId: "draft",
+        surfaceId: SURFACE,
+        dataModel: edited(drawn, { subject: "Shorter subject" }),
+        record: createdOf(drawn).dataModel,
+      },
+      ctx,
+    )) as { covers: Record<string, unknown> };
+    expect(revision.covers).toMatchObject({
+      subject: "Shorter subject",
+      body: long.body,
+    });
   });
 });
 
@@ -664,12 +876,19 @@ function expectConforms(component: A2uiComponentV1): void {
       );
     }
     // A `DynamicString` is a literal or a binding into the data model. This
-    // card carries no data model — it redraws the surface — so every one of
-    // them it writes has to be the literal.
+    // card binds exactly one thing — a field's `value`, which is what the
+    // person edits — and every other string it writes is the literal.
     if (property.$ref?.includes("DynamicString")) {
-      expect(typeof value, `${where} draws "${key}" as no string`).toBe(
-        "string",
-      );
+      if (component.component === "TextField" && key === "value") {
+        expect(
+          Object.keys(value as Record<string, unknown>),
+          `${where} binds "${key}" to no path`,
+        ).toEqual(["path"]);
+      } else {
+        expect(typeof value, `${where} draws "${key}" as no string`).toBe(
+          "string",
+        );
+      }
     }
     // An `Action` is A2UI's own, and the renderer accepts one shape for it:
     // a server event under `event`, or a client-side `functionCall`. A flat
@@ -717,8 +936,25 @@ describe("every state the email card draws", () => {
       { surfaceId: SURFACE, data: draft },
       other.ctx,
     );
+    const unclear = context({
+      sent: { status: "unknown", reason: "the message may have been sent" },
+    });
+    await cards.draft.render({ surfaceId: SURFACE, data: draft }, unclear.ctx);
+    await execute(
+      "email_send",
+      { surfaceId: SURFACE, approvalId: APPROVAL },
+      unclear.ctx,
+    );
+    const mayHaveSent = await cards.draft.render(
+      { surfaceId: SURFACE, data: draft },
+      unclear.ctx,
+    );
+    const long = await cards.draft.render(
+      { surfaceId: SURFACE, data: { ...draft, body: "word ".repeat(4_000) } },
+      context().ctx,
+    );
 
-    for (const state of [drafted, sent, discarded]) {
+    for (const state of [drafted, sent, discarded, mayHaveSent, long]) {
       for (const component of componentsOf(state)) expectConforms(component);
     }
 

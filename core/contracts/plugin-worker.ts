@@ -396,6 +396,56 @@ export interface PluginCardDecisionV1 {
   rationale?: string;
 }
 
+/**
+ * What a person left in a card's fields when they approved it, put back to
+ * the Plugin that drew the card before the decision is recorded.
+ *
+ * A card whose surface asks for its data model can be edited — a draft's
+ * recipients, its subject, its body — and the person's Send is then a
+ * decision about the edited values, not about the ones the card was drawn
+ * with. The kernel cannot say what the edit means: only the Plugin knows how
+ * its fields become what it acts on, so it is asked to restate what the
+ * decision now covers.
+ */
+export interface PluginWorkerReviseCardInvocationV1 {
+  schemaVersion: 1;
+  pluginId: string;
+  /** The card the decided surface was minted for; see `cardSurfaceCardIdV1`. */
+  cardId: string;
+  surfaceId: string;
+  /** The data model as the client held it when the person pressed. */
+  dataModel: Record<string, unknown>;
+  /** The Card's data model as the kernel stores it. */
+  record: Record<string, unknown>;
+  botId: string;
+  sessionId: string;
+  runId: string;
+  turnId: string;
+  generationId: string;
+  deadlineMs: number;
+}
+
+/**
+ * The Plugin's restatement of a decided card.
+ *
+ * `revised` is the decision's new subject: the `covers` the Approval is bound
+ * to from now on, the words it is recorded with, and optionally the messages
+ * that settle the card's face onto the values it now covers — which, like a
+ * press's, may not carry trust chrome. `unchanged` is a card that takes no
+ * edits: its decision covers what it was drawn with, whatever the fields say.
+ * A drop refuses the edit, and nothing is decided.
+ */
+export type PluginWorkerReviseCardResultV1 =
+  | { schemaVersion: 1; status: "drop"; reason?: string; deliberate?: true }
+  | { schemaVersion: 1; status: "unchanged" }
+  | {
+      schemaVersion: 1;
+      status: "revised";
+      covers: Record<string, unknown>;
+      decision: PluginCardDecisionV1;
+      messages?: Record<string, unknown>[];
+    };
+
 /** The bounds a decision's words are held to, matching a `send_to_user` approval. */
 export const MAX_PLUGIN_CARD_DECISION_ACTION_V1 = 2_000;
 export const MAX_PLUGIN_CARD_DECISION_RATIONALE_V1 = 8_000;
@@ -434,6 +484,9 @@ export interface PluginWorkerEntrypoint {
   renderCard(
     invocation: PluginWorkerRenderCardInvocationV1,
   ): Promise<PluginWorkerRenderCardResultV1>;
+  reviseCard(
+    invocation: PluginWorkerReviseCardInvocationV1,
+  ): Promise<PluginWorkerReviseCardResultV1>;
 }
 
 function record(value: unknown, label: string): Record<string, unknown> {
@@ -1118,6 +1171,58 @@ export function decodePluginWorkerRenderCardResultV1(
     ...(value.decision === undefined
       ? {}
       : { decision: decodeCardDecisionV1(value.decision, label) }),
+  };
+}
+
+export function decodePluginWorkerReviseCardResultV1(
+  input: unknown,
+  label = "plugin worker revise card result",
+): PluginWorkerReviseCardResultV1 {
+  const value = record(input, label);
+  if (value.schemaVersion !== 1) {
+    throw new Error(`${label}.schemaVersion is unsupported`);
+  }
+  if (value.status === "drop") {
+    exactKeys(value, ["schemaVersion", "status"], label, [
+      "reason",
+      "deliberate",
+    ]);
+    if (value.deliberate !== undefined && value.deliberate !== true) {
+      throw new Error(`${label}.deliberate must be true`);
+    }
+    return {
+      schemaVersion: 1,
+      status: "drop",
+      ...(value.reason === undefined
+        ? {}
+        : {
+            reason: boundedString(
+              value.reason,
+              `${label}.reason`,
+              MAX_FAILURE_REASON_V1,
+            ),
+          }),
+      ...(value.deliberate === true ? { deliberate: true as const } : {}),
+    };
+  }
+  if (value.status === "unchanged") {
+    exactKeys(value, ["schemaVersion", "status"], label);
+    return { schemaVersion: 1, status: "unchanged" };
+  }
+  exactKeys(value, ["schemaVersion", "status", "covers", "decision"], label, [
+    "messages",
+  ]);
+  if (value.status !== "revised") {
+    throw new Error(`${label}.status is invalid`);
+  }
+  return {
+    schemaVersion: 1,
+    status: "revised",
+    covers: decodeCardCoversV1(value.covers, label),
+    decision: decodeCardDecisionV1(value.decision, label),
+    ...(value.messages === undefined
+      ? {}
+      : { messages: decodeCardMessagesV1(value.messages, label) }),
   };
 }
 
