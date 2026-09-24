@@ -92,6 +92,7 @@ class LatchedPages implements ChatTransport {
     String id,
     String text, {
     String? retryOf,
+    List<MessageAttachment> attachments = const [],
   }) async {}
   @override
   Future<Map<String, dynamic>?> lookup(

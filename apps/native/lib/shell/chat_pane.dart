@@ -13,6 +13,7 @@ library;
 import 'dart:async';
 import 'dart:math' as math;
 
+import 'package:desktop_drop/desktop_drop.dart';
 import 'package:flutter/foundation.dart' show ValueListenable;
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter/services.dart';
@@ -21,6 +22,7 @@ import '../acceptance_metrics.dart';
 import '../cards/approvals.dart';
 import '../cards/connections.dart';
 import '../cards/chat_card.dart';
+import '../client/attachments.dart';
 import '../client/bot_sessions.dart';
 import '../client/chat_controller.dart';
 import '../client/transport.dart';
@@ -29,6 +31,7 @@ import '../theme/frock_theme.dart';
 import '../theme/states.dart';
 import '../voice/dictation.dart';
 import 'approvals.dart';
+import 'attachment_views.dart';
 import 'connect_cards.dart';
 import 'chat_header.dart';
 import 'composer.dart';
@@ -251,7 +254,10 @@ class _ChatPaneState extends State<ChatPane> {
   }
 
   Future<void> _send() async {
-    if (!controller.canSend || editor.text.trim().isEmpty) return;
+    if (!controller.canSend ||
+        !messageSendable(editor.text.trim(), controller.attachments)) {
+      return;
+    }
     final text = editor.text;
     if (text.trim() == '/$stopCommandName') {
       _clearCommand();
@@ -281,6 +287,34 @@ class _ChatPaneState extends State<ChatPane> {
     if (mounted) focus.requestFocus();
   }
 
+  /// Files chosen for this draft, attached and uploading at once. A choice
+  /// past the limit says so where commands speak.
+  void _attachFiles(List<PickedFile> files) {
+    final notice = controller.attachments.add(files);
+    if (notice != null) _note(notice);
+    focus.requestFocus();
+  }
+
+  Future<void> _attach() async {
+    try {
+      _attachFiles(await pickAttachments());
+    } catch (_) {
+      _note('Couldn’t open your files. Try again, or drop them here.');
+    }
+  }
+
+  /// Whether files are being dragged over the conversation.
+  bool _dropping = false;
+
+  Future<void> _dropped(DropDoneDetails details) async {
+    setState(() => _dropping = false);
+    try {
+      _attachFiles(await readDroppedFiles(details.files));
+    } catch (_) {
+      _note('Couldn’t read what was dropped. Try attaching it instead.');
+    }
+  }
+
   /// A command is the composer's own business: its words never reach the Bot.
   void _clearCommand() {
     editor.clear();
@@ -293,19 +327,24 @@ class _ChatPaneState extends State<ChatPane> {
   String? _commandNote;
   Timer? _commandNoteTimer;
 
+  void _note(String note) {
+    if (!mounted) return;
+    _commandNoteTimer?.cancel();
+    setState(() => _commandNote = note);
+    _commandNoteTimer = Timer(const Duration(seconds: 3), () {
+      if (mounted) setState(() => _commandNote = null);
+    });
+  }
+
   Future<void> _stop() async {
     if (!controller.stoppable) {
-      _commandNoteTimer?.cancel();
       // A message still being delivered has no Turn to stop yet, though the
       // Bot already looks busy: that is not "nothing".
-      setState(
-        () => _commandNote = controller.activeRunId != null
+      _note(
+        controller.activeRunId != null
             ? 'Your message is still on its way. Try /stop again in a moment.'
             : 'Nothing to stop.',
       );
-      _commandNoteTimer = Timer(const Duration(seconds: 3), () {
-        if (mounted) setState(() => _commandNote = null);
-      });
       return;
     }
     unawaited(HapticFeedback.mediumImpact().catchError((Object _) {}));
@@ -352,7 +391,7 @@ class _ChatPaneState extends State<ChatPane> {
     // The eyes follow the pointer over the whole conversation, not only over
     // the character's own square. Translucent: the region takes no pointer
     // from anything under it, the composer included.
-    return LayoutBuilder(
+    final pane = LayoutBuilder(
       builder: (context, constraints) => Listener(
         behavior: HitTestBehavior.translucent,
         onPointerDown: (_) => _pointerDown(),
@@ -364,6 +403,42 @@ class _ChatPaneState extends State<ChatPane> {
           onExit: (_) => gaze.value = null,
           child: _column(context, c),
         ),
+      ),
+    );
+    if (c.uploads == null) return pane;
+    // Files dropped anywhere on the conversation are attached to its draft.
+    return DropTarget(
+      onDragEntered: (_) => setState(() => _dropping = true),
+      onDragExited: (_) => setState(() => _dropping = false),
+      onDragDone: (details) => unawaited(_dropped(details)),
+      child: Stack(
+        children: [
+          pane,
+          if (_dropping)
+            Positioned.fill(
+              child: IgnorePointer(
+                child: Container(
+                  key: const ValueKey('drop-overlay'),
+                  margin: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.primary
+                        .withValues(alpha: 0.08),
+                    borderRadius: BorderRadius.circular(FrockTheme.radiusField),
+                    border: Border.all(
+                      color: Theme.of(context).colorScheme.primary,
+                      width: 2,
+                    ),
+                  ),
+                  child: Center(
+                    child: Text(
+                      'Drop to attach',
+                      style: Theme.of(context).textTheme.titleMedium,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+        ],
       ),
     );
   }
@@ -386,9 +461,11 @@ class _ChatPaneState extends State<ChatPane> {
           send.id,
           send.text,
           localOrder: c.localOrderOf(send.id),
+          attachments: send.attachments,
         ),
         null => null,
       },
+      attachmentBytes: c.uploads == null ? null : c.attachmentBytes,
       loading: c.loading,
       hasEarlier: c.before != null,
       storageKey: 'history-${c.botId}',
@@ -634,6 +711,9 @@ class _ChatPaneState extends State<ChatPane> {
     onRevertDictation: widget.onRevertDictation,
     dictationLevel: widget.dictationLevel,
     dictationElapsed: widget.dictationElapsed,
+    attachments: c.uploads == null ? null : c.attachments,
+    onAttach: c.uploads == null ? null : () => unawaited(_attach()),
+    onFiles: c.uploads == null ? null : _attachFiles,
   );
 
   @override

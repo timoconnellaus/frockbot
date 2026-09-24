@@ -98,7 +98,7 @@ export function createUploadReaderV1(
       // A range can end inside a character; the decoder drops that tail.
       const text = new TextDecoder()
         .decode(await object.arrayBuffer())
-        .replace(/�$/, "")
+        .replace(/\uFFFD$/, "")
         .slice(0, maxChars);
       const chars = Number(object.customMetadata?.chars);
       return {

@@ -22,6 +22,7 @@ class _StaleRunningPage implements ChatTransport {
     String id,
     String text, {
     String? retryOf,
+    List<MessageAttachment> attachments = const [],
   }) async {}
 
   @override
@@ -56,6 +57,7 @@ class _FixedPage implements ChatTransport {
     String id,
     String text, {
     String? retryOf,
+    List<MessageAttachment> attachments = const [],
   }) async {}
 
   @override
@@ -97,6 +99,7 @@ class RecordingTransport implements ChatTransport {
     String id,
     String text, {
     String? retryOf,
+    List<MessageAttachment> attachments = const [],
   }) async {}
 
   @override

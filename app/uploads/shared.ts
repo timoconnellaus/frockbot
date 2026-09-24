@@ -299,7 +299,7 @@ export function decodeUploadTextV1(bytes: Uint8Array): string | undefined {
   if (bytes.includes(0)) return undefined;
   try {
     const text = new TextDecoder("utf-8", { fatal: true }).decode(bytes);
-    return text.startsWith("﻿") ? text.slice(1) : text;
+    return text.startsWith("\ufeff") ? text.slice(1) : text;
   } catch {
     return undefined;
   }

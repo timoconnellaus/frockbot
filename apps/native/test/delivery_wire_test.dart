@@ -253,6 +253,7 @@ class HeldSendTransport implements ChatTransport {
     String id,
     String text, {
     String? retryOf,
+    List<MessageAttachment> attachments = const [],
   }) async {
     await _held.future;
   }

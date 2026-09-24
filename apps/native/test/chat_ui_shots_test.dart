@@ -5,13 +5,16 @@
 library;
 
 import 'dart:io';
+import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart' show FontLoader, rootBundle;
 import 'package:flutter_test/flutter_test.dart';
+import 'package:frockbot_native/client/attachments.dart';
 import 'package:frockbot_native/client/chat_controller.dart';
+import 'package:frockbot_native/client/image_prep.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/shell/chat_header.dart';
 import 'package:frockbot_native/shell/chat_pane.dart';
@@ -78,10 +81,13 @@ Map<String, dynamic> _turn(
   List<String> replies = const [],
   String? failure,
   bool canRetry = false,
+  List<MessageAttachment> attachments = const [],
 }) => {
   'runId': id,
   'admittedAt': at,
   'input': input,
+  if (attachments.isNotEmpty)
+    'attachments': [for (final file in attachments) file.toJson()],
   'status': status,
   'canRetry': canRetry,
   'events': [
@@ -126,6 +132,7 @@ class _SceneTransport implements ChatTransport, QuestionsTransport {
     String id,
     String text, {
     String? retryOf,
+    List<MessageAttachment> attachments = const [],
   }) async {}
   @override
   Future<Map<String, dynamic>?> lookup(
@@ -177,6 +184,8 @@ Future<void> _scene(
   ConnectionState connection = ConnectionState.connected,
   bool outOfCredit = false,
   List<Map<String, dynamic>> draftFrames = const [],
+  UploadTransport? uploads,
+  List<PickedFile> attach = const [],
 }) async {
   tester.view.physicalSize = Size(width, height);
   tester.view.devicePixelRatio = 1;
@@ -190,12 +199,20 @@ Future<void> _scene(
     userId: 'user-1',
     botId: 'bot-1',
     nextId: () => 'send-new',
+    uploads: uploads,
+    prepare: (file) async => PreparedUpload(
+      name: file.name,
+      mediaType: mediaTypeForName(file.name),
+      bytes: file.bytes,
+      isImage: false,
+    ),
   );
   await c.initialize();
   c.connection = connection;
   for (final draft in draftFrames) {
     await c.applyFrame(draft);
   }
+  if (attach.isNotEmpty) c.attachments.add(attach);
   final skills =
       SkillMenuController(api: SilentApi(VoidStore()), botId: 'bot-1')
         ..catalog = [
@@ -545,4 +562,142 @@ void main() {
       },
     );
   }, skip: _out.isEmpty);
+
+  testWidgets('attachments desk', (tester) async {
+    final chart = await tester.runAsync(_chart);
+    final photo = MessageAttachment(
+      uploadId: 'c' * 64,
+      kind: 'image',
+      name: 'signups.png',
+      mediaType: 'image/png',
+      bytes: chart!.length,
+    );
+    final plan = MessageAttachment(
+      uploadId: 'd' * 64,
+      kind: 'document',
+      name: 'Launch plan.pdf',
+      mediaType: 'application/pdf',
+      bytes: 2516582,
+    );
+    await _scene(
+      tester,
+      'attachments-desk',
+      width: 1200,
+      height: 675,
+      uploads: _SceneUploads({photo.uploadId: chart}),
+      runs: [
+        _turn(
+          'run-1',
+          '2026-09-23T01:00:00Z',
+          'Why did signups dip in week 6? Check it against the launch plan.',
+          attachments: [photo, plan],
+          replies: [
+            'It lines up with the plan: **the paid campaign paused in week 6** '
+                'while the pricing page was rebuilt (page 4). Signups fell '
+                'from about 1,900 to 1,150 and came back once the ads resumed '
+                'in week 7.\n\n'
+                'The chart’s axis starts at 800, so the dip looks steeper than '
+                'it was — about 40%, not the 80% it appears.',
+          ],
+        ),
+      ],
+      typed: 'Compare it with last quarter',
+      attach: [
+        PickedFile(
+          name: 'Q2 signups.xlsx',
+          bytes: Uint8List(48 * 1024),
+        ),
+      ],
+    );
+  }, skip: _out.isEmpty);
+}
+
+/// The Bot's copy of each upload: a thumbnail's bytes.
+class _SceneUploads implements UploadTransport {
+  final Map<String, Uint8List> held;
+  _SceneUploads(this.held);
+
+  @override
+  Future<MessageAttachment> upload(
+    String botId, {
+    required String name,
+    required String mediaType,
+    required Uint8List bytes,
+  }) async => MessageAttachment(
+    uploadId: 'e' * 64,
+    kind: mediaType.startsWith('image/') ? 'image' : 'document',
+    name: name,
+    mediaType: mediaType,
+    bytes: bytes.length,
+  );
+
+  @override
+  Future<Uint8List> download(String botId, String uploadId) async =>
+      held[uploadId] ?? Uint8List(0);
+}
+
+/// A chart someone screenshotted: the picture a message carries.
+Future<Uint8List> _chart() async {
+  const size = Size(900, 900);
+  const values = [1480, 1620, 1710, 1840, 1905, 1150, 1760, 1980, 2090];
+  final recorder = ui.PictureRecorder();
+  final canvas = Canvas(recorder);
+  canvas.drawRect(Offset.zero & size, Paint()..color = const Color(0xfffafaf8));
+  const plot = Rect.fromLTRB(60, 170, 840, 820);
+  final grid = Paint()
+    ..color = const Color(0xffe1e1de)
+    ..strokeWidth = 2;
+  for (var i = 0; i <= 7; i++) {
+    final y = plot.bottom - i * plot.height / 7;
+    canvas.drawLine(Offset(plot.left, y), Offset(plot.right, y), grid);
+  }
+  Offset at(int i) => Offset(
+    plot.left + i * plot.width / (values.length - 1),
+    plot.bottom - (values[i] - 800) / 1400 * plot.height,
+  );
+  final line = Path()..moveTo(at(0).dx, at(0).dy);
+  for (var i = 1; i < values.length; i++) {
+    line.lineTo(at(i).dx, at(i).dy);
+  }
+  final blue = const Color(0xff3478f6);
+  canvas.drawPath(
+    line,
+    Paint()
+      ..color = blue
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 7
+      ..strokeJoin = StrokeJoin.round,
+  );
+  for (var i = 0; i < values.length; i++) {
+    canvas.drawCircle(at(i), 9, Paint()..color = blue);
+  }
+  canvas.drawCircle(
+    at(5),
+    18,
+    Paint()
+      ..color = const Color(0xffe6463c)
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = 5,
+  );
+  final title =
+      (ui.ParagraphBuilder(
+              ui.ParagraphStyle(fontFamily: 'Inter', fontSize: 44),
+            )
+            ..pushStyle(
+              ui.TextStyle(
+                color: const Color(0xff1e1e1e),
+                fontWeight: FontWeight.w600,
+              ),
+            )
+            ..addText('Weekly signups'))
+          .build()
+        ..layout(const ui.ParagraphConstraints(width: 1000));
+  canvas.drawParagraph(title, const Offset(60, 60));
+  final image = await recorder.endRecording().toImage(
+    size.width.toInt(),
+    size.height.toInt(),
+  );
+  final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
+  image.dispose();
+  return bytes!.buffer.asUint8List();
 }

@@ -141,6 +141,7 @@ class _Transport implements ChatTransport, QuestionsTransport {
     String id,
     String text, {
     String? retryOf,
+    List<MessageAttachment> attachments = const [],
   }) async {}
   @override
   Future<Map<String, dynamic>?> lookup(

@@ -210,6 +210,7 @@ class RecordingTransport implements ChatTransport {
     String id,
     String text, {
     String? retryOf,
+    List<MessageAttachment> attachments = const [],
   }) async => sends.add(text);
   @override
   Future<Map<String, dynamic>?> lookup(

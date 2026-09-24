@@ -40,6 +40,9 @@ abstract final class ShellIds {
   static const composer = 'chat-composer';
   static const sendButton = 'send-button';
   static const composerPlus = 'composer-plus';
+  static const composerAttach = 'composer-attach';
+  static const attachmentTray = 'attachment-tray';
+  static String attachment(String id) => 'attachment-$id';
   static const composerCounter = 'composer-counter';
   static const skillMenu = 'skill-menu';
   static const skillChips = 'skill-chips';

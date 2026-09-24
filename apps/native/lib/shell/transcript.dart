@@ -5,14 +5,18 @@
 /// and the receipts live there.
 library;
 
+import 'dart:typed_data';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 
+import '../client/attachments.dart';
 import '../flock/avatar.dart';
 import '../theme/frock_theme.dart';
 import '../theme/states.dart';
 import '../theme/thread.dart';
 import '../theme/time.dart';
+import 'attachment_views.dart';
 import 'chat_header.dart';
 import 'markdown.dart';
 import 'run_view.dart';
@@ -81,6 +85,10 @@ class TranscriptView extends StatefulWidget {
 
   /// Drawn under the empty thread's greeting, and gone with the first row.
   final Widget? starters;
+
+  /// Reads a sent picture's bytes. Absent, pictures are drawn as cards.
+  final Future<Uint8List> Function(MessageAttachment attachment)?
+  attachmentBytes;
   const TranscriptView({
     super.key,
     required this.lines,
@@ -104,6 +112,7 @@ class TranscriptView extends StatefulWidget {
     this.focusRunId,
     this.background,
     this.starters,
+    this.attachmentBytes,
   });
 
   @override
@@ -584,12 +593,38 @@ class _TranscriptViewState extends State<TranscriptView> {
       return _Announcement(text: line.text);
     }
     if (line.role == LineRole.user) {
-      final bubble = _bubble(
-        id: line.id,
-        mine: true,
-        time: _stamped[line.id],
-        child: Text(line.text),
-      );
+      final words = line.text.isEmpty
+          ? null
+          : _bubble(
+              id: line.id,
+              mine: true,
+              time: _stamped[line.id],
+              child: Text(line.text),
+            );
+      // The files go above the words, outside the bubble: a picture is its
+      // own thing to look at, not a line of text.
+      final bubble = line.attachments.isEmpty
+          ? words ?? const SizedBox.shrink()
+          : Column(
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                identified(
+                  ShellIds.message('${line.id}:files'),
+                  Padding(
+                    padding: const EdgeInsets.fromLTRB(64, 5, 20, 2),
+                    child: Align(
+                      alignment: AlignmentDirectional.centerEnd,
+                      child: MessageAttachmentsView(
+                        attachments: line.attachments,
+                        load: widget.attachmentBytes,
+                      ),
+                    ),
+                  ),
+                ),
+                ?words,
+              ],
+            );
       if (line.notice == null) return bubble;
       // The person's message arrived; it is the reply that did not. So the
       // way out sits where the reply would have been, not on their words.

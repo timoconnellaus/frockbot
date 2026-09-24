@@ -67,6 +67,7 @@ class FakeTransport implements ChatTransport {
     String id,
     String text, {
     String? retryOf,
+    List<MessageAttachment> attachments = const [],
   }) async {
     expect(
       (jsonDecode(store.values['chat/user-1/bot-1']!)['pending'] as List)
@@ -113,7 +114,13 @@ class HeldSendTransport extends FakeTransport {
     'page': {'truncated': false},
   };
   @override
-  Future<void> send(String botId, String id, String text, {String? retryOf}) {
+  Future<void> send(
+    String botId,
+    String id,
+    String text, {
+    String? retryOf,
+    List<MessageAttachment> attachments = const [],
+  }) {
     calls.add('send:$id');
     return (answers[id] = Completer<void>()).future;
   }

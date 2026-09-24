@@ -60,8 +60,10 @@ class BotSessions {
       _live[key] = existing;
       return existing;
     }
+    final transport = BackendChatTransport(api);
     final controller = ChatController(
-      transport: BackendChatTransport(api),
+      transport: transport,
+      uploads: transport,
       store: store,
       userId: userId,
       botId: botId,

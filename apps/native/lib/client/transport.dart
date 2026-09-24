@@ -8,10 +8,12 @@ import 'package:web_socket_channel/web_socket_channel.dart';
 
 import '../protocol/client_wire.generated.dart' as wire;
 import '../update/app_version.dart';
+import 'attachments.dart';
 import 'credential.dart';
 import 'store.dart';
 import 'transport_io.dart' if (dart.library.js_interop) 'transport_web.dart';
 
+export 'attachments.dart' show MessageAttachment;
 export 'store.dart';
 
 /// The gateway this build talks to.
@@ -139,11 +141,35 @@ class NativeApi {
   Future<Uint8List> bytes(String path, {int limit = 4000000}) async =>
       Uint8List.fromList(await _fetch(path, limit: limit, authenticated: true));
 
+  /// Posts raw bytes — a file — and reads the JSON answer.
+  Future<Object?> upload(
+    String path, {
+    required Uint8List bytes,
+    required String contentType,
+    int limit = 64000,
+  }) async {
+    final answer = await _fetch(
+      path,
+      raw: (bytes: bytes, contentType: contentType),
+      limit: limit,
+      authenticated: true,
+      // A file takes longer to send than a command.
+      timeout: const Duration(minutes: 2),
+    );
+    try {
+      return decodeBoundedJson(utf8.decode(answer), maxBytes: limit);
+    } on FormatException {
+      throw const RequestFailure('Couldn’t read that reply. Please reconnect.');
+    }
+  }
+
   Future<List<int>> _fetch(
     String path, {
     Object? body,
+    ({Uint8List bytes, String contentType})? raw,
     required int limit,
     required bool authenticated,
+    Duration timeout = const Duration(seconds: 30),
   }) async {
     if (!path.startsWith('/') ||
         path.startsWith('//') ||
@@ -153,7 +179,7 @@ class NativeApi {
     }
     try {
       final request = http.Request(
-        body == null ? 'GET' : 'POST',
+        body == null && raw == null ? 'GET' : 'POST',
         Uri.parse('$hostedOrigin$path'),
       )..followRedirects = false;
       final sent = authenticated
@@ -164,9 +190,11 @@ class NativeApi {
             };
       request.headers.addAll(sent);
       if (body != null) request.bodyBytes = utf8.encode(jsonEncode(body));
-      final response = await _client
-          .send(request)
-          .timeout(const Duration(seconds: 30));
+      if (raw != null) {
+        request.headers['content-type'] = raw.contentType;
+        request.bodyBytes = raw.bytes;
+      }
+      final response = await _client.send(request).timeout(timeout);
       final bytes = <int>[];
       await for (final chunk in response.stream.timeout(
         const Duration(seconds: 30),
@@ -193,6 +221,9 @@ class NativeApi {
           413 =>
             _refusalReason(bytes) ??
                 'That message is too long. Please shorten it.',
+          // A file the server would not take, or a message naming one it no
+          // longer holds: its sentence says which, and what to do.
+          415 || 422 => _refusalReason(bytes) ?? 'That file can’t be sent.',
           // A Group Chat's refusals are written for the person — "a Group
           // Chat has 2 to 8 Bots" — and are the only useful thing to say.
           409 when path.startsWith('/api/groups') =>
@@ -258,10 +289,13 @@ class NativeApi {
       path: '/api/bots/$botId/state-channel',
       // `drafts` asks for the reply a running Turn is writing. A server that
       // predates drafts ignores it, and one that has them sends them only to
-      // a client that asked, so neither side has to know the other's age.
+      // a client that asked, so neither side has to know the other's age. A
+      // browser puts no header on a WebSocket, so the protocol this client
+      // decodes is named here too.
       queryParameters: {
         'version': '1',
         'drafts': '1',
+        'protocol': '${wire.clientProtocolVersion}',
         'cursor': ?cursor,
         'epoch': ?epoch,
       },
@@ -286,8 +320,16 @@ class NativeApi {
 abstract interface class ChatTransport {
   Future<Map<String, dynamic>> page(String botId, {String? before});
 
-  /// Starts a Turn. Sent while the Bot is working, it waits and steers.
-  Future<void> send(String botId, String id, String text, {String? retryOf});
+  /// Starts a Turn. Sent while the Bot is working, it waits and steers. The
+  /// files are uploads the Bot already holds, and with them `text` may be
+  /// empty.
+  Future<void> send(
+    String botId,
+    String id,
+    String text, {
+    String? retryOf,
+    List<MessageAttachment> attachments = const [],
+  });
   Future<Map<String, dynamic>?> lookup(
     String botId,
     String id, {
@@ -340,10 +382,39 @@ class BackendExchangeTransport implements ExchangeTransport {
   }
 }
 
-class BackendChatTransport implements ChatTransport, QuestionsTransport {
+class BackendChatTransport
+    implements ChatTransport, QuestionsTransport, UploadTransport {
   final NativeApi api;
   BackendChatTransport(this.api);
   String path(String bot) => '/api/bots/${Uri.encodeComponent(bot)}/turns';
+  String uploads(String bot) => '/api/bots/${Uri.encodeComponent(bot)}/uploads';
+
+  @override
+  Future<MessageAttachment> upload(
+    String botId, {
+    required String name,
+    required String mediaType,
+    required Uint8List bytes,
+  }) async {
+    final receipt = wire.UploadReceipt.fromJson(
+      await api.upload(
+        '${uploads(botId)}?${Uri(queryParameters: {'name': name}).query}',
+        bytes: bytes,
+        contentType: mediaType,
+      ),
+    );
+    final attachment = MessageAttachment.decode(receipt.upload.toJson());
+    if (attachment == null) {
+      throw const RequestFailure('Couldn’t read that reply. Please reconnect.');
+    }
+    return attachment;
+  }
+
+  @override
+  Future<Uint8List> download(String botId, String uploadId) => api.bytes(
+    '${uploads(botId)}/${Uri.encodeComponent(uploadId)}',
+    limit: uploadMaxBytes,
+  );
   @override
   Future<Map<String, dynamic>> page(String botId, {String? before}) async {
     final query = Uri(queryParameters: {'before': ?before}).query;
@@ -366,6 +437,7 @@ class BackendChatTransport implements ChatTransport, QuestionsTransport {
     String id,
     String text, {
     String? retryOf,
+    List<MessageAttachment> attachments = const [],
   }) async {
     if (utf8.encode(text).length > 32000) {
       throw const RequestFailure(
@@ -378,6 +450,11 @@ class BackendChatTransport implements ChatTransport, QuestionsTransport {
       'commandId': id,
       'text': text,
       'retryOf': ?retryOf,
+      if (attachments.isNotEmpty)
+        'attachments': [
+          for (final attachment in attachments)
+            {'uploadId': attachment.uploadId},
+        ],
     });
     final response = wire.TurnAdmission.fromJson(
       await api.request(path(botId), body: command.toJson(), limit: 256000),

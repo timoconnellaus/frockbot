@@ -7,13 +7,17 @@
 /// what disabled Try again for the exact case it exists for.
 library;
 
+import 'dart:async';
 import 'dart:math' as math;
 
-import 'package:flutter/foundation.dart' show ValueListenable;
+import 'package:flutter/foundation.dart'
+    show ValueListenable, defaultTargetPlatform, kIsWeb;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 
 import '../acceptance_metrics.dart';
+import '../client/attachments.dart';
+import 'attachment_views.dart';
 import '../orientation.dart' show isNativeMobile;
 import '../theme/caret.dart';
 import '../theme/controls.dart';
@@ -55,6 +59,23 @@ bool sendReady({
 
 /// Whether the draft is something the send route would accept.
 bool draftSendable(String text) => text.isNotEmpty && !turnTextTooLong(text);
+
+/// Whether the draft and its files are something to send: words, files that
+/// have finished uploading, or both — and nothing still on its way.
+bool messageSendable(String text, AttachmentTray? tray) {
+  if (turnTextTooLong(text)) return false;
+  if (tray != null && tray.busy) return false;
+  return text.isNotEmpty || (tray?.ready.isNotEmpty ?? false);
+}
+
+/// Whether ⌘V or Ctrl+V is the composer's to answer. On a desktop build it
+/// is, so a picture or a copied file on the clipboard is attached; a phone
+/// pastes from its menu, and a browser keeps its own paste.
+bool get composerOwnsPaste =>
+    !kIsWeb &&
+    (defaultTargetPlatform == TargetPlatform.macOS ||
+        defaultTargetPlatform == TargetPlatform.windows ||
+        defaultTargetPlatform == TargetPlatform.linux);
 
 /// Whether a bare Enter sends. Where there is a keyboard with a Shift key,
 /// Enter is Send and Shift+Enter is the line break. A phone's soft keyboard
@@ -251,6 +272,16 @@ class Composer extends StatefulWidget {
 
   /// Puts the raw transcript back. Null leaves the offer off entirely.
   final VoidCallback? onRevertDictation;
+
+  /// The files attached to this draft. Absent where nothing can be attached,
+  /// and then there is no way to attach one.
+  final AttachmentTray? attachments;
+
+  /// Opens the system's picker. Absent, the attach control is not drawn.
+  final VoidCallback? onAttach;
+
+  /// Files pasted or handed over some other way, to attach.
+  final void Function(List<PickedFile> files)? onFiles;
   const Composer({
     super.key,
     required this.editor,
@@ -273,6 +304,9 @@ class Composer extends StatefulWidget {
     this.dictationElapsed,
     this.canRevertDictation,
     this.onRevertDictation,
+    this.attachments,
+    this.onAttach,
+    this.onFiles,
   });
 
   @override
@@ -285,6 +319,7 @@ class _ComposerState extends State<Composer> {
     super.initState();
     widget.skills?.addListener(_changed);
     widget.focus.addListener(_changed);
+    widget.attachments?.addListener(_changed);
     _offerCommands();
   }
 
@@ -292,6 +327,10 @@ class _ComposerState extends State<Composer> {
   void didUpdateWidget(Composer oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.dictating && !oldWidget.dictating) widget.focus.unfocus();
+    if (!identical(oldWidget.attachments, widget.attachments)) {
+      oldWidget.attachments?.removeListener(_changed);
+      widget.attachments?.addListener(_changed);
+    }
     _offerCommands();
   }
 
@@ -312,7 +351,52 @@ class _ComposerState extends State<Composer> {
   void dispose() {
     widget.skills?.removeListener(_changed);
     widget.focus.removeListener(_changed);
+    widget.attachments?.removeListener(_changed);
     super.dispose();
+  }
+
+  /// ⌘V on a desktop: a copied file or a picture is attached, and words are
+  /// pasted into the draft exactly as the field would have.
+  Future<void> _paste() async {
+    final onFiles = widget.onFiles;
+    if (onFiles != null) {
+      final files = await readClipboardFiles();
+      if (files.isNotEmpty) {
+        onFiles(files);
+        return;
+      }
+    }
+    final data = await Clipboard.getData(Clipboard.kTextPlain);
+    final text = data?.text;
+    if (text == null || text.isEmpty || !mounted) return;
+    final value = widget.editor.value;
+    final selection = value.selection.isValid
+        ? value.selection
+        : TextSelection.collapsed(offset: value.text.length);
+    final next = value.text.replaceRange(selection.start, selection.end, text);
+    widget.editor.value = TextEditingValue(
+      text: next,
+      selection: TextSelection.collapsed(offset: selection.start + text.length),
+    );
+    widget.onChanged(next);
+    _refreshPopover();
+    setState(() {});
+  }
+
+  /// A picture a phone's keyboard offers — a screenshot, a GIF — arrives as
+  /// content rather than words.
+  void _inserted(KeyboardInsertedContent content) {
+    final bytes = content.data;
+    final onFiles = widget.onFiles;
+    if (bytes == null || bytes.isEmpty || onFiles == null) return;
+    final extension = content.mimeType.split('/').last;
+    onFiles([
+      PickedFile(
+        name: 'Keyboard image.$extension',
+        bytes: bytes,
+        mediaType: content.mimeType,
+      ),
+    ]);
   }
 
   void _refreshPopover() {
@@ -376,7 +460,7 @@ class _ComposerState extends State<Composer> {
   void _send() {
     if (!widget.dictating &&
         widget.ready &&
-        draftSendable(widget.editor.text.trim())) {
+        messageSendable(widget.editor.text.trim(), widget.attachments)) {
       widget.onSend();
     }
   }
@@ -440,6 +524,22 @@ class _ComposerState extends State<Composer> {
     _refreshPopover();
     widget.focus.requestFocus();
   }
+
+  Widget _attachButton(BuildContext context, double extent) => identified(
+    ShellIds.composerAttach,
+    FrockIconButton(
+      key: const ValueKey('composer-attach'),
+      kind: FrockIconButtonKind.outlined,
+      round: true,
+      tooltip: 'Attach files',
+      onPressed: widget.dictating || (widget.attachments?.room ?? 0) <= 0
+          ? null
+          : widget.onAttach,
+      extent: extent,
+      iconSize: composerControlIconSize(extent),
+      icon: const Icon(Icons.attach_file_rounded),
+    ),
+  );
 
   Widget _plusButton(BuildContext context, double extent) => identified(
     ShellIds.composerPlus,
@@ -540,8 +640,9 @@ class _ComposerState extends State<Composer> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final text = widget.editor.text;
+    final tray = widget.attachments;
     final canSend =
-        !widget.dictating && widget.ready && draftSendable(text.trim());
+        !widget.dictating && widget.ready && messageSendable(text.trim(), tray);
     final fieldStyle = theme.textTheme.bodyLarge?.copyWith(
       fontWeight: FontWeight.w400,
     );
@@ -558,7 +659,12 @@ class _ComposerState extends State<Composer> {
               (fieldStyle?.height ?? 1.0) +
           theme.visualDensity.baseSizeAdjustment.dy,
     );
-    final dictatable = widget.onDictate != null && text.trim().isEmpty;
+    // Files waiting to go are something to send, so the corner offers Send
+    // rather than dictation even while the words are empty.
+    final dictatable =
+        widget.onDictate != null &&
+        text.trim().isEmpty &&
+        (tray == null || tray.isEmpty);
     final skills = widget.skills;
     final field = _field(
       context,
@@ -576,6 +682,7 @@ class _ComposerState extends State<Composer> {
             onChoose: _choose,
             onCommand: _runCommand,
           ),
+        if (tray != null && !tray.isEmpty) AttachmentTrayView(tray: tray),
         if (skills != null && skills.attached.isNotEmpty)
           identified(
             ShellIds.skillChips,
@@ -629,6 +736,13 @@ class _ComposerState extends State<Composer> {
                 SizedBox(
                   height: oneLine,
                   child: Center(child: _plusButton(context, oneLine - 4)),
+                ),
+                const SizedBox(width: 8),
+              ],
+              if (widget.onAttach != null && tray != null) ...[
+                SizedBox(
+                  height: oneLine,
+                  child: Center(child: _attachButton(context, oneLine - 4)),
                 ),
                 const SizedBox(width: 8),
               ],
@@ -820,6 +934,18 @@ class _ComposerState extends State<Composer> {
                       LogicalKeyboardKey.enter,
                       control: true,
                     ): _send,
+                    if (composerOwnsPaste && widget.onFiles != null) ...{
+                      const SingleActivator(
+                        LogicalKeyboardKey.keyV,
+                        meta: true,
+                      ): () =>
+                          unawaited(_paste()),
+                      const SingleActivator(
+                        LogicalKeyboardKey.keyV,
+                        control: true,
+                      ): () =>
+                          unawaited(_paste()),
+                    },
                     if (enterSends) ...{
                       const SingleActivator(LogicalKeyboardKey.enter): _enter,
                       const SingleActivator(LogicalKeyboardKey.numpadEnter):
@@ -848,6 +974,17 @@ class _ComposerState extends State<Composer> {
                           maxLines: 6,
                           keyboardType: TextInputType.multiline,
                           textInputAction: TextInputAction.newline,
+                          contentInsertionConfiguration: widget.onFiles == null
+                              ? null
+                              : ContentInsertionConfiguration(
+                                  onContentInserted: _inserted,
+                                  allowedMimeTypes: const [
+                                    'image/png',
+                                    'image/jpeg',
+                                    'image/webp',
+                                    'image/gif',
+                                  ],
+                                ),
                           decoration: InputDecoration(
                             hintText: _prompt,
                             // A long name is cut, not wrapped: at large text

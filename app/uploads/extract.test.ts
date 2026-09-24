@@ -81,7 +81,7 @@ describe("a document's text", () => {
       await extractDocumentTextV1({
         name: "notes.md",
         mediaType: "text/markdown",
-        bytes: new TextEncoder().encode("﻿# Notes\r\n\r\nBuy milk.\r\n"),
+        bytes: new TextEncoder().encode("\ufeff# Notes\r\n\r\nBuy milk.\r\n"),
       }),
     ).toEqual({ status: "ok", text: "# Notes\n\nBuy milk.", chars: 18 });
   });
