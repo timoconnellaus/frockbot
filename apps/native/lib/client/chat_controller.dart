@@ -176,6 +176,18 @@ class ChatController extends ChangeNotifier {
     return null;
   }
 
+  /// The order submissions were made on this device, which is the order the
+  /// thread keeps them in until the durable transcript carries them. A count
+  /// rather than this device's clock, which says nothing against the server's
+  /// stamps. In memory only: a restored submission is numbered as it is
+  /// restored.
+  final _localOrder = <String, int>{};
+  void _number(PendingSend submission) =>
+      _localOrder.putIfAbsent(submission.id, () => _localOrder.length);
+
+  /// Where a submission falls among the others made on this device.
+  int localOrderOf(String id) => _localOrder[id] ?? _localOrder.length;
+
   /// Whether this client could start a Turn.
   ///
   /// Not gated on a Turn already running, and not on a submission still being
@@ -357,6 +369,7 @@ class ChatController extends ChangeNotifier {
         ?PendingSend.decode(entry),
     ];
     for (final submission in pending) {
+      _number(submission);
       if (submission.retryOf != null) {
         _putOptimisticRun(submission, queued: false);
       }
@@ -547,11 +560,13 @@ class ChatController extends ChangeNotifier {
       'admittedAt': DateTime.now().toUtc().toIso8601String(),
       'status': 'running',
       'queued': queued,
+      // A retry is drawn where its original message already is.
       if (submission.retryOf != null) ...{
         'retryOf': submission.retryOf,
         'messageRunId': submission.messageRunId,
         'messageAdmittedAt': submission.messageAdmittedAt,
-      },
+      } else
+        'localOrder': localOrderOf(submission.id),
       'events': const <Object?>[],
     };
   }
@@ -807,6 +822,7 @@ class ChatController extends ChangeNotifier {
 
   Future<void> _submit(PendingSend submission) async {
     final text = submission.text;
+    _number(submission);
     _inFlight += 1;
     // A new send clears outcomes for commands that are already resolved.
     // One that is still pending keeps its own.
