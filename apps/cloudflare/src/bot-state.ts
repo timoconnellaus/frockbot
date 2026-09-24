@@ -354,6 +354,7 @@ import {
   rpcInteger,
   rpcJsonSnapshotV1,
   rpcObject,
+  rpcOrigin,
   rpcPattern,
   rpcPluginIdOrNull,
   rpcString,
@@ -1452,6 +1453,7 @@ export class BotState
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
       botId: rpcBotId,
+      appOrigin: rpcOrigin,
     });
     const identity = {
       userId: request.userId as string,
@@ -1459,7 +1461,11 @@ export class BotState
     };
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    return openFocusedPanelV1(shell.state, identity);
+    return openFocusedPanelV1(
+      shell.state,
+      identity,
+      request.appOrigin as string,
+    );
   }
 
   async readFocusedPanel(input: unknown) {

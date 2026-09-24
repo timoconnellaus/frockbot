@@ -15,6 +15,11 @@ import {
   type FocusedPanelV1,
 } from "@frockbot/core/durable";
 import type { BotIdentity } from "@frockbot/core/durable";
+import {
+  pluginPageStateV1,
+  pluginPageUrlV1,
+  type PluginWorkerViewResultV1,
+} from "@frockbot/core/contracts";
 import { pluginMountOrderV1 } from "@frockbot/frock-compose";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import {
@@ -49,6 +54,11 @@ export interface PanelOpenViewV1 {
   bag: PluginPanelTabV1[];
   focus: { pluginId: string | null; surfaceId?: string };
   document?: ViewDocument;
+  /**
+   * The focused surface when its view names a page (ADR 0036): where the
+   * artifact host serves it, and the state its view returned.
+   */
+  page?: { url: string; state: Record<string, unknown> };
   failure?: string;
   doors: PanelDoorViewV1[];
 }
@@ -198,20 +208,24 @@ export function surfaceDocumentV1(
   }
 }
 
+/** What each wanted surface's view answered, keyed `<pluginId>:<surfaceId>`. */
 async function renderSurfacesV1(
   state: ShellBotStateV1,
   identity: BotIdentity,
   roster: BotPluginRosterV1,
-  wanted: { pluginId: string; surfaceId: string; kind: "page" | "section" }[],
-): Promise<Map<string, BotPluginSectionV1>> {
-  const drawn = new Map<string, BotPluginSectionV1>();
-  if (wanted.length === 0) return drawn;
+  wanted: { pluginId: string; surfaceId: string }[],
+): Promise<Map<string, PluginWorkerViewResultV1>> {
+  const answered = new Map<string, PluginWorkerViewResultV1>();
+  if (wanted.length === 0) return answered;
   const members = new Map(
     roster.members.map((member) => [member.packageId, member]),
   );
   const runId = `panels:${identity.botId}`;
-  const keyFor = (pluginId: string, surfaceId: string) =>
-    `${pluginId}:${surfaceId}`;
+  const drop = (reason: string): PluginWorkerViewResultV1 => ({
+    schemaVersion: 1,
+    status: "drop",
+    reason,
+  });
   const outcome = await withPluginWorkerV1(
     state,
     identity,
@@ -220,44 +234,30 @@ async function renderSurfacesV1(
     async (worker) => {
       await Promise.all(
         wanted.map(async (item) => {
-          const member = members.get(item.pluginId);
-          const tools = member?.descriptor.tools.map((tool) => tool.name) ?? [];
-          const source = {
-            pluginId: item.pluginId,
-            surfaceId: item.surfaceId,
-            tools,
-          };
+          const key = surfaceKeyV1(item.pluginId, item.surfaceId);
           const failure = worker.failures.find(
             (candidate) => candidate.pluginId === item.pluginId,
           );
-          const render = item.kind === "page" ? pluginPageV1 : pluginSectionV1;
-          if (failure || !member) {
-            drawn.set(
-              keyFor(item.pluginId, item.surfaceId),
-              render(source, {
-                schemaVersion: 1,
-                status: "drop",
-                reason: failure?.message ?? "this plugin is not mounted",
-              }),
+          if (failure || !members.has(item.pluginId)) {
+            answered.set(
+              key,
+              drop(failure?.message ?? "this plugin is not mounted"),
             );
             return;
           }
-          drawn.set(
-            keyFor(item.pluginId, item.surfaceId),
-            render(
-              source,
-              await worker.active.renderView({
-                schemaVersion: 1,
-                pluginId: item.pluginId,
-                surfaceId: item.surfaceId,
-                botId: identity.botId,
-                sessionId: `${identity.userId}:${identity.botId}`,
-                runId,
-                turnId: runId,
-                generationId: roster.generationId,
-                deadlineMs: PLUGIN_VIEW_DEADLINE_MS,
-              }),
-            ),
+          answered.set(
+            key,
+            await worker.active.renderView({
+              schemaVersion: 1,
+              pluginId: item.pluginId,
+              surfaceId: item.surfaceId,
+              botId: identity.botId,
+              sessionId: `${identity.userId}:${identity.botId}`,
+              runId,
+              turnId: runId,
+              generationId: roster.generationId,
+              deadlineMs: PLUGIN_VIEW_DEADLINE_MS,
+            }),
           );
         }),
       );
@@ -266,22 +266,71 @@ async function renderSurfacesV1(
   );
   if (outcome && outcome.status === "unavailable") {
     for (const item of wanted) {
-      const render = item.kind === "page" ? pluginPageV1 : pluginSectionV1;
-      drawn.set(
-        keyFor(item.pluginId, item.surfaceId),
-        render(
-          { pluginId: item.pluginId, surfaceId: item.surfaceId, tools: [] },
-          { schemaVersion: 1, status: "drop", reason: outcome.reason },
-        ),
+      answered.set(
+        surfaceKeyV1(item.pluginId, item.surfaceId),
+        drop(outcome.reason),
       );
     }
   }
-  return drawn;
+  return answered;
+}
+
+function surfaceKeyV1(pluginId: string, surfaceId: string): string {
+  return `${pluginId}:${surfaceId}`;
+}
+
+function toolsOfV1(roster: BotPluginRosterV1, pluginId: string): string[] {
+  return (
+    roster.members
+      .find((member) => member.packageId === pluginId)
+      ?.descriptor.tools.map((tool) => tool.name) ?? []
+  );
+}
+
+/**
+ * The focused surface's page, when its view names one: where the app serves
+ * the stored page, and the state the view returned.
+ */
+export function focusedPanelPageV1(
+  roster: BotPluginRosterV1,
+  focused: { pluginId: string; surfaceId: string },
+  answer: PluginWorkerViewResultV1 | undefined,
+  appOrigin: string,
+): { page?: PanelOpenViewV1["page"]; failure?: string } | undefined {
+  const member = roster.members.find(
+    (candidate) => candidate.packageId === focused.pluginId,
+  );
+  const path = member?.descriptor.views?.find(
+    (view) =>
+      view.slot === "conversation.panel" &&
+      view.surfaceId === focused.surfaceId,
+  )?.page;
+  if (!member || path === undefined) return undefined;
+  const stored = member.pages?.find((page) => page.path === path);
+  if (!stored) return { failure: "This plugin's page was not published." };
+  if (!answer || answer.status === "drop") {
+    return {
+      failure: `This plugin could not show its page${answer?.reason ? `: ${answer.reason.slice(0, 400)}` : "."}`,
+    };
+  }
+  const state = pluginPageStateV1(answer.document);
+  if ("failure" in state) {
+    return {
+      failure: `This plugin's page could not be shown: ${state.failure}.`,
+    };
+  }
+  return {
+    page: {
+      url: pluginPageUrlV1(appOrigin, stored.contentHash),
+      state: state.state,
+    },
+  };
 }
 
 function doorViewV1(
   door: PluginNavDoorV1,
-  drawn: Map<string, BotPluginSectionV1>,
+  roster: BotPluginRosterV1,
+  answered: Map<string, PluginWorkerViewResultV1>,
   revision: number,
 ): PanelDoorViewV1 {
   const view: PanelDoorViewV1 = {
@@ -290,11 +339,18 @@ function doorViewV1(
     ...(door.opens ? { opens: door.opens } : {}),
   };
   if (!door.surfaceId) return view;
-  const rendered = drawn.get(`${door.pluginId}:${door.surfaceId}`);
-  if (!rendered) return view;
+  const answer = answered.get(surfaceKeyV1(door.pluginId, door.surfaceId));
+  if (!answer) return view;
   const document = surfaceDocumentV1(
     panelDocumentIdV1("nav", door.pluginId, door.surfaceId),
-    rendered,
+    pluginSectionV1(
+      {
+        pluginId: door.pluginId,
+        surfaceId: door.surfaceId,
+        tools: toolsOfV1(roster, door.pluginId),
+      },
+      answer,
+    ),
     revision,
   );
   if (document.document) view.document = document.document;
@@ -309,6 +365,8 @@ function doorViewV1(
 export async function openFocusedPanelV1(
   state: ShellBotStateV1,
   identity: BotIdentity,
+  /** The app origin the canvas read arrived on, which serves the pages. */
+  appOrigin: string,
 ): Promise<PanelOpenViewV1> {
   const roster = await readBotPluginRosterV1(state, identity);
   const sources = panelSourcesFromRosterV1(roster);
@@ -324,28 +382,16 @@ export async function openFocusedPanelV1(
     await state.ctx.storage.delete(PANEL_FOCUSED_KEY);
   }
   const doors = botNavDoorsV1(sources, bag.tabs);
-  const wanted: {
-    pluginId: string;
-    surfaceId: string;
-    kind: "page" | "section";
-  }[] = [];
+  const wanted: { pluginId: string; surfaceId: string }[] = [];
   if (stored?.pluginId && stored.surfaceId) {
-    wanted.push({
-      pluginId: stored.pluginId,
-      surfaceId: stored.surfaceId,
-      kind: "page",
-    });
+    wanted.push({ pluginId: stored.pluginId, surfaceId: stored.surfaceId });
   }
   for (const door of doors) {
     if (door.surfaceId) {
-      wanted.push({
-        pluginId: door.pluginId,
-        surfaceId: door.surfaceId,
-        kind: "section",
-      });
+      wanted.push({ pluginId: door.pluginId, surfaceId: door.surfaceId });
     }
   }
-  const drawn = await renderSurfacesV1(state, identity, roster, wanted);
+  const answered = await renderSurfacesV1(state, identity, roster, wanted);
   const revision = Date.parse(stored?.changedAt ?? "0") || 0;
   const opened: PanelOpenViewV1 = {
     schemaVersion: 1,
@@ -356,14 +402,27 @@ export async function openFocusedPanelV1(
           ...(stored.surfaceId ? { surfaceId: stored.surfaceId } : {}),
         }
       : { pluginId: null },
-    doors: doors.map((door) => doorViewV1(door, drawn, revision)),
+    doors: doors.map((door) => doorViewV1(door, roster, answered, revision)),
   };
   if (stored?.pluginId && stored.surfaceId) {
-    const rendered = drawn.get(`${stored.pluginId}:${stored.surfaceId}`);
-    if (rendered) {
+    const focused = { pluginId: stored.pluginId, surfaceId: stored.surfaceId };
+    const answer = answered.get(
+      surfaceKeyV1(focused.pluginId, focused.surfaceId),
+    );
+    const page = focusedPanelPageV1(roster, focused, answer, appOrigin);
+    if (page) {
+      if (page.page) opened.page = page.page;
+      if (page.failure) opened.failure = page.failure.slice(0, 500);
+    } else if (answer) {
       const document = surfaceDocumentV1(
-        panelDocumentIdV1("panel", stored.pluginId, stored.surfaceId),
-        rendered,
+        panelDocumentIdV1("panel", focused.pluginId, focused.surfaceId),
+        pluginPageV1(
+          {
+            ...focused,
+            tools: toolsOfV1(roster, focused.pluginId),
+          },
+          answer,
+        ),
         revision,
       );
       if (document.document) opened.document = document.document;

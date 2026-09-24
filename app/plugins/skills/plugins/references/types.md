@@ -822,12 +822,23 @@ export interface PluginViewDocument {
   root: PluginViewNode;
 }
 
-/** A view: renders one declared surface with the same `ctx` a tool call gets. */
+/**
+ * What a `conversation.panel` view that names a `page` returns: the state its
+ * page is handed, any JSON object of at most 64 KB.
+ */
+export type PluginPageState = { [key: string]: unknown };
+
+/**
+ * A view: renders one declared surface with the same `ctx` a tool call gets.
+ * It returns the tree the host draws, or — for a view that names a `page` —
+ * the page's state.
+ */
 export type PluginView = (
   ctx: PluginContext,
 ) =>
-  | Promise<PluginViewDocument | undefined | void>
+  | Promise<PluginViewDocument | PluginPageState | undefined | void>
   | PluginViewDocument
+  | PluginPageState
   | undefined
   | void;
 
@@ -975,8 +986,10 @@ export interface PluginModule {
   services?: Record<string, unknown>;
   triggers?: PluginTriggers;
   /**
-   * One view per surface id declared under `views` in `plugin.json`, each
-   * with slot `settings.sections`: a section drawn on this Plugin's card.
+   * One view per surface id declared under `views` in `plugin.json`: a
+   * `settings.sections` block on this Plugin's card, a `conversation.panel`
+   * page beside the conversation, or a `bot.nav` door. A panel view that
+   * names a `page` returns that page's state instead of a tree.
    */
   views?: Record<string, PluginView>;
   /**

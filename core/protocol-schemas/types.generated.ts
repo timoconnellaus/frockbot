@@ -722,11 +722,18 @@ export type PanelDoor = {
   document?: ViewDocument;
   failure?: string;
 };
+export type PanelPage = {
+  url: string;
+  state: {
+    [key: string]: Json;
+  };
+};
 export type PanelOpenView = {
   schemaVersion: 1;
   bag: Array<PanelBagEntry>;
   focus: PanelFocus;
   document?: ViewDocument;
+  page?: PanelPage;
   failure?: string;
   doors: Array<PanelDoor>;
 };
@@ -1174,6 +1181,7 @@ export interface ProtocolTypes {
   PanelBagEntry: PanelBagEntry;
   PanelFocus: PanelFocus;
   PanelDoor: PanelDoor;
+  PanelPage: PanelPage;
   PanelOpenView: PanelOpenView;
   UnreadDirectory: UnreadDirectory;
   RunLookup: RunLookup;

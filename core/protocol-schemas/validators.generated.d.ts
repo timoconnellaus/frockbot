@@ -130,6 +130,7 @@ declare const validators: {
   isPanelBagEntry(value: unknown): value is ProtocolTypes["PanelBagEntry"];
   isPanelFocus(value: unknown): value is ProtocolTypes["PanelFocus"];
   isPanelDoor(value: unknown): value is ProtocolTypes["PanelDoor"];
+  isPanelPage(value: unknown): value is ProtocolTypes["PanelPage"];
   isPanelOpenView(value: unknown): value is ProtocolTypes["PanelOpenView"];
   isUnreadDirectory(value: unknown): value is ProtocolTypes["UnreadDirectory"];
   isRunLookup(value: unknown): value is ProtocolTypes["RunLookup"];

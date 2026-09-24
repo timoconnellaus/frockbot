@@ -6,7 +6,8 @@ allowed to do and "self-modification never widens your own authority". You
 cannot reach a host you did not declare, read another Plugin's store, or call
 a model other than this Bot's (`ctx.model` is the Bot's binding; serving a
 provider is only a catalog claim). You cannot `skill_write` a Skill this
-Plugin shipped. You cannot add a third source file. A Plugin you delete from
+Plugin shipped. Besides `plugin.ts` and `plugin.json`, the only source a Plugin uses is a
+page a `conversation.panel` view names (`pages.md`). A Plugin you delete from
 the source tree is still in the User's history; nothing published is ever lost.
 
 A publish never runs anything. `plugin_publish` and `plugin_enable` write an

@@ -9,6 +9,7 @@ import type {
   AuthIdentityCandidateV1,
   AuthPackageIdentityStoreV1,
 } from "@frockbot/core/contracts";
+import { pluginPageKeyV1 } from "@frockbot/core/contracts";
 import { sha256HexV1 as sha256Hex } from "@frockbot/core/crypto";
 import type { ClientSkillCatalogV1 } from "@frockbot/app/shell/skill-protocol";
 import { GroupChat, GROUP_CHANNEL_INTERNAL_PATH } from "./group-chat.js";
@@ -1218,6 +1219,11 @@ class R2ApplicationArtifacts
       );
     }
     return object.text();
+  }
+
+  async loadPluginPage(contentHash: string): Promise<string | undefined> {
+    const object = await this.bucket.get(pluginPageKeyV1(contentHash));
+    return object ? object.text() : undefined;
   }
 
   /**

@@ -161,6 +161,59 @@ describe("a plugin's declared views", () => {
   });
 });
 
+describe("a panel view that names a page", () => {
+  test("keeps the page on a conversation.panel view", () => {
+    expect(
+      decodePluginDescriptorV1({
+        ...base,
+        views: [
+          {
+            slot: "conversation.panel",
+            surfaceId: "tuner",
+            label: "Tuner",
+            page: "tuner.html",
+          },
+          {
+            slot: "conversation.panel",
+            surfaceId: "board",
+            label: "Board",
+            page: "pages/board.html",
+          },
+        ],
+      }).views?.map((view) => view.page),
+    ).toEqual(["tuner.html", "pages/board.html"]);
+  });
+
+  test("refuses a page anywhere but the conversation panel", () => {
+    for (const slot of ["settings.sections", "bot.nav"]) {
+      expect(() =>
+        decodePluginDescriptorV1({
+          ...base,
+          views: [{ slot, surfaceId: "tuner", page: "tuner.html" }],
+        }),
+      ).toThrow(/only valid on conversation.panel/);
+    }
+  });
+
+  test("refuses a page path outside the plugin's source or not HTML", () => {
+    for (const page of [
+      "../tuner.html",
+      "/tuner.html",
+      "tuner.js",
+      "a/b/tuner.html",
+      "Tuner.html",
+      "https://example.com/tuner.html",
+    ]) {
+      expect(() =>
+        decodePluginDescriptorV1({
+          ...base,
+          views: [{ slot: "conversation.panel", surfaceId: "tuner", page }],
+        }),
+      ).toThrow(/\.html file/);
+    }
+  });
+});
+
 describe("a plugin's hooks and contract", () => {
   test("orders hooks by the vocabulary and refuses an unopened event", () => {
     expect(

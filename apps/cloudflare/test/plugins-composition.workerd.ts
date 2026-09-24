@@ -6,7 +6,13 @@
 // firing — and the outcome of that activation lands on the User's record, not
 // the Bot's.
 import { env } from "cloudflare:workers";
-import { runDurableObjectAlarm, runInDurableObject } from "cloudflare:test";
+import {
+  createExecutionContext,
+  runDurableObjectAlarm,
+  runInDurableObject,
+  waitOnExecutionContext,
+} from "cloudflare:test";
+import worker from "../src/index.ts";
 import { describe, expect, test, vi } from "vitest";
 import { provisionBot, provisionSiblingBot } from "./provision-bot.ts";
 import { hydratedStoredRunsV1 } from "./session-log-probe.ts";
@@ -16,6 +22,8 @@ import {
   ISOLATE_CONTRACT_VERSION,
   decodePluginDescriptorV1,
   pluginCardToolNameV1,
+  pluginPageKeyV1,
+  withPluginPageBridgeV1,
 } from "@frockbot/core/contracts";
 import {
   routineDeliveryIdV1,
@@ -115,6 +123,13 @@ interface FeaturesRpc {
 
 interface BotRpc {
   run(command: unknown): Promise<{ runId: string }>;
+  setFocusedPanel(input: unknown): Promise<{ status: string }>;
+  openFocusedPanel(input: unknown): Promise<{
+    focus: { pluginId: string | null; surfaceId?: string };
+    document?: unknown;
+    page?: { url: string; state: Record<string, unknown> };
+    failure?: string;
+  }>;
   listCards(input: unknown): Promise<{
     cards: Array<{
       surfaceId: string;
@@ -2392,6 +2407,168 @@ export const views = {
     ).toEqual({
       status: "rejected",
       failure: '"Counter" has no "counter_other" control',
+    });
+  });
+
+  test("a Plugin's panel page is its stored page's URL and its view's state, and a tool it calls moves that state", async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    const identity = { userId, botId: "bot-1" };
+    await provisionBot(identity);
+    await turn(identity, "run-0");
+    const bootstrap = (
+      await user(userId).readComposition({ schemaVersion: 1, userId })
+    ).current;
+
+    const SCORE_ID = "score";
+    const SCORE_SOURCE = `
+export const tools = [
+  { name: "score_add", description: "Adds one", inputSchema: { type: "object" }, idempotent: false },
+];
+export async function execute(tool, input, ctx) {
+  const got = await ctx.storage.get({ key: "score" });
+  const next = (typeof got.value === "number" ? got.value : 0) + 1;
+  await ctx.storage.put({ key: "score", value: next });
+  return "score is " + next;
+}
+export const views = {
+  score: async function (ctx) {
+    const got = await ctx.storage.get({ key: "score" });
+    return { score: typeof got.value === "number" ? got.value : 0, bot: ctx.bot.botId };
+  },
+};
+`;
+    const PAGE = withPluginPageBridgeV1(
+      "<!doctype html><html><head></head><body>score</body></html>",
+    );
+    const descriptor = decodePluginDescriptorV1({
+      id: SCORE_ID,
+      displayName: "Score",
+      version: "0.0.1",
+      contractVersion: ISOLATE_CONTRACT_VERSION,
+      tools: [{ name: "score_add", description: "Adds one", inputSchema: {} }],
+      hooks: [],
+      grants: ["storage"],
+      views: [
+        { slot: "conversation.panel", surfaceId: "score", page: "score.html" },
+      ],
+      contextKeys: ["user", "bot", "session"],
+    });
+    const contentHash = await sha256Hex(SCORE_SOURCE);
+    const pageHash = await sha256Hex(PAGE);
+    await env.APPLICATION_ARTIFACTS.put(
+      `packages/${contentHash}.mjs`,
+      SCORE_SOURCE,
+    );
+    await env.APPLICATION_ARTIFACTS.put(pluginPageKeyV1(pageHash), PAGE);
+    const createdAt = "2026-09-24T05:00:00.000Z";
+    const members: CompositionMemberV1[] = [
+      {
+        packageId: SCORE_ID,
+        version: "0.0.1",
+        descriptor,
+        provenance: {
+          kind: "bot",
+          packageId: SCORE_ID,
+          version: "0.0.1",
+          botId: "bot-1",
+          sessionId: `${userId}:bot-1`,
+          turnId: "run-0",
+          runId: "run-0",
+          authoredAt: createdAt,
+        },
+        artifact: {
+          contentHash,
+          size: SCORE_SOURCE.length,
+          mediaType: "application/javascript",
+          bundlerVersion: "probe-seed",
+        },
+        pages: [
+          { path: "score.html", contentHash: pageHash, size: PAGE.length },
+        ],
+      },
+    ];
+    const artifactSetHash = await compositionArtifactSetHashV1(members);
+    await user(userId).proposeComposition({
+      schemaVersion: 1,
+      userId,
+      generation: {
+        schemaVersion: 1,
+        generationId: compositionGenerationIdV1(createdAt, artifactSetHash),
+        artifactSetHash,
+        parentGenerationId: bootstrap.generationId,
+        createdAt,
+        origin: {
+          kind: "bot-authored",
+          runId: "run-0",
+          sessionId: `${userId}:bot-1`,
+          turnId: "run-0",
+        },
+        members,
+        status: "pending",
+      },
+      pin: true,
+      expectedCurrentGenerationId: bootstrap.generationId,
+    });
+    await switchPlugin(identity, SCORE_ID, true);
+    expect(
+      await bot(identity).setFocusedPanel({
+        schemaVersion: 1,
+        ...identity,
+        pluginId: SCORE_ID,
+        surfaceId: "score",
+      }),
+    ).toMatchObject({ status: "applied" });
+
+    const ORIGIN = "https://bot.example.com";
+    const open = () =>
+      bot(identity).openFocusedPanel({
+        schemaVersion: 1,
+        ...identity,
+        appOrigin: ORIGIN,
+      });
+    // The page, where the app serves it, with the state its view returned for
+    // this Bot — and no document beside it.
+    const first = await open();
+    expect(first.page).toEqual({
+      url: `${ORIGIN}/plugin-pages/${pageHash}.html`,
+      state: { score: 0, bot: "bot-1" },
+    });
+    expect(first.document).toBeUndefined();
+    expect(first.failure).toBeUndefined();
+
+    // The Worker serves those bytes to anyone who names them, sandboxed.
+    const context = createExecutionContext();
+    const served = await worker.fetch(
+      new Request(first.page!.url),
+      env as unknown as Parameters<typeof worker.fetch>[1],
+      context,
+    );
+    await waitOnExecutionContext(context);
+    expect(served.status).toBe(200);
+    expect(await served.text()).toBe(PAGE);
+    expect(served.headers.get("content-security-policy")).toMatch(
+      /^sandbox allow-scripts;/,
+    );
+
+    // A tool the page calls runs outside any Turn, and the next read hands the
+    // page what it left behind.
+    expect(
+      await bot(identity).executeBotPluginTool({
+        schemaVersion: 1,
+        ...identity,
+        command: {
+          schemaVersion: 1,
+          kind: "plugin-tool",
+          commandId: "page-press-1",
+          pluginId: SCORE_ID,
+          tool: "score_add",
+          arguments: "{}",
+        },
+      }),
+    ).toEqual({ status: "ran", content: "score is 1", isError: false });
+    expect((await open()).page?.state).toEqual({
+      score: 1,
+      bot: "bot-1",
     });
   });
 

@@ -56,7 +56,8 @@ Required keys: `id`, `displayName`, `version`, `contractVersion`, `tools`,
 "actions" }[]`. See `cards.md`.
 - `modelProviders` (optional) is `{ "id", "protocolVersion" }[]`. See
   `providers.md`.
-- `slots` / `views` — see `sections.md` and `panels.md`. Open:
+- `slots` / `views` — see `sections.md`, `panels.md` and `pages.md`; a
+  `conversation.panel` view may name a `page`. Open:
   `settings.sections`, `conversation.panel`, and `bot.nav`. Closed:
   `composer.toolbar`, `message.actions`, and `bot.profile`.
 - `contextKeys` is always all three: `user`, `bot`, `session`.

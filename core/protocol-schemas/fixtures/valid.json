@@ -2234,6 +2234,41 @@
     }
   },
   {
+    "name": "PanelPage valid",
+    "schema": "PanelPage",
+    "value": {
+      "url": "https://bot.example/plugin-pages/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.html",
+      "state": {
+        "score": 2,
+        "moves": ["e4"]
+      }
+    }
+  },
+  {
+    "name": "PanelOpenView with a page valid",
+    "schema": "PanelOpenView",
+    "value": {
+      "schemaVersion": 1,
+      "bag": [
+        {
+          "pluginId": "score",
+          "displayName": "Score",
+          "surfaceId": "score",
+          "label": "Score"
+        }
+      ],
+      "focus": {
+        "pluginId": "score",
+        "surfaceId": "score"
+      },
+      "page": {
+        "url": "https://bot.example/plugin-pages/aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa.html",
+        "state": {}
+      },
+      "doors": []
+    }
+  },
+  {
     "name": "PanelDoor valid",
     "schema": "PanelDoor",
     "value": {

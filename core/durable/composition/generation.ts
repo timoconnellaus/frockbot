@@ -10,8 +10,10 @@
 import {
   canonicalJson,
   decodePluginDescriptorV1,
+  PLUGIN_PAGE_PATH_V1,
   sha256,
   type PluginDescriptorV1,
+  type PluginPageArtifactV1,
 } from "@frockbot/core/contracts";
 
 export type PackageProvenanceV1 =
@@ -62,6 +64,12 @@ export interface CompositionMemberV1 {
   artifact: ArtifactRefV1;
   /** What the plugin declares it reaches; the isolate's health must match. */
   descriptor: PluginDescriptorV1;
+  /**
+   * The pages its `conversation.panel` views name, stored beside the module
+   * and covered by the generation's hash, so a revert restores them with it.
+   * Present exactly when a view names a page.
+   */
+  pages?: PluginPageArtifactV1[];
 }
 
 export type CompositionOriginV1 =
@@ -332,7 +340,7 @@ export function decodeCompositionMemberV1(
   label: string,
 ): CompositionMemberV1 {
   const value = record(input, label);
-  exactKeys(value, MEMBER_KEYS, [], label);
+  exactKeys(value, MEMBER_KEYS, ["pages"], label);
   const packageId = boundedString(value.packageId, `${label}.packageId`, 128);
   const version = boundedString(value.version, `${label}.version`, 64);
   const provenance = decodePackageProvenanceV1(
@@ -349,13 +357,63 @@ export function decodeCompositionMemberV1(
   if (descriptor.id !== packageId || descriptor.version !== version) {
     throw new Error(`${label}.descriptor does not match its member`);
   }
+  const pages = decodeMemberPagesV1(value.pages, descriptor, `${label}.pages`);
   return {
     packageId,
     version,
     provenance,
     artifact: decodeArtifactRefV1(value.artifact, `${label}.artifact`),
     descriptor,
+    ...(pages === undefined ? {} : { pages }),
   };
+}
+
+/** Exactly one stored page for every page a view names, and no other. */
+function decodeMemberPagesV1(
+  input: unknown,
+  descriptor: PluginDescriptorV1,
+  label: string,
+): PluginPageArtifactV1[] | undefined {
+  const named = new Set(
+    (descriptor.views ?? []).flatMap((view) =>
+      view.page === undefined ? [] : [view.page],
+    ),
+  );
+  if (input === undefined) {
+    if (named.size > 0) throw new Error(`${label} is missing`);
+    return undefined;
+  }
+  if (!Array.isArray(input) || input.length === 0) {
+    throw new Error(`${label} must be a non-empty array`);
+  }
+  const pages = input.map((entry, index) => {
+    const value = record(entry, `${label}[${index}]`);
+    exactKeys(value, ["path", "contentHash", "size"], [], `${label}[${index}]`);
+    const path = boundedString(value.path, `${label}[${index}].path`, 140);
+    if (!PLUGIN_PAGE_PATH_V1.test(path)) {
+      throw new Error(`${label}[${index}].path is invalid`);
+    }
+    if (!Number.isSafeInteger(value.size) || (value.size as number) < 0) {
+      throw new Error(`${label}[${index}].size must be a non-negative integer`);
+    }
+    return {
+      path,
+      contentHash: hashString(
+        value.contentHash,
+        `${label}[${index}].contentHash`,
+      ),
+      size: value.size as number,
+    };
+  });
+  const paths = new Set(pages.map((page) => page.path));
+  if (
+    paths.size !== pages.length ||
+    paths.size !== named.size ||
+    ![...named].every((path) => paths.has(path))
+  ) {
+    throw new Error(`${label} must name each page the views name, once`);
+  }
+  return pages;
 }
 
 function decodeCompositionOriginV1(

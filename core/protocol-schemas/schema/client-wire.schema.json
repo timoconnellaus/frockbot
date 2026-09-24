@@ -4052,6 +4052,25 @@
       "required": ["pluginId", "label"],
       "additionalProperties": false
     },
+    "PanelPage": {
+      "type": "object",
+      "properties": {
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048
+        },
+        "state": {
+          "type": "object",
+          "maxProperties": 256,
+          "additionalProperties": {
+            "$ref": "#/$defs/Json"
+          }
+        }
+      },
+      "required": ["url", "state"],
+      "additionalProperties": false
+    },
     "PanelOpenView": {
       "type": "object",
       "properties": {
@@ -4070,6 +4089,9 @@
         },
         "document": {
           "$ref": "#/$defs/ViewDocument"
+        },
+        "page": {
+          "$ref": "#/$defs/PanelPage"
         },
         "failure": {
           "type": "string",

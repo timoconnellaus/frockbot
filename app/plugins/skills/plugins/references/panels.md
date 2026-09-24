@@ -1,8 +1,9 @@
 # Conversation panel
 
 A Plugin can fill the page beside the conversation — the same tree, drawn by
-the host, no HTML and no iframe. Declare a `conversation.panel` view; give it
-a `label` when you declare more than one. A `bot.nav` view is a door on this
+the host. Declare a `conversation.panel` view; give it a `label` when you
+declare more than one. A panel whose surface is its own drawing or
+interaction may be an HTML page instead: see `pages.md`. A `bot.nav` view is a door on this
 Bot's page; `opens` names which of your panel surfaces a press focuses.
 
 ```json

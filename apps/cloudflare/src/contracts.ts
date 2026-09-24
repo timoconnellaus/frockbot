@@ -378,6 +378,8 @@ export type BotPackageLoader = WorkerLoader<
 
 export interface ApplicationArtifactStore {
   load(applicationHash: string): Promise<string>;
+  /** A Plugin's stored page, or undefined when there is none. */
+  loadPluginPage?(contentHash: string): Promise<string | undefined>;
 }
 
 /**
@@ -640,6 +642,8 @@ export interface BotConfigurationBinding {
     schemaVersion: 1;
     userId: string;
     botId: string;
+    /** The origin the read arrived on, which serves the Plugin's pages. */
+    appOrigin: string;
   }): Promise<import("@frockbot/app/plugins/panels-bot").PanelOpenViewV1>;
   setFocusedPanel(request: {
     schemaVersion: 1;

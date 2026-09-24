@@ -143,10 +143,10 @@ describe("user application security headers", () => {
     // The document sets a `<base href>` of its own to the content-addressed
     // directory the engine's URLs are relative to.
     expect(policy.get("base-uri")).toEqual(["'self'"]);
-    // The expanded Computer viewer frames a page the Computer host serves,
-    // and the policy names whatever origins that host declared rather than a
-    // literal of its own.
+    // A Plugin's pages, by path on this origin and nothing else of it, and
+    // the expanded Computer viewer at whatever origins its host declared.
     expect(policy.get("frame-src")).toEqual([
+      "https://app.example/plugin-pages/",
       ...COMPUTER_HOST_CAPABILITIES_V1.viewerFrameOrigins,
     ]);
     expect(
