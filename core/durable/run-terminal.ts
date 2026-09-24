@@ -9,8 +9,9 @@ import type {
   StoredRunCodecV1,
   StoredRunV1,
 } from "./run-records.js";
-import { storedRunRecordV2 } from "./run-records.js";
+import { storedRunLaneV1, storedRunRecordV2 } from "./run-records.js";
 import { storedRunEventFieldsV2 } from "./run-records.js";
+import { pendingAgentRunKey, pendingUserRunKey } from "./storage-keys.js";
 import {
   SessionEventLog,
   type SessionEventLogStorage,
@@ -116,6 +117,23 @@ async function journalCoveringLogV1(
 }
 
 export interface RunTerminalStorage extends SessionEventLogStorage {}
+
+/**
+ * A run settled while it waited leaves the queue with its settlement. The
+ * queue's head is what every later Turn waits behind, and an entry left naming
+ * a run that will never start would hold them all there.
+ */
+async function leaveQueueV1(
+  storage: RunTerminalStorage,
+  run: StoredRunV1<unknown>,
+): Promise<void> {
+  if (run.phase !== "queued") return;
+  await storage.delete(
+    storedRunLaneV1(run) === "agent"
+      ? pendingAgentRunKey(run.acceptedAt, run.runId)
+      : pendingUserRunKey(run.acceptedAt, run.runId),
+  );
+}
 
 export interface RunTerminalKeys {
   run: string;
@@ -300,6 +318,7 @@ export async function cancelStoredRun<Snapshot>(
   await storage.put({
     [keys.run]: structuredClone(storedRunRecordV2(cancelled)),
   });
+  await leaveQueueV1(storage, run);
   if ((await storage.get<string>(keys.activeRun)) === runId) {
     await storage.delete(keys.activeRun);
   }
@@ -357,6 +376,7 @@ export async function failStoredRun<Snapshot>(
     decodedEvents,
   );
   await storage.put(records);
+  await leaveQueueV1(storage, run);
   if ((await storage.get<string>(keys.activeRun)) === runId) {
     await storage.delete(keys.activeRun);
   }
