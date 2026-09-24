@@ -11,6 +11,7 @@ import {
   type BotDurableAuthorityOptions,
 } from "@frockbot/core/durable";
 import type { BotIsolateLoader } from "@frockbot/frock-compose";
+import type { FrockAiChatCompletionV1 } from "@frockbot/providers/frock-ai/runtime";
 import { RoutineInboxStore } from "@frockbot/app/routines/inbox-store";
 import type { RoutineScheduler } from "@frockbot/app/routines/scheduler";
 import type { RoutineStore } from "@frockbot/app/routines/store";
@@ -68,10 +69,7 @@ export interface BotStateEnv {
   FROCK_AI?: {
     /** `null` on the `AI` binding path, which carries no dynamic route. */
     autoRoute: string | null;
-    runChatCompletion(
-      gatewayModel: string,
-      body: Record<string, unknown>,
-    ): Promise<ReadableStream<Uint8Array>>;
+    runChatCompletion: FrockAiChatCompletionV1;
   };
   USER_CONFIGURATIONS: BotUserConfigurationNamespaceV1;
   /**

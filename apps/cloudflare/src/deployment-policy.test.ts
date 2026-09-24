@@ -468,3 +468,19 @@ describe("retired signups policy cleanup", () => {
     });
   });
 });
+
+describe("hosted model rates", () => {
+  test("a fresh authority serves the seeded table, and a restart keeps it", async () => {
+    const storage = new MemoryStorage();
+    const { policy } = authority(storage);
+    const seeded = await policy.readModelRates({ schemaVersion: 1 });
+    expect(seeded.version).toBe(1);
+    expect(Object.keys(seeded.routes)).toContain("@frock/auto");
+
+    const again = authority(storage).policy;
+    expect(await again.readModelRates({ schemaVersion: 1 })).toEqual(seeded);
+    await expect(again.readModelRates({ schemaVersion: 2 })).rejects.toThrow(
+      "schemaVersion is invalid",
+    );
+  });
+});

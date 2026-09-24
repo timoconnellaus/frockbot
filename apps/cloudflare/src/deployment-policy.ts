@@ -21,6 +21,19 @@ import {
   evaluateAdmissionV1,
   identityMayBeCreatedV1,
 } from "./account-admission.js";
+import {
+  decodeModelRatesReadRequestV1,
+  type HostedModelRatesV1,
+  type HostedModelRatesViewV1,
+} from "@frockbot/app/billing/rates";
+import {
+  currentHostedModelRatesV1,
+  hostedModelRatesViewV1,
+  reportUnpricedServedModelV1,
+  saveHostedModelRatesV1,
+  seedHostedModelRatesStorageV1,
+  type ModelRatesWriteV1,
+} from "./model-rates.js";
 
 const POLICY_KEY = "deployment:admission:v1";
 const ACCESS_PREFIX = "account:access:v1:";
@@ -88,7 +101,9 @@ function nextRevision(current: number, label: string): number {
 
 /**
  * The deployment's beta-access authority: the admission mode, each account's
- * access record and the email invitations not yet redeemed.
+ * access record and the email invitations not yet redeemed. It also holds the
+ * versioned hosted model rate table (`./model-rates.ts`), which is equally
+ * deployment-wide and equally an administrator's to change.
  *
  * One object, and every read-decide-write in it is a synchronous storage
  * transaction, so two sign-ins, or a sign-in racing an admin, are serialized
@@ -98,9 +113,10 @@ function nextRevision(current: number, label: string): number {
 export class DeploymentPolicy extends DurableObject<Record<string, never>> {
   constructor(ctx: DurableObjectState, env: Record<string, never>) {
     super(ctx, env);
-    void ctx.blockConcurrencyWhile(async () =>
-      cleanRetiredDeploymentPolicyV1(ctx.storage),
-    );
+    void ctx.blockConcurrencyWhile(async () => {
+      cleanRetiredDeploymentPolicyV1(ctx.storage);
+      seedHostedModelRatesStorageV1(ctx.storage);
+    });
   }
 
   private get kv() {
@@ -268,5 +284,24 @@ export class DeploymentPolicy extends DurableObject<Record<string, never>> {
       request,
       request.emailVerified ? this.invitation(request.email) : null,
     );
+  }
+
+  /** The hosted model prices every Bot reserves and settles against. */
+  async readModelRates(input: unknown): Promise<HostedModelRatesV1> {
+    decodeModelRatesReadRequestV1(input);
+    return currentHostedModelRatesV1(this.ctx.storage);
+  }
+
+  async readModelRatesView(input: unknown): Promise<HostedModelRatesViewV1> {
+    decodeModelRatesReadRequestV1(input);
+    return hostedModelRatesViewV1(this.ctx.storage);
+  }
+
+  async saveModelRates(input: unknown): Promise<ModelRatesWriteV1> {
+    return saveHostedModelRatesV1(this.ctx.storage, input);
+  }
+
+  async reportUnpricedServedModel(input: unknown): Promise<void> {
+    reportUnpricedServedModelV1(this.ctx.storage, input);
   }
 }

@@ -338,10 +338,10 @@ describe("Frock AI prepaid limits", () => {
       autoRoute: "flock-auto",
       accountId: ACCOUNT_ID,
       token: TOKEN,
-      billingLimits: {
+      billingLimits: async () => ({
         "@frock/auto": { inputTokens: 2_000, outputTokens: 500 },
         "@frock/structured": { inputTokens: 200_000, outputTokens: 4_000 },
-      },
+      }),
       fetch: ((_url: string, init: RequestInit) => {
         sent.push(JSON.parse(init.body as string) as Record<string, unknown>);
         return Promise.resolve(new Response("data: [DONE]\n\n"));
@@ -369,10 +369,10 @@ describe("Frock AI prepaid limits", () => {
   test("holds two ids sent as one binding model to the tighter bound", async () => {
     const { ai } = gatewayHost(() => new Response("data: [DONE]\n\n"));
     const host = createFrockAiGatewayHostV1(ai, {
-      billingLimits: {
+      billingLimits: async () => ({
         "@frock/auto": { inputTokens: 2_000, outputTokens: 500 },
         "@frock/structured": { inputTokens: 200_000, outputTokens: 4_000 },
-      },
+      }),
     });
     await expect(
       host.runChatCompletion(FROCK_AI_BINDING_AUTO_MODEL, long),
@@ -384,5 +384,136 @@ describe("Frock AI prepaid limits", () => {
     await expect(
       limitedHost(sent).runChatCompletion("workers-ai/@cf/other", long),
     ).rejects.toThrow("exceeds its prepaid model limit");
+  });
+});
+
+describe("Frock AI Gateway host, billing", () => {
+  const SERVED_HEADERS = {
+    "cf-aig-provider": "custom-together",
+    "cf-aig-model": "deepseek-ai/DeepSeek-V4.1-Flash",
+    "cf-aig-cache-status": "MISS",
+  };
+
+  test("the compat transport skips the Gateway cache and says which model answered", async () => {
+    const { host, calls } = compatHost(
+      () => new Response("data: [DONE]\n\n", { headers: SERVED_HEADERS }),
+    );
+    const served: unknown[] = [];
+
+    await host.runChatCompletion(
+      "dynamic/flock-auto",
+      { messages: [] },
+      undefined,
+      (model) => served.push(model),
+    );
+
+    expect(
+      (calls[0]!.init.headers as Record<string, string>)["cf-aig-skip-cache"],
+    ).toBe("true");
+    expect(served).toEqual([
+      {
+        model: "custom-together/deepseek-ai/DeepSeek-V4.1-Flash",
+        cached: false,
+      },
+    ]);
+  });
+
+  test("the binding transport skips the cache too, and reports a cache hit", async () => {
+    const requests: unknown[] = [];
+    const ai = {
+      gateway: () => ({
+        run: (request: unknown) => {
+          requests.push(request);
+          return Promise.resolve(
+            new Response("data: [DONE]\n\n", {
+              headers: {
+                "cf-aig-provider": "workers-ai",
+                "cf-aig-model": "@cf/deepseek-ai/deepseek-v4-flash-0731",
+                "cf-aig-cache-status": "HIT",
+              },
+            }),
+          );
+        },
+      }),
+    } as unknown as Pick<Ai, "gateway">;
+    const served: unknown[] = [];
+
+    await createFrockAiGatewayHostV1(ai, {}).runChatCompletion(
+      "workers-ai/@cf/deepseek-ai/deepseek-v4-flash-0731",
+      { messages: [] },
+      undefined,
+      (model) => served.push(model),
+    );
+
+    expect(requests).toMatchObject([
+      { headers: { "cf-aig-skip-cache": "true" } },
+    ]);
+    expect(served).toEqual([
+      {
+        model: "workers-ai/@cf/deepseek-ai/deepseek-v4-flash-0731",
+        cached: true,
+      },
+    ]);
+  });
+
+  test("a rejected request names no served model", async () => {
+    const { host } = compatHost(
+      () =>
+        new Response(JSON.stringify({ error: "no" }), {
+          status: 400,
+          headers: SERVED_HEADERS,
+        }),
+    );
+    const served: unknown[] = [];
+
+    await host
+      .runChatCompletion(
+        "dynamic/flock-auto",
+        { messages: [] },
+        undefined,
+        (model) => served.push(model),
+      )
+      .catch(() => undefined);
+
+    expect(served).toEqual([]);
+  });
+
+  test("an answer without Gateway headers names no model", async () => {
+    const { host } = compatHost(() => new Response("data: [DONE]\n\n"));
+    const served: unknown[] = [];
+
+    await host.runChatCompletion(
+      "dynamic/flock-auto",
+      { messages: [] },
+      undefined,
+      (model) => served.push(model),
+    );
+
+    expect(served).toEqual([{ cached: false }]);
+  });
+
+  test("holds each request to the rate table's bounds as they stand when it is sent", async () => {
+    const calls: { init: RequestInit }[] = [];
+    let limits = { inputTokens: 4_096, outputTokens: 512 };
+    const host = createFrockAiGatewayHostV1(unusedBinding(), {
+      accountId: ACCOUNT_ID,
+      token: TOKEN,
+      billingLimits: async () => ({ "@frock/auto": limits }),
+      fetch: ((_url: string, init: RequestInit) => {
+        calls.push({ init });
+        return Promise.resolve(new Response("data: [DONE]\n\n"));
+      }) as unknown as typeof fetch,
+    });
+
+    await host.runChatCompletion("dynamic/flock-auto", { messages: [] });
+    expect(JSON.parse(calls[0]!.init.body as string).max_tokens).toBe(512);
+
+    limits = { inputTokens: 1_100, outputTokens: 512 };
+    await expect(
+      host.runChatCompletion("dynamic/flock-auto", {
+        messages: [{ role: "user", content: "x".repeat(200) }],
+      }),
+    ).rejects.toThrow("exceeds its prepaid model limit");
+    expect(calls).toHaveLength(1);
   });
 });

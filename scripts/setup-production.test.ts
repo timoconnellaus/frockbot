@@ -123,8 +123,6 @@ const productionEnvironment = {
   STRIPE_SECRET_KEY: "sk_test_production",
   STRIPE_WEBHOOK_SECRET: "whsec_production",
   STRIPE_MONTHLY_PRICE_ID: "price_production_monthly",
-  BILLING_MODEL_RATES:
-    '{"@cf/test/model":{"inputMicrosPerToken":1,"cachedInputMicrosPerToken":1,"outputMicrosPerToken":2,"maximumInputTokens":1000,"maximumOutputTokens":1000}}',
   // Required since plan step 8: a Turn's `plugin_check` and
   // `plugin_publish` both call the build service with it.
   APPLET_BUILD_TOKEN:

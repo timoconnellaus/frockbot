@@ -827,8 +827,13 @@ export async function agentRuntime(
   > = state.env.FROCK_AI
     ? {
         frockAiAutoRoute: state.env.FROCK_AI.autoRoute,
-        runFrockAiChatCompletion: (gatewayModel, body) =>
-          state.env.FROCK_AI!.runChatCompletion(gatewayModel, body),
+        runFrockAiChatCompletion: (gatewayModel, body, signal, served) =>
+          state.env.FROCK_AI!.runChatCompletion(
+            gatewayModel,
+            body,
+            signal,
+            served,
+          ),
       }
     : {};
   if (!pluginModel) {

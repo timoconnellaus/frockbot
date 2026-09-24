@@ -8,6 +8,11 @@ import {
   decodeEmailInvitationV1,
   DeploymentPolicyConflictError,
 } from "@frockbot/app/admin/shared";
+import {
+  decodeHostedModelRatesV1,
+  decodeHostedModelRatesViewV1,
+  ModelRatesConflictError,
+} from "@frockbot/app/billing/rates";
 import { rpcJsonSnapshotV1 } from "./durable-rpc.js";
 
 interface DeploymentPolicyAdminRpc {
@@ -16,6 +21,8 @@ interface DeploymentPolicyAdminRpc {
   readAccountAccess(input: unknown): Promise<unknown>;
   setAccountAccess(input: unknown): Promise<unknown>;
   inviteEmail(input: unknown): Promise<unknown>;
+  readModelRatesView(input: unknown): Promise<unknown>;
+  saveModelRates(input: unknown): Promise<unknown>;
 }
 
 function appliedWrite(
@@ -46,6 +53,8 @@ export function createDeploymentPolicyAdminHost(
   | "readAccountAccess"
   | "setAccountAccess"
   | "inviteEmail"
+  | "readModelRates"
+  | "saveModelRates"
 > {
   return {
     readDeploymentPolicy: async () =>
@@ -89,6 +98,23 @@ export function createDeploymentPolicyAdminHost(
             command,
             invitedBy,
           }),
+        ),
+      ),
+    readModelRates: async () =>
+      decodeHostedModelRatesViewV1(
+        rpcJsonSnapshotV1(
+          await authority().readModelRatesView({ schemaVersion: 1 }),
+        ),
+      ),
+    saveModelRates: async (command, createdBy) =>
+      decodeHostedModelRatesV1(
+        appliedWrite(
+          await authority().saveModelRates({
+            schemaVersion: 1,
+            command,
+            createdBy,
+          }),
+          (revision) => new ModelRatesConflictError(revision),
         ),
       ),
   };

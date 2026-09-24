@@ -124,5 +124,5 @@ context and one extra tool — a subagent. It does not share the thread.**
 - Execute a Bot's tools outside a Turn, with approvals, so Live can call them
   directly and only hand off what is genuinely long.
 - The chat model to `gemini-3.8-flash` with search grounding, as its own
-  change: it touches the gateway, `BILLING_MODEL_RATES` and per-Bot models.
+  change: it touches the gateway, the hosted model rate table and per-Bot models.
 - Dictation to `gemini-3.5-transcribe-live`, dropping `OPENAI_API_KEY`.

@@ -17,6 +17,7 @@ import {
   type AdmissionModeV1,
   type SetUserFeaturesCommandV1,
 } from "@frockbot/app/admin/shared";
+import { decodeSaveHostedModelRatesCommandV1 } from "@frockbot/app/billing/rates";
 import {
   accessTokenFromRequestV1,
   isPortalAdminV1,
@@ -109,6 +110,11 @@ const NOTICES: Readonly<Record<string, NoticeV1>> = {
   access: { tone: "done", message: "That account's access is saved." },
   features: { tone: "done", message: "That account's settings are saved." },
   credit: { tone: "done", message: "The credit is added." },
+  rates: {
+    tone: "done",
+    message:
+      "The new rate version is saved. Bots price from it within a minute.",
+  },
 };
 
 function dollarsToCents(value: string): number {
@@ -149,6 +155,33 @@ const STALE_MODE: NoticeV1 = {
     "The admission mode changed underneath you, so nothing was written. This page is the current state — make the change again if you still want it.",
 };
 
+const STALE_RATES: NoticeV1 = {
+  tone: "stale",
+  message:
+    "The rate table gained a version underneath you, so nothing was written. Your edit is below over the current version — check it against what changed, then save again.",
+};
+
+/** The table as the page's one text field spells it: `{ routes, served }`. */
+function ratesField(form: FormData): { routes: unknown; served: unknown } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(field(form, "rates"));
+  } catch {
+    throw new Error("The rate table is not valid JSON.");
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    throw new Error(
+      'The rate table must be an object with "routes" and "served".',
+    );
+  }
+  const { routes, served, ...rest } = parsed as Record<string, unknown>;
+  const unknown = Object.keys(rest)[0];
+  if (unknown !== undefined) {
+    throw new Error(`The rate table has an unknown field "${unknown}".`);
+  }
+  return { routes, served };
+}
+
 const STALE_ACCESS: NoticeV1 = {
   tone: "stale",
   message:
@@ -166,7 +199,7 @@ async function apply(
   form: FormData,
   admin: ReturnType<typeof administrationV1>,
   by: string,
-): Promise<{ notice: NoticeV1 } | { redirect: string }> {
+): Promise<{ notice: NoticeV1; ratesDraft?: string } | { redirect: string }> {
   switch (form.get("action")) {
     case "admission-mode": {
       const written = await admin.setAdmissionMode(
@@ -229,6 +262,18 @@ async function apply(
       );
       return { redirect: "/?notice=credit" };
     }
+    case "model-rates": {
+      const command = decodeSaveHostedModelRatesCommandV1({
+        schemaVersion: 1,
+        type: "deployment/save-model-rates",
+        baseVersion: revisionField(form),
+        ...ratesField(form),
+      });
+      const written = await admin.saveModelRates(command, by);
+      return written.status === "applied"
+        ? { redirect: "/?notice=rates" }
+        : { notice: STALE_RATES, ratesDraft: field(form, "rates") };
+    }
     default:
       throw new Error("That form is not one this page offers.");
   }
@@ -239,18 +284,24 @@ async function renderPage(
   email: string,
   notice: NoticeV1 | undefined,
   status = 200,
+  ratesDraft?: string,
 ): Promise<Response> {
   const admin = administrationV1(env.APP);
   const nonce = crypto.randomUUID();
-  const [policy, accounts] = await Promise.all([
+  const [policy, accounts, rates] = await Promise.all([
     admin.readPolicy(),
     admin.listAccounts(),
+    // A rate table that cannot be read is shown as unreadable; it does not
+    // take admission and accounts down with it.
+    admin.readModelRates().catch(() => undefined),
   ]);
   return html(
     renderAdminPageV1({
       email,
       policy,
       accounts,
+      ...(rates ? { rates } : {}),
+      ...(ratesDraft !== undefined ? { ratesDraft } : {}),
       ...(notice ? { notice } : {}),
       grantId: crypto.randomUUID(),
       nonce,
@@ -331,14 +382,17 @@ export default {
       );
     }
 
-    let outcome: { notice: NoticeV1 } | { redirect: string };
+    let form: FormData | undefined;
+    let outcome:
+      { notice: NoticeV1; ratesDraft?: string } | { redirect: string };
     try {
-      outcome = await apply(
-        await request.formData(),
-        administrationV1(env.APP),
-        email,
-      );
+      form = await request.formData();
+      outcome = await apply(form, administrationV1(env.APP), email);
     } catch (error) {
+      // A refused rate table comes back as it was typed, so fixing one
+      // number does not mean typing the table again.
+      const draft =
+        form?.get("action") === "model-rates" ? form.get("rates") : null;
       return renderPage(
         env,
         email,
@@ -349,10 +403,11 @@ export default {
           }`,
         },
         400,
+        typeof draft === "string" ? draft : undefined,
       );
     }
     return "redirect" in outcome
       ? seeOther(outcome.redirect)
-      : renderPage(env, email, outcome.notice, 409);
+      : renderPage(env, email, outcome.notice, 409, outcome.ratesDraft);
   },
 };

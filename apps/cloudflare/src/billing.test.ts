@@ -6,6 +6,9 @@ import {
   type BillingEnv,
 } from "./billing";
 import { billingPage, billingScript } from "@frockbot/app/billing/page";
+import { seedHostedModelRatesV1 } from "@frockbot/app/billing/rates";
+
+const rates = async () => seedHostedModelRatesV1("2026-09-24T00:00:00.000Z");
 
 const env: BillingEnv = {
   STRIPE_SECRET_KEY: "sk_test",
@@ -75,7 +78,7 @@ describe("billing HTTP routes", () => {
       expect(billingPage).toContain(text);
   });
   test("requires authentication for both the billing page and account API", async () => {
-    const routes = billingRoutes(env, () => account());
+    const routes = billingRoutes(env, () => account(), rates);
     for (const path of ["/billing", "/api/billing"]) {
       const request = new Request(`https://app.frockbot.com${path}`);
       expect(
@@ -91,10 +94,14 @@ describe("billing HTTP routes", () => {
 
   test("projects only the authenticated account and never caches its balance", async () => {
     const seen: string[] = [];
-    const routes = billingRoutes(env, (userId) => {
-      seen.push(userId);
-      return account();
-    });
+    const routes = billingRoutes(
+      env,
+      (userId) => {
+        seen.push(userId);
+        return account();
+      },
+      rates,
+    );
     const request = new Request("https://app.frockbot.com/api/billing");
     const response = await routes.route(
       request,
@@ -116,15 +123,54 @@ describe("billing HTTP routes", () => {
     });
   });
 
+  test("lists each billable model's customer rate once, from the rate table", async () => {
+    const read = async (tableRead: typeof rates) => {
+      const routes = billingRoutes(env, () => account(), tableRead);
+      const request = new Request("https://app.frockbot.com/api/billing");
+      const response = await routes.route(
+        request,
+        new URL(request.url),
+        signedIn,
+      );
+      return ((await response?.json()) as { modelRates: unknown }).modelRates;
+    };
+    // Twice the deployment's cost; a pre-rename `@flock/` id is not repeated.
+    expect(await read(rates)).toEqual({
+      "@frock/auto": {
+        inputUsdPerMillion: 0.6,
+        cachedInputUsdPerMillion: 0.012,
+        outputUsdPerMillion: 2.4,
+      },
+      "@frock/deepseek-ai/deepseek-v4-flash-0731": {
+        inputUsdPerMillion: 0.88,
+        cachedInputUsdPerMillion: 0.028,
+        outputUsdPerMillion: 2.64,
+      },
+      // Conversation summaries are billed to the account too.
+      "@frock/structured": {
+        inputUsdPerMillion: 0.6,
+        cachedInputUsdPerMillion: 0.012,
+        outputUsdPerMillion: 2.4,
+      },
+    });
+    // A table that cannot be read lists nothing rather than failing the page.
+    expect(
+      await read(() => Promise.reject(new Error("authority unreachable"))),
+    ).toEqual({});
+  });
+
   test("rejects cross-origin mutations before dispatch", async () => {
     let calls = 0;
-    const routes = billingRoutes(env, () =>
-      account({
-        async billingCheckout() {
-          calls += 1;
-          return { url: "https://checkout.stripe.com/c/test" };
-        },
-      }),
+    const routes = billingRoutes(
+      env,
+      () =>
+        account({
+          async billingCheckout() {
+            calls += 1;
+            return { url: "https://checkout.stripe.com/c/test" };
+          },
+        }),
+      rates,
     );
     const request = new Request(
       "https://app.frockbot.com/api/billing/checkout",
@@ -148,10 +194,14 @@ describe("billing HTTP routes", () => {
 
   test("webhook rejects missing signatures and oversized bodies before account dispatch", async () => {
     let calls = 0;
-    const routes = billingRoutes(env, () => {
-      calls += 1;
-      return account();
-    });
+    const routes = billingRoutes(
+      env,
+      () => {
+        calls += 1;
+        return account();
+      },
+      rates,
+    );
     const missing = new Request(
       "https://app.frockbot.com/api/billing/stripe/webhook",
       { method: "POST", body: "{}" },
@@ -179,12 +229,15 @@ describe("billing HTTP routes", () => {
 
   test("reconciliation is admin-only and targets the explicitly named account", async () => {
     const seen: unknown[] = [];
-    const routes = billingRoutes(env, (userId) =>
-      account({
-        async reconcileBilling(input) {
-          seen.push({ userId, input });
-        },
-      }),
+    const routes = billingRoutes(
+      env,
+      (userId) =>
+        account({
+          async reconcileBilling(input) {
+            seen.push({ userId, input });
+          },
+        }),
+      rates,
     );
     const body = JSON.stringify({
       userId: "affected-user",

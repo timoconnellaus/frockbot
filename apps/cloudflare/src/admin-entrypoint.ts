@@ -16,6 +16,10 @@ import {
   type EmailInvitationV1,
   type UserFeaturesV1,
 } from "@frockbot/app/admin/shared";
+import type {
+  HostedModelRatesV1,
+  HostedModelRatesViewV1,
+} from "@frockbot/app/billing/rates";
 import { createDeploymentPolicyAdminHost } from "./deployment-policy-admin-host.js";
 import { DEPLOYMENT_POLICY_SINGLETON_NAME } from "./deployment-policy.js";
 import { rpcJsonSnapshotV1 } from "./durable-rpc.js";
@@ -39,6 +43,8 @@ interface DeploymentPolicyAdminRpc {
   readAccountAccess(input: unknown): Promise<unknown>;
   setAccountAccess(input: unknown): Promise<unknown>;
   inviteEmail(input: unknown): Promise<unknown>;
+  readModelRatesView(input: unknown): Promise<unknown>;
+  saveModelRates(input: unknown): Promise<unknown>;
 }
 
 interface UserAccountRpc {
@@ -174,5 +180,15 @@ export class AdminEntrypoint extends WorkerEntrypoint<AdminEntrypointEnvV1> {
 
   grantCredit(input: unknown): Promise<AdminUserBillingV1> {
     return this.operations.grantCredit(input);
+  }
+
+  readModelRates(): Promise<HostedModelRatesViewV1> {
+    return this.operations.readModelRates();
+  }
+
+  saveModelRates(
+    input: unknown,
+  ): Promise<AdminWriteResultV1<HostedModelRatesV1>> {
+    return this.operations.saveModelRates(input);
   }
 }

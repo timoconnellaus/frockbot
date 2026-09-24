@@ -1,5 +1,4 @@
 import { BILLING_LAUNCH_BLOCKERS } from "../apps/cloudflare/src/billing-readiness.js";
-import { decodeModelRates } from "../app/billing/model.js";
 
 if (!process.env.STRIPE_SECRET_KEY?.trim()) {
   console.log(
@@ -8,21 +7,14 @@ if (!process.env.STRIPE_SECRET_KEY?.trim()) {
   process.exit(0);
 }
 const issues = [...BILLING_LAUNCH_BLOCKERS];
+// Hosted model prices are not a deploy secret: they live in the deployment's
+// rate table, which the admin portal edits and a fresh deployment seeds.
 for (const name of [
   "STRIPE_SECRET_KEY",
   "STRIPE_WEBHOOK_SECRET",
   "STRIPE_MONTHLY_PRICE_ID",
-  "BILLING_MODEL_RATES",
 ]) {
   if (!process.env[name]?.trim()) issues.push(`${name} is required.`);
-}
-try {
-  if (
-    Object.keys(decodeModelRates(process.env.BILLING_MODEL_RATES)).length === 0
-  )
-    issues.push("At least one verified hosted model rate is required.");
-} catch {
-  issues.push("The hosted model price table is invalid.");
 }
 if (issues.length) {
   console.error(

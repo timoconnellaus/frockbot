@@ -30,6 +30,7 @@
     "./billing/ledger": "./billing/ledger.ts",
     "./billing/model": "./billing/model.ts",
     "./billing/page": "./billing/page.ts",
+    "./billing/rates": "./billing/rates.ts",
     "./billing/stripe": "./billing/stripe.ts",
     "./bot-template": "./bot-template/index.ts",
     "./bot-template/agent": "./bot-template/agent.ts",

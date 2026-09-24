@@ -26,6 +26,13 @@ import {
   type SetUserFeaturesCommandV1,
   type UserFeaturesV1,
 } from "@frockbot/app/admin/shared";
+import {
+  decodeHostedModelRatesV1,
+  decodeHostedModelRatesViewV1,
+  type HostedModelRatesV1,
+  type HostedModelRatesViewV1,
+  type SaveHostedModelRatesCommandV1,
+} from "@frockbot/app/billing/rates";
 
 /** The `AdminEntrypoint` RPC surface, as this Worker calls it. */
 export interface AdminAppBindingV1 {
@@ -37,6 +44,8 @@ export interface AdminAppBindingV1 {
   inviteEmail(input: unknown): Promise<unknown>;
   setAccountFeatures(input: unknown): Promise<unknown>;
   grantCredit(input: unknown): Promise<unknown>;
+  readModelRates(): Promise<unknown>;
+  saveModelRates(input: unknown): Promise<unknown>;
 }
 
 export interface AdministrationV1 {
@@ -63,6 +72,11 @@ export interface AdministrationV1 {
     command: GrantUserCreditCommandV1,
     grantedBy: string,
   ): Promise<AdminUserBillingV1>;
+  readModelRates(): Promise<HostedModelRatesViewV1>;
+  saveModelRates(
+    command: SaveHostedModelRatesCommandV1,
+    createdBy: string,
+  ): Promise<AdminWriteResultV1<HostedModelRatesV1>>;
 }
 
 export function administrationV1(app: AdminAppBindingV1): AdministrationV1 {
@@ -123,6 +137,16 @@ export function administrationV1(app: AdminAppBindingV1): AdministrationV1 {
           command,
           grantedBy,
         }),
+      ),
+
+    readModelRates: async () =>
+      decodeHostedModelRatesViewV1(await app.readModelRates()),
+
+    saveModelRates: async (command, createdBy) =>
+      decodeAdminWriteResultV1(
+        await app.saveModelRates({ schemaVersion: 1, command, createdBy }),
+        (value) => decodeHostedModelRatesV1(value),
+        "model rates answer",
       ),
   };
 }
