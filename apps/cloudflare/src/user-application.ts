@@ -127,8 +127,8 @@ function appHtml(
   <link rel="icon" type="image/png" href="/favicon.ico">
   <link rel="apple-touch-icon" href="/favicon.ico">
   <meta name="color-scheme" content="dark">
-  <meta name="theme-color" content="#18161a">
-  <style>html,body{margin:0;height:100%;background:#18161a}</style>
+  <meta name="theme-color" content="#15151e">
+  <style>html,body{margin:0;height:100%;background:#15151e}</style>
 </head>
 <body data-frockbot-user-id="${userId}" data-frockbot-user-application="${applicationHash}" data-frockbot-auth-mode="${authMode}" data-frockbot-is-admin="${String(isAdmin)}">
   <script src="${FLUTTER_BASE}flutter_bootstrap.js" async></script>

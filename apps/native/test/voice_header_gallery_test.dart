@@ -24,7 +24,10 @@ import 'voice_shell_harness.dart';
 
 Color? _voiceIconColor(WidgetTester tester) {
   final button = tester.widget<IconButton>(
-    find.byKey(const ValueKey('composer-voice')),
+    find.descendant(
+      of: find.byKey(const ValueKey('composer-voice')),
+      matching: find.byType(IconButton),
+    ),
   );
   return button.style?.foregroundColor?.resolve({});
 }

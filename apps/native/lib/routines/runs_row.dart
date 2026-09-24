@@ -4,6 +4,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../theme/frock_theme.dart';
+import '../theme/time.dart';
 
 /// How a recent firing should be marked.
 enum RoutineRunMarkV1 { running, finished, failed }
@@ -70,35 +71,12 @@ String routineRunWhenV1(DateTime at, DateTime now) {
   final day = DateTime(at.year, at.month, at.day);
   final today = DateTime(now.year, now.month, now.day);
   final days = today.difference(day).inDays;
-  final clock = routineRunClockV1(at);
+  final clock = clockLabel(at);
   if (days == 0) return 'Today $clock';
   if (days == 1) return 'Yesterday $clock';
-  if (days > 1 && days < 7) return '${_weekdays[at.weekday - 1]} $clock';
-  return '${at.day} ${_months[at.month - 1]} $clock';
+  if (days > 1 && days < 7) return '${shortWeekdays[at.weekday - 1]} $clock';
+  return '${dateLabel(at, now: now)}, $clock';
 }
-
-/// The twelve-hour clock this app says times in.
-String routineRunClockV1(DateTime at) {
-  final hour = at.hour % 12 == 0 ? 12 : at.hour % 12;
-  final minute = at.minute.toString().padLeft(2, '0');
-  return '$hour:$minute ${at.hour < 12 ? 'am' : 'pm'}';
-}
-
-const _weekdays = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-const _months = [
-  'Jan',
-  'Feb',
-  'Mar',
-  'Apr',
-  'May',
-  'Jun',
-  'Jul',
-  'Aug',
-  'Sep',
-  'Oct',
-  'Nov',
-  'Dec',
-];
 
 /// One recent firing: the name, the time, and how it ended, on a single line.
 ///
@@ -120,7 +98,7 @@ class RoutineRunRow extends StatelessWidget {
     final theme = Theme.of(context);
     final dark = theme.brightness == Brightness.dark;
     // Paper's muted rung is inkMuted; the dark theme's third rung is subtle.
-    // ColorScheme.onSurfaceVariant is fine on ink and too faint on cream if
+    // ColorScheme.onSurfaceVariant is fine on ink and too faint on paper if
     // a look has remapped muted toward the window.
     final nameColor = dark ? FrockTheme.text : FrockTheme.ink;
     final timeColor = dark ? FrockTheme.muted : FrockTheme.inkMuted;
@@ -150,6 +128,7 @@ class RoutineRunRow extends StatelessWidget {
                 routineRunWhenV1(run.at, now),
                 style: theme.textTheme.bodySmall?.copyWith(
                   fontSize: 12.5,
+                  fontFeatures: FrockTheme.tabularFigures,
                   color: timeColor,
                 ),
               ),

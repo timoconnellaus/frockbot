@@ -1063,24 +1063,26 @@ class _Pill extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final scheme = Theme.of(context).colorScheme;
-    // Quiet by default: the row's name is the loud part. The primary pill
-    // wears the accent as a tint rather than a slab, so six of them in a
-    // column read as six doors and not six alarms.
+    // Quiet by default: the row's name is the loud part. Every pill stands on
+    // the same faint neutral, and the primary one writes its word in the
+    // accent: a column of accent slabs read as a column of alarms, and a wash
+    // of the accent reads as mauve.
+    final accent = FrockTheme.accentInk(Theme.of(context));
     final style = ButtonStyle(
       visualDensity: VisualDensity.standard,
       shape: WidgetStatePropertyAll(
-        RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
+        RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(FrockTheme.radiusRow),
+        ),
       ),
       backgroundColor: WidgetStatePropertyAll(
-        primary
-            ? scheme.primary.withValues(alpha: 0.16)
-            : scheme.onSurface.withValues(alpha: 0.07),
+        scheme.onSurface.withValues(alpha: 0.07),
       ),
       foregroundColor: WidgetStatePropertyAll(
-        primary ? scheme.primary : scheme.onSurface,
+        primary ? accent : scheme.onSurface,
       ),
       overlayColor: WidgetStatePropertyAll(
-        (primary ? scheme.primary : scheme.onSurface).withValues(alpha: 0.08),
+        scheme.onSurface.withValues(alpha: 0.08),
       ),
       // A fixed height with the label centred on its cap height: the line
       // box the theme's label style carries leaves more room below the
@@ -2002,29 +2004,32 @@ class _MarketplacePageState extends State<MarketplacePage> {
                 ),
               ),
               const SizedBox(height: 8),
-              SegmentedButton<MarketplaceSection>(
-                segments: [
-                  ButtonSegment(
-                    value: MarketplaceSection.catalog,
-                    label: identified(
-                      ConnectorIds.marketplaceCatalog,
-                      const Text('Catalog'),
+              Align(
+                alignment: AlignmentDirectional.centerStart,
+                child: SegmentedButton<MarketplaceSection>(
+                  segments: [
+                    ButtonSegment(
+                      value: MarketplaceSection.catalog,
+                      label: identified(
+                        ConnectorIds.marketplaceCatalog,
+                        const Text('Catalog'),
+                      ),
+                      tooltip: 'Browse models and connectors',
                     ),
-                    tooltip: 'Browse models and connectors',
-                  ),
-                  ButtonSegment(
-                    value: MarketplaceSection.installed,
-                    label: identified(
-                      ConnectorIds.marketplaceInstalled,
-                      const Text('Installed'),
+                    ButtonSegment(
+                      value: MarketplaceSection.installed,
+                      label: identified(
+                        ConnectorIds.marketplaceInstalled,
+                        const Text('Installed'),
+                      ),
+                      tooltip: 'Configure or remove what you have added',
                     ),
-                    tooltip: 'Configure or remove what you have added',
-                  ),
-                ],
-                selected: {section},
-                onSelectionChanged: (value) =>
-                    setState(() => section = value.single),
-                showSelectedIcon: false,
+                  ],
+                  selected: {section},
+                  onSelectionChanged: (value) =>
+                      setState(() => section = value.single),
+                  showSelectedIcon: false,
+                ),
               ),
             ],
           ),

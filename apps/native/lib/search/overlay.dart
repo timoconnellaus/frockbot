@@ -14,6 +14,8 @@ import '../groups/faces.dart';
 import '../shell/semantics.dart';
 import '../shell/desktop_layout.dart';
 import '../theme/caret.dart';
+import '../theme/controls.dart';
+import '../theme/frock_theme.dart';
 import 'controller.dart';
 
 Future<SearchSelection?> showSearchOverlayV1(
@@ -342,17 +344,12 @@ class _SearchOverlayState extends State<SearchOverlay> {
 
   Widget _close() => identified(
     SearchIds.close,
-    IconButton(
+    FrockIconButton(
+      kind: phone ? FrockIconButtonKind.tonal : FrockIconButtonKind.quiet,
+      round: phone,
       tooltip: 'Close search',
       onPressed: () => Navigator.of(context).pop(),
-      style: phone
-          ? IconButton.styleFrom(
-              backgroundColor: Theme.of(context)
-                  .colorScheme
-                  .surfaceContainerHighest,
-              minimumSize: const Size(44, 44),
-            )
-          : null,
+      extent: phone ? 44 : 40,
       icon: const Icon(Icons.close_rounded),
     ),
   );
@@ -372,19 +369,21 @@ class _SearchOverlayState extends State<SearchOverlay> {
                   controller.setCategory(category);
                   focus.requestFocus();
                 },
+                // The chosen category wears the accent, as the chosen segment
+                // of any control does.
                 style: TextButton.styleFrom(
                   foregroundColor: category == controller.category
-                      ? Theme.of(context).colorScheme.onSurface
+                      ? Theme.of(context).colorScheme.onPrimary
                       : Theme.of(context).colorScheme.onSurfaceVariant,
                   backgroundColor: category == controller.category
-                      ? Theme.of(context).colorScheme.surfaceContainerHighest
+                      ? Theme.of(context).colorScheme.primary
                       : Colors.transparent,
                   minimumSize: const Size(0, 34),
                   padding: const EdgeInsets.symmetric(horizontal: 10),
                   shape: RoundedRectangleBorder(
-                    borderRadius: BorderRadius.circular(10),
+                    borderRadius: BorderRadius.circular(FrockTheme.radiusRow),
                   ),
-                  textStyle: const TextStyle(fontSize: 14),
+                  textStyle: Theme.of(context).textTheme.labelLarge,
                 ),
                 child: Text(category.label),
               ),
@@ -672,21 +671,26 @@ class _SearchOverlayState extends State<SearchOverlay> {
         : destination.actionId != null
         ? SearchIds.action(destination.actionId!)
         : SearchIds.bot(destination.botId!);
+    // The highlighted result wears the accent, as the open conversation in
+    // the list does, and its words turn to the accent's ink.
+    final lit = !phone && selected == index;
+    final ink = lit ? scheme.onPrimary : null;
+    final muted = lit
+        ? scheme.onPrimary.withValues(alpha: 0.82)
+        : scheme.onSurfaceVariant;
     return identified(
       id,
       Semantics(
-        selected: !phone && selected == index,
+        selected: lit,
         child: Material(
-          color: !phone && selected == index
-              ? scheme.onSurface.withValues(alpha: 0.11)
-              : Colors.transparent,
-          borderRadius: BorderRadius.circular(12),
+          color: lit ? scheme.primary : Colors.transparent,
+          borderRadius: BorderRadius.circular(FrockTheme.radiusControl),
           child: InkWell(
             onTap: () => _activate(index),
             onHover: (hover) {
               if (hover && selected != index) setState(() => selected = index);
             },
-            borderRadius: BorderRadius.circular(12),
+            borderRadius: BorderRadius.circular(FrockTheme.radiusControl),
             child: Padding(
               padding: EdgeInsets.symmetric(
                 horizontal: phone ? 6 : 10,
@@ -730,6 +734,7 @@ class _SearchOverlayState extends State<SearchOverlay> {
                             fontWeight: phone
                                 ? FontWeight.w500
                                 : FontWeight.w400,
+                            color: ink,
                           ),
                         ),
                         if (entry.subtitle.isNotEmpty) ...[
@@ -740,7 +745,7 @@ class _SearchOverlayState extends State<SearchOverlay> {
                             overflow: TextOverflow.ellipsis,
                             style: TextStyle(
                               fontSize: phone ? 15 : 14,
-                              color: scheme.onSurfaceVariant,
+                              color: muted,
                             ),
                           ),
                         ],
@@ -753,13 +758,9 @@ class _SearchOverlayState extends State<SearchOverlay> {
                     const SizedBox(width: 10),
                     Semantics(
                       label: 'Unread',
-                      child: Container(
-                        width: 7,
-                        height: 7,
-                        decoration: BoxDecoration(
-                          color: scheme.primary,
-                          shape: BoxShape.circle,
-                        ),
+                      child: StatusDot(
+                        color: lit ? scheme.onPrimary : scheme.primary,
+                        size: 7,
                       ),
                     ),
                   ],
@@ -773,9 +774,10 @@ class _SearchOverlayState extends State<SearchOverlay> {
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(4),
                         border: Border.all(
-                          color: scheme.outlineVariant.withValues(alpha: 0.45),
+                          color: lit
+                              ? muted
+                              : scheme.outlineVariant.withValues(alpha: 0.45),
                         ),
-                        color: scheme.surface.withValues(alpha: 0.55),
                       ),
                       child: Semantics(
                         label: '${mac ? 'Command' : 'Control'} ${index + 1}',
@@ -787,14 +789,11 @@ class _SearchOverlayState extends State<SearchOverlay> {
                               Icon(
                                 Icons.keyboard_command_key,
                                 size: 12,
-                                color: scheme.onSurfaceVariant,
+                                color: muted,
                               ),
                             Text(
                               '${mac ? '' : 'Ctrl+'}${index + 1}',
-                              style: TextStyle(
-                                fontSize: 11,
-                                color: scheme.onSurfaceVariant,
-                              ),
+                              style: TextStyle(fontSize: 11, color: muted),
                             ),
                           ],
                         ),

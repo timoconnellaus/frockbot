@@ -91,4 +91,61 @@ void main() {
     await tester.pumpAndSettle();
     expect(find.byType(SkillMenu), findsOneWidget);
   });
+
+  testWidgets(
+    'the composer\'s + opens the Skill menu as / would, and shuts it',
+    (tester) async {
+      final editor = TextEditingController(text: 'Draft this');
+      final focus = FocusNode();
+      final skills = SkillMenuController(
+        api: SilentApi(VoidStore()),
+        botId: 'bot-1',
+      )..catalog = [entry('review'), entry('ship')];
+      addTearDown(editor.dispose);
+      addTearDown(focus.dispose);
+      addTearDown(skills.dispose);
+      final drafts = <String>[];
+
+      await tester.pumpWidget(
+        MaterialApp(
+          home: Scaffold(
+            body: Align(
+              alignment: Alignment.bottomCenter,
+              child: Composer(
+                editor: editor,
+                focus: focus,
+                ready: true,
+                stoppable: false,
+                onSend: () async {},
+                onStop: () async {},
+                onChanged: drafts.add,
+                skills: skills,
+              ),
+            ),
+          ),
+        ),
+      );
+
+      final plus = find.byKey(const ValueKey('composer-plus'));
+      await tester.tap(plus);
+      await tester.pumpAndSettle();
+      expect(find.byType(SkillMenu), findsOneWidget);
+      expect(editor.text, 'Draft this /');
+      expect(focus.hasFocus, isTrue);
+
+      await tester.tap(find.text('review'));
+      await tester.pumpAndSettle();
+      expect([for (final e in skills.attached) e.ref], ['bot:review']);
+      expect(editor.text, 'Draft this ');
+
+      await tester.tap(plus);
+      await tester.pumpAndSettle();
+      expect(find.byType(SkillMenu), findsOneWidget);
+      await tester.tap(plus);
+      await tester.pumpAndSettle();
+      expect(find.byType(SkillMenu), findsNothing);
+      expect(editor.text, 'Draft this ');
+      expect(drafts.last, 'Draft this ');
+    },
+  );
 }

@@ -4,6 +4,8 @@ import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart' hide ConnectionState;
 
 import '../client/chat_controller.dart';
+import '../theme/controls.dart';
+import '../theme/frock_theme.dart';
 import '../voice/voice_mode.dart' show VoiceHeaderPill;
 import 'semantics.dart';
 import 'chat_icons.dart';
@@ -16,48 +18,65 @@ const computerRunningColor = Color(0xff59c7ff);
 
 /// Silhouette height of the conversation companion. The empty canvas around
 /// a still is clipped, so this is the drawing, not the frame.
-const chatCompanionSize = 88.0;
+const chatCompanionSize = 56.0;
 
 /// The same companion on a phone, where the header shares the screen with a
 /// thread that is only a thumb wide.
-const chatCompanionPhoneSize = 53.0;
+const chatCompanionPhoneSize = 40.0;
 
 double chatCompanionSizeFor({required bool phone}) =>
     phone ? chatCompanionPhoneSize : chatCompanionSize;
 
-/// How far the thread fade reaches down from the top of the conversation.
-const chatHeaderFadeHeight = 168.0;
+/// Inset from the top of the header band to its row, and from the row to
+/// the band's hairline.
+const chatHeaderChromeTop = 14.0;
 
-/// Shared inset from the top of the conversation. At a desk the companion
-/// sits a little above it and the name and panel switch sit a little
-/// below, so the title meets the drawing's visual mass. On a phone the
-/// back arrow, companion, name and panel switch share one vertical center.
-const chatHeaderChromeTop = 20.0;
+/// The same inset on a phone, where the band shares a thumb-wide screen.
+const chatHeaderPhoneChromeTop = 10.0;
 
-/// How far the desk companion sits above [chatHeaderChromeTop].
-const chatHeaderCompanionLift = 8.0;
-
-/// How far the desk name and panel switch sit below [chatHeaderChromeTop].
-const chatHeaderChromeDrop = 8.0;
-
-/// Inset from the conversation's left and right for the companion and pills.
+/// Inset from the conversation's left and right for the header's row.
 const chatHeaderChromeSide = 16.0;
 
-/// Extra list padding at the visual top of the thread, so the first rows
-/// clear the companion a little while still sliding under the fade.
-const chatHeaderThreadPadding = 28.0;
+/// Space at the top of the thread, under the header band.
+const chatHeaderThreadPadding = 12.0;
+
+/// The band's least height at a desk, its hairline included. A column beside
+/// the conversation draws its own header at exactly this height, so the two
+/// lines meet.
+const chatHeaderBandHeight = 88.0;
+
+/// What the header says about the conversation's state, beside a dot.
+enum ChatHeaderStatus { online, working, reconnecting, offline }
+
+ChatHeaderStatus? chatHeaderStatusFor(
+  ConnectionState connection, {
+  required bool working,
+}) => switch (connection) {
+  ConnectionState.initializing => null,
+  ConnectionState.reconnecting => ChatHeaderStatus.reconnecting,
+  ConnectionState.disconnected ||
+  ConnectionState.paused => ChatHeaderStatus.offline,
+  ConnectionState.connected =>
+    working ? ChatHeaderStatus.working : ChatHeaderStatus.online,
+};
 
 /// The conversation's title chrome.
 ///
 /// On a call this is still an [AppBar]: the thread is gone, and the bar is
 /// the name, a mark that says why, and the Computer. In a conversation it is
-/// an overlay — a fade, the Bot's companion at the top-left with the name
-/// immediately to its right, and the panel switch on the far right. A phone
-/// keeps Back and that same panel switch, because the conversation is a
+/// a band above the thread: the Bot's companion, its name with what it is
+/// doing and its title under it, and the conversation's actions on the right.
+/// A phone keeps Back and the panel switch, because the conversation is a
 /// page over the list.
 class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   final String name;
   final double textScale;
+
+  /// The line under the name: the Bot's title, or who is in a group.
+  final String? subtitle;
+
+  /// Whether a Turn is running here, which the status line says.
+  final bool working;
 
   /// Whether this is a phone's chrome, where Back and the panel switch stay
   /// on the original inset and the panel is a page rather than a column.
@@ -74,6 +93,13 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   final bool computerRunning;
   final ConnectionState connection;
 
+  /// Searches the conversations.
+  final VoidCallback? onSearch;
+
+  /// This Bot's actions — pin, mute, hide and the rest — the same menu its
+  /// row in the list opens.
+  final VoidCallback? onActions;
+
   /// Shows or hides the panel beside the conversation. On a phone it opens
   /// the Bot page, the same door the desk keeps on the far right.
   final VoidCallback? onTogglePanel;
@@ -87,25 +113,28 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   /// other door leads out of a call that has no way out but ending it.
   final bool voiceMode;
 
-  /// The Bot's companion, laid in the overlay a little above the name and
-  /// pills. Null in chrome-only tests.
+  /// The Bot's companion, at the start of the band. Null in chrome-only
+  /// tests.
   final Widget? companion;
 
-  /// What sits under the row, in order: the conversation's notices, then a
-  /// live call. Laid out under the row itself, so it follows the row's real
-  /// height, and drawn over the fade, which would otherwise wash it out.
+  /// What sits under the band, in order: the conversation's notices, then a
+  /// live call.
   final List<Widget> below;
 
   const ChatHeader({
     super.key,
     required this.name,
     this.textScale = 1,
+    this.subtitle,
+    this.working = false,
     this.phone = false,
     this.onBack,
     this.onOpenBot,
     this.onComputer,
     this.computerRunning = false,
     this.connection = ConnectionState.initializing,
+    this.onSearch,
+    this.onActions,
     this.onTogglePanel,
     this.panelShown = false,
     this.onMembers,
@@ -118,7 +147,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
 
   /// A call sits past the lights. A phone page drops a band of the same
   /// surface under them. A conversation beside the list does neither: its
-  /// overlay is inside the conversation column.
+  /// band is inside the conversation column.
   DesktopChrome get _chrome => voiceMode
       ? DesktopChrome.leading
       : phone
@@ -130,251 +159,184 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
       ? Size.fromHeight(_toolbarHeight + desktopChromeHeight(_chrome))
       : Size.zero;
 
-  Size get _glyphTarget =>
-      chatDesktopChrome ? const Size(36, 36) : const Size(44, 44);
+  double get _actionExtent => chatControlExtent;
 
-  double get _overlayTop =>
-      chatHeaderChromeTop +
+  double get _bandTop =>
+      (phone ? chatHeaderPhoneChromeTop : chatHeaderChromeTop) +
       (phone && desktopTitleBarless ? desktopTitleBarBand : 0);
 
   @override
   Widget build(BuildContext context) =>
-      voiceMode ? _bar(context) : _overlay(context);
+      voiceMode ? _bar(context) : _band(context);
 
-  Widget _overlay(BuildContext context) {
-    final window = Theme.of(context).scaffoldBackgroundColor;
-    return Stack(
-      fit: StackFit.expand,
+  Widget _band(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    final actions = [
+      if (onComputer != null)
+        identified(
+          ShellIds.computerDestination,
+          _action(
+            'Computer',
+            const ChatIcon(ChatIconKind.computer),
+            onComputer,
+            color: computerRunning ? computerRunningColor : null,
+          ),
+        ),
+      if (onSearch != null)
+        identified(
+          ShellIds.headerSearch,
+          _action('Search', const Icon(Icons.search_rounded), onSearch),
+        ),
+      if (onActions != null)
+        identified(
+          ShellIds.headerActions,
+          _action(
+            'More for $name',
+            const Icon(Icons.more_horiz_rounded),
+            onActions,
+          ),
+        ),
+      if (onMembers != null)
+        identified(
+          GroupIds.membersButton,
+          _action('Members', const Icon(Icons.group_outlined), onMembers),
+        ),
+      if (onTogglePanel != null)
+        identified(
+          ShellIds.rightPanelToggle,
+          _action(
+            panelShown ? 'Hide the panel' : 'Show the panel',
+            const ChatIcon(ChatIconKind.panel),
+            onTogglePanel,
+          ),
+        ),
+    ];
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
-        Align(
-          alignment: Alignment.topCenter,
-          child: IgnorePointer(
-            child: SizedBox(
-              key: const ValueKey('chat-header-fade'),
-              height: phone
-                  ? chatHeaderFadeHeight *
-                        chatCompanionPhoneSize /
-                        chatCompanionSize
-                  : chatHeaderFadeHeight,
-              width: double.infinity,
-              child: DecoratedBox(
-                decoration: BoxDecoration(
-                  gradient: LinearGradient(
-                    begin: Alignment.topCenter,
-                    end: Alignment.bottomCenter,
-                    colors: [
-                      window,
-                      window.withValues(alpha: 0.82),
-                      window.withValues(alpha: 0.38),
-                      window.withValues(alpha: 0),
+        DesktopWindowDragRegion(
+          child: DecoratedBox(
+            key: const ValueKey('chat-header-band'),
+            decoration: BoxDecoration(
+              color: scheme.surface,
+              border: Border(
+                bottom: BorderSide(color: FrockTheme.hairline(scheme)),
+              ),
+            ),
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(
+                chatHeaderChromeSide,
+                _bandTop,
+                chatHeaderChromeSide,
+                phone ? chatHeaderPhoneChromeTop : chatHeaderChromeTop,
+              ),
+              child: ConstrainedBox(
+                constraints: BoxConstraints(
+                  minHeight: phone
+                      ? 0
+                      : chatHeaderBandHeight - 2 * chatHeaderChromeTop,
+                ),
+                child: Row(
+                  children: [
+                    if (onBack != null) ...[
+                      identified(
+                        ShellIds.sidebarToggle,
+                        FrockIconButton(
+                          tooltip: 'Your Bots',
+                          onPressed: onBack,
+                          extent: _actionExtent,
+                          iconSize: chatIconSize,
+                          icon: const Icon(Icons.arrow_back_rounded),
+                        ),
+                      ),
+                      const SizedBox(width: 4),
                     ],
-                    stops: const [0, 0.42, 0.72, 1],
-                  ),
+                    if (companion != null) ...[
+                      IgnorePointer(child: companion!),
+                      const SizedBox(width: 12),
+                    ],
+                    Expanded(child: _overlayName(context)),
+                    for (final action in actions) ...[
+                      const SizedBox(width: 8),
+                      action,
+                    ],
+                  ],
                 ),
               ),
             ),
           ),
         ),
-        // The drag region runs the width of the conversation from its top
-        // edge, so the strip above the name moves the window as well as the
-        // row does.
-        Positioned(
-          top: 0,
-          left: 0,
-          right: 0,
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              DesktopWindowDragRegion(
-                child: Padding(
-                  padding: EdgeInsets.fromLTRB(
-                    chatHeaderChromeSide,
-                    _overlayTop,
-                    chatHeaderChromeSide,
-                    0,
-                  ),
-                  child: Row(
-                    crossAxisAlignment: _centerPhoneChrome
-                        ? CrossAxisAlignment.center
-                        : CrossAxisAlignment.start,
-                    children: [
-                      if (onBack != null) ...[
-                        _chromeInset(
-                          identified(
-                            ShellIds.sidebarToggle,
-                            _iconButton(
-                              'Your Bots',
-                              Icon(
-                                Icons.arrow_back_rounded,
-                                size: chatIconSize,
-                              ),
-                              onBack,
-                            ),
-                          ),
-                        ),
-                        const SizedBox(width: 8),
-                      ],
-                      if (companion != null) ...[
-                        _centerPhoneChrome
-                            ? IgnorePointer(child: companion!)
-                            : Transform.translate(
-                                offset: const Offset(
-                                  0,
-                                  -chatHeaderCompanionLift,
-                                ),
-                                child: IgnorePointer(child: companion!),
-                              ),
-                        const SizedBox(width: 10),
-                      ],
-                      Expanded(
-                        child: _chromeInset(
-                          Align(
-                            alignment: _centerPhoneChrome
-                                ? Alignment.centerLeft
-                                : Alignment.topLeft,
-                            child: _overlayName(context),
-                          ),
-                        ),
-                      ),
-                      if (onComputer != null) ...[
-                        const SizedBox(width: 8),
-                        _chromeInset(
-                          identified(
-                            ShellIds.computerDestination,
-                            _glyphPill(
-                              'Computer',
-                              ChatIconKind.computer,
-                              onComputer,
-                              color: computerRunning
-                                  ? computerRunningColor
-                                  : null,
-                            ),
-                          ),
-                        ),
-                      ],
-                      if (onMembers != null) ...[
-                        const SizedBox(width: 8),
-                        _chromeInset(
-                          identified(
-                            GroupIds.membersButton,
-                            _iconButton(
-                              'Members',
-                              const Icon(Icons.group_outlined),
-                              onMembers,
-                            ),
-                          ),
-                        ),
-                      ],
-                      if (onTogglePanel != null) ...[
-                        const SizedBox(width: 8),
-                        _chromeInset(
-                          identified(
-                            ShellIds.rightPanelToggle,
-                            _glyphButton(
-                              panelShown ? 'Hide the panel' : 'Show the panel',
-                              ChatIconKind.panel,
-                              onTogglePanel,
-                            ),
-                          ),
-                        ),
-                      ],
-                    ],
-                  ),
-                ),
-              ),
-              ...below,
-            ],
-          ),
-        ),
+        ...below,
       ],
     );
   }
 
-  /// A phone conversation centers the back arrow, companion, name and panel
-  /// switch. The desk keeps the companion high and the title low.
-  bool get _centerPhoneChrome => phone && companion != null;
-
-  Widget _chromeInset(Widget child) => phone
-      ? child
-      : Padding(
-          padding: const EdgeInsets.only(top: chatHeaderChromeDrop),
-          child: child,
-        );
-
-  /// The Bot's name sits immediately to the right of the companion. On a
-  /// phone the Bot page is the panel switch on the far right, so the name
-  /// is only the title, as it is at a desk.
-  Widget _overlayName(BuildContext context) {
-    if (onOpenBot != null) {
-      return identified(
-        ShellIds.botPanelToggle,
-        _ChromePill(
-          tooltip: 'Open $name',
-          exposeButtonSemantics: true,
-          onPressed: onOpenBot,
-          padding: const EdgeInsets.fromLTRB(14, 0, 12, 0),
-          size: Size(0, chatDesktopChrome ? 40 : 44),
-          child: _title(context, chevron: true, flexible: true),
-        ),
-      );
-    }
-    return Padding(
-      padding: EdgeInsets.only(top: _centerPhoneChrome ? 0 : 12),
-      child: _title(context, chevron: false, flexible: true, prominent: true),
-    );
-  }
-
-  Widget _glyphPill(
-    String label,
-    ChatIconKind icon,
-    VoidCallback? open, {
-    Color? color,
-  }) => Builder(
-    builder: (context) => _ChromePill(
-      tooltip: label,
-      onPressed: open,
-      size: _glyphTarget,
-      child: IconTheme(
-        data: IconThemeData(
-          color: color ?? Theme.of(context).colorScheme.onSurfaceVariant,
-        ),
-        child: ChatIcon(icon),
-      ),
-    ),
-  );
-
-  /// A header icon with no stadium. The phone's back arrow and panel switch
-  /// are the same kind of control as the desk's panel switch.
-  Widget _iconButton(
+  Widget _action(
     String label,
     Widget icon,
-    VoidCallback? open, {
+    VoidCallback? onPressed, {
     Color? color,
-  }) => Builder(
-    builder: (context) => IconButton(
-      tooltip: label,
-      onPressed: open,
-      style: IconButton.styleFrom(
-        foregroundColor:
-            color ?? Theme.of(context).colorScheme.onSurfaceVariant,
-        minimumSize: _glyphTarget,
-        maximumSize: _glyphTarget,
-        fixedSize: _glyphTarget,
-        padding: EdgeInsets.zero,
-        iconSize: chatIconSize,
-        tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-      ),
-      icon: icon,
-    ),
+  }) => headerAction(
+    tooltip: label,
+    onPressed: onPressed,
+    color: color,
+    icon: icon,
   );
 
-  Widget _glyphButton(
-    String label,
-    ChatIconKind icon,
-    VoidCallback? open, {
-    Color? color,
-  }) => _iconButton(label, ChatIcon(icon), open, color: color);
+  /// The Bot's name, with what it is doing and its title under it. Where the
+  /// shell opens the Bot page from the name, the name is that door.
+  Widget _overlayName(BuildContext context) {
+    final status = chatHeaderStatusFor(connection, working: working);
+    if (onOpenBot != null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          identified(
+            ShellIds.botPanelToggle,
+            _ChromePill(
+              tooltip: 'Open $name',
+              exposeButtonSemantics: true,
+              onPressed: onOpenBot,
+              padding: const EdgeInsets.fromLTRB(14, 0, 12, 0),
+              size: Size(0, chatDesktopChrome ? 40 : 44),
+              child: _title(context, chevron: true, flexible: true),
+            ),
+          ),
+          if (status != null) ...[
+            const SizedBox(height: 2),
+            _StatusLine(status: status),
+          ],
+        ],
+      );
+    }
+    final theme = Theme.of(context);
+    final line = subtitle?.trim();
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _title(context, chevron: false, flexible: true, prominent: true),
+        if (status != null) ...[
+          const SizedBox(height: 1),
+          _StatusLine(status: status),
+        ],
+        if (!phone && line != null && line.isNotEmpty) ...[
+          const SizedBox(height: 1),
+          Text(
+            line,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: theme.textTheme.bodySmall?.copyWith(
+              fontSize: 12.5,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ],
+    );
+  }
 
   Widget _title(
     BuildContext context, {
@@ -385,7 +347,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     final scheme = Theme.of(context).colorScheme;
     final text = Text(
       name,
-      maxLines: 2,
+      maxLines: prominent ? 1 : 2,
       overflow: TextOverflow.ellipsis,
       style: prominent
           ? Theme.of(context).textTheme.titleLarge
@@ -398,10 +360,6 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     return Row(
       mainAxisSize: MainAxisSize.min,
       children: [
-        if (connection == ConnectionState.reconnecting) ...[
-          const _DelayedConnectionDot(),
-          const SizedBox(width: 6),
-        ],
         if (flexible) Flexible(child: text) else text,
         if (chevron) ...[
           const SizedBox(width: 3),
@@ -500,6 +458,81 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   );
 }
 
+/// The header of the column beside the conversation: what it is showing,
+/// the way back, and its own controls. The chat header's band at the same
+/// height, so the column and the conversation share one line under them.
+class PanelHeader extends StatelessWidget {
+  /// The way back to the page under this one, or the face of what is shown.
+  final Widget? leading;
+  final Widget title;
+  final List<Widget> actions;
+  const PanelHeader({
+    super.key,
+    this.leading,
+    required this.title,
+    this.actions = const [],
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final scheme = Theme.of(context).colorScheme;
+    return DesktopWindowDragRegion(
+      child: DecoratedBox(
+        decoration: BoxDecoration(
+          color: scheme.surface,
+          border: Border(
+            bottom: BorderSide(color: FrockTheme.hairline(scheme)),
+          ),
+        ),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(minHeight: chatHeaderBandHeight),
+          child: Padding(
+            padding: EdgeInsets.fromLTRB(leading == null ? 16 : 8, 8, 12, 8),
+            child: Row(
+              children: [
+                if (leading case final Widget start) ...[
+                  start,
+                  const SizedBox(width: 8),
+                ],
+                Expanded(
+                  child: DefaultTextStyle.merge(
+                    style: Theme.of(context).textTheme.titleMedium,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    child: title,
+                  ),
+                ),
+                for (final action in actions) ...[
+                  const SizedBox(width: 8),
+                  action,
+                ],
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// One of a header's controls: a glyph in a hairline frame.
+Widget headerAction({
+  Key? key,
+  required String tooltip,
+  required Widget icon,
+  required VoidCallback? onPressed,
+  Color? color,
+}) => FrockIconButton(
+  key: key,
+  kind: FrockIconButtonKind.outlined,
+  tooltip: tooltip,
+  onPressed: onPressed,
+  extent: chatControlExtent,
+  iconSize: chatIconSize,
+  color: color,
+  icon: icon,
+);
+
 /// A frosted stadium for one header control. Pointer-events stay on the
 /// control; the fade behind it does not take a tap.
 class _ChromePill extends StatelessWidget {
@@ -566,8 +599,56 @@ class _ChromePill extends StatelessWidget {
   }
 }
 
+/// What the conversation is doing, beside a dot: online, working, gone
+/// quiet. Reconnecting waits a moment before it says so, because most
+/// reconnects are over before anyone would read it.
+class _StatusLine extends StatelessWidget {
+  final ChatHeaderStatus status;
+  const _StatusLine({required this.status});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    if (status == ChatHeaderStatus.reconnecting) {
+      return const _DelayedConnectionDot(label: 'Reconnecting…');
+    }
+    final (colour, label) = switch (status) {
+      ChatHeaderStatus.online => (FrockTheme.success, 'Online'),
+      ChatHeaderStatus.working => (theme.colorScheme.primary, 'Working…'),
+      ChatHeaderStatus.offline => (
+        theme.colorScheme.onSurfaceVariant,
+        'Offline',
+      ),
+      ChatHeaderStatus.reconnecting => (FrockTheme.warning, 'Reconnecting…'),
+    };
+    return Row(
+      key: ValueKey('chat-status-${status.name}'),
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        StatusDot(color: colour),
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: _statusStyle(theme),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+TextStyle? _statusStyle(ThemeData theme) => theme.textTheme.bodySmall?.copyWith(
+  fontSize: 12.5,
+  color: theme.colorScheme.onSurfaceVariant,
+);
+
 class _DelayedConnectionDot extends StatefulWidget {
-  const _DelayedConnectionDot();
+  /// Said beside the dot, where there is room for words.
+  final String? label;
+  const _DelayedConnectionDot({this.label});
 
   @override
   State<_DelayedConnectionDot> createState() => _DelayedConnectionDotState();
@@ -617,8 +698,7 @@ class _DelayedConnectionDotState extends State<_DelayedConnectionDot>
   @override
   Widget build(BuildContext context) {
     if (!visible) return const SizedBox.shrink();
-    final scheme = Theme.of(context).colorScheme;
-    return Semantics(
+    final dot = Semantics(
       container: true,
       liveRegion: true,
       label: 'Updating conversation',
@@ -628,20 +708,26 @@ class _DelayedConnectionDotState extends State<_DelayedConnectionDot>
         child: FadeTransition(
           key: const ValueKey('conversation-update'),
           opacity: opacity,
-          child: Container(
-            width: 9,
-            height: 9,
-            decoration: BoxDecoration(
-              color: Color.alphaBlend(
-                scheme.primary.withValues(alpha: 0.68),
-                scheme.surface,
-              ),
-              shape: BoxShape.circle,
-              border: Border.all(color: scheme.surface, width: 1.5),
-            ),
-          ),
+          child: const StatusDot(color: FrockTheme.warning, size: 8),
         ),
       ),
+    );
+    final label = widget.label;
+    if (label == null) return dot;
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        dot,
+        const SizedBox(width: 6),
+        Flexible(
+          child: Text(
+            label,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: _statusStyle(Theme.of(context)),
+          ),
+        ),
+      ],
     );
   }
 

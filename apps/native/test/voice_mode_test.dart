@@ -16,6 +16,7 @@ import 'package:flutter/foundation.dart'
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:frockbot_native/theme/controls.dart';
 import 'package:frockbot_native/flock/avatar.dart';
 import 'package:frockbot_native/settings/bot_settings.dart';
 import 'package:frockbot_native/settings/voice_settings.dart';
@@ -219,7 +220,7 @@ void main() {
     await tester.pump();
     final voice = find.byKey(const ValueKey('composer-voice'));
     expect(find.byType(Composer), findsOneWidget);
-    expect(tester.widget<IconButton>(voice).onPressed, isNull);
+    expect(tester.widget<FrockIconButton>(voice).onPressed, isNull);
 
     stop.complete();
     await tester.runAsync(() => settle());
@@ -227,13 +228,13 @@ void main() {
     // the frame after that is the one carrying the released control.
     await tester.pump();
     await tester.pump();
-    expect(tester.widget<IconButton>(voice).onPressed, isNotNull);
+    expect(tester.widget<FrockIconButton>(voice).onPressed, isNotNull);
     // The footer's exit finishes on its own; the composer is talkable under
     // it, not over it.
     for (var frame = 0; frame < 20; frame++) {
       await tester.pump(const Duration(milliseconds: 16));
     }
-    expect(tester.widget<IconButton>(voice).onPressed, isNotNull);
+    expect(tester.widget<FrockIconButton>(voice).onPressed, isNotNull);
     await harness.dispose(tester);
   });
 

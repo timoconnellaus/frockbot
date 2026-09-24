@@ -129,8 +129,10 @@ void main() {
 
     // The row Tim's screenshot circled: you, the Marketplace, search and a
     // new Bot. Every one of them a target a thumb can hit.
+    final you = tester.getSize(byIdentifier(ShellIds.sidebarProfile));
+    expect(you.width, greaterThanOrEqualTo(40));
+    expect(you.height, greaterThanOrEqualTo(40));
     for (final id in [
-      ShellIds.sidebarProfile,
       ShellIds.sidebarMarketplace,
       ShellIds.sidebarSearch,
       ShellIds.sidebarCreateBot,
@@ -144,10 +146,7 @@ void main() {
       final size = tester.getSize(byIdentifier(id));
       expect(size.width, greaterThanOrEqualTo(40), reason: id);
       expect(size.height, greaterThanOrEqualTo(40), reason: id);
-      // The glyph inside it, where the button names one rather than drawing
-      // its own — the account's face is a circle with a person in it.
-      final glyph = button.style?.iconSize?.resolve({});
-      if (glyph != null) expect(glyph, chatIconSizeV1, reason: id);
+      expect(button.style?.iconSize?.resolve({}), chatIconSizeV1, reason: id);
     }
   }, variant: _phones);
 
@@ -161,14 +160,16 @@ void main() {
     await tester.pumpWidget(_sidebar(phone: false));
     await tester.pumpAndSettle();
 
-    final profile = tester.getRect(byIdentifier(ShellIds.sidebarProfile));
-    expect(profile.left, 12);
-    expect(profile.top, desktopSidebarTrafficLightClearance);
-    expect(
-      tester.getRect(byIdentifier(ShellIds.sidebarCreateBot)).top,
-      desktopSidebarTrafficLightClearance,
-    );
     debugDefaultTargetPlatformOverride = null;
+    final profile = tester.getRect(byIdentifier(ShellIds.sidebarProfile));
+    final create = tester.getRect(byIdentifier(ShellIds.sidebarCreateBot));
+    expect(profile.left, 12);
+    expect(
+      [profile.top, create.top].reduce((a, b) => a < b ? a : b),
+      greaterThanOrEqualTo(desktopSidebarTrafficLightClearance),
+    );
+    // One row: the account and the new-Bot button share a centre line.
+    expect(create.center.dy, closeTo(profile.center.dy, 1));
   });
 
   testWidgets('a desk names the Marketplace in the list\'s own weight', (
@@ -187,8 +188,8 @@ void main() {
         matching: find.text('Marketplace'),
       ),
     );
-    // A door, not a heading.
-    expect(label.style?.fontWeight, FontWeight.w400);
+    // A door, not a heading: the weight a Bot's name is written in.
+    expect(label.style?.fontWeight, FontWeight.w500);
   });
 
   testWidgets('the header\'s doors are one size, with 44-point targets', (
@@ -270,15 +271,9 @@ void main() {
           matching: find.byType(IconButton),
         ),
       ),
-      const Size.square(36),
+      // The row's one invitation stands a little prouder than its peers.
+      Size.square(chatControlExtent + 4),
     );
     expect(createBot.style?.iconSize?.resolve({}), chatIconSizeDesktop);
-    final marketplaceGlyph = tester.widget<Icon>(
-      find.descendant(
-        of: byIdentifier(ShellIds.sidebarMarketplace),
-        matching: find.byIcon(Icons.storefront_outlined),
-      ),
-    );
-    expect(marketplaceGlyph.size, chatIconSizeDesktop);
   }, variant: TargetPlatformVariant.desktop());
 }

@@ -305,7 +305,7 @@ void main() {
     api.close();
   });
 
-  testWidgets('What’s New is the megaphone beside the profile, and waits', (
+  testWidgets('What’s New is a row on the column’s foot, and waits', (
     tester,
   ) async {
     tester.view.physicalSize = const Size(900, 900);
@@ -343,11 +343,11 @@ void main() {
       ),
       findsOneWidget,
     );
+    // At a desk it is a named row on the column's foot, under the list.
     final profile = identifiedBy(ShellIds.sidebarProfile);
-    expect(tester.getCenter(megaphone).dy, tester.getCenter(profile).dy);
     expect(
-      tester.getTopLeft(megaphone).dx,
-      greaterThan(tester.getTopRight(profile).dx),
+      tester.getTopLeft(megaphone).dy,
+      greaterThan(tester.getBottomLeft(profile).dy),
     );
 
     await tester.tap(megaphone);

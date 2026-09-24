@@ -506,7 +506,7 @@ void main() {
           DateTime(2026, 1, 5, 9, 5).toUtc().toIso8601String(),
           now,
         ),
-        '1/5',
+        '5 Jan',
       );
       expect(formatSidebarMessageTime('not an instant', now), '');
     });
@@ -869,12 +869,12 @@ void main() {
       expect(byIdentifier(ShellIds.sidebarSearch), findsOneWidget);
       expect(byIdentifier(ShellIds.sidebarProfile), findsOneWidget);
       expect(byIdentifier(ShellIds.sidebarWhatsNew), findsOneWidget);
-      // The row carries only what the account needs: you, What’s New, search
-      // and a new Bot. A call is not among them — it addresses one Bot, so it
-      // starts on that Bot's composer (ADR 0029) — and the Marketplace is the
-      // column's foot, a named row below the list rather than an icon in its
-      // bar.
-      expect(find.byType(IconButton), findsNWidgets(3));
+      // The bar carries only what the account needs: you and a new Bot. A
+      // call is not among them — it addresses one Bot, so it starts on that
+      // Bot's composer (ADR 0029) — and What’s New, Settings and the
+      // Marketplace are the column's foot, named rows below the list rather
+      // than icons in its bar.
+      expect(find.byType(IconButton), findsNWidgets(1));
       final foot = byIdentifier(ShellIds.sidebarMarketplace);
       expect(foot, findsOneWidget);
       expect(
@@ -962,7 +962,9 @@ void main() {
       expect(marketplace, findsOneWidget);
       expect(find.text('Marketplace'), findsNothing);
       expect(find.byTooltip('Marketplace'), findsOneWidget);
-      expect(find.byType(IconButton), findsNWidgets(5));
+      // What’s New, the Marketplace, search and a new Bot; you are the face
+      // at the start of the row.
+      expect(find.byType(IconButton), findsNWidgets(4));
       final profile = tester.getRect(byIdentifier(ShellIds.sidebarProfile));
       final whatsNew = tester.getRect(byIdentifier(ShellIds.sidebarWhatsNew));
       final door = tester.getRect(marketplace);

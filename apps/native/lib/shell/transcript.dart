@@ -11,8 +11,9 @@ import 'package:flutter/rendering.dart';
 import '../flock/avatar.dart';
 import '../theme/frock_theme.dart';
 import '../theme/states.dart';
+import '../theme/thread.dart';
+import '../theme/time.dart';
 import 'chat_header.dart';
-import 'desktop_layout.dart';
 import 'markdown.dart';
 import 'run_view.dart';
 import 'semantics.dart';
@@ -358,6 +359,7 @@ class _TranscriptViewState extends State<TranscriptView> {
     // newest first.
     final slots = <_ThreadSlot>[];
     slots.add(const _ThreadSlot('tail', _SlotKind.tail));
+    _stamped = _stamps(ordered.where(_draws));
     var anyLine = false;
     for (final line in ordered.reversed) {
       if (!_draws(line)) continue;
@@ -470,48 +472,13 @@ class _TranscriptViewState extends State<TranscriptView> {
       case _SlotKind.earlier:
         return identified(
           ShellIds.transcriptEarlier,
-          Center(
-            child: TextButton(
-              onPressed: loading ? null : () => onRefresh(older: true),
-              style: TextButton.styleFrom(
-                foregroundColor: Theme.of(context).colorScheme.onSurfaceVariant,
-                textStyle: Theme.of(context).textTheme.labelMedium,
-                minimumSize: const Size(0, 32),
-              ),
-              child: const Text('Earlier messages'),
-            ),
+          EarlierMessages(
+            onPressed: () => onRefresh(older: true),
+            loading: loading,
           ),
         );
       case _SlotKind.unread:
-        return Padding(
-          padding: const EdgeInsets.fromLTRB(16, 10, 16, 6),
-          child: Row(
-            children: [
-              Expanded(
-                child: Divider(
-                  color: Theme.of(context).colorScheme.primary
-                      .withValues(alpha: 0.45),
-                ),
-              ),
-              Padding(
-                padding: const EdgeInsets.symmetric(horizontal: 10),
-                child: Text(
-                  'Unread from here',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                    color: FrockTheme.accentInk(Theme.of(context)),
-                    letterSpacing: 0.3,
-                  ),
-                ),
-              ),
-              Expanded(
-                child: Divider(
-                  color: Theme.of(context).colorScheme.primary
-                      .withValues(alpha: 0.45),
-                ),
-              ),
-            ],
-          ),
-        );
+        return const UnreadDivider();
       case _SlotKind.line:
         final line = slot.line!;
         final actions =
@@ -533,14 +500,63 @@ class _TranscriptViewState extends State<TranscriptView> {
         return Container(
           key: focusKey,
           decoration: BoxDecoration(
-            color: Theme.of(context).colorScheme.primary
-                .withValues(alpha: 0.08),
-            borderRadius: BorderRadius.circular(12),
+            color: Theme.of(context).colorScheme.onSurface
+                .withValues(alpha: 0.05),
+            borderRadius: BorderRadius.circular(FrockTheme.radiusControl),
+            border: Border.all(color: Theme.of(context).colorScheme.primary),
           ),
           child: row,
         );
     }
   }
+
+  /// The time each message is written with. A message is stamped when it
+  /// starts a new speaker's run, or five minutes after the last stamp in the
+  /// same run, so a burst from one side carries one time, not one per line.
+  Map<String, String> _stamped = const {};
+
+  static Map<String, String> _stamps(Iterable<TranscriptLine> lines) {
+    final now = DateTime.now();
+    final stamped = <String, String>{};
+    LineRole? role;
+    DateTime? last;
+    for (final line in lines) {
+      if (line.exchange != null ||
+          line.voiceCall != null ||
+          line.role == LineRole.system) {
+        role = null;
+        continue;
+      }
+      // An unconfirmed message has no time of its own yet. It reads as now,
+      // so receiving it changes nothing drawn.
+      final at = localInstant(line.at) ?? now;
+      if (line.role != role ||
+          last == null ||
+          at.difference(last).inMinutes >= 5) {
+        stamped[line.id] = messageTimeLabel(at, now);
+        last = at;
+      }
+      role = line.role;
+    }
+    return stamped;
+  }
+
+  Widget _bubble({
+    required String id,
+    required bool mine,
+    required Widget child,
+    String? time,
+  }) => identified(
+    ShellIds.message(id),
+    MessageBubble(
+      key: ValueKey(id),
+      mine: mine,
+      time: time,
+      animate: true,
+      semanticsLabel: mine ? 'You' : 'Bot',
+      child: child,
+    ),
+  );
 
   /// One line, or nothing where the line has nothing to say — a running Turn
   /// before its first token is the animated row, not an empty bubble.
@@ -562,7 +578,12 @@ class _TranscriptViewState extends State<TranscriptView> {
       return _Announcement(text: line.text);
     }
     if (line.role == LineRole.user) {
-      final bubble = _Bubble(id: line.id, mine: true, child: Text(line.text));
+      final bubble = _bubble(
+        id: line.id,
+        mine: true,
+        time: _stamped[line.id],
+        child: Text(line.text),
+      );
       if (line.notice == null) return bubble;
       // The person's message arrived; it is the reply that did not. So the
       // way out sits where the reply would have been, not on their words.
@@ -615,10 +636,10 @@ class _TranscriptViewState extends State<TranscriptView> {
             onOpenBilling: onOpenBilling,
           );
     if (children.isEmpty) return notice;
-    final bubble = _Bubble(
+    final bubble = _bubble(
       id: line.id,
       mine: false,
-      background: widget.background,
+      time: _stamped[line.id],
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         mainAxisSize: MainAxisSize.min,
@@ -744,89 +765,6 @@ class _RenderMeasuredSlot extends RenderProxyBox {
   }
 }
 
-class _Bubble extends StatelessWidget {
-  final String id;
-  final bool mine;
-  final String? background;
-  final Widget child;
-  const _Bubble({
-    required this.id,
-    required this.mine,
-    required this.child,
-    this.background,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return identified(
-      ShellIds.message(id),
-      TweenAnimationBuilder<double>(
-        key: ValueKey(id),
-        tween: Tween(begin: 0, end: 1),
-        duration: FrockTheme.motion(context),
-        curve: Curves.easeOutCubic,
-        builder: (context, value, child) => Opacity(
-          opacity: (0.7 + value * 0.3).clamp(0.0, 1.0),
-          child: Transform.translate(
-            offset: Offset(0, 6 * (1 - value)),
-            child: child,
-          ),
-        ),
-        child: Row(
-          mainAxisAlignment: mine
-              ? MainAxisAlignment.end
-              : MainAxisAlignment.start,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Flexible(
-              child: Container(
-                constraints: const BoxConstraints(maxWidth: 720),
-                margin: EdgeInsets.fromLTRB(
-                  mine ? 64 : 16,
-                  5,
-                  mine ? 16 : 16,
-                  5,
-                ),
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 13,
-                  vertical: 9,
-                ),
-                decoration: BoxDecoration(
-                  color:
-                      Theme.of(context)
-                          .extension<FrockLook>()
-                          ?.bubbleFill(mine: mine) ??
-                      (mine
-                          ? Color.alphaBlend(
-                              theme.colorScheme.primary.withValues(alpha: 0.2),
-                              theme.colorScheme.surfaceContainerHighest,
-                            )
-                          : theme.colorScheme.surfaceContainerHighest),
-                  borderRadius: BorderRadius.only(
-                    topLeft: const Radius.circular(18),
-                    topRight: const Radius.circular(18),
-                    bottomLeft: Radius.circular(mine ? 18 : 4),
-                    bottomRight: Radius.circular(mine ? 4 : 18),
-                  ),
-                ),
-                child: DefaultTextStyle.merge(
-                  style: FrockTheme.message(theme).copyWith(
-                    color: Theme.of(context)
-                        .extension<FrockLook>()
-                        ?.bubbleInk(mine: mine),
-                  ),
-                  child: Semantics(label: mine ? 'You' : 'Bot', child: child),
-                ),
-              ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
 /// Why a Turn ended where it did, and the way out of it, on the Bot's side of
 /// the thread: said once, quietly, with the action beside it. A reply that
 /// did not come is not an alarm, and it is not the person's doing.
@@ -840,29 +778,8 @@ class _Notice extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final muted = theme.colorScheme.onSurfaceVariant;
-    final action = theme.textTheme.labelMedium?.copyWith(
-      color: theme.colorScheme.primary,
-      fontWeight: FontWeight.w600,
-    );
     Widget link(String id, String label, IconData icon, VoidCallback onTap) =>
-        identified(
-          id,
-          InkWell(
-            borderRadius: BorderRadius.circular(8),
-            onTap: onTap,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 4),
-              child: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Icon(icon, size: 15, color: theme.colorScheme.primary),
-                  const SizedBox(width: 4),
-                  Text(label, style: action),
-                ],
-              ),
-            ),
-          ),
-        );
+        identified(id, ThreadLink(icon: icon, label: label, onTap: onTap));
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 2, 16, 4),
       // Wrapped, not a row: at large text the sentence and its action do not
@@ -946,13 +863,10 @@ class _VoiceCallAccordionState extends State<_VoiceCallAccordion> {
         child: ConstrainedBox(
           constraints: const BoxConstraints(maxWidth: 560),
           child: Material(
-            color: Color.alphaBlend(
-              scheme.primary.withValues(alpha: 0.07),
-              scheme.surfaceContainerHighest,
-            ),
+            color: scheme.surfaceContainerHighest,
             shape: RoundedRectangleBorder(
-              borderRadius: BorderRadius.circular(18),
-              side: BorderSide(color: scheme.primary.withValues(alpha: 0.28)),
+              borderRadius: BorderRadius.circular(FrockTheme.radiusCard),
+              side: BorderSide(color: FrockTheme.hairline(scheme)),
             ),
             clipBehavior: Clip.antiAlias,
             child: Column(
@@ -973,13 +887,13 @@ class _VoiceCallAccordionState extends State<_VoiceCallAccordion> {
                             width: 40,
                             height: 40,
                             decoration: BoxDecoration(
-                              color: scheme.primary.withValues(alpha: 0.18),
+                              color: scheme.primary,
                               shape: BoxShape.circle,
                             ),
                             child: Icon(
                               Icons.graphic_eq_rounded,
                               size: 22,
-                              color: scheme.primary,
+                              color: scheme.onPrimary,
                             ),
                           ),
                           const SizedBox(width: 12),
@@ -1069,7 +983,8 @@ class _SpokenLine extends StatelessWidget {
         padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
         decoration: BoxDecoration(
           color: mine
-              ? scheme.primary.withValues(alpha: 0.18)
+              ? theme.extension<FrockLook>()?.bubbleFill(mine: true) ??
+                    scheme.surface
               : scheme.surface.withValues(alpha: 0.6),
           borderRadius: BorderRadius.circular(14),
         ),
@@ -1084,42 +999,13 @@ class _EmptyThread extends StatelessWidget {
   const _EmptyThread({this.starters});
 
   @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    return SingleChildScrollView(
-      child: Padding(
-        padding: EdgeInsets.fromLTRB(
-          32,
-          chatHeaderChromeTop +
-              chatCompanionSizeFor(
-                phone:
-                    shellTierForWidth(MediaQuery.sizeOf(context).width) ==
-                    ShellTier.single,
-              ),
-          32,
-          32,
-        ),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(
-              'What would you like to work on?',
-              style: theme.textTheme.headlineMedium,
-            ),
-            const SizedBox(height: 8),
-            Text(
-              'Ask a question, make a plan, or give your Bot something to do.',
-              style: theme.textTheme.bodyMedium?.copyWith(
-                color: theme.colorScheme.onSurfaceVariant,
-              ),
-            ),
-            if (starters != null) ...[const SizedBox(height: 16), starters!],
-          ],
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => SingleChildScrollView(
+    child: EmptyThread(
+      title: 'What would you like to work on?',
+      detail: 'Ask a question, make a plan, or give your Bot something to do.',
+      child: starters,
+    ),
+  );
 }
 
 /// One line in the thread for a message that crossed to or from a
@@ -1144,56 +1030,31 @@ class _ExchangeMarker extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final exchange = line.exchange!;
-    final muted = theme.colorScheme.onSurfaceVariant.withValues(alpha: 0.8);
-    final quiet = theme.textTheme.bodySmall?.copyWith(color: muted);
-    final named = theme.textTheme.bodySmall?.copyWith(
-      color: theme.colorScheme.onSurfaceVariant,
-      fontWeight: FontWeight.w500,
-    );
+    final quiet = ThreadMarker.quiet(theme);
     final status = exchange.statusLabel;
-    return Padding(
-      padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 6),
-      child: Center(
-        child: identified(
-          ShellIds.exchange(line.id),
-          Material(
-            color: Colors.transparent,
-            borderRadius: BorderRadius.circular(999),
-            child: InkWell(
-              key: ValueKey('exchange:${line.id}'),
-              borderRadius: BorderRadius.circular(999),
-              onTap: onOpen == null ? null : () => onOpen!(line),
-              child: Padding(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 10,
-                  vertical: 4,
-                ),
-                child: Wrap(
-                  crossAxisAlignment: WrapCrossAlignment.center,
-                  spacing: 6,
-                  runSpacing: 2,
-                  children: [
-                    Text(
-                      exchange.direction == ExchangeDirection.outbound
-                          ? 'Messaged'
-                          : 'Message from',
-                      style: quiet,
-                    ),
-                    CounterpartAvatar(
-                      counterpart: exchange.counterpart,
-                      background: background,
-                      primary: primary,
-                      size: 18,
-                    ),
-                    Text(name ?? exchange.counterpart.label, style: named),
-                    if (status != null) Text('· $status', style: quiet),
-                  ],
-                ),
-              ),
-            ),
-          ),
+    return ThreadMarker(
+      identifier: ShellIds.exchange(line.id),
+      tapKey: ValueKey('exchange:${line.id}'),
+      onTap: onOpen == null ? null : () => onOpen!(line),
+      children: [
+        Text(
+          exchange.direction == ExchangeDirection.outbound
+              ? 'Messaged'
+              : 'Message from',
+          style: quiet,
         ),
-      ),
+        CounterpartAvatar(
+          counterpart: exchange.counterpart,
+          background: background,
+          primary: primary,
+          size: 18,
+        ),
+        Text(
+          name ?? exchange.counterpart.label,
+          style: ThreadMarker.named(theme),
+        ),
+        if (status != null) Text('· $status', style: quiet),
+      ],
     );
   }
 }
@@ -1229,13 +1090,13 @@ class CounterpartAvatar extends StatelessWidget {
       width: size,
       height: size,
       decoration: BoxDecoration(
-        color: scheme.primary.withValues(alpha: 0.16),
+        color: scheme.primary,
         borderRadius: BorderRadius.circular(size * 0.27),
       ),
       child: Icon(
         Icons.graphic_eq_rounded,
         size: size * 0.7,
-        color: scheme.primary,
+        color: scheme.onPrimary,
       ),
     );
   }

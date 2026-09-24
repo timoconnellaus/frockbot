@@ -15,6 +15,7 @@ import '../flock/avatar.dart';
 import '../shell/desktop_layout.dart';
 import '../shell/semantics.dart';
 import '../theme/caret.dart';
+import '../theme/controls.dart';
 import '../theme/document.dart';
 import '../theme/frock_theme.dart';
 import '../theme/rows.dart';
@@ -360,7 +361,7 @@ class _BotLookPageState extends State<BotLookPage> {
                 FrockRow(
                   title: 'Typeface',
                   chevron: false,
-                  trailing: _segmented(
+                  trailing: FrockSegmented(
                     label: 'Typeface',
                     selected: tokens.type.name,
                     options: const [
@@ -382,7 +383,7 @@ class _BotLookPageState extends State<BotLookPage> {
                 FrockRow(
                   title: 'Bot bubble',
                   chevron: false,
-                  trailing: _segmented(
+                  trailing: FrockSegmented(
                     label: 'Bot bubble',
                     selected: tokens.botBubble.name,
                     options: const [
@@ -404,12 +405,12 @@ class _BotLookPageState extends State<BotLookPage> {
                 FrockRow(
                   title: 'Me bubble',
                   chevron: false,
-                  trailing: _segmented(
+                  trailing: FrockSegmented(
                     label: 'Me bubble',
                     selected: tokens.meBubble.name,
                     options: const [
                       (slug: 'accent', label: 'Accent'),
-                      (slug: 'tint', label: 'Tint'),
+                      (slug: 'tint', label: 'Grey'),
                     ],
                     onChosen: (slug) => _setTokens(
                       tokens.copyWith(
@@ -423,62 +424,6 @@ class _BotLookPageState extends State<BotLookPage> {
               ),
             ],
           ),
-        ],
-      ),
-    );
-  }
-
-  Widget _segmented({
-    required String label,
-    required String selected,
-    required List<({String slug, String label})> options,
-    required void Function(String) onChosen,
-  }) {
-    final scheme = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(2),
-      decoration: BoxDecoration(
-        color: scheme.onSurface.withValues(alpha: 0.05),
-        borderRadius: BorderRadius.circular(FrockTheme.radiusControl),
-      ),
-      child: Row(
-        mainAxisSize: MainAxisSize.min,
-        children: [
-          for (final option in options)
-            Semantics(
-              button: true,
-              selected: option.slug == selected,
-              label: '$label: ${option.label}',
-              child: ExcludeSemantics(
-                child: InkWell(
-                  onTap: () => onChosen(option.slug),
-                  borderRadius: BorderRadius.circular(9),
-                  child: Container(
-                    height: 30,
-                    alignment: Alignment.center,
-                    padding: const EdgeInsets.symmetric(horizontal: 10),
-                    decoration: BoxDecoration(
-                      color: option.slug == selected
-                          ? scheme.primary.withValues(alpha: 0.18)
-                          : Colors.transparent,
-                      borderRadius: BorderRadius.circular(9),
-                    ),
-                    child: Text(
-                      option.label,
-                      style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                        fontSize: 12.5,
-                        color: option.slug == selected
-                            ? scheme.primary
-                            : scheme.onSurfaceVariant,
-                        fontWeight: option.slug == selected
-                            ? FontWeight.w600
-                            : FontWeight.w400,
-                      ),
-                    ),
-                  ),
-                ),
-              ),
-            ),
         ],
       ),
     );
@@ -600,8 +545,14 @@ class _CustomLookPreview extends StatelessWidget {
                       alignment: Alignment.centerRight,
                       child: DecoratedBox(
                         decoration: BoxDecoration(
-                          color: painted.colorScheme.primary,
-                          borderRadius: BorderRadius.circular(12),
+                          color:
+                              painted.extension<FrockLook>()?.bubbleFill(
+                                mine: true,
+                              ) ??
+                              painted.colorScheme.primary,
+                          borderRadius: BorderRadius.circular(
+                            FrockTheme.radiusControl,
+                          ),
                         ),
                         child: Padding(
                           padding: const EdgeInsets.symmetric(
@@ -611,7 +562,11 @@ class _CustomLookPreview extends StatelessWidget {
                           child: Text(
                             'Me',
                             style: painted.textTheme.labelMedium?.copyWith(
-                              color: painted.colorScheme.onPrimary,
+                              color:
+                                  painted.extension<FrockLook>()?.bubbleInk(
+                                    mine: true,
+                                  ) ??
+                                  painted.colorScheme.onPrimary,
                             ),
                           ),
                         ),

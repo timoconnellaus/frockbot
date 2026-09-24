@@ -133,12 +133,11 @@ class ChatPane extends StatefulWidget {
   final String? background;
   final String? primary;
 
-  /// Conversation chrome laid over the thread: the fade, the companion, the
-  /// name and the doors. The pane builds the companion so gaze stays with the
-  /// pane; the shell wraps it in [ChatHeader]. The companion there is at
-  /// rest: a Turn is worn at the end of the thread instead. The pane's
-  /// notices (offline, out of credit) go under the header's row, since the
-  /// top of the thread is behind the header.
+  /// The conversation's header above the thread: the companion, the name and
+  /// the doors. The pane builds the companion so gaze stays with the pane;
+  /// the shell wraps it in [ChatHeader]. The companion there is at rest: a
+  /// Turn is worn at the end of the thread instead. The pane's notices
+  /// (offline, out of credit) go under the header's band.
   final Widget Function(Widget companion, List<Widget> notices)? overlay;
 
   /// What the empty thread offers to write into the composer.
@@ -444,63 +443,54 @@ class _ChatPaneState extends State<ChatPane> {
     ];
     return Column(
       children: [
+        _chrome(_companion(c, working), notices),
         Expanded(
-          child: Stack(
+          child: Column(
             children: [
-              Column(
-                children: [
-                  Expanded(
-                    child: Center(
-                      child: ConstrainedBox(
-                        constraints: const BoxConstraints(
-                          maxWidth: readingWidth,
-                        ),
-                        child: thread,
+              Expanded(
+                child: Center(
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: readingWidth),
+                    child: thread,
+                  ),
+                ),
+              ),
+              if (c.error != null)
+                Padding(
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 16,
+                    vertical: 8,
+                  ),
+                  child: Text(
+                    c.error!,
+                    style: TextStyle(
+                      color: Theme.of(context).colorScheme.error,
+                    ),
+                  ),
+                ),
+              if (_commandNote != null)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(20, 4, 20, 2),
+                  child: Align(
+                    alignment: AlignmentDirectional.centerStart,
+                    child: Text(
+                      _commandNote!,
+                      key: const ValueKey('command-note'),
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                        color: Theme.of(context).colorScheme.onSurfaceVariant,
                       ),
                     ),
                   ),
-                  if (c.error != null)
-                    Padding(
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 16,
-                        vertical: 8,
-                      ),
-                      child: Text(
-                        c.error!,
-                        style: TextStyle(
-                          color: Theme.of(context).colorScheme.error,
-                        ),
-                      ),
-                    ),
-                  if (_commandNote != null)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 4, 20, 2),
-                      child: Align(
-                        alignment: AlignmentDirectional.centerStart,
-                        child: Text(
-                          _commandNote!,
-                          key: const ValueKey('command-note'),
-                          style: Theme.of(context).textTheme.bodySmall
-                              ?.copyWith(
-                                color: Theme.of(context)
-                                    .colorScheme
-                                    .onSurfaceVariant,
-                              ),
-                        ),
-                      ),
-                    ),
-                  if (c.pending.isNotEmpty && !c.sending)
-                    identified(
-                      ShellIds.checkDelivery,
-                      TextButton(
-                        key: const ValueKey('check-delivery'),
-                        onPressed: c.checking ? null : c.checkDelivery,
-                        child: const Text('Check message status'),
-                      ),
-                    ),
-                ],
-              ),
-              Positioned.fill(child: _chrome(_companion(c, working), notices)),
+                ),
+              if (c.pending.isNotEmpty && !c.sending)
+                identified(
+                  ShellIds.checkDelivery,
+                  TextButton(
+                    key: const ValueKey('check-delivery'),
+                    onPressed: c.checking ? null : c.checkDelivery,
+                    child: const Text('Check message status'),
+                  ),
+                ),
             ],
           ),
         ),
@@ -514,9 +504,9 @@ class _ChatPaneState extends State<ChatPane> {
     );
   }
 
-  /// The fade and the pills wrap [companion] when the shell passed chrome;
-  /// pane-only tests still get the character at the same inset, with the
-  /// notices under it.
+  /// The header wraps [companion] when the shell passed chrome; pane-only
+  /// tests still get the character at the same inset, with the notices under
+  /// it.
   Widget _chrome(Widget companion, List<Widget> notices) {
     if (widget.overlay != null) return widget.overlay!(companion, notices);
     return Column(
@@ -705,7 +695,7 @@ class ConversationView extends StatefulWidget {
   final String? background;
   final String? primary;
 
-  /// Conversation chrome laid over the thread. See [ChatPane.overlay].
+  /// The conversation header above the thread. See [ChatPane.overlay].
   final Widget Function(Widget companion, List<Widget> notices)? overlay;
 
   /// Whether this is General, whose empty thread offers starter suggestions.

@@ -33,12 +33,12 @@ Map<String, Object?> studioDocument() => {
   'look': 'studio',
   'tokens': {
     'surfaces': {
-      'window': '#fbf6ec',
+      'window': '#f5f6f9',
       'surface': '#ffffff',
-      'raised': '#f4ecdf',
-      'text': '#151416',
-      'muted': '#6b645b',
-      'line': '#e8ddcd',
+      'raised': '#eceef3',
+      'text': '#15151e',
+      'muted': '#5c5f70',
+      'line': '#dfe1e8',
       'accent': '#c23359',
       'onAccent': '#ffffff',
     },
@@ -265,7 +265,10 @@ void main() {
       expect(find.byKey(const ValueKey('thread-theme-bot-one')), findsNothing);
       await tester.tap(find.byKey(const ValueKey('bot-bot-two')));
       await tester.pump();
-      expect(find.byKey(const ValueKey('thread-theme-bot-two')), findsOneWidget);
+      expect(
+        find.byKey(const ValueKey('thread-theme-bot-two')),
+        findsOneWidget,
+      );
       expect(find.byKey(const ValueKey('panel-theme')), findsOneWidget);
       expect(
         threadTheme(tester, 'bot-two').data.colorScheme.primary,
@@ -274,4 +277,3 @@ void main() {
     },
   );
 }
-

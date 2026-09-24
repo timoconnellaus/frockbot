@@ -11,9 +11,10 @@ import 'package:flutter/material.dart';
 
 import '../flock/avatar.dart';
 import '../theme/frock_theme.dart';
+import '../theme/thread.dart';
 import '../theme/states.dart';
-import 'desktop_layout.dart';
 import 'markdown.dart';
+import 'chat_header.dart';
 import 'semantics.dart';
 import 'transcript.dart';
 
@@ -77,35 +78,26 @@ class ExchangeView extends StatelessWidget {
       Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          if (header) ...[
-            DesktopWindowDragRegion(
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(16, 12, 8, 8),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: ExchangeTitle(
-                        self: self,
-                        counterpart: counterpart,
-                        counterpartBackground: counterpartBackground,
-                        counterpartPrimary: counterpartPrimary,
-                      ),
-                    ),
-                    if (onClose != null)
-                      identified(
-                        ShellIds.exchangeViewClose,
-                        IconButton(
-                          tooltip: 'Close',
-                          onPressed: onClose,
-                          icon: const Icon(Icons.close),
-                        ),
-                      ),
-                  ],
-                ),
+          if (header)
+            PanelHeader(
+              title: ExchangeTitle(
+                self: self,
+                counterpart: counterpart,
+                counterpartBackground: counterpartBackground,
+                counterpartPrimary: counterpartPrimary,
               ),
+              actions: [
+                if (onClose != null)
+                  identified(
+                    ShellIds.exchangeViewClose,
+                    headerAction(
+                      tooltip: 'Close',
+                      onPressed: onClose,
+                      icon: const Icon(Icons.close_rounded),
+                    ),
+                  ),
+              ],
             ),
-            const Divider(height: 1),
-          ],
           Expanded(
             child: exchanges.isEmpty
                 ? Center(
@@ -131,18 +123,7 @@ class ExchangeView extends StatelessWidget {
                       crossAxisAlignment: CrossAxisAlignment.stretch,
                       children: [
                         if (hasEarlier)
-                          Center(
-                            child: TextButton(
-                              onPressed: loading ? null : onOlder,
-                              style: TextButton.styleFrom(
-                                foregroundColor:
-                                    theme.colorScheme.onSurfaceVariant,
-                                textStyle: theme.textTheme.labelMedium,
-                                minimumSize: const Size(0, 32),
-                              ),
-                              child: const Text('Earlier messages'),
-                            ),
-                          ),
+                          EarlierMessages(onPressed: onOlder, loading: loading),
                         if (error != null)
                           Padding(
                             padding: const EdgeInsets.fromLTRB(16, 8, 16, 8),
@@ -303,7 +284,6 @@ class _ExchangeRows extends StatelessWidget {
           ),
         _ExchangeMessage(
           party: asker,
-          voice: !outbound && exchange.counterpart.isVoice,
           text: exchange.request,
           onOpenLink: onOpenLink,
         ),
@@ -315,7 +295,7 @@ class _ExchangeRows extends StatelessWidget {
           )
         else if (pending != null)
           Padding(
-            padding: const EdgeInsets.fromLTRB(52, 2, 16, 6),
+            padding: const EdgeInsets.fromLTRB(24, 2, 16, 6),
             child: Text(
               pending,
               style: theme.textTheme.bodySmall?.copyWith(
@@ -328,17 +308,15 @@ class _ExchangeRows extends StatelessWidget {
   }
 }
 
-/// A message under its author's name, with their face beside its foot. Every
-/// message sits on the left: this is a chat between two others, read over
-/// their shoulders, and neither side is "mine".
+/// A message under its author's name. Every message sits on the left: this
+/// is a chat between two others, read over their shoulders, and neither side
+/// is "mine".
 class _ExchangeMessage extends StatelessWidget {
   final ExchangeParty party;
-  final bool voice;
   final String text;
   final void Function(String url)? onOpenLink;
   const _ExchangeMessage({
     required this.party,
-    this.voice = false,
     required this.text,
     this.onOpenLink,
   });
@@ -346,62 +324,18 @@ class _ExchangeMessage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
-      child: Row(
-        crossAxisAlignment: CrossAxisAlignment.end,
-        children: [
-          voice
-              ? const CounterpartAvatar(
-                  counterpart: ExchangeCounterpart.voice(),
-                  size: 26,
-                )
-              : CharacterAvatar(
-                  size: 26,
-                  characterId: party.background,
-                  primary: party.primary,
-                  motion: CharacterMotion.quiet,
-                ),
-          const SizedBox(width: 10),
-          Flexible(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                Padding(
-                  padding: const EdgeInsets.only(left: 4, bottom: 4),
-                  child: Text(
-                    party.name,
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: theme.colorScheme.primary,
-                    ),
-                  ),
-                ),
-                Container(
-                  constraints: const BoxConstraints(maxWidth: 720),
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 13,
-                    vertical: 9,
-                  ),
-                  decoration: BoxDecoration(
-                    color: theme.colorScheme.surfaceContainerHighest,
-                    borderRadius: const BorderRadius.only(
-                      topLeft: Radius.circular(18),
-                      topRight: Radius.circular(18),
-                      bottomLeft: Radius.circular(4),
-                      bottomRight: Radius.circular(18),
-                    ),
-                  ),
-                  child: DefaultTextStyle.merge(
-                    style: FrockTheme.message(theme),
-                    child: ShellMarkdown(text: text, onOpenLink: onOpenLink),
-                  ),
-                ),
-              ],
-            ),
+    return MessageBubble(
+      mine: false,
+      label: Padding(
+        padding: const EdgeInsets.only(left: 4),
+        child: Text(
+          party.name,
+          style: theme.textTheme.labelMedium?.copyWith(
+            color: FrockTheme.accentInk(theme),
           ),
-        ],
+        ),
       ),
+      child: ShellMarkdown(text: text, onOpenLink: onOpenLink),
     );
   }
 }

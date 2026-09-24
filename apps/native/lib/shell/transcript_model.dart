@@ -8,6 +8,8 @@ library;
 
 import 'dart:convert';
 
+import '../theme/time.dart';
+
 /// One user-facing send, as the thread draws it. `unsupported` is a payload
 /// this client cannot draw — a newer shape, or a malformed one. The thread
 /// says so rather than throwing: a Turn's history has to render on a client
@@ -884,29 +886,12 @@ List<Exchange> projectExchanges(
 /// When an exchange happened, for the view: the time today, the weekday and
 /// time inside the last week, the date and time beyond it.
 String formatExchangeTime(String? at, [DateTime? clock]) {
-  final message = at == null ? null : DateTime.tryParse(at)?.toLocal();
+  final message = localInstant(at);
   if (message == null) return '';
   final now = clock ?? DateTime.now();
   final today = DateTime(now.year, now.month, now.day);
   final tomorrow = today.add(const Duration(days: 1));
-  final hour = message.hour % 12 == 0 ? 12 : message.hour % 12;
-  final minute = message.minute.toString().padLeft(2, '0');
-  final time = '$hour:$minute ${message.hour < 12 ? 'am' : 'pm'}';
-  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'];
-  const months = [
-    'Jan',
-    'Feb',
-    'Mar',
-    'Apr',
-    'May',
-    'Jun',
-    'Jul',
-    'Aug',
-    'Sep',
-    'Oct',
-    'Nov',
-    'Dec',
-  ];
+  final time = clockLabel(message);
   if (!message.isBefore(today) && message.isBefore(tomorrow)) {
     return 'Today $time';
   }
@@ -914,15 +899,14 @@ String formatExchangeTime(String? at, [DateTime? clock]) {
       message.isBefore(today)) {
     return 'Yesterday $time';
   }
-  final day = days[message.weekday - 1];
-  final date = '${months[message.month - 1]} ${message.day}';
+  final day = shortWeekdays[message.weekday - 1];
   if (!message.isBefore(today.subtract(const Duration(days: 6))) &&
       message.isBefore(tomorrow)) {
     return '$day $time';
   }
   return message.year == now.year
-      ? '$day, $date $time'
-      : '$date, ${message.year} $time';
+      ? '$day ${dateLabel(message)}, $time'
+      : '${dateLabel(message, year: true)}, $time';
 }
 
 /// What a compaction says. The summary itself is deliberately not on the wire:

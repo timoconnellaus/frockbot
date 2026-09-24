@@ -17,6 +17,7 @@ abstract final class ShellIds {
   static const sidebarProfile = 'sidebar-profile';
   static const sidebarMarketplace = 'sidebar-marketplace';
   static const sidebarWhatsNew = 'sidebar-whats-new';
+  static const sidebarSettings = 'sidebar-settings';
   static const sidebarHiddenToggle = 'sidebar-hidden-toggle';
   static const sidebarRetry = 'sidebar-retry';
   static const conversation = 'shell-conversation';
@@ -31,11 +32,14 @@ abstract final class ShellIds {
   static const rightPanelToggle = 'right-panel-toggle';
   static const scrim = 'shell-scrim';
   static const botPanelToggle = 'bot-panel-toggle';
+  static const headerSearch = 'header-search';
+  static const headerActions = 'header-actions';
   static const computerDestination = 'computer-destination';
   static const transcript = 'chat-transcript';
   static const transcriptEarlier = 'transcript-earlier';
   static const composer = 'chat-composer';
   static const sendButton = 'send-button';
+  static const composerPlus = 'composer-plus';
   static const composerCounter = 'composer-counter';
   static const skillMenu = 'skill-menu';
   static const skillChips = 'skill-chips';

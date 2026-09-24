@@ -113,6 +113,20 @@ Future<void> chord(
 }
 
 void main() {
+  test('a schedule reads as the Routines list says it, never as cron', () {
+    expect(describeRoutineSchedule('0 9 * * *'), 'Every day at 9:00 am');
+    expect(describeRoutineSchedule('30 8 * * 1-5'), 'Every weekday at 8:30 am');
+    expect(describeRoutineSchedule('0 18 * * 5'), 'Every Friday at 6:00 pm');
+    expect(describeRoutineSchedule('0 9 * * 1'), 'Every Monday at 9:00 am');
+    expect(
+      describeRoutineSchedule('15 7 3 * *'),
+      'On day 3 of every month at 7:15 am',
+    );
+    expect(describeRoutineSchedule('@every 15m'), 'Every 15 minutes');
+    expect(describeRoutineSchedule('@daily'), 'Every day at 12:00 am');
+    expect(describeRoutineSchedule('0 9 1-7 * 1'), 'Custom schedule');
+  });
+
   test('a hit and group preserve their destination, kind and server count', () {
     expect(SearchHit.decode({'runId': 'r', 'kind': 'tool'})!.kindLabel, 'Tool');
     expect(SearchHit.decode({'runId': 'r', 'kind': 'link'})!.kindLabel, 'Link');
@@ -282,7 +296,7 @@ void main() {
       expect(controller.failedRoutineBots, 1);
       expect(
         controller.entries.first.subtitle,
-        contains('Weekdays at 7:30 AM'),
+        contains('Every weekday at 7:30 am'),
       );
       await controller.loadRoutines();
       expect(reads, hasLength(7));

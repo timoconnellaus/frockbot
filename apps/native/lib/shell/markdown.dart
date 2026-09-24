@@ -165,7 +165,9 @@ class _ShellMarkdownState extends State<ShellMarkdown> {
           fontFamily: 'monospace',
           fontFamilyFallback: const ['Menlo', 'Roboto Mono'],
           fontSize: base.fontSize! * 0.9,
-          backgroundColor: theme.colorScheme.surfaceContainerHighest,
+          // A faint wash of the text colour, so the chip shows on whatever
+          // bubble it sits in; the raised surface is the Bot's bubble itself.
+          backgroundColor: theme.colorScheme.onSurface.withValues(alpha: 0.09),
         );
       }
       final href = run.href;

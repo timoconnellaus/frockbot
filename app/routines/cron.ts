@@ -172,12 +172,12 @@ export function describeRoutineScheduleV1(schedule: string): string {
   const value = schedule.trim().toLowerCase();
   const aliases: Record<string, string> = {
     "@hourly": "Every hour",
-    "@daily": "Every day at 12:00am",
-    "@midnight": "Every day at 12:00am",
-    "@weekly": "Every Sunday at 12:00am",
-    "@monthly": "On day 1 of every month at 12:00am",
-    "@yearly": "Every 1 January at 12:00am",
-    "@annually": "Every 1 January at 12:00am",
+    "@daily": "Every day at 12:00 am",
+    "@midnight": "Every day at 12:00 am",
+    "@weekly": "Every Sunday at 12:00 am",
+    "@monthly": "On day 1 of every month at 12:00 am",
+    "@yearly": "Every 1 January at 12:00 am",
+    "@annually": "Every 1 January at 12:00 am",
   };
   if (aliases[value]) return aliases[value];
   const interval = /^@every\s+(\d+)\s*([mhd])$/.exec(value);
@@ -195,7 +195,7 @@ export function describeRoutineScheduleV1(schedule: string): string {
   const minutes = Number(minute);
   const hours = Number(hour);
   if (minutes > 59 || hours > 23 || month !== "*") return "Custom schedule";
-  const time = `${hours % 12 || 12}:${String(minutes).padStart(2, "0")}${hours >= 12 ? "pm" : "am"}`;
+  const time = `${hours % 12 || 12}:${String(minutes).padStart(2, "0")} ${hours >= 12 ? "pm" : "am"}`;
   if (day === "*" && weekday === "*") return `Every day at ${time}`;
   if (day === "*" && weekday === "1-5") return `Every weekday at ${time}`;
   const weekdays = [

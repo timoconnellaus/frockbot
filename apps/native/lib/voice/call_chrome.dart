@@ -11,6 +11,7 @@ library;
 import 'package:flutter/material.dart';
 
 import '../flock/avatar.dart';
+import '../shell/person_avatar.dart';
 import '../shell/semantics.dart';
 import '../theme/frock_theme.dart';
 import 'assistant.dart';
@@ -48,18 +49,6 @@ const double voiceCallClusterWidth =
 /// Top padding, the Bot, the control row, and the bottom padding.
 const double voiceCallChromeHeight =
     12 + voiceCallBotSize + voiceCallHangUpSize + 4;
-
-/// Initials from a display name or a user id: first letter of the first
-/// two tokens, the way [FrockAvatarView] does it.
-String voiceUserInitials(String name) {
-  final words = name
-      .trim()
-      .split(RegExp(r'[\s@._-]+'))
-      .where((word) => word.isNotEmpty)
-      .take(2);
-  final letters = words.map((word) => word[0].toUpperCase()).join();
-  return letters.isEmpty ? '?' : letters;
-}
 
 String voiceCallWordOf(VoiceModeState state, VoiceMeterMode mode) {
   if (state == VoiceModeState.failed) return 'Failed';
@@ -235,9 +224,11 @@ class _VoiceCallChromeState extends State<VoiceCallChrome> {
                     const SizedBox(width: 10),
                     identified(
                       VoiceIds.callUser,
-                      _UserDot(
-                        initials: widget.userInitials,
+                      PersonAvatar(
+                        name: widget.userInitials,
                         imageUrl: widget.userImageUrl,
+                        size: voiceCallUserSize,
+                        semanticsLabel: 'You on the call',
                       ),
                     ),
                   ],
@@ -302,53 +293,6 @@ class _VoiceCallChromeState extends State<VoiceCallChrome> {
             padding: EdgeInsets.zero,
             tapTargetSize: MaterialTapTargetSize.shrinkWrap,
           ),
-        ),
-      ),
-    );
-  }
-}
-
-class _UserDot extends StatelessWidget {
-  final String initials;
-  final String? imageUrl;
-  const _UserDot({required this.initials, this.imageUrl});
-
-  @override
-  Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-    final letters = voiceUserInitials(initials);
-    // The card is the raised surface, so the initials sit on the window
-    // behind it and stay a separate face.
-    final fill = theme.scaffoldBackgroundColor;
-    return Semantics(
-      label: 'You on the call',
-      child: ClipOval(
-        child: Container(
-          width: voiceCallUserSize,
-          height: voiceCallUserSize,
-          color: fill,
-          alignment: Alignment.center,
-          child: imageUrl == null
-              ? Text(
-                  letters,
-                  style: theme.textTheme.labelMedium?.copyWith(
-                    color: theme.colorScheme.onSurface,
-                    fontWeight: FontWeight.w600,
-                  ),
-                )
-              : Image.network(
-                  imageUrl!,
-                  width: voiceCallUserSize,
-                  height: voiceCallUserSize,
-                  fit: BoxFit.cover,
-                  errorBuilder: (context, error, stack) => Text(
-                    letters,
-                    style: theme.textTheme.labelMedium?.copyWith(
-                      color: theme.colorScheme.onSurface,
-                      fontWeight: FontWeight.w600,
-                    ),
-                  ),
-                ),
         ),
       ),
     );

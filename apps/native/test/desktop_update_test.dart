@@ -318,11 +318,11 @@ void main() {
       final control = byIdentifier(ShellIds.updateControl);
       expect(find.text('Update'), findsOneWidget);
       final profile = tester.getRect(byIdentifier(ShellIds.sidebarProfile));
-      // What’s New sits against the profile; the control follows it.
-      final whatsNew = tester.getRect(byIdentifier(ShellIds.sidebarWhatsNew));
+      // The control follows the account directly; What’s New is on the
+      // column's foot at a desk.
       final rect = tester.getRect(control);
-      expect(rect.left, greaterThanOrEqualTo(whatsNew.right - 1));
-      expect(rect.left - whatsNew.right, lessThan(16));
+      expect(rect.left, greaterThanOrEqualTo(profile.right - 1));
+      expect(rect.left - profile.right, lessThan(16));
       expect((rect.center.dy - profile.center.dy).abs(), lessThan(1));
       final label = tester.getRect(find.text('Update'));
       expect((label.center.dy - rect.center.dy).abs(), lessThan(1.5));

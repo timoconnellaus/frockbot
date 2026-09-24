@@ -10,15 +10,15 @@ import {
 
 describe("describeRoutineScheduleV1", () => {
   test("uses plain language for the schedules the Routine editor creates", () => {
-    expect(describeRoutineScheduleV1("0 9 * * *")).toBe("Every day at 9:00am");
+    expect(describeRoutineScheduleV1("0 9 * * *")).toBe("Every day at 9:00 am");
     expect(describeRoutineScheduleV1("30 8 * * 1-5")).toBe(
-      "Every weekday at 8:30am",
+      "Every weekday at 8:30 am",
     );
     expect(describeRoutineScheduleV1("0 18 * * 5")).toBe(
-      "Every Friday at 6:00pm",
+      "Every Friday at 6:00 pm",
     );
     expect(describeRoutineScheduleV1("15 7 3 * *")).toBe(
-      "On day 3 of every month at 7:15am",
+      "On day 3 of every month at 7:15 am",
     );
     expect(describeRoutineScheduleV1("@every 15m")).toBe("Every 15 minutes");
   });

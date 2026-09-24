@@ -119,7 +119,7 @@ export function auditMomentV1(iso: string): string {
   const number = (type: string) => String(Number(of(type)));
   return `${number("day")} ${MONTHS[Number(of("month")) - 1] ?? ""} ${of(
     "year",
-  )}, ${number("hour")}:${of("minute")}${of("dayPeriod")
+  )}, ${number("hour")}:${of("minute")} ${of("dayPeriod")
     .toLowerCase()
     .replace(/\s/gu, "")} UTC`;
 }

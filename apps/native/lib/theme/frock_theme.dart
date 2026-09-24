@@ -23,6 +23,7 @@ abstract final class FrockTheme {
   /// same hue as [accent], darker, so the two voices are one family told
   /// apart by weight rather than by a second colour.
   static const accentDeep = Color(0xff9a124c);
+
   /// The two states the scheme has no slot for. A Card's pill says "Sent" in
   /// green and "Needs your attention" in amber; `primary` is the brand and
   /// `error` is a failure, and neither of those is what those two mean. Each
@@ -34,58 +35,48 @@ abstract final class FrockTheme {
   static const warning = Color(0xffffc928);
   static const warningInk = Color(0xff8a6000);
 
-  static const window = Color(0xff18161a);
+  static const window = Color(0xff15151e);
 
-  /// The ground the furniture stands on: app bar, composer, sidebar. It sits
-  /// one step *below* the window, so the thread is the lit part of the screen
-  /// and the chrome falls back from it.
-  static const surface = Color(0xff111013);
-  static const raised = Color(0xff242127);
-  static const border = Color(0xff35313a);
-  static const muted = Color(0xffaba49c);
+  /// The ground the furniture stands on: the Bot list and the conversation's
+  /// header. It sits one step *above* the window, so the chrome reads as a
+  /// frame and the thread as the room inside it.
+  static const surface = Color(0xff181824);
+  static const raised = Color(0xff1f202e);
+  static const muted = Color(0xffa0a2b6);
 
   /// A third rung below [muted], where a timestamp or a run's age goes. On
   /// paper it would fall under the contrast floor, so the light theme reads
   /// those in [inkMuted] instead and only the dark theme has three rungs.
-  static const subtle = Color(0xff8f887f);
+  static const subtle = Color(0xff7f8297);
 
-  /// Cream written on ink, not lilac: the dark theme is the site's paper
-  /// inverted, which is why the whites here are warm — the cream of the
-  /// characters' eyes.
-  static const text = Color(0xfff9f3e7);
+  /// A cool near-white, so the only warm note on ink is the accent.
+  static const text = Color(0xfff1f1f6);
 
-  /// The light theme is the site's own paper — cream ground, white cards, a
-  /// warm line — rather than the lavender grey Material mixes from the seed.
-  static const cream = Color(0xfffbf6ec);
-  static const paper = Color(0xffffffff);
+  /// The light theme's text: a cool near-black on the cool grey paper, the
+  /// dark theme's greys turned over.
+  static const ink = Color(0xff15151e);
+  static const inkMuted = Color(0xff5c5f70);
 
-  /// The soft black the characters are outlined in.
-  static const ink = Color(0xff151416);
-  static const inkMuted = Color(0xff6b645b);
-  static const line = Color(0xffe8ddcd);
-
-  /// What a selected row, chip or rail tab is filled with. Rose at low alpha
-  /// went muddy over both grounds — over cream because the ground is warm and
-  /// the rose is not, over ink because alpha only ever greys. These are the
-  /// blend already made: the site's blush, and its opposite number on ink.
-  static const blush = Color(0xfffce2ea);
-  static const blushInk = Color(0xffb11f4b);
-  static const blushDark = Color(0xff3a2229);
-  static const blushDarkInk = Color(0xfff6d2db);
   static const fast = Duration(milliseconds: 140);
   static const enter = Duration(milliseconds: 260);
 
-  /// The radii, in one place: a control, a card, a sheet.
+  /// The radii, in one place: a list row, a control, a message, a card, the
+  /// composer's field, a sheet, and a pill.
+  static const radiusRow = 10.0;
   static const radiusControl = 12.0;
+  static const radiusBubble = 14.0;
   static const radiusCard = 16.0;
+  static const radiusField = 22.0;
   static const radiusSheet = 24.0;
+  static const radiusPill = 999.0;
 
   /// The style a message is read in, the person's and the Bot's.
-  static TextStyle message(ThemeData theme) =>
-      theme.textTheme.bodyLarge!.copyWith(
-        fontWeight: FontWeight.w400,
-        height: 1.55,
-      );
+  static TextStyle message(ThemeData theme) => theme.textTheme.bodyLarge!
+      .copyWith(fontWeight: FontWeight.w400, height: 1.55);
+
+  /// Figures of one width, for a time or a count that should not shift as it
+  /// changes. Only there: in Inter the feature widens a hyphen too.
+  static const tabularFigures = [FontFeature.tabularFigures()];
 
   /// The weight of `**emphasis**` inside a message.
   static const FontWeight messageStrong = FontWeight.w600;
@@ -143,22 +134,28 @@ abstract final class FrockTheme {
     final fontFamily = tokens.type == ThemeTypeface.manrope
         ? 'Manrope'
         : 'Inter';
-    final scheme = ColorScheme(
-      brightness: brightness,
-      primary: surfaces.accent,
-      onPrimary: surfaces.onAccent,
-      secondary: surfaces.accent,
-      onSecondary: surfaces.onAccent,
-      // The dark red reads on ink; paper needs a deeper one to carry text.
-      error: dark ? const Color(0xffe05a5a) : const Color(0xffc73a28),
-      onError: Colors.white,
-      surface: surfaces.surface,
-      onSurface: surfaces.text,
-    ).copyWith(
-      onSurfaceVariant: surfaces.muted,
-      surfaceContainerHighest: surfaces.raised,
-      outlineVariant: surfaces.line,
-    );
+    final scheme =
+        ColorScheme(
+          brightness: brightness,
+          primary: surfaces.accent,
+          onPrimary: surfaces.onAccent,
+          secondary: surfaces.accent,
+          onSecondary: surfaces.onAccent,
+          // The dark red reads on ink; paper needs a deeper one to carry text.
+          error: dark ? const Color(0xffe05a5a) : const Color(0xffc73a28),
+          onError: Colors.white,
+          surface: surfaces.surface,
+          onSurface: surfaces.text,
+        ).copyWith(
+          onSurfaceVariant: surfaces.muted,
+          surfaceContainerLow: surfaces.surface,
+          surfaceContainerHigh: surfaces.raised,
+          surfaceContainerHighest: surfaces.raised,
+          // A line with some weight: a quote's bar, a Plugin page's strong
+          // border. The hairline is outlineVariant.
+          outline: Color.lerp(surfaces.line, surfaces.muted, 0.5),
+          outlineVariant: surfaces.line,
+        );
     final base = ThemeData(
       useMaterial3: true,
       brightness: brightness,
@@ -172,8 +169,6 @@ abstract final class FrockTheme {
     );
     final hair = hairline(scheme);
     final cardColor = dark ? surfaces.raised : surfaces.surface;
-    final selectionFill = dark ? blushDark : blush;
-    final selectionInk = dark ? blushDarkInk : blushInk;
     final textTheme = type.copyWith(
       displaySmall: type.displaySmall?.copyWith(
         fontFamily: 'Archivo Black',
@@ -229,7 +224,6 @@ abstract final class FrockTheme {
         height: 1.4,
         letterSpacing: 0,
         color: dark ? subtle : scheme.onSurfaceVariant,
-        fontFeatures: [const FontFeature.tabularFigures()],
       ),
       labelLarge: type.labelLarge?.copyWith(
         fontSize: 13.5,
@@ -283,6 +277,9 @@ abstract final class FrockTheme {
         scrolledUnderElevation: 0,
         titleSpacing: 4,
         toolbarHeight: 56,
+        // The conversation's header band ends on a hairline; every other bar
+        // ends on the same one.
+        shape: Border(bottom: BorderSide(color: hair)),
         titleTextStyle: textTheme.titleLarge?.copyWith(
           fontSize: 16,
           color: scheme.onSurface,
@@ -393,8 +390,10 @@ abstract final class FrockTheme {
         shape: RoundedRectangleBorder(
           borderRadius: BorderRadius.circular(radiusControl),
         ),
-        selectedTileColor: selectionFill,
-        selectedColor: scheme.onSurface,
+        // Selection is the accent at full strength: a wash of it over either
+        // ground reads as mauve, not as the brand.
+        selectedTileColor: scheme.primary,
+        selectedColor: scheme.onPrimary,
         iconColor: scheme.onSurfaceVariant,
         textColor: scheme.onSurface,
         minVerticalPadding: 10,
@@ -428,6 +427,33 @@ abstract final class FrockTheme {
               : scheme.onSurface.withValues(alpha: dark ? 0.18 : 0.14),
         ),
       ),
+      // The same control as FrockSegmented: the chosen segment is the accent
+      // at full strength, the rest are words on the ground.
+      segmentedButtonTheme: SegmentedButtonThemeData(
+        style: ButtonStyle(
+          visualDensity: VisualDensity.compact,
+          tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+          shape: WidgetStatePropertyAll(
+            RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(radiusControl),
+            ),
+          ),
+          side: WidgetStatePropertyAll(BorderSide(color: hair)),
+          backgroundColor: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.selected)
+                ? scheme.primary
+                : Colors.transparent,
+          ),
+          foregroundColor: WidgetStateProperty.resolveWith(
+            (states) => states.contains(WidgetState.selected)
+                ? scheme.onPrimary
+                : scheme.onSurfaceVariant,
+          ),
+          textStyle: WidgetStatePropertyAll(
+            textTheme.labelMedium?.copyWith(fontWeight: FontWeight.w600),
+          ),
+        ),
+      ),
       checkboxTheme: CheckboxThemeData(
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
         side: BorderSide(color: scheme.onSurfaceVariant, width: 1.5),
@@ -441,12 +467,12 @@ abstract final class FrockTheme {
       ),
       chipTheme: ChipThemeData(
         backgroundColor: cardColor,
-        selectedColor: selectionFill,
+        selectedColor: scheme.primary,
         side: BorderSide(color: hair),
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(9)),
         labelStyle: textTheme.labelMedium?.copyWith(color: scheme.onSurface),
         secondaryLabelStyle: textTheme.labelMedium?.copyWith(
-          color: selectionInk,
+          color: scheme.onPrimary,
         ),
         labelPadding: const EdgeInsets.symmetric(horizontal: 4),
         padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 6),
@@ -468,7 +494,7 @@ abstract final class FrockTheme {
       ),
       tooltipTheme: TooltipThemeData(
         decoration: BoxDecoration(
-          color: dark ? const Color(0xff3a3742) : window,
+          color: dark ? const Color(0xff2c2d3e) : ink,
           borderRadius: BorderRadius.circular(8),
         ),
         textStyle: textTheme.labelMedium?.copyWith(color: Colors.white),
@@ -477,7 +503,7 @@ abstract final class FrockTheme {
       ),
       snackBarTheme: SnackBarThemeData(
         behavior: SnackBarBehavior.floating,
-        backgroundColor: dark ? const Color(0xff36333e) : window,
+        backgroundColor: dark ? const Color(0xff2c2d3e) : ink,
         contentTextStyle: textTheme.bodyMedium?.copyWith(color: Colors.white),
         actionTextColor: dark ? accentSoft : accentSoft,
         elevation: 0,
@@ -594,7 +620,7 @@ abstract final class FrockTheme {
       ),
       navigationRailTheme: NavigationRailThemeData(
         backgroundColor: scheme.surface,
-        indicatorColor: selectionFill,
+        indicatorColor: scheme.primary,
       ),
       pageTransitionsTheme: const PageTransitionsTheme(
         builders: {
@@ -618,21 +644,29 @@ class FrockLook extends ThemeExtension<FrockLook> {
 
   Color get accentInk => FrockTheme.readableAccent(tokens.surfaces);
 
+  bool get _dark => tokens.surfaces.window.computeLuminance() < 0.5;
+
+  /// The person's bubble is either the accent itself or a grey a step lighter
+  /// than the Bot's. Never the accent at low alpha: over either ground that
+  /// reads as mauve, not as the brand.
   Color bubbleFill({required bool mine}) {
+    final surfaces = tokens.surfaces;
     if (mine) {
       return tokens.meBubble == MeBubble.accent
-          ? tokens.surfaces.accent
-          : Color.alphaBlend(
-              tokens.surfaces.accent.withValues(alpha: 0.2),
-              tokens.surfaces.raised,
-            );
+          ? surfaces.accent
+          : Color.lerp(surfaces.raised, surfaces.text, _dark ? 0.16 : 0.07)!;
     }
     return tokens.botBubble == BotBubble.raised
-        ? tokens.surfaces.raised
-        : tokens.surfaces.surface;
+        ? surfaces.raised
+        : surfaces.surface;
   }
 
-  Color bubbleInk({required bool mine}) => mine && tokens.meBubble == MeBubble.accent
+  /// The Bot's bubble keeps a hairline so it holds its shape on a ground only
+  /// a step darker; the person's is solid enough not to need one.
+  Color? bubbleLine({required bool mine}) => mine ? null : tokens.surfaces.line;
+
+  Color bubbleInk({required bool mine}) =>
+      mine && tokens.meBubble == MeBubble.accent
       ? tokens.surfaces.onAccent
       : tokens.surfaces.text;
 

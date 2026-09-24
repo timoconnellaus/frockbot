@@ -110,10 +110,10 @@ test("a Routine says what it fires on and when it last did and next will", () =>
     (node) =>
       node.type === "text" &&
       node.style === "status" &&
-      node.text.includes("Every day at 9:00am"),
+      node.text.includes("Every day at 9:00 am"),
   );
   expect(facts?.type === "text" && facts.text).toBe(
-    "Every day at 9:00am · Australia/Sydney · Last 3 Sep 2026, 9:00am · Next 4 Sep 2026, 9:00am",
+    "Every day at 9:00 am · Australia/Sydney · Last 3 Sep 2026, 9:00 am · Next 4 Sep 2026, 9:00 am",
   );
   expect(document.surfaceId).toBe("routines");
 });
@@ -213,10 +213,10 @@ test("the revision moves only when what the document says changes", () => {
 
 test("a moment is read in the Profile zone, and an unknown zone is UTC", () => {
   expect(routineMomentV1("2026-09-03T23:00:00.000Z", "Australia/Sydney")).toBe(
-    "4 Sep 2026, 9:00am",
+    "4 Sep 2026, 9:00 am",
   );
   expect(routineMomentV1("2026-09-03T23:00:00.000Z", "Mars/Olympus")).toBe(
-    "3 Sep 2026, 11:00pm",
+    "3 Sep 2026, 11:00 pm",
   );
 });
 
@@ -265,7 +265,7 @@ test("the list is not a form, and naming a Routine is a read-only detail", () =>
   expect(values).toEqual([
     "Morning brief",
     "Summarise overnight email.",
-    "Every day at 9:00am · Australia/Sydney",
+    "Every day at 9:00 am · Australia/Sydney",
   ]);
   expect(
     walk(open.root).some(

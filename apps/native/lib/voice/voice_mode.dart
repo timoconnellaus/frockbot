@@ -214,7 +214,7 @@ class _VoiceModeState extends State<VoiceMode> {
                 border: Border.all(
                   width: 2,
                   color: speaking
-                      ? theme.colorScheme.primary.withValues(alpha: 0.55)
+                      ? theme.colorScheme.primary
                       : FrockTheme.hairline(theme.colorScheme),
                 ),
               ),
@@ -604,13 +604,13 @@ class VoiceHeaderPill extends StatelessWidget {
       Container(
         padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 3),
         decoration: BoxDecoration(
-          color: scheme.primary.withValues(alpha: 0.16),
-          borderRadius: BorderRadius.circular(999),
+          color: scheme.primary,
+          borderRadius: BorderRadius.circular(FrockTheme.radiusPill),
         ),
         child: Text(
           'Voice',
           style: Theme.of(context).textTheme.labelSmall
-              ?.copyWith(color: scheme.primary, fontWeight: FontWeight.w600),
+              ?.copyWith(color: scheme.onPrimary, fontWeight: FontWeight.w600),
         ),
       ),
     );

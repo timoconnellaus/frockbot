@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:frockbot_native/theme/controls.dart';
 import 'package:frockbot_native/shell/composer.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 import 'package:frockbot_native/voice/assistant.dart';
@@ -141,7 +142,7 @@ void main() {
         await tester.tap(stop);
         await tester.pump();
         expect(harness.dictation.state, DictationState.stopping);
-        expect(tester.widget<IconButton>(stop).onPressed, isNull);
+        expect(tester.widget<FrockIconButton>(stop).onPressed, isNull);
         expect(find.bySemanticsLabel('Finishing dictation'), findsWidgets);
         harness.dictationSocket.deliver(
           '{"schemaVersion":1,"type":"segment","text":"Keep this editable"}',

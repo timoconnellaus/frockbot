@@ -50,18 +50,23 @@ void main() {
     });
   }
   for (final width in [390.0, 1280.0]) {
-    testWidgets('the companion sits on the thread overlay at $width', (
+    testWidgets('the companion sits in the header band at $width', (
       tester,
     ) async {
       final harness = VoiceShellHarness();
       await harness.mount(tester, width: width, brightness: Brightness.dark);
       final companion = find.bySemanticsLabel('Bot is ready');
       expect(companion, findsOneWidget);
+      // In the header's band, above the thread.
       expect(
         tester.getTopLeft(companion).dy,
-        width == 390
-            ? chatHeaderChromeTop
-            : chatHeaderChromeTop - chatHeaderCompanionLift,
+        greaterThanOrEqualTo(
+          width == 390 ? chatHeaderPhoneChromeTop : chatHeaderChromeTop,
+        ),
+      );
+      expect(
+        tester.getTopLeft(companion).dy,
+        lessThan(chatHeaderChromeTop + 8),
       );
       // A phone's companion is smaller: the header shares a thumb-wide
       // screen with the thread.
