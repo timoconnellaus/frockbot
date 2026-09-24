@@ -32,7 +32,8 @@ void main() {
         'MaterialIcons',
       )..addFont(rootBundle.load('fonts/MaterialIcons-Regular.otf'))).load();
     });
-    tester.view.physicalSize = const Size(1600, 1400);
+    // 16:9, the frame the What’s New card draws.
+    tester.view.physicalSize = const Size(2560, 1440);
     tester.view.devicePixelRatio = 2;
     addTearDown(tester.view.resetPhysicalSize);
     addTearDown(tester.view.resetDevicePixelRatio);
