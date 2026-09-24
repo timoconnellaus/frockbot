@@ -20,9 +20,17 @@ import {
 /** Every upload's bytes and text live under this object-store prefix. */
 export const UPLOAD_OBJECT_PREFIX_V1 = "uploads";
 
+/**
+ * The prefix every upload of one account's Bots shares. Encoded, so no id can
+ * end where another begins: `a` must not be a prefix of `a/b`'s uploads.
+ */
+export function uploadUserPrefixV1(userId: string): string {
+  return `${UPLOAD_OBJECT_PREFIX_V1}/${encodeURIComponent(userId)}/`;
+}
+
 /** The prefix one Bot's uploads share, and nothing else's. */
 export function uploadBotPrefixV1(userId: string, botId: string): string {
-  return `${UPLOAD_OBJECT_PREFIX_V1}/${userId}/${botId}/`;
+  return `${uploadUserPrefixV1(userId)}${encodeURIComponent(botId)}/`;
 }
 
 /** Where one upload's bytes are. */

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import type { StoredUploadV1 } from "@frockbot/app/uploads/shared";
 import {
   deleteBotUploadsV1,
+  releaseBotUploadQuotaRpcV1,
   uploadRoutes,
   type UploadObjectStoreV1,
   type UploadRouteDependenciesV1,
@@ -308,5 +309,31 @@ describe("a deleted Bot's uploads", () => {
     );
     expect(removed).toBe(3);
     expect([...keys]).toEqual(["uploads/user-1/bot-10/c"]);
+  });
+
+  const releasing = (answer: () => Promise<unknown>) => ({
+    USER_CONFIGURATIONS: {
+      idFromName: () => ({}) as DurableObjectId,
+      get: () => ({ releaseBotUploadQuota: answer }),
+    },
+  });
+
+  test("an erased account has no space to give back, and the teardown still ends", async () => {
+    const erased = Object.assign(new Error("This account has been deleted."), {
+      name: "AccountDeletedError",
+    });
+    await releaseBotUploadQuotaRpcV1(
+      releasing(() => Promise.reject(erased)),
+      { userId: "user-1", botId: "bot-1" },
+    );
+  });
+
+  test("any other failure is the teardown's to retry", async () => {
+    await expect(
+      releaseBotUploadQuotaRpcV1(
+        releasing(() => Promise.reject(new Error("storage unavailable"))),
+        { userId: "user-1", botId: "bot-1" },
+      ),
+    ).rejects.toThrow("storage unavailable");
   });
 });

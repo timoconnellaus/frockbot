@@ -508,6 +508,9 @@ export class UserConfiguration
       bytes: rpcInteger({ minimum: 1, maximum: UPLOAD_MAX_BYTES_V1 }),
     });
     await this.assertUserIdentity(request.userId as string);
+    // A deleting account takes no new file: its Bots' uploads are being
+    // removed, and one counted now could land after its Bot's were.
+    await this.assertAccountOpen();
     return this.ctx.storage.transaction((transaction) =>
       reserveUploadQuotaV1(transaction, {
         botId: request.botId as string,

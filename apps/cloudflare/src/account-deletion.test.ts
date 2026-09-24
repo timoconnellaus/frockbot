@@ -2,6 +2,10 @@ import { describe, expect, mock, test } from "bun:test";
 import { workspaceObjectKeyV1 } from "@frockbot/core/workspace-store";
 import type { WorkspaceRootV1 } from "@frockbot/core/contracts";
 import type { AccountDeletionRecordV1 } from "@frockbot/app/account/deletion";
+import {
+  uploadObjectKeyV1,
+  uploadTextKeyV1,
+} from "@frockbot/app/uploads/shared";
 
 // `mock.module` is process-global and the first registration in a suite run
 // fixes the module's shape, so this stub has to satisfy every consumer the run
@@ -108,6 +112,23 @@ describe("the account's files", () => {
       },
     ] as WorkspaceRootV1[]) {
       const key = workspaceObjectKeyV1(root, "a.md");
+      expect(prefixes.some((prefix) => key.startsWith(prefix))).toBe(false);
+    }
+  });
+
+  test("every Bot's uploads are under one of the prefixes, and no one else's", () => {
+    const prefixes = accountObjectPrefixesV1(USER);
+    const upload = "a".repeat(64);
+    for (const key of [
+      uploadObjectKeyV1(USER, "bot-1", upload),
+      uploadTextKeyV1(USER, "bot-2", upload),
+    ]) {
+      expect(prefixes.some((prefix) => key.startsWith(prefix))).toBe(true);
+    }
+    for (const key of [
+      uploadObjectKeyV1(`${USER}x`, "bot-1", upload),
+      uploadObjectKeyV1(`${USER}/bot-1`, "bot-1", upload),
+    ]) {
       expect(prefixes.some((prefix) => key.startsWith(prefix))).toBe(false);
     }
   });

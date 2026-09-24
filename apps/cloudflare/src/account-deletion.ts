@@ -22,6 +22,7 @@ import {
 } from "@frockbot/app/billing/stripe";
 import { ComposioClient } from "@frockbot/app/connect/composio";
 import type { MemoryVectorIndex } from "@frockbot/app/memory/types";
+import { uploadUserPrefixV1 } from "@frockbot/app/uploads/shared";
 import {
   WORKSPACE_OBJECT_PREFIX,
   workspaceObjectPrefixV1,
@@ -86,9 +87,9 @@ function deploymentPolicy(
 
 /**
  * Every object-storage prefix that holds one User's files: the User's own
- * Skills and Memory, every Plugin-declared root, and every Bot root — which
- * the Bot delete saga already removed, and which are swept again in case a
- * Bot was lost before it could be.
+ * Skills and Memory, every Plugin-declared root, and every Bot root and Bot's
+ * uploads — which the Bot delete saga already removed, and which are swept
+ * again in case a Bot was lost before it could be.
  *
  * Content-addressed stores — Skill bodies, Plugin artifacts and exported
  * templates — are not here. One address can hold the same bytes for two
@@ -103,6 +104,7 @@ export function accountObjectPrefixesV1(userId: string): string[] {
     `${WORKSPACE_OBJECT_PREFIX}/package-declared:${user}:`,
     `${WORKSPACE_OBJECT_PREFIX}/bot-instructions:${user}:`,
     `${WORKSPACE_OBJECT_PREFIX}/bot-memory:${user}:`,
+    uploadUserPrefixV1(userId),
   ];
 }
 

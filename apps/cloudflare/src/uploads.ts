@@ -355,5 +355,16 @@ export async function releaseBotUploadQuotaRpcV1(
       botId: string;
     }): Promise<{ released: number }>;
   };
-  await user.releaseBotUploadQuota({ schemaVersion: 1, ...identity });
+  try {
+    await user.releaseBotUploadQuota({ schemaVersion: 1, ...identity });
+  } catch (error) {
+    // An erased account took its ledger with it: there is nothing to give
+    // back, and a Bot teardown that replays after it must still finish.
+    if (!(
+      error instanceof Error &&
+      (error.name === "AccountDeletedError" ||
+        /account has been deleted/i.test(error.message))
+    ))
+      throw error;
+  }
 }
