@@ -53,6 +53,5 @@ COMPOSIO_API_KEY=replace-with-composio-project-api-key
 STRIPE_SECRET_KEY=replace-with-stripe-test-secret-key
 STRIPE_WEBHOOK_SECRET=replace-with-stripe-test-webhook-secret
 STRIPE_MONTHLY_PRICE_ID=replace-with-20-usd-monthly-price-id
-# Exact hosted model IDs -> verified provider rates and hard token bounds.
-# See docs/billing.md. Empty means no hosted model is authorized to spend.
-BILLING_MODEL_RATES={}
+# Hosted model prices are the deployment's rate table, edited in the admin
+# portal, not a variable. See docs/billing.md.

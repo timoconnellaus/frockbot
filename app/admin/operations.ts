@@ -34,6 +34,12 @@ import {
   DEPLOYMENT_PLUGIN_CATALOG_V1,
   type SeededPluginV1,
 } from "@frockbot/app/plugins/catalog";
+import {
+  decodeSaveHostedModelRatesRequestV1,
+  type HostedModelRatesV1,
+  type HostedModelRatesViewV1,
+  type SaveHostedModelRatesCommandV1,
+} from "@frockbot/app/billing/rates";
 import { isRpcIdentifier } from "@frockbot/core/configuration";
 
 /** One account the identity store knows, before what it holds is read. */
@@ -80,6 +86,12 @@ export interface AdminOperationsHostV1 {
     command: GrantUserCreditCommandV1,
     grantedBy: string,
   ): Promise<AdminUserBillingV1>;
+  readModelRates(): Promise<HostedModelRatesViewV1>;
+  /** Throws `ModelRatesConflictError` when the base version is stale. */
+  saveModelRates(
+    command: SaveHostedModelRatesCommandV1,
+    createdBy: string,
+  ): Promise<HostedModelRatesV1>;
 }
 
 export interface AdminOperationsV1 {
@@ -95,6 +107,10 @@ export interface AdminOperationsV1 {
   inviteEmail(input: unknown): Promise<EmailInvitationV1>;
   setAccountFeatures(input: unknown): Promise<UserFeaturesV1>;
   grantCredit(input: unknown): Promise<AdminUserBillingV1>;
+  readModelRates(): Promise<HostedModelRatesViewV1>;
+  saveModelRates(
+    input: unknown,
+  ): Promise<AdminWriteResultV1<HostedModelRatesV1>>;
 }
 
 function accountId(value: string, label: string): string {
@@ -253,6 +269,16 @@ export function createAdminOperationsV1(
         accountId(request.userId, "credit grant request.userId"),
         request.command,
         request.grantedBy,
+      );
+    },
+
+    readModelRates: () => host.readModelRates(),
+
+    async saveModelRates(input) {
+      const request = decodeSaveHostedModelRatesRequestV1(input);
+      return write(
+        () => host.saveModelRates(request.command, request.createdBy),
+        "ModelRatesConflictError",
       );
     },
   };

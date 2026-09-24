@@ -62,7 +62,6 @@ import {
 import type { BotIdentity } from "@frockbot/core/durable";
 import { frockbotToolCallV1 } from "@frockbot/core/tools";
 import { estimateModelUsageV1 } from "@frockbot/core/agent-loop";
-import { modelCharge, modelCost } from "@frockbot/app/billing/model";
 import { FROCK_AI_PROVIDER_TYPE } from "@frockbot/providers/frock-ai/catalog";
 import { memoryScopeRootV1 } from "@frockbot/app/memory/roots";
 import { notePluginFailureV1 } from "@frockbot/app/plugins/health-bot";
@@ -1195,11 +1194,24 @@ function isolateModelPath(
         identity.botId,
         call.sessionId,
       );
+      // What the account was charged for this call, as its settlement says:
+      // the hosted price depends on which model answered, which only the
+      // settlement knows.
+      let chargedMicros: number | undefined;
       const composition = await createShellCompositionHost({
         botId: identity.botId,
         sessionId: call.sessionId,
         ...(billing
-          ? { billing: { ...billing, attribution: `plugin ${call.packageId}` } }
+          ? {
+              billing: {
+                ...billing,
+                attribution: `plugin ${call.packageId}`,
+                settled: (settlement) => {
+                  if (settlement.id === `model:${request.requestId}`)
+                    chargedMicros = settlement.chargeMicros;
+                },
+              },
+            }
           : {}),
         sessionEvents: [],
         agentPackages: runtime.agentPackages,
@@ -1231,9 +1243,9 @@ function isolateModelPath(
             usage ?? estimateModelUsageV1(request, { text, toolCalls });
           // Only a hosted call the provider reported usage for is settled as a
           // charge on the account, so only that one carries a price here.
-          const rate =
+          const costMicros =
             usage && request.provider === FROCK_AI_PROVIDER_TYPE
-              ? billing?.rates[request.model]
+              ? chargedMicros
               : undefined;
           try {
             await call.record({
@@ -1243,9 +1255,7 @@ function isolateModelPath(
               usage: counted,
               estimated: usage === undefined,
               latencyMs: Math.max(0, Date.now() - startedAt),
-              ...(rate
-                ? { costMicros: modelCharge(modelCost(counted, rate)) }
-                : {}),
+              ...(costMicros !== undefined ? { costMicros } : {}),
             });
           } catch {
             // Bookkeeping is not the Plugin's call: a failed append never

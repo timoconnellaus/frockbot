@@ -1,5 +1,9 @@
 import { prepaidComputerHost } from "./billing-computer.js";
-import { decodeModelRates } from "@frockbot/app/billing/model";
+import {
+  createHostedModelRatesReaderV1,
+  type HostedModelRatesAuthorityV1,
+} from "./model-rates.js";
+import { DEPLOYMENT_POLICY_SINGLETON_NAME } from "./deployment-policy.js";
 import type { BillingAccountRpc } from "./billing.js";
 import {
   hostedBillingEnabledV1,
@@ -226,18 +230,6 @@ import type {
   WorkspaceSyncEffectsV1,
 } from "@frockbot/core/contracts";
 import { decodeWorkspacePathV1 } from "@frockbot/core/contracts";
-
-function hostedModelLimits(raw?: string) {
-  return Object.fromEntries(
-    Object.entries(decodeModelRates(raw)).map(([model, rate]) => [
-      model,
-      {
-        inputTokens: rate.maximumInputTokens,
-        outputTokens: rate.maximumOutputTokens,
-      },
-    ]),
-  );
-}
 
 /** Base64 without a Node Buffer: this object runs in workerd. */
 function bytesToBase64(bytes: Uint8Array): string {
@@ -705,6 +697,18 @@ export class BotState
     const emailSender = createBindingEmailSenderV1(
       env as Parameters<typeof createBindingEmailSenderV1>[0],
     );
+    // One copy of the deployment's rate table per Bot object: billing prices
+    // from it and the Gateway bounds each request by it.
+    const hostedRates = hostedBillingEnabledV1(env as BillingSwitchEnv)
+      ? createHostedModelRatesReaderV1(
+          () =>
+            (
+              env as BotStateEnv & { DEPLOYMENT_POLICY: DurableObjectNamespace }
+            ).DEPLOYMENT_POLICY.getByName(
+              DEPLOYMENT_POLICY_SINGLETON_NAME,
+            ) as unknown as HostedModelRatesAuthorityV1,
+        )
+      : undefined;
     // The surfaces are built per identity in `bindSurfaces`, not here: they
     // carry the `owner` guard, and a Durable Object learns which User it
     // serves from the RPC that addresses it, never from its constructor.
@@ -721,7 +725,7 @@ export class BotState
             ),
           }
         : {}),
-      ...(hostedBillingEnabledV1(env as BillingSwitchEnv)
+      ...(hostedRates
         ? {
             BILLING: (userId: string, botId: string, sessionId: string) => {
               const account = env.USER_CONFIGURATIONS.get(
@@ -730,10 +734,12 @@ export class BotState
               return {
                 botId,
                 sessionId,
-                rates: decodeModelRates(
-                  (env as BotStateEnv & { BILLING_MODEL_RATES?: string })
-                    .BILLING_MODEL_RATES,
-                ),
+                rates: hostedRates.rates,
+                reportUnpriced: (report: {
+                  servedModel: string | null;
+                  route: string;
+                  version: number;
+                }) => this.ctx.waitUntil(hostedRates.reportUnpriced(report)),
                 account: {
                   reserve: (
                     reservation: import("@frockbot/app/billing/ledger").UsageReservation,
@@ -765,14 +771,7 @@ export class BotState
               autoRoute: frockAiWorkerVarV1(env, "FROCK_AI_AUTO_ROUTE"),
               accountId: frockAiWorkerVarV1(env, "FROCK_AI_ACCOUNT_ID"),
               token: frockAiWorkerVarV1(env, "FROCK_AI_GATEWAY_TOKEN"),
-              ...(hostedBillingEnabledV1(env as BillingSwitchEnv)
-                ? {
-                    billingLimits: hostedModelLimits(
-                      (env as BotStateEnv & { BILLING_MODEL_RATES?: string })
-                        .BILLING_MODEL_RATES,
-                    ),
-                  }
-                : {}),
+              ...(hostedRates ? { billingLimits: hostedRates.limits } : {}),
             }),
           }
         : {}),

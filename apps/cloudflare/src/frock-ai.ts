@@ -3,18 +3,18 @@ import {
   FROCK_AI_DEFAULT_AUTO_ROUTE,
   gatewayModelForFrockIdV1,
 } from "@frockbot/providers/frock-ai/catalog";
-import { FrockAiTransportErrorV1 } from "@frockbot/providers/frock-ai/runtime";
+import {
+  frockAiServedModelFromHeadersV1,
+  FrockAiTransportErrorV1,
+  type FrockAiChatCompletionV1,
+} from "@frockbot/providers/frock-ai/runtime";
 
 export const DEFAULT_FROCK_AI_GATEWAY_ID_V1 = "flock";
 
 export interface FrockAiGatewayHostV1 {
   /** `null` when this host took the `AI` binding, which carries no dynamic route. */
   autoRoute: string | null;
-  runChatCompletion(
-    gatewayModel: string,
-    body: Record<string, unknown>,
-    signal?: AbortSignal,
-  ): Promise<ReadableStream<Uint8Array>>;
+  runChatCompletion: FrockAiChatCompletionV1;
 }
 
 /**
@@ -47,11 +47,12 @@ export interface FrockAiBillingLimitV1 {
 
 export interface FrockAiGatewayConfigV1 {
   /**
-   * Each hosted model's prepaid bound, keyed by its Frock AI model id. A
-   * request is held to its own model's bound; one whose model has none — a
-   * structured Auto request pinned to a model of its own — to the smallest.
+   * Each hosted model's prepaid bound, keyed by its Frock AI model id, as the
+   * deployment's rate table holds them when the request is sent. A request is
+   * held to its own model's bound; one whose model has none — a structured
+   * Auto request pinned to a model of its own — to the smallest.
    */
-  billingLimits?: Record<string, FrockAiBillingLimitV1>;
+  billingLimits?: () => Promise<Record<string, FrockAiBillingLimitV1>>;
   gatewayId?: string;
   autoRoute?: string;
   /**
@@ -91,6 +92,7 @@ function retryAfterMillisecondsV1(value: string | null): number | undefined {
  */
 async function streamOrThrowV1(
   response: Response,
+  served: Parameters<FrockAiChatCompletionV1>[3],
 ): Promise<ReadableStream<Uint8Array>> {
   if (!response.ok) {
     const detail = (await response.text().catch(() => "")).slice(0, 512);
@@ -127,6 +129,7 @@ async function streamOrThrowV1(
   if (!response.body) {
     throw new Error("AI Gateway did not return a response stream");
   }
+  served?.(frockAiServedModelFromHeadersV1(response.headers));
   return response.body;
 }
 
@@ -193,14 +196,15 @@ export function createFrockAiGatewayHostV1(
     ? config.autoRoute || FROCK_AI_DEFAULT_AUTO_ROUTE
     : null;
   const timeoutMs = config.timeoutMs ?? FROCK_AI_GATEWAY_TIMEOUT_MS_V1;
-  const billingLimits = config.billingLimits
-    ? gatewayBillingLimitsV1(config.billingLimits, autoRoute)
-    : undefined;
   const doFetch = config.fetch ?? fetch;
   return {
     autoRoute,
-    async runChatCompletion(gatewayModel, body, signal) {
-      if (billingLimits) {
+    async runChatCompletion(gatewayModel, body, signal, served) {
+      if (config.billingLimits) {
+        const billingLimits = gatewayBillingLimitsV1(
+          await config.billingLimits(),
+          autoRoute,
+        );
         const { inputTokens, outputTokens } =
           billingLimits.byGatewayModel.get(gatewayModel) ??
           billingLimits.smallest;
@@ -253,6 +257,9 @@ export function createFrockAiGatewayHostV1(
                 headers: {
                   "content-type": "application/json",
                   "cf-aig-authorization": `Bearer ${token!}`,
+                  // Every answer is billed as the model that produced it; a
+                  // cached one would be another request's answer.
+                  "cf-aig-skip-cache": "true",
                 },
                 body: JSON.stringify({ ...body, model: gatewayModel }),
                 signal: requestSignal,
@@ -261,7 +268,7 @@ export function createFrockAiGatewayHostV1(
           } catch (error) {
             return timedOut(error);
           }
-          return streamOrThrowV1(response);
+          return streamOrThrowV1(response, served);
         }
         // The `AI` binding takes no signal, so the deadline is raced against
         // the call rather than cancelling it.
@@ -282,7 +289,7 @@ export function createFrockAiGatewayHostV1(
             gateway.run({
               provider: "compat",
               endpoint: "chat/completions",
-              headers: {},
+              headers: { "cf-aig-skip-cache": "true" },
               query: { ...body, model: gatewayModel },
             }),
             new Promise<never>((_resolve, reject) => {
@@ -299,7 +306,7 @@ export function createFrockAiGatewayHostV1(
           abandonRace.abort();
           gateway[Symbol.dispose]?.();
         }
-        return streamOrThrowV1(response);
+        return streamOrThrowV1(response, served);
       };
       try {
         return await reachGatewayV1();

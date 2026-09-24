@@ -3,7 +3,8 @@ import {
   hostedBillingEnabledV1,
 } from "./billing-readiness.js";
 import { COMPUTER_TARIFF } from "@frockbot/app/billing/computer";
-import { decodeModelRates } from "@frockbot/app/billing/model";
+import type { HostedModelRatesV1 } from "@frockbot/app/billing/rates";
+import { normalizeFrockModelIdV1 } from "@frockbot/providers/frock-ai/catalog";
 import {
   BillingError,
   type UsageReservation,
@@ -27,7 +28,6 @@ import type { BillingLedger } from "@frockbot/app/billing/ledger";
 import type { BackendRouteContribution } from "./contracts.js";
 
 export interface BillingEnv {
-  BILLING_MODEL_RATES?: string;
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
   STRIPE_MONTHLY_PRICE_ID?: string;
@@ -113,9 +113,36 @@ function failure(error: unknown) {
     },
   );
 }
+/**
+ * What an account pays per million tokens for each hosted model it can be
+ * charged for, the conversation-summary model included. These are ceilings: a call is charged for the model that answered it, never
+ * above the rate listed for the one it asked for. A pre-rename `@flock/` id is
+ * the same model under its old name, so it is listed once.
+ */
+export function customerModelRatesV1(table: HostedModelRatesV1 | undefined) {
+  const routes = table?.routes ?? {};
+  return Object.fromEntries(
+    Object.entries(routes)
+      .filter(
+        ([model]) =>
+          normalizeFrockModelIdV1(model) === model ||
+          !Object.hasOwn(routes, normalizeFrockModelIdV1(model)),
+      )
+      .map(([model, rate]) => [
+        model,
+        {
+          inputUsdPerMillion: rate.inputMicrosPerToken * 2,
+          cachedInputUsdPerMillion: rate.cachedInputMicrosPerToken * 2,
+          outputUsdPerMillion: rate.outputMicrosPerToken * 2,
+        },
+      ]),
+  );
+}
+
 export function billingRoutes(
   env: BillingEnv,
   account: (userId: string) => BillingAccountRpc,
+  modelRates: () => Promise<HostedModelRatesV1>,
 ): BackendRouteContribution {
   return {
     packageId: "billing",
@@ -242,18 +269,10 @@ export function billingRoutes(
                 userId,
                 ...(before === undefined ? {} : { before }),
               })),
-              modelRates: Object.fromEntries(
-                Object.entries(decodeModelRates(env.BILLING_MODEL_RATES)).map(
-                  ([model, rate]) => [
-                    model,
-                    {
-                      inputUsdPerMillion: rate.inputMicrosPerToken * 2,
-                      cachedInputUsdPerMillion:
-                        rate.cachedInputMicrosPerToken * 2,
-                      outputUsdPerMillion: rate.outputMicrosPerToken * 2,
-                    },
-                  ],
-                ),
+              // A table that cannot be read just now lists no rates; the
+              // balance and history are still the account's to see.
+              modelRates: customerModelRatesV1(
+                await modelRates().catch(() => undefined),
               ),
               computerRate: {
                 activeUsdPerHour: COMPUTER_TARIFF.activeUsdPerHour,

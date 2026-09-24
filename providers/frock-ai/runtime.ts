@@ -103,6 +103,34 @@ export function classifyFrockAiFailureV1(
 }
 
 /**
+ * Which model the Gateway actually ran for one request. Auto is a route the
+ * Gateway resolves, so this — not the requested id — is what the call cost.
+ */
+export interface FrockAiServedModelV1 {
+  /** `<provider>/<model>`, absent when the Gateway named neither. */
+  model?: string;
+  /** Answered from the Gateway's cache: no provider ran. */
+  cached: boolean;
+}
+
+function gatewayHeaderV1(headers: Headers, name: string): string | undefined {
+  const value = headers.get(name)?.trim();
+  return value && /^[\x21-\x7e]{1,200}$/.test(value) ? value : undefined;
+}
+
+/** Read the served model from the headers every Gateway answer carries. */
+export function frockAiServedModelFromHeadersV1(
+  headers: Headers,
+): FrockAiServedModelV1 {
+  const provider = gatewayHeaderV1(headers, "cf-aig-provider");
+  const model = gatewayHeaderV1(headers, "cf-aig-model");
+  return {
+    ...(provider && model ? { model: `${provider}/${model}` } : {}),
+    cached: headers.get("cf-aig-cache-status")?.trim().toUpperCase() === "HIT",
+  };
+}
+
+/**
  * The narrow native host seam. Cloudflare's generated `Ai` type remains in
  * apps/cloudflare; the Package consumes one streaming gateway operation.
  */
@@ -111,6 +139,8 @@ export type FrockAiChatCompletionV1 = (
   body: OpenAICompatibleChatCompletionBodyV1,
   /** Cancels the gateway request; the host bounds it with its own deadline. */
   signal?: AbortSignal,
+  /** Told which model answered, as soon as the Gateway's answer arrives. */
+  served?: (model: FrockAiServedModelV1) => void,
 ) => Promise<ReadableStream<Uint8Array>>;
 
 export interface FrockAiRuntimeConfig {
@@ -132,6 +162,11 @@ class FrockAiProvider implements LlmProvider {
   readonly supports = { structuredOutput: "json_schema" } as const;
   readonly autoFallbackFailures = new WeakSet<ModelProviderFailureError>();
   readonly summaryModel;
+  /** Read back by billing through {@link frockAiServedModelV1}. */
+  readonly servedModels = new WeakMap<
+    NormalizedModelRequest,
+    FrockAiServedModelV1
+  >();
 
   /**
    * The Gateway keeps no addressable copy of a completion, so an interrupted
@@ -193,7 +228,12 @@ class FrockAiProvider implements LlmProvider {
     try {
       yield* streamWithModelRequestDeadlinesV1(
         (deadlineSignal) =>
-          this.config.runChatCompletion(gatewayModel, body, deadlineSignal),
+          this.config.runChatCompletion(
+            gatewayModel,
+            body,
+            deadlineSignal,
+            (served) => this.servedModels.set(request, served),
+          ),
         signal,
         this.config.deadlines ?? {},
       );
@@ -230,6 +270,23 @@ export function createFrockAiSummaryFeature(
     if (runtime.llm.get(FROCK_AI_PROVIDER_TYPE)) return () => {};
     return runtime.llm.register(new FrockAiProvider(config));
   };
+}
+
+/**
+ * The model that answered `request`, when `provider` is the Frock AI provider
+ * that sent it and the Gateway has answered.
+ *
+ * Billing asks this rather than reading a stream event: the model stream is
+ * also what a Plugin model provider answers with, and which model the hosted
+ * Gateway ran is not a Plugin's to say or to see.
+ */
+export function frockAiServedModelV1(
+  provider: LlmProvider,
+  request: NormalizedModelRequest,
+): FrockAiServedModelV1 | undefined {
+  return provider instanceof FrockAiProvider
+    ? provider.servedModels.get(request)
+    : undefined;
 }
 
 export function createFrockAiFeature(

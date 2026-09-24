@@ -69,11 +69,31 @@ export interface UsageReservation {
   pricingVersion: string;
   unitRates?: Record<string, number>;
 }
+/**
+ * How a hosted model call was priced. `served`: at the rate of the model that
+ * answered. `capped`: that model is priced above its route, so the route's
+ * ceiling was charged. `unpriced`: that model has no rate, or the Gateway did
+ * not name it, so the ceiling was charged — a table to fix. `cached`: the
+ * Gateway answered from its cache and no provider ran.
+ */
+export type UsagePricingV1 = "served" | "capped" | "unpriced" | "cached";
+export const USAGE_PRICINGS_V1: readonly UsagePricingV1[] = [
+  "served",
+  "capped",
+  "unpriced",
+  "cached",
+];
+
 export interface UsageSettlement {
   id: string;
   costMicros: number;
   chargeMicros: number;
   quantities: Record<string, number>;
+  pricing?: UsagePricingV1;
+  /** `<provider>/<model>` as the Gateway named the model that answered. */
+  servedModel?: string;
+  /** The customer's per-token rates this settlement charged at. */
+  unitRates?: Record<string, number>;
 }
 interface Grant extends SqlRow {
   id: string;
@@ -353,6 +373,18 @@ export class BillingLedger {
     for (const value of Object.values(input.quantities))
       if (!Number.isFinite(value) || value < 0)
         throw new BillingError("Invalid usage quantities", 400);
+    for (const value of Object.values(input.unitRates ?? {}))
+      if (!Number.isFinite(value) || value < 0)
+        throw new BillingError("Invalid usage rates", 400);
+    if (
+      (input.pricing !== undefined &&
+        !USAGE_PRICINGS_V1.includes(input.pricing)) ||
+      (input.servedModel !== undefined &&
+        (typeof input.servedModel !== "string" ||
+          !input.servedModel ||
+          input.servedModel.length > 300))
+    )
+      throw new BillingError("Invalid usage pricing", 400);
     return this.storage.transactionSync(() => {
       const operation = this.rows<Operation>(
         "SELECT * FROM billing_operations WHERE id = ?",

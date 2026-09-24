@@ -142,6 +142,39 @@ describe("the billing ledger", () => {
     );
   });
 
+  test("a settlement keeps the model that answered and how it was priced", () => {
+    const ledger = new BillingLedger(storage(), () => NOW);
+    active(ledger);
+    ledger.grant("topup:one", "purchased", 10_000, null);
+    ledger.reserve({
+      ...reservation("model:served", 8_000),
+      pricingVersion: "model-rates-3",
+    });
+    const settlement = {
+      id: "model:served",
+      costMicros: 1_000,
+      chargeMicros: 2_000,
+      pricing: "unpriced" as const,
+      servedModel: "custom-together/deepseek-ai/DeepSeek-V5",
+      unitRates: { inputMicrosPerToken: 0.012 },
+      quantities: { inputTokens: 12, outputTokens: 4 },
+    };
+    expect(() =>
+      ledger.settle({
+        ...settlement,
+        pricing: "guessed" as unknown as "served",
+      }),
+    ).toThrow("Invalid usage pricing");
+    expect(() =>
+      ledger.settle({ ...settlement, unitRates: { inputMicrosPerToken: -1 } }),
+    ).toThrow("Invalid usage rates");
+    ledger.settle(settlement);
+    expect(ledger.snapshot().usage[0]).toMatchObject({
+      pricingVersion: "model-rates-3",
+      settlement,
+    });
+  });
+
   test("zero-cost BYO model usage releases its hold without consuming credit", () => {
     const ledger = new BillingLedger(storage(), () => NOW);
     active(ledger);

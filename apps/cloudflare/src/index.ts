@@ -1,4 +1,5 @@
 import { billingRoutes, type BillingAccountRpc } from "./billing.js";
+import { decodeHostedModelRatesV1 } from "@frockbot/app/billing/rates";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { BOT_STATE_CHANNEL_INTERNAL_PATH } from "./bot-state-channel.js";
 import {
@@ -233,7 +234,6 @@ interface Env {
   STRIPE_SECRET_KEY?: string;
   STRIPE_WEBHOOK_SECRET?: string;
   STRIPE_MONTHLY_PRICE_ID?: string;
-  BILLING_MODEL_RATES?: string;
   FCM_SERVICE_ACCOUNT?: string;
   /** Explicit qualification gate; not enabled by the production configuration. */
   NATIVE_SLICE_2_AUTH?: string;
@@ -688,6 +688,7 @@ interface DeploymentPolicyRpc {
   admitAccount(input: unknown): Promise<unknown>;
   checkAccount(input: unknown): Promise<unknown>;
   mayCreateIdentity(input: unknown): Promise<unknown>;
+  readModelRates(input: unknown): Promise<unknown>;
 }
 
 function deploymentPolicyStub(env: Env): DeploymentPolicyRpc {
@@ -2385,6 +2386,14 @@ export default {
                 env.USER_CONFIGURATIONS.get(
                   env.USER_CONFIGURATIONS.idFromName(userId),
                 ) as unknown as BillingAccountRpc,
+              async () =>
+                decodeHostedModelRatesV1(
+                  rpcJsonSnapshotV1(
+                    await deploymentPolicyStub(env).readModelRates({
+                      schemaVersion: 1,
+                    }),
+                  ),
+                ),
             ),
           ],
           debug: debugSurface(env),

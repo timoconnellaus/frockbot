@@ -7,6 +7,10 @@ import {
   type AdminUserListViewV1,
   type DeploymentPolicyV1,
 } from "@frockbot/app/admin/shared";
+import {
+  seedHostedModelRatesV1,
+  type HostedModelRatesViewV1,
+} from "@frockbot/app/billing/rates";
 
 const team = await accessTeamFixtureV1();
 const serveKeys = team.serveKeys();
@@ -82,6 +86,31 @@ function accounts(): AdminUserListViewV1 {
   };
 }
 
+function ratesView(): HostedModelRatesViewV1 {
+  const first = seedHostedModelRatesV1("2026-09-24T00:00:00.000Z");
+  const current = {
+    ...first,
+    version: 2,
+    createdAt: "2026-09-25T00:00:00.000Z",
+    createdBy: ADMIN,
+  };
+  return {
+    schemaVersion: 1,
+    current,
+    history: [current, first],
+    unpriced: [
+      {
+        schemaVersion: 1,
+        servedModel: "custom-together/new-model",
+        route: "@frock/auto",
+        version: 2,
+        firstSeenAt: "2026-09-25T01:00:00.000Z",
+        lastSeenAt: "2026-09-25T02:00:00.000Z",
+      },
+    ],
+  };
+}
+
 interface Recorded {
   calls: Array<{ method: string; input?: unknown }>;
 }
@@ -139,6 +168,11 @@ function app(
         subscribed: false,
         canSpend: true,
         suspended: false,
+      })),
+      readModelRates: record("readModelRates", () => ratesView()),
+      saveModelRates: record("saveModelRates", () => ({
+        status: "applied",
+        value: { ...ratesView().current, version: 3 },
       })),
     } as Env["APP"],
   };
@@ -299,6 +333,41 @@ describe("the page", () => {
 
     expect(body).not.toContain("<script>alert");
     expect(body).toContain("&lt;script&gt;alert(&quot;x&quot;)");
+  });
+
+  test("shows the rate table, its history and a model that answered unpriced", async () => {
+    const body = await (await get(environment())).text();
+
+    expect(body).toContain("Hosted model rates");
+    expect(body).toContain("Version 2, saved by owner@example.com");
+    expect(body).toContain(
+      "Input US$0.30 · cached input US$0.006 · output US$1.20",
+    );
+    expect(body).toContain("up to 400,000 tokens in, 16,384 out");
+    expect(body).toContain("custom-together/deepseek-ai/DeepSeek-V4.1-Flash");
+    expect(body).toContain("custom-together/new-model");
+    expect(body).toContain("Unpriced");
+    expect(body).toContain('<input type="hidden" name="revision" value="2">');
+    expect(body).toContain("Save as version 3");
+    expect(body).toContain("<h3>Version 1</h3>");
+    expect(body).toContain("&quot;@frock/auto&quot;");
+  });
+
+  test("a rate table that cannot be read leaves the rest of the page", async () => {
+    const response = await get(
+      environment({
+        APP: app({
+          readModelRates: () => {
+            throw new Error("authority unreachable");
+          },
+        }).binding,
+      }),
+    );
+    const body = await response.text();
+
+    expect(response.status).toBe(200);
+    expect(body).toContain("The rate table could not be read");
+    expect(body).toContain("Person One");
   });
 
   test("shows the notice a finished write redirected to", async () => {
@@ -512,6 +581,104 @@ describe("a write", () => {
     expect(
       binding.recorded.calls.some((call) => call.method === "setAdmissionMode"),
     ).toBe(false);
+  });
+
+  test("saves a rate version over the one the page read", async () => {
+    const binding = app();
+    const table = {
+      routes: ratesView().current.routes,
+      served: ratesView().current.served,
+    };
+    const response = await post(environment({ APP: binding.binding }), {
+      action: "model-rates",
+      revision: "2",
+      rates: JSON.stringify(table),
+    });
+
+    expect(response.status).toBe(303);
+    expect(response.headers.get("location")).toBe("/?notice=rates");
+    expect(
+      binding.recorded.calls.find((call) => call.method === "saveModelRates")
+        ?.input,
+    ).toEqual({
+      schemaVersion: 1,
+      command: {
+        schemaVersion: 1,
+        type: "deployment/save-model-rates",
+        baseVersion: 2,
+        ...table,
+      },
+      createdBy: ADMIN,
+    });
+  });
+
+  test("a rate table that does not parse is refused and comes back as typed", async () => {
+    const binding = app();
+    const response = await post(environment({ APP: binding.binding }), {
+      action: "model-rates",
+      revision: "2",
+      rates: '{"routes": {"@frock/auto": <oops>}',
+    });
+    const body = await response.text();
+
+    expect(response.status).toBe(400);
+    expect(body).toContain("The rate table is not valid JSON.");
+    expect(body).toContain(
+      "{&quot;routes&quot;: {&quot;@frock/auto&quot;: &lt;oops&gt;}",
+    );
+    expect(
+      binding.recorded.calls.some((call) => call.method === "saveModelRates"),
+    ).toBe(false);
+  });
+
+  test("a rate table that leaves Auto unpriced never reaches the app", async () => {
+    const binding = app();
+    const response = await post(environment({ APP: binding.binding }), {
+      action: "model-rates",
+      revision: "2",
+      rates: JSON.stringify({
+        routes: {
+          "@frock/deepseek-ai/deepseek-v4-flash-0731":
+            ratesView().current.routes["@frock/auto"],
+        },
+        served: {},
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.text()).toContain("routes must price");
+    expect(
+      binding.recorded.calls.some((call) => call.method === "saveModelRates"),
+    ).toBe(false);
+  });
+
+  test("a rate save that lost the race keeps the edit over the current version", async () => {
+    const response = await post(
+      environment({
+        APP: app({
+          saveModelRates: () => ({ status: "conflict", currentRevision: 3 }),
+        }).binding,
+      }),
+      {
+        action: "model-rates",
+        revision: "2",
+        rates: JSON.stringify({
+          routes: ratesView().current.routes,
+          served: {
+            "custom-together/kept-edit": {
+              inputMicrosPerToken: 1,
+              cachedInputMicrosPerToken: 0.5,
+              outputMicrosPerToken: 2,
+            },
+          },
+        }),
+      },
+    );
+    const body = await response.text();
+
+    expect(response.status).toBe(409);
+    expect(body).toContain("gained a version underneath you");
+    expect(body).toContain("custom-together/kept-edit");
   });
 
   test("refuses a form this page does not offer", async () => {

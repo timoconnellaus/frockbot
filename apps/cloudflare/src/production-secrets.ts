@@ -194,12 +194,6 @@ export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1
       degraded: "subscription checkout answers that the plan is not configured",
     },
     {
-      name: "BILLING_MODEL_RATES",
-      why: "Published hosted model prices and prepaid dispatch limits.",
-      degraded:
-        "while billing is on, no hosted model is authorized to spend, so hosted-model turns are refused",
-    },
-    {
       name: "FROCKBOT_ADMIN_EMAILS",
       why: "The identities allowed to open Admin.",
       degraded:

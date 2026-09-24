@@ -20,6 +20,11 @@ import {
   decodePluginCatalogV1,
   type SeededPluginV1,
 } from "@frockbot/app/plugins/catalog";
+import {
+  ModelRatesConflictError,
+  seedHostedModelRatesV1,
+  type HostedModelRatesV1,
+} from "@frockbot/app/billing/rates";
 
 function initialPolicy(): DeploymentPolicyV1 {
   return {
@@ -63,6 +68,9 @@ function memoryHost(
   } = {},
 ): AdminOperationsHostV1 & { recorded: Recorded } {
   let policy = initialPolicy();
+  const rates: HostedModelRatesV1[] = [
+    seedHostedModelRatesV1("2026-09-01T00:00:00.000Z"),
+  ];
   const recorded: Recorded = {
     access: new Map(),
     invitations: new Map(),
@@ -164,6 +172,28 @@ function memoryHost(
         );
       }
       return Promise.resolve(billing(userId));
+    },
+    readModelRates: () =>
+      Promise.resolve({
+        schemaVersion: 1,
+        current: rates[0]!,
+        history: [...rates],
+        unpriced: [],
+      }),
+    saveModelRates: (command, createdBy) => {
+      if (command.baseVersion !== rates[0]!.version) {
+        return Promise.reject(new ModelRatesConflictError(rates[0]!.version));
+      }
+      const next: HostedModelRatesV1 = {
+        schemaVersion: 1,
+        version: rates[0]!.version + 1,
+        createdAt: "2026-09-02T00:00:00.000Z",
+        createdBy,
+        routes: command.routes,
+        served: command.served,
+      };
+      rates.unshift(next);
+      return Promise.resolve(next);
     },
   };
 }
@@ -561,6 +591,64 @@ describe("credit an administrator grants by hand", () => {
       }),
     ).rejects.toThrow();
     expect(host.recorded.grants).toEqual([]);
+  });
+});
+
+describe("the hosted model rate table", () => {
+  const save = (baseVersion: number, routes: unknown) => ({
+    schemaVersion: 1,
+    command: {
+      schemaVersion: 1,
+      type: "deployment/save-model-rates",
+      baseVersion,
+      routes,
+      served: {
+        "custom-together/deepseek-ai/DeepSeek-V4.1-Flash": {
+          inputMicrosPerToken: 0.3,
+          cachedInputMicrosPerToken: 0.006,
+          outputMicrosPerToken: 1.2,
+        },
+      },
+    },
+    createdBy: owner,
+  });
+  const rate = {
+    inputMicrosPerToken: 0.5,
+    cachedInputMicrosPerToken: 0.01,
+    outputMicrosPerToken: 2,
+    maximumInputTokens: 400_000,
+    maximumOutputTokens: 16_384,
+  };
+  const auto = { "@frock/auto": rate, "@frock/structured": rate };
+
+  test("saves the next version over the one it read, and a stale save is a conflict", async () => {
+    const admin = createAdminOperationsV1(memoryHost());
+
+    const written = await admin.saveModelRates(save(1, auto));
+    expect(written.status).toBe("applied");
+    expect(written.status === "applied" && written.value).toMatchObject({
+      version: 2,
+      createdBy: owner,
+      routes: auto,
+    });
+    expect(await admin.saveModelRates(save(1, auto))).toEqual({
+      status: "conflict",
+      currentRevision: 2,
+    });
+    expect((await admin.readModelRates()).current.version).toBe(2);
+  });
+
+  test("a table that would leave Auto unpriced never reaches the authority", async () => {
+    const admin = createAdminOperationsV1(memoryHost());
+
+    await expect(
+      admin.saveModelRates(
+        save(1, {
+          "@frock/deepseek-ai/deepseek-v4-flash-0731": auto["@frock/auto"],
+        }),
+      ),
+    ).rejects.toThrow('routes must price "@frock/auto"');
+    expect((await admin.readModelRates()).current.version).toBe(1);
   });
 });
 

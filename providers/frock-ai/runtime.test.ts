@@ -20,6 +20,8 @@ import {
   classifyFrockAiFailureV1,
   createFrockAiFeature,
   createFrockAiSummaryFeature,
+  frockAiServedModelFromHeadersV1,
+  frockAiServedModelV1,
   FrockAiTransportErrorV1,
 } from "./runtime.js";
 import { manualClock, settle } from "../test-support.ts";
@@ -98,6 +100,66 @@ describe("Frock AI runtime Contribution", () => {
     expect(
       classifyFrockAiFailureV1({ error: { message: "opaque", code: 7999 } }),
     ).toMatchObject({ classification: "unknown", providerReason: "opaque" });
+  });
+
+  test("reads the served model from the Gateway's answer headers", () => {
+    expect(
+      frockAiServedModelFromHeadersV1(
+        new Headers({
+          "cf-aig-provider": "custom-together",
+          "cf-aig-model": "deepseek-ai/DeepSeek-V4.1-Flash",
+          "cf-aig-cache-status": "MISS",
+        }),
+      ),
+    ).toEqual({
+      model: "custom-together/deepseek-ai/DeepSeek-V4.1-Flash",
+      cached: false,
+    });
+    expect(
+      frockAiServedModelFromHeadersV1(
+        new Headers({ "cf-aig-model": "x/y", "cf-aig-cache-status": "hit" }),
+      ),
+    ).toEqual({ cached: true });
+    // A header that is not a plain model name names nothing.
+    expect(
+      frockAiServedModelFromHeadersV1(
+        new Headers({ "cf-aig-provider": "a b", "cf-aig-model": "m" }),
+      ),
+    ).toEqual({ cached: false });
+  });
+
+  test("remembers which model answered each request, for billing to read", async () => {
+    const root = createAgentRuntimeHarness();
+    await root.mount(
+      createFrockAiFeature(
+        runtimeConfig((_model, _body, _signal, served) => {
+          served?.({ model: "custom-together/served-model", cached: false });
+          return Promise.resolve(
+            sse(
+              'data: {"choices":[{"delta":{"content":"hi"},"finish_reason":"stop"}]}\n\ndata: [DONE]\n\n',
+            ),
+          );
+        }),
+      ),
+    );
+    const provider = root.llm.get("flock-ai")!;
+    const asked = { ...request };
+    for await (const event of root.llm.stream(
+      asked,
+      new AbortController().signal,
+    )) {
+      void event;
+    }
+
+    expect(frockAiServedModelV1(provider, asked)).toEqual({
+      model: "custom-together/served-model",
+      cached: false,
+    });
+    expect(frockAiServedModelV1(provider, { ...request })).toBeUndefined();
+    expect(
+      frockAiServedModelV1({ id: "flock-ai", stream: provider.stream }, asked),
+    ).toBeUndefined();
+    await root.dispose();
   });
 
   test("falls from a permanently rejected manual model to Auto immediately", async () => {

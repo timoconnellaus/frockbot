@@ -16,6 +16,12 @@ import {
   type AdminUserViewV1,
   type DeploymentPolicyV1,
 } from "@frockbot/app/admin/shared";
+import type {
+  HostedModelRatesV1,
+  HostedModelRatesViewV1,
+  ServedModelRateV1,
+  UnpricedServedModelV1,
+} from "@frockbot/app/billing/rates";
 
 export interface NoticeV1 {
   tone: "done" | "stale" | "refused";
@@ -27,6 +33,10 @@ export interface AdminPageV1 {
   email: string;
   policy: DeploymentPolicyV1;
   accounts: AdminUserListViewV1;
+  /** Absent when the authority could not be read. */
+  rates?: HostedModelRatesViewV1;
+  /** A refused or stale rate edit, returned to the field it was typed in. */
+  ratesDraft?: string;
   notice?: NoticeV1;
   /** One idempotency key per rendered page, so a repeated grant lands once. */
   grantId: string;
@@ -185,7 +195,7 @@ button.quiet {
   border: 1px solid var(--line-strong);
 }
 button.quiet:hover { background: var(--raised); }
-input, select {
+input, select, textarea {
   padding: 8px 10px;
   font: inherit;
   font-size: 0.9rem;
@@ -194,7 +204,13 @@ input, select {
   border: 1px solid var(--line-strong);
   border-radius: 8px;
 }
-input:focus-visible, select:focus-visible, button:focus-visible, summary:focus-visible {
+textarea, pre {
+  width: 100%;
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.8rem;
+}
+pre { margin: 0; overflow-x: auto; color: var(--muted); }
+input:focus-visible, select:focus-visible, textarea:focus-visible, button:focus-visible, summary:focus-visible {
   outline: 2px solid var(--pink);
   outline-offset: 2px;
 }
@@ -492,6 +508,146 @@ function account(
 </article>`;
 }
 
+/** Micro-dollars per token is US dollars per million tokens. */
+function perMillion(micros: number): string {
+  const fraction = String(Number(micros.toFixed(6))).split(".")[1] ?? "";
+  return `US$${micros.toFixed(Math.max(2, fraction.length))}`;
+}
+
+function priceLine(rate: ServedModelRateV1): string {
+  return `Input ${perMillion(rate.inputMicrosPerToken)} · cached input ${perMillion(
+    rate.cachedInputMicrosPerToken,
+  )} · output ${perMillion(rate.outputMicrosPerToken)}`;
+}
+
+function rateRows<T extends ServedModelRateV1>(
+  entries: Array<[string, T]>,
+  detail: (rate: T) => string,
+  empty: string,
+): string {
+  if (entries.length === 0) return `<p class="credit">${empty}</p>`;
+  return `<div class="rows">${entries
+    .map(
+      ([model, rate]) => `<div class="row">
+        <div>
+          <h3 class="identifier">${escapeHtmlV1(model)}</h3>
+          <p>${escapeHtmlV1(detail(rate))}</p>
+        </div>
+      </div>`,
+    )
+    .join("\n")}</div>`;
+}
+
+function unpricedRow(report: UnpricedServedModelV1): string {
+  const who =
+    report.servedModel === null
+      ? "An answer that did not name its model"
+      : report.servedModel;
+  return `<div class="row">
+    <div>
+      <h3 class="identifier">${escapeHtmlV1(who)}</h3>
+      <p>Answered for ${escapeHtmlV1(report.route)} under version ${
+        report.version
+      }. First seen ${when(report.firstSeenAt)}, last seen ${when(
+        report.lastSeenAt,
+      )}.</p>
+    </div>
+    <span class="pill pill-warn">Unpriced</span>
+  </div>`;
+}
+
+function ratesJson(table: HostedModelRatesV1): string {
+  return JSON.stringify(
+    { routes: table.routes, served: table.served },
+    null,
+    2,
+  );
+}
+
+function modelRates(page: AdminPageV1): string {
+  const view = page.rates;
+  if (!view) {
+    return `<section>
+  <h2>Hosted model rates</h2>
+  <p class="unreadable">The rate table could not be read. Reload to try
+  again.</p>
+</section>`;
+  }
+  const current = view.current;
+  const unpriced =
+    view.unpriced.length === 0
+      ? ""
+      : `<p class="unreadable spaced">These models answered without a price.
+  Each call was charged at the rate of the model it asked for. Add them under
+  "served" to charge what they cost.</p>
+  <div class="rows">${view.unpriced.map(unpricedRow).join("\n")}</div>`;
+  const history = view.history
+    .map(
+      (table) => `<div class="row${
+        table.version === current.version ? " row-current" : ""
+      }">
+        <div>
+          <h3>Version ${table.version}</h3>
+          <p>Saved by ${escapeHtmlV1(table.createdBy)} at ${when(
+            table.createdAt,
+          )}.</p>
+          <details>
+            <summary>Show</summary>
+            <pre>${escapeHtmlV1(ratesJson(table))}</pre>
+          </details>
+        </div>
+      </div>`,
+    )
+    .join("\n");
+  return `<section>
+  <h2>Hosted model rates</h2>
+  <p class="lede">What each hosted model costs this deployment, per million
+  tokens; accounts are charged twice this. A call reserves at the rate of the
+  model it asked for and settles at the rate of the model that answered, never
+  above the first.</p>
+  ${unpriced}
+  <p class="who spaced">Version ${current.version}, saved by ${escapeHtmlV1(
+    current.createdBy,
+  )} at ${when(current.createdAt)}.</p>
+  <h3 class="spaced">Asked for</h3>
+  ${rateRows(
+    Object.entries(current.routes),
+    (rate) =>
+      `${priceLine(rate)} · up to ${rate.maximumInputTokens.toLocaleString(
+        "en-US",
+      )} tokens in, ${rate.maximumOutputTokens.toLocaleString("en-US")} out`,
+    "No model is priced.",
+  )}
+  <h3 class="spaced">Answered by</h3>
+  ${rateRows(
+    Object.entries(current.served),
+    priceLine,
+    "No answering model is priced, so every call is charged at the rate of the model it asked for.",
+  )}
+  <details class="spaced"${page.ratesDraft !== undefined ? " open" : ""}>
+    <summary>Save a new version</summary>
+    <form method="post" action="/" class="panel">
+      <input type="hidden" name="action" value="model-rates">
+      <input type="hidden" name="revision" value="${current.version}">
+      <div class="field">
+        <label for="model-rates">Routes (the models asked for, with their
+        token bounds) and served models (as the Gateway names them,
+        <code>provider/model</code>), in micro-dollars per token</label>
+        <textarea id="model-rates" name="rates" rows="24" required
+          spellcheck="false" autocomplete="off">${escapeHtmlV1(
+            page.ratesDraft ?? ratesJson(current),
+          )}</textarea>
+      </div>
+      <button type="submit">Save as version ${current.version + 1}</button>
+    </form>
+  </details>
+  <details>
+    <summary>History</summary>
+    <div class="rows">${history}</div>
+  </details>
+</section>`;
+}
+
 function accounts(page: AdminPageV1): string {
   const body =
     page.accounts.users.length === 0
@@ -522,6 +678,7 @@ export function renderAdminPageV1(page: AdminPageV1): string {
 ${notice(page.notice)}
 ${admission(page.policy)}
 ${invitation()}
+${modelRates(page)}
 ${accounts(page)}
 <footer>
   <p>Administration is this portal, not the app: the product has no

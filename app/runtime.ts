@@ -67,6 +67,7 @@ import {
 import {
   createFrockAiFeature,
   createFrockAiSummaryFeature,
+  type FrockAiChatCompletionV1,
 } from "@frockbot/providers/frock-ai/runtime";
 import {
   createRoutinesRuntimeFeature,
@@ -339,10 +340,7 @@ interface ModelRuntimeContributionConfig {
   settleCredential?(effectId: string): Promise<void>;
   /** `null` on the `AI` binding path, which carries no dynamic route. */
   frockAiAutoRoute?: string | null;
-  runFrockAiChatCompletion?: (
-    gatewayModel: string,
-    body: Record<string, unknown>,
-  ) => Promise<ReadableStream<Uint8Array>>;
+  runFrockAiChatCompletion?: FrockAiChatCompletionV1;
   fetch?: typeof fetch;
   /**
    * Endpoint root carried on the Connection's settings bag, when its User

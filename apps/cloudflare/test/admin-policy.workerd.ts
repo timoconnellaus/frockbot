@@ -578,4 +578,51 @@ describe("beta access authority in workerd", () => {
       [guest.userId, true],
     ]);
   });
+
+  test("the hosted model rate table is seeded, versioned and never rewritten", async () => {
+    const admin = operations();
+    const before = await admin.readModelRates();
+    // Every Bot starts on Auto, so a fresh deployment prices it at once.
+    expect(before.current.routes["@frock/auto"]).toMatchObject({
+      maximumInputTokens: 400_000,
+      maximumOutputTokens: 16_384,
+    });
+    const save = (baseVersion: number) =>
+      admin.saveModelRates({
+        schemaVersion: 1,
+        command: {
+          schemaVersion: 1,
+          type: "deployment/save-model-rates",
+          baseVersion,
+          routes: before.current.routes,
+          served: {
+            ...before.current.served,
+            "custom-together/next-model": {
+              inputMicrosPerToken: 0.5,
+              cachedInputMicrosPerToken: 0.01,
+              outputMicrosPerToken: 2,
+            },
+          },
+        },
+        createdBy: owner,
+      });
+
+    const written = await save(before.current.version);
+    expect(written).toMatchObject({
+      status: "applied",
+      value: { version: before.current.version + 1, createdBy: owner },
+    });
+    expect(await save(before.current.version)).toEqual({
+      status: "conflict",
+      currentRevision: before.current.version + 1,
+    });
+
+    const after = await admin.readModelRates();
+    expect(after.current.version).toBe(before.current.version + 1);
+    expect(after.history[1]).toEqual(before.current);
+    // What each Bot object reads is the same current version.
+    expect(
+      await authority().readModelRates({ schemaVersion: 1 }),
+    ).toMatchObject({ version: after.current.version });
+  });
 });
