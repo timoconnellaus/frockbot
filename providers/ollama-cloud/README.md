@@ -9,41 +9,10 @@ The Ollama model provider Package. It contributes:
   leases the credential for a Turn;
 - a **runtime Contribution** (`./runtime`) that registers the `ollama-cloud`
   provider behind the kernel's model interface, translating a normalized model
-  request onto Ollama's OpenAI-compatible `/v1/chat/completions` endpoint;
-- the **`web_search` tool** (`./web-search`), a second Capability over the same
-  Connection.
+  request onto Ollama's OpenAI-compatible `/v1/chat/completions` endpoint.
 
-## The `ollama-cloud-web-search` Capability
-
-`POST /api/web_search` authenticates with the _same_ key as `/api/chat` — see
-`docs/research/ollama-cloud-auth.md` — and a credential is openable only by the
-Package that owns its Connection. So the search transport lives here, beside the
-model provider, rather than in a Package that would have to be handed a key it
-does not own. This is the pattern for a Connection-backed tool
-Capability.
-
-The _contract_ is not provider-specific. `@frockbot/app/web/contract` owns the
-`WebSearchV1` interface, the result DTO, its decoder and the `web_search` tool
-definition; this Package supplies transport and the credential, and a second
-search provider satisfies the same contract with no change here and none in the
-kernel.
-
-|                |                                                                                     |
-| -------------- | ----------------------------------------------------------------------------------- |
-| Capability     | `ollama-cloud-web-search`, kind `tool`, `connectionTypes: ["ollama-cloud-account"]` |
-| Endpoint       | `POST {apiBaseUrl}/api/web_search` — the same resolved root chat uses               |
-| Input          | `query` 1–400 chars, `max_results` 1–10 (default 5)                                 |
-| Response bound | 256 KiB, snippets trimmed to 1 000 characters                                       |
-| Durable result | `{"query", "results":[{"title","url","snippet"}]}`                                  |
-| Effect class   | read-only, `idempotent: true`                                                       |
-| Turn types     | all four (manifest v4 `admission`)                                                  |
-
-**Authority.** The tool mounts only while `ollama-cloud-web-search` is enabled
-account-wide and resolves a ready Connection. There is no unauthenticated
-fallback: without that capability the Bot is never offered the tool. The key
-is leased per durable `effectId`, opened inside this Package, used
-and settled, so it never reaches a tool argument, a tool result, or the event
-log.
+Web search is not this Package's: every Bot's `web_search` is the platform's,
+on the Web Package (`@frockbot/app/web`).
 
 ## The `api-base-url` Connection setting
 

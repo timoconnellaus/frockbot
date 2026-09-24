@@ -865,30 +865,39 @@ async function webStub(url: URL): Promise<Response> {
 }
 
 /**
- * The Ollama Cloud web-search endpoint. Authenticated exactly like the two
- * chat endpoints and unlike the catalog reads.
+ * Brave's Web Search API. The key is what `vitest.integration.config.ts` binds
+ * as `BRAVE_SEARCH_API_KEY`; anything else is refused as the real service
+ * would. At most three results, whatever `count` asked for.
  */
-async function webSearchStub(request: Request, key: string): Promise<Response> {
-  if (key !== OLLAMA_GOOD_API_KEY) {
-    return new Response(UNAUTHORIZED, {
-      status: 401,
-      headers: { "content-type": "application/json" },
-    });
+export const BRAVE_STUB_ORIGIN = "https://api.search.brave.com";
+export const BRAVE_TEST_API_KEY = "workerd-brave-key";
+
+function braveSearchStub(request: Request, url: URL): Response {
+  if (request.headers.get("x-subscription-token") !== BRAVE_TEST_API_KEY) {
+    return Response.json(
+      {
+        type: "ErrorResponse",
+        error: { status: 401, code: "SUBSCRIPTION_TOKEN_INVALID" },
+      },
+      { status: 401 },
+    );
   }
-  let body: { query?: unknown; max_results?: unknown } = {};
-  try {
-    body = (await request.clone().json()) as typeof body;
-  } catch {
-    body = {};
+  if (url.pathname !== "/res/v1/web/search") {
+    return new Response("unexpected Brave Search request", { status: 404 });
   }
-  const count =
-    typeof body.max_results === "number" ? Math.min(body.max_results, 3) : 3;
+  const query = url.searchParams.get("q") ?? "";
+  const count = Math.min(Number(url.searchParams.get("count") ?? "20"), 3);
   return Response.json({
-    results: Array.from({ length: count }, (_value, index) => ({
-      title: `Result ${index} for ${String(body.query ?? "")}`,
-      url: `https://example.test/result-${index}`,
-      content: `A snippet about ${String(body.query ?? "")}.`,
-    })),
+    type: "search",
+    query: { original: query, more_results_available: false },
+    web: {
+      type: "search",
+      results: Array.from({ length: count }, (_value, index) => ({
+        title: `Result ${index} for ${query}`,
+        url: `https://example.test/result-${index}`,
+        description: `A snippet about ${query}.`,
+      })),
+    },
   });
 }
 
@@ -898,6 +907,7 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
   if (url.origin === DEEPSEEK_STUB_ORIGIN) return deepseekStub(request, url);
   if (url.origin === COMPOSIO_STUB_ORIGIN) return composioStub(request, url);
   if (url.origin === MCP_STUB_ORIGIN) return mcpStub(request, url);
+  if (url.origin === BRAVE_STUB_ORIGIN) return braveSearchStub(request, url);
   if (
     url.origin === "https://auth.x.ai" &&
     url.pathname === "/oauth2/device/code"
@@ -933,9 +943,6 @@ export async function ollamaCloudStub(request: Request): Promise<Response> {
     return Response.json({ capabilities: ["tools"], model_info: {} });
   }
   const key = bearerKey(request);
-  if (url.pathname === "/api/web_search") {
-    return webSearchStub(request, key);
-  }
   if (url.pathname === "/api/chat") {
     if (
       key !== OLLAMA_GOOD_API_KEY &&

@@ -217,6 +217,12 @@ export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1
         "the events door answers 503; Routines cannot fire on a connected-app event",
     },
     {
+      name: "BRAVE_SEARCH_API_KEY",
+      why: "The Brave Search API key behind every Bot's `web_search`, billed per search.",
+      degraded:
+        "web search is unavailable: a Bot has no `web_search` tool, and `web_fetch` still reads pages",
+    },
+    {
       name: "FROCK_AI_GATEWAY_TOKEN",
       why: "The `cf-aig-authorization` bearer for the AI Gateway.",
       degraded:

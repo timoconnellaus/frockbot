@@ -28,6 +28,7 @@ import entry_voice_answers_after_tools from "./entries/voice-answers-after-tools
 import entry_voice_call_card from "./entries/voice-call-card.ts";
 import entry_voice_opening from "./entries/voice-opening.ts";
 import entry_voice_smooth_playback from "./entries/voice-smooth-playback.ts";
+import entry_web_search from "./entries/web-search.ts";
 import entry_whats_new from "./entries/whats-new.ts";
 import entry_whats_new_reading from "./entries/whats-new-reading.ts";
 import entry_working_bot from "./entries/working-bot.ts";
@@ -62,6 +63,7 @@ export const WHATS_NEW_ENTRY_FILES_V1 = [
   entry_voice_call_card,
   entry_voice_opening,
   entry_voice_smooth_playback,
+  entry_web_search,
   entry_whats_new,
   entry_whats_new_reading,
   entry_working_bot,

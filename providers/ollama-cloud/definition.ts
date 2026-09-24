@@ -3,21 +3,6 @@ import type { PackageDefinitionV1 } from "@frockbot/core/contracts";
 export const providerOllamaCloudDefinitionV1: PackageDefinitionV1 = {
   id: "provider-ollama-cloud",
   displayName: "Ollama Cloud",
-  settings: [
-    {
-      id: "web-search-max-results",
-      schemaVersion: 1,
-      scopes: ["user"],
-      schema: {
-        type: "integer",
-        title: "Maximum web search results",
-        description:
-          "How many results a Bot's web search returns at most, however many it asks for. Leave this empty to use the default of 5.",
-        minimum: 1,
-        maximum: 10,
-      },
-    },
-  ],
   capabilities: [
     {
       id: "ollama-cloud-models",
@@ -25,15 +10,6 @@ export const providerOllamaCloudDefinitionV1: PackageDefinitionV1 = {
       connectionTypes: ["ollama-cloud-account"],
       admission: {
         turnTypes: ["chat", "agent", "automation", "subagent"],
-      },
-    },
-    {
-      id: "ollama-cloud-web-search",
-      kind: "tool",
-      connectionTypes: ["ollama-cloud-account"],
-      admission: {
-        turnTypes: ["chat", "agent", "automation", "subagent"],
-        subagentRoles: ["executor"],
       },
     },
   ],
@@ -47,7 +23,7 @@ export const providerOllamaCloudDefinitionV1: PackageDefinitionV1 = {
         kind: "api-key",
         driverId: "ollama-cloud",
       },
-      capabilities: ["ollama-cloud-models", "ollama-cloud-web-search"],
+      capabilities: ["ollama-cloud-models"],
       settings: [
         {
           id: "api-base-url",
@@ -66,5 +42,5 @@ export const providerOllamaCloudDefinitionV1: PackageDefinitionV1 = {
     },
   ],
   defaultEnablement: "disabled",
-  dependencies: ["credentials", "settings", "web"],
+  dependencies: ["credentials", "settings"],
 };

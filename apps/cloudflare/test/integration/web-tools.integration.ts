@@ -1,6 +1,6 @@
-// The web-tools slice end to end: `web_search` (Ollama Cloud, Connection
-// backed) and `web_fetch` (generic, SSRF-safe), driven the way production
-// drives them.
+// The web-tools slice end to end: `web_search` (Brave Search, on the
+// deployment's key) and `web_fetch` (generic, SSRF-safe), driven the way
+// production drives them.
 //
 // Nothing here calls a tool directly. The stubbed model answers with a
 // `tool_calls` stream when a Turn's user message carries
@@ -10,6 +10,7 @@
 // reads back.
 import { describe, expect, it } from "vitest";
 import {
+  BRAVE_TEST_API_KEY,
   callsFrockbotTool,
   frockbotToolCallPrompt,
 } from "../harness/miniflare.ts";
@@ -113,8 +114,8 @@ describe("web_search through the gateway, the artifact and the Bot", () => {
     expect(body.results).toHaveLength(2);
     expect(body.results[0]?.url).toContain("https://example.test/result-");
     expect(body.results[0]?.snippet).toContain("frockbot parity");
-    // The Connection's key crossed the wire and never the event log.
-    expect(outcome.content).not.toContain("workerd-test-key");
+    // The deployment's key crossed the wire and never the event log.
+    expect(outcome.content).not.toContain(BRAVE_TEST_API_KEY);
   });
 });
 

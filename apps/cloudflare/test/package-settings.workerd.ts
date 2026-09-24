@@ -6,9 +6,11 @@
 //     Durable Object owns, projected onto the installation row a client reads;
 //  2. the values survive eviction, because they are durable state and not a
 //     resident cache;
-//  3. an uninstall drops them, and a reinstall starts from the Package's own
-//     defaults rather than resurrecting configuration the User discarded;
-//  4. a value the Package's declared schema refuses never reaches storage.
+//  3. a value the Package's declared schema refuses never reaches storage.
+//
+// Every Package that declares a User-level setting is platform-owned, so none
+// can be uninstalled here; `app/settings/user.test.ts` proves an uninstall
+// drops the values its row carried.
 import { env } from "cloudflare:workers";
 import { evictDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
@@ -17,8 +19,10 @@ import type {
   UserSettingsViewV1,
 } from "@frockbot/core/configuration";
 
-const PACKAGE_ID = "provider-ollama-cloud";
-const SETTING_ID = "web-search-max-results";
+const PACKAGE_ID = "image";
+const SETTING_ID = "model";
+const CHOSEN = "@cf/bytedance/stable-diffusion-xl-lightning";
+const ALSO_CHOSEN = "@cf/black-forest-labs/flux-2-klein-4b";
 
 interface ConfigurationRpc {
   readConfiguration(input: unknown): Promise<UserSettingsViewV1>;
@@ -54,11 +58,11 @@ function installedValues(
   return view.packages.find((pkg) => pkg.packageId === PACKAGE_ID)?.values;
 }
 
-async function installProvider(userId: string, attempt = 1): Promise<void> {
+async function installImage(userId: string): Promise<void> {
   await execute(userId, {
     schemaVersion: 1,
     type: "user/install-package",
-    commandId: `install-${attempt}-${userId}`,
+    commandId: `install-${userId}`,
     expectedRevision: (await read(userId)).revision,
     packageId: PACKAGE_ID,
     version: "0.0.1",
@@ -66,9 +70,9 @@ async function installProvider(userId: string, attempt = 1): Promise<void> {
 }
 
 describe("Package setting values in the User Durable Object", () => {
-  test("are durable across eviction, and an uninstall drops them", async () => {
+  test("are durable across eviction", async () => {
     const userId = `package-settings-${crypto.randomUUID().slice(0, 8)}`;
-    await installProvider(userId);
+    await installImage(userId);
 
     await execute(userId, {
       schemaVersion: 1,
@@ -76,13 +80,17 @@ describe("Package setting values in the User Durable Object", () => {
       commandId: `set-${userId}`,
       expectedRevision: (await read(userId)).revision,
       packageId: PACKAGE_ID,
-      values: { [SETTING_ID]: 2 },
+      values: { [SETTING_ID]: CHOSEN },
     });
-    expect(installedValues(await read(userId))).toEqual({ [SETTING_ID]: 2 });
+    expect(installedValues(await read(userId))).toEqual({
+      [SETTING_ID]: CHOSEN,
+    });
 
     // THE VALUES ARE DURABLE. They outlive the object that admitted them.
     await evictDurableObject(env.USER_CONFIGURATIONS.getByName(userId));
-    expect(installedValues(await read(userId))).toEqual({ [SETTING_ID]: 2 });
+    expect(installedValues(await read(userId))).toEqual({
+      [SETTING_ID]: CHOSEN,
+    });
 
     // A PARTIAL UPDATE SURVIVES THE SAME WAY, and replaces only what it names.
     await execute(userId, {
@@ -91,33 +99,17 @@ describe("Package setting values in the User Durable Object", () => {
       commandId: `set-again-${userId}`,
       expectedRevision: (await read(userId)).revision,
       packageId: PACKAGE_ID,
-      values: { [SETTING_ID]: 7 },
+      values: { [SETTING_ID]: ALSO_CHOSEN },
     });
     await evictDurableObject(env.USER_CONFIGURATIONS.getByName(userId));
-    expect(installedValues(await read(userId))).toEqual({ [SETTING_ID]: 7 });
-
-    // AN UNINSTALL DROPS THEM. The row is the store, so removing the row
-    // removes the configuration with it.
-    await execute(userId, {
-      schemaVersion: 1,
-      type: "user/uninstall-package",
-      commandId: `uninstall-${userId}`,
-      expectedRevision: (await read(userId)).revision,
-      packageId: PACKAGE_ID,
+    expect(installedValues(await read(userId))).toEqual({
+      [SETTING_ID]: ALSO_CHOSEN,
     });
-    await evictDurableObject(env.USER_CONFIGURATIONS.getByName(userId));
-    expect(
-      (await read(userId)).packages.some((pkg) => pkg.packageId === PACKAGE_ID),
-    ).toBe(false);
-
-    // AND A REINSTALL STARTS CLEAN.
-    await installProvider(userId, 2);
-    expect(installedValues(await read(userId))).toBeUndefined();
   });
 
   test("a value the declared schema refuses never reaches storage", async () => {
     const userId = `package-settings-bad-${crypto.randomUUID().slice(0, 8)}`;
-    await installProvider(userId);
+    await installImage(userId);
     const revision = (await read(userId)).revision;
 
     await expect(
@@ -127,7 +119,7 @@ describe("Package setting values in the User Durable Object", () => {
         commandId: `refused-${userId}`,
         expectedRevision: revision,
         packageId: PACKAGE_ID,
-        values: { [SETTING_ID]: 99 },
+        values: { [SETTING_ID]: "@cf/not/a-model" },
       }),
     ).rejects.toThrow();
 

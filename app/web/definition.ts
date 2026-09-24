@@ -13,6 +13,15 @@ export const webDefinitionV1: PackageDefinitionV1 = {
         subagentRoles: ["executor"],
       },
     },
+    {
+      id: "web-search",
+      kind: "tool",
+      connectionTypes: [],
+      admission: {
+        turnTypes: ["chat", "agent", "automation", "subagent"],
+        subagentRoles: ["executor"],
+      },
+    },
   ],
   platformOwned: true,
 };

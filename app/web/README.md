@@ -1,8 +1,10 @@
 # @frockbot/app/web
 
-The Web Package. It contributes one runtime Contribution (`./agent`) carrying
-one tool, **`web_fetch`**, and one provider-neutral contract (`./contract`) that
-a search provider Package implements.
+The Web Package. It contributes two tools — **`web_fetch`** (`./agent`) and
+**`web_search`** (`./brave`) — each behind its own Capability, and the
+provider-neutral search contract (`./contract`) that Brave Search implements.
+Both need no Connection and one per-Bot switch covers both: the Web row on a
+Bot's Plugins page.
 
 Row 47 of the parity register (`docs/research/grokbot-computer.md`) names web
 search, web fetch and image generation as first-class tools, but cites a section
@@ -64,10 +66,38 @@ known-internal name shapes, and best-effort for everything else. Closing the gap
 needs a platform primitive FrockBot does not have; it is recorded here rather
 than papered over.
 
+## `web_search`
+
+|                |                                                                             |
+| -------------- | --------------------------------------------------------------------------- |
+| Capability     | `web-search`, kind `tool`, `connectionTypes: []`                            |
+| Provider       | Brave Search, `GET https://api.search.brave.com/res/v1/web/search`          |
+| Key            | the deployment's `BRAVE_SEARCH_API_KEY`, sent as `X-Subscription-Token`     |
+| Input          | `query` 1–400 chars, `max_results` 1–10 (default 5)                         |
+| Response bound | 256 KiB, snippets trimmed to 1 000 characters                               |
+| Durable result | `{"query", "results":[{"title","url","snippet"}]}`                          |
+| Refusal        | `isError: true`, `{"error":"web-search-failed","query","message"}`          |
+| Cost           | US$0.01 per search where the deployment bills, keyed by the search's effect |
+| Effect class   | read-only, `idempotent: true`                                               |
+| Turn types     | all four (manifest v4 `admission`)                                          |
+
+Search is the platform's, so a User sets nothing up. The key is read
+server-side when a Turn mounts and never reaches a tool argument, a tool
+result, or the event log. A deployment without it mounts no `web_search` at all
+— the model is never offered a search it cannot run — and `web_fetch` is
+unaffected. Brave is asked for web results only, as plain text
+(`result_filter=web`, `text_decorations=false`), and its answer is decoded into
+the contract's shape at the seam: nothing else Brave sends reaches the model.
+
+Where the deployment bills, one search's price is reserved under
+`search:<effect id>` before the request goes out (`@frockbot/app/billing/search`).
+An answer charges it, a refusal releases it, and a request with no answer at
+all stays reserved for reconciliation. Recovery re-runs an idempotent tool, so
+the key is what keeps a re-run from being billed twice.
+
 ## `./contract` — `WebSearchV1`
 
 The `web_search` tool definition, its bounds, its DTO and its decoder live here
-so that a provider Package contributes the tool by supplying transport alone.
-`@frockbot/providers/ollama-cloud` is the first implementation
-(`POST {apiBaseUrl}/api/web_search`); this Package holds no transport and
-depends on no provider.
+so that a search provider contributes the tool by supplying transport alone.
+`./brave` is the implementation; the contract imports no transport and names
+no provider.

@@ -61,7 +61,7 @@ export interface BillingStorage {
 }
 export interface UsageReservation {
   id: string;
-  kind: "model" | "computer";
+  kind: "model" | "computer" | "search";
   maximumMicros: number;
   botId?: string;
   sessionId?: string;
@@ -309,7 +309,7 @@ export class BillingLedger {
     identifier(input.id);
     amount(input.maximumMicros, "reservation");
     if (
-      !["model", "computer"].includes(input.kind) ||
+      !["model", "computer", "search"].includes(input.kind) ||
       !input.description ||
       input.description.length > 300 ||
       !input.pricingVersion

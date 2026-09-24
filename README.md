@@ -27,6 +27,7 @@ Optional keys. Each is asked for once and each can be skipped with Enter; a skip
 | `FCM_SERVICE_ACCOUNT`     | push notifications to an Android app you build yourself            |
 | `COMPOSIO_API_KEY`        | Connected apps: a Bot using your Gmail, Slack, Notion and the rest |
 | `COMPOSIO_WEBHOOK_SECRET` | Routines that fire on a connected-app event                        |
+| `BRAVE_SEARCH_API_KEY`    | web search: a Bot that searches the public web                     |
 | `DEBUG_TOKEN`             | the read-only `/api/debug` operator surface                        |
 
 No model key is needed. Frock AI runs on the account's own `AI` binding, where Auto resolves to a concrete Workers AI chat model, so a deployment with no configuration at all still picks a model for a User who chose none.
@@ -531,7 +532,7 @@ app/              The product: `runtime.ts`, the Contribution tables, and one di
   testkit/        Shared test doubles and harnesses
   ui-theme/       The Appearance Package definition; it contributes no code
   voice/          Composer dictation and the account-wide voice assistant over the deployment's speech providers
-  web/            web_search and a bounded, SSRF-classified web_fetch
+  web/            web_search on Brave Search and a bounded, SSRF-classified web_fetch
 applets/          The Plugin build contract the app and the build service share
   sdk/            Plugin authoring SDK: the declarations-only Plugin entry and the build pipeline the build service runs; published to npm
 apps/

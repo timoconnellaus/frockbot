@@ -1062,11 +1062,11 @@ connectionId, triggerType }` on a Routine, an instance at the provider, and
 blocking dependency is named, and the gap is visible rather than a silent
 absence. Row 44 is the only one.
 
-- **47** — landed; all three tools exist. `web_search` is a Connection-backed
-  Capability of `providers/ollama-cloud` (`src/web-search.ts`,
-  `POST {apiBaseUrl}/api/web_search`, the same key and the same resolved
-  endpoint root as chat) and `web_fetch` is the `plugin-web` Package
-  (`src/agent.ts`, `src/ssrf.ts`). Both are work tools on every working turn
+- **47** — landed; all three tools exist. `web_search` and `web_fetch` are
+  the platform-owned `web` Package's two Capabilities, neither needing a
+  Connection: `web_search` runs on Brave Search with the deployment's key and
+  is billed per search (`app/web/brave.ts`), and `web_fetch` is
+  `app/web/agent.ts` with `app/web/ssrf.ts`. Both are work tools on every working turn
   type (row 57; the rule is in `docs/architecture.md` §4, tool exposure),
   both declare `idempotent: true`, and both emit stable JSON into `tool/result`
   rather than prose. `generate_image` is the `plugin-image` Package: it renders
