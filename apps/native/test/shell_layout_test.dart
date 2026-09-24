@@ -252,12 +252,13 @@ void main() {
     testWidgets('an open drawer is dismissed by tapping what it covers', (
       tester,
     ) async {
-      // The scrim has to be the size of the shell, and being in the tree does
-      // not say that: a `ColoredBox` with no child takes the smallest size its
-      // constraints allow, and a `Stack`'s non-positioned children are loosely
-      // constrained — so an unpositioned scrim was 0x0. It dimmed nothing, took
-      // no tap, and was dropped from the accessibility tree for having no area,
+      // The scrim's Close has to cover what the drawer leaves, and being in
+      // the tree does not say that: an unpositioned scrim was 0x0. It took no
+      // tap and was dropped from the accessibility tree for having no area,
       // which left the only way out of the panel the control that opened it.
+      // Nor may it reach under the drawer: a browser hit-tests that tree over
+      // the scene, and a Close there took every click meant for a page drawn
+      // in the drawer.
       tester.view.physicalSize = const Size(900, 780);
       tester.view.devicePixelRatio = 1;
       addTearDown(tester.view.resetPhysicalSize);
@@ -278,8 +279,14 @@ void main() {
       );
       await tester.pumpAndSettle();
       expect(
-        tester.getSize(byIdentifier(ShellIds.scrim)),
-        const Size(900, 780),
+        tester.getRect(byIdentifier(ShellIds.scrim)),
+        const Rect.fromLTWH(0, 0, 900 - shellRightPanelWidth, 780),
+      );
+      expect(
+        tester
+            .getRect(byIdentifier(ShellIds.scrim))
+            .overlaps(tester.getRect(byIdentifier(ShellIds.rightPanel))),
+        isFalse,
       );
       // Beside the drawer, over the conversation the person can see.
       await tester.tapAt(const Offset(340, 400));

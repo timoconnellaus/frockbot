@@ -1,5 +1,5 @@
-// A Plugin's own page in the conversation panel (ADR 0036), at desktop and
-// phone widths. The panel read, the tool route and the stored page are
+// A Plugin's own page in the conversation panel (ADR 0036), docked at desktop
+// width, as a drawer over the conversation, and at phone width. The panel read, the tool route and the stored page are
 // intercepted — this suite has no build service to publish a real one — but
 // the page is answered with the Worker's own policy, sandbox and all, and
 // everything that hosts and talks to it is the production client: the canvas,
@@ -21,6 +21,7 @@ import {
 const CONTENT_HASH = "c".repeat(64);
 const PLUGIN_ID = "score";
 const DESKTOP = { width: 1351, height: 831 } as const;
+const DRAWER = { width: 960, height: 540 } as const;
 const PHONE = { width: 390, height: 844 } as const;
 
 /** What the Bot's Plugin stored, as its view hands it to the page. */
@@ -158,7 +159,7 @@ function pageFrame(page: Page): Locator {
   return page.locator('iframe[title="Score"]').last();
 }
 
-test("a Plugin's own page runs in the conversation panel at desktop and phone widths", async ({
+test("a Plugin's own page runs in the conversation panel docked, in a drawer and on a phone", async ({
   page,
   userId,
   baseURL,
@@ -206,12 +207,24 @@ test("a Plugin's own page runs in the conversation panel at desktop and phone wi
     path: testInfo.outputPath("plugin-page-desktop.png"),
   });
 
+  // The drawer: the panel slides over a dimmed conversation, and a click
+  // inside the page is the page's, not the scrim's Close beside it.
+  await page.setViewportSize(DRAWER);
+  const drawn = pageFrame(page).contentFrame();
+  await expect(drawn.getByText("score:2", { exact: true })).toBeVisible({
+    timeout: 30_000,
+  });
+  await drawn.locator("#add").click();
+  await expect(drawn.getByText("score:3", { exact: true })).toBeVisible();
+  expect(toolCommands).toHaveLength(2);
+  await expect(sem(page, "conversation-panel-page")).toBeVisible();
+
   // The phone: the panel is its own page, and the Plugin's page is in it.
   await page.setViewportSize(PHONE);
   await openBotPage(page);
   await press(sem(page, `bot-page-panel-${PLUGIN_ID}`));
   await expect(
-    pageFrame(page).contentFrame().getByText("score:2", { exact: true }),
+    pageFrame(page).contentFrame().getByText("score:3", { exact: true }),
   ).toBeVisible({ timeout: 30_000 });
   await expectNoHorizontalOverflow(page);
   const box = await pageFrame(page).boundingBox();
