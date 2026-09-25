@@ -718,13 +718,28 @@ export async function runCompactionV1(
   });
   if (!intended) return { kind: "yielded" };
   const deadlineMs = input.deadlineMs ?? COMPACTION_DEADLINE_MS_V1;
-  const choices = input.choose
-    ? await compactionChoicesV1(
+  let choices: ReadonlyMap<LlmMessage, CompactionChoiceV1> | undefined;
+  if (input.choose) {
+    // A cleared timer, not AbortSignal.timeout: a pending timeout keeps the
+    // Bot referenced long after the chooser has answered.
+    const chooserController = new AbortController();
+    const chooserDeadline = setTimeout(
+      () =>
+        chooserController.abort(
+          new Error("The chooser ran past its deadline."),
+        ),
+      deadlineMs,
+    );
+    try {
+      choices = await compactionChoicesV1(
         covered,
         input.choose,
-        AbortSignal.timeout(deadlineMs),
-      )
-    : undefined;
+        chooserController.signal,
+      );
+    } finally {
+      clearTimeout(chooserDeadline);
+    }
+  }
   const controller = new AbortController();
   const deadline = setTimeout(
     () => controller.abort(new Error("The summariser ran past its deadline.")),
