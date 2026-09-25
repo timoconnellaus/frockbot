@@ -197,17 +197,6 @@ export async function generationWithPluginV1(
 }
 
 /**
- * What an approved intent does, after its decision committed.
- *
- * A `publish` proposes the generation on the User — skipped when the current
- * generation already holds this exact Plugin, which is what makes a retry
- * safe — and then switches the Plugin on for this Bot. An `enable` only
- * switches. An application that got through records its outcome on the
- * intent, so a person reading it later sees what their approval came to; one
- * that threw records nothing and raises, leaving an approval a retry can
- * still apply rather than one closed as failed.
- */
-/**
  * Whether the Composition already holds this Plugin as published: its code,
  * its pages and its declaration. The module alone is not enough — a page is
  * its own artifact, so a changed page, or a page rebuilt with a newer bridge,
@@ -222,6 +211,17 @@ export function samePublishedPluginV1(
   return canonicalJson(heldPlugin) === canonicalJson(memberPlugin);
 }
 
+/**
+ * What an approved intent does, after its decision committed.
+ *
+ * A `publish` proposes the generation on the User — skipped when the current
+ * generation already holds this exact Plugin, which is what makes a retry
+ * safe — and then switches the Plugin on for this Bot. An `enable` only
+ * switches. An application that got through records its outcome on the
+ * intent, so a person reading it later sees what their approval came to; one
+ * that threw records nothing and raises, leaving an approval a retry can
+ * still apply rather than one closed as failed.
+ */
 export async function applyApprovedPluginIntentV1(
   state: ShellBotStateV1,
   identity: BotIdentity,
