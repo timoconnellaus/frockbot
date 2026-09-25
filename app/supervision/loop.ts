@@ -32,7 +32,8 @@ import type { FoundationFeature } from "../runtime.js";
 //   says the person is waiting on real work, the first request carries a
 //   runtime note asking for a short acknowledgement first. The note sits at
 //   the tail of that one request, never in the system prompt, so the cached
-//   prefix is untouched.
+//   prefix is untouched. When it names a specialist the Turn is offered, the
+//   same note hands that work to the specialist.
 // - Once per response that calls tools, before any of them runs: is it
 //   working on what was asked. A response pursuing something else has every
 //   call that is not the Bot speaking refused, and its text sends withheld.
@@ -57,6 +58,11 @@ export interface SupervisionRuntimeHostV1 {
    * among the run's sends. Absent where nobody is drawn a draft.
    */
   clearReplyDraft?(ordinal: number): void;
+  /**
+   * The specialists this Turn may hand work to, by name, with the slug a
+   * `Task` names them by. Read at the first request, once they are known.
+   */
+  specialists?(): readonly { name: string; slug: string }[];
 }
 
 /** What a run's origin says about who is on the other end of its Turn. */
@@ -93,6 +99,14 @@ export const SUPERVISION_CONVERSATION_MAX_V1 = 8;
 /** Runtime notes carry a label so the model reads them as the platform's. */
 export const ACKNOWLEDGE_NOTE_V1 =
   '[FrockBot runtime: acknowledge first]\nThis will take some work. Before you start it, send the person one short line with send_to_user (disposition "continue") saying what you are about to do. Then do the work.';
+
+/** Where a Turn is steered when Jev names a specialist it is offered. */
+export function specialistNoteV1(specialist: {
+  name: string;
+  slug: string;
+}): string {
+  return `[FrockBot runtime: specialist]\nThis is ${specialist.name} work, which the ${specialist.name} specialist does better than you. Hand it over: call Task with model "${specialist.slug}" and a complete brief. When it comes back, give the person what it produced as it wrote it.`;
+}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
@@ -401,12 +415,21 @@ export function createSupervisionRuntimeFeatureV1(
           });
           await session.flush();
         }
-        if (!directive.acknowledge) return request;
+        const specialist = directive.requiredCapabilities
+          .map((name) =>
+            host.specialists?.().find((offered) => offered.name === name),
+          )
+          .find((offered) => offered !== undefined);
+        const notes = [
+          ...(directive.acknowledge ? [ACKNOWLEDGE_NOTE_V1] : []),
+          ...(specialist ? [specialistNoteV1(specialist)] : []),
+        ];
+        if (notes.length === 0) return request;
         return {
           ...request,
           messages: [
             ...request.messages,
-            { role: "user", content: ACKNOWLEDGE_NOTE_V1 },
+            { role: "user", content: notes.join("\n\n") },
           ],
         };
       },

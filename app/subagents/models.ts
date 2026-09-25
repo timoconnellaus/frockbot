@@ -28,6 +28,14 @@ export interface SubagentModelOptionV1 {
   binding: TaskModelBindingV1;
   /** True for the Bot's own durable binding: what an omitted `model` inherits. */
   isDefault: boolean;
+  /** Present on a specialist: what kind of work it is better at than the Bot. */
+  specialty?: SubagentSpecialtyV1;
+}
+
+/** A model offered for one kind of work, named in the deployment's words. */
+export interface SubagentSpecialtyV1 {
+  name: string;
+  summary: string;
 }
 
 export function subagentModelSlugV1(binding: {
@@ -59,6 +67,11 @@ export function subagentModelsAreNarrowedV1(turnType: TurnTypeV1): boolean {
 export function subagentModelCatalogV1(input: {
   bindings: readonly TaskModelBindingV1[];
   defaultBinding?: TaskModelBindingV1;
+  /** Specialists this deployment offers the Bot, after its own bindings. */
+  specialists?: readonly {
+    binding: TaskModelBindingV1;
+    specialty: SubagentSpecialtyV1;
+  }[];
   turnType: TurnTypeV1;
 }): SubagentModelOptionV1[] {
   const defaultSlug = input.defaultBinding
@@ -66,18 +79,29 @@ export function subagentModelCatalogV1(input: {
     : undefined;
   const seen = new Set<string>();
   const options: SubagentModelOptionV1[] = [];
-  const consider = (binding: TaskModelBindingV1) => {
+  const consider = (
+    binding: TaskModelBindingV1,
+    specialty?: SubagentSpecialtyV1,
+  ) => {
     const slug = subagentModelSlugV1(binding);
     if (seen.has(slug)) return;
     if (options.length >= SUBAGENT_MODEL_CATALOG_LIMIT_V1) return;
     seen.add(slug);
-    options.push({ slug, binding, isDefault: slug === defaultSlug });
+    options.push({
+      slug,
+      binding,
+      isDefault: slug === defaultSlug,
+      ...(specialty ? { specialty } : {}),
+    });
   };
   // The default first, so the one slug a narrowed turn renders is always the
   // Bot's own binding and never whichever binding happens to sort first.
   if (input.defaultBinding) consider(input.defaultBinding);
   if (!subagentModelsAreNarrowedV1(input.turnType)) {
     for (const binding of input.bindings) consider(binding);
+    for (const { binding, specialty } of input.specialists ?? []) {
+      consider(binding, specialty);
+    }
   }
   return subagentModelsAreNarrowedV1(input.turnType)
     ? options.slice(0, 1)
@@ -154,15 +178,26 @@ export function renderAvailableSubagentModelsPromptV1(
       `slug="${escapeAttribute(option.slug)}"`,
       `provider="${escapeAttribute(option.binding.provider)}"`,
       ...(option.isDefault ? ['default="true"'] : []),
+      ...(option.specialty
+        ? [`specialty="${escapeAttribute(option.specialty.name)}"`]
+        : []),
     ].join(" ");
-    return `  <model ${attributes} />`;
+    return option.specialty
+      ? `  <model ${attributes}>${escapeAttribute(option.specialty.summary)}</model>`
+      : `  <model ${attributes} />`;
   });
+  const specialists = catalog.some((option) => option.specialty);
   return [
     "<available_subagent_models>",
     ...entries,
     "</available_subagent_models>",
     "These are the models a subagent you dispatch may run on. Pass one slug as the Task tool's `model`.",
     "Omit `model` and the subagent inherits the model you are running on.",
+    ...(specialists
+      ? [
+          "A model with a `specialty` does that kind of work better than you do. Hand such work to it with a complete brief, and give the person what it produced as it wrote it.",
+        ]
+      : []),
   ].join("\n");
 }
 

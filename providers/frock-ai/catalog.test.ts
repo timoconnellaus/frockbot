@@ -8,7 +8,9 @@ import {
   gatewayModelForFrockRequestV1,
   FROCK_AI_BINDING_AUTO_MODEL,
   FROCK_AI_STRUCTURED_MODEL,
+  FROCK_AI_SPECIALTIES_V1,
   FROCK_AI_SUMMARY_MODEL,
+  frockAiSpecialtyV1,
   normalizeFrockModelIdV1,
 } from "./catalog.js";
 
@@ -45,6 +47,27 @@ describe("Frock AI catalog", () => {
     expect(
       gatewayModelForFrockIdV1(FROCK_AI_DEFAULT_MODEL, "production-auto"),
     ).toBe("dynamic/production-auto");
+  });
+
+  test("sends each specialist to its own route, and lists none of them", () => {
+    expect(gatewayModelForFrockIdV1("@frock/writing")).toBe(
+      "dynamic/frock-writing",
+    );
+    // The pre-rename spelling names the same specialist.
+    expect(gatewayModelForFrockIdV1("@flock/coding")).toBe(
+      "dynamic/frock-coding",
+    );
+    expect(gatewayModelForFrockIdV1("@frock/vision", null)).toBe(
+      FROCK_AI_BINDING_AUTO_MODEL,
+    );
+    expect(frockAiSpecialtyV1("@frock/thinking")?.name).toBe("thinking");
+    expect(frockAiSpecialtyV1(FROCK_AI_DEFAULT_MODEL)).toBeUndefined();
+    const listed = frockAiStaticCatalogV1().models.map(
+      (model) => model.providerModelId,
+    );
+    for (const specialty of FROCK_AI_SPECIALTIES_V1) {
+      expect(listed).not.toContain(specialty.model);
+    }
   });
 
   test("sends the summary model to its own route, and never lists it", () => {

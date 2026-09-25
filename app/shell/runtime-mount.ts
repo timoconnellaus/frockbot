@@ -85,8 +85,22 @@ import { subagentsRuntimeHost } from "@frockbot/app/subagents/bot";
 import {
   subagentModelCatalogV1,
   type SubagentModelOptionV1,
+  type SubagentSpecialtyV1,
 } from "@frockbot/app/subagents/models";
-import { taskDesktopLeaseOwnerV1 } from "@frockbot/app/subagents/records";
+import {
+  taskDesktopLeaseOwnerV1,
+  type TaskModelBindingV1,
+} from "@frockbot/app/subagents/records";
+import { decodeSubagentTaskContextV1 } from "@frockbot/app/subagents/durable-binding";
+import { taskContextKeyV1 } from "@frockbot/app/subagents/storage-keys";
+import {
+  routeRateV1,
+  type HostedModelRatesV1,
+} from "@frockbot/app/billing/rates";
+import {
+  FROCK_AI_PACKAGE_ID,
+  FROCK_AI_SPECIALTIES_V1,
+} from "@frockbot/providers/frock-ai/catalog";
 import {
   createBotComputerSyncHost,
   declaredPackageRootsV1,
@@ -456,6 +470,13 @@ export async function agentRuntime(
               ...(turn.clearReplyDraft
                 ? { clearReplyDraft: turn.clearReplyDraft }
                 : {}),
+              // Filled once the Turn's model is resolved, below.
+              specialists: () =>
+                subagentModels.flatMap((option) =>
+                  option.specialty
+                    ? [{ name: option.specialty.name, slug: option.slug }]
+                    : [],
+                ),
             },
           }
         : {}),
@@ -818,13 +839,24 @@ export async function agentRuntime(
     user,
     packages: packageDefinitions,
   });
-  const effectiveModel = effective.model;
-  if (!effectiveModel) {
+  const resolvedModel = effective.model;
+  if (!resolvedModel) {
     throw new Error(
       effective.binding?.failure ??
         "No model is set up yet. Choose one in Models.",
     );
   }
+  // A child runs on the model its task pinned, when that model is on the
+  // Bot's own connection — a specialist is. The Bot's settings name only the
+  // Bot's model; the task record is the one place the parent's choice lives.
+  const pinned = turn?.subagentTaskId
+    ? await pinnedSubagentModelV1(state, turn.subagentTaskId)
+    : undefined;
+  const effectiveModel = subagentEffectiveModelV1(
+    resolvedModel,
+    effective.binding?.connection?.connectionId,
+    pinned,
+  );
   const binding: ResolvedModelBindingV1 = effective.binding ?? {
     model: structuredClone(effectiveModel),
     state: "unavailable",
@@ -958,6 +990,12 @@ export async function agentRuntime(
       ...subagentModelCatalogV1({
         bindings: [subagentBinding],
         defaultBinding: subagentBinding,
+        specialists:
+          modelCapability.packageId === FROCK_AI_PACKAGE_ID && turn
+            ? await pricedFrockSpecialistsV1(state, identity, turn.sessionId, {
+                ...subagentBinding,
+              })
+            : [],
         turnType: turn?.turnType ?? "chat",
       }),
     );
@@ -1012,4 +1050,72 @@ async function userConfigurationReadConnectToolCatalogV1(
     generation: connection.generation ?? "",
     ...(toolName === undefined ? {} : { toolName }),
   });
+}
+
+/**
+ * The model a Turn runs on: the Bot's own, or the one its task pinned when
+ * that model is on the same connection. A pin on another connection is not
+ * one this Turn's binding can reach, so the Bot's own model runs.
+ */
+export function subagentEffectiveModelV1<
+  Model extends { providerModelId: string },
+>(
+  resolved: Model,
+  connectionId: string | undefined,
+  pinned: { connectionId: string; providerModelId: string } | undefined,
+): Model {
+  return pinned && pinned.connectionId === connectionId
+    ? { ...resolved, providerModelId: pinned.providerModelId }
+    : resolved;
+}
+
+/** The model a child's task pinned, off the task record this object holds. */
+export async function pinnedSubagentModelV1(
+  state: ShellBotStateV1,
+  taskId: string,
+): Promise<{ connectionId: string; providerModelId: string } | undefined> {
+  const stored = await state.ctx.storage.get<unknown>(taskContextKeyV1(taskId));
+  if (stored === undefined) return undefined;
+  try {
+    const binding = decodeSubagentTaskContextV1(stored).model?.binding;
+    return binding
+      ? {
+          connectionId: binding.connectionId,
+          providerModelId: binding.providerModelId,
+        }
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * The Frock AI specialists this deployment prices. An unpriced route would be
+ * refused at dispatch, so it is never offered; a table this object cannot read
+ * offers none.
+ */
+async function pricedFrockSpecialistsV1(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+  sessionId: string,
+  binding: TaskModelBindingV1,
+): Promise<{ binding: TaskModelBindingV1; specialty: SubagentSpecialtyV1 }[]> {
+  const billing = state.env.BILLING?.(
+    identity.userId,
+    identity.botId,
+    sessionId,
+  );
+  if (!billing) return [];
+  let table: HostedModelRatesV1;
+  try {
+    table = await billing.rates();
+  } catch {
+    return [];
+  }
+  return FROCK_AI_SPECIALTIES_V1.filter(
+    (specialty) => routeRateV1(table, specialty.model) !== undefined,
+  ).map((specialty) => ({
+    binding: { ...binding, providerModelId: specialty.model },
+    specialty: { name: specialty.name, summary: specialty.summary },
+  }));
 }

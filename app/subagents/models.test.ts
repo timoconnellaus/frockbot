@@ -172,3 +172,46 @@ describe("<available_subagent_models>", () => {
     expect(renderAvailableSubagentModelsPromptV1([])).toBe("");
   });
 });
+
+describe("specialists", () => {
+  const WRITING = {
+    binding: binding("provider-flock-ai", "@frock/writing", "flock-ai-ambient"),
+    specialty: {
+      name: "writing",
+      summary: "Writing the person will read at length: emails & documents.",
+    },
+  };
+
+  test("follow the Bot's own models, and name what they are for", () => {
+    const catalog = subagentModelCatalogV1({
+      bindings: [DEFAULT],
+      defaultBinding: DEFAULT,
+      specialists: [WRITING],
+      turnType: "chat",
+    });
+    expect(catalog.map((option) => option.slug)).toEqual([
+      "provider-ollama-cloud/glm-5.3-flash:cloud",
+      "provider-flock-ai/@frock/writing",
+    ]);
+    const rendered = renderAvailableSubagentModelsPromptV1(catalog);
+    expect(rendered).toContain(
+      '<model slug="provider-flock-ai/@frock/writing" provider="provider-flock-ai" specialty="writing">Writing the person will read at length: emails &amp; documents.</model>',
+    );
+    expect(rendered).toContain("does that kind of work better than you do");
+  });
+
+  test("are not offered on an unattended Turn, and their words are absent without them", () => {
+    const narrowed = subagentModelCatalogV1({
+      bindings: [DEFAULT],
+      defaultBinding: DEFAULT,
+      specialists: [WRITING],
+      turnType: "automation",
+    });
+    expect(narrowed.map((option) => option.slug)).toEqual([
+      "provider-ollama-cloud/glm-5.3-flash:cloud",
+    ]);
+    expect(renderAvailableSubagentModelsPromptV1(narrowed)).not.toContain(
+      "specialty",
+    );
+  });
+});

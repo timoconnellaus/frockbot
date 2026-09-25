@@ -186,7 +186,7 @@ export const turnStartFixturesV1: readonly TurnStartFixtureV1[] = [
   {
     name: "research-comparison",
     intent:
-      "A many-source comparison is complex research that earns a word first.",
+      "A many-source comparison is complex work that earns a word first, and the Bot does it with its own tools.",
     evidence: {
       input: {
         text: "Find the five best e-bikes under $2,000 and compare range, weight and price in a table.",
@@ -200,7 +200,7 @@ export const turnStartFixturesV1: readonly TurnStartFixtureV1[] = [
       complexity: "complex",
       objective: "new_request",
       ambiguity: "clear",
-      capability: "research",
+      capability: "none",
       consequenceAtMost: 0.5,
     },
   },
@@ -268,7 +268,7 @@ export const turnStartFixturesV1: readonly TurnStartFixtureV1[] = [
   },
   {
     name: "plan-the-week",
-    intent: "Fitting five deadlines around each other is planning.",
+    intent: "Fitting five deadlines around each other is careful reasoning.",
     evidence: {
       input: {
         text: "Plan my week so nothing collides: the grant report is due Wednesday, two client decks Thursday, payroll Friday, and I'm out Tuesday afternoon.",
@@ -277,12 +277,53 @@ export const turnStartFixturesV1: readonly TurnStartFixtureV1[] = [
       conversation: [],
       openWork: [],
     },
-    expected: { capability: "planning" },
+    expected: { capability: "thinking" },
+  },
+  {
+    name: "write-a-toast",
+    intent: "A speech the person will read out is writing at specialist scale.",
+    evidence: {
+      input: {
+        text: "Write me a warm, funny three-minute toast for my sister Mia's wedding on Saturday. She's a vet, they met at a climbing gym, and I want one story about her rescuing a goat.",
+        origin: "user",
+      },
+      conversation: [],
+      openWork: [],
+    },
+    expected: { capability: "writing" },
+  },
+  {
+    name: "read-a-photographed-bill",
+    intent:
+      "A photo of a bill has to be seen before anything can be said about it.",
+    evidence: {
+      input: {
+        text: "Here's a photo of my electricity bill [attached: bill.jpg]. What's the total due and when?",
+        origin: "user",
+      },
+      conversation: [],
+      openWork: [],
+    },
+    expected: { capability: "vision" },
+  },
+  {
+    name: "a-short-email-is-not-a-specialist-job",
+    intent:
+      "A two-line email is the Bot's own work, not a writing specialist's.",
+    evidence: {
+      input: {
+        text: "Email Sam to say I'll be ten minutes late.",
+        origin: "user",
+      },
+      conversation: [],
+      openWork: [],
+    },
+    expected: { capability: "none" },
   },
   {
     name: "critique-a-paragraph",
     intent:
-      "A critique of pasted text is criticism the Bot gives in one message.",
+      "A critique of pasted text is an opinion the Bot gives in one message.",
     evidence: {
       input: {
         text: "What's weak about this opening? \"In today's fast-paced world, businesses face many challenges, and our product helps with all of them.\"",
@@ -301,7 +342,7 @@ export const turnStartFixturesV1: readonly TurnStartFixtureV1[] = [
   {
     name: "critique-a-grant-draft",
     intent:
-      "Reviewing a long draft for where it would be marked down is criticism at specialist scale.",
+      "Reviewing a long draft for where it would be marked down is writing work at specialist scale.",
     evidence: {
       input: {
         text: "Read my 30-page grant application in the workspace and tell me where a reviewer would mark it down, section by section.",
@@ -313,7 +354,7 @@ export const turnStartFixturesV1: readonly TurnStartFixtureV1[] = [
     expected: {
       acknowledge: "yes",
       objective: "new_request",
-      capability: "criticism",
+      capability: "writing",
       consequenceAtMost: 0.5,
     },
   },
@@ -518,7 +559,7 @@ export const turnStartFixturesV1: readonly TurnStartFixtureV1[] = [
   {
     name: "still-broken-after-three-tries",
     intent:
-      "Work that has failed three times and is asked for again needs a new approach: mentoring.",
+      "Work that has failed three times and is asked for again needs careful thinking about a new approach.",
     evidence: {
       input: {
         text: "It's still broken. Can you try something different?",
@@ -555,7 +596,7 @@ export const turnStartFixturesV1: readonly TurnStartFixtureV1[] = [
     expected: {
       acknowledge: "yes",
       objective: "open_work",
-      capability: "mentoring",
+      capability: "thinking",
     },
   },
   {

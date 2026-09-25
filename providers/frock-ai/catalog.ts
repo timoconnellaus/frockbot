@@ -24,6 +24,50 @@ export const FROCK_AI_DEFAULT_AUTO_ROUTE = "flock-auto";
 export const FROCK_AI_SUMMARY_MODEL = "@frock/structured";
 /** The AI Gateway dynamic route behind {@link FROCK_AI_SUMMARY_MODEL}. */
 export const FROCK_AI_SUMMARY_ROUTE = "frock-structured";
+/**
+ * The specialists a Bot on Frock AI may hand work to: each a model id no one
+ * picks for a Bot, backed by a Gateway dynamic route whose target is chosen in
+ * the dashboard like Auto's. A specialty is offered only once the deployment
+ * prices its route (docs/billing.md), so an unconfigured one is never called.
+ */
+export const FROCK_AI_SPECIALTIES_V1 = [
+  {
+    name: "writing",
+    model: "@frock/writing",
+    route: "frock-writing",
+    summary:
+      "Writing the person will read at length: emails, documents, posts, stories.",
+  },
+  {
+    name: "coding",
+    model: "@frock/coding",
+    route: "frock-coding",
+    summary: "Code: Plugins, scripts, and fixes on the Computer.",
+  },
+  {
+    name: "thinking",
+    model: "@frock/thinking",
+    route: "frock-thinking",
+    summary: "Plans, maths and hard decisions that need careful reasoning.",
+  },
+  {
+    name: "vision",
+    model: "@frock/vision",
+    route: "frock-vision",
+    summary: "Photos, screenshots and PDFs: anything that has to be seen.",
+  },
+] as const;
+
+export type FrockAiSpecialtyV1 = (typeof FROCK_AI_SPECIALTIES_V1)[number];
+
+/** The specialty a Frock AI model id names, if it names one. */
+export function frockAiSpecialtyV1(
+  input: string,
+): FrockAiSpecialtyV1 | undefined {
+  const id = normalizeFrockModelIdV1(input);
+  return FROCK_AI_SPECIALTIES_V1.find((specialty) => specialty.model === id);
+}
+
 /** Workers AI model selected when Auto must honor a JSON Schema request. */
 export const FROCK_AI_STRUCTURED_MODEL =
   "workers-ai/@cf/meta/llama-3.3-70b-instruct-fp8-fast";
@@ -110,6 +154,12 @@ export function gatewayModelForFrockIdV1(
     return autoRoute === null
       ? FROCK_AI_BINDING_AUTO_MODEL
       : `dynamic/${FROCK_AI_SUMMARY_ROUTE}`;
+  }
+  const specialty = frockAiSpecialtyV1(id);
+  if (specialty) {
+    return autoRoute === null
+      ? FROCK_AI_BINDING_AUTO_MODEL
+      : `dynamic/${specialty.route}`;
   }
   if (id === FROCK_AI_DEFAULT_MODEL) {
     if (autoRoute === null) return FROCK_AI_BINDING_AUTO_MODEL;

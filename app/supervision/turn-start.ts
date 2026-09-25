@@ -8,7 +8,6 @@ import {
   type Usage,
 } from "@typesafe-ai/sdk";
 import {
-  SPECIALIST_CAPABILITIES_V1,
   type SpecialistCapabilityV1,
   type SupervisionJudgmentV1,
   type TurnDirective,
@@ -111,15 +110,31 @@ export function turnStartStateV1(
   };
 }
 
+/**
+ * The specialists a Turn may be steered to, by the names the deployment's
+ * catalog gives them (`FROCK_AI_SPECIALTIES_V1`); `turn-start.test.ts` holds
+ * the two lists together.
+ */
+export const TURN_START_SPECIALTIES_V1 = [
+  "writing",
+  "coding",
+  "thinking",
+  "vision",
+] as const;
+
 const capabilityCriteria = {
-  none: "No specialist: the Bot does it itself, in its reply or with its own tools in a few steps, including a quick opinion on something short",
-  planning: "Laying out a multi-part plan or schedule before any of it is done",
-  research: "Finding and comparing information from many sources",
+  none: "No specialist: the Bot does it itself, in its reply or with its own tools in a few steps, including a short message, a quick opinion or finding and comparing things",
+  writing:
+    "Writing, or reviewing writing, the User will read at length: an email that matters, a document, a post, a speech, a story",
   coding: "Writing, fixing or building code or a tool",
-  criticism:
-    "A thorough review of something long the User made, part by part, for its weaknesses",
-  mentoring: "Getting unstuck on work that has already failed more than once",
-} as const satisfies Record<"none" | SpecialistCapabilityV1, string>;
+  thinking:
+    "Careful reasoning before anything is done: a plan or schedule with many constraints, maths, a hard decision, or work that has already failed more than once",
+  vision:
+    "Seeing something: a photo, a screenshot, a scanned page or a PDF the User attached or pointed to",
+} as const satisfies Record<
+  "none" | (typeof TURN_START_SPECIALTIES_V1)[number],
+  string
+>;
 
 /**
  * Six narrow judgments, one per decision code makes. `objective` is not a
@@ -215,7 +230,7 @@ export const turnStartQuestionsV1 = {
       decision: "Which specialist capability, if any, does it most need?",
       rules: [
         "Answer none when the Bot can do it with its own tools in a few steps.",
-        "Work that has already failed more than once and is asked for again needs mentoring, whatever kind of work it is.",
+        "Work that has already failed more than once and is asked for again needs thinking, whatever kind of work it is.",
         "Name one: the capability the work cannot be done well without.",
       ],
     },
@@ -275,12 +290,12 @@ export async function reviewTurnStartV1(
   };
 }
 
-const CAPABILITIES: readonly string[] = SPECIALIST_CAPABILITIES_V1;
+const SPECIALTIES: readonly string[] = TURN_START_SPECIALTIES_V1;
 
 function isSpecialistCapabilityV1(
   value: string,
 ): value is SpecialistCapabilityV1 {
-  return CAPABILITIES.includes(value);
+  return SPECIALTIES.includes(value);
 }
 
 /** Where a person is waiting on the Turn's first word. */

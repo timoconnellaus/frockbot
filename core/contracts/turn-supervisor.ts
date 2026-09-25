@@ -71,16 +71,11 @@ export interface ContinuationDecision {
   evidenceRefs: string[];
 }
 
-export const SPECIALIST_CAPABILITIES_V1 = [
-  "planning",
-  "research",
-  "coding",
-  "criticism",
-  "mentoring",
-] as const;
-
-export type SpecialistCapabilityV1 =
-  (typeof SPECIALIST_CAPABILITIES_V1)[number];
+/**
+ * A kind of work a specialist does better than the Bot, by the deployment's
+ * own name for it. Which exist is the deployment's; the loop carries a name.
+ */
+export type SpecialistCapabilityV1 = string;
 
 export interface SpecialistBudgetV1 {
   maxSteps: number;
@@ -521,7 +516,7 @@ export function decodeTurnDirectiveV1(
     requiredCapabilities: list(
       directive.requiredCapabilities,
       `${label}.requiredCapabilities`,
-      (entry, at) => oneOf(entry, SPECIALIST_CAPABILITIES_V1, at),
+      (entry, at) => text(entry, at, JUDGMENT_TEXT_MAX_V1),
     ),
     steering: list(directive.steering, `${label}.steering`, (entry, at) =>
       oneOf(entry, SUPERVISION_REASON_CODES_V1, at),
