@@ -344,6 +344,7 @@ class _PluginPageFrameState extends State<PluginPageFrame>
   /// Set while the host holds the microphone for this page.
   StreamSubscription<Uint8List>? _hearing;
   bool _opening = false;
+  bool _stoppedWhileOpening = false;
 
   /// The use in progress: its id and when it began.
   ({String useId, DateTime startedAt})? _use;
@@ -407,7 +408,11 @@ class _PluginPageFrameState extends State<PluginPageFrame>
     if (message is PluginPageHelloV1) _greeted = true;
     if (message is PluginPageDeviceV1) {
       if (message.open) {
+        _stoppedWhileOpening = false;
         await _openMicrophone();
+      } else if (_opening) {
+        // The page has already let go of an open still in flight.
+        _stoppedWhileOpening = true;
       } else if (_hearing == null) {
         // Nothing to give back, but the page is still waiting to hear that
         // it closed.
@@ -455,6 +460,7 @@ class _PluginPageFrameState extends State<PluginPageFrame>
       return;
     }
     _opening = true;
+    _stoppedWhileOpening = false;
     try {
       final frames = await microphone.open(
         taken: () => _closeMicrophone(
@@ -462,7 +468,7 @@ class _PluginPageFrameState extends State<PluginPageFrame>
           PluginPageDeviceEndingV1.taken,
         ),
       );
-      if (!mounted) {
+      if (!mounted || _stoppedWhileOpening) {
         await microphone.close();
         return;
       }

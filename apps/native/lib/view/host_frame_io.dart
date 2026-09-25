@@ -124,6 +124,19 @@ window.addEventListener("message", (event) => {
     }
   }
 
+  /// A frame that cannot be made inspectable, as on iOS before 16.4, still
+  /// loads.
+  Future<void> _inspectable(WebViewController web) async {
+    try {
+      switch (web.platform) {
+        case final WebKitWebViewController webkit:
+          await webkit.setInspectable(true);
+        case AndroidWebViewController():
+          await AndroidWebViewController.enableDebugging(true);
+      }
+    } catch (_) {}
+  }
+
   Future<void> _open() async {
     final epoch = ++_epoch;
     _loaded = false;
@@ -155,11 +168,8 @@ window.addEventListener("message", (event) => {
       if (web.platform case final WebKitWebViewController webkit) {
         await webkit.setAllowsBackForwardNavigationGestures(false);
         await webkit.setAllowsLinkPreview(false);
-        if (hostFrameInspectableV1) await webkit.setInspectable(true);
       }
-      if (hostFrameInspectableV1 && web.platform is AndroidWebViewController) {
-        await AndroidWebViewController.enableDebugging(true);
-      }
+      if (hostFrameInspectableV1) await _inspectable(web);
       if (widget.onMessage != null) {
         await web.addJavaScriptChannel(
           _channel,
