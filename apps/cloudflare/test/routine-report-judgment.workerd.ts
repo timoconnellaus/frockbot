@@ -23,9 +23,7 @@ interface StoredRunProbe {
   admission?: { origin?: { kind?: string; quiet?: boolean } };
 }
 
-type Jev =
-  | { worth: number; urgency: number }
-  | { status: number };
+type Jev = { worth: number; urgency: number } | { status: number };
 
 // The production client, with Jev's answers scripted behind its fetch.
 function scriptedJev(answer: Jev, calls: unknown[]) {
@@ -82,9 +80,11 @@ async function fireWith(report: string, answer: Jev | undefined) {
   const calls: unknown[] = [];
   // The alarm runs the firing and then the hand-off delivery.
   await runInDurableObject(stub, async (instance) => {
-    const state = (instance as unknown as {
-      mountedShell?: { routineReportJudge: unknown };
-    }).mountedShell!;
+    const state = (
+      instance as unknown as {
+        mountedShell?: { routineReportJudge: unknown };
+      }
+    ).mountedShell!;
     if (answer)
       state.routineReportJudge = createJevRoutineReportJudgeV1(
         scriptedJev(answer, calls),
@@ -118,7 +118,8 @@ async function fireWith(report: string, answer: Jev | undefined) {
 
 describe("a Routine report is judged before it is delivered", () => {
   test("nothing new is dismissed: no Turn, no message, still in the log", async () => {
-    const report = "Checked your inbox. Nothing new from the bank since yesterday.";
+    const report =
+      "Checked your inbox. Nothing new from the bank since yesterday.";
     const result = await fireWith(report, { worth: 0.1, urgency: 0 });
     console.log("DISMISSED", JSON.stringify(result));
     expect(result.calls).toHaveLength(1);
@@ -153,10 +154,13 @@ describe("a Routine report is judged before it is delivered", () => {
   });
 
   test("an urgent report is loud: notify true, no quiet flag", async () => {
-    const result = await fireWith("Your website returns 503; checkout is down.", {
-      worth: 0.95,
-      urgency: 3,
-    });
+    const result = await fireWith(
+      "Your website returns 503; checkout is down.",
+      {
+        worth: 0.95,
+        urgency: 3,
+      },
+    );
     console.log("LOUD", JSON.stringify(result));
     expect(result.deliveries).toHaveLength(1);
     expect(result.deliveries[0]).not.toHaveProperty("quiet");
