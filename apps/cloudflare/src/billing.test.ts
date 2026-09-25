@@ -59,8 +59,11 @@ function account(
         groupBy: input.groupBy,
         filters: [],
         totalMicros: 0,
+        previousTotalMicros: 0,
         operations: 0,
         days: [],
+        topCause: null,
+        credit: null,
         groups: [],
         topTurns: null,
       };
@@ -152,8 +155,11 @@ describe("billing HTTP routes", () => {
               groupBy: input.groupBy,
               filters: [],
               totalMicros: 0,
+              previousTotalMicros: 0,
               operations: 0,
               days: [],
+              topCause: null,
+              credit: null,
               groups: [],
               topTurns: null,
             };

@@ -8,7 +8,9 @@ import {
   type UsageReservation,
 } from "./ledger";
 import {
+  dailySpendV1,
   readSpendingRowsV1,
+  spendingCreditV1,
   spendingReportV1,
   spendWindowV1,
   type SpendingQueryV1,
@@ -309,6 +311,7 @@ describe("the Spending rollups", () => {
     expect(view.days.find((d) => d.chargeMicros > 0)).toEqual({
       day: "2026-09-20",
       chargeMicros: 40,
+      stack: [40],
     });
     expect(view.days.length).toBeGreaterThanOrEqual(7);
   });
@@ -369,6 +372,82 @@ describe("the Spending rollups", () => {
       runId: "r",
       at: NOW - 2 * HOUR,
     });
+  });
+
+  test("the daily bars split out the five biggest groups and fold the rest into one", () => {
+    const { charge, report } = setup();
+    for (let k = 0; k < 7; k++)
+      charge(`model:${k}`, 100 * (7 - k), {
+        runId: `r${k}`,
+        cause: { kind: "routine", botId: "bot-1", id: `routine-${k}` },
+      });
+    const view = report();
+    expect(view.groups.map((g) => g.chargeMicros)).toEqual([
+      700, 600, 500, 400, 300, 200, 100,
+    ]);
+    const today = view.days.find((d) => d.chargeMicros > 0)!;
+    expect(today.stack).toEqual([700, 600, 500, 400, 300, 300]);
+    expect(view.days.every((d) => d.stack.length === 6)).toBe(true);
+  });
+
+  test("a view says what it cost the period before, and what drove it", () => {
+    const { charge, report } = setup();
+    const digest = {
+      kind: "routine" as const,
+      botId: "bot-1",
+      id: "digest",
+      label: "Morning digest",
+      trigger: "cron",
+    };
+    charge("model:now-1", 300, { runId: "a", cause: digest });
+    charge("model:now-2", 100, { runId: "b", cause: digest });
+    charge("model:now-3", 50, {
+      runId: "c",
+      cause: { kind: "chat", botId: "bot-1" },
+    });
+    charge(
+      "model:before",
+      120,
+      { runId: "d", cause: digest },
+      { at: NOW - 10 * 24 * HOUR },
+    );
+    const view = report({ groupBy: "bot" });
+    expect(view.totalMicros).toBe(450);
+    expect(view.previousTotalMicros).toBe(120);
+    expect(view.topCause).toMatchObject({
+      key: "routine|bot-1|digest",
+      label: "Morning digest",
+      detail: "Research",
+      chargeMicros: 400,
+      turns: 2,
+    });
+  });
+
+  test("credit lasts as long as the last week's pace allows", () => {
+    const DAY = 24 * HOUR;
+    expect(spendingCreditV1(7_000_000, 1_000_000, NOW + 30 * DAY, NOW)).toEqual(
+      {
+        availableMicros: 7_000_000,
+        dailyMicros: 1_000_000,
+        runsOutAt: NOW + 7 * DAY,
+        renewsAt: NOW + 30 * DAY,
+      },
+    );
+    expect(spendingCreditV1(7_000_000, 0, null, NOW).runsOutAt).toBeNull();
+    const { charge, db } = setup();
+    charge(
+      "model:w",
+      700,
+      { runId: "w", cause: { kind: "chat", botId: "bot-1" } },
+      { at: NOW - 2 * DAY },
+    );
+    charge(
+      "model:old",
+      9_000,
+      { runId: "o", cause: { kind: "chat", botId: "bot-1" } },
+      { at: NOW - 9 * DAY },
+    );
+    expect(dailySpendV1(db.sql, NOW)).toBe(100);
   });
 
   test("the billing period starts where paid access did", () => {
