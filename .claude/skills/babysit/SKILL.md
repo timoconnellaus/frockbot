@@ -188,12 +188,18 @@ get_run_log` for a cloud one). Give it `DONE ` when nothing is left, or
 `DONE-TODO ` and name the items in the report under "needs Tim". When they
 clear, change `DONE-TODO ` to `DONE `.
 
+For a `DONE-TODO ` session, also message it (`SendMessage`) to end with one
+short message listing what is still to do and whose call each item is, and
+to start none of it. That last message is what Tim reads when he opens the
+session, instead of scrolling back through the chat.
+
 Rename each session once per state, not every tick:
 
 - A local desktop session: `set_session_title` (the `ccd_session_mgmt`
   tools) with the sessionId from `list_sessions`.
 - A cloud session is not visible to those tools. `SendMessage` it asking it
-  to rename itself with the prefix and do nothing else. It then drops out
+  to rename itself with the prefix and, for `DONE-TODO `, to list its
+  to-dos as above; nothing else. It then drops out
   of `ListAgents`, and its run log may return 404; neither means it was
   deleted.
 
