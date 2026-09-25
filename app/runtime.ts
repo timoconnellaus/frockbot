@@ -113,6 +113,7 @@ import {
 } from "@frockbot/app/skills/agent";
 import { createPluginsFeature } from "@frockbot/app/plugins/feature";
 import { createPanelFocusFeature } from "@frockbot/app/plugins/panel-focus";
+import { createEmailReplyFeatureV1 } from "@frockbot/app/shell/email-reply";
 
 export { FOUNDATION_MODEL, FOUNDATION_PROVIDER };
 import {
@@ -553,6 +554,14 @@ export function createFoundationHostedRuntimePackages(
       : []),
     ...(host.panels
       ? [runtimePackage("panels", createPanelFocusFeature(host.panels))]
+      : []),
+    ...(host.emailReply
+      ? [
+          runtimePackage(
+            "email-reply",
+            createEmailReplyFeatureV1(host.emailReply),
+          ),
+        ]
       : []),
     runtimePackage(
       "credentials",

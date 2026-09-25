@@ -13,6 +13,7 @@
 // decoders each side holds the other to.
 
 import { isPublicIdentifier } from "@frockbot/core/configuration";
+import { cardSurfacePrefixV1 } from "@frockbot/core/contracts";
 import { accessEmailV1 } from "../admin/shared.js";
 
 /** One Bot's email: `/api/bots/:botId/email`, and its `/switch` and `/senders`. */
@@ -372,16 +373,38 @@ export type BotEmailSenderV1 =
       /** Where a reply to a draft card's mail goes: the person, not the Bot. */
       signInEmail?: string;
     }
-  | { status: "unavailable"; reason: string };
+  | { status: "unavailable"; code: BotEmailSenderRefusalV1; reason: string };
+
+/**
+ * Why a Bot cannot send yet. The `reason` beside it is worded for the Bot;
+ * the code is what lets the kernel say it to the person instead, when a reply
+ * falls back to the conversation.
+ */
+export type BotEmailSenderRefusalV1 =
+  "off" | "inactive" | "no-username" | "switched-off";
+
+const BOT_EMAIL_SENDER_REFUSALS_V1: readonly BotEmailSenderRefusalV1[] = [
+  "off",
+  "inactive",
+  "no-username",
+  "switched-off",
+];
 
 export function decodeBotEmailSenderV1(value: unknown): BotEmailSenderV1 {
   const candidate = record(value, "email sender");
   if (candidate.status === "unavailable") {
-    exactKeys(candidate, ["status", "reason"], [], "email sender");
-    if (typeof candidate.reason !== "string") {
+    exactKeys(candidate, ["status", "code", "reason"], [], "email sender");
+    const code = BOT_EMAIL_SENDER_REFUSALS_V1.find(
+      (known) => known === candidate.code,
+    );
+    if (typeof candidate.reason !== "string" || code === undefined) {
       throw new InboundEmailDecodeError("email sender.reason is invalid");
     }
-    return { status: "unavailable", reason: candidate.reason.slice(0, 500) };
+    return {
+      status: "unavailable",
+      code,
+      reason: candidate.reason.slice(0, 500),
+    };
   }
   if (candidate.status !== "ready") {
     throw new InboundEmailDecodeError("email sender.status is unknown");
@@ -573,4 +596,97 @@ export function inboundMessageIdV1(
 ): string | undefined {
   const id = value?.trim().replace(/^<|>$/g, "");
   return id && /^[\x21-\x3b\x3d\x3f-\x7e]{1,250}$/.test(id) ? id : undefined;
+}
+
+/** How many ids of a thread's history one message is read for. */
+export const EMAIL_THREAD_REFS_MAX_V1 = 20;
+
+/**
+ * The Message-IDs one `In-Reply-To` or `References` value names, brackets
+ * off, in the order written. Past the bound it keeps the first, which is the
+ * thread's start, and the latest, which are what the message answers.
+ */
+export function messageIdsInV1(value: string | undefined): string[] {
+  if (!value) return [];
+  const bounded = value.slice(0, 16_000);
+  const bracketed = [...bounded.matchAll(/<([^<>\s]+)>/g)].map(
+    (match) => match[1]!,
+  );
+  const ids: string[] = [];
+  for (const candidate of bracketed.length > 0
+    ? bracketed
+    : bounded.split(/[\s,]+/)) {
+    const id = inboundMessageIdV1(candidate);
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  return ids.length > EMAIL_THREAD_REFS_MAX_V1
+    ? [ids[0]!, ...ids.slice(-(EMAIL_THREAD_REFS_MAX_V1 - 1))]
+    : ids;
+}
+
+/** What one message says it answers, each id without its brackets. */
+export interface EmailThreadRefsV1 {
+  /** The message it replies to. */
+  inReplyTo?: string;
+  /** The thread it is in, from its first message to its parent. */
+  references: string[];
+}
+
+/**
+ * Which thread a message belongs to, or nothing when it starts its own.
+ *
+ * Mail the Bot sent is known by the id the provider gave it, so a reply to a
+ * note the Bot wrote joins that note's thread however the person's mail app
+ * wrote its headers: `known` looks one id up, parent first. Anything else is
+ * the thread its `References` start with, which is how every mail app keeps a
+ * conversation together.
+ */
+export async function emailThreadIdV1(
+  refs: EmailThreadRefsV1,
+  known: (messageId: string) => Promise<string | undefined>,
+): Promise<string | undefined> {
+  const asked = new Set([
+    ...(refs.inReplyTo ? [refs.inReplyTo] : []),
+    ...refs.references.toReversed(),
+  ]);
+  for (const id of asked) {
+    const thread = await known(id);
+    if (thread !== undefined) return thread;
+  }
+  return refs.references[0] ?? refs.inReplyTo;
+}
+
+/**
+ * The surface every note the Bot emails its person is drawn on starts with
+ * this: the email Plugin's `owner` card. The card is the note's receipt, and
+ * the thread it starts is named by its surface.
+ */
+export const EMAIL_NOTE_SURFACE_PREFIX_V1 = cardSurfacePrefixV1(
+  "email",
+  "owner",
+);
+
+/** The longest subject an email Turn keeps, and the reply repeats. */
+export const EMAIL_SUBJECT_MAX_CHARS_V1 = 300;
+
+/** The line an email Turn's words open with, when the message had a subject. */
+export function emailTurnHeadingV1(subject: string): string {
+  return subject ? `Subject: ${subject}` : "";
+}
+
+/**
+ * The words of an email Turn without the subject line they open with: what
+ * the person wrote, as the thread draws it under that subject.
+ */
+export function emailTurnBodyV1(input: string, subject: string): string {
+  const heading = emailTurnHeadingV1(subject);
+  if (!heading || !input.startsWith(heading)) return input;
+  return input.slice(heading.length).replace(/^\n+/, "");
+}
+
+/** The subject a reply in a thread carries: one `Re: `, never two. */
+export function emailReplySubjectV1(subject: string): string {
+  const trimmed = subject.trim();
+  if (!trimmed) return "Re: your email";
+  return /^re\s*:/i.test(trimmed) ? trimmed : `Re: ${trimmed}`;
 }

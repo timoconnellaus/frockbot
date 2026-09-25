@@ -215,15 +215,46 @@ export interface StoredRunInputDeliveryOriginV1 {
  * mailboxes rather than from the app.
  *
  * The one origin that is still the person: it runs on the user lane as an
- * ordinary chat Turn, steers like a typed message, and is drawn as their own
- * bubble. What the origin adds is where the words came from, so the thread can
- * say so. `messageId` is the message's Message-ID without its angle brackets;
- * the run id is derived from it and the recipient, so a redelivered message is
- * one Turn.
+ * ordinary chat Turn and steers like a typed message. What the origin adds is
+ * where the words came from and where the answer goes: the Turn answers by
+ * email, to `from`, in the thread the message belongs to. `messageId` is the
+ * message's Message-ID without its angle brackets; the run id is derived from
+ * it and the recipient, so a redelivered message is one Turn.
  */
 export interface StoredRunEmailOriginV1 {
   kind: "email";
   messageId: string;
+  /** The mailbox that wrote, one of the person's own; the reply goes there. */
+  from: string;
+  /** The subject line as it arrived, `""` for none. */
+  subject: string;
+  /**
+   * The thread the message belongs to, when it answers an earlier one: the
+   * first message of that thread, or the note of the Bot's it replied to.
+   * Absent, the message starts a thread of its own, named by `messageId`.
+   */
+  threadId?: string;
+}
+
+/** The thread one email Turn belongs to. */
+export function emailThreadIdOfOriginV1(
+  origin: StoredRunEmailOriginV1,
+): string {
+  return origin.threadId ?? origin.messageId;
+}
+
+/**
+ * A Message-ID without its angle brackets — or a thread id, which is one, or
+ * the surface of the note that started a thread: printable ASCII, no space
+ * and no bracket, so it can be written back between brackets into a header.
+ */
+export function isEmailMessageIdV1(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length > 0 &&
+    value.length <= 250 &&
+    /^[\x21-\x3b\x3d\x3f-\x7e]+$/.test(value)
+  );
 }
 
 /**
@@ -784,14 +815,41 @@ function decodeStoredRunOrigin(
     };
   }
   if (candidate.kind === "email") {
-    requireExactOriginFields(candidate, ["kind", "messageId"], runId);
+    requireExactOriginFields(
+      candidate,
+      [
+        "kind",
+        "messageId",
+        "from",
+        "subject",
+        ...(Object.hasOwn(candidate, "threadId") ? ["threadId"] : []),
+      ],
+      runId,
+    );
     if (
-      !boundedString(candidate.messageId, 250) ||
-      !/^[\x21-\x3b\x3d\x3f-\x7e]+$/.test(candidate.messageId)
+      !isEmailMessageIdV1(candidate.messageId) ||
+      (candidate.threadId !== undefined &&
+        !isEmailMessageIdV1(candidate.threadId))
     ) {
       throw new Error(`run "${runId}" has an invalid admission origin id`);
     }
-    return { kind: "email", messageId: candidate.messageId };
+    if (
+      !boundedString(candidate.from, 320) ||
+      !/^[^\s@<>]+@[^\s@<>]+$/.test(candidate.from) ||
+      !boundedString(candidate.subject, 1_200, true) ||
+      /[\r\n]/.test(candidate.subject)
+    ) {
+      throw new Error(`run "${runId}" has an invalid admission origin`);
+    }
+    return {
+      kind: "email",
+      messageId: candidate.messageId,
+      from: candidate.from,
+      subject: candidate.subject,
+      ...(candidate.threadId === undefined
+        ? {}
+        : { threadId: candidate.threadId }),
+    };
   }
   if (candidate.kind === "routine-delivery") {
     requireExactOriginFields(candidate, ["kind", "wakeRunId"], runId);

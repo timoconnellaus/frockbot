@@ -49,6 +49,7 @@ function delivery(events: readonly SessionEvent[], turn: number) {
   let repair = false;
   const addressed = callerAddressedV1(events, turn);
   const finalCalls = new Set<string>();
+  const answerCalls = new Set<string>();
   for (const event of events) {
     if (!("turn" in event) || event.turn !== turn) continue;
     if (event.type === "tool/call" && event.name === "send_to_user") {
@@ -61,9 +62,16 @@ function delivery(events: readonly SessionEvent[], turn: number) {
       )
         finalCalls.add(event.occurrenceId);
     }
+    if (event.type === "tool/call" && event.name === REPLY_TO_REQUEST_TOOL_V1) {
+      answerCalls.add(event.occurrenceId);
+    }
     // The answer a caller asked for is what ends a caller-addressed Turn, and
-    // the only thing that does.
-    if (event.type === "reply/to-caller") {
+    // the only thing that does — including the one an email could not carry,
+    // which its own call put in the conversation instead.
+    if (
+      event.type === "reply/to-caller" ||
+      (event.type === "send/to-user" && answerCalls.has(event.occurrenceId))
+    ) {
       return { required: false, attempts: 0, repair: false };
     }
     if (event.type === "send/to-user") {

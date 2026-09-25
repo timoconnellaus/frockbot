@@ -112,6 +112,11 @@ import type { BotStateEnv } from "@frockbot/app/shell/backend-state";
 import type { BotStateRpcTargetV1 } from "@frockbot/app/shell/durable-rpc-targets";
 import { createBindingEmailSenderV1 } from "@frockbot/app/email/sender";
 import {
+  indexInboundEmailV1,
+  inboundEmailThreadIdV1,
+} from "@frockbot/app/email/bot";
+import type { StoredRunEmailOriginV1 } from "@frockbot/core/durable";
+import {
   acceptSubagentTask,
   claimTaskMessages,
   listTasks,
@@ -2387,7 +2392,19 @@ export class BotState
     const identity = { userId: request.userId, botId: request.botId };
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
-    const { origin, ...command } = request.command;
+    const { origin: arrived, thread, ...command } = request.command;
+    // Which thread it joins is read against the mail this Bot has sent and
+    // received, and a redelivery reads the same answer: the index only grows.
+    const threadId = await inboundEmailThreadIdV1(
+      shell.state,
+      arrived.messageId,
+      thread,
+    );
+    const origin: StoredRunEmailOriginV1 = {
+      ...arrived,
+      ...(threadId === undefined ? {} : { threadId }),
+    };
+    await indexInboundEmailV1(shell.state, origin);
     const receipt = await shell.admit({
       ...identity,
       ...(await this.withAttachments(command)),

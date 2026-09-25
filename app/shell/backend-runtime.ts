@@ -30,6 +30,7 @@ import type { RoutinesRuntimeHostV1 } from "@frockbot/app/routines/agent";
 import type { SkillsRuntimeHostV1 } from "@frockbot/app/skills/agent";
 import type { SubagentsRuntimeHostV1 } from "@frockbot/app/subagents/agent";
 import type { FrockAiChatCompletionV1 } from "@frockbot/providers/frock-ai/runtime";
+import type { EmailReplyRuntimeHostV1 } from "./email-reply.js";
 
 /** The per-Turn seams a Computer host is built over. */
 export interface ShellComputerHostOptionsV1 {
@@ -191,6 +192,12 @@ export interface ShellHostedRuntimeHostV1 {
    * bag is non-empty. Absent, and `panel_focus` is not mounted.
    */
   panels?: PanelFocusRuntimeHostV1;
+  /**
+   * The email reply seam, supplied only for a Turn the person started by
+   * email. Absent, and the Turn answers in the conversation as every other
+   * chat Turn does.
+   */
+  emailReply?: EmailReplyRuntimeHostV1;
 }
 
 /** What the Shell hands the application to mount one Turn's enabled Packages. */

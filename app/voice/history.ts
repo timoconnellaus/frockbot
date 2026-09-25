@@ -28,7 +28,7 @@ interface VoiceHistoryMessageV1 {
   messageId?: string;
   text: string;
   fromBotId?: string;
-  to?: "user" | "voice" | "bot";
+  to?: "user" | "voice" | "bot" | "email";
 }
 
 function clip(text: string, max: number): string {

@@ -103,6 +103,7 @@ import {
 import { turnToolCatalogPin } from "./tool-catalog-pin.js";
 import { createBotSecretFillSeamV1 } from "@frockbot/app/secrets/fill";
 import { userSecretsV1 } from "@frockbot/app/secrets/bot";
+import { sendEmailReplyV1 } from "@frockbot/app/email/bot";
 
 /**
  * The model provider Plugin host for one mount (ADR 0032), or the reason a
@@ -240,6 +241,8 @@ export async function agentRuntime(
     subagentTaskId?: string;
     /** How many `subagent` hand-offs deep this Turn is; absent means none. */
     handoffDepth?: number;
+    /** The person started this Turn by email, so it answers by email. */
+    replyByEmail?: true;
   },
   prepared?: PreparedTurnInputsV1,
 ): Promise<{
@@ -463,6 +466,17 @@ export async function agentRuntime(
         : {}),
       ...(plugins ? { plugins } : {}),
       ...(panels ? { panels } : {}),
+      ...(turn?.replyByEmail
+        ? {
+            emailReply: {
+              send: (request: { occurrenceId: string; body: string }) =>
+                sendEmailReplyV1(state, identity, {
+                  runId: turn.runId,
+                  ...request,
+                }),
+            },
+          }
+        : {}),
       // A Bot changes its own identity, or adds a Bot to its User's flock,
       // only inside an admitted Turn whose Session and Turn the write names.
       ...(turn

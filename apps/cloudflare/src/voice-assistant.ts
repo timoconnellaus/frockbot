@@ -3953,7 +3953,7 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
             turn: number;
             at: string;
             runId?: string;
-            to?: "user" | "voice" | "bot";
+            to?: "user" | "voice" | "bot" | "email";
           }>;
         };
         return {
@@ -3971,8 +3971,8 @@ export class VoiceAssistant extends Agent<Cloudflare.Env & VoiceAssistantEnv> {
                     {
                       type: "reply/to-caller" as const,
                       caller:
-                        line.to === "bot"
-                          ? ("bot" as const)
+                        line.to === "bot" || line.to === "email"
+                          ? line.to
                           : ("voice" as const),
                       text: line.text,
                     },

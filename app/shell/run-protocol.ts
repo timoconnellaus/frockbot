@@ -1,4 +1,5 @@
 import { sentTextV1 } from "./sent-text.js";
+import { runEmailsV1 } from "@frockbot/app/email/thread";
 import {
   BATCH_TOOL_NAME,
   decodeMessageAttachmentsV1,
@@ -283,7 +284,7 @@ export type ClientRunEventV1 =
     }
   | {
       type: "reply/to-caller";
-      caller: "voice" | "bot";
+      caller: "voice" | "bot" | "email";
       text: string;
     }
   | {
@@ -371,6 +372,28 @@ export interface ClientRunV1 {
    * said next.
    */
   landedAt?: ClientRunLandingV1;
+  /**
+   * The emails this Turn took part in: the person's message that started it,
+   * when it came by email, the reply that answered it, and any note the Bot
+   * emailed them. A client draws every email of one thread as one card in
+   * place of the message bubble and the note's receipt. Only a client that
+   * negotiated {@link RUN_EMAILS_PROTOCOL_V1} is sent it.
+   */
+  emails?: ClientRunEmailV1[];
+}
+
+/** One email of a thread, as the thread card draws it. */
+export interface ClientRunEmailV1 {
+  /** Every email with the same thread id is one card. */
+  threadId: string;
+  /** `in` is the person's, `out` the Bot's. */
+  direction: "in" | "out";
+  /** `""` when the message had none. */
+  subject: string;
+  at: string;
+  text: string;
+  /** The card a note was drawn on, which the thread card stands in for. */
+  surfaceId?: string;
 }
 
 export interface ClientRunLandingV1 {
@@ -399,23 +422,73 @@ export const RUN_ATTACHMENTS_PROTOCOL_V1 = 3;
  * strips with one call rather than knowing where its Runs are.
  */
 export function withoutRunAttachmentsV1<T>(value: T): T {
-  const strip = (node: unknown, depth: number): unknown => {
+  return mapRunsV1(value, (run) => {
+    const { attachments: _attachments, ...rest } = run;
+    return rest;
+  });
+}
+
+/**
+ * The first client protocol that draws email threads: a Run's `emails`, and
+ * a `reply/to-caller` answered by email. An older client decodes both against
+ * exact schemas without them, so it is sent neither: it draws the person's
+ * email as the message it always did, and the reply went to their inbox.
+ */
+export const RUN_EMAILS_PROTOCOL_V1 = 5;
+
+/** The same value with every Run's email thread left off. */
+export function withoutRunEmailsV1<T>(value: T): T {
+  return mapRunsV1(value, (run) => {
+    const { emails: _emails, ...rest } = run;
+    return {
+      ...rest,
+      events: (rest.events as unknown[]).filter(
+        (event) =>
+          (event as { type?: unknown; caller?: unknown }).type !==
+            "reply/to-caller" ||
+          (event as { caller?: unknown }).caller !== "email",
+      ),
+    };
+  });
+}
+
+/**
+ * What a client that speaks `protocol` is sent of `value`: each Run with
+ * what that protocol cannot decode left off. Every seam that sends a Run —
+ * a page, a lookup, a Stop receipt, a state frame — strips through here.
+ */
+export function runsForProtocolV1<T>(value: T, protocol: number): T {
+  const current =
+    protocol >= RUN_EMAILS_PROTOCOL_V1 ? value : withoutRunEmailsV1(value);
+  return protocol >= RUN_ATTACHMENTS_PROTOCOL_V1
+    ? current
+    : withoutRunAttachmentsV1(current);
+}
+
+/** Rewrites every Run in whatever envelope carries them. */
+function mapRunsV1<T>(
+  value: T,
+  rewrite: (run: Record<string, unknown>) => Record<string, unknown>,
+): T {
+  const walk = (node: unknown, depth: number): unknown => {
     if (depth > 12 || node === null || typeof node !== "object") return node;
-    if (Array.isArray(node)) return node.map((item) => strip(item, depth + 1));
+    if (Array.isArray(node)) return node.map((item) => walk(item, depth + 1));
     const record = node as Record<string, unknown>;
-    const isRun =
+    // A Run's own fields hold nothing that nests another Run.
+    if (
       typeof record.runId === "string" &&
       typeof record.input === "string" &&
-      Array.isArray(record.events);
+      Array.isArray(record.events)
+    ) {
+      return rewrite(record);
+    }
     const copy: Record<string, unknown> = {};
     for (const [key, child] of Object.entries(record)) {
-      if (isRun && key === "attachments") continue;
-      // A Run's own fields hold nothing that nests another Run.
-      copy[key] = isRun ? child : strip(child, depth + 1);
+      copy[key] = walk(child, depth + 1);
     }
     return copy;
   };
-  return strip(value, 0) as T;
+  return walk(value, 0) as T;
 }
 
 /**
@@ -1214,6 +1287,7 @@ export function projectClientRunV1(
         : origin?.kind === "email"
           ? { kind: "email" as const }
           : undefined;
+  const emails = clientRunEmailsV1(run);
   return {
     // Every attempt carries its message identity, independently of paging.
     schemaVersion: 4,
@@ -1263,7 +1337,24 @@ export function projectClientRunV1(
           },
         }
       : {}),
+    ...(emails.length > 0 ? { emails } : {}),
   };
+}
+
+const MAX_EMAIL_SUBJECT_BYTES = 2_048;
+
+/** The emails a Run carries, bounded to what one wire event may hold. */
+function clientRunEmailsV1(run: StoredRun): ClientRunEmailV1[] {
+  return runEmailsV1(run).map((email) => ({
+    threadId: truncate(email.threadId, MAX_EVENT_ID_LENGTH),
+    direction: email.direction,
+    subject: truncateWireString(email.subject, MAX_EMAIL_SUBJECT_BYTES),
+    at: truncate(email.at, MAX_TIMESTAMP_LENGTH),
+    text: truncateWireString(email.text, MAX_EVENT_CONTENT_BYTES),
+    ...(email.surfaceId === undefined
+      ? {}
+      : { surfaceId: truncate(email.surfaceId, MAX_EVENT_ID_LENGTH) }),
+  }));
 }
 
 function lookupState(
@@ -1685,7 +1776,11 @@ function decodeEvent(value: unknown): ClientRunEventV1 | undefined {
   }
   if (event.type === "reply/to-caller") {
     exactKeys(event, ["type", "caller", "text"], "run event");
-    if (event.caller !== "voice" && event.caller !== "bot") {
+    if (
+      event.caller !== "voice" &&
+      event.caller !== "bot" &&
+      event.caller !== "email"
+    ) {
       throw new Error("run event.caller is invalid");
     }
     return {

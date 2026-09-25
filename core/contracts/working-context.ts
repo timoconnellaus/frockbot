@@ -171,7 +171,7 @@ export interface VoiceExcerptLineV1 {
   seq: number;
   at: string;
   runId?: string;
-  to?: "user" | "voice" | "bot";
+  to?: "user" | "voice" | "bot" | "email";
 }
 
 export interface VoiceExcerptV1 {

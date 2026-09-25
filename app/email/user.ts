@@ -18,6 +18,7 @@ import {
   INBOUND_EMAIL_SENDERS_MAX_V1,
   mintSenderCodeV1,
   type BotEmailNameV1,
+  type BotEmailSenderRefusalV1,
   type BotEmailSenderV1,
   type InboundEmailRouteDecisionV1,
   type InboundEmailSenderV1,
@@ -121,12 +122,12 @@ export class InboundEmailUserStoreV1 {
     botId: string,
     deployment: { domain?: string; username?: string; signInEmail?: string },
   ): Promise<BotEmailSenderV1> {
-    const unavailable = (reason: string): BotEmailSenderV1 => ({
-      status: "unavailable",
-      reason,
-    });
+    const unavailable = (
+      code: BotEmailSenderRefusalV1,
+      reason: string,
+    ): BotEmailSenderV1 => ({ status: "unavailable", code, reason });
     if (!deployment.domain) {
-      return unavailable("this deployment sends no email");
+      return unavailable("off", "this deployment sends no email");
     }
     const [bots, enabled, senders] = await Promise.all([
       this.host.bots(),
@@ -136,15 +137,17 @@ export class InboundEmailUserStoreV1 {
     const bot = bots.find((candidate) => candidate.botId === botId);
     const slug = botEmailSlugsV1(bots).get(botId);
     if (!bot || !slug || !bot.active) {
-      return unavailable("only an active Bot sends email");
+      return unavailable("inactive", "only an active Bot sends email");
     }
     if (!deployment.username) {
       return unavailable(
+        "no-username",
         "you have no email address yet, because your person has not chosen an email username; they can choose one under Account → Email username",
       );
     }
     if (!enabled) {
       return unavailable(
+        "switched-off",
         "email is switched off for you; your person can switch it on in your settings under Email",
       );
     }

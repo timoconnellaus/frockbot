@@ -327,6 +327,8 @@ describe("the admission record names what produced the Turn", () => {
     const origin: StoredRunOriginV1 = {
       kind: "email",
       messageId: "CAF=abc123@mail.gmail.com",
+      from: "tim@example.com",
+      subject: "Hi!",
     };
     const decoded = codec.require(withOrigin(origin));
 
@@ -334,14 +336,32 @@ describe("the admission record names what produced the Turn", () => {
     expect(storedRunLaneV1(decoded)).toBe("user");
     expect(storedRunIsDeliveryV1(decoded)).toBe(false);
     expect(codec.require(structuredClone(decoded))).toEqual(decoded);
+    // A reply in an earlier thread names that thread; no subject is "".
+    const reply = { ...origin, subject: "", threadId: "root@mail.gmail.com" };
+    expect(codec.require(withOrigin(reply)).admission?.origin).toEqual(reply);
 
     expect(() =>
-      codec.require(withOrigin({ ...origin, from: "tim@example.com" })),
+      codec.require(withOrigin({ ...origin, callId: "call-1" })),
+    ).toThrow(/invalid admission origin fields/);
+    expect(() =>
+      codec.require(withOrigin({ kind: "email", messageId: origin.messageId })),
     ).toThrow(/invalid admission origin fields/);
     for (const messageId of ["<a@b>", "has space@b", "", "x".repeat(251)]) {
       expect(() => codec.require(withOrigin({ ...origin, messageId }))).toThrow(
         /invalid admission origin id/,
       );
+      expect(() =>
+        codec.require(withOrigin({ ...origin, threadId: messageId })),
+      ).toThrow(/invalid admission origin id/);
+    }
+    for (const invalid of [
+      { from: "not an address" },
+      { from: "<tim@example.com>" },
+      { subject: "two\nlines" },
+    ]) {
+      expect(() =>
+        codec.require(withOrigin({ ...origin, ...invalid })),
+      ).toThrow(/invalid admission origin/);
     }
   });
 

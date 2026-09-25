@@ -1135,7 +1135,13 @@ function inboundEmailHostV1(env: Env): InboundEmailHostV1 {
           ...(command.attachments.length > 0
             ? { attachments: command.attachments }
             : {}),
-          origin: { kind: "email", messageId: command.messageId },
+          origin: {
+            kind: "email",
+            messageId: command.messageId,
+            from: command.from,
+            subject: command.subject,
+          },
+          thread: command.thread,
         },
       });
     },

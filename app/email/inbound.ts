@@ -26,11 +26,14 @@ import { senderAuthenticationV1 } from "./authentication.js";
 import { parseInboundEmailV1, type InboundEmailFileV1 } from "./message.js";
 import {
   addressDomainV1,
+  EMAIL_SUBJECT_MAX_CHARS_V1,
+  emailTurnHeadingV1,
   INBOUND_EMAIL_MAX_BYTES_V1,
   INBOUND_EMAIL_TEXT_MAX_CHARS_V1,
   inboundMessageIdV1,
   parseBotEmailLocalPartV1,
   senderCodesInV1,
+  type EmailThreadRefsV1,
   type InboundEmailRouteDecisionV1,
 } from "./shared.js";
 
@@ -82,6 +85,11 @@ export interface InboundEmailHostV1 {
       runId: string;
       text: string;
       messageId: string;
+      /** The mailbox that wrote, which the Turn's answer is emailed back to. */
+      from: string;
+      subject: string;
+      /** What the message answers, which the Bot reads its thread from. */
+      thread: EmailThreadRefsV1;
       attachments: { uploadId: string }[];
     },
   ): Promise<void>;
@@ -224,7 +232,7 @@ function turnText(
   body: string,
   missed: readonly { name: string; reason: string }[],
 ): string {
-  const heading = subject ? `Subject: ${subject.slice(0, 300)}` : "";
+  const heading = emailTurnHeadingV1(subject);
   const note = missed.length > 0 ? notAttached(missed) : "";
   let kept = Math.min(body.length, INBOUND_EMAIL_TEXT_MAX_CHARS_V1);
   for (;;) {
@@ -327,10 +335,19 @@ export async function receiveInboundEmailV1(
       attachments.push({ uploadId: stored.uploadId });
     }
   }
-  const text = turnText(email.subject, email.body, missed);
+  const subject = email.subject.slice(0, EMAIL_SUBJECT_MAX_CHARS_V1);
+  const text = turnText(subject, email.body, missed);
   const runId = await inboundEmailRunIdV1(addressed.recipient, messageId);
   try {
-    await host.admit(userId, botId, { runId, text, messageId, attachments });
+    await host.admit(userId, botId, {
+      runId,
+      text,
+      messageId,
+      from: email.from,
+      subject,
+      thread: email.thread,
+      attachments,
+    });
   } catch (error) {
     const refused = botTurnRefusalCodeV1(error);
     // A full queue would be as full on the next delivery: the sender is told.

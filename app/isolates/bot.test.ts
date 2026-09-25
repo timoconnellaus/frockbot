@@ -28,10 +28,13 @@ import {
   isolateStorageDelete,
   isolateStoragePut,
   isolateWorkspaceRead,
-  EMAIL_OWNER_COUNT_KEY_V1,
-  EMAIL_OWNER_DAILY_LIMIT_V1,
   type IsolateCallScopeV1,
 } from "./bot.ts";
+import {
+  EMAIL_OWNER_COUNT_KEY_V1,
+  EMAIL_OWNER_DAILY_LIMIT_V1,
+  emailThreadIndexKeyV1,
+} from "../email/bot.ts";
 
 const GENERATION = "2026-09-05T00:00:00.000Z:aaaaaaaaaaaaaaaa";
 
@@ -287,6 +290,10 @@ describe("one email, sent for the Bot that asked", () => {
       state: {
         ...base,
         ctx: { storage },
+        authority: {
+          readRunHeader: (runId: string) =>
+            Promise.resolve(values.get(`run:${runId}`)),
+        },
         env: {
           USER_CONFIGURATIONS: {
             idFromName: (name: string) => name,
@@ -343,6 +350,7 @@ describe("one email, sent for the Bot that asked", () => {
       { [approvalKeyV1("ap-1")]: approval(), ...(await binding()) },
       {
         status: "unavailable",
+        code: "switched-off",
         reason: "email is switched off for you",
       },
     );
@@ -667,7 +675,13 @@ describe("one email, sent for the Bot that asked", () => {
           admission: {
             schemaVersion: 1,
             turnType: "chat",
-            origin: { kind: "email", messageId: "m1@mail.example.com" },
+            origin: {
+              kind: "email",
+              messageId: "m1@mail.example.com",
+              from: "tim@example.com",
+              subject: "Agenda",
+              threadId: "root@mail.example.com",
+            },
           },
         },
       });
@@ -675,6 +689,19 @@ describe("one email, sent for the Bot that asked", () => {
       expect(subject.sent[0]).toMatchObject({
         inReplyTo: "<m1@mail.example.com>",
       });
+      // The note joins the thread the email was in, so a reply to it does.
+      expect(subject.values.get(await emailThreadIndexKeyV1("sent@x.co"))).toBe(
+        "root@mail.example.com",
+      );
+    });
+
+    test("any other note starts a thread of its own, named by its card", async () => {
+      const subject = sending();
+      await isolateEmail(subject.state, note());
+      expect(subject.sent[0]).not.toHaveProperty("inReplyTo");
+      expect(subject.values.get(await emailThreadIndexKeyV1("sent@x.co"))).toBe(
+        "email_owner.1",
+      );
     });
 
     test("a person with no address the Bot knows is told so", async () => {

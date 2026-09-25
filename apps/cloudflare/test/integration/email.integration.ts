@@ -25,7 +25,7 @@ import {
 import {
   EMAIL_OWNER_COUNT_KEY_V1,
   EMAIL_OWNER_DAILY_LIMIT_V1,
-} from "@frockbot/app/isolates/bot";
+} from "@frockbot/app/email/bot";
 import worker from "../../src/index.ts";
 import { dynamicToolInputV1 } from "../dynamic-tools.ts";
 import type { FakeSentEmailV1 } from "../email-fake.ts";

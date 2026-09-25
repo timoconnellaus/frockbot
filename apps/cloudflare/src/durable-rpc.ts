@@ -8,10 +8,16 @@ import { decodeBotIdV1, isRpcIdentifier } from "@frockbot/core/configuration";
 import { decodeRunIdV1 } from "@frockbot/app/shell/backend-contracts";
 import {
   decodeStoredRunCauseV1,
+  isEmailMessageIdV1,
   type StoredRunCauseV1,
   type StoredRunEmailOriginV1,
   type StoredRunGroupOriginV1,
 } from "@frockbot/core/durable";
+import {
+  EMAIL_SUBJECT_MAX_CHARS_V1,
+  EMAIL_THREAD_REFS_MAX_V1,
+  type EmailThreadRefsV1,
+} from "@frockbot/app/email/shared";
 import {
   VOICE_CALL_TRANSCRIPT_TEXT_MAX_V1,
   VOICE_CALL_TRANSCRIPT_TURNS_MAX_V1,
@@ -644,9 +650,27 @@ export interface DecodedBotEmailTurnRpcV1 {
     text: string;
     /** Refs only: the Bot resolves each against its own uploads. */
     attachments?: UploadRefV1[];
-    origin: StoredRunEmailOriginV1;
+    /** Everything but the thread, which the Bot reads from `thread`. */
+    origin: Omit<StoredRunEmailOriginV1, "threadId">;
+    thread: EmailThreadRefsV1;
   };
 }
+
+const rpcEmailMessageId: RpcValueDecoder = (value, label) => {
+  if (!isEmailMessageIdV1(value)) throw new Error(`${label} is invalid`);
+  return value;
+};
+
+const rpcEmailSubject: RpcValueDecoder = (value, label) => {
+  if (
+    typeof value !== "string" ||
+    value.length > EMAIL_SUBJECT_MAX_CHARS_V1 ||
+    /[\r\n]/.test(value)
+  ) {
+    throw new Error(`${label} is invalid`);
+  }
+  return value;
+};
 
 /**
  * Internal-only email admission: the person, writing from one of their
@@ -669,8 +693,16 @@ export function decodeBotEmailTurnRpcV1(
         text: rpcTurnText(32_000),
         origin: rpcObject({
           kind: rpcPattern(/^email$/, 5),
-          messageId: rpcPattern(/^[\x21-\x3b\x3d\x3f-\x7e]{1,250}$/, 250),
+          messageId: rpcEmailMessageId,
+          from: rpcPattern(/^[^\s@<>]+@[^\s@<>]+$/, 320),
+          subject: rpcEmailSubject,
         }),
+        thread: rpcObject(
+          {
+            references: rpcArray(rpcEmailMessageId, EMAIL_THREAD_REFS_MAX_V1),
+          },
+          { inReplyTo: rpcEmailMessageId },
+        ),
       },
       {
         attachments: (value, label) => decodeUploadRefsV1(value, label),

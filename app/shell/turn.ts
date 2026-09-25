@@ -73,6 +73,7 @@ import { compositionFailureTurnTextV1 } from "./backend-composition-input.js";
 import { createCardApprovalStoreV1 } from "./cards.js";
 import { createSecretRequestStoreV1 } from "@frockbot/app/secrets/bot";
 import { createReplyDraftWatchV1 } from "./reply-draft.js";
+import { replyChannelOfOriginV1 } from "./reply-to-caller.js";
 import {
   botStopCommandFingerprintV1,
   requireStoredRunV1,
@@ -330,6 +331,11 @@ export async function executeTurn(
     // run record; what the Turn needs to know is that a person is listening.
     ...(input.command.origin?.kind === "voice"
       ? { inboundAgent: { kind: "voice" as const } }
+      : {}),
+    // The person, by email: the Turn answers in their inbox rather than in
+    // the conversation, and the address it answers is on the run record.
+    ...(replyChannelOfOriginV1(input.command.origin) === "email"
+      ? { replyByEmail: true as const }
       : {}),
     // A Group Chat's return address. The Turn speaks to the group, and the
     // group reads what it said back off this run.

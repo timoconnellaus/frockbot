@@ -8,7 +8,11 @@
 
 import PostalMime, { addressParser } from "postal-mime";
 import type { EmailHeaderV1 } from "./authentication.js";
-import { normalizeSenderAddressV1 } from "./shared.js";
+import {
+  messageIdsInV1,
+  normalizeSenderAddressV1,
+  type EmailThreadRefsV1,
+} from "./shared.js";
 
 /** One file part of the message, before it is anything the Bot holds. */
 export interface InboundEmailFileV1 {
@@ -24,6 +28,11 @@ export interface InboundEmailV1 {
   /** The one mailbox in the one `From`, normalized; absent when that is not what it has. */
   from?: string;
   messageId?: string;
+  /**
+   * What the message answers, brackets off: the id its `In-Reply-To` names,
+   * and its `References`, which start at the thread's first message.
+   */
+  thread: EmailThreadRefsV1;
   subject: string;
   /** The words, quoted history and signature removed. */
   body: string;
@@ -288,10 +297,15 @@ export async function parseInboundEmailV1(
       placed.push(file);
     }
   }
+  const inReplyTo = messageIdsInV1(parsed.inReplyTo).at(-1);
   return {
     headers,
     ...(from ? { from } : {}),
     ...(parsed.messageId ? { messageId: parsed.messageId } : {}),
+    thread: {
+      ...(inReplyTo ? { inReplyTo } : {}),
+      references: messageIdsInV1(parsed.references),
+    },
     subject,
     body: readableBodyV1(text, isForward(subject)),
     automatic,

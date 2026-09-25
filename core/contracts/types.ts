@@ -439,9 +439,10 @@ export interface SessionEventMap {
    * Its own event rather than a `send/to-user` with a flag, because the two
    * are genuinely different deliveries. A send is addressed to the User: it
    * mints a message, advances unread, and wakes a device. This is addressed to
-   * the caller named on the Turn's admission — today the account's voice
-   * session — which is reading it out itself. Routing one as the other is how
-   * a person ends up badged for a sentence being spoken to them.
+   * the caller named on the Turn's admission — the account's voice session,
+   * which is reading it out itself, or the person's mailbox, where it was
+   * emailed. Routing one as the other is how a person ends up badged for a
+   * sentence being spoken to them.
    *
    * It is still part of the conversation, and the transcript draws it: the
    * exchange happened in this Bot's thread and the person can read it back.
@@ -450,8 +451,11 @@ export interface SessionEventMap {
     turn: number;
     step: number;
     occurrenceId: string;
-    /** Who asked: the account's voice session, or another Bot of the User. */
-    caller: "voice" | "bot";
+    /**
+     * Who asked: the account's voice session, another Bot of the User, or the
+     * person by email — and then `text` is the body that was emailed back.
+     */
+    caller: "voice" | "bot" | "email";
     text: string;
   };
   /**
@@ -1746,7 +1750,11 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       turn();
       step();
       eventString(event.occurrenceId, "session event.occurrenceId");
-      if (event.caller !== "voice" && event.caller !== "bot") {
+      if (
+        event.caller !== "voice" &&
+        event.caller !== "bot" &&
+        event.caller !== "email"
+      ) {
         throw new Error("session event.caller is invalid");
       }
       eventString(event.text, "session event.text");
