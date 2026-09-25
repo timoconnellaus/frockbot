@@ -10,9 +10,6 @@ import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/client/plain_store.dart';
 import 'package:frockbot_native/settings/page.dart';
 import 'package:frockbot_native/connections/page.dart';
-import 'package:frockbot_native/recovery/controller.dart';
-import 'package:frockbot_native/recovery/page.dart';
-import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
 import 'package:frockbot_native/theme/frock_theme.dart';
 
 class LocalSettingsApi extends NativeApi {
@@ -76,52 +73,15 @@ Future<void> main() async {
     'NATIVE_TEST_HOME',
     defaultValue: 'application',
   );
-  if (!{
-    'application',
-    'models',
-    'connections',
-    'inbox',
-    'recovery',
-    'recovery-detail',
-  }.contains(home)) {
+  if (!{'application', 'models', 'connections', 'inbox'}.contains(home)) {
     throw StateError('Unknown design page');
-  }
-  wire.BotRegistration? detailBot;
-  BotRecoveryController? recovery;
-  const recoveryTab = int.fromEnvironment('NATIVE_TEST_TAB');
-  if (recoveryTab < 0 || recoveryTab > 2) {
-    throw StateError('Unknown recovery tab');
-  }
-  if (home == 'recovery-detail') {
-    recovery = BotRecoveryController(api, store, 'native-settings-local');
-    await recovery.load();
-    detailBot = recovery.bots.firstWhere(
-      (bot) =>
-          bot.botId.value ==
-          const String.fromEnvironment(
-            'NATIVE_TEST_BOT',
-            defaultValue: 'native-inbox-design',
-          ),
-    );
   }
   runApp(
     MaterialApp(
       title: 'FrockBot',
       debugShowCheckedModeBanner: false,
       theme: FrockTheme.theme(Brightness.dark),
-      home: home == 'recovery'
-          ? BotRecoveryPage(
-              api: api,
-              store: store,
-              userId: 'native-settings-local',
-            )
-          : home == 'recovery-detail'
-          ? BotRecoveryDetail(
-              controller: recovery!,
-              bot: detailBot!,
-              initialTab: recoveryTab,
-            )
-          : home == 'connections'
+      home: home == 'connections'
           ? ConnectionsPage(
               api: api,
               store: store,

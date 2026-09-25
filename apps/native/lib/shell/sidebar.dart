@@ -11,9 +11,9 @@
 /// A pinned Bot is a tile above the list instead of a row inside it, never
 /// both — the tile *is* the row, moved — so the list orders what is left.
 /// Hidden and archived are different states: archiving stops a Bot
-/// working, hiding only takes it out of this list, so a hidden Bot stays
-/// selectable and the hidden rows below the list are how a person reaches it
-/// again.
+/// working, hiding only takes it out of this list. Each has its own folded
+/// group below the list, and both open: a hidden Bot as itself, an archived
+/// one read-only, with Restore where its composer would be.
 library;
 
 import 'package:flutter/gestures.dart' show kTouchSlop;
@@ -237,6 +237,10 @@ class ShellSidebar extends StatelessWidget {
   final bool loaded;
   final String? error;
   final bool showHidden;
+
+  /// Whether the Archived group below the list is open. An archived Bot is
+  /// in [bots] and [archived]; it is drawn only there.
+  final bool showArchived;
   final void Function(String botId) onSelect;
   final VoidCallback onCreateBot;
 
@@ -265,6 +269,7 @@ class ShellSidebar extends StatelessWidget {
   final bool phone;
 
   final VoidCallback onToggleHidden;
+  final VoidCallback? onToggleArchived;
   final Future<void> Function() onRetry;
 
   /// Opens the Bot's quick actions; [position] is where a secondary click
@@ -304,6 +309,8 @@ class ShellSidebar extends StatelessWidget {
     required this.onWhatsNew,
     required this.onMarketplace,
     required this.onToggleHidden,
+    this.showArchived = false,
+    this.onToggleArchived,
     required this.onRetry,
     this.onActions,
     this.onSwipeRead,
@@ -369,7 +376,17 @@ class ShellSidebar extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final entryProfiles = _entryProfiles;
-    final entries = <Object>[...bots, ...groupChats];
+    // An archived Bot has stopped, so it is in none of the list's places —
+    // pinned, ordered or hidden — only in its own group at the foot.
+    final stopped = [
+      for (final bot in bots)
+        if (archived.contains(_id(bot))) bot,
+    ];
+    final entries = <Object>[
+      for (final bot in bots)
+        if (!archived.contains(_id(bot))) bot,
+      ...groupChats,
+    ];
     final visible = [
       for (final entry in entries)
         if (!_entryHidden(entry)) entry,
@@ -462,36 +479,42 @@ class ShellSidebar extends StatelessWidget {
                     ),
                   for (final entry in listed)
                     _entryRow(context, entry, list: listedIds),
+                  if (hidden.isNotEmpty || stopped.isNotEmpty)
+                    const SizedBox(height: 10),
+                  // Keyed apart, so neither head's element is reused for the
+                  // other when one appears beside it: the web engine can keep a
+                  // reused node's old identifier.
                   if (hidden.isNotEmpty)
-                    Padding(
-                      padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
-                      child: Align(
-                        alignment: Alignment.centerLeft,
-                        child: identified(
-                          ShellIds.sidebarHiddenToggle,
-                          TextButton(
-                            onPressed: onToggleHidden,
-                            style: TextButton.styleFrom(
-                              foregroundColor:
-                                  theme.colorScheme.onSurfaceVariant,
-                              minimumSize: const Size(0, 32),
-                              padding: const EdgeInsets.symmetric(
-                                horizontal: 8,
-                              ),
-                              textStyle: theme.textTheme.labelMedium,
-                            ),
-                            child: Text(
-                              showHidden
-                                  ? 'Hide ${hidden.length} hidden'
-                                  : 'Show ${hidden.length} hidden'
-                                        '${hiddenUnread > 0 ? ' ($hiddenUnread)' : ''}',
-                            ),
-                          ),
+                    KeyedSubtree(
+                      key: const ValueKey('fold-hidden'),
+                      child: identified(
+                        ShellIds.sidebarHiddenToggle,
+                        _FoldToggle(
+                          label: 'Hidden',
+                          count: hidden.length,
+                          open: showHidden,
+                          unread: hiddenUnread,
+                          onPressed: onToggleHidden,
                         ),
                       ),
                     ),
                   if (showHidden)
                     for (final entry in hidden) _entryRow(context, entry),
+                  if (stopped.isNotEmpty)
+                    KeyedSubtree(
+                      key: const ValueKey('fold-archived'),
+                      child: identified(
+                        ShellIds.sidebarArchivedToggle,
+                        _FoldToggle(
+                          label: 'Archived',
+                          count: stopped.length,
+                          open: showArchived,
+                          onPressed: onToggleArchived,
+                        ),
+                      ),
+                    ),
+                  if (showArchived)
+                    for (final bot in stopped) _row(context, bot),
                 ],
                 // The same failure over a list that still has rows: a banner,
                 // not a replacement, because what is on screen is still the last
@@ -724,8 +747,8 @@ class ShellSidebar extends StatelessWidget {
       identifier: ShellIds.sidebarBot(botId),
       card: phone,
       selected: selected,
-      enabled: !isArchived,
-      onTap: isArchived ? null : () => onSelect(botId),
+      enabled: true,
+      onTap: () => onSelect(botId),
       onActions: actions,
       longPressOpens: !touchDrag,
       // A phone reaches the actions by pressing the row, and so may any
@@ -746,13 +769,18 @@ class ShellSidebar extends StatelessWidget {
         child: OverflowBox(
           maxWidth: sidebarRowAvatarSize,
           maxHeight: sidebarRowAvatarSize,
-          child: CharacterAvatar(
-            size: sidebarRowAvatarSize,
-            botId: _id(bot),
-            characterId: bot.avatar.characterId,
-            primary: bot.avatar.primary,
-            motion: CharacterMotion.quiet,
-            working: _working(bot),
+          // An archived Bot is faded: it is here to be found, not to be
+          // talked to.
+          child: Opacity(
+            opacity: isArchived ? 0.55 : 1,
+            child: CharacterAvatar(
+              size: sidebarRowAvatarSize,
+              botId: _id(bot),
+              characterId: bot.avatar.characterId,
+              primary: bot.avatar.primary,
+              motion: CharacterMotion.quiet,
+              working: !isArchived && _working(bot),
+            ),
           ),
         ),
       ),
@@ -765,8 +793,10 @@ class ShellSidebar extends StatelessWidget {
             ? theme.colorScheme.onSurfaceVariant
             : theme.colorScheme.onSurface,
       ),
-      time: at == null ? null : formatSidebarMessageTime(at),
-      preview: preview ?? profiles[botId]?.title ?? 'No messages yet',
+      time: at == null || isArchived ? null : formatSidebarMessageTime(at),
+      preview: isArchived
+          ? 'Archived'
+          : preview ?? profiles[botId]?.title ?? 'No messages yet',
       previewStyle: theme.textTheme.bodySmall?.copyWith(
         fontSize: 12.5,
         color: isUnread
@@ -774,30 +804,10 @@ class ShellSidebar extends StatelessWidget {
             : theme.colorScheme.onSurfaceVariant,
       ),
       // One slot, one meaning. The row's own selected state already says
-      // which Bot is open, so the slot carries unread and archived — the two
-      // things a row can say that its appearance does not.
-      trailing: badge == null && !isArchived
-          ? null
-          : Row(
-              mainAxisSize: MainAxisSize.min,
-              children: [
-                if (isArchived)
-                  Text(
-                    'Archived',
-                    style: theme.textTheme.labelSmall?.copyWith(
-                      color: theme.colorScheme.onSurfaceVariant,
-                      letterSpacing: 0.2,
-                    ),
-                  ),
-                if (badge != null) ...[
-                  if (isArchived) const SizedBox(width: 6),
-                  Badge(label: Text(badge)),
-                ],
-              ],
-            ),
+      // which Bot is open, so the slot carries unread alone.
+      trailing: badge == null || isArchived ? null : Badge(label: Text(badge)),
     );
-    // An archived Bot has stopped: it is not dragged about, though the rows
-    // around it still are, so it stays a place another row can land beside.
+    // An archived Bot has stopped: it is not dragged about.
     final Widget lifted = move == null || list == null || isArchived
         ? row
         : _DragSource(
@@ -854,6 +864,67 @@ class ShellSidebar extends StatelessWidget {
       onRead: onRead,
       onHide: onHide,
       child: row,
+    );
+  }
+}
+
+/// The head of a folded group below the list — Hidden, Archived — with its
+/// count, a chevron that says whether it is open, and, while it is shut, how
+/// many unread messages are inside.
+class _FoldToggle extends StatelessWidget {
+  final String label;
+  final int count;
+  final bool open;
+  final int unread;
+  final VoidCallback? onPressed;
+  const _FoldToggle({
+    required this.label,
+    required this.count,
+    required this.open,
+    required this.onPressed,
+    this.unread = 0,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final ink = theme.colorScheme.onSurfaceVariant;
+    return Padding(
+      padding: const EdgeInsets.symmetric(horizontal: 10),
+      child: Semantics(
+        expanded: open,
+        child: TextButton(
+          onPressed: onPressed,
+          style: TextButton.styleFrom(
+            foregroundColor: ink,
+            alignment: Alignment.centerLeft,
+            minimumSize: const Size(double.infinity, 32),
+            padding: const EdgeInsets.symmetric(horizontal: 8),
+            shape: RoundedRectangleBorder(
+              borderRadius: BorderRadius.circular(FrockTheme.radiusRow),
+            ),
+            textStyle: theme.textTheme.labelMedium?.copyWith(
+              fontSize: 12.5,
+              fontWeight: FontWeight.w600,
+            ),
+          ),
+          child: Row(
+            children: [
+              Icon(
+                open ? Icons.expand_more_rounded : Icons.chevron_right_rounded,
+                size: 16,
+                color: ink,
+              ),
+              const SizedBox(width: 6),
+              Flexible(child: Text('$label · $count')),
+              if (!open && unread > 0) ...[
+                const SizedBox(width: 8),
+                Badge(label: Text(unread > 99 ? '99+' : '$unread')),
+              ],
+            ],
+          ),
+        ),
+      ),
     );
   }
 }

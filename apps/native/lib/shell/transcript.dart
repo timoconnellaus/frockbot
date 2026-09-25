@@ -86,6 +86,10 @@ class TranscriptView extends StatefulWidget {
   /// Drawn under the empty thread's greeting, and gone with the first row.
   final Widget? starters;
 
+  /// Drawn instead of the greeting when there are no lines, where the thread
+  /// invites nothing: an archived Bot's.
+  final Widget? empty;
+
   /// Reads a sent picture's bytes. Absent, pictures are drawn as cards.
   final Future<Uint8List> Function(MessageAttachment attachment)?
   attachmentBytes;
@@ -112,6 +116,7 @@ class TranscriptView extends StatefulWidget {
     this.focusRunId,
     this.background,
     this.starters,
+    this.empty,
     this.attachmentBytes,
   });
 
@@ -395,7 +400,7 @@ class _TranscriptViewState extends State<TranscriptView> {
       _rowHeights.clear();
       return loading
           ? const FrockLoading(label: 'Loading your conversation')
-          : _EmptyThread(starters: widget.starters);
+          : widget.empty ?? _EmptyThread(starters: widget.starters);
     }
     if (hasEarlier) {
       slots.add(const _ThreadSlot('row:earlier', _SlotKind.earlier));

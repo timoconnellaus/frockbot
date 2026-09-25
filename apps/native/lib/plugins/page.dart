@@ -5,6 +5,7 @@ import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
 import '../theme/caret.dart';
 import '../view/surface.dart';
+import 'history.dart';
 
 /// The receipt a view surface needs for a Plugin control's press, from the
 /// Bot's answer to running the tool. The answer carries no command id, and a
@@ -200,7 +201,8 @@ class PluginsController extends ViewSurfaceController {
 /// One Bot's Plugins: what it could run, and whether it does.
 ///
 /// Enablement only. Nothing a Package declares — its accounts, its
-/// credentials, its settings — is edited here.
+/// credentials, its settings — is edited here. Under the switches is the
+/// Bot's setup history: the Plugin code it has written, read-only.
 class PluginsPage extends StatefulWidget {
   final NativeApi api;
   final LocalStore store;
@@ -287,6 +289,13 @@ class PluginsPageState extends State<PluginsPage>
             onChanged: controller.search,
           ),
         ),
+      ),
+      // What the Bot has written for itself is no switch, so it is drawn
+      // under the document rather than in it.
+      footer: (_) => SetupHistorySection(
+        key: ValueKey('history-${widget.botId}'),
+        api: widget.api,
+        botId: widget.botId,
       ),
       cacheScope: widget.botId,
     );

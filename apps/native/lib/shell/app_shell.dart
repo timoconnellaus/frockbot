@@ -42,11 +42,9 @@ import '../groups/thread.dart';
 import '../machines/page.dart';
 import '../secrets/page.dart';
 import '../plugins/page.dart';
-import '../recovery/page.dart';
 import '../routines/page.dart';
 import '../routines/runs.dart';
 import '../search/controller.dart';
-import '../search/archived_conversation.dart';
 import '../search/overlay.dart';
 import '../settings/account_deletion.dart';
 import '../settings/billing.dart';
@@ -87,6 +85,7 @@ import 'chat_header.dart';
 import 'chat_icons.dart';
 import 'desktop_layout.dart';
 import 'hot_panel.dart';
+import 'archived_conversation.dart';
 import 'lifecycle.dart';
 import 'message_actions.dart';
 import 'exchange_view.dart';
@@ -137,7 +136,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   final ShellSlots slots = ShellSlots();
 
   /// One retained lifecycle command for the account, whichever surface issued
-  /// it: the danger zone in Bot settings, or Manage Bots.
+  /// it: the danger zone in Bot settings, a row's actions, or an archived
+  /// Bot's bar.
   late final BotLifecycleCommands lifecycle = BotLifecycleCommands(
     widget.api,
     widget.store,
@@ -193,6 +193,11 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// The open Group Chat. A group and a Bot are never open together: opening
   /// either closes the other.
   String? selectedGroupId;
+
+  /// The archived Bot open read-only, and the message a search hit asked to
+  /// see in it. An archived Bot has no session: nothing here is [selected].
+  String? archivedOpenId;
+  String? _archivedRunId;
   GroupThreadController? _groupThread;
   GroupStateChannel? _groupChannel;
 
@@ -315,6 +320,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// voice mode is drawn on, and every other Bot's keeps its thread.
   String? voiceBotId;
   bool showHidden = false;
+  bool showArchived = false;
   TranscriptLine? openRun;
 
   /// The person's name and photo, for the call, the You page, and the sidebar.
@@ -1029,7 +1035,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     bool authoritative = false,
     bool fromCache = false,
   }) {
+    // An archived Bot open read-only that is no longer archived was restored
+    // or deleted, here or on another device: a restored one opens as itself.
+    final open = archivedOpenId;
+    final reopen = authoritative && open != null && !archivedIds.contains(open)
+        ? active.where((bot) => bot.botId.value == open).firstOrNull
+        : null;
     setState(() {
+      if (authoritative && open != null && !archivedIds.contains(open)) {
+        archivedOpenId = null;
+        _archivedRunId = null;
+        if (reopen == null) conversationOpen = false;
+      }
       bots = active;
       searchableBots = readable ?? active;
       // The directory is authority on what a Bot wears; whatever it says now
@@ -1047,6 +1064,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                 .firstOrNull;
       error = null;
     });
+    if (reopen != null) {
+      _select(reopen.botId.value);
+      return;
+    }
     final pendingBotId = widget.botLinks.value;
     if (pendingBotId != null) {
       if (!fromCache || bots.any((bot) => bot.botId.value == pendingBotId)) {
@@ -1060,6 +1081,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Future<void> _restoreSelection() async {
     if (selected != null ||
         selectedGroupId != null ||
+        archivedOpenId != null ||
         widget.botLinks.value != null) {
       return;
     }
@@ -1067,6 +1089,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (!mounted ||
         selected != null ||
         selectedGroupId != null ||
+        archivedOpenId != null ||
         widget.botLinks.value != null) {
       return;
     }
@@ -1094,6 +1117,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (general == null ||
         selected != null ||
         selectedGroupId != null ||
+        archivedOpenId != null ||
         widget.botLinks.value != null ||
         ModalRoute.of(context)?.isCurrent != true ||
         !bots.any((bot) => bot.botId.value == general)) {
@@ -1187,6 +1211,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       _selectGroup(groupId);
       return;
     }
+    if (archived.contains(botId)) {
+      _openArchived(botId);
+      return;
+    }
     clearManualForBot = botId;
     push.reading(null);
     final bot = bots.where((bot) => bot.botId.value == botId).firstOrNull;
@@ -1201,6 +1229,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     // delays the pane behind a store write.
     setState(() {
       selected = bot;
+      archivedOpenId = null;
+      _archivedRunId = null;
       // A switch arrives from search, a link or a new Bot.
       conversationOpen = true;
       _leaveRun();
@@ -1217,6 +1247,43 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           .write('selection.${widget.userId}', botId)
           .catchError((Object _) {}),
     );
+  }
+
+  /// An archived Bot, opened read-only where its conversation would be. It
+  /// has no session, so whatever Bot or group was open is closed, and nothing
+  /// is remembered as the selection to come back to.
+  void _openArchived(String botId, {String? runId}) {
+    push.reading(null);
+    if (selected != null) _closeOpenBot();
+    _closeGroup();
+    if (dictation?.active == true) unawaited(_stopDictation());
+    setState(() {
+      archivedOpenId = botId;
+      _archivedRunId = runId;
+      conversationOpen = true;
+      panelOpen = false;
+    });
+  }
+
+  /// Restore or Delete, from an archived Bot's bar: the same dialog and the
+  /// same retained command as every other surface that asks. The directory
+  /// read that follows is what opens a restored Bot or closes a deleted one.
+  Future<void> _changeArchived(String botId, String type) async {
+    final bot = searchableBots
+        .where((bot) => bot.botId.value == botId)
+        .firstOrNull;
+    final applied = await confirmBotLifecycleChange(
+      context: context,
+      lifecycle: lifecycle,
+      botId: botId,
+      botName: bot == null ? botId : _name(bot),
+      type: type,
+    );
+    if (!mounted) return;
+    if (lifecycle.error ?? lifecycle.message case final String notice) {
+      _say(notice);
+    }
+    if (applied) await load();
   }
 
   void _featuresChanged([String? botId]) {
@@ -2616,6 +2683,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
     setState(() {
       selectedGroupId = groupId;
+      archivedOpenId = null;
+      _archivedRunId = null;
       conversationOpen = true;
     });
     unawaited(
@@ -2937,7 +3006,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   ShellLayout(
                     header: null,
                     conversationOpen:
-                        (bot != null || selectedGroupId != null) &&
+                        (bot != null ||
+                            selectedGroupId != null ||
+                            archivedOpenId != null) &&
                         conversationOpen,
                     onBack: _openBack,
                     panelOpen: panelOpen,
@@ -2946,7 +3017,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     rightPanel: rightPanel,
                     panelTheme: ownLook ? botTheme : null,
                     sidebar: ShellSidebar(
-                      bots: bots,
+                      bots: searchableBots,
                       groupChats: _sidebarGroups,
                       activeGroupId: single ? null : selectedGroupId,
                       focusedGroupId: _focusedGroupId,
@@ -2960,13 +3031,18 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                       focusedBotId: _focusedBotId,
                       // A phone's list is a list of doors, not a selection: no row
                       // is the current one once the conversation is a page.
-                      activeBotId: single ? null : bot?.botId.value,
+                      activeBotId: single
+                          ? null
+                          : bot?.botId.value ?? archivedOpenId,
                       workingBotId: _workingRunId == null
                           ? null
                           : bot?.botId.value,
                       loaded: loaded,
                       error: error,
                       showHidden: showHidden,
+                      showArchived: showArchived,
+                      onToggleArchived: () =>
+                          setState(() => showArchived = !showArchived),
                       onSelect: _select,
                       onCreateBot: () => unawaited(_createBot()),
                       onSearch: _openSearch,
@@ -3013,6 +3089,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                     ),
                     conversation:
                         _groupPane(single) ??
+                        _archivedPane(single) ??
                         _maybeBotLookScope(
                           wrap: ownLook,
                           key: 'thread-theme-${bot?.botId.value ?? 'none'}',
@@ -3163,6 +3240,29 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           ),
         ),
       ),
+    );
+  }
+
+  /// The archived Bot open read-only, or null when none is.
+  Widget? _archivedPane(bool single) {
+    final botId = archivedOpenId;
+    final bot = botId == null
+        ? null
+        : searchableBots.where((bot) => bot.botId.value == botId).firstOrNull;
+    if (botId == null || bot == null) return null;
+    return ArchivedConversation(
+      key: ValueKey('${widget.userId}:archived:$botId:$_archivedRunId'),
+      api: widget.api,
+      botId: botId,
+      name: _name(bot),
+      characterId: bot.avatar.characterId,
+      primary: bot.avatar.primary,
+      runId: _archivedRunId,
+      phone: single,
+      onBack: single ? _openBack : null,
+      lifecycle: lifecycle,
+      onRestore: () => unawaited(_changeArchived(botId, 'bot/restore')),
+      onDelete: () => unawaited(_changeArchived(botId, 'bot/delete')),
     );
   }
 
@@ -3317,19 +3417,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           RoutineRunsPage(api: widget.api, botId: botId, routineId: routineId),
         );
       } else {
-        _push(
-          ArchivedConversationPage(
-            api: widget.api,
-            bot: SearchBot(
-              id: botId,
-              name: _name(matchedBot),
-              background: matchedBot.avatar.characterId,
-              primary: matchedBot.avatar.primary,
-              archived: true,
-            ),
-            runId: hit.runId,
-          ),
-        );
+        _openArchived(botId, runId: hit.runId);
       }
       return;
     }
@@ -3544,17 +3632,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               icon: Icons.computer_outlined,
               title: 'Your computers',
               page: _machinesPage,
-            ),
-            ProfileSection(
-              id: SettingsIds.profileManageBots,
-              icon: Icons.manage_accounts_outlined,
-              title: 'Manage Bots',
-              page: () => BotRecoveryPage(
-                api: widget.api,
-                store: widget.store,
-                userId: widget.userId,
-                changed: load,
-              ),
             ),
             ProfileSection(
               id: AuditIds.recoveryEntry,

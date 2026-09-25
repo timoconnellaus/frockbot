@@ -526,7 +526,7 @@ void main() {
     expect(find.widgetWithText(AppBar, 'Models'), findsOneWidget);
     expect(find.widgetWithText(AppBar, 'Personal details'), findsNothing);
     expect(menu, findsOneWidget);
-    await tester.tap(identifiedBy(SettingsIds.profileManageBots));
+    await tester.tap(identifiedBy(MachineIds.profileEntry));
     await tester.pumpAndSettle();
     expect(find.widgetWithText(AppBar, 'Models'), findsNothing);
     expect(find.byType(BackButton), findsOneWidget);

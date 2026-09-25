@@ -5,7 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/bot_sessions.dart';
 import 'package:frockbot_native/search/controller.dart';
-import 'package:frockbot_native/search/archived_conversation.dart';
+import 'package:frockbot_native/flock/lifecycle.dart';
+import 'package:frockbot_native/shell/archived_conversation.dart';
 import 'package:frockbot_native/shell/app_shell.dart';
 import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
@@ -37,9 +38,25 @@ class ArchiveHarness {
   final links = ValueNotifier<String?>(null);
   final reads = <String>[];
   final writes = <String>[];
+  var restored = false;
   late final api = SettingsApi(store, (path, body) async {
     if (body != null) writes.add(path);
     reads.add(path);
+    if (path == '/api/bots/archived/lifecycle' && body is Map) {
+      restored = body['type'] == 'bot/restore';
+      return {
+        'schemaVersion': 1,
+        'commandId': body['commandId'],
+        'botId': 'archived',
+        'status': 'applied',
+        'lifecycle': {
+          'schemaVersion': 1,
+          'botId': 'archived',
+          'status': restored ? 'active' : 'deleted',
+          'revision': 2,
+        },
+      };
+    }
     if (path == '/api/bots') {
       return {
         'schemaVersion': 1,
@@ -54,12 +71,13 @@ class ArchiveHarness {
       return {
         'schemaVersion': 1,
         'lifecycles': [
-          {
-            'schemaVersion': 1,
-            'botId': 'archived',
-            'status': 'archived',
-            'revision': 1,
-          },
+          if (!restored)
+            {
+              'schemaVersion': 1,
+              'botId': 'archived',
+              'status': 'archived',
+              'revision': 1,
+            },
         ],
       };
     }
@@ -169,7 +187,8 @@ void main() {
   ) async {
     const cursor = 'run-index:2026-09-01T00:00:00.000Z:old-run';
     final reads = <String>[];
-    final api = SettingsApi(MemoryStore(), (path, body) async {
+    final store = MemoryStore();
+    final api = SettingsApi(store, (path, body) async {
       expect(body, isNull);
       reads.add(path);
       return {
@@ -185,12 +204,14 @@ void main() {
     await tester.pumpWidget(
       MaterialApp(
         theme: FrockTheme.theme(Brightness.dark),
-        home: ArchivedConversationPage(
-          api: api,
-          bot: const SearchBot(
-            id: 'archived',
+        home: Scaffold(
+          body: ArchivedConversation(
+            api: api,
+            botId: 'archived',
             name: 'Archived Bot',
-            archived: true,
+            lifecycle: BotLifecycleCommands(api, store, 'u'),
+            onRestore: () {},
+            onDelete: () {},
           ),
         ),
       ),
@@ -219,8 +240,8 @@ void main() {
       expect(byIdentifier(SearchIds.bot('archived')), findsOneWidget);
       await tester.tap(byIdentifier(SearchIds.bot('archived')));
       await tester.pumpAndSettle();
-      expect(byIdentifier(SearchIds.archivedConversation), findsOneWidget);
-      expect(find.text('Archived · Read-only conversation'), findsOneWidget);
+      expect(byIdentifier(FlockIds.archivedConversation), findsOneWidget);
+      expect(byIdentifier(FlockIds.archivedBar), findsOneWidget);
       expect(byIdentifier(ShellIds.composer), findsNothing);
       expect(harness.sessions.live, 0);
       expect(harness.reads, contains('/api/bots/archived/turns'));
@@ -254,6 +275,59 @@ void main() {
         harness.writes.where((path) => path.contains('archived')),
         isEmpty,
       );
+      await harness.dispose(tester);
+    },
+  );
+
+  testWidgets(
+    'an archived Bot opens read-only from its folded group, and Restore brings it back',
+    (tester) async {
+      final harness = ArchiveHarness();
+      await harness.mount(tester);
+      expect(byIdentifier(ShellIds.sidebarBot('archived')), findsNothing);
+      await tester.tap(byIdentifier(ShellIds.sidebarArchivedToggle));
+      await tester.pumpAndSettle();
+      await tester.tap(byIdentifier(ShellIds.sidebarBot('archived')));
+      await tester.pumpAndSettle();
+
+      // Its conversation, with the bar where the composer would be.
+      expect(byIdentifier(FlockIds.archivedConversation), findsOneWidget);
+      expect(
+        find.text(
+          'Archived Bot is archived. Its conversation is kept, but it won’t '
+          'reply or run its Routines.',
+        ),
+        findsOneWidget,
+      );
+      expect(byIdentifier(ShellIds.composer), findsNothing);
+      expect(harness.sessions.live, 0);
+      expect(harness.reads, contains('/api/bots/archived/turns'));
+
+      // Delete asks first, in the one lifecycle dialog; cancelling sends
+      // nothing.
+      await tester.tap(byIdentifier(FlockIds.archivedDelete));
+      await tester.pumpAndSettle();
+      expect(find.text('Delete Archived Bot?'), findsOneWidget);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(harness.writes, isEmpty);
+
+      await tester.tap(byIdentifier(FlockIds.archivedRestore));
+      await tester.pumpAndSettle();
+      expect(find.text('Restore Archived Bot?'), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, 'Restore Bot'));
+      // A live conversation keeps drawing, so it never settles.
+      for (var frame = 0; frame < 20; frame++) {
+        await tester.pump(const Duration(milliseconds: 100));
+      }
+      expect(harness.writes, ['/api/bots/archived/lifecycle']);
+
+      // Restored, it opens as itself: a conversation with a composer, and no
+      // Archived group left in the list.
+      expect(byIdentifier(FlockIds.archivedConversation), findsNothing);
+      expect(byIdentifier(ShellIds.composer), findsOneWidget);
+      expect(byIdentifier(ShellIds.sidebarArchivedToggle), findsNothing);
+      expect(byIdentifier(ShellIds.sidebarBot('archived')), findsOneWidget);
       await harness.dispose(tester);
     },
   );

@@ -517,7 +517,7 @@ void main() {
         ),
       );
       expect(byIdentifier(GroupIds.row(groupId)), findsNothing);
-      expect(find.text('Show 1 hidden'), findsOneWidget);
+      expect(find.text('Hidden · 1'), findsOneWidget);
     });
   });
 

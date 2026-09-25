@@ -144,7 +144,8 @@ class BotLifecycleCommands extends ChangeNotifier {
       applied = true;
       error = null;
       message = switch (command['type']) {
-        'bot/archive' => 'Bot archived. You can restore it from Archived Bots.',
+        'bot/archive' =>
+          'Bot archived. It’s under Archived, at the foot of your Bots.',
         'bot/restore' => 'Bot restored.',
         _ => 'Bot deleted.',
       };
