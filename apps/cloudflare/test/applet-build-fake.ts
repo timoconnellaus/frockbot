@@ -63,6 +63,22 @@ function sha256Hex(text: string): string {
   return createHash("sha256").update(text, "utf8").digest("hex");
 }
 
+/** The surfaces `plugin.json` declares views for, as a build would export them. */
+function declaredViews(files: PluginBuildSourceFileV1[]): string[] {
+  const descriptor = files.find((file) => file.path === "plugin.json");
+  if (!descriptor) return [];
+  try {
+    const parsed = JSON.parse(descriptor.text) as {
+      views?: Array<{ surfaceId?: string }>;
+    };
+    return (parsed.views ?? []).flatMap((view) =>
+      typeof view.surfaceId === "string" ? [view.surfaceId] : [],
+    );
+  } catch {
+    return [];
+  }
+}
+
 export function createAppletBuildFake(): {
   fetch(request: Request): Promise<Response>;
   requests: FakePluginBuildRequestV1[];
@@ -110,7 +126,13 @@ export function createAppletBuildFake(): {
       }
       const asked = (await request.json()) as FakePluginBuildRequestV1;
       requests.push(asked);
-      return Response.json(built);
+      // A module exports the views its descriptor declares, or the app
+      // refuses the build as disagreeing with plugin.json; answering with
+      // them is what lets a suite publish a Plugin that has a page.
+      return Response.json({
+        ...built,
+        manifest: { ...built.manifest, views: declaredViews(asked.files) },
+      });
     },
   };
 }
