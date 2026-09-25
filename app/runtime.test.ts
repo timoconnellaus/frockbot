@@ -263,6 +263,7 @@ describe("foundation application", () => {
       rebuildSearchIndex: () =>
         Promise.reject(new Error("not used while composing")),
       readAudit: () => Promise.reject(new Error("not used while composing")),
+      readActivity: () => Promise.reject(new Error("not used while composing")),
       rebuildAuditIndex: () =>
         Promise.reject(new Error("not used while composing")),
       listBotUnread: () =>

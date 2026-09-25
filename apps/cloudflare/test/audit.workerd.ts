@@ -17,6 +17,7 @@ import { env } from "cloudflare:workers";
 import { evictDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 import {
+  decodeAuditActivityPageV1,
   decodeClientAuditPageV1,
   type AuditEntryV1,
   type AuditRebuildReceiptV1,
@@ -241,6 +242,76 @@ describe("the audit table in Workerd", () => {
     } while (before !== undefined && pages < 10);
     expect(pages).toBe(3);
     expect(seen.size).toBe(120);
+  });
+
+  test("Activity groups a Turn's effects on real SQL and pages by Turn", async () => {
+    const userId = `audit-user-${crypto.randomUUID()}`;
+    const botId = crypto.randomUUID();
+    await provisionBot({ userId, botId });
+    // Sixty Turns of three commands and an approved email each.
+    const entries = Array.from({ length: 60 }, (_, turn) =>
+      Array.from({ length: 4 }, (_, step) => ({
+        schemaVersion: 1,
+        botId,
+        runId: `run-${turn}`,
+        occurrenceId: `tool:${turn + 1}:${step + 1}:0`,
+        turn: turn + 1,
+        step: step + 1,
+        ordinal: 0,
+        effectId: `tool:${turn + 1}:${step + 1}:0`,
+        at: new Date(Date.now() - turn * 60_000).toISOString(),
+        kind: step === 3 ? "email" : "shell",
+        target: step === 3 ? "email" : "computer",
+        toolName: step === 3 ? "email/email_send" : "computer_exec",
+        argumentDigest: "a".repeat(64),
+        preview: step === 3 ? "Sent an email the person approved" : "ls",
+        outcome: "ok",
+      })),
+    ).flat();
+    await userStub(userId).indexAuditEntries({
+      schemaVersion: 1,
+      userId,
+      botId,
+      entries,
+    });
+    const rpc = userStub(userId) as unknown as {
+      readAuditActivity(input: unknown): Promise<unknown>;
+    };
+    const commands = new Map<string, number>();
+    let approved = 0;
+    let before: string | undefined;
+    let pages = 0;
+    do {
+      const page = decodeAuditActivityPageV1(
+        rpcJsonSnapshotV1(
+          await rpc.readAuditActivity({
+            schemaVersion: 1,
+            userId,
+            ...(before === undefined ? {} : { before }),
+          }),
+        ),
+      );
+      for (const group of page.groups) {
+        if (group.kind === "shell") commands.set(group.runId, group.count);
+        else approved += group.approved;
+      }
+      before = page.nextCursor;
+      pages += 1;
+    } while (before !== undefined && pages < 10);
+    expect(pages).toBe(3);
+    expect(commands.size).toBe(60);
+    expect([...commands.values()].every((count) => count === 3)).toBe(true);
+    expect(approved).toBe(60);
+    const devices = decodeAuditActivityPageV1(
+      rpcJsonSnapshotV1(
+        await rpc.readAuditActivity({
+          schemaVersion: 1,
+          userId,
+          filter: "devices",
+        }),
+      ),
+    );
+    expect(devices.groups).toEqual([]);
   });
 
   test("pages a filtered answer over two thousand rows on real SQL", async () => {

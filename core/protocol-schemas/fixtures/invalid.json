@@ -1797,6 +1797,34 @@
     }
   },
   {
+    "name": "ActivityRow rejects a row with no words",
+    "schema": "ActivityRow",
+    "value": {
+      "botId": "alpha",
+      "botName": "Scout",
+      "at": "2026-09-05T10:00:00.000Z",
+      "text": "",
+      "place": "Computer"
+    }
+  },
+  {
+    "name": "ActivityPage rejects a local time",
+    "schema": "ActivityPage",
+    "value": {
+      "schemaVersion": 1,
+      "rows": [
+        {
+          "botId": "alpha",
+          "botName": "Scout",
+          "at": "2026-09-05 10:00",
+          "text": "ran a command on its Computer",
+          "place": "Computer"
+        }
+      ],
+      "indexState": "ready"
+    }
+  },
+  {
     "name": "SetupHistory rejects unknown field",
     "schema": "SetupHistory",
     "value": {

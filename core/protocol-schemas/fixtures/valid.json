@@ -2030,6 +2030,47 @@
     }
   },
   {
+    "name": "ActivityRow valid",
+    "schema": "ActivityRow",
+    "value": {
+      "botId": "alpha",
+      "botName": "Scout",
+      "at": "2026-09-05T10:00:00.000Z",
+      "text": "sent an email",
+      "place": "Email",
+      "approved": true,
+      "runId": "run-1"
+    }
+  },
+  {
+    "name": "ActivityPage with a quiet row, a device use and a cursor",
+    "schema": "ActivityPage",
+    "value": {
+      "schemaVersion": 1,
+      "rows": [
+        {
+          "botId": "alpha",
+          "botName": "Scout",
+          "at": "2026-09-05T10:00:00.000Z",
+          "text": "made 12 calls to Gmail",
+          "place": "Gmail",
+          "quiet": true,
+          "note": "1 failed",
+          "runId": "run-1"
+        },
+        {
+          "botId": "alpha",
+          "botName": "Scout",
+          "at": "2026-09-05T09:00:00.000Z",
+          "text": "used the microphone for 2 min, through Tuner",
+          "place": "Android"
+        }
+      ],
+      "nextCursor": "MjAyNi0wOS0wNVQwOTowMDowMC4wMDBa",
+      "indexState": "truncated"
+    }
+  },
+  {
     "name": "SetupHistory valid",
     "schema": "SetupHistory",
     "value": {

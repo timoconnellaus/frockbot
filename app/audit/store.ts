@@ -17,11 +17,15 @@
 // {@link AUDIT_MAX_AGE_MS_V1}. Enforcing a bound by discarding rather than
 // refusing means the loss has to be observable, so it sets `audit-truncated`,
 // which the UI shows and a rebuild clears.
+import { EMAIL_SEND_TOOL } from "./classify.js";
 import {
+  AUDIT_ACTIVITY_MAX_ROWS_V1,
   AUDIT_MAX_AGE_MS_V1,
   AUDIT_MAX_ROWS_V1,
+  type AuditActivityGroupV1,
   type AuditEntryV1,
   type AuditIndexStateV1,
+  type AuditKindV1,
 } from "./shared.js";
 
 /** Exactly the column types SQLite storage returns. */
@@ -119,6 +123,30 @@ interface AuditRow extends Record<string, AuditSqlValueV1> {
   exit_code: number | null;
   duration_ms: number | null;
   bytes_out: number | null;
+}
+
+/**
+ * The one tool whose success means a person approved it: the email Plugin's
+ * send refuses unless the Approval it names was recorded and approved
+ * (`app/isolates/bot.ts`), so an `ok` row is that Approval having been given.
+ */
+const APPROVED_TOOL = EMAIL_SEND_TOOL;
+
+interface ActivityRow extends Record<string, AuditSqlValueV1> {
+  bot_id: string;
+  run_id: string;
+  kind: string;
+  target: string;
+  n: number;
+  last_at: string;
+  preview: string;
+  tools: string | null;
+  failed: number;
+  refused: number;
+  interrupted: number;
+  unknown: number;
+  approved: number;
+  duration_ms: number | null;
 }
 
 function fromRow(row: AuditRow): AuditEntryV1 {
@@ -444,6 +472,120 @@ export class AuditStoreV1 {
   }
 
   /**
+   * One page of Activity: every entry one Turn made of one kind in one place,
+   * aggregated into one group, newest group first.
+   *
+   * It pages by group rather than by entry, so a Turn is never split across
+   * "Show earlier": an entry page cut a six-command Turn into a row at the foot
+   * of one page and another at the head of the next. A Turn's entries carry
+   * their own event times and interleave with other Bots' Turns, so the groups
+   * are made in SQL, not by walking adjacent rows. The grouping reads every
+   * matching row per page; the table is bounded at {@link AUDIT_MAX_ROWS_V1}.
+   */
+  activity(request: {
+    botId?: string;
+    kinds?: readonly string[];
+    before?: string;
+    limit?: number;
+  }): { groups: AuditActivityGroupV1[]; nextCursor?: string } {
+    this.open();
+    this.evict();
+    const limit = Math.min(
+      Math.max(request.limit ?? 50, 1),
+      AUDIT_ACTIVITY_MAX_ROWS_V1,
+    );
+    const after = decodeAuditActivityCursorV1(request.before);
+    const clauses: string[] = [];
+    const bindings: unknown[] = [];
+    if (request.botId) {
+      clauses.push("bot_id = ?");
+      bindings.push(request.botId);
+    }
+    if (request.kinds) {
+      if (request.kinds.length === 0) return { groups: [] };
+      clauses.push(`kind IN (${request.kinds.map(() => "?").join(", ")})`);
+      bindings.push(...request.kinds);
+    }
+    const where = clauses.length > 0 ? ` WHERE ${clauses.join(" AND ")}` : "";
+    // Strictly after the cursor group, in the order spelled out below.
+    const page = after
+      ? " WHERE (last_at < ? OR (last_at = ? AND (bot_id > ?" +
+        " OR (bot_id = ? AND (run_id > ?" +
+        " OR (run_id = ? AND (kind > ? OR (kind = ? AND target > ?))))))))"
+      : "";
+    const pageBindings = after
+      ? [
+          after.at,
+          after.at,
+          after.botId,
+          after.botId,
+          after.runId,
+          after.runId,
+          after.kind,
+          after.kind,
+          after.target,
+        ]
+      : [];
+    const rows = this.sql
+      .exec<ActivityRow>(
+        "SELECT * FROM (SELECT bot_id, run_id, kind, target, " +
+          "count(*) AS n, max(at) AS last_at, max(preview) AS preview, " +
+          "group_concat(DISTINCT tool_name) AS tools, " +
+          "sum(outcome = 'error') AS failed, " +
+          "sum(outcome = 'refused') AS refused, " +
+          "sum(outcome = 'interrupted') AS interrupted, " +
+          "sum(outcome = 'unknown') AS unknown, " +
+          "sum(tool_name = ? AND outcome = 'ok') AS approved, " +
+          "sum(duration_ms) AS duration_ms " +
+          `FROM ${TABLE}${where} GROUP BY bot_id, run_id, kind, target)` +
+          `${page} ORDER BY last_at DESC, bot_id ASC, run_id ASC, kind ASC, target ASC LIMIT ?`,
+        APPROVED_TOOL,
+        ...bindings,
+        ...pageBindings,
+        limit + 1,
+      )
+      .toArray();
+    const kept = rows.slice(0, limit);
+    const last = kept.at(-1);
+    return {
+      groups: kept.map((row) => ({
+        botId: String(row.bot_id),
+        runId: String(row.run_id),
+        kind: String(row.kind) as AuditKindV1,
+        target: String(row.target),
+        count: Number(row.n),
+        at: String(row.last_at),
+        preview: String(row.preview),
+        // A tool name with a comma in it reads as two names that match
+        // nothing, which draws the row as a change: the safe direction.
+        toolNames: String(row.tools ?? "")
+          .split(",")
+          .filter((name) => name.length > 0)
+          .slice(0, 64),
+        failed: Number(row.failed),
+        refused: Number(row.refused),
+        interrupted: Number(row.interrupted),
+        unknown: Number(row.unknown),
+        approved: Number(row.approved),
+        ...(row.duration_ms === null
+          ? {}
+          : { durationMs: Number(row.duration_ms) }),
+      })),
+      ...(rows.length > limit && last
+        ? {
+            nextCursor: encodeAuditActivityCursorV1({
+              at: String(last.last_at),
+              botId: String(last.bot_id),
+              runId: String(last.run_id),
+              kind: String(last.kind),
+              target: String(last.target),
+            }),
+          }
+        : {}),
+    };
+  }
+
+  /**
    * Discards the table and re-projects it from the Bots' own stored runs.
    *
    * This is the correctness story for the whole Package: the table is
@@ -557,5 +699,51 @@ export function decodeAuditCursorV1(
     botId: fields[1]!,
     runId: fields[2]!,
     occurrenceId: fields[3]!,
+  };
+}
+
+/** The group an Activity page cursor addresses. */
+export interface AuditActivityCursorV1 {
+  at: string;
+  botId: string;
+  runId: string;
+  kind: string;
+  target: string;
+}
+
+/** Five fields where an entry cursor has four, so neither reads as the other. */
+export function encodeAuditActivityCursorV1(
+  cursor: AuditActivityCursorV1,
+): string {
+  return btoa(
+    [cursor.at, cursor.botId, cursor.runId, cursor.kind, cursor.target].join(
+      CURSOR_SEPARATOR,
+    ),
+  );
+}
+
+export function decodeAuditActivityCursorV1(
+  cursor: string | undefined,
+): AuditActivityCursorV1 | undefined {
+  if (cursor === undefined) return undefined;
+  let decoded: string;
+  try {
+    decoded = atob(cursor);
+  } catch {
+    throw new Error("activity cursor is invalid");
+  }
+  const fields = decoded.split(CURSOR_SEPARATOR);
+  if (
+    fields.length !== 5 ||
+    fields.some((field) => field.length > CURSOR_MAX_FIELD)
+  ) {
+    throw new Error("activity cursor is invalid");
+  }
+  return {
+    at: fields[0]!,
+    botId: fields[1]!,
+    runId: fields[2]!,
+    kind: fields[3]!,
+    target: fields[4]!,
   };
 }

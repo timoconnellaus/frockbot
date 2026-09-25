@@ -595,9 +595,9 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
   (`lib/routines/runs.dart`) is one Routine's firings, and one firing opens on
   the Work view. `RoutineInboxController` reads the completion inbox once for
   the recent runs the Bot page lists.
-- `AuditPage` — `lib/audit/page.dart`: every effect a Bot performed, and each
-  use of the microphone by a Plugin's page, filtered by kind, with an audited
-  effect's Turn opening on the Work view
+- `AuditPage` — `lib/audit/page.dart`: Activity, each Turn's effects and each
+  use of the microphone by a Plugin's page, narrowed by a Bot picker and four
+  filters, with a row's Turn opening on the Work view
 - `WhatsNewPage` — `lib/whats_new/page.dart`: the curated list of what
   production shipped, from `GET /api/whats-new`. Reached from the megaphone
   beside the profile in the sidebar, which wears an unread mark; it never
@@ -762,8 +762,8 @@ action input that carries them to the credential route, after which
 `ViewController` drops them. Nothing about a credential is ever in a document
 the server sent.
 
-**Routines and Audit, the same way again.** Two more projections in that
-family, both reached with `?as=document`:
+**Routines, the same way again.** One more projection in that family, reached
+with `?as=document`:
 
 - `app/routines/routines-document.ts` over a `RoutinesFrame`
   (`GET /api/bots/:botId/routines`, the one route in that group that takes a
@@ -776,20 +776,29 @@ family, both reached with `?as=document`:
   no route owns, which is a completion's run log and the detail a row opens.
   Conversation authors a Routine; the list is not a form
   ([ADR 0033](adr/0033-conversation-authored-routines.md)).
-- `app/audit/audit-document.ts` over an `AuditFrame` (`GET /api/audit`). Four
-  kinds: the filter and the page, which the host owns because the host owns
-  the read; the rebuild command; and opening an audited effect's Turn on the
-  Work view. The projection infers nothing — an effect whose outcome the
-  durable log does not know is drawn as "Outcome unknown" in the same place a
-  success would be.
 
-Neither frame carries a revision the way `SettingsFrame` does, and neither
-command fences on one: a Routine is its own durable record, so an unrelated
-edit must not make a Routine write conflict, and an audit page is a projection
-of facts the Bots already hold. Each projection derives a revision from its own
-bytes instead — FNV-1a over what the document says — so `ViewSurfacePage`
+The frame carries no revision the way `SettingsFrame` does, and no command
+fences on one: a Routine is its own durable record, so an unrelated edit must
+not make a Routine write conflict. The projection derives a revision from its
+own bytes instead — FNV-1a over what the document says — so `ViewSurfacePage`
 adopts a fresh `ViewController` exactly when what it is showing has changed and
 keeps the one it has when nothing did.
+
+**Activity is not a `ViewDocument`.** The audit table is read as the Activity
+page (`GET /api/audit?as=activity`, the `ActivityPage` wire schema): one row
+per Turn's effects of one kind in one place, grouped in SQL by the User Durable
+Object (`AuditStoreV1.activity`) and paged by group, so "Show earlier" never
+splits a Turn. `app/audit/activity.ts` writes each row's sentence, its place
+tag, whether it only read, whether an Approval authorized it, and any outcome
+other than success — "Outcome unknown" included, never dropped. The page needs
+avatars, tags, muted rows and days in the person's own time zone, which the
+plugin view vocabulary does not carry and should not grow for one first-party
+page; so the host draws typed rows and does only what the server cannot, which
+is put each row under its local day. Four filters are unions of kinds
+(`AUDIT_ACTIVITY_FILTERS_V1`); the table has no read-versus-write field, so
+none is a judgement about the effect. `POST /api/audit/rebuild` has no control
+in the app: it re-projects the table after the projection changes and clears a
+truncation marker, acting as the account.
 
 The last list `ViewDocument` for Routines, Plugins, Machines and Settings is
 kept the way a conversation page is (`lib/client/document_cache.dart`):
@@ -1106,7 +1115,7 @@ The selected tab is a Session pointer on the Bot Durable Object (`core/durable/p
 
 **A panel may be the Plugin's own page** ([ADR 0036](adr/0036-plugin-html-surfaces.md)). A `conversation.panel` view that names `page` returns state instead of a tree. `plugin_check` and `plugin_publish` refuse a named page the source lacks; publish injects the bridge (`PLUGIN_PAGE_HELPER_JS_V1`, `core/contracts/plugin-page.ts`) first in `<head>`, stores the bytes under `plugin-pages/<sha256>.html` in the artifact bucket, and records `pages` on the Composition member, so the generation hash covers them. The panel read answers `page: {url, state}`, and the gateway serves the page anonymously at that path on the app origin (`apps/cloudflare/src/plugin-page-route.ts`) under CSP `sandbox allow-scripts` with nothing to load or connect to, so it never runs as the app. The app document frames `/plugin-pages/` of its own origin and the Computer viewer, nothing else. `PluginPageFrame` (`apps/native/lib/panels/plugin_page.dart`) answers the page's `hello` with its state and theme tokens, runs the Plugin's own tools it calls through the `plugin-tool` command, and posts each new state after a read, over the host frame's `onMessage` and `outbox`. On a native client the frame is `HostFrame(keepAlive: true)`: up to two loaded pages stay kept under `plugin-page:<bot>:<plugin>:<surface>:<url>`, so a panel that comes back reattaches the same document and is greeted again rather than reloaded, and a page nobody shows hears nothing. The web iframe keeps nothing. Until the page is greeted, and for `pluginPageRevealDelayV1` after, the host's surface colour covers it.
 
-**A page may listen.** A descriptor with the `device` grant and `"device": {"abilities": ["microphone"]}` — valid only beside a page view — has its approval card say the page can use the microphone, and the panel read answers the page's `abilities`. The page asks with `frockbot.openMicrophone`; `PluginPageFrame` opens nothing the answer does not name, and otherwise borrows the shell's one capture through `ShellPageMicrophone` (`apps/native/lib/panels/page_microphone.dart`) at 16 kHz in the unprocessed `instrument` profile (Android's recognition source, no echo cancel, noise suppression or gain). A page is the weakest `MicOwnership` owner: it gets the microphone only when nobody holds it, and dictation or a call takes it back. Frames go to the page as base64 PCM16 `audio` messages under a host-drawn "… is using the microphone" bar with Stop; leaving the panel, the app going to the background, or Stop closes it and tells the page why. When a use ends, however it ended, the client reports it once to `POST /api/bots/:bot/panels/device-use`, keyed by a use id it minted when the microphone opened. The Bot records it only for a page of a Plugin in its Composition that declares the ability, keeps the row in its own bounded `audit:device-uses` record — no run holds it, and a rebuild must reproduce it, so a rebuild's first page from the Bot is those rows — and queues it through the audit outbox like any other. The row is a `device` kind with no Turn (`turn`, `step` and `ordinal` are 0, and it offers no "View activity details"), a `device:<kind>` target, the Plugin's name in its preview and how long the use lasted.
+**A page may listen.** A descriptor with the `device` grant and `"device": {"abilities": ["microphone"]}` — valid only beside a page view — has its approval card say the page can use the microphone, and the panel read answers the page's `abilities`. The page asks with `frockbot.openMicrophone`; `PluginPageFrame` opens nothing the answer does not name, and otherwise borrows the shell's one capture through `ShellPageMicrophone` (`apps/native/lib/panels/page_microphone.dart`) at 16 kHz in the unprocessed `instrument` profile (Android's recognition source, no echo cancel, noise suppression or gain). A page is the weakest `MicOwnership` owner: it gets the microphone only when nobody holds it, and dictation or a call takes it back. Frames go to the page as base64 PCM16 `audio` messages under a host-drawn "… is using the microphone" bar with Stop; leaving the panel, the app going to the background, or Stop closes it and tells the page why. When a use ends, however it ended, the client reports it once to `POST /api/bots/:bot/panels/device-use`, keyed by a use id it minted when the microphone opened. The Bot records it only for a page of a Plugin in its Composition that declares the ability, keeps the row in its own bounded `audit:device-uses` record — no run holds it, and a rebuild must reproduce it, so a rebuild's first page from the Bot is those rows — and queues it through the audit outbox like any other. The row is a `device` kind with no Turn (`turn`, `step` and `ordinal` are 0, so its Activity row opens no Turn), a `device:<kind>` target, the Plugin's name in its preview and how long the use lasted.
 
 **A page's failures reach its Bot.** The bridge forwards the page's `error`, `unhandledrejection` and `console.error` (still calling the original), and `frockbot.log(text)` sends a reading the page chooses to report — at most `PLUGIN_PAGE_REPORTS_PER_MINUTE_V1` a minute and `PLUGIN_PAGE_REPORT_TEXT_MAX_V1` characters each (`core/contracts/plugin-page.ts`), and `PluginPageFrame` enforces the same cap because a page can post without the helper. Nothing is posted back to the page. The client forwards each report best-effort to `POST /api/bots/:bot/panels/page-report`; the Bot keeps it only for a `conversation.panel` page of a Plugin in its Composition, switched on or not, stamped with its own time and the member's version, and holds the newest 50 per Plugin in its own storage (`app/plugins/page-reports.ts`). It is a debugging aid, so there is no outbox and no audit row. The Bot reads them with `plugin_page_reports`, which marks reports from an older version.
 

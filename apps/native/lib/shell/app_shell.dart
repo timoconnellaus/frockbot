@@ -3646,11 +3646,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             ProfileSection(
               id: AuditIds.recoveryEntry,
               icon: Icons.history_rounded,
-              title: 'Activity & history',
+              title: 'Activity',
               page: () => AuditPage(
                 api: widget.api,
                 store: widget.store,
                 userId: widget.userId,
+                nameOf: _name,
               ),
             ),
           ]),

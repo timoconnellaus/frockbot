@@ -121,7 +121,7 @@ export function routineMomentV1(iso: string, timeZone: string): string {
 }
 
 /** The house order's own month names, so no runtime's ICU decides them. */
-export const MONTHS = [
+const MONTHS = [
   "Jan",
   "Feb",
   "Mar",

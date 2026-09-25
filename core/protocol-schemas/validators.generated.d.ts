@@ -168,6 +168,8 @@ declare const validators: {
     value: unknown,
   ): value is ProtocolTypes["BotLifecycleDirectory"];
   isAuditPage(value: unknown): value is ProtocolTypes["AuditPage"];
+  isActivityRow(value: unknown): value is ProtocolTypes["ActivityRow"];
+  isActivityPage(value: unknown): value is ProtocolTypes["ActivityPage"];
   isSetupHistory(value: unknown): value is ProtocolTypes["SetupHistory"];
   isMessageCursor(value: unknown): value is ProtocolTypes["MessageCursor"];
   isGroupId(value: unknown): value is ProtocolTypes["GroupId"];
