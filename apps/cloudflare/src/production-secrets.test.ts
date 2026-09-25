@@ -79,14 +79,12 @@ describe("the production secrets manifest", () => {
     expect(named.length).toBe(new Set(named).size);
   });
 
-  test("carries JEV_API_KEY as optional, under the production GitHub secret name", () => {
-    // The hosted chooser reads this name only. The loop is not wired yet, so
-    // a missing key degrades rather than failing the deploy.
-    expect(
-      OPTIONAL_PRODUCTION_SECRETS_V1.map((secret) => secret.name),
-    ).toContain("JEV_API_KEY");
+  test("requires JEV_API_KEY: every Turn is supervised", () => {
     expect(
       REQUIRED_PRODUCTION_SECRETS_V1.map((secret) => secret.name),
+    ).toContain("JEV_API_KEY");
+    expect(
+      OPTIONAL_PRODUCTION_SECRETS_V1.map((secret) => secret.name),
     ).not.toContain("JEV_API_KEY");
   });
 

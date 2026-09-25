@@ -8,21 +8,24 @@ import {
 } from "@typesafe-ai/sdk";
 import type {
   ProposedCallV1,
+  SendDecisionV1,
+  SendReviewEvidenceV1,
   StepDecision,
   StepProposalEvidence,
   SupervisionJudgmentV1,
   TurnInputOriginV1,
 } from "@frockbot/core/contracts";
 
-// The whole-response Jev questions, and every threshold and veto code applies
-// to their answers. Jev judges; `composeStepDecisionV1` decides. Tuning is a
-// change here plus `bun run eval:whole-response`; a threshold never moves to
-// another wording or Jev version without that rerun.
+// The response and send Jev questions, and every threshold and veto code
+// applies to their answers. Jev judges; `composeStepDecisionV1` and
+// `composeSendDecisionV1` decide. Tuning is a change here plus
+// `bun run eval:response-review`; a threshold never moves to another wording
+// or Jev version without that rerun.
 
 /** Pinned because the suite's expected answers were labeled against it. */
 export const RESPONSE_REVIEW_MODEL_V1 = "jev-1.13.0";
 
-/** Off: one response is one call, and a lost answer fails the Turn. */
+/** Off for the evals: one case is one call, and the runner owns attempts. */
 export const RESPONSE_REVIEW_RETRY_V1 = { maxRetries: 0 } as const;
 
 /** Per attempt, which with retries off is the whole call. */
@@ -33,7 +36,7 @@ export const RESPONSE_REVIEW_RUN_TIMEOUT_MS_V1 = 600_000;
 
 /**
  * The Noul at or below which a message is one the person would not miss.
- * Both this and a redundant `messageKind` must agree before text is withheld.
+ * Both this and a redundant `messageKind` must agree before a send is withheld.
  */
 export const RESPONSE_REVIEW_NEEDED_NO_V1 = 0.3;
 
@@ -58,7 +61,7 @@ export const RESPONSE_REVIEW_EVIDENCE_CHARS_V1 = 600;
 /**
  * What Jev sees about one response. Narrower than `StepProposalEvidence`: the
  * policy and authorization fields bear on per-call approval, not on whether
- * the words are needed or the work is the work asked for.
+ * the work is the work asked for.
  */
 export interface ResponseReviewEvidenceV1 {
   readonly request: {
@@ -70,8 +73,6 @@ export interface ResponseReviewEvidenceV1 {
     readonly speaker: "user" | "bot";
     readonly text: string;
   }[];
-  /** Messages and cards the person has already been shown this Turn. */
-  readonly shownThisTurn: readonly string[];
   /** What the Bot proposes next: its words, and every other call. */
   readonly proposal: {
     readonly message: string;
@@ -88,19 +89,24 @@ function clip(text: string): string {
     : `${text.slice(0, RESPONSE_REVIEW_EVIDENCE_CHARS_V1)}…`;
 }
 
+function conversationEvidence(
+  conversation: readonly { speaker: "user" | "bot"; text: string }[],
+): { speaker: "user" | "bot"; text: string }[] {
+  return conversation.map((message) => ({
+    speaker: message.speaker,
+    text: clip(message.text),
+  }));
+}
+
 /** The judgment evidence of one response, each piece bounded. */
 export function responseReviewEvidenceV1(
   evidence: StepProposalEvidence,
 ): ResponseReviewEvidenceV1 {
   return {
     request: { text: clip(evidence.objective), origin: evidence.origin },
-    conversation: evidence.conversation.map((message) => ({
-      speaker: message.speaker,
-      text: clip(message.text),
-    })),
-    shownThisTurn: evidence.shown.map(clip),
+    conversation: conversationEvidence(evidence.conversation),
     proposal: {
-      message: evidence.text,
+      message: clip(evidence.text),
       calls: evidence.calls.map((call) => ({
         tool: call.tool,
         arguments: clip(JSON.stringify(call.arguments)),
@@ -122,7 +128,6 @@ export function responseReviewStateV1(
       speaker: message.speaker,
       text: message.text,
     })),
-    shownThisTurn: [...evidence.shownThisTurn],
     proposal: {
       message: evidence.proposal.message,
       calls: evidence.proposal.calls.map((call) => ({
@@ -134,9 +139,8 @@ export function responseReviewStateV1(
 }
 
 /**
- * Three narrow judgments. Two of them are about the same message on purpose:
- * text is withheld only when "would they miss it" and "what does it do" agree.
- * Each label set lists the safe reading first.
+ * One judgment per response: is it working on what was asked. Whether each
+ * message is needed is asked per send, once earlier results are in.
  */
 export const responseReviewQuestionsV1 = {
   alignment: choice(
@@ -159,42 +163,6 @@ export const responseReviewQuestionsV1 = {
       wrong_objective: "The calls pursue work the person did not ask for",
     },
   ),
-  messageNeeded: noul(
-    {
-      target: "`proposal.message`, the words the person would read next",
-      decision: "Would the person miss this message if it were never sent?",
-      requirements: [
-        "It gives them something they cannot already see in `shownThisTurn`, and that none of `proposal.calls` will show them",
-        "Or it answers their question, asks them something, asks their permission, or explains a failure, a limit or a refusal",
-      ],
-    },
-    {
-      true: "It tells them something they need",
-      false:
-        "It only restates, narrates or acknowledges what they can already see, or says nothing at all",
-    },
-  ),
-  messageKind: choice(
-    {
-      target: "`proposal.message`",
-      decision: "What does this message mainly do for the person?",
-      rules: [
-        "Judge it against `shownThisTurn` and what `proposal.calls` do.",
-        "When more than one fits, pick the one listed first.",
-      ],
-    },
-    {
-      answer: "Answers what they asked, or gives them what they asked for",
-      question: "Asks them something, or asks their permission",
-      problem:
-        "Explains a failure, a limit or a refusal, or something they must do",
-      news: "Tells them something new they cannot see yet: progress, a finding, or what comes next",
-      restates_shown:
-        "Says again what a card, receipt or message in `shownThisTurn` already shows, or what one of `proposal.calls` will show",
-      empty:
-        "Thanks, pleasantries, or an offer to help further, adding nothing",
-    },
-  ),
 } as const;
 
 export type ResponseReviewAnswersV1 = SystemOneResult<
@@ -203,15 +171,29 @@ export type ResponseReviewAnswersV1 = SystemOneResult<
 
 export type ResponseReviewAlignmentV1 =
   ResponseReviewAnswersV1["alignment"]["choice"];
-export type ResponseReviewMessageKindV1 =
-  ResponseReviewAnswersV1["messageKind"]["choice"];
 
-export interface ResponseReviewV1 {
+export interface JevReviewV1<Answers> {
   readonly model: string;
   readonly usage: Usage;
   readonly requestId: string | undefined;
-  readonly answers: ResponseReviewAnswersV1;
+  readonly answers: Answers;
 }
+
+export type ResponseReviewV1 = JevReviewV1<ResponseReviewAnswersV1>;
+
+/**
+ * How a review call runs: the evals ask once per case; a Turn retries once,
+ * then fails, because a Turn's review has no answer to fall back on.
+ */
+export interface JevCallBudgetV1 {
+  readonly retry: { readonly maxRetries: number };
+  readonly timeout: number;
+}
+
+export const RESPONSE_REVIEW_EVAL_BUDGET_V1: JevCallBudgetV1 = {
+  retry: RESPONSE_REVIEW_RETRY_V1,
+  timeout: RESPONSE_REVIEW_ATTEMPT_TIMEOUT_MS_V1,
+};
 
 /**
  * One bounded call. A service failure propagates as the SDK's error, never as
@@ -220,8 +202,12 @@ export interface ResponseReviewV1 {
 export async function reviewResponseV1(
   client: TypeSafeClient,
   evidence: ResponseReviewEvidenceV1,
-  options: { readonly signal?: AbortSignal } = {},
+  options: {
+    readonly signal?: AbortSignal;
+    readonly budget?: JevCallBudgetV1;
+  } = {},
 ): Promise<ResponseReviewV1> {
+  const budget = options.budget ?? RESPONSE_REVIEW_EVAL_BUDGET_V1;
   const { data, requestId } = await client
     .systemOne(
       {
@@ -229,11 +215,7 @@ export async function reviewResponseV1(
         questions: responseReviewQuestionsV1,
         model: RESPONSE_REVIEW_MODEL_V1,
       },
-      {
-        retry: RESPONSE_REVIEW_RETRY_V1,
-        timeout: RESPONSE_REVIEW_ATTEMPT_TIMEOUT_MS_V1,
-        signal: options.signal,
-      },
+      { retry: budget.retry, timeout: budget.timeout, signal: options.signal },
     )
     .withResponse();
   return {
@@ -242,34 +224,6 @@ export async function reviewResponseV1(
     requestId,
     answers: data.answers,
   };
-}
-
-const REDUNDANT_KINDS_V1: readonly ResponseReviewMessageKindV1[] = [
-  "restates_shown",
-  "empty",
-];
-
-/**
- * Why the words are released before Jev's answer is read, or `undefined` when
- * they may be judged. Fail safe on meaning: a question or a permission ask, a
- * long message, and a Turn's only word are never withheld, whatever Jev says.
- */
-export function textVetoV1(
-  evidence: ResponseReviewEvidenceV1,
-): string | undefined {
-  const message = evidence.proposal.message.trim();
-  if (message.length === 0) return "no message";
-  if (message.includes("?")) return "asks the person something";
-  if (message.length > RESPONSE_REVIEW_WITHHOLD_MAX_CHARS_V1) {
-    return "too long to be only narration";
-  }
-  if (
-    evidence.shownThisTurn.length === 0 &&
-    evidence.proposal.calls.length === 0
-  ) {
-    return "the Turn's only word";
-  }
-  return undefined;
 }
 
 function probability(
@@ -289,34 +243,25 @@ export function responseReviewJudgmentsV1(
       answer: answers.alignment.choice,
       value: probability(answers.alignment, answers.alignment.choice),
     },
-    { question: "messageNeeded", value: answers.messageNeeded.noul },
-    {
-      question: "messageKind",
-      answer: answers.messageKind.choice,
-      value: probability(answers.messageKind, answers.messageKind.choice),
-    },
   ];
 }
 
 /**
- * What code makes of the answers.
+ * What code makes of the answer.
  *
  * - A confident `wrong_objective` rejects every call except the ones that
  *   speak — a question, a card, an answer to a caller — and withholds the
- *   text: the next step is told why and goes back to the request.
- * - A confident `off_topic_message` withholds the text and lets the calls run.
- * - Otherwise the text is withheld as redundant only when no veto applies,
- *   Jev says the person would not miss it, and says what it does is restate
- *   or pad.
+ *   response's text sends: the next step is told why and goes back to the
+ *   request.
+ * - A confident `off_topic_message` withholds the text sends and lets the
+ *   calls run.
  */
 export function composeStepDecisionV1(input: {
   readonly answers: ResponseReviewAnswersV1;
-  readonly evidence: ResponseReviewEvidenceV1;
   readonly calls: readonly ProposedCallV1[];
   readonly model?: string;
 }): StepDecision {
-  const { answers, evidence } = input;
-  const veto = textVetoV1(evidence);
+  const { answers } = input;
   const alignmentLabel = answers.alignment.choice;
   const alignmentSure =
     probability(answers.alignment, alignmentLabel) >=
@@ -324,25 +269,15 @@ export function composeStepDecisionV1(input: {
   const responseAlignment =
     alignmentSure && alignmentLabel === "wrong_objective"
       ? ("wrong-objective" as const)
-      : alignmentSure && alignmentLabel === "off_topic_message" && !veto
+      : alignmentSure && alignmentLabel === "off_topic_message"
         ? ("repair" as const)
         : ("on-task" as const);
-  const redundant =
-    !veto &&
-    answers.messageNeeded.noul <= RESPONSE_REVIEW_NEEDED_NO_V1 &&
-    REDUNDANT_KINDS_V1.includes(answers.messageKind.choice) &&
-    probability(answers.messageKind, answers.messageKind.choice) >=
-      RESPONSE_REVIEW_REDUNDANT_KIND_MIN_V1;
-  const textReason =
-    responseAlignment !== "on-task" && !veto
-      ? ("off_task" as const)
-      : redundant
-        ? ("redundant_text" as const)
-        : undefined;
   const reject = responseAlignment === "wrong-objective";
   return {
-    text: textReason ? "withhold" : "release",
-    ...(textReason ? { textReason } : {}),
+    text: responseAlignment === "on-task" ? "release" : "withhold",
+    ...(responseAlignment === "on-task"
+      ? {}
+      : { textReason: "off_task" as const }),
     calls: input.calls.map((call) =>
       reject && !call.speaks
         ? {
@@ -370,6 +305,200 @@ export function composeStepDecisionV1(input: {
       : [],
     continuation: [],
     judgments: responseReviewJudgmentsV1(answers),
+    ...(input.model === undefined ? {} : { model: input.model }),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Per-send review: is this message one the person would miss?
+
+/** What Jev sees about one text send, each piece bounded. */
+export interface SendReviewJudgmentEvidenceV1 {
+  readonly request: {
+    readonly text: string;
+    readonly origin: TurnInputOriginV1;
+  };
+  readonly conversation: readonly {
+    readonly speaker: "user" | "bot";
+    readonly text: string;
+  }[];
+  /** Messages, cards and receipts the person has already been shown this Turn. */
+  readonly shownThisTurn: readonly string[];
+  /** What this Turn's tools have done so far. */
+  readonly resultsThisTurn: readonly string[];
+  /** The words the person would read next. */
+  readonly message: string;
+}
+
+/** The most recent results Jev is shown; older ones rarely bear on a message. */
+export const SEND_REVIEW_RESULTS_MAX_V1 = 8;
+
+export function sendReviewEvidenceV1(
+  evidence: SendReviewEvidenceV1,
+): SendReviewJudgmentEvidenceV1 {
+  return {
+    request: { text: clip(evidence.objective), origin: evidence.origin },
+    conversation: conversationEvidence(evidence.conversation),
+    shownThisTurn: evidence.shown.map(clip),
+    resultsThisTurn: evidence.priorResults
+      .slice(-SEND_REVIEW_RESULTS_MAX_V1)
+      .map((result) => clip(result.content)),
+    message: evidence.message,
+  };
+}
+
+export function sendReviewStateV1(
+  evidence: SendReviewJudgmentEvidenceV1,
+): Record<string, JsonValue> {
+  return {
+    request: {
+      text: evidence.request.text,
+      origin: evidence.request.origin,
+    },
+    conversation: evidence.conversation.map((message) => ({
+      speaker: message.speaker,
+      text: message.text,
+    })),
+    shownThisTurn: [...evidence.shownThisTurn],
+    resultsThisTurn: [...evidence.resultsThisTurn],
+    message: evidence.message,
+  };
+}
+
+/**
+ * Two narrow judgments about the same message on purpose: it is withheld only
+ * when "would they miss it" and "what does it do" agree. Each label set lists
+ * the safe reading first.
+ */
+export const sendReviewQuestionsV1 = {
+  messageNeeded: noul(
+    {
+      target: "`message`, the words the person would read next",
+      decision: "Would the person miss this message if it were never sent?",
+      requirements: [
+        "It gives them something they cannot already see in `shownThisTurn`",
+        "Or it answers their question, asks them something, asks their permission, or explains a failure, a limit or a refusal",
+      ],
+    },
+    {
+      true: "It tells them something they need",
+      false:
+        "It only restates, narrates or acknowledges what they can already see, or says nothing at all",
+    },
+  ),
+  messageKind: choice(
+    {
+      target: "`message`",
+      decision: "What does this message mainly do for the person?",
+      rules: [
+        "Judge it against `shownThisTurn` and what `resultsThisTurn` show was done.",
+        "A receipt or card in `shownThisTurn` already tells the person what it shows: an email sent, a file made, a routine set.",
+        "When more than one fits, pick the one listed first.",
+      ],
+    },
+    {
+      answer: "Answers what they asked, or gives them what they asked for",
+      question: "Asks them something, or asks their permission",
+      problem:
+        "Explains a failure, a limit or a refusal, or something they must do",
+      news: "Tells them something new they cannot see yet: progress, a finding, or what comes next",
+      restates_shown:
+        "Says again what a card, receipt or message in `shownThisTurn` already shows",
+      empty:
+        "Thanks, pleasantries, or an offer to help further, adding nothing",
+    },
+  ),
+} as const;
+
+export type SendReviewAnswersV1 = SystemOneResult<
+  typeof sendReviewQuestionsV1
+>["answers"];
+
+export type SendReviewMessageKindV1 =
+  SendReviewAnswersV1["messageKind"]["choice"];
+
+export type SendReviewV1 = JevReviewV1<SendReviewAnswersV1>;
+
+export async function reviewSendV1(
+  client: TypeSafeClient,
+  evidence: SendReviewJudgmentEvidenceV1,
+  options: {
+    readonly signal?: AbortSignal;
+    readonly budget?: JevCallBudgetV1;
+  } = {},
+): Promise<SendReviewV1> {
+  const budget = options.budget ?? RESPONSE_REVIEW_EVAL_BUDGET_V1;
+  const { data, requestId } = await client
+    .systemOne(
+      {
+        state: sendReviewStateV1(evidence),
+        questions: sendReviewQuestionsV1,
+        model: RESPONSE_REVIEW_MODEL_V1,
+      },
+      { retry: budget.retry, timeout: budget.timeout, signal: options.signal },
+    )
+    .withResponse();
+  return {
+    model: data.model,
+    usage: data.usage,
+    requestId,
+    answers: data.answers,
+  };
+}
+
+const REDUNDANT_KINDS_V1: readonly SendReviewMessageKindV1[] = [
+  "restates_shown",
+  "empty",
+];
+
+/**
+ * Why the words are released before Jev is asked, or `undefined` when they
+ * may be judged. Fail safe on meaning: a question or a permission ask, a long
+ * message, and a Turn's only word are never withheld, whatever Jev would say.
+ */
+export function sendVetoV1(evidence: SendReviewEvidenceV1): string | undefined {
+  const message = evidence.message.trim();
+  if (message.length === 0) return "no message";
+  if (message.includes("?")) return "asks the person something";
+  if (message.length > RESPONSE_REVIEW_WITHHOLD_MAX_CHARS_V1) {
+    return "too long to be only narration";
+  }
+  if (evidence.shown.length === 0) return "the Turn's only word";
+  return undefined;
+}
+
+/** The answers as the durable record keeps them. */
+export function sendReviewJudgmentsV1(
+  answers: SendReviewAnswersV1,
+): SupervisionJudgmentV1[] {
+  return [
+    { question: "messageNeeded", value: answers.messageNeeded.noul },
+    {
+      question: "messageKind",
+      answer: answers.messageKind.choice,
+      value: probability(answers.messageKind, answers.messageKind.choice),
+    },
+  ];
+}
+
+/**
+ * Withheld as redundant only when Jev says the person would not miss it and
+ * says what it does is restate or pad, each past its threshold.
+ */
+export function composeSendDecisionV1(input: {
+  readonly answers: SendReviewAnswersV1;
+  readonly model?: string;
+}): SendDecisionV1 {
+  const { answers } = input;
+  const redundant =
+    answers.messageNeeded.noul <= RESPONSE_REVIEW_NEEDED_NO_V1 &&
+    REDUNDANT_KINDS_V1.includes(answers.messageKind.choice) &&
+    probability(answers.messageKind, answers.messageKind.choice) >=
+      RESPONSE_REVIEW_REDUNDANT_KIND_MIN_V1;
+  return {
+    send: redundant ? "withhold" : "release",
+    ...(redundant ? { reason: "redundant_text" as const } : {}),
+    judgments: sendReviewJudgmentsV1(answers),
     ...(input.model === undefined ? {} : { model: input.model }),
   };
 }

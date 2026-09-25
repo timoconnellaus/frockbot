@@ -203,6 +203,7 @@ test("the directive reads each answer across, and names a capability only when o
     ambiguity: "clear",
     requiredCapabilities: ["coding"],
     steering: [],
+    judgments: expect.any(Array),
   });
   expect(
     composeTurnDirectiveV1(answersFor({ capability: "none" }), "user")

@@ -20,12 +20,12 @@ import {
   type StructuredOutputFailureV1,
 } from "./structured-output.js";
 import {
+  decodeSendDecisionV1,
   decodeStepDecisionV1,
   decodeTurnDirectiveV1,
-  decodeWithheldSendsV1,
+  type SendDecisionV1,
   type StepDecision,
   type TurnDirective,
-  type WithheldSendV1,
 } from "./turn-supervisor.js";
 
 export interface ToolCall {
@@ -440,16 +440,28 @@ export interface SessionEventMap {
   };
   /**
    * What Turn supervision decided about one complete model response, written
-   * once the response is journaled and before any of its calls runs.
-   * `withheld` is the text it kept from the person, word for word: never
-   * posted, and read here.
+   * once the response is journaled and before any of its calls runs. A
+   * resumed step reads it back rather than asking again.
    */
   "supervision/step": {
     turn: number;
     step: number;
     requestId: string;
     decision: StepDecision;
-    withheld: WithheldSendV1[];
+    latencyMs: number;
+  };
+  /**
+   * What Turn supervision decided about one text send, written before the
+   * send runs. A withheld send's words stay on its `tool/call`; they never
+   * reach the person. `finish` says the send would have ended the Turn, which
+   * a withheld one still does: the person already has what it would have said.
+   */
+  "supervision/send": {
+    turn: number;
+    step: number;
+    occurrenceId: string;
+    finish: boolean;
+    decision: SendDecisionV1;
     latencyMs: number;
   };
   /**
@@ -1768,14 +1780,28 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
     case "supervision/step":
       requireEventKeys(
         event,
-        keys("turn", "step", "requestId", "decision", "withheld", "latencyMs"),
+        keys("turn", "step", "requestId", "decision", "latencyMs"),
         "session event",
       );
       turn();
       step();
       requestId();
       decodeStepDecisionV1(event.decision, "session event.decision");
-      decodeWithheldSendsV1(event.withheld, "session event.withheld");
+      eventInteger(event.latencyMs, "session event.latencyMs", 0);
+      break;
+    case "supervision/send":
+      requireEventKeys(
+        event,
+        keys("turn", "step", "occurrenceId", "finish", "decision", "latencyMs"),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.occurrenceId, "session event.occurrenceId");
+      if (typeof event.finish !== "boolean") {
+        throw new Error("session event.finish must be a boolean");
+      }
+      decodeSendDecisionV1(event.decision, "session event.decision");
       eventInteger(event.latencyMs, "session event.latencyMs", 0);
       break;
     case "send/to-user":

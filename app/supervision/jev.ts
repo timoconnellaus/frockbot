@@ -12,12 +12,17 @@ import {
   type TurnSupervisor,
 } from "@frockbot/core/contracts";
 import {
+  composeSendDecisionV1,
   composeStepDecisionV1,
   responseReviewEvidenceV1,
   reviewResponseV1,
+  reviewSendV1,
+  sendReviewEvidenceV1,
+  sendVetoV1,
   RESPONSE_REVIEW_ATTEMPT_TIMEOUT_MS_V1,
   RESPONSE_REVIEW_MODEL_V1,
   RESPONSE_REVIEW_RETRY_V1,
+  type JevCallBudgetV1,
 } from "./response-review.js";
 import {
   composeTurnDirectiveV1,
@@ -27,8 +32,20 @@ import {
 
 export const JEV_SUPERVISION_ADAPTER_ID_V1 = "jev";
 
+/**
+ * How a Turn's Jev call runs: one retry, then the Turn fails. An answer
+ * usually lands in under 200 ms, so an attempt that takes seconds is a fault,
+ * not a slow judgment.
+ */
+export const JEV_TURN_BUDGET_V1: JevCallBudgetV1 = {
+  retry: { maxRetries: 1 },
+  timeout: 10_000,
+};
+
 export interface JevTurnSupervisorOptionsV1 {
   readonly client: TypeSafeClient;
+  /** Defaults to {@link JEV_TURN_BUDGET_V1}. */
+  readonly budget?: JevCallBudgetV1;
 }
 
 function classifyJevFailure(error: unknown): SupervisionUnavailableError {
@@ -65,15 +82,15 @@ function classifyJevFailure(error: unknown): SupervisionUnavailableError {
 
 /**
  * The hosted supervision adapter: one Jev call before a Turn's first model
- * call, and one per model response that calls tools. The response call judges
- * the whole response — its words and its calls together — so a response
- * never costs a second round trip. Per-call mutation approval
+ * call, one per model response that calls tools, and one per text send that
+ * code's vetoes leave open to judgment. Per-call mutation approval
  * (`app/evals/tool-approval.ts`) is not asked yet: it needs the host's
  * read/mutate catalog first.
  */
 export function createJevTurnSupervisorV1(
   options: JevTurnSupervisorOptionsV1,
 ): TurnSupervisor {
+  const budget = options.budget ?? JEV_TURN_BUDGET_V1;
   return {
     async startTurn(evidence, signal) {
       signal?.throwIfAborted();
@@ -81,7 +98,7 @@ export function createJevTurnSupervisorV1(
         const review = await reviewTurnStartV1(
           options.client,
           turnStartJudgmentEvidenceV1(evidence),
-          { signal },
+          { signal, budget },
         );
         return composeTurnDirectiveV1(
           review.answers,
@@ -94,15 +111,34 @@ export function createJevTurnSupervisorV1(
     },
     async reviewStep(evidence, signal) {
       signal?.throwIfAborted();
-      const judged = responseReviewEvidenceV1(evidence);
       try {
-        const review = await reviewResponseV1(options.client, judged, {
-          signal,
-        });
+        const review = await reviewResponseV1(
+          options.client,
+          responseReviewEvidenceV1(evidence),
+          { signal, budget },
+        );
         return composeStepDecisionV1({
           answers: review.answers,
-          evidence: judged,
           calls: evidence.calls,
+          model: review.model,
+        });
+      } catch (error) {
+        throw classifyJevFailure(error);
+      }
+    },
+    async reviewSend(evidence, signal) {
+      signal?.throwIfAborted();
+      if (sendVetoV1(evidence) !== undefined) {
+        return { send: "release", judgments: [] };
+      }
+      try {
+        const review = await reviewSendV1(
+          options.client,
+          sendReviewEvidenceV1(evidence),
+          { signal, budget },
+        );
+        return composeSendDecisionV1({
+          answers: review.answers,
           model: review.model,
         });
       } catch (error) {

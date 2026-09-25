@@ -273,6 +273,37 @@ export interface StepDecision {
   model?: string;
 }
 
+/**
+ * One text send, reviewed right before it runs, with everything the Turn has
+ * already shown the person and every result it has already seen. Judged per
+ * send rather than with the whole response because what makes a message
+ * redundant is often a result that landed earlier in the same step.
+ */
+export interface SendReviewEvidenceV1 {
+  objective: string;
+  origin: TurnInputOriginV1;
+  /** The conversation before this Turn, oldest first. */
+  conversation: readonly ConversationEvidenceV1[];
+  /** What the person has already been shown this Turn, oldest first. */
+  shown: readonly string[];
+  /** This Turn's tool results so far, oldest first. */
+  priorResults: readonly PriorToolResultV1[];
+  /** The words the send would put in front of the person. */
+  message: string;
+  /** The send would end the Turn. */
+  finish: boolean;
+}
+
+export interface SendDecisionV1 {
+  send: "release" | "withhold";
+  /** Why the send was withheld; present exactly when it was. */
+  reason?: SupervisionReasonCode;
+  /** What the judge answered. Empty for an adapter that asked nobody. */
+  judgments: SupervisionJudgmentV1[];
+  /** The judge's resolved model version, when one was asked. */
+  model?: string;
+}
+
 export interface TurnSupervisor {
   startTurn(
     evidence: TurnStartEvidence,
@@ -283,6 +314,11 @@ export interface TurnSupervisor {
     evidence: StepProposalEvidence,
     signal?: AbortSignal,
   ): Promise<StepDecision>;
+
+  reviewSend(
+    evidence: SendReviewEvidenceV1,
+    signal?: AbortSignal,
+  ): Promise<SendDecisionV1>;
 }
 
 export type SupervisionFailureKindV1 = "unavailable" | "timeout";
@@ -301,15 +337,16 @@ export class SupervisionUnavailableError extends Error {
   }
 }
 
-/** A text send a step review kept from the person, word for word. */
-export interface WithheldSendV1 {
-  occurrenceId: string;
-  text: string;
-  /** The send would have ended the Turn. */
-  finish: boolean;
-}
+/**
+ * How a result Turn supervision wrote begins. The model reads the rest; the
+ * audit reads the prefix, which is how a withheld send becomes a row there.
+ */
+export const SUPERVISION_WITHHELD_SEND_PREFIX_V1 =
+  "Not sent: supervision withheld this message";
+export const SUPERVISION_OFF_TASK_PREFIX_V1 =
+  "Not run: supervision judged this response to be working on something the person did not ask for.";
 
-// Exact-key decoders for the two durable supervision records. They cross the
+// Exact-key decoders for the durable supervision records. They cross the
 // session log, the debug surface and recovery, so nothing is trusted unread.
 
 const JUDGMENT_TEXT_MAX_V1 = 64;
@@ -557,22 +594,38 @@ export function decodeStepDecisionV1(
   };
 }
 
-export function decodeWithheldSendsV1(
+export function decodeSendDecisionV1(
   value: unknown,
-  label = "withheld sends",
-): WithheldSendV1[] {
-  return list(value, label, (entry, at) => {
-    const send = record(entry, at);
-    exactKeys(send, ["occurrenceId", "text", "finish"], [], at);
-    if (typeof send.finish !== "boolean") {
-      throw new Error(`${at}.finish must be a boolean`);
-    }
-    return {
-      occurrenceId: text(send.occurrenceId, `${at}.occurrenceId`, 128),
-      text: text(send.text, `${at}.text`),
-      finish: send.finish,
-    };
-  });
+  label = "send decision",
+): SendDecisionV1 {
+  const decision = record(value, label);
+  exactKeys(decision, ["send", "judgments"], ["reason", "model"], label);
+  const send = oneOf(
+    decision.send,
+    ["release", "withhold"] as const,
+    `${label}.send`,
+  );
+  if ((send === "withhold") !== (decision.reason !== undefined)) {
+    throw new Error(`${label}.reason must name why the send was withheld`);
+  }
+  return {
+    send,
+    ...(decision.reason === undefined
+      ? {}
+      : {
+          reason: oneOf(
+            decision.reason,
+            SUPERVISION_REASON_CODES_V1,
+            `${label}.reason`,
+          ),
+        }),
+    judgments: decodeJudgmentsV1(decision.judgments, `${label}.judgments`),
+    ...(decision.model === undefined
+      ? {}
+      : {
+          model: text(decision.model, `${label}.model`, JUDGMENT_TEXT_MAX_V1),
+        }),
+  };
 }
 
 export function emptyPolicySnapshotV1(
@@ -595,6 +648,10 @@ export function defaultTurnDirectiveV1(): TurnDirective {
     steering: [],
     judgments: [],
   };
+}
+
+export function releaseSendDecisionV1(): SendDecisionV1 {
+  return { send: "release", judgments: [] };
 }
 
 export function allowAllStepDecisionV1(
@@ -626,6 +683,7 @@ function throwIfAborted(signal?: AbortSignal): void {
 export function createFakeTurnSupervisorV1(options?: {
   startTurn?: TurnSupervisor["startTurn"];
   reviewStep?: TurnSupervisor["reviewStep"];
+  reviewSend?: TurnSupervisor["reviewSend"];
 }): TurnSupervisor {
   return {
     async startTurn(evidence, signal) {
@@ -638,6 +696,11 @@ export function createFakeTurnSupervisorV1(options?: {
       if (options?.reviewStep) return options.reviewStep(evidence, signal);
       return allowAllStepDecisionV1(evidence.calls);
     },
+    async reviewSend(evidence, signal) {
+      throwIfAborted(signal);
+      if (options?.reviewSend) return options.reviewSend(evidence, signal);
+      return releaseSendDecisionV1();
+    },
   };
 }
 
@@ -649,5 +712,5 @@ export function createUnavailableTurnSupervisorV1(
   const fail = async (): Promise<never> => {
     throw new SupervisionUnavailableError(kind, reason);
   };
-  return { startTurn: fail, reviewStep: fail };
+  return { startTurn: fail, reviewStep: fail, reviewSend: fail };
 }

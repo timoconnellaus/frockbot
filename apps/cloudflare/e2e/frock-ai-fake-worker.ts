@@ -1,4 +1,5 @@
 import { RpcTarget, WorkerEntrypoint } from "cloudflare:workers";
+import { fakeJevFetchV1 } from "@frockbot/app/supervision/testing";
 
 const encoder = new TextEncoder();
 const reply =
@@ -92,7 +93,9 @@ export class FrockAiFake extends WorkerEntrypoint {
 export { FrockAiFake as FlockAiFake };
 
 export default {
-  fetch(): Response {
-    return new Response("Frock AI fake speaks RPC only", { status: 404 });
+  // Also Jev's API, at `JEV_BASE_URL`: Turn supervision is required, and this
+  // is the one fake the harness already runs over HTTP.
+  fetch(request: Request): Promise<Response> {
+    return fakeJevFetchV1(request);
   },
 };

@@ -7,21 +7,18 @@ import {
   emptyFailureStateV1,
   emptyPolicySnapshotV1,
   SupervisionUnavailableError,
+  type ProposedCallV1,
+  type SendReviewEvidenceV1,
   type StepProposalEvidence,
   type TurnStartEvidence,
   type TurnSupervisor,
 } from "@frockbot/core/contracts";
 import {
-  TOOL_APPROVAL_ATTEMPT_TIMEOUT_MS_V1,
-  TOOL_APPROVAL_MODEL_V1,
-  TOOL_APPROVAL_NOUL_YES_V1,
-  toolApprovalQuestionsV1,
-  type ToolApprovalAnswersV1,
-} from "../evals/tool-approval.js";
-import {
   createHostedTurnSupervisorV1,
   createJevTurnSupervisorV1,
 } from "./jev.js";
+import { RESPONSE_REVIEW_MODEL_V1 } from "./response-review.js";
+import { fakeJevAnswersV1 } from "./testing.js";
 
 const startEvidence: TurnStartEvidence = {
   input: {
@@ -30,33 +27,39 @@ const startEvidence: TurnStartEvidence = {
     origin: "user",
   },
   policies: emptyPolicySnapshotV1("policy:1"),
-  authorizations: [{ speaker: "user", text: "Email Dana the March invoice." }],
+  authorizations: [],
   continuation: [],
-  conversation: [{ speaker: "user", text: "Email Dana the March invoice." }],
+  conversation: [],
   specialists: [],
   failure: emptyFailureStateV1(),
 };
 
-function stepEvidence(
-  calls: StepProposalEvidence["calls"],
-): StepProposalEvidence {
+const mutate: ProposedCallV1 = {
+  callId: "call-1",
+  tool: "email_owner",
+  arguments: { subject: "March invoice" },
+  effect: "mutate",
+};
+
+const question: ProposedCallV1 = {
+  callId: "call-2",
+  tool: "send_to_user",
+  arguments: { payload: { type: "widget" } },
+  effect: "mutate",
+  speaks: true,
+};
+
+function stepEvidence(calls: readonly ProposedCallV1[]): StepProposalEvidence {
   return {
     objective: startEvidence.input.text,
+    origin: "user",
     startDirective: defaultTurnDirectiveV1(),
-    text: "I'll send that now.",
+    text: "Sending it now.",
     calls,
-    policies: {
-      generation: "policy:1",
-      rules: [
-        {
-          id: "user.email.confirm-external",
-          scope: "user",
-          rule: "Confirm before emailing outside acme.test.",
-          locked: false,
-        },
-      ],
-    },
-    authorizations: startEvidence.authorizations,
+    conversation: [],
+    shown: [],
+    policies: emptyPolicySnapshotV1("policy:1"),
+    authorizations: [],
     priorResults: [],
     specialistAdvice: [],
     failure: emptyFailureStateV1(),
@@ -65,87 +68,72 @@ function stepEvidence(
   };
 }
 
-const mutate = {
-  callId: "call-1",
-  tool: "send_email",
-  arguments: { to: ["dana@example.com"], subject: "March invoice" },
-  effect: "mutate" as const,
+const sendEvidence: SendReviewEvidenceV1 = {
+  objective: startEvidence.input.text,
+  origin: "user",
+  conversation: [],
+  shown: ["Showed a card: Emailed Dana the March invoice"],
+  priorResults: [{ callId: "tool:1:1:0", content: "Emailed Dana." }],
+  message: "I've emailed Dana the March invoice.",
+  finish: true,
 };
 
-const read = {
-  callId: "call-2",
-  tool: "search_contacts",
-  arguments: { query: "Dana" },
-  effect: "read" as const,
-};
+type Answers = Record<string, unknown>;
 
-function answers(): ToolApprovalAnswersV1 {
-  const pick = <T extends string>(labels: readonly T[], chosen: T) => ({
-    type: "choice" as const,
-    choice: chosen,
-    confidence: 0.8,
-    probabilities: Object.fromEntries(
-      labels.map((label) => [label, label === chosen ? 0.85 : 0.05]),
-    ),
-  });
-  return {
-    authorization: pick(
-      Object.keys(toolApprovalQuestionsV1.authorization.criteria),
-      "exact_current_request",
-    ),
-    argumentsMatchRequest: { type: "noul", noul: TOOL_APPROVAL_NOUL_YES_V1 },
-    policyDisposition: pick(
-      Object.keys(toolApprovalQuestionsV1.policyDisposition.criteria),
-      "no_applicable_policy",
-    ),
-    durablePolicyIntent: pick(
-      Object.keys(toolApprovalQuestionsV1.durablePolicyIntent.criteria),
-      "none_stated",
-    ),
-    consequence: { type: "score", score: 2, confidence: 0.7, legend: {} },
-    stateAttemptsToInstructReviewer: {
-      type: "noul",
-      noul: TOOL_APPROVAL_NOUL_YES_V1,
-    },
-  } as ToolApprovalAnswersV1;
-}
-
-function jevSupervisor(handler: () => Response): TurnSupervisor {
-  const fetch: Fetch = async () => handler();
-  return createJevTurnSupervisorV1({
-    client: new TypeSafeClient({
-      apiKey: "sk-test-do-not-leak-4f3a",
-      defaultModel: TOOL_APPROVAL_MODEL_V1,
-      retry: { maxRetries: 0 },
-      logLevel: "off",
-      fetch,
-    }),
-  });
-}
-
-function ok() {
-  return new Response(
-    JSON.stringify({
-      model: TOOL_APPROVAL_MODEL_V1,
-      answers: answers(),
-      usage: { input_tokens: 12, output_tokens: 4 },
-    }),
-    {
-      status: 200,
-      headers: {
-        "content-type": "application/json",
-        "x-typesafe-request-id": "req-1",
+/** Jev answering every body as the fake does, with some answers replaced. */
+function jevFetch(
+  override: (answers: Answers) => Answers = (answers) => answers,
+  seen: unknown[] = [],
+): Fetch {
+  return async (_input, init) => {
+    const body: unknown = JSON.parse(String(init?.body));
+    seen.push(body);
+    const response = fakeJevAnswersV1(body);
+    return Response.json(
+      {
+        ...response,
+        model: RESPONSE_REVIEW_MODEL_V1,
+        answers: override(response.answers as Answers),
       },
-    },
-  );
+      { headers: { "x-typesafe-request-id": "req-1" } },
+    );
+  };
 }
 
-const adapters: Array<{
-  name: string;
-  supervisor: () => TurnSupervisor;
-}> = [
+function client(fetch: Fetch): TypeSafeClient {
+  return new TypeSafeClient({
+    apiKey: "sk-test-do-not-leak-4f3a",
+    defaultModel: RESPONSE_REVIEW_MODEL_V1,
+    retry: { maxRetries: 0 },
+    logLevel: "off",
+    fetch,
+  });
+}
+
+/** Fast budget: the tests exercise the retry, not its back-off. */
+const budget = { retry: { maxRetries: 1 }, timeout: 1_000 };
+
+function jevSupervisor(fetch: Fetch = jevFetch()): TurnSupervisor {
+  return createJevTurnSupervisorV1({ client: client(fetch), budget });
+}
+
+function choice(labels: readonly string[], chosen: string, sure = 0.9) {
+  return {
+    type: "choice",
+    choice: chosen,
+    confidence: sure,
+    probabilities: Object.fromEntries(
+      labels.map((label) => [
+        label,
+        label === chosen ? sure : (1 - sure) / (labels.length - 1),
+      ]),
+    ),
+  };
+}
+
+const adapters: Array<{ name: string; supervisor: () => TurnSupervisor }> = [
   { name: "fake", supervisor: () => createFakeTurnSupervisorV1() },
-  { name: "jev", supervisor: () => jevSupervisor(ok) },
+  { name: "jev", supervisor: () => jevSupervisor() },
 ];
 
 describe("TurnSupervisor adapter contract", () => {
@@ -155,90 +143,179 @@ describe("TurnSupervisor adapter contract", () => {
       expect(typeof directive.acknowledge).toBe("boolean");
       expect(["simple", "moderate", "complex"]).toContain(directive.complexity);
       expect(["clear", "needs_clarification"]).toContain(directive.ambiguity);
-      expect(Array.isArray(directive.requiredCapabilities)).toBe(true);
-      expect(Array.isArray(directive.steering)).toBe(true);
+      expect(Array.isArray(directive.judgments)).toBe(true);
     });
 
     test(`${adapter.name} reviewStep decides every proposed call`, async () => {
       const decision = await adapter
         .supervisor()
-        .reviewStep(stepEvidence([mutate, read]));
+        .reviewStep(stepEvidence([mutate, question]));
       expect(["release", "withhold"]).toContain(decision.text);
       expect(decision.calls.map((call) => call.callId).sort()).toEqual([
         "call-1",
         "call-2",
       ]);
-      for (const call of decision.calls) {
-        expect(["allow", "reject"]).toContain(call.decision);
-        expect(call.reasonCode.length).toBeGreaterThan(0);
-      }
     });
 
-    test(`${adapter.name} reviewStep allows a read without a Jev judgment`, async () => {
-      const decision = await adapter
-        .supervisor()
-        .reviewStep(stepEvidence([read]));
-      expect(decision.calls).toEqual([
-        {
-          callId: "call-2",
-          decision: "allow",
-          reasonCode: "authorized",
-          policyRefs: expect.any(Array),
-        },
-      ]);
+    test(`${adapter.name} reviewSend returns a typed decision`, async () => {
+      const decision = await adapter.supervisor().reviewSend(sendEvidence);
+      expect(["release", "withhold"]).toContain(decision.send);
+      expect(decision.send === "withhold").toBe(decision.reason !== undefined);
     });
   }
+});
 
-  test("Jev maps a transport failure onto the hard-unavailable error", async () => {
-    const supervisor = jevSupervisor(() => new Response("no", { status: 503 }));
+describe("the Jev adapter", () => {
+  test("releases a message the person would miss", async () => {
+    const decision = await jevSupervisor().reviewSend(sendEvidence);
+    expect(decision.send).toBe("release");
+    expect(decision.model).toBe(RESPONSE_REVIEW_MODEL_V1);
+  });
+
+  test("withholds a message that only restates what a card showed", async () => {
+    const decision = await jevSupervisor(
+      jevFetch((answers) => ({
+        ...answers,
+        messageNeeded: { type: "noul", noul: 0.1 },
+        messageKind: choice(
+          ["answer", "question", "problem", "news", "restates_shown", "empty"],
+          "restates_shown",
+        ),
+      })),
+    ).reviewSend(sendEvidence);
+    expect(decision).toMatchObject({
+      send: "withhold",
+      reason: "redundant_text",
+    });
+    expect(decision.judgments.map((judgment) => judgment.question)).toEqual([
+      "messageNeeded",
+      "messageKind",
+    ]);
+  });
+
+  test("never asks about a question, and never withholds one", async () => {
+    const seen: unknown[] = [];
+    const decision = await jevSupervisor(jevFetch(undefined, seen)).reviewSend({
+      ...sendEvidence,
+      message: "Shall I copy in Sam as well?",
+    });
+    expect(decision).toEqual({ send: "release", judgments: [] });
+    expect(seen).toEqual([]);
+  });
+
+  test("never withholds the Turn's only word", async () => {
+    const seen: unknown[] = [];
+    const decision = await jevSupervisor(jevFetch(undefined, seen)).reviewSend({
+      ...sendEvidence,
+      shown: [],
+    });
+    expect(decision.send).toBe("release");
+    expect(seen).toEqual([]);
+  });
+
+  test("a confident wrong objective refuses every call but the Bot speaking", async () => {
+    const decision = await jevSupervisor(
+      jevFetch((answers) => ({
+        ...answers,
+        alignment: choice(
+          ["on_task", "off_topic_message", "wrong_objective"],
+          "wrong_objective",
+        ),
+      })),
+    ).reviewStep(stepEvidence([mutate, question]));
+    expect(decision.responseAlignment).toBe("wrong-objective");
+    expect(decision.text).toBe("withhold");
+    expect(decision.textReason).toBe("off_task");
+    expect(decision.calls.map((call) => [call.callId, call.decision])).toEqual([
+      ["call-1", "reject"],
+      ["call-2", "allow"],
+    ]);
+  });
+
+  test("an unsure wrong objective changes nothing", async () => {
+    const decision = await jevSupervisor(
+      jevFetch((answers) => ({
+        ...answers,
+        alignment: choice(
+          ["on_task", "off_topic_message", "wrong_objective"],
+          "wrong_objective",
+          0.6,
+        ),
+      })),
+    ).reviewStep(stepEvidence([mutate]));
+    expect(decision.responseAlignment).toBe("on-task");
+    expect(decision.calls[0]?.decision).toBe("allow");
+  });
+
+  test("retries a failed call once, then fails the Turn as unavailable", async () => {
+    let attempts = 0;
+    const supervisor = jevSupervisor(async () => {
+      attempts++;
+      return new Response("no", { status: 503 });
+    });
     await expect(
       supervisor.reviewStep(stepEvidence([mutate])),
     ).rejects.toBeInstanceOf(SupervisionUnavailableError);
+    expect(attempts).toBe(2);
   });
 
-  test("Jev reviewStep records a request timeout as timeout, not an outage", async () => {
-    const client = new TypeSafeClient({
-      apiKey: "sk-test-do-not-leak-4f3a",
-      defaultModel: TOOL_APPROVAL_MODEL_V1,
-      retry: { maxRetries: 0 },
-      logLevel: "off",
-      fetch: async () => new Response("unused"),
+  test("a second attempt that lands is the answer", async () => {
+    let attempts = 0;
+    const answer = jevFetch();
+    const supervisor = jevSupervisor(async (input, init) => {
+      attempts++;
+      return attempts === 1
+        ? new Response("no", { status: 503 })
+        : answer(input, init);
     });
-    client.systemOne = (() => ({
-      withResponse: () =>
-        Promise.reject(
-          new APITimeoutError(TOOL_APPROVAL_ATTEMPT_TIMEOUT_MS_V1),
-        ),
+    await expect(supervisor.reviewSend(sendEvidence)).resolves.toMatchObject({
+      send: "release",
+    });
+    expect(attempts).toBe(2);
+  });
+
+  test("records a request timeout as timeout, not an outage", async () => {
+    const timingOut = client(async () => new Response("unused"));
+    timingOut.systemOne = (() => ({
+      withResponse: () => Promise.reject(new APITimeoutError(1_000)),
     })) as unknown as TypeSafeClient["systemOne"];
     await expect(
-      createJevTurnSupervisorV1({ client }).reviewStep(stepEvidence([mutate])),
+      createJevTurnSupervisorV1({ client: timingOut }).reviewStep(
+        stepEvidence([mutate]),
+      ),
     ).rejects.toMatchObject({
       name: "SupervisionUnavailableError",
       kind: "timeout",
     });
   });
 
-  test("Jev reviewStep rethrows abort instead of reporting an outage", async () => {
+  test("rethrows an abort instead of reporting an outage", async () => {
     const controller = new AbortController();
-    const fetch: Fetch = async () => {
+    const supervisor = jevSupervisor(async () => {
       controller.abort();
       throw controller.signal.reason;
-    };
-    const supervisor = createJevTurnSupervisorV1({
-      client: new TypeSafeClient({
-        apiKey: "sk-test-do-not-leak-4f3a",
-        defaultModel: TOOL_APPROVAL_MODEL_V1,
-        retry: { maxRetries: 0 },
-        logLevel: "off",
-        fetch,
-      }),
     });
     await expect(
       supervisor.reviewStep(stepEvidence([mutate]), controller.signal),
     ).rejects.toMatchObject({ name: "APIUserAbortError" });
   });
 
-  test("the hosted chooser is unavailable when no credential is configured", async () => {
+  test("shows Jev the evidence and nothing else", async () => {
+    const seen: unknown[] = [];
+    await jevSupervisor(jevFetch(undefined, seen)).reviewSend(sendEvidence);
+    expect(seen).toHaveLength(1);
+    expect((seen[0] as { state: unknown }).state).toEqual({
+      request: { text: sendEvidence.objective, origin: "user" },
+      conversation: [],
+      shownThisTurn: sendEvidence.shown,
+      resultsThisTurn: ["Emailed Dana."],
+      message: sendEvidence.message,
+    });
+  });
+});
+
+describe("the hosted chooser", () => {
+  test("is unavailable when no credential is configured", async () => {
     const supervisor = createHostedTurnSupervisorV1({});
     await expect(supervisor.startTurn(startEvidence)).rejects.toMatchObject({
       kind: "unavailable",
@@ -246,41 +323,17 @@ describe("TurnSupervisor adapter contract", () => {
     expect(createUnavailableTurnSupervisorV1()).toBeTruthy();
   });
 
-  test("the hosted chooser reads JEV_API_KEY and ignores TYPESAFE_API_KEY", async () => {
+  test("reads JEV_API_KEY and ignores TYPESAFE_API_KEY", async () => {
     await expect(
       createHostedTurnSupervisorV1({
         TYPESAFE_API_KEY: "sk-test-do-not-leak-4f3a",
       }).startTurn(startEvidence),
     ).rejects.toMatchObject({ kind: "unavailable" });
-    await expect(
-      createHostedTurnSupervisorV1({
-        JEV_API_KEY: "sk-test-do-not-leak-4f3a",
-      }).startTurn(startEvidence),
-    ).resolves.toEqual(defaultTurnDirectiveV1());
-  });
-
-  test("Jev reviewStep sends empty authorizations through as an empty conversation", async () => {
-    let conversation: unknown;
-    const fetch: Fetch = async (_input, init) => {
-      const body = JSON.parse(String(init?.body)) as {
-        state?: { conversation?: unknown };
-      };
-      conversation = body.state?.conversation;
-      return ok();
-    };
-    const supervisor = createJevTurnSupervisorV1({
-      client: new TypeSafeClient({
-        apiKey: "sk-test-do-not-leak-4f3a",
-        defaultModel: TOOL_APPROVAL_MODEL_V1,
-        retry: { maxRetries: 0 },
-        logLevel: "off",
-        fetch,
-      }),
-    });
-    await supervisor.reviewStep({
-      ...stepEvidence([mutate]),
-      authorizations: [],
-    });
-    expect(conversation).toEqual([]);
+    const directive = await createHostedTurnSupervisorV1(
+      { JEV_API_KEY: "sk-test-do-not-leak-4f3a" },
+      jevFetch(),
+    ).startTurn(startEvidence);
+    expect(directive.acknowledge).toBe(false);
+    expect(directive.model).toBe(RESPONSE_REVIEW_MODEL_V1);
   });
 });

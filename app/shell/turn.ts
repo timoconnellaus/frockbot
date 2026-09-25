@@ -73,6 +73,7 @@ import { compositionFailureTurnTextV1 } from "./backend-composition-input.js";
 import { createCardApprovalStoreV1 } from "./cards.js";
 import { createSecretRequestStoreV1 } from "@frockbot/app/secrets/bot";
 import { createReplyDraftWatchV1 } from "./reply-draft.js";
+import { turnInputOriginV1 } from "@frockbot/app/supervision";
 import {
   botStopCommandFingerprintV1,
   requireStoredRunV1,
@@ -343,33 +344,49 @@ export async function executeTurn(
         }
       : {}),
   };
-  const runtime = await agentRuntime(
-    state,
-    input.identity,
-    settings,
-    input.admittedRequest,
-    turn,
-    prepared,
-  );
-  const promptParts = [
-    `You are ${settings.profile.name}.`,
-    settings.profile.description,
-  ].filter((part): part is string => Boolean(part?.trim()));
   // The reply this Turn is writing, drawn in its Bot's thread while it is
   // written. One watcher for the Turn, whichever generation mounts: a group
   // Turn speaks in the group's thread, and only a Turn the thread shows has a
   // reply to draw there.
   const turnType = input.command.turnType ?? "chat";
   const deliverReplyDraft = state.deliverReplyDraft;
-  const watchToolInput =
-    deliverReplyDraft &&
+  const drawsDrafts =
+    deliverReplyDraft !== undefined &&
     input.command.origin?.kind !== "group" &&
-    (turnType === "chat" || turnType === "agent")
+    (turnType === "chat" || turnType === "agent");
+  const watchToolInput =
+    drawsDrafts && deliverReplyDraft
       ? createReplyDraftWatchV1({
           runId: input.command.runId,
           publish: deliverReplyDraft,
         })
       : undefined;
+  const runtime = await agentRuntime(
+    state,
+    input.identity,
+    settings,
+    input.admittedRequest,
+    {
+      ...turn,
+      inputOrigin: turnInputOriginV1(input.command.origin),
+      // A withheld send's draft goes: the words were never delivered.
+      ...(drawsDrafts && deliverReplyDraft
+        ? {
+            clearReplyDraft: (ordinal: number) =>
+              deliverReplyDraft({
+                runId: input.command.runId,
+                ordinal,
+                parts: [],
+              }),
+          }
+        : {}),
+    },
+    prepared,
+  );
+  const promptParts = [
+    `You are ${settings.profile.name}.`,
+    settings.profile.description,
+  ].filter((part): part is string => Boolean(part?.trim()));
   // The pin, never the current generation: activation takes effect at the
   // next admitted Turn, and an in-flight Turn completes on what it pinned.
   // The isolate bindings follow the generation actually being mounted, so a

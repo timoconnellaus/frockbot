@@ -10,6 +10,7 @@
 // workerd. It must stay free of Worker-only globals.
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
+import { fakeJevFetchV1 } from "@frockbot/app/supervision/testing";
 import { dynamicToolInputV1 } from "../dynamic-tools.ts";
 
 /**
@@ -1087,8 +1088,13 @@ function braveSearchStub(request: Request, url: URL): Response {
   });
 }
 
+/** Jev's API. Turn supervision is required, so every Turn here reaches it. */
+export const JEV_STUB_ORIGIN = "https://api.typesafe.ai";
+export const JEV_TEST_API_KEY = "workerd-jev-key";
+
 export async function ollamaCloudStub(request: Request): Promise<Response> {
   const url = new URL(request.url);
+  if (url.origin === JEV_STUB_ORIGIN) return fakeJevFetchV1(request);
   if (url.origin === WEB_STUB_ORIGIN) return webStub(url);
   if (url.origin === DEEPSEEK_STUB_ORIGIN) return deepseekStub(request, url);
   if (url.origin === COMPOSIO_STUB_ORIGIN) return composioStub(request, url);

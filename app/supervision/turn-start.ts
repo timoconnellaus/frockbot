@@ -244,7 +244,14 @@ export interface TurnStartReviewV1 {
 export async function reviewTurnStartV1(
   client: TypeSafeClient,
   evidence: TurnStartJudgmentEvidenceV1,
-  options: { readonly signal?: AbortSignal } = {},
+  options: {
+    readonly signal?: AbortSignal;
+    /** A Turn's budget; the evals ask once per case. */
+    readonly budget?: {
+      readonly retry: { readonly maxRetries: number };
+      readonly timeout: number;
+    };
+  } = {},
 ): Promise<TurnStartReviewV1> {
   const { data, requestId } = await client
     .systemOne(
@@ -254,8 +261,8 @@ export async function reviewTurnStartV1(
         model: TURN_START_MODEL_V1,
       },
       {
-        retry: TURN_START_RETRY_V1,
-        timeout: TURN_START_ATTEMPT_TIMEOUT_MS_V1,
+        retry: options.budget?.retry ?? TURN_START_RETRY_V1,
+        timeout: options.budget?.timeout ?? TURN_START_ATTEMPT_TIMEOUT_MS_V1,
         signal: options.signal,
       },
     )

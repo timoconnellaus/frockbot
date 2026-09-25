@@ -96,6 +96,7 @@ test("the kind in force is the primary filter, and every kind is offered", () =>
     "Processes",
     "Device",
     "Email",
+    "Held back",
   ]);
   const primary = filters.filter(
     (node) => node.type === "action" && node.style === "primary",

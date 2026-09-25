@@ -52,6 +52,8 @@ const PREVIEW_FIELDS: Record<AuditKindV1, readonly string[]> = {
   // where it was written, which is the question an audit answers.
   file: ["path", "root", "group_id", "packageId", "skill"],
   mcp: [],
+  // Written from the withheld words and the reason, never from arguments.
+  supervision: [],
   // A device use is not a tool call: its preview is written when it is
   // recorded, from the Plugin's name and the ability, never from arguments.
   device: [],

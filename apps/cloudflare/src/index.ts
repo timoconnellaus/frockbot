@@ -371,9 +371,11 @@ interface Env {
   DEBUG_TOKEN?: string;
   /**
    * The hosted Jev credential: Turn supervision, the routine-event rejector,
-   * and dictation tidy review. Absent, those choosers are unavailable.
+   * and dictation tidy review. Required: without it no Turn runs.
    */
   JEV_API_KEY?: string;
+  /** Points Jev at a local stand-in; set by the test harness only. */
+  JEV_BASE_URL?: string;
 }
 
 /**

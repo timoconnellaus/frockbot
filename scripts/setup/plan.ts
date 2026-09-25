@@ -468,7 +468,10 @@ export const HUMAN_SECRETS_V1: readonly HumanSecretV1[] = [
   },
   {
     name: "JEV_API_KEY",
-    enables: "hosted turn supervision against Jev",
+    enables:
+      "Turn supervision: without it no Bot runs a Turn, because every Turn is supervised",
+    where: "https://typesafe.ai — an API key for Jev",
+    required: true,
     workers: ["app"],
   },
 ];

@@ -10,6 +10,10 @@ import {
 } from "./bot.ts";
 import { FakeAuditOutboxStorage } from "./testing.ts";
 import { decodeAuditEntryV1, type AuditEntryV1 } from "./shared.ts";
+import {
+  SUPERVISION_OFF_TASK_PREFIX_V1,
+  SUPERVISION_WITHHELD_SEND_PREFIX_V1,
+} from "@frockbot/core/contracts";
 
 const AT = "2026-08-31T02:00:00.000Z";
 
@@ -45,6 +49,47 @@ function run(
 }
 
 describe("projecting a settled run", () => {
+  test("a send supervision withheld is a row with the words it would have said", async () => {
+    const entries = await auditEntriesFromStoredRunV1(
+      "foreman",
+      run([
+        call("tool:1:1:0", "send_to_user", {
+          disposition: "finish",
+          payload: { type: "text", text: "I've emailed Dana the invoice." },
+        }),
+        result("tool:1:1:0", {
+          content: `${SUPERVISION_WITHHELD_SEND_PREFIX_V1} because the person can already see what it says. The Turn is complete; do not send it again.`,
+        }),
+        call("tool:1:2:0", "send_to_user", {
+          disposition: "finish",
+          payload: { type: "text", text: "Delivered as usual." },
+        }),
+        result("tool:1:2:0", { content: "Sent." }),
+        call("tool:1:3:0", "computer_exec", { command: "rm -rf /tmp/x" }),
+        result("tool:1:3:0", {
+          content: `${SUPERVISION_OFF_TASK_PREFIX_V1} Go back to their request: invoice`,
+          isError: true,
+        }),
+      ]),
+    );
+    expect(
+      entries.map((entry) => [
+        entry.kind,
+        entry.target,
+        entry.preview,
+        entry.outcome,
+      ]),
+    ).toEqual([
+      [
+        "supervision",
+        "conversation",
+        "already shown: I've emailed Dana the invoice.",
+        "refused",
+      ],
+      ["supervision", "conversation", "computer_exec, off task", "refused"],
+    ]);
+  });
+
   test("audits the effects and ignores the rest", async () => {
     const entries = await auditEntriesFromStoredRunV1(
       "foreman",
