@@ -1029,8 +1029,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         };
       });
     } catch (_) {
-      // The registration seed is still a name; what is lost is the Bot's
-      // current name, its place, its pin and whether it is hidden.
+      // The registration seed is still a name, and the list keeps whatever
+      // identities it last read.
     }
   }
 
