@@ -229,11 +229,7 @@ Widget _sidebar({required bool phone, bool archived = false}) => ShellSidebar(
     ),
   ],
   profiles: const {
-    'bob': SidebarProfile(
-      name: 'Bob',
-      title: 'Helpful, friendly, and gets things done.',
-      sidebarOrder: 0,
-    ),
+    'bob': SidebarProfile(name: 'Bob', sidebarOrder: 0),
     'test': SidebarProfile(name: 'Test', sidebarOrder: 1),
     'qa': SidebarProfile(name: 'QA Throwaway', sidebarOrder: 2),
     'test-2': SidebarProfile(name: 'Test', sidebarOrder: 3),

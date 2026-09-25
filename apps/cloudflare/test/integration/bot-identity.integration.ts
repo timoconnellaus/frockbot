@@ -24,7 +24,6 @@ interface BotSettings {
   revision: number;
   profile: {
     name: string;
-    title?: string;
     namedBy?: string;
     hiddenFromSidebar?: boolean;
   };
@@ -37,7 +36,7 @@ async function settings(userId: string, botId: string): Promise<BotSettings> {
 }
 
 describe("Bot identity through the gateway", () => {
-  it("carries a title and hidden flag to the directory", async () => {
+  it("carries the hidden flag to the directory, and drops a retired title", async () => {
     const userId = freshUserId("bot-identity");
     const botId = "identity-bot";
     await provisionThroughGateway({ userId, botId });
@@ -49,6 +48,7 @@ describe("Bot identity through the gateway", () => {
       commandId: "identity-1",
       expectedRevision: before.revision,
       botId,
+      // Installed apps still send the retired title on every save.
       profile: { title: "Chief of staff", hiddenFromSidebar: true },
     });
     expect({
@@ -62,17 +62,15 @@ describe("Bot identity through the gateway", () => {
       identities: Array<{
         botId: string;
         name: string;
-        title?: string;
         hiddenFromSidebar: boolean;
       }>;
     };
-    expect(directory.identities).toContainEqual(
-      expect.objectContaining({
-        botId,
-        title: "Chief of staff",
-        hiddenFromSidebar: true,
-      }),
+    const identity = directory.identities.find(
+      (candidate) => candidate.botId === botId,
     );
+    expect(identity).toMatchObject({ hiddenFromSidebar: true });
+    expect(identity).not.toHaveProperty("title");
+    expect((await settings(userId, botId)).profile).not.toHaveProperty("title");
   });
 
   it("announces a rename in the Session the run list projects", async () => {

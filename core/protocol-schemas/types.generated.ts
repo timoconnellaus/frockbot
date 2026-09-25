@@ -807,7 +807,6 @@ export type BotIdentity = {
   name: string;
   namedBy: "user" | "bot";
   hiddenFromSidebar: boolean;
-  title?: string;
   pinnedAt?: Instant;
   sidebarOrder?: number;
 };

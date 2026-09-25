@@ -279,10 +279,10 @@ describe("Bot configuration admission", () => {
       request({
         schemaVersion: 1,
         type: "bot/set-profile",
-        commandId: "retitle",
+        commandId: "reorder",
         botId: "primary",
         expectedRevision: 2,
-        profile: { title: "Chief" },
+        profile: { sidebarOrder: 1000 },
       }),
     );
     expect(storage.values.get(PROFILE_MIRROR_KEY_V1)).toMatchObject({

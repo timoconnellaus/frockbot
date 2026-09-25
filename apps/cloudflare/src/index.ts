@@ -1465,7 +1465,6 @@ function botIdentityView(
     name: profile.name,
     namedBy: profile.namedBy ?? "user",
     hiddenFromSidebar: profile.hiddenFromSidebar === true,
-    ...(profile.title === undefined ? {} : { title: profile.title }),
     ...(profile.pinnedAt === undefined ? {} : { pinnedAt: profile.pinnedAt }),
     ...(profile.sidebarOrder === undefined
       ? {}

@@ -630,7 +630,7 @@ the rows whose status the code moved:
   Package contributes (`plugin-flock/src/agent.ts`), mounted only for an
   admitted Turn whose Session and Turn the write can name
   (`plugin-shell/src/backend-flock.ts`). `bot_update` is a true partial update:
-  it takes `name`, `description`, `title`, `hidden_from_sidebar` and
+  it takes `name`, `description`, `hidden_from_sidebar` and
   `notify_on_updates`, changes only the fields the call carries — apart from
   the hidden-implies-muted coupling in row 4 — and writes nothing at all when
   the durable record already holds them. A self-rename goes
@@ -638,11 +638,14 @@ the rows whose status the code moved:
   Session and Turn, so the `bot/renamed` announcement carries its provenance.
   **There is no delete tool**, matching GrokBot: `bot_update` cannot archive,
   restore or remove anything, and no third tool does.
+  **Owner decision 2026-09-25: no title.** GrokBot's profile carries a
+  `title`; a FrockBot Bot has only a name and a description, because the title
+  had no purpose beside them.
 
   Two deliberate narrowings. GrokBot's `UpdateAgent` cannot _clear_ a field;
   FrockBot's can, with the empty string, because `bot/set-profile` already
-  defines that and refusing it would leave a Bot able to set a title it could
-  never take back. And `bot_create` takes no `model`: giving the new Bot the
+  defines that and refusing it would leave a Bot able to set a description it
+  could never take back. And `bot_create` takes no `model`: giving the new Bot the
   caller's model would mean writing a `bot/select-model` and a Capability
   Assignment onto another Bot, and "self-modification never widens authority" —
   the new Bot is registered exactly as the sidebar registers one, with no
@@ -684,7 +687,7 @@ the rows whose status the code moved:
   redundant and confusing third way to arrange the list beside the pin and
   the order.
   Pinning matches GrokBot's pinned "General" chat: `BotProfile.pinnedAt` — an
-  ISO 8601 instant beside `title` and `hiddenFromSidebar`, decoded by the same
+  ISO 8601 instant beside `hiddenFromSidebar`, decoded by the same
   strict codec and patched the same way, where the empty string unpins — puts
   the Bot in a wrapping row of large round avatar tiles above the list,
   earliest pin first, and takes it out of the list below so it never appears
@@ -1198,8 +1201,8 @@ absence. Row 44 is the only one.
   Packages declare. The panel header's only Bot action is the
   settings cog, and Settings is a sub-page of that panel with a back chevron of
   its own. The separate Bot info surface and Clock card were retired, and so
-  were the Advanced expander and the Members sentence that lived in it: Title is
-  an About field like the others, Hidden from list is a behaviour switch, and
+  were the Advanced expander and the Members sentence that lived in it: Hidden
+  from list is a behaviour switch, and
   name provenance is no longer user-facing because the editable Name field is
   the identity control. The remaining old Computer, Routines, Members and
   Notifications deep links continue to resolve at their new homes. Playwright

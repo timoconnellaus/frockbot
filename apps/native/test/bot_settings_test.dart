@@ -117,8 +117,8 @@ void main() {
     expect(find.text('Inspected avatar'), findsOneWidget);
     expect(find.text('ABOUT'), findsOneWidget);
     expect(find.text('Name'), findsOneWidget);
-    // Title is an About field like the others: there is no Advanced to open.
-    expect(find.text('Title'), findsOneWidget);
+    // About is a name and a description: no title, and no Advanced to open.
+    expect(find.text('Title'), findsNothing);
     expect(find.text('Description'), findsOneWidget);
     expect(find.text('Advanced'), findsNothing);
     expect(find.text('BEHAVIOUR'), findsOneWidget);
@@ -555,6 +555,7 @@ void main() {
     // written again to say so: a rename is one request.
     expect(commands.map((command) => command['type']), ['bot/set-profile']);
     expect((commands.first['profile']! as Map)['name'], 'Renamed');
+    expect(commands.first['profile']! as Map, isNot(contains('title')));
     expect(find.text('Saved.'), findsOneWidget);
     // The field kept the person's focus and text through the write: what
     // they typed is what it shows, and nothing was read back over it.

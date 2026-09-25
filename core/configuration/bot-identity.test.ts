@@ -1,4 +1,4 @@
-// Bot identity: the title, the name's provenance, and the sidebar-hidden flag.
+// Bot identity: the name's provenance, and the sidebar-hidden flag.
 //
 // The first test is the one that matters most: a Bot settings record written
 // before any of this existed must still decode. Optional additions need no
@@ -31,15 +31,13 @@ describe("Bot identity codecs", () => {
       name: "Housework",
       description: "Keeps things tidy.",
     });
-    expect(decoded.profile.title).toBeUndefined();
     expect(decoded.profile.namedBy).toBeUndefined();
     expect(decoded.profile.hiddenFromSidebar).toBeUndefined();
   });
 
-  test("round-trips a title, provenance, and the hidden flag", () => {
+  test("round-trips provenance and the hidden flag", () => {
     const profile = {
       name: "Housework",
-      title: "Chief of staff",
       namedBy: "bot" as const,
       hiddenFromSidebar: true,
     };
@@ -49,6 +47,11 @@ describe("Bot identity codecs", () => {
   test("refuses a profile field outside the declared vocabulary", () => {
     expect(() =>
       decodeBotSettingsViewV1(settings({ name: "Housework", nickname: "H" })),
+    ).toThrow("profile has invalid fields");
+    expect(() =>
+      decodeBotSettingsViewV1(
+        settings({ name: "Housework", title: "Chief of staff" }),
+      ),
     ).toThrow("profile has invalid fields");
     expect(() =>
       decodeBotSettingsViewV1(
@@ -147,7 +150,7 @@ describe("bot/set-profile", () => {
     ).toThrow("profile has invalid fields");
   });
 
-  test("drops the retired label an installed app still sends", () => {
+  test("drops the retired label and title an installed app still sends", () => {
     const command = {
       schemaVersion: 1,
       type: "bot/set-profile",
@@ -158,24 +161,29 @@ describe("bot/set-profile", () => {
     expect(
       decodeConfigurationCommandV1({
         ...command,
-        profile: { name: "Atlas", label: "" },
+        profile: { name: "Atlas", label: "", title: "" },
       }),
     ).toEqual({ ...command, profile: { name: "Atlas" } });
     expect(
       decodeConfigurationCommandV1({ ...command, profile: { label: "Work" } }),
+    ).toEqual({ ...command, profile: {} });
+    expect(
+      decodeConfigurationCommandV1({
+        ...command,
+        profile: { title: "Chief of staff" },
+      }),
     ).toEqual({ ...command, profile: {} });
   });
 
   test("changes only the fields the patch carries", () => {
     const current: BotProfile = {
       name: "Housework",
-      title: "Chief of staff",
       description: "Keeps things tidy.",
       hiddenFromSidebar: true,
     };
     expect(
-      applyBotProfilePatchV1(current, { title: "Night shift" }, "user"),
-    ).toEqual({ ...current, title: "Night shift" });
+      applyBotProfilePatchV1(current, { description: "Night shift" }, "user"),
+    ).toEqual({ ...current, description: "Night shift" });
   });
 
   test("records the writer only when the name actually changes", () => {
@@ -187,20 +195,20 @@ describe("bot/set-profile", () => {
       applyBotProfilePatchV1(current, { name: "Housework" }, "bot").namedBy,
     ).toBe("user");
     expect(
-      applyBotProfilePatchV1(current, { title: "Chief" }, "bot").namedBy,
+      applyBotProfilePatchV1(current, { description: "Chief" }, "bot").namedBy,
     ).toBe("user");
   });
 
   test("clears optional fields with empty values", () => {
     const current: BotProfile = {
       name: "Housework",
-      title: "Chief of staff",
+      description: "Keeps things tidy.",
       hiddenFromSidebar: true,
     };
     expect(
       applyBotProfilePatchV1(
         current,
-        { title: "", hiddenFromSidebar: false },
+        { description: "", hiddenFromSidebar: false },
         "user",
       ),
     ).toEqual({ name: "Housework" });
@@ -223,7 +231,7 @@ describe("bot/set-profile", () => {
     expect(
       applyBotProfilePatchV1(
         { ...current, sidebarOrder: 1000 },
-        { title: "Chief" },
+        { description: "Chief" },
         "user",
       ).sidebarOrder,
     ).toBe(1000);
@@ -264,7 +272,8 @@ describe("bot/set-profile", () => {
     // A later save must not reshuffle the pinned row: the instant is durable,
     // so only an explicit change moves it.
     expect(
-      applyBotProfilePatchV1(current, { title: "Chief" }, "user").pinnedAt,
+      applyBotProfilePatchV1(current, { description: "Chief" }, "user")
+        .pinnedAt,
     ).toBe(at);
     expect(applyBotProfilePatchV1(current, { pinnedAt: "" }, "user")).toEqual({
       name: "Housework",

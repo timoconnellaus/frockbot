@@ -280,7 +280,6 @@ abstract final class SettingsIds {
   static const botDescription = 'bot-description';
   static const botNotifications = 'bot-notifications';
   static const botModel = 'bot-model';
-  static const botTitle = 'bot-title';
   static const botHidden = 'bot-hidden-from-sidebar';
   static const botHideConfirm = 'bot-hide-confirm';
   static const botSaveStatus = 'bot-settings-status';

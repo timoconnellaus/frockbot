@@ -244,8 +244,7 @@ describe("bot/set-profile", () => {
     const storage = new MemoryStorage();
     const contribution = contributionOn(storage);
     await contribution.materializeSettings(identity, { name: "Housework" });
-    await setProfile(contribution, "title-1", 0, {
-      title: "Chief of staff",
+    await setProfile(contribution, "describe-1", 0, {
       description: "Keeps things tidy.",
     });
     await setProfile(contribution, "hide-1", 1, { hiddenFromSidebar: true });
@@ -255,7 +254,6 @@ describe("bot/set-profile", () => {
     )) as BotSettingsViewV1;
     expect(settings.profile).toEqual({
       name: "Housework",
-      title: "Chief of staff",
       description: "Keeps things tidy.",
       hiddenFromSidebar: true,
     });

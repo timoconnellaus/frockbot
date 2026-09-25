@@ -196,7 +196,6 @@ const REVISION_RETRIES = 3;
 const PROFILE_FIELD_NAMES = [
   ["name", "name"],
   ["description", "description"],
-  ["title", "title"],
   ["hiddenFromSidebar", "hidden_from_sidebar"],
 ] as const satisfies ReadonlyArray<readonly [keyof BotProfilePatchV1, string]>;
 
@@ -252,11 +251,6 @@ const BOT_UPDATE_SCHEMA = {
       type: "string",
       description:
         "Your persona and standing instructions. The empty string clears it.",
-    },
-    title: {
-      type: "string",
-      description:
-        "A short role line shown under your name. The empty string clears it.",
     },
     hidden_from_sidebar: {
       type: "boolean",
@@ -430,7 +424,6 @@ export function decodeBotUpdateInputV1(input: unknown): BotUpdateInputV1 {
   const value = fields(input, [
     "name",
     "description",
-    "title",
     "hidden_from_sidebar",
     "notify_on_updates",
     "voice",
@@ -447,9 +440,6 @@ export function decodeBotUpdateInputV1(input: unknown): BotUpdateInputV1 {
   }
   if (value.description !== undefined) {
     profile.description = patchText(value.description, "description", 10_000);
-  }
-  if (value.title !== undefined) {
-    profile.title = patchText(value.title, "title", 120);
   }
   if (value.hidden_from_sidebar !== undefined) {
     profile.hiddenFromSidebar = boolean(
@@ -529,7 +519,6 @@ function canonicalProfile(profile: BotProfile): unknown[] {
   return [
     profile.name,
     profile.description ?? null,
-    profile.title ?? null,
     profile.namedBy ?? null,
     profile.hiddenFromSidebar === true,
   ];
@@ -598,7 +587,7 @@ export function createBotUpdateTool(
     name: "bot_update",
     namespace: "frockbot",
     description:
-      "Change your own name, description, title, sidebar visibility, update notifications, or how you sound on a voice call. Only the fields you pass change; everything else stays exactly as it is. Renaming yourself is announced in the conversation. This cannot archive or delete you — only your User can do that.",
+      "Change your own name, description, sidebar visibility, update notifications, or how you sound on a voice call. Only the fields you pass change; everything else stays exactly as it is. Renaming yourself is announced in the conversation. This cannot archive or delete you — only your User can do that.",
     inputSchema: BOT_UPDATE_SCHEMA as unknown as Record<string, unknown>,
     // Re-running converges on the same durable record and commands nothing
     // once it already holds, so recovery may replay it.

@@ -58,7 +58,6 @@ class BotSettingsController extends ChangeNotifier {
 
   String name = '';
   String description = '';
-  String title = '';
   bool pinned = false;
   String pinnedAt = '';
   bool hidden = false;
@@ -114,7 +113,6 @@ class BotSettingsController extends ChangeNotifier {
       revision = answer['revision']! as int;
       name = profile['name'] as String? ?? '';
       description = profile['description'] as String? ?? '';
-      title = profile['title'] as String? ?? '';
       hidden = profile['hiddenFromSidebar'] == true;
       pinnedAt = profile['pinnedAt'] as String? ?? '';
       pinned = pinnedAt.isNotEmpty;
@@ -211,7 +209,6 @@ class BotSettingsController extends ChangeNotifier {
   Map<String, Object?> _profileBody(String pinInstant) => {
     'name': name.trim(),
     'description': description,
-    'title': title.trim(),
     'hiddenFromSidebar': hidden,
     'pinnedAt': pinInstant,
     if (sidebarOrder case final int order) 'sidebarOrder': order,
@@ -228,7 +225,6 @@ class BotSettingsController extends ChangeNotifier {
 
   static SidebarProfile _profileOf(Map<String, Object?> body) => SidebarProfile(
     name: body['name'] as String?,
-    title: body['title'] as String?,
     pinnedAt: body['pinnedAt'] as String?,
     hiddenFromSidebar: body['hiddenFromSidebar'] == true,
     sidebarOrder: (body['sidebarOrder'] as num?)?.toInt(),
@@ -908,14 +904,6 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                         maxLength: 100,
                         required: true,
                         onChanged: (next) => state.name = next,
-                      ),
-                      _field(
-                        id: SettingsIds.botTitle,
-                        label: 'Title',
-                        hint: 'Chief of staff, night-shift researcher',
-                        value: state.title,
-                        maxLength: 120,
-                        onChanged: (next) => state.title = next,
                       ),
                       _field(
                         id: SettingsIds.botDescription,

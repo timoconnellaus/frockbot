@@ -231,32 +231,42 @@ function harness(initial?: Partial<BotSettingsViewV1>): Harness {
 describe("bot_update", () => {
   test("changes only the fields it was given", async () => {
     const test1 = harness({
-      profile: { name: "General", description: "A helper.", title: "Aide" },
+      profile: {
+        name: "General",
+        description: "A helper.",
+        sidebarOrder: 1000,
+      },
     });
     const tool = createBotUpdateTool(test1.host);
 
-    const result = await tool.execute({ title: "Chief of staff" }, CONTEXT);
+    const result = await tool.execute(
+      { description: "Chief of staff" },
+      CONTEXT,
+    );
 
     expect(result.isError).toBe(false);
     expect(test1.settings().profile).toEqual({
       name: "General",
-      description: "A helper.",
-      title: "Chief of staff",
+      description: "Chief of staff",
+      sidebarOrder: 1000,
     });
     expect(test1.announcements()).toEqual([]);
   });
 
   test("clears an optional field with the empty string", async () => {
     const test1 = harness({
-      profile: { name: "General", title: "Aide", description: "A helper." },
+      profile: { name: "General", description: "A helper." },
     });
 
-    await createBotUpdateTool(test1.host).execute({ title: "" }, CONTEXT);
+    await createBotUpdateTool(test1.host).execute({ description: "" }, CONTEXT);
 
-    expect(test1.settings().profile).toEqual({
-      name: "General",
-      description: "A helper.",
-    });
+    expect(test1.settings().profile).toEqual({ name: "General" });
+  });
+
+  test("has no title to set", () => {
+    expect(() => decodeBotUpdateInputV1({ title: "Aide" })).toThrow(
+      "input has unknown fields",
+    );
   });
 
   test("a self-rename records the Bot as the writer and announces it", async () => {
@@ -295,10 +305,12 @@ describe("bot_update", () => {
   });
 
   test("writes nothing when the profile already holds every value", async () => {
-    const test1 = harness({ profile: { name: "General", title: "Aide" } });
+    const test1 = harness({
+      profile: { name: "General", description: "Aide" },
+    });
 
     const result = await createBotUpdateTool(test1.host).execute(
-      { title: "Aide" },
+      { description: "Aide" },
       CONTEXT,
     );
 
@@ -326,7 +338,7 @@ describe("bot_update", () => {
     const test1 = harness();
 
     const result = await createBotUpdateTool(test1.host).execute(
-      { title: "Aide", notify_on_updates: false },
+      { description: "Aide", notify_on_updates: false },
       CONTEXT,
     );
 
@@ -373,12 +385,12 @@ describe("bot_update", () => {
     test1.raceOnce();
 
     const result = await createBotUpdateTool(test1.host).execute(
-      { title: "Aide" },
+      { description: "Aide" },
       CONTEXT,
     );
 
     expect(result.isError).toBe(false);
-    expect(test1.settings().profile.title).toBe("Aide");
+    expect(test1.settings().profile.description).toBe("Aide");
   });
 
   test("refuses an empty call, an unknown field, and a blank name", () => {
@@ -394,7 +406,6 @@ describe("bot_update", () => {
     expect(Object.keys(schema.properties)).toEqual([
       "name",
       "description",
-      "title",
       "hidden_from_sidebar",
       "notify_on_updates",
       "voice",
@@ -843,14 +854,14 @@ describe("bot_update: how the Bot sounds", () => {
     const tool = createBotUpdateTool(test1.host);
 
     const result = await tool.execute(
-      { title: "Chief of staff", voice: { formality: "formal" } },
+      { description: "Chief of staff", voice: { formality: "formal" } },
       CONTEXT,
     );
 
     expect(result.content).toBe(
-      "Updated title, voice. Everything else is unchanged.",
+      "Updated description, voice. Everything else is unchanged.",
     );
-    expect(test1.settings().profile.title).toBe("Chief of staff");
+    expect(test1.settings().profile.description).toBe("Chief of staff");
     expect(test1.voice().voice?.delivery.formality).toBe("formal");
   });
 });
