@@ -33,6 +33,7 @@ import {
   runCompactionV1,
 } from "./compaction.js";
 import { compactionScopeV1, compactionWorkV1 } from "./compaction-scheduler.js";
+import { SUMMARY_EFFECT_PREFIX_V1 } from "@frockbot/app/billing/model";
 import { conversationDeliveryHooksV1 } from "./delivery.js";
 import { shellDefinitionV1 } from "./definition.js";
 import {
@@ -856,7 +857,8 @@ export const shellAgentFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
                     },
                   }
                 : {}),
-              newEffectId: () => `compaction-${crypto.randomUUID()}`,
+              newEffectId: () =>
+                `${SUMMARY_EFFECT_PREFIX_V1}${crypto.randomUUID()}`,
               summarise: async (request) => {
                 try {
                   let text = "";

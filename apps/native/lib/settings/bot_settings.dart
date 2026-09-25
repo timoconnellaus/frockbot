@@ -621,6 +621,9 @@ class BotSettingsView extends StatefulWidget {
   /// the conversation on a desk, so a chosen look paints the thread.
   final VoidCallback? onOpenLook;
 
+  /// The Spending page, narrowed to this Bot.
+  final VoidCallback? onOpenSpending;
+
   /// Archiving, restoring and deleting belong to the Flock, whose directory
   /// they change, so the card is handed in rather than rebuilt here. It is
   /// built in `lib/flock/lifecycle.dart`, which owns that seam.
@@ -636,6 +639,7 @@ class BotSettingsView extends StatefulWidget {
     this.onOpenPlugins,
     this.onOpenVoice,
     this.onOpenLook,
+    this.onOpenSpending,
     this.dangerZone,
   });
 
@@ -961,6 +965,16 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                     onOpen: widget.onOpenLook,
                   ),
                   if (state.modelAvailable) _model(context),
+                  if (widget.onOpenSpending case final VoidCallback open)
+                    identified(
+                      SpendingIds.botEntry,
+                      FrockRow(
+                        icon: Icons.account_balance_wallet_outlined,
+                        title: 'Spending',
+                        subtitle: 'What this Bot’s work has cost',
+                        onTap: open,
+                      ),
+                    ),
                 ],
               ),
               if (widget.dangerZone case final Widget zone) ...[

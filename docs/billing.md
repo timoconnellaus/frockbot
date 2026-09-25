@@ -57,7 +57,19 @@ Each model dispatch reserves its bounded maximum before the provider is called. 
 
 Metering wraps the registered provider stream inside the Plugin hook chain. A Plugin cannot reduce a bill by replacing the outward usage event. A hook that returns without invoking the provider incurs no provider charge. Missing or uncertain usage remains reserved for reconciliation; byte/token estimates are never billed as provider-reported consumption. A definitive no-effect provider failure releases the reservation.
 
-The user can see available monthly/purchased credit, pending reservations, usage by Bot/conversation, recent credit grants and account totals grouped by day/Bot over the past 31 days. Usage pagination uses SQLite insertion sequence, so equal timestamps do not skip rows.
+The user can see available monthly/purchased credit, pending reservations, recent usage, recent credit grants and what the account spent in the last 30 days. Usage pagination uses SQLite insertion sequence, so equal timestamps do not skip rows. Where that spending went is the Spending page's, below.
+
+## Spending
+
+The Flutter app's **Spending** page answers where an account's credit went. It opens from Billing, from search, from a Bot's settings (narrowed to that Bot) and from a Routine's run log (narrowed to that Routine). One page: a period, the total, a bar per day, and the charges grouped by one dimension. Tapping a row narrows to it and groups by the next dimension; each narrowing is a chip that widens again. Under the groups are the ten most expensive Turns, each opening its Bot's conversation.
+
+The dimensions are the Bot that spent it; **what started it** — a chat with a Bot, a Routine, a Group Chat, voice, the person using a Computer directly, or a Plugin's own page; the trigger (the person, a schedule, a webhook, a connected app, run by hand); the conversation; what it bought (model replies, conversation summaries, web search, Computer time); the model; and the Plugin that made the call.
+
+**What started it is the start of the chain, recorded when the charge is made.** A hand-off, a subagent task or a question to another Bot is charged to whatever started the Turn that asked, so a Routine is charged for the work it sets going in other Bots too. Within one Bot the chain is read back from the run that asked (`app/billing/run-cause.ts`); where it crosses into another Bot or a subagent object, the asking side writes its cause onto the origin (`StoredRunCauseV1`), because the run that asked is not readable from there. A Computer charge is the running Turn's, read from the Bot object the billing proxy sits in; viewer and control time is always the person's.
+
+Attribution is descriptive. It sits in `billing_attribution` beside the operation, it is not part of the reservation's fingerprint — a retry that names a renamed Routine is still the same charge — and a malformed one is recorded as unattributed rather than refusing the call. A Routine's and a Group Chat's name are kept as last charged, so a rename reads by its new name.
+
+Every settlement adds itself, in its own transaction, to an hourly rollup (`billing_spend_hourly`) and to its Turn's running total (`billing_spend_runs`); `GET /api/billing/spending` reads only those, never the operation log. Hours rather than days, because the person's days are in their Profile timezone: the rollup is summed into them when it is read. A Turn has one Bot, cause, trigger and conversation, so a grouping by those counts Turns; categories, models and Plugins split a Turn, so a view narrowed by them lists no Turns and counts none.
 
 ## Stripe
 

@@ -25,6 +25,13 @@ import {
   billingStyles,
 } from "@frockbot/app/billing/page";
 import type { BillingLedger } from "@frockbot/app/billing/ledger";
+import {
+  SPEND_DIMENSIONS_V1,
+  SPEND_PERIODS_V1,
+  type SpendDimensionV1,
+  type SpendingReportV1,
+  type SpendPeriodV1,
+} from "@frockbot/app/billing/spending";
 import type { BackendRouteContribution } from "./contracts.js";
 
 export interface BillingEnv {
@@ -98,6 +105,40 @@ export interface BillingAccountRpc {
     settlement: UsageSettlement;
   }): Promise<void>;
   requirePaidAccount(input: { userId: string }): Promise<void>;
+  readSpending(input: {
+    userId: string;
+    period: SpendPeriodV1;
+    groupBy: SpendDimensionV1;
+    filters: Partial<Record<SpendDimensionV1, string>>;
+  }): Promise<SpendingReportV1>;
+}
+
+/**
+ * `GET /api/billing/spending?period=30d&groupBy=cause&bot=<id>…`: one view of
+ * the Spending page. Each dimension may also be a filter, named by the key a
+ * grouping by it returned.
+ */
+export function decodeSpendingQueryV1(url: URL): {
+  period: SpendPeriodV1;
+  groupBy: SpendDimensionV1;
+  filters: Partial<Record<SpendDimensionV1, string>>;
+} {
+  const period = SPEND_PERIODS_V1.find(
+    (p) => p === (url.searchParams.get("period") ?? "30d"),
+  );
+  const groupBy = SPEND_DIMENSIONS_V1.find(
+    (d) => d === (url.searchParams.get("groupBy") ?? "bot"),
+  );
+  if (!period || !groupBy) throw new BillingError("Invalid spending view", 400);
+  const filters: Partial<Record<SpendDimensionV1, string>> = {};
+  for (const dimension of SPEND_DIMENSIONS_V1) {
+    const value = url.searchParams.get(dimension);
+    if (value === null) continue;
+    if (value.length > 600)
+      throw new BillingError("Invalid spending view", 400);
+    filters[dimension] = value;
+  }
+  return { period, groupBy, filters };
 }
 function failure(error: unknown) {
   return Response.json(
@@ -302,6 +343,17 @@ export function billingRoutes(
             { headers },
           );
         }
+        if (
+          request.method === "GET" &&
+          url.pathname === "/api/billing/spending"
+        )
+          return Response.json(
+            await account(userId).readSpending({
+              userId,
+              ...decodeSpendingQueryV1(url),
+            }),
+            { headers },
+          );
         if (request.method !== "POST")
           return new Response(null, { status: 405 });
         const origin = request.headers.get("origin");

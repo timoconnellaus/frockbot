@@ -6,7 +6,11 @@ import {
 } from "@frockbot/core/contracts";
 import { decodeBotIdV1, isRpcIdentifier } from "@frockbot/core/configuration";
 import { decodeRunIdV1 } from "@frockbot/app/shell/backend-contracts";
-import type { StoredRunGroupOriginV1 } from "@frockbot/core/durable";
+import {
+  decodeStoredRunCauseV1,
+  type StoredRunCauseV1,
+  type StoredRunGroupOriginV1,
+} from "@frockbot/core/durable";
 import {
   VOICE_CALL_TRANSCRIPT_TEXT_MAX_V1,
   VOICE_CALL_TRANSCRIPT_TURNS_MAX_V1,
@@ -416,9 +420,19 @@ export interface DecodedBotAgentRunRpcV1 {
       fromBotId: string;
       fromBotName: string;
       messageId: string;
+      cause?: StoredRunCauseV1;
     };
   };
 }
+
+/** What started the asking Turn, decoded as the run record decodes it. */
+const rpcRunCause: RpcValueDecoder = (value, label) => {
+  try {
+    return decodeStoredRunCauseV1(value, label);
+  } catch {
+    throw new Error(`${label} is invalid`);
+  }
+};
 
 export interface DecodedBotVoiceRunRpcV1 {
   schemaVersion: 1;
@@ -582,12 +596,15 @@ export function decodeVoiceCallTranscriptRpcV1(
 export function decodeBotAgentRunRpcV1(
   input: unknown,
 ): DecodedBotAgentRunRpcV1 {
-  const source = rpcObject({
-    kind: rpcPattern(/^bot$/, 3),
-    fromBotId: rpcBotId,
-    fromBotName: rpcString(100),
-    messageId: rpcString(256),
-  });
+  const source = rpcObject(
+    {
+      kind: rpcPattern(/^bot$/, 3),
+      fromBotId: rpcBotId,
+      fromBotName: rpcString(100),
+      messageId: rpcString(256),
+    },
+    { cause: rpcRunCause },
+  );
   const request = decodeRpcEnvelopeV1(input, {
     userId: rpcIdentifier,
     botId: rpcBotId,

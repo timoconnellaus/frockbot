@@ -5,6 +5,8 @@
 // `app/subagents/backend.ts` is the User-facing gateway contribution; this is
 // what runs inside a Bot Durable Object.
 
+import { runCauseOfRunV1 } from "@frockbot/app/billing/run-cause";
+import { runCauseReadersV1 } from "@frockbot/app/shell/run-cause";
 import type { TurnTypeV1 } from "@frockbot/core/contracts";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import type { BotIdentity } from "@frockbot/core/durable";
@@ -385,6 +387,11 @@ async function dispatchSubagentTask(
       runId: turn.runId,
       turnId: turn.turnId,
       sessionId: turn.sessionId,
+      cause: await runCauseOfRunV1(
+        identity.botId,
+        turn.runId,
+        runCauseReadersV1(state),
+      ),
     },
     compositionGenerationId,
     model: admission.record.model,
@@ -983,6 +990,7 @@ export async function runOwedSubagentTurns(
           kind: "subagent",
           taskId: context.taskId,
           parentRunId: context.parent.runId,
+          ...(context.parent.cause ? { cause: context.parent.cause } : {}),
         },
       });
       outcome = subagentOutcomeForRunV1(

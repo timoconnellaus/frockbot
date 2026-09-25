@@ -15,6 +15,7 @@ import {
 } from "@frockbot/providers/frock-ai/runtime";
 import {
   BILLING_PLAN,
+  type UsageAttributionV1,
   type UsageReservation,
   type UsageSettlement,
 } from "./ledger.js";
@@ -57,6 +58,19 @@ export interface ModelBilling {
    * a Plugin, named on the operation's description (ADR 0026).
    */
   attribution?: string;
+  /** The Turn and cause each call's charge is recorded against. */
+  spend?: UsageAttributionV1;
+}
+
+/**
+ * How a conversation summary's effect id starts. The summariser keys each
+ * call by its compaction effect, and that id is all that tells the call apart
+ * from the Bot answering.
+ */
+export const SUMMARY_EFFECT_PREFIX_V1 = "compaction-";
+
+function summaryRequestV1(request: NormalizedModelRequest): boolean {
+  return request.requestId.startsWith(SUMMARY_EFFECT_PREFIX_V1);
 }
 
 /** What the account pays for a call that cost the deployment `costMicros`. */
@@ -206,6 +220,11 @@ export class BilledLlmRegistry extends LlmRegistry {
           ? modelRatesPricingVersionV1(table.version)
           : BILLING_PLAN.pricingVersion,
         ...(rate ? { unitRates: customerRates(rate) } : {}),
+        attribution: {
+          ...this.billing.spend,
+          model: request.model,
+          ...(summaryRequestV1(request) ? { summary: true } : {}),
+        },
       });
     } catch (error) {
       throw new ModelProviderFailureError({

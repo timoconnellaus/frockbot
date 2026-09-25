@@ -366,6 +366,14 @@ abstract final class PluginIds {
 /// be rewritten against Flutter Web with the same intent. The one door to the
 /// surface is the All Routines row on the Bot page
 /// ([SettingsIds.botPageRoutinesAll]) at every tier.
+/// Where an account's credit went.
+abstract final class SpendingIds {
+  static const page = 'spending-page';
+  static const billingEntry = 'billing-spending';
+  static const botEntry = 'bot-settings-spending';
+  static const routineEntry = 'routine-run-log-spending';
+}
+
 abstract final class RoutineIds {
   static const document = 'routines-document';
   static const refresh = 'routines-refresh';

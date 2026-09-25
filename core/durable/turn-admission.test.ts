@@ -205,6 +205,44 @@ describe("the admission record names what produced the Turn", () => {
     expect(codec.require(structuredClone(decoded))).toEqual(decoded);
   });
 
+  test("a Bot's and a subagent's origin carry the cause they are charged to, exactly", () => {
+    const cause = {
+      kind: "routine" as const,
+      botId: "bot-2",
+      id: "morning-briefing",
+      label: "Morning briefing",
+      trigger: "cron" as const,
+    };
+    for (const origin of [
+      { ...BOT_ORIGIN, cause },
+      { ...SUBAGENT_ORIGIN, cause },
+    ] as StoredRunOriginV1[]) {
+      const decoded = codec.require(
+        legacyRun({
+          admission: { schemaVersion: 1, turnType: "agent", origin },
+        }),
+      );
+      expect(decoded.admission?.origin).toEqual(origin);
+    }
+    for (const bad of [
+      { ...cause, kind: "desktop" },
+      { ...cause, trigger: "whenever" },
+      { ...cause, extra: 1 },
+      { kind: "chat" },
+    ])
+      expect(() =>
+        codec.require(
+          legacyRun({
+            admission: {
+              schemaVersion: 1,
+              turnType: "agent",
+              origin: { ...BOT_ORIGIN, cause: bad } as StoredRunOriginV1,
+            },
+          }),
+        ),
+      ).toThrow("cause");
+  });
+
   test("round-trips a voice request and its return address", () => {
     const decoded = codec.require(
       legacyRun({

@@ -1,3 +1,4 @@
+import type { StoredRunCauseV1 } from "@frockbot/core/durable";
 import type { ConfigurationCommandV1 } from "@frockbot/core/configuration";
 import type { MachineCommandV1 } from "@frockbot/core/machine-protocol";
 import type { TemplateCommandV1 } from "@frockbot/app/bot-template/shared";
@@ -212,6 +213,7 @@ export interface BotStateRpcTargetV1 extends SubagentDurableObjectRpcTargetV1 {
         fromBotId: string;
         fromBotName: string;
         messageId: string;
+        cause?: StoredRunCauseV1;
       };
     };
   }): Promise<object>;
