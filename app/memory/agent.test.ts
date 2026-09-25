@@ -472,9 +472,7 @@ describe("a Group Chat's Memory", () => {
     });
     const groups = createInMemoryMemoryGroupsV1([GROUP_ID]);
     const request = { role: "user" as const, content: "Where is the offsite?" };
-    const recalled = async (
-      rankRecall?: MemoryRuntimeHostV1["rankRecall"],
-    ) => {
+    const recalled = async (rankRecall?: MemoryRuntimeHostV1["rankRecall"]) => {
       const projection = new MemoryProjection({
         ...hostFor(),
         records,
