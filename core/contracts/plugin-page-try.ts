@@ -353,12 +353,17 @@ const finish = () => {
   process.stdout.write(out + "\\n");
 };
 setTimeout(() => {
+  result.errors.unshift("the try was cut short before it finished");
+  for (const step of request.steps.slice(result.steps.length)) {
+    result.steps.push({ step: Object.keys(step)[0], ok: false, error: "not run: the try ran out of time" });
+  }
   finish();
   process.exit(0);
 }, ${PLUGIN_PAGE_TRY_DEADLINE_MS_V1} + 15000).unref();
 const browser = await chromium.launch({
   executablePath,
   headless: true,
+  timeout: 30000,
   args: ["--no-sandbox", "--disable-dev-shm-usage", "--disable-gpu"],
 });
 try {
