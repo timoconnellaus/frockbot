@@ -2294,6 +2294,100 @@ export async function execute(tool, input, ctx) {
     });
   });
 
+  test("a Custom look the person picks holds over a theme Plugin until the Plugin is switched again", async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    const identity = { userId, botId: "bot-1" };
+    await provisionBot(identity);
+    await turn(identity, "run-0");
+    const bootstrap = (
+      await user(userId).readComposition({ schemaVersion: 1, userId })
+    ).current;
+    const PAINT_ID = "paint";
+    // Paints over whatever look it is handed, every time it runs.
+    const PAINT_SOURCE = `
+export const tools = [];
+export const hooks = {
+  "theme/assemble": async function (payload) {
+    const tokens = payload.document.tokens;
+    return {
+      ...payload.document,
+      tokens: { ...tokens, surfaces: {
+        window: "#ffef00", surface: "#fff7a8", raised: "#fffbd0",
+        text: "#1a1a1a", muted: "#4d4a00", line: "#c9bd00",
+        accent: "#1a1a1a", onAccent: "#ffef00",
+      } },
+    };
+  },
+};
+export async function execute() {
+  return "ok";
+}
+`;
+    await seedPlugin(
+      identity,
+      bootstrap.generationId,
+      "2026-09-12T07:00:00.000Z",
+      PAINT_ID,
+      PAINT_SOURCE,
+      decodePluginDescriptorV1({
+        id: PAINT_ID,
+        displayName: "Paint",
+        version: "0.0.1",
+        contractVersion: ISOLATE_CONTRACT_VERSION,
+        tools: [],
+        hooks: ["theme/assemble"],
+        grants: [],
+        contextKeys: ["user", "bot", "session"],
+      }),
+    );
+    await switchPlugin(identity, PAINT_ID, true);
+    const window = async () =>
+      (await bot(identity).readLook({ schemaVersion: 1, ...identity })).document
+        ?.tokens.surfaces.window;
+    await vi.waitFor(async () => expect(await window()).toBe("#ffef00"), {
+      timeout: 5_000,
+      interval: 25,
+    });
+
+    // The person saves their own Custom colours over the Plugin's.
+    const painted = await bot(identity).readLook({
+      schemaVersion: 1,
+      ...identity,
+    });
+    expect(painted.look).toBe("custom");
+    const mine = structuredClone(painted.document!);
+    mine.tokens.surfaces.window = "#fafafa";
+    expect(
+      (
+        await bot(identity).updateLook({
+          schemaVersion: 1,
+          ...identity,
+          command: {
+            schemaVersion: 1,
+            type: "bot/update-look",
+            commandId: "look-custom",
+            expectedRevision: painted.revision,
+            botId: "bot-1",
+            look: "custom",
+            document: mine,
+          },
+        })
+      ).status,
+    ).toBe("applied");
+    // Hour after hour, the Plugin does not paint over it.
+    await bot(identity).assembleTheme({ schemaVersion: 1, ...identity });
+    await bot(identity).assembleTheme({ schemaVersion: 1, ...identity });
+    expect(await window()).toBe("#fafafa");
+
+    // Switched off and on, the Plugin is asked to set the look again.
+    await switchPlugin(identity, PAINT_ID, false);
+    await switchPlugin(identity, PAINT_ID, true);
+    await vi.waitFor(async () => expect(await window()).toBe("#ffef00"), {
+      timeout: 5_000,
+      interval: 25,
+    });
+  });
+
   /**
    * Seeds one Plugin as the current pinned generation of `userId`, and
    * answers the generation id so the next proposal can parent itself on it.

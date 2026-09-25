@@ -87,7 +87,10 @@ never cross. `theme/assemble` can change how this Bot looks; the directory
 row is what the client paints, and switching Bots never waits on the hook.
 When a Plugin actually changes the tokens, the pick becomes Custom — that is
 where the person sees the assembled document, and where they can edit the
-tokens by hand.
+tokens by hand. A look the person then picks, Custom included, wins: no Plugin
+wraps it until one is asked to set the look again — a theme Plugin writing its
+storage or the Bot changing its settings, a Plugin switched on or off, or a
+generation approved (`app/theme/owed.ts`).
 
 ### Records
 
