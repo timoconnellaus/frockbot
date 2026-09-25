@@ -21,6 +21,7 @@ import { createWebFetchToolDefinitionV1 } from "@frockbot/app/web/agent";
 import { shellAgentFeature } from "../shell/agent.js";
 import { createReplyToRequestToolV1 } from "../shell/reply-to-caller.js";
 import type { FoundationFeature } from "../runtime.js";
+import { pendingBotInputPreambleV1 } from "../routines/inbox.js";
 import {
   ACKNOWLEDGE_NOTE_V1,
   createSupervisionRuntimeFeatureV1,
@@ -662,6 +663,22 @@ test("work Jev names for a specialist the Turn is offered is handed to it from t
   });
 });
 
+function drainedToast(work: string): string {
+  return pendingBotInputPreambleV1([
+    {
+      kind: "wake",
+      wakeId: "tw-task-2",
+      runId: "task-2",
+      routineId: "task-2",
+      title: "Subagent",
+      text: `executor subagent "Write the toast" completed. ${work}`,
+      createdAt: "2026-09-25T00:00:00.000Z",
+      quiet: { automation: true },
+      source: "subagent",
+    },
+  ]);
+}
+
 test("a subagent's work is read off a blocking result and off a completion the Turn was opened for", () => {
   const events = [
     {
@@ -669,7 +686,7 @@ test("a subagent's work is read off a blocking result and off a completion the T
       turn: 1,
       step: 1,
       messageId: "m",
-      text: 'executor subagent "Write the toast" completed. Mia, the goat whisperer...',
+      text: `${drainedToast("Mia, the goat whisperer...\n\nTo Mia!")}\nmake it punchier`,
     },
     {
       type: "tool/result",
@@ -693,7 +710,7 @@ test("a subagent's work is read off a blocking result and off a completion the T
     },
   ] as unknown as SessionEvent[];
   expect(subagentWorkV1(events, 1)).toEqual([
-    "Mia, the goat whisperer...",
+    "Mia, the goat whisperer...\n\nTo Mia!",
     "Dear Sam, thank you...",
   ]);
   expect(subagentWorkV1(events, 2)).toEqual([]);
@@ -732,8 +749,7 @@ test("a send that rewrites the work is withheld, and the Turn goes on to send th
     }),
     {
       followUp: undefined,
-      initialText:
-        'executor subagent "Write the toast" completed. Mia, the goat whisperer...',
+      initialText: `${drainedToast("Mia, the goat whisperer...")}\nnobody spoke`,
     },
   );
   expect(reviewed[0]?.work).toEqual(["Mia, the goat whisperer..."]);

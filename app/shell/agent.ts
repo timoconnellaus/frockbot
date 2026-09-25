@@ -1,7 +1,10 @@
 // The Shell owns reply delivery and conversation completion. Final sends end
 // the Turn; interim sends continue work; background Turns hand off to a parent.
 import { packageAdmissionCeilingV1 } from "@frockbot/core/contracts";
-import { SUBAGENT_QUESTION_PREFIX_V1 } from "@frockbot/app/subagents/records";
+import {
+  SUBAGENT_QUESTION_PREFIX_V1,
+  TASK_QUESTION_MAX_V1,
+} from "@frockbot/app/subagents/records";
 import {
   decodeSendToUserPayloadV1,
   SEND_TO_USER_PAYLOAD_TYPES_V1,
@@ -793,9 +796,9 @@ function createTaskAskTool(sessions: {
           `${TASK_ASK_TOOL_V1} was refused: question must be a non-empty string`,
         );
       }
-      if (question.length > WAKE_PARENT_MESSAGE_LIMIT_V1) {
+      if (question.trim().length > TASK_QUESTION_MAX_V1) {
         return refusal(
-          `${TASK_ASK_TOOL_V1} was refused: question exceeds ${WAKE_PARENT_MESSAGE_LIMIT_V1} characters`,
+          `${TASK_ASK_TOOL_V1} was refused: question exceeds ${TASK_QUESTION_MAX_V1} characters`,
         );
       }
       return handOffToParentV1(

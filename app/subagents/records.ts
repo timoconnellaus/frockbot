@@ -74,6 +74,12 @@ export const TASK_ATTACHMENT_LIMIT_V1 = 4;
  */
 export const SUBAGENT_QUESTION_PREFIX_V1 = "[Question for you] ";
 
+/**
+ * Longest question `task_ask` takes: its notice, with the task_resume line
+ * after it, has to fit the inbox's hand-off limit whole.
+ */
+export const TASK_QUESTION_MAX_V1 = 3_000;
+
 /** The question a settled task's hand-off asks, if it asks one. */
 export function subagentQuestionV1(
   summary: string | undefined,

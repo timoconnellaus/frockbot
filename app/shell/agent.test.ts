@@ -37,6 +37,7 @@ import {
 } from "./agent.ts";
 import {
   SUBAGENT_QUESTION_PREFIX_V1,
+  TASK_QUESTION_MAX_V1,
   subagentQuestionV1,
 } from "@frockbot/app/subagents/records";
 
@@ -224,6 +225,15 @@ describe("the Shell's tool admission", () => {
         subagentQuestionV1(`${SUBAGENT_QUESTION_PREFIX_V1}Nomad or Ester?`),
       ).toBe("Nomad or Ester?");
       expect(subagentQuestionV1("Booked Ester.")).toBeUndefined();
+      expect(
+        await invoke(
+          mounted,
+          "subagent",
+          call(TASK_ASK_TOOL_V1, {
+            question: "x".repeat(TASK_QUESTION_MAX_V1 + 1),
+          }),
+        ),
+      ).toMatchObject({ isError: true });
     } finally {
       await mounted.dispose();
     }

@@ -25,6 +25,7 @@ import {
 } from "@frockbot/core/contracts";
 import type { StoredRunOriginV1 } from "@frockbot/core/durable";
 import { resolveDynamicToolNameV1 } from "../audit/classify.js";
+import { SUBAGENT_SUMMARY_END_V1 } from "../routines/inbox.js";
 import type { FoundationFeature } from "../runtime.js";
 
 // Turn supervision, mounted into the loop. Jev judges; this file enforces.
@@ -383,7 +384,9 @@ export function subagentWorkV1(
 ): string[] {
   const settled =
     /^(?:\w+ subagent \S+|Subagent \S+ resumed and) completed\. ([\s\S]+)$/;
-  const notice = /(?:^|\n)\w+ subagent "[^"\n]*" completed\. ([\s\S]+)$/;
+  const notice = new RegExp(
+    `(?:^|\\n)\\w+ subagent "[^"\\n]*" completed\\. ([\\s\\S]+?)\\n${escapeRegExp(SUBAGENT_SUMMARY_END_V1)}`,
+  );
   return turnEvents(events, turn).flatMap((event) => {
     const match =
       event.type === "tool/result" && !event.isError
@@ -395,6 +398,10 @@ export function subagentWorkV1(
     // A question the subagent asked is not work it made.
     return work && !work.startsWith("It asks: ") ? [work] : [];
   });
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function clip(text: string, max = 280): string {
