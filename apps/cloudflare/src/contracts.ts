@@ -686,6 +686,12 @@ export interface BotConfigurationBinding {
     botId: string;
     use: import("@frockbot/app/audit").DeviceUseV1;
   }): Promise<{ status: "recorded" } | { status: "refused"; reason: string }>;
+  recordPanelPageReport(request: {
+    schemaVersion: 1;
+    userId: string;
+    botId: string;
+    report: import("@frockbot/app/plugins/page-reports").PluginPageReportCommandV1;
+  }): Promise<{ status: "recorded" } | { status: "refused"; reason: string }>;
   listCompositionGenerations(request: {
     schemaVersion: 1;
     userId: string;

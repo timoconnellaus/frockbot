@@ -8,6 +8,7 @@ import {
 } from "@frockbot/app/plugins/page";
 import { decodePanelFocusCommandV1 } from "@frockbot/app/plugins/panels";
 import { decodeDeviceUseCommandV1 } from "@frockbot/app/audit";
+import { decodePluginPageReportCommandV1 } from "@frockbot/app/plugins/page-reports";
 import { accessEmailV1 } from "@frockbot/app/admin/shared";
 import {
   ACCOUNT_DELETION_PATH_V1,
@@ -1065,6 +1066,43 @@ export function createGateway(
         const result = await dependencies
           .botConfigurationFor(userId, botId)
           .recordPanelDeviceUse({ schemaVersion: 1, userId, botId, use });
+        if (result.status === "refused") {
+          return jsonError(400, result.reason);
+        }
+        return Response.json(result, {
+          headers: { "cache-control": "no-store" },
+        });
+      } catch (error) {
+        if (error instanceof ConfigurationDecodeError) {
+          return jsonError(400, "invalid bot id");
+        }
+        return jsonError(503, "Panels are temporarily unavailable.");
+      }
+    }
+
+    const botPanelsPageReportMatch = url.pathname.match(
+      /^\/api\/bots\/([^/]+)\/panels\/page-report$/,
+    );
+    if (botPanelsPageReportMatch) {
+      if (request.method !== "POST") {
+        return jsonError(405, "method not allowed");
+      }
+      try {
+        const botId = decodeBotPathSegment(botPanelsPageReportMatch[1]);
+        let report;
+        try {
+          report = decodePluginPageReportCommandV1(await request.json());
+        } catch (error) {
+          return jsonError(
+            400,
+            error instanceof Error && !(error instanceof SyntaxError)
+              ? error.message
+              : "invalid page report",
+          );
+        }
+        const result = await dependencies
+          .botConfigurationFor(userId, botId)
+          .recordPanelPageReport({ schemaVersion: 1, userId, botId, report });
         if (result.status === "refused") {
           return jsonError(400, result.reason);
         }

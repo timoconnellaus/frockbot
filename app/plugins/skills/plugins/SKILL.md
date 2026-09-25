@@ -54,7 +54,8 @@ files, not as extra paths. The one other file is an HTML page a
 run on this Bot. `plugin_disable` turns one off for this Bot at once, no
 approval needed — narrowing what you can do is always yours to decide.
 `plugin_settings` reads or writes the values a Plugin's `settingsSchema`
-declares, for this Bot. Never a secret.
+declares, for this Bot. Never a secret. `plugin_page_reports` reads what a
+Plugin's pages reported from the person's devices: see `pages.md`.
 
 A Plugin with no tools is valid: hooks, a provider, a trigger, a card or a
 conversation panel can be the whole surface. A card's Bot-facing tool is `<pluginId>_<cardId>`;
