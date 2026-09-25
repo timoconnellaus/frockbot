@@ -56,15 +56,16 @@ export const routineReportQuestionsV1 = {
     {
       target: "`report`, what the Routine called `routine` found this time",
       decision:
-        "Would the person who set up this Routine want to be told this?",
+        "Did this firing find something the person would want to be told about?",
       requirements: [
-        "It says something new or something they asked this Routine to tell them, even that nothing changed when that is the point of the Routine",
+        "It found what the Routine watches for, or something new, changed or due",
+        "A report that nothing was found or nothing changed counts only when `routine` asks for a status every time, such as a daily summary",
       ],
     },
     {
-      true: "They would want to hear it",
+      true: "It found something they would want to hear",
       false:
-        "It is nothing to report: no change, nothing found, a routine check that passed, when the Routine is not for telling them that",
+        "Nothing to report: nothing found, nothing new, a check that passed",
     },
   ),
   urgency: score(

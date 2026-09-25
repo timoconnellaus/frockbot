@@ -3,6 +3,7 @@ import {
   judgeMemoryRecallV1,
   MEMORY_RECALL_KEEP_MIN_V1,
 } from "../supervision/memory-recall.js";
+import { createJevRoutineReportJudgeV1 } from "../supervision/routine-report.js";
 import {
   nominateSkillsV1,
   type SkillCandidateV1,
@@ -13,6 +14,14 @@ import {
 // on. Run with `bun run eval:context`.
 
 export type ContextFixtureV1 =
+  | {
+      readonly kind: "routine";
+      readonly name: string;
+      readonly routine: string;
+      readonly report: string;
+      /** What the delivery should be. */
+      readonly expected: "dismiss" | "quiet" | "loud";
+    }
   | {
       readonly kind: "recall";
       readonly name: string;
@@ -34,6 +43,24 @@ export async function runContextCaseV1(
   client: TypeSafeClient,
   fixture: ContextFixtureV1,
 ): Promise<{ passed: boolean; expected: string; actual: string }> {
+  if (fixture.kind === "routine") {
+    const verdict = await createJevRoutineReportJudgeV1(client)({
+      routine: fixture.routine,
+      report: fixture.report,
+    });
+    const actual = !verdict
+      ? "undecided"
+      : !verdict.tell
+        ? "dismiss"
+        : verdict.quiet
+          ? "quiet"
+          : "loud";
+    return {
+      passed: actual === fixture.expected,
+      expected: fixture.expected,
+      actual: `${actual}${verdict ? ` (worth ${verdict.worth.toFixed(2)}, urgency ${verdict.urgency.toFixed(2)})` : ""}`,
+    };
+  }
   if (fixture.kind === "recall") {
     const scores = await judgeMemoryRecallV1(client, {
       request: fixture.request,
@@ -130,5 +157,42 @@ export const contextFixturesV1: readonly ContextFixtureV1[] = [
     request: "Make me a Plugin that shows my guitar practice streak.",
     skills: SKILLS,
     named: ["managed/plugins"],
+  },
+  {
+    kind: "routine",
+    name: "nothing-new-is-dismissed",
+    routine: "Check my inbox for anything from the bank",
+    report: "Checked your inbox. Nothing new from the bank since yesterday.",
+    expected: "dismiss",
+  },
+  {
+    kind: "routine",
+    name: "a-digest-can-wait",
+    routine: "Weekly reading digest",
+    report:
+      "This week's digest: 4 articles on e-bike batteries, 2 on cycling routes near Brisbane, and a long read on urban planning.",
+    expected: "quiet",
+  },
+  {
+    kind: "routine",
+    name: "an-outage-is-loud",
+    routine: "Watch my website",
+    report:
+      "Your website frockbot.com has returned 503 errors for the last 12 minutes; checkout is down.",
+    expected: "loud",
+  },
+  {
+    kind: "routine",
+    name: "a-due-bill-today-is-told",
+    routine: "Bills reminder",
+    report: "Your electricity bill of $312.40 is due today.",
+    expected: "loud",
+  },
+  {
+    kind: "routine",
+    name: "a-daily-status-is-told-even-when-quiet",
+    routine: "Every morning, tell me how my servers are doing",
+    report: "All three servers were healthy overnight; no alerts.",
+    expected: "quiet",
   },
 ];
