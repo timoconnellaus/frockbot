@@ -1,4 +1,5 @@
 import { PLUGIN_SERVED_PROVIDER_IDS_V1 } from "@frockbot/providers/catalog/definition";
+import { createSupervisionRuntimeFeatureV1 } from "@frockbot/app/supervision";
 import { createGroupChatsRuntimeFeature } from "@frockbot/app/groups/agent";
 import { catalogProvidersV1 } from "@frockbot/providers/catalog/registry";
 import { createCatalogProviderFeatureV1 } from "@frockbot/providers/catalog/runtime";
@@ -483,6 +484,16 @@ export function createFoundationHostedRuntimePackages(
 ): FoundationRuntimePackage[] {
   const computerConfigured = computerConfiguredV1(host);
   return [
+    // First, so its hooks are outermost: no Plugin hook sees a call it
+    // refused, and nothing after it reopens a Turn it ended.
+    ...(host.supervision
+      ? [
+          runtimePackage(
+            "supervision",
+            createSupervisionRuntimeFeatureV1(host.supervision),
+          ),
+        ]
+      : []),
     ...(host.botSelfManagement
       ? [
           runtimePackage(

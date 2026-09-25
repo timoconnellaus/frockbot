@@ -5,7 +5,10 @@ import {
   type TurnTypeV1,
   type WorkspaceFilesV1,
 } from "@frockbot/core/contracts";
-import { createHostedRoutineEventJudgeV1 } from "@frockbot/app/supervision";
+import {
+  createHostedRoutineEventJudgeV1,
+  createHostedTurnSupervisorV1,
+} from "@frockbot/app/supervision";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
 import {
   BotDurableAuthority,
@@ -24,6 +27,7 @@ import {
 import { PluginModelDispatchRegistryV1 } from "@frockbot/app/isolates/model-dispatch";
 import type { ShellMountedComposition } from "./backend-composition.js";
 import type { ReplyDraftV1 } from "./reply-draft.js";
+import type { TurnSupervisor } from "@frockbot/core/contracts";
 import { storedRunCodecV1 } from "./backend-contracts.js";
 import type { NativeAiBindingV1 } from "./backend-image.js";
 import type { EmailSenderV1 } from "@frockbot/app/email/sender";
@@ -115,10 +119,12 @@ export interface BotStateEnv {
    */
   ROUTINE_HOOK_SECRET?: string;
   /**
-   * The hosted Jev credential. Absent, the routine-event judge never drops.
-   * The key never leaves the chooser.
+   * The hosted Jev credential. Required: without it Turn supervision is
+   * unavailable and no Turn runs. The key never leaves the chooser.
    */
   JEV_API_KEY?: string;
+  /** A stand-in for Jev's API; only a test harness names one. */
+  JEV_BASE_URL?: string;
 }
 
 /** Constructs the kernel Bot Durable Object authority this Package runs under. */
@@ -187,6 +193,11 @@ export interface ShellBotBackendHost extends ShellApplicationV1 {
    * Absent, the drain mounts the fake that always keeps the event.
    */
   routineEventJudge?: RoutineEventJudgeV1;
+  /**
+   * Judges every Turn. Absent, the hosted Jev supervisor built from `env`,
+   * which refuses every Turn when no `JEV_API_KEY` is set.
+   */
+  turnSupervisor?: TurnSupervisor;
 }
 
 /** The Turn currently executing on this object, for durable Stop. */
@@ -363,6 +374,7 @@ export class ShellBotStateV1 {
    * verdict and still admits; Cut 4 is what skips.
    */
   readonly routineEventJudge: RoutineEventJudgeV1;
+  readonly turnSupervisor: TurnSupervisor;
 
   constructor(
     host: ShellBotBackendHost,
@@ -395,6 +407,13 @@ export class ShellBotStateV1 {
       host.routineEventJudge ??
       createHostedRoutineEventJudgeV1({
         JEV_API_KEY: host.env.JEV_API_KEY,
+        JEV_BASE_URL: host.env.JEV_BASE_URL,
+      });
+    this.turnSupervisor =
+      host.turnSupervisor ??
+      createHostedTurnSupervisorV1({
+        JEV_API_KEY: host.env.JEV_API_KEY,
+        JEV_BASE_URL: host.env.JEV_BASE_URL,
       });
     this.now = host.now ?? (() => new Date());
     this.sleep =

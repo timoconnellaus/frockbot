@@ -7,7 +7,11 @@ import {
   emptyFailureStateV1,
   emptyPolicySnapshotV1,
   SupervisionUnavailableError,
+  decodeSendDecisionV1,
+  decodeStepDecisionV1,
+  releaseSendDecisionV1,
   type ProposedCallV1,
+  type SendReviewEvidenceV1,
   type StepProposalEvidence,
   type TurnStartEvidence,
 } from "./turn-supervisor.js";
@@ -26,6 +30,16 @@ const startEvidence: TurnStartEvidence = {
   failure: emptyFailureStateV1(),
 };
 
+const sendEvidence: SendReviewEvidenceV1 = {
+  objective: startEvidence.input.text,
+  origin: "user",
+  conversation: [],
+  shown: ["Sent the March invoice to Dana."],
+  priorResults: [],
+  message: "I've emailed Dana the invoice.",
+  finish: true,
+};
+
 const sendCall: ProposedCallV1 = {
   callId: "call-1",
   tool: "send_email",
@@ -35,9 +49,12 @@ const sendCall: ProposedCallV1 = {
 
 const stepEvidence: StepProposalEvidence = {
   objective: startEvidence.input.text,
+  origin: "user",
   startDirective: defaultTurnDirectiveV1(),
   text: "I'll send that now.",
   calls: [sendCall],
+  conversation: [],
+  shown: [],
   policies: emptyPolicySnapshotV1(),
   authorizations: startEvidence.conversation,
   priorResults: [],
@@ -55,6 +72,9 @@ describe("the fake TurnSupervisor", () => {
     );
     await expect(supervisor.reviewStep(stepEvidence)).resolves.toEqual(
       allowAllStepDecisionV1(stepEvidence.calls),
+    );
+    await expect(supervisor.reviewSend(sendEvidence)).resolves.toEqual(
+      releaseSendDecisionV1(),
     );
   });
 
@@ -86,6 +106,7 @@ describe("the fake TurnSupervisor", () => {
           { kind: "wrong_objective", weight: 1, refs: [sendCall.callId] },
         ],
         continuation: [],
+        judgments: [],
       }),
     });
     expect(await supervisor.startTurn(startEvidence)).toEqual(
@@ -109,5 +130,60 @@ describe("the unavailable TurnSupervisor", () => {
     await expect(supervisor.reviewStep(stepEvidence)).rejects.toBeInstanceOf(
       SupervisionUnavailableError,
     );
+    await expect(supervisor.reviewSend(sendEvidence)).rejects.toBeInstanceOf(
+      SupervisionUnavailableError,
+    );
+  });
+});
+
+describe("a send decision on the log", () => {
+  test("names why it was withheld, and only when it was", () => {
+    expect(
+      decodeSendDecisionV1({
+        send: "withhold",
+        reason: "redundant_text",
+        judgments: [{ question: "messageNeeded", value: 0.1 }],
+        model: "jev-1.13.0",
+      }),
+    ).toEqual({
+      send: "withhold",
+      reason: "redundant_text",
+      judgments: [{ question: "messageNeeded", value: 0.1 }],
+      model: "jev-1.13.0",
+    });
+    expect(() =>
+      decodeSendDecisionV1({ send: "withhold", judgments: [] }),
+    ).toThrow(/reason/);
+    expect(() =>
+      decodeSendDecisionV1({
+        send: "release",
+        reason: "redundant_text",
+        judgments: [],
+      }),
+    ).toThrow(/reason/);
+    expect(() =>
+      decodeSendDecisionV1({ send: "release", judgments: [], extra: 1 }),
+    ).toThrow(/not allowed/);
+  });
+});
+
+describe("a step decision on the log", () => {
+  test("holds one entry per call, however many the response made", () => {
+    const calls = Array.from({ length: 100 }, (_, index) => ({
+      ...sendCall,
+      callId: `call-${index}`,
+    }));
+    const decision = {
+      ...allowAllStepDecisionV1(calls),
+      responseAlignment: "wrong-objective" as const,
+      failureSignals: [
+        {
+          kind: "wrong_objective" as const,
+          weight: 1,
+          refs: calls.map((call) => call.callId),
+        },
+      ],
+    };
+    expect(decodeStepDecisionV1(decision)).toEqual(decision);
   });
 });

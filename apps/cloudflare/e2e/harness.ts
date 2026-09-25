@@ -872,6 +872,11 @@ export async function startHarness(
         // service that is not there.
         "--var",
         `APPLET_BUILD_TOKEN:${E2E_APPLET_BUILD_TOKEN}`,
+        // Turn supervision is required. The Frock AI fake answers as Jev.
+        "--var",
+        "JEV_API_KEY:e2e-jev-key",
+        "--var",
+        `JEV_BASE_URL:http://127.0.0.1:${options.frockAiPort}`,
         "--persist-to",
         persistDirectory,
         // As above: the per-request log is the flood, not the signal. `debug`

@@ -29,6 +29,7 @@ import type { MemoryRuntimeHostV1 } from "@frockbot/app/memory/agent";
 import type { RoutinesRuntimeHostV1 } from "@frockbot/app/routines/agent";
 import type { SkillsRuntimeHostV1 } from "@frockbot/app/skills/agent";
 import type { SubagentsRuntimeHostV1 } from "@frockbot/app/subagents/agent";
+import type { SupervisionRuntimeHostV1 } from "@frockbot/app/supervision";
 import type { FrockAiChatCompletionV1 } from "@frockbot/providers/frock-ai/runtime";
 
 /** The per-Turn seams a Computer host is built over. */
@@ -60,6 +61,11 @@ export type ShellComputerHostFactoryV1 = (
 export interface ShellHostedRuntimeHostV1 {
   userId: string;
   readSecret(name: string): string | undefined;
+  /**
+   * Turn supervision for one admitted Turn. Present on every Turn: a Turn
+   * runs supervised or not at all.
+   */
+  supervision?: SupervisionRuntimeHostV1;
   /**
    * This deployment's Computer host. Absent, and there is no Computer at all:
    * no host registers, the Computer tools are not mounted, and every Computer

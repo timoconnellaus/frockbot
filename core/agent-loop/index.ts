@@ -56,6 +56,21 @@ export {
 } from "./errors.js";
 export { estimateModelUsageV1 } from "./model-request.js";
 
+/** What a step's review and its tool calls need of the model's response. */
+interface StepResponseV1 {
+  requestId: string;
+  text: string;
+  toolCalls: readonly ToolCall[];
+}
+
+function stepResponseV1(response: ModelResponse): StepResponseV1 {
+  return {
+    requestId: response.request.requestId,
+    text: response.text,
+    toolCalls: response.toolCalls,
+  };
+}
+
 export interface AgentLoopConfig {
   maxSteps?: number;
   /**
@@ -417,7 +432,7 @@ class LoopAgent implements Agent, LoopRuntime {
             await this.#completeStep(
               openTurn,
               latestStep,
-              response.toolCalls,
+              stepResponseV1(response),
               cursor,
               signal,
             )
@@ -431,7 +446,7 @@ class LoopAgent implements Agent, LoopRuntime {
             await this.#completeStep(
               openTurn,
               latestStep,
-              latestAssistant.toolCalls,
+              latestAssistant,
               cursor,
               signal,
             )
@@ -474,7 +489,7 @@ class LoopAgent implements Agent, LoopRuntime {
             await this.#completeStep(
               openTurn,
               step,
-              response.toolCalls,
+              stepResponseV1(response),
               cursor,
               signal,
             )
@@ -552,7 +567,7 @@ class LoopAgent implements Agent, LoopRuntime {
             await this.#completeStep(
               turn,
               step,
-              response.toolCalls,
+              stepResponseV1(response),
               cursor,
               signal,
             )
@@ -603,20 +618,38 @@ class LoopAgent implements Agent, LoopRuntime {
   }
 
   /**
-   * Runs the step's tool calls, closes the step, and reports whether the Turn
-   * stops here.
+   * Has the response reviewed, runs its tool calls, closes the step, and
+   * reports whether the Turn stops here.
+   *
+   * The review comes before the first call is prepared, on a fresh step and a
+   * resumed one alike, so nothing a response proposed runs unreviewed. A
+   * response with no calls has no effect and nothing the person sees, so it is
+   * not reviewed.
    */
   async #completeStep(
     turn: number,
     step: number,
-    toolCalls: readonly ToolCall[],
+    response: StepResponseV1,
     cursor: TurnCursor,
     signal: AbortSignal,
   ): Promise<boolean> {
+    const { toolCalls } = response;
     let proposed: LoopStepContinuationV1;
     if (toolCalls.length === 0) {
       proposed = { kind: "stop" };
     } else {
+      await this.services.hooks.reviewResponse(
+        this,
+        {
+          turn,
+          step,
+          requestId: response.requestId,
+          text: response.text,
+          toolCalls,
+        },
+        signal,
+      );
+      signal.throwIfAborted();
       const endsTurn = await executeToolsV1(
         this,
         toolCallOccurrences(turn, step, [...toolCalls]),

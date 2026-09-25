@@ -21,6 +21,7 @@ export const SUPERVISION_REASON_CODES_V1 = [
   "policy_requires_confirmation",
   "arguments_changed",
   "off_task",
+  "redundant_text",
   "text_depends_on_rejected_effect",
   "supervisor_unavailable",
   "supervisor_timeout",
@@ -121,6 +122,8 @@ export interface ContinuationItemV1 {
   id: string;
   status: ContinuationStatusV1;
   evidenceRefs: string[];
+  /** What the work is, in words code wrote from the log; never Jev's. */
+  description?: string;
 }
 
 export interface FailureStateV1 {
@@ -129,8 +132,33 @@ export interface FailureStateV1 {
   mentorRequired: boolean;
 }
 
+/**
+ * Where an admitted Turn's input came from. `user` is a person in the app;
+ * `email` and `group` are a person too, but not one watching this thread.
+ */
 export type TurnInputOriginV1 =
-  "user" | "agent" | "schedule" | "subagent" | "voice";
+  "user" | "email" | "group" | "agent" | "schedule" | "subagent" | "voice";
+
+export const TURN_INPUT_ORIGINS_V1: readonly TurnInputOriginV1[] = [
+  "user",
+  "email",
+  "group",
+  "agent",
+  "schedule",
+  "subagent",
+  "voice",
+];
+
+/**
+ * One raw answer a supervisor's judge gave, kept beside the decision code made
+ * of it so a person can see why. `answer` is the label a choice picked;
+ * `value` is a Noul, a Score, or the picked label's probability.
+ */
+export interface SupervisionJudgmentV1 {
+  question: string;
+  answer?: string;
+  value: number;
+}
 
 export interface TurnStartEvidence {
   input: {
@@ -165,6 +193,10 @@ export interface TurnDirective {
   ambiguity: TurnAmbiguityV1;
   requiredCapabilities: SpecialistCapabilityV1[];
   steering: SupervisionReasonCode[];
+  /** What the judge answered. Empty for an adapter that asked nobody. */
+  judgments: SupervisionJudgmentV1[];
+  /** The judge's resolved model version, when one was asked. */
+  model?: string;
 }
 
 export interface ProposedCallV1 {
@@ -172,6 +204,12 @@ export interface ProposedCallV1 {
   tool: string;
   arguments: Readonly<Record<string, unknown>>;
   effect: ToolEffectV1;
+  /**
+   * The call is the Bot speaking to someone rather than acting: a question,
+   * a card, an answer to its caller. Such a call is never refused as off-task,
+   * because asking is how a Bot finds out what the task is.
+   */
+  speaks?: boolean;
 }
 
 export interface PriorToolResultV1 {
@@ -179,11 +217,24 @@ export interface PriorToolResultV1 {
   content: string;
 }
 
+/**
+ * One complete model response, as the person would receive it.
+ *
+ * `text` is the words the person would see: every plain-text message the
+ * response sends them, in order. `calls` is everything else it proposes,
+ * including a send that asks a question or draws a card; a text send is judged
+ * as text, never as a call.
+ */
 export interface StepProposalEvidence {
   objective: string;
+  origin: TurnInputOriginV1;
   startDirective: TurnDirective;
   text: string;
   calls: readonly ProposedCallV1[];
+  /** The conversation before this Turn, oldest first. */
+  conversation: readonly ConversationEvidenceV1[];
+  /** What the person has already been shown this Turn, oldest first. */
+  shown: readonly string[];
   policies: PolicySnapshotV1;
   authorizations: readonly ConversationEvidenceV1[];
   priorResults: readonly PriorToolResultV1[];
@@ -210,10 +261,47 @@ export interface StepCallDecision {
 
 export interface StepDecision {
   text: "release" | "withhold";
+  /** Why the text was withheld; present exactly when it was. */
+  textReason?: SupervisionReasonCode;
   calls: StepCallDecision[];
   responseAlignment: ResponseAlignmentV1;
   failureSignals: FailureSignal[];
   continuation: ContinuationDecision[];
+  /** What the judge answered. Empty for an adapter that asked nobody. */
+  judgments: SupervisionJudgmentV1[];
+  /** The judge's resolved model version, when one was asked. */
+  model?: string;
+}
+
+/**
+ * One text send, reviewed right before it runs, with everything the Turn has
+ * already shown the person and every result it has already seen. Judged per
+ * send rather than with the whole response because what makes a message
+ * redundant is often a result that landed earlier in the same step.
+ */
+export interface SendReviewEvidenceV1 {
+  objective: string;
+  origin: TurnInputOriginV1;
+  /** The conversation before this Turn, oldest first. */
+  conversation: readonly ConversationEvidenceV1[];
+  /** What the person has already been shown this Turn, oldest first. */
+  shown: readonly string[];
+  /** This Turn's tool results so far, oldest first. */
+  priorResults: readonly PriorToolResultV1[];
+  /** The words the send would put in front of the person. */
+  message: string;
+  /** The send would end the Turn. */
+  finish: boolean;
+}
+
+export interface SendDecisionV1 {
+  send: "release" | "withhold";
+  /** Why the send was withheld; present exactly when it was. */
+  reason?: SupervisionReasonCode;
+  /** What the judge answered. Empty for an adapter that asked nobody. */
+  judgments: SupervisionJudgmentV1[];
+  /** The judge's resolved model version, when one was asked. */
+  model?: string;
 }
 
 export interface TurnSupervisor {
@@ -226,6 +314,11 @@ export interface TurnSupervisor {
     evidence: StepProposalEvidence,
     signal?: AbortSignal,
   ): Promise<StepDecision>;
+
+  reviewSend(
+    evidence: SendReviewEvidenceV1,
+    signal?: AbortSignal,
+  ): Promise<SendDecisionV1>;
 }
 
 export type SupervisionFailureKindV1 = "unavailable" | "timeout";
@@ -242,6 +335,303 @@ export class SupervisionUnavailableError extends Error {
     this.name = "SupervisionUnavailableError";
     this.kind = kind;
   }
+}
+
+/** How a result Turn supervision wrote begins, for the model to read. */
+export const SUPERVISION_WITHHELD_SEND_PREFIX_V1 =
+  "Not sent: supervision withheld this message";
+export const SUPERVISION_OFF_TASK_PREFIX_V1 =
+  "Not run: supervision judged this response to be working on something the person did not ask for.";
+
+// Exact-key decoders for the durable supervision records. They cross the
+// session log, the debug surface and recovery, so nothing is trusted unread.
+
+const JUDGMENT_TEXT_MAX_V1 = 64;
+const SUPERVISION_LIST_MAX_V1 = 64;
+
+function record(value: unknown, label: string): Record<string, unknown> {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error(`${label} must be an object`);
+  }
+  return value as Record<string, unknown>;
+}
+
+function exactKeys(
+  value: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[],
+  label: string,
+): void {
+  for (const key of required) {
+    if (!Object.hasOwn(value, key))
+      throw new Error(`${label}.${key} is missing`);
+  }
+  for (const key of Object.keys(value)) {
+    if (!required.includes(key) && !optional.includes(key)) {
+      throw new Error(`${label}.${key} is not allowed`);
+    }
+  }
+}
+
+function text(value: unknown, label: string, maximum?: number): string {
+  if (
+    typeof value !== "string" ||
+    (maximum !== undefined && value.length > maximum)
+  ) {
+    throw new Error(`${label} must be a bounded string`);
+  }
+  return value;
+}
+
+function finite(value: unknown, label: string): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    throw new Error(`${label} must be a finite number`);
+  }
+  return value;
+}
+
+function oneOf<T extends string>(
+  value: unknown,
+  allowed: readonly T[],
+  label: string,
+): T {
+  if (typeof value !== "string" || !allowed.includes(value as T)) {
+    throw new Error(`${label} is invalid`);
+  }
+  return value as T;
+}
+
+function list<T>(
+  value: unknown,
+  label: string,
+  decode: (entry: unknown, label: string) => T,
+  maximum = SUPERVISION_LIST_MAX_V1,
+): T[] {
+  if (!Array.isArray(value) || value.length > maximum) {
+    throw new Error(`${label} must be a bounded array`);
+  }
+  return value.map((entry, index) => decode(entry, `${label}[${index}]`));
+}
+
+function decodeJudgmentsV1(
+  value: unknown,
+  label: string,
+): SupervisionJudgmentV1[] {
+  return list(value, label, (entry, at) => {
+    const judgment = record(entry, at);
+    exactKeys(judgment, ["question", "value"], ["answer"], at);
+    return {
+      question: text(judgment.question, `${at}.question`, JUDGMENT_TEXT_MAX_V1),
+      ...(judgment.answer === undefined
+        ? {}
+        : {
+            answer: text(judgment.answer, `${at}.answer`, JUDGMENT_TEXT_MAX_V1),
+          }),
+      value: finite(judgment.value, `${at}.value`),
+    };
+  });
+}
+
+export function decodeTurnDirectiveV1(
+  value: unknown,
+  label = "turn directive",
+): TurnDirective {
+  const directive = record(value, label);
+  exactKeys(
+    directive,
+    [
+      "acknowledge",
+      "complexity",
+      "consequence",
+      "ambiguity",
+      "requiredCapabilities",
+      "steering",
+      "judgments",
+    ],
+    ["model"],
+    label,
+  );
+  if (typeof directive.acknowledge !== "boolean") {
+    throw new Error(`${label}.acknowledge must be a boolean`);
+  }
+  return {
+    acknowledge: directive.acknowledge,
+    complexity: oneOf(
+      directive.complexity,
+      TURN_COMPLEXITIES_V1,
+      `${label}.complexity`,
+    ),
+    consequence: finite(directive.consequence, `${label}.consequence`),
+    ambiguity: oneOf(
+      directive.ambiguity,
+      TURN_AMBIGUITIES_V1,
+      `${label}.ambiguity`,
+    ),
+    requiredCapabilities: list(
+      directive.requiredCapabilities,
+      `${label}.requiredCapabilities`,
+      (entry, at) => oneOf(entry, SPECIALIST_CAPABILITIES_V1, at),
+    ),
+    steering: list(directive.steering, `${label}.steering`, (entry, at) =>
+      oneOf(entry, SUPERVISION_REASON_CODES_V1, at),
+    ),
+    judgments: decodeJudgmentsV1(directive.judgments, `${label}.judgments`),
+    ...(directive.model === undefined
+      ? {}
+      : {
+          model: text(directive.model, `${label}.model`, JUDGMENT_TEXT_MAX_V1),
+        }),
+  };
+}
+
+export function decodeStepDecisionV1(
+  value: unknown,
+  label = "step decision",
+): StepDecision {
+  const decision = record(value, label);
+  exactKeys(
+    decision,
+    [
+      "text",
+      "calls",
+      "responseAlignment",
+      "failureSignals",
+      "continuation",
+      "judgments",
+    ],
+    ["textReason", "model"],
+    label,
+  );
+  const released = oneOf(
+    decision.text,
+    ["release", "withhold"] as const,
+    `${label}.text`,
+  );
+  if ((released === "withhold") !== (decision.textReason !== undefined)) {
+    throw new Error(`${label}.textReason must name why text was withheld`);
+  }
+  return {
+    text: released,
+    ...(decision.textReason === undefined
+      ? {}
+      : {
+          textReason: oneOf(
+            decision.textReason,
+            SUPERVISION_REASON_CODES_V1,
+            `${label}.textReason`,
+          ),
+        }),
+    calls: list(
+      decision.calls,
+      `${label}.calls`,
+      (entry, at) => {
+        const call = record(entry, at);
+        exactKeys(
+          call,
+          ["callId", "decision", "reasonCode", "policyRefs"],
+          [],
+          at,
+        );
+        return {
+          callId: text(call.callId, `${at}.callId`, 128),
+          decision: oneOf(
+            call.decision,
+            ["allow", "reject"] as const,
+            `${at}.decision`,
+          ),
+          reasonCode: oneOf(
+            call.reasonCode,
+            SUPERVISION_REASON_CODES_V1,
+            `${at}.reasonCode`,
+          ),
+          policyRefs: list(call.policyRefs, `${at}.policyRefs`, (ref, where) =>
+            text(ref, where, 128),
+          ),
+        };
+      },
+      Number.POSITIVE_INFINITY,
+    ),
+    responseAlignment: oneOf(
+      decision.responseAlignment,
+      RESPONSE_ALIGNMENTS_V1,
+      `${label}.responseAlignment`,
+    ),
+    failureSignals: list(
+      decision.failureSignals,
+      `${label}.failureSignals`,
+      (entry, at) => {
+        const signal = record(entry, at);
+        exactKeys(signal, ["kind", "weight", "refs"], [], at);
+        return {
+          kind: oneOf(signal.kind, FAILURE_SIGNAL_KINDS_V1, `${at}.kind`),
+          weight: finite(signal.weight, `${at}.weight`),
+          refs: list(
+            signal.refs,
+            `${at}.refs`,
+            (ref, where) => text(ref, where, 128),
+            Number.POSITIVE_INFINITY,
+          ),
+        };
+      },
+    ),
+    continuation: list(
+      decision.continuation,
+      `${label}.continuation`,
+      (entry, at) => {
+        const item = record(entry, at);
+        exactKeys(item, ["id", "status", "evidenceRefs"], [], at);
+        return {
+          id: text(item.id, `${at}.id`, 128),
+          status: oneOf(item.status, CONTINUATION_STATUSES_V1, `${at}.status`),
+          evidenceRefs: list(
+            item.evidenceRefs,
+            `${at}.evidenceRefs`,
+            (ref, where) => text(ref, where, 128),
+          ),
+        };
+      },
+    ),
+    judgments: decodeJudgmentsV1(decision.judgments, `${label}.judgments`),
+    ...(decision.model === undefined
+      ? {}
+      : {
+          model: text(decision.model, `${label}.model`, JUDGMENT_TEXT_MAX_V1),
+        }),
+  };
+}
+
+export function decodeSendDecisionV1(
+  value: unknown,
+  label = "send decision",
+): SendDecisionV1 {
+  const decision = record(value, label);
+  exactKeys(decision, ["send", "judgments"], ["reason", "model"], label);
+  const send = oneOf(
+    decision.send,
+    ["release", "withhold"] as const,
+    `${label}.send`,
+  );
+  if ((send === "withhold") !== (decision.reason !== undefined)) {
+    throw new Error(`${label}.reason must name why the send was withheld`);
+  }
+  return {
+    send,
+    ...(decision.reason === undefined
+      ? {}
+      : {
+          reason: oneOf(
+            decision.reason,
+            SUPERVISION_REASON_CODES_V1,
+            `${label}.reason`,
+          ),
+        }),
+    judgments: decodeJudgmentsV1(decision.judgments, `${label}.judgments`),
+    ...(decision.model === undefined
+      ? {}
+      : {
+          model: text(decision.model, `${label}.model`, JUDGMENT_TEXT_MAX_V1),
+        }),
+  };
 }
 
 export function emptyPolicySnapshotV1(
@@ -262,7 +652,12 @@ export function defaultTurnDirectiveV1(): TurnDirective {
     ambiguity: "clear",
     requiredCapabilities: [],
     steering: [],
+    judgments: [],
   };
+}
+
+export function releaseSendDecisionV1(): SendDecisionV1 {
+  return { send: "release", judgments: [] };
 }
 
 export function allowAllStepDecisionV1(
@@ -279,6 +674,7 @@ export function allowAllStepDecisionV1(
     responseAlignment: "on-task",
     failureSignals: [],
     continuation: [],
+    judgments: [],
   };
 }
 
@@ -293,6 +689,7 @@ function throwIfAborted(signal?: AbortSignal): void {
 export function createFakeTurnSupervisorV1(options?: {
   startTurn?: TurnSupervisor["startTurn"];
   reviewStep?: TurnSupervisor["reviewStep"];
+  reviewSend?: TurnSupervisor["reviewSend"];
 }): TurnSupervisor {
   return {
     async startTurn(evidence, signal) {
@@ -305,6 +702,11 @@ export function createFakeTurnSupervisorV1(options?: {
       if (options?.reviewStep) return options.reviewStep(evidence, signal);
       return allowAllStepDecisionV1(evidence.calls);
     },
+    async reviewSend(evidence, signal) {
+      throwIfAborted(signal);
+      if (options?.reviewSend) return options.reviewSend(evidence, signal);
+      return releaseSendDecisionV1();
+    },
   };
 }
 
@@ -316,5 +718,5 @@ export function createUnavailableTurnSupervisorV1(
   const fail = async (): Promise<never> => {
     throw new SupervisionUnavailableError(kind, reason);
   };
-  return { startTurn: fail, reviewStep: fail };
+  return { startTurn: fail, reviewStep: fail, reviewSend: fail };
 }

@@ -82,6 +82,15 @@ function delivery(events: readonly SessionEvent[], turn: number) {
       attempts = 0;
       repair = false;
     }
+    // A finish Turn supervision withheld is still the Turn's last word: the
+    // person already has what it would have said.
+    if (
+      !addressed &&
+      event.type === "supervision/send" &&
+      event.finish &&
+      event.decision.send === "withhold"
+    )
+      return { required: false, attempts: 0, repair: false };
     if (event.type === "assistant/message" && event.toolCalls.length === 0) {
       attempts++;
       repair = true;

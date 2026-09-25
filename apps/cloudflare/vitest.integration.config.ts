@@ -22,6 +22,7 @@ import {
 } from "./test/computer-host-fake.ts";
 import {
   BRAVE_TEST_API_KEY,
+  JEV_TEST_API_KEY,
   COMPOSIO_TEST_API_KEY,
   createOutboundService,
   TEST_CREDENTIAL_KEYRING,
@@ -142,6 +143,8 @@ export default defineConfig({
           COMPOSIO_API_KEY: COMPOSIO_TEST_API_KEY,
           // The platform search key the harness's Brave stub accepts.
           BRAVE_SEARCH_API_KEY: BRAVE_TEST_API_KEY,
+          // Turn supervision is required; the outbound stub answers as Jev.
+          JEV_API_KEY: JEV_TEST_API_KEY,
           // The registered-machine door's signing secret. Fixed, so a test can
           // mint the token a machine presents and forge one that must be
           // refused.

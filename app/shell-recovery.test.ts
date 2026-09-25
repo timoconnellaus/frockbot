@@ -1,3 +1,4 @@
+import { createFakeTurnSupervisorV1 } from "@frockbot/core/contracts";
 import { describe, expect, test } from "bun:test";
 import {
   parseCredentialKeyringV1,
@@ -230,6 +231,7 @@ describe("Bot recovery on this application", () => {
     const host = () =>
       createShellBotBackendContribution({
         ...foundationShellApplicationV1,
+        turnSupervisor: createFakeTurnSupervisorV1(),
         state: { storage } as unknown as DurableObjectState,
         env: {
           CREDENTIAL_KEYRING: credentialKeyring,

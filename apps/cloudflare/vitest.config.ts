@@ -13,6 +13,7 @@ import {
 import {
   COMPOSIO_TEST_API_KEY,
   createOutboundService,
+  JEV_TEST_API_KEY,
   TEST_CREDENTIAL_KEYRING,
 } from "./test/harness/miniflare.ts";
 import {
@@ -57,6 +58,8 @@ const workerdBindings = {
   ROUTINE_HOOK_SECRET: "workerd-routine-hook-secret-0123456789abcdef",
   // The Connected apps provider key the harness stub accepts.
   COMPOSIO_API_KEY: COMPOSIO_TEST_API_KEY,
+  // Turn supervision is required; the outbound stub answers as Jev.
+  JEV_API_KEY: JEV_TEST_API_KEY,
   // The registered-machine door's signing secret. Fixed, so a test can
   // mint the token a machine presents and forge one that must be
   // refused.

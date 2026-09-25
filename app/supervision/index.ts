@@ -21,3 +21,9 @@ export {
   createHostedGroupReplyJudgeV1,
   createJevGroupReplyJudgeV1,
 } from "./group-reply.js";
+export {
+  createSupervisionRuntimeFeatureV1,
+  turnInputOriginV1,
+  withheldFinishV1,
+  type SupervisionRuntimeHostV1,
+} from "./loop.js";

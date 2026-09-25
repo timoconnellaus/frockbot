@@ -10,6 +10,7 @@ import { createBotGroupChatsHost } from "./backend-groups.js";
 import {
   PLUGIN_MODEL_PROVIDER_UNAVAILABLE_REASON_V1,
   type NormalizedModelRequest,
+  type TurnInputOriginV1,
   type TurnTypeV1,
 } from "@frockbot/core/contracts";
 import {
@@ -240,6 +241,10 @@ export async function agentRuntime(
     subagentTaskId?: string;
     /** How many `subagent` hand-offs deep this Turn is; absent means none. */
     handoffDepth?: number;
+    /** Where this Turn's input came from, for Turn supervision. */
+    inputOrigin?: TurnInputOriginV1;
+    /** Clears a withheld send's reply draft; absent where none is drawn. */
+    clearReplyDraft?(ordinal: number): void;
   },
   prepared?: PreparedTurnInputsV1,
 ): Promise<{
@@ -443,6 +448,17 @@ export async function agentRuntime(
     ...state.application.runtime.hosted({
       userId: identity.userId,
       readSecret,
+      ...(turn
+        ? {
+            supervision: {
+              supervisor: state.turnSupervisor,
+              origin: turn.inputOrigin ?? "user",
+              ...(turn.clearReplyDraft
+                ? { clearReplyDraft: turn.clearReplyDraft }
+                : {}),
+            },
+          }
+        : {}),
       ...(turn ? { skills } : {}),
       ...(turn
         ? { memory: createBotMemoryHost(identity, turn, state.env) }

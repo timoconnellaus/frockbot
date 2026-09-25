@@ -293,9 +293,12 @@ describe("minting the internal secrets", () => {
 });
 
 describe("the keys only a deployer has", () => {
-  test("the Computer's token is the one that is required", () => {
+  test("the Computer's token and Jev's key are the ones that are required", () => {
     const required = HUMAN_SECRETS_V1.filter((secret) => secret.required);
-    expect(required.map((secret) => secret.name)).toEqual(["SPRITES_TOKEN"]);
+    expect(required.map((secret) => secret.name)).toEqual([
+      "SPRITES_TOKEN",
+      "JEV_API_KEY",
+    ]);
     expect(required[0]!.where).toContain("fly.io");
   });
 

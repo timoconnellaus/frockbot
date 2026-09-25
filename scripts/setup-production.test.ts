@@ -132,6 +132,8 @@ const productionEnvironment = {
   // optional.
   OPENAI_API_KEY: "sk-production-openai",
   GEMINI_API_KEY: "gemini-production",
+  // Required with enforced Turn supervision: no Turn runs without Jev.
+  JEV_API_KEY: "jev-production",
 };
 
 type WorkflowStep = {

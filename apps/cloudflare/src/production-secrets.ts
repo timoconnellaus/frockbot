@@ -88,6 +88,10 @@ export interface NonSecretWorkerSettingV1 extends ProductionSecretV1 {
  */
 export const REQUIRED_PRODUCTION_SECRETS_V1: readonly ProductionSecretV1[] = [
   {
+    name: "JEV_API_KEY",
+    why: "Authorizes Turn supervision against Jev: every Turn is supervised, so without it no Bot runs a Turn. The routine-event rejector, group replies and dictation tidy review use it too.",
+  },
+  {
     name: "FCM_SERVICE_ACCOUNT",
     why: "Authorizes Firebase push delivery to registered Android devices.",
   },
@@ -228,12 +232,6 @@ export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1
       degraded:
         "Frock AI falls back to the `AI` binding and the Auto model fails",
     },
-    {
-      name: "JEV_API_KEY",
-      why: "Authorizes the hosted TurnSupervisor, the routine-event rejector, and dictation tidy review against Jev.",
-      degraded:
-        "turn supervision, the routine-event rejector and dictation tidy review are unavailable",
-    },
   ];
 
 /**
@@ -276,6 +274,12 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] 
       why: "Points dictation at a local stand-in; set by the test harness only.",
       forbiddenLive:
         "every dictation session would be sent to that host instead of the speech provider",
+    },
+    {
+      name: "JEV_BASE_URL",
+      why: "Points Turn supervision at a local stand-in for Jev; set by the test harness only.",
+      forbiddenLive:
+        "every Turn's supervision would be sent to that host instead of Jev",
     },
     { name: "FROCK_AI_AUTO_ROUTE", why: "A `vars` entry." },
     {

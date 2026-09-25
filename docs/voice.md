@@ -1166,7 +1166,7 @@ anywhere.
 | `GEMINI_API_KEY`                | Worker secret     | yes      | The continuous voice session: one Gemini Live socket per call, ears, words and voice together. Absent: starting a session is refused.              |
 | `VOICE_ASSISTANT_MODEL`         | Worker var        | optional | Pins the gateway model the end-of-call memory update is asked; the platform's Auto route when unset. The call has no chat model.                   |
 | `VOICE_DICTATION_CLEANUP_MODEL` | Worker var        | optional | The model that tidies a dictated transcript. Unset is `groq/llama-3.1-8b-instant`; no `AI` binding means no tidying and the raw transcript stands. |
-| `JEV_API_KEY`                   | Worker secret     | optional | Reviews a Groq tidy before it replaces the draft. Absent or a failed call keeps the raw transcript.                                                |
+| `JEV_API_KEY`                   | Worker secret     | yes      | Reviews a Groq tidy before it replaces the draft; a failed call keeps the raw transcript. Required because every Turn is supervised by it.         |
 | `VOICE_DICTATION_UPSTREAM_URL`  | test harness only | —        | Points dictation at a local fake; never set in production.                                                                                         |
 | `VOICE_ASSISTANT_UPSTREAM_URL`  | test harness only | —        | Points the voice session at a local fake; never set in production.                                                                                 |
 

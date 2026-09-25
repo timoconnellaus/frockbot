@@ -1,0 +1,524 @@
+import {
+  BATCH_TOOL_NAME,
+  decodeBatchCallsV1,
+  defaultTurnDirectiveV1,
+  emptyFailureStateV1,
+  emptyPolicySnapshotV1,
+  SUPERVISION_OFF_TASK_PREFIX_V1,
+  SUPERVISION_WITHHELD_SEND_PREFIX_V1,
+  type ConversationEvidenceV1,
+  type LlmMessage,
+  type LoopHooksV1,
+  type ProposedCallV1,
+  type SendDecisionV1,
+  type Session,
+  type SessionEvent,
+  type StepDecision,
+  type ToolCall,
+  type TurnDirective,
+  type TurnInputOriginV1,
+  type TurnSupervisor,
+} from "@frockbot/core/contracts";
+import type { StoredRunOriginV1 } from "@frockbot/core/durable";
+import type { FoundationFeature } from "../runtime.js";
+
+// Turn supervision, mounted into the loop. Jev judges; this file enforces.
+//
+// - Before a Turn's first model call, the start-of-Turn judgment. When it
+//   says the person is waiting on real work, the first request carries a
+//   runtime note asking for a short acknowledgement first. The note sits at
+//   the tail of that one request, never in the system prompt, so the cached
+//   prefix is untouched.
+// - Once per response that calls tools, before any of them runs: is it
+//   working on what was asked. A response pursuing something else has every
+//   call that is not the Bot speaking refused, and its text sends withheld.
+// - Right before each text send runs: would the person miss it. A withheld
+//   send is never delivered; its draft is cleared; and a withheld finish
+//   still ends the Turn, because the person already has what it would say.
+//
+// Every decision is a session event, read back rather than asked again when a
+// Turn resumes, and inspectable per Turn through `/api/debug`. Mounted first,
+// so no Plugin hook sees a call supervision refused.
+
+export interface SupervisionRuntimeHostV1 {
+  readonly supervisor: TurnSupervisor;
+  /** Where this Turn's input came from. */
+  readonly origin: TurnInputOriginV1;
+  /**
+   * Clears the reply draft a step is showing, from the send at `ordinal`
+   * among the run's sends. Absent where nobody is drawn a draft.
+   */
+  clearReplyDraft?(ordinal: number): void;
+}
+
+/** What a run's origin says about who is on the other end of its Turn. */
+export function turnInputOriginV1(
+  origin: StoredRunOriginV1 | undefined,
+): TurnInputOriginV1 {
+  switch (origin?.kind) {
+    case undefined:
+    case "input-delivery":
+      return "user";
+    case "email":
+      return "email";
+    case "group":
+      return "group";
+    case "voice":
+      return "voice";
+    case "routine":
+    case "routine-delivery":
+      return "schedule";
+    case "subagent":
+      return "subagent";
+    case "handoff":
+    case "bot":
+      return "agent";
+  }
+}
+
+const SEND_TO_USER = "send_to_user";
+const REPLY_TO_REQUEST = "reply_to_request";
+
+/** The earlier conversation Jev is shown, most recent last. */
+export const SUPERVISION_CONVERSATION_MAX_V1 = 8;
+
+/** Runtime notes carry a label so the model reads them as the platform's. */
+export const ACKNOWLEDGE_NOTE_V1 =
+  '[FrockBot runtime: acknowledge first]\nThis will take some work. Before you start it, send the person one short line with send_to_user (disposition "continue") saying what you are about to do. Then do the work.';
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+/** A plain text send's words, or `undefined` for any other call. */
+export function textSendV1(
+  tool: string,
+  input: unknown,
+): { text: string; finish: boolean } | undefined {
+  if (tool !== SEND_TO_USER || !isRecord(input)) return undefined;
+  const payload = input.payload;
+  if (!isRecord(payload) || payload.type !== "text") return undefined;
+  if (typeof payload.text !== "string") return undefined;
+  return { text: payload.text, finish: input.disposition === "finish" };
+}
+
+function speaks(tool: string): boolean {
+  return tool === SEND_TO_USER || tool === REPLY_TO_REQUEST;
+}
+
+/** The step's calls, a batch opened into the calls it carries. */
+function flattenCalls(
+  calls: readonly ToolCall[],
+): { id: string; tool: string; input: unknown }[] {
+  return calls.flatMap((call) => {
+    if (call.name !== BATCH_TOOL_NAME) {
+      return [{ id: call.id, tool: call.name, input: call.input }];
+    }
+    const decoded = decodeBatchCallsV1(call.input);
+    if (typeof decoded === "string") return [];
+    return decoded.flatMap((sub, index) =>
+      sub.kind === "call"
+        ? [{ id: `${call.id}.${index}`, tool: sub.tool, input: sub.arguments }]
+        : [],
+    );
+  });
+}
+
+/** `tool:<turn>:<step>:<ordinal>`, with `.<index>` for a batch sub-call. */
+function occurrenceTurnStep(
+  occurrenceId: string,
+): { turn: number; step: number } | undefined {
+  const match = /^tool:(\d+):(\d+):/.exec(occurrenceId);
+  if (!match) return undefined;
+  return { turn: Number(match[1]), step: Number(match[2]) };
+}
+
+function turnEvents(
+  events: readonly SessionEvent[],
+  turn: number,
+): SessionEvent[] {
+  return events.filter((event) => "turn" in event && event.turn === turn);
+}
+
+/** Everything the Turn was asked, oldest first: a follow-up adds to the task. */
+function inputText(events: readonly SessionEvent[], turn: number): string {
+  return events
+    .flatMap((event) =>
+      event.type === "user/message" && event.turn === turn ? [event.text] : [],
+    )
+    .join("\n\n");
+}
+
+/** Whether the Turn owes its answer to a caller, by the tools it offered. */
+function callerAddressed(
+  events: readonly SessionEvent[],
+  turn: number,
+): boolean {
+  return events.some(
+    (event) =>
+      event.type === "model/request" &&
+      event.turn === turn &&
+      event.request.tools.some((tool) => tool.name === REPLY_TO_REQUEST),
+  );
+}
+
+function describeShown(event: SessionEvent): string | undefined {
+  if (event.type !== "send/to-user") return undefined;
+  const payload = event.payload;
+  switch (payload.type) {
+    case "text":
+      return payload.text;
+    case "widget":
+      return `Question: ${payload.widget.prompt}`;
+    case "secret-request":
+      return `Asked for a secret: ${payload.prompt}`;
+    case "approval":
+      return `Asked for approval: ${payload.action}`;
+    default:
+      return `Showed a ${payload.type}: ${JSON.stringify(payload)}`;
+  }
+}
+
+/** What the person has already been shown this Turn, oldest first. */
+function shownThisTurn(
+  events: readonly SessionEvent[],
+  turn: number,
+): string[] {
+  return turnEvents(events, turn).flatMap((event) => {
+    const shown = describeShown(event);
+    return shown === undefined ? [] : [shown];
+  });
+}
+
+function priorResults(events: readonly SessionEvent[], turn: number) {
+  return turnEvents(events, turn).flatMap((event) =>
+    event.type === "tool/result"
+      ? [{ callId: event.occurrenceId, content: event.content }]
+      : [],
+  );
+}
+
+function messageSpeech(message: LlmMessage): ConversationEvidenceV1[] {
+  if (message.role === "user") {
+    return message.content.trim()
+      ? [{ speaker: "user", text: message.content }]
+      : [];
+  }
+  if (message.role !== "assistant") return [];
+  // A Bot's visible words are its sends; its assistant text is private.
+  return message.toolCalls.flatMap((call) =>
+    flattenCalls([call]).flatMap((flat) => {
+      const send = textSendV1(flat.tool, flat.input);
+      if (send) return [{ speaker: "bot" as const, text: send.text }];
+      if (flat.tool === REPLY_TO_REQUEST && isRecord(flat.input)) {
+        const answer = flat.input.answer;
+        return typeof answer === "string"
+          ? [{ speaker: "bot" as const, text: answer }]
+          : [];
+      }
+      return [];
+    }),
+  );
+}
+
+/** The conversation before the Turn, as the person and the Bot said it. */
+function conversationBefore(session: Session): ConversationEvidenceV1[] {
+  return session.committedContext.turns
+    .flatMap((turn) => turn.messages.flatMap(messageSpeech))
+    .slice(-SUPERVISION_CONVERSATION_MAX_V1);
+}
+
+function directiveOf(
+  events: readonly SessionEvent[],
+  turn: number,
+): TurnDirective | undefined {
+  const event = events.findLast(
+    (candidate) =>
+      candidate.type === "supervision/turn-start" && candidate.turn === turn,
+  );
+  return event?.type === "supervision/turn-start" ? event.directive : undefined;
+}
+
+function stepDecisionOf(
+  events: readonly SessionEvent[],
+  turn: number,
+  step: number,
+): StepDecision | undefined {
+  const event = events.findLast(
+    (candidate) =>
+      candidate.type === "supervision/step" &&
+      candidate.turn === turn &&
+      candidate.step === step,
+  );
+  return event?.type === "supervision/step" ? event.decision : undefined;
+}
+
+function sendDecisionOf(
+  events: readonly SessionEvent[],
+  occurrenceId: string,
+): SendDecisionV1 | undefined {
+  const event = events.findLast(
+    (candidate) =>
+      candidate.type === "supervision/send" &&
+      candidate.occurrenceId === occurrenceId,
+  );
+  return event?.type === "supervision/send" ? event.decision : undefined;
+}
+
+/**
+ * Whether a step withheld a send that would have ended the Turn. A Turn that
+ * owes a caller its answer is not ended by a send, withheld or not.
+ */
+export function withheldFinishV1(
+  events: readonly SessionEvent[],
+  turn: number,
+  step: number,
+): boolean {
+  if (callerAddressed(events, turn)) return false;
+  return events.some(
+    (event) =>
+      event.type === "supervision/send" &&
+      event.turn === turn &&
+      event.step === step &&
+      event.finish &&
+      event.decision.send === "withhold",
+  );
+}
+
+function clip(text: string, max = 280): string {
+  return text.length <= max ? text : `${text.slice(0, max)}…`;
+}
+
+function withheldResult(
+  reason: "off_task" | "redundant_text",
+  finish: boolean,
+  addressed: boolean,
+): string {
+  const why =
+    reason === "redundant_text"
+      ? "because the person can already see what it says."
+      : "because it is not about what the person asked for.";
+  const next =
+    finish && !addressed
+      ? " The Turn is complete; do not send it again."
+      : reason === "redundant_text"
+        ? addressed
+          ? ` Answer the caller with ${REPLY_TO_REQUEST}.`
+          : " Carry on without repeating it."
+        : " Go back to what they asked.";
+  return `${SUPERVISION_WITHHELD_SEND_PREFIX_V1} ${why}${next}`;
+}
+
+function offTaskResult(objective: string): string {
+  return `${SUPERVISION_OFF_TASK_PREFIX_V1} Go back to their request: ${clip(objective)}`;
+}
+
+function elapsed(started: number): number {
+  return Math.max(0, Math.round(Date.now() - started));
+}
+
+export function createSupervisionRuntimeFeatureV1(
+  host: SupervisionRuntimeHostV1,
+): FoundationFeature {
+  return (runtime) => {
+    const sessionOf = (sessionId: string): Session => {
+      const session = runtime.sessions.get(sessionId);
+      if (!session) {
+        throw new Error(`supervision: session "${sessionId}" is not open`);
+      }
+      return session;
+    };
+
+    const hooks: LoopHooksV1 = {
+      async request(agent, _request, turn, step, signal, next) {
+        const request = await next();
+        if (step !== 1) return request;
+        const session = agent.session;
+        let directive = directiveOf(session.activeRunJournal, turn);
+        if (!directive) {
+          const started = Date.now();
+          directive = await host.supervisor.startTurn(
+            {
+              input: {
+                messageId: `turn:${turn}`,
+                text: inputText(session.activeRunJournal, turn),
+                origin: host.origin,
+              },
+              policies: emptyPolicySnapshotV1(),
+              authorizations: [],
+              continuation: [],
+              conversation: conversationBefore(session),
+              specialists: [],
+              failure: emptyFailureStateV1(),
+            },
+            signal,
+          );
+          session.append({
+            type: "supervision/turn-start",
+            turn,
+            directive,
+            latencyMs: elapsed(started),
+          });
+          await session.flush();
+        }
+        if (!directive.acknowledge) return request;
+        return {
+          ...request,
+          messages: [
+            ...request.messages,
+            { role: "user", content: ACKNOWLEDGE_NOTE_V1 },
+          ],
+        };
+      },
+
+      async reviewResponse(agent, response, signal) {
+        const session = agent.session;
+        const events = session.activeRunJournal;
+        if (stepDecisionOf(events, response.turn, response.step)) return;
+        const flat = flattenCalls(response.toolCalls);
+        const text = flat
+          .flatMap((call) => {
+            const send = textSendV1(call.tool, call.input);
+            return send ? [send.text] : [];
+          })
+          .join("\n\n");
+        const calls: ProposedCallV1[] = flat
+          .filter((call) => !textSendV1(call.tool, call.input))
+          .map((call) => ({
+            callId: call.id,
+            tool: call.tool,
+            arguments: isRecord(call.input) ? call.input : {},
+            effect: "mutate" as const,
+            ...(speaks(call.tool) ? { speaks: true } : {}),
+          }));
+        const started = Date.now();
+        const decision = await host.supervisor.reviewStep(
+          {
+            objective: inputText(events, response.turn),
+            origin: host.origin,
+            startDirective:
+              directiveOf(events, response.turn) ?? defaultTurnDirectiveV1(),
+            text,
+            calls,
+            conversation: conversationBefore(session),
+            shown: shownThisTurn(events, response.turn),
+            policies: emptyPolicySnapshotV1(),
+            authorizations: [],
+            priorResults: priorResults(events, response.turn),
+            specialistAdvice: [],
+            failure: emptyFailureStateV1(),
+            continuationCandidates: [],
+            finalStep: false,
+          },
+          signal,
+        );
+        session.append({
+          type: "supervision/step",
+          turn: response.turn,
+          step: response.step,
+          requestId: response.requestId,
+          decision,
+          latencyMs: elapsed(started),
+        });
+        await session.flush();
+      },
+
+      async prepareTool(call, context, next) {
+        const at = occurrenceTurnStep(context.effectId);
+        if (!at) return next();
+        const session = sessionOf(context.sessionId);
+        const events = session.activeRunJournal;
+        const decision = stepDecisionOf(events, at.turn, at.step);
+        if (!decision) {
+          throw new Error(
+            `supervision: step ${at.turn}:${at.step} ran a call it never reviewed`,
+          );
+        }
+        const send = textSendV1(call.name, call.input);
+        if (!send) {
+          if (
+            decision.responseAlignment === "wrong-objective" &&
+            !speaks(call.name)
+          ) {
+            return {
+              kind: "denied",
+              call,
+              result: {
+                content: offTaskResult(inputText(events, at.turn)),
+                isError: true,
+              },
+            };
+          }
+          return next();
+        }
+        let verdict = sendDecisionOf(events, context.effectId);
+        if (!verdict) {
+          const started = Date.now();
+          verdict =
+            decision.text === "withhold"
+              ? {
+                  send: "withhold",
+                  reason: decision.textReason ?? "off_task",
+                  judgments: [],
+                }
+              : await host.supervisor.reviewSend(
+                  {
+                    objective: inputText(events, at.turn),
+                    origin: host.origin,
+                    conversation: conversationBefore(session),
+                    shown: shownThisTurn(events, at.turn),
+                    priorResults: priorResults(events, at.turn),
+                    message: send.text,
+                    finish: send.finish,
+                  },
+                  context.signal,
+                );
+          session.append({
+            type: "supervision/send",
+            turn: at.turn,
+            step: at.step,
+            occurrenceId: context.effectId,
+            finish: send.finish,
+            decision: verdict,
+            latencyMs: elapsed(started),
+          });
+          await session.flush();
+        }
+        if (verdict.send === "release") return next();
+        host.clearReplyDraft?.(
+          events.filter(
+            (event) =>
+              event.type === "send/to-user" &&
+              !(event.turn === at.turn && event.step === at.step),
+          ).length,
+        );
+        return {
+          kind: "denied",
+          call,
+          result: {
+            content: withheldResult(
+              verdict.reason === "redundant_text"
+                ? "redundant_text"
+                : "off_task",
+              send.finish,
+              callerAddressed(events, at.turn),
+            ),
+            isError: false,
+          },
+        };
+      },
+
+      async stepContinuation(agent, _decision, turn, step, _signal, next) {
+        // Outermost, so nothing after it can reopen a Turn whose last word
+        // the person already has. A caller-addressed Turn is left to delivery,
+        // which keeps it going until the caller is answered.
+        if (withheldFinishV1(agent.session.activeRunJournal, turn, step)) {
+          return { kind: "stop" };
+        }
+        return next();
+      },
+    };
+    const dispose = runtime.hooks.add(hooks);
+    return () => dispose();
+  };
+}
