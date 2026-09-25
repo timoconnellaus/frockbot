@@ -57,11 +57,21 @@ export interface LoopAgentSnapshotV1 {
 }
 
 /** The live in-process projection first-party hooks receive. */
+/** Where the running Turn is in its budget, as the loop's own clock reads it. */
+export interface LoopTurnBudgetV1 {
+  maxSteps: number;
+  /** Wall clock the Turn must finish by. */
+  deadlineAt: number;
+  now: number;
+}
+
 export interface LoopAgentRuntimeV1 {
   readonly id: string;
   readonly botId: string;
   readonly session: Session;
   readonly status: LoopAgentStatusV1;
+  /** Absent outside the loop's own agent, which is the only one that has one. */
+  turnBudget?(): LoopTurnBudgetV1;
 }
 
 export interface LoopStepSnapshotV1 extends LoopAgentSnapshotV1 {

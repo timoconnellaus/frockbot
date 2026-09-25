@@ -14,6 +14,7 @@ import {
   decodeSkillRefsV1,
   expandToolCallOccurrencesV1,
   type LoopStepContinuationV1,
+  type LoopTurnBudgetV1,
   type NormalizedModelRequest,
   type Session,
   type StepOutcome,
@@ -163,6 +164,14 @@ class LoopAgent implements Agent, LoopRuntime {
 
   get turnDeadlineAt(): number {
     return this.#turnDeadlineAt;
+  }
+
+  turnBudget(): LoopTurnBudgetV1 {
+    return {
+      maxSteps: this.maxSteps,
+      deadlineAt: this.#turnDeadlineAt,
+      now: this.retry.now(),
+    };
   }
 
   get status(): AgentStatus {
