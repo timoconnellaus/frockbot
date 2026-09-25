@@ -129,6 +129,7 @@ String _causeKind(String key, Object? detail) {
     'chat' => 'You, in chat',
     'group' => 'Group Chat',
     'voice' => 'Voice',
+    'email' => 'You, by email',
     'desktop' => 'Watching or controlling it',
     'plugin' => 'A Plugin’s own page',
     _ => 'Not attributed',

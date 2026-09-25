@@ -89,12 +89,13 @@ export interface UsageReservation {
  * Computer directly, and a Plugin calling a model from its own page.
  */
 export type SpendCauseKindV1 =
-  "chat" | "routine" | "group" | "voice" | "desktop" | "plugin";
+  "chat" | "routine" | "group" | "voice" | "email" | "desktop" | "plugin";
 export const SPEND_CAUSE_KINDS_V1: readonly SpendCauseKindV1[] = [
   "chat",
   "routine",
   "group",
   "voice",
+  "email",
   "desktop",
   "plugin",
 ];

@@ -140,6 +140,24 @@ describe("what a Turn's spending is charged to", () => {
     });
   });
 
+  test("mail to a Bot is its own cause, and a hand-off it asks for stays one", async () => {
+    const email = { kind: "email" as const, messageId: "m-1" };
+    expect(await runCauseV1("bot-1", email, readers({}))).toEqual({
+      kind: "email",
+      botId: "bot-1",
+    });
+    expect(
+      await runCauseOfRunV1(
+        "bot-1",
+        "handoff-1",
+        readers({
+          "mail-1": email,
+          "handoff-1": { kind: "handoff", parentRunId: "mail-1", depth: 1 },
+        }),
+      ),
+    ).toEqual({ kind: "email", botId: "bot-1" });
+  });
+
   test("a Group Chat is the group", async () => {
     expect(
       await runCauseV1(

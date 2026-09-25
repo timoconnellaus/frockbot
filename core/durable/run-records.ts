@@ -125,7 +125,7 @@ export interface StoredRunBotOriginV1 {
  * one Bot it is read back from the run that asked.
  */
 export interface StoredRunCauseV1 {
-  kind: "chat" | "routine" | "group" | "voice";
+  kind: "chat" | "routine" | "group" | "voice" | "email";
   /** The Bot whose conversation or Routine it was. */
   botId: string;
   /** The Routine's or the Group Chat's id. */
@@ -588,6 +588,7 @@ const STORED_RUN_CAUSE_KINDS: readonly StoredRunCauseV1["kind"][] = [
   "routine",
   "group",
   "voice",
+  "email",
 ];
 
 function decodeCauseField(

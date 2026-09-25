@@ -63,10 +63,12 @@ export async function runCauseV1(
       );
       return runCauseV1(botId, parent?.admission?.origin, readers, links + 1);
     }
-    // A person's answer to a card or an approval, or a person writing by
-    // email, is the conversation.
-    case "input-delivery":
+    // Mail arrives without the person opening the app, so it is its own
+    // cause rather than the conversation it lands in.
     case "email":
+      return { kind: "email", botId };
+    // A person's answer to a card or an approval is the conversation.
+    case "input-delivery":
       return chat;
   }
 }

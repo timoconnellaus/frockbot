@@ -270,6 +270,20 @@ describe("the Spending rollups", () => {
     expect(report().groups[0]?.label).toBe("Digest v2");
   });
 
+  test("mail reads as its own cause and its own trigger", () => {
+    const { charge, report } = setup();
+    charge("model:m", 90, {
+      runId: "m",
+      cause: { kind: "email", botId: "bot-1" },
+    });
+    expect(report().groups).toMatchObject([
+      { key: "email|bot-1|", label: "Email to Research", chargeMicros: 90 },
+    ]);
+    expect(report({ groupBy: "trigger" }).groups).toMatchObject([
+      { key: "email", label: "Email" },
+    ]);
+  });
+
   test("a malformed attribution is recorded as unattributed, never refused", () => {
     const { charge, report } = setup();
     charge("model:a", 70, {
