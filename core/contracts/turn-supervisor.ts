@@ -31,6 +31,7 @@ export const SUPERVISION_REASON_CODES_V1 = [
   "arguments_changed",
   "off_task",
   "redundant_text",
+  "paraphrased_work",
   "text_depends_on_rejected_effect",
   "supervisor_unavailable",
   "supervisor_timeout",
@@ -296,6 +297,8 @@ export interface SendReviewEvidenceV1 {
   message: string;
   /** The send would end the Turn. */
   finish: boolean;
+  /** What a subagent produced for this Turn, oldest first. */
+  work: readonly string[];
 }
 
 export interface SendDecisionV1 {

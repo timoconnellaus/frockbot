@@ -1,5 +1,9 @@
 import {
   composeSendDecisionV1,
+  relayRewroteV1,
+  relayStateV1,
+  type RelayJudgmentEvidenceV1,
+  type RelayV1,
   RESPONSE_REVIEW_ALIGNMENT_MIN_V1,
   responseReviewStateV1,
   sendReviewStateV1,
@@ -41,8 +45,17 @@ export interface SendFixtureV1 {
   };
 }
 
+/** One send after a subagent's work: is it the work, as written? */
+export interface RelayFixtureV1 {
+  readonly kind: "relay";
+  readonly name: string;
+  readonly intent: string;
+  readonly evidence: RelayJudgmentEvidenceV1;
+  readonly expected: { readonly send: "release" | "withhold" };
+}
+
 export type ResponseReviewFixtureV1 =
-  ResponseAlignmentFixtureV1 | SendFixtureV1;
+  ResponseAlignmentFixtureV1 | SendFixtureV1 | RelayFixtureV1;
 
 export interface ResponseReviewCheckV1 {
   readonly question: string;
@@ -74,6 +87,22 @@ export function gradeResponseAlignmentV1(
       expected: fixture.expected,
       actual: `${answer.choice} (p ${round(answer.probabilities[answer.choice] ?? 0)}, acts as ${acted})`,
       passed: acted === fixture.expected,
+    },
+  ];
+}
+
+export function gradeRelayV1(
+  fixture: RelayFixtureV1,
+  review: RelayV1,
+): ResponseReviewCheckV1[] {
+  const rewrote = relayRewroteV1(review.answers);
+  const relay = review.answers.relay;
+  return [
+    {
+      question: "relay",
+      expected: fixture.expected.send,
+      actual: `${rewrote ? "withhold" : "release"} (wants work ${round(review.answers.wantsTheWork.noul)}, relay ${relay.choice} p ${round(relay.probabilities[relay.choice] ?? 0)})`,
+      passed: (rewrote ? "withhold" : "release") === fixture.expected.send,
     },
   ];
 }
@@ -111,7 +140,7 @@ export function responseReviewReportCaseV1(
   fixture: ResponseReviewFixtureV1,
   outcome:
     | {
-        readonly review: ResponseReviewV1 | SendReviewV1;
+        readonly review: ResponseReviewV1 | SendReviewV1 | RelayV1;
         readonly checks: readonly ResponseReviewCheckV1[];
       }
     | { readonly failure: unknown },
@@ -123,7 +152,9 @@ export function responseReviewReportCaseV1(
     state:
       fixture.kind === "response"
         ? responseReviewStateV1(fixture.evidence)
-        : sendReviewStateV1(fixture.evidence),
+        : fixture.kind === "relay"
+          ? relayStateV1(fixture.evidence)
+          : sendReviewStateV1(fixture.evidence),
     expected: fixture.expected,
   };
   if ("failure" in outcome)

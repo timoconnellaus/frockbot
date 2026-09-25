@@ -140,7 +140,9 @@ function supervisionRefusalsV1(
         event.occurrenceId,
         event.decision.reason === "redundant_text"
           ? "already shown"
-          : "off task",
+          : event.decision.reason === "paraphrased_work"
+            ? "rewrote the work"
+            : "off task",
       );
     }
     if (

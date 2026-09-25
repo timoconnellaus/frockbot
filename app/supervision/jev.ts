@@ -14,7 +14,11 @@ import {
 import {
   composeSendDecisionV1,
   composeStepDecisionV1,
+  relayEvidenceV1,
+  relayJudgmentsV1,
+  relayRewroteV1,
   responseReviewEvidenceV1,
+  reviewRelayV1,
   reviewResponseV1,
   reviewSendV1,
   sendReviewEvidenceV1,
@@ -131,10 +135,27 @@ export function createJevTurnSupervisorV1(
     },
     async reviewSend(evidence, signal) {
       signal?.throwIfAborted();
-      if (sendVetoV1(evidence) !== undefined) {
-        return { send: "release", judgments: [] };
-      }
       try {
+        // Work a subagent produced is judged first, and whatever the vetoes
+        // say: a long message or a question can still be a rewrite of it.
+        if (evidence.work.length > 0) {
+          const relay = await reviewRelayV1(
+            options.client,
+            relayEvidenceV1(evidence),
+            { signal, budget },
+          );
+          if (relayRewroteV1(relay.answers)) {
+            return {
+              send: "withhold",
+              reason: "paraphrased_work",
+              judgments: relayJudgmentsV1(relay.answers),
+              model: relay.model,
+            };
+          }
+        }
+        if (sendVetoV1(evidence) !== undefined) {
+          return { send: "release", judgments: [] };
+        }
         const review = await reviewSendV1(
           options.client,
           sendReviewEvidenceV1(evidence),

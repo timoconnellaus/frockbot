@@ -88,7 +88,8 @@ function delivery(events: readonly SessionEvent[], turn: number) {
       !addressed &&
       event.type === "supervision/send" &&
       event.finish &&
-      event.decision.send === "withhold"
+      event.decision.send === "withhold" &&
+      event.decision.reason !== "paraphrased_work"
     )
       return { required: false, attempts: 0, repair: false };
     if (event.type === "assistant/message" && event.toolCalls.length === 0) {

@@ -329,8 +329,34 @@ export function withheldFinishV1(
       event.turn === turn &&
       event.step === step &&
       event.finish &&
-      event.decision.send === "withhold",
+      event.decision.send === "withhold" &&
+      // A rewrite of the work is withheld so the work itself goes instead.
+      event.decision.reason !== "paraphrased_work",
   );
+}
+
+/**
+ * The work a subagent handed back this Turn: a blocking dispatch's result,
+ * or a background task's completion the Turn was opened for. Read off the
+ * words `app/subagents` writes for each; anything else is not a subagent's.
+ */
+export function subagentWorkV1(
+  events: readonly SessionEvent[],
+  turn: number,
+): string[] {
+  const settled =
+    /^(?:\w+ subagent \S+|Subagent \S+ resumed and) completed\. ([\s\S]+)$/;
+  const notice = /(?:^|\n)\w+ subagent "[^"\n]*" completed\. ([\s\S]+)$/;
+  return turnEvents(events, turn).flatMap((event) => {
+    const match =
+      event.type === "tool/result" && !event.isError
+        ? settled.exec(event.content)
+        : event.type === "user/message"
+          ? notice.exec(event.text)
+          : null;
+    const work = match?.[1]?.trim();
+    return work ? [work] : [];
+  });
 }
 
 function clip(text: string, max = 280): string {
@@ -338,10 +364,13 @@ function clip(text: string, max = 280): string {
 }
 
 function withheldResult(
-  reason: "off_task" | "redundant_text",
+  reason: "off_task" | "redundant_text" | "paraphrased_work",
   finish: boolean,
   addressed: boolean,
 ): string {
+  if (reason === "paraphrased_work") {
+    return `${SUPERVISION_WITHHELD_SEND_PREFIX_V1} because the person asked for the work itself and this rewrites it. Send what the subagent produced as it was written, whole; one short line before it is fine.`;
+  }
   const why =
     reason === "redundant_text"
       ? "because the person can already see what it says."
@@ -578,6 +607,7 @@ export function createSupervisionRuntimeFeatureV1(
                     priorResults: priorResults(events, at.turn),
                     message: send.text,
                     finish: send.finish,
+                    work: subagentWorkV1(events, at.turn),
                   },
                   context.signal,
                 );
@@ -605,8 +635,9 @@ export function createSupervisionRuntimeFeatureV1(
           call,
           result: {
             content: withheldResult(
-              verdict.reason === "redundant_text"
-                ? "redundant_text"
+              verdict.reason === "redundant_text" ||
+                verdict.reason === "paraphrased_work"
+                ? verdict.reason
                 : "off_task",
               send.finish,
               callerAddressed(events, at.turn),

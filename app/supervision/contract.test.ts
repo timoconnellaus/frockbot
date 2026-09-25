@@ -77,6 +77,7 @@ const sendEvidence: SendReviewEvidenceV1 = {
   priorResults: [{ callId: "tool:1:1:0", content: "Emailed Dana." }],
   message: "I've emailed Dana the March invoice.",
   finish: true,
+  work: [],
 };
 
 const callEvidence: CallReviewEvidenceV1 = {
@@ -277,6 +278,63 @@ describe("the Jev adapter's call review", () => {
       conversation: callEvidence.conversation,
       resultsThisTurn: ["Notes: shipped the invoice fix."],
     });
+  });
+});
+
+describe("the Jev adapter's relay check", () => {
+  const toast = "Mia, the goat whisperer, once talked a goat off a roof...";
+  const withWork = {
+    ...sendEvidence,
+    objective: "Write me a toast for Mia's wedding.",
+    work: [toast],
+    message: "Here's a shorter version: Mia is great with goats.",
+  };
+
+  test("withholds a rewrite of work the person asked for, whatever the vetoes say", async () => {
+    const decision = await jevSupervisor(
+      jevFetch((answers) =>
+        "relay" in answers
+          ? {
+              wantsTheWork: { type: "noul", noul: 0.9 },
+              relay: choice(
+                ["relays", "unrelated", "condenses", "rewrites"],
+                "condenses",
+              ),
+            }
+          : answers,
+      ),
+    ).reviewSend({ ...withWork, message: `${withWork.message} Want changes?` });
+    expect(decision).toMatchObject({
+      send: "withhold",
+      reason: "paraphrased_work",
+    });
+  });
+
+  test("lets the work through as written, then judges redundancy as ever", async () => {
+    const seen: unknown[] = [];
+    const decision = await jevSupervisor(jevFetch(undefined, seen)).reviewSend({
+      ...withWork,
+      message: toast,
+    });
+    expect(decision.send).toBe("release");
+    expect(
+      seen.map((body) =>
+        Object.keys((body as { questions: object }).questions),
+      ),
+    ).toEqual([
+      ["wantsTheWork", "relay"],
+      ["messageNeeded", "messageKind"],
+    ]);
+  });
+
+  test("asks nothing about relay when no subagent worked this Turn", async () => {
+    const seen: unknown[] = [];
+    await jevSupervisor(jevFetch(undefined, seen)).reviewSend(sendEvidence);
+    expect(
+      seen.map((body) =>
+        Object.keys((body as { questions: object }).questions),
+      ),
+    ).toEqual([["messageNeeded", "messageKind"]]);
   });
 });
 

@@ -38,6 +38,7 @@ const sendEvidence: SendReviewEvidenceV1 = {
   priorResults: [],
   message: "I've emailed Dana the invoice.",
   finish: true,
+  work: [],
 };
 
 const sendCall: ProposedCallV1 = {

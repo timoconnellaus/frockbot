@@ -1,5 +1,6 @@
 import { expect, test } from "bun:test";
 import {
+  relayQuestionsV1,
   responseReviewQuestionsV1,
   sendReviewQuestionsV1,
 } from "./response-review.js";
@@ -16,6 +17,7 @@ test("the fake knows exactly Turn supervision's question sets", () => {
     Object.keys(turnStartQuestionsV1),
     Object.keys(responseReviewQuestionsV1),
     Object.keys(sendReviewQuestionsV1),
+    Object.keys(relayQuestionsV1),
     Object.keys(callReviewQuestionsV1),
   ]);
 });

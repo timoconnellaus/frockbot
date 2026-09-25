@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { TypeSafeClient } from "@typesafe-ai/sdk";
 import { responseReviewFixturesV1 } from "./response-review.fixtures.js";
 import {
+  gradeRelayV1,
   gradeResponseAlignmentV1,
   gradeSendV1,
   responseReviewReportCaseV1,
@@ -16,6 +17,7 @@ import {
   RESPONSE_REVIEW_REDUNDANT_KIND_MIN_V1,
   RESPONSE_REVIEW_RETRY_V1,
   RESPONSE_REVIEW_RUN_TIMEOUT_MS_V1,
+  reviewRelayV1,
   reviewResponseV1,
   reviewSendV1,
 } from "../supervision/response-review.js";
@@ -74,6 +76,14 @@ async function runResponseReviewEvalV1() {
         entry = responseReviewReportCaseV1(fixture, {
           review,
           checks: gradeResponseAlignmentV1(fixture, review),
+        });
+      } else if (fixture.kind === "relay") {
+        const review = await reviewRelayV1(client, fixture.evidence, {
+          signal,
+        });
+        entry = responseReviewReportCaseV1(fixture, {
+          review,
+          checks: gradeRelayV1(fixture, review),
         });
       } else {
         const review = await reviewSendV1(client, fixture.evidence, {
