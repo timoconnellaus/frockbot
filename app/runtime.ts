@@ -580,6 +580,14 @@ export function createFoundationHostedRuntimePackages(
           ? { demonstrations: host.computerDemonstrations }
           : {}),
         ...(host.computerSecrets ? { secrets: host.computerSecrets } : {}),
+        ...(host.plugins
+          ? {
+              pluginPages: {
+                pageToTry: (input: { pluginId: string; surfaceId?: string }) =>
+                  host.plugins!.plugins.pageToTry(input),
+              },
+            }
+          : {}),
       }),
     ),
   ];

@@ -28,6 +28,13 @@
 // failure." Every run appends `computer/sync` to the session event log with
 // what it moved, and nothing on this path can fail a Turn.
 import {
+  decodePluginPageTryRequestV1,
+  PLUGIN_PAGE_STAND_IN_HOST_JS_V1,
+  PLUGIN_PAGE_TRY_RUNNER_MJS_V1,
+  PLUGIN_PAGE_TRY_THEME_TOKENS_V1,
+  pluginPageForTryV1,
+  type PluginPageTryRequestV1,
+  type PluginPageTryResultV1,
   type AgentRuntimeV1,
   type ComputerCaptureTimingV1,
   type ComputerTimingV1,
@@ -171,6 +178,23 @@ export interface ComputerAgentPluginConfig {
    * absent, and `demonstration_delete` is not offered.
    */
   demonstrations?: ComputerDemonstrationDeletionV1;
+  /** Where `plugin_page_try` gets the page it tries. */
+  pluginPages?: ComputerPluginPagesSeamV1;
+}
+
+/**
+ * A Plugin's page as `plugin_publish` would store it, built from its source
+ * now, for `plugin_page_try` (ADR 0036 step 10). The Plugin authoring host
+ * supplies it; absent, and the tool is not offered.
+ */
+export interface ComputerPluginPagesSeamV1 {
+  pageToTry(input: {
+    pluginId: string;
+    surfaceId?: string;
+  }): Promise<
+    | { pluginId: string; surfaceId: string; html: string; microphone: boolean }
+    | { failure: string }
+  >;
 }
 
 /** Deleting one demonstration the person sent this Bot. */
@@ -2155,6 +2179,223 @@ export function createComputerAgentFeature(
       }
     };
 
+    /**
+     * `plugin_page_try`: a Plugin's page, tried on this Bot's own Computer in
+     * a headless browser beside the platform's stand-in host, before it is
+     * published. The runner and the stand-in travel with each try, so they
+     * are always this release's; they are not installed on the Computer.
+     */
+    const pluginPages = config.pluginPages;
+    const pageTryTool: ToolDefinition = {
+      name: "plugin_page_try",
+      namespace: "frockbot",
+      admission: {
+        turnTypes: ["chat", "agent", "automation", "subagent"],
+        subagentRoles: ["executor"],
+      },
+      idempotent: true,
+      description:
+        'Try one of your Plugin\'s pages on your Computer before you publish it: the page exactly as plugin_publish would store it, in a headless browser, beside a stand-in for the app that greets it with the app\'s theme and your state, answers its tool calls with your toolAnswers, and feeds its microphone whatever tone you say. Steps run in order, each one action: {"click": "<css selector>"}, {"tone": {"frequency": 196, "level": 0.3, "noise": 0.05}}, {"silence": true}, {"hostStop": true} (the person presses the app\'s Stop), {"state": {...}}, {"wait": ms}, {"screenshot": "label"}. You get back the page\'s text, what it reported, any error it threw, which steps failed, and each screenshot. Try every control a person will press, including stopping twice and starting again.',
+      inputSchema: {
+        type: "object",
+        properties: {
+          pluginId: { type: "string", description: "The Plugin's id." },
+          surfaceId: {
+            type: "string",
+            description:
+              "Which page, when the Plugin has more than one. Defaults to the first.",
+          },
+          state: {
+            type: "object",
+            description:
+              "The state the page is handed, as its view would return it.",
+          },
+          toolAnswers: {
+            type: "object",
+            description:
+              'What each of the Plugin\'s tools answers when the page calls it, by name. Unnamed tools answer "ok".',
+          },
+          steps: {
+            type: "array",
+            description: "At most 30 steps, 30 s of waiting and 4 screenshots.",
+            items: { type: "object" },
+          },
+        },
+        required: ["pluginId", "steps"],
+        additionalProperties: false,
+      },
+      execute: async (input, context) => {
+        if (!pluginPages || !writer) {
+          return {
+            content: "Trying a page needs a Turn with a Computer",
+            isError: true,
+          };
+        }
+        const body = record(input) ?? {};
+        const pluginId = body.pluginId;
+        if (typeof pluginId !== "string" || pluginId.length === 0) {
+          return { content: "pluginId is required", isError: true };
+        }
+        let tried: PluginPageTryRequestV1;
+        try {
+          tried = decodePluginPageTryRequestV1(body);
+        } catch (error) {
+          return { content: errorMessage(error), isError: true };
+        }
+        const page = await pluginPages.pageToTry({
+          pluginId,
+          ...(typeof body.surfaceId === "string"
+            ? { surfaceId: body.surfaceId }
+            : {}),
+        });
+        if ("failure" in page) return { content: page.failure, isError: true };
+        const request = {
+          width: 390,
+          height: 700,
+          standIn: PLUGIN_PAGE_STAND_IN_HOST_JS_V1,
+          steps: tried.steps,
+          config: {
+            pluginId: page.pluginId,
+            botId: context.botId,
+            surfaceId: page.surfaceId,
+            microphone: page.microphone,
+            themeTokens: PLUGIN_PAGE_TRY_THEME_TOKENS_V1,
+            state: tried.state,
+            toolAnswers: tried.toolAnswers,
+            html: pluginPageForTryV1(page.html),
+          },
+        };
+        try {
+          const effectId = await operationIdOf(context);
+          return await useComputer(await open(context), async (computer) => {
+            const exec = computer.exec;
+            const workspace = computer.workspace;
+            if (!exec || !workspace) {
+              throw new ComputerError(
+                "capability-unavailable",
+                "The selected Computer cannot run a page",
+              );
+            }
+            const shell = (
+              script: string,
+              stdin?: Uint8Array,
+              env?: Record<string, string>,
+            ) =>
+              operation(context, () =>
+                exec.execute(
+                  {
+                    executable: "/bin/bash",
+                    args: ["-lc", script],
+                    ...(stdin ? { stdin } : {}),
+                    ...(env ? { env } : {}),
+                    timeoutMs: 120_000,
+                    maxOutputBytes: 30_000,
+                  },
+                  { signal: context.signal, effectId },
+                ),
+              );
+            const ran = await shell(
+              [
+                "set -e",
+                'D=$(mktemp -d "${TMPDIR:-/tmp}/page-try.XXXXXX")',
+                'printf %s "$FROCKBOT_PAGE_TRY_RUNNER" | base64 -d > "$D/run.mjs"',
+                'cat > "$D/request.json"',
+                'node "$D/run.mjs" "$D" || { status=$?; rm -rf "$D"; exit $status; }',
+                'printf "%s\\n" "$D"',
+              ].join("\n"),
+              new TextEncoder().encode(JSON.stringify(request)),
+              {
+                FROCKBOT_PAGE_TRY_RUNNER: base64Of(
+                  new TextEncoder().encode(PLUGIN_PAGE_TRY_RUNNER_MJS_V1),
+                ),
+              },
+            );
+            const lines = text(ran.stdout).trim().split("\n");
+            const directory = lines.at(-1) ?? "";
+            if (ran.exitCode !== 0 || !directory.includes("page-try.")) {
+              return {
+                content: `The page could not be tried: ${
+                  text(ran.stderr).trim().slice(-1_500) ||
+                  `the runner exited ${ran.exitCode}`
+                }`,
+                isError: true,
+              };
+            }
+            let result: PluginPageTryResultV1;
+            try {
+              result = JSON.parse(lines.at(-2) ?? "") as PluginPageTryResultV1;
+            } catch {
+              return {
+                content: "The page ran, but its result could not be read",
+                isError: true,
+              };
+            }
+            const attachments: ToolAttachmentV1[] = [];
+            const botKey = computerBotPathKeyV1(context.botId);
+            for (const [index, shot] of result.shots.entries()) {
+              const read = await shell(`base64 -w0 ${shellQuote(shot.file)}`);
+              if (read.exitCode !== 0) continue;
+              const bytes = Uint8Array.from(
+                atob(text(read.stdout).trim()),
+                (character) => character.charCodeAt(0),
+              );
+              captureSequence += 1;
+              const path = {
+                root: screenshotsRoot(),
+                path: `${botKey}/${writer.turnId}-page-${captureSequence}.jpg`,
+              };
+              const written = await workspace.write({
+                path,
+                bytes,
+                writer: {
+                  kind: "bot",
+                  botId: context.botId,
+                  sessionId: writer.sessionId,
+                  turnId: writer.turnId,
+                  runId: writer.runId,
+                },
+                expectedGenerationId: null,
+                mediaType: "image/jpeg",
+              });
+              if (written.status !== "ok") continue;
+              screenshotFiledThisTurn = true;
+              const attachment: ToolAttachmentV1 = {
+                kind: "image",
+                mediaType: "image/jpeg",
+                workspacePath: path,
+                contentHash: written.generation.contentHash,
+                bytes: written.generation.size,
+              };
+              runtime.sessions
+                .get(context.sessionId)
+                ?.offerAttachmentBytes(attachment.contentHash, base64Of(bytes));
+              attachments.push(attachment);
+              result.shots[index] = { label: shot.label, file: path.path };
+            }
+            await shell(`rm -rf ${shellQuote(directory)}`).catch(
+              () => undefined,
+            );
+            return {
+              content: JSON.stringify({
+                page: `${page.pluginId}/${page.surfaceId}`,
+                greeted: result.greeted,
+                text: result.text,
+                reports: result.reports,
+                errors: result.errors,
+                steps: result.steps,
+                screenshots: result.shots.map((shot) => shot.label),
+                pageSaid: result.said,
+              }),
+              isError: false,
+              ...(attachments.length > 0 ? { attachments } : {}),
+            };
+          });
+        } catch (error) {
+          return failure(error);
+        }
+      },
+    };
+
     const demonstrations = config.demonstrations;
     return [
       ...(demonstrations
@@ -2166,6 +2407,9 @@ export function createComputerAgentFeature(
         : []),
       runtime.tools.register(timed(execTool)),
       ...(writer ? [runtime.tools.register(timed(screenshotTool))] : []),
+      ...(writer && pluginPages
+        ? [runtime.tools.register(timed(pageTryTool))]
+        : []),
       runtime.tools.register(timed(doctorTool)),
       ...(processes && writer
         ? [
