@@ -24,6 +24,7 @@ import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import { SpritesClient } from "@fly/sprites";
 import WebSocket from "ws";
+import { proveUpdateResetAndDelete } from "./live-machine.ts";
 import {
   COMPUTER_HOST_ROUTES,
   COMPUTER_HOST_TOKEN_HEADER,
@@ -774,9 +775,11 @@ try {
     reopened.display === ":100",
     "the tenant keeps the display slot it was allocated before the restart",
   );
+  // The only work it reports is the in-place update the deleted digest
+  // asked for: a restarted container adopts the machine, never provisions it.
   check(
-    reopened.provisioning === undefined,
-    "a restarted container provisions nothing it has already provisioned",
+    reopened.provisioning?.kind === "update",
+    `a restarted container updates the runtime in place and provisions nothing — ${JSON.stringify(reopened.provisioning)}`,
   );
   check(
     reopened.directory.endsWith(
@@ -880,6 +883,27 @@ try {
     Buffer.from(stopped.stdoutBase64, "base64").toString().includes("alive=0"),
     "TERM escalated to KILL ends the process group",
   );
+
+  // --- Update, Reset and Delete my Computer --------------------------------
+  // Last, because it ends by deleting the Computer this test provisioned.
+  await proveUpdateResetAndDelete({
+    origin,
+    hostToken,
+    userId,
+    botId,
+    check,
+    spriteExists: async () => {
+      try {
+        await client.getSprite(spriteName);
+        return true;
+      } catch (error) {
+        if ((error as { statusCode?: unknown }).statusCode === 404) {
+          return false;
+        }
+        throw error;
+      }
+    },
+  });
 
   // --- authorization ------------------------------------------------------
   const unauthorized = await fetch(`${origin}${COMPUTER_HOST_ROUTES.open}`, {
