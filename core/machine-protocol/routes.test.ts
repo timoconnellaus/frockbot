@@ -1,13 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
-  MACHINE_POLL_WAIT_PARAM_V1,
   MACHINE_ROUTES_V1,
   MACHINE_ROUTE_NAMES_V1,
   MACHINE_ROUTE_PREFIX_V1,
-  decodeMachinePollWaitV1,
   machineRoutePathV1,
 } from "./routes.ts";
-import { MACHINE_LIMITS_V1, MachineDecodeError } from "./protocol.ts";
+import { MachineDecodeError } from "./protocol.ts";
 
 const MACHINE_ID = "994dc2ee-3f42-4a4d-9f2a-0a3f6f0d1b77";
 
@@ -16,7 +14,7 @@ describe("machine route table", () => {
     const publicRoutes = MACHINE_ROUTE_NAMES_V1.filter(
       (name) => MACHINE_ROUTES_V1[name].publicRoute,
     );
-    expect(publicRoutes).toEqual(["enroll", "poll", "claim", "result"]);
+    expect(publicRoutes).toEqual(["enroll", "socket", "claim", "result"]);
     // Public means "no session", never "no authority": every public route is
     // addressed by the machine, which presents a token instead.
     for (const name of publicRoutes) {
@@ -33,12 +31,9 @@ describe("machine route table", () => {
     expect(machineRoutePathV1("pair")).toBe("/api/machines/pair");
     expect(machineRoutePathV1("enroll")).toBe("/api/machines/enroll");
     expect(machineRoutePathV1("list")).toBe("/api/machines");
-    expect(machineRoutePathV1("poll", { machineId: MACHINE_ID })).toBe(
-      `/api/machines/${MACHINE_ID}/poll`,
+    expect(machineRoutePathV1("socket", { machineId: MACHINE_ID })).toBe(
+      `/api/machines/${MACHINE_ID}/socket`,
     );
-    expect(
-      machineRoutePathV1("poll", { machineId: MACHINE_ID, waitSeconds: 25 }),
-    ).toBe(`/api/machines/${MACHINE_ID}/poll?${MACHINE_POLL_WAIT_PARAM_V1}=25`);
     expect(machineRoutePathV1("revoke", { machineId: MACHINE_ID })).toBe(
       `/api/machines/${MACHINE_ID}/revoke`,
     );
@@ -57,12 +52,14 @@ describe("machine route table", () => {
   });
 
   test("refuses a missing or unsafe segment rather than emitting one", () => {
-    expect(() => machineRoutePathV1("poll")).toThrow(/needs a valid machineId/);
+    expect(() => machineRoutePathV1("socket")).toThrow(
+      /needs a valid machineId/,
+    );
     expect(() =>
       machineRoutePathV1("claim", { machineId: MACHINE_ID }),
     ).toThrow(/needs a valid commandId/);
     for (const bad of ["../../admin", "a b", "", "-x"]) {
-      expect(() => machineRoutePathV1("poll", { machineId: bad })).toThrow(
+      expect(() => machineRoutePathV1("socket", { machineId: bad })).toThrow(
         MachineDecodeError,
       );
     }
@@ -76,30 +73,6 @@ describe("machine route table", () => {
       });
       expect(path).not.toContain(":machineId");
       expect(path).not.toContain(":commandId");
-    }
-  });
-});
-
-describe("poll wait", () => {
-  test("accepts the ceiling from a number or a query string", () => {
-    expect(decodeMachinePollWaitV1(0)).toBe(0);
-    expect(decodeMachinePollWaitV1("25")).toBe(25);
-    expect(decodeMachinePollWaitV1(MACHINE_LIMITS_V1.pollMaxWaitSeconds)).toBe(
-      MACHINE_LIMITS_V1.pollMaxWaitSeconds,
-    );
-  });
-
-  test("refuses a longer hold rather than silently clamping it", () => {
-    // A silently clamped wait is a backoff the agent believes it does not need.
-    for (const bad of [
-      MACHINE_LIMITS_V1.pollMaxWaitSeconds + 1,
-      "26",
-      -1,
-      1.5,
-      "twenty",
-      null,
-    ]) {
-      expect(() => decodeMachinePollWaitV1(bad)).toThrow(MachineDecodeError);
     }
   });
 });

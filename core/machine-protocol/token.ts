@@ -1,7 +1,7 @@
 // The machine door: the key an agent presents, and the two places it is checked.
 //
 // A device agent has no session — it is a program on the User's laptop, not a
-// browser — so `poll`, `claim` and `result` run before gateway authentication.
+// browser — so `socket`, `claim` and `result` run before gateway authentication.
 // That makes the token the only thing standing between the open internet and a
 // Durable Object, and one check is not enough. This is `plugin-routines`'
 // webhook door, port for port:

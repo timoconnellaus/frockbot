@@ -11,12 +11,13 @@
 // it to the machine, and the agent enrols with no session at all. Nothing in
 // this file constructs a token, and nothing reads one.
 
-import { env, runInDurableObject, SELF } from "cloudflare:test";
+import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { MACHINE_LIMITS_V1 } from "@frockbot/core/machine-protocol";
 import {
   MachineDeviceAgentV1,
   createMemoryMachineSecretStoreV1,
+  fetchUpgradeMachineWebSocketV1,
 } from "@frockbot/app/machine/device";
 import { createMachineDeviceRunnerV1 } from "@frockbot/app/machine/device-runner";
 import {
@@ -37,6 +38,9 @@ function deviceAgent(): { agent: MachineDeviceAgentV1; ran: string[] } {
     // No session header: the machine's four routes are the pre-authentication
     // seam, and an agent that needed a cookie would be a different design.
     fetch: (input, init) => SELF.fetch(input, init),
+    webSocket: fetchUpgradeMachineWebSocketV1((input, init) =>
+      SELF.fetch(input, init),
+    ),
     secrets: createMemoryMachineSecretStoreV1(),
     runner: createMachineDeviceRunnerV1({
       host: {
@@ -82,22 +86,13 @@ async function listMachines(userId: string): Promise<MachineRowV1[]> {
   return view.machines;
 }
 
-/** Age the machine's presence past its TTL, without touching anything else. */
-async function stopPolling(userId: string, machineId: string): Promise<void> {
-  await runInDurableObject(
-    env.USER_CONFIGURATIONS.getByName(userId),
-    async (_instance, state) => {
-      const key = `machine:${machineId}`;
-      const record = await state.storage.get<{ lastSeenAt: string }>(key);
-      expect(record).toBeDefined();
-      await state.storage.put(key, {
-        ...record!,
-        lastSeenAt: new Date(
-          Date.now() - MACHINE_LIMITS_V1.presenceTtlMs - 1_000,
-        ).toISOString(),
-      });
-    },
-  );
+/** A socket opening or closing reaches the User Durable Object asynchronously. */
+async function eventually(userId: string, connected: boolean): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if ((await listMachines(userId))[0]?.connected === connected) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`the machine never read connected: ${connected}`);
 }
 
 describe("the Machines surface", () => {
@@ -130,19 +125,13 @@ describe("the Machines surface", () => {
         label: "Tims-M5-MacBook-Pro.local",
         platform: "macos",
         capabilities: ["exec", "files"],
-        connected: true,
+        connected: false,
       },
     ]);
 
-    // Presence is arithmetic: a laptop that stops polling reads offline, and
-    // one that polls again reads connected.
-    await stopPolling(userId, offer.machineId);
-    expect(await listMachines(userId)).toMatchObject([{ connected: false }]);
-    expect(await device.agent.runOnce(0)).toMatchObject({
-      paired: true,
-      delivered: 0,
-    });
-    expect(await listMachines(userId)).toMatchObject([{ connected: true }]);
+    // Presence is the agent's socket: it reads connected while one is open.
+    const session = device.agent.connectOnce();
+    await eventually(userId, true);
 
     // Revoking from the surface kills the token wherever the laptop is.
     const revoked = await postAsUser(
@@ -155,9 +144,10 @@ describe("the Machines surface", () => {
     expect(after[0]?.revokedAt).toBeDefined();
     expect(after[0]?.connected).toBe(false);
 
-    // The agent finds out the only way it can: its next poll is refused, and
-    // it forgets the token rather than retrying a door that will not open.
-    const cycle = await device.agent.runOnce(0);
+    // The agent's socket is closed as revoked, and it forgets the token
+    // rather than retrying a door that will not open.
+    const cycle = await session;
+    expect(cycle).toMatchObject({ paired: true, delivered: 0 });
     expect(cycle.unenrolled).toBe(true);
     expect(device.agent.status().enrolled).toBe(false);
     // Nothing ever ran on the laptop: no command was ever approved.

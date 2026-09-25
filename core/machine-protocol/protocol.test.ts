@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
   MACHINE_LIMITS_V1,
-  MACHINE_PRESENCE_TTL_MS,
   MachineDecodeError,
   decodeMachineClaimReceiptV1,
   decodeMachineCommandResultV1,
@@ -15,10 +14,9 @@ import {
   decodeMachinePairingOfferV1,
   decodeMachinePairingRequestV1,
   decodeMachinePathV1,
-  decodeMachinePollResultV1,
   decodeMachineRecordV1,
   decodeMachineResultReceiptV1,
-  machineConnectedV1,
+  decodeMachineSocketFrameV1,
   machineListEntryV1,
   machineOpCapabilityV1,
   type MachineRecordV1,
@@ -113,9 +111,9 @@ const DTOS: {
   { name: "op", decode: decodeMachineOpV1, valid: { ...op } },
   { name: "command", decode: decodeMachineCommandV1, valid: { ...command } },
   {
-    name: "poll result",
-    decode: decodeMachinePollResultV1,
-    valid: { schemaVersion: 1, commands: [{ ...command }], serverTime: NOW },
+    name: "socket frame",
+    decode: decodeMachineSocketFrameV1,
+    valid: { type: "commands", commands: [{ ...command }], serverTime: NOW },
   },
   {
     name: "claim receipt",
@@ -153,7 +151,7 @@ const DTOS: {
   {
     name: "list entry",
     decode: decodeMachineListEntryV1,
-    valid: machineListEntryV1(record, Date.parse(NOW)) as unknown as Record<
+    valid: machineListEntryV1(record, true) as unknown as Record<
       string,
       unknown
     >,
@@ -163,7 +161,7 @@ const DTOS: {
     decode: decodeMachineListViewV1,
     valid: {
       schemaVersion: 1,
-      machines: [machineListEntryV1(record, Date.parse(NOW))],
+      machines: [machineListEntryV1(record, true)],
       serverTime: NOW,
     },
   },
@@ -265,7 +263,7 @@ describe("bounds", () => {
     expect(
       over(
         {
-          schemaVersion: 1,
+          type: "commands",
           commands: Array.from(
             { length: MACHINE_LIMITS_V1.maxQueue + 1 },
             () => ({
@@ -274,7 +272,7 @@ describe("bounds", () => {
           ),
           serverTime: NOW,
         },
-        decodeMachinePollResultV1,
+        decodeMachineSocketFrameV1,
       ).code,
     ).toBe("limit-exceeded");
     expect(
@@ -283,7 +281,7 @@ describe("bounds", () => {
           schemaVersion: 1,
           machines: Array.from(
             { length: MACHINE_LIMITS_V1.maxMachinesPerUser + 1 },
-            () => machineListEntryV1(record, Date.parse(NOW)),
+            () => machineListEntryV1(record, true),
           ),
           serverTime: NOW,
         },
@@ -342,47 +340,31 @@ describe("capabilities", () => {
   });
 });
 
-describe("presence is arithmetic, not a stored flag", () => {
-  const seen = Date.parse(NOW);
+describe("the socket frame", () => {
+  test("names its type, and refuses one it does not know", () => {
+    expect(() =>
+      decodeMachineSocketFrameV1({
+        type: "hello",
+        commands: [],
+        serverTime: NOW,
+      }),
+    ).toThrow(/type is unsupported/);
+  });
+});
 
-  test("reads connected up to the TTL and disconnected one millisecond past it", () => {
-    expect(machineConnectedV1(record, seen)).toBe(true);
-    expect(machineConnectedV1(record, seen + MACHINE_PRESENCE_TTL_MS)).toBe(
-      true,
-    );
-    expect(machineConnectedV1(record, seen + MACHINE_PRESENCE_TTL_MS + 1)).toBe(
-      false,
-    );
-    expect(machineConnectedV1(record, new Date(seen + 1_000))).toBe(true);
+describe("presence is the caller's, never stored", () => {
+  test("the list projection carries what it is told, unless revoked", () => {
+    expect(machineListEntryV1(record, true).connected).toBe(true);
+    expect(machineListEntryV1(record, false).connected).toBe(false);
+    expect(
+      machineListEntryV1({ ...record, revokedAt: NOW }, true).connected,
+    ).toBe(false);
   });
 
-  test("tolerates ordinary clock skew but not a wildly future last-seen", () => {
-    expect(machineConnectedV1(record, seen - 1_000)).toBe(true);
-    expect(machineConnectedV1(record, seen - MACHINE_PRESENCE_TTL_MS - 1)).toBe(
-      false,
-    );
-  });
-
-  test("a revoked machine is never connected, however fresh its poll", () => {
-    expect(machineConnectedV1({ ...record, revokedAt: NOW }, seen)).toBe(false);
-  });
-
-  test("an unparseable last-seen reads disconnected rather than throwing", () => {
-    expect(machineConnectedV1({ lastSeenAt: "never" }, seen)).toBe(false);
-  });
-
-  test("the list projection carries presence and no proof of anything", () => {
-    const entry = machineListEntryV1(
-      record,
-      seen + MACHINE_PRESENCE_TTL_MS + 1,
-    );
-    expect(entry.connected).toBe(false);
+  test("the list projection carries no proof of anything", () => {
+    const entry = machineListEntryV1(record, true);
     expect(JSON.stringify(entry)).not.toContain(DIGEST);
     expect(JSON.stringify(entry)).not.toContain("user-1");
     expect(Object.hasOwn(entry, "keyVersion")).toBe(false);
-    // Pure: the same record and the same clock give the same row.
-    expect(machineListEntryV1(record, seen)).toEqual(
-      machineListEntryV1(record, seen),
-    );
   });
 });

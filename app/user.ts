@@ -10,7 +10,10 @@ import {
   type FlockUserBackendContribution,
   type FlockUserBackendHost,
 } from "@frockbot/app/flock/user";
-import { type MachineUserBackendContribution } from "@frockbot/app/machine/user";
+import {
+  type MachineSocketsV1,
+  type MachineUserBackendContribution,
+} from "@frockbot/app/machine/user";
 import type { MachineStorageV1 } from "@frockbot/app/machine/store";
 import {
   type SearchUserBackendContribution,
@@ -191,6 +194,8 @@ export async function createFoundationUserBackendContributions(host: {
       | "BETTER_AUTH_URL"
       | "COMPOSIO_API_KEY",
   ): string | undefined;
+  /** The registered machines' sockets, which only the Durable Object holds. */
+  machineSockets: MachineSocketsV1;
   /**
    * The Bot lifecycle seam. Archive and restore are Bot authority, so the
    * User coordinator carries each command to the Bot Durable Object rather
@@ -320,6 +325,7 @@ export async function createFoundationUserBackendContributions(host: {
       return {
         storage: host.storage,
         readSecret: (name: "MACHINE_TOKEN_SECRET") => host.readSecret(name),
+        sockets: host.machineSockets,
       };
     },
     get search() {

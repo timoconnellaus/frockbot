@@ -82,7 +82,7 @@ function machineFacts(machine: MachineListEntryV1, now: string): string {
   const can = machine.capabilities
     .map((capability) => CAPABILITY_WORDS[capability] ?? capability)
     .join(", ");
-  // Revoked outranks connected: a revoked machine's next poll is a 401, so
+  // Revoked outranks connected: a revoked machine's next connect is a 401, so
   // saying it is connected would be saying it still works. A connected machine
   // was seen a moment ago by definition, so when is only worth saying about
   // one that is not there.

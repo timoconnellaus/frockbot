@@ -20,6 +20,7 @@ import {
 } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 import { machineTokenDigestV1 } from "@frockbot/core/machine-protocol";
+import { nextMachineFrame, openMachineSocket } from "./machine-socket.ts";
 import type {
   MachineCommandV1,
   MachineEnrollmentReceiptV1,
@@ -58,7 +59,9 @@ interface BotRpc {
 interface UserRpc {
   createMachinePairing(input: unknown): Promise<MachinePairingOfferV1>;
   enrollMachine(input: unknown): Promise<MachineEnrollmentReceiptV1>;
-  pollMachine(input: unknown): Promise<{ commands: MachineCommandV1[] }>;
+  listMachines(
+    input: unknown,
+  ): Promise<{ machines: Array<{ connected: boolean }> }>;
 }
 
 function bot(identity: { userId: string; botId: string }) {
@@ -76,7 +79,11 @@ function userRpc(userId: string): UserRpc {
   return env.USER_CONFIGURATIONS.getByName(userId) as unknown as UserRpc;
 }
 
-/** One registered, connected machine, through the RPCs the routes call. */
+/**
+ * One registered, connected machine, through the RPCs the routes call. The
+ * socket stays open: a machine with none is not connected, and a control tool
+ * refuses to ask about it.
+ */
 async function enrolled(userId: string) {
   const rpc = userRpc(userId);
   const offer = await rpc.createMachinePairing({ schemaVersion: 1, userId });
@@ -93,11 +100,27 @@ async function enrolled(userId: string) {
       capabilities: ["exec", "files"],
     },
   });
-  return {
+  const machine = {
     machineId: offer.machineId,
     claims: { u: userId, m: offer.machineId, v: receipt.keyVersion },
-    token: receipt.token,
+    digest: await machineTokenDigestV1(receipt.token),
   };
+  const socket = await openMachineSocket(userId, machine);
+  expect(await nextMachineFrame(socket)).toEqual([]);
+  return { ...machine, socket };
+}
+
+/** A socket close reaches the User Durable Object asynchronously. */
+async function eventuallyOffline(userId: string): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const view = await userRpc(userId).listMachines({
+      schemaVersion: 1,
+      userId,
+    });
+    if (view.machines.every((machine) => !machine.connected)) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("the machine still reads connected");
 }
 
 /** Everything on this machine's queue, read straight out of durable state. */
@@ -182,7 +205,8 @@ async function identityFor(prefix: string) {
 describe("a machine command's approval in Workerd", () => {
   test("asking records intent and an approval, and queues nothing", async () => {
     const identity = await identityFor("machine-ask");
-    const { machineId, claims, token } = await enrolled(identity.userId);
+    const machine = await enrolled(identity.userId);
+    const { machineId } = machine;
 
     const runId = await askToRun(identity, machineId, "ask-1");
 
@@ -206,18 +230,12 @@ describe("a machine command's approval in Workerd", () => {
     });
     expect(intent!.decision).toBeUndefined();
 
-    // Nothing has run and nothing is waiting to. The machine's own poll — the
-    // only way a command ever reaches it — answers empty.
+    // Nothing has run and nothing is waiting to. A fresh connect — the
+    // machine is sent everything still waiting — is sent nothing.
     expect(await queued(identity.userId, machineId)).toEqual([]);
-    const polled = await userRpc(identity.userId).pollMachine({
-      schemaVersion: 1,
-      userId: identity.userId,
-      machineId,
-      claims,
-      tokenDigest: await machineTokenDigestV1(token),
-      waitSeconds: 0,
-    });
-    expect(polled.commands).toEqual([]);
+    machine.socket.close();
+    const reconnected = await openMachineSocket(identity.userId, machine);
+    expect(await nextMachineFrame(reconnected)).toEqual([]);
   });
 
   test("approving queues exactly one command, across an eviction", async () => {
@@ -327,20 +345,10 @@ describe("a machine command's approval in Workerd", () => {
 
   test("a machine that is not connected is refused before anybody is asked", async () => {
     const identity = await identityFor("machine-offline");
-    const { machineId } = await enrolled(identity.userId);
-    // Age the row past its presence TTL. `connected` is arithmetic, so this is
-    // the honest way to make a laptop offline without waiting ninety seconds.
-    await runInDurableObject(
-      env.USER_CONFIGURATIONS.getByName(identity.userId),
-      async (_instance, state) => {
-        const key = `machine:${machineId}`;
-        const record = await state.storage.get<{ lastSeenAt: string }>(key);
-        await state.storage.put(key, {
-          ...record!,
-          lastSeenAt: new Date(Date.now() - 10 * 60_000).toISOString(),
-        });
-      },
-    );
+    const { machineId, socket } = await enrolled(identity.userId);
+    // The laptop quits: presence is the socket, so closing it is offline.
+    socket.close();
+    await eventuallyOffline(identity.userId);
 
     await askToRun(identity, machineId, "ask-offline");
     // No card, no intent, no command: a refusal is a sentence the Bot reads,

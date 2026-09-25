@@ -308,7 +308,8 @@ describe("foundation application", () => {
         Promise.reject(new Error("not used while composing")),
       enrollMachine: () =>
         Promise.reject(new Error("not used while composing")),
-      pollMachine: () => Promise.reject(new Error("not used while composing")),
+      openMachineSocket: () =>
+        Promise.reject(new Error("not used while composing")),
       claimMachineCommand: () =>
         Promise.reject(new Error("not used while composing")),
       recordMachineResult: () =>

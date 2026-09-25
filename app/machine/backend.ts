@@ -11,7 +11,7 @@
 // somebody's laptop and has no session:
 //
 //   POST /api/machines/enroll                             bearer: pairing code
-//   GET  /api/machines/:id/poll?wait=25                   bearer: machine token
+//   GET  /api/machines/:id/socket                         bearer: machine token
 //   POST /api/machines/:id/commands/:commandId/claim      bearer: machine token
 //   POST /api/machines/:id/commands/:commandId/result     bearer: machine token
 //
@@ -30,11 +30,14 @@
 //     machine record — the authority — so revocation is effective on the very
 //     next call.
 //
+// The socket is an upgrade, and RPC cannot hand one over, so once the token
+// checks out the request itself is forwarded to the User Durable Object, which
+// accepts it as a hibernating WebSocket and pushes commands down it.
+//
 // Nothing here holds state, and nothing here decides who owns a machine. The
-// User Durable Object refuses any RPC naming a User it is not.
+// User Durable Object refuses any request naming a User it is not.
 
 import {
-  MACHINE_POLL_WAIT_PARAM_V1,
   MACHINE_ROUTE_PREFIX_V1,
   MachineDecodeError,
   MachineTokenError,
@@ -44,8 +47,6 @@ import {
   decodeMachineListViewV1,
   decodeMachinePairingOfferV1,
   decodeMachinePairingRequestV1,
-  decodeMachinePollResultV1,
-  decodeMachinePollWaitV1,
   decodeMachineResultReceiptV1,
   machineBearerTokenV1,
   machineTokenDigestV1,
@@ -54,7 +55,6 @@ import {
   type MachineEnrollmentReceiptV1,
   type MachineListViewV1,
   type MachinePairingOfferV1,
-  type MachinePollResultV1,
   type MachineResultReceiptV1,
   type MachineTokenClaimsV1,
 } from "@frockbot/core/machine-protocol";
@@ -89,10 +89,15 @@ export interface MachineGatewayHostV1 {
     userId: string,
     input: { machineId: string; enrollment: unknown },
   ): Promise<MachineEnrollmentReceiptV1>;
-  pollMachine(
+  /**
+   * Hand a verified socket upgrade to the User Durable Object. The answer is
+   * its 101, or its refusal.
+   */
+  openMachineSocket(
     userId: string,
-    call: MachineCallV1 & { waitSeconds: number },
-  ): Promise<MachinePollResultV1>;
+    call: MachineCallV1,
+    request: Request,
+  ): Promise<Response>;
   claimMachineCommand(
     userId: string,
     call: MachineCallV1 & { commandId: string },
@@ -123,7 +128,7 @@ const PAIR = new RegExp(`^${MACHINE_ROUTE_PREFIX_V1}/pair$`);
 const ENROLL = new RegExp(`^${MACHINE_ROUTE_PREFIX_V1}/enroll$`);
 const LIST = new RegExp(`^${MACHINE_ROUTE_PREFIX_V1}$`);
 const REVOKE = new RegExp(`^${MACHINE_ROUTE_PREFIX_V1}/([^/]+)/revoke$`);
-const POLL = new RegExp(`^${MACHINE_ROUTE_PREFIX_V1}/([^/]+)/poll$`);
+const SOCKET = new RegExp(`^${MACHINE_ROUTE_PREFIX_V1}/([^/]+)/socket$`);
 const CLAIM = new RegExp(
   `^${MACHINE_ROUTE_PREFIX_V1}/([^/]+)/commands/([^/]+)/claim$`,
 );
@@ -287,10 +292,10 @@ export function createMachineBackendContribution(
 
   contribution.publicRoute = async (request, url) => {
     const enroll = ENROLL.test(url.pathname);
-    const poll = POLL.exec(url.pathname);
+    const socket = SOCKET.exec(url.pathname);
     const claim = CLAIM.exec(url.pathname);
     const result = RESULT.exec(url.pathname);
-    if (!enroll && !poll && !claim && !result) return undefined;
+    if (!enroll && !socket && !claim && !result) return undefined;
     try {
       const secret = secretOrRefuse();
       if (enroll) {
@@ -316,23 +321,20 @@ export function createMachineBackendContribution(
           ),
         );
       }
-      if (poll) {
+      if (socket) {
         if (request.method !== "GET") {
           return jsonError(405, "method not allowed");
         }
-        for (const key of url.searchParams.keys()) {
-          if (key !== MACHINE_POLL_WAIT_PARAM_V1) {
-            return jsonError(400, `machine poll query.${key} is not allowed`);
-          }
+        if ([...url.searchParams.keys()].length > 0) {
+          return jsonError(400, "the machine socket takes no query parameters");
         }
-        const call = await machineCall(secret, request, poll[1]!);
-        const raw = url.searchParams.get(MACHINE_POLL_WAIT_PARAM_V1);
-        const waitSeconds = raw === null ? 0 : decodeMachinePollWaitV1(raw);
-        return Response.json(
-          decodeMachinePollResultV1(
-            await host.pollMachine(call.claims.u, { ...call, waitSeconds }),
-          ),
-        );
+        // The token first, so a plain GET tells an agent whose upgrade failed
+        // opaquely whether its token is dead (401) or only its socket (426).
+        const call = await machineCall(secret, request, socket[1]!);
+        if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+          return jsonError(426, "WebSocket upgrade required");
+        }
+        return await host.openMachineSocket(call.claims.u, call, request);
       }
       const matched = (claim ?? result)!;
       if (request.method !== "POST") {

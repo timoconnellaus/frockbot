@@ -5,7 +5,9 @@
 // and none of it depends on the object staying resident. So every step runs
 // through the production RPCs — the same ones the gateway's routes call — and
 // the object is evicted in the middle of the one sequence where losing state
-// would matter: between a claim and the result that answers it.
+// would matter: between a claim and the result that answers it. The machine's
+// socket is opened on the object's own `fetch`, exactly as the gateway
+// forwards a verified upgrade.
 //
 // The routes themselves are exercised in `plugin-user-machine`'s own unit
 // suite (which drives the real `publicRoute` seam) and end to end in
@@ -15,6 +17,7 @@ import { env } from "cloudflare:workers";
 import { evictDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
 import {
+  MACHINE_SOCKET_REVOKED_CODE_V1,
   machineTokenDigestV1,
   mintMachineTokenV1,
   type MachineCommandV1,
@@ -22,11 +25,15 @@ import {
   type MachineListViewV1,
   type MachinePairingOfferV1,
 } from "@frockbot/core/machine-protocol";
+import {
+  nextMachineFrame as nextFrame,
+  openMachineSocket as connect,
+  upgradeMachineSocket as upgrade,
+} from "./machine-socket.ts";
 
 interface MachineRpc {
   createMachinePairing(input: unknown): Promise<MachinePairingOfferV1>;
   enrollMachine(input: unknown): Promise<MachineEnrollmentReceiptV1>;
-  pollMachine(input: unknown): Promise<{ commands: MachineCommandV1[] }>;
   claimMachineCommand(input: unknown): Promise<{
     status: string;
     leaseExpiresAt: string;
@@ -88,6 +95,21 @@ async function enrolled(userId: string, label = "Workerd-Mac.local") {
   };
 }
 
+/** Presence, read the way the settings surface reads it. */
+async function connected(userId: string): Promise<boolean | undefined> {
+  return (await machines(userId).listMachines({ schemaVersion: 1, userId }))
+    .machines[0]?.connected;
+}
+
+/** A socket close is delivered to the object asynchronously. */
+async function eventuallyDisconnected(userId: string): Promise<void> {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    if ((await connected(userId)) === false) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("the machine still reads connected");
+}
+
 function command(machineId: string, commandId: string): MachineCommandV1 {
   return {
     schemaVersion: 1,
@@ -109,7 +131,7 @@ function command(machineId: string, commandId: string): MachineCommandV1 {
 }
 
 describe("registered machines in Workerd", () => {
-  test("enroll, poll, claim and result survive eviction between claim and answer", async () => {
+  test("enroll, push, claim and result survive eviction between claim and answer", async () => {
     const userId = `machines-user-${crypto.randomUUID()}`;
     const machine = await enrolled(userId);
     const envelope = {
@@ -120,11 +142,11 @@ describe("registered machines in Workerd", () => {
       tokenDigest: machine.digest,
     };
 
-    // An empty queue answers immediately when nothing is asked to be held.
-    expect(
-      await machine.rpc.pollMachine({ ...envelope, waitSeconds: 0 }),
-    ).toMatchObject({ commands: [] });
+    // Connecting to an empty queue is answered with an empty frame.
+    const socket = await connect(userId, machine);
+    expect(await nextFrame(socket)).toEqual([]);
 
+    // A dispatch reaches the open socket without the machine asking.
     expect(
       await machine.rpc.dispatchMachineCommand({
         schemaVersion: 1,
@@ -132,14 +154,7 @@ describe("registered machines in Workerd", () => {
         command: command(machine.machineId, "tool:1:1:0"),
       }),
     ).toMatchObject({ status: "queued" });
-
-    const delivered = await machine.rpc.pollMachine({
-      ...envelope,
-      waitSeconds: 0,
-    });
-    expect(delivered.commands.map((entry) => entry.commandId)).toEqual([
-      "tool:1:1:0",
-    ]);
+    expect(await nextFrame(socket)).toEqual(["tool:1:1:0"]);
 
     const claimed = await machine.rpc.claimMachineCommand({
       ...envelope,
@@ -149,6 +164,7 @@ describe("registered machines in Workerd", () => {
 
     // The agent goes away and the object is evicted while the command is
     // claimed. Nothing about the claim was resident.
+    socket.close();
     await evictDurableObject(env.USER_CONFIGURATIONS.getByName(userId));
 
     const second = await machines(userId).claimMachineCommand({
@@ -203,33 +219,23 @@ describe("registered machines in Workerd", () => {
     ).toMatchObject({ outcome: "ok", stdout: " M README.md" });
   });
 
-  test("a held poll returns as soon as a command is queued", async () => {
-    const userId = `machines-hold-${crypto.randomUUID()}`;
+  test("a machine that connects is sent every command still waiting", async () => {
+    const userId = `machines-pending-${crypto.randomUUID()}`;
     const machine = await enrolled(userId);
-    const started = Date.now();
-    const held = machine.rpc.pollMachine({
-      schemaVersion: 1,
-      userId,
-      machineId: machine.machineId,
-      claims: machine.claims,
-      tokenDigest: machine.digest,
-      waitSeconds: 25,
-    });
-    // The dispatch is what ends the hold; the twenty-five second ceiling is
-    // never reached, which is the difference between a long poll and a sleep.
-    await machines(userId).dispatchMachineCommand({
-      schemaVersion: 1,
-      userId,
-      command: command(machine.machineId, "tool:2:1:0"),
-    });
-    const answered = await held;
-    expect(answered.commands.map((entry) => entry.commandId)).toEqual([
-      "tool:2:1:0",
-    ]);
-    expect(Date.now() - started).toBeLessThan(20_000);
+    for (const commandId of ["tool:2:1:0", "tool:2:2:0"]) {
+      await machines(userId).dispatchMachineCommand({
+        schemaVersion: 1,
+        userId,
+        command: command(machine.machineId, commandId),
+      });
+    }
+    await evictDurableObject(env.USER_CONFIGURATIONS.getByName(userId));
+    const socket = await connect(userId, machine);
+    expect(await nextFrame(socket)).toEqual(["tool:2:1:0", "tool:2:2:0"]);
+    socket.close();
   });
 
-  test("the registry reads connected while a machine polls, and revocation kills its token", async () => {
+  test("the registry reads connected while a socket is open, and revocation closes it", async () => {
     const userId = `machines-revoke-${crypto.randomUUID()}`;
     const machine = await enrolled(userId, "Revoked-Mac.local");
     const envelope = {
@@ -239,22 +245,36 @@ describe("registered machines in Workerd", () => {
       claims: machine.claims,
       tokenDigest: machine.digest,
     };
-    await machine.rpc.pollMachine({ ...envelope, waitSeconds: 0 });
+    expect(await connected(userId)).toBe(false);
+    const first = await connect(userId, machine);
+    await nextFrame(first);
     expect(
       (await machine.rpc.listMachines({ schemaVersion: 1, userId })).machines,
     ).toMatchObject([{ label: "Revoked-Mac.local", connected: true }]);
+    // The keep-alive is answered without the object.
+    first.send("ping");
+    expect(await first.receive()).toEqual({ type: "message", data: "pong" });
+    first.close();
+    await eventuallyDisconnected(userId);
 
+    const socket = await connect(userId, machine);
+    await nextFrame(socket);
+    expect(await connected(userId)).toBe(true);
     const revoked = await machine.rpc.revokeMachine({
       schemaVersion: 1,
       userId,
       machineId: machine.machineId,
     });
-    // The row stays, as evidence; presence does not.
+    // The row stays, as evidence; presence does not, and the socket is shut.
     expect(revoked.machines).toMatchObject([{ connected: false }]);
+    expect(await socket.receive()).toMatchObject({
+      type: "close",
+      code: MACHINE_SOCKET_REVOKED_CODE_V1,
+    });
 
     await evictDurableObject(env.USER_CONFIGURATIONS.getByName(userId));
+    expect((await upgrade(userId, machine)).status).toBe(401);
     for (const call of [
-      () => machines(userId).pollMachine({ ...envelope, waitSeconds: 0 }),
       () =>
         machines(userId).claimMachineCommand({
           ...envelope,
@@ -289,30 +309,20 @@ describe("registered machines in Workerd", () => {
     // machine has a digest this record does not hold.
     const foreignDigest = await machineTokenDigestV1(foreign);
     expect(
-      await refusal(() =>
-        machine.rpc.pollMachine({
-          schemaVersion: 1,
-          userId,
-          machineId: machine.machineId,
-          claims: machine.claims,
-          tokenDigest: foreignDigest,
-          waitSeconds: 0,
-        }),
-      ),
-    ).toMatch(/invalid/);
+      (await upgrade(userId, { ...machine, digest: foreignDigest })).status,
+    ).toBe(401);
     // …and so does a token at a key version the record has moved past.
     expect(
-      await refusal(() =>
-        machine.rpc.pollMachine({
-          schemaVersion: 1,
-          userId,
-          machineId: machine.machineId,
+      (
+        await upgrade(userId, {
+          ...machine,
           claims: { ...machine.claims, v: machine.claims.v + 1 },
-          tokenDigest: machine.digest,
-          waitSeconds: 0,
-        }),
-      ),
-    ).toMatch(/invalid/);
+        })
+      ).status,
+    ).toBe(401);
+    // A socket is only ever an upgrade.
+    expect((await upgrade(userId, machine, {})).status).toBe(426);
+    expect(await connected(userId)).toBe(false);
   });
 
   test("a machine cannot be enrolled twice with one pairing code", async () => {

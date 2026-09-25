@@ -1,7 +1,6 @@
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
   MACHINE_LIMITS_V1,
-  machineConnectedV1,
   type MachineCommandV1,
 } from "@frockbot/core/machine-protocol";
 import {
@@ -9,6 +8,7 @@ import {
   dispatchMachineCommandV1,
   enrollMachineV1,
   listMachineRecordsV1,
+  machineListViewV1,
   pendingMachineCommandsV1,
   readMachineRecordV1,
   readMachineResultV1,
@@ -176,19 +176,22 @@ describe("the registry", () => {
     });
   });
 
-  test("presence is arithmetic over lastSeenAt, and a revoked machine is never connected", async () => {
+  test("presence is the caller's, and a revoked machine is never connected", async () => {
     await register("m-live");
-    const fresh = await readMachineRecordV1(storage, "m-live");
-    expect(machineConnectedV1(fresh!, T0)).toBe(true);
-    expect(
-      machineConnectedV1(fresh!, T0 + MACHINE_LIMITS_V1.presenceTtlMs + 1),
-    ).toBe(false);
     await touchMachineV1(storage, "m-live", T0 + 60_000);
     const touched = await readMachineRecordV1(storage, "m-live");
-    expect(machineConnectedV1(touched!, T0 + 60_000)).toBe(true);
+    expect(touched?.lastSeenAt).toBe(new Date(T0 + 60_000).toISOString());
+    expect(
+      machineListViewV1([touched!], T0, () => true).machines[0]?.connected,
+    ).toBe(true);
+    expect(
+      machineListViewV1([touched!], T0, () => false).machines[0]?.connected,
+    ).toBe(false);
     const revoked = await revokeMachineV1(storage, "m-live", T0 + 60_000);
     expect(revoked.keyVersion).toBe(2);
-    expect(machineConnectedV1(revoked, T0 + 60_000)).toBe(false);
+    expect(
+      machineListViewV1([revoked], T0, () => true).machines[0]?.connected,
+    ).toBe(false);
   });
 
   test("revocation purges the queue and leaves the row", async () => {
@@ -309,7 +312,7 @@ describe("claims, results and leases", () => {
       status: "already-claimed",
       leaseExpiresAt: first.leaseExpiresAt,
     });
-    // A claimed command is not offered to the next poll.
+    // A claimed command is not offered on the next connect.
     expect(await pendingMachineCommandsV1(storage, "m-claim")).toEqual([]);
   });
 
