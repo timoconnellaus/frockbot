@@ -12,6 +12,7 @@
 !computer/core/bot-path.ts
 !computer/fly/runtime.ts
 !computer/fly/shell.ts
+!computer/fly/demonstration.ts
 !applets/package.json
 !applets/build-contract.ts
 !applets/sdk
