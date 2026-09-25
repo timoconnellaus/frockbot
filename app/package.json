@@ -355,7 +355,7 @@
     "postal-mime": "3.0.0"
   },
   "devDependencies": {
-    "@cloudflare/workers-types": "5.20260916.1",
+    "@cloudflare/workers-types": "5.20260918.1",
     "@modelcontextprotocol/server": "2.0.0",
     "@types/bun": "1.4.2",
     "@types/node": "26.6.1",
