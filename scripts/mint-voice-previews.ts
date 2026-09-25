@@ -165,7 +165,7 @@ function redact(text: string, apiKey: string): string {
   return apiKey.length > 0 ? text.split(apiKey).join("<key>") : text;
 }
 
-async function main(): Promise<void> {
+async function main(apiKey: string): Promise<void> {
   const argv = process.argv.slice(2);
   const force = argv.includes("--force");
   const named = argv.filter((arg) => arg !== "--force");
@@ -177,7 +177,6 @@ async function main(): Promise<void> {
   if (unknown.length > 0) {
     throw new Error(`not a Gemini voice: ${unknown.join(", ")}`);
   }
-  const apiKey = readApiKeyV1();
   const result = await mintVoicePreviewsV1({
     voices,
     outDir,
@@ -200,10 +199,15 @@ async function main(): Promise<void> {
 
 const isMain = import.meta.main;
 if (isMain) {
-  main().catch((error: unknown) => {
-    const message = error instanceof Error ? error.message : String(error);
-    const key = process.env.GEMINI_API_KEY?.trim() ?? "";
-    console.error(redact(message, key));
-    process.exit(1);
-  });
+  let apiKey = "";
+  Promise.resolve()
+    .then(() => {
+      apiKey = readApiKeyV1();
+      return main(apiKey);
+    })
+    .catch((error: unknown) => {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(redact(message, apiKey));
+      process.exit(1);
+    });
 }
