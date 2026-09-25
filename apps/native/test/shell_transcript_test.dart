@@ -1288,7 +1288,7 @@ void main() {
   });
 
   group('the conversation\'s own announcements', () {
-    test('a rename and a compaction each become one system line', () {
+    test('a rename becomes one system line; a compaction becomes none', () {
       final lines = projectAnnouncements([
         {
           'type': 'bot/renamed',
@@ -1305,12 +1305,8 @@ void main() {
           'throughTurn': 4,
         },
       ]);
-      expect(lines.map((line) => line.role), everyElement(LineRole.system));
-      expect(lines.first.text, 'Renamed to Test by user');
-      // The summary itself is never on the wire: every Turn it covers is
-      // still readable, unchanged, immediately above the line.
-      expect(lines.last.text, compactedAnnouncementText);
-      expect(lines.map((line) => line.id), ['announcement-3', 'compaction-9']);
+      expect(lines.map((line) => line.role), [LineRole.system]);
+      expect(lines.single.text, 'Renamed to Test by user');
     });
 
     test('a hang-up becomes a collapsible Voice chat line', () {
@@ -1446,14 +1442,16 @@ void main() {
           ),
           ...projectAnnouncements([
             {
-              'type': 'conversation/compacted',
-              'announcementId': 'compaction-1',
+              'type': 'bot/renamed',
+              'announcementId': 'announcement-1',
               'at': '2026-09-05T12:19:30.000Z',
-              'throughTurn': 1,
+              'from': 'Scout',
+              'to': 'Test',
+              'namedBy': 'user',
             },
           ]),
         ]),
-        ['user: first', 'system: $compactedAnnouncementText', 'user: second'],
+        ['user: first', 'system: Renamed to Test by user', 'user: second'],
       );
     });
 

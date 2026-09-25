@@ -2991,29 +2991,6 @@
           "type": "object",
           "properties": {
             "type": {
-              "const": "conversation/compacted"
-            },
-            "announcementId": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 256
-            },
-            "at": {
-              "$ref": "#/$defs/Instant"
-            },
-            "throughTurn": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 9007199254740991
-            }
-          },
-          "required": ["type", "announcementId", "at", "throughTurn"],
-          "additionalProperties": false
-        },
-        {
-          "type": "object",
-          "properties": {
-            "type": {
               "const": "voice/call"
             },
             "announcementId": {

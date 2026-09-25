@@ -165,72 +165,22 @@ function inConversationV1(
   );
 }
 
-/**
- * The announcements the Session shows, oldest first.
- *
- * Two sources, and deliberately so. A rename or a settled task has no live
- * Session to be appended to, so it lives in this object's own bounded
- * announcement log. A compaction is already a durable event on the
- * conversation's session log — appending a second copy of it here would be
- * two records of one fact — so it is read back from there instead.
- * The transcript injects that log after reading it once, because marker
- * collection and marker placement consume the same events.
- */
-export async function announcementsFromSession(
+/** The Bot's durable announcement log, oldest first. */
+export async function listAnnouncements(
   state: ShellBotStateV1,
-  conversationEvents: readonly SessionEvent[],
 ): Promise<SessionEvent[]> {
   const stored = await state.ctx.storage.list<unknown>({
     prefix: BOT_ANNOUNCEMENT_PREFIX,
   });
-  const announcements = [...stored.entries()]
+  return [...stored.entries()]
     .sort(([left], [right]) => left.localeCompare(right))
-    .map(([, value]) => decodeSessionEvent(value));
-  for (const event of conversationEvents) {
-    if (event.type === "conversation/compacted") announcements.push(event);
-  }
-  return announcements
+    .map(([, value]) => decodeSessionEvent(value))
     .sort((left, right) => left.timestamp.localeCompare(right.timestamp))
     .slice(-BOT_ANNOUNCEMENT_RETENTION);
 }
 
-/** Session events the announcement page needs; exact payloads stay on disk. */
-const CONVERSATION_ANNOUNCEMENT_EVENT_TYPES = new Set<string>([
-  "conversation/compacted",
-  "turn/end",
-]);
-
-async function conversationAnnouncementEvents(
-  state: ShellBotStateV1,
-): Promise<SessionEvent[]> {
-  const sessionId = await state.authority.readConversationSessionId();
-  if (!sessionId) return [];
-  return state.authority.readSessionInlineEventsOfTypes(
-    sessionId,
-    CONVERSATION_ANNOUNCEMENT_EVENT_TYPES,
-  );
-}
-
-/**
- * The announcements as the transcript reads them, each already carrying the
- * timestamp of the place it belongs rather than the moment it was written.
- */
-export async function projectAnnouncementPage(state: ShellBotStateV1) {
-  const session = await conversationAnnouncementEvents(state);
-  return projectClientAnnouncementsV1(
-    await announcementsFromSession(state, session),
-    session,
-  );
-}
-
-/** The Bot's durable announcement log, including Session compaction markers. */
-export async function listAnnouncements(
-  state: ShellBotStateV1,
-): Promise<SessionEvent[]> {
-  return announcementsFromSession(
-    state,
-    await conversationAnnouncementEvents(state),
-  );
+async function projectAnnouncementPage(state: ShellBotStateV1) {
+  return projectClientAnnouncementsV1(await listAnnouncements(state));
 }
 
 export async function listRuns(

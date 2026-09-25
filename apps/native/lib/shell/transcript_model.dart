@@ -1047,13 +1047,6 @@ String formatExchangeTime(String? at, [DateTime? clock]) {
       : '${dateLabel(message, year: true)}, $time';
 }
 
-/// What a compaction says. The summary itself is deliberately not on the wire:
-/// every Turn it covers is still readable, unchanged, immediately above this
-/// line, and the summary is what the model carries rather than what a person
-/// reads.
-const compactedAnnouncementText =
-    'Earlier messages are now carried as a summary. They are all still here to read.';
-
 /// The collapsed header of a hang-up accordion.
 String voiceCallTitle(VoiceCallSection call) {
   final duration = voiceCallDurationLabel(call.startedAt, call.endedAt);
@@ -1108,9 +1101,8 @@ VoiceCallSection? _voiceCallOf(Map<String, Object?> announcement) {
 /// Projects the conversation's announcements as system lines.
 ///
 /// They belong to the Session rather than to a Turn, and they carry the
-/// timestamp of the place they belong — a compaction is dated at the end of
-/// the range it covers, not when the summariser ran — so `orderTranscript`
-/// seats each one between the Turns it happened between.
+/// timestamp of the place they belong, so `orderTranscript` seats each one
+/// between the Turns it happened between.
 List<TranscriptLine> projectAnnouncements(List<Object?> announcements) {
   final lines = <TranscriptLine>[];
   for (final value in announcements) {
@@ -1135,15 +1127,13 @@ List<TranscriptLine> projectAnnouncements(List<Object?> announcements) {
       );
       continue;
     }
-    if (type != 'bot/renamed' && type != 'conversation/compacted') continue;
+    if (type != 'bot/renamed') continue;
     lines.add(
       TranscriptLine(
         id: id,
         runId: id,
         role: LineRole.system,
-        text: type == 'bot/renamed'
-            ? 'Renamed to ${announcement['to']} by ${announcement['namedBy']}'
-            : compactedAnnouncementText,
+        text: 'Renamed to ${announcement['to']} by ${announcement['namedBy']}',
         at: announcement['at'] as String?,
         status: LineStatus.completed,
       ),

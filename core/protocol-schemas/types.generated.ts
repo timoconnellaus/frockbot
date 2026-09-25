@@ -495,12 +495,6 @@ export type Announcement =
       namedBy: "user" | "bot";
     }
   | {
-      type: "conversation/compacted";
-      announcementId: string;
-      at: Instant;
-      throughTurn: number;
-    }
-  | {
       type: "voice/call";
       announcementId: string;
       at: Instant;

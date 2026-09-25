@@ -436,17 +436,10 @@ export interface ClientRunPageV1 {
 }
 
 /**
- * A durable Session event that belongs to no Turn. The WebUI renders it as a
- * system line in the conversation.
- */
-/**
  * A session-level line in the transcript that belongs to neither party.
  *
- * `conversation/compacted` is compaction's one user-visible surface: the
- * earlier Turns are still there and still readable, and this says plainly that
- * the model now carries a summary of them instead of the Turns themselves. The
- * "not summarised" notice still stands where Turns were genuinely evicted, so
- * the two never claim each other's ground.
+ * Only what a person did or said is announced. Housekeeping the platform does
+ * for the model, such as compaction, never is.
  */
 export type ClientAnnouncementV1 =
   | {
@@ -456,12 +449,6 @@ export type ClientAnnouncementV1 =
       from: string;
       to: string;
       namedBy: "user" | "bot";
-    }
-  | {
-      type: "conversation/compacted";
-      announcementId: string;
-      at: string;
-      throughTurn: number;
     }
   | {
       type: "voice/call";
@@ -1454,37 +1441,10 @@ export function createClientRunListV1(
 const MAX_ANNOUNCEMENTS = 64;
 const MAX_ANNOUNCEMENT_NAME_BYTES = 400;
 
-/**
- * Where each Turn ended, by Turn number.
- *
- * A compaction is written at the end of the Turn that crossed the threshold,
- * which is the *newest* Turn — so its own timestamp would place its marker at
- * the bottom of the thread, far from the range it describes. The boundary it
- * actually names is the end of `throughTurn`, and that is what the marker is
- * dated with.
- */
-function turnEndTimestampsV1(
-  session: readonly SessionEvent[],
-): Map<number, string> {
-  const ends = new Map<number, string>();
-  for (const event of session) {
-    if (event.type === "turn/end") ends.set(event.turn, event.timestamp);
-  }
-  return ends;
-}
-
-/**
- * Projects the Bot's durable announcement events onto the wire.
- *
- * `session` is the conversation's own log, used only to date a compaction
- * marker at the boundary it covers. Omitting it dates the marker by when the
- * compaction was written, which is where it used to sit.
- */
+/** Projects the Bot's durable announcement events onto the wire. */
 export function projectClientAnnouncementsV1(
   events: readonly SessionEvent[],
-  session: readonly SessionEvent[] = events,
 ): ClientAnnouncementV1[] {
-  const turnEnds = turnEndTimestampsV1(session);
   return events.flatMap((event): ClientAnnouncementV1[] => {
     if (event.type === "bot/renamed") {
       return [
@@ -1495,28 +1455,6 @@ export function projectClientAnnouncementsV1(
           from: truncateWireString(event.from, MAX_ANNOUNCEMENT_NAME_BYTES),
           to: truncateWireString(event.to, MAX_ANNOUNCEMENT_NAME_BYTES),
           namedBy: event.namedBy,
-        },
-      ];
-    }
-    if (event.type === "conversation/compacted") {
-      // The summary itself is deliberately not on the wire. A person can read
-      // every Turn it covers, unchanged, immediately above this line; the
-      // summary is what the model carries, and it belongs to the audit view.
-      return [
-        {
-          type: "conversation/compacted" as const,
-          // A distinct prefix: a compaction is numbered by the session log and
-          // a rename by this Bot's announcement log, and the two counters would
-          // otherwise collide on an id the client upserts by.
-          announcementId: `compaction-${event.seq}`,
-          // Dated where the covered range ends, not when the summariser ran,
-          // so the marker sits between the last compacted Turn and the first
-          // verbatim one and stays there as newer Turns arrive.
-          at: truncate(
-            turnEnds.get(event.throughTurn) ?? event.timestamp,
-            MAX_TIMESTAMP_LENGTH,
-          ),
-          throughTurn: event.throughTurn,
         },
       ];
     }
@@ -2781,7 +2719,6 @@ function decodeAnnouncement(value: unknown): ClientAnnouncementV1 {
   const announcement = record(value, "run list.announcement");
   if (
     announcement.type !== "bot/renamed" &&
-    announcement.type !== "conversation/compacted" &&
     announcement.type !== "voice/call"
   ) {
     throw new Error("run list.announcement.type is invalid");
@@ -2796,25 +2733,6 @@ function decodeAnnouncement(value: unknown): ClientAnnouncementV1 {
     "run list.announcement.announcementId",
   );
   const at = decodeAnnouncementInstant(announcement, "at");
-  if (announcement.type === "conversation/compacted") {
-    exactKeys(
-      announcement,
-      ["type", "announcementId", "at", "throughTurn"],
-      "run list.announcement",
-    );
-    if (
-      !Number.isSafeInteger(announcement.throughTurn) ||
-      (announcement.throughTurn as number) < 1
-    ) {
-      throw new Error("run list.announcement.throughTurn is invalid");
-    }
-    return {
-      type: "conversation/compacted",
-      announcementId,
-      at,
-      throughTurn: announcement.throughTurn as number,
-    };
-  }
   if (announcement.type === "voice/call") {
     exactKeys(
       announcement,
