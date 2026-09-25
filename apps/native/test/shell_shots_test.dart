@@ -15,8 +15,10 @@ import 'package:flutter/services.dart' show FontLoader, rootBundle;
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/chat_controller.dart';
 import 'package:frockbot_native/client/transport.dart';
+import 'package:frockbot_native/flock/lifecycle.dart';
 import 'package:frockbot_native/groups/faces.dart';
 import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
+import 'package:frockbot_native/shell/archived_conversation.dart';
 import 'package:frockbot_native/shell/chat_header.dart';
 import 'package:frockbot_native/shell/chat_pane.dart';
 import 'package:frockbot_native/shell/desktop_layout.dart';
@@ -24,6 +26,7 @@ import 'package:frockbot_native/shell/sidebar.dart';
 import 'package:frockbot_native/shell/skill_menu.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 
+import 'settings_test.dart' show SettingsApi;
 import 'skill_popover_reopen_test.dart' show SilentApi, VoidStore;
 import 'widget_test.dart' show MemoryStore;
 
@@ -205,13 +208,17 @@ const _groupFaces = [
   ),
 ];
 
-Widget _sidebar({required bool phone}) => ShellSidebar(
+Widget _sidebar({required bool phone, bool archived = false}) => ShellSidebar(
   phone: phone,
   bots: [
     _bot('bob', 'Bob', 'nudge'),
     _bot('test', 'Test', 'cat'),
     _bot('qa', 'QA Throwaway', 'goat'),
     _bot('test-2', 'Test', 'rabbit'),
+    if (archived) ...[
+      _bot('ledger', 'Ledger', 'fox'),
+      _bot('old', 'Test Bot', 'rabbit'),
+    ],
   ],
   groupChats: [
     SidebarGroupChat(
@@ -250,12 +257,14 @@ Widget _sidebar({required bool phone}) => ShellSidebar(
       _daysAgo(12),
     ),
   },
-  archived: const {},
-  activeBotId: phone ? null : 'bob',
-  focusedBotId: phone ? null : 'bob',
+  archived: archived ? const {'ledger', 'old'} : const {},
+  activeBotId: phone ? null : (archived ? 'ledger' : 'bob'),
+  focusedBotId: phone || archived ? null : 'bob',
   workingBotId: null,
   loaded: true,
   showHidden: false,
+  showArchived: archived,
+  onToggleArchived: () {},
   profileName: 'Alex Morgan',
   onSelect: (_) {},
   onCreateBot: () {},
@@ -274,6 +283,7 @@ Future<void> _scene(
   required Brightness brightness,
   required Size size,
   bool list = false,
+  bool archived = false,
 }) async {
   // A desk is drawn as the Mac app, a phone as Android: each platform's own
   // control sizes and window chrome.
@@ -320,6 +330,37 @@ Future<void> _scene(
       companion: companion,
     ),
   );
+  final store = MemoryStore();
+  final api = SettingsApi(
+    store,
+    (_, _) async => {
+      'schemaVersion': 1,
+      'runs': [
+        {
+          'schemaVersion': 3,
+          'runId': 'ledger-1',
+          'admittedAt': '2026-09-12T09:00:00.000Z',
+          'input': 'Can you total the receipts in my inbox for August?',
+          'status': 'completed',
+          'events': [
+            {
+              'type': 'send/to-user',
+              'ordinal': 0,
+              'payload': {
+                'type': 'text',
+                'text':
+                    'August comes to A\$1,284.60 across 23 receipts. The '
+                    'biggest is the Qantas fare, at A\$612.',
+              },
+            },
+          ],
+          'outcome': {'type': 'completed', 'text': ''},
+        },
+      ],
+      'page': {'truncated': false},
+    },
+  );
+  final lifecycle = BotLifecycleCommands(api, store, 'user-1');
   await tester.pumpWidget(
     MaterialApp(
       debugShowCheckedModeBanner: false,
@@ -328,8 +369,21 @@ Future<void> _scene(
         key: _boundary,
         child: Scaffold(
           body: ShellLayout(
-            sidebar: _sidebar(phone: phone),
-            conversation: pane,
+            sidebar: _sidebar(phone: phone, archived: archived),
+            conversation: archived
+                ? ArchivedConversation(
+                    api: api,
+                    botId: 'ledger',
+                    name: 'Ledger',
+                    characterId: 'fox',
+                    primary: '#9db4ff',
+                    phone: phone,
+                    onBack: phone ? () {} : null,
+                    lifecycle: lifecycle,
+                    onRestore: () {},
+                    onDelete: () {},
+                  )
+                : pane,
             rightPanel: null,
             panelOpen: false,
             onDismiss: () {},
@@ -354,6 +408,7 @@ Future<void> _scene(
     image.dispose();
   });
   await tester.pumpWidget(const SizedBox());
+  lifecycle.dispose();
   skills.dispose();
   c.dispose();
   debugDefaultTargetPlatformOverride = null;
@@ -386,6 +441,37 @@ void main() {
       'phone-chat',
       brightness: Brightness.dark,
       size: const Size(390, 844),
+    );
+  }, skip: _out.isEmpty);
+
+  testWidgets('desk archived, dark', (tester) async {
+    await _scene(
+      tester,
+      'desk-archived',
+      brightness: Brightness.dark,
+      size: const Size(1440, 860),
+      archived: true,
+    );
+  }, skip: _out.isEmpty);
+
+  testWidgets('phone archived, dark', (tester) async {
+    await _scene(
+      tester,
+      'phone-archived',
+      brightness: Brightness.dark,
+      size: const Size(390, 844),
+      archived: true,
+    );
+  }, skip: _out.isEmpty);
+
+  testWidgets('phone list archived, dark', (tester) async {
+    await _scene(
+      tester,
+      'phone-list-archived',
+      brightness: Brightness.dark,
+      size: const Size(390, 844),
+      list: true,
+      archived: true,
     );
   }, skip: _out.isEmpty);
 

@@ -19,6 +19,7 @@ abstract final class ShellIds {
   static const sidebarWhatsNew = 'sidebar-whats-new';
   static const sidebarSettings = 'sidebar-settings';
   static const sidebarHiddenToggle = 'sidebar-hidden-toggle';
+  static const sidebarArchivedToggle = 'sidebar-archived-toggle';
   static const sidebarRetry = 'sidebar-retry';
   static const conversation = 'shell-conversation';
   static const rightPanel = 'shell-right-panel';
@@ -263,7 +264,6 @@ abstract final class SettingsIds {
   static const profileSettings = 'profile-settings';
   static const profileModels = 'profile-models';
   static const profileBilling = 'profile-billing';
-  static const profileManageBots = 'profile-manage-bots';
 
   /// Deleting the Computer or the whole account.
   static const profileDelete = 'profile-delete';
@@ -358,6 +358,12 @@ String viewGroupIdentifierV1(String title) =>
 abstract final class PluginIds {
   static const document = 'plugins-document';
   static const refresh = 'plugins-refresh';
+
+  /// The Plugin code a Bot has written, version by version, under its Plugins.
+  static const history = 'plugins-history';
+  static String historyEntry(String generationId) =>
+      'plugins-history-$generationId';
+  static const historyEarlier = 'plugins-history-earlier';
 }
 
 /// Where an account's credit went.
@@ -441,6 +447,13 @@ abstract final class FlockIds {
   static const deleteBot = 'flock-delete-bot';
   static const lifecycleConfirm = 'flock-lifecycle-confirm';
 
+  /// An archived Bot, open read-only: its conversation, and the bar where the
+  /// composer would be.
+  static const archivedConversation = 'flock-archived-conversation';
+  static const archivedBar = 'flock-archived-bar';
+  static const archivedRestore = 'flock-archived-restore';
+  static const archivedDelete = 'flock-archived-delete';
+
   static String createBackgroundOption(String id) => 'flock-background-$id';
 }
 
@@ -511,7 +524,6 @@ abstract final class AuditIds {
 abstract final class SearchIds {
   static const trigger = ShellIds.sidebarSearch;
   static const overlay = 'search-overlay';
-  static const archivedConversation = 'search-archived-conversation';
   static const field = 'search-field';
   static const rebuild = 'search-rebuild';
   static const includeArchived = 'search-include-archived';
