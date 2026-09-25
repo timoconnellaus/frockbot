@@ -26,10 +26,14 @@ import {
  */
 export const CLAIM_UNSUPPORTED_MIN_V1 = 0.7;
 
-/** The most recent calls Jev is shown; a claim is almost always about them. */
-export const CLAIM_ACTIONS_MAX_V1 = 24;
+/**
+ * The most recent calls Jev is shown in full; older calls keep their tool and
+ * outcome with a short result, so no call this Turn is missing from the check.
+ */
+export const CLAIM_RECENT_ACTIONS_V1 = 24;
 
 const CLAIM_RESULT_CHARS_V1 = 240;
+const CLAIM_OLDER_RESULT_CHARS_V1 = 60;
 const CLAIM_TEXT_CHARS_V1 = 1_200;
 
 function clip(text: string, max: number): string {
@@ -67,13 +71,16 @@ export function claimEvidenceV1(
       speaker: message.speaker,
       text: clip(message.text, CLAIM_RESULT_CHARS_V1),
     })),
-    actionsThisTurn: evidence.priorResults
-      .slice(-CLAIM_ACTIONS_MAX_V1)
-      .map((result) => ({
-        tool: result.tool,
-        outcome: result.isError ? ("failed" as const) : ("done" as const),
-        result: clip(result.content, CLAIM_RESULT_CHARS_V1),
-      })),
+    actionsThisTurn: evidence.priorResults.map((result, index) => ({
+      tool: result.tool,
+      outcome: result.isError ? ("failed" as const) : ("done" as const),
+      result: clip(
+        result.content,
+        index < evidence.priorResults.length - CLAIM_RECENT_ACTIONS_V1
+          ? CLAIM_OLDER_RESULT_CHARS_V1
+          : CLAIM_RESULT_CHARS_V1,
+      ),
+    })),
     message: clip(evidence.message, CLAIM_TEXT_CHARS_V1),
   };
 }
