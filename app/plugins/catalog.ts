@@ -86,12 +86,6 @@ export const FIRST_PARTY_TOGGLEABLE_PLUGINS_V1: readonly {
     description:
       "Delegate parts of a task to helper agents. May use additional model calls.",
   },
-  {
-    packageId: "machine-messages",
-    displayName: "Messages",
-    description:
-      "Read and send Messages through your Mac. Setup and your approval are required.",
-  },
 ];
 
 export function isFirstPartyToggleableV1(packageId: string): boolean {

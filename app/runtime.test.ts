@@ -44,7 +44,6 @@ describe("foundation application", () => {
       "computer",
       "computer-host",
       "user-machine",
-      "machine-messages",
       "subagents",
     ]);
   });
@@ -184,7 +183,6 @@ describe("foundation application", () => {
       "credentials",
       "custom-models",
       "image",
-      "machine-messages",
       "provider-flock-ai",
       "routines",
       "settings",

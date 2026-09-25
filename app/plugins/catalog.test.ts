@@ -214,7 +214,7 @@ describe("first-party features a Bot may switch", () => {
   test("are the five the page lists, and custom models is not one", () => {
     expect(
       FIRST_PARTY_TOGGLEABLE_PLUGINS_V1.map((plugin) => plugin.packageId),
-    ).toEqual(["web", "routines", "image", "subagents", "machine-messages"]);
+    ).toEqual(["web", "routines", "image", "subagents"]);
     expect(isFirstPartyToggleableV1("custom-models")).toBe(false);
   });
 

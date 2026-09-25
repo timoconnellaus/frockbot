@@ -23,7 +23,6 @@ import type { BotTemplateRuntimeHostV1 } from "@frockbot/app/bot-template/agent"
 import type { FlockSelfRuntimeHostV1 } from "@frockbot/app/flock/agent";
 import type { GroupChatsRuntimeHostV1 } from "@frockbot/app/groups/agent";
 import type { ImageRuntimeHostV1 } from "@frockbot/app/image/agent";
-import type { MachineMessagesRuntimeHostV1 } from "@frockbot/app/machine-messages/agent";
 import type { MachineRuntimeHostV1 } from "@frockbot/app/machine/agent";
 import type { MemoryRuntimeHostV1 } from "@frockbot/app/memory/agent";
 import type { RoutinesRuntimeHostV1 } from "@frockbot/app/routines/agent";
@@ -178,14 +177,6 @@ export interface ShellHostedRuntimeHostV1 {
    * nobody can trace back to a conversation.
    */
   machines?: MachineRuntimeHostV1;
-  /**
-   * Row 57g's seam, supplied only when all of its gate is open: the User
-   * setting is on, and at least one connected macOS machine reports the
-   * `messages` capability. Absent, and the seven Messages tools are not
-   * mounted at all — absent from the catalog rather than present and
-   * refusing, which is what a feature gate is for.
-   */
-  machineMessages?: MachineMessagesRuntimeHostV1;
   /**
    * The Plugin authoring seam (ADR 0026), supplied by the Bot Durable Object
    * for one admitted Turn behind the account's Plugin-authoring switch.

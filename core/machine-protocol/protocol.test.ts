@@ -97,7 +97,7 @@ const DTOS: {
       label: "Tims-M5-MacBook-Pro.local",
       platform: "macos",
       agentVersion: "0.1.0",
-      capabilities: ["exec", "files", "messages"],
+      capabilities: ["exec", "files"],
     },
   },
   {
@@ -321,24 +321,6 @@ describe("bounds", () => {
 });
 
 describe("capabilities", () => {
-  test("only a macos agent may report messages", () => {
-    const enrollment = {
-      schemaVersion: 1,
-      code: "AB12",
-      label: "box",
-      platform: "linux",
-      agentVersion: "0.1.0",
-      capabilities: ["exec", "messages"],
-    };
-    expect(() => decodeMachineEnrollmentV1(enrollment)).toThrow(
-      /only report messages on macos/,
-    );
-    expect(
-      decodeMachineEnrollmentV1({ ...enrollment, platform: "macos" })
-        .capabilities,
-    ).toEqual(["exec", "messages"]);
-  });
-
   test("a repeated capability is refused rather than deduplicated", () => {
     expect(() =>
       decodeMachineRecordV1({ ...record, capabilities: ["exec", "exec"] }),

@@ -735,13 +735,6 @@ class _ConnectionsPageState extends State<ConnectionsPage>
                 spacing: gap,
                 runSpacing: gap,
                 children: [
-                  if (!widget.installed &&
-                      !widget.models &&
-                      widget.packageId == null)
-                    SizedBox(
-                      width: width,
-                      child: _MacMessagesRow(page: widget),
-                    ),
                   for (final (index, provider) in rows.indexed)
                     SizedBox(
                       width: width,
@@ -777,11 +770,6 @@ class _ConnectionsPageState extends State<ConnectionsPage>
     List<List<Map<String, Object?>>> rows,
     String? banner,
   ) {
-    final showMac =
-        widget.showConnectors &&
-        !widget.installed &&
-        widget.packageId == null &&
-        widget.query.trim().isEmpty;
     return LayoutBuilder(
       builder: (context, viewport) {
         final maxWidth = widget.grid ? marketplaceDialogWidth : 680.0;
@@ -791,8 +779,7 @@ class _ConnectionsPageState extends State<ConnectionsPage>
             ? 2
             : 1;
         const gap = 8.0;
-        final extras = showMac ? 1 : 0;
-        final count = rows.length + extras;
+        final count = rows.length;
         final lines = (count / columns).ceil();
         return CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
@@ -845,12 +832,8 @@ class _ConnectionsPageState extends State<ConnectionsPage>
                         itemCount: lines + (nextCursor == null ? 0 : 1),
                         itemBuilder: (context, row) {
                           if (row == lines) return _moreRow();
-                          Widget card(int index) => showMac && index == 0
-                              ? _MacMessagesRow(page: widget)
-                              : _providerCard(
-                                  rows[index - extras],
-                                  index - extras,
-                                );
+                          Widget card(int index) =>
+                              _providerCard(rows[index], index);
                           final first = row * columns;
                           return Padding(
                             padding: const EdgeInsets.only(bottom: gap),
@@ -1051,33 +1034,6 @@ class _MoreRow extends StatelessWidget {
       ),
     );
   }
-}
-
-class _MacMessagesRow extends StatelessWidget {
-  final ConnectionsPage page;
-  const _MacMessagesRow({required this.page});
-  @override
-  Widget build(BuildContext context) => _Row(
-    mark: const ConnectorIconTile(icon: Icons.message_outlined),
-    title: 'Messages on your Mac',
-    subtitle: 'Allow access to Messages through a connected Mac',
-    trailing: Icon(
-      Icons.chevron_right,
-      color: Theme.of(context).colorScheme.onSurfaceVariant,
-    ),
-    onTap: () => Navigator.of(context).push(
-      MaterialPageRoute<void>(
-        builder: (_) => SettingsPage(
-          onFeaturesChanged: page.onFeaturesChanged,
-          api: page.api,
-          store: page.store,
-          userId: page.userId,
-          section: 'package.machine-messages',
-          title: 'Messages on your Mac',
-        ),
-      ),
-    ),
-  );
 }
 
 /// The small pill at the end of a row: the way in when nothing is

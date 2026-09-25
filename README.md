@@ -521,7 +521,6 @@ app/              The product: `runtime.ts`, the Contribution tables, and one di
   image/          generate_image through Cloudflare's AI binding, fenced by the Workspace
   isolates/       The authority a Bot isolate member is mounted with, and its grants
   machine/        Registered-machine enrollment and pairing
-  machine-messages/ Message delivery to and from a User's registered machines
   memory/         Bot, User and Group Chat memory: canonical records and Markdown tiers
   notifications/  User-visible messages, their unread cursors, and the push outbox
   plugins/        The deployment catalog and seed states, a Bot's Plugins page, its enable map behind a revision fence, and the `plugin_*` authoring tools with the approval that makes a published Plugin live
