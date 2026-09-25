@@ -117,6 +117,10 @@ Each call, in order                 (prepareTool hook, outermost)
         |        +--> release: the send runs
         |        +--> withhold: never delivered, draft cleared, audited;
         |             a withheld finish still ends the Turn
+        +--> a mutate call: TurnSupervisor.reviewCall, recorded per call
+        |        +--> allow: the call runs
+        |        +--> reject: never runs, the model is told to ask the
+        |             person, audited
         +--> any other call runs
         |
         v
