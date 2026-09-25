@@ -6,7 +6,7 @@
 // recorded the decision, because a proposal is a cross-object call, and it is
 // idempotent on what the Composition already holds: a crash between the
 // commit and this call is a retry, never a second generation.
-import { pluginPageKeyV1 } from "@frockbot/core/contracts";
+import { canonicalJson, pluginPageKeyV1 } from "@frockbot/core/contracts";
 import type { BotIdentity } from "@frockbot/core/durable";
 import {
   CompositionPinConflictError,
@@ -200,13 +200,28 @@ export async function generationWithPluginV1(
  * What an approved intent does, after its decision committed.
  *
  * A `publish` proposes the generation on the User — skipped when the current
- * generation already holds this exact artifact, which is what makes a retry
+ * generation already holds this exact Plugin, which is what makes a retry
  * safe — and then switches the Plugin on for this Bot. An `enable` only
  * switches. An application that got through records its outcome on the
  * intent, so a person reading it later sees what their approval came to; one
  * that threw records nothing and raises, leaving an approval a retry can
  * still apply rather than one closed as failed.
  */
+/**
+ * Whether the Composition already holds this Plugin as published: its code,
+ * its pages and its declaration. The module alone is not enough — a page is
+ * its own artifact, so a changed page, or a page rebuilt with a newer bridge,
+ * leaves the module's hash as it was. Who published it is not a difference.
+ */
+export function samePublishedPluginV1(
+  held: CompositionMemberV1,
+  member: CompositionMemberV1,
+): boolean {
+  const { provenance: _held, ...heldPlugin } = held;
+  const { provenance: _member, ...memberPlugin } = member;
+  return canonicalJson(heldPlugin) === canonicalJson(memberPlugin);
+}
+
 export async function applyApprovedPluginIntentV1(
   state: ShellBotStateV1,
   identity: BotIdentity,
@@ -228,7 +243,7 @@ export async function applyApprovedPluginIntentV1(
       const held = current.members.find(
         (candidate) => candidate.packageId === member.packageId,
       );
-      if (held?.artifact.contentHash === member.artifact.contentHash) {
+      if (held && samePublishedPluginV1(held, member)) {
         generationId = current.generationId;
         break;
       }
