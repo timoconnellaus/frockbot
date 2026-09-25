@@ -2332,13 +2332,19 @@ export function createComputerAgentFeature(
             }
             const attachments: ToolAttachmentV1[] = [];
             const botKey = computerBotPathKeyV1(context.botId);
-            for (const [index, shot] of result.shots.entries()) {
+            const filed: string[] = [];
+            for (const shot of result.shots) {
               const read = await shell(`base64 -w0 ${shellQuote(shot.file)}`);
-              if (read.exitCode !== 0) continue;
-              const bytes = Uint8Array.from(
-                atob(text(read.stdout).trim()),
-                (character) => character.charCodeAt(0),
-              );
+              if (read.exitCode !== 0 || read.outputTruncated) continue;
+              let bytes: Uint8Array;
+              try {
+                bytes = Uint8Array.from(
+                  atob(text(read.stdout).trim()),
+                  (character) => character.charCodeAt(0),
+                );
+              } catch {
+                continue;
+              }
               captureSequence += 1;
               const path = {
                 root: screenshotsRoot(),
@@ -2370,7 +2376,7 @@ export function createComputerAgentFeature(
                 .get(context.sessionId)
                 ?.offerAttachmentBytes(attachment.contentHash, base64Of(bytes));
               attachments.push(attachment);
-              result.shots[index] = { label: shot.label, file: path.path };
+              filed.push(shot.label);
             }
             await shell(`rm -rf ${shellQuote(directory)}`).catch(
               () => undefined,
@@ -2383,7 +2389,7 @@ export function createComputerAgentFeature(
                 reports: result.reports,
                 errors: result.errors,
                 steps: result.steps,
-                screenshots: result.shots.map((shot) => shot.label),
+                screenshots: filed,
                 pageSaid: result.said,
               }),
               isError: false,

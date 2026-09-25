@@ -18,6 +18,10 @@ export const PLUGIN_PAGE_TRY_MAX_WAIT_MS_V1 = 30_000;
 /** How many pictures one try hands back, and the most each may weigh. */
 export const PLUGIN_PAGE_TRY_MAX_SCREENSHOTS_V1 = 4;
 export const PLUGIN_PAGE_TRY_SHOT_MAX_BYTES_V1 = 20_000;
+/** How long a try's steps may run, and how much its result may weigh. */
+export const PLUGIN_PAGE_TRY_DEADLINE_MS_V1 = 90_000;
+export const PLUGIN_PAGE_TRY_RESULT_MAX_BYTES_V1 = 24_000;
+const PLUGIN_PAGE_TRY_ERROR_MAX_V1 = 300;
 
 export type PluginPageTryStepV1 =
   /** Clicks the first element the CSS selector finds in the page. */
@@ -320,6 +324,38 @@ const request = JSON.parse(fs.readFileSync(path.join(dir, "request.json"), "utf8
 const require = createRequire(path.join(os.homedir(), ".frockbot", "node_modules", "runner.cjs"));
 const { chromium } = require(process.env.PAGE_TRY_PLAYWRIGHT || "playwright-core");
 const executablePath = process.env.PAGE_TRY_CHROMIUM || path.join(os.homedir(), "bin", "chromium");
+// Well inside the command's own limit, so what happened always comes back.
+const started = Date.now();
+const left = () => ${PLUGIN_PAGE_TRY_DEADLINE_MS_V1} - (Date.now() - started);
+const within = (promise, ms) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) => setTimeout(() => reject(new Error("the page did not answer in time")), Math.max(0, ms)).unref()),
+  ]);
+const line = (error) => String(error).split("\\n")[0].slice(0, ${PLUGIN_PAGE_TRY_ERROR_MAX_V1});
+const result = { text: "", greeted: false, reports: [], said: [], errors: [], steps: [], shots: [] };
+let written = false;
+const finish = () => {
+  if (written) return;
+  written = true;
+  let out = JSON.stringify(result);
+  // One line, small enough to come back through one command's output.
+  while (Buffer.byteLength(out) > ${PLUGIN_PAGE_TRY_RESULT_MAX_BYTES_V1}) {
+    if (result.text.length > 200) result.text = result.text.slice(0, result.text.length >> 1);
+    else if (result.reports.length > 0) result.reports.shift();
+    else if (result.said.length > 0) result.said.shift();
+    else if (result.errors.length > 0) result.errors.pop();
+    else if (result.steps.some((step) => step.error && step.error.length > 60)) {
+      for (const step of result.steps) if (step.error) step.error = step.error.slice(0, 60);
+    } else break;
+    out = JSON.stringify(result);
+  }
+  process.stdout.write(out + "\\n");
+};
+setTimeout(() => {
+  finish();
+  process.exit(0);
+}, ${PLUGIN_PAGE_TRY_DEADLINE_MS_V1} + 15000).unref();
 const browser = await chromium.launch({
   executablePath,
   headless: true,
@@ -327,8 +363,9 @@ const browser = await chromium.launch({
 });
 try {
   const page = await browser.newPage({ viewport: { width: request.width, height: request.height } });
-  const errors = [];
-  page.on("pageerror", (error) => errors.push(String((error && error.stack) || error).split("\\n").slice(0, 3).join(" ")));
+  page.on("pageerror", (error) => {
+    if (result.errors.length < 10) result.errors.push(line(String((error && error.stack) || error).split("\\n").slice(0, 3).join(" ")));
+  });
   await page.setContent(
     "<!doctype html><html><head><style>html,body{margin:0;height:100%;background:" +
       request.config.themeTokens.surface +
@@ -336,57 +373,63 @@ try {
       request.standIn +
       "</script></body></html>",
   );
-  await page.evaluate((config) => window.frockbotStandIn.start(config), request.config);
+  await within(page.evaluate((config) => window.frockbotStandIn.start(config), request.config), 10000);
   await page.waitForFunction(() => window.frockbotStandIn.greeted(), null, { timeout: 10000 }).catch(() => {});
   await page.waitForTimeout(150);
   const frame = page.frameLocator("iframe");
-  const shots = [];
-  const steps = [];
   for (const step of request.steps) {
     const kind = Object.keys(step)[0];
+    if (left() <= 0) {
+      result.steps.push({ step: kind, ok: false, error: "not run: the try ran out of time" });
+      continue;
+    }
     try {
-      if (kind === "click") await frame.locator(step.click).first().click({ timeout: 5000 });
-      else if (kind === "tone") await page.evaluate((t) => window.frockbotStandIn.tone(t), step.tone);
-      else if (kind === "silence") await page.evaluate(() => window.frockbotStandIn.silence());
-      else if (kind === "hostStop") await page.evaluate(() => window.frockbotStandIn.hostStop());
-      else if (kind === "state") await page.evaluate((s) => window.frockbotStandIn.state(s), step.state);
-      else if (kind === "wait") await page.waitForTimeout(step.wait);
-      else if (kind === "screenshot") {
-        await page.waitForTimeout(100);
-        // Small enough to come back through one command's output.
-        let bytes;
-        for (const quality of [70, 55, 40, 25]) {
-          bytes = await page.screenshot({ type: "jpeg", quality });
-          if (bytes.length <= ${PLUGIN_PAGE_TRY_SHOT_MAX_BYTES_V1}) break;
+      await within((async () => {
+        if (kind === "click") await frame.locator(step.click).first().click({ timeout: Math.min(5000, left()) });
+        else if (kind === "tone") await page.evaluate((t) => window.frockbotStandIn.tone(t), step.tone);
+        else if (kind === "silence") await page.evaluate(() => window.frockbotStandIn.silence());
+        else if (kind === "hostStop") await page.evaluate(() => window.frockbotStandIn.hostStop());
+        else if (kind === "state") await page.evaluate((s) => window.frockbotStandIn.state(s), step.state);
+        else if (kind === "wait") await page.waitForTimeout(step.wait);
+        else if (kind === "screenshot") {
+          await page.waitForTimeout(100);
+          // Small enough to come back through one command's output.
+          let bytes;
+          for (const quality of [70, 55, 40, 25]) {
+            bytes = await page.screenshot({ type: "jpeg", quality, timeout: 10000 });
+            if (bytes.length <= ${PLUGIN_PAGE_TRY_SHOT_MAX_BYTES_V1}) break;
+          }
+          if (bytes.length > ${PLUGIN_PAGE_TRY_SHOT_MAX_BYTES_V1}) {
+            throw new Error("the picture was too busy to send back, so it was left out");
+          }
+          const file = path.join(dir, "shot-" + result.shots.length + ".jpg");
+          fs.writeFileSync(file, bytes);
+          result.shots.push({ label: step.screenshot, file });
         }
-        const file = path.join(dir, "shot-" + shots.length + ".jpg");
-        fs.writeFileSync(file, bytes);
-        shots.push({ label: step.screenshot, file });
-      }
-      steps.push({ step: kind, ok: true, listening: await page.evaluate(() => window.frockbotStandIn.listening()) });
+      })(), left());
+      const listening = await within(page.evaluate(() => window.frockbotStandIn.listening()), 5000);
+      result.steps.push({ step: kind, ok: true, listening });
     } catch (error) {
-      steps.push({ step: kind, ok: false, error: String((error && error.message) || error).split("\\n")[0] });
+      result.steps.push({ step: kind, ok: false, error: line((error && error.message) || error) });
     }
   }
-  const text = await frame.locator("body").innerText({ timeout: 3000 }).catch(() => "");
-  const host = await page.evaluate(() => ({
-    greeted: window.frockbotStandIn.greeted(),
-    reports: window.frockbotStandIn.reports(),
-    said: window.frockbotStandIn.said(),
-  }));
-  process.stdout.write(
-    JSON.stringify({
-      text: text.slice(0, 3000),
-      greeted: host.greeted,
-      reports: host.reports.slice(-20),
-      said: host.said.slice(-60),
-      errors: errors.slice(0, 10),
-      steps,
-      shots,
-    }) + "\\n",
-  );
+  result.text = (await frame.locator("body").innerText({ timeout: 3000 }).catch(() => "")).slice(0, 3000);
+  const host = await within(
+    page.evaluate(() => ({
+      greeted: window.frockbotStandIn.greeted(),
+      reports: window.frockbotStandIn.reports(),
+      said: window.frockbotStandIn.said(),
+    })),
+    5000,
+  ).catch(() => null);
+  if (host) {
+    result.greeted = host.greeted;
+    result.reports = host.reports.slice(-20);
+    result.said = host.said.slice(-60);
+  }
 } finally {
-  await browser.close();
+  finish();
+  await within(browser.close(), 10000).catch(() => {});
 }
 `;
 

@@ -10,6 +10,7 @@ import { chromium, expect, test } from "@playwright/test";
 import {
   decodePluginPageTryRequestV1,
   PLUGIN_PAGE_STAND_IN_HOST_JS_V1,
+  PLUGIN_PAGE_TRY_RESULT_MAX_BYTES_V1,
   PLUGIN_PAGE_TRY_RUNNER_MJS_V1,
   PLUGIN_PAGE_TRY_THEME_TOKENS_V1,
   pluginPageForTryV1,
@@ -141,4 +142,39 @@ document.getElementById("go").onclick = () => {
         report.level === "error" && report.text.includes("detector blew up"),
     ),
   ).toBe(true);
+});
+
+test("a page that says a lot still comes back in one command's output", () => {
+  const result = tryPage(
+    `<!doctype html><html><head></head><body><p id="t"></p><script>
+document.getElementById("t").textContent = "語".repeat(3000);
+for (let i = 0; i < 30; i++) frockbot.log("語".repeat(500));
+</script></body></html>`,
+    {
+      steps: [
+        { click: `#missing-${"語".repeat(150)}-a` },
+        { click: `#missing-${"語".repeat(150)}-b` },
+      ],
+    },
+  );
+  expect(Buffer.byteLength(JSON.stringify(result))).toBeLessThanOrEqual(
+    PLUGIN_PAGE_TRY_RESULT_MAX_BYTES_V1,
+  );
+  expect(result.text.length).toBeGreaterThan(0);
+  expect(result.steps.map((step) => step.ok)).toEqual([false, false]);
+});
+
+test("a picture too busy to send back is left out, and the try says so", () => {
+  const result = tryPage(
+    `<!doctype html><html><head></head><body style="margin:0"><canvas id="c" width="390" height="700"></canvas><script>
+const c = document.getElementById("c").getContext("2d");
+const image = c.createImageData(390, 700);
+for (let i = 0; i < image.data.length; i++) image.data[i] = Math.random() * 256;
+c.putImageData(image, 0, 0);
+</script></body></html>`,
+    { steps: [{ wait: 200 }, { screenshot: "noise" }] },
+  );
+  expect(result.steps[1]).toMatchObject({ step: "screenshot", ok: false });
+  expect(result.steps[1]?.error).toContain("too busy");
+  expect(result.shots).toEqual([]);
 });
