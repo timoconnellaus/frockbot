@@ -17,6 +17,7 @@
 // arrangement where the two cannot drift.
 import {
   AUDIT_TARGET_COMPUTER_V1,
+  AUDIT_TARGET_EMAIL_V1,
   AUDIT_TARGET_MACHINE_PREFIX_V1,
   AUDIT_TARGET_REMOTE_PREFIX_V1,
   AUDIT_TARGET_WORKSPACE_V1,
@@ -102,6 +103,10 @@ function isObject(value: unknown): value is Record<string, unknown> {
 
 /** The wrapper every namespaced Package tool is journalled under. */
 const DYNAMIC_TOOL = "call_dynamic_tool";
+
+/** The seeded email Plugin's two sends, as a namespaced call names them. */
+export const EMAIL_OWNER_TOOL = "email/email_owner";
+export const EMAIL_SEND_TOOL = "email/email_send";
 
 /**
  * The tool a call actually made.
@@ -212,6 +217,12 @@ export function auditKindForToolV1(
   }
   if (name.startsWith(MACHINE_MESSAGES_PREFIX)) {
     return { kind: "mcp", target: onComputer };
+  }
+  // Mail that left from the Bot's own address: a note to its person, or a
+  // draft the person approved. Drawing a draft sends nothing, so it is not
+  // here.
+  if (name === EMAIL_OWNER_TOOL || name === EMAIL_SEND_TOOL) {
+    return { kind: "email", target: AUDIT_TARGET_EMAIL_V1 };
   }
   if (WORKSPACE_FILE_TOOLS.has(name)) {
     return { kind: "file", target: AUDIT_TARGET_WORKSPACE_V1 };

@@ -1,8 +1,10 @@
-// Sending one transactional email, for whoever the deployment let ask.
+// Sending one email from a Bot's own address, for whoever the kernel let ask.
 //
 // The deployment sends mail, not the thing that asked: a Plugin drafting an
 // email holds no credential and names no provider, and the sender here is the
-// one place a message actually leaves. Cloudflare Email Service is this
+// one place a message actually leaves. Every message is from a Bot's address
+// on the deployment's one email domain, `<bot>.<username>@<domain>`, the same
+// address mail to the Bot arrives at. Cloudflare Email Service is this
 // deployment's choice (2026-09-15), reached through a `send_email` binding;
 // a deployment that has bound none sends nothing and says so, which is what
 // the email Plugin then tells the Bot in so many words.
@@ -14,10 +16,18 @@
 
 /** One message, as the kernel accepts it. Addresses are already validated. */
 export interface EmailSendRequestV1 {
+  /**
+   * The Bot sending it: its own address on the deployment's email domain,
+   * and its name. Composed by the kernel, never by whoever asked.
+   */
+  from: { address: string; name: string };
   to: string[];
   cc?: string[];
+  /** Where a reply goes when it should reach a person rather than the Bot. */
+  replyTo?: string;
   subject: string;
   body: string;
+  /** The `Message-ID` this answers, angle brackets and all. */
   inReplyTo?: string;
 }
 
@@ -34,6 +44,8 @@ export type EmailSendOutcomeV1 =
 
 /** The deployment's sender. Structural, so no Package is imported to send. */
 export interface EmailSenderV1 {
+  /** The one domain every message is sent from. */
+  readonly domain: string;
   send(request: EmailSendRequestV1): Promise<EmailSendOutcomeV1>;
 }
 
@@ -44,9 +56,10 @@ export interface EmailSenderV1 {
  */
 export interface EmailBindingV1 {
   send(message: {
-    from: string;
+    from: { email: string; name: string };
     to: string[];
     cc?: string[];
+    replyTo?: string;
     subject: string;
     text: string;
     headers?: Record<string, string>;
@@ -95,28 +108,54 @@ function failureOf(error: unknown): { code?: string; message: string } {
   };
 }
 
+/** The longest display name a message carries. A Bot's name, not a sentence. */
+const DISPLAY_NAME_MAX_V1 = 80;
+
 /**
  * The deployment's sender, when it has one: a `send_email` binding and the
- * address it sends from. Absent either, there is no sender — never a partial
- * one that fails at the moment a person presses Send.
+ * email domain. Absent either, there is no sender — never a partial one that
+ * fails at the moment a person presses Send.
+ *
+ * The binding may send from any address on any domain the account onboarded,
+ * because it cannot be told "one domain" (`allowed_sender_addresses` is a list
+ * of exact addresses), so the domain is held here: a `from` anywhere else is
+ * refused before the binding is reached.
  */
 export function createBindingEmailSenderV1(env: {
   SEND_EMAIL?: EmailBindingV1;
-  EMAIL_SENDER_ADDRESS?: string;
+  EMAIL_DOMAIN?: string;
 }): EmailSenderV1 | undefined {
   const binding = env.SEND_EMAIL;
-  const address = env.EMAIL_SENDER_ADDRESS?.trim();
-  if (!binding || !address) return undefined;
+  const domain = env.EMAIL_DOMAIN?.trim().toLowerCase();
+  if (!binding || !domain) return undefined;
   return {
+    domain,
     async send(request) {
+      const address = request.from.address.toLowerCase();
+      if (address.slice(address.lastIndexOf("@") + 1) !== domain) {
+        return {
+          status: "unavailable",
+          reason: `the message was not sent: ${address} is not on ${domain}`,
+        };
+      }
+      // The binding writes the header from these parts; what is left to keep
+      // out of it is a control character and a name long enough to be a
+      // message.
+      const name = request.from.name
+        .replace(/[\p{Cc}\p{Cf}]+/gu, " ")
+        .trim()
+        .slice(0, DISPLAY_NAME_MAX_V1);
       try {
         const { messageId } = await binding.send({
-          from: address,
+          from: { email: address, name },
           to: request.to,
           ...(request.cc && request.cc.length > 0 ? { cc: request.cc } : {}),
+          ...(request.replyTo === undefined
+            ? {}
+            : { replyTo: request.replyTo }),
           subject: request.subject,
           text: request.body,
-          // The reply relationship is the one thing a draft says that
+          // The reply relationship is the one thing a message says that
           // becomes a header, and the kernel has already refused a value
           // carrying a line break.
           ...(request.inReplyTo === undefined

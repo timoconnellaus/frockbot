@@ -10,17 +10,22 @@ import type {
 /**
  * Email: the first seeded Plugin, and the first Card (ADR 0030).
  *
- * The Bot drafts; the person edits and decides; the deployment sends. The
- * draft card is the whole of the Plugin's face — who it is to, what it says,
- * each of them a field the person can change, and one control that sends it
- * and one that discards it — and when it is sent the card settles into a
- * receipt rather than disappearing.
+ * Mail to anyone: the Bot drafts; the person edits and decides; the
+ * deployment sends. The draft card is the whole of the Plugin's face for it —
+ * who it is to, what it says, each of them a field the person can change, and
+ * one control that sends it and one that discards it — and when it is sent
+ * the card settles into a receipt rather than disappearing.
  *
- * Two things are deliberately not here. The Plugin never sends by itself: the
- * approval the card asks for is the kernel's, and the tool that sends is
- * called on the Turn after the person decided. And the Plugin holds no
- * credential: `ctx.email` is the deployment's own sender, reached through the
- * kernel and attributed to the Bot that asked.
+ * Mail to the Bot's own person: the `owner` card sends as it is drawn and is
+ * only ever a receipt. No decision stands in front of it because the kernel
+ * holds it to the owner's own addresses and to a few a day.
+ *
+ * Two things are deliberately not here. The Plugin never sends to anyone else
+ * by itself: the approval the draft card asks for is the kernel's, and the
+ * tool that sends is called on the Turn after the person decided. And the
+ * Plugin holds no credential and never names the sender: `ctx.email` is the
+ * deployment's own sender, reached through the kernel, sending from the Bot's
+ * own address.
  */
 
 export const tools: PluginTool[] = [
@@ -479,7 +484,86 @@ const draftCard: PluginCard = {
   },
 };
 
-export const cards = { draft: draftCard };
+/**
+ * One note to the Bot's own person, as it went. Keyed by its surface, which
+ * the kernel minted from the Turn's tool call: a draw repeated after an
+ * interruption finds it here, and the kernel holds the send to the same key,
+ * so the note is sent at most once however often it is drawn.
+ */
+type NoteState =
+  | { status: "sent"; subject: string; to: string; at: string }
+  | { status: "unclear"; subject: string; reason: string; at: string };
+
+function noteKey(surfaceId: string): string {
+  return `note:${surfaceId}`;
+}
+
+function noteReceipt(surfaceId: string, note: NoteState): CardMessage[] {
+  return surface(
+    surfaceId,
+    note.status === "sent"
+      ? receiptComponents(
+          note.subject,
+          "Emailed you",
+          "success",
+          `Emailed you at ${note.to} — ${note.subject}`,
+        )
+      : receiptComponents(
+          note.subject,
+          "May have sent",
+          "warning",
+          `May have reached you — ${note.subject}. It was not sent again.`,
+        ),
+  );
+}
+
+const ownerCard: PluginCard = {
+  /**
+   * Sends the note, then draws what happened to it. A note that could not go
+   * — no address yet, not one of the person's own, today's limit — draws
+   * nothing and tells the Bot why, in words it can pass on.
+   */
+  async render({ surfaceId, data }, ctx) {
+    const storage = ctx.storage;
+    if (!storage) throw new Error("the storage grant is not open");
+    const stored = await storage.get({ key: noteKey(surfaceId) });
+    if (stored.status === "available" && stored.value) {
+      return noteReceipt(surfaceId, stored.value as NoteState);
+    }
+    const subject = String(data.subject ?? "").trim();
+    const body = String(data.body ?? "");
+    if (subject.length === 0 || /[\r\n]/.test(subject)) {
+      return { drop: true, reason: "a note needs a one-line subject" };
+    }
+    if (body.trim().length === 0) {
+      return { drop: true, reason: "a note needs a message" };
+    }
+    const send = ctx.email;
+    if (!send) throw new Error("the http grant is not open");
+    const outcome = await send({
+      owner: true,
+      key: surfaceId,
+      ...(typeof data.to === "string" && data.to.trim().length > 0
+        ? { to: data.to.trim() }
+        : {}),
+      subject,
+      body,
+    });
+    const at = new Date().toISOString();
+    let note: NoteState;
+    if (outcome.status === "sent") {
+      note = { status: "sent", subject, to: outcome.to ?? "", at };
+    } else if (outcome.status === "unknown") {
+      note = { status: "unclear", subject, reason: outcome.reason, at };
+    } else {
+      return { drop: true, reason: `nothing was sent: ${outcome.reason}` };
+    }
+    await storage.put({ key: noteKey(surfaceId), value: note });
+    return noteReceipt(surfaceId, note);
+  },
+};
+
+export const cards = { draft: draftCard, owner: ownerCard };
 
 /**
  * A string answer goes to the Bot as it is; throwing answers with an error it

@@ -49,26 +49,26 @@ describe("each Bot's email", () => {
     expect(await store.state("b-fox")).toEqual({
       schemaVersion: 1,
       slug: "fox",
-      receiving: false,
+      enabled: false,
       senders: [],
     });
-    await store.setReceiving("b-fox", true);
-    expect((await store.state("b-fox")).receiving).toBe(true);
+    await store.setEnabled("b-fox", true);
+    expect((await store.state("b-fox")).enabled).toBe(true);
     bots[0]!.name = "Red Fox";
     expect((await store.state("b-fox")).slug).toBe("red-fox");
-    await store.setReceiving("b-fox", false);
-    expect((await store.state("b-fox")).receiving).toBe(false);
+    await store.setEnabled("b-fox", false);
+    expect((await store.state("b-fox")).enabled).toBe(false);
   });
 
   test("only an active Bot can be turned on, and a deleted one leaves nothing", async () => {
     const { host, bots, map } = memoryHost();
     const store = new InboundEmailUserStoreV1(host);
-    await store.setReceiving("b-owl", true);
+    await store.setEnabled("b-owl", true);
     bots[1]!.active = false;
-    await expect(store.setReceiving("b-owl", true)).rejects.toThrow(
+    await expect(store.setEnabled("b-owl", true)).rejects.toThrow(
       "Only an active Bot",
     );
-    await expect(store.setReceiving("b-gone", true)).rejects.toThrow(
+    await expect(store.setEnabled("b-gone", true)).rejects.toThrow(
       "Only an active Bot",
     );
     await expect(store.state("b-gone")).rejects.toThrow("isn’t yours");
@@ -78,17 +78,17 @@ describe("each Bot's email", () => {
 });
 
 describe("which message reaches which Bot", () => {
-  async function receiving() {
+  async function enabled() {
     const memory = memoryHost();
     const store = new InboundEmailUserStoreV1(memory.host);
-    await store.setReceiving("b-fox", true);
+    await store.setEnabled("b-fox", true);
     const route = (slug: string, sender = TIM, codes: string[] = []) =>
       store.route({ slug, sender, signInEmail: TIM, codes, now: NOW });
     return { ...memory, store, route };
   }
 
   test("the slug names the Bot by its name now", async () => {
-    const { route, bots } = await receiving();
+    const { route, bots } = await enabled();
     expect(await route("fox")).toEqual({ kind: "admit", botId: "b-fox" });
     bots[0]!.name = "Red Fox";
     expect(await route("fox")).toEqual({
@@ -102,10 +102,10 @@ describe("which message reaches which Bot", () => {
   });
 
   test("a Bot that does not receive, or is archived, is refused", async () => {
-    const { route, bots } = await receiving();
+    const { route, bots } = await enabled();
     expect(await route("owl")).toEqual({
       kind: "refused",
-      code: "not-receiving",
+      code: "switched-off",
     });
     bots[0]!.active = false;
     expect(await route("fox")).toEqual({
@@ -115,16 +115,16 @@ describe("which message reaches which Bot", () => {
   });
 
   test("the later of two Bots with one name is -2", async () => {
-    const { store, route, bots } = await receiving();
+    const { store, route, bots } = await enabled();
     bots[1]!.name = "fox";
-    await store.setReceiving("b-owl", true);
+    await store.setEnabled("b-owl", true);
     expect(await route("fox")).toEqual({ kind: "admit", botId: "b-fox" });
     expect(await route("fox-2")).toEqual({ kind: "admit", botId: "b-owl" });
     expect((await store.state("b-owl")).slug).toBe("fox-2");
   });
 
   test("a stranger learns nothing about which Bots there are", async () => {
-    const { route, botReads } = await receiving();
+    const { route, botReads } = await enabled();
     const before = botReads();
     for (const slug of ["fox", "owl", "nobody"]) {
       expect(await route(slug, "eve@evil.example")).toEqual({
@@ -140,7 +140,7 @@ describe("who may write to the User's Bots", () => {
   test("an added address writes only once its code came back from it", async () => {
     const { host } = memoryHost();
     const store = new InboundEmailUserStoreV1(host);
-    await store.setReceiving("b-fox", true);
+    await store.setEnabled("b-fox", true);
     await store.addSender("tim@work.example", { now: NOW });
     const pending = (await store.state("b-fox")).senders[0]!;
     expect(pending).toMatchObject({ address: "tim@work.example" });

@@ -1,9 +1,9 @@
-/// Email this Bot: whether it receives email, its address, and the addresses
-/// allowed to write to it.
+/// Email this Bot: whether it has email at all — receiving and sending — its
+/// address, and the addresses allowed to write to it.
 ///
 /// The server holds all of it (`app/email/backend.ts`); every command answers
 /// the whole view, and this page draws what came back. A Bot's address is its
-/// name and the account's username, `fox.tim@frockbot.com`, so it is never
+/// name and the account's username, `fox.tim@bots.frockbot.com`, so it is never
 /// made here: it follows the Bot's name, and the username has its own page
 /// ([EmailUsernamePage]). The senders are the account's — one list for every
 /// Bot — and are here because this is where the address they write to is. A
@@ -75,8 +75,9 @@ class BotEmailController extends ChangeNotifier {
   /// `<bot-slug>.<username>@<domain>`, once there is a username.
   String? address;
 
-  /// Whether mail to [address] reaches this Bot. Off until turned on.
-  bool receiving = false;
+  /// Whether this Bot receives mail at [address] and sends from it. Off until
+  /// turned on.
+  bool enabled = false;
   List<BotEmailSender> senders = const [];
 
   String get _path => '/api/bots/${Uri.encodeComponent(botId)}/email';
@@ -92,7 +93,7 @@ class BotEmailController extends ChangeNotifier {
     username = named is String && named.isNotEmpty ? named : null;
     final held = answer['address'];
     address = held is String && held.contains('@') ? held : null;
-    receiving = answer['receiving'] == true;
+    enabled = answer['enabled'] == true;
     senders = [
       for (final entry in (answer['senders'] as List? ?? const []))
         if (BotEmailSender.fromJson(entry) case final BotEmailSender sender)
@@ -123,9 +124,9 @@ class BotEmailController extends ChangeNotifier {
 
   Future<bool> load() => _run(() => api.request(_path));
 
-  /// Turn this Bot's email on or off.
-  Future<bool> setReceiving(bool on) =>
-      _run(() => api.request('$_path/switch', body: {'receiving': on}));
+  /// Turn this Bot's email — receiving and sending — on or off.
+  Future<bool> setEnabled(bool on) =>
+      _run(() => api.request('$_path/switch', body: {'enabled': on}));
 
   /// `add` (again, for a fresh code) or `remove`.
   Future<bool> senderCommand(String action, String sender) => _run(
@@ -275,9 +276,9 @@ class _BotEmailPageState extends State<BotEmailPage> {
   Widget _intro(BuildContext context) => Padding(
     padding: const EdgeInsets.fromLTRB(4, 4, 4, 0),
     child: Text(
-      'Email this Bot from your own address. What you send becomes a message '
-      'in its conversation, with the files attached. Its answer stays here in '
-      'the app — it doesn’t email you back yet.',
+      'Email this Bot from your own address: what you send becomes a message '
+      'in its conversation, with the files attached. It can email you back '
+      'from the same address, and anyone else once you approve the draft.',
       style: Theme.of(context).textTheme.bodySmall
           ?.copyWith(color: Theme.of(context).colorScheme.onSurfaceVariant),
     ),
@@ -299,24 +300,23 @@ class _BotEmailPageState extends State<BotEmailPage> {
         children: [
           FrockRow(
             icon: Icons.mark_email_read_outlined,
-            title: 'Receive email',
-            subtitle: controller.receiving
-                ? 'Mail to this address reaches the Bot'
-                : 'Mail to this address is refused',
+            title: 'Email',
+            subtitle: controller.enabled
+                ? 'The Bot receives and sends mail at this address'
+                : 'Off: mail to this address is refused and the Bot sends none',
             chevron: false,
             onTap: busy
                 ? null
-                : () =>
-                      unawaited(controller.setReceiving(!controller.receiving)),
+                : () => unawaited(controller.setEnabled(!controller.enabled)),
             trailing: identified(
-              EmailIds.receiving,
+              EmailIds.enabled,
               Semantics(
-                label: 'Receive email',
+                label: 'Email',
                 child: Switch(
-                  value: controller.receiving,
+                  value: controller.enabled,
                   onChanged: busy
                       ? null
-                      : (next) => unawaited(controller.setReceiving(next)),
+                      : (next) => unawaited(controller.setEnabled(next)),
                 ),
               ),
             ),

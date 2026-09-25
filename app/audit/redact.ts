@@ -55,6 +55,9 @@ const PREVIEW_FIELDS: Record<AuditKindV1, readonly string[]> = {
   // A device use is not a tool call: its preview is written when it is
   // recorded, from the Plugin's name and the ability, never from arguments.
   device: [],
+  // Written below from the tool: the subject a note to the person carried,
+  // never its body or its address.
+  email: [],
 };
 
 function render(value: unknown): string | undefined {
@@ -77,7 +80,14 @@ export function auditPreviewV1(
   input: unknown,
 ): string {
   const parts: string[] = [];
-  if (kind === "mcp") {
+  if (kind === "email") {
+    const data = isObject(input) && isObject(input.data) ? input.data : {};
+    parts.push(
+      toolName.endsWith("email_owner")
+        ? `Emailed you: ${render(data.subject) ?? ""}`
+        : "Sent an email the person approved",
+    );
+  } else if (kind === "mcp") {
     // A remote server's arguments are somebody else's schema; there is no
     // allowlist that could be right for all of them, so the preview names the
     // tool and the *shape* of what it was given and stops there.

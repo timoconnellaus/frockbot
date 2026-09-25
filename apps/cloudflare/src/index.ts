@@ -207,7 +207,7 @@ import {
 import {
   decodeInboundEmailRouteDecisionV1,
   decodeInboundEmailStateV1,
-  inboundEmailDomainV1,
+  emailDomainV1,
   normalizeSenderAddressV1,
 } from "@frockbot/app/email/shared";
 import {
@@ -344,10 +344,11 @@ interface Env {
   ROUTINE_HOOK_SECRET?: string;
   /**
    * The domain Email Routing hands to this Worker's `email()` handler, from
-   * the deployment profile's `inboundEmail`. Absent, no Bot has an address
-   * and every message is refused.
+   * the deployment profile's `email`, and the one every Bot sends from.
+   * Absent, no Bot has an address, every message is refused and nothing is
+   * sent.
    */
-  INBOUND_EMAIL_DOMAIN?: string;
+  EMAIL_DOMAIN?: string;
   /** The Connected apps provider key. Absent, no app can be connected. */
   COMPOSIO_API_KEY?: string;
   /**
@@ -1028,7 +1029,7 @@ interface UserAuditRpc {
 /** The User Durable Object's inbound email RPCs. */
 interface UserInboundEmailRpc {
   readInboundEmail(input: unknown): Promise<unknown>;
-  setInboundEmailReceiving(input: unknown): Promise<unknown>;
+  setBotEmailEnabled(input: unknown): Promise<unknown>;
   commandInboundEmailSender(input: unknown): Promise<unknown>;
   routeInboundEmail(input: unknown): Promise<unknown>;
 }
@@ -1044,7 +1045,7 @@ function userInboundEmailStub(env: Env, userId: string): UserInboundEmailRpc {
  * The address the User signs in with, when the identity provider verified
  * it: the one sender that needs no code, because signing in already proved it.
  */
-async function inboundEmailSignInV1(
+async function emailSignInV1(
   env: Env,
   userId: string,
 ): Promise<string | undefined> {
@@ -1078,7 +1079,7 @@ function inboundEmailCommandOutcomeV1(
  * order (`app/email/inbound.ts`).
  */
 function inboundEmailHostV1(env: Env): InboundEmailHostV1 {
-  const domain = inboundEmailDomainV1(env);
+  const domain = emailDomainV1(env);
   return {
     ...(domain ? { domain } : {}),
     resolveUsername: async (username) => {
@@ -1090,7 +1091,7 @@ function inboundEmailHostV1(env: Env): InboundEmailHostV1 {
       ) as { userId?: unknown };
       return typeof userId === "string" ? userId : undefined;
     },
-    signInEmail: (userId) => inboundEmailSignInV1(env, userId),
+    signInEmail: (userId) => emailSignInV1(env, userId),
     accountRefusal: async (userId) =>
       (await externalAccountRefusal(env, userId))?.message,
     route: async (userId, request) =>
@@ -2408,10 +2409,10 @@ const createGatewayBackendContributions = (env: Env) =>
     // The account's username and senders, and each Bot's switch. The messages
     // themselves arrive at `email()` below, never through the gateway.
     ...(() => {
-      const domain = inboundEmailDomainV1(env);
-      return domain ? { inboundEmailDomain: domain } : {};
+      const domain = emailDomainV1(env);
+      return domain ? { emailDomain: domain } : {};
     })(),
-    inboundEmailSignIn: (userId) => inboundEmailSignInV1(env, userId),
+    emailSignIn: (userId) => emailSignInV1(env, userId),
     readInboundEmail: async (userId, botId) =>
       decodeInboundEmailStateV1(
         rpcJsonSnapshotV1(
@@ -2448,13 +2449,13 @@ const createGatewayBackendContributions = (env: Env) =>
       ) as { status?: unknown };
       return { status: status === "claimed" ? "claimed" : "taken" };
     },
-    setInboundEmailReceiving: async (userId, botId, receiving) =>
+    setBotEmailEnabled: async (userId, botId, enabled) =>
       inboundEmailCommandOutcomeV1(
-        await userInboundEmailStub(env, userId).setInboundEmailReceiving({
+        await userInboundEmailStub(env, userId).setBotEmailEnabled({
           schemaVersion: 1,
           userId,
           botId,
-          receiving,
+          enabled,
         }),
       ),
     commandInboundEmailSender: async (userId, command) =>

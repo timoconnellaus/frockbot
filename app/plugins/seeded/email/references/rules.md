@@ -1,5 +1,9 @@
 # Rules
 
+- `email_owner` reaches your person's own addresses and nobody else's. An
+  address that is not theirs is refused with nothing sent: draw a draft card
+  for it instead. It sends a few notes a day at most; past that it answers
+  that today's limit is reached, and you tell them in the conversation.
 - One card per email, and one email per card. A card that already holds a
   draft is redrawn as it stands: to change what you are sending, call
   `email_draft` with **no** `surfaceId` and draw a fresh card, because the

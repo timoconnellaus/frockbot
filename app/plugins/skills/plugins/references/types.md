@@ -408,34 +408,54 @@ export interface PluginContext {
     connectionId: string,
   ) => Promise<ConnectionLease | CapabilityFailure>;
   /**
-   * The `http` grant, second half: the deployment's own sender, sending for
-   * this Bot. The Plugin holds no credential and names no provider; a
-   * deployment that has bound no sender answers unavailable. One call is one
-   * message to every recipient: `unavailable` means nothing left and the
-   * decision is still good, while `unknown` means it may have left — the
-   * decision is spent, and sending again could deliver it twice.
+   * The `http` grant, second half: the deployment's own sender, sending from
+   * this Bot's own address. The Plugin holds no credential, names no provider
+   * and never names the sender; a deployment that has bound no sender, or a
+   * Bot with no address yet, answers unavailable. One call is one message to
+   * every recipient: `unavailable` means nothing left and the decision is
+   * still good, while `unknown` means it may have left — the decision is
+   * spent, and sending again could deliver it twice.
+   *
+   * Two kinds. Mail a person approved on a draft card goes to anyone, with
+   * their decision's id; a reply to it reaches the person, not the Bot. A
+   * note to the Bot's owner (`owner: true`) needs no decision: the kernel
+   * holds it to one of the owner's own addresses, to at most one message per
+   * `key` and to a daily count per Bot.
    */
-  readonly email?: (request: {
-    /**
-     * The Approval whose decision authorizes this send. The kernel refuses a
-     * send whose Approval is missing, undecided, denied, expired or already
-     * spent, so one decision sends at most one message.
-     */
-    approvalId: string;
-    /**
-     * The Card that decision was given on. The Approval is bound to the
-     * surface and to the values it was showing, so a send whose message is
-     * not the one that was approved is refused.
-     */
-    surfaceId: string;
-    to: string[];
-    cc?: string[];
-    subject: string;
-    body: string;
-    /** The `Message-Id` this answers, when it answers one. */
-    inReplyTo?: string;
-  }) => Promise<
-    | { status: "sent"; messageId: string }
+  readonly email?: (
+    request:
+      | {
+          /**
+           * The Approval whose decision authorizes this send. The kernel
+           * refuses a send whose Approval is missing, undecided, denied,
+           * expired or already spent, so one decision sends at most one
+           * message.
+           */
+          approvalId: string;
+          /**
+           * The Card that decision was given on. The Approval is bound to the
+           * surface and to the values it was showing, so a send whose message
+           * is not the one that was approved is refused.
+           */
+          surfaceId: string;
+          to: string[];
+          cc?: string[];
+          subject: string;
+          body: string;
+          /** The `Message-Id` this answers, when it answers one. */
+          inReplyTo?: string;
+        }
+      | {
+          owner: true;
+          /** What makes a retry the same send, such as the card's surface. */
+          key: string;
+          /** One of the owner's own addresses; absent, their sign-in one. */
+          to?: string;
+          subject: string;
+          body: string;
+        },
+  ) => Promise<
+    | { status: "sent"; messageId: string; to?: string }
     | { status: "unknown"; reason: string }
     | CapabilityFailure
   >;

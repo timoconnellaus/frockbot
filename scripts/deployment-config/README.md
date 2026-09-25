@@ -82,14 +82,14 @@ The tracked file, with identity applied:
 | `services` with no target                 | the profile's own Worker names: the Computer host, the build service, and the app Worker the portal binds |
 | `vars` without identity                   | plus the identity vars below                                                                              |
 | `containers[].image` a Dockerfile path    | the published image, when the profile's `images.source` is `registry`                                     |
-| no `send_email`                           | the app Worker's `SEND_EMAIL` sender, when the profile names an `email` address (below)                   |
+| no `send_email`                           | the app Worker's `SEND_EMAIL` sender, when the profile names an `email` domain (below)                    |
 | `env.development`, `env.e2e`              | dropped — a named environment in a deployed config is a second Worker                                     |
 
 The identity vars the app Worker gains: `NATIVE_SLICE_2_AUTH` (the profile's
 `nativeAuth` list, comma-joined),
 `FROCK_AI_GATEWAY_ID`, `FROCK_AI_ACCOUNT_ID`, `FROCK_AI_AUTO_ROUTE`, `ACCESS_TEAM_DOMAIN`/`ACCESS_AUD` when the profile
-builds the Access auth Package, `EMAIL_SENDER_ADDRESS` when it names a sender, and `INBOUND_EMAIL_DOMAIN` when it
-names `inboundEmail` (below). `FROCK_AI_ACCOUNT_ID` is what selects the compat
+builds the Access auth Package, and `EMAIL_DOMAIN` when it names an `email`
+domain (below). `FROCK_AI_ACCOUNT_ID` is what selects the compat
 HTTP transport, the only one that accepts a `dynamic/<route>` model
 (cloudflare/ai#617); a profile with no `aiGateway` takes the `AI` binding, where
 Auto resolves to a concrete Workers AI model instead.
@@ -109,94 +109,75 @@ Some fields keep a placeholder rather than nothing: wrangler's validator refuses
 `FROCKBOT_ADMIN_EMAILS` secret the installer sets; the hosted deployment already
 carries it as a repository secret, which is why `hosted.json` omits it.
 
-## Inbound email
+## Email
 
-Email your Bot is off until a profile names a domain for it:
+Email to and from Bots is off until a profile names one domain for both
+directions:
 
 ```json
-"inboundEmail": { "domain": "frockbot.com" }
+"email": { "domain": "bots.frockbot.com" }
 ```
 
-That becomes the app Worker's `INBOUND_EMAIL_DOMAIN` var, and each Bot's
-address is its name and the account's username at it, `fox.tim@frockbot.com`
-(`docs/architecture.md`, "By email"). The generator writes the var; the mail
-itself is routed in Cloudflare, by hand, once per deployment:
+Each Bot's address is its name and the account's username at it,
+`fox.tim@bots.frockbot.com` (`docs/architecture.md`, "By email"): mail to the
+Bot arrives there, and mail from the Bot leaves from there. The generated app
+config gains the var both directions read and the sender's binding:
 
-1. Choose the domain. It may be the apex (`frockbot.com`): a Bot's address
-   always has a dot before the `@`, so a plain mailbox like `hello@` is never
-   a Bot's and the Worker refuses it. Email Routing takes over the domain's
-   MX records, though, so the domain must receive no mail through another
-   provider; if it does, use a subdomain (`in.frockbot.com`) instead.
-2. In the Cloudflare dashboard, open that zone → **Email** → **Email
+```json
+"vars": { "EMAIL_DOMAIN": "bots.frockbot.com" },
+"send_email": [{ "name": "SEND_EMAIL" }]
+```
+
+The binding names no sender, deliberately. Every Bot sends from its own
+address, and a `send_email` binding cannot be told "any address on one
+domain": `allowed_sender_addresses` is a list of exact addresses, with no
+wildcard or domain form ([send bindings][send-bindings], read 2026-09-25). So
+`app/email/sender.ts` holds the domain instead — the kernel composes every
+`from` itself, and the sender refuses one that is not on `EMAIL_DOMAIN` before
+the binding is reached — and Email Service refuses any domain the account has
+not onboarded. It names no destination either: a Bot writes to its person, and
+a draft card to whoever the person approved.
+
+`hosted` names `bots.frockbot.com`; `staging` names none, so staging receives
+and sends no email. What the domain needs in Cloudflare, once per deployment:
+
+1. **Choose the domain.** Both Email Routing and Email Sending take over its
+   records, so it must receive no mail through another provider; a subdomain
+   of the app's zone is the simple choice. It may be the apex: a Bot's address
+   always has a dot before the `@`, so a plain mailbox like `hello@` is never a
+   Bot's and the Worker refuses it.
+2. **Receiving.** In the dashboard, open the zone → **Email** → **Email
    Routing** and enable it for the domain (for a subdomain, add it under
-   **Settings → Subdomains**). Cloudflare adds the MX and SPF records it asks
-   for; accept them. No destination address is needed.
-3. Under **Routing rules**, set the **Catch-all address** to **Send to a
-   Worker** and choose the app Worker (`frockbot-cloudflare` for the hosted
-   profile), then enable the catch-all. A plain mailbox that should reach a
-   person, such as `postmaster@`, gets its own custom address above it; no
-   username can be one of those names.
-4. Add `inboundEmail` to the profile, and deploy. Until this deploy lands,
-   the Worker has no domain and refuses every message it is handed.
-5. Check it: in the app, choose a username under Account → Email username,
-   turn on a Bot's settings → Email → Receive email, and send it a message
-   from your sign-in address. The Worker logs one `inbound-email` line per
-   message with its outcome; a `rejected` with code `unauthenticated` means
-   the message carried no DMARC verdict the Worker believes
-   (`docs/known-issues.md` 51).
+   **Settings → Subdomains**), accepting the MX and SPF records it asks for.
+   Under **Routing rules**, set the **Catch-all address** to **Send to a
+   Worker**, choose the app Worker (`frockbot-cloudflare` for the hosted
+   profile), and enable it. A plain mailbox that should reach a person, such as
+   `postmaster@`, gets its own custom address above it; no username can be one
+   of those names.
+3. **Sending.** Workers Paid (3,000 messages a month included, then $0.35 per
+   1,000), then **Compute › Email Service › Email Sending › Onboard Domain**
+   for the same domain. Cloudflare writes MX, SPF and DKIM on the `cf-bounce`
+   subdomain and DMARC on `_dmarc.<domain>`; for `bots.frockbot.com` those are
+   live, with `p=reject`. Until the domain is verified every send is refused
+   with `E_SENDER_NOT_VERIFIED`, which the sender reports as "not sent" and
+   never as "may have sent". A new account starts on a conservative daily
+   quota, which the Limit Increase Request Form raises; past it a send is
+   refused with `E_DAILY_LIMIT_EXCEEDED` and nothing leaves.
+4. **The profile.** Add `email`, and for `hosted` update
+   `fixtures/hosted/app.wrangler.jsonc` in the same commit — the equivalence
+   gate below exists to make exactly that visible. Until the deploy lands the
+   Worker has no domain: it refuses every message and sends none.
+5. **Check it.** In the app, choose a username under Account → Email
+   username, switch a Bot's settings → Email on, and send it a message from
+   your sign-in address; ask it to email you back. The Worker logs one
+   `inbound-email` line per message with its outcome; a `rejected` with code
+   `unauthenticated` means the message carried no DMARC verdict the Worker
+   believes (`docs/known-issues.md` 51).
 
-Removing `inboundEmail` turns email off again: every message is refused, and
-the addresses start working again when it comes back.
+Removing `email` turns both directions off again: every message is refused,
+nothing is sent, and the addresses start working again when it comes back.
 
-## Sending email
-
-The email Plugin's draft card sends through the deployment's own sender
-(`app/email/sender.ts`): Cloudflare Email Service, reached through a
-`send_email` binding. A profile turns it on with one field,
-
-```json
-"email": { "senderAddress": "bot@frockbot.com" }
-```
-
-and the generated app config gains the binding — allowed to send from that one
-address and no other — and the var the sender reads:
-
-```json
-"send_email": [{ "name": "SEND_EMAIL", "allowed_sender_addresses": ["bot@frockbot.com"] }],
-"vars": { "EMAIL_SENDER_ADDRESS": "bot@frockbot.com" }
-```
-
-A profile with no `email` binds nothing. That is `hosted` and `staging` today:
-the deployment sends no email, and a person who presses Send on a draft card
-gets the Bot telling them so in plain words, with the decision left unspent so
-the same card sends once there is a sender and the decision has not expired.
-
-What the profile's Cloudflare account needs first, as the dashboard has it on
-2026-09-24 ([Email Service][email-service]):
-
-1. **Workers Paid.** Sending to anyone but the account's own verified
-   destination addresses needs it: 3,000 messages a month are included, then
-   $0.35 per 1,000.
-2. **The sender's domain on Cloudflare DNS**, which `frockbot.com` is.
-3. **Compute › Email Service › Email Sending › Onboard Domain**, choosing that
-   domain. Cloudflare writes the records itself — MX, SPF and DKIM on the
-   `cf-bounce` subdomain, DMARC on `_dmarc.<domain>` — and the domain is ready
-   when the dashboard shows it verified, usually within minutes. Until then
-   every send is refused with `E_SENDER_NOT_VERIFIED`, which the sender reports
-   as "not sent" and never as "may have sent".
-4. **Optionally, Email Routing** for the sender address, so a reply to the
-   Bot's mail reaches a person. The sender never reads mail; without a route a
-   reply bounces.
-5. **The quota.** A new account starts on a conservative daily quota; the
-   Limit Increase Request Form raises it. A send past it is refused with
-   `E_DAILY_LIMIT_EXCEEDED`, and nothing leaves.
-
-Then add the field to the profile. For `hosted` that changes the generated app
-config, so the same commit updates `fixtures/hosted/app.wrangler.jsonc` — the
-equivalence gate below exists to make exactly that visible. The next tag's
-deploy binds the sender; nothing else is configured and no secret is involved.
-
-[email-service]: https://developers.cloudflare.com/email-service/get-started/send-emails/
+[send-bindings]: https://developers.cloudflare.com/email-service/configuration/send-bindings/
 
 ## The equivalence gate
 

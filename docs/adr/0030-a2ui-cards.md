@@ -386,9 +386,9 @@ serve`), the platform model over the remote Workers AI binding, asked
    > because a seeded artifact has no publisher to put it in R2, and is read
    > back through the same content address by
    > `createR2PackageArtifactStore`. Sending is a kernel loopback —
-   > `ctx.email` to `isolateEmail` to `app/email/sender.ts` — attributed to
-   > the Bot and holding no credential the Plugin can see, and inert until a
-   > deployment binds `SEND_EMAIL` and `EMAIL_SENDER_ADDRESS`. An Approval a
+   > `ctx.email` to `isolateEmail` to `app/email/sender.ts` — from the Bot's
+   > own address and holding no credential the Plugin can see, and inert until
+   > a deployment binds `SEND_EMAIL` and `EMAIL_DOMAIN`. An Approval a
    > Card asks for is bound to what it authorizes: `renderCard` answers with
    > `covers` — the canonical values the Plugin drew and will act on — beside
    > its messages, and the kernel records the Plugin, the surface and a digest

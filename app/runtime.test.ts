@@ -327,15 +327,14 @@ describe("foundation application", () => {
       listMachines: () => Promise.reject(new Error("not used while composing")),
       revokeMachine: () =>
         Promise.reject(new Error("not used while composing")),
-      inboundEmailSignIn: () =>
-        Promise.reject(new Error("not used while composing")),
+      emailSignIn: () => Promise.reject(new Error("not used while composing")),
       readInboundEmail: () =>
         Promise.reject(new Error("not used while composing")),
       readEmailUsername: () =>
         Promise.reject(new Error("not used while composing")),
       claimEmailUsername: () =>
         Promise.reject(new Error("not used while composing")),
-      setInboundEmailReceiving: () =>
+      setBotEmailEnabled: () =>
         Promise.reject(new Error("not used while composing")),
       commandInboundEmailSender: () =>
         Promise.reject(new Error("not used while composing")),

@@ -279,8 +279,8 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] 
     },
     { name: "FROCK_AI_AUTO_ROUTE", why: "A `vars` entry." },
     {
-      name: "INBOUND_EMAIL_DOMAIN",
-      why: "The `vars` entry the profile's `inboundEmail` writes: the domain Email Routing hands to `email()`. Absent, every message is refused.",
+      name: "EMAIL_DOMAIN",
+      why: "The `vars` entry the profile's `email` writes: the domain Email Routing hands to `email()` and every Bot sends from. Absent, every message is refused and nothing is sent.",
     },
     { name: "FROCK_AI_ACCOUNT_ID", why: "A `vars` entry." },
     {

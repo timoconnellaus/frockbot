@@ -111,15 +111,6 @@
         "autoRoute": { "type": "string", "pattern": "^[A-Za-z0-9-]+$" }
       }
     },
-    "inboundEmail": {
-      "description": "Email your Bot. The domain whose Email Routing catch-all sends every message to the app Worker's `email()` handler; each Bot's address is a random token at it. It becomes the app Worker's `INBOUND_EMAIL_DOMAIN` var. Absent, no Bot has an address and the Bot's Email page says email is not set up. The routing rule itself is set up in Cloudflare by hand: see `scripts/deployment-config/README.md`.",
-      "type": "object",
-      "additionalProperties": false,
-      "required": ["domain"],
-      "properties": {
-        "domain": { "$ref": "#/$defs/hostname" }
-      }
-    },
     "nativeAuth": {
       "description": "The native returns this deployment serves: `android`, the released Mac and iPhone apps (`macos`, `ios`), and the FrockBot Dev builds (`macos-dev`, `ios-dev`), each named only where such a build signs in. Nothing is implied by another entry. Absent, the deployment offers no native sign-in at all.",
       "type": "array",
@@ -131,12 +122,12 @@
       }
     },
     "email": {
-      "description": "The deployment's own outbound sender, Cloudflare Email Service. Present, the app Worker gains a `send_email` binding named `SEND_EMAIL`, allowed to send from this one address and no other, and the `EMAIL_SENDER_ADDRESS` var. Absent, the deployment sends no email and the email Plugin says so when a person presses Send. The address's domain must first be onboarded under Email Service > Email Sending in the Cloudflare dashboard (scripts/deployment-config/README.md).",
+      "description": "Email to and from Bots, both directions on one domain. Each Bot's address is `<bot-slug>.<username>@<domain>`. The domain becomes the app Worker's `EMAIL_DOMAIN` var, which the `email()` handler receives mail for, and the app Worker gains a `send_email` binding named `SEND_EMAIL`, through which each Bot sends from its own address on that domain and no other. Absent, no Bot has an address, every message is refused and nothing is sent. The domain's Email Routing catch-all and its onboarding for Email Sending are set up in Cloudflare by hand: see `scripts/deployment-config/README.md`.",
       "type": "object",
       "additionalProperties": false,
-      "required": ["senderAddress"],
+      "required": ["domain"],
       "properties": {
-        "senderAddress": { "$ref": "#/$defs/email" }
+        "domain": { "$ref": "#/$defs/hostname" }
       }
     },
     "resources": {

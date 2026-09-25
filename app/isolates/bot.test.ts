@@ -14,6 +14,7 @@ import type {
 import { approvalKeyV1 } from "../shell/approvals.js";
 import {
   cardApprovalBindingKeyV1,
+  cardApprovalUseKeyV1,
   cardValuesDigestV1,
 } from "../shell/cards.js";
 import { MemoryStorage } from "@frockbot/core/durable/testing";
@@ -27,6 +28,8 @@ import {
   isolateStorageDelete,
   isolateStoragePut,
   isolateWorkspaceRead,
+  EMAIL_OWNER_COUNT_KEY_V1,
+  EMAIL_OWNER_DAILY_LIMIT_V1,
   type IsolateCallScopeV1,
 } from "./bot.ts";
 
@@ -249,8 +252,20 @@ describe("one email, sent for the Bot that asked", () => {
     };
   }
 
+  /** What the User object answers about this Bot's address. */
+  const READY = {
+    status: "ready",
+    address: "fox.tim@bots.frock.test",
+    name: "Fox",
+    owner: ["tim@example.com", "tim@work.example"],
+    signInEmail: "tim@example.com",
+  };
+
   /** The Bot's state with a sender bound and whatever approvals it recorded. */
-  function sending(records: Record<string, unknown> = {}) {
+  function sending(
+    records: Record<string, unknown> = {},
+    identity: Record<string, unknown> = READY,
+  ) {
     const values = new Map<string, unknown>(Object.entries(records));
     const sent: unknown[] = [];
     const storage = {
@@ -273,7 +288,14 @@ describe("one email, sent for the Bot that asked", () => {
         ...base,
         ctx: { storage },
         env: {
+          USER_CONFIGURATIONS: {
+            idFromName: (name: string) => name,
+            get: () => ({
+              readBotEmailSender: () => Promise.resolve(identity),
+            }),
+          },
           EMAIL_SENDER: {
+            domain: "bots.frock.test",
             send: (request: unknown) => {
               sent.push(request);
               return Promise.resolve({
@@ -305,8 +327,31 @@ describe("one email, sent for the Bot that asked", () => {
       await isolateEmail(subject.state, call(requestValues())),
     ).toMatchObject({ status: "sent" });
     // The approvalId and the surface are the kernel's gate, never part of
-    // the message.
-    expect(subject.sent).toEqual([MESSAGE]);
+    // the message; the Bot's address is the kernel's to write, and a reply
+    // reaches the person rather than the Bot.
+    expect(subject.sent).toEqual([
+      {
+        ...MESSAGE,
+        from: { address: "fox.tim@bots.frock.test", name: "Fox" },
+        replyTo: "tim@example.com",
+      },
+    ]);
+  });
+
+  test("a Bot with no address yet spends no decision and says why", async () => {
+    const subject = sending(
+      { [approvalKeyV1("ap-1")]: approval(), ...(await binding()) },
+      {
+        status: "unavailable",
+        reason: "email is switched off for you",
+      },
+    );
+    expect(await isolateEmail(subject.state, call(requestValues()))).toEqual({
+      status: "unavailable",
+      reason: "email is switched off for you",
+    });
+    expect(subject.sent).toHaveLength(0);
+    expect(subject.values.has(cardApprovalUseKeyV1("ap-1"))).toBe(false);
   });
 
   // The gate exists because the model is not trusted to remember the
@@ -443,6 +488,7 @@ describe("one email, sent for the Bot that asked", () => {
       reason: "no route",
     });
     subject.state.env.EMAIL_SENDER = {
+      domain: "bots.frock.test",
       send: (message: unknown) => {
         subject.sent.push(message);
         return Promise.resolve({
@@ -500,6 +546,145 @@ describe("one email, sent for the Bot that asked", () => {
     subject.state.env.EMAIL_SENDER = undefined as never;
     expect(await isolateEmail(subject.state, request)).toMatchObject({
       reason: "this deployment has no sender bound, so it sends no email",
+    });
+  });
+
+  describe("a note to the Bot's own person", () => {
+    const note = (fields: Record<string, unknown> = {}) =>
+      call({
+        owner: true,
+        key: "email_owner.1",
+        subject: "Agenda",
+        body: "Done.",
+        ...fields,
+      });
+
+    test("goes from the Bot to the address they sign in with, with no decision", async () => {
+      const subject = sending();
+      expect(await isolateEmail(subject.state, note())).toEqual({
+        status: "sent",
+        messageId: "<sent@x.co>",
+        to: "tim@example.com",
+      });
+      expect(subject.sent).toEqual([
+        {
+          from: { address: "fox.tim@bots.frock.test", name: "Fox" },
+          to: ["tim@example.com"],
+          subject: "Agenda",
+          body: "Done.",
+        },
+      ]);
+    });
+
+    test("reaches the person's own addresses and nobody else's", async () => {
+      const subject = sending();
+      expect(
+        await isolateEmail(subject.state, note({ to: "Tim@Work.Example" })),
+      ).toMatchObject({ status: "sent", to: "tim@work.example" });
+      const stranger = await isolateEmail(
+        subject.state,
+        note({ key: "email_owner.2", to: "eve@evil.example" }),
+      );
+      expect(stranger).toMatchObject({ status: "unavailable" });
+      expect((stranger as { reason: string }).reason).toMatch(
+        /not one of your person's own addresses/,
+      );
+      expect(subject.sent).toHaveLength(1);
+    });
+
+    test("is sent at most once per key, whatever the outcome", async () => {
+      const subject = sending();
+      await isolateEmail(subject.state, note());
+      expect(await isolateEmail(subject.state, note())).toEqual({
+        status: "sent",
+        messageId: "<sent@x.co>",
+        to: "tim@example.com",
+      });
+      expect(subject.sent).toHaveLength(1);
+
+      const lost = sending();
+      lost.state.env.EMAIL_SENDER = {
+        domain: "bots.frock.test",
+        send: () => {
+          lost.sent.push("attempt");
+          return Promise.resolve({ status: "unknown", reason: "lost" });
+        },
+      } as never;
+      expect(await isolateEmail(lost.state, note())).toMatchObject({
+        status: "unknown",
+      });
+      expect(await isolateEmail(lost.state, note())).toMatchObject({
+        status: "unknown",
+      });
+      expect(lost.sent).toHaveLength(1);
+    });
+
+    test("stops at the day's limit, and a note that never left does not count", async () => {
+      const subject = sending();
+      subject.state.env.EMAIL_SENDER = {
+        domain: "bots.frock.test",
+        send: () =>
+          Promise.resolve({ status: "unavailable", reason: "no route" }),
+      } as never;
+      expect(await isolateEmail(subject.state, note())).toMatchObject({
+        status: "unavailable",
+        reason: "no route",
+      });
+      expect(subject.values.get(EMAIL_OWNER_COUNT_KEY_V1)).toMatchObject({
+        count: 0,
+      });
+      subject.state.env.EMAIL_SENDER = {
+        domain: "bots.frock.test",
+        send: () =>
+          Promise.resolve({ status: "sent", messageId: "<sent@x.co>" }),
+      } as never;
+      for (let index = 0; index < EMAIL_OWNER_DAILY_LIMIT_V1; index += 1) {
+        expect(
+          await isolateEmail(subject.state, note({ key: `note-${index}` })),
+        ).toMatchObject({ status: "sent" });
+      }
+      const over = await isolateEmail(
+        subject.state,
+        note({ key: "one-too-many" }),
+      );
+      expect(over).toMatchObject({ status: "unavailable" });
+      expect((over as { reason: string }).reason).toMatch(/today/);
+      // A new day starts the count again.
+      subject.values.set(EMAIL_OWNER_COUNT_KEY_V1, {
+        schemaVersion: 1,
+        day: "2000-01-01",
+        count: EMAIL_OWNER_DAILY_LIMIT_V1,
+      });
+      expect(
+        await isolateEmail(subject.state, note({ key: "tomorrow" })),
+      ).toMatchObject({ status: "sent" });
+    });
+
+    test("answers the email the Turn came from, in its thread", async () => {
+      const subject = sending({
+        "run:run-1": {
+          runId: "run-1",
+          admission: {
+            schemaVersion: 1,
+            turnType: "chat",
+            origin: { kind: "email", messageId: "m1@mail.example.com" },
+          },
+        },
+      });
+      await isolateEmail(subject.state, { ...note(), runId: "run-1" });
+      expect(subject.sent[0]).toMatchObject({
+        inReplyTo: "<m1@mail.example.com>",
+      });
+    });
+
+    test("a person with no address the Bot knows is told so", async () => {
+      const subject = sending(
+        {},
+        { ...READY, owner: [], signInEmail: undefined },
+      );
+      const outcome = await isolateEmail(subject.state, note());
+      expect(outcome).toMatchObject({ status: "unavailable" });
+      expect((outcome as { reason: string }).reason).toMatch(/draft card/);
     });
   });
 });

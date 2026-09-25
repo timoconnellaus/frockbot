@@ -18,13 +18,14 @@ import {
   INBOUND_EMAIL_SENDERS_MAX_V1,
   mintSenderCodeV1,
   type BotEmailNameV1,
+  type BotEmailSenderV1,
   type InboundEmailRouteDecisionV1,
   type InboundEmailSenderV1,
   type InboundEmailStateV1,
 } from "./shared.js";
 
 /** Present while the Bot receives email. */
-const RECEIVING_PREFIX = "email:receiving:";
+const ENABLED_PREFIX = "email:enabled:";
 const SENDERS_KEY = "email:senders";
 
 export interface InboundEmailUserStorageV1 {
@@ -73,44 +74,101 @@ export class InboundEmailUserStoreV1 {
     return storedSenders(await this.host.storage.get<unknown>(SENDERS_KEY));
   }
 
-  private async receiving(botId: string): Promise<boolean> {
+  private async enabled(botId: string): Promise<boolean> {
     return (
-      (await this.host.storage.get<unknown>(RECEIVING_PREFIX + botId)) === true
+      (await this.host.storage.get<unknown>(ENABLED_PREFIX + botId)) === true
     );
   }
 
-  /** One Bot's email: its slug now, whether it receives, and the senders. */
+  /** One Bot's email: its slug now, whether it is on, and the senders. */
   async state(botId: string): Promise<InboundEmailStateV1> {
-    const [bots, receiving, senders] = await Promise.all([
+    const [bots, enabled, senders] = await Promise.all([
       this.host.bots(),
-      this.receiving(botId),
+      this.enabled(botId),
       this.senders(),
     ]);
     const slug = botEmailSlugsV1(bots).get(botId);
     if (!slug) throw new InboundEmailCommandError("That Bot isn’t yours.");
-    return { schemaVersion: 1, slug, receiving, senders };
+    return { schemaVersion: 1, slug, enabled, senders };
   }
 
-  /** Whether this Bot receives email. Off until the person turns it on. */
-  async setReceiving(botId: string, receiving: boolean): Promise<void> {
-    if (receiving) {
+  /**
+   * Whether this Bot receives and sends email. Off until the person turns it
+   * on.
+   */
+  async setEnabled(botId: string, enabled: boolean): Promise<void> {
+    if (enabled) {
       const bot = (await this.host.bots()).find(
         (candidate) => candidate.botId === botId,
       );
       if (!bot?.active) {
         throw new InboundEmailCommandError(
-          "Only an active Bot can receive email.",
+          "Only an active Bot can have email.",
         );
       }
-      await this.host.storage.put(RECEIVING_PREFIX + botId, true);
+      await this.host.storage.put(ENABLED_PREFIX + botId, true);
       return;
     }
-    await this.host.storage.delete(RECEIVING_PREFIX + botId);
+    await this.host.storage.delete(ENABLED_PREFIX + botId);
+  }
+
+  /**
+   * What this Bot sends as, or why it cannot send yet in words the Bot can
+   * pass on: its address and name, and the owner's own addresses — the
+   * sign-in one first — which it may write to without a draft card.
+   */
+  async sender(
+    botId: string,
+    deployment: { domain?: string; username?: string; signInEmail?: string },
+  ): Promise<BotEmailSenderV1> {
+    const unavailable = (reason: string): BotEmailSenderV1 => ({
+      status: "unavailable",
+      reason,
+    });
+    if (!deployment.domain) {
+      return unavailable("this deployment sends no email");
+    }
+    const [bots, enabled, senders] = await Promise.all([
+      this.host.bots(),
+      this.enabled(botId),
+      this.senders(),
+    ]);
+    const bot = bots.find((candidate) => candidate.botId === botId);
+    const slug = botEmailSlugsV1(bots).get(botId);
+    if (!bot || !slug || !bot.active) {
+      return unavailable("only an active Bot sends email");
+    }
+    if (!deployment.username) {
+      return unavailable(
+        "you have no email address yet, because your person has not chosen an email username; they can choose one under Account → Email username",
+      );
+    }
+    if (!enabled) {
+      return unavailable(
+        "email is switched off for you; your person can switch it on in your settings under Email",
+      );
+    }
+    const owner = [
+      ...(deployment.signInEmail ? [deployment.signInEmail] : []),
+      ...senders
+        .filter((sender) => sender.verifiedAt !== undefined)
+        .map((sender) => sender.address)
+        .filter((address) => address !== deployment.signInEmail),
+    ];
+    return {
+      status: "ready",
+      address: `${slug}.${deployment.username}@${deployment.domain}`,
+      name: bot.name,
+      owner,
+      ...(deployment.signInEmail
+        ? { signInEmail: deployment.signInEmail }
+        : {}),
+    };
   }
 
   /** What deleting the Bot leaves of its email: nothing. */
   async forgetBot(botId: string): Promise<void> {
-    await this.host.storage.delete(RECEIVING_PREFIX + botId);
+    await this.host.storage.delete(ENABLED_PREFIX + botId);
   }
 
   /**
@@ -204,8 +262,8 @@ export class InboundEmailUserStoreV1 {
     );
     if (!bot) return { kind: "refused", code: "unknown-address" };
     if (!bot.active) return { kind: "refused", code: "bot-unavailable" };
-    if (!(await this.receiving(bot.botId))) {
-      return { kind: "refused", code: "not-receiving" };
+    if (!(await this.enabled(bot.botId))) {
+      return { kind: "refused", code: "switched-off" };
     }
     return { kind: "admit", botId: bot.botId };
   }

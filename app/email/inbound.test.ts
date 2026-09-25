@@ -333,9 +333,9 @@ describe("a message that may not reach the Bot", () => {
     });
     expect(unknown.calls).toEqual(["resolve", "account", "sign-in", "route"]);
     const off = await refused(message(email()), {
-      route: async () => ({ kind: "refused", code: "not-receiving" }),
+      route: async () => ({ kind: "refused", code: "switched-off" }),
     });
-    expect(off.outcome).toEqual({ status: "rejected", code: "not-receiving" });
+    expect(off.outcome).toEqual({ status: "rejected", code: "switched-off" });
     expect(off.reason).toBe("This address does not accept mail right now.");
   });
 

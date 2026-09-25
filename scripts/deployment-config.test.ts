@@ -138,6 +138,9 @@ function fixtureStagingShape(): Config {
   ).toBeDefined();
   const inherited = structuredClone(config);
   delete inherited.env;
+  // Not inherited by a named environment either, and staging binds no sender,
+  // so `wrangler deploy --env staging` resolves none.
+  delete inherited.send_email;
   for (const key of NON_INHERITED_KEYS) {
     if (key in inherited) {
       expect(
@@ -375,28 +378,6 @@ describe("the generator", () => {
     );
   });
 
-  test("gives the app Worker the inbound email domain the profile names", () => {
-    const hosted = generateWorkerConfigV1("app", {
-      profile: loadProfileV1("hosted"),
-    });
-    expect((hosted.config.vars as Config).INBOUND_EMAIL_DOMAIN).toBeUndefined();
-    const profile = {
-      ...loadProfileV1("hosted"),
-      inboundEmail: { domain: "in.frockbot.com" },
-    };
-    validateProfileV1(profile, "a profile");
-    const app = generateWorkerConfigV1("app", { profile });
-    expect((app.config.vars as Config).INBOUND_EMAIL_DOMAIN).toBe(
-      "in.frockbot.com",
-    );
-    expect(() =>
-      validateProfileV1(
-        { ...profile, inboundEmail: { domain: "not a domain" } },
-        "a profile",
-      ),
-    ).toThrow(/inboundEmail/);
-  });
-
   test("aliases the sign-in Package the profile builds", () => {
     // The whole of how a deployment chooses its auth Package: the tracked source
     // resolves `#auth-package` to the better-auth chooser, and this alias is what
@@ -441,37 +422,40 @@ describe("the generator", () => {
     }
   });
 
-  test("binds a sender allowed to send from the profile's one address", () => {
-    const profile = {
-      ...loadProfileV1("hosted"),
-      email: { senderAddress: "bot@frockbot.com" },
-    };
-    expect(() => validateProfileV1(profile, "hosted")).not.toThrow();
-    const app = generateWorkerConfigV1("app", { profile });
-    expect(app.config.send_email).toEqual([
-      {
-        name: "SEND_EMAIL",
-        allowed_sender_addresses: ["bot@frockbot.com"],
-      },
-    ]);
-    expect((app.config.vars as Config).EMAIL_SENDER_ADDRESS).toBe(
-      "bot@frockbot.com",
-    );
-    // The app Worker is the only one that sends.
-    const portal = generateWorkerConfigV1("adminPortal", { profile });
-    expect(portal.config.send_email).toBeUndefined();
-    // And a profile that names no sender binds none: the deployment sends no
-    // email and says so, which is what hosted and staging do today.
-    const unset = generateWorkerConfigV1("app", {
+  test("gives the app Worker the email domain and a sender for it", () => {
+    const hosted = generateWorkerConfigV1("app", {
       profile: loadProfileV1("hosted"),
     });
-    expect(unset.config.send_email).toBeUndefined();
-    expect(unset.config.vars as Config).not.toHaveProperty(
-      "EMAIL_SENDER_ADDRESS",
+    expect((hosted.config.vars as Config).EMAIL_DOMAIN).toBe(
+      "bots.frockbot.com",
     );
+    // The binding cannot name a domain, so it names no sender at all and the
+    // sender holds every `from` to `EMAIL_DOMAIN` itself.
+    expect(hosted.config.send_email).toEqual([{ name: "SEND_EMAIL" }]);
+    // The app Worker is the only one that receives or sends.
+    const portal = generateWorkerConfigV1("adminPortal", {
+      profile: loadProfileV1("hosted"),
+    });
+    expect(portal.config.send_email).toBeUndefined();
+    // A profile that names no domain has neither: staging today.
+    const staging = generateWorkerConfigV1("app", {
+      profile: loadProfileV1("staging"),
+      d1DatabaseId: STAGING_D1_PLACEHOLDER,
+    });
+    expect(staging.config.send_email).toBeUndefined();
+    expect(staging.config.vars as Config).not.toHaveProperty("EMAIL_DOMAIN");
     expect(() =>
       validateProfileV1(
-        { ...profile, email: { senderAddress: "not an address" } },
+        { ...loadProfileV1("hosted"), email: { domain: "not a domain" } },
+        "hosted",
+      ),
+    ).toThrow(/email/);
+    expect(() =>
+      validateProfileV1(
+        {
+          ...loadProfileV1("hosted"),
+          email: { senderAddress: "bot@frockbot.com" },
+        },
         "hosted",
       ),
     ).toThrow();

@@ -448,7 +448,7 @@ Admission is closed by default. Set `FROCKBOT_ADMIN_EMAILS` to one or more comma
 
 `MACHINE_TOKEN_SECRET` is generated the same way and on the same terms. Every registered machine's token and every pairing code is `HMAC-SHA256` over its own claims under this secret, verified at the edge before any Durable Object is addressed. Rotating it un-enrols every registered machine, which then has to be paired again; without it set, enrollment and every machine route answer `503` rather than admitting a caller nothing could verify.
 
-Email your Bot needs no secret: it is on when the deployment profile names `inboundEmail.domain` and that domain's Email Routing catch-all sends to the app Worker. The steps are in [`scripts/deployment-config/README.md`](scripts/deployment-config/README.md#inbound-email).
+Email to and from Bots needs no secret: it is on when the deployment profile names `email.domain` (`bots.frockbot.com` for this profile), that domain's Email Routing catch-all sends to the app Worker, and the domain is onboarded for Email Sending. The steps are in [`scripts/deployment-config/README.md`](scripts/deployment-config/README.md#email).
 
 `COMPUTER_HOST_TOKEN` is not obtained from anywhere — generate it, once, with `openssl rand -hex 32`, and add it as a GitHub `production` secret. It is checked inside the container as well as at the host Worker, because the service binding is not the only route to that port. Rotating it means redeploying both Workers together.
 
@@ -513,7 +513,7 @@ app/              The product: `runtime.ts`, the Contribution tables, and one di
   credentials/    Per-User Connection credential encryption and leases
   custom-models/  Opt-in Bot model override setting, default-disabled
   echo/           Minimal reference feature used by tests and examples
-  email/          The deployment's own outbound sender, Cloudflare Email Service behind the `SEND_EMAIL` binding and `EMAIL_SENDER_ADDRESS`, both written from a profile's `email` and inert until it names one
+  email/          Email to and from Bots: inbound `email()`, usernames, and the sender, Cloudflare Email Service behind the `SEND_EMAIL` binding and `EMAIL_DOMAIN`, both written from a profile's `email` and inert until it names one
   evals/          Development-only model evaluations and their grading, run through `bun run eval:greeting`, `eval:conversation`, `eval:tool-approval` and `eval:routine-event`
   flock/          Durable Bot directory and Bot character avatars
   identity/       The agent runtime's identity system-prompt section

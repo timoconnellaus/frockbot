@@ -25,5 +25,6 @@
     "id": "flock",
     "autoRoute": "flock-auto"
   },
-  "nativeAuth": ["android", "macos", "macos-dev", "ios"]
+  "nativeAuth": ["android", "macos", "macos-dev", "ios"],
+  "email": { "domain": "bots.frockbot.com" }
 }

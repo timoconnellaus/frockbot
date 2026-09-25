@@ -3,6 +3,7 @@ import { describe, expect, test } from "bun:test";
 import { createBindingEmailSenderV1, type EmailBindingV1 } from "./sender.ts";
 
 const request = {
+  from: { address: "fox.tim@bots.example.com", name: "Fox" },
   to: ["nick@example.com", "sam@example.com"],
   subject: "Café — update",
   body: "The whole message.",
@@ -29,7 +30,7 @@ function platformError(code: string, message: string): Error {
 function sender(platform: EmailBindingV1) {
   return createBindingEmailSenderV1({
     SEND_EMAIL: platform,
-    EMAIL_SENDER_ADDRESS: "bot@example.com",
+    EMAIL_DOMAIN: "Bots.Example.com",
   })!;
 }
 
@@ -39,14 +40,43 @@ describe("the deployment's binding sender", () => {
       createBindingEmailSenderV1({ SEND_EMAIL: binding() }),
     ).toBeUndefined();
     expect(
-      createBindingEmailSenderV1({ EMAIL_SENDER_ADDRESS: "bot@example.com" }),
+      createBindingEmailSenderV1({ EMAIL_DOMAIN: "bots.example.com" }),
     ).toBeUndefined();
     expect(
-      createBindingEmailSenderV1({
-        SEND_EMAIL: binding(),
-        EMAIL_SENDER_ADDRESS: "  ",
-      }),
+      createBindingEmailSenderV1({ SEND_EMAIL: binding(), EMAIL_DOMAIN: "  " }),
     ).toBeUndefined();
+    expect(sender(binding()).domain).toBe("bots.example.com");
+  });
+
+  // The binding cannot be told one domain, so the sender is what holds it.
+  test("sends from nowhere but the deployment's email domain", async () => {
+    const platform = binding();
+    for (const address of [
+      "fox.tim@example.com",
+      "fox.tim@evil.bots.example.com",
+      "fox.tim@bots.example.com.evil",
+    ]) {
+      expect(
+        await sender(platform).send({
+          ...request,
+          from: { address, name: "Fox" },
+        }),
+      ).toMatchObject({ status: "unavailable" });
+    }
+    expect(platform.sent).toEqual([]);
+  });
+
+  test("names the Bot, and sends a reply to whoever it is meant for", async () => {
+    const platform = binding();
+    await sender(platform).send({
+      ...request,
+      from: { address: "Fox.Tim@bots.example.com", name: "Fox\r\nBcc: x" },
+      replyTo: "tim@example.com",
+    });
+    expect(platform.sent[0]).toMatchObject({
+      from: { email: "fox.tim@bots.example.com", name: "Fox Bcc: x" },
+      replyTo: "tim@example.com",
+    });
   });
 
   // One message to everyone on it: the provider takes it or refuses it whole,
@@ -63,7 +93,7 @@ describe("the deployment's binding sender", () => {
     });
     expect(platform.sent).toEqual([
       {
-        from: "bot@example.com",
+        from: { email: "fox.tim@bots.example.com", name: "Fox" },
         to: ["nick@example.com", "sam@example.com"],
         cc: ["cc@example.com"],
         subject: "Café — update",
@@ -80,7 +110,7 @@ describe("the deployment's binding sender", () => {
       inReplyTo: "<earlier@example.com>",
     });
     expect(platform.sent[0]).toEqual({
-      from: "bot@example.com",
+      from: { email: "fox.tim@bots.example.com", name: "Fox" },
       to: request.to,
       subject: request.subject,
       text: request.body,

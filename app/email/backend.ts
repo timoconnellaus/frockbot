@@ -5,7 +5,7 @@
 //   GET  /api/email/username              the username and the domain
 //   POST /api/email/username              {username} — or null to give it up
 //   GET  /api/bots/:botId/email           the address and who may write to it
-//   POST /api/bots/:botId/email/switch    {receiving: boolean}
+//   POST /api/bots/:botId/email/switch    {enabled: boolean}
 //   POST /api/bots/:botId/email/senders   {action: add | remove, address}
 //
 // Every answer is the page's whole view. The username and the senders belong
@@ -31,9 +31,9 @@ export type InboundEmailCommandOutcomeV1 =
 
 export interface InboundEmailGatewayHostV1 {
   /** Absent: this deployment receives no email, and the pages say so. */
-  inboundEmailDomain?: string;
+  emailDomain?: string;
   /** The User's verified sign-in address, when the identity has one. */
-  inboundEmailSignIn(userId: string): Promise<string | undefined>;
+  emailSignIn(userId: string): Promise<string | undefined>;
   readEmailUsername(userId: string): Promise<string | undefined>;
   /** Claim a username for the User, or give theirs up with `undefined`. */
   claimEmailUsername(
@@ -41,10 +41,10 @@ export interface InboundEmailGatewayHostV1 {
     username: string | undefined,
   ): Promise<{ status: "claimed" } | { status: "taken" }>;
   readInboundEmail(userId: string, botId: string): Promise<InboundEmailStateV1>;
-  setInboundEmailReceiving(
+  setBotEmailEnabled(
     userId: string,
     botId: string,
-    receiving: boolean,
+    enabled: boolean,
   ): Promise<InboundEmailCommandOutcomeV1>;
   commandInboundEmailSender(
     userId: string,
@@ -93,8 +93,8 @@ export function createInboundEmailBackendContribution(
     return Response.json(
       {
         schemaVersion: 1,
-        available: host.inboundEmailDomain !== undefined,
-        ...(host.inboundEmailDomain ? { domain: host.inboundEmailDomain } : {}),
+        available: host.emailDomain !== undefined,
+        ...(host.emailDomain ? { domain: host.emailDomain } : {}),
         ...(username ? { username } : {}),
       } satisfies EmailUsernameViewV1,
       { headers: NO_STORE },
@@ -104,12 +104,12 @@ export function createInboundEmailBackendContribution(
   async function botView(userId: string, botId: string): Promise<Response> {
     const [state, signInEmail, username] = await Promise.all([
       host.readInboundEmail(userId, botId),
-      host.inboundEmailSignIn(userId),
+      host.emailSignIn(userId),
       host.readEmailUsername(userId),
     ]);
     return Response.json(
       inboundEmailViewV1(state, {
-        ...(host.inboundEmailDomain ? { domain: host.inboundEmailDomain } : {}),
+        ...(host.emailDomain ? { domain: host.emailDomain } : {}),
         ...(username ? { username } : {}),
         ...(signInEmail ? { signInEmail } : {}),
         now: Date.now(),
@@ -126,7 +126,7 @@ export function createInboundEmailBackendContribution(
       await host.claimEmailUsername(userId, undefined);
       return usernameView(userId);
     }
-    if (!host.inboundEmailDomain) return jsonError(503, UNAVAILABLE);
+    if (!host.emailDomain) return jsonError(503, UNAVAILABLE);
     const wanted =
       typeof body.username === "string"
         ? body.username.trim().toLowerCase()
@@ -153,16 +153,16 @@ export function createInboundEmailBackendContribution(
     if (request.method !== "POST") return jsonError(405, "method not allowed");
     const body = await readBody(request);
     if (tail === "/switch") {
-      if (typeof body.receiving !== "boolean") {
-        return jsonError(400, "receiving must be true or false");
+      if (typeof body.enabled !== "boolean") {
+        return jsonError(400, "enabled must be true or false");
       }
-      if (body.receiving && !host.inboundEmailDomain) {
+      if (body.enabled && !host.emailDomain) {
         return jsonError(503, UNAVAILABLE);
       }
-      const outcome = await host.setInboundEmailReceiving(
+      const outcome = await host.setBotEmailEnabled(
         userId,
         botId,
-        body.receiving,
+        body.enabled,
       );
       if (outcome.status === "rejected") return jsonError(409, outcome.reason);
       return botView(userId, botId);
@@ -177,7 +177,7 @@ export function createInboundEmailBackendContribution(
         return jsonError(400, "Enter an email address, like you@example.com.");
       }
       const signInEmail =
-        action === "add" ? await host.inboundEmailSignIn(userId) : undefined;
+        action === "add" ? await host.emailSignIn(userId) : undefined;
       const outcome = await host.commandInboundEmailSender(userId, {
         action,
         address,

@@ -59,7 +59,7 @@ export class AuditDecodeError extends Error {
  * shape when they land.
  */
 export type AuditKindV1 =
-  "shell" | "browser" | "mcp" | "file" | "process" | "device";
+  "shell" | "browser" | "mcp" | "file" | "process" | "device" | "email";
 
 export const AUDIT_KINDS_V1: readonly AuditKindV1[] = [
   "shell",
@@ -68,6 +68,7 @@ export const AUDIT_KINDS_V1: readonly AuditKindV1[] = [
   "file",
   "process",
   "device",
+  "email",
 ];
 
 /**
@@ -105,6 +106,8 @@ export const AUDIT_TARGET_WORKSPACE_V1 = "workspace";
 export const AUDIT_TARGET_MACHINE_PREFIX_V1 = "machine:";
 /** A remote MCP server, `remote:<host>`. */
 export const AUDIT_TARGET_REMOTE_PREFIX_V1 = "remote:";
+/** Mail the Bot sent from its own address, through the deployment's sender. */
+export const AUDIT_TARGET_EMAIL_V1 = "email";
 /**
  * The person's device a Plugin's page used an ability on, `device:<kind>` —
  * `web`, `android`, `ios`, `macos` and the like, until devices have ids of
@@ -290,6 +293,7 @@ export function decodeAuditOccurrenceIdV1(value: unknown): {
 export function isAuditTargetV1(value: string): boolean {
   if (value === AUDIT_TARGET_COMPUTER_V1) return true;
   if (value === AUDIT_TARGET_WORKSPACE_V1) return true;
+  if (value === AUDIT_TARGET_EMAIL_V1) return true;
   if (value.length > MAX_TARGET_LENGTH) return false;
   if (value.startsWith(AUDIT_TARGET_MACHINE_PREFIX_V1)) {
     return /^machine:[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(value);

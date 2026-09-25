@@ -16,15 +16,19 @@ member per grant the descriptor declares that actually opens a handle:
   the credential. Use `capabilities.list()` to learn which Connections
   exist; pass an id you did not invent.
 - `ctx.email` (`http`) — asks this deployment's own sender to send one
-  plain-text message for this Bot. You hold no credential and name no
-  provider. The request names `approvalId` and `surfaceId` of a card
-  decision that covers this exact message; one decision sends at most one
-  message, to every recipient at once. A deployment that has bound no sender
-  answers unavailable, and so does a message the provider refused: nothing
-  left, and the decision is still good. `unknown` means it may have left —
-  the decision is spent, and you must never send it again. An
-  `http` grant with `"network": { "hosts": [] }` still opens email and
-  opens no `fetch` host.
+  plain-text message from this Bot's own address. You hold no credential,
+  name no provider and never name the sender. Mail to anyone names
+  `approvalId` and `surfaceId` of a card decision that covers this exact
+  message; one decision sends at most one message, to every recipient at
+  once, and a reply reaches the person rather than the Bot. A note to the
+  Bot's owner is `{ owner: true, key, to?, subject, body }`: no decision,
+  because the kernel holds `to` to the owner's own addresses, sends at most
+  one message per `key` and a few a day. A deployment that has bound no
+  sender, or a Bot with no address yet, answers unavailable, and so does a
+  message the provider refused: nothing left, and the decision is still good.
+  `unknown` means it may have left — the decision is spent, and you must
+  never send it again. An `http` grant with `"network": { "hosts": [] }`
+  still opens email and opens no `fetch` host.
 - `ctx.schedule` (`schedule`) — `{ callId, input }`. `input` is a
   `routine_manage` body; `callId` is yours and makes a retry at-most-once
   for this Plugin. Outside a Turn — a section, a control, a trigger —

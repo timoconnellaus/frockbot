@@ -64,7 +64,7 @@ const draft = {
 function context(
   options: {
     sent?:
-      | { status: "sent"; messageId: string }
+      | { status: "sent"; messageId: string; to?: string }
       | { status: "unknown"; reason: string }
       | { status: "unavailable"; reason: string };
   } = {},
@@ -632,13 +632,122 @@ describe("the person's edits to a draft", () => {
   });
 });
 
+describe("a note to the Bot's own person", () => {
+  const NOTE = "email-owner-1";
+
+  function receiptOf(answer: unknown) {
+    const created = createdOf(answer);
+    return (created.components ?? []).find(
+      (component: A2uiComponentV1) => component.component === "Receipt",
+    ) as Record<string, unknown> | undefined;
+  }
+
+  test("sends as it is drawn, keyed by its surface, and draws that it went", async () => {
+    const { ctx, sends } = context({
+      sent: { status: "sent", messageId: "<n@x.co>", to: "tim@example.com" },
+    });
+    const answer = await cards.owner!.render(
+      { surfaceId: NOTE, data: { subject: "Agenda", body: "Done." } },
+      ctx,
+    );
+    expect(sends).toEqual([
+      { owner: true, key: NOTE, subject: "Agenda", body: "Done." },
+    ]);
+    // Nothing to decide: no covers, no decision, and no controls.
+    expect(coversOf(answer)).toBeUndefined();
+    expect(decisionOf(answer)).toBeUndefined();
+    expect(receiptOf(answer)).toMatchObject({
+      status: "Emailed you",
+      tone: "success",
+      summary: "Emailed you at tim@example.com — Agenda",
+    });
+    // Drawn again — a repeat after an interruption — it is the same receipt
+    // and no second message.
+    await cards.owner!.render(
+      { surfaceId: NOTE, data: { subject: "Agenda", body: "Done." } },
+      ctx,
+    );
+    expect(sends).toHaveLength(1);
+  });
+
+  test("passes one of the person's other addresses on, and the kernel decides", async () => {
+    const { ctx, sends } = context();
+    await cards.owner!.render(
+      {
+        surfaceId: NOTE,
+        data: { subject: "Agenda", body: "Done.", to: " tim@work.example " },
+      },
+      ctx,
+    );
+    expect(sends).toEqual([
+      {
+        owner: true,
+        key: NOTE,
+        to: "tim@work.example",
+        subject: "Agenda",
+        body: "Done.",
+      },
+    ]);
+  });
+
+  test("a note that could not go draws nothing and says why", async () => {
+    const { ctx, store } = context({
+      sent: {
+        status: "unavailable",
+        reason: "email is switched off for you",
+      },
+    });
+    expect(
+      await cards.owner!.render(
+        { surfaceId: NOTE, data: { subject: "Agenda", body: "Done." } },
+        ctx,
+      ),
+    ).toEqual({
+      drop: true,
+      reason: "nothing was sent: email is switched off for you",
+    });
+    expect(store.size).toBe(0);
+    for (const data of [
+      { subject: " ", body: "Done." },
+      { subject: "Two\nlines", body: "Done." },
+      { subject: "Agenda", body: "  " },
+    ]) {
+      expect(
+        await cards.owner!.render({ surfaceId: NOTE, data }, ctx),
+      ).toMatchObject({ drop: true });
+    }
+  });
+
+  test("a note nobody can vouch for is never sent again", async () => {
+    const { ctx, sends } = context({
+      sent: { status: "unknown", reason: "the answer was lost" },
+    });
+    const answer = await cards.owner!.render(
+      { surfaceId: NOTE, data: { subject: "Agenda", body: "Done." } },
+      ctx,
+    );
+    expect(receiptOf(answer)).toMatchObject({
+      status: "May have sent",
+      tone: "warning",
+    });
+    await cards.owner!.render(
+      { surfaceId: NOTE, data: { subject: "Agenda", body: "Done." } },
+      ctx,
+    );
+    expect(sends).toHaveLength(1);
+  });
+});
+
 describe("the seeded email Plugin", () => {
   test("is in the deployment's catalog, with the artifact the build produced", () => {
     const seeded = DEPLOYMENT_PLUGIN_CATALOG_V1.find(
       (plugin) => plugin.pluginId === "email",
     );
     expect(seeded?.seed).toBe("default-off");
-    expect(seeded?.descriptor.cards?.map((card) => card.id)).toEqual(["draft"]);
+    expect(seeded?.descriptor.cards?.map((card) => card.id)).toEqual([
+      "draft",
+      "owner",
+    ]);
     expect(seeded?.descriptor.tools.map((tool) => tool.name)).toEqual([
       "email_send",
       "email_discard",

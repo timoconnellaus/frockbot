@@ -47,7 +47,7 @@ _Avoid_: DM, room, channel, thread
 _Avoid_: Channel, room, project, team
 
 **Channel**
-: A way a User writes to their Bots from outside the app — email today. Each Bot that has email switched on answers at its name and the account's username, `fox.tim@frockbot.com`; the address is guessable by design, and only the User's sign-in address and the addresses they confirmed, authenticated by their provider, may write to it. What arrives is the person speaking: an ordinary user-lane Turn in that Bot's conversation, its origin naming the channel. The Bot answers in the app; email has no way back yet.
+: A way a User and their Bots reach each other from outside the app — email today. Each Bot that has email switched on has its own address, its name and the account's username, `fox.tim@bots.frockbot.com`: mail to it arrives there and mail from it leaves from there. The address is guessable by design, and only the User's sign-in address and the addresses they confirmed, authenticated by their provider, may write to it. What arrives is the person speaking: an ordinary user-lane Turn in that Bot's conversation, its origin naming the channel. The Bot answers in the app, and may email its own person directly; mail to anyone else is a draft the person approves, and a reply to it reaches the person, not the Bot.
 _Avoid_: Connector, integration, bridge; and never a Group Chat, which is the User's own Bots
 
 **Hand-off**

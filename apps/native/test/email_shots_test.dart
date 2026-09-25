@@ -44,8 +44,8 @@ void main() {
         'schemaVersion': 1,
         'available': true,
         'username': 'tim',
-        'address': 'fox.tim@frockbot.com',
-        'receiving': true,
+        'address': 'fox.tim@bots.frockbot.com',
+        'enabled': true,
         'senders': [
           {'address': 'tim@example.com', 'status': 'sign-in'},
           {

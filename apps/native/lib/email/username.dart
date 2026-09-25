@@ -1,5 +1,5 @@
 /// The account's email username: the part after the dot in every Bot's
-/// address, `fox.tim@frockbot.com`.
+/// address, `fox.tim@bots.frockbot.com`.
 ///
 /// It is the deployment's to keep to one account (`app/email/directory.ts`),
 /// so the server says whether a name is free; this page only draws what it

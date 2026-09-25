@@ -30,6 +30,10 @@ import {
   createFrockAiFakeWorker,
   FROCK_AI_FAKE_SERVICE,
 } from "./test/frock-ai-fake.ts";
+import {
+  createEmailFakeWorker,
+  EMAIL_FAKE_SERVICE,
+} from "./test/email-fake.ts";
 
 // The bytes `test:integration` just built, read here rather than imported with
 // Vite's `?raw` from a test file: `tsc` resolves a relative specifier on disk
@@ -81,8 +85,15 @@ export default defineConfig({
           // entrypoint so tests can inspect its call log.
           AI: FROCK_AI_FAKE_SERVICE,
           AI_PROBE: FROCK_AI_FAKE_SERVICE,
+          // The deployment's sender, impersonated at the binding: every Bot's
+          // mail lands in the fake, and `EMAIL_PROBE` reads it back.
+          SEND_EMAIL: EMAIL_FAKE_SERVICE,
+          EMAIL_PROBE: EMAIL_FAKE_SERVICE,
         },
-        workers: [createFrockAiFakeWorker("2026-08-27")],
+        workers: [
+          createFrockAiFakeWorker("2026-08-27"),
+          createEmailFakeWorker("2026-08-27"),
+        ],
         r2Buckets: ["APPLICATION_ARTIFACTS", "MEMORY_FILES"],
         d1Databases: ["AUTH_DB"],
         durableObjects: {
@@ -136,8 +147,9 @@ export default defineConfig({
           // refused.
           MACHINE_TOKEN_SECRET: "workerd-machine-token-secret-0123456789ab",
           // The domain `email.integration.ts` addresses its messages to, as
-          // Email Routing would hand them to `email()`.
-          INBOUND_EMAIL_DOMAIN: "in.frock.test",
+          // Email Routing would hand them to `email()`, and every Bot sends
+          // from.
+          EMAIL_DOMAIN: "bots.frock.test",
         },
         // Deliberately absent, and why:
         //

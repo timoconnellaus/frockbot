@@ -39,7 +39,7 @@ export const INBOUND_EMAIL_SENDERS_MAX_V1 = 10;
 export const INBOUND_EMAIL_CODE_TTL_MS_V1 = 24 * 60 * 60 * 1000;
 
 /**
- * The authentication services whose verdict is believed: the receiving
+ * The authentication services whose verdict is believed: the enabled
  * server's own. Any other `Authentication-Results` line in a message was
  * written by someone on the way, and the sender can write those.
  */
@@ -86,10 +86,10 @@ const SENDER_CODE = /^[0-9A-HJKMNP-TV-Z]{8}$/;
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 /** The deployment's inbound domain, or nothing: then email is off. */
-export function inboundEmailDomainV1(settings: {
-  INBOUND_EMAIL_DOMAIN?: string;
+export function emailDomainV1(settings: {
+  EMAIL_DOMAIN?: string;
 }): string | undefined {
-  const domain = settings.INBOUND_EMAIL_DOMAIN?.trim().toLowerCase();
+  const domain = settings.EMAIL_DOMAIN?.trim().toLowerCase();
   return domain &&
     domain.length <= 253 &&
     /^[a-z0-9]([a-z0-9-]*[a-z0-9])?(\.[a-z0-9]([a-z0-9-]*[a-z0-9])?)+$/.test(
@@ -273,7 +273,7 @@ export interface InboundEmailStateV1 {
   /** The Bot's slug now: it follows the Bot's name. */
   slug: string;
   /** Whether the Bot receives email. Off until the person turns it on. */
-  receiving: boolean;
+  enabled: boolean;
   senders: InboundEmailSenderV1[];
 }
 
@@ -298,7 +298,7 @@ export interface InboundEmailViewV1 {
   username?: string;
   /** `<slug>.<username>@<domain>`, once there is a username. */
   address?: string;
-  receiving: boolean;
+  enabled: boolean;
   senders: InboundEmailSenderViewV1[];
 }
 
@@ -352,14 +352,73 @@ export function inboundEmailViewV1(
     ...(options.domain && options.username
       ? { address: `${state.slug}.${options.username}@${options.domain}` }
       : {}),
-    receiving: state.receiving,
+    enabled: state.enabled,
     senders,
+  };
+}
+
+/**
+ * What a Bot sends as, as the User object answers the Bot's kernel: its own
+ * address and name, and the owner's addresses — the sign-in one first — it
+ * may write to without a draft card. Or why it cannot send yet, in words the
+ * Bot passes on.
+ */
+export type BotEmailSenderV1 =
+  | {
+      status: "ready";
+      address: string;
+      name: string;
+      owner: string[];
+      /** Where a reply to a draft card's mail goes: the person, not the Bot. */
+      signInEmail?: string;
+    }
+  | { status: "unavailable"; reason: string };
+
+export function decodeBotEmailSenderV1(value: unknown): BotEmailSenderV1 {
+  const candidate = record(value, "email sender");
+  if (candidate.status === "unavailable") {
+    exactKeys(candidate, ["status", "reason"], [], "email sender");
+    if (typeof candidate.reason !== "string") {
+      throw new InboundEmailDecodeError("email sender.reason is invalid");
+    }
+    return { status: "unavailable", reason: candidate.reason.slice(0, 500) };
+  }
+  if (candidate.status !== "ready") {
+    throw new InboundEmailDecodeError("email sender.status is unknown");
+  }
+  exactKeys(
+    candidate,
+    ["status", "address", "name", "owner"],
+    ["signInEmail"],
+    "email sender",
+  );
+  if (typeof candidate.name !== "string" || !Array.isArray(candidate.owner)) {
+    throw new InboundEmailDecodeError("email sender is invalid");
+  }
+  if (candidate.owner.length > INBOUND_EMAIL_SENDERS_MAX_V1 + 1) {
+    throw new InboundEmailDecodeError("email sender has too many owners");
+  }
+  return {
+    status: "ready",
+    address: senderAddress(candidate.address, "email sender.address"),
+    name: candidate.name.slice(0, 200),
+    owner: candidate.owner.map((address, index) =>
+      senderAddress(address, `email sender.owner[${index}]`),
+    ),
+    ...(candidate.signInEmail === undefined
+      ? {}
+      : {
+          signInEmail: senderAddress(
+            candidate.signInEmail,
+            "email sender.signInEmail",
+          ),
+        }),
   };
 }
 
 /** Why the User object refused one message. */
 export type InboundEmailRefusalV1 =
-  "unverified-sender" | "unknown-address" | "bot-unavailable" | "not-receiving";
+  "unverified-sender" | "unknown-address" | "bot-unavailable" | "switched-off";
 
 /** What the User object decided about one message to one of its Bots. */
 export type InboundEmailRouteDecisionV1 =
@@ -444,14 +503,14 @@ export function decodeInboundEmailStateV1(value: unknown): InboundEmailStateV1 {
   const candidate = record(value, "inbound email");
   exactKeys(
     candidate,
-    ["schemaVersion", "slug", "receiving", "senders"],
+    ["schemaVersion", "slug", "enabled", "senders"],
     [],
     "inbound email",
   );
   if (
     candidate.schemaVersion !== 1 ||
     !isBotEmailSlugV1(candidate.slug) ||
-    typeof candidate.receiving !== "boolean" ||
+    typeof candidate.enabled !== "boolean" ||
     !Array.isArray(candidate.senders)
   ) {
     throw new InboundEmailDecodeError("inbound email is invalid");
@@ -462,7 +521,7 @@ export function decodeInboundEmailStateV1(value: unknown): InboundEmailStateV1 {
   return {
     schemaVersion: 1,
     slug: candidate.slug,
-    receiving: candidate.receiving,
+    enabled: candidate.enabled,
     senders: candidate.senders.map((sender, index) =>
       decodeInboundEmailSenderV1(sender, `inbound email.senders[${index}]`),
     ),
@@ -473,7 +532,7 @@ const REFUSALS: ReadonlySet<string> = new Set([
   "unverified-sender",
   "unknown-address",
   "bot-unavailable",
-  "not-receiving",
+  "switched-off",
 ]);
 
 export function decodeInboundEmailRouteDecisionV1(

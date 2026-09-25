@@ -18,7 +18,7 @@ const _address = 'fox.tim@frock.test';
 Map<String, Object?> view({
   bool available = true,
   String? username = 'tim',
-  bool receiving = false,
+  bool enabled = false,
   List<Map<String, Object?>> senders = const [
     {'address': 'tim@example.com', 'status': 'sign-in'},
   ],
@@ -29,7 +29,7 @@ Map<String, Object?> view({
   'address': ?(available && username != null
       ? 'fox.$username@frock.test'
       : null),
-  'receiving': receiving,
+  'enabled': enabled,
   'senders': senders,
 };
 
@@ -45,6 +45,12 @@ Map<String, Object?> usernameView({String? username, bool available = true}) =>
 Finder byId(String id) => find.bySemanticsIdentifier(id);
 
 Future<void> pumpPage(WidgetTester tester, SettingsApi api) async {
+  // A phone held upright: the whole page, the sender field included, on one
+  // screen.
+  tester.view.physicalSize = const Size(800, 1400);
+  tester.view.devicePixelRatio = 1;
+  addTearDown(tester.view.resetPhysicalSize);
+  addTearDown(tester.view.resetDevicePixelRatio);
   await tester.pumpWidget(
     MaterialApp(
       theme: FrockTheme.theme(Brightness.dark),
@@ -59,13 +65,13 @@ void main() {
     tester,
   ) async {
     final calls = <List<Object?>>[];
-    var receiving = false;
+    var enabled = false;
     final api = SettingsApi(MemoryStore(), (path, body) async {
       calls.add([path, body]);
       if (path == '/api/bots/fox/email/switch') {
-        receiving = (body as Map)['receiving'] == true;
+        enabled = (body as Map)['enabled'] == true;
       }
-      return view(receiving: receiving);
+      return view(enabled: enabled);
     });
     final copied = <String>[];
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
@@ -79,17 +85,23 @@ void main() {
     );
     await pumpPage(tester, api);
     expect(find.text(_address), findsOneWidget);
-    expect(find.text('Mail to this address is refused'), findsOneWidget);
+    expect(
+      find.text('Off: mail to this address is refused and the Bot sends none'),
+      findsOneWidget,
+    );
     expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
 
-    await tester.tap(byId(EmailIds.receiving));
+    await tester.tap(byId(EmailIds.enabled));
     await tester.pumpAndSettle();
     expect(calls.last, [
       '/api/bots/fox/email/switch',
-      {'receiving': true},
+      {'enabled': true},
     ]);
     expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
-    expect(find.text('Mail to this address reaches the Bot'), findsOneWidget);
+    expect(
+      find.text('The Bot receives and sends mail at this address'),
+      findsOneWidget,
+    );
 
     await tester.tap(find.text('Copy'));
     await tester.pumpAndSettle();

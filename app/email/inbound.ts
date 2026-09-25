@@ -104,7 +104,7 @@ export type InboundEmailRejectionV1 =
   | "no-message-id"
   | "account"
   | "bot-unavailable"
-  | "not-receiving"
+  | "switched-off"
   | "unverified-sender"
   | "empty"
   | "busy";
@@ -125,7 +125,7 @@ const REJECTION_TEXT: Readonly<Record<InboundEmailRejectionV1, string>> = {
   "no-message-id": "Message has no usable Message-ID.",
   account: "This address does not accept mail right now.",
   "bot-unavailable": "This address does not accept mail right now.",
-  "not-receiving": "This address does not accept mail right now.",
+  "switched-off": "This address does not accept mail right now.",
   "unverified-sender":
     "This address only accepts mail from its owner's confirmed addresses.",
   empty: "Message is empty.",

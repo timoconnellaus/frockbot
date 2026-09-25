@@ -302,11 +302,20 @@ export type IsolateWorkspaceOutcomeV1 =
  *
  * Sending is a loopback rather than a `fetch`, because a plugin never holds
  * the credential that sends mail: the deployment's own sender does, the
- * message leaves attributed to the Bot that asked, and the plugin learns only
- * whether it went. A deployment that has bound no sender answers unavailable,
- * which the Plugin then tells the Bot in so many words.
+ * message leaves from the Bot's own address, and the plugin learns only
+ * whether it went. A deployment that has bound no sender, or a Bot with no
+ * address yet, answers unavailable, which the Plugin then tells the Bot in so
+ * many words.
+ *
+ * Two kinds: mail a person approved on a draft card, to anyone, and a note to
+ * the Bot's owner at one of their own addresses, which needs no decision
+ * because the kernel checks the recipient is theirs.
  */
-export interface IsolateEmailRequestV1 {
+export type IsolateEmailRequestV1 =
+  IsolateEmailDraftRequestV1 | IsolateEmailOwnerRequestV1;
+
+/** Mail a person approved on a draft card. */
+export interface IsolateEmailDraftRequestV1 {
   /**
    * The Approval whose decision authorizes this send. Required: the kernel,
    * not the model and not the Plugin, is what holds a send to a decision a
@@ -328,6 +337,25 @@ export interface IsolateEmailRequestV1 {
 }
 
 /**
+ * A note from the Bot to its owner. The kernel holds it to one of the owner's
+ * own addresses — the sign-in one, or one they confirmed — to at most one
+ * message per `key`, and to a daily count per Bot; and when the Turn came from
+ * the owner's email, it answers that message.
+ */
+export interface IsolateEmailOwnerRequestV1 {
+  owner: true;
+  /**
+   * What makes a retry the same send: the email Plugin passes the card
+   * surface it draws, which the kernel mints from the Turn's tool call.
+   */
+  key: string;
+  /** One of the owner's own addresses. Absent, the one they sign in with. */
+  to?: string;
+  subject: string;
+  body: string;
+}
+
+/**
  * One message is one send: every recipient rides the one message the
  * provider accepts or refuses whole. `unavailable` means nothing left, so the
  * decision that authorized it is still good. `unknown` means the provider may
@@ -336,7 +364,12 @@ export interface IsolateEmailRequestV1 {
  * deliver the mail twice.
  */
 export type IsolateEmailOutcomeV1 =
-  | { status: "sent"; messageId: string }
+  | {
+      status: "sent";
+      messageId: string;
+      /** For a note to the owner: the address it went to. */
+      to?: string;
+    }
   | { status: "unknown"; reason: string }
   | IsolateCapabilityFailureV1;
 
@@ -347,6 +380,7 @@ export const ISOLATE_EMAIL_LIMITS_V1 = {
   subject: 512,
   body: 64_000,
   messageId: 512,
+  key: 256,
 } as const;
 
 /** A durable Routine operation attributed to one Package call. */
@@ -1303,11 +1337,45 @@ function emailAddresses(
   });
 }
 
+/** A subject or a reply id: one line, because each becomes a header. */
+function emailHeaderValue(input: unknown, label: string, max: number): string {
+  const text = boundedString(input, label, max);
+  if (/[\r\n]/.test(text)) throw new Error(`${label} must be one line`);
+  return text;
+}
+
 export function decodeIsolateEmailRequestV1(
   input: unknown,
   label = "isolate email request",
 ): IsolateEmailRequestV1 {
   const value = record(input, label);
+  if (value.owner !== undefined) {
+    exactKeys(value, ["owner", "key", "subject", "body"], label, ["to"]);
+    if (value.owner !== true) throw new Error(`${label}.owner must be true`);
+    const to =
+      value.to === undefined
+        ? undefined
+        : emailAddresses([value.to], `${label}.to`, true)[0]!;
+    return {
+      owner: true,
+      key: boundedString(
+        value.key,
+        `${label}.key`,
+        ISOLATE_EMAIL_LIMITS_V1.key,
+      ),
+      ...(to === undefined ? {} : { to }),
+      subject: emailHeaderValue(
+        value.subject,
+        `${label}.subject`,
+        ISOLATE_EMAIL_LIMITS_V1.subject,
+      ),
+      body: boundedString(
+        value.body,
+        `${label}.body`,
+        ISOLATE_EMAIL_LIMITS_V1.body,
+      ),
+    };
+  }
   exactKeys(
     value,
     ["approvalId", "surfaceId", "to", "subject", "body"],

@@ -1,5 +1,20 @@
 # The loop
 
+## To your person
+
+Call `email_owner` with the note:
+
+```json
+{ "data": { "subject": "Re: Tuesday's agenda", "body": "The whole message." } }
+```
+
+It sends at once, from your address to the one they sign in with, and the
+card in the conversation says "Emailed you". Add `"to"` only to reach
+another of their own confirmed addresses. There is no decision to wait for,
+and calling it again draws a new note: call it once per note.
+
+## To anyone else
+
 1. **Draw the draft.** Call `email_draft` with the values:
 
    ```json

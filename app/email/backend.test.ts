@@ -6,7 +6,7 @@ import {
 import {
   botEmailSlugsV1,
   emailUsernameProblemV1,
-  inboundEmailDomainV1,
+  emailDomainV1,
   inboundEmailViewV1,
   inboundMessageIdV1,
   parseBotEmailLocalPartV1,
@@ -107,7 +107,7 @@ describe("the email view", () => {
   const state: InboundEmailStateV1 = {
     schemaVersion: 1,
     slug: "fox",
-    receiving: true,
+    enabled: true,
     senders: [
       {
         address: "tim@work.example",
@@ -142,7 +142,7 @@ describe("the email view", () => {
       available: true,
       username: "tim",
       address: "fox.tim@frock.test",
-      receiving: true,
+      enabled: true,
       senders: [
         { address: "tim@example.com", status: "sign-in" },
         {
@@ -170,7 +170,7 @@ describe("the email view", () => {
       domain: "frock.test",
       now: NOW,
     });
-    expect(noUsername).toMatchObject({ available: true, receiving: true });
+    expect(noUsername).toMatchObject({ available: true, enabled: true });
     expect(noUsername.address).toBeUndefined();
     const noDomain = inboundEmailViewV1(state, { username: "tim", now: NOW });
     expect(noDomain).toMatchObject({ available: false, username: "tim" });
@@ -178,13 +178,11 @@ describe("the email view", () => {
   });
 
   test("reads a domain, a code and a Message-ID only in their shapes", () => {
-    expect(
-      inboundEmailDomainV1({ INBOUND_EMAIL_DOMAIN: " In.Frock.Test " }),
-    ).toBe("in.frock.test");
-    expect(inboundEmailDomainV1({ INBOUND_EMAIL_DOMAIN: "not a domain" })).toBe(
-      undefined,
+    expect(emailDomainV1({ EMAIL_DOMAIN: " In.Frock.Test " })).toBe(
+      "in.frock.test",
     );
-    expect(inboundEmailDomainV1({})).toBeUndefined();
+    expect(emailDomainV1({ EMAIL_DOMAIN: "not a domain" })).toBe(undefined);
+    expect(emailDomainV1({})).toBeUndefined();
     expect(
       senderCodesInV1("re: FROCK-7k3p-9qxm and frock-ABCD1234 and FROCK-XXXX"),
     ).toEqual(["7K3P9QXM", "ABCD1234"]);
@@ -202,8 +200,8 @@ function gateway(overrides: Partial<InboundEmailGatewayHostV1> = {}) {
   const commands: unknown[] = [];
   let username: string | undefined;
   const host: InboundEmailGatewayHostV1 = {
-    inboundEmailDomain: "frock.test",
-    inboundEmailSignIn: async () => "tim@example.com",
+    emailDomain: "frock.test",
+    emailSignIn: async () => "tim@example.com",
     readEmailUsername: async () => username,
     claimEmailUsername: async (userId, wanted) => {
       commands.push(["username", userId, wanted]);
@@ -214,10 +212,10 @@ function gateway(overrides: Partial<InboundEmailGatewayHostV1> = {}) {
     readInboundEmail: async () => ({
       schemaVersion: 1,
       slug: "fox",
-      receiving: false,
+      enabled: false,
       senders: [],
     }),
-    setInboundEmailReceiving: async (...args) => {
+    setBotEmailEnabled: async (...args) => {
       commands.push(["switch", ...args]);
       return { status: "applied" };
     },
@@ -247,7 +245,7 @@ describe("the email settings routes", () => {
     expect((await before!.json()) as unknown).toEqual({
       schemaVersion: 1,
       available: true,
-      receiving: false,
+      enabled: false,
       senders: [{ address: "tim@example.com", status: "sign-in" }],
     });
     const claimed = await call("/api/email/username", { username: " Tim " });
@@ -294,7 +292,7 @@ describe("the email settings routes", () => {
   test("carry the switch and the senders to the User's object", async () => {
     const { call, commands } = gateway();
     expect(
-      (await call("/api/bots/fox/email/switch", { receiving: true }))?.status,
+      (await call("/api/bots/fox/email/switch", { enabled: true }))?.status,
     ).toBe(200);
     expect(
       (
@@ -320,24 +318,24 @@ describe("the email settings routes", () => {
 
   test("refuse what cannot be done, and leave other paths alone", async () => {
     const { call } = gateway({
-      inboundEmailDomain: undefined,
+      emailDomain: undefined,
       commandInboundEmailSender: async () => ({
         status: "rejected",
         reason: "Up to 10 addresses can email your Bots.",
       }),
     });
     expect(
-      (await call("/api/bots/fox/email/switch", { receiving: true }))?.status,
+      (await call("/api/bots/fox/email/switch", { enabled: true }))?.status,
     ).toBe(503);
     expect(
       (await call("/api/email/username", { username: "tim" }))?.status,
     ).toBe(503);
     expect(
-      (await call("/api/bots/fox/email/switch", { receiving: "yes" }))?.status,
+      (await call("/api/bots/fox/email/switch", { enabled: "yes" }))?.status,
     ).toBe(400);
     // Turning off needs no domain.
     expect(
-      (await call("/api/bots/fox/email/switch", { receiving: false }))?.status,
+      (await call("/api/bots/fox/email/switch", { enabled: false }))?.status,
     ).toBe(200);
     const full = await call("/api/bots/fox/email/senders", {
       action: "add",

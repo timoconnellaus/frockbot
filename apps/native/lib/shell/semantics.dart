@@ -476,7 +476,7 @@ abstract final class EmailIds {
   static const unavailable = 'bot-email-unavailable';
   static const address = 'bot-email-address';
   static const copy = 'bot-email-copy';
-  static const receiving = 'bot-email-receiving';
+  static const enabled = 'bot-email-enabled';
   static const noUsername = 'bot-email-no-username';
   static const chooseUsername = 'bot-email-choose-username';
   static const senderField = 'bot-email-sender-field';

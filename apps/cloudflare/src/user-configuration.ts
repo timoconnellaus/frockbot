@@ -268,10 +268,13 @@ import {
   type InboundEmailUserHostV1,
 } from "@frockbot/app/email/user";
 import {
+  emailDomainV1,
   normalizeSenderAddressV1,
+  type BotEmailSenderV1,
   type InboundEmailRouteDecisionV1,
   type InboundEmailStateV1,
 } from "@frockbot/app/email/shared";
+import { DEPLOYMENT_POLICY_SINGLETON_NAME } from "./deployment-policy.js";
 
 /** The durable key pinning the User this object was provisioned for. */
 const USER_IDENTITY_KEY = "user:identity";
@@ -284,6 +287,8 @@ interface UserConfigurationEnv
   extends BillingEnv, AccountDeletionEnvV1, AuthPackageEnvironmentV1 {
   FCM_SERVICE_ACCOUNT?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
+  /** Where every Bot's email address is, and what it sends from. */
+  EMAIL_DOMAIN?: string;
   BETTER_AUTH_URL?: string;
   CREDENTIAL_KEYRING?: string;
   /** The Connected apps provider key. Absent, nothing can be connected. */
@@ -3921,20 +3926,17 @@ export class UserConfiguration
   }
 
   /** Whether a Bot receives email. */
-  async setInboundEmailReceiving(input: unknown) {
+  async setBotEmailEnabled(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
       botId: rpcBotId,
-      receiving: rpcBoolean,
+      enabled: rpcBoolean,
     });
     await this.assertUserIdentity(request.userId as string);
     const botId = request.botId as string;
     await this.requireInboundEmailBot(botId);
     try {
-      await this.inboundEmail().setReceiving(
-        botId,
-        request.receiving as boolean,
-      );
+      await this.inboundEmail().setEnabled(botId, request.enabled as boolean);
     } catch (error) {
       if (error instanceof Error && error.name === "InboundEmailCommandError") {
         return {
@@ -3946,6 +3948,62 @@ export class UserConfiguration
       throw error;
     }
     return { schemaVersion: 1 as const, status: "applied" as const };
+  }
+
+  /**
+   * What one of the User's Bots sends email as, for that Bot's kernel: its
+   * address, which needs the account's username and the Bot's switch, and the
+   * owner's own addresses it may write to without a draft card.
+   */
+  async readBotEmailSender(input: unknown): Promise<BotEmailSenderV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+    });
+    const userId = request.userId as string;
+    await this.assertUserIdentity(userId);
+    const domain = emailDomainV1(this.env);
+    if (!domain) {
+      return this.inboundEmail().sender(request.botId as string, {});
+    }
+    const [username, signInEmail] = await Promise.all([
+      this.emailUsername(userId),
+      this.emailSignIn(userId),
+    ]);
+    return this.inboundEmail().sender(request.botId as string, {
+      domain,
+      ...(username ? { username } : {}),
+      ...(signInEmail ? { signInEmail } : {}),
+    });
+  }
+
+  /** The account's email username, which the deployment's directory holds. */
+  private async emailUsername(userId: string): Promise<string | undefined> {
+    const policy = this.env.DEPLOYMENT_POLICY;
+    if (!policy) return undefined;
+    // SAFETY: the binding names DeploymentPolicy; this is its username read.
+    const directory = policy.get(
+      policy.idFromName(DEPLOYMENT_POLICY_SINGLETON_NAME),
+    ) as unknown as { readEmailUsername(input: unknown): Promise<unknown> };
+    const { username } = (await directory.readEmailUsername({
+      schemaVersion: 1,
+      userId,
+    })) as { username?: unknown };
+    return typeof username === "string" ? username : undefined;
+  }
+
+  /**
+   * The address the identity provider verified, read from the stored identity
+   * and never from a session: the one owner address that needs no code.
+   */
+  private async emailSignIn(userId: string): Promise<string | undefined> {
+    const { AUTH_PACKAGE_V1 } = await import("#auth-package");
+    const identity = await AUTH_PACKAGE_V1.create(this.env).storedIdentity?.(
+      userId,
+    );
+    return identity?.emailVerified
+      ? normalizeSenderAddressV1(identity.email)
+      : undefined;
   }
 
   /** Add an address that may email the User's Bots, or take one away. */
