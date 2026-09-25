@@ -783,16 +783,26 @@ List<TranscriptLine> projectRuns(
   List<Map<String, dynamic>> runs, {
   Map<String, ReplyDraft> replyDrafts = const {},
 }) {
+  // An attempt that was retried never speaks for its message, however the
+  // attempts sort: a retry drawn before its receipt is stamped by this
+  // device's clock, which can run behind the server's.
+  final retried = {
+    for (final run in runs) ...[
+      if (run['retryOf'] case final String id) id,
+      if (run['retriedBy'] != null) run['runId'] as String,
+    ],
+  };
   final latest = <String, Map<String, dynamic>>{};
   for (final run in runs) {
     final messageId = run['messageRunId'] as String? ?? run['runId'] as String;
     final previous = latest[messageId];
     if (previous == null ||
-        run['retryOf'] == previous['runId'] ||
-        (run['admittedAt'] as String? ?? '').compareTo(
-              previous['admittedAt'] as String? ?? '',
-            ) >
-            0) {
+        retried.contains(previous['runId']) ||
+        (!retried.contains(run['runId']) &&
+            (run['admittedAt'] as String? ?? '').compareTo(
+                  previous['admittedAt'] as String? ?? '',
+                ) >
+                0)) {
       latest[messageId] = run;
     }
   }
