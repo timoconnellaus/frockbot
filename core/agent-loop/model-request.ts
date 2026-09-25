@@ -142,8 +142,9 @@ export async function requestModelV1(
     ...(runtime.subagentRole === undefined
       ? {}
       : { subagentRole: runtime.subagentRole }),
-    // Where the Turn is in its budget, so a section can warn the model
-    // before the loop stops it.
+    // Where the Turn is in its budget. A section must not render from this:
+    // it changes every step, and a changed system prompt misses the cache.
+    // Budget warnings go at the request tail (`turnBudgetHooksV1`).
     step: { current: step, max: runtime.maxSteps },
     // The same loop clock that armed the deadline. Prompt policy receives
     // the deadline as data; the kernel retains ownership of the timer.

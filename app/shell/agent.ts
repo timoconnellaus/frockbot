@@ -8,6 +8,7 @@ import {
   latestOpenStepPositionV1,
   type FirstPartyCardDrawsV1,
   type LlmMessage,
+  type LoopHooksV1,
   type SendToUserPayloadV1,
   type Session,
   type ToolDefinition,
@@ -216,15 +217,9 @@ export const CONVERSATION_PROMPT_SECTION_V1 = "conversation";
 /** Ordered after identity (0), before anything a Package contributes. */
 export const CONVERSATION_PROMPT_ORDER_V1 = 1;
 
-export const STEP_BUDGET_PROMPT_SECTION_V1 = "step-budget";
-/** Late in the prompt, where the model reads it last and heeds it most. */
-export const STEP_BUDGET_PROMPT_ORDER_V1 = 90;
-/** The section appears when this many steps or fewer remain after this one. */
+/** The note appears when this many steps or fewer remain after this one. */
 export const STEP_BUDGET_WARNING_STEPS_V1 = 3;
-export const TIME_BUDGET_PROMPT_SECTION_V1 = "time-budget";
-/** Immediately after the step warning, so the time warning is read last. */
-export const TIME_BUDGET_PROMPT_ORDER_V1 = 91;
-/** The section appears only once strictly fewer than two minutes remain. */
+/** The note appears only once strictly fewer than two minutes remain. */
 export const TIME_BUDGET_WARNING_MS_V1 = 2 * 60_000;
 
 /**
@@ -287,6 +282,47 @@ export function timeBudgetPromptTextV1(context: {
     "</time_budget>",
   ].join("\n");
 }
+
+/** Runtime notes carry a label so the model reads them as the platform's. */
+export const TURN_BUDGET_NOTE_LABEL_V1 = "[FrockBot runtime: budget]";
+
+/**
+ * The step and time warnings, as one note at the tail of the request they
+ * apply to. Not a system prompt section: the warning changes every step at
+ * the end of a Turn, and a system prompt that changed would miss the cache on
+ * the whole conversation behind it. A note at the tail costs nothing, and the
+ * next request, built from the log, does not carry it.
+ */
+export const turnBudgetHooksV1: LoopHooksV1 = {
+  async request(agent, _request, _turn, step, _signal, next) {
+    const request = await next();
+    const budget = agent.turnBudget?.();
+    if (!budget) return request;
+    const replyToCaller = request.tools.some(
+      (tool) => tool.name === "reply_to_request",
+    );
+    const note = [
+      stepBudgetPromptTextV1({
+        step: { current: step, max: budget.maxSteps },
+        replyToCaller,
+      }),
+      timeBudgetPromptTextV1({
+        deadline: { at: budget.deadlineAt, now: budget.now },
+        replyToCaller,
+      }),
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    if (!note) return request;
+    return {
+      ...request,
+      messages: [
+        ...request.messages,
+        { role: "user", content: `${TURN_BUDGET_NOTE_LABEL_V1}\n${note}` },
+      ],
+    };
+  },
+};
 
 export const CONVERSATION_PROMPT_TEXT_V1 = [
   "## Talking to the user",
@@ -759,30 +795,9 @@ export const shellAgentFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
       order: CONVERSATION_PROMPT_ORDER_V1,
       render: (context) => conversationPromptTextV1(context.turnType),
     }),
-    // Empty for most of a Turn; a countdown and one instruction at the end of
-    // its step budget. See `stepBudgetPromptTextV1`.
-    runtime.systemPrompt.register({
-      id: STEP_BUDGET_PROMPT_SECTION_V1,
-      order: STEP_BUDGET_PROMPT_ORDER_V1,
-      render: (context) =>
-        stepBudgetPromptTextV1({
-          ...context,
-          replyToCaller:
-            runtime.tools.registeredNames?.().includes("reply_to_request") ??
-            false,
-        }),
-    }),
-    runtime.systemPrompt.register({
-      id: TIME_BUDGET_PROMPT_SECTION_V1,
-      order: TIME_BUDGET_PROMPT_ORDER_V1,
-      render: (context) =>
-        timeBudgetPromptTextV1({
-          ...context,
-          replyToCaller:
-            runtime.tools.registeredNames?.().includes("reply_to_request") ??
-            false,
-        }),
-    }),
+    // Nothing for most of a Turn; a countdown and one instruction at the end
+    // of its step or time budget. See `turnBudgetHooksV1`.
+    runtime.hooks.add(turnBudgetHooksV1),
     runtime.tools.register(
       createSendToUserTool(SEND_TO_USER_TOOL_V1, runtime.sessions, runtime),
       userVoice ? { admissionCeiling: userVoice } : undefined,

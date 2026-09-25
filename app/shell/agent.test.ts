@@ -6,6 +6,7 @@ import {
   decodeSendToUserPayloadV1,
   SEND_TO_USER_PAYLOAD_TYPES_V1,
   type FirstPartyCardDrawV1,
+  type NormalizedModelRequest,
   type SendToUserPayloadV1,
   type Session,
   type ToolCall,
@@ -27,6 +28,8 @@ import {
   PARENT_HANDOFF_CAPABILITY_V1,
   SEND_TO_USER_TOOL_V1,
   TIME_BUDGET_WARNING_MS_V1,
+  TURN_BUDGET_NOTE_LABEL_V1,
+  turnBudgetHooksV1,
   USER_VOICE_CAPABILITY_V1,
   WAKE_PARENT_TOOL_V1,
 } from "./agent.ts";
@@ -79,6 +82,47 @@ async function invoke(
   const preparation = await mounted.root.tools.prepare(toolCall, context);
   if (preparation.kind === "denied") return preparation.result;
   return mounted.root.tools.executePrepared(preparation, context);
+}
+
+/** The budget note the request hook appends, or `undefined` for none. */
+async function budgetNote(input: {
+  step: number;
+  remainingMs?: number;
+  noBudget?: boolean;
+}): Promise<string | undefined> {
+  const base: NormalizedModelRequest = {
+    requestId: "request-1",
+    provider: "provider-1",
+    model: "model-1",
+    system: "system",
+    messages: [{ role: "user", content: "hello" }],
+    tools: [],
+  } as NormalizedModelRequest;
+  const agent = {
+    ...(input.noBudget
+      ? {}
+      : {
+          turnBudget: () => ({
+            maxSteps: 64,
+            deadlineAt: TURN_DEADLINE_MS_V1,
+            now: TURN_DEADLINE_MS_V1 - (input.remainingMs ?? 10 * 60_000),
+          }),
+        }),
+  } as never;
+  const request = await turnBudgetHooksV1.request!(
+    agent,
+    base,
+    1,
+    input.step,
+    new AbortController().signal,
+    async () => base,
+  );
+  expect(request.system).toBe(base.system);
+  if (request.messages.length === base.messages.length) return undefined;
+  const note = request.messages.at(-1);
+  expect(note?.role).toBe("user");
+  expect(note?.content.startsWith(TURN_BUDGET_NOTE_LABEL_V1)).toBe(true);
+  return note?.content;
 }
 
 describe("the Shell's tool admission", () => {
@@ -828,6 +872,35 @@ describe("the acknowledgement reaches the user", () => {
   });
 
   test("the last steps of a reply tell the model to send a status", async () => {
+    const warning = await budgetNote({ step: 61 });
+    expect(warning).toContain("<step_budget>");
+    expect(warning).toContain("3 steps left after this one");
+    expect(warning).toContain(SEND_TO_USER_TOOL_V1);
+    expect(await budgetNote({ step: 64 })).toContain(
+      "This is the last step of this reply",
+    );
+    expect(await budgetNote({ step: 10 })).toBeUndefined();
+    // Outside the loop there is no budget, so nothing is said.
+    expect(await budgetNote({ step: 64, noBudget: true })).toBeUndefined();
+  });
+
+  test("the last two minutes of a Turn tell the model to send a status", async () => {
+    expect(
+      await budgetNote({ step: 1, remainingMs: TIME_BUDGET_WARNING_MS_V1 }),
+    ).toBeUndefined();
+    const warning = await budgetNote({
+      step: 61,
+      remainingMs: TIME_BUDGET_WARNING_MS_V1 - 1,
+    });
+    expect(warning).toContain("<time_budget>");
+    expect(warning).toContain("fewer than 2 minutes left");
+    expect(warning).toContain("Do not start new work");
+    expect(warning!.indexOf("<time_budget>")).toBeGreaterThan(
+      warning!.indexOf("<step_budget>"),
+    );
+  });
+
+  test("a Turn's last steps leave the system prompt, the cached prefix, as it was", async () => {
     const mounted = await mount();
     try {
       const assemble = (current: number) =>
@@ -837,57 +910,9 @@ describe("the acknowledgement reaches the user", () => {
           model: "model-1",
           turnType: "chat",
           step: { current, max: 64 },
+          deadline: { at: TURN_DEADLINE_MS_V1, now: TURN_DEADLINE_MS_V1 - 1 },
         });
-      const early = await assemble(10);
-      expect(early.text).not.toContain("<step_budget>");
-      const warning = await assemble(61);
-      expect(warning.text).toContain("<step_budget>");
-      expect(warning.text).toContain("3 steps left after this one");
-      expect(warning.text).toContain(SEND_TO_USER_TOOL_V1);
-      const last = await assemble(64);
-      expect(last.text).toContain("This is the last step of this reply");
-      // The budget section sits after the conversation contract, where the
-      // model reads it last.
-      expect(last.text.indexOf("<step_budget>")).toBeGreaterThan(
-        last.text.indexOf("send_to_user"),
-      );
-      const outside = await mounted.root.systemPrompt.assemble({
-        sessionId: "session-1",
-        provider: "provider-1",
-        model: "model-1",
-        turnType: "chat",
-      });
-      expect(outside.text).not.toContain("<step_budget>");
-    } finally {
-      await mounted.dispose();
-    }
-  });
-
-  test("the last two minutes of a Turn tell the model to send a status", async () => {
-    const mounted = await mount();
-    try {
-      const assemble = (remainingMs: number) =>
-        mounted.root.systemPrompt.assemble({
-          sessionId: "session-1",
-          provider: "provider-1",
-          model: "model-1",
-          turnType: "chat",
-          step: { current: 61, max: 64 },
-          deadline: {
-            at: TURN_DEADLINE_MS_V1,
-            now: TURN_DEADLINE_MS_V1 - remainingMs,
-          },
-        });
-      const boundary = await assemble(TIME_BUDGET_WARNING_MS_V1);
-      expect(boundary.text).not.toContain("<time_budget>");
-      const warning = await assemble(TIME_BUDGET_WARNING_MS_V1 - 1);
-      expect(warning.text).toContain("<time_budget>");
-      expect(warning.text).toContain("fewer than 2 minutes left");
-      expect(warning.text).toContain("Do not start new work");
-      expect(warning.text).toContain(SEND_TO_USER_TOOL_V1);
-      expect(warning.text.indexOf("<time_budget>")).toBeGreaterThan(
-        warning.text.indexOf("<step_budget>"),
-      );
+      expect((await assemble(64)).text).toBe((await assemble(1)).text);
     } finally {
       await mounted.dispose();
     }
