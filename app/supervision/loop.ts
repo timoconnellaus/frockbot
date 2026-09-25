@@ -386,17 +386,20 @@ export function subagentWorkV1(
     /^(?:\w+ subagent \S+|Subagent \S+ resumed and) completed\. ([\s\S]+)$/;
   const notice = new RegExp(
     `(?:^|\\n)\\w+ subagent "[^"\\n]*" completed\\. ([\\s\\S]+?)\\n${escapeRegExp(SUBAGENT_SUMMARY_END_V1)}`,
+    "g",
   );
   return turnEvents(events, turn).flatMap((event) => {
-    const match =
+    const matches =
       event.type === "tool/result" && !event.isError
-        ? settled.exec(event.content)
+        ? [settled.exec(event.content)]
         : event.type === "user/message"
-          ? notice.exec(event.text)
-          : null;
-    const work = match?.[1]?.trim();
-    // A question the subagent asked is not work it made.
-    return work && !work.startsWith("It asks: ") ? [work] : [];
+          ? [...event.text.matchAll(notice)]
+          : [];
+    return matches.flatMap((match) => {
+      const work = match?.[1]?.trim();
+      // A question the subagent asked is not work it made.
+      return work && !work.startsWith("It asks: ") ? [work] : [];
+    });
   });
 }
 

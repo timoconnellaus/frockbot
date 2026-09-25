@@ -663,20 +663,20 @@ test("work Jev names for a specialist the Turn is offered is handed to it from t
   });
 });
 
-function drainedToast(work: string): string {
-  return pendingBotInputPreambleV1([
-    {
-      kind: "wake",
-      wakeId: "tw-task-2",
-      runId: "task-2",
-      routineId: "task-2",
+function drainedToast(...works: string[]): string {
+  return pendingBotInputPreambleV1(
+    works.map((work, index) => ({
+      kind: "wake" as const,
+      wakeId: `tw-task-${index + 2}`,
+      runId: `task-${index + 2}`,
+      routineId: `task-${index + 2}`,
       title: "Subagent",
       text: `executor subagent "Write the toast" completed. ${work}`,
       createdAt: "2026-09-25T00:00:00.000Z",
       quiet: { automation: true },
-      source: "subagent",
-    },
-  ]);
+      source: "subagent" as const,
+    })),
+  );
 }
 
 test("a subagent's work is read off a blocking result and off a completion the Turn was opened for", () => {
@@ -714,6 +714,19 @@ test("a subagent's work is read off a blocking result and off a completion the T
     "Dear Sam, thank you...",
   ]);
   expect(subagentWorkV1(events, 2)).toEqual([]);
+});
+
+test("every subagent completion drained into one message is read as work", () => {
+  const events = [
+    {
+      type: "user/message",
+      turn: 1,
+      step: 1,
+      messageId: "m",
+      text: `${drainedToast("To Mia!", "To Sam!")}\nsend me the second draft`,
+    },
+  ] as unknown as SessionEvent[];
+  expect(subagentWorkV1(events, 1)).toEqual(["To Mia!", "To Sam!"]);
 });
 
 test("a send that rewrites the work is withheld, and the Turn goes on to send the work", async () => {
