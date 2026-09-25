@@ -473,6 +473,7 @@ export class ToolRegistry implements ToolExecution {
     this.namespaces.set(FROCKBOT_TOOL_NAMESPACE, {
       name: FROCKBOT_TOOL_NAMESPACE,
       external: false,
+      effect: "read",
       useInstructions: FROCKBOT_NAMESPACE_USE_INSTRUCTIONS,
     });
     this.installMetaTool({
