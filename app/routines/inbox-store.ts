@@ -500,6 +500,20 @@ export class RoutineInboxStore {
   }
 
   /**
+   * Drop a wake nobody needs to hear about, so no Turn carries it. The firing's
+   * entry in the Routine's log stays: the report is still there to read, it
+   * just does not come to the person.
+   */
+  async dismiss(key: string): Promise<void> {
+    await this.#storage.transaction(async (transaction) => {
+      const stored = await transaction.get<unknown>(key);
+      if (stored === undefined) return;
+      if (decodePendingBotInputV1(stored).kind !== "wake") return;
+      await transaction.delete(key);
+    });
+  }
+
+  /**
    * The durable inputs one chat Turn carries. The first call for a run moves
    * the queue into the run's receipt; every later call — a resumed Turn, a
    * recovered one — reads that receipt back and drains nothing, which is what

@@ -85,6 +85,11 @@ export interface VisibleMessageDraftV1 {
    */
   voice?: boolean;
   /**
+   * Whether the run delivers a Routine report judged able to wait: it lands
+   * and counts as unread, and wakes no device.
+   */
+  quiet?: boolean;
+  /**
    * The ordinal of a message whose run could not journal a send of its own,
    * because the run had already ended when the message was minted. The
    * transcript projects the run with this send appended at that ordinal, so
@@ -122,7 +127,10 @@ export async function visibleMessageRecordsV1(input: {
       createdAt: message.createdAt,
       title: input.settings.profile.name,
       body: message.body,
-      notify: input.settings.notifications.enabled && !message.voice,
+      notify:
+        input.settings.notifications.enabled &&
+        !message.voice &&
+        !message.quiet,
     };
     records[`${MESSAGE_PREFIX}${cursor}`] = notice;
     records[`${PUSH_OUTBOX_PREFIX}${cursor}`] = notice;
@@ -199,6 +207,8 @@ export async function messageRecords(input: {
   const allSends = allSendsOnRun;
   const automation = input.run.admission?.turnType === "automation";
   const voice = input.run.admission?.origin?.kind === "voice";
+  const origin = input.run.admission?.origin;
+  const quiet = origin?.kind === "routine-delivery" && origin.quiet === true;
   return visibleMessageRecordsV1({
     settings,
     read: input.read,
@@ -212,6 +222,7 @@ export async function messageRecords(input: {
       body: messagePreview(event.payload as unknown as Record<string, unknown>),
       ...(automation ? { automation: true } : {}),
       ...(voice ? { voice: true } : {}),
+      ...(quiet ? { quiet: true } : {}),
     })),
   });
 }

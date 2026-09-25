@@ -321,9 +321,16 @@ were, and neither is enforced.
   of up to 24 against the request, and up to three strong matches are named
   in the tail runtime note (`app/supervision/skill-nomination.ts`). The
   catalog in the system prompt is unchanged.
+- **Routine reports.** Before a delivery Turn is opened for a Routine's
+  hand-offs, Jev judges each report: did the firing find something the person
+  would want to hear, and how soon (`app/supervision/routine-report.ts`). A
+  report it is sure nobody needs is dismissed and stays in the Routine's log;
+  a delivery whose every report can wait is `quiet` on its run origin, so its
+  message lands unread and wakes no device. When Jev cannot say, the report is
+  delivered loudly, as before.
 - Runtime notes from several features share one trailing message
   (`appendRuntimeNoteV1`), since some providers refuse two user messages in a
-  row. Labelled in `bun run eval:context`.
+  row. Labelled in `bun run eval:context` (10/10 on `jev-1.13.0`).
 
 ## Mentor and failure score
 
