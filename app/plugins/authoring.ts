@@ -28,6 +28,7 @@ import {
   type WorkspaceFilesV1,
 } from "@frockbot/core/contracts";
 import { sha256HexTextV1 } from "@frockbot/core/crypto";
+import { oweThemeAssembleV1 } from "@frockbot/app/theme/assemble";
 import type {
   CompositionGenerationV1,
   CompositionMemberV1,
@@ -356,6 +357,7 @@ export async function switchPluginForBotV1(
         expectedRevision: current.revision,
         now,
       });
+      await oweThemeAssembleV1(storage, now);
       return;
     } catch (error) {
       if (error instanceof PluginEnablementConflictError && attempt < 2) {

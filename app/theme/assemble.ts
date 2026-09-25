@@ -52,6 +52,19 @@ export function rosterDeclaresThemeAssembleV1(
   return themeAssemblersV1(roster).length > 0;
 }
 
+/**
+ * Owes an assemble now. Switching a Plugin, or approving a new generation of
+ * one, can change which Plugins wrap the look, and the Bot would otherwise
+ * wear the old one until the next hour. Owed rather than run, so the alarm
+ * the Bot re-arms after the write carries it through an eviction.
+ */
+export async function oweThemeAssembleV1(
+  storage: { put(key: string, value: unknown): Promise<void> },
+  now: Date,
+): Promise<void> {
+  await storage.put(THEME_ASSEMBLE_DUE_KEY_V1, now.getTime());
+}
+
 export async function themeAssembleDeadlineV1(storage: {
   get<T>(key: string): Promise<T | undefined>;
 }): Promise<number[]> {
