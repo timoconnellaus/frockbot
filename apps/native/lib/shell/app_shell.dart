@@ -1081,6 +1081,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Future<void> _restoreSelection() async {
     if (selected != null ||
         selectedGroupId != null ||
+        archivedOpenId != null ||
         widget.botLinks.value != null) {
       return;
     }
@@ -1088,6 +1089,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (!mounted ||
         selected != null ||
         selectedGroupId != null ||
+        archivedOpenId != null ||
         widget.botLinks.value != null) {
       return;
     }
@@ -1115,6 +1117,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (general == null ||
         selected != null ||
         selectedGroupId != null ||
+        archivedOpenId != null ||
         widget.botLinks.value != null ||
         ModalRoute.of(context)?.isCurrent != true ||
         !bots.any((bot) => bot.botId.value == general)) {
