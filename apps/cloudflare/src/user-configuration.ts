@@ -200,10 +200,14 @@ import {
 } from "@frockbot/app/search";
 import type { BotSearchRpc } from "./search.js";
 import {
+  AUDIT_ACTIVITY_FILTER_NAMES_V1,
+  AUDIT_ACTIVITY_MAX_ROWS_V1,
   AUDIT_KINDS_V1,
   AUDIT_MAX_CURSOR_LENGTH_V1,
   AUDIT_MAX_ENTRY_PAGE_V1,
   AUDIT_MAX_RESULTS_V1,
+  type AuditActivityFilterV1,
+  type AuditActivityPageV1,
   type AuditRebuildReceiptV1,
   type ClientAuditPageV1,
 } from "@frockbot/app/audit";
@@ -3805,6 +3809,35 @@ export class UserConfiguration
       total: page.total,
       indexState: contribution.state(),
     };
+  }
+
+  /** One page of Activity out of this User's audit table, a Turn to a row. */
+  async readAuditActivity(input: unknown): Promise<AuditActivityPageV1> {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      { userId: rpcIdentifier },
+      {
+        botId: rpcBotId,
+        filter: rpcEnum(AUDIT_ACTIVITY_FILTER_NAMES_V1),
+        before: rpcString(AUDIT_MAX_CURSOR_LENGTH_V1),
+        limit: rpcInteger({ minimum: 1, maximum: AUDIT_ACTIVITY_MAX_ROWS_V1 }),
+      },
+    );
+    await this.assertFlockIdentity(request.userId as string);
+    return (await this.auditContribution()).activity({
+      ...(request.botId === undefined
+        ? {}
+        : { botId: request.botId as string }),
+      ...(request.filter === undefined
+        ? {}
+        : { filter: request.filter as AuditActivityFilterV1 }),
+      ...(request.before === undefined
+        ? {}
+        : { before: request.before as string }),
+      ...(request.limit === undefined
+        ? {}
+        : { limit: request.limit as number }),
+    });
   }
 
   private async machineContribution(): Promise<

@@ -501,10 +501,13 @@ abstract final class EmailIds {
   static const usernameRemoveConfirm = 'email-username-remove-confirm';
 }
 
-/// Audit: every effect a Bot performed, and what the log can and cannot say.
+/// Activity: what the Bots did outside the conversation.
 abstract final class AuditIds {
-  static const document = 'audit-document';
+  static const list = 'audit-list';
   static const refresh = 'audit-refresh';
+  static const botFilter = 'audit-bot-filter';
+  static const filter = 'audit-filter';
+  static const showEarlier = 'audit-show-earlier';
   static const recoveryEntry = 'recovery-audit-entry';
 }
 

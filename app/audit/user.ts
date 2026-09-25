@@ -14,8 +14,11 @@
 //    on the one path both projection and rebuild take, is what stops the two
 //    disagreeing about what a row says.
 import {
+  AUDIT_ACTIVITY_FILTERS_V1,
   AUDIT_MAX_ENTRY_PAGE_V1,
   AuditDecodeError,
+  type AuditActivityFilterV1,
+  type AuditActivityPageV1,
   AUDIT_TARGET_REMOTE_PREFIX_V1,
   decodeAuditEntryPageV1,
   decodeAuditEntryV1,
@@ -158,6 +161,29 @@ export class AuditUserBackendContribution {
     limit?: number;
   }): { entries: AuditEntryV1[]; nextCursor?: string; total: number } {
     return this.store.query(request);
+  }
+
+  /** One page of Activity, a Turn's effects in one place to a row. */
+  activity(request: {
+    botId?: string;
+    filter?: AuditActivityFilterV1;
+    before?: string;
+    limit?: number;
+  }): AuditActivityPageV1 {
+    const page = this.store.activity({
+      ...(request.botId === undefined ? {} : { botId: request.botId }),
+      ...(request.filter === undefined || request.filter === "everything"
+        ? {}
+        : { kinds: AUDIT_ACTIVITY_FILTERS_V1[request.filter] }),
+      ...(request.before === undefined ? {} : { before: request.before }),
+      ...(request.limit === undefined ? {} : { limit: request.limit }),
+    });
+    return {
+      schemaVersion: 1,
+      groups: page.groups,
+      ...(page.nextCursor === undefined ? {} : { nextCursor: page.nextCursor }),
+      indexState: this.store.state(),
+    };
   }
 
   /**

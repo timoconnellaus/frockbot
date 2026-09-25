@@ -1,334 +1,283 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/audit/document.dart';
+import 'package:frockbot_native/audit/activity.dart';
 import 'package:frockbot_native/audit/page.dart';
 import 'package:frockbot_native/client/transport.dart';
+import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
 import 'package:frockbot_native/theme/frock_theme.dart';
 
-import 'settings_test.dart' show SettingsApi;
+import 'native_session.dart';
 import 'widget_test.dart' show MemoryStore;
 
-/// The shape `auditDocumentV1` produces, written by hand so the Flutter side
+/// The shape `activityPageV1` produces, written by hand so the Flutter side
 /// is pinned to the projection's contract.
-Map<String, Object?> auditDocument({
-  int revision = 1,
-  String? kind,
+Map<String, Object?> activityPage({
+  List<Map<String, Object?>>? rows,
   String? cursor,
-  String outcome = 'ok',
+  String indexState = 'ready',
 }) => {
   'schemaVersion': 1,
-  'surfaceId': 'audit',
-  'revision': revision,
-  'root': {
-    'type': 'group',
-    'orientation': 'column',
-    'children': [
-      {
-        'type': 'text',
-        'text': '1 audited effect${kind == null ? '' : ' · $kind'}',
-        'style': 'status',
-      },
-      {
-        'type': 'group',
-        'orientation': 'row',
-        'children': [
-          {
-            'type': 'action',
-            'actionId': 'filter-kind',
-            'label': 'All',
-            'input': {'kind': 'filter-kind'},
-          },
-          {
-            'type': 'action',
-            'actionId': 'filter-kind',
-            'label': 'shell',
-            'input': {'kind': 'filter-kind', 'auditKind': 'shell'},
-          },
-        ],
-      },
-      {
-        'type': 'group',
-        'orientation': 'column',
-        'title': 'ls -la /workspace',
-        'children': [
-          {
-            'type': 'text',
-            'text': outcome == 'unknown'
-                ? 'Outcome unknown · shell_exec · This Computer'
-                : 'Completed · shell_exec · This Computer',
-            'style': 'status',
-          },
-          if (outcome == 'unknown')
-            {
-              'type': 'text',
-              'text': 'Its outcome is uncertain. Check the affected service before repeating the action.',
-            },
-          {
-            'type': 'action',
-            'actionId': 'open-run',
-            'label': 'Open the Turn',
-            'input': {'kind': 'open-run', 'runId': 'run-1'},
-          },
-        ],
-      },
-      if (cursor != null)
+  'rows':
+      rows ??
+      [
         {
-          'type': 'action',
-          'actionId': 'load-more',
-          'label': 'Earlier activity',
-          'input': {'kind': 'load-more', 'cursor': cursor},
+          'botId': 'scout',
+          'botName': 'Scout',
+          'at': '2026-09-25T00:42:00.000Z',
+          'text': 'sent an email',
+          'place': 'Email',
+          'approved': true,
+          'runId': 'run-1',
         },
-      {
-        'type': 'action',
-        'actionId': 'rebuild',
-        'label': 'Rebuild',
-        'input': {'kind': 'rebuild'},
-      },
-    ],
-  },
-  'actions': [
+        {
+          'botId': 'bob',
+          'botName': 'Bob',
+          'at': '2026-09-24T23:02:00.000Z',
+          'text': 'ran 6 commands on its Computer',
+          'place': 'Computer',
+          'note': '1 failed',
+          'runId': 'run-2',
+        },
+      ],
+  'nextCursor': ?cursor,
+  'indexState': indexState,
+};
+
+const directory = {
+  'schemaVersion': 1,
+  'revision': 0,
+  'bots': [
     {
-      'id': 'filter-kind',
-      'schema': {
-        'type': 'object',
-        'properties': {
-          'kind': {
-            'type': 'string',
-            'enum': ['filter-kind'],
-          },
-          'auditKind': {
-            'type': 'string',
-            'enum': ['shell', 'browser', 'mcp', 'file', 'process'],
-          },
-        },
-        'required': ['kind'],
-        'additionalProperties': false,
-      },
-    },
-    {
-      'id': 'load-more',
-      'schema': {
-        'type': 'object',
-        'properties': {
-          'kind': {
-            'type': 'string',
-            'enum': ['load-more'],
-          },
-          'cursor': {'type': 'string', 'maxLength': 512},
-        },
-        'required': ['kind', 'cursor'],
-        'additionalProperties': false,
-      },
-    },
-    {
-      'id': 'rebuild',
-      'schema': {
-        'type': 'object',
-        'properties': {
-          'kind': {
-            'type': 'string',
-            'enum': ['rebuild'],
-          },
-        },
-        'required': ['kind'],
-        'additionalProperties': false,
-      },
-    },
-    {
-      'id': 'open-run',
-      'schema': {
-        'type': 'object',
-        'properties': {
-          'kind': {
-            'type': 'string',
-            'enum': ['open-run'],
-          },
-          'runId': {'type': 'string', 'maxLength': 128},
-        },
-        'required': ['kind', 'runId'],
-        'additionalProperties': false,
+      'schemaVersion': 1,
+      'botId': 'bob',
+      'registeredAt': '2026-09-01T00:00:00.000Z',
+      'initialName': 'Bob',
+      'avatar': {
+        'schemaVersion': 1,
+        'characterId': 'fox',
+        'primary': '#fc85ae',
       },
     },
   ],
 };
 
+Widget host(NativeApi api, MemoryStore store, {String? botId}) => MaterialApp(
+  theme: FrockTheme.theme(Brightness.dark),
+  home: AuditPage(
+    api: api,
+    store: store,
+    userId: 'tim',
+    botId: botId,
+    now: () => DateTime.parse('2026-09-25T02:00:00.000Z').toLocal(),
+  ),
+);
+
 void main() {
-  group('the projection read back', () {
-    test('the query the host owns is the path it reads', () {
-      expect(auditPathV1(botId: 'bot-1'), '/api/audit?botId=bot-1&as=document');
+  group('the Activity query', () {
+    test('asks for Activity, and spells out only what is not the default', () {
+      expect(activityPathV1(), '/api/audit?as=activity');
       expect(
-        auditPathV1(botId: 'bot-1', kind: 'shell', before: 'p50'),
-        '/api/audit?botId=bot-1&kind=shell&before=p50&as=document',
+        activityPathV1(botId: 'bot-1', filter: 'commands', before: 'c2'),
+        '/api/audit?botId=bot-1&filter=commands&before=c2&as=activity',
       );
-      // No Bot is every Bot this account has.
-      expect(auditPathV1(), '/api/audit?as=document');
+      expect(activityPathV1(filter: 'everything'), '/api/audit?as=activity');
     });
 
-    test('every action names the kind it means', () {
+    test('the filters are the four the server holds', () {
+      expect(activityFilters.map((filter) => filter.slug), [
+        'everything',
+        'sent',
+        'commands',
+        'devices',
+      ]);
+    });
+  });
+
+  group('days', () {
+    final now = DateTime(2026, 9, 25, 14);
+    test('are Today, Yesterday, then the date, in local time', () {
+      expect(activityDayLabel(DateTime(2026, 9, 25, 0, 5), now), 'Today');
+      expect(activityDayLabel(DateTime(2026, 9, 24, 23, 55), now), 'Yesterday');
+      expect(activityDayLabel(DateTime(2026, 9, 22, 9), now), 'Tue 22 Sep');
       expect(
-        auditActionKindV1({
-          'input': {'kind': 'filter-kind', 'auditKind': 'browser'},
-        }),
-        'filter-kind',
+        activityDayLabel(DateTime(2025, 9, 22, 9), now),
+        'Mon 22 Sep 2025',
       );
+    });
+
+    test('cut the rows where the local day changes', () {
+      final local = DateTime(2026, 9, 25, 0, 30);
+      final rows = [
+        for (final at in [
+          local,
+          local.subtract(const Duration(minutes: 20)),
+          local.subtract(const Duration(minutes: 40)),
+        ])
+          wire.ActivityRow.fromJson({
+            'botId': 'bob',
+            'botName': 'Bob',
+            'at': at.toUtc().toIso8601String(),
+            'text': 'ran a command on its Computer',
+            'place': 'Computer',
+          }),
+      ];
       expect(
-        auditKindV1({
-          'input': {'kind': 'filter-kind', 'auditKind': 'browser'},
-        }),
-        'browser',
-      );
-      expect(
-        auditCursorV1({
-          'input': {'kind': 'load-more', 'cursor': 'p50'},
-        }),
-        'p50',
-      );
-      expect(
-        auditRunIdV1({
-          'input': {'kind': 'open-run', 'runId': 'run-1'},
-        }),
-        'run-1',
-      );
-      // A kind the vocabulary does not carry names nothing at all.
-      expect(
-        auditActionKindV1({
-          'input': {'kind': 'delete-everything'},
-        }),
-        isNull,
+        activityDays(rows, now).map((day) => (day.label, day.rows.length)),
+        [('Today', 2), ('Yesterday', 1)],
       );
     });
   });
 
-  test('account-wide activity opens the Bot named by the entry', () async {
-    final opened = <String>[];
-    final controller = AuditController(
-      SettingsApi(MemoryStore(), (_, _) async => null),
-      openRun: (runId, botId) async => opened.add('$botId/$runId'),
+  testWidgets('a row says who did what, where, and what went wrong', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final api = NativeSessionApi(store, (path, _) async {
+      if (path == '/api/bots') return directory;
+      return activityPage();
+    });
+    addTearDown(api.close);
+    await tester.pumpWidget(host(api, store));
+    await tester.pumpAndSettle();
+    expect(find.text('Activity'), findsOneWidget);
+    expect(
+      find.textContaining('What your Bots did outside the conversation'),
+      findsOneWidget,
     );
-    await controller.dispatch({
-      'commandId': 'open-1',
-      'input': {'kind': 'open-run', 'botId': 'bot-2', 'runId': 'run-2'},
-    });
-    expect(opened, ['bot-2/run-2']);
-    controller.dispose();
+    expect(find.textContaining('sent an email'), findsOneWidget);
+    expect(find.text('Email'), findsOneWidget);
+    expect(find.text('You approved'), findsOneWidget);
+    expect(find.text('1 failed'), findsOneWidget);
+    expect(
+      find.textContaining('Commands are kept only as a short preview'),
+      findsOneWidget,
+    );
+    // Nothing of the old page's upkeep is left on it.
+    expect(find.textContaining('Rebuild'), findsNothing);
+    // The first page is kept for the next visit.
+    expect(store.values.containsKey('activity-page.tim'), isTrue);
   });
 
-  testWidgets('a filter re-reads, and a page reads from its own cursor', (
+  testWidgets('a filter re-reads, and Show earlier appends from the cursor', (
     tester,
   ) async {
     final store = MemoryStore();
     final read = <String>[];
-    final api = SettingsApi(store, (path, body) async {
-      if (path == "/api/bots") {
-        return {"schemaVersion": 1, "revision": 0, "bots": []};
-      }
+    final api = NativeSessionApi(store, (path, _) async {
+      if (path == '/api/bots') return directory;
       read.add(path);
-      return auditDocument(
-        revision: read.length,
-        kind: path.contains('kind=shell') ? 'shell' : null,
-        cursor: path.contains('before=') ? null : 'p50',
-      );
-    });
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: FrockTheme.theme(Brightness.dark),
-        home: AuditPage(
-          api: api,
-          store: store,
-          userId: 'tim',
-          botId: 'bot-1',
-          botName: 'Scout',
-        ),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(read.single, '/api/audit?botId=bot-1&as=document');
-
-    await tester.tap(find.text('shell'));
-    await tester.pumpAndSettle();
-    expect(read.last, '/api/audit?botId=bot-1&kind=shell&as=document');
-
-    await tester.tap(find.text('Earlier activity'));
-    await tester.pumpAndSettle();
-    expect(
-      read.last,
-      '/api/audit?botId=bot-1&kind=shell&before=p50&as=document',
-    );
-
-    // Choosing a filter is how a reader gets back to the newest page: a
-    // cursor minted under one filter names nothing under another.
-    await tester.tap(find.text('All'));
-    await tester.pumpAndSettle();
-    expect(read.last, '/api/audit?botId=bot-1&as=document');
-  });
-
-  testWidgets('an outcome the log cannot explain is drawn, not classified', (
-    tester,
-  ) async {
-    final store = MemoryStore();
-    final api = SettingsApi(
-      store,
-      (_, _) async => auditDocument(outcome: 'unknown'),
-    );
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: FrockTheme.theme(Brightness.dark),
-        home: AuditPage(api: api, store: store, userId: 'tim', botId: 'bot-1'),
-      ),
-    );
-    await tester.pumpAndSettle();
-    expect(find.textContaining('Outcome unknown'), findsOneWidget);
-    expect(find.textContaining('Its outcome is uncertain'), findsOneWidget);
-  });
-
-  testWidgets('a rebuild is the one write, and it re-reads after', (
-    tester,
-  ) async {
-    final store = MemoryStore();
-    final written = <String>[];
-    final api = SettingsApi(store, (path, body) async {
-      if (body != null) {
-        written.add(path);
-        return {'schemaVersion': 1, 'status': 'rebuilt'};
+      if (path.contains('before=')) {
+        return activityPage(
+          rows: [
+            {
+              'botId': 'bob',
+              'botName': 'Bob',
+              'at': '2026-09-20T09:00:00.000Z',
+              'text': 'updated its memory',
+              'place': 'Memory',
+              'runId': 'run-9',
+            },
+          ],
+        );
       }
-      return auditDocument(revision: written.length + 1);
+      return activityPage(cursor: 'c2');
     });
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: FrockTheme.theme(Brightness.dark),
-        home: AuditPage(api: api, store: store, userId: 'tim', botId: 'bot-1'),
-      ),
-    );
+    addTearDown(api.close);
+    await tester.pumpWidget(host(api, store));
     await tester.pumpAndSettle();
-    await tester.tap(find.text('Rebuild'));
+    expect(read.single, '/api/audit?as=activity');
+
+    await tester.tap(find.text('Commands'));
     await tester.pumpAndSettle();
-    expect(written.single, '/api/audit/rebuild');
-    // A finished rebuild is confirmed, and nothing is left pending to retry.
-    expect(find.textContaining('Couldn’t confirm'), findsNothing);
-    expect(store.values.containsKey('view-pending.tim.audit'), isFalse);
+    expect(read.last, '/api/audit?filter=commands&as=activity');
+
+    await tester.scrollUntilVisible(find.text('Show earlier'), 200);
+    await tester.tap(find.text('Show earlier'));
+    await tester.pumpAndSettle();
+    expect(read.last, '/api/audit?filter=commands&before=c2&as=activity');
+    // Appended, not replaced.
+    expect(find.textContaining('updated its memory'), findsOneWidget);
+    expect(find.textContaining('ran 6 commands'), findsOneWidget);
+    expect(find.text('Show earlier'), findsNothing);
   });
 
-  testWidgets('Audit recovers from offline without raw backend detail', (
+  testWidgets('the Bot picker narrows to one Bot', (tester) async {
+    final store = MemoryStore();
+    final read = <String>[];
+    final api = NativeSessionApi(store, (path, _) async {
+      if (path == '/api/bots') return directory;
+      read.add(path);
+      return activityPage();
+    });
+    addTearDown(api.close);
+    await tester.pumpWidget(host(api, store));
+    await tester.pumpAndSettle();
+    await tester.tap(find.text('All Bots'));
+    await tester.pumpAndSettle();
+    await tester.tap(find.byType(CheckedPopupMenuItem<String>).last);
+    await tester.pumpAndSettle();
+    expect(read.last, '/api/audit?botId=bob&as=activity');
+  });
+
+  testWidgets('nothing yet is said, not left blank', (tester) async {
+    final store = MemoryStore();
+    final api = NativeSessionApi(store, (path, _) async {
+      if (path == '/api/bots') return directory;
+      return activityPage(rows: []);
+    });
+    addTearDown(api.close);
+    await tester.pumpWidget(host(api, store));
+    await tester.pumpAndSettle();
+    expect(find.text('Nothing yet'), findsOneWidget);
+    expect(
+      find.text(
+        'When a Bot sends, changes or runs something, it shows up here.',
+      ),
+      findsOneWidget,
+    );
+  });
+
+  testWidgets('Activity recovers from offline without raw backend detail', (
     tester,
   ) async {
     var offline = true;
     final store = MemoryStore();
-    final api = SettingsApi(store, (_, _) async {
+    final api = NativeSessionApi(store, (path, _) async {
+      if (path == '/api/bots') return directory;
       if (offline) throw const RequestFailure('synthetic backend detail');
-      return auditDocument();
+      return activityPage();
     });
-    await tester.pumpWidget(
-      MaterialApp(
-        theme: FrockTheme.theme(Brightness.dark),
-        home: AuditPage(api: api, store: store, userId: 'tim', botId: 'bot-1'),
-      ),
-    );
+    addTearDown(api.close);
+    await tester.pumpWidget(host(api, store));
     await tester.pumpAndSettle();
     expect(find.textContaining('synthetic backend'), findsNothing);
-    expect(find.textContaining('couldn’t load'), findsOneWidget);
+    expect(find.text('Activity couldn’t load'), findsOneWidget);
     offline = false;
     await tester.tap(find.text('Try again'));
     await tester.pumpAndSettle();
-    expect(find.text('ls -la /workspace'), findsOneWidget);
+    expect(find.textContaining('sent an email'), findsOneWidget);
+  });
+
+  testWidgets('the last page read paints before the network answers', (
+    tester,
+  ) async {
+    final store = MemoryStore()
+      ..values['activity-page.tim'] =
+          '{"schemaVersion":1,"rows":[{"botId":"bob","botName":"Bob",'
+          '"at":"2026-09-25T00:10:00.000Z","text":"ran a command on its '
+          'Computer","place":"Computer"}],"indexState":"ready"}';
+    final api = NativeSessionApi(store, (path, _) async {
+      if (path == '/api/bots') return directory;
+      throw const RequestFailure('offline');
+    });
+    addTearDown(api.close);
+    await tester.pumpWidget(host(api, store));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('ran a command on its Computer'),
+      findsOneWidget,
+    );
+    // A refresh that failed says so without taking the rows away.
+    expect(find.textContaining('Couldn’t load activity'), findsOneWidget);
   });
 }

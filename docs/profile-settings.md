@@ -48,11 +48,15 @@ own model in its Settings; without a choice it follows the account default
 set in Models. Core identity, history, search, memory, computer
 infrastructure and site administration are not plugin switches.
 
-Activity & history starts with all Bots from Profile. A visible Bot filter
-and plain activity-type labels narrow it. Each activity link carries its Bot
-and run, so it works without a previously selected conversation. Unknown
-outcomes remain explicit. Rebuilding retained history is an advanced action;
-it never re-executes the recorded effects.
+Activity starts with all Bots from Profile: what the Bots did outside the
+conversation. A Bot picker and four filters narrow it — Everything, Sent &
+changed (email, connected services, files), Commands (commands, background
+commands and the web browser on a Computer) and Devices. Rows fall under the
+local day, one row for each Turn's effects in one place, and each carries its
+Bot and run, so it opens that Turn's work without a previously selected
+conversation. Unknown outcomes and failures remain explicit on the row. There
+is no rebuild control: rebuilding the table is upkeep, not something a person
+does.
 
 Templates starts at Use a template when no Bot is selected. Sharing offers a
 Bot chooser. Add Bot also offers the template route. Import keeps its preview

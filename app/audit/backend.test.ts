@@ -4,8 +4,10 @@ import {
   decodeAuditRequestQueryV1,
   type AuditGatewayHost,
 } from "./backend.ts";
+import type { ActivityPage } from "@frockbot/core/protocol-schemas";
 import {
   decodeClientAuditPageV1,
+  type AuditActivityQueryV1,
   type AuditEntryV1,
   type AuditQueryV1,
   type AuditRebuildReceiptV1,
@@ -88,12 +90,39 @@ const RECEIPT: AuditRebuildReceiptV1 = {
   unknownOutcomes: 0,
 };
 
-function host(
-  overrides: Partial<AuditGatewayHost> = {},
-): AuditGatewayHost & { queries: AuditQueryV1[] } {
+function host(overrides: Partial<AuditGatewayHost> = {}): AuditGatewayHost & {
+  queries: AuditQueryV1[];
+  activity: AuditActivityQueryV1[];
+} {
   const queries: AuditQueryV1[] = [];
+  const activity: AuditActivityQueryV1[] = [];
   return {
     queries,
+    activity,
+    readActivity: async (_userId, query) => {
+      activity.push(query);
+      return {
+        schemaVersion: 1,
+        groups: [
+          {
+            botId: "foreman",
+            runId: "run-1",
+            kind: "shell",
+            target: "computer",
+            count: 6,
+            at: ENTRY.at,
+            preview: "ls -la",
+            toolNames: ["computer_exec"],
+            failed: 0,
+            refused: 0,
+            interrupted: 0,
+            unknown: 0,
+            approved: 0,
+          },
+        ],
+        indexState: "ready",
+      };
+    },
     readAudit: async (_userId, query) => {
       queries.push(query);
       const page: ClientAuditPageV1 = {
@@ -196,47 +225,49 @@ describe("the audit gateway route", () => {
     expect(read?.status).toBe(405);
   });
 
-  test("`as=document` answers the same page as a document, and is not a filter", async () => {
+  test("`as=activity` answers Activity rows, named, for the filter asked", async () => {
     const gateway = host();
     const route = createAuditBackendContribution(gateway);
     const { request, url: target } = get(
-      "/api/audit?botId=foreman&kind=shell&as=document",
+      "/api/audit?botId=foreman&filter=commands&as=activity",
     );
     const response = await route.route(request, target, context);
     expect(response?.status).toBe(200);
-    const document = await response!.json<{
-      surfaceId: string;
-      actions: { id: string }[];
-    }>();
-    expect(document.surfaceId).toBe("audit");
-    expect(document.actions.map((action) => action.id)).toEqual([
-      "filter-kind",
-      "load-more",
-      "rebuild",
-      "open-run",
+    const page = await response!.json<ActivityPage>();
+    expect(page.rows).toEqual([
+      {
+        botId: "foreman",
+        botName: "Foreman",
+        at: "2026-08-31T00:00:00.000Z",
+        text: "ran 6 commands on its Computer",
+        place: "Computer",
+        runId: "run-1",
+      },
     ]);
     // `as` never reaches the query the User Durable Object is asked.
-    expect(gateway.queries.at(-1)).toEqual({
-      schemaVersion: 1,
+    expect(gateway.activity.at(-1)).toEqual({
       botId: "foreman",
-      kind: "shell",
+      filter: "commands",
     });
 
     // A client that wants the page keeps getting one.
-    const page = get("/api/audit?botId=foreman");
-    const plain = await route.route(page.request, page.url, context);
-    expect(await plain!.json<{ total: number }>()).toMatchObject({ total: 1 });
+    const plain = get("/api/audit?botId=foreman");
+    const raw = await route.route(plain.request, plain.url, context);
+    expect(await raw!.json<{ total: number }>()).toMatchObject({ total: 1 });
   });
 
-  test("the account-wide document names each Bot rather than its id", async () => {
+  test("Activity refuses the entry filters, and the entry read refuses Activity's", async () => {
     const route = createAuditBackendContribution(host());
-    const { request, url: target } = get("/api/audit?as=document");
-    const response = await route.route(request, target, context);
-    expect(response?.status).toBe(200);
-    const document = await response!.json<{ root: unknown }>();
-    const text = JSON.stringify(document.root);
-    expect(text).toContain("Bot: Foreman");
-    expect(text).not.toContain("Bot: foreman");
+    for (const path of [
+      "/api/audit?kind=shell&as=activity",
+      "/api/audit?filter=bogus&as=activity",
+      "/api/audit?filter=commands",
+      "/api/audit?as=document",
+    ]) {
+      const { request, url: target } = get(path);
+      const response = await route.route(request, target, context);
+      expect(response?.status).toBe(400);
+    }
   });
 
   test("turns an unexpected failure into a 500, not a leaked stack", async () => {

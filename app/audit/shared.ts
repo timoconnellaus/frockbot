@@ -679,3 +679,187 @@ export function decodeAuditRebuildReceiptV1(
     unknownOutcomes: receipt.unknownOutcomes as number,
   };
 }
+
+// ---------------------------------------------------------------------------
+// Activity: the same table, read a Turn at a time.
+// ---------------------------------------------------------------------------
+
+/**
+ * The filters the Activity page offers, each a union of kinds.
+ *
+ * The table records what an effect was, never whether it only read, so no
+ * filter is a judgement about the effect: a lookup in a connected service is
+ * under "Sent & changed" with the rest of that service's calls, drawn quietly
+ * rather than left out. Turn supervision's rows are under Everything alone.
+ */
+export const AUDIT_ACTIVITY_FILTERS_V1 = {
+  everything: AUDIT_KINDS_V1,
+  sent: ["email", "mcp", "file"],
+  commands: ["shell", "process", "browser"],
+  devices: ["device"],
+} as const satisfies Record<string, readonly AuditKindV1[]>;
+
+export type AuditActivityFilterV1 = keyof typeof AUDIT_ACTIVITY_FILTERS_V1;
+
+export const AUDIT_ACTIVITY_FILTER_NAMES_V1 = Object.keys(
+  AUDIT_ACTIVITY_FILTERS_V1,
+) as AuditActivityFilterV1[];
+
+/** Most rows one Activity page carries. */
+export const AUDIT_ACTIVITY_MAX_ROWS_V1 = 100;
+
+/** One filtered, paged request for a User's Activity. */
+export interface AuditActivityQueryV1 {
+  botId?: string;
+  filter?: AuditActivityFilterV1;
+  /** Opaque cursor from a previous Activity page. */
+  before?: string;
+  limit?: number;
+}
+
+/**
+ * Every entry one Turn made of one kind in one place, as one row.
+ *
+ * A Turn that ran six commands is one thing a person did not see, not six; a
+ * Turn that ran commands and sent an email is two, because they happened in
+ * two places.
+ */
+export interface AuditActivityGroupV1 {
+  botId: string;
+  runId: string;
+  kind: AuditKindV1;
+  target: string;
+  count: number;
+  /** The newest entry's time. */
+  at: string;
+  /** One entry's preview; the row's own only when `count` is 1. */
+  preview: string;
+  /** The distinct tools the entries ran. */
+  toolNames: string[];
+  failed: number;
+  refused: number;
+  interrupted: number;
+  unknown: number;
+  /** Entries an Approval authorized that went through. */
+  approved: number;
+  /** Summed where the entries carry one: how long a device was in use. */
+  durationMs?: number;
+}
+
+export interface AuditActivityPageV1 {
+  schemaVersion: 1;
+  groups: AuditActivityGroupV1[];
+  nextCursor?: string;
+  indexState: AuditIndexStateV1;
+}
+
+const ACTIVITY_GROUP_KEYS = [
+  "botId",
+  "runId",
+  "kind",
+  "target",
+  "count",
+  "at",
+  "preview",
+  "toolNames",
+  "failed",
+  "refused",
+  "interrupted",
+  "unknown",
+  "approved",
+  "durationMs",
+] as const;
+
+function decodeAuditActivityGroupV1(input: unknown): AuditActivityGroupV1 {
+  const label = "activity group";
+  const group = record(input, label);
+  exactKeys(group, ACTIVITY_GROUP_KEYS, label);
+  const target = text(group, "target", MAX_TARGET_LENGTH, label);
+  if (!isAuditTargetV1(target)) {
+    throw new AuditDecodeError(`${label}.target is invalid`);
+  }
+  const at = text(group, "at", MAX_TIMESTAMP_LENGTH, label);
+  if (!Number.isFinite(Date.parse(at))) {
+    throw new AuditDecodeError(`${label}.at must be a timestamp`);
+  }
+  const toolNames = group.toolNames;
+  if (
+    !Array.isArray(toolNames) ||
+    toolNames.length > 64 ||
+    toolNames.some(
+      (name) =>
+        typeof name !== "string" ||
+        name.length === 0 ||
+        name.length > MAX_TOOL_NAME_LENGTH,
+    )
+  ) {
+    throw new AuditDecodeError(`${label}.toolNames is invalid`);
+  }
+  const tally = (key: string, min = 0) =>
+    integer(group, key, { min, max: AUDIT_MAX_ROWS_V1 }, label);
+  return {
+    botId: identifier(group, "botId", label),
+    runId: identifier(group, "runId", label),
+    kind: auditKind(group.kind, label),
+    target,
+    count: tally("count", 1),
+    at,
+    preview: text(group, "preview", AUDIT_MAX_PREVIEW_LENGTH_V1, label),
+    toolNames: toolNames as string[],
+    failed: tally("failed"),
+    refused: tally("refused"),
+    interrupted: tally("interrupted"),
+    unknown: tally("unknown"),
+    approved: tally("approved"),
+    ...(group.durationMs === undefined
+      ? {}
+      : {
+          durationMs: integer(
+            group,
+            "durationMs",
+            { min: 0, max: 2 ** 40 },
+            label,
+          ),
+        }),
+  };
+}
+
+export function decodeAuditActivityPageV1(input: unknown): AuditActivityPageV1 {
+  const answer = record(input, "activity page");
+  exactKeys(
+    answer,
+    ["schemaVersion", "groups", "nextCursor", "indexState"],
+    "activity page",
+  );
+  if (answer.schemaVersion !== 1) {
+    throw new AuditDecodeError("activity page.schemaVersion must be 1");
+  }
+  if (
+    !Array.isArray(answer.groups) ||
+    answer.groups.length > AUDIT_ACTIVITY_MAX_ROWS_V1
+  ) {
+    throw new AuditDecodeError("activity page.groups must be a bounded array");
+  }
+  if (
+    answer.indexState !== "ready" &&
+    answer.indexState !== "rebuilding" &&
+    answer.indexState !== "truncated"
+  ) {
+    throw new AuditDecodeError("activity page.indexState is invalid");
+  }
+  return {
+    schemaVersion: 1,
+    groups: answer.groups.map(decodeAuditActivityGroupV1),
+    ...(answer.nextCursor === undefined
+      ? {}
+      : {
+          nextCursor: text(
+            answer,
+            "nextCursor",
+            AUDIT_MAX_CURSOR_LENGTH_V1,
+            "activity page",
+          ),
+        }),
+    indexState: answer.indexState,
+  };
+}

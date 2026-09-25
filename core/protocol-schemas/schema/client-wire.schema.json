@@ -5123,6 +5123,75 @@
       "required": ["schemaVersion", "entries", "page", "total", "indexState"],
       "additionalProperties": false
     },
+    "ActivityRow": {
+      "type": "object",
+      "properties": {
+        "botId": {
+          "$ref": "#/$defs/BotId"
+        },
+        "botName": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "at": {
+          "$ref": "#/$defs/Instant"
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 400
+        },
+        "place": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 80
+        },
+        "approved": {
+          "type": "boolean"
+        },
+        "quiet": {
+          "type": "boolean"
+        },
+        "note": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120
+        },
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        }
+      },
+      "required": ["botId", "botName", "at", "text", "place"],
+      "additionalProperties": false
+    },
+    "ActivityPage": {
+      "type": "object",
+      "properties": {
+        "schemaVersion": {
+          "const": 1
+        },
+        "rows": {
+          "type": "array",
+          "maxItems": 100,
+          "items": {
+            "$ref": "#/$defs/ActivityRow"
+          }
+        },
+        "nextCursor": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 1024
+        },
+        "indexState": {
+          "enum": ["ready", "rebuilding", "truncated"]
+        }
+      },
+      "required": ["schemaVersion", "rows", "indexState"],
+      "additionalProperties": false
+    },
     "SetupHistory": {
       "type": "object",
       "properties": {

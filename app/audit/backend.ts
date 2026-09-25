@@ -12,29 +12,46 @@
 // something quietly ignored: a client that means something the route does not
 // implement finds out, instead of being handed a page it will misread as
 // filtered.
+//
+// `?as=activity` answers the same table as the Activity page reads it: a
+// Turn's effects in one place to a row, in sentences (`activity.ts`).
+//
+// `POST /api/audit/rebuild` has no control in the app. Rebuilding is upkeep,
+// not something a person should have to do; the route stays because it is
+// how the table is re-projected after the projection changes, and how an
+// operator clears a truncation marker, acting as the account.
 import {
+  AUDIT_ACTIVITY_FILTER_NAMES_V1,
+  AUDIT_ACTIVITY_MAX_ROWS_V1,
   AUDIT_KINDS_V1,
   AUDIT_MAX_CURSOR_LENGTH_V1,
   AUDIT_MAX_RESULTS_V1,
   AuditDecodeError,
   decodeAuditQueryV1,
+  type AuditActivityFilterV1,
+  type AuditActivityPageV1,
+  type AuditActivityQueryV1,
   type AuditKindV1,
   type AuditQueryV1,
   type AuditRebuildReceiptV1,
   type ClientAuditPageV1,
 } from "./shared.js";
-import { auditDocumentV1 } from "./audit-document.js";
+import { activityPageV1 } from "./activity.js";
 import type { BotDirectoryViewV1 } from "@frockbot/app/flock/shared";
 import { defineGatewayContribution } from "@frockbot/core/contracts/contributions";
 
 export interface AuditGatewayHost {
   readAudit(userId: string, query: AuditQueryV1): Promise<ClientAuditPageV1>;
+  readActivity(
+    userId: string,
+    query: AuditActivityQueryV1,
+  ): Promise<AuditActivityPageV1>;
   rebuildAuditIndex(userId: string): Promise<AuditRebuildReceiptV1>;
   /**
-   * The Bot directory, for the account-wide document alone. An entry is
-   * stored against a Bot id, and an id is not what a person reading their own
-   * history is looking at; the same directory names the filter above the list,
-   * so both agree by construction.
+   * The Bot directory, for Activity's rows. An entry is stored against a Bot
+   * id, and an id is not what a person reading their own history is looking
+   * at; the same directory names the filter above the list, so both agree by
+   * construction.
    */
   listBots(userId: string): Promise<BotDirectoryViewV1>;
 }
@@ -48,27 +65,61 @@ export interface AuditBackendRouteContribution {
   ): Promise<Response | undefined>;
 }
 
-const ALLOWED_PARAMS = new Set([
-  "botId",
-  "kind",
-  "target",
-  "before",
-  "limit",
-  // Not part of the query: it asks for the same page in the vocabulary the
-  // host renders every plugin view in, and is stripped before decoding.
-  "as",
-]);
+const ALLOWED_PARAMS = new Set(["botId", "kind", "target", "before", "limit"]);
 
-/** The query string, decoded into the exact DTO. */
-export function decodeAuditRequestQueryV1(url: URL): AuditQueryV1 {
+/** What `?as=activity` may be asked: the Bot, the filter and the page. */
+const ACTIVITY_PARAMS = new Set(["botId", "filter", "before", "limit", "as"]);
+
+function refuseUnknownParams(url: URL, allowed: ReadonlySet<string>): void {
   for (const key of url.searchParams.keys()) {
-    if (!ALLOWED_PARAMS.has(key)) {
+    if (!allowed.has(key)) {
       throw new AuditDecodeError(`audit query.${key} is not allowed`);
     }
     if (url.searchParams.getAll(key).length > 1) {
       throw new AuditDecodeError(`audit query.${key} is repeated`);
     }
   }
+}
+
+/** The Activity query string, decoded. */
+export function decodeActivityRequestQueryV1(url: URL): AuditActivityQueryV1 {
+  refuseUnknownParams(url, ACTIVITY_PARAMS);
+  const botId = url.searchParams.get("botId");
+  const filter = url.searchParams.get("filter");
+  const before = url.searchParams.get("before");
+  const limit = url.searchParams.get("limit");
+  if (
+    filter !== null &&
+    !AUDIT_ACTIVITY_FILTER_NAMES_V1.includes(filter as AuditActivityFilterV1)
+  ) {
+    throw new AuditDecodeError("activity query.filter is invalid");
+  }
+  if (botId !== null && !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,127}$/.test(botId)) {
+    throw new AuditDecodeError("activity query.botId is invalid");
+  }
+  if (before !== null && before.length > AUDIT_MAX_CURSOR_LENGTH_V1) {
+    throw new AuditDecodeError(
+      "activity query.before must be a bounded string",
+    );
+  }
+  if (limit !== null && !/^[1-9][0-9]{0,2}$/.test(limit)) {
+    throw new AuditDecodeError(
+      "activity query.limit must be a bounded integer",
+    );
+  }
+  return {
+    ...(botId === null ? {} : { botId }),
+    ...(filter === null ? {} : { filter: filter as AuditActivityFilterV1 }),
+    ...(before === null ? {} : { before }),
+    ...(limit === null
+      ? {}
+      : { limit: Math.min(Number(limit), AUDIT_ACTIVITY_MAX_ROWS_V1) }),
+  };
+}
+
+/** The query string, decoded into the exact DTO. */
+export function decodeAuditRequestQueryV1(url: URL): AuditQueryV1 {
+  refuseUnknownParams(url, ALLOWED_PARAMS);
   const botId = url.searchParams.get("botId");
   const kind = url.searchParams.get("kind");
   const target = url.searchParams.get("target");
@@ -146,36 +197,27 @@ export function createAuditBackendContribution(
             { status: 405 },
           );
         }
-        const query = decodeAuditRequestQueryV1(url);
-        const page = await host.readAudit(userId, query);
-        // The page is what this route produces; `as=document` asks for the
-        // same entries as a `ViewDocument`. Nothing else about the route
-        // changes, so a client that wants the page keeps getting one.
-        if (url.searchParams.get("as") !== "document") {
-          return Response.json(page);
+        const as = url.searchParams.get("as");
+        if (as !== null && as !== "activity") {
+          throw new AuditDecodeError("audit query.as is invalid");
         }
-        const botNames =
-          query.botId === undefined
-            ? Object.fromEntries(
-                (await host.listBots(userId)).bots.map((bot) => [
-                  bot.botId,
-                  bot.initialName,
-                ]),
-              )
-            : undefined;
+        if (as === null) {
+          return Response.json(
+            await host.readAudit(userId, decodeAuditRequestQueryV1(url)),
+          );
+        }
+        const query = decodeActivityRequestQueryV1(url);
+        const [page, directory] = await Promise.all([
+          host.readActivity(userId, query),
+          host.listBots(userId),
+        ]);
         return Response.json(
-          auditDocumentV1({
-            schemaVersion: 1,
-            botId: query.botId ?? "",
-            ...(botNames === undefined ? {} : { botNames }),
-            entries: page.entries,
-            total: page.total,
-            indexState: page.indexState,
-            ...(query.kind === undefined ? {} : { kind: query.kind }),
-            ...(page.page.nextCursor === undefined
-              ? {}
-              : { nextCursor: page.page.nextCursor }),
-          }),
+          activityPageV1(
+            page,
+            Object.fromEntries(
+              directory.bots.map((bot) => [bot.botId, bot.initialName]),
+            ),
+          ),
         );
       } catch (error) {
         return errorResponse(error);

@@ -134,8 +134,10 @@ import {
   type SearchQueryV1,
 } from "@frockbot/app/search";
 import {
+  decodeAuditActivityPageV1,
   decodeAuditRebuildReceiptV1,
   decodeClientAuditPageV1,
+  type AuditActivityQueryV1,
   type AuditQueryV1,
 } from "@frockbot/app/audit";
 import {
@@ -1025,6 +1027,7 @@ function userMachineStub(env: Env, userId: string): UserMachineRpc {
  */
 interface UserAuditRpc {
   readAuditEntries(input: unknown): Promise<unknown>;
+  readAuditActivity(input: unknown): Promise<unknown>;
   rebuildAuditIndex(input: unknown): Promise<unknown>;
 }
 
@@ -2135,6 +2138,19 @@ const createGatewayBackendContributions = (env: Env) =>
             ...(query.botId === undefined ? {} : { botId: query.botId }),
             ...(query.kind === undefined ? {} : { kind: query.kind }),
             ...(query.target === undefined ? {} : { target: query.target }),
+            ...(query.before === undefined ? {} : { before: query.before }),
+            ...(query.limit === undefined ? {} : { limit: query.limit }),
+          }),
+        ),
+      ),
+    readActivity: async (userId: string, query: AuditActivityQueryV1) =>
+      decodeAuditActivityPageV1(
+        rpcJsonSnapshotV1(
+          await userAuditStub(env, userId).readAuditActivity({
+            schemaVersion: 1,
+            userId,
+            ...(query.botId === undefined ? {} : { botId: query.botId }),
+            ...(query.filter === undefined ? {} : { filter: query.filter }),
             ...(query.before === undefined ? {} : { before: query.before }),
             ...(query.limit === undefined ? {} : { limit: query.limit }),
           }),

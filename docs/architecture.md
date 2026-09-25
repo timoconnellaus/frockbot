@@ -755,8 +755,8 @@ action input that carries them to the credential route, after which
 `ViewController` drops them. Nothing about a credential is ever in a document
 the server sent.
 
-**Routines and Audit, the same way again.** Two more projections in that
-family, both reached with `?as=document`:
+**Routines, the same way again.** One more projection in that family, reached
+with `?as=document`:
 
 - `app/routines/routines-document.ts` over a `RoutinesFrame`
   (`GET /api/bots/:botId/routines`, the one route in that group that takes a
@@ -769,20 +769,29 @@ family, both reached with `?as=document`:
   no route owns, which is a completion's run log and the detail a row opens.
   Conversation authors a Routine; the list is not a form
   ([ADR 0033](adr/0033-conversation-authored-routines.md)).
-- `app/audit/audit-document.ts` over an `AuditFrame` (`GET /api/audit`). Four
-  kinds: the filter and the page, which the host owns because the host owns
-  the read; the rebuild command; and opening an audited effect's Turn on the
-  Work view. The projection infers nothing — an effect whose outcome the
-  durable log does not know is drawn as "Outcome unknown" in the same place a
-  success would be.
 
-Neither frame carries a revision the way `SettingsFrame` does, and neither
-command fences on one: a Routine is its own durable record, so an unrelated
-edit must not make a Routine write conflict, and an audit page is a projection
-of facts the Bots already hold. Each projection derives a revision from its own
-bytes instead — FNV-1a over what the document says — so `ViewSurfacePage`
+The frame carries no revision the way `SettingsFrame` does, and no command
+fences on one: a Routine is its own durable record, so an unrelated edit must
+not make a Routine write conflict. The projection derives a revision from its
+own bytes instead — FNV-1a over what the document says — so `ViewSurfacePage`
 adopts a fresh `ViewController` exactly when what it is showing has changed and
 keeps the one it has when nothing did.
+
+**Activity is not a `ViewDocument`.** The audit table is read as the Activity
+page (`GET /api/audit?as=activity`, the `ActivityPage` wire schema): one row
+per Turn's effects of one kind in one place, grouped in SQL by the User Durable
+Object (`AuditStoreV1.activity`) and paged by group, so "Show earlier" never
+splits a Turn. `app/audit/activity.ts` writes each row's sentence, its place
+tag, whether it only read, whether an Approval authorized it, and any outcome
+other than success — "Outcome unknown" included, never dropped. The page needs
+avatars, tags, muted rows and days in the person's own time zone, which the
+plugin view vocabulary does not carry and should not grow for one first-party
+page; so the host draws typed rows and does only what the server cannot, which
+is put each row under its local day. Four filters are unions of kinds
+(`AUDIT_ACTIVITY_FILTERS_V1`); the table has no read-versus-write field, so
+none is a judgement about the effect. `POST /api/audit/rebuild` has no control
+in the app: it re-projects the table after the projection changes and clears a
+truncation marker, acting as the account.
 
 The last list `ViewDocument` for Routines, Plugins, Machines and Settings is
 kept the way a conversation page is (`lib/client/document_cache.dart`):

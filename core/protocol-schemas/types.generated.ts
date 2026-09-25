@@ -965,6 +965,23 @@ export type AuditPage = {
   total: number;
   indexState: "ready" | "rebuilding" | "truncated";
 };
+export type ActivityRow = {
+  botId: BotId;
+  botName: string;
+  at: Instant;
+  text: string;
+  place: string;
+  approved?: boolean;
+  quiet?: boolean;
+  note?: string;
+  runId?: string;
+};
+export type ActivityPage = {
+  schemaVersion: 1;
+  rows: Array<ActivityRow>;
+  nextCursor?: string;
+  indexState: "ready" | "rebuilding" | "truncated";
+};
 export type SetupHistory = {
   schemaVersion: 1;
   botId: BotId;
@@ -1265,6 +1282,8 @@ export interface ProtocolTypes {
   MarkReadReceipt: MarkReadReceipt;
   BotLifecycleDirectory: BotLifecycleDirectory;
   AuditPage: AuditPage;
+  ActivityRow: ActivityRow;
+  ActivityPage: ActivityPage;
   SetupHistory: SetupHistory;
   MessageCursor: MessageCursor;
   GroupId: GroupId;
