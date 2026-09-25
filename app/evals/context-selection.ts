@@ -3,6 +3,7 @@ import {
   judgeMemoryRecallV1,
   MEMORY_RECALL_KEEP_MIN_V1,
 } from "../supervision/memory-recall.js";
+import { routineAttributionV1 } from "../routines/inbox.js";
 import { createJevRoutineReportJudgeV1 } from "../supervision/routine-report.js";
 import {
   nominateSkillsV1,
@@ -44,8 +45,9 @@ export async function runContextCaseV1(
   fixture: ContextFixtureV1,
 ): Promise<{ passed: boolean; expected: string; actual: string }> {
   if (fixture.kind === "routine") {
+    // Delivery names the Routine by its wake title, so the eval does too.
     const verdict = await createJevRoutineReportJudgeV1(client)({
-      routine: fixture.routine,
+      routine: routineAttributionV1(fixture.routine),
       report: fixture.report,
     });
     const actual = !verdict

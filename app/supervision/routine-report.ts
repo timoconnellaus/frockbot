@@ -21,7 +21,7 @@ export const ROUTINE_REPORT_QUIET_BELOW_V1 = 0.8;
 export const ROUTINE_REPORT_TIMEOUT_MS_V1 = 5_000;
 
 export interface RoutineReportV1 {
-  /** The Routine's name, as the person set it up. */
+  /** The Routine's wake title, `Automation: <name>`. */
   readonly routine: string;
   /** What the firing handed off. */
   readonly report: string;
