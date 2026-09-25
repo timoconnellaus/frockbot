@@ -1,0 +1,23 @@
+{
+  "name": "@frockbot/device-host",
+  "version": "0.0.1",
+  "private": true,
+  "type": "module",
+  "knip": {
+    "entry": [
+      "src/runtime.ts",
+      "src/**/*.test.ts"
+    ],
+    "project": [
+      "src/**/*.ts"
+    ]
+  },
+  "scripts": {
+    "test": "bun test src",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@types/bun": "1.4.2",
+    "@types/node": "26.6.1"
+  }
+}

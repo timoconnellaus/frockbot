@@ -142,6 +142,14 @@
         "wrangler": "4.129.0",
       },
     },
+    "apps/device-host": {
+      "name": "@frockbot/device-host",
+      "version": "0.0.1",
+      "devDependencies": {
+        "@types/bun": "1.4.2",
+        "@types/node": "26.6.1",
+      },
+    },
     "apps/marketing": {
       "name": "@frockbot/marketing",
       "version": "0.0.1",
@@ -441,6 +449,8 @@
     "@frockbot/computer-host": ["@frockbot/computer-host@workspace:apps/computer-host"],
 
     "@frockbot/core": ["@frockbot/core@workspace:core"],
+
+    "@frockbot/device-host": ["@frockbot/device-host@workspace:apps/device-host"],
 
     "@frockbot/frock-compose": ["@frockbot/frock-compose@workspace:frock-compose"],
 
