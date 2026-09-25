@@ -314,6 +314,10 @@ describe("foundation application", () => {
         Promise.reject(new Error("not used while composing")),
       recordMachineResult: () =>
         Promise.reject(new Error("not used while composing")),
+      loadMachineModule: () =>
+        Promise.reject(new Error("not used while composing")),
+      recordMachineModuleReports: () =>
+        Promise.reject(new Error("not used while composing")),
       listMachines: () => Promise.reject(new Error("not used while composing")),
       revokeMachine: () =>
         Promise.reject(new Error("not used while composing")),

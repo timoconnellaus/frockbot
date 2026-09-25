@@ -5,8 +5,8 @@
 // its own string. One table means the agent cannot dial a path the gateway
 // does not serve, and a test cannot pass against a route nobody registered.
 //
-// `audience` and `publicRoute` are the load-bearing columns. `socket`, `claim`
-// and `result` are declared public because they carry a *machine token*, not a
+// `audience` and `publicRoute` are the load-bearing columns. `socket`, `claim`,
+// `result`, `module` and `moduleReports` are declared public because they carry a *machine token*, not a
 // session: they run at the seam in `apps/cloudflare/src/gateway.ts` that
 // executes before session authentication, which `plugin-routines`' webhook
 // already uses. Public here means "no session", never "no authority" — the
@@ -18,11 +18,19 @@ import { MACHINE_LIMITS_V1, MachineDecodeError } from "./protocol.js";
 export const MACHINE_ROUTE_PREFIX_V1 = "/api/machines";
 
 export type MachineRouteNameV1 =
-  "pair" | "enroll" | "socket" | "claim" | "result" | "list" | "revoke";
+  | "pair"
+  | "enroll"
+  | "socket"
+  | "claim"
+  | "result"
+  | "module"
+  | "moduleReports"
+  | "list"
+  | "revoke";
 
 export interface MachineRouteV1 {
   method: "GET" | "POST";
-  /** The template the gateway registers, with `:machineId` / `:commandId`. */
+  /** The template the gateway registers, with its `:parameters`. */
   template: string;
   /** Who presents at this route. */
   audience: "browser" | "machine";
@@ -63,6 +71,18 @@ export const MACHINE_ROUTES_V1: Readonly<
     audience: "machine",
     publicRoute: true,
   },
+  module: {
+    method: "GET",
+    template: `${MACHINE_ROUTE_PREFIX_V1}/:machineId/modules/:contentHash`,
+    audience: "machine",
+    publicRoute: true,
+  },
+  moduleReports: {
+    method: "POST",
+    template: `${MACHINE_ROUTE_PREFIX_V1}/:machineId/module-reports`,
+    audience: "machine",
+    publicRoute: true,
+  },
   list: {
     method: "GET",
     template: MACHINE_ROUTE_PREFIX_V1,
@@ -84,6 +104,7 @@ export const MACHINE_ROUTE_NAMES_V1 = Object.keys(
 export interface MachineRouteParamsV1 {
   machineId?: string;
   commandId?: string;
+  contentHash?: string;
 }
 
 const SEGMENT_SAFE = /^[A-Za-z0-9][A-Za-z0-9._:@-]*$/;
@@ -105,8 +126,8 @@ export function machineRoutePathV1(
     throw new MachineDecodeError(`unknown machine route: ${String(name)}`);
   }
   return route.template.replace(
-    /:(machineId|commandId)/g,
-    (_match, key: "machineId" | "commandId") => {
+    /:(machineId|commandId|contentHash)/g,
+    (_match, key: "machineId" | "commandId" | "contentHash") => {
       const value = params[key];
       if (
         typeof value !== "string" ||

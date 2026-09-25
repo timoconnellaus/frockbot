@@ -170,7 +170,9 @@ grants to the app that neither boundary can limit.
 
 The Device's sync ([ADR 0035](0035-device-bridge.md)) carries the modules the
 account runs: `(pluginId, moduleId, artifact hash, generation)` for each
-installed Plugin enabled on at least one Bot. The desktop fetches each
+Plugin installed on the account, in its active Composition generation. A
+Bot's switch is not consulted, because it lives in that Bot's Durable Object
+and the User Durable Object that holds the socket never reads it. The desktop fetches each
 artifact, checks its hash, and runs it while the app is open. A new generation
 replaces the running module; a module never updates itself. A crashing module
 restarts with backoff.

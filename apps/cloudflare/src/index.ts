@@ -11,7 +11,7 @@ import type {
   AuthIdentityCandidateV1,
   AuthPackageIdentityStoreV1,
 } from "@frockbot/core/contracts";
-import { pluginPageKeyV1 } from "@frockbot/core/contracts";
+import { pluginModuleKeyV1, pluginPageKeyV1 } from "@frockbot/core/contracts";
 import type { ClientSkillCatalogV1 } from "@frockbot/app/shell/skill-protocol";
 import { GroupChat, GROUP_CHANNEL_INTERNAL_PATH } from "./group-chat.js";
 import {
@@ -125,6 +125,7 @@ import {
   MachineTokenError,
   decodeMachineEnrollmentReceiptV1,
   decodeMachineListViewV1,
+  decodeMachineModuleReportsReceiptV1,
   decodeMachinePairingOfferV1,
   decodeMachineResultReceiptV1,
 } from "@frockbot/core/machine-protocol";
@@ -958,6 +959,8 @@ interface UserMachineRpc {
   enrollMachine(input: unknown): Promise<unknown>;
   claimMachineCommand(input: unknown): Promise<unknown>;
   recordMachineResult(input: unknown): Promise<unknown>;
+  readMachineModule(input: unknown): Promise<{ found: boolean }>;
+  recordMachineModuleReports(input: unknown): Promise<unknown>;
   takeMachineDeliveries(input: unknown): Promise<unknown>;
   listMachines(input: unknown): Promise<unknown>;
   revokeMachine(input: unknown): Promise<unknown>;
@@ -2290,6 +2293,34 @@ const createGatewayBackendContributions = (env: Env) =>
       await deliverMachineResults(env, userId);
       return receipt;
     },
+    loadMachineModule: async (userId, call) => {
+      const { found } = await userMachineStub(env, userId).readMachineModule({
+        schemaVersion: 1,
+        userId,
+        machineId: call.machineId,
+        contentHash: call.contentHash,
+        claims: call.claims,
+        tokenDigest: call.tokenDigest,
+      });
+      if (!found) return undefined;
+      const object = await env.APPLICATION_ARTIFACTS.get(
+        pluginModuleKeyV1(call.contentHash),
+      );
+      return object ? await object.arrayBuffer() : undefined;
+    },
+    recordMachineModuleReports: async (userId, call) =>
+      decodeMachineModuleReportsReceiptV1(
+        rpcJsonSnapshotV1(
+          await userMachineStub(env, userId).recordMachineModuleReports({
+            schemaVersion: 1,
+            userId,
+            machineId: call.machineId,
+            claims: call.claims,
+            tokenDigest: call.tokenDigest,
+            reports: call.reports,
+          }),
+        ),
+      ),
     listMachines: async (userId) =>
       decodeMachineListViewV1(
         rpcJsonSnapshotV1(

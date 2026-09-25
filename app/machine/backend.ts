@@ -1,4 +1,4 @@
-// The registered-machine gateway Contribution: seven routes, on two doors.
+// The registered-machine gateway Contribution: nine routes, on two doors.
 //
 // Three are ordinary authenticated routes beside `/api/settings` — the browser
 // asks for a pairing code, reads the registry, and revokes a machine:
@@ -7,15 +7,17 @@
 //   GET  /api/machines               the `ListMachines` projection
 //   POST /api/machines/:id/revoke    kill every token this machine holds
 //
-// Four are not authenticated at all, because the caller is a program on
+// Six are not authenticated at all, because the caller is a program on
 // somebody's laptop and has no session:
 //
 //   POST /api/machines/enroll                             bearer: pairing code
 //   GET  /api/machines/:id/socket                         bearer: machine token
 //   POST /api/machines/:id/commands/:commandId/claim      bearer: machine token
 //   POST /api/machines/:id/commands/:commandId/result     bearer: machine token
+//   GET  /api/machines/:id/modules/:contentHash           bearer: machine token
+//   POST /api/machines/:id/module-reports                 bearer: machine token
 //
-// Those four are `publicRoute`s: they run at the seam in
+// Those six are `publicRoute`s: they run at the seam in
 // `apps/cloudflare/src/gateway.ts` that executes *before* session
 // authentication, exactly where `plugin-routines`' webhook runs. Public means
 // "no session", never "no authority" — and the order of the checks is the
@@ -45,6 +47,8 @@ import {
   decodeMachineEnrollmentReceiptV1,
   decodeMachineIdV1,
   decodeMachineListViewV1,
+  decodeMachineModuleReportsReceiptV1,
+  decodeMachineModuleReportsV1,
   decodeMachinePairingOfferV1,
   decodeMachinePairingRequestV1,
   decodeMachineResultReceiptV1,
@@ -54,10 +58,13 @@ import {
   type MachineClaimReceiptV1,
   type MachineEnrollmentReceiptV1,
   type MachineListViewV1,
+  type MachineModuleReportsReceiptV1,
+  type MachineModuleReportsV1,
   type MachinePairingOfferV1,
   type MachineResultReceiptV1,
   type MachineTokenClaimsV1,
 } from "@frockbot/core/machine-protocol";
+import { sha256HexBytesV1 } from "@frockbot/core/crypto";
 import { verifyMachinePairingCodeV1 } from "./pairing.js";
 import { machinesDocumentV1 } from "./machines-document.js";
 import { defineGatewayContribution } from "@frockbot/core/contracts/contributions";
@@ -106,6 +113,18 @@ export interface MachineGatewayHostV1 {
     userId: string,
     call: MachineCallV1 & { commandId: string; result: unknown },
   ): Promise<MachineResultReceiptV1>;
+  /**
+   * A device module's bytes, or undefined when the account's active
+   * generation carries no module with that hash.
+   */
+  loadMachineModule(
+    userId: string,
+    call: MachineCallV1 & { contentHash: string },
+  ): Promise<ArrayBuffer | undefined>;
+  recordMachineModuleReports(
+    userId: string,
+    call: MachineCallV1 & { reports: MachineModuleReportsV1 },
+  ): Promise<MachineModuleReportsReceiptV1>;
   listMachines(userId: string): Promise<MachineListViewV1>;
   revokeMachine(userId: string, machineId: string): Promise<MachineListViewV1>;
 }
@@ -135,6 +154,13 @@ const CLAIM = new RegExp(
 const RESULT = new RegExp(
   `^${MACHINE_ROUTE_PREFIX_V1}/([^/]+)/commands/([^/]+)/result$`,
 );
+const MODULE = new RegExp(
+  `^${MACHINE_ROUTE_PREFIX_V1}/([^/]+)/modules/([^/]+)$`,
+);
+const MODULE_REPORTS = new RegExp(
+  `^${MACHINE_ROUTE_PREFIX_V1}/([^/]+)/module-reports$`,
+);
+const CONTENT_HASH = /^[0-9a-f]{64}$/;
 
 function jsonError(status: number, message: string): Response {
   return Response.json({ error: message }, { status });
@@ -295,7 +321,11 @@ export function createMachineBackendContribution(
     const socket = SOCKET.exec(url.pathname);
     const claim = CLAIM.exec(url.pathname);
     const result = RESULT.exec(url.pathname);
-    if (!enroll && !socket && !claim && !result) return undefined;
+    const module = MODULE.exec(url.pathname);
+    const moduleReports = MODULE_REPORTS.exec(url.pathname);
+    if (!enroll && !socket && !claim && !result && !module && !moduleReports) {
+      return undefined;
+    }
     try {
       const secret = secretOrRefuse();
       if (enroll) {
@@ -335,6 +365,51 @@ export function createMachineBackendContribution(
           return jsonError(426, "WebSocket upgrade required");
         }
         return await host.openMachineSocket(call.claims.u, call, request);
+      }
+      if (module) {
+        if (request.method !== "GET") {
+          return jsonError(405, "method not allowed");
+        }
+        const call = await machineCall(secret, request, module[1]!);
+        const contentHash = module[2]!;
+        const bytes = CONTENT_HASH.test(contentHash)
+          ? await host.loadMachineModule(call.claims.u, {
+              ...call,
+              contentHash,
+            })
+          : undefined;
+        if (bytes === undefined) {
+          return jsonError(404, "module was not found");
+        }
+        // The hash is the whole promise this route makes, and the desktop
+        // checks it again; a stored object that no longer matches is refused
+        // here rather than handed to a process to run.
+        if ((await sha256HexBytesV1(new Uint8Array(bytes))) !== contentHash) {
+          return jsonError(502, "module failed verification");
+        }
+        return new Response(bytes, {
+          headers: {
+            "content-type": "application/javascript",
+            "cache-control": "private, max-age=31536000, immutable",
+            "x-content-type-options": "nosniff",
+          },
+        });
+      }
+      if (moduleReports) {
+        if (request.method !== "POST") {
+          return jsonError(405, "method not allowed");
+        }
+        const call = await machineCall(secret, request, moduleReports[1]!);
+        return Response.json(
+          decodeMachineModuleReportsReceiptV1(
+            await host.recordMachineModuleReports(call.claims.u, {
+              ...call,
+              reports: decodeMachineModuleReportsV1(
+                await readJsonBody(request),
+              ),
+            }),
+          ),
+        );
       }
       const matched = (claim ?? result)!;
       if (request.method !== "POST") {

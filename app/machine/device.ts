@@ -44,6 +44,7 @@ import {
   type MachineCapabilityV1,
   type MachineCommandResultV1,
   type MachineCommandV1,
+  type MachineModuleV1,
   type MachinePlatformV1,
 } from "@frockbot/core/machine-protocol";
 
@@ -459,6 +460,12 @@ export interface MachineDeviceAgentOptionsV1 {
   random?(): number;
   /** Called whenever the status changes, so a UI can render it. */
   onStatus?(status: MachineDeviceAgentStatusV1): void;
+  /**
+   * Called with the whole list of device modules this machine should run
+   * (ADR 0037), on every connect and whenever the account's active
+   * generation changes. Each list replaces the last; the agent keeps none.
+   */
+  onModules?(modules: MachineModuleV1[]): void;
 }
 
 export class MachineDeviceAgentError extends Error {
@@ -788,6 +795,10 @@ export class MachineDeviceAgentV1 {
         if (event.data === "pong") continue;
         const frame = decodeMachineSocketFrameV1(JSON.parse(event.data));
         cycle.frames += 1;
+        if (frame.type === "modules") {
+          this.options.onModules?.(frame.modules);
+          continue;
+        }
         cycle.delivered += frame.commands.length;
         for (const command of frame.commands) {
           if (signal.aborted) break;

@@ -18,6 +18,7 @@ import {
   decodeMachineClaimReceiptV1,
   decodeMachineEnrollmentReceiptV1,
   decodeMachineListViewV1,
+  decodeMachineModuleReportsReceiptV1,
   decodeMachinePairingOfferV1,
   decodeMachineResultReceiptV1,
   decodeMachineSocketFrameV1,
@@ -27,6 +28,9 @@ import {
   type MachineCommandResultV1,
   type MachineCommandV1,
   type MachineListViewV1,
+  type MachineModuleReportV1,
+  type MachineModuleReportsReceiptV1,
+  type MachineModuleV1,
   type MachinePairingOfferV1,
   type MachinePlatformV1,
   type MachineResultReceiptV1,
@@ -105,7 +109,7 @@ export function createMemoryMachineSocketsV1(): MemoryMachineSocketsV1 {
       return client;
     },
     push(machineId, frame) {
-      if (frame.commands.length === 0) return;
+      if (frame.type === "commands" && frame.commands.length === 0) return;
       for (const entry of sockets(machineId)) {
         entry.emit("message", { data: JSON.stringify(frame) });
       }
@@ -269,6 +273,7 @@ export class MachineAgentDriverV1 {
       this.options.origin,
     );
     url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    this.held.length = 0;
     this.socket = await this.options.webSocket(url.toString(), token);
   }
 
@@ -278,11 +283,23 @@ export class MachineAgentDriverV1 {
     this.socket = undefined;
   }
 
+  /** Frames read past while waiting for one of another type. */
+  private readonly held: MachineSocketFrameV1[] = [];
+
   /**
-   * The commands in the next frame the backend sends. Fails on a closed
-   * socket, and on a frame that never comes, rather than hanging the test.
+   * The next frame of `type` the backend sends. Fails on a closed socket, and
+   * on a frame that never comes, rather than hanging the test.
    */
-  async next(): Promise<MachineCommandV1[]> {
+  private async nextFrame<T extends MachineSocketFrameV1["type"]>(
+    type: T,
+  ): Promise<Extract<MachineSocketFrameV1, { type: T }>> {
+    const heldAt = this.held.findIndex((frame) => frame.type === type);
+    if (heldAt !== -1) {
+      return this.held.splice(heldAt, 1)[0] as Extract<
+        MachineSocketFrameV1,
+        { type: T }
+      >;
+    }
     if (!this.socket) await this.connect();
     const socket = this.socket!;
     const timeoutMs = this.options.frameTimeoutMs ?? 5_000;
@@ -309,9 +326,45 @@ export class MachineAgentDriverV1 {
       }
       if (event.data === "pong") continue;
       const frame = decodeMachineSocketFrameV1(JSON.parse(event.data));
-      this.delivered.push(...frame.commands);
-      return frame.commands;
+      if (frame.type === type) {
+        return frame as Extract<MachineSocketFrameV1, { type: T }>;
+      }
+      this.held.push(frame);
     }
+  }
+
+  /** The commands in the next commands frame the backend sends. */
+  async next(): Promise<MachineCommandV1[]> {
+    const frame = await this.nextFrame("commands");
+    this.delivered.push(...frame.commands);
+    return frame.commands;
+  }
+
+  /** The module list in the next modules frame the backend sends. */
+  async nextModules(): Promise<MachineModuleV1[]> {
+    return (await this.nextFrame("modules")).modules;
+  }
+
+  /** One module's artifact, as the desktop fetches it. */
+  async fetchModule(contentHash: string): Promise<Response> {
+    const { machineId, token } = this.identity();
+    return this.options.fetch(
+      `${this.options.origin}${machineRoutePathV1("module", { machineId, contentHash })}`,
+      { headers: { authorization: `Bearer ${token}` } },
+    );
+  }
+
+  async reportModules(
+    reports: MachineModuleReportV1[],
+  ): Promise<MachineModuleReportsReceiptV1> {
+    const { machineId } = this.identity();
+    return decodeMachineModuleReportsReceiptV1(
+      await this.call(machineRoutePathV1("moduleReports", { machineId }), {
+        method: "POST",
+        token: this.token!,
+        body: JSON.stringify({ reports }),
+      }),
+    );
   }
 
   async claim(commandId: string): Promise<MachineClaimReceiptV1> {

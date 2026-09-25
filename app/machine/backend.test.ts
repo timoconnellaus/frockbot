@@ -22,6 +22,7 @@ import {
   type MemoryMachineSocketsV1,
 } from "./testing.ts";
 import type { MachineSocketV1 } from "./device.ts";
+import { sha256HexTextV1 } from "@frockbot/core/crypto";
 
 const SECRET = "machine-route-secret-0123456789abcdef";
 const USER = "route-user";
@@ -33,6 +34,9 @@ let sockets: MemoryMachineSocketsV1;
 /** The socket the host accepted, waiting for the agent's seam to take it. */
 let accepted: MachineSocketV1 | undefined;
 let now = Date.parse("2026-09-01T00:00:00.000Z");
+/** The module artifacts the active generation carries, by the hash stored. */
+let modules: Map<string, string>;
+let moduleReports: unknown[];
 
 /** One request through whichever door matches, as the gateway routes it. */
 async function call(
@@ -109,6 +113,8 @@ beforeEach(() => {
   const storage = createMemoryMachineStorageV1();
   sockets = createMemoryMachineSocketsV1();
   accepted = undefined;
+  modules = new Map();
+  moduleReports = [];
   authority = new MachineUserBackendContribution({
     storage,
     readSecret: () => SECRET,
@@ -148,6 +154,30 @@ beforeEach(() => {
         callInput.commandId,
         callInput.result,
       ),
+    loadMachineModule: async (_userId, callInput) => {
+      await authority.authorize(
+        callInput.claims,
+        callInput.tokenDigest,
+        callInput.machineId,
+      );
+      const text = modules.get(callInput.contentHash);
+      return text === undefined
+        ? undefined
+        : (new TextEncoder().encode(text).buffer as ArrayBuffer);
+    },
+    recordMachineModuleReports: async (_userId, callInput) => {
+      await authority.authorize(
+        callInput.claims,
+        callInput.tokenDigest,
+        callInput.machineId,
+      );
+      moduleReports.push(...callInput.reports.reports);
+      return {
+        schemaVersion: 1,
+        recorded: callInput.reports.reports.length,
+        dropped: 0,
+      };
+    },
     listMachines: () => authority.list(),
     revokeMachine: (_userId, machineId) => authority.revoke(machineId),
   });
@@ -358,6 +388,74 @@ describe("the machine door", () => {
     expect(await driver.next()).toEqual([]);
   });
 
+  test("a module's bytes are served only for a hash the account carries, and only as those bytes", async () => {
+    const driver = agent();
+    await driver.enroll((await pair()).code);
+    const code = "export default {};\n";
+    const hash = await sha256HexTextV1(code);
+    modules.set(hash, code);
+    const served = await driver.fetchModule(hash);
+    expect(served.status).toBe(200);
+    expect(served.headers.get("content-type")).toBe("application/javascript");
+    expect(served.headers.get("cache-control")).toBe(
+      "private, max-age=31536000, immutable",
+    );
+    expect(await served.text()).toBe(code);
+
+    expect((await driver.fetchModule("c".repeat(64))).status).toBe(404);
+    expect(
+      (
+        await call(
+          "GET",
+          `/api/machines/${driver.machineId!}/modules/NOT-A-HASH`,
+          { token: driver.token! },
+        )
+      ).status,
+    ).toBe(404);
+    const path = machineRoutePathV1("module", {
+      machineId: driver.machineId!,
+      contentHash: hash,
+    });
+    expect((await call("GET", path)).status).toBe(401);
+    expect((await call("POST", path, { token: driver.token! })).status).toBe(
+      405,
+    );
+
+    modules.set(hash, "export default { tampered: true };\n");
+    expect((await driver.fetchModule(hash)).status).toBe(502);
+  });
+
+  test("module reports are decoded at the door and handed on", async () => {
+    const driver = agent();
+    await driver.enroll((await pair()).code);
+    const report = {
+      pluginId: "beeper",
+      moduleId: "bridge",
+      kind: "state" as const,
+      state: "running" as const,
+    };
+    expect(await driver.reportModules([report])).toEqual({
+      schemaVersion: 1,
+      recorded: 1,
+      dropped: 0,
+    });
+    expect(moduleReports).toEqual([report]);
+    const path = machineRoutePathV1("moduleReports", {
+      machineId: driver.machineId!,
+    });
+    expect(
+      (
+        await call("POST", path, {
+          token: driver.token!,
+          body: { reports: [{ ...report, state: "paused" }] },
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (await call("POST", path, { body: { reports: [report] } })).status,
+    ).toBe(401);
+  });
+
   test("a revoked machine's token fails every machine route", async () => {
     const offer = await pair();
     const driver = agent();
@@ -405,6 +503,12 @@ describe("the machine door", () => {
         throw new Error("unreachable");
       },
       recordMachineResult: () => {
+        throw new Error("unreachable");
+      },
+      loadMachineModule: () => {
+        throw new Error("unreachable");
+      },
+      recordMachineModuleReports: () => {
         throw new Error("unreachable");
       },
       listMachines: () => {

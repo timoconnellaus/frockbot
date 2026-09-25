@@ -450,6 +450,22 @@ export function pluginTools(
       },
     }),
     tool({
+      name: "plugin_module_reports",
+      description:
+        "Read what a Plugin's device modules reported from the person's desktops: each module's latest state on each desktop (starting, running, crashed with its output, stopped) and its newest log lines, newest first. A module runs on their computer, not here, so this is the only way to see it fail. Read it after publishing a module, and before you change one they say misbehaves.",
+      inputSchema: {
+        type: "object",
+        properties: { ...PLUGIN_ID_PROPERTY },
+        required: ["pluginId"],
+        additionalProperties: false,
+      },
+      idempotent: true,
+      async answer(input) {
+        const pluginId = requireString(input, "pluginId");
+        return host.plugins.moduleReports({ pluginId });
+      },
+    }),
+    tool({
       name: "plugin_settings",
       description:
         "Read a Plugin's settings for this Bot — the values its plugin.json settingsSchema declares — or write them. Pass `values` to write; omit it to read. Never a secret.",

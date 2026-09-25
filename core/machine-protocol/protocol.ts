@@ -75,6 +75,16 @@ export const MACHINE_LIMITS_V1 = {
   pairingTtlMs: 5 * 60_000,
   /** How long a claim holds a command before the lease may be reclaimed. */
   leaseMs: 120_000,
+  /** Device modules one frame may list: every member's, at four each. */
+  modules: 64,
+  /** Entries in one of a module's declared lists. */
+  moduleDeclarations: 32,
+  /** The largest module artifact a frame may name. */
+  moduleBytes: 32 * 1_024 * 1_024,
+  /** Reports one post may carry. */
+  moduleReports: 50,
+  /** A report's text or a crash's detail. */
+  moduleReportText: 2_000,
 } as const;
 
 /** Commands one machine may hold queued at once. */
@@ -760,22 +770,128 @@ export function decodeMachineCommandV1(
   };
 }
 
+/** The close code a revoked machine's socket is ended with. */
+export const MACHINE_SOCKET_REVOKED_CODE_V1 = 4001;
+
+/**
+ * One device module the desktop should run (ADR 0037): a member's stored
+ * artifact joined with what its descriptor declares, so the desktop builds
+ * both boundaries from the same frame that names the bytes.
+ */
+export interface MachineModuleV1 {
+  pluginId: string;
+  moduleId: string;
+  /** sha-256 hex of the artifact the module route serves. */
+  contentHash: string;
+  size: number;
+  read: string[];
+  net: string[];
+  appleEvents: string[];
+  calls: string[];
+  events: string[];
+}
+
+const PLUGIN_ID = /^[a-z][a-z0-9-]{0,63}$/;
+const MODULE_ID = /^[a-z][a-z0-9-]{0,31}$/;
+const CONTENT_HASH = /^[0-9a-f]{64}$/;
+
+function pattern(input: unknown, rule: RegExp, label: string): string {
+  const value = boundedString(input, MACHINE_LIMITS_V1.identifier, label);
+  if (!rule.test(value)) fail(`${label} is invalid`);
+  return value;
+}
+
+/** A declared list: the descriptor decoded each entry, this bounds the wire. */
+function declared(input: unknown, label: string): string[] {
+  if (!Array.isArray(input)) fail(`${label} must be an array`);
+  const values = input as unknown[];
+  if (values.length > MACHINE_LIMITS_V1.moduleDeclarations) {
+    throw new MachineDecodeError(
+      `${label} exceeds ${MACHINE_LIMITS_V1.moduleDeclarations} entries`,
+      "limit-exceeded",
+    );
+  }
+  return values.map((entry, index) => {
+    const value = boundedString(entry, 512, `${label} ${index}`);
+    if (CONTROL_CHARACTERS.test(value)) {
+      fail(`${label} ${index} must not contain control characters`);
+    }
+    return value;
+  });
+}
+
+export function decodeMachineModuleV1(
+  input: unknown,
+  label = "machine module",
+): MachineModuleV1 {
+  const value = object(input, label);
+  exactly(
+    value,
+    [
+      "pluginId",
+      "moduleId",
+      "contentHash",
+      "size",
+      "read",
+      "net",
+      "appleEvents",
+      "calls",
+      "events",
+    ],
+    label,
+  );
+  return {
+    pluginId: pattern(value.pluginId, PLUGIN_ID, `${label} pluginId`),
+    moduleId: pattern(value.moduleId, MODULE_ID, `${label} moduleId`),
+    contentHash: pattern(
+      value.contentHash,
+      CONTENT_HASH,
+      `${label} contentHash`,
+    ),
+    size: boundedInteger(
+      value.size,
+      0,
+      MACHINE_LIMITS_V1.moduleBytes,
+      `${label} size`,
+    ),
+    read: declared(value.read, `${label} read`),
+    net: declared(value.net, `${label} net`),
+    appleEvents: declared(value.appleEvents, `${label} appleEvents`),
+    calls: declared(value.calls, `${label} calls`),
+    events: declared(value.events, `${label} events`),
+  };
+}
+
 /**
  * A frame the User Durable Object sends down a machine's socket.
  *
  * The channel is server-push only, so this is the one direction that carries
  * frames. `commands` is sent on connect with everything still waiting, and
  * after each dispatch or lease lapse with what became claimable. A command may
- * arrive twice; the claim is what stops it running twice. `serverTime` is the
- * backend's clock, since the laptop's may have been asleep.
+ * arrive twice; the claim is what stops it running twice. `modules` follows it
+ * on connect and is sent again whenever the account's active Composition
+ * generation changes; each one is the whole list, so the latest replaces what
+ * came before. `serverTime` is the backend's clock, since the laptop's may
+ * have been asleep.
  */
-/** The close code a revoked machine's socket is ended with. */
-export const MACHINE_SOCKET_REVOKED_CODE_V1 = 4001;
+export type MachineSocketFrameV1 =
+  | { type: "commands"; commands: MachineCommandV1[]; serverTime: string }
+  | { type: "modules"; modules: MachineModuleV1[]; serverTime: string };
 
-export interface MachineSocketFrameV1 {
-  type: "commands";
-  commands: MachineCommandV1[];
-  serverTime: string;
+function boundedList(
+  input: unknown,
+  maximum: number,
+  label: string,
+): unknown[] {
+  if (!Array.isArray(input)) fail(`${label} must be an array`);
+  const values = input as unknown[];
+  if (values.length > maximum) {
+    throw new MachineDecodeError(
+      `${label} exceeds ${maximum} entries`,
+      "limit-exceeded",
+    );
+  }
+  return values;
 }
 
 export function decodeMachineSocketFrameV1(
@@ -783,22 +899,158 @@ export function decodeMachineSocketFrameV1(
   label = "machine socket frame",
 ): MachineSocketFrameV1 {
   const value = object(input, label);
+  if (value.type === "modules") {
+    exactly(value, ["type", "modules", "serverTime"], label);
+    return {
+      type: "modules",
+      modules: boundedList(
+        value.modules,
+        MACHINE_LIMITS_V1.modules,
+        `${label} modules`,
+      ).map((module, index) =>
+        decodeMachineModuleV1(module, `${label} module ${index}`),
+      ),
+      serverTime: timestamp(value.serverTime, `${label} serverTime`),
+    };
+  }
   exactly(value, ["type", "commands", "serverTime"], label);
   if (value.type !== "commands") fail(`${label} type is unsupported`);
-  if (!Array.isArray(value.commands))
-    fail(`${label} commands must be an array`);
-  if (value.commands.length > MACHINE_LIMITS_V1.maxQueue) {
-    throw new MachineDecodeError(
-      `${label} exceeds ${MACHINE_LIMITS_V1.maxQueue} commands`,
-      "limit-exceeded",
-    );
-  }
   return {
     type: "commands",
-    commands: value.commands.map((command, index) =>
+    commands: boundedList(
+      value.commands,
+      MACHINE_LIMITS_V1.maxQueue,
+      `${label} commands`,
+    ).map((command, index) =>
       decodeMachineCommandV1(command, `${label} command ${index}`),
     ),
     serverTime: timestamp(value.serverTime, `${label} serverTime`),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Module reports
+// ---------------------------------------------------------------------------
+
+export type MachineModuleStateV1 =
+  "starting" | "running" | "crashed" | "stopped";
+
+export const MACHINE_MODULE_STATES_V1: readonly MachineModuleStateV1[] = [
+  "starting",
+  "running",
+  "crashed",
+  "stopped",
+];
+
+export const MACHINE_MODULE_LOG_LEVELS_V1 = ["log", "error"] as const;
+
+/**
+ * What the desktop's module host says about one module: a state change, or a
+ * line the module logged. The vocabulary is the supervisor's own
+ * (`apps/device-host/src/supervisor.ts`), addressed by Plugin and module.
+ */
+export type MachineModuleReportV1 =
+  | {
+      pluginId: string;
+      moduleId: string;
+      kind: "state";
+      state: MachineModuleStateV1;
+      detail?: string;
+    }
+  | {
+      pluginId: string;
+      moduleId: string;
+      kind: "log";
+      level: (typeof MACHINE_MODULE_LOG_LEVELS_V1)[number];
+      text: string;
+    };
+
+export interface MachineModuleReportsV1 {
+  reports: MachineModuleReportV1[];
+}
+
+function reportText(input: unknown, label: string): string {
+  return boundedString(input, MACHINE_LIMITS_V1.moduleReportText, label);
+}
+
+export function decodeMachineModuleReportV1(
+  input: unknown,
+  label = "module report",
+): MachineModuleReportV1 {
+  const value = object(input, label);
+  const pluginId = pattern(value.pluginId, PLUGIN_ID, `${label} pluginId`);
+  const moduleId = pattern(value.moduleId, MODULE_ID, `${label} moduleId`);
+  if (value.kind === "state") {
+    exactly(value, ["pluginId", "moduleId", "kind", "state", "detail"], label);
+    return {
+      pluginId,
+      moduleId,
+      kind: "state",
+      state: literal(value.state, MACHINE_MODULE_STATES_V1, `${label} state`),
+      ...(value.detail === undefined
+        ? {}
+        : { detail: reportText(value.detail, `${label} detail`) }),
+    };
+  }
+  exactly(value, ["pluginId", "moduleId", "kind", "level", "text"], label);
+  if (value.kind !== "log") fail(`${label} kind must be state or log`);
+  return {
+    pluginId,
+    moduleId,
+    kind: "log",
+    level: literal(value.level, MACHINE_MODULE_LOG_LEVELS_V1, `${label} level`),
+    text: reportText(value.text, `${label} text`),
+  };
+}
+
+export function decodeMachineModuleReportsV1(
+  input: unknown,
+  label = "module reports",
+): MachineModuleReportsV1 {
+  const value = object(input, label);
+  exactly(value, ["reports"], label);
+  return {
+    reports: boundedList(
+      value.reports,
+      MACHINE_LIMITS_V1.moduleReports,
+      `${label} reports`,
+    ).map((report, index) =>
+      decodeMachineModuleReportV1(report, `${label} report ${index}`),
+    ),
+  };
+}
+
+/**
+ * The answer to posted reports. `dropped` counts reports for a Plugin or
+ * module the active generation does not carry: a desktop still running the
+ * last generation says so for a moment, and it is not an error.
+ */
+export interface MachineModuleReportsReceiptV1 {
+  schemaVersion: 1;
+  recorded: number;
+  dropped: number;
+}
+
+export function decodeMachineModuleReportsReceiptV1(
+  input: unknown,
+  label = "module reports receipt",
+): MachineModuleReportsReceiptV1 {
+  const value = object(input, label);
+  exactly(value, ["schemaVersion", "recorded", "dropped"], label);
+  return {
+    schemaVersion: schemaVersion(value, label),
+    recorded: boundedInteger(
+      value.recorded,
+      0,
+      MACHINE_LIMITS_V1.moduleReports,
+      `${label} recorded`,
+    ),
+    dropped: boundedInteger(
+      value.dropped,
+      0,
+      MACHINE_LIMITS_V1.moduleReports,
+      `${label} dropped`,
+    ),
   };
 }
 

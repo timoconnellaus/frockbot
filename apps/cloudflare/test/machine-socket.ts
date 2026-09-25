@@ -5,6 +5,7 @@ import { expect } from "vitest";
 import {
   decodeMachineSocketFrameV1,
   machineRoutePathV1,
+  type MachineSocketFrameV1,
   type MachineTokenClaimsV1,
 } from "@frockbot/core/machine-protocol";
 import {
@@ -56,21 +57,42 @@ export async function openMachineSocket(
   return machineSocketFromWebSocketV1(socket);
 }
 
-/** The command ids in the next frame, failing rather than hanging. */
+/**
+ * The next frame of `type`, failing rather than hanging. Frames of the other
+ * type are read past: a socket is sent its module list after every connect.
+ */
+export async function nextMachineFrameOf<
+  T extends MachineSocketFrameV1["type"],
+>(
+  socket: MachineSocketV1,
+  type: T,
+): Promise<Extract<MachineSocketFrameV1, { type: T }>> {
+  for (;;) {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const event = await Promise.race([
+      socket.receive(),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("no frame within 5s")),
+          5_000,
+        );
+      }),
+    ]).finally(() => clearTimeout(timer));
+    if (event.type !== "message") {
+      throw new Error(`the socket closed: ${event.code} ${event.reason}`);
+    }
+    const frame = decodeMachineSocketFrameV1(JSON.parse(event.data));
+    if (frame.type === type) {
+      return frame as Extract<MachineSocketFrameV1, { type: T }>;
+    }
+  }
+}
+
+/** The command ids in the next commands frame. */
 export async function nextMachineFrame(
   socket: MachineSocketV1,
 ): Promise<string[]> {
-  let timer: ReturnType<typeof setTimeout> | undefined;
-  const event = await Promise.race([
-    socket.receive(),
-    new Promise<never>((_, reject) => {
-      timer = setTimeout(() => reject(new Error("no frame within 5s")), 5_000);
-    }),
-  ]).finally(() => clearTimeout(timer));
-  if (event.type !== "message") {
-    throw new Error(`the socket closed: ${event.code} ${event.reason}`);
-  }
-  return decodeMachineSocketFrameV1(JSON.parse(event.data)).commands.map(
+  return (await nextMachineFrameOf(socket, "commands")).commands.map(
     (entry) => entry.commandId,
   );
 }

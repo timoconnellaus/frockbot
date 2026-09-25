@@ -12,6 +12,7 @@
 import {
   MachineTokenError,
   machineTokenClaimsV1,
+  type MachinePlatformV1,
   type MachineSocketFrameV1,
 } from "@frockbot/core/machine-protocol";
 import type { MachineCallV1 } from "@frockbot/app/machine/backend";
@@ -35,6 +36,8 @@ export interface MachineSocketAttachmentV1 {
   machineId: string;
   tokenDigest: string;
   keyVersion: number;
+  /** Which device modules the machine is sent. */
+  platform: MachinePlatformV1;
 }
 
 /** The upgrade, as the gateway hands it to the User Durable Object. */
@@ -95,7 +98,7 @@ export function durableObjectMachineSocketsV1(
       .filter((socket) => socket.readyState === OPEN);
   return {
     push(machineId: string, frame: MachineSocketFrameV1): void {
-      if (frame.commands.length === 0) return;
+      if (frame.type === "commands" && frame.commands.length === 0) return;
       const encoded = JSON.stringify(frame);
       for (const socket of open(machineId)) {
         try {
@@ -117,4 +120,31 @@ export function durableObjectMachineSocketsV1(
       }
     },
   };
+}
+
+/**
+ * Send every open machine socket its platform's frame. The frame is built once
+ * per platform, however many machines share it.
+ */
+export function broadcastMachineFrameV1(
+  ctx: DurableObjectState,
+  frameFor: (platform: MachinePlatformV1) => MachineSocketFrameV1,
+): void {
+  const encoded = new Map<MachinePlatformV1, string>();
+  for (const socket of ctx.getWebSockets()) {
+    if (socket.readyState !== OPEN) continue;
+    const attachment =
+      socket.deserializeAttachment() as MachineSocketAttachmentV1 | null;
+    if (!attachment) continue;
+    let frame = encoded.get(attachment.platform);
+    if (frame === undefined) {
+      frame = JSON.stringify(frameFor(attachment.platform));
+      encoded.set(attachment.platform, frame);
+    }
+    try {
+      socket.send(frame);
+    } catch {
+      // A closing socket is sent the whole list again when it reconnects.
+    }
+  }
 }

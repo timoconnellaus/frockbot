@@ -12,6 +12,7 @@ import { describe, expect, test } from "bun:test";
 import {
   MACHINE_SOCKET_REVOKED_CODE_V1,
   type MachineCommandV1,
+  type MachineModuleV1,
 } from "@frockbot/core/machine-protocol";
 import {
   MACHINE_AGENT_BACKOFF_V1,
@@ -149,6 +150,7 @@ function agent(options: {
   opened?: Opened[];
   secrets?: MachineSecretStoreV1;
   run?(command: MachineCommandV1): Promise<MachineCommandReportV1>;
+  onModules?(modules: MachineModuleV1[]): void;
 }): MachineDeviceAgentV1 {
   return new MachineDeviceAgentV1({
     origin: ORIGIN,
@@ -178,6 +180,7 @@ function agent(options: {
     now: () => Date.parse("2026-09-01T00:00:02.000Z"),
     sleep: () => Promise.resolve(),
     random: () => 0.5,
+    ...(options.onModules ? { onModules: options.onModules } : {}),
   });
 }
 
@@ -365,6 +368,50 @@ describe("machine device agent connection", () => {
     // The connection is closed once the agent is done with it.
     expect(line.closed).toEqual([1000]);
     expect(device.status().lastConnectedAt).toBe("2026-09-01T00:00:02.000Z");
+  });
+
+  test("hands each module list to its embedder, and runs nothing for it", async () => {
+    const bridge = {
+      pluginId: "beeper",
+      moduleId: "bridge",
+      contentHash: "b".repeat(64),
+      size: 42,
+      read: [],
+      net: ["localhost:23373"],
+      appleEvents: [],
+      calls: ["send"],
+      events: ["message"],
+    };
+    const lists: MachineModuleV1[][] = [];
+    const backend = server(() => CLAIMED);
+    const device = agent({
+      fetch: backend.fetch,
+      secrets: pairedStore(),
+      webSocket: () =>
+        Promise.resolve(
+          scripted([
+            frame(),
+            {
+              type: "modules",
+              modules: [bridge],
+              serverTime: "2026-09-01T00:00:00.000Z",
+            },
+            {
+              type: "modules",
+              modules: [],
+              serverTime: "2026-09-01T00:00:01.000Z",
+            },
+          ]).socket,
+        ),
+      onModules: (modules) => lists.push(modules),
+    });
+
+    const cycle = await device.connectOnce({ frames: 3 });
+
+    expect(lists).toEqual([[bridge], []]);
+    expect(cycle).toMatchObject({ frames: 3, delivered: 0, claimed: 0 });
+    expect(cycle.error).toBeUndefined();
+    expect(backend.calls).toEqual([]);
   });
 
   test("a claim that lost the race does not run the command", async () => {
