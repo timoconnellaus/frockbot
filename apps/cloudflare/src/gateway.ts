@@ -387,6 +387,89 @@ async function deletionRoute(
   }
 }
 
+/**
+ * Who a request is, and whether they may come in: a native bearer, the
+ * development identity, or the browser's session, then the admission
+ * authority. A refusal is the answer to send instead.
+ */
+async function identifyRequest(
+  dependencies: GatewayDependencies,
+  request: Request,
+  url: URL,
+) {
+  let development = dependencies.allowDevelopmentIdentity
+    ? developmentIdentity(request)
+    : { persist: false };
+  const nativeIdentity = await dependencies.nativeAuth?.authenticate(request);
+  const nativeRefusal = nativeIdentity?.refusal;
+  if (nativeRefusal) return { refusal: nativeRefusal };
+  // The app signed in through the development door: the same identity the
+  // browser's "Continue as local developer" carries, with the same standing.
+  if (
+    dependencies.allowDevelopmentIdentity &&
+    nativeIdentity?.session?.user.id === DEVELOPMENT_USER_ID
+  ) {
+    development = { userId: DEVELOPMENT_USER_ID, persist: false };
+  }
+  const session = nativeIdentity
+    ? nativeIdentity.session
+    : development.userId
+      ? null
+      : await dependencies.auth.getSession(request.headers);
+  let userId = development.userId ?? session?.user.id;
+  const authMode: "development" | "better-auth" | "anonymous" =
+    development.userId ? "development" : session ? "better-auth" : "anonymous";
+  const isPublicAsset =
+    request.method === "GET" && isPublicAssetPathV1(url.pathname);
+  if (!userId && isPublicAsset) userId = PUBLIC_APPLICATION_USER_ID;
+  if (!userId) return { refusal: jsonError(401, "authentication required") };
+  const isAdmin =
+    userId !== PUBLIC_APPLICATION_USER_ID &&
+    isDeploymentAdminV1(
+      {
+        id: userId,
+        ...(session?.user.email ? { email: session.user.email } : {}),
+        mode: development.userId ? "development" : "better-auth",
+      },
+      dependencies.adminEmails,
+    );
+  // Every authenticated request asks, so pausing an account takes effect on
+  // its next request rather than at its next sign-in. An admin is never
+  // asked: the allowlist admits them even while the authority is down.
+  if (
+    userId !== PUBLIC_APPLICATION_USER_ID &&
+    !development.userId &&
+    !isAdmin
+  ) {
+    // A native bearer was already admitted by `nativeAuth`, which had to
+    // ask after verifying its existing session without provisioning a User.
+    let admission = nativeIdentity?.admission;
+    if (!admission) {
+      const email = accessEmailV1(session?.user.email);
+      try {
+        admission = await dependencies.admitAccount({
+          schemaVersion: 1,
+          userId,
+          ...(email === undefined ? {} : { email }),
+          emailVerified: session?.user.emailVerified === true,
+          isAdmin,
+        });
+      } catch {
+        return { refusal: admissionUnavailableResponse() };
+      }
+    }
+    if (!admission.admitted) {
+      return {
+        refusal: admissionRefusedResponse(
+          admission.reason,
+          request.method === "GET" && url.pathname === "/",
+        ),
+      };
+    }
+  }
+  return { userId, session, development, authMode, isAdmin };
+}
+
 export function createGateway(
   dependencies: GatewayDependencies,
   entryTiming?: VoiceTimingV1,
@@ -450,12 +533,26 @@ export function createGateway(
     const debugResponse = await debugRoute(request, url);
     if (debugResponse) return debugResponse;
 
+    // Resolved once, when first asked: a public route that must act only for
+    // the browser's own session asks, and everything after the public routes
+    // needs it.
+    let identified: ReturnType<typeof identifyRequest> | undefined;
+    const identify = () =>
+      (identified ??= identifyRequest(dependencies, request, url));
+
     for (const contribution of dependencies.backendContributions ?? []) {
       const response = await contribution.publicRoute?.(request, url, {
         client:
           request.headers.get("x-frockbot-client") === "desktop"
             ? "desktop"
             : "browser",
+        sessionUserId: async () => {
+          const identity = await identify();
+          return identity.refusal ||
+            identity.userId === PUBLIC_APPLICATION_USER_ID
+            ? undefined
+            : identity.userId;
+        },
       });
       if (response) return response;
     }
@@ -465,76 +562,9 @@ export function createGateway(
     // happened, so authentication is invisible from inside it.
     const timing = entryTiming ?? voiceAssistantEdgeTimingV1(url);
     timing?.mark("edge-auth-start");
-    let development = dependencies.allowDevelopmentIdentity
-      ? developmentIdentity(request)
-      : { persist: false };
-    const nativeIdentity = await dependencies.nativeAuth?.authenticate(request);
-    if (nativeIdentity?.refusal) return nativeIdentity.refusal;
-    // The app signed in through the development door: the same identity the
-    // browser's "Continue as local developer" carries, with the same standing.
-    if (
-      dependencies.allowDevelopmentIdentity &&
-      nativeIdentity?.session?.user.id === DEVELOPMENT_USER_ID
-    ) {
-      development = { userId: DEVELOPMENT_USER_ID, persist: false };
-    }
-    const session = nativeIdentity
-      ? nativeIdentity.session
-      : development.userId
-        ? null
-        : await dependencies.auth.getSession(request.headers);
-    let userId = development.userId ?? session?.user.id;
-    const authMode = development.userId
-      ? "development"
-      : session
-        ? "better-auth"
-        : "anonymous";
-    const isPublicAsset =
-      request.method === "GET" && isPublicAssetPathV1(url.pathname);
-    if (!userId && isPublicAsset) userId = PUBLIC_APPLICATION_USER_ID;
-    if (!userId) return jsonError(401, "authentication required");
-    const isAdmin =
-      userId !== PUBLIC_APPLICATION_USER_ID &&
-      isDeploymentAdminV1(
-        {
-          id: userId,
-          ...(session?.user.email ? { email: session.user.email } : {}),
-          mode: development.userId ? "development" : "better-auth",
-        },
-        dependencies.adminEmails,
-      );
-    // Every authenticated request asks, so pausing an account takes effect on
-    // its next request rather than at its next sign-in. An admin is never
-    // asked: the allowlist admits them even while the authority is down.
-    if (
-      userId !== PUBLIC_APPLICATION_USER_ID &&
-      !development.userId &&
-      !isAdmin
-    ) {
-      // A native bearer was already admitted by `nativeAuth`, which had to
-      // ask after verifying its existing session without provisioning a User.
-      let admission = nativeIdentity?.admission;
-      if (!admission) {
-        const email = accessEmailV1(session?.user.email);
-        try {
-          admission = await dependencies.admitAccount({
-            schemaVersion: 1,
-            userId,
-            ...(email === undefined ? {} : { email }),
-            emailVerified: session?.user.emailVerified === true,
-            isAdmin,
-          });
-        } catch {
-          return admissionUnavailableResponse();
-        }
-      }
-      if (!admission.admitted) {
-        return admissionRefusedResponse(
-          admission.reason,
-          request.method === "GET" && url.pathname === "/",
-        );
-      }
-    }
+    const identity = await identify();
+    if (identity.refusal) return identity.refusal;
+    const { userId, session, development, authMode, isAdmin } = identity;
     // Authenticated and admitted: everything above is what a socket waits
     // through before a route is even chosen.
     timing?.mark("edge-auth-ready");

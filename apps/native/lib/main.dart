@@ -23,7 +23,13 @@ import 'client/bot_sessions.dart';
 import 'client/identity.dart';
 import 'client/plain_store.dart';
 import 'client/transport.dart';
-import 'connections/document.dart' show connectReturns, isConnectReturnV1;
+import 'connections/document.dart'
+    show
+        connectReturnNotice,
+        connectReturns,
+        isConnectReturnV1,
+        mcpSignInCompletionV1,
+        mcpSignInRefusalV1;
 import 'flock/avatar.dart' show riveRuntimeReady;
 import 'orientation.dart';
 import 'shell/app_shell.dart';
@@ -132,8 +138,19 @@ class _FrockBotAppState extends State<FrockBotApp> {
       return;
     }
     // A hosted door closing: the Marketplace is still where the person left
-    // it, and it reads its frame again to show what they did there.
+    // it, and it reads its frame again to show what they did there. An MCP
+    // server's sign-in is finished here first, under this app's session.
     if (isConnectReturnV1(uri)) {
+      String? refusal;
+      final completion = mcpSignInCompletionV1(uri);
+      if (completion != null) {
+        try {
+          await api.request(completion.path, body: completion.body);
+        } on RequestFailure catch (failure) {
+          refusal = mcpSignInRefusalV1(failure.status);
+        }
+      }
+      connectReturnNotice.value = refusal;
       connectReturns.value += 1;
       return;
     }

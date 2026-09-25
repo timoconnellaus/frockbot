@@ -209,3 +209,12 @@ export async function forgetMcpGrantV1(
 ): Promise<void> {
   await storage.delete(`${GRANT_PREFIX}${connectionId}`);
 }
+
+/** The Connection of every grant kept, whatever state its server is in. */
+export async function listMcpGrantConnectionsV1(storage: {
+  list<T>(options: { prefix: string }): Promise<Map<string, T>>;
+}): Promise<string[]> {
+  return [
+    ...(await storage.list<unknown>({ prefix: GRANT_PREFIX })).keys(),
+  ].map((key) => key.slice(GRANT_PREFIX.length));
+}

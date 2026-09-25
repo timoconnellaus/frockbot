@@ -143,6 +143,8 @@ export interface FakeMcpAuthorizationServerV1 {
   clientMetadataDocuments: boolean;
   /** Whether the metadata offers dynamic registration. */
   registration: boolean;
+  /** Answer every revocation with this status instead of honouring it. */
+  revocationStatus?: number;
   approve(authorizationUrl: string): string;
   deny(authorizationUrl: string): string;
 }
@@ -294,6 +296,9 @@ export function createFakeMcpAuthorizationServerV1(
           );
         }
         case "/revoke": {
+          if (fake.revocationStatus !== undefined) {
+            return new Response(null, { status: fake.revocationStatus });
+          }
           const form = new URLSearchParams(await request.text());
           const token = form.get("token") ?? "";
           fake.revoked.push(token);

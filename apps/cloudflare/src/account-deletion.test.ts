@@ -31,8 +31,11 @@ mock.module("cloudflare:workers", () => ({
   },
 }));
 
-const { accountObjectPrefixesV1, runAccountDeletionStepV1 } =
-  await import("./account-deletion.js");
+const {
+  accountObjectPrefixesV1,
+  MCP_REVOCATION_ATTEMPTS_V1,
+  runAccountDeletionStepV1,
+} = await import("./account-deletion.js");
 type Seams = Parameters<typeof runAccountDeletionStepV1>[1];
 
 const USER = "user:1/ü";
@@ -59,6 +62,7 @@ function seams(overrides: Partial<Seams> = {}): Seams {
     vectorIdsAfter: () => [],
     deleteIdentity: async () => undefined,
     eraseVoice: async () => undefined,
+    revokeMcpGrants: async () => 0,
     ...overrides,
   };
 }
@@ -212,6 +216,30 @@ describe("the account's connected apps", () => {
     expect(
       await runAccountDeletionStepV1({}, seams(), "connected-apps", record()),
     ).toEqual({ status: "complete" });
+  });
+});
+
+describe("the account's MCP server grants", () => {
+  test("waits on a server that did not answer, then gives it up", async () => {
+    const asked: boolean[] = [];
+    const owing = seams({
+      revokeMcpGrants: async (giveUp) => {
+        asked.push(giveUp);
+        return giveUp ? 0 : 1;
+      },
+    });
+    await expect(
+      runAccountDeletionStepV1({}, owing, "mcp-servers", record()),
+    ).rejects.toThrow("1 MCP server did not answer the revocation");
+    expect(
+      await runAccountDeletionStepV1(
+        {},
+        owing,
+        "mcp-servers",
+        record({ attempts: MCP_REVOCATION_ATTEMPTS_V1 - 1 }),
+      ),
+    ).toEqual({ status: "complete" });
+    expect(asked).toEqual([false, true]);
   });
 });
 

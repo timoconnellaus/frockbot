@@ -180,8 +180,28 @@ describe("signing in to an MCP server", () => {
         hint: "refresh_token",
         fetch: auth.fetch,
       }),
-    ).toBe(true);
+    ).toBe("revoked");
     expect(auth.revoked).toEqual([refreshed.refreshToken!]);
+    // No answer is the one worth asking again; any other answer stands.
+    expect(
+      await revokeMcpSignInV1({
+        server,
+        client,
+        token: "t",
+        hint: "access_token",
+        fetch: async () => new Response("down", { status: 503 }),
+      }),
+    ).toBe("unreachable");
+    expect(
+      await revokeMcpSignInV1({
+        server,
+        client,
+        token: "t",
+        hint: "access_token",
+        fetch: async () =>
+          Response.json({ error: "unsupported_token_type" }, { status: 400 }),
+      }),
+    ).toBe("refused");
   });
 
   test("uses a client metadata document where the server takes nothing else", async () => {

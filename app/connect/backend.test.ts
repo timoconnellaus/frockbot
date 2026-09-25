@@ -265,6 +265,21 @@ describe("the Connected apps gateway routes", () => {
       );
       expect(page).not.toContain("ca_1");
     }
+    // An MCP server's sign-in answer is the one thing the hand-off carries,
+    // re-encoded so nothing in it can close the script it sits in.
+    const answer =
+      "https://bot.frockbot.com/api/connect/callback/macos?mcp_state=s.1&mcp_code=%3C%2Fscript%3E&connectedAccountId=ca_1";
+    const answered = await (await backend.publicRoute!(
+      new Request(answer),
+      new URL(answer),
+      {},
+    ))!.text();
+    expect(answered).toContain(
+      '"frockbot://bot.frockbot.com/api/connect/callback/macos?mcp_state=s.1&mcp_code=%3C%2Fscript%3E"',
+    );
+    expect(answered).not.toContain('</script>"');
+    expect(answered).not.toContain("ca_1");
+    expect(commands).toHaveLength(0);
     // Not a page of ours.
     expect(
       await backend.publicRoute!(

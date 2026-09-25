@@ -38,6 +38,8 @@ import {
 
 /** Where an authorization server sends the person back. */
 export const MCP_OAUTH_CALLBACK_PATH = "/api/mcp/oauth/callback";
+/** Where an app hands back a sign-in it was given, under its own session. */
+export const MCP_OAUTH_COMPLETE_PATH = "/api/mcp/oauth/complete";
 /** FrockBot's client metadata document, its `client_id` where one is taken. */
 export const MCP_OAUTH_CLIENT_PATH = "/api/mcp/oauth/client";
 /** How long a person has to finish signing in. */
@@ -121,6 +123,35 @@ export function mcpOAuthReturnClientV1(
       (client) => pathname === mcpOAuthCallbackPathV1(client),
     ) ?? null
   );
+}
+
+/**
+ * The parameters of an authorization response FrockBot reads. On an app's
+ * return link each travels as `mcp_<name>`, which keeps it apart from
+ * anything a connected app's own return carries.
+ */
+export const MCP_RETURN_PARAMETERS_V1 = [
+  "state",
+  "code",
+  "iss",
+  "error",
+] as const;
+
+/**
+ * What an app is handed from a server's answer: those parameters under their
+ * `mcp_` names, and nothing else. `from` is the callback itself, or a return
+ * link that already carries them.
+ */
+export function mcpReturnHandOffV1(
+  from: URL,
+  prefixed: boolean,
+): URLSearchParams {
+  const handOff = new URLSearchParams();
+  for (const name of MCP_RETURN_PARAMETERS_V1) {
+    const value = from.searchParams.get(prefixed ? `mcp_${name}` : name);
+    if (value !== null) handOff.set(`mcp_${name}`, value);
+  }
+  return handOff;
 }
 
 /**
@@ -499,19 +530,25 @@ export async function refreshMcpSignInV1(input: {
 }
 
 /**
- * Tells the server a token is done with (RFC 7009). Answers whether it said
- * so; a server with no revocation endpoint cannot be told, and a token it
- * does not know is, by the RFC, a success.
+ * What telling a server a token is done with came to. `revoked` is its
+ * success, which by RFC 7009 is also its answer for a token it no longer
+ * knows; `refused` is any other answer it gave, which asking again would not
+ * change; `unsupported` is a server with nowhere to ask; `unreachable` is no
+ * answer at all, the one worth asking again.
  */
+export type McpRevocationV1 =
+  "revoked" | "refused" | "unsupported" | "unreachable";
+
+/** Tells the server a token is done with (RFC 7009). */
 export async function revokeMcpSignInV1(input: {
   server: McpSignInServerV1;
   client: McpSignInClientV1;
   token: string;
   hint: "access_token" | "refresh_token";
   fetch?: McpFetchV1;
-}): Promise<boolean> {
+}): Promise<McpRevocationV1> {
   const endpoint = input.server.metadata.revocation_endpoint;
-  if (!endpoint) return false;
+  if (!endpoint) return "unsupported";
   const body = new URLSearchParams({
     token: input.token,
     token_type_hint: input.hint,
@@ -541,9 +578,13 @@ export async function revokeMcpSignInV1(input: {
       headers,
       body,
     });
-    return response.ok;
+    if (response.ok) return "revoked";
+    // A server in trouble, or one asking us to slow down, may answer later.
+    return response.status >= 500 || response.status === 429
+      ? "unreachable"
+      : "refused";
   } catch {
-    return false;
+    return "unreachable";
   }
 }
 

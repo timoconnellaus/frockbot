@@ -19,8 +19,10 @@
 // - Every Bot goes through the Bot delete saga, which already purges its
 //   vectors, its files and its object.
 // - The Computer goes once no Bot is left that could open it again.
-// - Provider accounts, the payment customer, files and vectors follow, while
-//   this object still holds what names them.
+// - Provider accounts, the grants MCP servers issued, the payment customer,
+//   files and vectors follow, while this object still holds what names them.
+//   A grant is revoked at its server with the refresh token only this object
+//   holds, so it has to go before the wipe does.
 // - The sign-in identity goes before the access record, so no live session
 //   is left that admission could let back in.
 // - The object's own storage goes last, because it holds this record.
@@ -119,6 +121,7 @@ export const ACCOUNT_DELETION_STEPS_V1 = [
   "bots",
   "computer",
   "connected-apps",
+  "mcp-servers",
   "payments",
   "files",
   "memory-vectors",

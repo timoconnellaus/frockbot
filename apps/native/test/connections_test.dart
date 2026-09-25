@@ -513,6 +513,25 @@ void main() {
     expect(reads, 2);
   });
 
+  testWidgets('a door that connected nothing says why when it closes', (
+    tester,
+  ) async {
+    final store = MemoryStore();
+    final api = SettingsApi(store, (path, body) async => connectionsFrame());
+    await tester.pumpWidget(page(api, store));
+    await tester.pumpAndSettle();
+    connectReturnNotice.value = mcpSignInRefusalV1(403);
+    connectReturns.value += 1;
+    await tester.pumpAndSettle();
+    expect(
+      find.text(
+        'That sign-in was started from another FrockBot account, so nothing was connected.',
+      ),
+      findsOneWidget,
+    );
+    expect(connectReturnNotice.value, isNull);
+  });
+
   testWidgets('a door closing while a read is in flight still re-reads', (
     tester,
   ) async {
@@ -1494,6 +1513,41 @@ void main() {
   });
 
   group('an MCP server sign-in', () {
+    test('a return link carrying a server\'s answer is sent back to finish', () {
+      final completion = mcpSignInCompletionV1(
+        Uri.parse(
+          'https://bot.frockbot.com/api/connect/callback/android'
+          '?mcp_state=s.1&mcp_code=c%2B1&mcp_iss=https%3A%2F%2Fauth.example'
+          '&connectedAccountId=ca_1',
+        ),
+      )!;
+      expect(completion.path, '/api/mcp/oauth/complete');
+      expect(completion.body, {
+        'schemaVersion': 1,
+        'state': 's.1',
+        'code': 'c+1',
+        'iss': 'https://auth.example',
+      });
+      expect(
+        mcpSignInCompletionV1(
+          Uri.parse(
+            'frockbot://bot.frockbot.com/api/connect/callback/macos'
+            '?mcp_state=s.1&mcp_error=access_denied',
+          ),
+        )!.body,
+        {'schemaVersion': 1, 'state': 's.1', 'error': 'access_denied'},
+      );
+      // A connected app's own return carries none, and finishes nothing.
+      for (final link in [
+        'https://bot.frockbot.com/api/connect/callback/android?status=success',
+        'https://bot.frockbot.com/api/connect/callback/android?mcp_state=',
+      ]) {
+        expect(mcpSignInCompletionV1(Uri.parse(link)), isNull, reason: link);
+      }
+      expect(mcpSignInRefusalV1(403), contains('another FrockBot account'));
+      expect(mcpSignInRefusalV1(400), contains('Sign in to the server again'));
+    });
+
     test('is the server\'s own door, and a token change is a command', () {
       expect(
         mcpSignInRequestV1({
@@ -1589,7 +1643,10 @@ void main() {
     expect(find.text('This server asks you to sign in.'), findsOneWidget);
     await tester.tap(find.widgetWithText(FilledButton, 'Sign in'));
     await tester.pumpAndSettle();
-    expect(sent.single['path'], '/api/plugins/mcp/connections/conn-1/authorize');
+    expect(
+      sent.single['path'],
+      '/api/plugins/mcp/connections/conn-1/authorize',
+    );
     expect(sent.single['type'], 'connection/start');
     expect(opened, [Uri.parse('https://auth.linear.app/authorize?state=s')]);
   });

@@ -5,7 +5,7 @@
 //
 //   POST /api/plugins/connect/connections                       start
 //   POST /api/plugins/connect/connections/:connectionId/revoke  disconnect
-//   GET  /api/connect/callback[/android|/macos]                 the return page
+//   GET  /api/connect/callback[/<return client>]                the return page
 //
 // The start is a `connection/oauth` command in the User Durable Object, which
 // is where the sign-in link is minted and the Connection written; this route
@@ -35,6 +35,7 @@ import {
   verifyConnectEventSignatureV1,
 } from "./events.js";
 import type { ConnectTriggerOfferV1 } from "./triggers.js";
+import { mcpReturnHandOffV1 } from "@frockbot/app/mcp/oauth";
 
 export interface ConnectGatewayHost {
   executeConnection(
@@ -152,18 +153,22 @@ const APPLE_SCHEMES = {
  * verified App Link has already opened the app by the time this renders, and
  * the page is what the browser keeps. On a Mac or an iPhone no browser but
  * Safari opens a Universal Link from a redirect, so the page hands over on the
- * app's scheme with nothing from the query attached. A browser tab is told to
- * return.
+ * app's scheme with nothing from the query attached but an MCP server's
+ * sign-in answer — `mcpAnswer`, which the app sends back under its own
+ * session to finish that sign-in. A browser tab is told to return.
  */
 export function connectCallbackPageV1(
   client: ConnectionReturnClientV1 | undefined,
   origin: string,
+  mcpAnswer?: URLSearchParams,
 ): Response {
   const heading = "Back to FrockBot";
   const footnote =
     "FrockBot shows whether the app connected. If it did not, connect it again from the Marketplace.";
   if (client !== undefined && client !== "android") {
-    const target = `${APPLE_SCHEMES[client]}://${new URL(origin).host}${connectCallbackPathV1(client)}`;
+    const answer = mcpAnswer?.toString();
+    const query = answer ? `?${answer}` : "";
+    const target = `${APPLE_SCHEMES[client]}://${new URL(origin).host}${connectCallbackPathV1(client)}${query}`;
     return returnPageV1({
       title: "Back to FrockBot",
       heading,
@@ -205,7 +210,11 @@ export function createConnectBackendContribution(
       if (request.method !== "GET") {
         return jsonError(405, "method not allowed");
       }
-      return connectCallbackPageV1(client, url.origin);
+      return connectCallbackPageV1(
+        client,
+        url.origin,
+        mcpReturnHandOffV1(url, true),
+      );
     },
     async route(request, url, context) {
       if (url.pathname === TRIGGERS) {

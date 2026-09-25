@@ -6,9 +6,10 @@
 //  1. Access ends before the request answers, and a deleting account starts
 //     nothing new: no Turn, no Bot.
 //  2. Driven by nothing but its own alarm, the saga removes every Bot, the
-//     voice session, the Computer, the provider accounts, the User's files,
-//     uploads and Memory vectors, the sign-in identity with its sessions, and
-//     the access record and invitation — and nobody else's.
+//     voice session, the Computer, the provider accounts, the grants MCP
+//     servers issued, the User's files, uploads and Memory vectors, the
+//     sign-in identity with its sessions, and the access record and
+//     invitation — and nobody else's.
 //  3. The User object ends holding its tombstone and nothing else, stays
 //     that way across a restart, and refuses to be provisioned again.
 //  4. "Delete my Computer" destroys the Computer once per command.
@@ -30,7 +31,11 @@ import {
 import { createUserMemoryEngineV1 } from "../src/memory-records.ts";
 import { DEPLOYMENT_POLICY_SINGLETON_NAME } from "../src/deployment-policy.ts";
 import type { FakeComputerHostCall } from "./computer-host-fake.ts";
-import { COMPOSIO_TEST_API_KEY } from "./harness/miniflare.ts";
+import {
+  COMPOSIO_TEST_API_KEY,
+  MCP_AUTH_STUB_ORIGIN,
+  MCP_STUB_ORIGIN,
+} from "./harness/miniflare.ts";
 import { provisionBot, provisionSiblingBot } from "./provision-bot.ts";
 
 const HOST = "http://computer-host.internal";
@@ -44,6 +49,11 @@ interface UserRpc {
   prepareAccount(input: unknown): Promise<unknown>;
   reserveUploadQuota(input: unknown): Promise<{ status: string }>;
   executeGroupChatCommand(input: unknown): Promise<unknown>;
+  executeConnection(input: unknown): Promise<{
+    connectionId: string;
+    status: string;
+    oauth?: { status: string; authorizationUrl?: string };
+  }>;
 }
 
 function user(userId: string) {
@@ -449,6 +459,75 @@ describe("deleting an account", () => {
         }),
       ),
     ).toMatch(/deleted/);
+    expect((await storedKeys(user(userId))).keys).toEqual([
+      ACCOUNT_DELETED_KEY_V1,
+    ]);
+  });
+
+  test("revokes the grant each MCP server issued before the object is wiped", async () => {
+    const suffix = crypto.randomUUID().slice(0, 8);
+    const identity = { userId: `mcp-${suffix}`, botId: `bot-${suffix}` };
+    const { userId } = identity;
+    await provisionBot(identity);
+    const connection = (command: Record<string, unknown>) =>
+      userRpc(userId).executeConnection({
+        schemaVersion: 1,
+        userId,
+        command: { schemaVersion: 1, ...command },
+      });
+
+    // A server behind OAuth, added and signed in to as the Connectors row
+    // does it: the authorization server approves at once and sends back.
+    const added = await connection({
+      type: "connection/create",
+      commandId: `add-${suffix}`,
+      packageId: "mcp",
+      connectionTypeId: "mcp-server",
+      label: "Signed in",
+      settings: { url: `${MCP_STUB_ORIGIN}/oauth/mcp` },
+    });
+    const started = await connection({
+      type: "connection/oauth",
+      commandId: `sign-in-${suffix}`,
+      attemptId: `sign-in-${suffix}`,
+      packageId: "mcp",
+      action: "start",
+      connectionId: added.connectionId,
+      callbackUrl: "https://bot.frockbot.com/api/mcp/oauth/callback",
+    });
+    const approved = await fetch(started.oauth!.authorizationUrl!, {
+      redirect: "manual",
+    });
+    expect(
+      await connection({
+        type: "connection/oauth",
+        commandId: `return-${suffix}`,
+        attemptId: `sign-in-${suffix}`,
+        packageId: "mcp",
+        action: "complete",
+        connectionId: added.connectionId,
+        code: approved.headers.get("location")!,
+      }),
+    ).toMatchObject({ status: "applied", oauth: { status: "ready" } });
+
+    const revoked = async () =>
+      (await (
+        await fetch(`${MCP_AUTH_STUB_ORIGIN}/__revoked`)
+      ).json()) as string[];
+    const before = await revoked();
+    await userRpc(userId).beginAccountDeletion({
+      schemaVersion: 1,
+      userId,
+      commandId: `delete-account-${suffix}`,
+    });
+    await driveDeletion(userId);
+
+    // The refresh token only the wiped object held was told to the server.
+    expect(
+      (await revoked())
+        .filter((token) => !before.includes(token))
+        .filter((token) => token.startsWith("oauth-refresh-")),
+    ).toHaveLength(1);
     expect((await storedKeys(user(userId))).keys).toEqual([
       ACCOUNT_DELETED_KEY_V1,
     ]);

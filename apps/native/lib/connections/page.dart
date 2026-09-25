@@ -198,7 +198,14 @@ class _ConnectionsPageState extends State<ConnectionsPage>
 
   /// The hosted door closed straight into the app, on its verified link or
   /// its own scheme: the same read, without waiting on the window to resume.
-  void _returned() => unawaited(load());
+  void _returned() {
+    final refusal = connectReturnNotice.value;
+    if (refusal != null) {
+      connectReturnNotice.value = null;
+      setState(() => notice = refusal);
+    }
+    unawaited(load());
+  }
 
   /// The Marketplace read for the current search, boxes and half, starting
   /// at [cursor]. The ordinary read carries no query.

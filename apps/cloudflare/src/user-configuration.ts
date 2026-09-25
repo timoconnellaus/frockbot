@@ -1145,6 +1145,11 @@ export class UserConfiguration
         );
         await voice.eraseAccount({ schemaVersion: 1, userId });
       },
+      revokeMcpGrants: async (giveUp) =>
+        (await this.contributions()).mcp.revokeGrantsForDeletion({
+          userId,
+          giveUp,
+        }),
     };
   }
 

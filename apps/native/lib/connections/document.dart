@@ -273,8 +273,9 @@ const connectReturnPathV1 = '/api/connect/callback';
 /// Whether a link the app was opened with is a hosted door closing. There
 /// are exactly three such links: the verified App Link under this app's own
 /// segment on Android, and the same page handed over on the app's scheme on
-/// a Mac or an iPhone. Nothing on the link is read — the next settings read
-/// is what settles the Connection.
+/// a Mac or an iPhone. The next settings read is what settles the Connection;
+/// the one thing read from a link is an MCP server's sign-in answer, which
+/// [mcpSignInCompletionV1] sends back.
 ///
 /// The Mac and iPhone apps share a scheme, so each link is its scheme and its
 /// segment together, never the scheme alone.
@@ -288,3 +289,31 @@ bool isConnectReturnV1(Uri uri) =>
 /// Bumped each time a hosted door closes into the app, so the page that
 /// opened it reads its frame again without waiting on a lifecycle resume.
 final connectReturns = ValueNotifier<int>(0);
+
+/// Why the door that last closed connected nothing, when the reason is not
+/// on any Connection this account holds; set before [connectReturns] moves.
+final connectReturnNotice = ValueNotifier<String?>(null);
+
+/// Where the app finishes an MCP server's sign-in, under its own session.
+const mcpSignInCompletePathV1 = '/api/mcp/oauth/complete';
+
+/// The request that finishes the MCP server sign-in a return [uri] carries,
+/// or `null` when it carries none — any connected app's return. The browser
+/// that came back holds no session, so the server trades the code only for
+/// this app's, and only when it is the account that started the sign-in.
+ConnectionRequestV1? mcpSignInCompletionV1(Uri uri) {
+  final query = uri.queryParameters;
+  final state = query['mcp_state'];
+  if (state == null || state.isEmpty) return null;
+  return ConnectionRequestV1(mcpSignInCompletePathV1, {
+    'schemaVersion': 1,
+    'state': state,
+    for (final name in const ['code', 'iss', 'error'])
+      name: ?query['mcp_$name'],
+  });
+}
+
+/// What the person reads when the server refused to finish a sign-in.
+String mcpSignInRefusalV1(int? status) => status == 403
+    ? 'That sign-in was started from another FrockBot account, so nothing was connected.'
+    : 'That sign-in couldn’t finish. Sign in to the server again.';

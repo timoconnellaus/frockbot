@@ -154,6 +154,8 @@ export interface MountedFoundationUserBackend {
   machines: MachineUserBackendContribution;
   /** Connected apps: Connections, trigger instances, and event mapping. */
   connect: ConnectUserBackendContribution;
+  /** Remote MCP servers: their credentials, sign-ins and tool directories. */
+  mcp: McpUserBackendContribution;
   dispose(): Promise<void>;
 }
 
@@ -446,6 +448,7 @@ export async function createFoundationUserBackendContributions(host: {
   const audit = mounted.get(auditUserContribution);
   const machines = mounted.get(machineUserContribution);
   const connect = mounted.get(connectUserContribution);
+  const mcp = mounted.get(mcpUserContribution);
   if (
     !settings ||
     !credentials ||
@@ -456,11 +459,12 @@ export async function createFoundationUserBackendContributions(host: {
     !search ||
     !audit ||
     !machines ||
-    !connect
+    !connect ||
+    !mcp
   ) {
     await mounted.dispose();
     throw new Error(
-      "Foundation requires Settings, Credentials, Ollama, Frock AI, Flock, Bot Templates, Search, Audit, Machines, and Connected apps User Contributions",
+      "Foundation requires Settings, Credentials, Ollama, Frock AI, Flock, Bot Templates, Search, Audit, Machines, Connected apps and MCP servers User Contributions",
     );
   }
 
@@ -490,6 +494,7 @@ export async function createFoundationUserBackendContributions(host: {
     audit,
     machines,
     connect,
+    mcp,
     async dispose() {
       for (const undo of unregister) undo();
       await mounted.dispose();

@@ -873,4 +873,54 @@ describe("signing in to a server", () => {
     expect(only(second.settings).authorization?.kind).toBe("api-key");
     expect(second.auth.revoked).toEqual(["refresh-2"]);
   });
+
+  test("revokes every grant for the account's deletion, and gives up on a silent server", async () => {
+    const grants = (storage: MemoryStorage) =>
+      [...storage.values.keys()].filter((key) => key.startsWith("mcp:grant"));
+    const answered = await signedIn();
+    expect(
+      await answered.contribution.revokeGrantsForDeletion({
+        userId: "tim",
+        giveUp: false,
+      }),
+    ).toBe(0);
+    expect(answered.auth.revoked).toEqual(["refresh-2"]);
+    expect(grants(answered.storage)).toEqual([]);
+    // Asked again after a crash, there is nothing left to ask.
+    expect(
+      await answered.contribution.revokeGrantsForDeletion({
+        userId: "tim",
+        giveUp: false,
+      }),
+    ).toBe(0);
+    expect(answered.auth.revoked).toEqual(["refresh-2"]);
+
+    const silent = await signedIn();
+    silent.auth.revocationStatus = 503;
+    expect(
+      await silent.contribution.revokeGrantsForDeletion({
+        userId: "tim",
+        giveUp: false,
+      }),
+    ).toBe(1);
+    expect(grants(silent.storage)).toHaveLength(1);
+    expect(
+      await silent.contribution.revokeGrantsForDeletion({
+        userId: "tim",
+        giveUp: true,
+      }),
+    ).toBe(0);
+    expect(grants(silent.storage)).toEqual([]);
+
+    // A server that refuses — a token it no longer knows — is answered.
+    const refusing = await signedIn();
+    refusing.auth.revocationStatus = 400;
+    expect(
+      await refusing.contribution.revokeGrantsForDeletion({
+        userId: "tim",
+        giveUp: false,
+      }),
+    ).toBe(0);
+    expect(grants(refusing.storage)).toEqual([]);
+  });
 });
