@@ -29,7 +29,11 @@ import {
   type BotPluginRosterV1,
 } from "@frockbot/app/plugins/worker-bot";
 
-/** When the next cadence assemble is owed. Absent means none. */
+/**
+ * When the next assemble is owed: the next hour's cadence, or now after a
+ * Plugin switch (`oweThemeAssembleV1`). An assemble that finds it rewritten
+ * while it ran leaves it for the alarm. Absent means none.
+ */
 export const THEME_ASSEMBLE_DUE_KEY_V1 = "theme:assemble-due:v1";
 
 /** How long one assemble may run inside the Plugin worker. */
