@@ -1676,14 +1676,14 @@ export class UserConfiguration
    * asked for, and a desktop that missed it is sent the list on reconnect.
    */
   private async changingActiveGeneration(change: () => Promise<void>) {
-    let before: string | undefined;
-    await loggedEntryV1("Active generation read", async () => {
-      before = (await this.activeGeneration()).generationId;
-    });
+    const store = userCompositionStoreV1({ ctx: this.ctx });
+    // Only the pointer is compared, so the commit every Turn makes decodes
+    // nothing it did not already.
+    const before = await store.lastKnownGoodId();
     await change();
+    if ((await store.lastKnownGoodId()) === before) return;
     await loggedEntryV1("Machine modules push", async () => {
       const active = await this.activeGeneration();
-      if (active.generationId === before) return;
       const serverTime = new Date().toISOString();
       broadcastMachineFrameV1(this.ctx, (platform) => ({
         type: "modules",

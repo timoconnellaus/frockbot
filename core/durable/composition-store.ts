@@ -177,6 +177,16 @@ export class DurableCompositionStore implements CompositionStore {
     return this.require(pin.generationId);
   }
 
+  /** The last known good generation's id alone, without decoding it. */
+  async lastKnownGoodId(): Promise<string | undefined> {
+    const generationId = await this.ctx.storage.get<string>(
+      COMPOSITION_LAST_KNOWN_GOOD_KEY,
+    );
+    return typeof generationId === "string" && generationId.length > 0
+      ? generationId
+      : undefined;
+  }
+
   async lastKnownGood(): Promise<CompositionGenerationV1> {
     await this.materialize();
     const generationId = await this.ctx.storage.get<string>(
