@@ -795,6 +795,12 @@ export class BotState
                 botId,
                 sessionId,
                 ...(spend ? { spend } : {}),
+                limits: {
+                  paused: (scopes: string[]) =>
+                    account.readSpendingPaused({ userId, scopes }),
+                  claimSpike: (scope: string) =>
+                    account.claimSpendingSpike({ userId, scope }),
+                },
                 rates: hostedRates.rates,
                 reportUnpriced: (report: {
                   servedModel: string | null;

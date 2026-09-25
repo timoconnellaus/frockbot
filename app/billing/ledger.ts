@@ -2,6 +2,7 @@ import {
   createSpendingTablesV1,
   recordAttributionV1,
   rollUpSettlementV1,
+  spendLimitReachedV1,
   spentSinceV1,
 } from "./spending.js";
 
@@ -21,6 +22,12 @@ export const SUBSCRIPTION_REQUIRED_REASON_V1 =
   "A paid FrockBot subscription is required. Open Billing to subscribe or update your payment method.";
 export const CREDIT_EXHAUSTED_REASON_V1 =
   "You have no usage credit left. Open Billing to add more.";
+/**
+ * A Bot's or a Routine's own daily limit. Its subject is whoever is reading
+ * it: the message about a Routine already names the Routine.
+ */
+export const DAILY_LIMIT_REASON_V1 =
+  "It reached its daily spending limit and is paused until midnight. You can raise the limit on the Spending page.";
 
 export type GrantKind = "included" | "purchased" | "complimentary";
 
@@ -359,7 +366,13 @@ export class BillingLedger {
       this.now(),
     );
   }
-  reserve(input: UsageReservation) {
+  /**
+   * Hold a charge's maximum against the account's credit. `dayStart` is the
+   * person's last midnight: given it, a charge for background work a daily
+   * limit has already stopped is refused. A charge already reserved is never
+   * refused again: its retry is the same charge.
+   */
+  reserve(input: UsageReservation, dayStart?: number) {
     identifier(input.id);
     amount(input.maximumMicros, "reservation");
     if (
@@ -384,6 +397,11 @@ export class BillingLedger {
           created: false,
         };
       }
+      if (
+        dayStart !== undefined &&
+        spendLimitReachedV1(this.storage.sql, input, attribution, dayStart)
+      )
+        throw new BillingError(DAILY_LIMIT_REASON_V1);
       const subscribed = this.subscribed();
       if (this.get<boolean>("suspended"))
         throw new BillingError(SUBSCRIPTION_REQUIRED_REASON_V1);

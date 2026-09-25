@@ -76,6 +76,9 @@ export function createSpendingTablesV1(sql: BillingSql) {
   sql.exec(
     `CREATE TABLE IF NOT EXISTS billing_spend_labels (key TEXT PRIMARY KEY, label TEXT NOT NULL)`,
   );
+  sql.exec(
+    `CREATE TABLE IF NOT EXISTS billing_spend_limits (scope TEXT PRIMARY KEY, daily_micros INTEGER NOT NULL)`,
+  );
 }
 
 function text(value: unknown, maximum: number): string | undefined {
@@ -258,6 +261,224 @@ export function rollUpSettlementV1(
   );
 }
 
+/**
+ * Work a person started by being there — including a Plugin's own page in
+ * front of them: a daily limit never stops it. A limit is for what runs
+ * while nobody is watching.
+ */
+const PERSONAL_CAUSES: readonly string[] = [
+  "chat",
+  "group",
+  "voice",
+  "desktop",
+  "plugin",
+];
+const PERSONAL_CAUSE_LIST = PERSONAL_CAUSES.map((kind) => `'${kind}'`).join(
+  ", ",
+);
+
+/**
+ * What a daily limit applies to: one Bot (`bot|<botId>`), or one Routine and
+ * everything it sets going (`routine|<botId>|<routineId>`, its cause key).
+ */
+export function isSpendLimitScopeV1(scope: unknown): scope is string {
+  return (
+    typeof scope === "string" &&
+    scope.length <= 400 &&
+    (/^bot\|[^|]{1,128}$/.test(scope) ||
+      /^routine\|[^|]{1,128}\|[^|]{1,256}$/.test(scope))
+  );
+}
+
+/** At most this much a day may be set: a limit is a guard, not a budget. */
+export const SPEND_LIMIT_MAX_MICROS_V1 = 1_000_000_000;
+
+export function setSpendLimitV1(
+  sql: BillingSql,
+  scope: string,
+  dailyMicros: number | null,
+) {
+  if (dailyMicros === null) {
+    sql.exec("DELETE FROM billing_spend_limits WHERE scope = ?", scope);
+    return;
+  }
+  sql.exec(
+    "INSERT INTO billing_spend_limits(scope, daily_micros) VALUES (?, ?) ON CONFLICT(scope) DO UPDATE SET daily_micros = excluded.daily_micros",
+    scope,
+    dailyMicros,
+  );
+}
+
+export function readSpendLimitsV1(sql: BillingSql): Map<string, number> {
+  return new Map(
+    sql
+      .exec<{ scope: string; micros: number }>(
+        "SELECT scope, daily_micros AS micros FROM billing_spend_limits",
+      )
+      .toArray()
+      .map((row) => [row.scope, row.micros]),
+  );
+}
+
+/**
+ * What one limit's scope has spent since `since`: a Routine everything its
+ * chain spent, a Bot only its background work, because the person's own
+ * chatting is never what a limit is guarding against.
+ *
+ * The rollup is hourly, so `since` is rounded up to the hour: where a day
+ * starts on the half hour, its first minutes go uncounted rather than
+ * yesterday's last ones keeping a limit reached past midnight.
+ */
+export function spentOnScopeSinceV1(
+  sql: BillingSql,
+  scope: string,
+  since: number,
+): number {
+  const [kind, botId = "", id = ""] = scope.split("|");
+  const hour = Math.ceil(since / HOUR_MS);
+  const row =
+    kind === "bot"
+      ? sql
+          .exec<{ micros: number }>(
+            `SELECT COALESCE(SUM(charge), 0) AS micros FROM billing_spend_hourly WHERE hour >= ? AND bot_id = ? AND cause_kind NOT IN (${PERSONAL_CAUSE_LIST})`,
+            hour,
+            botId,
+          )
+          .toArray()[0]
+      : sql
+          .exec<{ micros: number }>(
+            "SELECT COALESCE(SUM(charge), 0) AS micros FROM billing_spend_hourly WHERE hour >= ? AND cause_kind = 'routine' AND cause_bot_id = ? AND cause_id = ?",
+            hour,
+            botId,
+            id,
+          )
+          .toArray()[0];
+  return row?.micros ?? 0;
+}
+
+/** The limits one charge is held to. */
+export function spendLimitScopesV1(
+  reservation: Pick<UsageReservation, "kind" | "botId">,
+  attribution: UsageAttributionV1 | undefined,
+): string[] {
+  const row = attributionRowV1(reservation, attribution);
+  if (!row.causeKind || PERSONAL_CAUSES.includes(row.causeKind)) return [];
+  return [
+    ...(row.causeKind === "routine" && row.causeId ? [causeKeyV1(row)] : []),
+    ...(reservation.botId ? [`bot|${reservation.botId}`] : []),
+  ];
+}
+
+/**
+ * Whether a limit this charge is held to has already been reached today.
+ * The check is on what has settled, so the charge that crosses a limit
+ * completes and the next one is refused.
+ */
+export function spendLimitReachedV1(
+  sql: BillingSql,
+  reservation: Pick<UsageReservation, "kind" | "botId">,
+  attribution: UsageAttributionV1 | undefined,
+  dayStart: number,
+): boolean {
+  const scopes = spendLimitScopesV1(reservation, attribution);
+  if (scopes.length === 0) return false;
+  const limits = readSpendLimitsV1(sql);
+  return scopes.some((scope) => {
+    const limit = limits.get(scope);
+    return (
+      limit !== undefined && spentOnScopeSinceV1(sql, scope, dayStart) >= limit
+    );
+  });
+}
+
+/** Whether a scope's daily limit is reached today. */
+export function spendScopePausedV1(
+  sql: BillingSql,
+  scope: string,
+  dayStart: number,
+): boolean {
+  const limit = readSpendLimitsV1(sql).get(scope);
+  return (
+    limit !== undefined && spentOnScopeSinceV1(sql, scope, dayStart) >= limit
+  );
+}
+
+/**
+ * A day well above a scope's usual: three times its average over up to the
+ * seven days before, and at least fifty cents. Its usual is measured over
+ * the days it has existed, and a scope with fewer than three of them has no
+ * usual yet to be above.
+ */
+export function spendSpikeV1(
+  sql: BillingSql,
+  scope: string,
+  dayStart: number,
+): { todayMicros: number; usualMicros: number } | null {
+  const [kind, botId = "", id = ""] = scope.split("|");
+  const first =
+    sql
+      .exec<{ hour: number | null }>(
+        kind === "bot"
+          ? "SELECT MIN(hour) AS hour FROM billing_spend_hourly WHERE bot_id = ?"
+          : "SELECT MIN(hour) AS hour FROM billing_spend_hourly WHERE cause_kind = 'routine' AND cause_bot_id = ? AND cause_id = ?",
+        ...(kind === "bot" ? [botId] : [botId, id]),
+      )
+      .toArray()[0]?.hour ?? null;
+  if (first === null) return null;
+  const days = Math.min(
+    7,
+    Math.ceil((Math.ceil(dayStart / HOUR_MS) - first) / 24),
+  );
+  if (days < 3) return null;
+  const today = spentOnScopeSinceV1(sql, scope, dayStart);
+  const before =
+    spentOnScopeSinceV1(sql, scope, dayStart - days * DAY_MS) - today;
+  const usual = Math.round(before / days);
+  if (today < 500_000 || usual <= 0 || today < 3 * usual) return null;
+  return { todayMicros: today, usualMicros: usual };
+}
+
+/** The person's last midnight, in their own timezone. */
+export function localDayStartV1(now: number, timezone: string): number {
+  let parts: Intl.DateTimeFormatPart[];
+  try {
+    parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: timezone,
+      hour: "numeric",
+      minute: "numeric",
+      hourCycle: "h23",
+    }).formatToParts(now);
+  } catch {
+    parts = new Intl.DateTimeFormat("en-US", {
+      timeZone: "UTC",
+      hour: "numeric",
+      minute: "numeric",
+      hourCycle: "h23",
+    }).formatToParts(now);
+  }
+  const part = (type: string) =>
+    Number(parts.find((p) => p.type === type)?.value ?? 0);
+  const minute = now - (now % 60_000);
+  const guess = minute - (part("hour") * 60 + part("minute")) * 60_000;
+  // Wall-clock minutes since midnight are not elapsed minutes on a day the
+  // clocks change: the guess then lands an hour off midnight, and moves back.
+  const hourAt = (at: number) =>
+    Number(
+      dayFormatter(timezone, { hour: "numeric", hourCycle: "h23" })
+        .formatToParts(at)
+        .find((p) => p.type === "hour")?.value ?? 0,
+    );
+  const off = hourAt(guess);
+  if (off === 23) return guess + HOUR_MS;
+  if (off === 1) return guess - HOUR_MS;
+  return guess;
+}
+
+/** The person's calendar day at `now`, as `2026-09-25`. */
+export function localDayKeyV1(now: number, timezone: string): string {
+  return dayFormatter(timezone).format(now);
+}
+
 /** What the account has been charged since `since`, from the rollup. */
 export function spentSinceV1(sql: BillingSql, since: number): number {
   return (
@@ -425,6 +646,17 @@ export interface SpendingGroupV1 {
   operations: number;
   /** Absent when the grouping is finer than a Turn. */
   turns?: number;
+  /** The daily limit a Bot or a Routine can carry; absent for anything else. */
+  limitScope?: string;
+  limit?: SpendingLimitV1;
+}
+
+/** One daily limit, and where today stands against it. */
+export interface SpendingLimitV1 {
+  dailyMicros: number;
+  todayMicros: number;
+  /** Background work under it is paused until midnight. */
+  reached: boolean;
 }
 
 /** How long the account's credit lasts at its recent pace. */
@@ -558,21 +790,18 @@ export function spendLabelV1(
   }
 }
 
-function dayFormatter(timezone: string) {
+function dayFormatter(
+  timezone: string,
+  options: Intl.DateTimeFormatOptions = {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  },
+) {
   try {
-    return new Intl.DateTimeFormat("en-CA", {
-      timeZone: timezone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    });
+    return new Intl.DateTimeFormat("en-CA", { ...options, timeZone: timezone });
   } catch {
-    return new Intl.DateTimeFormat("en-CA", {
-      timeZone: "UTC",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    });
+    return new Intl.DateTimeFormat("en-CA", { ...options, timeZone: "UTC" });
   }
 }
 
@@ -583,7 +812,34 @@ export function spendingReportV1(
   names: SpendingNamesV1,
   timezone: string,
   credit: SpendingCreditV1 | null = null,
+  limits: ReadonlyMap<
+    string,
+    { dailyMicros: number; todayMicros: number }
+  > = new Map(),
 ): SpendingReportV1 {
+  const limitScope = (key: string): string | undefined =>
+    query.groupBy === "bot" && key
+      ? `bot|${key}`
+      : query.groupBy === "cause" && key.startsWith("routine|")
+        ? key
+        : undefined;
+  const withLimit = (group: SpendingGroupV1): SpendingGroupV1 => {
+    const scope = limitScope(group.key);
+    if (!scope || !isSpendLimitScopeV1(scope)) return group;
+    const limit = limits.get(scope);
+    return {
+      ...group,
+      limitScope: scope,
+      ...(limit
+        ? {
+            limit: {
+              ...limit,
+              reached: limit.todayMicros >= limit.dailyMicros,
+            },
+          }
+        : {}),
+    };
+  };
   const format = dayFormatter(timezone);
   const dayKeys = new Set<string>();
   for (let at = query.since; at < query.until; at += DAY_MS / 4)
@@ -668,9 +924,9 @@ export function spendingReportV1(
     topCause,
     credit,
     groups: ranked.map((group) => {
-      if (countsTurns) return group;
+      if (countsTurns) return withLimit(group);
       const { turns: _turns, ...rest } = group;
-      return rest;
+      return withLimit(rest);
     }),
     topTurns:
       rows.topTurns?.map((run) => ({

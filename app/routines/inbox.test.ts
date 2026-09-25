@@ -2,6 +2,8 @@ import { describe, expect, test } from "bun:test";
 import type { SessionEvent } from "@frockbot/core/contracts";
 import { STEP_LIMIT_REASON_V1 } from "@frockbot/core/agent-loop";
 import { RUN_FAILURE_COPY_V1 } from "../shell/run-failure-copy.js";
+import { DAILY_LIMIT_REASON_V1 } from "../billing/ledger.js";
+import { routineSpikeMessageV1 } from "./bot.js";
 import {
   routineFailureMessageV1,
   decodePendingBotInputV1,
@@ -809,5 +811,27 @@ describe("the message a failed firing sends", () => {
     expect(
       routineFailureMessageV1({ routineName: "brief" }).startsWith('"brief" '),
     ).toBe(true);
+  });
+});
+
+describe("what a Routine's daily limit and spike say", () => {
+  test("a firing a limit stopped says so in the product's words", () => {
+    expect(
+      routineFailureMessageV1({
+        routineName: "Morning digest",
+        failure: `Bot turn ended with outcome model-error: ${DAILY_LIMIT_REASON_V1}`,
+      }),
+    ).toBe(`"Morning digest" did not run: ${DAILY_LIMIT_REASON_V1}`);
+  });
+
+  test("a spike names the day's spend against the usual", () => {
+    expect(
+      routineSpikeMessageV1("Inbox triage", {
+        todayMicros: 910_000,
+        usualMicros: 220_000,
+      }),
+    ).toBe(
+      '"Inbox triage" has spent US$0.91 today, about 4× its usual US$0.22 a day. You can set a daily limit on the Spending page.',
+    );
   });
 });

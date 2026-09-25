@@ -247,6 +247,35 @@ class _SpendingPageState extends State<SpendingPage> {
     );
   }
 
+  /// Set, change or remove one Bot's or Routine's daily limit.
+  Future<void> _editLimit(Map group) async {
+    final scope = '${group['limitScope']}';
+    final current = (group['limit'] as Map?)?['dailyMicros'] as num?;
+    final result = await showDialog<({bool remove, int? micros})>(
+      context: context,
+      builder: (_) =>
+          _LimitDialog(name: '${group['label']}', currentMicros: current),
+    );
+    if (result == null || !mounted) return;
+    try {
+      await widget.api.request(
+        '/api/billing/limits',
+        body: {
+          'scope': scope,
+          'dailyMicros': result.remove ? null : result.micros,
+        },
+      );
+      await _load();
+    } catch (_) {
+      if (mounted) {
+        setState(
+          () => message =
+              'Couldn’t save that limit. Check your connection and try again.',
+        );
+      }
+    }
+  }
+
   void _widen(SpendFilter filter) {
     final widened = [
       for (final f in filters)
@@ -346,6 +375,7 @@ class _SpendingPageState extends State<SpendingPage> {
       wide: wide,
       onTab: (key) => _choose(groupBy: key),
       onRow: canNarrow ? _narrow : null,
+      onLimit: _editLimit,
     );
     final turns = _TopTurns(
       turns: data['topTurns'] as List?,
@@ -877,6 +907,7 @@ class _Breakdown extends StatelessWidget {
   final bool wide;
   final void Function(String key) onTab;
   final void Function(Map group)? onRow;
+  final void Function(Map group) onLimit;
   const _Breakdown({
     required this.groups,
     required this.total,
@@ -886,6 +917,7 @@ class _Breakdown extends StatelessWidget {
     required this.wide,
     required this.onTab,
     required this.onRow,
+    required this.onLimit,
   });
 
   Color _color(int i) => colors[math.min(i, 5)];
@@ -894,6 +926,7 @@ class _Breakdown extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final countsTurns = groups.any((g) => g['turns'] != null);
+    final limits = groups.any((g) => g['limitScope'] != null);
     final header = theme.textTheme.labelSmall?.copyWith(
       color: theme.colorScheme.onSurfaceVariant,
       fontWeight: FontWeight.w600,
@@ -994,6 +1027,7 @@ class _Breakdown extends StatelessWidget {
                       textAlign: TextAlign.right,
                     ),
                   ),
+                  if (limits) const SizedBox(width: 44),
                   if (onRow != null) const SizedBox(width: 26),
                 ],
               ),
@@ -1005,7 +1039,9 @@ class _Breakdown extends StatelessWidget {
               color: _color(i),
               wide: wide,
               countsTurns: countsTurns,
+              limits: limits,
               onTap: onRow == null ? null : () => onRow!(groups[i]),
+              onLimit: () => onLimit(groups[i]),
             ),
         ],
       ],
@@ -1020,6 +1056,8 @@ class _GroupRow extends StatelessWidget {
   final bool wide;
   final bool countsTurns;
   final VoidCallback? onTap;
+  final bool limits;
+  final VoidCallback onLimit;
   const _GroupRow({
     required this.group,
     required this.total,
@@ -1027,12 +1065,19 @@ class _GroupRow extends StatelessWidget {
     required this.wide,
     required this.countsTurns,
     this.onTap,
+    required this.limits,
+    required this.onLimit,
   });
 
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
     final charge = group['chargeMicros'] as num? ?? 0;
+    final limit = group['limit'] as Map?;
+    final reached = limit?['reached'] == true;
+    final warn = theme.brightness == Brightness.dark
+        ? FrockTheme.warning
+        : FrockTheme.warningInk;
     final turns = group['turns'] as num?;
     final share = total > 0 ? '${(charge / total * 100).round()}%' : '—';
     final key = '${group['key']}';
@@ -1092,6 +1137,18 @@ class _GroupRow extends StatelessWidget {
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
+                    if (limit != null)
+                      Text(
+                        reached
+                            ? 'Paused until midnight · limit ${spendMoney(limit['dailyMicros'])} a day'
+                            : 'Limit ${spendMoney(limit['dailyMicros'])} a day · ${spendMoney(limit['todayMicros'])} today',
+                        style: muted?.copyWith(
+                          color: reached ? warn : null,
+                          fontWeight: reached ? FontWeight.w600 : null,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                   ],
                 ),
               ),
@@ -1114,6 +1171,27 @@ class _GroupRow extends StatelessWidget {
                 ),
               ],
               if (wide) SizedBox(width: 110, child: amount) else amount,
+              if (limits)
+                SizedBox(
+                  width: 44,
+                  child: group['limitScope'] == null
+                      ? null
+                      : IconButton(
+                          tooltip: limit == null
+                              ? 'Set a daily limit'
+                              : 'Change the daily limit',
+                          onPressed: onLimit,
+                          icon: Icon(
+                            Icons.speed_rounded,
+                            size: 20,
+                            color: limit == null
+                                ? theme.colorScheme.onSurfaceVariant
+                                : reached
+                                ? warn
+                                : theme.colorScheme.primary,
+                          ),
+                        ),
+                ),
               if (onTap != null) ...[
                 const SizedBox(width: 8),
                 Icon(
@@ -1250,4 +1328,78 @@ class _Initial extends StatelessWidget {
       ),
     );
   }
+}
+
+/// A daily limit for one Bot or Routine, in US dollars.
+class _LimitDialog extends StatefulWidget {
+  final String name;
+  final num? currentMicros;
+  const _LimitDialog({required this.name, this.currentMicros});
+
+  @override
+  State<_LimitDialog> createState() => _LimitDialogState();
+}
+
+class _LimitDialogState extends State<_LimitDialog> {
+  late final TextEditingController amount = TextEditingController(
+    text: widget.currentMicros == null
+        ? ''
+        : (widget.currentMicros! / 1000000).toStringAsFixed(2),
+  );
+  String? error;
+
+  @override
+  void dispose() {
+    amount.dispose();
+    super.dispose();
+  }
+
+  void _save() {
+    final value = double.tryParse(amount.text.trim().replaceAll(r'$', ''));
+    if (value == null || value < 0.01 || value > 1000) {
+      setState(() => error = 'Enter an amount between US\$0.01 and US\$1000.');
+      return;
+    }
+    Navigator.of(context)
+        .pop((remove: false, micros: (value * 1000000).round()));
+  }
+
+  @override
+  Widget build(BuildContext context) => AlertDialog(
+    title: Text('Daily limit for ${widget.name}'),
+    content: Column(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          'Once it spends this much in a day, its Routines and background work pause until midnight. Your own chats keep working.',
+        ),
+        const SizedBox(height: 16),
+        TextField(
+          controller: amount,
+          autofocus: true,
+          keyboardType: const TextInputType.numberWithOptions(decimal: true),
+          decoration: InputDecoration(
+            labelText: 'US dollars a day',
+            prefixText: 'US\$ ',
+            errorText: error,
+          ),
+          onSubmitted: (_) => _save(),
+        ),
+      ],
+    ),
+    actions: [
+      if (widget.currentMicros != null)
+        TextButton(
+          onPressed: () =>
+              Navigator.of(context).pop((remove: true, micros: null)),
+          child: const Text('Remove limit'),
+        ),
+      TextButton(
+        onPressed: () => Navigator.of(context).pop(),
+        child: const Text('Cancel'),
+      ),
+      FilledButton(onPressed: _save, child: const Text('Save')),
+    ],
+  );
 }

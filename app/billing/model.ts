@@ -60,6 +60,18 @@ export interface ModelBilling {
   attribution?: string;
   /** The Turn and cause each call's charge is recorded against. */
   spend?: UsageAttributionV1;
+  /** The account's daily limits, where the deployment bills. */
+  limits?: SpendingLimitsV1;
+}
+
+/** What a Bot asks the account about its daily limits. */
+export interface SpendingLimitsV1 {
+  /** Whether any of these Bot or Routine limits is reached today. */
+  paused(scopes: string[]): Promise<boolean>;
+  /** Today's spike for a scope, handed to the first asker of the day. */
+  claimSpike(
+    scope: string,
+  ): Promise<{ todayMicros: number; usualMicros: number } | null>;
 }
 
 /**

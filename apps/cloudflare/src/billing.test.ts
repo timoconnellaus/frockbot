@@ -51,6 +51,13 @@ function account(
     },
     async settleUsage() {},
     async requirePaidAccount() {},
+    async setSpendingLimit() {},
+    async readSpendingPaused() {
+      return false;
+    },
+    async claimSpendingSpike() {
+      return null;
+    },
     async readSpending(input) {
       return {
         since: 0,
@@ -188,6 +195,52 @@ describe("billing HTTP routes", () => {
     expect(asked[1]).toMatchObject({ period: "30d", groupBy: "bot" });
     expect((await view("?period=forever"))?.status).toBe(400);
     expect((await view("?groupBy=colour"))?.status).toBe(400);
+  });
+
+  test("sets and clears a daily limit for the signed-in account only", async () => {
+    const set: unknown[] = [];
+    const routes = billingRoutes(
+      env,
+      () =>
+        account({
+          async setSpendingLimit(input) {
+            set.push(input);
+          },
+        }),
+      rates,
+    );
+    const post = (body: unknown) => {
+      const request = new Request(
+        "https://app.frockbot.com/api/billing/limits",
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            origin: "https://app.frockbot.com",
+          },
+          body: JSON.stringify(body),
+        },
+      );
+      return routes.route(request, new URL(request.url), signedIn);
+    };
+    expect(
+      (await post({ scope: "routine|bot-1|digest", dailyMicros: 1_000_000 }))
+        ?.status,
+    ).toBe(200);
+    expect(
+      (await post({ scope: "bot|bot-1", dailyMicros: null }))?.status,
+    ).toBe(200);
+    expect((await post({ scope: "bot|bot-1", dailyMicros: "1" }))?.status).toBe(
+      400,
+    );
+    expect(set).toEqual([
+      {
+        userId: "user-one",
+        scope: "routine|bot-1|digest",
+        dailyMicros: 1_000_000,
+      },
+      { userId: "user-one", scope: "bot|bot-1", dailyMicros: null },
+    ]);
   });
 
   test("lists each billable model's customer rate once, from the rate table", async () => {
