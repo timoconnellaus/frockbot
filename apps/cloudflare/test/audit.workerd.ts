@@ -22,6 +22,7 @@ import {
   type AuditRebuildReceiptV1,
 } from "@frockbot/app/audit";
 import { computerOperationIdV1 } from "@frockbot/computer/core";
+import { rpcJsonSnapshotV1 } from "../src/durable-rpc.ts";
 import type { FakeExecScript } from "./computer-host-fake.ts";
 import { frockbotToolCallPrompt } from "./harness/miniflare.ts";
 import { provisionBot, provisionSiblingBot } from "./provision-bot.ts";
@@ -230,7 +231,9 @@ describe("the audit table in Workerd", () => {
     let pages = 0;
     do {
       const page = decodeClientAuditPageV1(
-        await readAudit(userId, before === undefined ? {} : { before }),
+        rpcJsonSnapshotV1(
+          await readAudit(userId, before === undefined ? {} : { before }),
+        ),
       );
       for (const entry of page.entries) seen.add(entry.runId);
       before = page.page.nextCursor;
