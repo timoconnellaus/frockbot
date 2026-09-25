@@ -31,6 +31,7 @@
 		68AFA791355F25FC0A6BE7BF /* Pods_Runner.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = 4D28607CC4462B799E783BDF /* Pods_Runner.framework */; };
 		78A318202AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage in Frameworks */ = {isa = PBXBuildFile; productRef = 78A3181F2AECB46A00862997 /* FlutterGeneratedPluginSwiftPackage */; };
 		F1A0C0012E6B5A0000D0E001 /* DesktopUpdater.swift in Sources */ = {isa = PBXBuildFile; fileRef = F1A0C0022E6B5A0000D0E001 /* DesktopUpdater.swift */; };
+		D7E1C0A12F1B3A0000D0E101 /* DeviceHostBridge.swift in Sources */ = {isa = PBXBuildFile; fileRef = D7E1C0A12F1B3A0000D0E102 /* DeviceHostBridge.swift */; };
 		F1A0C0032E6B5A0000D0E001 /* Sparkle in Frameworks */ = {isa = PBXBuildFile; productRef = F1A0C0042E6B5A0000D0E001 /* Sparkle */; };
 /* End PBXBuildFile section */
 
@@ -77,6 +78,7 @@
 		33CC10F72044A3C60003C045 /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; name = Info.plist; path = Runner/Info.plist; sourceTree = "<group>"; };
 		33CC11122044BFA00003C045 /* MainFlutterWindow.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = MainFlutterWindow.swift; sourceTree = "<group>"; };
 		F1A0C0022E6B5A0000D0E001 /* DesktopUpdater.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DesktopUpdater.swift; sourceTree = "<group>"; };
+		D7E1C0A12F1B3A0000D0E102 /* DeviceHostBridge.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = DeviceHostBridge.swift; sourceTree = "<group>"; };
 		33CEB47222A05771004F2AC0 /* Flutter-Debug.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "Flutter-Debug.xcconfig"; sourceTree = "<group>"; };
 		33CEB47422A05771004F2AC0 /* Flutter-Release.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; path = "Flutter-Release.xcconfig"; sourceTree = "<group>"; };
 		33CEB47722A0578A004F2AC0 /* Flutter-Generated.xcconfig */ = {isa = PBXFileReference; lastKnownFileType = text.xcconfig; name = "Flutter-Generated.xcconfig"; path = "ephemeral/Flutter-Generated.xcconfig"; sourceTree = "<group>"; };
@@ -186,6 +188,7 @@
 				33CC10F02044A3C60003C045 /* AppDelegate.swift */,
 				33CC11122044BFA00003C045 /* MainFlutterWindow.swift */,
 				F1A0C0022E6B5A0000D0E001 /* DesktopUpdater.swift */,
+				D7E1C0A12F1B3A0000D0E102 /* DeviceHostBridge.swift */,
 				33E51913231747F40026EE4D /* DebugProfile.entitlements */,
 				33E51914231749380026EE4D /* Release.entitlements */,
 				33CC11242044D66E0003C045 /* Resources */,
@@ -439,6 +442,7 @@
 				33CC11132044BFA00003C045 /* MainFlutterWindow.swift in Sources */,
 				33CC10F12044A3C60003C045 /* AppDelegate.swift in Sources */,
 				F1A0C0012E6B5A0000D0E001 /* DesktopUpdater.swift in Sources */,
+				D7E1C0A12F1B3A0000D0E101 /* DeviceHostBridge.swift in Sources */,
 				335BBD1B22A9A15E00E9071D /* GeneratedPluginRegistrant.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;

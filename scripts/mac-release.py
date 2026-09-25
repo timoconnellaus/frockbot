@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 """Build the main FrockBot Mac app; publishing requires Developer ID + notarization."""
 import argparse
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -11,6 +12,14 @@ import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
 NATIVE = ROOT / "apps/native"
+DEVICE_HOST = ROOT / "apps/device-host"
+
+
+def fetch_deno(target, destination):
+    spec = importlib.util.spec_from_file_location("fetch_deno", ROOT / "scripts/fetch-deno.py")
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module.fetch(target, destination)
 
 
 def run(*args):
@@ -47,6 +56,13 @@ def build(version, destination, identity=None, profile=None, provisioning=None):
             "ARCHS=arm64 x86_64", "ONLY_ACTIVE_ARCH=NO", "build")
         app = staging / "build/Build/Products/Release/FrockBot.app"
         contents = app / "Contents"
+        # The module host (ADR 0037): a universal Deno, and the host and module
+        # runtime it runs, bundled so nothing is fetched on the person's Mac.
+        (contents / "Helpers").mkdir(exist_ok=True)
+        deno = contents / "Helpers/deno"
+        parts = [fetch_deno(target, staging / f"deno-{target}") for target in ["aarch64-apple-darwin", "x86_64-apple-darwin"]]
+        run("lipo", "-create", *parts, "-output", deno)
+        run("bun", DEVICE_HOST / "build.ts", contents / "Resources")
         app_entitlements = plistlib.loads((NATIVE / "macos/Runner/Release.entitlements").read_bytes())
         if identity:
             decoded = subprocess.run(["security", "cms", "-D", "-i", str(provisioning)], check=True, capture_output=True)
@@ -79,11 +95,13 @@ def build(version, destination, identity=None, profile=None, provisioning=None):
             if item.suffix == ".xpc": args.append("--preserve-metadata=entitlements")
             if identity: args.append("--timestamp")
             run(*args, item)
-        args = ["codesign", "--force", "--sign", identity or "-", "--options", "runtime",
-                "--entitlements", entitlement_file]
-        if identity:
-            args.append("--timestamp")
-        run(*args, app)
+        # Deno before the app that seals it, with only the JIT V8 needs.
+        for item, entitlements in [(deno, DEVICE_HOST / "Deno.entitlements"), (app, entitlement_file)]:
+            args = ["codesign", "--force", "--sign", identity or "-", "--options", "runtime",
+                    "--entitlements", entitlements]
+            if identity:
+                args.append("--timestamp")
+            run(*args, item)
         run("codesign", "--verify", "--deep", "--strict", app)
         if identity:
             # Notarize and staple the app first so the copy inside the image

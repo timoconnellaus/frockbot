@@ -101,4 +101,8 @@ class AppDelegate: FlutterAppDelegate {
     return false
   }
   override func applicationSupportsSecureRestorableState(_ app: NSApplication) -> Bool { true }
+  override func applicationWillTerminate(_ notification: Notification) {
+    DeviceHostBridge.shared.stop()
+    super.applicationWillTerminate(notification)
+  }
 }
