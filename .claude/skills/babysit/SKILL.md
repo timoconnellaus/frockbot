@@ -183,8 +183,8 @@ anything it left open: a question waiting on Tim, a follow-up it named, a
 branch still to open, a verification it is waiting on.
 
 - Nothing open: put `DONE ` in front of its title.
-- Something open: put `TODO ` in front, and name the items in the report
-  under "needs Tim". When they clear, change `TODO ` to `DONE `.
+- Something open: put `DONE-TODO ` in front, and name the items in the
+  report under "needs Tim". When they clear, change it to `DONE `.
 
 Rename each session once per state, not every tick:
 
