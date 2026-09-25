@@ -26,6 +26,7 @@ import {
   isolateEmail,
   isolateJevDecide,
   ISOLATE_JEV_CALLS_PER_RUN_V1,
+  pluginJevUsageV1,
   isolateSchedule,
   isolateStorageDelete,
   isolateStoragePut,
@@ -891,6 +892,48 @@ describe("a Plugin's Jev decision", () => {
       ).toEqual({ status: "unavailable", reason: "Jev is unavailable" });
     });
     expect(seen).toEqual([]);
+  });
+
+  test("outside a Turn, is kept on the Bot as the Plugin's", async () => {
+    const call: StandaloneIsolateCallV1 = {
+      runId: "trigger:bot-1",
+      sessionId: "user-1:bot-1",
+      turnId: "trigger:bot-1",
+      generationId: GENERATION,
+      members: [
+        {
+          packageId: "greeter",
+          artifact: { contentHash: "a" },
+          descriptor: { hooks: [], grants: ["jev"] },
+        },
+      ],
+    };
+    const target = state([], call) as unknown as {
+      env: Record<string, unknown>;
+      ctx: { storage: MemoryStorage };
+    };
+    target.env = { JEV_API_KEY: "k", JEV_BASE_URL: "http://jev.test" };
+    target.ctx = { storage: new MemoryStorage() };
+    const bot = target as unknown as ShellBotStateV1;
+    const outcome = await withFakeJev([], () =>
+      isolateJevDecide(
+        bot,
+        scope({ runId: "trigger:bot-1", turnId: "trigger:bot-1", request }),
+      ),
+    );
+    expect(outcome).toMatchObject({ status: "available" });
+    expect(await pluginJevUsageV1(bot)).toEqual([
+      {
+        at: expect.any(String),
+        runId: "trigger:bot-1",
+        packageId: "greeter",
+        requestId: expect.any(String),
+        model: "jev-1.13.0",
+        inputTokens: 42,
+        outputTokens: 0,
+        latencyMs: expect.any(Number),
+      },
+    ]);
   });
 
   test("a run spends at most its calls", async () => {

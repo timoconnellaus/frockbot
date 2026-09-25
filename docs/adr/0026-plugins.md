@@ -132,7 +132,8 @@ Turn it is.
   on the Work view.
 - **Jev decisions** through the `jev` capability run on the deployment's Jev
   key with the model pinned, at most 32 questions and 64 KB a call and 64
-  calls a run. Each is itemised under the Plugin like a model call. The
+  calls a run. Each is itemised under the Plugin like a model call; one made
+  outside a Turn (a trigger, a section, a press) is kept on the Bot. The
   answers go back to the Plugin alone; nothing the kernel decides reads them,
   so a Plugin can never judge its own approval.
 
