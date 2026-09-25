@@ -105,6 +105,19 @@ export interface BillingAccountRpc {
     settlement: UsageSettlement;
   }): Promise<void>;
   requirePaidAccount(input: { userId: string }): Promise<void>;
+  setSpendingLimit(input: {
+    userId: string;
+    scope: string;
+    dailyMicros: number | null;
+  }): Promise<void>;
+  readSpendingPaused(input: {
+    userId: string;
+    scope: string;
+  }): Promise<boolean>;
+  claimSpendingSpike(input: {
+    userId: string;
+    scope: string;
+  }): Promise<{ todayMicros: number; usualMicros: number } | null>;
   readSpending(input: {
     userId: string;
     period: SpendPeriodV1;
@@ -387,6 +400,19 @@ export function billingRoutes(
               ...command,
               actorId: context.userId,
             } as unknown as Parameters<BillingLedger["reconcile"]>[0],
+          });
+          return Response.json({ ok: true }, { headers });
+        }
+        if (url.pathname === "/api/billing/limits") {
+          if (
+            typeof body.scope !== "string" ||
+            (body.dailyMicros !== null && typeof body.dailyMicros !== "number")
+          )
+            throw new BillingError("Invalid daily limit", 400);
+          await account(userId).setSpendingLimit({
+            userId,
+            scope: body.scope,
+            dailyMicros: body.dailyMicros as number | null,
           });
           return Response.json({ ok: true }, { headers });
         }

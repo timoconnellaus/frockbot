@@ -17,6 +17,7 @@ import {
 import { UNSENT_REPLY_REASON_V1 } from "./delivery.js";
 import {
   CREDIT_EXHAUSTED_REASON_V1,
+  DAILY_LIMIT_REASON_V1,
   SUBSCRIPTION_REQUIRED_REASON_V1,
 } from "../billing/ledger.js";
 
@@ -62,6 +63,7 @@ export const USER_FACING_FAILURE_REASONS_V1: readonly string[] = [
   // or add credit — which the outcome alone ("model-error") never could.
   SUBSCRIPTION_REQUIRED_REASON_V1,
   CREDIT_EXHAUSTED_REASON_V1,
+  DAILY_LIMIT_REASON_V1,
 ];
 
 /**

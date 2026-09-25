@@ -3,13 +3,19 @@ import { describe, expect, test } from "bun:test";
 import {
   BILLING_PLAN,
   BillingLedger,
+  DAILY_LIMIT_REASON_V1,
   type BillingStorage,
   type UsageAttributionV1,
   type UsageReservation,
 } from "./ledger";
 import {
   dailySpendV1,
+  isSpendLimitScopeV1,
+  localDayStartV1,
   readSpendingRowsV1,
+  setSpendLimitV1,
+  spendScopePausedV1,
+  spendSpikeV1,
   spendingCreditV1,
   spendingReportV1,
   spendWindowV1,
@@ -151,6 +157,7 @@ describe("the Spending rollups", () => {
         chargeMicros: 510,
         operations: 3,
         turns: 2,
+        limitScope: "routine|bot-1|digest",
       },
       {
         key: "chat|bot-1|",
@@ -462,6 +469,159 @@ describe("the Spending rollups", () => {
       { at: NOW - 9 * DAY },
     );
     expect(dailySpendV1(db.sql, NOW)).toBe(100);
+  });
+
+  test("a daily limit stops background work once reached, and never the person's own chat", () => {
+    const { ledger, charge, db } = setup();
+    const dayStart = NOW - 12 * HOUR;
+    setSpendLimitV1(db.sql, "routine|bot-1|digest", 300);
+    setSpendLimitV1(db.sql, "bot|bot-2", 200);
+    const reserve = (
+      id: string,
+      attribution: UsageAttributionV1,
+      botId = "bot-1",
+    ) =>
+      ledger.reserve(
+        {
+          id,
+          kind: "model",
+          maximumMicros: 500,
+          botId,
+          description: "work",
+          pricingVersion: BILLING_PLAN.pricingVersion,
+          attribution,
+        },
+        dayStart,
+      );
+    // Under the limit, the charge goes through, and the one that crosses it
+    // completes.
+    charge("model:a", 200, { runId: "f1", cause: digest });
+    expect(reserve("model:b", { runId: "f2", cause: digest })).toMatchObject({
+      created: true,
+    });
+    ledger.settle({
+      id: "model:b",
+      costMicros: 1,
+      chargeMicros: 150,
+      quantities: {},
+    });
+    // Reached: the next charge of that Routine is refused, in any Bot it asks.
+    expect(() => reserve("model:c", { runId: "f3", cause: digest })).toThrow(
+      DAILY_LIMIT_REASON_V1,
+    );
+    expect(() =>
+      reserve("model:d", { runId: "a1", cause: digest }, "bot-2"),
+    ).toThrow(DAILY_LIMIT_REASON_V1);
+    // A retry of a charge already held is the same charge, never refused.
+    expect(reserve("model:b", { runId: "f2", cause: digest })).toMatchObject({
+      created: false,
+    });
+    // A limit is on today: yesterday's spend does not count toward it.
+    expect(
+      spendScopePausedV1(db.sql, "routine|bot-1|digest", NOW + 13 * HOUR),
+    ).toBe(false);
+    // A Bot's limit stops mail and Routines on that Bot, not its chat.
+    charge(
+      "model:e",
+      250,
+      { runId: "c1", cause: { kind: "chat", botId: "bot-2" } },
+      {
+        botId: "bot-2",
+      },
+    );
+    expect(spendScopePausedV1(db.sql, "bot|bot-2", dayStart)).toBe(true);
+    expect(
+      reserve(
+        "model:f",
+        { runId: "c2", cause: { kind: "chat", botId: "bot-2" } },
+        "bot-2",
+      ),
+    ).toMatchObject({ created: true });
+    expect(() =>
+      reserve(
+        "model:g",
+        { runId: "m1", cause: { kind: "email", botId: "bot-2" } },
+        "bot-2",
+      ),
+    ).toThrow(DAILY_LIMIT_REASON_V1);
+    // Without the person's day, nothing is held to a limit.
+    expect(
+      ledger.reserve({
+        id: "model:h",
+        kind: "model",
+        maximumMicros: 50,
+        botId: "bot-2",
+        description: "work",
+        pricingVersion: BILLING_PLAN.pricingVersion,
+        attribution: { runId: "m2", cause: { kind: "email", botId: "bot-2" } },
+      }),
+    ).toMatchObject({ created: true });
+  });
+
+  test("the page shows each limit beside its row, and whether it is reached", () => {
+    const { charge, db, report } = setup();
+    setSpendLimitV1(db.sql, "routine|bot-1|digest", 300);
+    charge("model:a", 400, { runId: "f1", cause: digest });
+    const limits = new Map([
+      ["routine|bot-1|digest", { dailyMicros: 300, todayMicros: 400 }],
+    ]);
+    const query = {
+      ...spendWindowV1("7d", NOW, undefined),
+      groupBy: "cause" as const,
+      filters: {},
+    };
+    const view = spendingReportV1(
+      query,
+      readSpendingRowsV1(db.sql, query),
+      { userId: "user-1", bots: { "bot-1": "Research" } },
+      "UTC",
+      null,
+      limits,
+    );
+    expect(view.groups[0]).toMatchObject({
+      limitScope: "routine|bot-1|digest",
+      limit: { dailyMicros: 300, todayMicros: 400, reached: true },
+    });
+    expect(report({ groupBy: "bot" }).groups[0]).toMatchObject({
+      limitScope: "bot|bot-1",
+    });
+    expect(report({ groupBy: "model" }).groups[0]).not.toHaveProperty(
+      "limitScope",
+    );
+  });
+
+  test("a spike is three times the week's usual and at least fifty cents", () => {
+    const { charge, db } = setup();
+    const dayStart = NOW - 12 * HOUR;
+    for (let d = 1; d <= 7; d++)
+      charge(
+        `model:w${d}`,
+        200_000,
+        { runId: `w${d}`, cause: digest },
+        {
+          at: dayStart - d * 24 * HOUR + HOUR,
+        },
+      );
+    charge("model:t1", 500_000, { runId: "t1", cause: digest });
+    expect(spendSpikeV1(db.sql, "routine|bot-1|digest", dayStart)).toBeNull();
+    charge("model:t2", 200_000, { runId: "t2", cause: digest });
+    expect(spendSpikeV1(db.sql, "routine|bot-1|digest", dayStart)).toEqual({
+      todayMicros: 700_000,
+      usualMicros: 200_000,
+    });
+    expect(spendSpikeV1(db.sql, "routine|bot-1|other", dayStart)).toBeNull();
+  });
+
+  test("a day starts at the person's own midnight", () => {
+    // 12:00 UTC is 22:00 in Sydney (UTC+10 in September).
+    expect(localDayStartV1(NOW, "Australia/Sydney")).toBe(NOW - 22 * HOUR);
+    expect(localDayStartV1(NOW, "UTC")).toBe(NOW - 12 * HOUR);
+    // Adelaide is half an hour off the hour.
+    expect(localDayStartV1(NOW, "Australia/Adelaide")).toBe(NOW - 21.5 * HOUR);
+    expect(isSpendLimitScopeV1("routine|bot-1|digest")).toBe(true);
+    expect(isSpendLimitScopeV1("bot|bot-1")).toBe(true);
+    expect(isSpendLimitScopeV1("chat|bot-1|")).toBe(false);
+    expect(isSpendLimitScopeV1("bot|a|b")).toBe(false);
   });
 
   test("the billing period starts where paid access did", () => {

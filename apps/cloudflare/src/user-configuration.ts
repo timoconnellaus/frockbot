@@ -1,4 +1,5 @@
 import {
+  BillingError,
   BillingLedger,
   type BillingBalance,
   type ComplimentaryGrant,
@@ -8,7 +9,15 @@ import {
 } from "@frockbot/app/billing/ledger";
 import {
   dailySpendV1,
+  isSpendLimitScopeV1,
+  localDayStartV1,
+  readSpendLimitsV1,
   readSpendingRowsV1,
+  setSpendLimitV1,
+  SPEND_LIMIT_MAX_MICROS_V1,
+  spendScopePausedV1,
+  spendSpikeV1,
+  spentOnScopeSinceV1,
   spendingCreditV1,
   spendingReportV1,
   type SpendingCreditV1,
@@ -529,7 +538,86 @@ export class UserConfiguration
       },
       timezone,
       this.spendingCredit(ledger),
+      this.spendingLimits(localDayStartV1(Date.now(), timezone)),
     );
+  }
+  /** Every daily limit the account set, and what each has spent today. */
+  private spendingLimits(dayStart: number) {
+    const sql = this.ctx.storage.sql;
+    return new Map(
+      [...readSpendLimitsV1(sql)].map(([scope, dailyMicros]) => [
+        scope,
+        {
+          dailyMicros,
+          todayMicros: spentOnScopeSinceV1(sql, scope, dayStart),
+        },
+      ]),
+    );
+  }
+  /** The person's last midnight, cached briefly: every paid call asks. */
+  private async dayStart(userId: string): Promise<number> {
+    const now = Date.now();
+    if (!this.cachedTimezone || this.cachedTimezone.until < now)
+      this.cachedTimezone = {
+        timezone: await this.routineTimezone(userId),
+        until: now + 60_000,
+      };
+    return localDayStartV1(now, this.cachedTimezone.timezone);
+  }
+  private cachedTimezone: { timezone: string; until: number } | undefined;
+
+  /** Set or clear one Bot's or Routine's daily limit. */
+  async setSpendingLimit(input: {
+    userId: string;
+    scope: string;
+    dailyMicros: number | null;
+  }): Promise<void> {
+    await this.assertUserIdentity(input.userId);
+    if (
+      !isSpendLimitScopeV1(input.scope) ||
+      (input.dailyMicros !== null &&
+        (!Number.isSafeInteger(input.dailyMicros) ||
+          input.dailyMicros <= 0 ||
+          input.dailyMicros > SPEND_LIMIT_MAX_MICROS_V1))
+    )
+      throw new BillingError("Invalid daily limit", 400);
+    this.billing();
+    setSpendLimitV1(this.ctx.storage.sql, input.scope, input.dailyMicros);
+  }
+
+  /** Whether a Routine's or Bot's daily limit has paused it today. */
+  async readSpendingPaused(input: {
+    userId: string;
+    scope: string;
+  }): Promise<boolean> {
+    await this.assertUserIdentity(input.userId);
+    if (!isSpendLimitScopeV1(input.scope)) return false;
+    this.billing();
+    return spendScopePausedV1(
+      this.ctx.storage.sql,
+      input.scope,
+      await this.dayStart(input.userId),
+    );
+  }
+
+  /**
+   * A day well above a Routine's usual, told once a day: the first ask that
+   * finds one gets it, and every later ask that day gets nothing.
+   */
+  async claimSpendingSpike(input: {
+    userId: string;
+    scope: string;
+  }): Promise<{ todayMicros: number; usualMicros: number } | null> {
+    await this.assertUserIdentity(input.userId);
+    if (!isSpendLimitScopeV1(input.scope)) return null;
+    const ledger = this.billing();
+    const dayStart = await this.dayStart(input.userId);
+    const spike = spendSpikeV1(this.ctx.storage.sql, input.scope, dayStart);
+    if (!spike) return null;
+    const told = `spike:${input.scope}:${dayStart}`;
+    if (ledger.get<boolean>(told)) return null;
+    ledger.set(told, true);
+    return spike;
   }
   /**
    * How long the account's credit lasts at its recent pace. None where the
@@ -596,7 +684,13 @@ export class UserConfiguration
   async reserveUsage(input: { userId: string; reservation: UsageReservation }) {
     await this.assertUserIdentity(input.userId);
     await this.assertAccountOpen();
-    return this.billing().reserve(input.reservation);
+    const ledger = this.billing();
+    // Only an account with a limit pays for reading its timezone.
+    const limited = readSpendLimitsV1(this.ctx.storage.sql).size > 0;
+    return ledger.reserve(
+      input.reservation,
+      limited ? await this.dayStart(input.userId) : undefined,
+    );
   }
   async settleUsage(input: { userId: string; settlement: UsageSettlement }) {
     await this.assertUserIdentity(input.userId);

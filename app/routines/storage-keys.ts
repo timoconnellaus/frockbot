@@ -197,6 +197,19 @@ export function routineFailureMessageKeyV1(fireId: string): string {
   return `${ROUTINE_FAILURE_MESSAGE_PREFIX}${fireId}`;
 }
 
+/** The one message a firing that spent well above usual owes. */
+export function routineSpikeMessageKeyV1(fireId: string): string {
+  return `routine-spike-message:${fireId}`;
+}
+
+/**
+ * That a Routine's daily limit has been told today. The first firing a limit
+ * stops is a message; the rest of that day's are skipped quietly.
+ */
+export function routineLimitToldKeyV1(routineId: string, day: string): string {
+  return `routine-limit-told:${routineId}:${day}`;
+}
+
 /** One `RoutineInboxEntryV1`, newest first. */
 export const ROUTINE_INBOX_PREFIX = "routine-inbox:";
 /** The inbox's monotonic sequence. Read by key, because the terminal seam cannot list. */

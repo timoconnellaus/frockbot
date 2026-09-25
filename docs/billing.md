@@ -71,6 +71,16 @@ Attribution is descriptive. It sits in `billing_attribution` beside the operatio
 
 The previous period's total, the per-day split and the biggest cause come from the same rollup; the credit's pace is the account's last seven days, whatever the view, because the credit is account-wide, and a deployment that does not bill reports no credit at all. Every settlement adds itself, in the settlement's own transaction, to an hourly rollup (`billing_spend_hourly`) and to its Turn's running total (`billing_spend_runs`); `GET /api/billing/spending` reads only those, never the operation log. A rollup that fails leaves a gap in the page, never an unsettled charge. The rollup starts empty on deploy; charges settled before it are in the usage list only. Hours rather than days, because the person's days are in their Profile timezone: the rollup is summed into them when it is read. A Turn has one Bot, cause, trigger and conversation, so a grouping by those counts Turns; categories, models and Plugins split a Turn, so a view narrowed by them lists no Turns and counts none.
 
+## Daily limits and spike alerts
+
+A person can give any Bot or Routine a **daily limit** from its row on the Spending page (`POST /api/billing/limits` with a scope of `bot|<botId>` or `routine|<botId>|<routineId>` and `dailyMicros`, or `null` to remove it). A day is the person's own, from midnight in their Profile timezone.
+
+A limit stops background work, never the person: a charge whose cause is a chat, a Group Chat, voice or the person on the Computer is never refused by one. Every other attributed charge is held to its Bot's limit, and a Routine's charges — in whichever Bot its chain reaches — to the Routine's. The check is inside the reservation's own transaction and on what has settled today, so the charge that crosses a limit completes and the next one is refused with `DAILY_LIMIT_REASON_V1`, which a failed Turn shows as written. A charge already reserved is never refused again: its retry is the same charge. An unattributed charge is held to nothing.
+
+Before each firing, a Routine asks whether its own or its Bot's limit is reached. The first firing a limit stops in the person's day fails with a message in the Bot's conversation — the same message and push as any Routine that did not run — and the rest of that day's firings are skipped quietly, so a Routine that runs every half hour says so once.
+
+After a firing that finishes, the Routine asks for a **spike**: a day at least three times its average over the previous seven, and at least US$0.50. The account hands the alert to one firing a day, which posts it on its own run as a message — "has spent US$0.91 today, about 4× its usual US$0.22 a day" — through the same path. A Routine with no history has no usual and raises none.
+
 ## Stripe
 
 The adapter pins Stripe API version `2025-02-24.acacia`. Configure the webhook destination to the same version. Secrets remain in the Worker environment and never enter the client, Bot context, Workspace or Sprite.

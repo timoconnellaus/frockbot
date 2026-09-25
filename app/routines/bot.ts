@@ -55,6 +55,8 @@ import {
 import {
   ROUTINE_ACCOUNT_TIMEZONE_KEY,
   routineFailureMessageKeyV1,
+  routineLimitToldKeyV1,
+  routineSpikeMessageKeyV1,
   routineKeyV1,
 } from "@frockbot/app/routines/storage-keys";
 import { isRoutineTimezoneV1 } from "@frockbot/app/routines/cron";
@@ -82,6 +84,8 @@ import type {
 } from "@frockbot/app/routines/shared";
 import type { RoutineWriterV1 } from "@frockbot/app/routines/records";
 import { readBotSettingsV1 } from "@frockbot/app/settings/bot";
+import { DAILY_LIMIT_REASON_V1 } from "@frockbot/app/billing/ledger";
+import type { StoredRun } from "@frockbot/app/shell/backend-contracts";
 import { expireDueApprovals } from "@frockbot/app/approvals/bot";
 import {
   APPROVAL_PREFIX,
@@ -754,8 +758,18 @@ async function settleRoutineFirings(state: ShellBotStateV1): Promise<void> {
           summary: "Routines is switched off for this Bot.",
         };
       }
-      const outcome = await runOneFiring(state, identity, fire);
+      const paused = await pausedFiring(state, identity, fire);
+      if (paused?.status === "skipped") return paused;
+      const outcome = paused ?? (await runOneFiring(state, identity, fire));
+      // A limit reached part-way through a firing is told by that firing;
+      // the rest of the day's are skipped quietly, as after a refused one.
+      if (!paused && outcome.summary?.includes(DAILY_LIMIT_REASON_V1))
+        await state.ctx.storage.put(await limitToldKey(state, fire), {
+          schemaVersion: 1,
+        });
       await notifyFailedFiring(state, identity, fire, outcome);
+      if (outcome.status === "ok")
+        await notifySpendingSpike(state, identity, fire);
       return outcome;
     },
     await routineAccountTimezoneV1(state.ctx.storage),
@@ -846,15 +860,13 @@ async function notifyFailedFiring(
   outcome: RoutineFireOutcomeV1,
 ): Promise<void> {
   if (outcome.status === "ok" || outcome.status === "skipped") return;
-  const settings = await readBotSettingsV1(state, identity);
-  const receiptKey = routineFailureMessageKeyV1(fire.fireId);
   const createdAt = state.now().toISOString();
   const run =
     (await state.authority.readStoredRun(fire.fireId)) ??
     (await state.authority.recordUnadmittedFailure({
       command: routineTurnCommandV1(identity, fire, createdAt),
       failure: outcome.summary ?? "the firing recorded no run",
-      snapshot: settings,
+      snapshot: await readBotSettingsV1(state, identity),
     }));
   const body = routineFailureMessageV1({
     routineName: await routineMessageNameV1(state, fire.routineId),
@@ -866,6 +878,36 @@ async function notifyFailedFiring(
       : { failure: run.failure }),
     ...(run?.events === undefined ? {} : { events: run.events }),
   }).slice(0, 240);
+  await postFiringMessage(state, identity, fire, {
+    run,
+    body,
+    createdAt,
+    receiptKey: routineFailureMessageKeyV1(fire.fireId),
+    // The directory id the failure used to be filed under, kept so the
+    // internal hand-off between the settling transaction and this one is
+    // still one identity per firing.
+    notificationId: notificationIdV1("routine-failed", fire.fireId),
+  });
+}
+
+/**
+ * One message on a firing's own run: the next send ordinal, past whatever
+ * the Turn had already said, so no two messages of that run share an id.
+ */
+async function postFiringMessage(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+  fire: RoutineFireV1,
+  message: {
+    run: StoredRun | undefined;
+    body: string;
+    createdAt: string;
+    receiptKey: string;
+    notificationId: string;
+  },
+): Promise<void> {
+  const { run, body, createdAt, receiptKey } = message;
+  const settings = await readBotSettingsV1(state, identity);
   const ordinal =
     run?.events.filter((event) => event.type === "send/to-user").length ?? 0;
   let committed = false;
@@ -907,21 +949,110 @@ async function notifyFailedFiring(
     }
     await transaction.put(receiptKey, {
       schemaVersion: 1,
-      // The directory id the failure used to be filed under, kept so the
-      // internal hand-off between the settling transaction and this one is
-      // still one identity per firing.
-      notificationId: notificationIdV1("routine-failed", fire.fireId),
+      notificationId: message.notificationId,
       at: createdAt,
     });
     committed = true;
   });
   // The message is written here rather than through the Turn's own settlement,
   // so the drain that a committed message wakes is asked for here too: a
-  // broken Routine reaches the device now, not on whatever alarm comes next.
+  // Routine's news reaches the device now, not on whatever alarm comes next.
   if (committed) {
     state.messagesCommitted();
     await state.authority.drainCommittedPublication();
   }
+}
+
+/**
+ * A firing a daily limit stops, before it spends anything. The first one of
+ * the person's day fails and says so; the rest of that day are skipped
+ * quietly, because one message is the whole of what there is to say.
+ * `undefined` runs the firing: no limit, or none reached, or an account that
+ * could not be asked — a limit is never a reason to lose a Routine.
+ */
+async function pausedFiring(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+  fire: RoutineFireV1,
+): Promise<RoutineFireOutcomeV1 | undefined> {
+  const limits = state.env.BILLING?.(
+    identity.userId,
+    identity.botId,
+    "",
+  ).limits;
+  if (!limits) return undefined;
+  const scopes = [
+    `routine|${identity.botId}|${fire.routineId}`,
+    `bot|${identity.botId}`,
+  ];
+  const paused = await Promise.all(
+    scopes.map((scope) => limits.paused(scope).catch(() => false)),
+  );
+  if (!paused.some(Boolean)) return undefined;
+  const told = await limitToldKey(state, fire);
+  if (await state.ctx.storage.get(told))
+    return { status: "skipped", summary: DAILY_LIMIT_REASON_V1 };
+  await state.ctx.storage.put(told, { schemaVersion: 1 });
+  return { status: "failed", summary: DAILY_LIMIT_REASON_V1 };
+}
+
+/** Today's "the limit has been told" receipt for one Routine. */
+async function limitToldKey(
+  state: ShellBotStateV1,
+  fire: RoutineFireV1,
+): Promise<string> {
+  const day = localDateV1(
+    state.now(),
+    await routineAccountTimezoneV1(state.ctx.storage),
+  );
+  return routineLimitToldKeyV1(fire.routineId, day);
+}
+
+/** A calendar day in the person's timezone, as `2026-09-25`. */
+function localDateV1(now: Date, timezone: string): string {
+  try {
+    return new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(now);
+  } catch {
+    return now.toISOString().slice(0, 10);
+  }
+}
+
+/**
+ * A Routine that spent well above its usual today, told on the firing that
+ * crossed the line. The account hands the alert to one firing a day.
+ */
+async function notifySpendingSpike(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+  fire: RoutineFireV1,
+): Promise<void> {
+  const limits = state.env.BILLING?.(
+    identity.userId,
+    identity.botId,
+    "",
+  ).limits;
+  const spike = await limits
+    ?.claimSpike(`routine|${identity.botId}|${fire.routineId}`)
+    .catch(() => null);
+  if (!spike) return;
+  const name = await routineMessageNameV1(state, fire.routineId);
+  await postFiringMessage(state, identity, fire, {
+    run: await state.authority.readStoredRun(fire.fireId),
+    body: routineSpikeMessageV1(name, spike),
+    createdAt: state.now().toISOString(),
+    receiptKey: routineSpikeMessageKeyV1(fire.fireId),
+    notificationId: notificationIdV1("routine-spike", fire.fireId),
+  });
+}
+
+/** What a spike alert says. */
+export function routineSpikeMessageV1(
+  routineName: string,
+  spike: { todayMicros: number; usualMicros: number },
+): string {
+  const usd = (micros: number) => `US$${(micros / 1_000_000).toFixed(2)}`;
+  const times = Math.round(spike.todayMicros / spike.usualMicros);
+  return `"${routineName}" has spent ${usd(spike.todayMicros)} today, about ${times}× its usual ${usd(spike.usualMicros)} a day. You can set a daily limit on the Spending page.`;
 }
 
 export async function readRoutineRecordV1(

@@ -196,11 +196,7 @@ void main() {
       await tester.pumpAndSettle();
       expect(asked.last.queryParameters.containsKey('cause'), isFalse);
 
-      await tester.scrollUntilVisible(
-        find.text('7d'),
-        -300,
-        scrollable: _list,
-      );
+      await tester.scrollUntilVisible(find.text('7d'), -300, scrollable: _list);
       await tester.ensureVisible(find.text('7d'));
       await tester.pumpAndSettle();
       await tester.tap(find.text('7d'));
@@ -271,4 +267,67 @@ void main() {
     );
     api.close();
   });
+
+  testWidgets(
+    'a Routine shows its daily limit, and a limit is set from its row',
+    (tester) async {
+      final posted = <Object?>[];
+      var limited = false;
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        if (path == '/api/billing/limits') {
+          posted.add(body);
+          limited = true;
+          return {'ok': true};
+        }
+        return _report(
+          Uri.parse(path),
+          groups: [
+            {
+              ..._digest,
+              'limitScope': 'routine|bot-1|digest',
+              if (limited)
+                'limit': {
+                  'dailyMicros': 500000,
+                  'todayMicros': 510000,
+                  'reached': true,
+                },
+            },
+          ],
+          topTurns: const [],
+        );
+      });
+      await tester.pumpWidget(MaterialApp(home: SpendingPage(api: api)));
+      await tester.pumpAndSettle();
+      await tester.scrollUntilVisible(
+        find.byTooltip('Set a daily limit'),
+        300,
+        scrollable: _list,
+      );
+      await tester.ensureVisible(find.byTooltip('Set a daily limit'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.byTooltip('Set a daily limit'));
+      await tester.pumpAndSettle();
+      expect(find.text('Daily limit for Morning digest'), findsOneWidget);
+      await tester.enterText(find.byType(TextField), 'abc');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(find.textContaining('Enter an amount'), findsOneWidget);
+      await tester.enterText(find.byType(TextField), '0.50');
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(posted, [
+        {'scope': 'routine|bot-1|digest', 'dailyMicros': 500000},
+      ]);
+      await tester.scrollUntilVisible(
+        find.textContaining('Paused until midnight'),
+        300,
+        scrollable: _list,
+      );
+      expect(
+        find.text('Paused until midnight · limit US\$0.50 a day'),
+        findsOneWidget,
+      );
+      api.close();
+    },
+  );
 }
