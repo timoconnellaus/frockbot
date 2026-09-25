@@ -134,7 +134,7 @@ test("deleting a Bot from its settings removes it for good", async ({
   await expect(sidebarRow(page, "Beta")).toHaveCount(0);
 });
 
-test("an archived Bot opens read-only from the sidebar, and its bar deletes or restores it", async ({
+test("an archived Bot opens read-only from the sidebar, and its bar deletes it after asking", async ({
   page,
   userId,
   allowedFailures,
@@ -180,7 +180,9 @@ test("an archived Bot opens read-only from the sidebar, and its bar deletes or r
   // It opens read-only: its conversation, and a bar where the composer was.
   await press(sidebarRow(page, "Doomed"));
   const bar = sem(page, "flock-archived-bar");
-  await expect(bar).toContainText(
+  // The bar's sentence is its accessible name; its buttons are its text.
+  await expect(bar).toHaveAttribute(
+    "aria-label",
     "Doomed is archived. Its conversation is kept, but it won’t reply or run its Routines.",
     { timeout: 60_000 },
   );
