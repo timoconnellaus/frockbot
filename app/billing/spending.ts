@@ -298,6 +298,10 @@ export interface SpendingRowsV1 {
       }[]
     | null;
   labels: Record<string, string>;
+  /** What the same view cost over the window just before this one. */
+  previousTotal: number;
+  /** The cause that spent the most in this view. */
+  topCause: { key: string; charge: number; turns: number } | null;
 }
 
 function where(
@@ -370,7 +374,39 @@ export function readSpendingRowsV1(
       .toArray()
       .map((row) => [row.key, row.label]),
   );
-  return { hours, topTurns, labels };
+  const span = query.until - query.since;
+  const previous = where(
+    { ...query, since: query.since - span, until: query.since },
+    "hour",
+  );
+  const previousTotal =
+    sql
+      .exec<{ micros: number }>(
+        `SELECT COALESCE(SUM(charge), 0) AS micros FROM billing_spend_hourly WHERE ${previous.clause}`,
+        Math.floor((query.since - span) / HOUR_MS),
+        Math.floor(query.since / HOUR_MS),
+        ...previous.bindings,
+      )
+      .toArray()[0]?.micros ?? 0;
+  const topCause =
+    sql
+      .exec<{ key: string; charge: number; turns: number }>(
+        `SELECT (${DIMENSION_SQL.cause}) AS key, SUM(charge) AS charge, SUM(turns) AS turns FROM billing_spend_hourly WHERE ${hourly.clause} GROUP BY key ORDER BY charge DESC LIMIT 1`,
+        Math.floor(query.since / HOUR_MS),
+        Math.ceil(query.until / HOUR_MS),
+        ...hourly.bindings,
+      )
+      .toArray()[0] ?? null;
+  return { hours, topTurns, labels, previousTotal, topCause };
+}
+
+/**
+ * What the account has spent a day, on average, over the last week: the
+ * pace its remaining credit is measured against. Account-wide, whatever the
+ * view, because the credit is.
+ */
+export function dailySpendV1(sql: BillingSql, now: number): number {
+  return Math.round(spentSinceV1(sql, now - 7 * DAY_MS) / 7);
 }
 
 export interface SpendingNamesV1 {
@@ -391,6 +427,21 @@ export interface SpendingGroupV1 {
   turns?: number;
 }
 
+/** How long the account's credit lasts at its recent pace. */
+export interface SpendingCreditV1 {
+  /** What the account can spend now. */
+  availableMicros: number;
+  /** Its average daily spend over the last seven days. */
+  dailyMicros: number;
+  /** When the credit runs out at that pace; null when nothing is being spent. */
+  runsOutAt: number | null;
+  /** When the monthly allowance next renews; null without a subscription. */
+  renewsAt: number | null;
+}
+
+/** How many groups the daily bars split out; the rest is one "Other". */
+export const SPEND_STACKED_GROUPS_V1 = 5;
+
 export interface SpendingReportV1 {
   since: number;
   until: number;
@@ -398,9 +449,19 @@ export interface SpendingReportV1 {
   groupBy: SpendDimensionV1;
   filters: { dimension: SpendDimensionV1; value: string; label: string }[];
   totalMicros: number;
+  /** The same view over the window just before this one. */
+  previousTotalMicros: number;
   operations: number;
   turns?: number;
-  days: { day: string; chargeMicros: number }[];
+  /**
+   * Each of the person's days, split by the first groups in `groups` order
+   * (at most `SPEND_STACKED_GROUPS_V1`), then everything else as one last
+   * entry when there is more.
+   */
+  days: { day: string; chargeMicros: number; stack: number[] }[];
+  /** The cause that spent the most in this view. */
+  topCause: SpendingGroupV1 | null;
+  credit: SpendingCreditV1 | null;
   groups: SpendingGroupV1[];
   topTurns:
     | {
@@ -518,22 +579,18 @@ export function spendingReportV1(
   rows: SpendingRowsV1,
   names: SpendingNamesV1,
   timezone: string,
+  credit: SpendingCreditV1 | null = null,
 ): SpendingReportV1 {
   const format = dayFormatter(timezone);
-  const days = new Map<string, number>();
+  const dayKeys = new Set<string>();
   for (let at = query.since; at < query.until; at += DAY_MS / 4)
-    days.set(format.format(at), 0);
-  days.set(
-    format.format(query.until - 1),
-    days.get(format.format(query.until - 1)) ?? 0,
-  );
+    dayKeys.add(format.format(at));
+  dayKeys.add(format.format(query.until - 1));
   const groups = new Map<string, SpendingGroupV1>();
   let total = 0;
   let operations = 0;
   let turns = 0;
   for (const row of rows.hours) {
-    const day = format.format(row.hour * HOUR_MS);
-    days.set(day, (days.get(day) ?? 0) + row.charge);
     const group =
       groups.get(row.key) ??
       ({
@@ -553,6 +610,30 @@ export function spendingReportV1(
   }
   const countsTurns =
     TURN_DIMENSIONS.has(query.groupBy) && rows.topTurns !== null;
+  const ranked = [...groups.values()].sort(
+    (a, b) => b.chargeMicros - a.chargeMicros,
+  );
+  const stacked = ranked.slice(0, SPEND_STACKED_GROUPS_V1).map((g) => g.key);
+  const width = stacked.length + (ranked.length > stacked.length ? 1 : 0);
+  const days = new Map<string, number[]>(
+    [...dayKeys].map((day) => [day, new Array<number>(width).fill(0)]),
+  );
+  for (const row of rows.hours) {
+    const day = format.format(row.hour * HOUR_MS);
+    const stack = days.get(day) ?? new Array<number>(width).fill(0);
+    const slot = stacked.indexOf(row.key);
+    stack[slot === -1 ? width - 1 : slot]! += row.charge;
+    days.set(day, stack);
+  }
+  const topCause = rows.topCause
+    ? {
+        key: rows.topCause.key,
+        ...spendLabelV1("cause", rows.topCause.key, names, rows.labels),
+        chargeMicros: rows.topCause.charge,
+        operations: 0,
+        turns: rows.topCause.turns,
+      }
+    : null;
   return {
     since: query.since,
     until: query.until,
@@ -571,18 +652,23 @@ export function spendingReportV1(
           ];
     }),
     totalMicros: total,
+    previousTotalMicros: rows.previousTotal,
     operations,
     ...(rows.topTurns !== null ? { turns } : {}),
     days: [...days.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
-      .map(([day, chargeMicros]) => ({ day, chargeMicros })),
-    groups: [...groups.values()]
-      .map((group) => {
-        if (countsTurns) return group;
-        const { turns: _turns, ...rest } = group;
-        return rest;
-      })
-      .sort((a, b) => b.chargeMicros - a.chargeMicros),
+      .map(([day, stack]) => ({
+        day,
+        chargeMicros: stack.reduce((sum, micros) => sum + micros, 0),
+        stack,
+      })),
+    topCause,
+    credit,
+    groups: ranked.map((group) => {
+      if (countsTurns) return group;
+      const { turns: _turns, ...rest } = group;
+      return rest;
+    }),
     topTurns:
       rows.topTurns?.map((run) => ({
         runId: run.runId,
@@ -603,6 +689,24 @@ export const SPEND_PERIODS_V1: readonly SpendPeriodV1[] = [
   "90d",
   "billing",
 ];
+
+/** How long the account's credit lasts at the pace it has been spent. */
+export function spendingCreditV1(
+  availableMicros: number,
+  dailyMicros: number,
+  renewsAt: number | null,
+  now: number,
+): SpendingCreditV1 {
+  return {
+    availableMicros,
+    dailyMicros,
+    runsOutAt:
+      dailyMicros > 0
+        ? now + Math.floor((availableMicros / dailyMicros) * DAY_MS)
+        : null,
+    renewsAt,
+  };
+}
 
 /** The window a period names, ending now. */
 export function spendWindowV1(

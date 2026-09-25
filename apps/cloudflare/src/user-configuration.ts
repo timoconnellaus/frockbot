@@ -7,14 +7,21 @@ import {
   type UsageSettlement,
 } from "@frockbot/app/billing/ledger";
 import {
+  dailySpendV1,
   readSpendingRowsV1,
+  spendingCreditV1,
   spendingReportV1,
+  type SpendingCreditV1,
   spendWindowV1,
   type SpendDimensionV1,
   type SpendingReportV1,
   type SpendPeriodV1,
 } from "@frockbot/app/billing/spending";
 import { accountPayments, type BillingEnv } from "./billing.js";
+import {
+  hostedBillingEnabledV1,
+  type BillingSwitchEnv,
+} from "./billing-readiness.js";
 import { isPublicIdentifier } from "@frockbot/core/configuration";
 import {
   accessEmailV1,
@@ -521,6 +528,29 @@ export class UserConfiguration
         ),
       },
       timezone,
+      this.spendingCredit(ledger),
+    );
+  }
+  /**
+   * How long the account's credit lasts at its recent pace. None where the
+   * deployment does not bill: there is no credit to run out.
+   */
+  private spendingCredit(ledger: BillingLedger): SpendingCreditV1 | null {
+    if (!hostedBillingEnabledV1(this.env as BillingSwitchEnv)) return null;
+    const now = Date.now();
+    const balance = ledger.balance();
+    return spendingCreditV1(
+      // Without a subscription only complimentary credit is spendable.
+      balance.subscribed
+        ? balance.includedMicros +
+            balance.complimentaryMicros +
+            balance.purchasedMicros
+        : balance.complimentaryMicros,
+      dailySpendV1(this.ctx.storage.sql, now),
+      balance.subscribed
+        ? (ledger.get<PaidAccessState>("paidAccess")?.periodEnd ?? null)
+        : null,
+      now,
     );
   }
   async readBillingBalance(input: { userId: string }): Promise<BillingBalance> {
