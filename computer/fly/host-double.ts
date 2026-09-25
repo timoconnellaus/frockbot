@@ -28,7 +28,17 @@ import {
   type ComputerHostViewerResultV1,
 } from "@frockbot/computer/host-protocol";
 import type { ComputerHostV1 } from "@frockbot/computer/core/host";
-import { BOTS_ROOT, DESKTOP_GUI_LEASE_KEY } from "./runtime.js";
+import {
+  BOTS_ROOT,
+  DEMONSTRATION_SCRIPT,
+  DESKTOP_GUI_LEASE_KEY,
+} from "./runtime.js";
+import {
+  DEMONSTRATION_MARKER,
+  DEMONSTRATION_NONE_MARKER,
+  DEMONSTRATION_NOT_HOLDER_MARKER,
+  DEMONSTRATION_STARTED_MARKER,
+} from "./demonstration.js";
 import {
   computerBotKey,
   FlyComputer,
@@ -525,7 +535,38 @@ export function contractHostV1(userId: string, botId: string): ComputerHostV1 {
   const disk = new FakeWorkspaceDisk();
   const png = new Uint8Array(64);
   png.set([137, 80, 78, 71, 13, 10, 26, 10], 0);
+  let recording = false;
   const double = new FakeComputerHost((script) => {
+    if (script.includes(`${DEMONSTRATION_SCRIPT} record`)) {
+      // The start script's own fence: the named owner must hold the
+      // desktop lease, as the lease file on a real Computer would say.
+      const lease = double.leases.get(DESKTOP_GUI_LEASE_KEY);
+      if (!lease?.fresh || lease.owner !== quoted(script, "OWNER")) {
+        return { stdout: `${DEMONSTRATION_NOT_HOLDER_MARKER}\n` };
+      }
+      recording = true;
+      return { stdout: `${DEMONSTRATION_STARTED_MARKER}\n` };
+    }
+    if (script.includes(`${DEMONSTRATION_SCRIPT} collect`)) {
+      if (!recording) return { stdout: `${DEMONSTRATION_NONE_MARKER}\n` };
+      recording = false;
+      return {
+        stdout: `${DEMONSTRATION_MARKER}${JSON.stringify({
+          startedAt: "2026-01-01T00:00:00.000Z",
+          stoppedAt: "2026-01-01T00:01:00.000Z",
+          stoppedBecause: "stopped",
+          steps: [
+            {
+              action: "navigate",
+              t: 0,
+              tab: 1,
+              url: "https://example.com/",
+            },
+          ],
+          screenshots: [],
+        })}\n`,
+      };
+    }
     if (script.includes("scrot")) return { stdout: "64\n" };
     if (script.includes("__FROCKBOT_EXIT__")) {
       return { stdout: "contract\n__FROCKBOT_EXIT__0\n" };

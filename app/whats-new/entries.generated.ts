@@ -11,6 +11,7 @@ import entry_delete_account from "./entries/delete-account.ts";
 import entry_flock_palette from "./entries/flock-palette.ts";
 import entry_group_chats from "./entries/group-chats.ts";
 import entry_header_align from "./entries/header-align.ts";
+import entry_learn_from_demonstration from "./entries/learn-from-demonstration.ts";
 import entry_mac_window_place from "./entries/mac-window-place.ts";
 import entry_marketplace_installed from "./entries/marketplace-installed.ts";
 import entry_mcp_servers from "./entries/mcp-servers.ts";
@@ -49,6 +50,7 @@ export const WHATS_NEW_ENTRY_FILES_V1 = [
   entry_flock_palette,
   entry_group_chats,
   entry_header_align,
+  entry_learn_from_demonstration,
   entry_mac_window_place,
   entry_marketplace_installed,
   entry_mcp_servers,

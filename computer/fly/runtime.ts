@@ -14,6 +14,10 @@
  * There is one copy. `computer/fly` imports this module rather than holding its
  * own, so a change to the Computer's layout cannot mean two Computers.
  */
+// The container ships this module, `./shell.ts` and `./demonstration.ts` and
+// nothing else of the Package (`apps/computer-host/Dockerfile`), so neither may
+// reach further.
+import { demonstrationRecorderV1 } from "./demonstration.js";
 import { shellQuote } from "./shell.js";
 
 export const DESKTOP_SERVICE = "frockbot-viewer-gateway";
@@ -1332,6 +1336,33 @@ set -eu
 exec websockify --web=${VIEWER_ROOT} --token-plugin TokenFile --token-source=${RUNTIME_ROOT}/tokens ${DESKTOP_GATEWAY_PORT}
 `;
 
+/**
+ * The demonstration recorder (parity row 54): it attaches to the one browser
+ * while a person holds control of the desktop and writes down what they do in
+ * the Bot's window. It reads the same lease file `control.sh` writes, and
+ * stops by itself the moment that lease is no longer the recording person's.
+ */
+export const DEMONSTRATION_SCRIPT = `${RUNTIME_ROOT}/demonstrate.mjs`;
+/** Where one Bot's demonstration is written while it runs. */
+export function demonstrationDirectoryV1(botKey: string): string {
+  return `${BOTS_ROOT}/${botKey}/demonstration`;
+}
+/**
+ * The recorder as installed. Its three bounds are the Computer interface's
+ * (`COMPUTER_DEMONSTRATION_*` in `@frockbot/computer/core/host`), written as
+ * literals because the container cannot import that module; `runtime.test.ts`
+ * holds the two to each other.
+ */
+export const demonstrationRecorder = demonstrationRecorderV1({
+  botsRoot: BOTS_ROOT,
+  targetIdFile: TARGET_ID_FILE,
+  leasePath: `${BOTS_ROOT}/${DESKTOP_GUI_LEASE_KEY}/human-control`,
+  leaseMaxAgeSeconds: LEASE_MAX_AGE_SECONDS,
+  maxSteps: 200,
+  maxScreenshots: 4,
+  maxScreenshotBytes: 512 * 1024,
+});
+
 /** Where box-doctor is installed, and the log a human reads it back from. */
 export const DOCTOR_SCRIPT = `${RUNTIME_ROOT}/box-doctor.sh`;
 /** GrokBot's path, kept: `/tmp/box-doctor.log` (`grokbot-computer.md:396`). */
@@ -2016,6 +2047,7 @@ export const COMPUTER_RUNTIME_FILES: readonly {
   { path: CONTROL_SCRIPT, content: controlScript, mode: 0o700 },
   { path: BOUNDED_LOG_SCRIPT, content: boundedLogScript, mode: 0o700 },
   { path: `${RUNTIME_ROOT}/browser.mjs`, content: browserHelper, mode: 0o700 },
+  { path: DEMONSTRATION_SCRIPT, content: demonstrationRecorder, mode: 0o700 },
   {
     path: `${RUNTIME_ROOT}/start-gateway.sh`,
     content: gatewayScript,

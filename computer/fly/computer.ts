@@ -6,9 +6,15 @@ import {
   type ComputerOperationOptions,
 } from "@frockbot/computer/core";
 import {
+  decodeComputerDemonstrationStepsV1,
   decodeComputerDoctorReportV1,
+  isDemonstrationScreenshotV1,
+  isDemonstrationStopReasonV1,
+  COMPUTER_DEMONSTRATION_MAX_SCREENSHOTS_V1,
   type ComputerConnectionOptionsV1,
   type ComputerControlRequestV1,
+  type ComputerDemonstrationCaptureV1,
+  type ComputerDemonstrationScreenshotV1,
   type ComputerDoctorReportV1,
 } from "@frockbot/computer/core/host";
 import type {
@@ -23,11 +29,15 @@ import {
   BIN_ROOT,
   BOTS_ROOT,
   BOUNDED_LOG_SCRIPT,
+  COMPUTER_CDP_PORT,
   CONTROL_SCRIPT,
   DATA_ROOT,
+  DEMONSTRATION_SCRIPT,
+  demonstrationDirectoryV1,
   DESKTOP_GUI_LEASE_KEY,
   DOCTOR_MARKER,
   DOCTOR_SCRIPT,
+  ENSURE_WINDOW_SCRIPT,
   HOME_ROOT,
   LEASE_MAX_AGE_SECONDS,
   NO_SLOTS_MARKER,
@@ -43,6 +53,14 @@ import {
   WORKSPACE_SYNC_SERVICE,
   WORKSPACES_ROOT,
 } from "./runtime.js";
+import {
+  DEMONSTRATION_FAILED_MARKER,
+  DEMONSTRATION_MARKER,
+  DEMONSTRATION_MISSING_MARKER,
+  DEMONSTRATION_NONE_MARKER,
+  DEMONSTRATION_NOT_HOLDER_MARKER,
+  DEMONSTRATION_STARTED_MARKER,
+} from "./demonstration.js";
 import type {
   ComputerHostCallOptions,
   ComputerHostExecCommandV1,
@@ -97,7 +115,14 @@ const TIMEOUTS = {
   doctor: 45_000,
   control: 15_000,
   viewer: 30_000,
+  /** Attaching the recorder to every tab of the Bot's window. */
+  demonstrationStart: 45_000,
+  /** Ending the recorder and reading back what it wrote. */
+  demonstrationStop: 45_000,
 } as const;
+
+/** What a demonstration's `stop` may carry back: its steps and screenshots. */
+const DEMONSTRATION_OUTPUT_BYTES = 3_500_000;
 
 /**
  * The shared Computer host as this provider uses it.
@@ -404,6 +429,34 @@ export class FlyAgentComputer {
   /** Runs the Computer's self-check for this tenant. */
   doctor(signal: AbortSignal): Promise<ComputerDoctorReportV1> {
     return this.computer.doctorForAgent(this.layout, signal);
+  }
+
+  /** Starts recording what the lease holder does in this tenant's window. */
+  startDemonstration(
+    ownerId: string,
+    seconds: number,
+    signal: AbortSignal,
+    effectId?: string,
+  ): Promise<void> {
+    return this.computer.startDemonstrationForAgent(
+      this.layout,
+      ownerId,
+      seconds,
+      signal,
+      effectId,
+    );
+  }
+
+  /** Ends this tenant's demonstration and reads back what it recorded. */
+  stopDemonstration(
+    signal: AbortSignal,
+    effectId?: string,
+  ): Promise<ComputerDemonstrationCaptureV1 | undefined> {
+    return this.computer.stopDemonstrationForAgent(
+      this.layout,
+      signal,
+      effectId,
+    );
   }
 
   launchProcess(
@@ -919,6 +972,151 @@ export class FlyComputer {
       );
     }
     return report;
+  }
+
+  /**
+   * Starts the demonstration recorder for the person holding control.
+   *
+   * No agent guard, and deliberately: this is the human's own session, run
+   * under the human's own lease. It asks instead that `ownerId` *holds* the
+   * desktop lease — freshly, as `control.sh` counts fresh — because what is
+   * recorded is that person's work and nobody else's. The Bot's window is
+   * ensured first, so the recorder has a window to attach to even if the
+   * browser came back since the takeover raised it.
+   */
+  async startDemonstrationForAgent(
+    layout: AgentLayout,
+    ownerId: string,
+    seconds: number,
+    signal: AbortSignal,
+    effectId?: string,
+  ): Promise<void> {
+    // The host, not a ready tenant: readying one asserts the agent fence,
+    // which is exactly what a person holding control has closed.
+    const host = this.hostFor(layout);
+    signal.throwIfAborted();
+    const lease = `${BOTS_ROOT}/${DESKTOP_GUI_LEASE_KEY}/human-control`;
+    const script = [
+      this.tenantStamp(layout),
+      `LEASE=${shellQuote(lease)}`,
+      `OWNER=${shellQuote(ownerId)}`,
+      'HOLDER=$(sed -n 1p "$LEASE" 2>/dev/null || true)',
+      'AGE=$(( $(date +%s) - $(stat -c %Y "$LEASE" 2>/dev/null || echo 0) ))',
+      `if [ "$HOLDER" != "$OWNER" ] || [ "$AGE" -gt ${LEASE_MAX_AGE_SECONDS} ]; then echo ${DEMONSTRATION_NOT_HOLDER_MARKER}; exit 0; fi`,
+      `if [ ! -f ${DEMONSTRATION_SCRIPT} ]; then echo ${DEMONSTRATION_MISSING_MARKER}; exit 0; fi`,
+      `DIR=${shellQuote(demonstrationDirectoryV1(layout.key))}`,
+      // One recording per Bot: an earlier one that was never collected is
+      // ended and forgotten, not appended to.
+      'if [ -f "$DIR/pid" ]; then kill -TERM "$(cat "$DIR/pid")" 2>/dev/null || true; fi',
+      'rm -rf "$DIR"',
+      'mkdir -p "$DIR"',
+      'chmod 700 "$DIR"',
+      `export ${SANCTIONED_SURFACE_ENV}=1`,
+      `${ENSURE_WINDOW_SCRIPT} ${shellQuote(layout.key)} >/dev/null 2>&1 || true`,
+      `DEADLINE=$(( ($(date +%s) + ${Math.max(1, Math.floor(seconds))}) * 1000 ))`,
+      `setsid nohup node ${DEMONSTRATION_SCRIPT} record ${COMPUTER_CDP_PORT} ${shellQuote(layout.key)} "$DIR" "$OWNER" "$DEADLINE" > "$DIR/recorder.log" 2>&1 &`,
+      `printf '%s\\n' "$!" > "$DIR/pid"`,
+      "for _ in $(seq 1 300); do",
+      '  [ -f "$DIR/ready" ] && break',
+      '  kill -0 "$(cat "$DIR/pid")" 2>/dev/null || break',
+      "  sleep 0.1",
+      "done",
+      `if [ -f "$DIR/ready" ]; then echo ${DEMONSTRATION_STARTED_MARKER}; else printf '%s%s\\n' ${DEMONSTRATION_FAILED_MARKER} "$(tail -c 400 "$DIR/recorder.log" 2>/dev/null | tr '\\n' ' ')"; fi`,
+    ].join("\n");
+    const outcome = await this.execute(
+      host,
+      script,
+      {
+        signal,
+        effectId,
+        timeoutMs: TIMEOUTS.demonstrationStart,
+        maxOutputBytes: MAX_OUTPUT,
+      },
+      "Sprite demonstration start failed",
+    );
+    const said = outputText(outcome.stdout);
+    if (said.includes(DEMONSTRATION_STARTED_MARKER)) return;
+    if (said.includes(DEMONSTRATION_NOT_HOLDER_MARKER)) {
+      throw new ComputerError(
+        "conflict",
+        "Only the person holding control of this Computer can record it",
+      );
+    }
+    if (said.includes(DEMONSTRATION_MISSING_MARKER)) {
+      throw new ComputerError(
+        "capability-unavailable",
+        "This Computer can record once it has updated; it updates the next time it is opened",
+      );
+    }
+    const detail = said
+      .split("\n")
+      .find((line) => line.startsWith(DEMONSTRATION_FAILED_MARKER))
+      ?.slice(DEMONSTRATION_FAILED_MARKER.length)
+      .trim();
+    throw new ComputerError(
+      "provider-failure",
+      `The recorder did not start${detail ? `: ${detail}` : ""}`,
+    );
+  }
+
+  /**
+   * Ends this tenant's demonstration, if one is running, and reads it back.
+   *
+   * No guard: collecting a recording is not the Bot acting on the Computer,
+   * and it has to work after the person has let go of control — releasing is
+   * one of the ways a recording ends. The directory goes once it has been
+   * read, so a capture is handed back once; a read that fails leaves it for
+   * the next attempt.
+   */
+  async stopDemonstrationForAgent(
+    layout: AgentLayout,
+    signal: AbortSignal,
+    effectId?: string,
+  ): Promise<ComputerDemonstrationCaptureV1 | undefined> {
+    const host = this.hostFor(layout);
+    signal.throwIfAborted();
+    const script = [
+      this.tenantStamp(layout),
+      `DIR=${shellQuote(demonstrationDirectoryV1(layout.key))}`,
+      `if [ ! -d "$DIR" ]; then echo ${DEMONSTRATION_NONE_MARKER}; exit 0; fi`,
+      'PID=$(cat "$DIR/pid" 2>/dev/null || echo 0)',
+      'if [ ! -f "$DIR/stopped" ] && [ "$PID" -gt 0 ] && kill -0 "$PID" 2>/dev/null; then',
+      '  kill -TERM "$PID" 2>/dev/null || true',
+      "  for _ in $(seq 1 100); do",
+      '    [ -f "$DIR/stopped" ] && break',
+      '    kill -0 "$PID" 2>/dev/null || break',
+      "    sleep 0.1",
+      "  done",
+      '  kill -KILL "$PID" 2>/dev/null || true',
+      "fi",
+      `if [ ! -f ${DEMONSTRATION_SCRIPT} ]; then echo ${DEMONSTRATION_NONE_MARKER}; rm -rf "$DIR"; exit 0; fi`,
+      `timeout 20 node ${DEMONSTRATION_SCRIPT} collect "$DIR" && rm -rf "$DIR"`,
+    ].join("\n");
+    const outcome = await this.execute(
+      host,
+      script,
+      {
+        signal,
+        effectId,
+        timeoutMs: TIMEOUTS.demonstrationStop,
+        maxOutputBytes: DEMONSTRATION_OUTPUT_BYTES,
+      },
+      "Sprite demonstration stop failed",
+    );
+    const lines = outputText(outcome.stdout).split("\n");
+    if (lines.some((line) => line.trim() === DEMONSTRATION_NONE_MARKER)) {
+      return undefined;
+    }
+    const line = lines.find((candidate) =>
+      candidate.startsWith(DEMONSTRATION_MARKER),
+    );
+    if (!line || outcome.outputTruncated) {
+      throw new ComputerError(
+        "provider-failure",
+        "The Computer's recording could not be read back",
+      );
+    }
+    return decodeFlyDemonstrationV1(line.slice(DEMONSTRATION_MARKER.length));
   }
 
   /**
@@ -1581,4 +1779,75 @@ export class FlyComputer {
     }
     return outcome;
   }
+}
+
+/**
+ * The recorder's `collect` line, as the Computer interface's capture.
+ *
+ * The steps pass the interface's own step decoder, so what this Computer's
+ * recorder wrote is held to what a step may say before anything above the
+ * Computer sees it: a step with any field a step does not have is left out.
+ */
+export function decodeFlyDemonstrationV1(
+  text: string,
+): ComputerDemonstrationCaptureV1 {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(text);
+  } catch {
+    throw new ComputerError(
+      "provider-failure",
+      "The Computer's recording is not readable",
+    );
+  }
+  const record =
+    typeof parsed === "object" && parsed !== null && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : {};
+  const time = (value: unknown): string | undefined =>
+    typeof value === "string" && Number.isFinite(Date.parse(value))
+      ? value
+      : undefined;
+  const startedAt = time(record.startedAt);
+  const stoppedAt = time(record.stoppedAt);
+  if (!startedAt || !stoppedAt) {
+    throw new ComputerError(
+      "provider-failure",
+      "The Computer's recording has no start or stop time",
+    );
+  }
+  const { steps, dropped } = decodeComputerDemonstrationStepsV1(record.steps);
+  const screenshots: ComputerDemonstrationScreenshotV1[] = [];
+  const reported = Array.isArray(record.screenshots) ? record.screenshots : [];
+  for (const entry of reported) {
+    if (screenshots.length >= COMPUTER_DEMONSTRATION_MAX_SCREENSHOTS_V1) break;
+    if (typeof entry !== "object" || entry === null) continue;
+    const shot = entry as Record<string, unknown>;
+    const afterStep = shot.afterStep;
+    if (
+      typeof shot.bytesBase64 !== "string" ||
+      typeof afterStep !== "number" ||
+      !Number.isSafeInteger(afterStep) ||
+      afterStep < 0
+    ) {
+      continue;
+    }
+    const bytes = Uint8Array.from(Buffer.from(shot.bytesBase64, "base64"));
+    if (!isDemonstrationScreenshotV1(bytes)) continue;
+    screenshots.push({
+      afterStep: Math.min(afterStep, steps.length),
+      bytes,
+      mediaType: "image/jpeg",
+    });
+  }
+  return {
+    startedAt,
+    stoppedAt,
+    stoppedBecause: isDemonstrationStopReasonV1(record.stoppedBecause)
+      ? record.stoppedBecause
+      : "stopped",
+    steps,
+    screenshots,
+    dropped,
+  };
 }

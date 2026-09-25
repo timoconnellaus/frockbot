@@ -372,6 +372,29 @@ void main() {
       expect(chat.error, 'One of the attached files is no longer available.');
     });
 
+    test(
+      'a recording taught from the Computer leaves the draft alone',
+      () async {
+        final transport = _Transport();
+        final chat = controller(transport, _Uploads());
+        addTearDown(chat.dispose);
+        await chat.initialize();
+        chat.draft = 'half a thought';
+        chat.attachments.add([_file('notes.txt')]);
+        await pumpEventQueue();
+
+        expect(
+          await chat.sendFiles('Learn this: Book a court', [_report, _photo]),
+          isTrue,
+        );
+        expect(transport.sent.single.text, 'Learn this: Book a court');
+        expect(transport.sent.single.attachments, [_report, _photo]);
+        // What the person was typing, and attaching, is still theirs.
+        expect(chat.draft, 'half a thought');
+        expect(chat.attachments.ready.single.name, 'notes.txt');
+      },
+    );
+
     test('nothing is sent while a file is still uploading', () async {
       final transport = _Transport();
       final chat = controller(transport, _Uploads()..hold = true);

@@ -157,6 +157,13 @@ export interface ShellBotBackendHost extends ShellApplicationV1 {
     kind: "frame" | "doctor",
   ): void;
   /**
+   * Deletes a demonstration the person sent this Bot (parity row 54), in the
+   * Computer Contribution that keeps it. Absent where there is no Computer.
+   */
+  deleteComputerDemonstration?(
+    demonstrationId: string,
+  ): Promise<"deleted" | "missing">;
+  /**
    * This deployment's Computer host. The Durable Object's own shell chooses
    * which one it is; nothing under `app/` names an implementation.
    */
@@ -328,6 +335,7 @@ export class ShellBotStateV1 {
   readonly messagesCommitted: () => void;
   readonly lifecycleAdmission: ShellBotBackendHost["assertLifecycleActive"];
   readonly invalidateComputerProjectionFile: ShellBotBackendHost["invalidateComputerProjectionFile"];
+  readonly deleteComputerDemonstration: ShellBotBackendHost["deleteComputerDemonstration"];
   readonly deliverReplyDraft: ShellBotBackendHost["deliverReplyDraft"];
   /** This deployment's Computer host, handed in by the shell. */
   readonly computerHost: ShellComputerHostFactoryV1 | undefined;
@@ -364,6 +372,7 @@ export class ShellBotStateV1 {
     this.messagesCommitted = () => host.messagesCommitted?.();
     this.invalidateComputerProjectionFile =
       host.invalidateComputerProjectionFile;
+    this.deleteComputerDemonstration = host.deleteComputerDemonstration;
     this.deliverReplyDraft = host.deliverReplyDraft;
     this.computerHost = host.computerHost;
     this.hostScheduled = {

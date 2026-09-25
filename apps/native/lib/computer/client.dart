@@ -38,7 +38,19 @@ const computerCommandTypesV1 = <String>{
   'refreshViewer',
   'closeViewer',
   'runDoctor',
+  'startDemonstration',
+  'stopDemonstration',
+  'discardDemonstration',
 };
+
+/// How often the viewer renews the person's hold on the desktop. The lease
+/// lapses 90 seconds after it was last renewed, and a recording stops with it.
+const computerControlHeartbeatV1 = Duration(seconds: 30);
+
+/// What a recording keeps, said once for the viewer and the send panel.
+const computerRecordingScopeV1 =
+    'Only the browser is recorded. What you type and passwords are never '
+    'recorded, and form fields are hidden in the screenshots.';
 
 /// What the card promises a first-ever cold provision will take.
 const computerColdProvisionExpectationV1 = 'This usually takes 2-3 minutes';
@@ -93,6 +105,62 @@ class ComputerScreenshot {
   });
 }
 
+/// What the person is recording, or has recorded and not yet sent.
+class ComputerDemonstration {
+  final String id;
+
+  /// `recording` or `ready`.
+  final String status;
+  final DateTime startedAt;
+
+  /// When a recording stops by itself.
+  final DateTime? endsAt;
+
+  /// How many steps a kept recording holds.
+  final int steps;
+
+  /// The files a kept recording is sent as: its log and its screenshots.
+  final List<MessageAttachment> attachments;
+  const ComputerDemonstration({
+    required this.id,
+    required this.status,
+    required this.startedAt,
+    this.endsAt,
+    this.steps = 0,
+    this.attachments = const [],
+  });
+
+  bool get recording => status == 'recording';
+  bool get ready => status == 'ready';
+  int get screenshots => attachments.where((file) => file.isImage).length;
+
+  static ComputerDemonstration? decode(Object? value) {
+    if (value is! Map) return null;
+    final id = value['id'];
+    final status = value['status'];
+    final startedAt = DateTime.tryParse('${value['startedAt']}');
+    if (id is! String ||
+        (status != 'recording' && status != 'ready') ||
+        startedAt == null) {
+      return null;
+    }
+    return ComputerDemonstration(
+      id: id,
+      status: status as String,
+      startedAt: startedAt,
+      endsAt: DateTime.tryParse('${value['endsAt']}'),
+      steps: (value['steps'] as num?)?.toInt() ?? 0,
+      attachments: MessageAttachment.decodeList(value['attachments']),
+    );
+  }
+}
+
+/// `0:42`, `10:00`: how long a recording has run.
+String computerRecordingElapsedV1(Duration elapsed) {
+  final seconds = elapsed.inSeconds < 0 ? 0 : elapsed.inSeconds;
+  return '${seconds ~/ 60}:${(seconds % 60).toString().padLeft(2, '0')}';
+}
+
 class ComputerProjection {
   final String phase;
   final String message;
@@ -103,6 +171,9 @@ class ComputerProjection {
   final String? viewerUrl;
   final bool controlHeld;
   final List<ComputerScreenshot> screenshots;
+
+  /// A recording running, or kept and waiting to be sent or discarded.
+  final ComputerDemonstration? demonstration;
   const ComputerProjection({
     required this.phase,
     required this.message,
@@ -111,6 +182,7 @@ class ComputerProjection {
     this.viewerUrl,
     this.controlHeld = false,
     this.screenshots = const [],
+    this.demonstration,
   });
 
   bool get running =>
@@ -136,6 +208,7 @@ class ComputerProjection {
       providerLabel: json['providerLabel']! as String,
       viewerUrl: session?['url'] as String?,
       controlHeld: json['controlLease'] != null,
+      demonstration: ComputerDemonstration.decode(json['demonstration']),
       progress: progress == null
           ? null
           : ComputerProgress(
@@ -338,6 +411,12 @@ class ComputerController extends ChangeNotifier {
     notices?.addListener(_noticed);
   }
 
+  /// Sends a kept recording to the Bot as an ordinary message carrying its
+  /// files. The shell supplies it, because the conversation is the shell's;
+  /// without one there is nowhere to teach, and the viewer offers Discard
+  /// alone.
+  Future<bool> Function(String text, List<MessageAttachment> files)? onTeach;
+
   void _noticed() {
     if (!_closed) unawaited(read());
   }
@@ -349,7 +428,13 @@ class ComputerController extends ChangeNotifier {
   bool takingControl = false;
   String? failure;
   Timer? _poll;
+  Timer? _heartbeat;
   bool _closed = false;
+
+  /// What the last recording command answered, when it refused: nothing was
+  /// recorded, or recording could not start. A projection read does not
+  /// clear it; the next recording command does.
+  String? recordingNotice;
   Future<Uint8List>? _capture;
   String? _captureHash;
   DateTime? _captureRefusedAt;
@@ -388,7 +473,40 @@ class ComputerController extends ChangeNotifier {
       failure = 'Couldn’t read the computer.';
     }
     _schedule();
+    _syncHeartbeat();
     _changed();
+  }
+
+  /// Keeps the person's hold on the desktop while the full window shows it.
+  /// Closing the window stops renewing, so a hold nobody is looking at lapses
+  /// on its own — and a recording with it.
+  void _syncHeartbeat() {
+    final holding = !_closed && expanded && state.phase == 'human-control';
+    if (!holding) {
+      _heartbeat?.cancel();
+      _heartbeat = null;
+      return;
+    }
+    _heartbeat ??= Timer.periodic(
+      computerControlHeartbeatV1,
+      (_) => unawaited(_quietly('refreshControl')),
+    );
+  }
+
+  /// A command nobody pressed: it moves no busy state and says nothing when
+  /// it fails, because the next projection read says what matters.
+  Future<void> _quietly(String type) async {
+    try {
+      await api.request(
+        '$_root/commands',
+        body: {
+          'version': 1,
+          'commandId': randomId(),
+          'botId': botId,
+          'type': type,
+        },
+      );
+    } catch (_) {}
   }
 
   /// The bytes of the Bot's frame.
@@ -444,9 +562,11 @@ class ComputerController extends ChangeNotifier {
     if (busy || !computerCommandTypesV1.contains(type)) return;
     busy = true;
     failure = null;
+    final recordingCommand = type.endsWith('Demonstration');
+    if (recordingCommand) recordingNotice = null;
     _changed();
     try {
-      await api.request(
+      final receipt = await api.request(
         '$_root/commands',
         body: {
           'version': 1,
@@ -455,6 +575,14 @@ class ComputerController extends ChangeNotifier {
           'type': type,
         },
       );
+      // A refused recording command changes no phase, so its receipt is the
+      // only place the reason is.
+      if (recordingCommand &&
+          receipt is Map &&
+          receipt['status'] == 'rejected' &&
+          receipt['failure'] is String) {
+        recordingNotice = receipt['failure'] as String;
+      }
     } on RequestFailure catch (error) {
       failure = error.message;
     } finally {
@@ -475,6 +603,7 @@ class ComputerController extends ChangeNotifier {
   Future<void> close() async {
     expanded = false;
     takingControl = false;
+    _syncHeartbeat();
     _changed();
     await command('closeViewer');
   }
@@ -493,11 +622,44 @@ class ComputerController extends ChangeNotifier {
     await command('releaseControl');
   }
 
+  void dismissRecordingNotice() {
+    recordingNotice = null;
+    _changed();
+  }
+
+  /// Starts recording what the person does in the browser while they hold
+  /// control, so the Bot can learn it.
+  Future<void> startRecording() => command('startDemonstration');
+
+  /// Stops the recording; what it captured is kept, ready to send.
+  Future<void> stopRecording() => command('stopDemonstration');
+
+  /// Throws away a recording that has not been sent.
+  Future<void> discardRecording() => command('discardDemonstration');
+
+  /// Sends the kept recording to the Bot as "Learn this: …", with its
+  /// files. Answers whether the message was sent.
+  Future<bool> teach(String what) async {
+    final demonstration = state.demonstration;
+    final send = onTeach;
+    if (demonstration == null || !demonstration.ready || send == null) {
+      return false;
+    }
+    final named = what.trim();
+    final sent = await send(
+      named.isEmpty ? 'Learn this.' : 'Learn this: $named',
+      demonstration.attachments,
+    );
+    if (sent) await read();
+    return sent;
+  }
+
   @override
   void dispose() {
     _closed = true;
     notices?.removeListener(_noticed);
     _poll?.cancel();
+    _heartbeat?.cancel();
     super.dispose();
   }
 }

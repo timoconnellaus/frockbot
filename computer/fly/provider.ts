@@ -562,6 +562,23 @@ function handle(
       release: (_current, request, options) =>
         computer.releaseControl(options, request),
     },
+    // Recording what the person holding control does in this Bot's window.
+    // Started under their lease; read back after it, since releasing is one
+    // of the ways a recording ends.
+    demonstration: {
+      start: (request, options) =>
+        computer.startDemonstration(
+          request.ownerId,
+          request.seconds,
+          options?.signal ?? new AbortController().signal,
+          options?.effectId,
+        ),
+      stop: (options) =>
+        computer.stopDemonstration(
+          options?.signal ?? new AbortController().signal,
+          options?.effectId,
+        ),
+    },
     close: () => Promise.resolve(),
   };
 }

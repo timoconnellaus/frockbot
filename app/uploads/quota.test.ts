@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   releaseBotUploadQuotaV1,
+  releaseUploadQuotaV1,
   reserveUploadQuotaV1,
   UPLOAD_QUOTA_TOTAL_KEY_V1,
   type UploadQuotaStorageV1,
@@ -92,5 +93,33 @@ describe("the account's upload space", () => {
       more: false,
     });
     expect(storage.values.get(UPLOAD_QUOTA_TOTAL_KEY_V1)).toBe(5);
+  });
+
+  test("files a Bot deleted give their space back once, and only theirs", async () => {
+    const storage = memory();
+    for (const c of "ab") {
+      await reserveUploadQuotaV1(storage, {
+        botId: "bot-1",
+        uploadId: id(c),
+        bytes: 10,
+      });
+    }
+    await reserveUploadQuotaV1(storage, {
+      botId: "bot-2",
+      uploadId: id("a"),
+      bytes: 10,
+    });
+    const release = { botId: "bot-1", uploadIds: [id("a"), id("a"), id("c")] };
+    expect(await releaseUploadQuotaV1(storage, release)).toEqual({
+      released: 10,
+    });
+    expect(await releaseUploadQuotaV1(storage, release)).toEqual({
+      released: 0,
+    });
+    // bot-1's other file and bot-2's copy of the same bytes stay counted.
+    expect(storage.values.get(UPLOAD_QUOTA_TOTAL_KEY_V1)).toBe(20);
+    await expect(
+      releaseUploadQuotaV1(storage, { botId: "bot-1", uploadIds: ["nope"] }),
+    ).rejects.toThrow();
   });
 });

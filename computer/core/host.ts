@@ -304,6 +304,311 @@ export interface ComputerDoctorCapabilityV1 {
   run(options?: ComputerOperationOptions): Promise<ComputerDoctorReportV1>;
 }
 
+/** The most steps one demonstration keeps; the capture stops at this many. */
+export const COMPUTER_DEMONSTRATION_MAX_STEPS_V1 = 200;
+/**
+ * The screenshots one demonstration hands back. Four, so the log and every
+ * one of them fit the five files a single message may carry.
+ */
+export const COMPUTER_DEMONSTRATION_MAX_SCREENSHOTS_V1 = 4;
+/** The largest screenshot a demonstration keeps. */
+export const COMPUTER_DEMONSTRATION_SCREENSHOT_MAX_BYTES_V1 = 512 * 1024;
+/** The longest a demonstration may run before it stops by itself. */
+export const COMPUTER_DEMONSTRATION_MAX_SECONDS_V1 = 600;
+
+const DEMONSTRATION_NAME_MAX = 120;
+const DEMONSTRATION_SELECTOR_MAX = 300;
+const DEMONSTRATION_URL_MAX = 500;
+const DEMONSTRATION_ROLE = /^[a-z][a-z-]{0,39}$/;
+const DEMONSTRATION_SPECIAL_KEYS = new Set([
+  "Enter",
+  "Tab",
+  "Escape",
+  "Backspace",
+  "Delete",
+  "ArrowUp",
+  "ArrowDown",
+  "ArrowLeft",
+  "ArrowRight",
+  "PageUp",
+  "PageDown",
+  "Home",
+  "End",
+  ...Array.from({ length: 12 }, (_, index) => `F${index + 1}`),
+]);
+const DEMONSTRATION_MODIFIERS = new Set(["Control", "Meta", "Alt", "Shift"]);
+
+/**
+ * One thing the person did in the Computer's browser while they held control.
+ *
+ * What is absent is the point. A step names the field typed into — its role,
+ * its label and a selector — and never what was typed: no step has a field
+ * that could carry a value, a key step is a special key or a shortcut and
+ * never a printable character, and a URL keeps its query's names and drops
+ * their values. Password fields leave no step at all.
+ */
+export type ComputerDemonstrationStepV1 =
+  | {
+      action: "navigate" | "switch-tab";
+      /** Seconds since the demonstration started. */
+      t: number;
+      /** Which tab, numbered in the order the demonstration first saw it. */
+      tab: number;
+      url: string;
+    }
+  | {
+      action: "click" | "type" | "choose";
+      t: number;
+      tab: number;
+      /** The element's ARIA role, explicit or implied by its tag. */
+      role: string;
+      /** Its accessible name, or a field's label. Never a field's contents. */
+      name?: string;
+      selector: string;
+    }
+  | { action: "key"; t: number; tab: number; key: string };
+
+export type ComputerDemonstrationStopReasonV1 =
+  "stopped" | "control-released" | "time-limit" | "step-limit";
+
+/** A picture of the page after one step, with every form field covered. */
+export interface ComputerDemonstrationScreenshotV1 {
+  afterStep: number;
+  bytes: Uint8Array;
+  mediaType: "image/jpeg";
+}
+
+/** One demonstration, as the Computer hands it back when it stops. */
+export interface ComputerDemonstrationCaptureV1 {
+  startedAt: string;
+  stoppedAt: string;
+  stoppedBecause: ComputerDemonstrationStopReasonV1;
+  steps: ComputerDemonstrationStepV1[];
+  screenshots: ComputerDemonstrationScreenshotV1[];
+  /** Steps the Computer reported that were not a step's shape, left out. */
+  dropped: number;
+}
+
+/**
+ * Records what the person does in the browser while they hold control, so a
+ * Bot can learn it (parity row 54).
+ *
+ * Only the lease holder can start one: `start` is refused unless `ownerId`
+ * holds the `desktop-gui` lease, because what is recorded is a human session
+ * and nobody else's. A capture stops by itself when that lease is released or
+ * lapses, at `seconds`, or at `COMPUTER_DEMONSTRATION_MAX_STEPS_V1`. `stop`
+ * ends one that is still running and hands back what was captured, or
+ * `undefined` when there is nothing — and removes it from the Computer either
+ * way, so a capture is read once.
+ */
+export interface ComputerDemonstrationCapabilityV1 {
+  start(
+    request: { ownerId: string; seconds: number },
+    options?: ComputerOperationOptions,
+  ): Promise<void>;
+  stop(
+    options?: ComputerOperationOptions,
+  ): Promise<ComputerDemonstrationCaptureV1 | undefined>;
+}
+
+function demonstrationText(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const text = value.replace(/\s+/g, " ").trim();
+  if (!text) return undefined;
+  return text.length > DEMONSTRATION_NAME_MAX
+    ? `${text.slice(0, DEMONSTRATION_NAME_MAX - 1)}…`
+    : text;
+}
+
+/**
+ * A URL as a demonstration keeps it: its query's values are dropped and its
+ * names kept, and its fragment and any credentials go. A search form submits
+ * what was typed into it as a query value, so a URL kept whole would record
+ * exactly what a step never may.
+ */
+export function demonstrationUrlV1(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0) return undefined;
+  let url: URL;
+  try {
+    url = new URL(value);
+  } catch {
+    return undefined;
+  }
+  if (url.protocol !== "http:" && url.protocol !== "https:") {
+    // `about:blank` is a place; `data:` and `blob:` are contents.
+    return url.protocol === "about:" ? `about:${url.pathname}` : undefined;
+  }
+  const names = [...new Set([...url.searchParams.keys()])];
+  const query =
+    names.length === 0
+      ? ""
+      : `?${names.map((name) => `${encodeURIComponent(name)}=…`).join("&")}`;
+  const kept = `${url.protocol}//${url.host}${url.pathname}${query}`;
+  return kept.length > DEMONSTRATION_URL_MAX
+    ? `${kept.slice(0, DEMONSTRATION_URL_MAX - 1)}…`
+    : kept;
+}
+
+/**
+ * A key a demonstration may keep: a special key, or a shortcut held with
+ * Control or Meta. A printable character on its own is typing, and is never
+ * kept, whatever modifier-free spelling it arrives in.
+ */
+export function demonstrationKeyV1(value: unknown): string | undefined {
+  if (typeof value !== "string" || value.length === 0 || value.length > 40) {
+    return undefined;
+  }
+  const parts = value.split("+");
+  const key = parts.pop() ?? "";
+  if (parts.some((part) => !DEMONSTRATION_MODIFIERS.has(part))) {
+    return undefined;
+  }
+  if (new Set(parts).size !== parts.length) return undefined;
+  if (DEMONSTRATION_SPECIAL_KEYS.has(key)) return value;
+  const shortcut = parts.includes("Control") || parts.includes("Meta");
+  return shortcut && /^[a-z0-9]$/.test(key) ? value : undefined;
+}
+
+function demonstrationNumber(
+  value: unknown,
+  maximum: number,
+  integer: boolean,
+): number | undefined {
+  if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
+  if (value < 0 || value > maximum) return undefined;
+  if (integer) return Number.isSafeInteger(value) ? value : undefined;
+  return Math.round(value * 10) / 10;
+}
+
+function demonstrationKeys(
+  value: Record<string, unknown>,
+  required: readonly string[],
+  optional: readonly string[],
+): boolean {
+  const allowed = new Set([...required, ...optional]);
+  return (
+    required.every((key) => Object.hasOwn(value, key)) &&
+    Object.keys(value).every((key) => allowed.has(key))
+  );
+}
+
+/**
+ * One step, or `undefined` when the value is not exactly a step.
+ *
+ * Exact-field and rebuilt field by field, so this is where a capture is
+ * held to what it may say: a step carrying anything else — a `value`, the
+ * text of a field, a printable key — is not a step, and is left out rather
+ * than trimmed into one.
+ */
+export function decodeComputerDemonstrationStepV1(
+  value: unknown,
+): ComputerDemonstrationStepV1 | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const step = value as Record<string, unknown>;
+  const t = demonstrationNumber(
+    step.t,
+    COMPUTER_DEMONSTRATION_MAX_SECONDS_V1 * 2,
+    false,
+  );
+  const tab = demonstrationNumber(step.tab, 1_000, true);
+  if (t === undefined || tab === undefined || tab < 1) return undefined;
+  switch (step.action) {
+    case "navigate":
+    case "switch-tab": {
+      if (!demonstrationKeys(step, ["action", "t", "tab", "url"], [])) {
+        return undefined;
+      }
+      const url = demonstrationUrlV1(step.url);
+      return url ? { action: step.action, t, tab, url } : undefined;
+    }
+    case "click":
+    case "type":
+    case "choose": {
+      if (
+        !demonstrationKeys(
+          step,
+          ["action", "t", "tab", "role", "selector"],
+          ["name"],
+        )
+      ) {
+        return undefined;
+      }
+      if (typeof step.role !== "string" || !DEMONSTRATION_ROLE.test(step.role))
+        return undefined;
+      if (
+        typeof step.selector !== "string" ||
+        step.selector.length === 0 ||
+        step.selector.length > DEMONSTRATION_SELECTOR_MAX
+      ) {
+        return undefined;
+      }
+      const name =
+        step.name === undefined ? undefined : demonstrationText(step.name);
+      return {
+        action: step.action,
+        t,
+        tab,
+        role: step.role,
+        ...(name === undefined ? {} : { name }),
+        selector: step.selector,
+      };
+    }
+    case "key": {
+      if (!demonstrationKeys(step, ["action", "t", "tab", "key"], [])) {
+        return undefined;
+      }
+      const key = demonstrationKeyV1(step.key);
+      return key ? { action: "key", t, tab, key } : undefined;
+    }
+    default:
+      return undefined;
+  }
+}
+
+/** The steps a Computer reported, each held to a step's shape. */
+export function decodeComputerDemonstrationStepsV1(value: unknown): {
+  steps: ComputerDemonstrationStepV1[];
+  dropped: number;
+} {
+  if (!Array.isArray(value)) return { steps: [], dropped: 0 };
+  const steps: ComputerDemonstrationStepV1[] = [];
+  let dropped = 0;
+  for (const entry of value) {
+    if (steps.length >= COMPUTER_DEMONSTRATION_MAX_STEPS_V1) {
+      dropped += 1;
+      continue;
+    }
+    const step = decodeComputerDemonstrationStepV1(entry);
+    if (step) steps.push(step);
+    else dropped += 1;
+  }
+  return { steps, dropped };
+}
+
+/** True for the bytes of a JPEG no larger than a demonstration keeps. */
+export function isDemonstrationScreenshotV1(bytes: Uint8Array): boolean {
+  return (
+    bytes.byteLength > 3 &&
+    bytes.byteLength <= COMPUTER_DEMONSTRATION_SCREENSHOT_MAX_BYTES_V1 &&
+    bytes[0] === 0xff &&
+    bytes[1] === 0xd8 &&
+    bytes[2] === 0xff
+  );
+}
+
+export function isDemonstrationStopReasonV1(
+  value: unknown,
+): value is ComputerDemonstrationStopReasonV1 {
+  return (
+    value === "stopped" ||
+    value === "control-released" ||
+    value === "time-limit" ||
+    value === "step-limit"
+  );
+}
+
 export interface ComputerViewerSession {
   id: string;
   url: string;
@@ -558,6 +863,8 @@ export interface ComputerHostSessionV1 {
   presence?: ComputerPresence;
   viewer?: ComputerViewer;
   control?: ComputerControl;
+  /** Recording what the lease holder does in the browser, where offered. */
+  demonstration?: ComputerDemonstrationCapabilityV1;
   close(): Promise<void>;
 }
 
@@ -658,6 +965,7 @@ function guardedHandle(
     presence,
     viewer,
     control,
+    demonstration,
   } = handle;
   return {
     assignment: handle.assignment,
@@ -759,6 +1067,16 @@ function guardedHandle(
             guardedOperation(assertCurrent, () =>
               control.release(lease, request, options),
             ),
+        }
+      : undefined,
+    demonstration: demonstration
+      ? {
+          start: (request, options) =>
+            guardedOperation(assertCurrent, () =>
+              demonstration.start(request, options),
+            ),
+          stop: (options) =>
+            guardedOperation(assertCurrent, () => demonstration.stop(options)),
         }
       : undefined,
     close: () => handle.close(),

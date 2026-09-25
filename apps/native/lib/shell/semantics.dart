@@ -511,4 +511,15 @@ abstract final class ComputerIds {
   static const takeControlConfirm = 'computer-take-control-confirm';
   static const releaseControl = 'computer-release-control';
   static const reconnect = 'computer-reconnect';
+
+  /// Record, and Stop while a recording runs.
+  static const record = 'computer-record';
+  static const recording = 'computer-recording';
+  static const recordingNotice = 'computer-recording-notice';
+
+  /// The panel a kept recording waits in: what to call it, Send and Discard.
+  static const teach = 'computer-teach';
+  static const teachName = 'computer-teach-name';
+  static const teachSend = 'computer-teach-send';
+  static const teachDiscard = 'computer-teach-discard';
 }

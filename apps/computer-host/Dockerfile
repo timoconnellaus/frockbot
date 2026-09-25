@@ -17,7 +17,7 @@ RUN npm ci --omit=dev
 # (ERR_UNSUPPORTED_NODE_MODULES_TYPE_STRIPPING) and resolves a symlink to its
 # real path before deciding. This is the same shape a workspace install has.
 # Only the manifest, the protocol directory, the Bot path-key leaf and the Fly
-# runtime files are copied; the exports map resolves
+# runtime files (with the two leaves it imports) are copied; the exports map resolves
 # `@frockbot/computer/host-protocol`, `@frockbot/computer/core/bot-path` and
 # `@frockbot/computer/fly/runtime` to them. `computer/core` and `computer/fly`
 # hold the rest, which runs in the Worker and is not copied.
@@ -26,10 +26,11 @@ COPY computer/host-protocol ./computer/host-protocol
 COPY computer/core/bot-path.ts ./computer/core/bot-path.ts
 COPY computer/fly/runtime.ts ./computer/fly/runtime.ts
 COPY computer/fly/shell.ts ./computer/fly/shell.ts
+COPY computer/fly/demonstration.ts ./computer/fly/demonstration.ts
 COPY core/package.json ./core/package.json
 COPY core/crypto.ts ./core/crypto.ts
 RUN node --no-warnings -e \
-  "const fs = require('node:fs'); const { stripTypeScriptTypes } = require('node:module'); const source = fs.readFileSync('computer/fly/shell.ts', 'utf8'); fs.writeFileSync('computer/fly/shell.js', stripTypeScriptTypes(source, { mode: 'strip' }));"
+  "const fs = require('node:fs'); const { stripTypeScriptTypes } = require('node:module'); for (const leaf of ['shell', 'demonstration']) { const source = fs.readFileSync('computer/fly/' + leaf + '.ts', 'utf8'); fs.writeFileSync('computer/fly/' + leaf + '.js', stripTypeScriptTypes(source, { mode: 'strip' })); }"
 RUN mkdir -p node_modules/@frockbot \
   && ln -s ../../computer node_modules/@frockbot/computer \
   && ln -s ../../core node_modules/@frockbot/core

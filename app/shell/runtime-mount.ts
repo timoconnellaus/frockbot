@@ -682,6 +682,17 @@ export async function agentRuntime(
                   },
                 }
               : {}),
+            // The demonstrations the person sent live in this Bot's own
+            // object, and deciding what happens to one is the conversation's:
+            // a subagent's Turn runs in its task's object and gets none.
+            ...(state.deleteComputerDemonstration && !turn.subagentRole
+              ? {
+                  computerDemonstrations: {
+                    delete: (demonstrationId: string) =>
+                      state.deleteComputerDemonstration!(demonstrationId),
+                  },
+                }
+              : {}),
             // A computerUse child is the holder of the User-wide lease its
             // parent acquired. Its guarded commands must name that same
             // durable task owner or the shared fence would refuse itself.

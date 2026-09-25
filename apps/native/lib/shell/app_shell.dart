@@ -1280,6 +1280,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       botId,
       notices: _selectedChat?.computerNotices,
     );
+    // A recording the person chose to teach is sent into this Bot's
+    // conversation, as a message they could have written themselves.
+    machine.onTeach = (text, files) async {
+      final chat = _selectedChat;
+      if (chat == null || chat.botId != botId) return false;
+      return chat.sendFiles(text, files);
+    };
     computer = machine;
     // The Computer is not a panel entry: it is one destination, the desktop
     // full window, opened from the card and from the bar's own icon.

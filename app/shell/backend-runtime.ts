@@ -139,6 +139,10 @@ export interface ShellHostedRuntimeHostV1 {
   >;
   /** The Bot DO's storage, which holds the newest frame the card shows. */
   computerFrames?: NonNullable<ComputerAgentPluginConfig["frames"]>;
+  /** The demonstrations the person sent, for the Bot's own chat Turn. */
+  computerDemonstrations?: NonNullable<
+    ComputerAgentPluginConfig["demonstrations"]
+  >;
   /** The `computerUse` task owner whose User-wide lease this child holds. */
   computerAgentControlOwnerId?: string;
   /**

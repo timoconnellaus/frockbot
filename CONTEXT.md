@@ -130,6 +130,10 @@ _Avoid_: Sandbox, box, Sprite (a provider)
 The durable disk of a Computer. Declared durable roots on it survive hibernation, cold start, migration, and image rebuild; the rest is scratch.
 _Avoid_: Volume, filesystem, box
 
+**Demonstration**:
+What a person did in the Computer's browser while they held control and pressed Record: an ordered log of steps — where they went, what they clicked, which field they typed into but never what, which keys — and a few screenshots with every form field covered. They send it to their Bot as a message's files so it can draft a Skill, and it is deleted once that Skill is decided.
+_Avoid_: Recording (the act, not the thing), teach session, video, macro
+
 **Memory**:
 What a Bot knows across Sessions, written only through the Memory Package. Bot Memory belongs to one Bot; User Memory is shared by a User's Bots; a Group Chat's Memory is shared by its members, and a Bot that leaves the group loses it. Bot and User Memory are also Markdown files under durable roots of the Workspace, sharded per writing Bot so each file has one writer.
 _Avoid_: Context, history, knowledge base

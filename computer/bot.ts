@@ -10,16 +10,25 @@ import {
   ComputerError,
 } from "@frockbot/computer/core";
 import {
+  COMPUTER_DEMONSTRATION_MAX_SECONDS_V1,
   decodeComputerDoctorReportV1,
   type ComputerConnectionProgressV1,
   type ComputerControlLease,
+  type ComputerDemonstrationCaptureV1,
   type ComputerHostSessionV1,
   type ComputerViewerSession,
 } from "@frockbot/computer/core/host";
-import type {
-  WorkspaceFilesV1,
-  WorkspaceRootV1,
+import {
+  decodeMessageAttachmentsV1,
+  durableMessageAttachmentV1,
+  type MessageAttachmentV1,
+  type WorkspaceFilesV1,
+  type WorkspaceRootV1,
 } from "@frockbot/core/contracts";
+import {
+  computerDemonstrationFilesV1,
+  type ComputerDemonstrationFileV1,
+} from "./demonstration.js";
 import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import { COMPUTER_DOCTOR_ROOT_ID } from "./roots.js";
 import {
@@ -42,6 +51,7 @@ import {
   type ComputerCommandReceiptV1,
   type ComputerCommandResponse,
   type ComputerCommandV1,
+  type ComputerDemonstrationViewV1,
   type ComputerDoctorViewV1,
   type ComputerPhase,
   type ComputerProjectionV1,
@@ -58,6 +68,55 @@ import {
 import { defineBotBackendContribution } from "@frockbot/core/contracts/contributions";
 
 export { COMPUTER_CONTROL_RECORD_KEY } from "./control-record.js";
+export type { ComputerDemonstrationFileV1 } from "./demonstration.js";
+
+/** Every demonstration this Bot holds, in one bounded record. */
+export const COMPUTER_DEMONSTRATIONS_KEY = "computer:demonstrations:v1";
+/** How long a recording may run before it stops by itself. */
+export const COMPUTER_DEMONSTRATION_SECONDS =
+  COMPUTER_DEMONSTRATION_MAX_SECONDS_V1;
+/**
+ * How long a kept recording lives when nobody deletes it: long enough for the
+ * person to send it and for the Bot's draft to be decided on — an approval
+ * waits a day by default and a week at most — and no longer.
+ */
+export const COMPUTER_DEMONSTRATION_RETENTION_MS = 7 * 24 * 60 * 60_000;
+/**
+ * How long after a recording should have stopped the alarm collects it: the
+ * Computer's recorder notices a lapsed lease within seconds, so this is only
+ * the margin for it to have written everything down.
+ */
+export const COMPUTER_DEMONSTRATION_COLLECT_GRACE_MS = 60_000;
+/** How long a collection or deletion the Computer or the store refused waits. */
+export const COMPUTER_DEMONSTRATION_RETRY_MS = 5 * 60_000;
+/** Attempts before a recording the Computer never hands back is let go. */
+const COMPUTER_DEMONSTRATION_ATTEMPTS = 3;
+/** Demonstrations one Bot holds at once; the oldest sent one makes room. */
+const COMPUTER_DEMONSTRATION_LIMIT = 8;
+
+/** Why a recording was stopped with nothing in it. */
+export const COMPUTER_DEMONSTRATION_EMPTY_MESSAGE =
+  "Nothing was recorded. Only what you do in the Computer's browser is recorded.";
+
+/**
+ * Where a demonstration's files are kept once it stops: the Bot's uploads,
+ * counted against the account's upload space like any file the person
+ * attaches, so sending one is sending an ordinary message with files.
+ */
+export interface ComputerDemonstrationStoreV1 {
+  /** Keeps the files and answers the attachments a message names them by. */
+  keep(input: {
+    userId: string;
+    botId: string;
+    files: ComputerDemonstrationFileV1[];
+  }): Promise<MessageAttachmentV1[]>;
+  /** Deletes the files and gives their space back. Idempotent. */
+  remove(input: {
+    userId: string;
+    botId: string;
+    uploadIds: string[];
+  }): Promise<void>;
+}
 
 export const COMPUTER_VIEWER_RECORD_KEY = "computer:viewer:v1";
 export const COMPUTER_PROVIDER_RECORD_KEY = "computer:provider:v1";
@@ -97,8 +156,45 @@ export interface ComputerBotBackendHost {
     botId: string,
     effectId: string,
   ): Promise<ComputerHostSessionV1>;
+  /** Where a stopped recording's files go. Absent, and nothing is recorded. */
+  demonstrations?: ComputerDemonstrationStoreV1;
   now?(): Date;
   newId?(): string;
+}
+
+/**
+ * One demonstration: recording, kept and waiting to be sent, or sent and
+ * waiting to be deleted. It names its User and Bot because the alarm that
+ * collects or expires it has no command to take them from.
+ */
+type StoredDemonstrationV1 =
+  | {
+      id: string;
+      userId: string;
+      botId: string;
+      status: "recording";
+      /** The human lease the recording belongs to. */
+      ownerId: string;
+      startedAt: string;
+      endsAt: string;
+      /** When the alarm next tries to collect it, after a refusal. */
+      retryAt?: string;
+      attempts?: number;
+    }
+  | {
+      id: string;
+      userId: string;
+      botId: string;
+      status: "ready" | "sent";
+      startedAt: string;
+      steps: number;
+      attachments: MessageAttachmentV1[];
+      expiresAt: string;
+    };
+
+interface StoredDemonstrationsV1 {
+  version: 1;
+  entries: StoredDemonstrationV1[];
 }
 
 interface StoredViewerV1 {
@@ -403,6 +499,118 @@ function decodeStoredPendingConnect(value: unknown): StoredPendingConnectV1 {
           ),
         }),
   };
+}
+
+function decodeStoredDemonstration(value: unknown): StoredDemonstrationV1 {
+  const record = object(value, "Computer demonstration");
+  const common = {
+    id: storedText(record.id, "Computer demonstration id"),
+    userId: storedText(record.userId, "Computer demonstration userId"),
+    botId: storedText(record.botId, "Computer demonstration botId"),
+    startedAt: storedTimestamp(
+      record.startedAt,
+      "Computer demonstration startedAt",
+    ),
+  };
+  if (record.status === "recording") {
+    exact(
+      record,
+      ["id", "userId", "botId", "status", "ownerId", "startedAt", "endsAt"],
+      ["retryAt", "attempts"],
+      "Computer demonstration",
+    );
+    if (
+      record.attempts !== undefined &&
+      (!Number.isSafeInteger(record.attempts) ||
+        (record.attempts as number) < 0)
+    ) {
+      throw new Error("Computer demonstration attempts is corrupt");
+    }
+    return {
+      ...common,
+      status: "recording",
+      ownerId: storedText(record.ownerId, "Computer demonstration ownerId"),
+      endsAt: storedTimestamp(record.endsAt, "Computer demonstration endsAt"),
+      ...(record.retryAt === undefined
+        ? {}
+        : {
+            retryAt: storedTimestamp(
+              record.retryAt,
+              "Computer demonstration retryAt",
+            ),
+          }),
+      ...(record.attempts === undefined
+        ? {}
+        : { attempts: record.attempts as number }),
+    };
+  }
+  if (record.status !== "ready" && record.status !== "sent") {
+    throw new Error("Computer demonstration status is corrupt");
+  }
+  exact(
+    record,
+    [
+      "id",
+      "userId",
+      "botId",
+      "status",
+      "startedAt",
+      "steps",
+      "attachments",
+      "expiresAt",
+    ],
+    [],
+    "Computer demonstration",
+  );
+  if (!Number.isSafeInteger(record.steps) || (record.steps as number) < 1) {
+    throw new Error("Computer demonstration steps is corrupt");
+  }
+  return {
+    ...common,
+    status: record.status,
+    steps: record.steps as number,
+    attachments: decodeMessageAttachmentsV1(
+      record.attachments,
+      "Computer demonstration attachments",
+      true,
+    ),
+    expiresAt: storedTimestamp(
+      record.expiresAt,
+      "Computer demonstration expiresAt",
+    ),
+  };
+}
+
+function decodeStoredDemonstrations(value: unknown): StoredDemonstrationsV1 {
+  const record = object(value, "Computer demonstrations");
+  exact(record, ["version", "entries"], [], "Computer demonstrations");
+  if (record.version !== 1 || !Array.isArray(record.entries)) {
+    throw new Error("Computer demonstrations are corrupt");
+  }
+  return {
+    version: 1,
+    entries: record.entries.map(decodeStoredDemonstration),
+  };
+}
+
+/** When the alarm owes a demonstration its next step. */
+function demonstrationDeadline(
+  entry: StoredDemonstrationV1,
+  control: StoredComputerControlV1 | undefined,
+): number {
+  if (entry.status !== "recording") return Date.parse(entry.expiresAt);
+  if (entry.retryAt !== undefined) return Date.parse(entry.retryAt);
+  // A recording ends at its time cap, or when the person's lease lapses —
+  // the Computer stops it then by itself, and the alarm collects it after.
+  // A lease that is no longer theirs has already lapsed.
+  const lapses =
+    control && control.ownerId === entry.ownerId
+      ? Date.parse(control.expiresAt)
+      : Date.parse(entry.startedAt);
+  return (
+    Math.min(Date.parse(entry.endsAt), lapses) +
+    COMPUTER_DEMONSTRATION_COLLECT_GRACE_MS
+  );
 }
 
 function pendingConnectDeadline(pending: StoredPendingConnectV1): number {
@@ -830,10 +1038,29 @@ export class ComputerBotBackendContribution {
         case "runDoctor":
           await this.runDoctor(userId, command);
           break;
+        case "startDemonstration":
+          await this.startDemonstration(userId, command);
+          break;
+        case "stopDemonstration":
+          await this.stopDemonstration(userId, command);
+          break;
+        case "discardDemonstration":
+          await this.discardDemonstration(userId, command);
+          break;
       }
       return this.settle(command, admitted.fingerprint, "applied");
     } catch (error) {
       const failure = failureText(error);
+      // A recording that could not start, or stopped with nothing in it, is
+      // an answer to that one gesture. It says nothing about the Computer, so
+      // it moves no phase: the receipt carries it to the person.
+      if (
+        command.type === "startDemonstration" ||
+        command.type === "stopDemonstration" ||
+        command.type === "discardDemonstration"
+      ) {
+        return this.settle(command, admitted.fingerprint, "rejected", failure);
+      }
       const updating =
         command.type === "connect" &&
         error instanceof ComputerError &&
@@ -896,8 +1123,22 @@ export class ComputerBotBackendContribution {
 
   async scheduledDeadlines(storage: ComputerBotTransaction): Promise<number[]> {
     const value = await storage.get<unknown>(COMPUTER_PENDING_CONNECT_KEY);
-    if (value === undefined) return [];
-    return [pendingConnectDeadline(decodeStoredPendingConnect(value))];
+    const control = decoded(
+      await storage.get<unknown>(COMPUTER_CONTROL_RECORD_KEY),
+      decodeStoredComputerControlV1,
+    );
+    const demonstrations = decoded(
+      await storage.get<unknown>(COMPUTER_DEMONSTRATIONS_KEY),
+      decodeStoredDemonstrations,
+    );
+    return [
+      ...(value === undefined
+        ? []
+        : [pendingConnectDeadline(decodeStoredPendingConnect(value))]),
+      ...(demonstrations?.entries ?? []).map((entry) =>
+        demonstrationDeadline(entry, control),
+      ),
+    ];
   }
 
   async deferScheduledWork(storage: ComputerBotTransaction): Promise<void> {
@@ -917,6 +1158,14 @@ export class ComputerBotBackendContribution {
   }
 
   async settleScheduledWork(): Promise<void> {
+    try {
+      await this.settleScheduledConnect();
+    } finally {
+      await this.settleDemonstrations();
+    }
+  }
+
+  private async settleScheduledConnect(): Promise<void> {
     if (this.#scheduledConnect) return this.#scheduledConnect;
     const activity = this.armScheduledConnectWatchdog()
       .then(() => this.runScheduledConnect())
@@ -1269,6 +1518,354 @@ export class ComputerBotBackendContribution {
       // Prior art: `releaseDesktopLease` in `@frockbot/app/subagents`.
       await this.host.storage.delete(COMPUTER_CONTROL_RECORD_KEY);
     }
+    // Letting go of control ends a recording, so it is collected now rather
+    // than on the alarm; the alarm is what tries again if this cannot.
+    const recording = (await this.demonstrations()).find(
+      (entry) =>
+        entry.status === "recording" && entry.ownerId === current.ownerId,
+    );
+    if (!recording || recording.status !== "recording") return;
+    try {
+      await this.collect(recording, (run) =>
+        this.withComputer(userId, command, (computer, effectId) =>
+          run(computer, `${effectId}:collect-demonstration`),
+        ),
+      );
+    } catch {
+      // The release happened; a recording the Computer would not hand back
+      // yet is the alarm's to collect.
+    }
+  }
+
+  // --- demonstrations (parity row 54) --------------------------------------
+
+  private async demonstrations(): Promise<StoredDemonstrationV1[]> {
+    return (
+      decoded(
+        await this.host.storage.get<unknown>(COMPUTER_DEMONSTRATIONS_KEY),
+        decodeStoredDemonstrations,
+      )?.entries ?? []
+    );
+  }
+
+  /**
+   * Rewrites the one record from what it holds now, in one transaction, and
+   * answers whether anything changed. A record no codec reads is taken as
+   * empty and replaced, rather than making every recording refuse for ever.
+   */
+  private async updateDemonstrations(
+    change: (entries: StoredDemonstrationV1[]) => StoredDemonstrationV1[],
+  ): Promise<boolean> {
+    return this.host.storage.transaction(async (storage) => {
+      const stored = await storage.get<unknown>(COMPUTER_DEMONSTRATIONS_KEY);
+      const current =
+        decoded(stored, decodeStoredDemonstrations)?.entries ?? [];
+      const next = change(current);
+      if (JSON.stringify(next) === JSON.stringify(current)) return false;
+      if (next.length === 0) {
+        await storage.delete(COMPUTER_DEMONSTRATIONS_KEY);
+      } else {
+        await storage.put(COMPUTER_DEMONSTRATIONS_KEY, {
+          version: 1,
+          entries: next,
+        } satisfies StoredDemonstrationsV1);
+      }
+      return true;
+    });
+  }
+
+  private async demonstrationId(command: ComputerCommandV1): Promise<string> {
+    const digest = await sha256HexTextV1(
+      `${command.botId}\u0000demonstration\u0000${command.commandId}`,
+    );
+    return digest.slice(0, 16);
+  }
+
+  /** Deletes a kept demonstration's files, then its record. */
+  private async forget(entry: StoredDemonstrationV1): Promise<void> {
+    if (entry.status !== "recording" && this.host.demonstrations) {
+      await this.host.demonstrations.remove({
+        userId: entry.userId,
+        botId: entry.botId,
+        uploadIds: entry.attachments.map((attachment) => attachment.uploadId),
+      });
+    }
+    await this.updateDemonstrations((entries) =>
+      entries.filter((candidate) => candidate.id !== entry.id),
+    );
+  }
+
+  /**
+   * Stops a recording on the Computer and keeps what it captured as the
+   * files a message carries. `open` supplies the Computer and the effect id
+   * the stop is named by, because a command, a release and the alarm each
+   * collect under their own.
+   */
+  private async collect(
+    entry: Extract<StoredDemonstrationV1, { status: "recording" }>,
+    open: (
+      run: (
+        computer: ComputerHostSessionV1,
+        effectId: string,
+      ) => Promise<ComputerDemonstrationCaptureV1 | undefined>,
+    ) => Promise<ComputerDemonstrationCaptureV1 | undefined>,
+  ): Promise<"kept" | "empty"> {
+    const store = this.host.demonstrations;
+    const capture = await open(async (computer, effectId) =>
+      computer.demonstration?.stop({ effectId }),
+    );
+    if (!capture || capture.steps.length === 0 || !store) {
+      await this.updateDemonstrations((entries) =>
+        entries.filter((candidate) => candidate.id !== entry.id),
+      );
+      return "empty";
+    }
+    const attachments = (
+      await store.keep({
+        userId: entry.userId,
+        botId: entry.botId,
+        files: computerDemonstrationFilesV1(entry.id, capture),
+      })
+    ).map(durableMessageAttachmentV1);
+    const kept = await this.updateDemonstrations((entries) =>
+      entries.map((candidate) =>
+        candidate.id === entry.id
+          ? {
+              id: entry.id,
+              userId: entry.userId,
+              botId: entry.botId,
+              status: "ready",
+              startedAt: entry.startedAt,
+              steps: capture.steps.length,
+              attachments,
+              expiresAt: new Date(
+                this.now().getTime() + COMPUTER_DEMONSTRATION_RETENTION_MS,
+              ).toISOString(),
+            }
+          : candidate,
+      ),
+    );
+    // Discarded while it was being read back: the files it became go too.
+    if (!kept) {
+      await store.remove({
+        userId: entry.userId,
+        botId: entry.botId,
+        uploadIds: attachments.map((attachment) => attachment.uploadId),
+      });
+    }
+    return "kept";
+  }
+
+  /**
+   * Starts recording what the person holding control does in the browser.
+   *
+   * Anything recorded earlier and never sent is replaced: pressing Record
+   * again is starting over. The record is written before the Computer is
+   * asked, and dropped again if it refuses.
+   */
+  private async startDemonstration(
+    userId: string,
+    command: ComputerCommandV1,
+  ): Promise<void> {
+    const store = this.host.demonstrations;
+    if (!store) {
+      throw new Error("Recordings can't be kept on this deployment");
+    }
+    const control = decoded(
+      await this.host.storage.get<unknown>(COMPUTER_CONTROL_RECORD_KEY),
+      decodeStoredComputerControlV1,
+    );
+    if (!control || !isStoredComputerControlFreshV1(control, this.now())) {
+      throw new Error(
+        "Take control of the Computer to record: only what you do while you hold it is recorded.",
+      );
+    }
+    const id = await this.demonstrationId(command);
+    const entries = await this.demonstrations();
+    if (entries.some((entry) => entry.id === id)) return;
+    const unsent = entries.filter((entry) => entry.status !== "sent");
+    const sent = entries.filter((entry) => entry.status === "sent");
+    const evicted = sent.slice(
+      0,
+      Math.max(0, sent.length - (COMPUTER_DEMONSTRATION_LIMIT - 1)),
+    );
+    for (const entry of [...unsent, ...evicted]) {
+      if (entry.status !== "recording") {
+        await store.remove({
+          userId: entry.userId,
+          botId: entry.botId,
+          uploadIds: entry.attachments.map((attachment) => attachment.uploadId),
+        });
+      }
+    }
+    const replaced = new Set([...unsent, ...evicted].map((entry) => entry.id));
+    const startedAt = this.now();
+    await this.updateDemonstrations((current) => [
+      ...current.filter((entry) => !replaced.has(entry.id)),
+      {
+        id,
+        userId,
+        botId: command.botId,
+        status: "recording",
+        ownerId: control.ownerId,
+        startedAt: startedAt.toISOString(),
+        endsAt: new Date(
+          startedAt.getTime() + COMPUTER_DEMONSTRATION_SECONDS * 1_000,
+        ).toISOString(),
+      },
+    ]);
+    try {
+      await this.withComputer(userId, command, async (computer, effectId) => {
+        if (!computer.demonstration) {
+          throw new Error("This Computer can't record");
+        }
+        await computer.demonstration.start(
+          { ownerId: control.ownerId, seconds: COMPUTER_DEMONSTRATION_SECONDS },
+          { effectId: `${effectId}:start-demonstration` },
+        );
+      });
+    } catch (error) {
+      await this.updateDemonstrations((current) =>
+        current.filter((entry) => entry.id !== id),
+      );
+      throw error;
+    }
+  }
+
+  private async stopDemonstration(
+    userId: string,
+    command: ComputerCommandV1,
+  ): Promise<void> {
+    const recording = (await this.demonstrations()).findLast(
+      (entry) => entry.status === "recording",
+    );
+    // Nothing recording: already collected — by a release, the alarm, or
+    // this same command before a replay — and that is what Stop asked for.
+    if (!recording || recording.status !== "recording") return;
+    const outcome = await this.collect(recording, (run) =>
+      this.withComputer(userId, command, (computer, effectId) =>
+        run(computer, `${effectId}:stop-demonstration`),
+      ),
+    );
+    if (outcome === "empty") {
+      throw new Error(COMPUTER_DEMONSTRATION_EMPTY_MESSAGE);
+    }
+  }
+
+  private async discardDemonstration(
+    userId: string,
+    command: ComputerCommandV1,
+  ): Promise<void> {
+    const entry = (await this.demonstrations()).findLast(
+      (candidate) => candidate.status !== "sent",
+    );
+    if (!entry) return;
+    if (entry.status === "recording") {
+      try {
+        await this.withComputer(userId, command, (computer, effectId) =>
+          computer.demonstration
+            ? computer.demonstration.stop({
+                effectId: `${effectId}:discard-demonstration`,
+              })
+            : Promise.resolve(undefined),
+        );
+      } catch {
+        // What it recorded stays on the Computer only until the next
+        // recording starts, which clears it before anything else.
+      }
+    }
+    await this.forget(entry);
+  }
+
+  /**
+   * A message was admitted carrying these files. A kept recording among them
+   * has been sent: the person decided, so it is no longer offered to them.
+   */
+  async noteDemonstrationSent(uploadIds: readonly string[]): Promise<void> {
+    if (uploadIds.length === 0) return;
+    const sent = new Set(uploadIds);
+    await this.updateDemonstrations((entries) =>
+      entries.map((entry) =>
+        entry.status === "ready" &&
+        entry.attachments.some((attachment) => sent.has(attachment.uploadId))
+          ? { ...entry, status: "sent" }
+          : entry,
+      ),
+    );
+  }
+
+  /**
+   * Deletes a demonstration the person sent this Bot, once its Skill is
+   * saved or turned down. Only a sent one: the Bot never saw anything else.
+   */
+  async deleteDemonstration(
+    demonstrationId: string,
+  ): Promise<"deleted" | "missing"> {
+    const entry = (await this.demonstrations()).find(
+      (candidate) => candidate.id === demonstrationId,
+    );
+    if (!entry || entry.status !== "sent") return "missing";
+    await this.forget(entry);
+    return "deleted";
+  }
+
+  /** Collects what the alarm owes collecting, and deletes what expired. */
+  private async settleDemonstrations(): Promise<void> {
+    const now = this.now().getTime();
+    const control = decoded(
+      await this.host.storage.get<unknown>(COMPUTER_CONTROL_RECORD_KEY),
+      decodeStoredComputerControlV1,
+    );
+    for (const entry of await this.demonstrations()) {
+      if (demonstrationDeadline(entry, control) > now) continue;
+      try {
+        if (entry.status === "recording") {
+          await this.collect(entry, (run) =>
+            this.withDemonstrationComputer(entry, run),
+          );
+        } else {
+          await this.forget(entry);
+        }
+      } catch {
+        // Tried again later, never at once: a deadline left in the past
+        // would wake this object for ever. A recording the Computer never
+        // hands back is let go after a few tries.
+        const retry = new Date(now + COMPUTER_DEMONSTRATION_RETRY_MS);
+        await this.updateDemonstrations((entries) =>
+          entries.flatMap((candidate): StoredDemonstrationV1[] => {
+            if (candidate.id !== entry.id) return [candidate];
+            if (candidate.status !== "recording") {
+              return [{ ...candidate, expiresAt: retry.toISOString() }];
+            }
+            const attempts = (candidate.attempts ?? 0) + 1;
+            return attempts >= COMPUTER_DEMONSTRATION_ATTEMPTS
+              ? []
+              : [{ ...candidate, attempts, retryAt: retry.toISOString() }];
+          }),
+        );
+      }
+    }
+  }
+
+  /** The Computer, for work the alarm does with no command to name it. */
+  private async withDemonstrationComputer<T>(
+    entry: Extract<StoredDemonstrationV1, { status: "recording" }>,
+    run: (computer: ComputerHostSessionV1, effectId: string) => Promise<T>,
+  ): Promise<T> {
+    const digest = await sha256HexTextV1(
+      `${entry.botId}\u0000demonstration\u0000${entry.id}\u0000${entry.attempts ?? 0}`,
+    );
+    const effectId = `computer-demonstration-${digest.slice(0, 32)}`;
+    const computer = await this.host.openComputer(
+      entry.userId,
+      entry.botId,
+      effectId,
+    );
+    try {
+      return await run(computer, `${effectId}:collect`);
+    } finally {
+      await computer.close();
+    }
   }
 
   /**
@@ -1421,14 +2018,21 @@ export class ComputerBotBackendContribution {
 
   async read(userId: string, botId: string): Promise<ComputerProjectionV1> {
     const now = this.now();
-    const [viewerValue, controlValue, providerValue, frameValue, doctor] =
-      await Promise.all([
-        this.host.storage.get<unknown>(COMPUTER_VIEWER_RECORD_KEY),
-        this.host.storage.get<unknown>(COMPUTER_CONTROL_RECORD_KEY),
-        this.host.storage.get<unknown>(COMPUTER_PROVIDER_RECORD_KEY),
-        this.host.storage.get<unknown>(COMPUTER_FRAME_RECORD_KEY),
-        this.doctor(userId, botId),
-      ]);
+    const [
+      viewerValue,
+      controlValue,
+      providerValue,
+      frameValue,
+      doctor,
+      demonstrations,
+    ] = await Promise.all([
+      this.host.storage.get<unknown>(COMPUTER_VIEWER_RECORD_KEY),
+      this.host.storage.get<unknown>(COMPUTER_CONTROL_RECORD_KEY),
+      this.host.storage.get<unknown>(COMPUTER_PROVIDER_RECORD_KEY),
+      this.host.storage.get<unknown>(COMPUTER_FRAME_RECORD_KEY),
+      this.doctor(userId, botId),
+      this.demonstrations(),
+    ]);
     // A record the codec refuses is treated as absent, the way `doctor()`
     // above and `ComputerProcessStore.list` already do. These three decoders
     // throw on any unexpected shape — a field a future version adds included —
@@ -1478,6 +2082,7 @@ export class ComputerBotBackendContribution {
         ? "Reconnect to pick up where you left off"
         : "Ready to start";
     }
+    const demonstration = demonstrationViewV1(demonstrations);
     const viewerSession: ComputerViewerSessionViewV1 | undefined = liveViewer
       ? {
           version: 1,
@@ -1509,8 +2114,37 @@ export class ComputerBotBackendContribution {
         : {}),
       screenshots: frame ? [computerFrameViewV1(botId, frame)] : [],
       ...(doctor ? { doctor } : {}),
+      ...(demonstration ? { demonstration } : {}),
     };
   }
+}
+
+/**
+ * What the person has to decide about: the newest recording that is still
+ * running, or kept and not yet sent. A sent one is the Bot's business.
+ */
+function demonstrationViewV1(
+  entries: readonly StoredDemonstrationV1[],
+): ComputerDemonstrationViewV1 | undefined {
+  const entry = entries.findLast((candidate) => candidate.status !== "sent");
+  if (!entry) return undefined;
+  if (entry.status === "recording") {
+    return {
+      version: 1,
+      id: entry.id,
+      status: "recording",
+      startedAt: entry.startedAt,
+      endsAt: entry.endsAt,
+    };
+  }
+  return {
+    version: 1,
+    id: entry.id,
+    status: "ready",
+    startedAt: entry.startedAt,
+    steps: entry.steps,
+    attachments: entry.attachments.map(durableMessageAttachmentV1),
+  };
 }
 
 export function createComputerBotBackendContribution(

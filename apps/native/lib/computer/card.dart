@@ -23,6 +23,7 @@ import '../theme/states.dart';
 import '../view/embed.dart';
 import '../view/host_frame.dart';
 import 'client.dart';
+import 'recording.dart';
 
 /// The desktop, framed. Also the widget the `computer-viewer` host frame
 /// resolves to for any `embed` node under a Computer surface.
@@ -483,7 +484,9 @@ class _ComputerViewerPageState extends State<ComputerViewerPage>
     final human = state.phase == 'human-control';
     final opening = state.phase == 'provisioning' || state.phase == 'updating';
     final url = state.viewerUrl;
+    final demonstration = state.demonstration;
     final actions = <Widget>[
+      if (human) ComputerRecordButton(controller: controller),
       if (human)
         identified(
           ComputerIds.releaseControl,
@@ -653,6 +656,54 @@ class _ComputerViewerPageState extends State<ComputerViewerPage>
                   decoration: BoxDecoration(
                     border: Border.all(color: FrockTheme.accent, width: 3),
                   ),
+                ),
+              ),
+            ),
+          if (demonstration != null && demonstration.recording)
+            Positioned(
+              top: 12,
+              left: 0,
+              right: 0,
+              child: SafeArea(
+                child: IgnorePointer(
+                  child: Center(
+                    child: ComputerRecordingPill(
+                      key: ValueKey(demonstration.id),
+                      demonstration: demonstration,
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          if (demonstration != null && demonstration.ready)
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 16,
+              child: SafeArea(
+                child: Center(
+                  child: ComputerTeachPanel(
+                    key: ValueKey(demonstration.id),
+                    controller: controller,
+                    demonstration: demonstration,
+                    botName: widget.botName,
+                    // The Bot answers in the conversation, so that is
+                    // where the person goes once it is sent.
+                    onSent: () {
+                      if (mounted) Navigator.of(context).maybePop();
+                    },
+                  ),
+                ),
+              ),
+            )
+          else if (controller.recordingNotice != null)
+            Positioned(
+              left: 16,
+              right: 16,
+              bottom: 16,
+              child: SafeArea(
+                child: Center(
+                  child: ComputerRecordingNotice(controller: controller),
                 ),
               ),
             ),

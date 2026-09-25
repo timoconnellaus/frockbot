@@ -66,6 +66,34 @@ export async function reserveUploadQuotaV1(
 }
 
 /**
+ * Gives back the space of some of one Bot's uploads, which it has deleted.
+ * Run inside the User object's transaction; an upload no longer counted is
+ * nothing to give back, so a repeat releases nothing twice.
+ */
+export async function releaseUploadQuotaV1(
+  storage: UploadQuotaStorageV1,
+  input: { botId: string; uploadIds: readonly string[] },
+): Promise<{ released: number }> {
+  let released = 0;
+  const keys: string[] = [];
+  for (const uploadId of new Set(input.uploadIds)) {
+    if (!isUploadIdV1(uploadId)) {
+      throw new Error("upload quota release is invalid");
+    }
+    const key = `${entryPrefix(input.botId)}${uploadId}`;
+    const bytes = await storage.get<number>(key);
+    if (bytes === undefined) continue;
+    released += total(bytes);
+    keys.push(key);
+  }
+  if (keys.length === 0) return { released: 0 };
+  const used = total(await storage.get<number>(UPLOAD_QUOTA_TOTAL_KEY_V1));
+  await storage.delete(keys);
+  await storage.put(UPLOAD_QUOTA_TOTAL_KEY_V1, Math.max(0, used - released));
+  return { released };
+}
+
+/**
  * Gives back one page of a deleted Bot's uploads. Answers whether more
  * remain, so a caller repeats until none do; each page is its own
  * transaction, and a repeat after a crash finds only what is still counted.

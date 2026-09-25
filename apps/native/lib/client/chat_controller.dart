@@ -192,8 +192,7 @@ class ChatController extends ChangeNotifier {
   /// last drew it. Never persisted and never read back: the message each
   /// part becomes is the record, and a draft lives only as long as the
   /// socket that brought it.
-  Map<String, ReplyDraft> get replyDrafts =>
-      UnmodifiableMapView(_replyDrafts);
+  Map<String, ReplyDraft> get replyDrafts => UnmodifiableMapView(_replyDrafts);
   final Map<String, ReplyDraft> _replyDrafts = {};
 
   /// The conversation's own announcements — a rename, a compaction — as the
@@ -949,7 +948,19 @@ class ChatController extends ChangeNotifier {
     );
   }
 
-  Future<void> _submit(PendingSend submission) async {
+  /// Sends a message the person chose outside the composer — a recording
+  /// they are teaching the Bot — and leaves what they are typing alone.
+  /// Answers whether it was handed to the send path at all.
+  Future<bool> sendFiles(String text, List<MessageAttachment> files) async {
+    if (!canSend) return false;
+    await _submit(
+      PendingSend(nextId(), text, attachments: files),
+      keepDraft: true,
+    );
+    return true;
+  }
+
+  Future<void> _submit(PendingSend submission, {bool keepDraft = false}) async {
     final text = submission.text;
     _number(submission);
     _inFlight += 1;
@@ -972,7 +983,7 @@ class ChatController extends ChangeNotifier {
       _putOptimisticRun(submission, queued: waitsBehind);
     }
     changed();
-    if (submission.retryOf == null) draft = '';
+    if (submission.retryOf == null && !keepDraft) draft = '';
     try {
       await _persist(); // No transport call can precede this durable local write.
     } catch (_) {

@@ -19,22 +19,21 @@
 // same key and records the same record. A write that fails after the space
 // was counted leaves that one file counted until the Bot is deleted, which is
 // the whole of what a crash can cost.
-import {
-  UPLOAD_ACCOUNT_QUOTA_BYTES_V1,
-  UPLOAD_MAX_BYTES_V1,
-} from "@frockbot/core/contracts";
+import { UPLOAD_MAX_BYTES_V1 } from "@frockbot/core/contracts";
 import { decodeBotIdV1 } from "@frockbot/core/configuration";
 import {
   extractDocumentTextV1,
   type DocumentConverterV1,
 } from "@frockbot/app/uploads/extract";
 import type { UploadQuotaAnswerV1 } from "@frockbot/app/uploads/quota";
+import type { BotFileStoreV1 } from "@frockbot/app/uploads/bot";
 import {
   classifyUploadV1,
   normalizeUploadNameV1,
   uploadBotPrefixV1,
   uploadObjectKeyV1,
   uploadTextKeyV1,
+  UPLOAD_QUOTA_FULL_MESSAGE_V1,
   type StoredUploadV1,
   type UploadReceiptV1,
 } from "@frockbot/app/uploads/shared";
@@ -188,10 +187,7 @@ export function uploadRoutes(
       bytes: body.byteLength,
     });
     if (quota.status === "full") {
-      return refusal(
-        413,
-        `Your files use all ${UPLOAD_ACCOUNT_QUOTA_BYTES_V1 / 1024 ** 3} GB of upload space. Delete a Bot you no longer need to make room.`,
-      );
+      return refusal(413, UPLOAD_QUOTA_FULL_MESSAGE_V1);
     }
     await bucket.put(uploadObjectKeyV1(userId, botId, uploadId), body, {
       httpMetadata: { contentType: classified.mediaType },
@@ -338,6 +334,70 @@ export async function deleteBotUploadsV1(
     cursor = page.truncated ? page.cursor : undefined;
   } while (cursor !== undefined);
   return removed;
+}
+
+/** The bindings a Bot needs to keep and delete files of its own. */
+export interface BotFileEnvV1 {
+  MEMORY_FILES: {
+    put(
+      key: string,
+      value: Uint8Array | string,
+      options?: {
+        httpMetadata?: { contentType?: string };
+        customMetadata?: Record<string, string>;
+      },
+    ): Promise<unknown>;
+    delete(keys: string | string[]): Promise<void>;
+  };
+  USER_CONFIGURATIONS: UploadTeardownEnvV1["USER_CONFIGURATIONS"];
+}
+
+/**
+ * Where one Bot keeps files the product hands it — a demonstration the
+ * person recorded — the same store, prefix and account ledger the upload
+ * route writes for a file they attach.
+ */
+export function botFileStoreV1(
+  env: BotFileEnvV1,
+  owner: { userId: string; botId: string },
+  storage: BotFileStoreV1["storage"],
+): BotFileStoreV1 {
+  // SAFETY: this binding names UserConfiguration; these are its reviewed RPCs.
+  const user = () =>
+    env.USER_CONFIGURATIONS.get(
+      env.USER_CONFIGURATIONS.idFromName(owner.userId),
+    ) as {
+      reserveUploadQuota(input: {
+        schemaVersion: 1;
+        userId: string;
+        botId: string;
+        uploadId: string;
+        bytes: number;
+      }): Promise<UploadQuotaAnswerV1>;
+      releaseUploadQuota(input: {
+        schemaVersion: 1;
+        userId: string;
+        botId: string;
+        uploadIds: string[];
+      }): Promise<{ released: number }>;
+    };
+  return {
+    bucket: {
+      put: (key, value, options) => env.MEMORY_FILES.put(key, value, options),
+      delete: (keys) => env.MEMORY_FILES.delete(keys),
+    },
+    storage,
+    reserveQuota: (input) =>
+      user().reserveUploadQuota({ schemaVersion: 1, ...owner, ...input }),
+    releaseQuota: async (uploadIds) => {
+      await user().releaseUploadQuota({
+        schemaVersion: 1,
+        ...owner,
+        uploadIds,
+      });
+    },
+    now: () => new Date(),
+  };
 }
 
 /** Asks the User object to give back a deleted Bot's upload space. */

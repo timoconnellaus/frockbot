@@ -41,7 +41,7 @@ import {
   isTaskIdV1,
   SubagentDecodeError,
   TASK_ATTACHMENT_LIMIT_V1,
-  TASK_ATTACHMENT_PATH_MAX_V1,
+  TASK_ATTACHMENT_NAME_MAX_V1,
   TASK_DESCRIPTION_MAX_V1,
   TASK_ID_MAX_V1,
   TASK_MESSAGE_MAX_V1,
@@ -280,7 +280,7 @@ const TASK_INPUT_SCHEMA = {
       type: "array",
       items: { type: "string" },
       description:
-        "Workspace paths the subagent is given, at most four. Required by watchVideo.",
+        "Files attached to this conversation to hand the subagent, at most four, each by the name it was attached under or by its upload id. The subagent sees them as attached to its own message. Required by watchVideo.",
     },
   },
   required: ["description", "prompt"],
@@ -374,10 +374,10 @@ export function decodeTaskToolInputV1(input: unknown): TaskToolInputV1 {
       if (
         typeof entry !== "string" ||
         entry.trim().length === 0 ||
-        entry.trim().length > TASK_ATTACHMENT_PATH_MAX_V1
+        entry.trim().length > TASK_ATTACHMENT_NAME_MAX_V1
       ) {
         throw new SubagentDecodeError(
-          `${TASK_TOOL_V1} attachment paths must be bounded non-empty strings`,
+          `${TASK_TOOL_V1} attachments must be bounded non-empty file names`,
         );
       }
       attachments.push(entry.trim());

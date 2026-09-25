@@ -84,12 +84,21 @@ import {
   type BotIdentity,
   type BotTurnCommand,
 } from "@frockbot/core/durable";
-import { recordUploadV1, resolveUploadRefsV1 } from "@frockbot/app/uploads/bot";
+import {
+  keepBotFilesV1,
+  recordUploadV1,
+  removeBotFilesV1,
+  resolveUploadRefsV1,
+} from "@frockbot/app/uploads/bot";
 import {
   decodeStoredUploadV1,
   type StoredUploadV1,
 } from "@frockbot/app/uploads/shared";
-import { deleteBotUploadsV1, releaseBotUploadQuotaRpcV1 } from "./uploads.js";
+import {
+  botFileStoreV1,
+  deleteBotUploadsV1,
+  releaseBotUploadQuotaRpcV1,
+} from "./uploads.js";
 import type {
   OwnedBotTurnCommand,
   ShellBotBackendContribution,
@@ -884,6 +893,11 @@ export class BotState
               // second instead of at the next projection poll.
               this.stateChannel.noticeComputer();
             },
+            deleteComputerDemonstration: (demonstrationId) =>
+              mountedContributions
+                .get(computerBotContribution)
+                ?.deleteDemonstration(demonstrationId) ??
+              Promise.resolve("missing" as const),
             scheduledDeadlines: async (transaction) => [
               ...((await mountedContributions
                 .get(computerBotContribution)
@@ -948,6 +962,22 @@ export class BotState
             workspace: this.backendEnv.WORKSPACE_FILES,
             providerLabel: "Computer",
             configured: computerConfigured,
+            // A stopped recording becomes the Bot's uploads, kept and
+            // counted exactly as a file the person attaches.
+            demonstrations: {
+              keep: ({ userId, botId, files }) =>
+                keepBotFilesV1(
+                  botFileStoreV1(this.env, { userId, botId }, this.ctx.storage),
+                  { userId, botId },
+                  files,
+                ),
+              remove: ({ userId, botId, uploadIds }) =>
+                removeBotFilesV1(
+                  botFileStoreV1(this.env, { userId, botId }, this.ctx.storage),
+                  { userId, botId },
+                  uploadIds,
+                ),
+            },
             openComputer: (userId, botId, effectId) => {
               const identity = { userId };
               if (!computers.assignment(identity)) {
@@ -2101,6 +2131,14 @@ export class BotState
   ): Promise<BotTurnCommand> {
     const { attachments: refs, ...rest } = command;
     const attachments = await resolveUploadRefsV1(this.ctx.storage, refs);
+    if (attachments) {
+      // A recording the person just sent is theirs no longer to decide on:
+      // the Computer stops offering it. Never a reason to refuse the message.
+      const mounted = await this.mounted?.catch(() => undefined);
+      await mounted?.computer
+        .noteDemonstrationSent(attachments.map(({ uploadId }) => uploadId))
+        .catch(() => undefined);
+    }
     return { ...rest, ...(attachments ? { attachments } : {}) };
   }
 
