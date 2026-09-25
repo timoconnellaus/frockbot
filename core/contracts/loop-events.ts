@@ -56,7 +56,6 @@ export interface LoopAgentSnapshotV1 {
   status: LoopAgentStatusV1;
 }
 
-/** The live in-process projection first-party hooks receive. */
 /** Where the running Turn is in its budget, as the loop's own clock reads it. */
 export interface LoopTurnBudgetV1 {
   maxSteps: number;
@@ -65,6 +64,7 @@ export interface LoopTurnBudgetV1 {
   now: number;
 }
 
+/** The live in-process projection first-party hooks receive. */
 export interface LoopAgentRuntimeV1 {
   readonly id: string;
   readonly botId: string;
