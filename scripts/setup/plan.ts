@@ -417,6 +417,7 @@ export const HUMAN_SECRETS_V1: readonly HumanSecretV1[] = [
       "the Computer: a Bot that browses, runs commands and sees a screen",
     where:
       "https://fly.io/dashboard — the token the Computer host presents to Fly",
+    // Required because the Computer is part of every deployment (ADR 0028).
     required: true,
     // The host is the only place it is used; the app Worker is handed it too
     // because the release does, and the manifest classifies it there.

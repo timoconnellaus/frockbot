@@ -498,7 +498,7 @@ export async function askHumanSecretsV1(
     if (answer) values[secret.name] = answer;
     else if (secret.required) {
       throw new Error(
-        `${secret.name} is required: without it ${secret.enables} does not exist, and the Computer is part of every deployment (ADR 0028).`,
+        `${secret.name} is required: without it ${secret.enables} does not exist.`,
       );
     } else {
       skipped.push(secret.name);
