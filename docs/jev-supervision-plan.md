@@ -484,7 +484,8 @@ _Done, enforced._
   `Task` result, or the completion a Turn was opened for — each send is first
   asked whether the person wanted the words themselves and whether it gives
   them as written. A condensed or reworded version is withheld with feedback,
-  and the Turn goes on to send the work.
+  and the Turn goes on to send the work; a change the person asked for
+  ("make it punchier") passes, and a Turn withholds a rewrite at most once.
 - _Done._ `task_ask`: a subagent hands its parent one question and ends its
   Turn; the parent's notice says to answer with `task_resume`. When a Turn
   opens on such a question, Jev judges whether what the person already said
