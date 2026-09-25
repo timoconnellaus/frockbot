@@ -85,6 +85,17 @@ class MemoryStorage {
  * deriving that id and comparing it with its own, so a test that leaves the
  * binding out is testing an object that cannot know who it is.
  */
+// The Workers global the constructor names for its socket keep-alive; Bun has
+// none.
+(
+  globalThis as { WebSocketRequestResponsePair?: unknown }
+).WebSocketRequestResponsePair ??= class {
+  constructor(
+    readonly request: string,
+    readonly response: string,
+  ) {}
+};
+
 function identity(userId: string): {
   ctx: (storage: unknown) => DurableObjectState;
   env: {
@@ -118,6 +129,8 @@ function identity(userId: string): {
           ).constructorReady = run;
           return run;
         },
+        // Machine sockets are exercised in the workerd suites.
+        setWebSocketAutoResponse: () => {},
       }) as unknown as DurableObjectState,
     env: {
       USER_CONFIGURATIONS: {
