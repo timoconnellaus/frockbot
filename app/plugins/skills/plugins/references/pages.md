@@ -125,7 +125,7 @@ log the readings you would want to see, and read them back with
 ## Seeing it fail
 
 The page runs on the person's device, never here, and you cannot open it
-yourself. `plugin_page_reports` with the Plugin's id is how you see it: the
+there. `plugin_page_reports` with the Plugin's id is how you see it: the
 errors and logs its pages reported, newest first, with the device and the
 version each came from. Read it after the person has used a page, and before
 you change one they say misbehaves. Something that is wrong but throws
