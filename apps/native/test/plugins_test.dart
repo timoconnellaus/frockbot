@@ -5,9 +5,11 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/document_cache.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/plugins/page.dart';
+import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 
 import 'settings_test.dart' show SettingsApi;
+import 'shell_layout_test.dart' show byIdentifier;
 import 'widget_test.dart' show MemoryStore;
 
 /// The shape `botPluginsDocumentV1` produces for one switchable row, written
@@ -126,6 +128,52 @@ Map<String, Object?> botPluginsDocument() => {
     ],
   },
   'actions': const [],
+};
+
+/// One Composition generation as `/composition/generations` lists it.
+Map<String, Object?> generation(
+  String id,
+  String status, {
+  bool current = false,
+  String? source,
+  bool failed = false,
+}) => {
+  'schemaVersion': 1,
+  'botId': 'bot-1',
+  'generationId': id,
+  'createdAt': '2026-09-20T09:00:00.000Z',
+  'status': status,
+  'origin': {
+    'kind': 'bot-authored',
+    'runId': 'run-1',
+    'sessionId': 'session-1',
+    'turnId': 'turn-1',
+  },
+  'isCurrent': current,
+  'members': [
+    {
+      'packageId': 'tuner',
+      'version': '1.0.$id',
+      'provenance': {
+        'kind': 'bot',
+        'botId': 'bot-1',
+        'sessionId': 'session-1',
+        'turnId': 'turn-1',
+        'runId': 'run-1',
+        'authoredAt': '2026-09-20T09:00:00.000Z',
+      },
+      'source': ?source,
+    },
+  ],
+  'failures': [
+    if (failed)
+      {
+        'attempt': 1,
+        'at': '2026-09-20T09:00:01.000Z',
+        'phase': 'mount',
+        'message': 'mount failed',
+      },
+  ],
 };
 
 void main() {
@@ -310,6 +358,14 @@ void main() {
     final sent = <Map<String, Object?>>[];
     var loads = 0;
     final api = SettingsApi(store, (path, body) async {
+      if (body == null && path.contains('/composition/generations')) {
+        return {
+          'schemaVersion': 1,
+          'botId': 'bot-1',
+          'currentGenerationId': 'g0',
+          'generations': <Object>[],
+        };
+      }
       if (body == null) {
         loads += 1;
         return {
@@ -478,5 +534,106 @@ void main() {
     await tester.tap(find.text('Try again'));
     await tester.pumpAndSettle();
     expect(find.text('Web'), findsOneWidget);
+  });
+
+  testWidgets(
+    'setup history sits under the switches, read-only, with the code a tap away',
+    (tester) async {
+      final store = MemoryStore();
+      final reads = <String>[];
+      final api = SettingsApi(store, (path, body) async {
+        expect(body, isNull);
+        reads.add(path);
+        if (!path.startsWith('/api/bots/bot-1/composition/generations')) {
+          return switchDocument();
+        }
+        final earlier = Uri.parse(path).queryParameters['cursor'] == 'page-2';
+        return {
+          'schemaVersion': 1,
+          'botId': 'bot-1',
+          'currentGenerationId': 'g3',
+          'generations': earlier
+              ? [generation('g1', 'failed', failed: true)]
+              : [
+                  generation('g3', 'active', current: true),
+                  generation(
+                    'g2',
+                    'quarantined',
+                    source: 'export default { tune() {} }',
+                  ),
+                ],
+          if (!earlier) 'cursor': 'page-2',
+        };
+      });
+      tester.view.physicalSize = const Size(800, 1400);
+      tester.view.devicePixelRatio = 1;
+      addTearDown(tester.view.reset);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: PluginsPage(
+            api: api,
+            store: store,
+            userId: 'tim',
+            botId: 'bot-1',
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+      expect(byIdentifier(PluginIds.history), findsOneWidget);
+      expect(find.text('HISTORY'), findsOneWidget);
+      // Under the switches, not among them.
+      expect(
+        tester.getTopLeft(byIdentifier(PluginIds.history)).dy,
+        greaterThan(tester.getTopLeft(find.text('Web')).dy),
+      );
+      expect(find.text('Current setup'), findsOneWidget);
+      expect(find.text('Needs attention'), findsOneWidget);
+
+      await tester.tap(find.text('Needs attention'));
+      await tester.pumpAndSettle();
+      expect(find.text('tuner · 1.0.g2'), findsOneWidget);
+      await tester.tap(find.text('Inspect authored code'));
+      await tester.pumpAndSettle();
+      expect(find.text('export default { tune() {} }'), findsOneWidget);
+
+      await tester.tap(byIdentifier(PluginIds.historyEarlier));
+      await tester.pumpAndSettle();
+      expect(find.text('Couldn’t activate'), findsOneWidget);
+      expect(byIdentifier(PluginIds.historyEarlier), findsNothing);
+      expect(reads.where((path) => path.contains('/composition/generations')), [
+        '/api/bots/bot-1/composition/generations?limit=10',
+        '/api/bots/bot-1/composition/generations?limit=10&cursor=page-2',
+      ]);
+    },
+  );
+
+  testWidgets('a Bot that has written nothing says so', (tester) async {
+    final store = MemoryStore();
+    final api = SettingsApi(store, (path, _) async {
+      if (path.contains('/composition/generations')) {
+        return {
+          'schemaVersion': 1,
+          'botId': 'bot-1',
+          'currentGenerationId': 'g0',
+          'generations': <Object>[],
+        };
+      }
+      return switchDocument();
+    });
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: PluginsPage(
+          api: api,
+          store: store,
+          userId: 'tim',
+          botId: 'bot-1',
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+    expect(find.text('No setup changes yet'), findsOneWidget);
+    expect(byIdentifier(PluginIds.historyEarlier), findsNothing);
   });
 }

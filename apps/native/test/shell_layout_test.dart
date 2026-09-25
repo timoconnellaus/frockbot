@@ -700,65 +700,114 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
     });
 
-    testWidgets('an archived row stays put, and a pinned tile is not a row', (
-      tester,
-    ) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-      final drops = <SidebarDrop>[];
-      await tester.pumpWidget(
-        host(
-          ShellSidebar(
-            bots: [
-              bot('scout', 'Scout'),
-              bot('rosemary', 'Rosemary'),
-              bot('atlas', 'Atlas'),
-            ],
-            profiles: {
-              'atlas': const SidebarProfile(
-                pinnedAt: '2026-09-01T00:00:00.000Z',
+    testWidgets(
+      'archived Bots fold into their own group below the list, and open',
+      (tester) async {
+        debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
+        final drops = <SidebarDrop>[];
+        final opened = <String>[];
+        var showArchived = false;
+        await tester.pumpWidget(
+          host(
+            StatefulBuilder(
+              builder: (context, setState) => ShellSidebar(
+                bots: [
+                  bot('scout', 'Scout'),
+                  bot('rosemary', 'Rosemary'),
+                  bot('atlas', 'Atlas'),
+                ],
+                profiles: {
+                  'atlas': const SidebarProfile(
+                    pinnedAt: '2026-09-01T00:00:00.000Z',
+                  ),
+                  // Archived wins over pinned: a stopped Bot is in no place
+                  // of the list's own.
+                  'rosemary': const SidebarProfile(
+                    pinnedAt: '2026-09-02T00:00:00.000Z',
+                  ),
+                },
+                unread: const {},
+                archived: const {'rosemary'},
+                activeBotId: null,
+                focusedBotId: null,
+                workingBotId: null,
+                loaded: true,
+                showHidden: false,
+                showArchived: showArchived,
+                onToggleArchived: () =>
+                    setState(() => showArchived = !showArchived),
+                onSelect: opened.add,
+                onCreateBot: () {},
+                onSearch: () {},
+                onProfile: () {},
+                onWhatsNew: () {},
+                onMarketplace: () {},
+                onToggleHidden: () {},
+                onRetry: () async {},
+                onMove: drops.add,
               ),
-            },
-            unread: const {},
-            archived: const {'rosemary'},
-            activeBotId: null,
-            focusedBotId: null,
-            workingBotId: null,
-            loaded: true,
-            showHidden: false,
-            onSelect: (_) {},
-            onCreateBot: () {},
-            onSearch: () {},
-            onProfile: () {},
-            onWhatsNew: () {},
-            onMarketplace: () {},
-            onToggleHidden: () {},
-            onRetry: () async {},
-            onMove: drops.add,
+            ),
           ),
-        ),
-      );
-      await tester.pumpAndSettle();
-      expect(byIdentifier(ShellIds.sidebarPinned('atlas')), findsOneWidget);
+        );
+        await tester.pumpAndSettle();
+        expect(byIdentifier(ShellIds.sidebarPinned('atlas')), findsOneWidget);
+        expect(byIdentifier(ShellIds.sidebarPinned('rosemary')), findsNothing);
 
-      // An archived Bot is not lifted: dragging it lands nothing.
-      final scout = tester.getRect(byIdentifier(ShellIds.sidebarBot('scout')));
-      final from = tester.getCenter(
-        byIdentifier(ShellIds.sidebarBot('rosemary')),
-      );
-      final gesture = await tester.startGesture(
-        from,
-        kind: PointerDeviceKind.mouse,
-      );
-      await tester.pump();
-      await gesture.moveTo(from + const Offset(0, -24));
-      await tester.pump();
-      await gesture.moveTo(Offset(scout.center.dx, scout.top + 6));
-      await tester.pump();
-      await gesture.up();
-      await tester.pumpAndSettle();
-      expect(drops, isEmpty);
-      debugDefaultTargetPlatformOverride = null;
-    });
+        // Folded by default: the group's head and its count, and no row.
+        expect(byIdentifier(ShellIds.sidebarBot('rosemary')), findsNothing);
+        expect(find.text('Archived · 1'), findsOneWidget);
+        expect(
+          tester.getSemantics(byIdentifier(ShellIds.sidebarArchivedToggle)),
+          matchesSemantics(isExpanded: false, hasExpandedState: true),
+        );
+
+        await tester.tap(byIdentifier(ShellIds.sidebarArchivedToggle));
+        await tester.pumpAndSettle();
+        final row = byIdentifier(ShellIds.sidebarBot('rosemary'));
+        expect(row, findsOneWidget);
+        expect(
+          find.descendant(of: row, matching: find.text('Archived')),
+          findsOneWidget,
+        );
+        // Under the list and under its own head.
+        expect(
+          tester.getTopLeft(row).dy,
+          greaterThan(
+            tester.getTopLeft(byIdentifier(ShellIds.sidebarBot('scout'))).dy,
+          ),
+        );
+        expect(
+          tester.getTopLeft(row).dy,
+          greaterThan(
+            tester.getTopLeft(byIdentifier(ShellIds.sidebarArchivedToggle)).dy,
+          ),
+        );
+
+        // It opens, read-only, which is the shell's to draw.
+        await tester.tap(row);
+        await tester.pumpAndSettle();
+        expect(opened, ['rosemary']);
+
+        // An archived Bot is not lifted: dragging it lands nothing.
+        final scout = tester.getRect(
+          byIdentifier(ShellIds.sidebarBot('scout')),
+        );
+        final from = tester.getCenter(row);
+        final gesture = await tester.startGesture(
+          from,
+          kind: PointerDeviceKind.mouse,
+        );
+        await tester.pump();
+        await gesture.moveTo(from + const Offset(0, -24));
+        await tester.pump();
+        await gesture.moveTo(Offset(scout.center.dx, scout.top + 6));
+        await tester.pump();
+        await gesture.up();
+        await tester.pumpAndSettle();
+        expect(drops, isEmpty);
+        debugDefaultTargetPlatformOverride = null;
+      },
+    );
 
     testWidgets('carries a stable identifier per Bot and per control', (
       tester,

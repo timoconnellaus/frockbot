@@ -1,4 +1,4 @@
-// Deleting a Bot, from its own settings and from Manage Bots.
+// Deleting a Bot, from its own settings and from an archived Bot's bar.
 //
 // The unit tests cover the store and the saga; what only the real app can show
 // is that the confirmation says what it must before anything is destroyed,
@@ -10,7 +10,6 @@ import {
   createBot,
   expect,
   openApplication,
-  openProfileMenu,
   revealSidebar,
   sem,
   SHELL_TIMEOUT_MS,
@@ -18,15 +17,13 @@ import {
   tap,
   test,
   openBotSettings,
+  press,
 } from "./fixtures.ts";
 
 /**
- * Something a person can press, by the words on it.
- *
- * Manage Bots is the one surface here with no identifiers of its own: what it
- * offers is prose, and the prose is the claim. A dialog is drawn over the page
- * it belongs to, so where both carry the same verb the dialog's is the later
- * of the two.
+ * Something a person can press, by the words on it. A dialog is drawn over
+ * the page it belongs to, so where both carry the same verb the dialog's is
+ * the later of the two.
  */
 function pressable(page: Page, text: string | RegExp) {
   return page.locator("[flt-tappable]").filter({ hasText: text });
@@ -137,7 +134,7 @@ test("deleting a Bot from its settings removes it for good", async ({
   await expect(sidebarRow(page, "Beta")).toHaveCount(0);
 });
 
-test("manage mode offers Archive and Delete, and Delete confirms first", async ({
+test("an archived Bot opens read-only from the sidebar, and its bar deletes or restores it", async ({
   page,
   userId,
   allowedFailures,
@@ -145,9 +142,6 @@ test("manage mode offers Archive and Delete, and Delete confirms first", async (
   // Same reason as above: a poll already on the wire when the delete lands is
   // answered 410 or 404, and neither is a fault in the client.
   allowedFailures.console.push(/Failed to load resource.*(404|410)/u);
-  // The state channel is the same race over a socket: an upgrade already
-  // on the wire when the delete lands is answered 404, and the browser
-  // reports a failed handshake rather than a failed resource.
   allowedFailures.console.push(
     /WebSocket connection to .*state-channel.*(404|410)/u,
   );
@@ -157,83 +151,71 @@ test("manage mode offers Archive and Delete, and Delete confirms first", async (
   await createBot(page, "Doomed");
   await expect(sidebarRow(page, "Doomed")).toHaveCount(1);
 
-  // Off Manage Bots, a row is a row: nothing destructive is one click away.
+  // A row is a row: nothing destructive is one click away in the list.
   await expect(sem(page, "shell-sidebar").getByText("Delete")).toHaveCount(0);
 
-  // Manage Bots is the account's, so it is on the account's sheet rather
-  // than a control beside the list.
-  await openProfileMenu(page);
-  await tap(page, "profile-manage-bots").click();
-  const manage = page.getByText("Your Bots, in your control");
-  await expect(manage).toBeVisible({ timeout: 60_000 });
+  /*
+   * Archiving asks in the same voice as deleting: it names the Bot, and it
+   * says what it does in the words a person would use (2026-09-05).
+   */
+  await openBotSettings(page);
   await settle(page);
+  await tap(page, "flock-archive-bot").click();
+  const dialog = sem(page, "flock-lifecycle-confirm");
+  await expect(dialog).toContainText("Archive Doomed?");
+  await expect(dialog).toContainText(/you can restore it later\./u);
+  await settle(page);
+  await pressable(page, "Archive Bot").last().click();
 
-  // Every Bot offers the same two changes, and each says what it does before
-  // it does it.
-  for (const name of ["Keeper", "Doomed"]) {
-    await pressable(page, name).first().click();
-    await expect(pressable(page, "Archive Bot").first()).toBeVisible({
-      timeout: 60_000,
-    });
-    await expect(pressable(page, "Delete Bot").first()).toBeVisible();
-    await page.goBack();
-    await expect(manage).toBeVisible();
-    await settle(page);
-  }
+  // The archived Bot leaves the list for its own folded group at the foot.
+  await expect(sidebarRow(page, "Doomed")).toHaveCount(0, { timeout: 60_000 });
+  await revealSidebar(page);
+  await expect(sem(page, "sidebar-archived-toggle")).toContainText(
+    "Archived · 1",
+    { timeout: 60_000 },
+  );
+  await tap(page, "sidebar-archived-toggle").click();
+  await expect(sidebarRow(page, "Doomed")).toHaveCount(1);
+
+  // It opens read-only: its conversation, and a bar where the composer was.
+  await press(sidebarRow(page, "Doomed"));
+  const bar = sem(page, "flock-archived-bar");
+  await expect(bar).toContainText(
+    "Doomed is archived. Its conversation is kept, but it won’t reply or run its Routines.",
+    { timeout: 60_000 },
+  );
+  await expect(sem(page, "chat-composer")).toHaveCount(0);
+  await settle(page);
 
   // Delete is irreversible, so it asks — naming the Bot and saying what goes.
-  await pressable(page, "Doomed").first().click();
-  await expect(pressable(page, "Delete Bot").first()).toBeVisible({
-    timeout: 60_000,
-  });
-  await settle(page);
-  await pressable(page, "Delete Bot").first().click();
-  await expect(page.getByText("Delete Doomed?")).toBeVisible();
-  await expect(
-    page.getByText("This removes its conversation. It cannot be undone."),
-  ).toBeVisible();
+  await tap(page, "flock-archived-delete").click();
+  await expect(dialog).toContainText("Delete Doomed?");
+  await expect(dialog).toContainText(
+    "This removes its conversation and cannot be undone",
+  );
   await settle(page);
 
   // Cancelling destroys nothing.
   await pressable(page, "Cancel").last().click();
-  await expect(page.getByText("Delete Doomed?")).toHaveCount(0);
+  await expect(dialog).toHaveCount(0);
+  await expect(bar).toBeVisible();
   await settle(page);
 
-  await pressable(page, "Delete Bot").first().click();
-  await expect(page.getByText("Delete Doomed?")).toBeVisible();
+  await tap(page, "flock-archived-delete").click();
+  await expect(dialog).toBeVisible();
   await settle(page);
   const sent = deletionSent(page);
-  await pressable(page, "Delete Bot").last().click();
-  await expect(manage).toBeVisible({ timeout: 60_000 });
-  await expect(pressable(page, "Doomed")).toHaveCount(0, { timeout: 60_000 });
+  await dialog
+    .locator("[flt-tappable]")
+    .filter({ hasText: /^Delete$/u })
+    .first()
+    .click();
   await expectDeletionApplied(page, sent);
-  await expect(pressable(page, "Keeper").first()).toBeVisible();
-  await settle(page);
-
-  /*
-   * Archiving asks in the same voice as deleting: it names the Bot, and it
-   * says what it does in the words a person would use. "History and settings
-   * are preserved for restoration" described a mechanism; "You can restore it
-   * later" answers the question the dialog is asked (2026-09-05).
-   */
-  await pressable(page, "Keeper").first().click();
-  await expect(pressable(page, "Archive Bot").first()).toBeVisible({
+  await expect(bar).toHaveCount(0, { timeout: 60_000 });
+  await revealSidebar(page);
+  await expect(sem(page, "sidebar-archived-toggle")).toHaveCount(0, {
     timeout: 60_000,
   });
-  await settle(page);
-  await pressable(page, "Archive Bot").first().click();
-  await expect(page.getByText("Archive Keeper?")).toBeVisible();
-  await expect(page.getByText(/you can restore it later\./u)).toBeVisible();
-  await settle(page);
-  await pressable(page, "Archive Bot").last().click();
-
-  // And the Bot that comes back says what it is. Before this, an archived Bot
-  // looked exactly like a working one and only the word on its action — the
-  // difference between "Archive" and "Restore" — said otherwise.
-  await expect(pressable(page, "Restore Bot").first()).toBeVisible({
-    timeout: 60_000,
-  });
-  await page.goBack();
-  await expect(manage).toBeVisible();
-  await expect(page.getByText("Archived · history preserved")).toBeVisible();
+  await expect(sidebarRow(page, "Doomed")).toHaveCount(0);
+  await expect(sidebarRow(page, "Keeper")).toHaveCount(1);
 });

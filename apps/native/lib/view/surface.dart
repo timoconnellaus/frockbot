@@ -105,6 +105,11 @@ class ViewSurfacePage extends StatefulWidget {
   /// Shown in the tap frame, including while the list is still loading.
   final WidgetBuilder? banner;
 
+  /// Drawn below the document once it has loaded, by the host, out of what it
+  /// reads elsewhere: a Bot's Plugins page ends with the Plugin code that Bot
+  /// has written, which is no switch and so no row of the document.
+  final WidgetBuilder? footer;
+
   /// When set, the last list document is restored before the network answers
   /// and written after a successful read. Editor and create documents stay
   /// off this path: a form is navigation, not a list someone can return to.
@@ -124,6 +129,7 @@ class ViewSurfacePage extends StatefulWidget {
     this.onClose,
     this.chrome = true,
     this.banner,
+    this.footer,
     this.confirmLeave,
     this.allowPop,
     this.backId,
@@ -413,6 +419,15 @@ class _ViewSurfacePageState extends State<ViewSurfacePage>
                           child: pane,
                         ),
                       ),
+                      if (widget.footer case final WidgetBuilder draw)
+                        Center(
+                          child: ConstrainedBox(
+                            constraints: BoxConstraints(
+                              maxWidth: widget.maxWidth,
+                            ),
+                            child: draw(context),
+                          ),
+                        ),
                     ],
                   ),
                 ),

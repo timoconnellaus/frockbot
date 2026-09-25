@@ -540,8 +540,15 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
   `ExchangeController` (`lib/client/exchange_controller.dart`) pages the
   counterpart-filtered run read and merges the loaded thread, so an exchange
   still in flight updates live.
-- `BotRecoveryPage` — `lib/recovery/page.dart:11`, Manage Bots on the account
-  sheet, detail with three tabs at `:202`
+- `ArchivedConversation` — `lib/shell/archived_conversation.dart`, an archived
+  Bot opened from the sidebar's Archived group (or a search hit): its
+  transcript read over the GET routes with no session, and a bar where the
+  composer would be offering Restore and Delete through the shell's one
+  `BotLifecycleCommands`.
+- `SetupHistorySection` — `lib/plugins/history.dart`, the foot of a Bot's
+  Plugins page: its Composition generations from
+  `/api/bots/:id/composition/generations`, read-only, with each member's
+  authored code a tap away.
 - `DeletionPage` — `lib/settings/account_deletion.dart`, You → Delete: "Delete
   my Computer" behind one confirmation, and "Delete account" behind typing the
   phrase `GET /api/account/delete` names. Each press keeps one command id across
@@ -891,8 +898,7 @@ conversation companion and Bot settings, each from the `characterId` and `primar
 the directory already returns. The cast and the motion contract are
 [the character integration note](design/character-app-integration.md).
 
-`create.dart` is the sidebar's create gesture, which no longer hands off to
-Manage Bots, and `AvatarPickerSheet` beside it is the edit half — the one thing
+`create.dart` is the sidebar's create gesture, and `AvatarPickerSheet` beside it is the edit half — the one thing
 left of the old wardrobe under the single-default-avatar rule — reached
 by pressing the avatar in Bot settings and fenced on the avatar revision the read
 just reported rather than one held since the sheet opened. The command is written to the durable store before it is sent and
@@ -905,8 +911,7 @@ one is.
 
 `lifecycle.dart` is one retained `BotLifecycleCommand` per account, whichever
 surface issued it — `BotDangerZone`, which is the Danger card at the foot of Bot
-Settings, or Manage Bots, which now shares it rather than keeping a second
-copy. The zone is
+Settings, a row's quick actions, or an archived Bot's bar. The zone is
 contributed by the Flock rather than rebuilt inside the settings surface,
 because the directory a delete changes is the Flock's. The route answers
 `pending` for a saga that has not settled, which is why the zone locks rather
