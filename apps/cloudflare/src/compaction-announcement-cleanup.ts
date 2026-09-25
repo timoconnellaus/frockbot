@@ -19,12 +19,24 @@ import {
 
 const RECEIPT = "maintenance:compaction-announcements:2026-09-25";
 const COMPACTION_ENTITY_PREFIX = "ann:compaction-";
+// Durable Object storage deletes at most 128 keys per call, and this runs in
+// the Bot's constructor, where a throw keeps the Bot from starting.
+const DELETE_BATCH = 128;
 
 interface CleanupStorage {
   get<T = unknown>(key: string): Promise<T | undefined>;
   put(key: string, value: unknown): Promise<void>;
   delete(key: string | string[]): Promise<boolean | number | void>;
   list<T = unknown>(options: { prefix?: string }): Promise<Map<string, T>>;
+}
+
+async function deleteAll(
+  storage: CleanupStorage,
+  keys: string[],
+): Promise<void> {
+  for (let start = 0; start < keys.length; start += DELETE_BATCH) {
+    await storage.delete(keys.slice(start, start + DELETE_BATCH));
+  }
 }
 
 function isCompactionEntity(value: unknown): boolean {
@@ -54,7 +66,7 @@ export async function cleanCompactionAnnouncementsV1(
         (id) => !id.startsWith(COMPACTION_ENTITY_PREFIX),
       ),
     });
-    await storage.delete(compactions.map(conversationRowKeyV1));
+    await deleteAll(storage, compactions.map(conversationRowKeyV1));
     removed += compactions.length;
   }
 
@@ -73,7 +85,7 @@ export async function cleanCompactionAnnouncementsV1(
     for (let cursor = head.firstRetainedCursor; cursor <= through; cursor++) {
       expired.push(conversationUpdateKeyV1(cursor));
     }
-    await storage.delete(expired);
+    await deleteAll(storage, expired);
     // An undrained broadcast at or before the trim point is either a
     // compaction nobody should see or an update the snapshot now carries.
     const pending = await storage.list({ prefix: PUBLICATION_PENDING_PREFIX });
@@ -85,7 +97,10 @@ export async function cleanCompactionAnnouncementsV1(
         typeof value.cursor === "number" &&
         value.cursor <= through,
     );
-    if (stale.length > 0) await storage.delete(stale.map(([key]) => key));
+    await deleteAll(
+      storage,
+      stale.map(([key]) => key),
+    );
     await storage.put(PUBLICATION_HEAD_KEY, {
       ...head,
       firstRetainedCursor: through + 1,
