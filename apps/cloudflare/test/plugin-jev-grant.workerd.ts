@@ -171,11 +171,7 @@ async function runEvents(
     []) as StoredEvent[];
 }
 
-async function install(
-  identity: Identity,
-  pluginId: string,
-  grants: string[],
-) {
+async function install(identity: Identity, pluginId: string, grants: string[]) {
   const { userId } = identity;
   await run(identity, "run-0", "hello");
   const bootstrap = (
@@ -359,7 +355,11 @@ describe("the jev grant", () => {
     expect(await standaloneUsage(identity)).toBeUndefined();
     console.log(
       "EVIDENCE turn-call",
-      JSON.stringify({ toolResult: outcome, jevRequest: seen[0], usage: usage[0] }),
+      JSON.stringify({
+        toolResult: outcome,
+        jevRequest: seen[0],
+        usage: usage[0],
+      }),
     );
   });
 
@@ -391,11 +391,15 @@ describe("the jev grant", () => {
     const seen = recordPluginJevRequests();
 
     await run(identity, "run-1", judge("triage", "model"));
-    const model = parsedToolOutput((await toolResult(identity, "run-1")).content);
+    const model = parsedToolOutput(
+      (await toolResult(identity, "run-1")).content,
+    );
     await run(identity, "run-2", judge("triage", "big"));
     const big = parsedToolOutput((await toolResult(identity, "run-2")).content);
     await run(identity, "run-3", judge("triage", "heavy"));
-    const heavy = parsedToolOutput((await toolResult(identity, "run-3")).content);
+    const heavy = parsedToolOutput(
+      (await toolResult(identity, "run-3")).content,
+    );
 
     expect(model).toMatchObject({ status: "unavailable" });
     expect(big).toMatchObject({
@@ -466,10 +470,12 @@ describe("the jev grant", () => {
     expect(seen[0]!.body.model).toBe("jev-1.13.0");
 
     const kept = (await standaloneUsage(identity)) as
-      | Array<Record<string, unknown>>
-      | undefined;
+      Array<Record<string, unknown>> | undefined;
     expect(kept).toHaveLength(1);
-    expect(kept![0]).toMatchObject({ packageId: "triage", model: "jev-1.13.0" });
+    expect(kept![0]).toMatchObject({
+      packageId: "triage",
+      model: "jev-1.13.0",
+    });
     expect(kept![0]).not.toHaveProperty("costMicros");
     console.log("EVIDENCE press", JSON.stringify({ pressed, kept }));
   });
@@ -546,10 +552,12 @@ describe("the jev grant", () => {
     expect(seen[0]!.body.model).toBe("jev-1.13.0");
 
     const kept = (await standaloneUsage(identity)) as
-      | Array<Record<string, unknown>>
-      | undefined;
+      Array<Record<string, unknown>> | undefined;
     expect(kept).toHaveLength(1);
-    expect(kept![0]).toMatchObject({ packageId: "triage", model: "jev-1.13.0" });
+    expect(kept![0]).toMatchObject({
+      packageId: "triage",
+      model: "jev-1.13.0",
+    });
     console.log("EVIDENCE trigger", JSON.stringify({ cue, kept }));
   });
 });
