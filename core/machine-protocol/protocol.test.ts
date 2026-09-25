@@ -10,6 +10,9 @@ import {
   decodeMachineIdV1,
   decodeMachineListEntryV1,
   decodeMachineListViewV1,
+  decodeMachineModuleReportsReceiptV1,
+  decodeMachineModuleReportsV1,
+  decodeMachineModuleV1,
   decodeMachineOpV1,
   decodeMachinePairingOfferV1,
   decodeMachinePairingRequestV1,
@@ -45,6 +48,18 @@ const command = {
   issuedAt: NOW,
   status: "queued",
 } as const;
+
+const module = {
+  pluginId: "beeper",
+  moduleId: "bridge",
+  contentHash: "b".repeat(64),
+  size: 1_024,
+  read: [],
+  net: ["localhost:23373"],
+  appleEvents: [],
+  calls: ["send"],
+  events: ["message"],
+};
 
 const record: MachineRecordV1 = {
   schemaVersion: 1,
@@ -114,6 +129,39 @@ const DTOS: {
     name: "socket frame",
     decode: decodeMachineSocketFrameV1,
     valid: { type: "commands", commands: [{ ...command }], serverTime: NOW },
+  },
+  {
+    name: "modules frame",
+    decode: decodeMachineSocketFrameV1,
+    valid: { type: "modules", modules: [{ ...module }], serverTime: NOW },
+  },
+  { name: "module", decode: decodeMachineModuleV1, valid: { ...module } },
+  {
+    name: "module reports",
+    decode: decodeMachineModuleReportsV1,
+    valid: {
+      reports: [
+        {
+          pluginId: "beeper",
+          moduleId: "bridge",
+          kind: "state",
+          state: "crashed",
+          detail: "exit 1",
+        },
+        {
+          pluginId: "beeper",
+          moduleId: "bridge",
+          kind: "log",
+          level: "error",
+          text: "connection refused",
+        },
+      ],
+    },
+  },
+  {
+    name: "module reports receipt",
+    decode: decodeMachineModuleReportsReceiptV1,
+    valid: { schemaVersion: 1, recorded: 2, dropped: 0 },
   },
   {
     name: "claim receipt",
@@ -278,6 +326,54 @@ describe("bounds", () => {
     expect(
       over(
         {
+          type: "modules",
+          modules: Array.from(
+            { length: MACHINE_LIMITS_V1.modules + 1 },
+            () => ({
+              ...module,
+            }),
+          ),
+          serverTime: NOW,
+        },
+        decodeMachineSocketFrameV1,
+      ).code,
+    ).toBe("limit-exceeded");
+    expect(
+      over(
+        {
+          reports: Array.from(
+            { length: MACHINE_LIMITS_V1.moduleReports + 1 },
+            () => ({
+              pluginId: "beeper",
+              moduleId: "bridge",
+              kind: "log",
+              level: "log",
+              text: "x",
+            }),
+          ),
+        },
+        decodeMachineModuleReportsV1,
+      ).code,
+    ).toBe("limit-exceeded");
+    expect(
+      over(
+        {
+          reports: [
+            {
+              pluginId: "beeper",
+              moduleId: "bridge",
+              kind: "log",
+              level: "log",
+              text: "x".repeat(MACHINE_LIMITS_V1.moduleReportText + 1),
+            },
+          ],
+        },
+        decodeMachineModuleReportsV1,
+      ).code,
+    ).toBe("limit-exceeded");
+    expect(
+      over(
+        {
           schemaVersion: 1,
           machines: Array.from(
             { length: MACHINE_LIMITS_V1.maxMachinesPerUser + 1 },
@@ -337,6 +433,34 @@ describe("capabilities", () => {
         workspacePath: "notes.md",
       }),
     ).toBe("files");
+  });
+});
+
+describe("module reports", () => {
+  test("a report's kind decides its fields, and an unknown kind is refused", () => {
+    const base = { pluginId: "beeper", moduleId: "bridge" };
+    expect(() =>
+      decodeMachineModuleReportsV1({
+        reports: [{ ...base, kind: "state", state: "running", text: "x" }],
+      }),
+    ).toThrow(/unknown field: text/);
+    expect(() =>
+      decodeMachineModuleReportsV1({
+        reports: [{ ...base, kind: "event", level: "log", text: "x" }],
+      }),
+    ).toThrow(/kind must be state or log/);
+    expect(() =>
+      decodeMachineModuleReportsV1({
+        reports: [{ ...base, kind: "state", state: "paused" }],
+      }),
+    ).toThrow(/state must be one of/);
+    expect(() =>
+      decodeMachineModuleReportsV1({
+        reports: [
+          { ...base, pluginId: "Beeper", kind: "log", level: "log", text: "x" },
+        ],
+      }),
+    ).toThrow(/pluginId is invalid/);
   });
 });
 

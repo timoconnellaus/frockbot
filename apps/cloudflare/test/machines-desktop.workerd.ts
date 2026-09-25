@@ -120,6 +120,11 @@ function gateway(userId: string): MachineBackendRouteContribution {
           }),
         ),
       ),
+    // Module sync is covered through the real Worker in
+    // `machine-modules.workerd.ts`; nothing here fetches or reports one.
+    loadMachineModule: () => Promise.resolve(undefined),
+    recordMachineModuleReports: () =>
+      Promise.reject(new Error("not used by this suite")),
     listMachines: async (owner) =>
       decodeMachineListViewV1(
         snapshot(await rpc.listMachines({ schemaVersion: 1, userId: owner })),
@@ -271,9 +276,9 @@ describe("the desktop device agent against the real machine routes", () => {
       capabilities: ["exec", "files"],
     });
     await agent.pair(offer.code);
-    // The first frame finds nothing queued; the second is the dispatch,
-    // pushed down the socket the agent already holds.
-    const session = agent.connectOnce({ frames: 2 });
+    // The first frame finds nothing queued and the second lists no modules;
+    // the third is the dispatch, pushed down the socket the agent holds.
+    const session = agent.connectOnce({ frames: 3 });
     await eventuallyConnected(desktopUser);
     await machines(desktopUser).dispatchMachineCommand({
       schemaVersion: 1,
@@ -282,7 +287,7 @@ describe("the desktop device agent against the real machine routes", () => {
     });
     expect(await session).toMatchObject({
       paired: true,
-      frames: 2,
+      frames: 3,
       delivered: 1,
       claimed: 1,
       alreadyClaimed: 0,
@@ -438,7 +443,7 @@ describe("the desktop device agent against the real machine routes", () => {
       machineId: offer.machineId,
     });
 
-    expect(await session).toMatchObject({ frames: 1, unenrolled: true });
+    expect(await session).toMatchObject({ frames: 2, unenrolled: true });
     expect(await secrets.read()).toBeUndefined();
     expect(await connected(userId)).toBe(false);
   });

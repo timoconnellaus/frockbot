@@ -106,7 +106,21 @@ import {
   reserveAgentTurnSlotV1,
   type AgentTurnSlotReceiptV1,
 } from "@frockbot/app/flock/quota";
-import { machineTokenClaimsV1 } from "@frockbot/core/machine-protocol";
+import {
+  decodeMachineModuleReportsV1,
+  machineTokenClaimsV1,
+  type MachineModuleReportsReceiptV1,
+  type MachinePlatformV1,
+  type MachineSocketFrameV1,
+} from "@frockbot/core/machine-protocol";
+import {
+  generationCarriesModuleV1,
+  machineModulesV1,
+} from "@frockbot/app/machine/modules";
+import {
+  readPluginModuleReportsV1,
+  recordPluginModuleReportsV1,
+} from "@frockbot/app/plugins/module-reports";
 import { DurableWorkspaceGenerations } from "@frockbot/core/durable";
 import {
   COMPOSITION_CURRENT_KEY,
@@ -155,6 +169,7 @@ import { cleanUserMachineMessagesV1 } from "./machine-messages-cleanup.js";
 import { ComputerLoginsLedgerV1 } from "@frockbot/app/shell/computer-logins";
 import {
   MACHINE_SOCKET_INTERNAL_PATH_V1,
+  broadcastMachineFrameV1,
   durableObjectMachineSocketsV1,
   machineSocketTagV1,
   readMachineSocketCallV1,
@@ -1622,8 +1637,10 @@ export class UserConfiguration
       generationId: rpcString(256),
     });
     await this.assertUserIdentity(request.userId as string);
-    await userCompositionStoreV1({ ctx: this.ctx }).commit(
-      request.generationId as string,
+    await this.changingActiveGeneration(() =>
+      userCompositionStoreV1({ ctx: this.ctx }).commit(
+        request.generationId as string,
+      ),
     );
   }
 
@@ -1634,10 +1651,46 @@ export class UserConfiguration
       quarantined: rpcBoolean,
     });
     await this.assertUserIdentity(request.userId as string);
-    await userCompositionStoreV1({ ctx: this.ctx }).fail(
-      request.generationId as string,
-      { quarantined: request.quarantined as boolean },
+    await this.changingActiveGeneration(() =>
+      userCompositionStoreV1({ ctx: this.ctx }).fail(
+        request.generationId as string,
+        { quarantined: request.quarantined as boolean },
+      ),
     );
+  }
+
+  /**
+   * The generation the account runs: the last one a Turn mounted and
+   * committed. The pointer can name a pending proposal no Turn has mounted
+   * yet, and a desktop should not start code that may never activate.
+   */
+  private activeGeneration() {
+    return userCompositionStoreV1({ ctx: this.ctx }).lastKnownGood();
+  }
+
+  /**
+   * Runs a commit or a failure, and sends every open machine socket the new
+   * module list when the active generation moved. A commit of the generation
+   * already active, which every Turn after the first makes, sends nothing.
+   * The sockets are told best-effort: the change itself is what the caller
+   * asked for, and a desktop that missed it is sent the list on reconnect.
+   */
+  private async changingActiveGeneration(change: () => Promise<void>) {
+    let before: string | undefined;
+    await loggedEntryV1("Active generation read", async () => {
+      before = (await this.activeGeneration()).generationId;
+    });
+    await change();
+    await loggedEntryV1("Machine modules push", async () => {
+      const active = await this.activeGeneration();
+      if (active.generationId === before) return;
+      const serverTime = new Date().toISOString();
+      broadcastMachineFrameV1(this.ctx, (platform) => ({
+        type: "modules",
+        modules: machineModulesV1(active, platform),
+        serverTime,
+      }));
+    });
   }
 
   async revertComposition(input: unknown) {
@@ -3578,6 +3631,7 @@ export class UserConfiguration
     }
     const machines = await this.machineContribution();
     let opened: Awaited<ReturnType<typeof machines.connect>>;
+    let modules: MachineSocketFrameV1 | undefined;
     let machineId: string;
     let tokenDigest: string;
     try {
@@ -3596,6 +3650,12 @@ export class UserConfiguration
           : 401;
       return Response.json({ error: "machine token is invalid" }, { status });
     }
+    const platform = opened.record.platform;
+    // Commands still flow while the Composition cannot be read; the list
+    // arrives with the next generation change or reconnect.
+    await loggedEntryV1("Machine modules frame", async () => {
+      modules = await this.machineModulesFrame(platform);
+    });
     // Nothing is awaited from here to the send, so a dispatch cannot land
     // between the pending read above and the socket being registered.
     const [client, server] = Object.values(new WebSocketPair());
@@ -3604,9 +3664,21 @@ export class UserConfiguration
       machineId,
       tokenDigest,
       keyVersion: opened.record.keyVersion,
+      platform,
     } satisfies MachineSocketAttachmentV1);
     server!.send(JSON.stringify(opened.frame));
+    if (modules) server!.send(JSON.stringify(modules));
     return new Response(null, { status: 101, webSocket: client });
+  }
+
+  private async machineModulesFrame(
+    platform: MachinePlatformV1,
+  ): Promise<MachineSocketFrameV1> {
+    return {
+      type: "modules",
+      modules: machineModulesV1(await this.activeGeneration(), platform),
+      serverTime: new Date().toISOString(),
+    };
   }
 
   // The machine socket is server-push only: anything but the auto-answered
@@ -3683,6 +3755,79 @@ export class UserConfiguration
       request.machineId as string,
       request.commandId as string,
       request.result,
+    );
+  }
+
+  /**
+   * Whether a machine may fetch the module artifact `contentHash`: only one
+   * the active generation carries. The Worker serves the bytes; this object
+   * is the authority on which bytes are the account's to hand out.
+   */
+  async readMachineModule(input: unknown): Promise<{ found: boolean }> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      machineId: rpcIdentifier,
+      contentHash: rpcPattern(/^[0-9a-f]{64}$/, 64),
+      claims: rpcDecodedValue,
+      tokenDigest: rpcPattern(/^[0-9a-f]{64}$/, 64),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    await (
+      await this.machineContribution()
+    ).authorize(
+      machineTokenClaimsV1(request.claims),
+      request.tokenDigest as string,
+      request.machineId as string,
+    );
+    return {
+      found: generationCarriesModuleV1(
+        await this.activeGeneration(),
+        request.contentHash as string,
+      ),
+    };
+  }
+
+  /** What a machine's module host said about the modules it runs. */
+  async recordMachineModuleReports(
+    input: unknown,
+  ): Promise<MachineModuleReportsReceiptV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      machineId: rpcIdentifier,
+      claims: rpcDecodedValue,
+      tokenDigest: rpcPattern(/^[0-9a-f]{64}$/, 64),
+      reports: rpcDecoded(decodeMachineModuleReportsV1),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    const record = await (
+      await this.machineContribution()
+    ).authorize(
+      machineTokenClaimsV1(request.claims),
+      request.tokenDigest as string,
+      request.machineId as string,
+    );
+    const receipt = await recordPluginModuleReportsV1(this.ctx.storage, {
+      generation: await this.activeGeneration(),
+      machineId: record.machineId,
+      machineLabel: record.label,
+      reports: (
+        request.reports as ReturnType<typeof decodeMachineModuleReportsV1>
+      ).reports,
+      now: new Date(),
+    });
+    return { schemaVersion: 1, ...receipt };
+  }
+
+  /** One Plugin's module reports, for its Bot's `plugin_module_reports`. */
+  async readPluginModuleReports(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      pluginId: rpcPattern(/^[a-z][a-z0-9-]{0,63}$/, 64),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return readPluginModuleReportsV1(
+      this.ctx.storage,
+      request.pluginId as string,
     );
   }
 

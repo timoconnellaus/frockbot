@@ -70,4 +70,5 @@ export const PLUGIN_AUTHORING_TOOL_NAMES_V1 = [
   "plugin_settings",
   "plugin_page_reports",
   "plugin_page_try",
+  "plugin_module_reports",
 ] as const;

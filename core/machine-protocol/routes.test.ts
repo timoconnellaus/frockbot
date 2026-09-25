@@ -14,7 +14,14 @@ describe("machine route table", () => {
     const publicRoutes = MACHINE_ROUTE_NAMES_V1.filter(
       (name) => MACHINE_ROUTES_V1[name].publicRoute,
     );
-    expect(publicRoutes).toEqual(["enroll", "socket", "claim", "result"]);
+    expect(publicRoutes).toEqual([
+      "enroll",
+      "socket",
+      "claim",
+      "result",
+      "module",
+      "moduleReports",
+    ]);
     // Public means "no session", never "no authority": every public route is
     // addressed by the machine, which presents a token instead.
     for (const name of publicRoutes) {
@@ -49,6 +56,15 @@ describe("machine route table", () => {
         commandId: "tool:3:1:0",
       }),
     ).toBe(`/api/machines/${MACHINE_ID}/commands/tool%3A3%3A1%3A0/result`);
+    expect(
+      machineRoutePathV1("module", {
+        machineId: MACHINE_ID,
+        contentHash: "a".repeat(64),
+      }),
+    ).toBe(`/api/machines/${MACHINE_ID}/modules/${"a".repeat(64)}`);
+    expect(machineRoutePathV1("moduleReports", { machineId: MACHINE_ID })).toBe(
+      `/api/machines/${MACHINE_ID}/module-reports`,
+    );
   });
 
   test("refuses a missing or unsafe segment rather than emitting one", () => {
@@ -70,9 +86,11 @@ describe("machine route table", () => {
       const path = machineRoutePathV1(name, {
         machineId: MACHINE_ID,
         commandId: "tool:3:1:0",
+        contentHash: "a".repeat(64),
       });
       expect(path).not.toContain(":machineId");
       expect(path).not.toContain(":commandId");
+      expect(path).not.toContain(":contentHash");
     }
   });
 });

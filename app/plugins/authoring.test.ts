@@ -235,6 +235,7 @@ function harness(
       },
     },
     composition: { current: async () => generation(options.members) },
+    moduleReports: async () => ({ entries: [], states: [] }),
     storage: {
       get: <T>(key: string) =>
         Promise.resolve(storage.get(key) as T | undefined),
@@ -519,6 +520,7 @@ describe("checking and publishing", () => {
         putPluginModuleArtifact: async () => {},
       },
       composition: { current: async () => generation() },
+      moduleReports: async () => ({ entries: [], states: [] }),
       storage: {
         get: <T>(key: string) =>
           Promise.resolve(storage.get(key) as T | undefined),

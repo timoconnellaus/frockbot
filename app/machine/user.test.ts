@@ -50,9 +50,9 @@ async function connect(
 async function nextFrame(socket: MachineSocketV1): Promise<string[]> {
   const event = await socket.receive();
   if (event.type !== "message") throw new Error(`closed: ${event.code}`);
-  return decodeMachineSocketFrameV1(JSON.parse(event.data)).commands.map(
-    (command) => command.commandId,
-  );
+  const frame = decodeMachineSocketFrameV1(JSON.parse(event.data));
+  if (frame.type !== "commands") throw new Error(`a ${frame.type} frame`);
+  return frame.commands.map((command) => command.commandId);
 }
 
 /** Pair, enroll, and hand back what a machine needs to speak. */

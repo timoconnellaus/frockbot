@@ -45,6 +45,7 @@ import {
   switchPluginForBotV1,
 } from "./authoring.js";
 import { DEPLOYMENT_PLUGIN_CATALOG_V1 } from "./catalog.js";
+import type { PluginModuleReportsV1 } from "./module-reports.js";
 import type { PluginAuthoringRuntimeHostV1 } from "./feature.js";
 
 /** How many times a proposal re-reads and retries after losing the pin race. */
@@ -140,6 +141,21 @@ export async function pluginAuthoringRuntimeHost(
     },
     composition: {
       current: () => currentUserCompositionV1(state, identity),
+    },
+    moduleReports: (pluginId) => {
+      const namespace = state.env.USER_CONFIGURATIONS;
+      // SAFETY: this namespace is bound to UserConfiguration; generated
+      // Worker types do not expose its RPC surface.
+      const user = namespace.get(
+        namespace.idFromName(identity.userId),
+      ) as unknown as {
+        readPluginModuleReports(input: unknown): Promise<PluginModuleReportsV1>;
+      };
+      return user.readPluginModuleReports({
+        schemaVersion: 1,
+        userId: identity.userId,
+        pluginId,
+      });
     },
     storage: {
       get: <T>(key: string) => state.ctx.storage.get<T>(key),

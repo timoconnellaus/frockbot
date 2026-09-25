@@ -132,9 +132,11 @@ export class MachineUserBackendContribution {
    * The edge already proved the token was minted here. This is the second
    * check, and the authoritative one: the digest must be this machine's, at
    * this key version, and the machine must not be revoked. Revocation bumps
-   * the key version, so every token issued before it dies here.
+   * the key version, so every token issued before it dies here. Public for
+   * the machine routes the Durable Object answers itself: a module's bytes
+   * and its reports.
    */
-  private async authorize(
+  async authorize(
     claims: MachineTokenClaimsV1,
     presentedDigest: string,
     machineId: string,

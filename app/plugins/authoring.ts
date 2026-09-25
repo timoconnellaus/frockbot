@@ -69,6 +69,10 @@ import {
   readPluginPageReportsV1,
 } from "./page-reports.js";
 import {
+  pluginModuleReportsTextV1,
+  type PluginModuleReportsV1,
+} from "./module-reports.js";
+import {
   assertPluginIdV1,
   pluginIdFromDisplayNameV1,
   pluginSourceFilePathV1,
@@ -153,6 +157,11 @@ export interface PluginAuthoringSeamsV1 {
     putPluginModuleArtifact(contentHash: string, code: string): Promise<void>;
   };
   composition: { current(): Promise<CompositionGenerationV1> };
+  /**
+   * What this Plugin's device modules reported from the account's desktops.
+   * The User Durable Object keeps them, since it holds the desktops' sockets.
+   */
+  moduleReports(pluginId: string): Promise<PluginModuleReportsV1>;
   /** The Bot's own storage: its enable map and its intents. */
   storage: PluginEnablementStorageV1 &
     PluginIntentStorageV1 &
@@ -213,6 +222,8 @@ export interface PluginAuthoringHostV1 {
   }): Promise<{ status: "written" | "refused"; reason?: string }>;
   /** What this Plugin's pages reported, in words, newest first. */
   pageReports(input: { pluginId: string }): Promise<string>;
+  /** What this Plugin's device modules reported, in words. */
+  moduleReports(input: { pluginId: string }): Promise<string>;
   /**
    * One of this Plugin's pages as `plugin_publish` would store it, bridge and
    * all, built from its source now — for trying it before it is published.
@@ -866,6 +877,14 @@ export function createPluginAuthoringHostV1(
         pluginId,
         await readPluginPageReportsV1(seams.storage, pluginId),
         member?.version,
+      );
+    },
+
+    async moduleReports(input) {
+      const pluginId = assertPluginIdV1(input.pluginId);
+      return pluginModuleReportsTextV1(
+        pluginId,
+        await seams.moduleReports(pluginId),
       );
     },
 

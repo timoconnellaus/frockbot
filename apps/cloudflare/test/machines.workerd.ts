@@ -27,6 +27,7 @@ import {
 } from "@frockbot/core/machine-protocol";
 import {
   nextMachineFrame as nextFrame,
+  nextMachineFrameOf,
   openMachineSocket as connect,
   upgradeMachineSocket as upgrade,
 } from "./machine-socket.ts";
@@ -248,6 +249,7 @@ describe("registered machines in Workerd", () => {
     expect(await connected(userId)).toBe(false);
     const first = await connect(userId, machine);
     await nextFrame(first);
+    await nextMachineFrameOf(first, "modules");
     expect(
       (await machine.rpc.listMachines({ schemaVersion: 1, userId })).machines,
     ).toMatchObject([{ label: "Revoked-Mac.local", connected: true }]);
@@ -259,6 +261,7 @@ describe("registered machines in Workerd", () => {
 
     const socket = await connect(userId, machine);
     await nextFrame(socket);
+    await nextMachineFrameOf(socket, "modules");
     expect(await connected(userId)).toBe(true);
     const revoked = await machine.rpc.revokeMachine({
       schemaVersion: 1,
