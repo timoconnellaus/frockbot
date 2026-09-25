@@ -89,8 +89,6 @@ describe("the managed Skill source", () => {
     expect(injected?.skills?.map((skill) => skill.path)).toEqual([
       "managed/a2ui/SKILL.md",
       "managed/add-connector/SKILL.md",
-      "managed/export-bot-template/SKILL.md",
-      "managed/import-bot-template/SKILL.md",
       "managed/write-skill/SKILL.md",
     ]);
     expect(injected?.refusals).toEqual([]);

@@ -147,11 +147,7 @@ import {
   isolateWorkspaceWrite,
 } from "@frockbot/app/isolates/bot";
 import { deliverMachineResult } from "@frockbot/app/machine/bot";
-import {
-  listOwnSkillDocuments,
-  listSkills,
-  writeUserSkill,
-} from "@frockbot/app/skills/bot";
+import { listSkills } from "@frockbot/app/skills/bot";
 import {
   archiveEligible,
   refreshScheduledWork,
@@ -2812,50 +2808,6 @@ export class BotState
     const identity = decodeBotIdentityRpcV1(input);
     const { shell } = await this.materialized(identity);
     return listSkills(shell.state, identity);
-  }
-
-  /**
-   * Write one Skill into this Bot's instruction root as its **User**.
-   *
-   * The import path's only Bot-scoped write. It is the User's own authority —
-   * `isLoadableSkillSourceV1` admits a `user` writer under the Bot's own
-   * instruction root — so an imported Skill is loadable on the Bot's first
-   * Turn and its provenance records who put it there.
-   */
-
-  async writeUserSkill(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-      slug: rpcString(128),
-      name: rpcString(100),
-      description: rpcString(1_024),
-      body: rpcString(64 * 1024),
-    });
-    const identity = {
-      userId: request.userId as string,
-      botId: request.botId as string,
-    };
-    const { shell } = await this.materialized(identity);
-    return writeUserSkill(shell.state, identity, {
-      slug: request.slug as string,
-      name: request.name as string,
-      description: request.description as string,
-      body: request.body as string,
-    });
-  }
-
-  /**
-   * This Bot's own instruction root, bodies included, for a template export.
-   *
-   * Read-only, and no wider than what the Turn loader already loads: the
-   * managed set and the plugin-borne index are never walked, and a candidate
-   * the authority predicate refuses is absent here too.
-   */
-  async listOwnSkillDocuments(input: unknown) {
-    const identity = decodeBotIdentityRpcV1(input);
-    const { shell } = await this.materialized(identity);
-    return listOwnSkillDocuments(shell.state, identity);
   }
 
   async stopRun(input: unknown) {

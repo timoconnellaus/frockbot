@@ -436,18 +436,6 @@ abstract final class FlockIds {
   static String createBackgroundOption(String id) => 'flock-background-$id';
 }
 
-/// Bot templates: packing a Bot up, and unpacking someone else's.
-///
-/// Both halves are projections, so the controls are named by the document's own
-/// conventions and only the surface's chrome is named here.
-abstract final class TemplateIds {
-  static const shareDocument = 'template-share-document';
-  static const shareRefresh = 'template-share-refresh';
-  static const importDocument = 'template-import-document';
-  static const importRefresh = 'template-import-refresh';
-  static const profileEntry = 'profile-templates';
-}
-
 /// Registered machines: the computers a Bot may reach, and the code that
 /// registers one.
 ///

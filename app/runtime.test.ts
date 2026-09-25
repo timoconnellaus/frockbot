@@ -35,7 +35,6 @@ describe("foundation application", () => {
       "provider-flock-ai",
       ...catalogProviderDefinitionsV1.map((provider) => provider.id),
       "flock",
-      "bot-template",
       "search",
       "audit",
       "clock",
@@ -208,15 +207,6 @@ describe("foundation application", () => {
       backendHost: "gateway",
       listBots: () =>
         Promise.resolve({ schemaVersion: 1, revision: 0, bots: [] }),
-      listTemplateShares: () =>
-        Promise.resolve({ schemaVersion: 1 as const, shares: [] }),
-      executeTemplateCommand: () =>
-        Promise.reject(new Error("not used while composing")),
-      readPublishedTemplate: () => Promise.resolve(undefined),
-      listTemplateImports: () =>
-        Promise.resolve({ schemaVersion: 1 as const, imports: [] }),
-      executeTemplateImport: () =>
-        Promise.reject(new Error("not used while composing")),
       createBot: () =>
         Promise.resolve({
           schemaVersion: 1,
@@ -345,7 +335,6 @@ describe("foundation application", () => {
         .sort(),
     ).toEqual([
       "audit",
-      "bot-template",
       "computer",
       "connect",
       "email",
@@ -377,7 +366,7 @@ describe("foundation application", () => {
       });
     expect(botBackend.contributions).toHaveLength(3);
     expect(userBackend.contributions).toHaveLength(
-      11 + catalogProviderDefinitionsV1.length,
+      10 + catalogProviderDefinitionsV1.length,
     );
     const userSpecifiers = userBackend.contributions.map(
       (contribution) => contribution.specifier,

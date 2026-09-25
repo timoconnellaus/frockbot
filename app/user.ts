@@ -7,17 +7,6 @@ import {
   type CredentialUserBackendContribution,
 } from "@frockbot/app/credentials/user";
 import {
-  type BotTemplateUserBackendContribution,
-  type TemplateBlobStoreV1,
-  type TemplateBotReaderV1,
-  type TemplateImportWriterV1,
-} from "@frockbot/app/bot-template/user";
-export type {
-  TemplateBlobStoreV1,
-  TemplateBotReaderV1,
-  TemplateImportWriterV1,
-} from "@frockbot/app/bot-template/user";
-import {
   type FlockUserBackendContribution,
   type FlockUserBackendHost,
 } from "@frockbot/app/flock/user";
@@ -45,7 +34,6 @@ import type {
 } from "@frockbot/core/contracts";
 import {
   auditUserContribution,
-  botTemplateUserContribution,
   createFoundationBackendContributions,
   createFoundationMountedContributionsV1,
   credentialsUserContribution,
@@ -133,8 +121,6 @@ export interface MountedFoundationUserBackend {
   credentials: CredentialUserBackendContribution;
   connections: ReadonlyMap<string, FoundationConnectionUserBackendContribution>;
   flock: FlockUserBackendContribution;
-  /** The Bot Template share ledger, and the staging command that writes it. */
-  botTemplate: BotTemplateUserBackendContribution;
   /**
    * The User's transcript index. It is User-scoped state like every other
    * Contribution here, and it is the only one that is a *projection*: the rows
@@ -212,25 +198,6 @@ export async function createFoundationUserBackendContributions(host: {
    */
   commandBotLifecycle: FlockUserBackendHost["commandBotLifecycle"];
   readBotLifecycle: FlockUserBackendHost["readBotLifecycle"];
-  /**
-   * The Bot Template seams the adapter owns: the Bot Durable Object reads one
-   * export needs, and the immutable blob store the recipe is published into.
-   */
-  botTemplate: {
-    bots: TemplateBotReaderV1;
-    blobs: TemplateBlobStoreV1;
-    /**
-     * The import half. The writer carries the importing User's own commands
-     * and nothing wider — there is no method on it for a Connection or
-     * model binding, so an import cannot create either. `readPublishedShare`
-     * routes by the share id's owner half, which is the only way this
-     * application ever reaches another User's Durable Object.
-     */
-    importer?: TemplateImportWriterV1;
-    readPublishedShare?(
-      shareId: string,
-    ): Promise<{ hash: string; document: string } | undefined>;
-  };
   /**
    * The transcript-index seams the adapter owns: this object's own SQL
    * storage, and one page of a Bot's projected rows read from that Bot's
@@ -349,30 +316,6 @@ export async function createFoundationUserBackendContributions(host: {
       }
       return { storage: host.storage, settings };
     },
-    get botTemplate() {
-      const settings = mountedContributions.get(settingsUserContribution);
-      if (!settings) {
-        throw new Error("Bot templates require the Settings Contribution");
-      }
-      return {
-        storage: host.storage,
-        settings,
-        bots: host.botTemplate.bots,
-        blobs: host.botTemplate.blobs,
-        ...(host.botTemplate.importer
-          ? { importer: host.botTemplate.importer }
-          : {}),
-        ...(host.botTemplate.readPublishedShare
-          ? { readPublishedShare: host.botTemplate.readPublishedShare }
-          : {}),
-        // Existence and display name for a template's Package lines both come
-        // from the application's own list; there is no second index to consult.
-        availablePackages: FOUNDATION_PACKAGE_CATALOG_V1.entries.map((pkg) => ({
-          packageId: pkg.id,
-          displayName: pkg.displayName,
-        })),
-      };
-    },
     get machines() {
       return {
         storage: host.storage,
@@ -432,7 +375,6 @@ export async function createFoundationUserBackendContributions(host: {
     | OllamaCloudUserBackendContribution
     | FrockAiUserBackendContribution
     | FlockUserBackendContribution
-    | BotTemplateUserBackendContribution
     | SearchUserBackendContribution
     | AuditUserBackendContribution
     | MachineUserBackendContribution
@@ -443,7 +385,6 @@ export async function createFoundationUserBackendContributions(host: {
   const ollama = mounted.get(ollamaCloudUserContribution);
   const frockAi = mounted.get(frockAiUserContribution);
   const flock = mounted.get(flockUserContribution);
-  const botTemplate = mounted.get(botTemplateUserContribution);
   const search = mounted.get(searchUserContribution);
   const audit = mounted.get(auditUserContribution);
   const machines = mounted.get(machineUserContribution);
@@ -455,7 +396,6 @@ export async function createFoundationUserBackendContributions(host: {
     !ollama ||
     !frockAi ||
     !flock ||
-    !botTemplate ||
     !search ||
     !audit ||
     !machines ||
@@ -464,7 +404,7 @@ export async function createFoundationUserBackendContributions(host: {
   ) {
     await mounted.dispose();
     throw new Error(
-      "Foundation requires Settings, Credentials, Ollama, Frock AI, Flock, Bot Templates, Search, Audit, Machines, Connected apps and MCP servers User Contributions",
+      "Foundation requires Settings, Credentials, Ollama, Frock AI, Flock, Search, Audit, Machines, Connected apps and MCP servers User Contributions",
     );
   }
 
@@ -489,7 +429,6 @@ export async function createFoundationUserBackendContributions(host: {
     credentials,
     connections,
     flock,
-    botTemplate,
     search,
     audit,
     machines,

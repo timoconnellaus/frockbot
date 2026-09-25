@@ -1,7 +1,6 @@
 import type { StoredRunCauseV1 } from "@frockbot/core/durable";
 import type { ConfigurationCommandV1 } from "@frockbot/core/configuration";
 import type { MachineCommandV1 } from "@frockbot/core/machine-protocol";
-import type { TemplateCommandV1 } from "@frockbot/app/bot-template/shared";
 import type { GroupChatCommandV1 } from "@frockbot/app/groups/shared";
 import type {
   BotDirectoryProfileV1,
@@ -149,9 +148,6 @@ export interface BotUserConfigurationRpcTargetV1
   ): Promise<object>;
   mirrorBotProfile(
     input: BotRpcEnvelopeV1<{ profile: BotDirectoryProfileV1 }>,
-  ): Promise<object>;
-  executeTemplateCommand(
-    input: UserRpcEnvelopeV1<{ command: TemplateCommandV1 }>,
   ): Promise<object>;
   listMachines(input: UserRpcEnvelopeV1): Promise<object>;
   describeMachineTarget(

@@ -289,8 +289,8 @@ describe("the five locked card Plugins", () => {
         await drawV1({
           type: "agent-card",
           agentId: "bot-2",
-          title: "Bot template staged",
-          body: "Nothing is shared until you choose a visibility.",
+          title: "Routine ready",
+          body: "It runs every morning at eight.",
         })
       ).answer,
     );

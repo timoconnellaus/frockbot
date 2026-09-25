@@ -2,7 +2,7 @@ import 'package:flutter/widgets.dart';
 
 /// Doors the panel keeps mounted after the first visit.
 ///
-/// Audit, Templates, Voice, Look and framed WebViews stay out: they are
+/// Audit, Voice, Look and framed WebViews stay out: they are
 /// not the thing someone flips back to, and a WebView that stays alive is
 /// a tab nobody asked to keep.
 const hotPanelDoors = {'bot-page', 'routines', 'plugins', 'bot-settings'};

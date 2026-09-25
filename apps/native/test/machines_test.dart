@@ -3,7 +3,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/document_cache.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/machines/page.dart';
-import 'package:frockbot_native/templates/page.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
 
 import 'settings_test.dart' show SettingsApi;
@@ -241,95 +240,5 @@ void main() {
     );
     await tester.pumpWidget(const SizedBox());
     api.close();
-  });
-
-  group('a template action becomes', () {
-    Map<String, Object?> command(String kind, Map<String, Object?> input) => {
-      'commandId': 'c1',
-      'input': {'kind': kind, ...input},
-    };
-
-    test('a stage naming the Bot the host is showing', () {
-      expect(templateCommandV1(command('pack-template', {}), 'researcher'), {
-        'schemaVersion': 1,
-        'commandId': 'c1',
-        'type': 'template/stage',
-        'botId': 'researcher',
-      });
-      // With no Bot open there is nothing to pack, and the refusal is said
-      // before anything is sent.
-      expect(
-        () => templateCommandV1(command('pack-template', {}), null),
-        throwsFormatException,
-      );
-    });
-
-    test('a visibility change reading its own share’s select', () {
-      expect(
-        templateCommandV1(
-          command('set-visibility', {
-            'shareId': 'u.1',
-            'field': 'template.v.1',
-            'template.v.0': 'private',
-            'template.v.1': 'public',
-          }),
-          null,
-        ),
-        {
-          'schemaVersion': 1,
-          'commandId': 'c1',
-          'type': 'template/set-visibility',
-          'shareId': 'u.1',
-          'visibility': 'public',
-        },
-      );
-    });
-
-    test('a plan from whatever was pasted', () {
-      expect(
-        templateShareIdV1('  https://bot.example/templates/v1/u.abc  '),
-        'u.abc',
-      );
-      expect(templateShareIdV1('u.abc'), 'u.abc');
-      expect(
-        templateCommandV1(
-          command('plan-import', {'template.link': 'u.abc'}),
-          null,
-        )['shareId'],
-        'u.abc',
-      );
-      expect(
-        () => templateCommandV1(
-          command('plan-import', {'template.link': '   '}),
-          null,
-        ),
-        throwsFormatException,
-      );
-    });
-
-    test('an apply naming the import the plan made', () {
-      expect(
-        templateCommandV1(
-          command('apply-import', {'importId': 'import-1'}),
-          null,
-        ),
-        {
-          'schemaVersion': 1,
-          'commandId': 'c1',
-          'type': 'template/apply-import',
-          'importId': 'import-1',
-        },
-      );
-    });
-
-    test('nothing, when the action is not one of ours', () {
-      expect(
-        () => templateCommandV1({
-          'commandId': 'c1',
-          'input': {'kind': 'delete-everything'},
-        }, null),
-        throwsFormatException,
-      );
-    });
   });
 }

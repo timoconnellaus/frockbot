@@ -863,9 +863,7 @@ export function createSkillWriteTool(
         });
         await session.flush();
       };
-      // One write path, shared with the template import (`./write.ts`); the
-      // only thing that differs between them is the writer, and here it is
-      // this Bot inside the Turn whose Session and Turn it names.
+      // The writer is this Bot, inside the Turn whose Session and Turn it names.
       const outcome =
         decoded.kind === "reference"
           ? await writeSkillReferenceV1(

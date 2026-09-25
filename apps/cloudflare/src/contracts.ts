@@ -71,14 +71,6 @@ import type {
   UpdateLookCommandV1,
 } from "@frockbot/app/flock/shared";
 import type {
-  TemplateCommandV1,
-  TemplateImportListViewV1,
-  TemplateImportRecordV1,
-  TemplateShareListViewV1,
-  TemplateShareReceiptV1,
-} from "@frockbot/app/bot-template/shared";
-import type { TemplateVisibilityV1 } from "@frockbot/core/template";
-import type {
   ApprovalDecisionCommandV1,
   ApprovalDecisionReceiptV1,
   ApprovalListViewV1,
@@ -562,38 +554,6 @@ export interface UserConfigurationBinding {
     packageId: string;
     effectId: string;
   }): Promise<void>;
-  listTemplateShares(request: {
-    schemaVersion: 1;
-    userId: string;
-  }): Promise<TemplateShareListViewV1>;
-  executeTemplateCommand(request: {
-    schemaVersion: 1;
-    userId: string;
-    command: TemplateCommandV1;
-  }): Promise<TemplateShareReceiptV1>;
-  /**
-   * Unauthenticated by design: the share id is the capability, and the User
-   * Durable Object answers only for a `link` or `public` share it has not had
-   * revoked. Everything else is `undefined`, which the route serves as 404.
-   */
-  listTemplateImports(request: {
-    schemaVersion: 1;
-    userId: string;
-  }): Promise<TemplateImportListViewV1>;
-  executeTemplateImport(request: {
-    schemaVersion: 1;
-    userId: string;
-    command: TemplateCommandV1;
-  }): Promise<TemplateImportRecordV1>;
-  resolveTemplateShare(request: { schemaVersion: 1; shareId: string }): Promise<
-    | {
-        schemaVersion: 1;
-        hash: string;
-        visibility: TemplateVisibilityV1;
-        document: string;
-      }
-    | undefined
-  >;
 }
 
 export interface BotConfigurationBinding {

@@ -14,8 +14,7 @@
 //   app/skills/managed-a2ui.generated.ts    the Cards Skill (ADR 0030), whose
 //                                           references are themselves built by
 //                                           scripts/generate-a2ui-skill.ts
-//   app/skills/managed-recipes.generated.ts add-connector, export/import
-//                                           templates, write-skill
+//   app/skills/managed-recipes.generated.ts add-connector, write-skill
 //
 // Freshness is proved by `--check`, which `bun run typecheck` runs.
 import { existsSync, readdirSync } from "node:fs";

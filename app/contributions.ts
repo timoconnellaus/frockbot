@@ -22,10 +22,6 @@ import {
   type AuditGatewayHost,
 } from "@frockbot/app/audit/backend";
 import {
-  backendContribution as botTemplateGatewayContribution,
-  type BotTemplateGatewayHostV1,
-} from "@frockbot/app/bot-template/backend";
-import {
   backendContribution as computerGatewayContribution,
   type ComputerGatewayHost,
 } from "@frockbot/computer/backend";
@@ -93,10 +89,6 @@ import {
   type FrockAiUserApplicationHostV1,
 } from "@frockbot/providers/frock-ai/user";
 import {
-  userContribution as botTemplateUserContribution,
-  type BotTemplateUserApplicationHostV1,
-} from "@frockbot/app/bot-template/user";
-import {
   userContribution as machineUserContribution,
   type MachineUserApplicationHostV1,
 } from "@frockbot/app/machine/user";
@@ -128,7 +120,6 @@ import {
 
 export {
   auditGatewayContribution,
-  botTemplateGatewayContribution,
   computerGatewayContribution,
   connectGatewayContribution,
   flockGatewayContribution,
@@ -146,7 +137,6 @@ export {
   mcpUserContribution,
   ollamaCloudUserContribution,
   frockAiUserContribution,
-  botTemplateUserContribution,
   machineUserContribution,
   searchUserContribution,
   auditUserContribution,
@@ -219,8 +209,7 @@ export interface MountedFoundationBackend<T> {
  */
 export type FoundationGatewayHost = {
   backendHost: "gateway";
-} & BotTemplateGatewayHostV1 &
-  ComputerGatewayHost &
+} & ComputerGatewayHost &
   ConnectGatewayHost &
   FlockGatewayHost &
   GroupChatGatewayHost &
@@ -250,7 +239,6 @@ export type FoundationUserBackendHostV1 = {
   McpUserApplicationHostV1 &
   ModelConnectionsUserApplicationHostV1 &
   FrockAiUserApplicationHostV1 &
-  BotTemplateUserApplicationHostV1 &
   MachineUserApplicationHostV1 &
   SearchUserApplicationHostV1 &
   AuditUserApplicationHostV1 &
@@ -296,7 +284,6 @@ export function createFoundationMountedContributionsV1(): FoundationMountedContr
 /** Every backend Contribution this application composes, in mount order. */
 export const backendDescriptorsV1: readonly AnyBackendDescriptor[] = [
   auditGatewayContribution,
-  botTemplateGatewayContribution,
   computerGatewayContribution,
   connectGatewayContribution,
   flockGatewayContribution,
@@ -315,7 +302,6 @@ export const backendDescriptorsV1: readonly AnyBackendDescriptor[] = [
   ...catalogUserContributionsV1,
   ollamaCloudUserContribution,
   frockAiUserContribution,
-  botTemplateUserContribution,
   machineUserContribution,
   searchUserContribution,
   auditUserContribution,

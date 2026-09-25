@@ -89,10 +89,6 @@ function requiredTokensFor(slug: string): readonly string[] {
   switch (slug) {
     case "add-connector":
       return ["send_to_user", "Marketplace", "Connectors", "connectors_offer"];
-    case "export-bot-template":
-      return ["bot_export_template"];
-    case "import-bot-template":
-      return ["cannot import"];
     case "write-skill":
       return ["skill_write", "skill_load", "reference", "demonstration_delete"];
     case "plugins":
