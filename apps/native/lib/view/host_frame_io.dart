@@ -95,6 +95,7 @@ class _HostFrameViewState extends State<HostFrameView> {
   _KeptPage? _page;
   int _epoch = 0;
   bool _loaded = false;
+  bool _reopened = false;
   StreamSubscription<Map<String, Object?>>? _outbox;
   final _waiting = <Map<String, Object?>>[];
 
@@ -284,9 +285,12 @@ if (!window.__frockbotForwarding) {
             final owner = page.owner;
             if (error.errorType ==
                     WebResourceErrorType.webContentProcessTerminated &&
+                page.loaded &&
                 owner != null &&
                 owner.mounted &&
-                owner._page == page) {
+                owner._page == page &&
+                !owner._reopened) {
+              owner._reopened = true;
               unawaited(owner._open());
             }
           },
