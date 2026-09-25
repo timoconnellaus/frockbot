@@ -5,7 +5,7 @@ an open pull request holds 0037. Decisions are Tim's from the 2026-09-25
 discussion:
 
 - The integration is a Plugin, not first-party. That includes device abilities:
-  a host ability may be a Plugin.
+  a host ability may be a Plugin. Messages becomes one, alongside Beeper.
 - The desktop runs the Plugin's own code, which holds the source's connection.
 - An event reaches a Routine through the cloud, and the outgoing side is a tool
   the Plugin exposes.
@@ -99,8 +99,53 @@ arguments carry the whole effect, such as `beeper_send({ chatId, text })`, and a
 Plugin tool is `mutate` by default. Review sees what would be sent.
 
 What the operating system grants to the app, such as Full Disk Access or
-Automation, the host passes to a module that declares it. Messages moves from
-`apps/mac-messages` to a Plugin on this path.
+Automation, reaches a module only through the desktop primitives below.
+
+### Desktop primitives
+
+A module's isolate has no filesystem and cannot send Apple Events. What the
+operating system grants only to the app, the host offers as a few generic
+bindings, each limited to what the module declares:
+
+```ts
+device: {
+  modules: [
+    {
+      id: "messages",
+      platforms: ["macos"],
+      files: {
+        read: ["~/Library/Messages/chat.db", "~/Library/Messages/Attachments/"],
+        watch: ["~/Library/Messages/"],
+      },
+      appleEvents: ["com.apple.iChat"],
+      calls: [
+        "find-chats",
+        "chat-items",
+        "search",
+        "activity",
+        "attachment",
+        "send",
+      ],
+      events: ["message"],
+    },
+  ];
+}
+```
+
+- **`sqlite.query(path, sql, params)`** opens a declared file read-only and
+  runs one statement. The database is never written.
+- **`files.read(path, { maxBytes })`** reads bytes from a declared path. A path
+  that resolves outside it, through `..` or a symlink, is refused.
+- **`files.watch(path)`** tells the module that something under a declared
+  path changed. It carries no content; the module reads what it needs.
+- **`appleEvents.run(bundleId, script)`** hands an AppleScript to the app, which
+  runs it only against a declared target. The operating system attributes it
+  to the app, whose Automation consent covers it.
+- **`permissions()`** reports whether the operating system has granted what
+  the module declared, checked when asked, not remembered.
+
+A primitive names an operating system mechanism, never an integration. Adding
+one is a client release; adding an integration built on them is a Plugin.
 
 ### The desktop keeps the modules running
 
@@ -218,6 +263,44 @@ A result that arrives after the deadline is recorded in audit and on the Work
 view, and never reaches the model. There is no Pending input for a module call:
 the Turn that asked is the only one that hears the answer.
 
+## Messages as a Plugin
+
+Messages is first-party today: `app/machine-messages` holds its tools, its SQL
+and its AppleScript, `apps/mac-messages` runs them on the Mac, and the machine
+protocol carries a `messages` operation for them. It becomes a Plugin, and the
+Messages-specific code leaves the host.
+
+The Messages code already draws the line this ADR needs. `device.ts` keeps the
+SQL, the Apple-epoch arithmetic, the row shapes, the send script and every
+classification decision, and leaves the helper "three verbs it cannot avoid
+running on the Mac": open SQLite read-only, hand an AppleScript to the app, read
+bytes off a disk. Those verbs are the desktop primitives. Everything else moves
+into the Plugin.
+
+| Today                                                                       | As a Plugin                                                    |
+| --------------------------------------------------------------------------- | -------------------------------------------------------------- |
+| `app/machine-messages/device.ts`: queries, rows, send script, refusals      | The Plugin's module                                            |
+| `app/machine-messages/agent.ts`: six read tools and `machine_messages_send` | The Plugin's tools, each calling its module with `device.call` |
+| `apps/mac-messages/messages.ts`: `bun:sqlite`, attachment reads             | `sqlite.query` and `files.read`                                |
+| `AppDelegate.swift` `send`: `NSAppleScript` against Messages                | `appleEvents.run("com.apple.iChat", …)`                        |
+| `apps/mac-messages/send-ledger.ts`                                          | The host's ledger, for every module                            |
+| `messages` operation in `core/machine-protocol`                             | The `module` operation                                         |
+| The Messages settings toggle and Mac consent screen                         | The Plugin's enablement and the module's reported state        |
+| Nothing: Messages has no inbound path                                       | The `message` event, below                                     |
+
+**New messages fire Routines.** Messages has no push. The module watches
+`~/Library/Messages/` with `files.watch`. When it changes, the module reads
+rows past its cursor, the highest `message.ROWID` it has emitted, and emits
+each incoming one keyed by the message's `guid`. The cursor lives in the
+module's own store, so catch-up after the app was closed is the same query.
+
+**It ships in the deployment's catalog.** A deployment may build and embed a
+Plugin artifact in its catalog, and it still runs through the Plugin boundary.
+Messages ships that way, unlocked and installed only when the User asks. It is
+the working example of a device module that Frock reads when it builds the
+next one, and it proves the boundary: if Messages cannot be built from the
+primitives, neither can anything else.
+
 ## Not decided here
 
 - The isolate the host uses. Local workerd matches the cloud Plugin worker, so
@@ -238,6 +321,9 @@ On acceptance, `AGENTS.md` changes as follows:
 - **Triggers** says a Plugin trigger may also be fed by the Plugin's own
   device module.
 - **Untrusted code gets an isolate** covers the desktop host.
+- **Grants** gains the desktop primitives a module declares: read-only SQLite,
+  file reads and watches under declared paths, and Apple Events to declared
+  targets.
 
 ADR 0035 changes with it: a device ability may be provided by a Plugin module,
 and its own-machine tier is no longer first-party only. Its device command path
@@ -257,9 +343,12 @@ absent Device and the Pending-input result.
 - The machine protocol gains the `module` operation and its outcomes.
 - The Plugin worker gains the `device` binding.
 - Frock Compose builds module artifacts.
-- Messages leaves the first-party code for a Plugin. Its code, surfaces and
-  stored shapes go under the disposable-state rule, and a fresh conversation is
-  verified.
+- The app gains the desktop primitives. `AppDelegate.swift`'s Messages-only
+  `send` becomes `appleEvents.run` for a declared target.
+- Messages becomes a catalog Plugin. `app/machine-messages`, the helper's
+  Messages code, the `messages` protocol operation, the Messages settings and
+  the Mac consent screen go. Their stored shapes go under the disposable-state
+  rule, and a fresh conversation is verified.
 
 ## Order
 
@@ -272,6 +361,8 @@ Each step leaves `main` shippable.
 4. Module events into Plugin triggers, with the listening flags, the replay key
    and catch-up.
 5. `device.call`, with the ledger, the deadline and its outcomes.
-6. Proof: ask Frock for a Beeper Plugin on a clean account. Anything it cannot
+6. The desktop primitives, then Messages as a catalog Plugin, with its
+   `message` event, and the first-party Messages code removed in the same
+   change.
+7. Proof: ask Frock for a Beeper Plugin on a clean account. Anything it cannot
    build without Beeper-specific platform code is a gap in this design.
-7. Messages as a Plugin, and the first-party Messages code removed.
