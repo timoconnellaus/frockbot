@@ -42,6 +42,7 @@ import { cleanRetiredPublicationStateV1 } from "./publication-state-cleanup.js";
 import { cleanCompactionAnnouncementsV1 } from "./compaction-announcement-cleanup.js";
 import { projectUnprojectedSessionsV1 } from "./working-context-cleanup.js";
 import { cleanRetiredComputerScreenshotsV1 } from "./computer-screenshot-cleanup.js";
+import { createComputerLoginVaultV1 } from "@frockbot/app/shell/computer-logins";
 import { computerBotPathKeyV1 } from "@frockbot/computer/core/bot-path";
 import {
   decodeStoredComputerFrameV1,
@@ -1043,6 +1044,14 @@ export class BotState
               }
               return computers.open(identity, { botId }, { effectId });
             },
+            loginVault: (userId) =>
+              createComputerLoginVaultV1({
+                userId,
+                keyring: this.backendEnv.CREDENTIAL_KEYRING,
+                user: this.backendEnv.USER_CONFIGURATIONS.get(
+                  this.backendEnv.USER_CONFIGURATIONS.idFromName(userId),
+                ),
+              }),
           },
         });
         // Every Bot-host Contribution the application lists must have

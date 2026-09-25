@@ -110,6 +110,7 @@ import {
   computerFrameSinkV1,
   type StoredComputerFrameV1,
 } from "@frockbot/computer/frame";
+import { createComputerLoginVaultV1 } from "./computer-logins.js";
 import { turnToolCatalogPin } from "./tool-catalog-pin.js";
 import { createBotSecretFillSeamV1 } from "@frockbot/app/secrets/fill";
 import { userSecretsV1 } from "@frockbot/app/secrets/bot";
@@ -649,6 +650,22 @@ export async function agentRuntime(
               vault: userSecretsV1(state, identity),
               readSecret: (name) => readSecret(name),
             }),
+            // The sign-ins are the User's, so the vault is the User's object;
+            // when this object last kept them, and the checkpoint it knows
+            // of, are this object's own.
+            computerUpkeep: (() => {
+              const vault = createComputerLoginVaultV1({
+                userId: identity.userId,
+                keyring: readSecret("CREDENTIAL_KEYRING"),
+                user: state.env.USER_CONFIGURATIONS.get(
+                  state.env.USER_CONFIGURATIONS.idFromName(identity.userId),
+                ),
+              });
+              return {
+                records: state.ctx.storage,
+                ...(vault ? { vault } : {}),
+              };
+            })(),
             ...(state.invalidateComputerProjectionFile
               ? {
                   computerProjectionFiles: {

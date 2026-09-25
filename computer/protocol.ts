@@ -18,9 +18,32 @@ export const COMPUTER_COMMAND_TYPES = [
   "startDemonstration",
   "stopDemonstration",
   "discardDemonstration",
+  "saveCheckpoint",
+  "resetComputer",
+  "updateComputer",
 ] as const;
 
 export type ComputerCommandTypeV1 = (typeof COMPUTER_COMMAND_TYPES)[number];
+
+/**
+ * The commands that bring a Computer up with a viewer and so are scheduled
+ * rather than answered: the plain connect, and the two that change the whole
+ * machine first. Each is accepted, then settles in the Bot's own alarm.
+ */
+export const COMPUTER_SCHEDULED_COMMAND_TYPES = [
+  "connect",
+  "resetComputer",
+  "updateComputer",
+] as const;
+
+export type ComputerScheduledCommandTypeV1 =
+  (typeof COMPUTER_SCHEDULED_COMMAND_TYPES)[number];
+
+export function isComputerScheduledCommandV1(
+  type: ComputerCommandTypeV1,
+): type is ComputerScheduledCommandTypeV1 {
+  return (COMPUTER_SCHEDULED_COMMAND_TYPES as readonly string[]).includes(type);
+}
 
 export interface ComputerCommandV1 {
   version: 1;
@@ -92,6 +115,12 @@ export interface ComputerDoctorViewV1 {
   capturedAt: string;
   summary: string;
   checks: ComputerDoctorCheckViewV1[];
+}
+
+/** The newest checkpoint this Bot knows of: what Reset returns the machine to. */
+export interface ComputerCheckpointViewV1 {
+  version: 1;
+  createdAt: string;
 }
 
 export type ComputerProgressStepStatusV1 = "pending" | "active" | "complete";
@@ -175,6 +204,7 @@ export interface ComputerProjectionV1 {
   screenshots: ComputerScreenshotViewV1[];
   doctor?: ComputerDoctorViewV1;
   demonstration?: ComputerDemonstrationViewV1;
+  checkpoint?: ComputerCheckpointViewV1;
 }
 
 export type ComputerCommandReceiptV1 =
@@ -195,14 +225,14 @@ export type ComputerCommandReceiptV1 =
     };
 
 /**
- * A connect command has been durably admitted and scheduled. Version 2 is a
- * distinct wire shape from the terminal version 1 receipt: it never claims
- * that the Computer effect has completed.
+ * A scheduled command has been durably admitted. Version 2 is a distinct
+ * wire shape from the terminal version 1 receipt: it never claims that the
+ * Computer effect has completed.
  */
 export interface ComputerCommandAcceptedV2 {
   version: 2;
   commandId: string;
-  type: "connect";
+  type: ComputerScheduledCommandTypeV1;
   status: "accepted";
   admittedAt: string;
 }
@@ -527,6 +557,20 @@ function decodeDoctorCheckV1(value: unknown): ComputerDoctorCheckViewV1 {
   };
 }
 
+function decodeCheckpointV1(value: unknown): ComputerCheckpointViewV1 {
+  const candidate = record(value, "Computer checkpoint");
+  exactKeys(candidate, ["version", "createdAt"], [], "Computer checkpoint");
+  if (candidate.version !== 1) {
+    throw new ComputerProtocolDecodeError(
+      "Computer checkpoint version is unsupported",
+    );
+  }
+  return {
+    version: 1,
+    createdAt: timestamp(candidate.createdAt, "Computer checkpoint createdAt"),
+  };
+}
+
 function decodeDoctorV1(value: unknown): ComputerDoctorViewV1 {
   const candidate = record(value, "Computer doctor report");
   exactKeys(
@@ -624,7 +668,14 @@ export function decodeComputerProjectionV1(
   exactKeys(
     candidate,
     ["version", "botId", "providerLabel", "phase", "message", "screenshots"],
-    ["viewerSession", "controlLease", "doctor", "progress", "demonstration"],
+    [
+      "viewerSession",
+      "controlLease",
+      "doctor",
+      "progress",
+      "demonstration",
+      "checkpoint",
+    ],
     "Computer projection",
   );
   if (candidate.version !== 1 || !Array.isArray(candidate.screenshots)) {
@@ -659,6 +710,9 @@ export function decodeComputerProjectionV1(
             candidate.demonstration,
           ),
         }),
+    ...(candidate.checkpoint === undefined
+      ? {}
+      : { checkpoint: decodeCheckpointV1(candidate.checkpoint) }),
   };
 }
 
@@ -716,7 +770,11 @@ export function decodeComputerCommandResponse(
       [],
       "Computer command acceptance",
     );
-    if (candidate.type !== "connect" || candidate.status !== "accepted") {
+    const type = commandType(candidate.type);
+    if (
+      !isComputerScheduledCommandV1(type) ||
+      candidate.status !== "accepted"
+    ) {
       throw new ComputerProtocolDecodeError(
         "Computer command acceptance is invalid",
       );
@@ -727,7 +785,7 @@ export function decodeComputerCommandResponse(
         candidate.commandId,
         "Computer command acceptance commandId",
       ),
-      type: "connect",
+      type,
       status: "accepted",
       admittedAt: timestamp(
         candidate.admittedAt,

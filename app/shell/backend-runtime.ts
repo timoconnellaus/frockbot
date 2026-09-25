@@ -152,6 +152,8 @@ export interface ShellHostedRuntimeHostV1 {
    * whether a fill may go ahead, and the value for that one action.
    */
   computerSecrets?: NonNullable<ComputerAgentPluginConfig["secrets"]>;
+  /** The User's sealed sign-ins and this Bot's upkeep records, for one Turn. */
+  computerUpkeep?: NonNullable<ComputerAgentPluginConfig["upkeep"]>;
   /** The `computerUse` task owner whose User-wide lease this child holds. */
   computerAgentControlOwnerId?: string;
   /**

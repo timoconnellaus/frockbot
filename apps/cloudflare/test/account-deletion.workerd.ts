@@ -12,7 +12,9 @@
 //     invitation — and nobody else's.
 //  3. The User object ends holding its tombstone and nothing else, stays
 //     that way across a restart, and refuses to be provisioned again.
-//  4. "Delete my Computer" destroys the Computer once per command.
+//  4. "Delete my Computer" destroys the Computer once per command, and the
+//     browser sign-ins kept for it go too: nothing asked for before it can
+//     bring them, or a machine, back.
 import {
   applyD1Migrations,
   env,
@@ -44,6 +46,8 @@ const COMPOSIO = "https://backend.composio.dev/api/v3.1";
 interface UserRpc {
   beginAccountDeletion(input: unknown): Promise<{ status: string }>;
   deleteComputer(input: unknown): Promise<{ status: string }>;
+  oweComputerLogins(input: unknown): Promise<{ outcome: string }>;
+  readComputerLogins(input: unknown): Promise<object>;
   listBots(input: unknown): Promise<{ bots: Array<{ botId: string }> }>;
   createBot(input: unknown): Promise<unknown>;
   prepareAccount(input: unknown): Promise<unknown>;
@@ -613,5 +617,42 @@ describe("deleting the Computer", () => {
       ),
     ).toMatch(/deleted/);
     await driveDeletion(identity.userId);
+  });
+
+  test("forgets the kept sign-ins, and refuses an Update asked for before it", async () => {
+    const suffix = crypto.randomUUID().slice(0, 8);
+    const identity = { userId: `logins-${suffix}`, botId: `bot-${suffix}` };
+    await provisionBot(identity);
+    const rpc = userRpc(identity.userId);
+    const before = new Date(Date.now() - 60_000).toISOString();
+    // An Update is under way: the next machine is owed the sign-ins.
+    expect(
+      await rpc.oweComputerLogins({
+        schemaVersion: 1,
+        userId: identity.userId,
+        at: before,
+      }),
+    ).toEqual({ outcome: "owed" });
+
+    await rpc.deleteComputer({
+      schemaVersion: 1,
+      userId: identity.userId,
+      commandId: `delete-computer-${suffix}`,
+    });
+
+    const held = (await rpc.readComputerLogins({
+      schemaVersion: 1,
+      userId: identity.userId,
+      capture: true,
+    })) as { version: number; deletedAt?: string; owedSince?: string };
+    expect(Object.keys(held).sort()).toEqual(["deletedAt", "version"]);
+    expect(Date.parse(held.deletedAt!)).toBeGreaterThan(Date.parse(before));
+    expect(
+      await rpc.oweComputerLogins({
+        schemaVersion: 1,
+        userId: identity.userId,
+        at: before,
+      }),
+    ).toEqual({ outcome: "deleted" });
   });
 });

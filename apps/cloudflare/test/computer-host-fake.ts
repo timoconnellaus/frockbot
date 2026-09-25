@@ -587,6 +587,34 @@ export function createComputerHostFake(
           deleted,
         });
       }
+      // The machine-wide operations answer their shapes and change nothing:
+      // this fake has one machine per User that no suite resets.
+      case "checkpoint":
+        return value.operation.action === "restore"
+          ? problem(
+              404,
+              "not-found",
+              "This Computer has no checkpoint to reset to yet",
+            )
+          : Response.json({
+              version: 1,
+              effectId: value.effectId,
+              action: "create",
+              checkpoint: {
+                id: "fake-checkpoint",
+                createdAt: new Date(0).toISOString(),
+              },
+              created: true,
+            });
+      case "replace":
+        return Response.json({ version: 1, effectId: value.effectId });
+      case "logins":
+        return Response.json({
+          version: 1,
+          effectId: value.effectId,
+          action: value.operation.action,
+          count: 0,
+        });
     }
   }
 

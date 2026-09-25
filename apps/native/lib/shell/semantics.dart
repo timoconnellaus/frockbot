@@ -304,7 +304,21 @@ abstract final class SettingsIds {
   /// Settings' door to this Bot's Plugins, and to its model.
   static const botPlugins = 'bot-settings-plugins';
 
+  /// Settings' door to the Computer this Bot shares with the User's others.
+  static const botComputer = 'bot-settings-computer';
+
   static String modelOption(String label) => 'model-option-$label';
+}
+
+/// The Computer's own settings: its checkpoint, Reset, and Update.
+abstract final class ComputerSettingsIds {
+  static const page = 'computer-settings';
+  static const status = 'computer-settings-status';
+  static const save = 'computer-settings-save-checkpoint';
+  static const reset = 'computer-settings-reset';
+  static const resetConfirm = 'computer-settings-reset-confirm';
+  static const update = 'computer-settings-update';
+  static const updateConfirm = 'computer-settings-update-confirm';
 }
 
 /// Connectors: the accounts a User authorizes for every Bot they own.

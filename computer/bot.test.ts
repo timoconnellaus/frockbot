@@ -26,7 +26,17 @@ import {
   computerCommandFingerprintV1,
   type ComputerCommandV1,
 } from "./protocol.js";
-import { FakeWorkspace } from "@frockbot/computer/fake";
+import {
+  createFakeComputerHostV1,
+  fakeLoginNamesV1,
+  fakeLoginsStateV1,
+  FakeWorkspace,
+} from "@frockbot/computer/fake";
+import type {
+  ComputerLoginsKeepOutcomeV1,
+  ComputerLoginsKeptV1,
+  ComputerLoginVaultV1,
+} from "./upkeep.js";
 import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import { computerFrameFromCaptureV1, computerFrameSinkV1 } from "./frame.js";
 
@@ -1785,5 +1795,482 @@ describe("Computer Bot Durable Object Contribution", () => {
       expect(projected.message).toBe("Reconnect to pick up where you left off");
     }
     expect(opens).toBe(0);
+  });
+});
+
+/**
+ * The host application's vault, in memory: the same refusals the User's
+ * Durable Object makes, and the sign-ins in the clear because nothing here
+ * is a secret.
+ */
+class MemoryLoginVault implements ComputerLoginVaultV1 {
+  held?: ComputerLoginsKeptV1;
+  owedSince?: string;
+  deletedAt?: string;
+  readonly keeps: ComputerLoginsKeepOutcomeV1[] = [];
+
+  /** "Delete my Computer", as the User's object records it. */
+  forget(at: string): void {
+    this.held = undefined;
+    this.owedSince = undefined;
+    this.deletedAt = at;
+  }
+
+  deletedSince(at: string): Promise<boolean> {
+    return Promise.resolve(
+      this.deletedAt !== undefined && this.deletedAt >= at,
+    );
+  }
+
+  owed(): Promise<string | undefined> {
+    return Promise.resolve(this.owedSince);
+  }
+
+  kept(): Promise<ComputerLoginsKeptV1 | undefined> {
+    return Promise.resolve(this.held);
+  }
+
+  keep(capture: ComputerLoginsKeptV1): Promise<ComputerLoginsKeepOutcomeV1> {
+    const outcome: ComputerLoginsKeepOutcomeV1 = this.owedSince
+      ? "owed"
+      : (this.deletedAt !== undefined &&
+            this.deletedAt >= capture.capturedAt) ||
+          (this.held && this.held.capturedAt >= capture.capturedAt)
+        ? "stale"
+        : "kept";
+    if (outcome === "kept") this.held = capture;
+    this.keeps.push(outcome);
+    return Promise.resolve(outcome);
+  }
+
+  owe(at: string): Promise<"owed" | "deleted"> {
+    if (this.deletedAt !== undefined && this.deletedAt >= at) {
+      return Promise.resolve("deleted");
+    }
+    this.owedSince ??= at;
+    return Promise.resolve("owed");
+  }
+
+  settle(owedSince: string): Promise<void> {
+    if (this.owedSince === owedSince) this.owedSince = undefined;
+    return Promise.resolve();
+  }
+}
+
+describe("Update, Reset and the User's sign-ins", () => {
+  function machineHost(options: { now?: () => Date } = {}) {
+    const storage = new MemoryStorage();
+    // Before the in-memory host's viewer sessions expire, so a viewer the
+    // Update mints is a live one.
+    const now = options.now ?? (() => new Date("2023-11-14T22:00:00.000Z"));
+    const computers = createFakeComputerHostV1({
+      now: () => now().getTime(),
+    });
+    const vault = new MemoryLoginVault();
+    const host = {
+      storage,
+      configured: true,
+      providerLabel: "Fake Computer",
+      now,
+      loginVault: () => vault,
+      openComputer: (userId: string, botId: string, _effectId: string) =>
+        computers.open(
+          { userId },
+          { botId },
+          { providerId: computers.id, generation: 1 },
+        ),
+    };
+    const machine = computers.computerFor({ userId: "user-1" });
+    return { storage, computers, machine, vault, host };
+  }
+
+  test("an Update keeps the sign-ins, replaces the machine and puts them back", async () => {
+    const { storage, computers, machine, vault, host } = machineHost();
+    machine.signIns = ["mail.example", "bank.example"];
+    machine.checkpoints.push({
+      id: "old-checkpoint",
+      createdAt: "2023-11-01T00:00:00.000Z",
+      signIns: [],
+    });
+    const contribution = createComputerBotBackendContribution(host);
+
+    expect(
+      await contribution.execute(
+        "user-1",
+        "scout",
+        command("updateComputer", "update-1"),
+      ),
+    ).toMatchObject({ version: 2, type: "updateComputer", status: "accepted" });
+    // Admitted, and the card says what is under way before anything ran.
+    expect(await contribution.read("user-1", "scout")).toMatchObject({
+      phase: "updating",
+      progress: {
+        kind: "update",
+        steps: [
+          { id: "keeping-sign-ins", status: "active" },
+          { id: "replacing", status: "pending" },
+          { id: "preparing", status: "pending" },
+          { id: "restoring-sign-ins", status: "pending" },
+        ],
+      },
+    });
+    await contribution.settleScheduledWork();
+
+    expect(computers.calls).toContain("replace:user-1");
+    // The fresh machine has the sign-ins the old one had, and nothing owes
+    // them any more.
+    expect(machine.signIns).toEqual(["mail.example", "bank.example"]);
+    expect(fakeLoginNamesV1(vault.held!.state)).toEqual([
+      "mail.example",
+      "bank.example",
+    ]);
+    expect(vault.owedSince).toBeUndefined();
+    // Its first checkpoint is where a Reset of it goes.
+    expect(machine.checkpoints).toHaveLength(1);
+    const projected = await contribution.read("user-1", "scout");
+    expect(projected).toMatchObject({
+      phase: "ready",
+      checkpoint: { version: 1, createdAt: machine.checkpoints[0]!.createdAt },
+    });
+    expect(projected.viewerSession?.url).toContain("viewer.invalid");
+    expect(storage.values.has(COMPUTER_PENDING_CONNECT_KEY)).toBe(false);
+    expect(
+      await contribution.execute(
+        "user-1",
+        "scout",
+        command("updateComputer", "update-1"),
+      ),
+    ).toMatchObject({ version: 1, status: "applied" });
+  });
+
+  test("a Reset goes back to the checkpoint and keeps the newer sign-ins", async () => {
+    const { computers, machine, vault, host } = machineHost();
+    machine.signIns = ["old.example"];
+    const contribution = createComputerBotBackendContribution(host);
+    await contribution.execute(
+      "user-1",
+      "scout",
+      command("saveCheckpoint", "checkpoint-1"),
+    );
+    const saved = machine.checkpoints[0]!;
+    machine.signIns = ["old.example", "new.example"];
+
+    await contribution.execute(
+      "user-1",
+      "scout",
+      command("resetComputer", "reset-1"),
+    );
+    await contribution.settleScheduledWork();
+
+    expect(computers.calls).toContain("reset:scout");
+    // The machine went back; the sign-ins made since came back with it.
+    expect(machine.signIns).toEqual(["old.example", "new.example"]);
+    expect(vault.owedSince).toBeUndefined();
+    expect(await contribution.read("user-1", "scout")).toMatchObject({
+      phase: "ready",
+      checkpoint: { createdAt: saved.createdAt },
+    });
+  });
+
+  test("a Reset with nothing to go back to changes nothing and owes nothing", async () => {
+    const { machine, vault, host } = machineHost();
+    machine.signIns = ["mail.example"];
+    const contribution = createComputerBotBackendContribution(host);
+
+    await contribution.execute(
+      "user-1",
+      "scout",
+      command("resetComputer", "reset-1"),
+    );
+    await contribution.settleScheduledWork();
+
+    expect(vault.owedSince).toBeUndefined();
+    expect(machine.signIns).toEqual(["mail.example"]);
+    expect(await contribution.read("user-1", "scout")).toMatchObject({
+      phase: "error",
+      message: "This Computer has no checkpoint to reset to yet",
+    });
+    expect(
+      await contribution.execute(
+        "user-1",
+        "scout",
+        command("resetComputer", "reset-1"),
+      ),
+    ).toMatchObject({ status: "rejected" });
+  });
+
+  test("an Update is refused while another start is pending, never folded into it", async () => {
+    const { computers, host } = machineHost();
+    const contribution = createComputerBotBackendContribution(host);
+    await contribution.execute("user-1", "scout", command("connect", "c-1"));
+
+    expect(
+      await contribution.execute(
+        "user-1",
+        "scout",
+        command("updateComputer", "update-1"),
+      ),
+    ).toMatchObject({
+      version: 1,
+      status: "rejected",
+      failure: "The Computer is already starting. Try again once it is ready.",
+    });
+    // A connect asked for during an Update is the Update's own connect.
+    await contribution.settleScheduledWork();
+    await contribution.execute(
+      "user-1",
+      "scout",
+      command("updateComputer", "update-2"),
+    );
+    expect(
+      await contribution.execute("user-1", "scout", command("connect", "c-2")),
+    ).toMatchObject({ version: 2, type: "connect", status: "accepted" });
+    await contribution.settleScheduledWork();
+    expect(
+      computers.calls.filter((call) => call === "replace:user-1"),
+    ).toHaveLength(1);
+  });
+
+  test("a replay after eviction resumes rather than replacing the machine again", async () => {
+    const { computers, machine, vault, host, storage } = machineHost();
+    machine.signIns = ["mail.example"];
+    const evicted = createComputerBotBackendContribution({
+      ...host,
+      openComputer: async (userId, botId, effectId) => {
+        const session = await host.openComputer(userId, botId, effectId);
+        // The object is evicted while the new machine comes up.
+        return {
+          ...session,
+          presence: { connect: () => new Promise<never>(() => undefined) },
+        };
+      },
+    });
+    await evicted.execute("user-1", "scout", command("updateComputer", "u-1"));
+    void evicted.settleScheduledWork();
+    for (let wait = 0; wait < 200; wait += 1) {
+      const pending = storage.values.get(COMPUTER_PENDING_CONNECT_KEY) as
+        { machineAt?: string } | undefined;
+      if (pending?.machineAt) break;
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    }
+
+    const cold = createComputerBotBackendContribution(host);
+    await cold.settleScheduledWork();
+
+    expect(
+      computers.calls.filter((call) => call.startsWith("replace")),
+    ).toEqual(["replace:user-1"]);
+    expect(machine.signIns).toEqual(["mail.example"]);
+    expect(vault.owedSince).toBeUndefined();
+    expect(
+      await cold.execute("user-1", "scout", command("updateComputer", "u-1")),
+    ).toMatchObject({ version: 1, status: "applied" });
+  });
+
+  test("an Update whose new machine never came up leaves the sign-ins owed to the next open", async () => {
+    const { machine, vault, host } = machineHost();
+    machine.signIns = ["mail.example"];
+    const failing = createComputerBotBackendContribution({
+      ...host,
+      openComputer: async (userId, botId, effectId) => {
+        const session = await host.openComputer(userId, botId, effectId);
+        return {
+          ...session,
+          presence: {
+            connect: () => Promise.reject(new Error("no answer in time")),
+          },
+        };
+      },
+    });
+    await failing.execute("user-1", "scout", command("updateComputer", "u-1"));
+    await failing.settleScheduledWork();
+    expect(vault.owedSince).toBeDefined();
+    expect(machine.signIns).toEqual([]);
+
+    const warm = createComputerBotBackendContribution(host);
+    await warm.execute("user-1", "scout", command("connect", "c-1"));
+    await warm.settleScheduledWork();
+
+    expect(machine.signIns).toEqual(["mail.example"]);
+    expect(vault.owedSince).toBeUndefined();
+  });
+
+  /**
+   * "Delete my Computer" as the User's object runs it: the kept sign-ins are
+   * forgotten on both sides of the teardown.
+   */
+  async function deleteComputer(
+    computers: ReturnType<typeof createFakeComputerHostV1>,
+    vault: MemoryLoginVault,
+    at: string,
+  ): Promise<void> {
+    vault.forget(at);
+    await computers.teardown({ userId: "user-1" });
+    vault.forget(at);
+  }
+
+  /** Whether anything opened the Computer after its last teardown. */
+  function openedAfterTeardown(calls: readonly string[]): boolean {
+    const torn = calls.lastIndexOf("teardown:user-1");
+    return calls.slice(torn + 1).some((call) => call.startsWith("open:"));
+  }
+
+  for (const when of ["overtakes the replace", "lands after the replace"]) {
+    test(`a Delete my Computer that ${when} brings nothing back`, async () => {
+      const { computers, machine, vault, host } = machineHost();
+      machine.signIns = ["mail.example"];
+      const contribution = createComputerBotBackendContribution({
+        ...host,
+        openComputer: async (userId, botId, effectId) => {
+          const session = await host.openComputer(userId, botId, effectId);
+          const replace = session.machine!.replace;
+          return {
+            ...session,
+            machine: {
+              ...session.machine!,
+              replace: async (options) => {
+                if (when === "overtakes the replace") {
+                  await deleteComputer(
+                    computers,
+                    vault,
+                    host.now().toISOString(),
+                  );
+                  await replace(options);
+                } else {
+                  await replace(options);
+                  await deleteComputer(
+                    computers,
+                    vault,
+                    host.now().toISOString(),
+                  );
+                }
+              },
+            },
+          };
+        },
+      });
+
+      await contribution.execute(
+        "user-1",
+        "scout",
+        command("updateComputer", "update-1"),
+      );
+      await contribution.settleScheduledWork();
+
+      expect(computers.calls).toContain("teardown:user-1");
+      // No machine was opened for it, and no sign-in outlived the deletion.
+      expect(openedAfterTeardown(computers.calls)).toBe(false);
+      expect(
+        computers.calls.filter((call) => call.startsWith("logins:restore")),
+      ).toEqual([]);
+      expect(vault.held).toBeUndefined();
+      expect(vault.owedSince).toBeUndefined();
+      expect(await contribution.read("user-1", "scout")).toMatchObject({
+        phase: "error",
+      });
+      expect(
+        await contribution.execute(
+          "user-1",
+          "scout",
+          command("updateComputer", "update-1"),
+        ),
+      ).toMatchObject({ status: "rejected" });
+    });
+  }
+
+  test("an Update or a Reset asked for before a Delete my Computer refuses to run", async () => {
+    for (const type of ["updateComputer", "resetComputer"] as const) {
+      const { computers, machine, vault, host } = machineHost();
+      machine.signIns = ["mail.example"];
+      const contribution = createComputerBotBackendContribution(host);
+      await contribution.execute(
+        "user-1",
+        "scout",
+        command("saveCheckpoint", "checkpoint-1"),
+      );
+      expect(
+        await contribution.execute("user-1", "scout", command(type, "renew-1")),
+      ).toMatchObject({ status: "accepted" });
+
+      await deleteComputer(computers, vault, host.now().toISOString());
+      await contribution.settleScheduledWork();
+
+      expect(
+        computers.calls.filter(
+          (call) => call.startsWith("replace") || call.startsWith("reset"),
+        ),
+      ).toEqual([]);
+      expect(openedAfterTeardown(computers.calls)).toBe(false);
+      expect(vault.owedSince).toBeUndefined();
+      expect(await contribution.read("user-1", "scout")).toMatchObject({
+        phase: "error",
+        message: expect.stringMatching(/deleted after this was asked for/),
+      });
+    }
+  });
+
+  test("handing the desktop back keeps the sign-ins made during it", async () => {
+    const { machine, vault, host } = machineHost();
+    const contribution = createComputerBotBackendContribution({
+      ...host,
+      newId: () => "owner-1",
+    });
+    await contribution.execute("user-1", "scout", command("takeControl", "t"));
+    machine.signIns = ["mail.example"];
+
+    await contribution.execute(
+      "user-1",
+      "scout",
+      command("releaseControl", "r"),
+    );
+
+    expect(vault.keeps).toEqual(["kept"]);
+    expect(fakeLoginNamesV1(vault.held!.state)).toEqual(["mail.example"]);
+  });
+
+  test("a machine that has not had its sign-ins back is never captured in their place", async () => {
+    const { machine, vault, host } = machineHost();
+    vault.held = {
+      state: fakeLoginsStateV1(["mail.example"]),
+      count: 1,
+      capturedAt: "2023-11-13T00:00:00.000Z",
+    };
+    vault.owedSince = "2023-11-13T12:00:00.000Z";
+    machine.signIns = [];
+    const contribution = createComputerBotBackendContribution({
+      ...host,
+      newId: () => "owner-1",
+    });
+    await contribution.execute("user-1", "scout", command("takeControl", "t"));
+
+    await contribution.execute(
+      "user-1",
+      "scout",
+      command("releaseControl", "r"),
+    );
+
+    expect(vault.keeps).toEqual(["owed"]);
+    expect(fakeLoginNamesV1(vault.held.state)).toEqual(["mail.example"]);
+  });
+
+  test("a saved checkpoint is what the card says Reset returns to", async () => {
+    const { machine, host } = machineHost({
+      now: () => new Date("2026-09-24T03:00:00.000Z"),
+    });
+    const contribution = createComputerBotBackendContribution(host);
+
+    expect(
+      await contribution.execute(
+        "user-1",
+        "scout",
+        command("saveCheckpoint", "checkpoint-1"),
+      ),
+    ).toMatchObject({ version: 1, status: "applied" });
+
+    expect(machine.checkpoints).toHaveLength(1);
+    expect((await contribution.read("user-1", "scout")).checkpoint).toEqual({
+      version: 1,
+      createdAt: "2026-09-24T03:00:00.000Z",
+    });
   });
 });

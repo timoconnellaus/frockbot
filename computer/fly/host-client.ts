@@ -39,6 +39,7 @@ import {
   ComputerHostExecFrameReaderV1,
   ComputerHostOpenFrameReaderV1,
   decodeComputerHostCancelResultV1,
+  decodeComputerHostCheckpointResultV1,
   decodeComputerHostControlResultV1,
   decodeComputerHostExecResultV1,
   decodeComputerHostFileDeleteResultV1,
@@ -46,13 +47,20 @@ import {
   decodeComputerHostFileReadResultV1,
   decodeComputerHostFileStatResultV1,
   decodeComputerHostFileWriteResultV1,
+  decodeComputerHostLoginsResultV1,
   decodeComputerHostOpenResultV1,
   decodeComputerHostProblemV1,
+  decodeComputerHostReplaceResultV1,
   decodeComputerHostServiceResultV1,
   decodeComputerHostTeardownResultV1,
   decodeComputerHostViewerResultV1,
   encodeComputerHostRequestV1,
   type ComputerHostCancelResultV1,
+  type ComputerHostCheckpointActionV1,
+  type ComputerHostCheckpointResultV1,
+  type ComputerHostLoginsActionV1,
+  type ComputerHostLoginsResultV1,
+  type ComputerHostReplaceResultV1,
   type ComputerHostControlActionV1,
   type ComputerHostControlScopeV1,
   type ComputerHostControlResultV1,
@@ -586,6 +594,50 @@ export class FlyHostTransportV1 {
     return this.json(
       { kind: "service", name },
       decodeComputerHostServiceResultV1,
+      options,
+    );
+  }
+
+  checkpoint(
+    action: ComputerHostCheckpointActionV1,
+    options?: ComputerHostCallOptions & { maxAgeSeconds?: number },
+  ): Promise<ComputerHostCheckpointResultV1> {
+    return this.json(
+      {
+        kind: "checkpoint",
+        action,
+        ...(options?.maxAgeSeconds === undefined
+          ? {}
+          : { maxAgeSeconds: options.maxAgeSeconds }),
+      },
+      decodeComputerHostCheckpointResultV1,
+      options,
+    );
+  }
+
+  replace(
+    options?: ComputerHostCallOptions,
+  ): Promise<ComputerHostReplaceResultV1> {
+    return this.json(
+      { kind: "replace" },
+      decodeComputerHostReplaceResultV1,
+      options,
+    );
+  }
+
+  logins(
+    action: ComputerHostLoginsActionV1,
+    options?: ComputerHostCallOptions & { state?: Uint8Array },
+  ): Promise<ComputerHostLoginsResultV1> {
+    return this.json(
+      {
+        kind: "logins",
+        action,
+        ...(options?.state === undefined
+          ? {}
+          : { stateBase64: fromBytes(options.state) }),
+      },
+      decodeComputerHostLoginsResultV1,
       options,
     );
   }

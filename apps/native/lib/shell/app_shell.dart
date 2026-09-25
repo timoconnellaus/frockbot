@@ -26,6 +26,7 @@ import '../client/exchange_controller.dart';
 import '../client/transport.dart';
 import '../computer/card.dart';
 import '../computer/client.dart';
+import '../computer/settings.dart';
 import '../connections/page.dart';
 import '../email/username.dart';
 import '../flock/avatar.dart';
@@ -2018,6 +2019,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   onOpenLook: () => _openPanel('look', push: true),
                   onOpenSpending: () =>
                       _openSpending([SpendFilter('bot', botId, name)]),
+                  onOpenComputer: switch (computer) {
+                    final ComputerController machine when machine.available =>
+                      () => unawaited(
+                        _push(ComputerSettingsPage(controller: machine)),
+                      ),
+                    _ => null,
+                  },
                   dangerZone: _dangerZone(botId, name),
                 ),
               ],

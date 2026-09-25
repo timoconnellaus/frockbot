@@ -12,9 +12,12 @@
  * It is deliberately the *interface's* behaviour and not the implementations'
  * detail: open and close, a Workspace round-trip, the shape of an exec result,
  * screenshot bytes, a secret typed only on its origin and never answered back,
- * a viewer's open/renew/revoke, a control lease taken and given back, and a
- * teardown that is idempotent where a host offers one. A
- * third host is a third entry in `HOSTS` and no new assertion.
+ * a viewer's open/renew/revoke, a control lease taken and given back, a
+ * checkpoint recorded and reset to, a machine replaced, the browser's sign-ins
+ * carried off and back, a teardown that is idempotent where a host offers one,
+ * and nothing of the machine's own that outlives a teardown or brings the
+ * Computer back. A third host is a third entry in `HOSTS` and no new
+ * assertion.
  */
 import { afterEach, describe, expect, test } from "bun:test";
 import type {
@@ -309,6 +312,51 @@ for (const build of HOSTS) {
       expect(Date.parse(capture!.stoppedAt)).not.toBeNaN();
       expect(await session.demonstration!.stop()).toBeUndefined();
     });
+    test("records a checkpoint once per effect and resets to it", async () => {
+      const session = await open();
+      expect(session.machine).toBeDefined();
+
+      const first = await session.machine!.checkpoint({
+        effectId: "checkpoint-1",
+      });
+      const retried = await session.machine!.checkpoint({
+        effectId: "checkpoint-1",
+      });
+      const young = await session.machine!.checkpoint({
+        effectId: "checkpoint-2",
+        maxAgeMs: 60 * 60_000,
+      });
+      const reset = await session.machine!.reset();
+
+      expect(first.created).toBe(true);
+      expect(Date.parse(first.checkpoint.createdAt)).not.toBeNaN();
+      // A retry of the same effect is the same checkpoint, and one young
+      // enough answers in place of another.
+      expect(retried).toEqual({ checkpoint: first.checkpoint, created: false });
+      expect(young).toEqual({ checkpoint: first.checkpoint, created: false });
+      expect(reset).toEqual(first.checkpoint);
+    });
+
+    test("replaces the machine with one that has no checkpoints of the old", async () => {
+      const session = await open();
+      expect(session.machine).toBeDefined();
+      await session.machine!.checkpoint({ effectId: "checkpoint-1" });
+
+      await session.machine!.replace();
+      await expect(session.machine!.reset()).rejects.toThrow();
+    });
+
+    test("carries the browser's sign-ins off the machine and back", async () => {
+      const session = await open();
+      expect(session.logins).toBeDefined();
+
+      const captured = await session.logins!.capture();
+      expect(captured).toBeDefined();
+      expect(captured!.state).toBeInstanceOf(Uint8Array);
+      const restored = await session.logins!.restore(captured!.state);
+
+      expect(restored.restored).toBe(captured!.count);
+    });
 
     test("tears the Computer down idempotently, where it offers teardown", async () => {
       if (!host.teardown) {
@@ -324,6 +372,47 @@ for (const build of HOSTS) {
       // on the next call rather than remembered as destroyed.
       const session = await open();
       expect(session.tenant.botId).toBe(BOT);
+    });
+
+    test("refuses to replace, reset or carry sign-ins for a Computer torn down", async () => {
+      if (!host.teardown) return;
+      // Used, so that a host which opens its machine lazily has one.
+      const use = (session: ComputerHostSessionV1) =>
+        session.exec!.execute({
+          executable: "/bin/bash",
+          args: ["-lc", "true"],
+        });
+      const before = await open();
+      await use(before);
+      await before.machine!.checkpoint({ effectId: "checkpoint-1" });
+      const captured = await before.logins!.capture();
+
+      await host.teardown({ userId: USER });
+
+      // A session that outlived the teardown finds no machine, and never
+      // makes one: a replacement is not leave to open a new Computer.
+      await expect(before.machine!.replace()).rejects.toMatchObject({
+        code: "not-found",
+      });
+      await expect(before.machine!.reset()).rejects.toMatchObject({
+        code: "not-found",
+      });
+      await expect(before.machine!.checkpoint()).rejects.toMatchObject({
+        code: "not-found",
+      });
+      await expect(before.logins!.capture()).rejects.toMatchObject({
+        code: "not-found",
+      });
+      await expect(
+        before.logins!.restore(captured!.state),
+      ).rejects.toMatchObject({ code: "not-found" });
+
+      // The next open is a new Computer with nothing of the old machine's.
+      const after = await open();
+      await use(after);
+      await expect(after.machine!.reset()).rejects.toMatchObject({
+        code: "not-found",
+      });
     });
   });
 }

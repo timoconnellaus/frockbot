@@ -589,8 +589,39 @@ function handle(
           options?.effectId,
         ),
     },
+    machine: {
+      checkpoint: async (options) => {
+        const result = await computer.checkpoint(options);
+        return { checkpoint: result.checkpoint, created: result.created };
+      },
+      reset: async (options) => (await computer.reset(options)).checkpoint,
+      replace: async (options) => {
+        await computer.replace(options);
+      },
+    },
+    logins: {
+      capture: async (options) => {
+        const result = await computer.logins("capture", options);
+        return result.stateBase64 === undefined
+          ? undefined
+          : { state: bytesOf(result.stateBase64), count: result.count };
+      },
+      restore: async (state, options) => ({
+        restored: (await computer.logins("restore", { ...options, state }))
+          .count,
+      }),
+    },
     close: () => Promise.resolve(),
   };
+}
+
+function bytesOf(base64: string): Uint8Array {
+  const binary = atob(base64);
+  const bytes = new Uint8Array(binary.length);
+  for (let index = 0; index < binary.length; index += 1) {
+    bytes[index] = binary.charCodeAt(index);
+  }
+  return bytes;
 }
 
 /**

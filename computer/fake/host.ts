@@ -10,8 +10,9 @@
  * What it is made of is deliberately boring: a `Map` for the Workspace, a
  * table of scripted `exec` answers, one 1×1 PNG, viewer sessions on an
  * `https://viewer.invalid/…` URL, process records, one doctor report, a
- * one-page browser with two fields, and leases keyed by scope. It records what it was asked, so a test asserts on
- * the calls rather than on a filesystem.
+ * one-page browser with two fields, leases keyed by scope, checkpoints, and
+ * the browser's sign-ins as a list of names. It records what it was asked, so
+ * a test asserts on the calls rather than on a filesystem.
  *
  * It imports `@frockbot/computer/core` and nothing else from this Package —
  * `scripts/check-computer-host-imports.ts` rule 4 — because a fake that
@@ -273,11 +274,47 @@ export interface FakeComputerHostOptionsV1 {
     steps: unknown[];
     screenshots?: { afterStep: number; bytes: Uint8Array }[];
   };
+  /** The clock a checkpoint is dated by. */
+  now?: () => number;
+}
+
+/**
+ * This host's capture document: the sign-ins by name. Opaque above the host,
+ * as every host's is; tests build one with this and read one back with
+ * `fakeLoginNamesV1`.
+ */
+export function fakeLoginsStateV1(names: readonly string[]): Uint8Array {
+  return encoder.encode(JSON.stringify({ signIns: names }));
+}
+
+export function fakeLoginNamesV1(state: Uint8Array): string[] {
+  const document = JSON.parse(new TextDecoder().decode(state)) as {
+    signIns?: unknown;
+  };
+  if (
+    !Array.isArray(document.signIns) ||
+    !document.signIns.every((name) => typeof name === "string")
+  ) {
+    throw new Error("not a capture this host made");
+  }
+  return document.signIns as string[];
 }
 
 /** One User's Computer on this host: everything that survives a `close`. */
 export class FakeComputerV1 {
   readonly workspace = new FakeWorkspace();
+  /**
+   * The browser's sign-ins, or `undefined` for a machine whose browser is not
+   * running. A fresh machine's browser runs and is signed in to nothing.
+   */
+  signIns: string[] | undefined = [];
+  /** Checkpoints, oldest first, each holding the sign-ins it caught. */
+  readonly checkpoints: Array<{
+    id: string;
+    createdAt: string;
+    effectId?: string;
+    signIns: string[] | undefined;
+  }> = [];
   readonly execCalls: FakeExecCallV1[] = [];
   readonly syncCalls: FakeSyncCallV1[] = [];
   readonly viewerCalls: { action: string; sessionId?: string }[] = [];
@@ -432,6 +469,10 @@ export class FakeComputerHostV1 implements ComputerHostV1 {
     this.capabilities = options.capabilities ?? FAKE_HOST_CAPABILITIES_V1;
   }
 
+  now(): number {
+    return this.options.now?.() ?? Date.now();
+  }
+
   /** The Computer backing one User, created on first reach. */
   computerFor(identity: ComputerIdentityV1): FakeComputerV1 {
     const key = computerIdentityKeyV1(identity);
@@ -495,6 +536,14 @@ export class FakeComputerHostV1 implements ComputerHostV1 {
     assignment: ComputerAssignment,
   ): ComputerHostSessionV1 {
     const host = this;
+    // A session outlives the Computer it opened when a teardown lands; what
+    // acts on the whole machine then finds nothing, and never makes one.
+    const gone = (): Promise<never> | undefined =>
+      host.computers.get(computerIdentityKeyV1(identity)) === computer
+        ? undefined
+        : Promise.reject(
+            new ComputerError("not-found", "This Computer has been deleted"),
+          );
     const mint = (): ComputerViewerSession => {
       const id = computer.next("viewer");
       const session: ComputerViewerSession = {
@@ -708,6 +757,92 @@ export class FakeComputerHostV1 implements ComputerHostV1 {
             })),
             dropped,
           });
+        },
+      },
+      machine: {
+        checkpoint: (options) => {
+          host.calls.push(`checkpoint:${botId}`);
+          const refused = gone();
+          if (refused) return refused;
+          const newest = computer.checkpoints.at(-1);
+          const same = options?.effectId
+            ? computer.checkpoints.find(
+                (checkpoint) => checkpoint.effectId === options.effectId,
+              )
+            : undefined;
+          const young =
+            newest &&
+            options?.maxAgeMs !== undefined &&
+            host.now() - Date.parse(newest.createdAt) < options.maxAgeMs;
+          const answered = same ?? (young ? newest : undefined);
+          if (answered) {
+            return Promise.resolve({
+              checkpoint: { id: answered.id, createdAt: answered.createdAt },
+              created: false,
+            });
+          }
+          const recorded = {
+            id: computer.next("checkpoint"),
+            createdAt: new Date(host.now()).toISOString(),
+            ...(options?.effectId ? { effectId: options.effectId } : {}),
+            signIns: computer.signIns ? [...computer.signIns] : undefined,
+          };
+          computer.checkpoints.push(recorded);
+          return Promise.resolve({
+            checkpoint: { id: recorded.id, createdAt: recorded.createdAt },
+            created: true,
+          });
+        },
+        reset: () => {
+          host.calls.push(`reset:${botId}`);
+          const refused = gone();
+          if (refused) return refused;
+          const newest = computer.checkpoints.at(-1);
+          if (!newest) {
+            return Promise.reject(
+              new ComputerError(
+                "not-found",
+                "This Computer has no checkpoint to reset to yet",
+              ),
+            );
+          }
+          // The machine goes back; the Workspace is durable and does not.
+          computer.signIns = newest.signIns ? [...newest.signIns] : undefined;
+          return Promise.resolve({
+            id: newest.id,
+            createdAt: newest.createdAt,
+          });
+        },
+        replace: () => {
+          host.calls.push(`replace:${identity.userId}`);
+          const refused = gone();
+          if (refused) return refused;
+          // A fresh machine: no checkpoints, a browser signed in to nothing,
+          // and the durable Workspace exactly as it was.
+          computer.checkpoints.splice(0);
+          computer.signIns = [];
+          return Promise.resolve();
+        },
+      },
+      logins: {
+        capture: () => {
+          host.calls.push(`logins:capture:${botId}`);
+          const refused = gone();
+          if (refused) return refused;
+          const held = computer.signIns;
+          return Promise.resolve(
+            held
+              ? { state: fakeLoginsStateV1(held), count: held.length }
+              : undefined,
+          );
+        },
+        restore: (state) => {
+          host.calls.push(`logins:restore:${botId}`);
+          const refused = gone();
+          if (refused) return refused;
+          const names = fakeLoginNamesV1(state);
+          computer.signIns = [...names];
+          return Promise.resolve({ restored: names.length });
         },
       },
       ...(this.options.sync

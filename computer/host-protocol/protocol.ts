@@ -51,10 +51,18 @@ export const COMPUTER_HOST_LIMITS = {
   maxOutputBytes: 4 * 1_024 * 1_024,
   /** Human-control lease age a request may ask for, in seconds. */
   controlMaxAgeSeconds: 3_600,
+  /** The oldest a `create` may accept its newest checkpoint as: a year. */
+  checkpointMaxAgeSeconds: 366 * 24 * 3_600,
   /** Declared service name. */
   serviceName: 128,
   /** Failure text carried on a frame or a problem response. */
   message: 2_048,
+  /**
+   * The browser's sign-ins as one document, base64. Its own ceiling rather
+   * than a file's: the app seals and keeps it, and what it keeps has to fit
+   * one Durable Object value after compression.
+   */
+  loginsBase64: 8 * 1_024 * 1_024,
   /** The whole JSON request body. */
   requestBytes: 32 * 1_024 * 1_024,
 } as const;
@@ -206,6 +214,53 @@ export interface ComputerHostTeardownOperationV1 {
   kind: "teardown";
 }
 
+/**
+ * The Computer as one machine rather than one tenant's use of it.
+ *
+ * `create` records a checkpoint of the whole machine; `restore` puts the
+ * machine back to the newest checkpoint this host recorded. A checkpoint
+ * another party made on the same machine is never restored: only one this
+ * host recorded is a state it knows how to come back from.
+ */
+export type ComputerHostCheckpointActionV1 = "create" | "restore";
+
+export interface ComputerHostCheckpointOperationV1 {
+  kind: "checkpoint";
+  action: ComputerHostCheckpointActionV1;
+  /**
+   * `create` only: answer the newest checkpoint instead of recording another
+   * when it is younger than this. Absent records one unconditionally.
+   */
+  maxAgeSeconds?: number;
+}
+
+/**
+ * Discards the machine. The next `open` provisions a fresh one, and what
+ * comes back is what the Workspace always promised would: the durable roots,
+ * through the sync.
+ *
+ * Refused `not-found` when there is no machine to discard, and when a
+ * `teardown` destroyed the Computer while this ran: a replacement never
+ * stands in for a Computer the User deleted.
+ */
+export interface ComputerHostReplaceOperationV1 {
+  kind: "replace";
+}
+
+export type ComputerHostLoginsActionV1 = "capture" | "restore";
+
+/**
+ * The browser's sign-ins, carried off the machine and back as one document
+ * only the host reads. The app keeps it sealed; the wire carries it in the
+ * clear, as it carries every file, inside the service binding.
+ */
+export interface ComputerHostLoginsOperationV1 {
+  kind: "logins";
+  action: ComputerHostLoginsActionV1;
+  /** `restore` only: a document a `capture` answered, base64. */
+  stateBase64?: string;
+}
+
 export type ComputerHostOperationV1 =
   | ComputerHostOpenOperationV1
   | ComputerHostExecOperationV1
@@ -218,7 +273,10 @@ export type ComputerHostOperationV1 =
   | ComputerHostViewerOperationV1
   | ComputerHostServiceOperationV1
   | ComputerHostCancelOperationV1
-  | ComputerHostTeardownOperationV1;
+  | ComputerHostTeardownOperationV1
+  | ComputerHostCheckpointOperationV1
+  | ComputerHostReplaceOperationV1
+  | ComputerHostLoginsOperationV1;
 
 export interface ComputerHostRequestV1 extends ComputerHostEnvelopeV1 {
   operation: ComputerHostOperationV1;
@@ -240,6 +298,9 @@ export const COMPUTER_HOST_ROUTES = {
   service: "/v1/computer/service",
   cancel: "/v1/computer/cancel",
   teardown: "/v1/computer/teardown",
+  checkpoint: "/v1/computer/checkpoint",
+  replace: "/v1/computer/replace",
+  logins: "/v1/computer/logins",
 } as const satisfies Record<ComputerHostOperationKindV1, string>;
 
 const KIND_BY_ROUTE = new Map<string, ComputerHostOperationKindV1>(
@@ -397,6 +458,46 @@ export interface ComputerHostTeardownResultV1 {
   effectId: string;
   /** False when there was no Computer left to destroy. */
   deleted: boolean;
+}
+
+/** One point the machine can be put back to. `id` is opaque above the host. */
+export interface ComputerHostCheckpointV1 {
+  id: string;
+  /** ISO-8601. */
+  createdAt: string;
+}
+
+export interface ComputerHostCheckpointResultV1 {
+  version: typeof COMPUTER_HOST_PROTOCOL_VERSION;
+  effectId: string;
+  action: ComputerHostCheckpointActionV1;
+  /** The checkpoint recorded, answered, or restored. */
+  checkpoint: ComputerHostCheckpointV1;
+  /**
+   * True only when this call recorded it. A retry of the same effect, and a
+   * `create` whose newest checkpoint was young enough, answer false.
+   */
+  created: boolean;
+}
+
+/** Answered only once the machine is gone. */
+export interface ComputerHostReplaceResultV1 {
+  version: typeof COMPUTER_HOST_PROTOCOL_VERSION;
+  effectId: string;
+}
+
+export interface ComputerHostLoginsResultV1 {
+  version: typeof COMPUTER_HOST_PROTOCOL_VERSION;
+  effectId: string;
+  action: ComputerHostLoginsActionV1;
+  /**
+   * `capture` only, and absent when no browser was running to ask — which is
+   * a different fact from a browser with no sign-ins, and is never answered
+   * as an empty document that would overwrite a kept one.
+   */
+  stateBase64?: string;
+  /** Sign-in records captured, or restored. */
+  count: number;
 }
 
 /**
@@ -763,6 +864,50 @@ function decodeOperation(
           "Computer service name",
         ),
       };
+    case "checkpoint": {
+      const action = value.action;
+      if (action !== "create" && action !== "restore") {
+        fail("Computer checkpoint action is invalid");
+      }
+      if (action === "restore" && value.maxAgeSeconds !== undefined) {
+        fail("Computer checkpoint restore takes no maximum age");
+      }
+      return {
+        kind,
+        action,
+        ...(value.maxAgeSeconds === undefined
+          ? {}
+          : {
+              maxAgeSeconds: boundedInteger(
+                value.maxAgeSeconds,
+                1,
+                COMPUTER_HOST_LIMITS.checkpointMaxAgeSeconds,
+                "Computer checkpoint maximum age",
+              ),
+            }),
+      };
+    }
+    case "replace":
+      return { kind };
+    case "logins": {
+      const action = value.action;
+      if (action !== "capture" && action !== "restore") {
+        fail("Computer logins action is invalid");
+      }
+      if (action === "capture") {
+        if (value.stateBase64 !== undefined) {
+          fail("Computer logins capture carries no state");
+        }
+        return { kind, action };
+      }
+      const stateBase64 = decodeBase64FieldV1(
+        value.stateBase64,
+        "Computer logins state",
+        COMPUTER_HOST_LIMITS.loginsBase64,
+      );
+      if (!stateBase64) fail("Computer logins restore requires a state");
+      return { kind, action, stateBase64 };
+    }
   }
 }
 
@@ -788,6 +933,9 @@ const OPERATION_FIELDS: Record<ComputerHostOperationKindV1, readonly string[]> =
     service: ["name"],
     cancel: [],
     teardown: [],
+    checkpoint: ["action", "maxAgeSeconds"],
+    replace: [],
+    logins: ["action", "stateBase64"],
   };
 
 /** Decodes one request body already known to address `kind`. */
@@ -1242,6 +1390,90 @@ export function decodeComputerHostTeardownResultV1(
     version: COMPUTER_HOST_PROTOCOL_VERSION,
     effectId: value.effectId as string,
     deleted: boolean(value.deleted, `${label} deletion`),
+  };
+}
+
+function timestampField(input: unknown, label: string): string {
+  const value = boundedString(input, 64, label);
+  if (!Number.isFinite(Date.parse(value))) fail(`${label} is not a time`);
+  return value;
+}
+
+export function decodeComputerHostCheckpointResultV1(
+  input: unknown,
+): ComputerHostCheckpointResultV1 {
+  const label = "Computer host checkpoint result";
+  const value = resultEnvelope(
+    input,
+    ["action", "checkpoint", "created"],
+    label,
+  );
+  const action = value.action;
+  if (action !== "create" && action !== "restore") {
+    fail(`${label} action is invalid`);
+  }
+  const checkpoint = object(value.checkpoint, `${label} checkpoint`);
+  exactly(checkpoint, ["id", "createdAt"], `${label} checkpoint`);
+  return {
+    version: COMPUTER_HOST_PROTOCOL_VERSION,
+    effectId: value.effectId as string,
+    action,
+    checkpoint: {
+      id: identifier(checkpoint.id, `${label} checkpoint id`),
+      createdAt: timestampField(
+        checkpoint.createdAt,
+        `${label} checkpoint time`,
+      ),
+    },
+    created: boolean(value.created, `${label} creation`),
+  };
+}
+
+export function decodeComputerHostReplaceResultV1(
+  input: unknown,
+): ComputerHostReplaceResultV1 {
+  const value = resultEnvelope(input, [], "Computer host replace result");
+  return {
+    version: COMPUTER_HOST_PROTOCOL_VERSION,
+    effectId: value.effectId as string,
+  };
+}
+
+export function decodeComputerHostLoginsResultV1(
+  input: unknown,
+): ComputerHostLoginsResultV1 {
+  const label = "Computer host logins result";
+  const value = resultEnvelope(
+    input,
+    ["action", "stateBase64", "count"],
+    label,
+  );
+  const action = value.action;
+  if (action !== "capture" && action !== "restore") {
+    fail(`${label} action is invalid`);
+  }
+  if (action === "restore" && value.stateBase64 !== undefined) {
+    fail(`${label} restore carries no state`);
+  }
+  return {
+    version: COMPUTER_HOST_PROTOCOL_VERSION,
+    effectId: value.effectId as string,
+    action,
+    ...(value.stateBase64 === undefined
+      ? {}
+      : {
+          stateBase64: decodeBase64FieldV1(
+            value.stateBase64,
+            `${label} state`,
+            COMPUTER_HOST_LIMITS.loginsBase64,
+          ),
+        }),
+    count: boundedInteger(
+      value.count,
+      0,
+      Number.MAX_SAFE_INTEGER,
+      `${label} count`,
+    ),
   };
 }
 

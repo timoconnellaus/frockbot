@@ -703,6 +703,78 @@ export interface ComputerControl {
   ): Promise<void>;
 }
 
+/** One point the whole Computer can be put back to. */
+export interface ComputerCheckpointV1 {
+  /** The host's own name for it; opaque above the host. */
+  id: string;
+  createdAt: string;
+}
+
+/**
+ * The Computer as one machine rather than one tenant's use of it.
+ *
+ * Every member reaches all of the User's Bots at once, because one Computer
+ * serves them all. What survives `reset` and `replace` is the promise the
+ * Workspace already makes — the declared durable roots come back from object
+ * storage through the sync — and nothing else on the machine: what was
+ * installed, and every file outside those roots, is the machine's.
+ */
+export interface ComputerMachineV1 {
+  /**
+   * Records a checkpoint of the whole machine. With `maxAgeMs`, answers the
+   * newest checkpoint instead when it is younger than that. A retry of the
+   * same `effectId` answers the checkpoint the first attempt recorded.
+   */
+  checkpoint(
+    options?: ComputerOperationOptions & { maxAgeMs?: number },
+  ): Promise<{ checkpoint: ComputerCheckpointV1; created: boolean }>;
+  /**
+   * Puts the machine back to the newest checkpoint this host recorded, and
+   * answers which one. Refused `not-found` when there is none yet.
+   */
+  reset(options?: ComputerOperationOptions): Promise<ComputerCheckpointV1>;
+  /**
+   * Discards the machine; the next open provisions a fresh one. Refused
+   * `not-found` when there is no machine to discard — after a `teardown`
+   * there is nothing to update — and when a `teardown` overtakes it.
+   *
+   * None of these members provisions a machine: each refuses `not-found`
+   * when there is none, so nothing here brings back a Computer the User
+   * deleted.
+   */
+  replace(options?: ComputerOperationOptions): Promise<void>;
+}
+
+/** One capture of the browser's sign-ins: opaque to everything but its host. */
+export interface ComputerLoginsCaptureV1 {
+  state: Uint8Array;
+  /** How many sign-in records the capture holds. */
+  count: number;
+}
+
+/**
+ * The browser's sign-ins, carried off the machine so they can outlive it.
+ *
+ * The capture is the User's credentials in the clear. The host hands it to
+ * its caller and keeps none of it; the caller seals it before it is stored,
+ * and it never reaches the Workspace, a log, or a model.
+ */
+export interface ComputerBrowserLoginsV1 {
+  /**
+   * The sign-ins as they stand, or `undefined` when no browser was running
+   * to ask. Never an empty capture standing in for an absent browser: an
+   * empty capture would overwrite one worth keeping.
+   */
+  capture(
+    options?: ComputerOperationOptions,
+  ): Promise<ComputerLoginsCaptureV1 | undefined>;
+  /** Puts a capture back into the browser, starting the browser if it must. */
+  restore(
+    state: Uint8Array,
+    options?: ComputerOperationOptions,
+  ): Promise<{ restored: number }>;
+}
+
 /** Why one run of the durable-root sync happened. */
 export type ComputerSyncReasonV1 = "open" | "signal" | "turn-end";
 
@@ -880,6 +952,10 @@ export interface ComputerHostSessionV1 {
   control?: ComputerControl;
   /** Recording what the lease holder does in the browser, where offered. */
   demonstration?: ComputerDemonstrationCapabilityV1;
+  /** The whole machine: checkpoint, reset, replace. */
+  machine?: ComputerMachineV1;
+  /** The browser's sign-ins, carried off the machine and back. */
+  logins?: ComputerBrowserLoginsV1;
   close(): Promise<void>;
 }
 
@@ -981,6 +1057,8 @@ function guardedHandle(
     viewer,
     control,
     demonstration,
+    machine,
+    logins,
   } = handle;
   return {
     assignment: handle.assignment,
@@ -1092,6 +1170,26 @@ function guardedHandle(
             ),
           stop: (options) =>
             guardedOperation(assertCurrent, () => demonstration.stop(options)),
+        }
+      : undefined,
+    machine: machine
+      ? {
+          checkpoint: (options) =>
+            guardedOperation(assertCurrent, () => machine.checkpoint(options)),
+          reset: (options) =>
+            guardedOperation(assertCurrent, () => machine.reset(options)),
+          replace: (options) =>
+            guardedOperation(assertCurrent, () => machine.replace(options)),
+        }
+      : undefined,
+    logins: logins
+      ? {
+          capture: (options) =>
+            guardedOperation(assertCurrent, () => logins.capture(options)),
+          restore: (state, options) =>
+            guardedOperation(assertCurrent, () =>
+              logins.restore(state, options),
+            ),
         }
       : undefined,
     close: () => handle.close(),

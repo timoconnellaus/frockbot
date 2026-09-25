@@ -18,10 +18,13 @@ import {
   type ComputerDoctorReportV1,
 } from "@frockbot/computer/core/host";
 import type {
+  ComputerHostCheckpointResultV1,
   ComputerHostControlResultV1,
   ComputerHostFileReadResultV1,
+  ComputerHostLoginsResultV1,
   ComputerHostOpenResultV1,
   ComputerHostProvisioningV1,
+  ComputerHostReplaceResultV1,
   ComputerHostTeardownResultV1,
   ComputerHostViewerResultV1,
 } from "@frockbot/computer/host-protocol";
@@ -119,6 +122,12 @@ const TIMEOUTS = {
   demonstrationStart: 45_000,
   /** Ending the recorder and reading back what it wrote. */
   demonstrationStop: 45_000,
+  /** Recording or restoring a checkpoint of the whole machine. */
+  checkpoint: 5 * 60_000,
+  /** Discarding the machine, and waiting for its name to come free. */
+  replace: 2 * 60_000,
+  /** Reading or writing the browser's sign-ins, starting it if it must. */
+  logins: 2 * 60_000,
 } as const;
 
 /** What a demonstration's `stop` may carry back: its steps and screenshots. */
@@ -157,6 +166,17 @@ export interface ComputerHostSurfaceV1 {
   teardown?(
     options?: ComputerHostCallOptions,
   ): Promise<ComputerHostTeardownResultV1>;
+  checkpoint(
+    action: "create" | "restore",
+    options?: ComputerHostCallOptions & { maxAgeSeconds?: number },
+  ): Promise<ComputerHostCheckpointResultV1>;
+  replace(
+    options?: ComputerHostCallOptions,
+  ): Promise<ComputerHostReplaceResultV1>;
+  logins(
+    action: "capture" | "restore",
+    options?: ComputerHostCallOptions & { state?: Uint8Array },
+  ): Promise<ComputerHostLoginsResultV1>;
 }
 
 /**
@@ -637,6 +657,31 @@ export class FlyAgentComputer {
   /** The human session owner this Computer uses for local takeover. */
   get controlOwnerId(): string {
     return this.computer.humanControlOwnerId;
+  }
+
+  checkpoint(
+    options?: ComputerOperationOptions & { maxAgeMs?: number },
+  ): Promise<ComputerHostCheckpointResultV1> {
+    return this.computer.checkpointForAgent(this.layout, "create", options);
+  }
+
+  reset(
+    options?: ComputerOperationOptions,
+  ): Promise<ComputerHostCheckpointResultV1> {
+    return this.computer.checkpointForAgent(this.layout, "restore", options);
+  }
+
+  replace(
+    options?: ComputerOperationOptions,
+  ): Promise<ComputerHostReplaceResultV1> {
+    return this.computer.replaceForAgent(this.layout, options);
+  }
+
+  logins(
+    action: "capture" | "restore",
+    options?: ComputerOperationOptions & { state?: Uint8Array },
+  ): Promise<ComputerHostLoginsResultV1> {
+    return this.computer.loginsForAgent(this.layout, action, options);
   }
 }
 
@@ -1517,6 +1562,76 @@ export class FlyComputer {
       timeoutMs: TIMEOUTS.viewer,
       ...(sessionId === undefined ? {} : { sessionId }),
     });
+  }
+
+  /**
+   * Records a checkpoint of the machine, or puts it back to the newest one.
+   *
+   * Neither opens the Computer first: a machine that no longer opens is the
+   * one somebody resets, and a checkpoint of a machine that is not there has
+   * nothing to record.
+   */
+  async checkpointForAgent(
+    layout: AgentLayout,
+    action: "create" | "restore",
+    options?: ComputerOperationOptions & { maxAgeMs?: number },
+  ): Promise<ComputerHostCheckpointResultV1> {
+    const maxAgeMs = options?.maxAgeMs;
+    const result = await this.hostFor(layout).checkpoint(action, {
+      ...(options?.signal ? { signal: options.signal } : {}),
+      ...(options?.effectId ? { effectId: options.effectId } : {}),
+      timeoutMs: TIMEOUTS.checkpoint,
+      ...(maxAgeMs === undefined
+        ? {}
+        : { maxAgeSeconds: Math.max(1, Math.ceil(maxAgeMs / 1_000)) }),
+    });
+    if (action === "restore") this.forgetMachine();
+    return result;
+  }
+
+  async replaceForAgent(
+    layout: AgentLayout,
+    options?: ComputerOperationOptions,
+  ): Promise<ComputerHostReplaceResultV1> {
+    const result = await this.hostFor(layout).replace({
+      ...(options?.signal ? { signal: options.signal } : {}),
+      ...(options?.effectId ? { effectId: options.effectId } : {}),
+      timeoutMs: TIMEOUTS.replace,
+    });
+    this.forgetMachine();
+    return result;
+  }
+
+  /**
+   * The browser's sign-ins. Unguarded, like the Workspace: carrying the
+   * User's own sign-ins off the machine is not the Bot acting on the desktop,
+   * and a human holding the screen is the likeliest person to have just
+   * signed in.
+   */
+  loginsForAgent(
+    layout: AgentLayout,
+    action: "capture" | "restore",
+    options?: ComputerOperationOptions & { state?: Uint8Array },
+  ): Promise<ComputerHostLoginsResultV1> {
+    return this.hostFor(layout).logins(action, {
+      ...(options?.signal ? { signal: options.signal } : {}),
+      ...(options?.effectId ? { effectId: options.effectId } : {}),
+      ...(options?.state ? { state: options.state } : {}),
+      timeoutMs: TIMEOUTS.logins,
+    });
+  }
+
+  /**
+   * Drops everything this object learned about the machine, for every
+   * tenant. After a reset or a replacement the tenant directories, the slots
+   * and the generation it cached describe a machine that is gone, and the
+   * next operation has to open the one that is there.
+   */
+  private forgetMachine(): void {
+    this.agentPromises.clear();
+    this.storagePromises.clear();
+    this.displays.clear();
+    this.generations.clear();
   }
 
   // --- internals -----------------------------------------------------------

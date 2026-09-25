@@ -1,12 +1,10 @@
 // What an audit entry is allowed to carry out of a tool call.
 //
 // The constitution is explicit and this module is where it is enforced:
-// "No secret lives on the Workspace except the User's browser profile … Code
-// running on the Computer receives every other credential only as an opaque,
-// expiring lease" (`AGENTS.md` § Computer and Workspace), and "client bundles
-// and protocols contain no secrets" (§ Architecture checks). An audit table is
-// durable state a person reads, so it gets the digest and a redacted preview,
-// never the arguments.
+// "Secrets stay server-side. They cross an interface only as opaque, expiring
+// leases. Memory and the Workspace hold none." (`AGENTS.md` § Invariants). An
+// audit table is durable state a person reads, so it gets the digest and a
+// redacted preview, never the arguments.
 //
 // Three refusals, in order of how badly they would fail:
 //

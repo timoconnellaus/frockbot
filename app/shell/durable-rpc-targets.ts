@@ -194,6 +194,17 @@ export interface BotUserConfigurationRpcTargetV1
   operateMemory(
     input: BotRpcEnvelopeV1<{ action: string; request: object }>,
   ): Promise<object>;
+  /** The User's sealed browser sign-ins; `./computer-logins.ts` is both halves. */
+  readComputerLogins(
+    input: UserRpcEnvelopeV1<{ capture: boolean }>,
+  ): Promise<object>;
+  keepComputerLogins(
+    input: UserRpcEnvelopeV1<{ kept: object }>,
+  ): Promise<object>;
+  oweComputerLogins(input: UserRpcEnvelopeV1<{ at: string }>): Promise<object>;
+  settleComputerLogins(
+    input: UserRpcEnvelopeV1<{ owedSince: string }>,
+  ): Promise<void>;
 }
 
 export interface BotStateRpcTargetV1 extends SubagentDurableObjectRpcTargetV1 {

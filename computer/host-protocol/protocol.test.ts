@@ -8,6 +8,7 @@ import {
   computerHostProblemV1,
   decodeBase64FieldV1,
   decodeComputerHostCancelResultV1,
+  decodeComputerHostCheckpointResultV1,
   decodeComputerHostControlResultV1,
   decodeComputerHostExecFrameV1,
   decodeComputerHostExecResultV1,
@@ -17,9 +18,11 @@ import {
   decodeComputerHostFileStatResultV1,
   decodeComputerHostFileWriteResultV1,
   decodeComputerHostHttpRequestV1,
+  decodeComputerHostLoginsResultV1,
   decodeComputerHostOpenResultV1,
   decodeComputerHostOpenFrameV1,
   decodeComputerHostProblemV1,
+  decodeComputerHostReplaceResultV1,
   decodeComputerHostRequestV1,
   decodeComputerHostServiceResultV1,
   decodeComputerHostTeardownResultV1,
@@ -398,6 +401,97 @@ describe("control, viewer, service, cancel", () => {
   });
 });
 
+describe("checkpoint, replace, logins", () => {
+  test("round-trips a checkpoint with a maximum age and a restore without one", () => {
+    const create: ComputerHostOperationV1 = {
+      kind: "checkpoint",
+      action: "create",
+      maxAgeSeconds: 86_400,
+    };
+    const restore: ComputerHostOperationV1 = {
+      kind: "checkpoint",
+      action: "restore",
+    };
+    expect(
+      decodeComputerHostRequestV1("checkpoint", request(create)).operation,
+    ).toEqual(create);
+    expect(
+      decodeComputerHostRequestV1("checkpoint", request(restore)).operation,
+    ).toEqual(restore);
+  });
+
+  test("a restore takes no maximum age, and an age has a ceiling", () => {
+    expect(() =>
+      decodeComputerHostRequestV1("checkpoint", {
+        ...envelope,
+        action: "restore",
+        maxAgeSeconds: 60,
+      }),
+    ).toThrow(/restore takes no maximum age/);
+    expect(() =>
+      decodeComputerHostRequestV1("checkpoint", {
+        ...envelope,
+        action: "create",
+        maxAgeSeconds: COMPUTER_HOST_LIMITS.checkpointMaxAgeSeconds + 1,
+      }),
+    ).toThrow(/maximum age must be between/);
+    expect(() =>
+      decodeComputerHostRequestV1("checkpoint", {
+        ...envelope,
+        action: "rewind",
+      }),
+    ).toThrow(/checkpoint action is invalid/);
+  });
+
+  test("a replacement carries nothing but the envelope", () => {
+    expect(
+      decodeComputerHostRequestV1("replace", request({ kind: "replace" }))
+        .operation,
+    ).toEqual({ kind: "replace" });
+    expect(() =>
+      decodeComputerHostRequestV1("replace", { ...envelope, force: true }),
+    ).toThrow(/unknown field/);
+  });
+
+  test("a capture carries no state and a restore requires one", () => {
+    expect(
+      decodeComputerHostRequestV1(
+        "logins",
+        request({ kind: "logins", action: "capture" }),
+      ).operation,
+    ).toEqual({ kind: "logins", action: "capture" });
+    const restore: ComputerHostOperationV1 = {
+      kind: "logins",
+      action: "restore",
+      stateBase64: "eyJ2ZXJzaW9uIjoxfQ==",
+    };
+    expect(
+      decodeComputerHostRequestV1("logins", request(restore)).operation,
+    ).toEqual(restore);
+    expect(() =>
+      decodeComputerHostRequestV1("logins", {
+        ...envelope,
+        action: "capture",
+        stateBase64: "eyJ2ZXJzaW9uIjoxfQ==",
+      }),
+    ).toThrow(/capture carries no state/);
+    expect(() =>
+      decodeComputerHostRequestV1("logins", {
+        ...envelope,
+        action: "restore",
+        stateBase64: "",
+      }),
+    ).toThrow(/restore requires a state/);
+    expect(() =>
+      decodeComputerHostRequestV1("logins", {
+        ...envelope,
+        action: "restore",
+        stateBase64: "A".repeat(COMPUTER_HOST_LIMITS.loginsBase64 + 4),
+      }),
+    ).toThrow(/exceeds/);
+  });
+});
+
 describe("HTTP decoding", () => {
   function post(path: string, body: unknown, method = "POST"): Request {
     return new Request(`http://computer-host.internal${path}`, {
@@ -611,6 +705,55 @@ describe("results", () => {
         cancelled: false,
       }).cancelled,
     ).toBe(false);
+  });
+
+  test("round-trips checkpoint, replace, and logins results", () => {
+    expect(
+      decodeComputerHostCheckpointResultV1({
+        version: 1,
+        effectId: "effect-1",
+        action: "create",
+        checkpoint: { id: "v3", createdAt: "2026-09-24T00:00:00.000Z" },
+        created: true,
+      }).checkpoint,
+    ).toEqual({ id: "v3", createdAt: "2026-09-24T00:00:00.000Z" });
+    expect(() =>
+      decodeComputerHostCheckpointResultV1({
+        version: 1,
+        effectId: "effect-1",
+        action: "restore",
+        checkpoint: { id: "v3", createdAt: "yesterday" },
+        created: false,
+      }),
+    ).toThrow(/is not a time/);
+    expect(
+      decodeComputerHostReplaceResultV1({ version: 1, effectId: "effect-1" }),
+    ).toEqual({ version: 1, effectId: "effect-1" });
+    // A replacement that did not happen is refused, never answered.
+    expect(() =>
+      decodeComputerHostReplaceResultV1({
+        version: 1,
+        effectId: "effect-1",
+        replaced: false,
+      }),
+    ).toThrow();
+    expect(
+      decodeComputerHostLoginsResultV1({
+        version: 1,
+        effectId: "effect-1",
+        action: "capture",
+        count: 0,
+      }).stateBase64,
+    ).toBeUndefined();
+    expect(() =>
+      decodeComputerHostLoginsResultV1({
+        version: 1,
+        effectId: "effect-1",
+        action: "restore",
+        stateBase64: "eyJ2ZXJzaW9uIjoxfQ==",
+        count: 1,
+      }),
+    ).toThrow(/restore carries no state/);
   });
 
   test("refuses a result carrying an undeclared field", () => {

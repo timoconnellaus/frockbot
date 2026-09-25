@@ -575,6 +575,7 @@ export function createFoundationHostedRuntimePackages(
               },
             }
           : {}),
+        ...(host.computerUpkeep ? { upkeep: host.computerUpkeep } : {}),
       }),
     ),
   ];
