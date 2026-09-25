@@ -109,8 +109,10 @@ export type PluginPagePageMessageV1 =
  * The page side of the bridge, as `window.frockbot`:
  *
  * - `ready` resolves with `{pluginId, botId, surfaceId, themeTokens, state}`
- *   once the host answers the page's `hello`, and sets every theme token as a
- *   `--frockbot-<name>` custom property on the document.
+ *   once the host greets the page, and sets every theme token as a
+ *   `--frockbot-<name>` custom property on the document. The host greets each
+ *   document when it has loaded and answers `hello` as well, so a page may be
+ *   greeted twice: the first resolves `ready`, a later one is new state.
  * - `state` is the latest state; `onState(fn)` is called with each new one and
  *   returns its unsubscribe.
  * - `callTool(name, input)` runs one of this Plugin's own tools and resolves
@@ -120,7 +122,9 @@ export type PluginPagePageMessageV1 =
  *   opened it, then hands each frame to `onSamples` as a `Float32Array` of
  *   -1..1 mono samples; it rejects with the host's reason when refused, and
  *   `onClosed(reason)` hears the host close it — the person's Stop, the page
- *   leaving the screen, another use of the microphone.
+ *   leaving the screen, another use of the microphone, or the page's own
+ *   `close()`. `close()` resolves once the host has let go; a host that never
+ *   answers is taken as having let go after a few seconds.
  *
  * Only messages from `parent` are read. In a phone WebView the page is its own
  * parent and the host delivers with `window.postMessage`, so the one check
@@ -136,6 +140,7 @@ export const PLUGIN_PAGE_HELPER_JS_V1 = `(() => {
   let ok;
   let fail;
   let mic = null;
+  let greeted = false;
   const ready = new Promise((resolve, reject) => {
     ok = resolve;
     fail = reject;
@@ -157,7 +162,12 @@ export const PLUGIN_PAGE_HELPER_JS_V1 = `(() => {
         if (typeof v === "string") document.documentElement.style.setProperty("--frockbot-" + k, v);
       }
       current = m.state;
-      ok({ pluginId: m.pluginId, botId: m.botId, surfaceId: m.surfaceId, themeTokens: m.themeTokens, state: m.state });
+      if (greeted) {
+        for (const fn of listeners) fn(current);
+      } else {
+        greeted = true;
+        ok({ pluginId: m.pluginId, botId: m.botId, surfaceId: m.surfaceId, themeTokens: m.themeTokens, state: m.state });
+      }
       return;
     }
     if (m.type === "state" && rec(m.state)) {
@@ -180,18 +190,31 @@ export const PLUGIN_PAGE_HELPER_JS_V1 = `(() => {
         mic.pending = null;
         opened.resolve({ sampleRate: m.sampleRate, close: () => frockbot.closeMicrophone() });
       } else if (m.status === "closed") {
-        const ended = mic;
-        mic = null;
         const reason = typeof m.reason === "string" ? m.reason : "The microphone was closed.";
-        if (ended.pending) ended.pending.reject(new Error(reason));
-        else if (ended.onClosed) ended.onClosed(reason);
+        if (mic.pending) {
+          const refused = mic.pending;
+          mic = null;
+          refused.reject(new Error(reason));
+        } else {
+          ended(mic, reason);
+        }
       }
       return;
     }
-    if (m.type === "audio" && typeof m.pcm === "string" && mic && !mic.pending) {
+    if (m.type === "audio" && typeof m.pcm === "string" && mic && !mic.pending && !mic.closing) {
       mic.onSamples(pcm(m.pcm));
     }
   });
+  // Once per use, however it ends: the page's own close, the host's, or a
+  // host that never answered the page's close.
+  const ended = (use, reason) => {
+    if (use.over) return;
+    use.over = true;
+    if (mic === use) mic = null;
+    clearTimeout(use.timer);
+    if (use.onClosed) use.onClosed(reason);
+    if (use.let) use.let();
+  };
   const frockbot = {
     ready,
     get state() {
@@ -220,9 +243,22 @@ export const PLUGIN_PAGE_HELPER_JS_V1 = `(() => {
       });
     },
     closeMicrophone() {
-      if (!mic) return;
-      mic = null;
-      post({ type: "device", ability: "microphone", open: false });
+      const use = mic;
+      if (!use) return Promise.resolve();
+      if (use.pending) {
+        mic = null;
+        use.pending.reject(new Error("You stopped the microphone."));
+        post({ type: "device", ability: "microphone", open: false });
+        return Promise.resolve();
+      }
+      if (!use.closing) {
+        use.closing = new Promise((resolve) => {
+          use.let = resolve;
+        });
+        use.timer = setTimeout(() => ended(use, "You stopped the microphone."), 3000);
+        post({ type: "device", ability: "microphone", open: false });
+      }
+      return use.closing;
     },
   };
   window.frockbot = frockbot;

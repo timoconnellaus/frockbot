@@ -101,6 +101,7 @@ void main() {
 
   group('PluginPageFrame', () {
     late ValueChanged<Map<String, Object?>> say;
+    late VoidCallback loaded;
     late List<Map<String, Object?>> heard;
     late List<String> identities;
 
@@ -126,8 +127,10 @@ void main() {
             required identity,
             required onMessage,
             required outbox,
+            required onLoaded,
           }) {
             say = onMessage;
+            loaded = onLoaded;
             identities.add(identity);
             return _Listening(outbox: outbox, heard: heard);
           },
@@ -163,6 +166,32 @@ void main() {
       expect(heard, hasLength(2));
       // New state keeps the same document: the frame's identity is its URL.
       expect(identities.toSet(), hasLength(1));
+    });
+
+    testWidgets('greets a document once it has loaded, asked or not', (
+      tester,
+    ) async {
+      // A WebView forwards nothing a page says while it is still parsing, and
+      // that is when the helper says hello, so the host cannot wait for it.
+      await tester.pumpWidget(MaterialApp(home: frame({'score': 1})));
+      expect(heard, isEmpty);
+      loaded();
+      await tester.pump();
+      expect(heard.single, containsPair('type', 'init'));
+      expect(heard.single['state'], {'score': 1});
+      expect(
+        heard.single['themeTokens'],
+        containsPair('surface', isA<String>()),
+      );
+      // Greeted, it hears new state without saying anything.
+      await tester.pumpWidget(MaterialApp(home: frame({'score': 2})));
+      await tester.pump();
+      expect(heard.last, containsPair('type', 'state'));
+      // A hello that did get through is answered too: the helper takes the
+      // first and is unharmed by the second.
+      say({'frockbotPage': 1, 'type': 'hello'});
+      await tester.pump();
+      expect(heard.last, containsPair('type', 'init'));
     });
 
     testWidgets('answers a tool call with a result naming it', (tester) async {

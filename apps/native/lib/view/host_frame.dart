@@ -28,6 +28,11 @@ class HostFrame extends StatelessWidget {
   /// one sent before that waits for it.
   final Stream<Map<String, Object?>>? outbox;
 
+  /// Told each time a document has loaded and the page's messages are being
+  /// heard. A page may speak before then, and what it says is lost, so the
+  /// host greets it here rather than waiting to be asked.
+  final VoidCallback? onLoaded;
+
   /// The frame is remade rather than reused when this changes: a new
   /// generation, or a new viewer session, is a new document.
   final String identity;
@@ -39,6 +44,7 @@ class HostFrame extends StatelessWidget {
     this.allowSameOrigin = false,
     this.onMessage,
     this.outbox,
+    this.onLoaded,
     this.borderRadius = const BorderRadius.all(Radius.circular(12)),
   });
 
@@ -54,6 +60,7 @@ class HostFrame extends StatelessWidget {
         allowSameOrigin: allowSameOrigin,
         onMessage: onMessage,
         outbox: outbox,
+        onLoaded: onLoaded,
       ),
     ),
   );

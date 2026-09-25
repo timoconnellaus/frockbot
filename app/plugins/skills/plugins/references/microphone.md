@@ -21,12 +21,16 @@ const mic = await frockbot.openMicrophone(
     /* a Float32Array of -1..1, about 40 ms at a time */
   },
   (reason) => {
-    /* the host closed it: the person pressed Stop, left the panel, or
-       started dictation or a call */
+    /* it closed, however it closed: your own mic.close(), the person's Stop,
+       leaving the panel, or dictation or a call taking it */
   },
 );
-// mic.sampleRate is 16000. mic.close() gives it back.
+// mic.sampleRate is 16000. await mic.close() gives it back.
 ```
+
+Reset your controls in `onClosed` and only there: it runs exactly once for
+every use, including the one your own `close()` ends, so a Stop button that
+waits for it never sticks.
 
 `openMicrophone` rejects with the reason when the User did not approve it,
 the device refused, or voice or dictation holds the microphone. Open it from
@@ -249,8 +253,7 @@ nearest note, how many cents off it is, and a needle:
 
       document.getElementById("listen").onclick = async () => {
         if (mic) {
-          mic.close();
-          stopped("Stopped.");
+          await mic.close(); // onClosed resets the button
           return;
         }
         try {

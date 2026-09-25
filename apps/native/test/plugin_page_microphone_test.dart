@@ -192,6 +192,7 @@ void main() {
                 required identity,
                 required onMessage,
                 required outbox,
+                required onLoaded,
               }) {
                 say = onMessage;
                 return _Listening(outbox: outbox, heard: heard);
@@ -259,6 +260,42 @@ void main() {
       // The bar came and went around one page, never a reloaded one.
       expect(framesMounted, 1);
     });
+
+    testWidgets(
+      'a page that stops the microphone itself hears that it closed',
+      (tester) async {
+        final microphone = FakePageMicrophone();
+        await tester.pumpWidget(frame(microphone));
+        say(ask);
+        await tester.pumpAndSettle();
+        const stop = {
+          'frockbotPage': 1,
+          'type': 'device',
+          'ability': 'microphone',
+          'open': false,
+        };
+        say(stop);
+        await tester.pumpAndSettle();
+        expect(microphone.closes, 1);
+        expect(heard.last, {
+          'frockbotPage': 1,
+          'type': 'device',
+          'ability': 'microphone',
+          'status': 'closed',
+          'reason': 'You stopped the microphone.',
+        });
+        expect(uses.single.ending, PluginPageDeviceEndingV1.stopped);
+        expect(find.text('Tuner is using the microphone'), findsNothing);
+
+        // Asked again with nothing open, it still answers, so a page waiting on
+        // its close is never left waiting.
+        heard.clear();
+        say(stop);
+        await tester.pumpAndSettle();
+        expect(microphone.closes, 1);
+        expect(heard.single['status'], 'closed');
+      },
+    );
 
     testWidgets('opens nothing the User did not approve', (tester) async {
       final microphone = FakePageMicrophone();

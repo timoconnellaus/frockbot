@@ -162,12 +162,13 @@ function pageWindow() {
     openMicrophone(
       onSamples: (samples: Float32Array) => void,
       onClosed?: (reason: string) => void,
-    ): Promise<{ sampleRate: number; close(): void }>;
+    ): Promise<{ sampleRate: number; close(): Promise<void> }>;
   };
   return {
     frockbot,
     posted,
     properties,
+    timers,
     deliver(data: unknown, source: unknown = parent) {
       for (const listener of listeners) listener({ source, data });
     },
@@ -198,6 +199,21 @@ describe("the helper, as a page runs it", () => {
     });
     expect(page.properties.get("--frockbot-accent")).toBe("#ff3366");
     expect(page.frockbot.state).toEqual({ a4: 440 });
+  });
+
+  test("a second greeting is new state, not a second ready", async () => {
+    const page = pageWindow();
+    page.deliver(init);
+    const seen: unknown[] = [];
+    page.frockbot.onState((state) => seen.push(state));
+    page.deliver({
+      ...init,
+      themeTokens: { accent: "#123456" },
+      state: { a4: 442 },
+    });
+    expect((await page.frockbot.ready).state).toEqual({ a4: 440 });
+    expect(seen).toEqual([{ a4: 442 }]);
+    expect(page.properties.get("--frockbot-accent")).toBe("#123456");
   });
 
   test("hears new state and nothing from anyone but its parent", async () => {
@@ -343,12 +359,75 @@ describe("the microphone, as a page asks for it", () => {
     await expect(refused).rejects.toThrow("not allowed the microphone");
     const opening = page.frockbot.openMicrophone(() => {});
     page.deliver(OPEN);
-    (await opening).close();
+    void (await opening).close();
     expect(page.posted.at(-1)).toEqual({
       frockbotPage: 1,
       type: "device",
       ability: "microphone",
       open: false,
     });
+  });
+
+  test("its own close ends in onClosed, once, when the host lets go", async () => {
+    const page = pageWindow();
+    const closed: string[] = [];
+    const heard: number[] = [];
+    const opening = page.frockbot.openMicrophone(
+      () => heard.push(1),
+      (reason: string) => closed.push(reason),
+    );
+    page.deliver(OPEN);
+    const mic = await opening;
+    let let_ = false;
+    const closing = mic.close().then(() => {
+      let_ = true;
+    });
+    // Asking twice is one request.
+    void mic.close();
+    expect(
+      page.posted.filter((m) => (m as { open?: boolean }).open === false),
+    ).toHaveLength(1);
+    // Nothing more is heard once the page has asked to stop.
+    page.deliver({ frockbotPage: 1, type: "audio", pcm: "AAA=" });
+    expect(heard).toEqual([]);
+    expect(closed).toEqual([]);
+    page.deliver({
+      frockbotPage: 1,
+      type: "device",
+      ability: "microphone",
+      status: "closed",
+      reason: "You stopped the microphone.",
+    });
+    await closing;
+    expect(let_).toBe(true);
+    expect(closed).toEqual(["You stopped the microphone."]);
+    // The page may listen again.
+    const again = page.frockbot.openMicrophone(() => {});
+    page.deliver(OPEN);
+    expect((await again).sampleRate).toBe(16000);
+  });
+
+  test("a host that never answers the close is taken as having let go", async () => {
+    const page = pageWindow();
+    const closed: string[] = [];
+    const opening = page.frockbot.openMicrophone(
+      () => {},
+      (reason: string) => closed.push(reason),
+    );
+    page.deliver(OPEN);
+    const closing = (await opening).close();
+    // The last timer armed is the close's; the others are the init timeout.
+    page.timers.at(-1)!();
+    await closing;
+    expect(closed).toEqual(["You stopped the microphone."]);
+    // A late answer does not end the use a second time.
+    page.deliver({
+      frockbotPage: 1,
+      type: "device",
+      ability: "microphone",
+      status: "closed",
+      reason: "You stopped the microphone.",
+    });
+    expect(closed).toHaveLength(1);
   });
 });

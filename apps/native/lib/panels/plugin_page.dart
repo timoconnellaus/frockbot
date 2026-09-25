@@ -245,6 +245,7 @@ typedef PluginPageFrameBuilderV1 = Widget Function(
   required String identity,
   required ValueChanged<Map<String, Object?>> onMessage,
   required Stream<Map<String, Object?>> outbox,
+  required VoidCallback onLoaded,
 });
 
 Widget _hostFrame(
@@ -254,14 +255,19 @@ Widget _hostFrame(
   required String identity,
   required ValueChanged<Map<String, Object?>> onMessage,
   required Stream<Map<String, Object?>> outbox,
+  required VoidCallback onLoaded,
 }) => HostFrame(
   url: url,
   label: label,
   identity: identity,
   onMessage: onMessage,
   outbox: outbox,
+  onLoaded: onLoaded,
   borderRadius: BorderRadius.zero,
 );
+
+/// What the page is told when it closed the microphone itself.
+const pluginPageMicrophoneStoppedByPageV1 = 'You stopped the microphone.';
 
 /// How the host ended a use of a device ability, as its audit row says it.
 enum PluginPageDeviceEndingV1 { stopped, left, background, taken, failed }
@@ -378,6 +384,23 @@ class _PluginPageFrameState extends State<PluginPageFrame>
     if (!_outbox.isClosed) _outbox.add(message);
   }
 
+  Map<String, Object?> _init() => pluginPageInitMessageV1(
+    pluginId: widget.pluginId,
+    botId: widget.botId,
+    surfaceId: widget.surfaceId,
+    themeTokens: pluginPageThemeTokensV1(context),
+    state: widget.state,
+  );
+
+  /// A page says `hello` while it is still parsing, before a WebView forwards
+  /// anything it says, so the host greets each document once it has loaded
+  /// rather than waiting to be asked (ADR 0036, amended 2026-09-25).
+  void _loaded() {
+    if (!mounted) return;
+    _greeted = true;
+    _post(_init());
+  }
+
   Future<void> _onMessage(Map<String, Object?> raw) async {
     final message = decodePluginPageMessageV1(raw);
     if (message == null) return;
@@ -385,21 +408,26 @@ class _PluginPageFrameState extends State<PluginPageFrame>
     if (message is PluginPageDeviceV1) {
       if (message.open) {
         await _openMicrophone();
+      } else if (_hearing == null) {
+        // Nothing to give back, but the page is still waiting to hear that
+        // it closed.
+        _post(
+          pluginPageMicrophoneClosedMessageV1(
+            pluginPageMicrophoneStoppedByPageV1,
+          ),
+        );
       } else {
-        await _closeMicrophone(null, PluginPageDeviceEndingV1.stopped);
+        await _closeMicrophone(
+          pluginPageMicrophoneStoppedByPageV1,
+          PluginPageDeviceEndingV1.stopped,
+        );
       }
       return;
     }
-    final themeTokens = pluginPageThemeTokensV1(context);
+    final init = _init();
     final answer = await pluginPageAnswerV1(
       message,
-      init: () => pluginPageInitMessageV1(
-        pluginId: widget.pluginId,
-        botId: widget.botId,
-        surfaceId: widget.surfaceId,
-        themeTokens: themeTokens,
-        state: widget.state,
-      ),
+      init: () => init,
       runTool: widget.runTool,
     );
     if (answer != null && mounted) _post(answer);
@@ -465,7 +493,7 @@ class _PluginPageFrameState extends State<PluginPageFrame>
   }
 
   /// Gives the microphone back. [reason] is what the page is told; null when
-  /// the page asked, or has gone, and there is nobody to tell.
+  /// the page has gone and there is nobody to tell.
   Future<void> _closeMicrophone(
     String? reason,
     PluginPageDeviceEndingV1 ending,
@@ -522,6 +550,7 @@ class _PluginPageFrameState extends State<PluginPageFrame>
           'plugin-page:${widget.pluginId}:${widget.surfaceId}:${widget.url}',
       onMessage: (message) => unawaited(_onMessage(message)),
       outbox: _outbox.stream,
+      onLoaded: _loaded,
     );
     // One shape whether or not the bar is up, and the frame keyed, so the bar
     // coming and going never remounts the frame — which would load the page
