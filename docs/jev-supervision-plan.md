@@ -283,31 +283,26 @@ This keeps acknowledgement behavior identical over text and voice.
 
 ## Specialist subagents
 
-Reuse the existing durable subagent runtime, concurrency limits, one-level depth,
-model pinning and per-role tool ceilings in `app/subagents`.
+The main model stays fixed per Bot, so its prompt cache holds; other models'
+strengths come in through subagents. A specialist is a Frock AI model id —
+`@frock/writing`, `@frock/coding`, `@frock/thinking`, `@frock/vision`
+(`FROCK_AI_SPECIALTIES_V1`, `providers/frock-ai/catalog.ts`) — backed by an AI
+Gateway dynamic route (`frock-writing` and so on) whose target model is chosen
+in the dashboard, the way Auto's is. Nobody picks a specialist as a Bot's own
+model.
 
-Add a deployment-owned profile catalog:
-
-```ts
-interface SpecialistProfile {
-  id: string;
-  capabilities: SpecialistCapability[];
-  model: ModelBindingSnapshot;
-  role: SubagentRoleV1;
-  instructions: string;
-  budget: SpecialistBudget;
-}
-```
-
-The initial profiles are planner, researcher, coder, critic and Mentor. Multiple
-profiles may use different providers and models. Jev judges needed capabilities
-against the eligible profiles; code enforces availability, budget and maximum
-fan-out.
-
-The conversational model supplies the concrete, self-contained assignment
-because Jev does not generate prose. Review verifies that the assignment matches
-the User's request and the profile Jev selected. Specialist results return to the
-conversational model; specialists do not normally speak directly to the User.
+- A Bot on Frock AI is offered each specialist whose route the deployment
+  prices (docs/billing.md), in `<available_subagent_models>` with its specialty
+  and what it is for. An unpriced route is never offered, so an unconfigured
+  specialist is never called. Automation and subagent Turns are offered none.
+- A `Task` names the specialist's slug; the child Turn runs on the model its
+  task pinned, read off the task record, when that model is on the Bot's own
+  connection.
+- The start-of-Turn judgment names the specialty the work most needs, from
+  the same names. When the Turn is offered it, the first request's tail note
+  hands the work over: call `Task` with that model and a complete brief, and
+  give the person what it produced as it wrote it. The conversational model
+  still writes the brief; Jev does not generate prose.
 
 Every specialist Turn is supervised. A specialist's mutating call crosses the
 same approval path as a call proposed by the main Bot.
@@ -481,12 +476,12 @@ _Done, enforced._
 
 ### 5. Specialist profiles and routing
 
-- Add the profile catalog over the existing subagent runtime.
-- Have Jev select required capabilities and eligible profiles.
-- Constrain dispatch to the chosen profile while the main model supplies the
-  assignment.
-- Start with one specialist per route, then enable bounded parallel selection
-  when labeled cases justify it.
+- _Done._ Four specialists on Frock AI routes, offered once priced; a child
+  runs on its task's pinned model; the start-of-Turn judgment names the
+  specialty (`bun run eval:turn-start`, 32/32 on `jev-1.13.0`) and the tail
+  note hands the work over.
+- Next: catch a specialist's work paraphrased instead of passed on (per-send
+  review), and let a subagent ask its parent a question mid-task.
 
 ### 6. Mentor and continuation
 
