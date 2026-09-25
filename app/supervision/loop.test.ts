@@ -16,6 +16,7 @@ import {
 import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
 import { createWebFetchToolDefinitionV1 } from "@frockbot/app/web/agent";
 import { shellAgentFeature } from "../shell/agent.js";
+import { createReplyToRequestToolV1 } from "../shell/reply-to-caller.js";
 import type { FoundationFeature } from "../runtime.js";
 import {
   ACKNOWLEDGE_NOTE_V1,
@@ -49,18 +50,44 @@ function scripted(
 async function run(
   provider: LlmProvider,
   supervisor: TurnSupervisor,
-  cleared: number[] = [],
+  options: {
+    cleared?: number[];
+    /** A voice caller waiting on `reply_to_request`. */
+    voice?: boolean;
+    /** Folded into the Turn as a later message before step 2. */
+    followUp?: string;
+  } = {},
 ): Promise<SessionEvent[]> {
   const root = createAgentRuntimeHarness({});
   // Mounted first, as the host does.
   await root.mount(
     createSupervisionRuntimeFeatureV1({
       supervisor,
-      origin: "user",
-      clearReplyDraft: (ordinal) => cleared.push(ordinal),
+      origin: options.voice ? "voice" : "user",
+      clearReplyDraft: (ordinal) => options.cleared?.push(ordinal),
     }) as unknown as Parameters<typeof root.mount>[0],
   );
   await root.mount(shellAgentFeature);
+  const followUp = options.followUp;
+  if (followUp !== undefined) {
+    root.hooks.add({
+      preStep: async (_agent, _inputs, _turn, step, next) => {
+        const decision = await next();
+        return decision.kind === "enter" && step === 2
+          ? {
+              kind: "enter",
+              inputs: [
+                ...decision.inputs,
+                { messageId: "follow-up", text: followUp },
+              ],
+            }
+          : decision;
+      },
+    });
+  }
+  if (options.voice) {
+    root.tools.register(createReplyToRequestToolV1("voice", root.sessions));
+  }
   root.tools.register(
     createWebFetchToolDefinitionV1({
       fetch: async () =>
@@ -83,7 +110,7 @@ async function run(
       sessionId: "user:test",
       provider: provider.id,
       model: "test",
-      turnType: "chat",
+      turnType: options.voice ? "agent" : "chat",
       admitEffect: () => Promise.resolve(true),
     });
     handle.agent.send("Email Dana the March invoice.");
@@ -190,7 +217,7 @@ test("a withheld finish is never delivered and still ends the Turn", async () =>
       seen,
     ),
     withholding((evidence) => evidence.message === "I've emailed Dana."),
-    cleared,
+    { cleared },
   );
   expect(seen).toHaveLength(1);
   expect(sent(events)).toEqual(["Here it is."]);
@@ -216,6 +243,65 @@ test("a withheld finish is never delivered and still ends the Turn", async () =>
     type: "turn/end",
     outcome: "completed",
   });
+});
+
+test("a withheld finish does not end a Turn that still owes its caller an answer", async () => {
+  const seen: NormalizedModelRequest[] = [];
+  const events = await run(
+    scripted(
+      [
+        [{ id: "a", name: "send_to_user", input: text("On it.", "finish") }],
+        [{ id: "b", name: "reply_to_request", input: { answer: "4 pm." } }],
+      ],
+      seen,
+    ),
+    withholding((evidence) => evidence.message === "On it."),
+    { voice: true },
+  );
+  expect(seen).toHaveLength(2);
+  const withheld = events.find(
+    (event) => event.type === "tool/result" && event.name === "send_to_user",
+  );
+  expect(withheld).toMatchObject({
+    content: expect.stringContaining("reply_to_request"),
+  });
+  expect(withheld).not.toMatchObject({
+    content: expect.stringContaining("The Turn is complete"),
+  });
+  expect(
+    events.filter((event) => event.type === "reply/to-caller"),
+  ).toMatchObject([{ text: "4 pm." }]);
+  expect(events.at(-1)).toMatchObject({
+    type: "turn/end",
+    outcome: "completed",
+  });
+});
+
+test("a later message adds to the task rather than replacing it", async () => {
+  const objectives: string[] = [];
+  await run(
+    scripted([
+      [
+        {
+          id: "fetch",
+          name: "web_fetch",
+          input: { url: "https://example.com" },
+        },
+      ],
+      [{ id: "b", name: "send_to_user", input: text("Sent.", "finish") }],
+    ]),
+    createFakeTurnSupervisorV1({
+      reviewStep: async (evidence) => {
+        objectives.push(evidence.objective);
+        return allowAllStepDecisionV1(evidence.calls);
+      },
+    }),
+    { followUp: "Also include prices." },
+  );
+  expect(objectives).toEqual([
+    "Email Dana the March invoice.",
+    "Email Dana the March invoice.\n\nAlso include prices.",
+  ]);
 });
 
 test("a withheld interim send lets the Turn carry on to its answer", async () => {

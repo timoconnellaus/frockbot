@@ -140,11 +140,26 @@ function turnEvents(
   return events.filter((event) => "turn" in event && event.turn === turn);
 }
 
+/** Everything the Turn was asked, oldest first: a follow-up adds to the task. */
 function inputText(events: readonly SessionEvent[], turn: number): string {
-  const message = events.findLast(
-    (event) => event.type === "user/message" && event.turn === turn,
+  return events
+    .flatMap((event) =>
+      event.type === "user/message" && event.turn === turn ? [event.text] : [],
+    )
+    .join("\n\n");
+}
+
+/** Whether the Turn owes its answer to a caller, by the tools it offered. */
+function callerAddressed(
+  events: readonly SessionEvent[],
+  turn: number,
+): boolean {
+  return events.some(
+    (event) =>
+      event.type === "model/request" &&
+      event.turn === turn &&
+      event.request.tools.some((tool) => tool.name === REPLY_TO_REQUEST),
   );
-  return message?.type === "user/message" ? message.text : "";
 }
 
 function describeShown(event: SessionEvent): string | undefined {
@@ -250,12 +265,16 @@ function sendDecisionOf(
   return event?.type === "supervision/send" ? event.decision : undefined;
 }
 
-/** Whether a step withheld a send that would have ended the Turn. */
+/**
+ * Whether a step withheld a send that would have ended the Turn. A Turn that
+ * owes a caller its answer is not ended by a send, withheld or not.
+ */
 export function withheldFinishV1(
   events: readonly SessionEvent[],
   turn: number,
   step: number,
 ): boolean {
+  if (callerAddressed(events, turn)) return false;
   return events.some(
     (event) =>
       event.type === "supervision/send" &&
@@ -273,16 +292,20 @@ function clip(text: string, max = 280): string {
 function withheldResult(
   reason: "off_task" | "redundant_text",
   finish: boolean,
+  addressed: boolean,
 ): string {
   const why =
     reason === "redundant_text"
       ? "because the person can already see what it says."
       : "because it is not about what the person asked for.";
-  const next = finish
-    ? " The Turn is complete; do not send it again."
-    : reason === "redundant_text"
-      ? " Carry on without repeating it."
-      : " Go back to what they asked.";
+  const next =
+    finish && !addressed
+      ? " The Turn is complete; do not send it again."
+      : reason === "redundant_text"
+        ? addressed
+          ? ` Answer the caller with ${REPLY_TO_REQUEST}.`
+          : " Carry on without repeating it."
+        : " Go back to what they asked.";
   return `${SUPERVISION_WITHHELD_SEND_PREFIX_V1} ${why}${next}`;
 }
 
@@ -478,6 +501,7 @@ export function createSupervisionRuntimeFeatureV1(
                 ? "redundant_text"
                 : "off_task",
               send.finish,
+              callerAddressed(events, at.turn),
             ),
             isError: false,
           },
@@ -486,7 +510,8 @@ export function createSupervisionRuntimeFeatureV1(
 
       async stepContinuation(agent, _decision, turn, step, _signal, next) {
         // Outermost, so nothing after it can reopen a Turn whose last word
-        // the person already has.
+        // the person already has. A caller-addressed Turn is left to delivery,
+        // which keeps it going until the caller is answered.
         if (withheldFinishV1(agent.session.activeRunJournal, turn, step)) {
           return { kind: "stop" };
         }

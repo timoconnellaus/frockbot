@@ -8,6 +8,7 @@ import {
   emptyPolicySnapshotV1,
   SupervisionUnavailableError,
   decodeSendDecisionV1,
+  decodeStepDecisionV1,
   releaseSendDecisionV1,
   type ProposedCallV1,
   type SendReviewEvidenceV1,
@@ -163,5 +164,26 @@ describe("a send decision on the log", () => {
     expect(() =>
       decodeSendDecisionV1({ send: "release", judgments: [], extra: 1 }),
     ).toThrow(/not allowed/);
+  });
+});
+
+describe("a step decision on the log", () => {
+  test("holds one entry per call, however many the response made", () => {
+    const calls = Array.from({ length: 100 }, (_, index) => ({
+      ...sendCall,
+      callId: `call-${index}`,
+    }));
+    const decision = {
+      ...allowAllStepDecisionV1(calls),
+      responseAlignment: "wrong-objective" as const,
+      failureSignals: [
+        {
+          kind: "wrong_objective" as const,
+          weight: 1,
+          refs: calls.map((call) => call.callId),
+        },
+      ],
+    };
+    expect(decodeStepDecisionV1(decision)).toEqual(decision);
   });
 });

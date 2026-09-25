@@ -337,10 +337,7 @@ export class SupervisionUnavailableError extends Error {
   }
 }
 
-/**
- * How a result Turn supervision wrote begins. The model reads the rest; the
- * audit reads the prefix, which is how a withheld send becomes a row there.
- */
+/** How a result Turn supervision wrote begins, for the model to read. */
 export const SUPERVISION_WITHHELD_SEND_PREFIX_V1 =
   "Not sent: supervision withheld this message";
 export const SUPERVISION_OFF_TASK_PREFIX_V1 =
@@ -408,8 +405,9 @@ function list<T>(
   value: unknown,
   label: string,
   decode: (entry: unknown, label: string) => T,
+  maximum = SUPERVISION_LIST_MAX_V1,
 ): T[] {
-  if (!Array.isArray(value) || value.length > SUPERVISION_LIST_MAX_V1) {
+  if (!Array.isArray(value) || value.length > maximum) {
     throw new Error(`${label} must be a bounded array`);
   }
   return value.map((entry, index) => decode(entry, `${label}[${index}]`));
@@ -523,31 +521,38 @@ export function decodeStepDecisionV1(
             `${label}.textReason`,
           ),
         }),
-    calls: list(decision.calls, `${label}.calls`, (entry, at) => {
-      const call = record(entry, at);
-      exactKeys(
-        call,
-        ["callId", "decision", "reasonCode", "policyRefs"],
-        [],
-        at,
-      );
-      return {
-        callId: text(call.callId, `${at}.callId`, 128),
-        decision: oneOf(
-          call.decision,
-          ["allow", "reject"] as const,
-          `${at}.decision`,
-        ),
-        reasonCode: oneOf(
-          call.reasonCode,
-          SUPERVISION_REASON_CODES_V1,
-          `${at}.reasonCode`,
-        ),
-        policyRefs: list(call.policyRefs, `${at}.policyRefs`, (ref, where) =>
-          text(ref, where, 128),
-        ),
-      };
-    }),
+    calls: list(
+      decision.calls,
+      `${label}.calls`,
+      (entry, at) => {
+        const call = record(entry, at);
+        exactKeys(
+          call,
+          ["callId", "decision", "reasonCode", "policyRefs"],
+          [],
+          at,
+        );
+        return {
+          callId: text(call.callId, `${at}.callId`, 128),
+          decision: oneOf(
+            call.decision,
+            ["allow", "reject"] as const,
+            `${at}.decision`,
+          ),
+          reasonCode: oneOf(
+            call.reasonCode,
+            SUPERVISION_REASON_CODES_V1,
+            `${at}.reasonCode`,
+          ),
+          policyRefs: list(
+            call.policyRefs,
+            `${at}.policyRefs`,
+            (ref, where) => text(ref, where, 128),
+          ),
+        };
+      },
+      Number.POSITIVE_INFINITY,
+    ),
     responseAlignment: oneOf(
       decision.responseAlignment,
       RESPONSE_ALIGNMENTS_V1,
@@ -562,8 +567,11 @@ export function decodeStepDecisionV1(
         return {
           kind: oneOf(signal.kind, FAILURE_SIGNAL_KINDS_V1, `${at}.kind`),
           weight: finite(signal.weight, `${at}.weight`),
-          refs: list(signal.refs, `${at}.refs`, (ref, where) =>
-            text(ref, where, 128),
+          refs: list(
+            signal.refs,
+            `${at}.refs`,
+            (ref, where) => text(ref, where, 128),
+            Number.POSITIVE_INFINITY,
           ),
         };
       },

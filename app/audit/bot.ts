@@ -22,10 +22,6 @@
 // client projection drops `call.input` and the argument digest needs the exact
 // arguments.
 import { computerOperationIdV1 } from "@frockbot/computer/core";
-import {
-  SUPERVISION_OFF_TASK_PREFIX_V1,
-  SUPERVISION_WITHHELD_SEND_PREFIX_V1,
-} from "@frockbot/core/contracts";
 import { redactSecretShapesV1 } from "@frockbot/core/secret-shapes";
 import {
   auditKindForToolV1,
@@ -67,6 +63,9 @@ export interface AuditProjectableRunV1 {
     content?: string;
     isError?: boolean;
     status?: string;
+    turn?: number;
+    step?: number;
+    decision?: { send?: string; reason?: string; responseAlignment?: string };
   }[];
   /** Used only when an event carries no timestamp of its own. */
   acceptedAt?: string;
@@ -94,6 +93,7 @@ const AWAITING_APPROVAL =
 
 function outcomeFor(
   result: { isError?: boolean; status?: string; content?: string } | undefined,
+  supervised: boolean,
 ): AuditOutcomeV1 {
   // No result at all is `unknown`, never `error`. The durable log does not
   // know how the effect ended, and inventing an answer here would be the
@@ -101,7 +101,7 @@ function outcomeFor(
   if (!result) return "unknown";
   if (result.status === "interrupted") return "interrupted";
   // Turn supervision stopped it before it ran, whatever flag the model read.
-  if (isSupervisionResultV1(result.content)) return "refused";
+  if (supervised) return "refused";
   if (result.isError !== true) {
     return AWAITING_APPROVAL.test(result.content ?? "") ? "unknown" : "ok";
   }
@@ -114,12 +114,45 @@ function outcomeFor(
     : "error";
 }
 
-function isSupervisionResultV1(content: string | undefined): boolean {
-  return (
-    content !== undefined &&
-    (content.startsWith(SUPERVISION_WITHHELD_SEND_PREFIX_V1) ||
-      content.startsWith(SUPERVISION_OFF_TASK_PREFIX_V1))
-  );
+/**
+ * Why Turn supervision stopped each call it stopped, read off its own
+ * journaled decisions and never off a result, which a tool's output can say
+ * anything in.
+ */
+function supervisionRefusalsV1(
+  events: AuditProjectableRunV1["events"],
+): (occurrenceId: string, name: string) => string | undefined {
+  const withheld = new Map<string, string>();
+  const offTask = new Set<string>();
+  for (const event of events) {
+    if (
+      event.type === "supervision/send" &&
+      event.occurrenceId &&
+      event.decision?.send === "withhold"
+    ) {
+      withheld.set(
+        event.occurrenceId,
+        event.decision.reason === "redundant_text"
+          ? "already shown"
+          : "off task",
+      );
+    }
+    if (
+      event.type === "supervision/step" &&
+      event.decision?.responseAlignment === "wrong-objective"
+    ) {
+      offTask.add(`${event.turn}:${event.step}`);
+    }
+  }
+  return (occurrenceId, name) => {
+    const why = withheld.get(occurrenceId);
+    if (why !== undefined) return why;
+    if (name === "send_to_user" || name === "reply_to_request") return;
+    const at = /^tool:(\d+):(\d+):/.exec(occurrenceId);
+    return at && offTask.has(`${Number(at[1])}:${Number(at[2])}`)
+      ? "off task"
+      : undefined;
+  };
 }
 
 /**
@@ -129,9 +162,9 @@ function isSupervisionResultV1(content: string | undefined): boolean {
 function supervisionAuditV1(
   name: string,
   input: unknown,
-  content: string | undefined,
+  why: string | undefined,
 ): (AuditClassificationV1 & { preview: string }) | undefined {
-  if (!isSupervisionResultV1(content)) return undefined;
+  if (why === undefined) return undefined;
   const payload =
     typeof input === "object" && input !== null && "payload" in input
       ? (input as { payload?: unknown }).payload
@@ -143,11 +176,6 @@ function supervisionAuditV1(
     typeof (payload as { text?: unknown }).text === "string"
       ? (payload as { text: string }).text
       : undefined;
-  const why = content?.startsWith(SUPERVISION_WITHHELD_SEND_PREFIX_V1)
-    ? content.includes("already see")
-      ? "already shown"
-      : "off task"
-    : "off task";
   const preview = words === undefined ? `${name}, ${why}` : `${why}: ${words}`;
   return {
     kind: "supervision",
@@ -185,6 +213,7 @@ export async function auditEntriesFromStoredRunV1(
       ...(event.content === undefined ? {} : { content: event.content }),
     });
   }
+  const refusedBySupervision = supervisionRefusalsV1(run.events);
   const entries: AuditEntryV1[] = [];
   for (const event of run.events) {
     if (event.type !== "tool/call") continue;
@@ -193,7 +222,7 @@ export async function auditEntriesFromStoredRunV1(
     const supervised = supervisionAuditV1(
       name,
       event.input,
-      results.get(occurrenceId)?.content,
+      refusedBySupervision(occurrenceId, name),
     );
     const classification = supervised ?? auditKindForToolV1(name, event.input);
     if (!classification) continue;
@@ -239,7 +268,7 @@ export async function auditEntriesFromStoredRunV1(
       preview:
         supervised?.preview ??
         auditPreviewV1(classification.kind, toolName, toolInput),
-      outcome: outcomeFor(result),
+      outcome: outcomeFor(result, supervised !== undefined),
       ...(result?.content === undefined
         ? {}
         : { bytesOut: new TextEncoder().encode(result.content).byteLength }),
