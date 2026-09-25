@@ -332,25 +332,32 @@ were, and neither is enforced.
   (`appendRuntimeNoteV1`), since some providers refuse two user messages in a
   row. Labelled in `bun run eval:context` (10/10 on `jev-1.13.0`).
 
-## Mentor and failure score
+## Loop health and claims
 
-Step review produces independently meaningful failure signals such as:
+Built in `app/supervision/loop-health.ts` and `app/supervision/claim-check.ts`.
 
-- wrong objective;
-- unauthorized mutation;
-- unsupported claim about an effect;
-- ignored supervisor feedback;
-- repeated invalid tool arguments;
-- failure to use a required specialist.
+A long Turn is checked for progress before its model call, from step 5, then
+every 4 steps. Code counts what it can: the same call with the same arguments
+made 3 times, or 3 failed results in a row. Either is a loop signal, and a
+signalled Turn is checked every 2 steps. Jev answers one Noul, whether the
+latest calls moved the work toward what was asked. At or below 0.25 the Turn is
+stuck; with a loop signal, at or below 0.45. A stuck Turn's request carries a
+tail runtime note telling it to stop repeating what failed and to try another
+approach. The note offers the thinking specialist (the Mentor) when the Turn is
+offered one, or else tells it to say what blocks it and ask the person. Each
+check is a `supervision/progress` session event, read back on resume.
 
-Code assigns weights, applies decay and compares the accumulated score with a
-calibrated Mentor threshold. Infrastructure failures and missing User authority
-have separate routes and do not masquerade as reasoning failures.
+Every text send is also checked for its claims, beside the redundancy question
+and whatever that question's vetoes say. Jev is shown each call this Turn made,
+its tool and whether it failed, and is asked whether the message says something
+was done that none of them did. An `unsupported` answer at 0.7 or above
+withholds the send with reason `unsupported_claim`. The model is told to do the
+thing or say plainly that it is not done. Such a send does not end the Turn,
+even as a finish, and the check runs at most once per Turn, so a Turn is
+corrected once and never held in a loop.
 
-At the threshold, the supervisor requires the Mentor profile. The Mentor receives
-the objective, proposals, rejection evidence and tool outcomes, then returns
-advice. The fast model authors the repaired response. Existing maximum steps and
-the Turn deadline prevent an infinite retry loop.
+A weighted failure score with decay was not built. Loop signals and the
+per-send claim check cover the cases it was for.
 
 ## Continuation state
 
@@ -426,7 +433,7 @@ Evaluation suites cover:
 - policy-mutation requests and accidental over-broad policies;
 - acknowledgement steering and needless acknowledgements;
 - specialist necessity, capability selection and no-match cases;
-- Mentor scoring, decay and infrastructure exclusions;
+- stuck and progressing long Turns, with and without loop signals;
 - continuation classification;
 - adversarial instructions in User text, retrieved content and tool output;
 - Jev failure before a Turn, between proposal and release, and during recovery.
@@ -522,8 +529,8 @@ _Done, enforced._
 
 ### 6. Mentor and continuation
 
-- Add weighted failure signals, decay and the Mentor threshold.
-- Feed Mentor advice back to the fast model.
+- Built: loop health and the per-send claim check (see Loop health and
+  claims); the thinking specialist is the Mentor a stuck Turn is offered.
 - Add bounded continuation candidates and final-step classification.
 - Inject open continuation state into the next Turn.
 

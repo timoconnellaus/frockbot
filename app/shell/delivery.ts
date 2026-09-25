@@ -1,4 +1,8 @@
-import type { LoopHooksV1, SessionEvent } from "@frockbot/core/contracts";
+import {
+  withheldSendEndsTurnV1,
+  type LoopHooksV1,
+  type SessionEvent,
+} from "@frockbot/core/contracts";
 import { turnTypesByTurnV1 } from "./history.js";
 import { REPLY_TO_REQUEST_TOOL_V1 } from "./reply-to-caller.js";
 
@@ -82,14 +86,14 @@ function delivery(events: readonly SessionEvent[], turn: number) {
       attempts = 0;
       repair = false;
     }
-    // A finish Turn supervision withheld is still the Turn's last word: the
-    // person already has what it would have said.
+    // A finish Turn supervision withheld as redundant is still the Turn's
+    // last word: the person already has what it would have said.
     if (
       !addressed &&
       event.type === "supervision/send" &&
       event.finish &&
       event.decision.send === "withhold" &&
-      event.decision.reason !== "paraphrased_work"
+      withheldSendEndsTurnV1(event.decision.reason)
     )
       return { required: false, attempts: 0, repair: false };
     if (event.type === "assistant/message" && event.toolCalls.length === 0) {

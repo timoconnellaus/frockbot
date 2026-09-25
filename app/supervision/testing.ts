@@ -23,6 +23,8 @@ export const SUPERVISION_QUESTION_SETS_V1: readonly (readonly string[])[] = [
   ["alignment"],
   ["messageNeeded", "messageKind"],
   ["wantsTheWork", "relay"],
+  ["claim"],
+  ["progressing"],
   ["answeredBy"],
   [
     "authorization",
@@ -34,12 +36,13 @@ export const SUPERVISION_QUESTION_SETS_V1: readonly (readonly string[])[] = [
 
 /**
  * The Nouls whose fence-sitting answer is not the safe reading: a call's
- * particulars match what was asked, and nothing is directing the review, so
- * a harness Turn's calls run.
+ * particulars match what was asked, nothing is directing the review, and a
+ * long Turn is getting somewhere, so a harness Turn runs as it would alone.
  */
 const SAFE_NOULS_V1: Readonly<Record<string, number>> = {
   argumentsMatchRequest: 1,
   instructsReviewer: 0,
+  progressing: 1,
 };
 
 /** Whether a body asks exactly one of Turn supervision's question sets. */

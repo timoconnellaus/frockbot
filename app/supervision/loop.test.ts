@@ -9,6 +9,7 @@ import {
   SUPERVISION_WITHHELD_SEND_PREFIX_V1,
   type LlmProvider,
   type NormalizedModelRequest,
+  type ProgressEvidenceV1,
   type SendReviewEvidenceV1,
   type SessionEvent,
   type CallReviewEvidenceV1,
@@ -27,6 +28,7 @@ import {
   createSupervisionRuntimeFeatureV1,
   questionNoteV1,
   specialistNoteV1,
+  stuckNoteV1,
   subagentQuestionOfTurnV1,
   subagentWorkV1,
   turnInputOriginV1,
@@ -865,4 +867,112 @@ test("only the notice a subagent's question writes is read as one", () => {
   expect(
     subagentQuestionOfTurnV1(message("It asks: anything? no notice"), 1),
   ).toBeUndefined();
+});
+
+const fetchStep = (id: string): ToolCall[] => [
+  { id, name: "web_fetch", input: { url: "https://example.com" } },
+];
+
+test("a long Turn going in circles is told, at that request's tail, to change course", async () => {
+  const seen: NormalizedModelRequest[] = [];
+  const asked: ProgressEvidenceV1[] = [];
+  const events = await run(
+    scripted(
+      [
+        ...["a", "b", "c", "d", "e", "f"].map(fetchStep),
+        [{ id: "g", name: "send_to_user", input: text("Done.", "finish") }],
+      ],
+      seen,
+    ),
+    createFakeTurnSupervisorV1({
+      reviewProgress: async (evidence) => {
+        asked.push(evidence);
+        return {
+          stuck: evidence.step === 5,
+          signals: [...evidence.signals],
+          judgments: [],
+        };
+      },
+    }),
+    { specialists: [{ name: "thinking", slug: "@frock/thinking" }] },
+  );
+  // Nothing before step 5; then every other step while code sees a loop.
+  expect(asked.map((evidence) => evidence.step)).toEqual([5, 7]);
+  expect(asked[0]).toMatchObject({
+    objective: "Email Dana the March invoice.",
+    // The harness offers web_fetch only by name, so each attempt fails.
+    signals: ["repeated_call", "repeated_error"],
+  });
+  expect(asked[0]?.actions).toHaveLength(4);
+  expect(asked[0]?.actions[0]).toMatchObject({
+    tool: "web_fetch",
+    arguments: '{"url":"https://example.com"}',
+    isError: true,
+  });
+  const note = stuckNoteV1({ slug: "@frock/thinking" });
+  expect(note).toContain('model "@frock/thinking"');
+  const carries = (index: number) =>
+    seen[index]?.messages.some((m) => m.content.includes(note)) ?? false;
+  expect(seen[4]?.messages.at(-1)?.content).toContain(note);
+  expect([3, 5, 6].map(carries)).toEqual([false, false, false]);
+  expect(
+    events.filter((event) => event.type === "supervision/progress"),
+  ).toMatchObject([
+    { step: 5, decision: { stuck: true } },
+    { step: 7, decision: { stuck: false } },
+  ]);
+});
+
+test("a stuck Turn offered no thinking specialist is told to try another way or ask", () => {
+  const note = stuckNoteV1();
+  expect(note).not.toContain("Task");
+  expect(note).toContain("ask how to go on");
+});
+
+test("a send claiming undone work is withheld once, and the Turn goes on to say what is true", async () => {
+  const reviewed: SendReviewEvidenceV1[] = [];
+  const events = await run(
+    scripted([
+      [
+        {
+          id: "a",
+          name: "send_to_user",
+          input: text("I've emailed Dana the invoice.", "finish"),
+        },
+      ],
+      [
+        {
+          id: "b",
+          name: "send_to_user",
+          input: text("I couldn't email Dana: I have no email tool.", "finish"),
+        },
+      ],
+    ]),
+    createFakeTurnSupervisorV1({
+      reviewSend: async (evidence) => {
+        reviewed.push(evidence);
+        return evidence.checkClaim
+          ? { send: "withhold", reason: "unsupported_claim", judgments: [] }
+          : { send: "release", judgments: [] };
+      },
+    }),
+  );
+  expect(reviewed.map((evidence) => evidence.checkClaim)).toEqual([
+    true,
+    false,
+  ]);
+  expect(sent(events)).toEqual([
+    "I couldn't email Dana: I have no email tool.",
+  ]);
+  expect(
+    events.find(
+      (event) => event.type === "tool/result" && event.name === "send_to_user",
+    ),
+  ).toMatchObject({
+    content: expect.stringContaining("not done"),
+  });
+  expect(events.at(-1)).toMatchObject({
+    type: "turn/end",
+    outcome: "completed",
+  });
 });

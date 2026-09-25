@@ -38,6 +38,13 @@ import {
   reviewCallV1,
 } from "./call-review.js";
 import {
+  claimEvidenceV1,
+  claimJudgmentsV1,
+  claimUnsupportedV1,
+  reviewClaimV1,
+} from "./claim-check.js";
+import { composeProgressDecisionV1, reviewProgressV1 } from "./loop-health.js";
+import {
   composeTurnDirectiveV1,
   reviewTurnStartV1,
   turnStartJudgmentEvidenceV1,
@@ -95,8 +102,9 @@ function classifyJevFailure(error: unknown): SupervisionUnavailableError {
 
 /**
  * The hosted supervision adapter: one Jev call before a Turn's first model
- * call, one per model response that calls tools, one per text send that
- * code's vetoes leave open to judgment, and one per `mutate` call.
+ * call, one per model response that calls tools, up to two per text send
+ * (what it claims, and whether it is needed when code's vetoes leave that
+ * open), one per `mutate` call, and one every few steps of a long Turn.
  */
 export function createJevTurnSupervisorV1(
   options: JevTurnSupervisorOptionsV1,
@@ -157,18 +165,43 @@ export function createJevTurnSupervisorV1(
             };
           }
         }
-        if (sendVetoV1(evidence) !== undefined) {
-          return { send: "release", judgments: [] };
+        // What it says was done is checked whatever the vetoes say: a long
+        // message is where a claim hides. Both questions go out at once.
+        const [claim, review] = await Promise.all([
+          evidence.checkClaim && evidence.message.trim()
+            ? reviewClaimV1(options.client, claimEvidenceV1(evidence), {
+                signal,
+                budget,
+              })
+            : undefined,
+          sendVetoV1(evidence) === undefined
+            ? reviewSendV1(options.client, sendReviewEvidenceV1(evidence), {
+                signal,
+                budget,
+              })
+            : undefined,
+        ]);
+        if (claim && claimUnsupportedV1(claim.answers)) {
+          return {
+            send: "withhold",
+            reason: "unsupported_claim",
+            judgments: claimJudgmentsV1(claim.answers),
+            model: claim.model,
+          };
         }
-        const review = await reviewSendV1(
-          options.client,
-          sendReviewEvidenceV1(evidence),
-          { signal, budget },
-        );
-        return composeSendDecisionV1({
+        const claimed = claim ? claimJudgmentsV1(claim.answers) : [];
+        if (!review) {
+          return {
+            send: "release",
+            judgments: claimed,
+            ...(claim ? { model: claim.model } : {}),
+          };
+        }
+        const decision = composeSendDecisionV1({
           answers: review.answers,
           model: review.model,
         });
+        return { ...decision, judgments: [...decision.judgments, ...claimed] };
       } catch (error) {
         throw classifyJevFailure(error);
       }
@@ -182,6 +215,22 @@ export function createJevTurnSupervisorV1(
         });
         return composeQuestionRouteV1({
           answers: review.answers,
+          model: review.model,
+        });
+      } catch (error) {
+        throw classifyJevFailure(error);
+      }
+    },
+    async reviewProgress(evidence, signal) {
+      signal?.throwIfAborted();
+      try {
+        const review = await reviewProgressV1(options.client, evidence, {
+          signal,
+          budget,
+        });
+        return composeProgressDecisionV1({
+          answers: review.answers,
+          signals: evidence.signals,
           model: review.model,
         });
       } catch (error) {

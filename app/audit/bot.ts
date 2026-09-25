@@ -71,6 +71,7 @@ export interface AuditProjectableRunV1 {
       responseAlignment?: string;
       decision?: string;
       reasonCode?: string;
+      stuck?: boolean;
     };
   }[];
   /** Used only when an event carries no timestamp of its own. */
@@ -142,7 +143,9 @@ function supervisionRefusalsV1(
           ? "already shown"
           : event.decision.reason === "paraphrased_work"
             ? "rewrote the work"
-            : "off task",
+            : event.decision.reason === "unsupported_claim"
+              ? "claimed undone work"
+              : "off task",
       );
     }
     if (
