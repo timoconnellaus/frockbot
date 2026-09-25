@@ -29,9 +29,9 @@
     "typecheck": "tsc --noEmit -p tsconfig.json"
   },
   "dependencies": {
-    "@ai-sdk/openai-compatible": "3.0.49",
-    "@ai-sdk/provider": "4.0.15",
-    "@ai-sdk/provider-utils": "5.0.41",
+    "@ai-sdk/openai-compatible": "3.0.51",
+    "@ai-sdk/provider": "4.0.17",
+    "@ai-sdk/provider-utils": "5.0.43",
     "@earendil-works/pi-ai": "0.85.1",
     "@frockbot/app": "workspace:*",
     "@frockbot/core": "workspace:*"
