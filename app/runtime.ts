@@ -17,11 +17,6 @@ import type {
   PackageSettingValueV1,
   ResolvedModelBindingV1,
 } from "@frockbot/core/configuration";
-import {
-  createBotTemplateFeature,
-  type BotTemplateRuntimeHostV1,
-} from "@frockbot/app/bot-template/agent";
-export type { BotTemplateRuntimeHostV1 } from "@frockbot/app/bot-template/agent";
 import clockFeature from "@frockbot/app/clock/agent";
 import type {
   AgentRuntimeV1,
@@ -496,14 +491,6 @@ export function createFoundationHostedRuntimePackages(
           runtimePackage(
             "flock",
             createFlockRuntimeFeature(host.botSelfManagement),
-          ),
-        ]
-      : []),
-    ...(host.botTemplate
-      ? [
-          runtimePackage(
-            "bot-template",
-            createBotTemplateFeature(host.botTemplate),
           ),
         ]
       : []),

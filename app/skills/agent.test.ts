@@ -117,8 +117,6 @@ describe("the Skill catalog", () => {
         { path: "skills/kept/SKILL.md", name: "kept" },
         { path: "managed/a2ui/SKILL.md" },
         { path: "managed/add-connector/SKILL.md" },
-        { path: "managed/export-bot-template/SKILL.md" },
-        { path: "managed/import-bot-template/SKILL.md" },
         { path: "managed/plugins/SKILL.md" },
         { path: "managed/write-skill/SKILL.md" },
       ],

@@ -506,7 +506,6 @@ app/              The product: `runtime.ts`, the Contribution tables, and one di
   auth/           The two auth Packages behind `AuthPackageV1` — `better-auth/` and `access/` — and what they share
   authoring/      The source persistence Bot-authored Plugins use, up to the build boundary
   billing/        The account's subscription, its metered usage ledger, the Stripe seam, and the billing page
-  bot-template/   Bot template export, share records, and guarded import
   cards/          The Bot's half of Cards: an approval, a Plugin's own action, or conversation input
   clock/          Reference feature with agent and host contributions
   composition/    The User's Composition store and RPCs, and the Bot's mirror of them
@@ -557,7 +556,6 @@ core/
   connection/       Provider-neutral Connection transport result contracts
   workspace-store/  Object-storage durable-root store and its generation ledger
   secret-shapes/    Declared shapes of the deployment's secrets
-  template/         Bot template recipe document and its decoder
   protocol/         Commands and events shared across process seams
   protocol-schemas/ Generated protocol schemas shared by clients
   machine-protocol/ Contracts for registered User machines and their tokens

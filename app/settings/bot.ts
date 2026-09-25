@@ -59,11 +59,6 @@ import {
   type VoiceIdentityViewV1,
 } from "@frockbot/app/flock/shared";
 import {
-  decodeTemplateShareReceiptV1,
-  type TemplateCommandV1,
-  type TemplateShareReceiptV1,
-} from "@frockbot/app/bot-template/shared";
-import {
   decodeMachineDispatchAnswerV1,
   type MachineDispatchAnswerV1,
 } from "@frockbot/app/machine/approval";
@@ -520,10 +515,6 @@ export interface UserConfigurationRpcV1 {
     userId: string,
     command: CreateBotCommandV1,
   ): Promise<FlockReceiptV1>;
-  executeTemplateCommand(
-    userId: string,
-    command: TemplateCommandV1,
-  ): Promise<TemplateShareReceiptV1>;
   listMachines(userId: string): Promise<MachineListViewV1>;
   describeMachineTarget(
     userId: string,
@@ -758,14 +749,6 @@ export function userConfigurationV1(
           userId,
           botId,
           profile,
-        }),
-      ),
-    executeTemplateCommand: async (userId, command) =>
-      decodeTemplateShareReceiptV1(
-        await rpc.executeTemplateCommand({
-          schemaVersion: 1,
-          userId,
-          command,
         }),
       ),
     leaseModelCredential: async (

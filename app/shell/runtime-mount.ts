@@ -556,30 +556,6 @@ export async function agentRuntime(
             }),
           }
         : {}),
-      // A Bot packs itself into a template only inside an admitted Turn, and
-      // only through its User's own staging command: the seam it is handed
-      // has no way to publish, so the Bot cannot.
-      ...(turn
-        ? {
-            botTemplate: {
-              owner: {
-                userId: identity.userId,
-                botId: identity.botId,
-              },
-              runId: turn.runId,
-              stageTemplate: (input: { commandId: string; botId: string }) =>
-                userConfigurationV1(state, identity).executeTemplateCommand(
-                  identity.userId,
-                  {
-                    schemaVersion: 1,
-                    type: "template/stage",
-                    commandId: input.commandId,
-                    botId: input.botId,
-                  },
-                ),
-            },
-          }
-        : {}),
       // Command ids fold in the run, so the seam exists only inside a Turn.
       ...(turn
         ? (() => {

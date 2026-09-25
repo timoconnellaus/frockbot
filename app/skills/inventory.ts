@@ -15,14 +15,6 @@ export const MANAGED_SKILL_AUTHORSHIPS_V1 = [
     directory: "app/skills/managed-skills/add-connector",
   },
   {
-    slug: "export-bot-template",
-    directory: "app/skills/managed-skills/export-bot-template",
-  },
-  {
-    slug: "import-bot-template",
-    directory: "app/skills/managed-skills/import-bot-template",
-  },
-  {
     slug: "write-skill",
     directory: "app/skills/managed-skills/write-skill",
   },
@@ -42,8 +34,6 @@ export type ManagedSkillSlugV1 =
 /** Recipe Skills the generator compiles as one module; the other three have their own. */
 export const MANAGED_RECIPE_SKILL_SLUGS_V1 = [
   "add-connector",
-  "export-bot-template",
-  "import-bot-template",
   "write-skill",
 ] as const;
 

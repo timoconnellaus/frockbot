@@ -25,7 +25,6 @@ import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/desktop_layout.dart';
 import '../shell/semantics.dart';
 import '../theme/dialogs.dart';
-import '../templates/page.dart';
 
 import '../theme/caret.dart';
 import 'avatar.dart';
@@ -283,21 +282,6 @@ class _CreateBotSheetState extends State<CreateBotSheet> {
                         ),
                       ],
                     ),
-                  ),
-                  TextButton.icon(
-                    icon: const Icon(Icons.inventory_2_outlined),
-                    label: const Text('Use a template instead'),
-                    onPressed: state.busy
-                        ? null
-                        : () => Navigator.of(context).push(
-                            MaterialPageRoute<void>(
-                              builder: (_) => TemplatesPage(
-                                api: state.api,
-                                store: state.store,
-                                userId: state.userId,
-                              ),
-                            ),
-                          ),
                   ),
                   const SizedBox(height: 16),
                   Center(

@@ -1,15 +1,12 @@
 // Writing one Skill document into one of a Bot's instruction roots.
 //
-// Two callers reach this, and they differ in exactly one thing: who the write
-// is attributed to. `skill_write` writes as the Bot, inside an admitted Turn
-// whose Session and Turn the provenance names. Importing a Bot template writes
-// as the importing *User*, because a template is prose their User chose to
-// materialize and no Turn of the new Bot has run yet.
+// The writer names who the write is attributed to. `skill_write` writes as the
+// Bot, inside an admitted Turn whose Session and Turn the provenance names.
 //
 // "The kernel treats every Workspace file as data. Only Skills under a Bot's
 // instruction roots — its own and its User's — written under the Bot's own
-// authority or its User's, are loaded as instructions." Both writers this
-// module admits are on the right side of that sentence, and
+// authority or its User's, are loaded as instructions." Every writer this
+// module admits is on the right side of that sentence, and
 // `isLoadableSkillSourceV1` is still the one place it is decided — this module
 // cannot widen it, because both roots it can write are derived from the owner
 // rather than passed in, so there is no argument with which to name another
@@ -76,9 +73,8 @@ export const sha256HexV1 = sha256HexTextV1;
  * Renders and writes one Skill, enforcing that root's quota on the way.
  *
  * A refusal is a value, never a throw: a quota breach, an unreadable root, or a
- * losing optimistic write are all outcomes a caller must record and report, and
- * the two callers report them very differently — one as a tool result the model
- * reads, one as a repairable step on a durable import record.
+ * losing optimistic write are all outcomes a caller must record and report; the
+ * Bot's tool reports them as a tool result the model reads.
  */
 export async function writeSkillDocumentV1(
   files: WorkspaceFilesV1,
@@ -98,9 +94,9 @@ export async function writeSkillDocumentV1(
     /**
      * Recorded intent, after the quota admits the write and strictly before it
      * runs. "Record durable execution intent before invoking an external side
-     * effect" — the Bot's tool appends `skill/write-intent` here, and the
-     * import saga marks its step in flight, so neither can be interrupted
-     * between deciding to write and having a record that it tried.
+     * effect" — the Bot's tool appends `skill/write-intent` here, so it cannot
+     * be interrupted between deciding to write and having a record that it
+     * tried.
      */
     onIntent?(intent: { path: string; contentHash: string }): Promise<void>;
   } = {},

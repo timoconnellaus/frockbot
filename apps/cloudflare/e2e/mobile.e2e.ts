@@ -215,8 +215,8 @@ test("the shell is usable on a phone", async ({
    *
    * This is the finding that made the phone unusable rather than cramped: the
    * gear lived in the right panel's header, the right panel is a closed drawer
-   * at this width, and so Name, Description, Routines, the audit log
-   * and template import had no route at all on a phone. In this client the
+   * at this width, and so Name, Description, Routines and the audit log
+   * had no route at all on a phone. In this client the
    * Bot's name in the bar opens its page — what it is doing, and a row for
    * each of the rest — one tap from the conversation, and the gear on that
    * page opens what it is.

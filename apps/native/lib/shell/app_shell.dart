@@ -57,7 +57,6 @@ import '../settings/look_settings.dart';
 import '../settings/page.dart';
 import '../settings/spending.dart';
 import '../settings/voice_settings.dart';
-import '../templates/page.dart';
 import '../theme/document.dart';
 import '../theme/controls.dart';
 import '../theme/frock_theme.dart';
@@ -3545,18 +3544,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               icon: Icons.computer_outlined,
               title: 'Your computers',
               page: _machinesPage,
-            ),
-            ProfileSection(
-              id: TemplateIds.profileEntry,
-              icon: Icons.inventory_2_outlined,
-              title: 'Bot templates',
-              page: () => TemplatesPage(
-                api: widget.api,
-                store: widget.store,
-                userId: widget.userId,
-                botId: selected?.botId.value,
-                botName: selected == null ? null : _name(selected!),
-              ),
             ),
             ProfileSection(
               id: SettingsIds.profileManageBots,

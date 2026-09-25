@@ -114,8 +114,6 @@ describe("the object-storage Workspace store in Workerd", () => {
       SKILL_PATH,
       "managed/a2ui/SKILL.md",
       "managed/add-connector/SKILL.md",
-      "managed/export-bot-template/SKILL.md",
-      "managed/import-bot-template/SKILL.md",
       "managed/write-skill/SKILL.md",
     ]);
     expect(payload.skills[0]?.name).toBe("deploy");

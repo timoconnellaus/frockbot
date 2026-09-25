@@ -6,6 +6,10 @@ discussion. Supersedes the cascade, the ElevenLabs voices and the
 rest of 0029 — one Bot per call, `switch_bot`, first-person read-out, the
 composer's voice control — stands.
 
+> **Note, 2026-09-25.** Bot templates were removed, so decision 6's "templates
+> carry the setting" no longer applies. They will return as "Share a Bot", a
+> link from the Bot itself.
+
 ## Context
 
 Voice was a cascade: the phone's PCM to a `VoiceAssistant` Durable Object,

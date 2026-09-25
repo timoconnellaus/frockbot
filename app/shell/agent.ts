@@ -114,9 +114,9 @@ export async function recordSendToUserV1(
      * The locked first-party cards, and the call drawing one of them (ADR
      * 0030 step 7).
      *
-     * Passed by the four places that record one of the five old members —
-     * `send_to_user`, the Plugin-authoring ask, the Machine command ask and
-     * the Bot-template card — and by nothing else. A Plugin's card already
+     * Passed by the three places that record one of the five old members —
+     * `send_to_user`, the Plugin-authoring ask and the Machine command ask —
+     * and by nothing else. A Plugin's card already
      * draws its own decision, so the approval the card seam records beside it
      * must not be mapped a second time.
      */
