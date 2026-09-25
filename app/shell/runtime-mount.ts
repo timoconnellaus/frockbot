@@ -458,6 +458,13 @@ export async function agentRuntime(
   // Filled in once this Turn's model binding is resolved, below. The tool
   // and the prompt section both read it lazily, from inside the Turn.
   const subagentModels: SubagentModelOptionV1[] = [];
+  // A Bot dispatches a subagent only inside an admitted Turn, whose run
+  // the task record names, and only where a Subagent Durable Object can
+  // actually be addressed.
+  const subagentGenerationId =
+    turn && state.subagentBinding && featureOn("subagents")
+      ? turn.compositionGenerationId
+      : undefined;
   const resolvedAgentPackages: FoundationAgentPackage[] = [
     ...state.application.runtime.hosted({
       userId: identity.userId,
@@ -631,19 +638,13 @@ export async function agentRuntime(
             },
           }
         : {}),
-      // A Bot dispatches a subagent only inside an admitted Turn, whose run
-      // the task record names, and only where a Subagent Durable Object can
-      // actually be addressed.
-      ...(turn &&
-      turn.compositionGenerationId &&
-      state.subagentBinding &&
-      featureOn("subagents")
+      ...(turn && subagentGenerationId
         ? {
             subagents: subagentsRuntimeHost(
               state,
               identity,
               turn,
-              turn.compositionGenerationId,
+              subagentGenerationId,
               turn.turnType ?? "chat",
               () => subagentModels,
               turn.subagentTaskId,
@@ -991,7 +992,9 @@ export async function agentRuntime(
         bindings: [subagentBinding],
         defaultBinding: subagentBinding,
         specialists:
-          modelCapability.packageId === FROCK_AI_PACKAGE_ID && turn
+          modelCapability.packageId === FROCK_AI_PACKAGE_ID &&
+          turn &&
+          subagentGenerationId
             ? await pricedFrockSpecialistsV1(state, identity, turn.sessionId, {
                 ...subagentBinding,
               })
