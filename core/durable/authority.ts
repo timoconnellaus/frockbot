@@ -1553,25 +1553,6 @@ export class BotDurableAuthority<Snapshot> {
   }
 
   /**
-   * Inline Session events of the given types, without hydrating cut payloads.
-   *
-   * Announcements and the stale-run repair only need a type, a seq, and a
-   * timestamp.
-   * The exact model-request bytes stay on the audit path.
-   */
-  async readSessionInlineEventsOfTypes(
-    sessionId: string,
-    types: ReadonlySet<string>,
-    startSeq = 0,
-  ): Promise<SessionEvent[]> {
-    return new SessionEventLog(this.ctx.storage).readInlineEventsOfTypes(
-      sessionId,
-      types,
-      startSeq,
-    );
-  }
-
-  /**
    * The bounded durable event projections for a run. This is the inspection
    * path: recovery, compaction and audit use `readStoredRun` and therefore
    * receive exact events, the transcript uses `readStoredRunForDisplay`, and a

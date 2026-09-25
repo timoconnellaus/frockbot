@@ -150,48 +150,18 @@ describe("conversation compaction in Workerd", () => {
       ),
     ).toHaveLength(1);
 
-    // And the transcript says so, once, without putting the summary on the wire.
+    // And the transcript never mentions it: compaction is housekeeping for the
+    // model, and the conversation shows only what a person or the Bot said.
     const page = await stub.listRuns({
       ...identity,
       query: { schemaVersion: 1 },
     });
-    const announcements = (page as { announcements?: unknown[] }).announcements;
-    expect(announcements).toContainEqual(
-      expect.objectContaining({
-        type: "conversation/compacted",
-        throughTurn: compacted.throughTurn,
-      }),
+    const announcements =
+      (page as { announcements?: Array<{ type: string }> }).announcements ?? [];
+    expect(announcements.map((entry) => entry.type)).not.toContain(
+      "conversation/compacted",
     );
-    expect(JSON.stringify(announcements)).not.toContain(compacted.summary);
-
-    // AND IT SITS WHERE THE SUMMARY ENDS. The marker is dated by the end of the
-    // Turn it covers through, not by the Turn that triggered it — so the
-    // transcript draws it between the last compacted Turn and the first
-    // verbatim one instead of under the newest reply.
-    const marker = (
-      announcements as Array<{ type: string; at: string; throughTurn: number }>
-    ).find((entry) => entry.type === "conversation/compacted");
-    const boundary = after.find(
-      (event) =>
-        event.type === "turn/end" && event.turn === compacted.throughTurn,
-    );
-    expect(marker?.at).toBe(boundary?.timestamp);
-    // Between the two Turns that bound the range, on the log's own clock. (The
-    // runs' `admittedAt` cannot be compared with it here: this suite hands the
-    // object a synthetic `acceptedAt`, so the two clocks are years apart.)
-    const started = after.find(
-      (event) =>
-        event.type === "turn/start" && event.turn === compacted.throughTurn,
-    );
-    const next = after.find(
-      (event) =>
-        event.type === "turn/start" && event.turn === compacted.throughTurn + 1,
-    );
-    expect(started!.timestamp <= marker!.at).toBe(true);
-    expect(marker!.at <= next!.timestamp).toBe(true);
-    // And never the newest line in the thread, which is where it used to sit.
-    const newest = after.findLast((event) => event.type === "turn/end");
-    expect(marker!.at < newest!.timestamp).toBe(true);
+    expect(JSON.stringify(page)).not.toContain(compacted.summary);
   });
 
   // The defect this replaces: `agent/turn-stopping` is a hook the agent loop

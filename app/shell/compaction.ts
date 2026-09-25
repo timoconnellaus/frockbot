@@ -75,10 +75,6 @@ export const COMPACTION_DEADLINE_MS_V1 = 60_000;
 /** Most Turn ends a retry ever waits after a failure. */
 export const COMPACTION_MAX_BACKOFF_TURNS_V1 = 8;
 
-/** The line a person sees in the transcript where a compaction stands. */
-export const COMPACTED_ANNOUNCEMENT_TEXT_V1 =
-  "Earlier messages were summarised";
-
 /** One completed compaction, read back off the log. */
 export interface CompactionV1 {
   effectId: string;

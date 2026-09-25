@@ -858,8 +858,9 @@ reconnect. An explicit mark-read
 clears it. The Computer continues through its existing backend surface; header
 navigation adds no authority or credentials.
 
-Session announcements such as rename and compaction remain system lines,
-projected by `projectAnnouncements` and ordered by their recorded timestamps.
+Session announcements such as a rename remain system lines, projected by
+`projectAnnouncements` and ordered by their recorded timestamps. Compaction is
+never announced: it is housekeeping for the model, not something a person said.
 
 **PR 9: the Flock, and three more projections.**
 

@@ -195,7 +195,7 @@ class ChatController extends ChangeNotifier {
   Map<String, ReplyDraft> get replyDrafts => UnmodifiableMapView(_replyDrafts);
   final Map<String, ReplyDraft> _replyDrafts = {};
 
-  /// The conversation's own announcements — a rename, a compaction — as the
+  /// The conversation's own announcements — a rename — as the
   /// newest page carried them. They belong to the Session rather than to a
   /// Turn, so only the newest page has them and an older page never clears
   /// what it does not carry.

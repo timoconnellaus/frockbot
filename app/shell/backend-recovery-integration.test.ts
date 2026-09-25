@@ -1446,7 +1446,7 @@ describe("Bot recovery", () => {
     ).toBe(false);
   });
 
-  test("reads the conversation Session once per transcript page request", async () => {
+  test("a transcript page never announces a compaction", async () => {
     const storage = new MemoryStorage();
     const contribution = createShellBotBackendContribution({
       ...shellTestApplicationV1(),
@@ -1489,15 +1489,8 @@ describe("Bot recovery", () => {
 
     const page = await contribution.listRuns({ schemaVersion: 1 });
 
-    expect(page.announcements).toMatchObject([
-      { type: "conversation/compacted", throughTurn: 1 },
-    ]);
-    // Marker collection and marker placement share one bounded type walk.
-    expect(
-      storage.gets.filter(
-        (key) => key === sessionEventLogIndexKeyV1(sessionId),
-      ),
-    ).toHaveLength(1);
+    expect(page.announcements ?? []).toEqual([]);
+    expect(JSON.stringify(page)).not.toContain("The first Turn.");
   });
 
   test("listRuns does not hydrate exact model-request payloads", async () => {
@@ -1549,9 +1542,7 @@ describe("Bot recovery", () => {
 
     const page = await contribution.listRuns({ schemaVersion: 1 });
 
-    expect(page.announcements).toMatchObject([
-      { type: "conversation/compacted", throughTurn: 8 },
-    ]);
+    expect(page.announcements ?? []).toEqual([]);
     expect(
       storage.gets.filter((key) =>
         key.startsWith(sessionEventPayloadPrefixV1(sessionId)),
