@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import { APIError, TypeSafeClient, type Fetch } from "@typesafe-ai/sdk";
+import { FROCK_AI_SPECIALTIES_V1 } from "@frockbot/providers/frock-ai/catalog";
 import {
-  SPECIALIST_CAPABILITIES_V1,
   TURN_AMBIGUITIES_V1,
   TURN_COMPLEXITIES_V1,
 } from "@frockbot/core/contracts";
@@ -11,6 +11,7 @@ import {
   TURN_START_ACKNOWLEDGE_NO_V1,
   TURN_START_ACKNOWLEDGE_YES_V1,
   TURN_START_MODEL_V1,
+  TURN_START_SPECIALTIES_V1,
   turnStartQuestionsV1,
   turnStartStateV1,
   type TurnStartAnswersV1,
@@ -149,10 +150,14 @@ test("the choices are exactly the TurnDirective's values, and a capability may b
   expect(Object.keys(turnStartQuestionsV1.ambiguity.criteria)).toEqual([
     ...TURN_AMBIGUITIES_V1,
   ]);
+  // The specialists Jev may name are exactly the ones the catalog offers.
   expect(Object.keys(turnStartQuestionsV1.capability.criteria)).toEqual([
     "none",
-    ...SPECIALIST_CAPABILITIES_V1,
+    ...TURN_START_SPECIALTIES_V1,
   ]);
+  expect([...TURN_START_SPECIALTIES_V1]).toEqual(
+    FROCK_AI_SPECIALTIES_V1.map((specialty) => specialty.name),
+  );
 });
 
 test("code acknowledges at the threshold and not below it", () => {

@@ -24,6 +24,7 @@ import type { FoundationFeature } from "../runtime.js";
 import {
   ACKNOWLEDGE_NOTE_V1,
   createSupervisionRuntimeFeatureV1,
+  specialistNoteV1,
   turnInputOriginV1,
 } from "./loop.js";
 
@@ -61,6 +62,8 @@ async function run(
     followUp?: string;
     /** More tools, registered as a host would. */
     tools?: readonly ToolDefinition[];
+    /** Specialists the Turn is offered. */
+    specialists?: readonly { name: string; slug: string }[];
   } = {},
 ): Promise<SessionEvent[]> {
   const root = createAgentRuntimeHarness({});
@@ -70,6 +73,9 @@ async function run(
       supervisor,
       origin: options.voice ? "voice" : "user",
       clearReplyDraft: (ordinal) => options.cleared?.push(ordinal),
+      ...(options.specialists
+        ? { specialists: () => options.specialists ?? [] }
+        : {}),
     }) as unknown as Parameters<typeof root.mount>[0],
   );
   await root.mount(shellAgentFeature);
@@ -610,4 +616,43 @@ test("a namespaced mutate call is reviewed and recorded under its namespace", as
   expect(
     events.filter((event) => event.type === "supervision/call"),
   ).toMatchObject([{ tool: "composio-gmail/GMAIL_SEND_EMAIL" }]);
+});
+
+test("work Jev names for a specialist the Turn is offered is handed to it from the first request's tail", async () => {
+  const writing = { name: "writing", slug: "provider-flock-ai/@frock/writing" };
+  const directive = {
+    ...defaultTurnDirectiveV1(),
+    acknowledge: true,
+    requiredCapabilities: ["writing"],
+  };
+  const seen: NormalizedModelRequest[] = [];
+  await run(
+    scripted(
+      [[{ id: "a", name: "send_to_user", input: text("Done.", "finish") }]],
+      seen,
+    ),
+    createFakeTurnSupervisorV1({ startTurn: async () => directive }),
+    { specialists: [writing] },
+  );
+  expect(seen[0]?.messages.at(-1)).toEqual({
+    role: "user",
+    content: `${ACKNOWLEDGE_NOTE_V1}\n\n${specialistNoteV1(writing)}`,
+  });
+
+  // A specialist the Turn is not offered is never named.
+  const unoffered: NormalizedModelRequest[] = [];
+  await run(
+    scripted(
+      [[{ id: "a", name: "send_to_user", input: text("Done.", "finish") }]],
+      unoffered,
+    ),
+    createFakeTurnSupervisorV1({
+      startTurn: async () => ({ ...directive, acknowledge: false }),
+    }),
+    { specialists: [] },
+  );
+  expect(unoffered[0]?.messages.at(-1)).toEqual({
+    role: "user",
+    content: "Email Dana the March invoice.",
+  });
 });
