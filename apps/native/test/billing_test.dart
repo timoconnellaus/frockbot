@@ -94,7 +94,7 @@ SettingsApi _api(
 });
 
 Finder _list() => find
-    .descendant(of: find.byType(ListView), matching: find.byType(Scrollable))
+    .descendant(of: find.byType(SingleChildScrollView), matching: find.byType(Scrollable))
     .first;
 
 Future<void> _show(WidgetTester tester, SettingsApi api, {Size? size}) async {
@@ -346,6 +346,51 @@ void main() {
     await tester.tap(find.text('Try again'));
     await tester.pumpAndSettle();
     expect(find.text('Available to spend'), findsOneWidget);
+    api.close();
+  });
+
+  testWidgets('a lapsed plan counts only what it can still spend', (
+    tester,
+  ) async {
+    final api = _api(
+      billing({
+        'canSpend': false,
+        'purchasedMicros': 12000000,
+        'subscription': {'status': 'canceled', 'periodEnd': _renews},
+      }),
+    );
+    await _show(tester, api);
+    expect(find.text('Your Bots can’t reply'), findsOneWidget);
+    expect(identifiedBy(BillingIds.balance), findsOneWidget);
+    expect(find.text('US\$0.00'), findsOneWidget);
+    expect(find.text('Top-up credit'), findsOneWidget);
+    expect(find.text('US\$12.00'), findsOneWidget);
+    api.close();
+  });
+
+  testWidgets('Spending below the plan on a short phone still opens there', (
+    tester,
+  ) async {
+    final api = _api(
+      billing({
+        'canSpend': false,
+        'complimentaryMicros': 0,
+        'reservedMicros': 1000000,
+        'payments': [
+          {'id': 'complimentary:a', 'kind': 'complimentary'},
+        ],
+      }),
+    );
+    tester.view.physicalSize = const Size(360, 560);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(home: BillingPage(api: api, showSpending: true)),
+    );
+    await tester.pumpAndSettle();
+    expect(identifiedBy(BillingIds.plan), findsOneWidget);
+    final section = tester.getTopLeft(identifiedBy(BillingIds.spending));
+    expect(section.dy, lessThan(200));
     api.close();
   });
 

@@ -227,10 +227,13 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
                         : constraints.maxWidth >= 600
                         ? 24.0
                         : 16.0;
-                    return ListView(
+                    return SingleChildScrollView(
                       physics: const AlwaysScrollableScrollPhysics(),
                       padding: EdgeInsets.fromLTRB(side, 12, side, 40),
-                      children: _sections(context, data),
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: _sections(context, data),
+                      ),
                     );
                   },
                 ),
@@ -246,10 +249,11 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
     final metered = data['metered'] == true;
     final payments = data['paymentsAvailable'] == true;
     int micros(String key) => (data[key] as num?)?.toInt() ?? 0;
-    final available =
-        micros('includedMicros') +
-        micros('complimentaryMicros') +
-        micros('purchasedMicros');
+    final available = subscribed
+        ? micros('includedMicros') +
+              micros('complimentaryMicros') +
+              micros('purchasedMicros')
+        : micros('complimentaryMicros');
     final blocked = !metered
         ? null
         : data['suspended'] == true
@@ -261,7 +265,14 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
         : subscribed && available <= 0
         ? 'You have no usage credit left. Add credit to keep them working.'
         : null;
-    final balance = subscribed || available > 0 || micros('reservedMicros') > 0;
+    final balance =
+        subscribed ||
+        [
+          'includedMicros',
+          'complimentaryMicros',
+          'purchasedMicros',
+          'reservedMicros',
+        ].any((key) => micros(key) > 0);
     return [
       if (message case final String text) _Notice(text),
       if (!payments) const _Notice('Payments are not available yet.'),

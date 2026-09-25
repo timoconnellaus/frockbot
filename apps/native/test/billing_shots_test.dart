@@ -189,7 +189,7 @@ Future<void> _scene(
   if (prices) {
     await tester.dragUntilVisible(
       find.text('Prices'),
-      find.byType(ListView),
+      find.byType(SingleChildScrollView),
       const Offset(0, -400),
     );
     await tester.pumpAndSettle();
