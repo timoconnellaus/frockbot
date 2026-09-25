@@ -24,6 +24,7 @@ import {
   type ComputerDemonstrationStoreV1,
 } from "./bot.js";
 import type { ComputerCommandV1 } from "./protocol.js";
+import type { ComputerLoginVaultV1 } from "./upkeep.js";
 
 const USER = "user-1";
 const BOT = "scout";
@@ -139,7 +140,32 @@ const RECORDED_STEPS = [
   },
 ];
 
-function rig(options: { steps?: unknown[]; screenshots?: boolean } = {}): {
+/** A vault that holds no sign-ins and knows only when the Computer went. */
+function deletionVault(): ComputerLoginVaultV1 & { deletedAt?: string } {
+  const vault: ComputerLoginVaultV1 & { deletedAt?: string } = {
+    owed: () => Promise.resolve(undefined),
+    kept: () => Promise.resolve(undefined),
+    keep: () => Promise.resolve("kept"),
+    owe: (at) =>
+      Promise.resolve(
+        vault.deletedAt !== undefined && vault.deletedAt >= at
+          ? "deleted"
+          : "owed",
+      ),
+    settle: () => Promise.resolve(),
+    deletedSince: (at) =>
+      Promise.resolve(vault.deletedAt !== undefined && vault.deletedAt >= at),
+  };
+  return vault;
+}
+
+function rig(
+  options: {
+    steps?: unknown[];
+    screenshots?: boolean;
+    vault?: ComputerLoginVaultV1;
+  } = {},
+): {
   contribution: ReturnType<typeof createComputerBotBackendContribution>;
   storage: MemoryStorage;
   uploads: MemoryUploads;
@@ -164,6 +190,7 @@ function rig(options: { steps?: unknown[]; screenshots?: boolean } = {}): {
     providerLabel: "Computer",
     configured: true,
     demonstrations: uploads,
+    ...(options.vault ? { loginVault: () => options.vault } : {}),
     now: () => new Date(clock.now),
     newId: () => `id-${(sequence += 1)}`,
     openComputer: (userId, botId) =>
@@ -355,6 +382,56 @@ describe("a demonstration in the Bot Durable Object", () => {
     await contribution.settleScheduledWork();
     expect((await contribution.read(USER, BOT)).demonstration).toBeUndefined();
     expect(await deadlines()).toEqual([]);
+  });
+
+  test("an Update collects it before the machine it was recorded on goes", async () => {
+    const { contribution, command, host } = rig({ vault: deletionVault() });
+    await command("takeControl");
+    await command("startDemonstration");
+
+    await command("updateComputer");
+    await contribution.settleScheduledWork();
+
+    const stop = host.calls.indexOf(`demonstration:stop:${BOT}`);
+    expect(stop).toBeGreaterThanOrEqual(0);
+    expect(stop).toBeLessThan(host.calls.indexOf(`replace:${USER}`));
+    expect((await contribution.read(USER, BOT)).demonstration?.status).toBe(
+      "ready",
+    );
+  });
+
+  test("a Reset collects it before the machine goes back to its checkpoint", async () => {
+    const { contribution, command, host } = rig({ vault: deletionVault() });
+    await command("saveCheckpoint");
+    await command("takeControl");
+    await command("startDemonstration");
+
+    await command("resetComputer");
+    await contribution.settleScheduledWork();
+
+    const stop = host.calls.indexOf(`demonstration:stop:${BOT}`);
+    expect(stop).toBeGreaterThanOrEqual(0);
+    expect(stop).toBeLessThan(host.calls.indexOf(`reset:${BOT}`));
+    expect((await contribution.read(USER, BOT)).demonstration?.status).toBe(
+      "ready",
+    );
+  });
+
+  test("after Delete my Computer, the alarm lets it go without opening a Computer", async () => {
+    const vault = deletionVault();
+    const { contribution, command, clock, storage, host } = rig({ vault });
+    await command("takeControl");
+    await command("startDemonstration");
+    vault.deletedAt = new Date(clock.now).toISOString();
+    await host.teardown({ userId: USER });
+    const calls = host.calls.length;
+
+    clock.now = Math.min(...(await contribution.scheduledDeadlines(storage)));
+    await contribution.settleScheduledWork();
+
+    expect(host.calls.slice(calls)).toEqual([]);
+    expect((await contribution.read(USER, BOT)).demonstration).toBeUndefined();
+    expect(await contribution.scheduledDeadlines(storage)).toEqual([]);
   });
 
   test("an expiry the store refuses is tried again later, never at once", async () => {

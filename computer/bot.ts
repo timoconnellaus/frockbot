@@ -1962,7 +1962,16 @@ export class ComputerBotBackendContribution {
     for (const entry of await this.demonstrations()) {
       if (demonstrationDeadline(entry, control) > now) continue;
       try {
-        if (entry.status === "recording") {
+        if (
+          entry.status === "recording" &&
+          (await this.host
+            .loginVault?.(entry.userId)
+            ?.deletedSince(entry.startedAt))
+        ) {
+          // The User deleted the Computer, and the recording with it. Opening
+          // it to ask would start a new one.
+          await this.forget(entry);
+        } else if (entry.status === "recording") {
           await this.collect(entry, (run) =>
             this.withDemonstrationComputer(entry, run),
           );
@@ -2008,6 +2017,31 @@ export class ComputerBotBackendContribution {
       return await run(computer, `${effectId}:collect`);
     } finally {
       await computer.close();
+    }
+  }
+
+  /**
+   * Collects this Bot's stopped recording, if any, before an Update or a
+   * Reset discards the files it lives in. Never fails the command: a
+   * recording the Computer would not hand back is the alarm's to try again,
+   * and gone with the machine it was on.
+   */
+  private async collectBeforeMachineChanges(
+    userId: string,
+    command: ComputerCommandV1,
+  ): Promise<void> {
+    const recording = (await this.demonstrations()).find(
+      (entry) => entry.status === "recording",
+    );
+    if (recording?.status !== "recording") return;
+    try {
+      await this.collect(recording, (run) =>
+        this.withComputer(userId, command, (computer, effectId) =>
+          run(computer, `${effectId}:collect-demonstration`),
+        ),
+      );
+    } catch {
+      // Left for the alarm.
     }
   }
 
@@ -2143,6 +2177,11 @@ export class ComputerBotBackendContribution {
           throw new ComputerError("not-found", COMPUTER_DELETED_BEFORE);
         }
       }
+      // What was recorded is on the machine and nowhere else, so it is
+      // collected before the machine changes. A recorder is never running
+      // here: the host refuses both while anyone holds control, and the
+      // recorder stops when control goes.
+      await this.collectBeforeMachineChanges(userId, command);
       await report(2);
       try {
         await this.withComputer(userId, command, async (computer, effectId) => {
