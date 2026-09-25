@@ -259,6 +259,71 @@ describe("the device grant", () => {
   });
 });
 
+describe("a device module", () => {
+  const bridge = {
+    id: "bridge",
+    platforms: ["macos"],
+    read: ["~/Library/Messages/chat.db"],
+    net: ["localhost:23373"],
+    appleEvents: ["com.apple.iChat"],
+    calls: ["search", "send"],
+    events: ["message"],
+  };
+  const withModule = (module: Record<string, unknown>) => ({
+    ...base,
+    grants: ["device"],
+    device: { abilities: [], modules: [module] },
+    triggers: [{ name: "message", description: "A new message arrived." }],
+  });
+
+  test("names what its process may reach, and needs no page", () => {
+    expect(
+      decodePluginDescriptorV1(withModule(bridge)).device as unknown,
+    ).toEqual({
+      abilities: [],
+      modules: [bridge],
+    });
+  });
+
+  test("refuses a reach it cannot confine", () => {
+    for (const change of [
+      { read: ["relative/path"] },
+      { read: ["~/../etc/passwd"] },
+      { read: ["/Users/tim/../root"] },
+      { read: ["/a//b"] },
+      { net: ["example.com:443"] },
+      { net: ["localhost:0"] },
+      { net: ["localhost:70000"] },
+      { appleEvents: ["iChat"] },
+      { platforms: [] },
+      { platforms: ["ios"] },
+      { calls: ["Search"] },
+      { id: "Bridge" },
+      { extra: true },
+    ]) {
+      expect(() =>
+        decodePluginDescriptorV1(withModule({ ...bridge, ...change })),
+      ).toThrow();
+    }
+  });
+
+  test("emits only the Plugin's own triggers", () => {
+    expect(() =>
+      decodePluginDescriptorV1(withModule({ ...bridge, events: ["other"] })),
+    ).toThrow(/not one of the Plugin's triggers/);
+  });
+
+  test("a device grant names an ability or a module", () => {
+    expect(() =>
+      decodePluginDescriptorV1({
+        ...base,
+        grants: ["device"],
+        device: { abilities: [], modules: [] },
+      }),
+    ).toThrow(/no ability and no module/);
+  });
+});
+
 describe("a plugin's hooks and contract", () => {
   test("orders hooks by the vocabulary and refuses an unopened event", () => {
     expect(

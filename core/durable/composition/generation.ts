@@ -13,6 +13,7 @@ import {
   PLUGIN_PAGE_PATH_V1,
   sha256,
   type PluginDescriptorV1,
+  type PluginModuleArtifactV1,
   type PluginPageArtifactV1,
 } from "@frockbot/core/contracts";
 
@@ -70,6 +71,12 @@ export interface CompositionMemberV1 {
    * Present exactly when a view names a page.
    */
   pages?: PluginPageArtifactV1[];
+  /**
+   * The device modules its descriptor declares (ADR 0037), stored beside the
+   * module and covered by the generation's hash like its pages. Present
+   * exactly when the descriptor declares a module.
+   */
+  modules?: PluginModuleArtifactV1[];
 }
 
 export type CompositionOriginV1 =
@@ -340,7 +347,7 @@ export function decodeCompositionMemberV1(
   label: string,
 ): CompositionMemberV1 {
   const value = record(input, label);
-  exactKeys(value, MEMBER_KEYS, ["pages"], label);
+  exactKeys(value, MEMBER_KEYS, ["pages", "modules"], label);
   const packageId = boundedString(value.packageId, `${label}.packageId`, 128);
   const version = boundedString(value.version, `${label}.version`, 64);
   const provenance = decodePackageProvenanceV1(
@@ -358,6 +365,11 @@ export function decodeCompositionMemberV1(
     throw new Error(`${label}.descriptor does not match its member`);
   }
   const pages = decodeMemberPagesV1(value.pages, descriptor, `${label}.pages`);
+  const modules = decodeMemberModulesV1(
+    value.modules,
+    descriptor,
+    `${label}.modules`,
+  );
   return {
     packageId,
     version,
@@ -365,7 +377,52 @@ export function decodeCompositionMemberV1(
     artifact: decodeArtifactRefV1(value.artifact, `${label}.artifact`),
     descriptor,
     ...(pages === undefined ? {} : { pages }),
+    ...(modules === undefined ? {} : { modules }),
   };
+}
+
+/** Exactly one stored module for every module the descriptor declares. */
+function decodeMemberModulesV1(
+  input: unknown,
+  descriptor: PluginDescriptorV1,
+  label: string,
+): PluginModuleArtifactV1[] | undefined {
+  const declared = new Set(
+    (descriptor.device?.modules ?? []).map((module) => module.id),
+  );
+  if (input === undefined) {
+    if (declared.size > 0) throw new Error(`${label} is missing`);
+    return undefined;
+  }
+  if (!Array.isArray(input) || input.length === 0) {
+    throw new Error(`${label} must be a non-empty array`);
+  }
+  const modules = input.map((entry, index) => {
+    const value = record(entry, `${label}[${index}]`);
+    exactKeys(value, ["id", "contentHash", "size"], [], `${label}[${index}]`);
+    if (!Number.isSafeInteger(value.size) || (value.size as number) < 0) {
+      throw new Error(`${label}[${index}].size must be a non-negative integer`);
+    }
+    return {
+      id: boundedString(value.id, `${label}[${index}].id`, 32),
+      contentHash: hashString(
+        value.contentHash,
+        `${label}[${index}].contentHash`,
+      ),
+      size: value.size as number,
+    };
+  });
+  const ids = new Set(modules.map((module) => module.id));
+  if (
+    ids.size !== modules.length ||
+    ids.size !== declared.size ||
+    ![...declared].every((id) => ids.has(id))
+  ) {
+    throw new Error(
+      `${label} must name each module the descriptor declares, once`,
+    );
+  }
+  return modules;
 }
 
 /** Exactly one stored page for every page a view names, and no other. */

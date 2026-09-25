@@ -358,6 +358,18 @@ export function pluginApprovalActionV1(
       "Its page can use your microphone while you have it open, with a sign on screen and a Stop control; what it hears reaches only this Plugin's own tools.",
     );
   }
+  // A device module is the Plugin's own code running on the person's
+  // computer, so the card names everything it can reach there.
+  for (const module of descriptor.device?.modules ?? []) {
+    const reach = [
+      ...module.read.map((path) => `reads ${path}`),
+      ...module.net.map((address) => `connects to ${address}`),
+      ...module.appleEvents.map((bundleId) => `controls ${bundleId}`),
+    ];
+    parts.push(
+      `It runs code on your computer while the FrockBot app is open${reach.length === 0 ? ", reaching nothing on it" : ` that ${reach.join(", ")}`}.`,
+    );
+  }
   // A model provider contribution runs when a Bot's model names it, which is
   // not the switch this card asks about — so the card says what it serves and
   // what choosing it means.
@@ -413,6 +425,7 @@ export function pluginApprovalRiskV1(
   const descriptor = member.descriptor;
   if (descriptor.network && "open" in descriptor.network) return "high";
   if (descriptor.grants.includes("http")) return "high";
+  if (descriptor.device?.modules?.length) return "high";
   if (descriptor.device) return "medium";
   if (descriptor.hooks.length > 0) return "medium";
   if ((descriptor.views ?? []).some((view) => view.page !== undefined)) {

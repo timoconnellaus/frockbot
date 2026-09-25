@@ -57,6 +57,7 @@ const MANIFEST = {
   views: ["weather.settings"],
   cards: ["draft"],
   modelProviders: ["weather"],
+  modules: [{ id: "bridge", calls: ["search", "send"], hash: "c".repeat(64) }],
   hashes: { module: "b".repeat(64) },
 };
 
@@ -195,12 +196,32 @@ describe("the Plugin build response", () => {
       status: "built" as const,
       manifest: MANIFEST,
       module: "export const tools = [];\n",
+      modules: [{ id: "bridge", code: "export const calls = {};\n" }],
     };
     const decoded = decodePluginBuildResponseV1(
       encodePluginBuildResponseV1(response),
     );
     expect(decoded).toEqual(response);
     expect(isPluginBuiltResponseV1(decoded)).toBe(true);
+  });
+
+  test("refuses device module code the manifest does not declare", () => {
+    expect(() =>
+      decodePluginBuildResponseV1({
+        status: "built",
+        manifest: MANIFEST,
+        module: "x",
+        modules: [],
+      }),
+    ).toThrow(/one artifact per declared module/);
+    expect(() =>
+      decodePluginBuildResponseV1({
+        status: "built",
+        manifest: MANIFEST,
+        module: "x",
+        modules: [{ id: "other", code: "" }],
+      }),
+    ).toThrow(/not the module the manifest declares/);
   });
 
   test("round-trips a passing check, which carries no module", () => {

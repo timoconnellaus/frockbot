@@ -8,11 +8,13 @@
   "exports": {
     "./build/plugin": "./src/build/plugin.ts",
     "./plugin": "./plugin/index.d.ts",
+    "./module": "./module/index.d.ts",
     "./package.json": "./package.json"
   },
   "files": [
     "src",
     "plugin",
+    "module",
     "README.md"
   ],
   "scripts": {

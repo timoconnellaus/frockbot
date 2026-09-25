@@ -174,9 +174,11 @@ function buildsCleanly(
           views: [],
           cards: [],
           modelProviders: [],
+          modules: [],
           hashes: { module: await sha256Hex(MODULE) },
         },
         module: MODULE,
+        modules: [],
       };
     },
   };
@@ -220,6 +222,9 @@ function harness(
       },
       putPackageUiArtifact: async (hash, html) => {
         artifacts.set(hash, html);
+      },
+      putPluginModuleArtifact: async (hash, code) => {
+        artifacts.set(hash, code);
       },
     },
     composition: { current: async () => generation(options.members) },
@@ -427,9 +432,11 @@ describe("checking and publishing", () => {
           views: [],
           cards: [],
           modelProviders: [],
+          modules: [],
           hashes: { module: "f".repeat(64) },
         },
         module: MODULE,
+        modules: [],
       })),
     });
     expect(
@@ -477,6 +484,7 @@ describe("checking and publishing", () => {
       artifacts: {
         putPackageArtifact: async () => {},
         putPackageUiArtifact: async () => {},
+        putPluginModuleArtifact: async () => {},
       },
       composition: { current: async () => generation() },
       storage: {
@@ -519,6 +527,7 @@ describe("the manifest against the descriptor", () => {
     views: [],
     cards: [],
     modelProviders: [],
+    modules: [],
     hashes: { module: "a".repeat(64) },
   };
 
@@ -723,9 +732,11 @@ describe("a Plugin with a page", () => {
               views: ["tuner"],
               cards: [],
               modelProviders: [],
+              modules: [],
               hashes: { module: await sha256Hex(MODULE) },
             },
             module: MODULE,
+            modules: [],
           },
     );
 
@@ -781,5 +792,108 @@ describe("a Plugin with a page", () => {
     });
     expect(artifacts.size).toBe(0);
     expect(storage.size).toBe(0);
+  });
+});
+
+describe("a Plugin with a device module", () => {
+  const CODE = "export const calls = { search: () => [] };\n";
+  const withModule = {
+    "notes/plugin.json": JSON.stringify({
+      ...JSON.parse(DESCRIPTOR_JSON),
+      grants: [...JSON.parse(DESCRIPTOR_JSON).grants, "device"],
+      device: {
+        abilities: [],
+        modules: [
+          {
+            id: "bridge",
+            platforms: ["macos"],
+            read: [],
+            net: ["localhost:23373"],
+            appleEvents: [],
+            calls: ["search"],
+            events: [],
+          },
+        ],
+      },
+    }),
+    "notes/plugin.ts": MODULE,
+    "notes/modules/bridge.ts": CODE,
+  };
+  const buildsTheModule = (calls: string[], hash?: string) =>
+    buildsCleanly([], async (request) =>
+      request.mode === "check"
+        ? { status: "built" }
+        : {
+            status: "built",
+            manifest: {
+              contract: 1,
+              tools: [
+                { name: "note_count", description: "Count.", inputSchema: {} },
+                { name: "note_add", description: "Add.", inputSchema: {} },
+              ],
+              hooks: [],
+              services: [],
+              triggers: [],
+              views: [],
+              cards: [],
+              modelProviders: [],
+              modules: [
+                { id: "bridge", calls, hash: hash ?? (await sha256Hex(CODE)) },
+              ],
+              hashes: { module: await sha256Hex(MODULE) },
+            },
+            module: MODULE,
+            modules: [{ id: "bridge", code: CODE }],
+          },
+    );
+
+  test("a publish stores the module and names it on the member", async () => {
+    const { host, storage, artifacts } = harness({
+      source: withModule,
+      build: buildsTheModule(["search"]),
+    });
+    const result = await host.publish({ pluginId: "notes" }, "tool:9:1:0");
+    if (result.status !== "pending-approval") {
+      throw new Error(`expected an approval: ${JSON.stringify(result)}`);
+    }
+    const hash = await sha256Hex(CODE);
+    expect(artifacts.get(hash)).toBe(CODE);
+    const intent = decodePluginIntentRecordV1(
+      storage.get(pluginIntentKeyV1(result.ask.approvalId)),
+    );
+    if (intent.action.kind !== "publish") throw new Error("not a publish");
+    expect(intent.action.member.modules).toEqual([
+      { id: "bridge", contentHash: hash, size: CODE.length },
+    ]);
+    // Code on the person's computer: the card names what it reaches there.
+    expect(result.ask.action).toContain(
+      "runs code on your computer while the FrockBot app is open that connects to localhost:23373",
+    );
+    expect(result.ask.risk).toBe("high");
+  });
+
+  test("refuses a module whose calls are not the ones it declares", async () => {
+    const { host, artifacts } = harness({
+      source: withModule,
+      build: buildsTheModule(["search", "send"]),
+    });
+    const result = await host.publish({ pluginId: "notes" }, "tool:9:1:0");
+    expect(result).toMatchObject({ status: "failed" });
+    if (result.status === "failed") {
+      expect(result.reason).toContain(
+        "modules/bridge.ts exports calls [search, send]",
+      );
+    }
+    expect(artifacts.size).toBe(0);
+  });
+
+  test("refuses a module whose code is not what the manifest hashed", async () => {
+    const { host, artifacts } = harness({
+      source: withModule,
+      build: buildsTheModule(["search"], "d".repeat(64)),
+    });
+    const result = await host.publish({ pluginId: "notes" }, "tool:9:1:0");
+    expect(result).toMatchObject({ status: "failed" });
+    expect(artifacts.size).toBe(0);
   });
 });
