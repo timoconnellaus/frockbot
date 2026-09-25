@@ -41,7 +41,7 @@ bun run --filter @frockbot/computer-host typecheck
 bun run --filter @frockbot/computer-host test
 ```
 
-The live test needs Docker and `SPRITES_TOKEN` in a gitignored `apps/computer-host/.dev.vars` or `apps/cloudflare/.dev.vars`. It builds the production image, runs it, and drives a real disposable `frockbot-test-<runId>-…` Sprite, asserting the large-script regression, streaming, cancellation, a filesystem round-trip, and reconstruction after a container restart. The Sprite is deleted in a `finally` and every leftover `frockbot-test-` Sprite is swept:
+The live test needs Docker and `SPRITES_TOKEN` in a gitignored `apps/computer-host/.dev.vars` or `apps/cloudflare/.dev.vars`. It builds the production image, runs it, and drives a real disposable `frockbot-test-<runId>-…` Sprite, asserting the large-script regression, streaming, cancellation, a filesystem round-trip, and reconstruction after a container restart. It then runs the Bot's own checkpoint, Update and Reset commands through the Fly Computer against the same container (`live-machine.ts`), with the Bot's records, object storage and the sealed sign-ins in memory: a Skill and a real HTTP sign-in survive an Update and a Reset, Reset keeps the newer sign-in, and Delete my Computer leaves the next Computer signed in to nothing. A run provisions three Sprites and takes about fifteen minutes. The Sprite is deleted in a `finally` and every leftover `frockbot-test-` Sprite is swept:
 
 ```sh
 bun run --filter @frockbot/computer-host test:live

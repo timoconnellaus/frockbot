@@ -922,8 +922,9 @@ connectionId, triggerType }` on a Routine, an instance at the provider, and
   sync, and the browser's sign-ins, and lose what was installed and every other
   file — including `/workspaces/<bot>`, which is not a durable root. GrokBot's
   "keep files" is its whole `/home`; FrockBot's is the declared roots, and the
-  settings copy says so. Neither has run against a real machine yet (known
-  issue 58), and checkpoints are never deleted (known issue 56).
+  settings copy says so. Both are proved on a real machine by the Computer
+  host's live test. Neither syncs the durable roots first (known issue 58),
+  and checkpoints are never deleted (known issue 56).
 - **26b** — durability exists, by the opposite mechanism. The durable-root sync
   (`computer/fly/sync.ts`, called from `computer/agent.ts`)
   is bidirectional, per-file and generation-fenced rather than
