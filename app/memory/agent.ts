@@ -395,7 +395,7 @@ export class MemoryProjection {
     });
     this.#recallStatus = recalled.status;
     const hits =
-      this.#host.rankRecall && recalled.hits.length > 1
+      this.#host.rankRecall && recalled.hits.length > 0
         ? await this.#host.rankRecall({ request: query, hits: recalled.hits })
         : recalled.hits;
     noteMemoryRecallV1(this.#recall, signature, recallBlocksFromHitsV1(hits));
