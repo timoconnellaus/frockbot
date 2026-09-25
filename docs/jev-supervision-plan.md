@@ -344,6 +344,16 @@ were, and neither is enforced.
   the elements to act on: clicks resolve by role and name on the live page,
   the snapshot is already the candidate list, and ranking would need the
   Turn's goal, which the tool does not see.
+- **Compaction.** Before the summariser reads the oldest Turns, Jev
+  chooses for each longer message the person sent and each tool result:
+  summarise, keep word for word, or drop
+  (`app/supervision/compaction-choice.ts`, applied in `compactionChoicesV1`).
+  A kept message is marked in the transcript and copied under the summary's
+  `## Kept word for word` heading, up to 4,000 characters a slice. A dropped
+  tool result is named but left out; the person's words are never dropped.
+  Keeping is readily chosen (at 0.6); dropping is not (at 0.9). This runs
+  after the Turn, so it costs no Turn time. Labelled in
+  `bun run eval:context`.
 - **Skills.** At the Turn's first request, Jev judges each Skill in a catalog
   of up to 24 against the request, and up to three strong matches are named
   in the tail runtime note (`app/supervision/skill-nomination.ts`). The

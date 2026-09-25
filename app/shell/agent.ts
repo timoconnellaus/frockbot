@@ -37,6 +37,7 @@ import {
   applyParkedCompactionV1,
   COMPACTION_MAX_SLICES_PER_RUN_V1,
   type CompactionLogV1,
+  type CompactionChooserV1,
   type ParkedCompactionStoreV1,
   runCompactionV1,
 } from "./compaction.js";
@@ -900,11 +901,14 @@ export const shellAgentFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
         work.adopt(session);
         const types = turnTypesByTurnV1(session.activeRunJournal);
         if ((types.get(turn) ?? "chat") !== "chat") return;
-        const parked =
-          (
-            session.workingContextSelector as
-              { parkedCompaction?: ParkedCompactionStoreV1 } | undefined
-          )?.parkedCompaction ?? work.memoryParking;
+        const selector = session.workingContextSelector as
+          | {
+              parkedCompaction?: ParkedCompactionStoreV1;
+              compactionChooser?: CompactionChooserV1;
+            }
+          | undefined;
+        const parked = selector?.parkedCompaction ?? work.memoryParking;
+        const choose = selector?.compactionChooser;
         const log: CompactionLogV1 = {
           journal: session.activeRunJournal,
           append: (event) =>
@@ -951,6 +955,7 @@ export const shellAgentFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
                 : {}),
               newEffectId: () =>
                 `${SUMMARY_EFFECT_PREFIX_V1}${crypto.randomUUID()}`,
+              ...(choose ? { choose } : {}),
               summarise: async (request) => {
                 try {
                   let text = "";

@@ -66,6 +66,41 @@ export const COMPACTION_INPUT_MAX_BYTES_V1 = 80_000;
 /** Longest a tool result may be in a summariser's transcript. */
 export const COMPACTION_TOOL_RESULT_MAX_CHARS_V1 = 2_000;
 
+/**
+ * What becomes of one message being summarised: its gist in the summary,
+ * its exact words carried forward, or nothing at all.
+ */
+export type CompactionChoiceV1 = "summarise" | "keep" | "drop";
+
+/** One message a chooser is asked about. */
+export interface CompactionItemV1 {
+  role: "user" | "tool";
+  /** The tool, for a tool result. */
+  tool?: string;
+  text: string;
+}
+
+/**
+ * Chooses for each item, in order, or `undefined` when it cannot say, and
+ * then every message is summarised as before.
+ */
+export type CompactionChooserV1 = (
+  items: readonly CompactionItemV1[],
+  signal: AbortSignal,
+) => Promise<readonly CompactionChoiceV1[] | undefined>;
+
+/** Shorter than this, a message is summarised without asking. */
+export const COMPACTION_CHOICE_MIN_CHARS_V1 = 120;
+
+/** The most messages one slice asks about. */
+export const COMPACTION_CHOICE_ITEMS_MAX_V1 = 40;
+
+/** The most characters carried forward word for word, across a slice. */
+export const COMPACTION_KEEP_MAX_CHARS_V1 = 4_000;
+
+/** The most characters of one message carried forward word for word. */
+export const COMPACTION_KEEP_ITEM_MAX_CHARS_V1 = 1_500;
+
 /** Most slices one detached compaction summarises before it stops. */
 export const COMPACTION_MAX_SLICES_PER_RUN_V1 = 8;
 
@@ -290,22 +325,41 @@ export const COMPACTION_SYSTEM_PROMPT_V1 = [
   "## Identifiers mentioned — one bullet per opaque identifier, copied exactly.",
   'Write "- none" under a heading with nothing to list.',
   "",
+  'When the transcript marks a passage "(keep word for word)", add a fifth heading after those four, ## Kept word for word, and copy each such passage under it exactly, one bullet each. Leave the heading out when nothing is marked.',
+  "",
   "Leave out pleasantries, repetition, and superseded detail. Do not invent anything that is not in the transcript. Do not address the user.",
 ].join("\n");
 
-/** The transcript one summariser call is given, flattened to plain text. */
+/**
+ * The transcript one summariser call is given, flattened to plain text. A
+ * message chosen to keep is marked for the summary to carry word for word;
+ * a tool result chosen to drop is named and left out.
+ */
 export function compactionTranscriptV1(
   messages: readonly LlmMessage[],
+  choices?: ReadonlyMap<LlmMessage, CompactionChoiceV1>,
 ): string {
   return messages
     .map((message) => {
-      if (message.role === "user") return `USER: ${message.content}`;
+      const choice = choices?.get(message);
+      if (message.role === "user") {
+        return choice === "keep"
+          ? `USER (keep word for word): ${message.content.slice(0, COMPACTION_KEEP_ITEM_MAX_CHARS_V1)}`
+          : `USER: ${message.content}`;
+      }
       if (message.role === "tool") {
+        const error = message.isError ? " (error)" : "";
+        if (choice === "drop") {
+          return `[tool-result ${message.name}${error}: omitted, nothing in it matters later]`;
+        }
+        if (choice === "keep") {
+          return `[tool-result ${message.name}${error} (keep word for word): ${message.content.slice(0, COMPACTION_KEEP_ITEM_MAX_CHARS_V1)}]`;
+        }
         const content =
           message.content.length > COMPACTION_TOOL_RESULT_MAX_CHARS_V1
             ? `${message.content.slice(0, COMPACTION_TOOL_RESULT_MAX_CHARS_V1)} …[truncated]`
             : message.content;
-        return `[tool-result ${message.name}${message.isError ? " (error)" : ""}: ${content}]`;
+        return `[tool-result ${message.name}${error}: ${content}]`;
       }
       const calls = message.toolCalls
         .map(
@@ -342,6 +396,7 @@ function boundedPrefixV1(text: string, maxBytes: number): string {
 export function compactionRequestMessagesV1(input: {
   messages: readonly LlmMessage[];
   previous?: CompactionV1;
+  choices?: ReadonlyMap<LlmMessage, CompactionChoiceV1>;
 }): LlmMessage[] {
   const preamble = input.previous
     ? [
@@ -353,7 +408,7 @@ export function compactionRequestMessagesV1(input: {
         "",
       ].join("\n")
     : "";
-  const transcript = compactionTranscriptV1(input.messages);
+  const transcript = compactionTranscriptV1(input.messages, input.choices);
   // A single Turn can outgrow the cap on its own; its beginning is kept.
   const bounded = boundedPrefixV1(transcript, COMPACTION_INPUT_MAX_BYTES_V1);
   return [
@@ -573,6 +628,8 @@ export interface CompactionRunnerV1 {
    */
   model?: CompactionModelV1;
   newEffectId(): string;
+  /** Chooses which messages survive word for word. Absent, all are summarised. */
+  choose?: CompactionChooserV1;
   /**
    * One bounded summariser call on the summary model.
    *
@@ -668,6 +725,9 @@ export async function runCompactionV1(
   let outcome: ParkedCompactionV1;
   let result: CompactionOutcomeV1;
   try {
+    const choices = input.choose
+      ? await compactionChoicesV1(covered, input.choose, controller.signal)
+      : undefined;
     const text = await input.summarise({
       ...binding,
       effectId,
@@ -675,6 +735,7 @@ export async function runCompactionV1(
       messages: compactionRequestMessagesV1({
         messages: covered,
         ...(state.compaction ? { previous: state.compaction } : {}),
+        ...(choices ? { choices } : {}),
       }),
       signal: controller.signal,
     });
@@ -706,6 +767,57 @@ export async function runCompactionV1(
   if (await log.append(outcome)) return result;
   await log.park(outcome);
   return { kind: "parked", throughTurn };
+}
+
+/**
+ * What the chooser makes of a slice's messages. Only the person's messages
+ * and tool results long enough to matter are asked about; a person's words
+ * are never dropped, and what is kept stops at a budget, so the summary stays
+ * inside its length. A chooser that fails leaves every message summarised.
+ */
+export async function compactionChoicesV1(
+  covered: readonly LlmMessage[],
+  choose: CompactionChooserV1,
+  signal: AbortSignal,
+): Promise<ReadonlyMap<LlmMessage, CompactionChoiceV1> | undefined> {
+  const asked = covered
+    .filter(
+      (message) =>
+        (message.role === "user" || message.role === "tool") &&
+        message.content.length >= COMPACTION_CHOICE_MIN_CHARS_V1,
+    )
+    .slice(0, COMPACTION_CHOICE_ITEMS_MAX_V1);
+  if (asked.length === 0) return undefined;
+  let answers: readonly CompactionChoiceV1[] | undefined;
+  try {
+    answers = await choose(
+      asked.map((message) =>
+        message.role === "tool"
+          ? { role: "tool", tool: message.name, text: message.content }
+          : { role: "user", text: message.content },
+      ),
+      signal,
+    );
+  } catch {
+    return undefined;
+  }
+  if (!answers || answers.length !== asked.length) return undefined;
+  const choices = new Map<LlmMessage, CompactionChoiceV1>();
+  let kept = 0;
+  asked.forEach((message, index) => {
+    let choice = answers[index]!;
+    if (choice === "drop" && message.role !== "tool") choice = "summarise";
+    if (choice === "keep") {
+      const size = Math.min(
+        message.content.length,
+        COMPACTION_KEEP_ITEM_MAX_CHARS_V1,
+      );
+      if (kept + size > COMPACTION_KEEP_MAX_CHARS_V1) choice = "summarise";
+      else kept += size;
+    }
+    if (choice !== "summarise") choices.set(message, choice);
+  });
+  return choices;
 }
 
 /**
