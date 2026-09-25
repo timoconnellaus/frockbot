@@ -40,7 +40,9 @@ A bridge is added to the page when you publish, as `window.frockbot`:
 - `await frockbot.ready` — `{ pluginId, botId, surfaceId, themeTokens, state }`.
   Every theme token is also set as a CSS variable, `--frockbot-<name>`:
   `surface`, `text`, `text-muted`, `border`, `accent`, `on-accent`,
-  `danger`, `font-sans`, `text-sm`, `radius-control` and more.
+  `danger`, `font-sans`, `text-sm`, `radius-control` and more. The
+  variables follow the Bot's look when it changes while the page is open;
+  `themeTokens` is only the first one, so style with the variables.
 - `frockbot.state` — the latest state; `frockbot.onState(fn)` is called with
   each new one and returns its unsubscribe.
 - `await frockbot.callTool(name, input)` — runs one of this Plugin's tools

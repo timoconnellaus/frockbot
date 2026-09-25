@@ -293,6 +293,9 @@ Widget _hostFrame(
   borderRadius: BorderRadius.zero,
 );
 
+/// How long a Theme change must hold still before a page is restyled.
+const pluginPageRestyleDelayV1 = Duration(milliseconds: 300);
+
 /// How long a greeted page has to draw before the host's cover lifts.
 const pluginPageRevealDelayV1 = Duration(milliseconds: 120);
 
@@ -405,6 +408,28 @@ class _PluginPageFrameState extends State<PluginPageFrame>
     }
   }
 
+  /// The tokens this document was last handed, so a new look is sent once.
+  Map<String, String>? _themeTokens;
+
+  @override
+  void didChangeDependencies() {
+    super.didChangeDependencies();
+    // The Bot's look can change while its page is open. A second `init`
+    // restyles a greeted page without reloading it.
+    // Read every time, so the frame depends on the Theme and hears it change.
+    final tokens = pluginPageThemeTokensV1(context);
+    if (!_greeted || jsonEncode(tokens) == jsonEncode(_themeTokens)) return;
+    // A theme change can animate; the page is handed where it settles.
+    _restyle?.cancel();
+    _restyle = Timer(pluginPageRestyleDelayV1, () {
+      if (!mounted || !_greeted) return;
+      final settled = pluginPageThemeTokensV1(context);
+      if (jsonEncode(settled) != jsonEncode(_themeTokens)) _post(_init());
+    });
+  }
+
+  Timer? _restyle;
+
   @override
   void didUpdateWidget(PluginPageFrame old) {
     super.didUpdateWidget(old);
@@ -424,13 +449,17 @@ class _PluginPageFrameState extends State<PluginPageFrame>
     if (!_outbox.isClosed) _outbox.add(message);
   }
 
-  Map<String, Object?> _init() => pluginPageInitMessageV1(
-    pluginId: widget.pluginId,
-    botId: widget.botId,
-    surfaceId: widget.surfaceId,
-    themeTokens: pluginPageThemeTokensV1(context),
-    state: widget.state,
-  );
+  Map<String, Object?> _init() {
+    final tokens = pluginPageThemeTokensV1(context);
+    _themeTokens = tokens;
+    return pluginPageInitMessageV1(
+      pluginId: widget.pluginId,
+      botId: widget.botId,
+      surfaceId: widget.surfaceId,
+      themeTokens: tokens,
+      state: widget.state,
+    );
+  }
 
   /// A page says `hello` while it is still parsing, before a WebView forwards
   /// anything it says, so the host greets each document once it has loaded
@@ -623,6 +652,7 @@ class _PluginPageFrameState extends State<PluginPageFrame>
   @override
   void dispose() {
     _reveal?.cancel();
+    _restyle?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     // Nobody is left to tell and nothing is left to redraw.
     final hearing = _hearing;

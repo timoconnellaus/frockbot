@@ -196,6 +196,33 @@ void main() {
       expect(heard.last, containsPair('type', 'init'));
     });
 
+    testWidgets('restyles a greeted page when the Bot\'s look changes', (
+      tester,
+    ) async {
+      Widget themed(Color accent) => MaterialApp(
+        theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: accent)),
+        home: frame({'score': 1}),
+      );
+      await tester.pumpWidget(themed(const Color(0xff65a30d)));
+      loaded();
+      await tester.pump();
+      final lime = heard.single['themeTokens']! as Map;
+      // The same look again is not news.
+      await tester.pumpWidget(themed(const Color(0xff65a30d)));
+      await tester.pump(pluginPageRestyleDelayV1);
+      expect(heard, hasLength(1));
+      await tester.pumpWidget(themed(const Color(0xffffd400)));
+      await tester.pumpAndSettle();
+      await tester.pump(pluginPageRestyleDelayV1);
+      // Once, where the look settled, not on each frame of its animation.
+      expect(heard, hasLength(2));
+      expect(heard.last, containsPair('type', 'init'));
+      expect(heard.last['state'], {'score': 1});
+      expect(heard.last['themeTokens'], isNot(lime));
+      // Restyled in place: the document is never reloaded for a new look.
+      expect(identities.toSet(), hasLength(1));
+    });
+
     testWidgets('covers the page until it has been greeted and has drawn', (
       tester,
     ) async {
