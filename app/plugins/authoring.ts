@@ -874,6 +874,9 @@ export function createPluginAuthoringHostV1(
         pluginId,
         JSON.parse(serialized) as Record<string, unknown>,
       );
+      if (member.descriptor.hooks.includes("theme/assemble")) {
+        await oweThemeAssembleV1(seams.storage, now());
+      }
       return { status: "written" };
     },
   };
