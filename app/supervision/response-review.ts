@@ -581,16 +581,20 @@ export const relayQuestionsV1 = {
   ),
   relay: choice(
     {
-      target: "`message`, against the latest entry in `work`",
+      target:
+        "`message`, against the latest entry in `work` and the person's latest message in `request.text`",
       decision: "What does `message` do with the work?",
       rules: [
         "A short line before or after the work, framing it, still gives it as written.",
+        "A change to the work that the person asked for in `request.text` is edits_as_asked.",
         "When more than one fits, pick the one listed first.",
       ],
     },
     {
       relays:
         "Gives the work as it was written, whole, perhaps with a short line around it",
+      edits_as_asked:
+        "Changes the work the way the person asked it to be changed - shorter, punchier, another tone - in their latest message",
       unrelated: "Says something else, not the work",
       condenses: "Gives a shortened or summarised version of the work",
       rewrites:

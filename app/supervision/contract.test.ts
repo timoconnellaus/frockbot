@@ -297,7 +297,13 @@ describe("the Jev adapter's relay check", () => {
           ? {
               wantsTheWork: { type: "noul", noul: 0.9 },
               relay: choice(
-                ["relays", "unrelated", "condenses", "rewrites"],
+                [
+                  "relays",
+                  "edits_as_asked",
+                  "unrelated",
+                  "condenses",
+                  "rewrites",
+                ],
                 "condenses",
               ),
             }
@@ -308,6 +314,33 @@ describe("the Jev adapter's relay check", () => {
       send: "withhold",
       reason: "paraphrased_work",
     });
+  });
+
+  test("lets through a change the person asked for", async () => {
+    const decision = await jevSupervisor(
+      jevFetch((answers) =>
+        "relay" in answers
+          ? {
+              wantsTheWork: { type: "noul", noul: 0.9 },
+              relay: choice(
+                [
+                  "relays",
+                  "edits_as_asked",
+                  "unrelated",
+                  "condenses",
+                  "rewrites",
+                ],
+                "edits_as_asked",
+              ),
+            }
+          : answers,
+      ),
+    ).reviewSend({
+      ...withWork,
+      objective: "Make it punchier.",
+      message: "To Mia, goat whisperer!",
+    });
+    expect(decision.send).toBe("release");
   });
 
   test("lets the work through as written, then judges redundancy as ever", async () => {

@@ -444,6 +444,17 @@ export const responseReviewFixturesV1: readonly ResponseReviewFixtureV1[] = [
     "release",
   ),
   relay(
+    "toast-made-punchier",
+    "Asked to make the drafted toast punchier, a punchier rewrite is what they asked for.",
+    {
+      request: "Make it punchier.",
+      work: TOAST,
+      message:
+        "Here's a punchier one:\n\nI'm Jo, Mia's big sister. Mia can't walk past an animal in trouble - last spring that meant a shed roof and a goat called Doris. Then she met Ben at a climbing gym, the calmest man on any wall. Glasses up to Mia and Ben: may every roof you climb have a way down.",
+    },
+    "release",
+  ),
+  relay(
     "draft-reworded",
     "A reply the person asked to have drafted, reworded by the Bot, is not the draft.",
     {

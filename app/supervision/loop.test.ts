@@ -773,6 +773,52 @@ test("a send that rewrites the work is withheld, and the Turn goes on to send th
   });
 });
 
+test("a send is withheld as a rewrite of the work at most once a Turn", async () => {
+  const reviewed: SendReviewEvidenceV1[] = [];
+  const events = await run(
+    scripted([
+      [
+        {
+          id: "a",
+          name: "send_to_user",
+          input: text("Here's a punchier toast: To Mia!", "finish"),
+        },
+      ],
+      [
+        {
+          id: "b",
+          name: "send_to_user",
+          input: text("To Mia, goat whisperer!", "finish"),
+        },
+      ],
+    ]),
+    createFakeTurnSupervisorV1({
+      reviewSend: async (evidence) => {
+        reviewed.push(evidence);
+        return evidence.work.length > 0
+          ? {
+              send: "withhold",
+              reason: "paraphrased_work",
+              judgments: [],
+            }
+          : { send: "release", judgments: [] };
+      },
+    }),
+    {
+      initialText: `${drainedToast("Mia, the goat whisperer...")}\nmake it punchier`,
+    },
+  );
+  expect(reviewed.map((evidence) => evidence.work)).toEqual([
+    ["Mia, the goat whisperer..."],
+    [],
+  ]);
+  expect(sent(events)).toEqual(["To Mia, goat whisperer!"]);
+  expect(events.at(-1)).toMatchObject({
+    type: "turn/end",
+    outcome: "completed",
+  });
+});
+
 const QUESTION_NOTICE =
   'executor subagent "Book the table" asked a question. It asks: Nomad at 7pm or Ester at 8:30pm? It is waiting: answer with task_resume {"resume":"task-1","prompt":"<your answer>"}.';
 

@@ -373,6 +373,20 @@ export function withheldFinishV1(
   );
 }
 
+/** Whether a send this Turn was already withheld as a rewrite of the work. */
+function withheldRewriteV1(
+  events: readonly SessionEvent[],
+  turn: number,
+): boolean {
+  return events.some(
+    (event) =>
+      event.type === "supervision/send" &&
+      event.turn === turn &&
+      event.decision.send === "withhold" &&
+      event.decision.reason === "paraphrased_work",
+  );
+}
+
 /**
  * The work a subagent handed back this Turn: a blocking dispatch's result,
  * or a background task's completion the Turn was opened for. Read off the
@@ -675,7 +689,9 @@ export function createSupervisionRuntimeFeatureV1(
                     priorResults: priorResults(events, at.turn),
                     message: send.text,
                     finish: send.finish,
-                    work: subagentWorkV1(events, at.turn),
+                    work: withheldRewriteV1(events, at.turn)
+                      ? []
+                      : subagentWorkV1(events, at.turn),
                   },
                   context.signal,
                 );
