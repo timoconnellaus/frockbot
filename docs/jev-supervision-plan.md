@@ -324,9 +324,10 @@ were, and neither is enforced.
   fact holding a secret the credential patterns missed is refused (at 0.7). A
   fact saying what one already says is not written (at 0.8). A newer value
   replaces the kept one through the engine's `replaces`, which supersedes it
-  (at 0.7). A profile fact that will not stay true is kept as a log entry
-  (at or below 0.2). The model is told each outcome. Labelled in
-  `bun run eval:context`.
+  (at 0.7); a fact another writer kept is left standing beside it. A profile
+  fact that will not stay true is kept as a log entry (at or below 0.2). The
+  model is told each outcome. The legacy Markdown store, with no records
+  binding, is not judged.
 - **Skills.** At the Turn's first request, Jev judges each Skill in a catalog
   of up to 24 against the request, and up to three strong matches are named
   in the tail runtime note (`app/supervision/skill-nomination.ts`). The
@@ -340,7 +341,8 @@ were, and neither is enforced.
   delivered loudly, as before.
 - Runtime notes from several features share one trailing message
   (`appendRuntimeNoteV1`), since some providers refuse two user messages in a
-  row. Labelled in `bun run eval:context` (10/10 on `jev-1.13.0`).
+  row. Labelled in `bun run eval:context` (17/17 live, with the seven write
+  cases; 10/10 on `jev-1.13.0` before they were added).
 
 ## Loop health and claims
 
