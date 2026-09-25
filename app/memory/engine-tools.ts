@@ -25,9 +25,40 @@ import type { MemoryOwnerV1 } from "./roots.js";
 import type { MemoryGroupsV1 } from "./groups.js";
 import { MEMORY_MAX_FACT_LENGTH } from "./store.js";
 
+/** A fact about to be remembered, and what is kept near it. */
+export interface MemoryWriteEvidenceV1 {
+  readonly fact: string;
+  readonly tier: "profile" | "log" | "note";
+  /** What is already kept in the same scope that recall found near it. */
+  readonly candidates: readonly {
+    readonly id: string;
+    readonly text: string;
+  }[];
+}
+
+/** What a write becomes once judged. */
+export type MemoryWriteVerdictV1 =
+  | { readonly action: "refuse-secret" }
+  | { readonly action: "already-kept"; readonly id: string }
+  | {
+      readonly action: "write";
+      readonly tier: "profile" | "log" | "note";
+      readonly replaces?: { readonly id: string; readonly text: string };
+    };
+
+/** How many kept facts are recalled to judge a write against. */
+export const MEMORY_WRITE_RECALL_V1 = 5;
+
 export interface MemoryRecordsHostV1 {
   owner: MemoryOwnerV1;
   records: MemoryRecordsV1;
+  /**
+   * Judges a fact against what is kept before it is written. Absent, or
+   * when it cannot say, the fact is written as asked.
+   */
+  judgeWrite?(
+    evidence: MemoryWriteEvidenceV1,
+  ): Promise<MemoryWriteVerdictV1 | undefined>;
   writer?: { sessionId: string; turnId: string; runId: string };
   groups?: MemoryGroupsV1;
   /** The Group Chat this Turn speaks in, the default `group_id`. */
@@ -122,23 +153,70 @@ export async function executeRecordsWriteV1(
         },
       ]
     : [];
+  const verdict = await judgedWriteV1(host, authority, scope, input);
+  if (verdict?.action === "refuse-secret") {
+    return refusal(
+      "memory_write was refused: it holds a secret, such as a password, key or account number. Never keep a secret in Memory.",
+    );
+  }
+  if (verdict?.action === "already-kept") {
+    return { content: "Already remembered; nothing changed.", isError: false };
+  }
+  const tier = verdict?.tier ?? input.tier;
   const outcome = await host.records.write({
     authority,
     scope,
     content: input.fact,
     operationKey,
-    kind: toolKindFromTierV1(input.tier),
+    kind: toolKindFromTierV1(tier),
     sources,
+    ...(verdict?.replaces ? { replaces: verdict.replaces.id } : {}),
   });
   if (outcome.status !== "ok") {
     return refusal(`memory_write was ${outcome.status}: ${outcome.reason}`);
   }
+  if (outcome.receipt.duplicate) {
+    return { content: "Already remembered; nothing changed.", isError: false };
+  }
+  const notes = [
+    ...(verdict?.replaces
+      ? [`It replaces what was kept before: "${verdict.replaces.text}".`]
+      : []),
+    ...(tier !== input.tier
+      ? [`It is kept as a ${tier} entry, since it will not stay true.`]
+      : []),
+  ];
   return {
-    content: outcome.receipt.duplicate
-      ? `Already remembered; nothing changed.`
-      : `Remembered.`,
+    content: ["Remembered.", ...notes].join(" "),
     isError: false,
   };
+}
+
+/** What the judge makes of a write, against what recall finds kept near it. */
+async function judgedWriteV1(
+  host: MemoryRecordsHostV1,
+  authority: MemoryAuthorityV1,
+  scope: MemoryScopeRefV1,
+  input: { tier: "profile" | "log" | "note"; fact: string },
+): Promise<MemoryWriteVerdictV1 | undefined> {
+  if (!host.judgeWrite) return undefined;
+  let candidates: { id: string; text: string }[] = [];
+  try {
+    const recalled = await host.records.recall({
+      authority,
+      query: input.fact,
+      scopes: [scope],
+      budget: MEMORY_WRITE_RECALL_V1,
+      effort: "automatic",
+    });
+    candidates = recalled.hits
+      .filter((hit) => hit.item.status === "active")
+      .slice(0, MEMORY_WRITE_RECALL_V1)
+      .map((hit) => ({ id: hit.item.id, text: hit.item.text }));
+  } catch {
+    // Nothing recalled to compare with; the secret and lasting questions stand.
+  }
+  return host.judgeWrite({ fact: input.fact, tier: input.tier, candidates });
 }
 
 export async function executeRecordsForgetV1(

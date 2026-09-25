@@ -197,3 +197,110 @@ describe("canonical Memory tools", () => {
     expect(gone.content).toBe("No memory matches.");
   });
 });
+
+describe("a judged Memory write", () => {
+  const search = async (host: ReturnType<typeof recordsHost>, query: string) =>
+    String(
+      (await executeRecordsSearchV1(host, { query, scope: "user" })).content,
+    );
+
+  test("a secret is refused and never written", async () => {
+    const host = {
+      ...recordsHost(),
+      judgeWrite: async () => ({ action: "refuse-secret" as const }),
+    };
+    const written = await executeRecordsWriteV1(
+      host,
+      { scope: "user", tier: "profile", fact: "The alarm code is 4417." },
+      "w-secret",
+    );
+    expect(written).toMatchObject({ isError: true });
+    expect(written.content).toContain("secret");
+    expect(await search(host, "alarm")).toBe("No memory matches.");
+  });
+
+  test("a newer value replaces the kept one, found by recall and named back", async () => {
+    const seen: unknown[] = [];
+    const host = recordsHost();
+    await executeRecordsWriteV1(
+      host,
+      { scope: "user", tier: "profile", fact: "Tim drinks flat whites." },
+      "w-old",
+    );
+    const judged = {
+      ...host,
+      judgeWrite: async (evidence: {
+        candidates: readonly { id: string; text: string }[];
+      }) => {
+        seen.push(evidence);
+        const kept = evidence.candidates[0]!;
+        return {
+          action: "write" as const,
+          tier: "profile" as const,
+          replaces: kept,
+        };
+      },
+    };
+    const written = await executeRecordsWriteV1(
+      judged,
+      { scope: "user", tier: "profile", fact: "Tim drinks long blacks now." },
+      "w-new",
+    );
+    expect(seen).toEqual([
+      {
+        fact: "Tim drinks long blacks now.",
+        tier: "profile",
+        candidates: [
+          { id: expect.any(String), text: "Tim drinks flat whites." },
+        ],
+      },
+    ]);
+    expect(written).toEqual({
+      content:
+        'Remembered. It replaces what was kept before: "Tim drinks flat whites.".',
+      isError: false,
+    });
+    const found = await search(host, "Tim drinks");
+    expect(found).toContain("long blacks");
+    expect(found).not.toContain("flat whites");
+  });
+
+  test("a fact already kept writes nothing; a passing one is kept as a log entry", async () => {
+    const host = recordsHost();
+    const kept = await executeRecordsWriteV1(
+      {
+        ...host,
+        judgeWrite: async () => ({ action: "already-kept", id: "x" }),
+      },
+      { scope: "user", tier: "profile", fact: "Tim likes coffee." },
+      "w-kept",
+    );
+    expect(kept).toEqual({
+      content: "Already remembered; nothing changed.",
+      isError: false,
+    });
+    expect(await search(host, "coffee")).toBe("No memory matches.");
+    const passing = await executeRecordsWriteV1(
+      {
+        ...host,
+        judgeWrite: async () => ({ action: "write", tier: "log" }),
+      },
+      { scope: "user", tier: "profile", fact: "Tim is at the dentist today." },
+      "w-passing",
+    );
+    expect(passing.content).toBe(
+      "Remembered. It is kept as a log entry, since it will not stay true.",
+    );
+  });
+
+  test("a judge that cannot say leaves the write as asked", async () => {
+    const host = { ...recordsHost(), judgeWrite: async () => undefined };
+    expect(
+      await executeRecordsWriteV1(
+        host,
+        { scope: "user", tier: "profile", fact: "Tim lives in Wollongong." },
+        "w-plain",
+      ),
+    ).toEqual({ content: "Remembered.", isError: false });
+  });
+});

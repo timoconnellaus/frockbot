@@ -30,6 +30,7 @@ import {
   judgeMemoryRecallV1,
   rankRecalledV1,
 } from "@frockbot/app/supervision/memory-recall";
+import { judgeMemoryWriteV1 } from "@frockbot/app/supervision/memory-write";
 import type { MemoryChunkIndexWriterV1 } from "@frockbot/app/memory/chunk-index";
 import type { MemoryRecordsV1 } from "@frockbot/app/memory/owner";
 
@@ -105,6 +106,7 @@ export function createBotMemoryHost(
     ...(bindings.MEMORY_RECORDS ? { records: bindings.MEMORY_RECORDS } : {}),
     ...(jev
       ? {
+          judgeWrite: (evidence) => judgeMemoryWriteV1(jev, evidence),
           rankRecall: async ({ request, hits }) =>
             rankRecalledV1(
               hits,

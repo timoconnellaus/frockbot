@@ -73,7 +73,7 @@ import {
   renderMemoryRequestMessagesV1,
   type MemoryTurnRecallV1,
 } from "./context.js";
-import { authorityOf } from "./engine-tools.js";
+import { authorityOf, type MemoryRecordsHostV1 } from "./engine-tools.js";
 import { explicitDatesInQueryV1 } from "./hybrid.js";
 import { isControlOnlyMemoryInputV1 } from "./policy.js";
 import { memoryDayV1 } from "./facts.js";
@@ -149,6 +149,8 @@ export interface MemoryRuntimeHostV1 {
     request: string;
     hits: readonly MemoryHitV1[];
   }): Promise<readonly MemoryHitV1[]>;
+  /** Judges a fact against what is kept before a records write; see engine-tools. */
+  judgeWrite?: MemoryRecordsHostV1["judgeWrite"];
 }
 
 export const sha256HexV1 = sha256HexTextV1;

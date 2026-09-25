@@ -317,6 +317,16 @@ were, and neither is enforced.
   judges up to 12 against the request; code drops those below 0.2 and orders
   the rest (`app/supervision/memory-recall.ts`). They land in the existing
   `<memory-recall>` message.
+- **Memory writes.** Before a Bot's `memory_write` or a Plugin's
+  `ctx.memory.write` stores a fact, recall finds up to five kept facts near
+  it in the same scope and Jev judges the fact against them
+  (`app/supervision/memory-write.ts`, applied in `executeRecordsWriteV1`). A
+  fact holding a secret the credential patterns missed is refused (at 0.7). A
+  fact saying what one already says is not written (at 0.8). A newer value
+  replaces the kept one through the engine's `replaces`, which supersedes it
+  (at 0.7). A profile fact that will not stay true is kept as a log entry
+  (at or below 0.2). The model is told each outcome. Labelled in
+  `bun run eval:context`.
 - **Skills.** At the Turn's first request, Jev judges each Skill in a catalog
   of up to 24 against the request, and up to three strong matches are named
   in the tail runtime note (`app/supervision/skill-nomination.ts`). The
