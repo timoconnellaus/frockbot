@@ -46,10 +46,9 @@ built against the same interface.
   outrank overridable platform defaults. Locked platform policy always wins.
 - The Bot may propose a policy change through a tool. That mutation is reviewed
   against the same existing policy and User evidence as every other mutation.
-- Repeated bad proposals accumulate weighted failure signals with decay. At a
-  calibrated threshold, Jev requires a Mentor specialist. The fast model keeps
-  authorship after receiving the Mentor's advice and remains bounded by the
-  existing step and Turn deadlines.
+- A long Turn that stops getting anywhere is told to change course and offered
+  the Mentor specialist (see Loop health and claims). The fast model keeps
+  authorship and remains bounded by the existing step and Turn deadlines.
 - Continuation state contains bounded candidates and evidence references, not
   prose invented by Jev.
 - A mutating call is allowed only when review finds User authorization and
@@ -88,7 +87,7 @@ interface TurnSupervisor {
 ```
 
 The Jev adapter, deterministic policy composition, retry ownership, durable
-effect admission, telemetry and failure scoring are implementation details
+effect admission, telemetry and loop detection are implementation details
 behind this seam.
 
 ## Runtime flow
@@ -98,6 +97,7 @@ Input admitted durably
         |
         v
 TurnSupervisor.startTurn            (request hook, step 1, recorded once)
+TurnSupervisor.reviewProgress       (request hook, from step 5, recorded)
         |
         v
 Fast conversational model
@@ -116,7 +116,7 @@ Each call, in order                 (prepareTool hook, outermost)
         +--> a text send: TurnSupervisor.reviewSend, recorded per send
         |        +--> release: the send runs
         |        +--> withhold: never delivered, draft cleared, audited;
-        |             a withheld finish still ends the Turn
+        |             a finish withheld as redundant still ends the Turn
         +--> a mutate call: TurnSupervisor.reviewCall, recorded per call
         |        +--> allow: the call runs
         |        +--> reject: never runs, the model is told to ask the
