@@ -565,3 +565,49 @@ test("an allowed mutate call runs once, and a read call is never reviewed", asyn
     events.filter((event) => event.type === "supervision/call"),
   ).toHaveLength(1);
 });
+
+test("a namespaced mutate call is reviewed and recorded under its namespace", async () => {
+  const ran: string[] = [];
+  const reviewed: CallReviewEvidenceV1[] = [];
+  const events = await run(
+    scripted([
+      [
+        {
+          id: "send",
+          name: "call_dynamic_tool",
+          input: {
+            namespace: "composio-gmail",
+            toolName: "GMAIL_SEND_EMAIL",
+            arguments: { to: "dana@example.com" },
+            mcpDetails: { description: "Email Dana the invoice." },
+          },
+        },
+      ],
+      [{ id: "a", name: "send_to_user", input: text("Sent.", "finish") }],
+    ]),
+    createFakeTurnSupervisorV1({
+      reviewCall: async (evidence) => {
+        reviewed.push(evidence);
+        return { decision: "allow", reasonCode: "authorized", judgments: [] };
+      },
+    }),
+    {
+      tools: [
+        {
+          ...effectTool("GMAIL_SEND_EMAIL", "mutate", ran),
+          namespace: "composio-gmail",
+        },
+      ],
+    },
+  );
+  expect(ran).toEqual(["GMAIL_SEND_EMAIL"]);
+  expect(reviewed.map((evidence) => evidence.call)).toEqual([
+    {
+      tool: "composio-gmail/GMAIL_SEND_EMAIL",
+      arguments: { to: "dana@example.com" },
+    },
+  ]);
+  expect(
+    events.filter((event) => event.type === "supervision/call"),
+  ).toMatchObject([{ tool: "composio-gmail/GMAIL_SEND_EMAIL" }]);
+});

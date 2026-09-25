@@ -23,6 +23,7 @@ import {
   type TurnSupervisor,
 } from "@frockbot/core/contracts";
 import type { StoredRunOriginV1 } from "@frockbot/core/durable";
+import { resolveDynamicToolNameV1 } from "../audit/classify.js";
 import type { FoundationFeature } from "../runtime.js";
 
 // Turn supervision, mounted into the loop. Jev judges; this file enforces.
@@ -492,12 +493,14 @@ export function createSupervisionRuntimeFeatureV1(
             let verdict = callDecisionOf(events, context.effectId);
             if (!verdict) {
               const started = Date.now();
+              const outer = context.toolCall ?? call;
+              const tool = resolveDynamicToolNameV1(outer.name, outer.input);
               verdict = await host.supervisor.reviewCall(
                 {
                   objective: inputText(events, at.turn),
                   origin: host.origin,
                   call: {
-                    tool: call.name,
+                    tool,
                     arguments: isRecord(call.input) ? call.input : {},
                   },
                   conversation: [
@@ -514,7 +517,7 @@ export function createSupervisionRuntimeFeatureV1(
                 turn: at.turn,
                 step: at.step,
                 occurrenceId: context.effectId,
-                tool: call.name,
+                tool,
                 decision: verdict,
                 latencyMs: elapsed(started),
               });
