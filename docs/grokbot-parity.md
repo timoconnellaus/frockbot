@@ -663,7 +663,7 @@ the rows whose status the code moved:
   cannot archive itself, restore itself, or remove any Bot.
 
 - **4** — landed. Hidden Bots remain reachable through the search palette
-  and the Flock sidebar’s "Show N hidden" group
+  and the Flock sidebar’s folded "Hidden · N" group
   (`apps/native/lib/shell/sidebar.dart`). The
   durable field is `BotProfile.hiddenFromSidebar`, beside — not inside — the
   notification policy, because it describes how the Bot presents itself rather
