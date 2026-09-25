@@ -102,7 +102,7 @@ Until visibility is confirmed, exact/FTS/time queries already see committed item
 
 Use a single request budget across scopes and channels, not a fresh limit for every Bot, Group or model step. Execute authorized FTS, semantic and explicit time-filter searches concurrently within the shared limiter. Expand relationship neighbors from these seeds in one bounded hop; graph recall depends on seeds and cannot honestly run before they exist. Honor explicit dates in the query filters; do not treat newest as inherently most relevant.
 
-Hydrate and filter canonical candidates before ranking. Fuse channel ranks with reciprocal-rank fusion (`sum(1 / (60 + rank))`), deduplicate by item ID, and prefer a valid concise observation when it covers the selected evidence. Preserve conflicting active evidence with dates/source IDs instead of concealing it behind one summary. No extra LLM reranker in the initial implementation. `memory_expand` obtains exact supporting detail only when needed.
+Hydrate and filter canonical candidates before ranking. Fuse channel ranks with reciprocal-rank fusion (`sum(1 / (60 + rank))`), deduplicate by item ID, and prefer a valid concise observation when it covers the selected evidence. Preserve conflicting active evidence with dates/source IDs instead of concealing it behind one summary. Recall itself adds no LLM reranker; a Turn's automatic recall is then judged against the request by Jev ([memory recall](../../app/supervision/memory-recall.ts), owned by [context selection](../jev-supervision-plan.md#context-selection)). `memory_expand` obtains exact supporting detail only when needed.
 
 Put these starting defaults in one typed policy module and test the boundary cases:
 

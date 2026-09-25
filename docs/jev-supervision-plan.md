@@ -402,7 +402,8 @@ conversation or policy content is not needed for diagnosis.
 
 Keep live evaluation separate from unit tests. Pin the calibrated Jev version.
 Run the labeled suites with `bun run eval:turn-start`,
-`bun run eval:response-review` and `bun run eval:call-review`; each reads
+`bun run eval:response-review`, `bun run eval:call-review` and
+`bun run eval:context`; each reads
 `JEV_API_KEY` from the main checkout's `.dev.vars` (the runners still accept
 `TYPESAFE_API_KEY` as a local alias) and writes traces to `.eval-results/`.
 Neither is part of ordinary tests or the pre-push gate.
