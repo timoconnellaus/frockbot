@@ -134,6 +134,7 @@ export async function pluginAuthoringRuntimeHost(
     storage: {
       get: <T>(key: string) => state.ctx.storage.get<T>(key),
       put: (key: string, value: unknown) => state.ctx.storage.put(key, value),
+      delete: (key: string) => state.ctx.storage.delete(key),
     },
     settings: {
       async read(pluginId) {

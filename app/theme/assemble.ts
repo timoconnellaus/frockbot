@@ -31,6 +31,7 @@ import {
 import {
   THEME_ASSEMBLE_DUE_KEY_V1,
   THEME_ASSEMBLE_RUN_PREFIX_V1,
+  themePickHoldsV1,
 } from "@frockbot/app/theme/owed";
 
 /** How long one assemble may run inside the Plugin worker. */
@@ -82,7 +83,8 @@ export interface AssembleBotThemeHostV1 {
  * person gets a notice with the reason and a third in a row turns it off. No
  * Plugin declaring the hook drops a named look's stored document so Inherit +
  * System still follows the OS. Custom keeps its document: that is the Plugin
- * result the person can inspect.
+ * result the person can inspect. While a look the person picked holds
+ * (`holdThemePickV1`), no Plugin wraps it, as if none declared the hook.
  */
 export async function assembleBotThemeV1(
   state: ShellBotStateV1,
@@ -96,7 +98,10 @@ export async function assembleBotThemeV1(
   const compiled = compileBotLookV1(seed, host.appearance, true);
   const original = look.document ?? compiled;
   const roster = host.roster ?? (await readBotPluginRosterV1(state, identity));
-  const declares = rosterDeclaresThemeAssembleV1(roster);
+  // A look the person picked is what they see, whatever wraps it.
+  const declares =
+    rosterDeclaresThemeAssembleV1(roster) &&
+    !(await themePickHoldsV1(state.ctx.storage));
   const owed = await state.ctx.storage.get<unknown>(THEME_ASSEMBLE_DUE_KEY_V1);
   let assembled = original;
   if (declares) {

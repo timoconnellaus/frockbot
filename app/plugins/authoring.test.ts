@@ -25,7 +25,11 @@ import {
   pluginApprovalIdV1,
   pluginIntentKeyV1,
 } from "./approval.js";
-import { THEME_ASSEMBLE_DUE_KEY_V1 } from "@frockbot/app/theme/owed";
+import {
+  THEME_ASSEMBLE_DUE_KEY_V1,
+  holdThemePickV1,
+  themePickHoldsV1,
+} from "@frockbot/app/theme/owed";
 import { PLUGIN_ENABLEMENT_KEY_V1 } from "./enablement.js";
 import { pluginsSourceRootV1 } from "./root.js";
 
@@ -226,6 +230,7 @@ function harness(
         storage.set(key, structuredClone(value));
         return Promise.resolve();
       },
+      delete: (key: string) => Promise.resolve(storage.delete(key)),
     },
     settings: {
       read: async (pluginId) => settings.get(pluginId) ?? {},
@@ -480,6 +485,7 @@ describe("checking and publishing", () => {
         put: async (key, value) => {
           storage.set(key, value);
         },
+        delete: async (key) => storage.delete(key),
       },
       settings: { read: async () => ({}), write: async () => {} },
       catalog: [],
@@ -643,7 +649,7 @@ describe("enabling, disabling and settings", () => {
   });
 
   test("settings follow the descriptor's schema", async () => {
-    const { host, settings } = harness({ members: [member] });
+    const { host, settings, storage } = harness({ members: [member] });
     expect(await host.readSettings({ pluginId: "notes" })).toEqual({
       schema: member.descriptor.settingsSchema,
       values: {},
@@ -655,6 +661,34 @@ describe("enabling, disabling and settings", () => {
     expect(
       await host.writeSettings({ pluginId: "weather", values: {} }),
     ).toMatchObject({ status: "refused" });
+    expect(storage.has(THEME_ASSEMBLE_DUE_KEY_V1)).toBe(false);
+  });
+
+  test("setting a theme Plugin's settings ends the person's pick and re-assembles now", async () => {
+    const theme: CompositionMemberV1 = {
+      ...member,
+      descriptor: decodePluginDescriptorV1({
+        ...JSON.parse(DESCRIPTOR_JSON),
+        hooks: ["theme/assemble"],
+        settingsSchema: member.descriptor.settingsSchema,
+      }),
+    };
+    const { host, storage } = harness({ members: [theme] });
+    const view = {
+      get: <T>(key: string) =>
+        Promise.resolve(storage.get(key) as T | undefined),
+      put: async (key: string, value: unknown) => {
+        storage.set(key, value);
+      },
+    };
+    await holdThemePickV1(view);
+    expect(
+      await host.writeSettings({ pluginId: "notes", values: { tone: "dry" } }),
+    ).toEqual({ status: "written" });
+    expect(await themePickHoldsV1(view)).toBe(false);
+    expect(storage.get(THEME_ASSEMBLE_DUE_KEY_V1)).toBe(
+      Date.parse("2026-09-12T01:00:00.000Z"),
+    );
   });
 });
 

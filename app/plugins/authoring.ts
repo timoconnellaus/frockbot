@@ -142,7 +142,9 @@ export interface PluginAuthoringSeamsV1 {
   };
   composition: { current(): Promise<CompositionGenerationV1> };
   /** The Bot's own storage: its enable map and its intents. */
-  storage: PluginEnablementStorageV1 & PluginIntentStorageV1;
+  storage: PluginEnablementStorageV1 &
+    PluginIntentStorageV1 &
+    Parameters<typeof oweThemeAssembleV1>[0];
   /** This Bot's settings values for one Plugin, under the isolate's own key. */
   settings: {
     read(pluginId: string): Promise<Record<string, unknown>>;
@@ -365,7 +367,8 @@ export async function pluginPagesFromSourceV1(
  * a row is a real contention problem, and is thrown as one.
  */
 export async function switchPluginForBotV1(
-  storage: Parameters<typeof setPluginEnabledV1>[0],
+  storage: Parameters<typeof setPluginEnabledV1>[0] &
+    Parameters<typeof oweThemeAssembleV1>[0],
   pluginId: string,
   enabled: boolean,
   now: Date,
@@ -871,6 +874,9 @@ export function createPluginAuthoringHostV1(
         pluginId,
         JSON.parse(serialized) as Record<string, unknown>,
       );
+      if (member.descriptor.hooks.includes("theme/assemble")) {
+        await oweThemeAssembleV1(seams.storage, now());
+      }
       return { status: "written" };
     },
   };

@@ -172,8 +172,10 @@ interface BotRpc {
   assembleTheme(input: unknown): Promise<unknown>;
   readLook(input: unknown): Promise<{
     look: unknown;
+    revision: number;
     document?: { tokens: { surfaces: { window: string } } };
   }>;
+  updateLook(input: unknown): Promise<{ status: string }>;
   executeRoutineCommand(input: unknown): Promise<{
     status: string;
     hook?: { token: string; keyVersion: number };
@@ -2232,6 +2234,154 @@ export async function execute(tool, input, ctx) {
 
     // Nothing calls assembleTheme: the write owed one, and the alarm the
     // settled Turn re-armed runs it rather than the next hour.
+    await vi.waitFor(async () => expect(await window()).toBe("#ffef00"), {
+      timeout: 5_000,
+      interval: 25,
+    });
+
+    // The person picks Inherit back on the Look page, with the Plugin on:
+    // their pick is what the Bot wears, not promoted back to Custom.
+    const painted = await bot(identity).readLook({
+      schemaVersion: 1,
+      ...identity,
+    });
+    expect(painted.look).toBe("custom");
+    expect(
+      (
+        await bot(identity).updateLook({
+          schemaVersion: 1,
+          ...identity,
+          command: {
+            schemaVersion: 1,
+            type: "bot/update-look",
+            commandId: "look-inherit",
+            expectedRevision: painted.revision,
+            botId: "bot-1",
+            look: "inherit",
+          },
+        })
+      ).status,
+    ).toBe("applied");
+    await bot(identity).assembleTheme({ schemaVersion: 1, ...identity });
+    const picked = await bot(identity).readLook({
+      schemaVersion: 1,
+      ...identity,
+    });
+    expect(picked.look).toBe("inherit");
+    expect(picked.document).toBeUndefined();
+
+    // Asked to set it again, the Plugin wears it once more.
+    await bot(identity).run({
+      schemaVersion: 1,
+      ...identity,
+      command: {
+        runId: "paint-2",
+        sessionId: `${userId}:bot-1`,
+        acceptedAt: new Date().toISOString(),
+        text: toolCallTriggerPrompt([
+          "call_dynamic_tool",
+          dynamicToolInputV1({
+            namespace: PAINT_ID,
+            toolName: "paint_set",
+            input: { window: "#ffef00" },
+          }),
+        ]),
+      },
+    });
+    await vi.waitFor(async () => expect(await window()).toBe("#ffef00"), {
+      timeout: 5_000,
+      interval: 25,
+    });
+  });
+
+  test("a Custom look the person picks holds over a theme Plugin until the Plugin is switched again", async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    const identity = { userId, botId: "bot-1" };
+    await provisionBot(identity);
+    await turn(identity, "run-0");
+    const bootstrap = (
+      await user(userId).readComposition({ schemaVersion: 1, userId })
+    ).current;
+    const PAINT_ID = "paint";
+    // Paints over whatever look it is handed, every time it runs.
+    const PAINT_SOURCE = `
+export const tools = [];
+export const hooks = {
+  "theme/assemble": async function (payload) {
+    const tokens = payload.document.tokens;
+    return {
+      ...payload.document,
+      tokens: { ...tokens, surfaces: {
+        window: "#ffef00", surface: "#fff7a8", raised: "#fffbd0",
+        text: "#1a1a1a", muted: "#4d4a00", line: "#c9bd00",
+        accent: "#1a1a1a", onAccent: "#ffef00",
+      } },
+    };
+  },
+};
+export async function execute() {
+  return "ok";
+}
+`;
+    await seedPlugin(
+      identity,
+      bootstrap.generationId,
+      "2026-09-12T07:00:00.000Z",
+      PAINT_ID,
+      PAINT_SOURCE,
+      decodePluginDescriptorV1({
+        id: PAINT_ID,
+        displayName: "Paint",
+        version: "0.0.1",
+        contractVersion: ISOLATE_CONTRACT_VERSION,
+        tools: [],
+        hooks: ["theme/assemble"],
+        grants: [],
+        contextKeys: ["user", "bot", "session"],
+      }),
+    );
+    await switchPlugin(identity, PAINT_ID, true);
+    const window = async () =>
+      (await bot(identity).readLook({ schemaVersion: 1, ...identity })).document
+        ?.tokens.surfaces.window;
+    await vi.waitFor(async () => expect(await window()).toBe("#ffef00"), {
+      timeout: 5_000,
+      interval: 25,
+    });
+
+    // The person saves their own Custom colours over the Plugin's.
+    const painted = await bot(identity).readLook({
+      schemaVersion: 1,
+      ...identity,
+    });
+    expect(painted.look).toBe("custom");
+    const mine = structuredClone(painted.document!);
+    mine.tokens.surfaces.window = "#fafafa";
+    expect(
+      (
+        await bot(identity).updateLook({
+          schemaVersion: 1,
+          ...identity,
+          command: {
+            schemaVersion: 1,
+            type: "bot/update-look",
+            commandId: "look-custom",
+            expectedRevision: painted.revision,
+            botId: "bot-1",
+            look: "custom",
+            document: mine,
+          },
+        })
+      ).status,
+    ).toBe("applied");
+    // Hour after hour, the Plugin does not paint over it.
+    await bot(identity).assembleTheme({ schemaVersion: 1, ...identity });
+    await bot(identity).assembleTheme({ schemaVersion: 1, ...identity });
+    expect(await window()).toBe("#fafafa");
+
+    // Switched off and on, the Plugin is asked to set the look again.
+    await switchPlugin(identity, PAINT_ID, false);
+    await switchPlugin(identity, PAINT_ID, true);
     await vi.waitFor(async () => expect(await window()).toBe("#ffef00"), {
       timeout: 5_000,
       interval: 25,

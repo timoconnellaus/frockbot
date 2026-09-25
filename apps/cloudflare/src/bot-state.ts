@@ -430,6 +430,7 @@ import { groupChatObjectNameV1 } from "@frockbot/app/groups/shared";
 import { assembleBotThemeV1 } from "@frockbot/app/theme/assemble";
 import {
   deferThemeAssembleV1,
+  holdThemePickV1,
   themeAssembleDeadlineV1,
 } from "@frockbot/app/theme/owed";
 import { decodeThemeDocumentV1, decodeBotLookV1 } from "@frockbot/core/theme";
@@ -1903,6 +1904,7 @@ export class BotState
       request.command as ReturnType<typeof decodeUpdateLookCommandV1>,
     );
     if (receipt.status === "applied") {
+      await holdThemePickV1(this.ctx.storage);
       // Another of the person's devices may have this Bot open.
       this.ctx.waitUntil(this.stateChannel.noticeLook().catch(() => undefined));
       this.ctx.waitUntil(

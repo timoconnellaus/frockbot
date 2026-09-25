@@ -12,16 +12,40 @@ export const THEME_ASSEMBLE_DUE_KEY_V1 = "theme:assemble-due:v1";
 export const THEME_ASSEMBLE_RUN_PREFIX_V1 = "theme:";
 
 /**
+ * Present while the look the person last picked holds: no Plugin wraps it
+ * until one is asked to set the look again.
+ */
+export const THEME_PICK_HOLDS_KEY_V1 = "theme:pick-holds:v1";
+
+/** A person picked this Bot's look; it wins over any Plugin that wraps one. */
+export async function holdThemePickV1(storage: {
+  put(key: string, value: unknown): Promise<void>;
+}): Promise<void> {
+  await storage.put(THEME_PICK_HOLDS_KEY_V1, true);
+}
+
+export async function themePickHoldsV1(storage: {
+  get<T>(key: string): Promise<T | undefined>;
+}): Promise<boolean> {
+  return (await storage.get<unknown>(THEME_PICK_HOLDS_KEY_V1)) === true;
+}
+
+/**
  * Owes an assemble now. Switching a Plugin, approving a new generation of
  * one, or a Plugin that wraps the look writing its own storage can each
  * change what the Bot should wear, and it would otherwise wear the old look
  * until the next hour. Owed rather than run, so the alarm carries it through
- * an eviction.
+ * an eviction. Each is a Plugin being asked to set the look, so a person's
+ * earlier pick stops holding.
  */
 export async function oweThemeAssembleV1(
-  storage: { put(key: string, value: unknown): Promise<void> },
+  storage: {
+    put(key: string, value: unknown): Promise<void>;
+    delete(key: string): Promise<unknown>;
+  },
   now: Date,
 ): Promise<void> {
+  await storage.delete(THEME_PICK_HOLDS_KEY_V1);
   await storage.put(THEME_ASSEMBLE_DUE_KEY_V1, now.getTime());
 }
 

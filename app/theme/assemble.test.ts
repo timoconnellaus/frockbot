@@ -13,6 +13,7 @@ import {
 } from "./assemble.js";
 import {
   deferThemeAssembleV1,
+  holdThemePickV1,
   oweThemeAssembleV1,
   THEME_ASSEMBLE_DUE_KEY_V1,
   THEME_ASSEMBLE_TURN_DEFERRAL_MS_V1,
@@ -225,6 +226,61 @@ describe("assembleBotThemeV1", () => {
     );
     expect(next.look).toBe("custom");
     expect(next.document?.tokens.surfaces.accent).toBe("#9c1a44");
+  });
+
+  test("a look the person picked holds over a Plugin until one is asked to set it again", async () => {
+    const storage = new MemoryStorage();
+    const flock = createFlockBotBackendContribution({
+      storage,
+      materializeSettings: () => Promise.resolve(),
+      archiveEligible: () => Promise.resolve(true),
+      tearDown: () => Promise.resolve("complete"),
+    });
+    const canary = {
+      ...INK_DOCUMENT_V1,
+      tokens: {
+        ...INK_DOCUMENT_V1.tokens,
+        surfaces: { ...INK_DOCUMENT_V1.tokens.surfaces, accent: "#9c1a44" },
+      },
+    };
+    const assemble = () =>
+      assembleBotThemeV1(
+        stateOf(storage),
+        { userId: "user-1", botId: "alpha" },
+        {
+          flock,
+          registration,
+          appearance: "ink",
+          timezone: "UTC",
+          roster: roster(["theme/assemble"]),
+          assemble: () => Promise.resolve(canary),
+          mirror: () => Promise.resolve(),
+        },
+      );
+    expect((await assemble()).look).toBe("custom");
+
+    // The person picks Inherit back on the Look page.
+    const current = await flock.readLook(registration, "user-1");
+    await flock.updateLook(registration, "user-1", {
+      schemaVersion: 1,
+      type: "bot/update-look",
+      commandId: "look-back",
+      expectedRevision: current.revision,
+      botId: "alpha",
+      look: "inherit",
+    });
+    await holdThemePickV1(storage);
+    const held = await assemble();
+    expect(held.look).toBe("inherit");
+    expect(held.document).toBeUndefined();
+    // Nothing is owed on the hour for a Plugin that is not wrapping it.
+    expect(storage.values.has(THEME_ASSEMBLE_DUE_KEY_V1)).toBe(false);
+
+    // The Plugin is asked to set the look again: it wraps it once more.
+    await oweThemeAssembleV1(storage, new Date());
+    const resumed = await assemble();
+    expect(resumed.look).toBe("custom");
+    expect(resumed.document?.tokens.surfaces.accent).toBe("#9c1a44");
   });
 
   test("Custom with no Plugin keeps the assembled document", async () => {
