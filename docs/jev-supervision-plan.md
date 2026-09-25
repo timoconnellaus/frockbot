@@ -4,8 +4,8 @@
 
 FrockBot uses a fast conversational model at one fixed reasoning level. Jev
 supervises every Bot Turn and decides when the Bot needs a specialist subagent.
-The conversational model remains the Bot's voice; specialists perform slower
-planning, research, coding, criticism and recovery work behind it.
+The conversational model remains the Bot's voice; specialists perform writing,
+coding, thinking and vision work behind it.
 
 Jev is a hard runtime dependency. If supervision is unavailable, no Bot Turn,
 scheduled Turn, subagent or tool call runs. There is no unsupervised fallback.
@@ -27,9 +27,9 @@ built against the same interface.
   effort selection.
 - Jev decides whether specialist help is required. A weak conversational model
   is not trusted to identify all of its own blind spots.
-- Specialist profiles pair a model with instructions, tool reach and a budget.
-  Profiles express durable capabilities such as planning or code diagnosis;
-  provider model names remain deployment configuration.
+- A specialist is a named capability (writing, coding, thinking, vision)
+  backed by a deployment-configured model; provider model names remain
+  deployment configuration (see Specialist subagents).
 - One Jev request assesses an admitted Turn before its first conversational
   model call. One Jev request reviews each complete model response that calls
   tools, for whether it works on what was asked. One more reviews each text

@@ -1140,7 +1140,9 @@ absence. Row 44 is the only one.
   `resume` refuses a running task and refuses a `model`, because the resumed
   run continues a Session already pinned to a binding.
   `<available_subagent_models>` renders from the Bot's enabled model
-  Assignments and narrows to exactly one slug on an automation or subagent
+  Assignments, plus on a chat Turn any priced Frock AI specialists
+  ([Specialist subagents](jev-supervision-plan.md#specialist-subagents)),
+  and narrows to exactly one slug on an automation or subagent
   Turn, which is GrokBot's `sand-automation`-only rule.
 
   `task_message` is _delivery_, not queueing: the parent holds the bounded
