@@ -328,6 +328,12 @@ were, and neither is enforced.
   fact that will not stay true is kept as a log entry (at or below 0.2). The
   model is told each outcome. The legacy Markdown store, with no records
   binding, is not judged.
+- **Email triage.** Only the owner's own confirmed mailboxes reach a Turn, so
+  triage is not a spam filter. Before an email Turn is admitted, Jev judges
+  whether the message asks the Bot anything or only passes something on
+  (`app/supervision/email-triage.ts`). A message it is sure only passes
+  something on (at 0.8) is `quiet` on its email origin, so the Bot's answer
+  lands unread and wakes no device. Labelled in `bun run eval:context`.
 - **Skills.** At the Turn's first request, Jev judges each Skill in a catalog
   of up to 24 against the request, and up to three strong matches are named
   in the tail runtime note (`app/supervision/skill-nomination.ts`). The

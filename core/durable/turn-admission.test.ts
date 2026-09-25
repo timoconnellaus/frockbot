@@ -191,6 +191,28 @@ describe("the admission record names what produced the Turn", () => {
     ).toThrow();
   });
 
+  test("round-trips a quiet email, and refuses a quiet that is not true", () => {
+    const origin = {
+      kind: "email" as const,
+      messageId: "abc@mail.example.com",
+      quiet: true as const,
+    };
+    const admitted = (value: unknown) =>
+      codec.require(
+        legacyRun({
+          admission: {
+            schemaVersion: 1,
+            turnType: "chat",
+            origin: value as typeof origin,
+          },
+        }),
+      );
+    expect(admitted(origin).admission?.origin).toEqual(origin);
+    const { quiet: _quiet, ...loud } = origin;
+    expect(admitted(loud).admission?.origin).toEqual(loud);
+    expect(() => admitted({ ...origin, quiet: false })).toThrow();
+  });
+
   test("an admission with no origin decodes without the key", () => {
     const decoded = codec.require(
       legacyRun({ admission: { schemaVersion: 1, turnType: "automation" } }),

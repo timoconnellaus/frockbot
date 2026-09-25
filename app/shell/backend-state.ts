@@ -32,6 +32,10 @@ import {
   createHostedRoutineReportJudgeV1,
   type RoutineReportJudgeV1,
 } from "@frockbot/app/supervision/routine-report";
+import {
+  createHostedEmailTriageJudgeV1,
+  type EmailTriageJudgeV1,
+} from "@frockbot/app/supervision/email-triage";
 import { createHostedPluginFitJudgeV1 } from "@frockbot/app/supervision/plugin-fit";
 import type { PluginFitJudgeV1 } from "@frockbot/app/plugins/authoring-check";
 import { storedRunCodecV1 } from "./backend-contracts.js";
@@ -209,6 +213,11 @@ export interface ShellBotBackendHost extends ShellApplicationV1 {
    * the hosted Jev judge built from `env`, or none when there is no key.
    */
   routineReportJudge?: RoutineReportJudgeV1;
+  /**
+   * Judges whether an email the person sent asks the Bot anything. Absent,
+   * the hosted Jev judge, or none when there is no key.
+   */
+  emailTriageJudge?: EmailTriageJudgeV1;
   /**
    * Checks a Plugin the Bot publishes against what was asked, for its
    * approval card. Absent, the hosted Jev judge, or none without a key.
@@ -392,6 +401,7 @@ export class ShellBotStateV1 {
   readonly routineEventJudge: RoutineEventJudgeV1;
   readonly turnSupervisor: TurnSupervisor;
   readonly routineReportJudge: RoutineReportJudgeV1 | undefined;
+  readonly emailTriageJudge: EmailTriageJudgeV1 | undefined;
   readonly pluginFitJudge: PluginFitJudgeV1 | undefined;
 
   constructor(
@@ -430,6 +440,12 @@ export class ShellBotStateV1 {
     this.routineReportJudge =
       host.routineReportJudge ??
       createHostedRoutineReportJudgeV1({
+        JEV_API_KEY: host.env.JEV_API_KEY,
+        JEV_BASE_URL: host.env.JEV_BASE_URL,
+      });
+    this.emailTriageJudge =
+      host.emailTriageJudge ??
+      createHostedEmailTriageJudgeV1({
         JEV_API_KEY: host.env.JEV_API_KEY,
         JEV_BASE_URL: host.env.JEV_BASE_URL,
       });

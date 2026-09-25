@@ -2425,12 +2425,15 @@ export class BotState
     const { shell } = await this.materialized(identity);
     await shell.validateIdentity(identity);
     const { origin, ...command } = request.command;
+    // A message that only passes something on is answered without waking a
+    // device. Unjudged, the Turn is as loud as ever.
+    const triage = await shell.state.emailTriageJudge?.({ text: command.text });
     const receipt = await shell.admit({
       ...identity,
       ...(await this.withAttachments(command)),
       turnType: "chat",
       lane: "user",
-      origin,
+      origin: triage?.quiet ? { ...origin, quiet: true } : origin,
     });
     const work = shell.pendingWork();
     if (work) this.ctx.waitUntil(work);

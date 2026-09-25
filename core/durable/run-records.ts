@@ -226,6 +226,11 @@ export interface StoredRunInputDeliveryOriginV1 {
 export interface StoredRunEmailOriginV1 {
   kind: "email";
   messageId: string;
+  /**
+   * Present when the message only passes something on and asks nothing, so
+   * the Bot's answer lands unread without waking a device.
+   */
+  quiet?: true;
 }
 
 /**
@@ -787,14 +792,25 @@ function decodeStoredRunOrigin(
     };
   }
   if (candidate.kind === "email") {
-    requireExactOriginFields(candidate, ["kind", "messageId"], runId);
+    requireExactOriginFields(
+      candidate,
+      candidate.quiet === undefined
+        ? ["kind", "messageId"]
+        : ["kind", "messageId", "quiet"],
+      runId,
+    );
     if (
       !boundedString(candidate.messageId, 250) ||
-      !/^[\x21-\x3b\x3d\x3f-\x7e]+$/.test(candidate.messageId)
+      !/^[\x21-\x3b\x3d\x3f-\x7e]+$/.test(candidate.messageId) ||
+      (candidate.quiet !== undefined && candidate.quiet !== true)
     ) {
       throw new Error(`run "${runId}" has an invalid admission origin id`);
     }
-    return { kind: "email", messageId: candidate.messageId };
+    return {
+      kind: "email",
+      messageId: candidate.messageId,
+      ...(candidate.quiet === true ? { quiet: true as const } : {}),
+    };
   }
   if (candidate.kind === "routine-delivery") {
     requireExactOriginFields(

@@ -5,6 +5,7 @@ import {
 } from "../supervision/memory-recall.js";
 import { routineAttributionV1 } from "../routines/inbox.js";
 import { judgeMemoryWriteV1 } from "../supervision/memory-write.js";
+import { createJevEmailTriageJudgeV1 } from "../supervision/email-triage.js";
 import { createJevRoutineReportJudgeV1 } from "../supervision/routine-report.js";
 import {
   nominateSkillsV1,
@@ -44,6 +45,12 @@ export type ContextFixtureV1 =
         | "already-kept"
         | `replaces:${number}`
         | `write:${"profile" | "log" | "note"}`;
+    }
+  | {
+      readonly kind: "email";
+      readonly name: string;
+      readonly text: string;
+      readonly expected: "quiet" | "loud";
     }
   | {
       readonly kind: "skills";
@@ -97,6 +104,17 @@ export async function runContextCaseV1(
       passed: actual === fixture.expected,
       expected: fixture.expected,
       actual,
+    };
+  }
+  if (fixture.kind === "email") {
+    const verdict = await createJevEmailTriageJudgeV1(client)({
+      text: fixture.text,
+    });
+    const actual = !verdict ? "undecided" : verdict.quiet ? "quiet" : "loud";
+    return {
+      passed: actual === fixture.expected,
+      expected: fixture.expected,
+      actual: `${actual}${verdict ? ` (fyi ${verdict.fyi.toFixed(2)})` : ""}`,
     };
   }
   if (fixture.kind === "recall") {
@@ -206,6 +224,36 @@ export const contextFixturesV1: readonly ContextFixtureV1[] = [
     tier: "profile",
     kept: ["Tim's sister Mia is a vet."],
     expected: "write:profile",
+  },
+  {
+    kind: "email",
+    name: "email-a-question",
+    text: "Subject: Friday\n\nCan you check whether I'm free Friday afternoon and let me know?",
+    expected: "loud",
+  },
+  {
+    kind: "email",
+    name: "email-a-receipt-to-keep",
+    text: "Subject: Fwd: Your Qantas booking QF-4471\n\n---------- Forwarded message ---------\nFrom: Qantas <noreply@qantas.com>\nYour booking is confirmed. Sydney to Melbourne, 3 October, 7:05am. Booking reference QF-4471.",
+    expected: "quiet",
+  },
+  {
+    kind: "email",
+    name: "email-a-forward-with-an-ask",
+    text: "Subject: Fwd: Invoice 2231\n\nCan you pay this before Friday?\n\n---------- Forwarded message ---------\nFrom: Acme Plumbing\nInvoice 2231, $480 due 30 September.",
+    expected: "loud",
+  },
+  {
+    kind: "email",
+    name: "email-a-note-to-keep",
+    text: "Subject: For your records\n\nFYI, Mum's new gate code starts next month. Nothing to do, just keep it in mind.",
+    expected: "quiet",
+  },
+  {
+    kind: "email",
+    name: "email-a-task",
+    text: "Subject: Draft a reply\n\nDraft a polite reply to Sam saying we'll go with option B.",
+    expected: "loud",
   },
   {
     kind: "recall",

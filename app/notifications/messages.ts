@@ -208,7 +208,9 @@ export async function messageRecords(input: {
   const automation = input.run.admission?.turnType === "automation";
   const voice = input.run.admission?.origin?.kind === "voice";
   const origin = input.run.admission?.origin;
-  const quiet = origin?.kind === "routine-delivery" && origin.quiet === true;
+  const quiet =
+    (origin?.kind === "routine-delivery" || origin?.kind === "email") &&
+    origin.quiet === true;
   return visibleMessageRecordsV1({
     settings,
     read: input.read,
