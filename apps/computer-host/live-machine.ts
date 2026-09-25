@@ -276,8 +276,10 @@ export async function proveUpdateResetAndDelete(
     });
   }
 
+  // The tenant's directory is relative to the home the layout mounts
+  // durable roots under; the Bot's own Skills root is inside it.
   const skillPath = (session: ComputerHostSessionV1) =>
-    `${session.tenant.directory}/skills/live-check/SKILL.md`;
+    `/home/box/agent-data/agents/${session.tenant.directory?.split("/").at(-1)}/skills/live-check/SKILL.md`;
   const skill = `---\nname: live-check\ndescription: Written on a Computer before its Update (${randomUUID()}).\n---\n\nKept.\n`;
   const readSkill = (session: ComputerHostSessionV1) =>
     shell(session, `cat ${skillPath(session)} 2>/dev/null || true`);
