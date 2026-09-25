@@ -8,7 +8,7 @@
 //     Object is the authority for everything User-scoped";
 //  2. the entries survive that object being evicted, because they are durable
 //     state and not a resident cache;
-//  3. archiving a Bot purges its entries;
+//  3. archiving a Bot keeps its entries, and deleting it purges them;
 //  4. an emptied table plus `rebuildAuditIndex()` reproduces the identical
 //     set — the property that makes the table a projection rather than an
 //     authority;
@@ -16,7 +16,11 @@
 import { env } from "cloudflare:workers";
 import { evictDurableObject } from "cloudflare:test";
 import { describe, expect, test } from "vitest";
-import type { AuditEntryV1, AuditRebuildReceiptV1 } from "@frockbot/app/audit";
+import {
+  decodeClientAuditPageV1,
+  type AuditEntryV1,
+  type AuditRebuildReceiptV1,
+} from "@frockbot/app/audit";
 import { computerOperationIdV1 } from "@frockbot/computer/core";
 import type { FakeExecScript } from "./computer-host-fake.ts";
 import { frockbotToolCallPrompt } from "./harness/miniflare.ts";
@@ -28,9 +32,11 @@ const EXEC_EXIT_MARKER = "__FROCKBOT_EXIT__";
 interface AuditRpc {
   readAuditEntries(input: unknown): Promise<{
     entries: AuditEntryV1[];
+    page: { truncated: boolean; nextCursor?: string };
     total: number;
     indexState: string;
   }>;
+  indexAuditEntries(input: unknown): Promise<{ indexed: number }>;
   rebuildAuditIndex(input: unknown): Promise<AuditRebuildReceiptV1>;
   executeBotLifecycle(input: unknown): Promise<{ status: string }>;
 }
@@ -75,7 +81,7 @@ async function settleExecTurn(
 function readAudit(
   userId: string,
   query: Record<string, unknown> = {},
-): Promise<{ entries: AuditEntryV1[]; total: number; indexState: string }> {
+): ReturnType<AuditRpc["readAuditEntries"]> {
   return userStub(userId).readAuditEntries({
     schemaVersion: 1,
     userId,
@@ -157,8 +163,8 @@ describe("the audit table in Workerd", () => {
     const rebuilt = await readAudit(userId);
     expect(rebuilt.entries).toEqual(afterEviction.entries);
 
-    // AND ARCHIVING PURGES.
-    const lifecycle = await userStub(userId).executeBotLifecycle({
+    // ARCHIVING KEEPS THE HISTORY, as the archive copy promises.
+    const archived = await userStub(userId).executeBotLifecycle({
       schemaVersion: 1,
       userId,
       command: {
@@ -168,11 +174,70 @@ describe("the audit table in Workerd", () => {
         botId: second.botId,
       },
     });
-    expect(lifecycle.status).toBe("applied");
+    expect(archived.status).toBe("applied");
     const afterArchive = await readAudit(userId);
-    expect(new Set(afterArchive.entries.map((entry) => entry.botId))).toEqual(
+    expect(afterArchive.entries).toEqual(rebuilt.entries);
+
+    // AND DELETING PURGES.
+    const deleted = await userStub(userId).executeBotLifecycle({
+      schemaVersion: 1,
+      userId,
+      command: {
+        schemaVersion: 1,
+        type: "bot/delete",
+        commandId: `audit-delete-${suffix}`,
+        botId: second.botId,
+      },
+    });
+    expect(deleted.status).toBe("applied");
+    const afterDelete = await readAudit(userId);
+    expect(new Set(afterDelete.entries.map((entry) => entry.botId))).toEqual(
       new Set([first.botId]),
     );
+  });
+
+  test("pages past the first page with real ids, through the Worker's decoder", async () => {
+    const userId = `audit-user-${crypto.randomUUID()}`;
+    const botId = crypto.randomUUID();
+    await provisionBot({ userId, botId });
+    // A native run id is 33 characters. The cursor carries it, the Bot id and
+    // the instant, so a bound sized for a toy id refused every second page.
+    const entries = Array.from({ length: 120 }, (_, index) => ({
+      schemaVersion: 1,
+      botId,
+      runId: `n${btoa(String(index).padStart(24, "x")).replaceAll("=", "")}`,
+      occurrenceId: `tool:${index + 1}:1:0`,
+      turn: index + 1,
+      step: 1,
+      ordinal: 0,
+      effectId: `tool:${index + 1}:1:0`,
+      at: new Date(Date.now() - index * 60_000).toISOString(),
+      kind: "shell",
+      target: "computer",
+      toolName: "computer_exec",
+      argumentDigest: "a".repeat(64),
+      preview: "ls -la",
+      outcome: "ok",
+    }));
+    await userStub(userId).indexAuditEntries({
+      schemaVersion: 1,
+      userId,
+      botId,
+      entries,
+    });
+    const seen = new Set<string>();
+    let before: string | undefined;
+    let pages = 0;
+    do {
+      const page = decodeClientAuditPageV1(
+        await readAudit(userId, before === undefined ? {} : { before }),
+      );
+      for (const entry of page.entries) seen.add(entry.runId);
+      before = page.page.nextCursor;
+      pages += 1;
+    } while (before !== undefined && pages < 10);
+    expect(pages).toBe(3);
+    expect(seen.size).toBe(120);
   });
 
   test("pages a filtered answer over two thousand rows on real SQL", async () => {

@@ -303,6 +303,9 @@ void main() {
     await tester.tap(find.text('Rebuild'));
     await tester.pumpAndSettle();
     expect(written.single, '/api/audit/rebuild');
+    // A finished rebuild is confirmed, and nothing is left pending to retry.
+    expect(find.textContaining('Couldn’t confirm'), findsNothing);
+    expect(store.values.containsKey('view-pending.tim.audit'), isFalse);
   });
 
   testWidgets('Audit recovers from offline without raw backend detail', (

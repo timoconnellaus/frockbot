@@ -200,6 +200,7 @@ import {
 import type { BotSearchRpc } from "./search.js";
 import {
   AUDIT_KINDS_V1,
+  AUDIT_MAX_CURSOR_LENGTH_V1,
   AUDIT_MAX_ENTRY_PAGE_V1,
   AUDIT_MAX_RESULTS_V1,
   type AuditRebuildReceiptV1,
@@ -2769,12 +2770,12 @@ export class UserConfiguration
     // An archive that settled on a retry rather than on its command purges the
     // transcript index here. Purge is a delete of a projection, so sweeping
     // every archived Bot on every firing is idempotent and cheap, and it means
-    // no archived Bot keeps rows because its saga finished out of band.
+    // no archived Bot keeps rows because its saga finished out of band. Its
+    // audit entries stay: an archived Bot's history is preserved.
     const lifecycles = await contributions.flock.listBotLifecycles();
     for (const lifecycle of lifecycles.lifecycles) {
       if (lifecycle.status === "archived") {
         contributions.search.purge(lifecycle.botId);
-        contributions.audit.purgeAuditForBot(lifecycle.botId);
       }
     }
     // A delete that settled on a retry rather than on its own command left its
@@ -2970,10 +2971,10 @@ export class UserConfiguration
     ).executeLifecycle(request.userId as string, command);
     // Archiving a Bot removes its transcript from the index. The rows are a
     // projection, so this destroys nothing: restoring the Bot and rebuilding
-    // brings every one of them back from the Bot's own stored runs.
+    // brings every one of them back from the Bot's own stored runs. Its audit
+    // entries stay, because archiving promises the history is preserved.
     if (command.type === "bot/archive" && receipt.status === "applied") {
       (await this.searchContribution()).purge(command.botId);
-      (await this.auditContribution()).purgeAuditForBot(command.botId);
     }
     // Deleting a Bot destroys them rather than dropping a projection: nothing
     // is left to rebuild from. The sweep runs here on the common path and from
@@ -3768,7 +3769,7 @@ export class UserConfiguration
         botId: rpcBotId,
         kind: rpcEnum(AUDIT_KINDS_V1),
         target: rpcString(160),
-        before: rpcString(64),
+        before: rpcString(AUDIT_MAX_CURSOR_LENGTH_V1),
         limit: rpcInteger({ minimum: 1, maximum: AUDIT_MAX_RESULTS_V1 }),
       },
     );
@@ -3801,18 +3802,6 @@ export class UserConfiguration
       total: page.total,
       indexState: contribution.state(),
     };
-  }
-
-  /** Every entry of one Bot leaves the table. Archiving a Bot calls this. */
-  async purgeAuditForBot(input: unknown): Promise<{ removed: number }> {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-    });
-    await this.assertFlockIdentity(request.userId as string);
-    return (await this.auditContribution()).purgeAuditForBot(
-      request.botId as string,
-    );
   }
 
   private async machineContribution(): Promise<

@@ -5028,7 +5028,16 @@
                 "$ref": "#/$defs/Instant"
               },
               "kind": {
-                "enum": ["shell", "browser", "mcp", "file", "process", "device"]
+                "enum": [
+                  "shell",
+                  "browser",
+                  "mcp",
+                  "file",
+                  "process",
+                  "device",
+                  "email",
+                  "supervision"
+                ]
               },
               "target": {
                 "type": "string",
@@ -5096,7 +5105,7 @@
             "nextCursor": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 64
+              "maxLength": 1024
             }
           },
           "required": ["truncated"],

@@ -1981,6 +1981,55 @@
     }
   },
   {
+    "name": "AuditPage with email, supervision and a real cursor",
+    "schema": "AuditPage",
+    "value": {
+      "schemaVersion": 1,
+      "entries": [
+        {
+          "schemaVersion": 1,
+          "botId": "9b2f6a1e-4c3d-4e8f-9a7b-1c2d3e4f5a6b",
+          "runId": "nQk3vT9xLm2pR7sW1yZ4bC8dF6gH0jK5",
+          "occurrenceId": "tool:12:4:0",
+          "turn": 12,
+          "step": 4,
+          "ordinal": 0,
+          "effectId": "tool:12:4:0",
+          "at": "2026-09-05T10:00:01.000Z",
+          "kind": "email",
+          "target": "email",
+          "toolName": "email_owner",
+          "argumentDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "preview": "Note to Tim",
+          "outcome": "ok"
+        },
+        {
+          "schemaVersion": 1,
+          "botId": "9b2f6a1e-4c3d-4e8f-9a7b-1c2d3e4f5a6b",
+          "runId": "nQk3vT9xLm2pR7sW1yZ4bC8dF6gH0jK5",
+          "occurrenceId": "tool:12:3:0",
+          "turn": 12,
+          "step": 3,
+          "ordinal": 0,
+          "effectId": "tool:12:3:0",
+          "at": "2026-09-05T10:00:01.000Z",
+          "kind": "supervision",
+          "target": "conversation",
+          "toolName": "send_to_user",
+          "argumentDigest": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "preview": "off task: hello",
+          "outcome": "ok"
+        }
+      ],
+      "page": {
+        "truncated": true,
+        "nextCursor": "MjAyNi0wOS0wNVQxMDowMDowMS4wMDBaADliMmY2YTFlLTRjM2QtNGU4Zi05YTdiLTFjMmQzZTRmNWE2YgBuUWszdlQ5eExtMnBSN3NXMXlaNGJDOGRGNmdIMGpLNQB0b29sOjEyOjM6MA=="
+      },
+      "total": 60,
+      "indexState": "ready"
+    }
+  },
+  {
     "name": "SetupHistory valid",
     "schema": "SetupHistory",
     "value": {

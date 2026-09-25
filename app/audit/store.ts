@@ -313,7 +313,7 @@ export class AuditStoreV1 {
     if (evicted) this.setMeta(TRUNCATED_KEY, "1");
   }
 
-  /** Every entry of one Bot leaves the table; the archive saga calls this. */
+  /** Every entry of one Bot leaves the table; deleting a Bot calls this. */
   purge(botId: string): number {
     this.open();
     const removed = Number(
