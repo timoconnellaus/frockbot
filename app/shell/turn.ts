@@ -87,6 +87,8 @@ import { admitTurnToSessionLogV1 } from "./compaction-scheduler.js";
 import { storedParkedCompactionV1 } from "./compaction.js";
 import { notificationIdV1 } from "./notification-id.js";
 import { agentRuntime } from "./runtime-mount.js";
+import { namedRunCauseOfBotV1, runCauseReadersV1 } from "./run-cause.js";
+import { runCauseV1 } from "@frockbot/app/billing/run-cause";
 import {
   heldSkillRevisionsV1,
   holdSkillIndexRevisionsV1,
@@ -278,8 +280,16 @@ export async function executeTurn(
   }
   const prepared = decodePreparedTurnInputsV1(input.preparedInputs);
   const settings = input.configurationSnapshot;
+  // What this Turn's spending is charged to, and what it hands on to the
+  // Bots and subagents it asks.
+  const cause = await runCauseV1(
+    input.identity.botId,
+    input.command.origin,
+    runCauseReadersV1(state),
+  );
   const turn = {
     runId: input.command.runId,
+    cause,
     // One admitted Turn is one run; the Turn ordinal lives in the session log.
     turnId: input.command.runId,
     sessionId: input.command.sessionId,
@@ -438,6 +448,14 @@ export async function executeTurn(
           input.identity.userId,
           input.identity.botId,
           input.command.sessionId,
+          {
+            runId: input.command.runId,
+            cause: await namedRunCauseOfBotV1(
+              state,
+              input.identity.botId,
+              cause,
+            ),
+          },
         ),
         // The files this conversation carries, read for each dispatch and
         // never written into the request the log keeps.

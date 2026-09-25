@@ -1,4 +1,7 @@
 import { prepaidComputerHost } from "./billing-computer.js";
+import type { UsageAttributionV1 } from "@frockbot/app/billing/ledger";
+import { runCauseV1 } from "@frockbot/app/billing/run-cause";
+import { runCauseReadersV1 } from "@frockbot/app/shell/run-cause";
 import {
   createHostedModelRatesReaderV1,
   type HostedModelRatesAuthorityV1,
@@ -594,6 +597,7 @@ export class BotState
     new DurableWorkspaceGenerations({ state: this.ctx });
   /** Durable invalidation log plus hibernatable observer transport. */
   private readonly stateChannel = new BotStateChannel(this.ctx);
+  private mountedShell: ShellBotBackendContribution["state"] | undefined;
   private mounted:
     | Promise<{
         shell: ShellBotBackendContribution;
@@ -760,18 +764,26 @@ export class BotState
                 env.USER_CONFIGURATIONS.get(
                   env.USER_CONFIGURATIONS.idFromName(userId),
                 ) as unknown as BillingAccountRpc,
+              undefined,
+              (botId, personal) => this.computerSpend(botId, personal),
             ),
           }
         : {}),
       ...(hostedRates
         ? {
-            BILLING: (userId: string, botId: string, sessionId: string) => {
+            BILLING: (
+              userId: string,
+              botId: string,
+              sessionId: string,
+              spend?: import("@frockbot/app/billing/ledger").UsageAttributionV1,
+            ) => {
               const account = env.USER_CONFIGURATIONS.get(
                 env.USER_CONFIGURATIONS.idFromName(userId),
               ) as unknown as BillingAccountRpc;
               return {
                 botId,
                 sessionId,
+                ...(spend ? { spend } : {}),
                 rates: hostedRates.rates,
                 reportUnpriced: (report: {
                   servedModel: string | null;
@@ -779,9 +791,18 @@ export class BotState
                   version: number;
                 }) => this.ctx.waitUntil(hostedRates.reportUnpriced(report)),
                 account: {
+                  // A charge that names no cause of its own — a search —
+                  // is recorded against the Turn this billing was made for.
                   reserve: (
                     reservation: import("@frockbot/app/billing/ledger").UsageReservation,
-                  ) => account.reserveUsage({ userId, reservation }),
+                  ) =>
+                    account.reserveUsage({
+                      userId,
+                      reservation:
+                        spend && !reservation.attribution
+                          ? { ...reservation, attribution: spend }
+                          : reservation,
+                    }),
                   settle: (
                     settlement: import("@frockbot/app/billing/ledger").UsageSettlement,
                   ) => account.settleUsage({ userId, settlement }),
@@ -1038,6 +1059,14 @@ export class BotState
         };
       })();
       this.mounted = pending;
+      // Read by Computer billing, which must never wait on a mount: the
+      // mount itself may be what is calling the Computer.
+      void pending.then(
+        (mounted) => {
+          if (this.mounted === pending) this.mountedShell = mounted.shell.state;
+        },
+        () => undefined,
+      );
       // A mount that failed is not a durable verdict. Memoizing the rejection
       // made one transient failure — an artifact read, a User RPC, a member
       // that would not resolve — final for the life of the object: every
@@ -1045,7 +1074,10 @@ export class BotState
       // included, so nothing could heal it short of eviction. The next call
       // retries instead, exactly as `immutable-application.ts` already does.
       void pending.catch(() => {
-        if (this.mounted === pending) this.mounted = undefined;
+        if (this.mounted === pending) {
+          this.mounted = undefined;
+          this.mountedShell = undefined;
+        }
       });
     }
     return this.mounted;
@@ -1278,6 +1310,7 @@ export class BotState
     await deleteBotUploadsV1(this.env, identity);
     await releaseBotUploadQuotaRpcV1(this.env, identity);
     this.mounted = undefined;
+    this.mountedShell = undefined;
     this.surfacesFor = undefined;
   }
 
@@ -1379,6 +1412,30 @@ export class BotState
     if (outcome === "pending") return outcome;
     await this.finishTearDown(identity);
     return "complete";
+  }
+
+  /** What a Computer charge made from this object is recorded against. */
+  private async computerSpend(
+    botId: string,
+    personal: boolean,
+  ): Promise<UsageAttributionV1> {
+    const desktop: UsageAttributionV1 = { cause: { kind: "desktop", botId } };
+    const state = this.mountedShell;
+    // No Turn runs in an object that has not mounted.
+    if (personal || !state) return desktop;
+    const runId = await state.authority.readActiveRunId();
+    if (!runId) return desktop;
+    const run = await state.authority
+      .readRunHeader(runId)
+      .catch(() => undefined);
+    return {
+      runId,
+      cause: await runCauseV1(
+        botId,
+        run?.admission?.origin,
+        runCauseReadersV1(state),
+      ),
+    };
   }
 
   private async materialized(identity: { userId: string; botId: string }) {

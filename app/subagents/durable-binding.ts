@@ -10,6 +10,10 @@
 // task, and a deadline that belongs to the parent's one alarm.
 
 import {
+  decodeStoredRunCauseV1,
+  type StoredRunCauseV1,
+} from "@frockbot/core/durable";
+import {
   decodeTaskOutcomeV1,
   isTaskIdV1,
   subagentExactKeys,
@@ -45,6 +49,8 @@ export interface SubagentParentV1 {
   runId: string;
   turnId: string;
   sessionId: string;
+  /** What the parent's Turn is charged to; the child is charged the same. */
+  cause?: StoredRunCauseV1;
 }
 
 /**
@@ -114,15 +120,24 @@ export function decodeSubagentParentV1(
   subagentExactKeys(
     candidate,
     ["userId", "botId", "runId", "turnId", "sessionId"],
-    [],
+    ["cause"],
     label,
   );
+  let cause: StoredRunCauseV1 | undefined;
+  if (candidate.cause !== undefined) {
+    try {
+      cause = decodeStoredRunCauseV1(candidate.cause, `${label}.cause`);
+    } catch {
+      throw new SubagentDecodeError(`${label}.cause is invalid`);
+    }
+  }
   return {
     userId: subagentText(candidate.userId, 128, `${label}.userId`),
     botId: subagentText(candidate.botId, 128, `${label}.botId`),
     runId: subagentText(candidate.runId, 128, `${label}.runId`),
     turnId: subagentText(candidate.turnId, 256, `${label}.turnId`),
     sessionId: subagentText(candidate.sessionId, 256, `${label}.sessionId`),
+    ...(cause ? { cause } : {}),
   };
 }
 

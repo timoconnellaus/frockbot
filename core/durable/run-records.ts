@@ -83,6 +83,8 @@ export interface StoredRunSubagentOriginV1 {
   kind: "subagent";
   taskId: string;
   parentRunId: string;
+  /** What started the parent's Turn; see {@link StoredRunCauseV1}. */
+  cause?: StoredRunCauseV1;
 }
 
 /**
@@ -107,6 +109,31 @@ export interface StoredRunBotOriginV1 {
   fromBotId: string;
   fromBotName: string;
   messageId: string;
+  /** What started the asking Turn, so this one's spending is charged to it. */
+  cause?: StoredRunCauseV1;
+}
+
+/**
+ * What a Turn's spending is charged to: the start of the chain that led to
+ * it — a person talking to a Bot, a Routine firing, a Group Chat, the voice
+ * session. A hand-off, a subagent task or a question from another Bot is
+ * charged to whatever started the Turn that asked, so a Routine that sets
+ * other work going is charged for that work too.
+ *
+ * It is written when the chain crosses an object — into another Bot or a
+ * subagent — because the Turn that asked is not readable from there. Within
+ * one Bot it is read back from the run that asked.
+ */
+export interface StoredRunCauseV1 {
+  kind: "chat" | "routine" | "group" | "voice";
+  /** The Bot whose conversation or Routine it was. */
+  botId: string;
+  /** The Routine's or the Group Chat's id. */
+  id?: string;
+  /** Its name when the chain started. */
+  label?: string;
+  /** How a Routine was fired. */
+  trigger?: StoredRunTriggerV1;
 }
 
 /**
@@ -532,6 +559,65 @@ function requireExactOriginFields(
   }
 }
 
+function causeField(candidate: Record<PropertyKey, unknown>): string[] {
+  return Object.hasOwn(candidate, "cause") ? ["cause"] : [];
+}
+
+const STORED_RUN_CAUSE_KINDS: readonly StoredRunCauseV1["kind"][] = [
+  "chat",
+  "routine",
+  "group",
+  "voice",
+];
+
+function decodeCauseField(
+  candidate: Record<PropertyKey, unknown>,
+  runId: string,
+): { cause?: StoredRunCauseV1 } {
+  if (!Object.hasOwn(candidate, "cause")) return {};
+  return { cause: decodeStoredRunCauseV1(candidate.cause, runId) };
+}
+
+export function decodeStoredRunCauseV1(
+  value: unknown,
+  runId: string,
+): StoredRunCauseV1 {
+  const invalid = () =>
+    new Error(`run "${runId}" has an invalid admission origin cause`);
+  if (!value || typeof value !== "object" || Array.isArray(value))
+    throw invalid();
+  const candidate = value as Record<PropertyKey, unknown>;
+  const allowed = new Set(["kind", "botId", "id", "label", "trigger"]);
+  if (
+    Reflect.ownKeys(candidate).some(
+      (key) => typeof key !== "string" || !allowed.has(key),
+    )
+  )
+    throw invalid();
+  const kind = STORED_RUN_CAUSE_KINDS.find((k) => k === candidate.kind);
+  const trigger =
+    candidate.trigger === undefined
+      ? undefined
+      : STORED_RUN_ORIGIN_TRIGGERS.find((t) => t === candidate.trigger);
+  if (
+    !kind ||
+    !boundedString(candidate.botId, 128) ||
+    (candidate.id !== undefined && !boundedString(candidate.id, 256)) ||
+    (candidate.label !== undefined && !boundedString(candidate.label, 1_000)) ||
+    (candidate.trigger !== undefined && !trigger)
+  )
+    throw invalid();
+  return {
+    kind,
+    botId: candidate.botId,
+    ...(candidate.id === undefined ? {} : { id: candidate.id as string }),
+    ...(candidate.label === undefined
+      ? {}
+      : { label: candidate.label as string }),
+    ...(trigger ? { trigger } : {}),
+  };
+}
+
 function decodeStoredRunOrigin(
   value: unknown,
   runId: string,
@@ -543,7 +629,7 @@ function decodeStoredRunOrigin(
   if (candidate.kind === "subagent") {
     requireExactOriginFields(
       candidate,
-      ["kind", "taskId", "parentRunId"],
+      ["kind", "taskId", "parentRunId", ...causeField(candidate)],
       runId,
     );
     if (
@@ -556,6 +642,7 @@ function decodeStoredRunOrigin(
       kind: "subagent",
       taskId: candidate.taskId,
       parentRunId: candidate.parentRunId,
+      ...decodeCauseField(candidate, runId),
     };
   }
   if (candidate.kind === "handoff") {
@@ -587,7 +674,13 @@ function decodeStoredRunOrigin(
   if (candidate.kind === "bot") {
     requireExactOriginFields(
       candidate,
-      ["kind", "fromBotId", "fromBotName", "messageId"],
+      [
+        "kind",
+        "fromBotId",
+        "fromBotName",
+        "messageId",
+        ...causeField(candidate),
+      ],
       runId,
     );
     if (
@@ -602,6 +695,7 @@ function decodeStoredRunOrigin(
       fromBotId: candidate.fromBotId,
       fromBotName: candidate.fromBotName,
       messageId: candidate.messageId,
+      ...decodeCauseField(candidate, runId),
     };
   }
   if (candidate.kind === "group") {

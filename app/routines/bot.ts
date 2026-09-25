@@ -924,7 +924,7 @@ async function notifyFailedFiring(
   }
 }
 
-async function readRoutineRecordV1(
+export async function readRoutineRecordV1(
   state: ShellBotStateV1,
   routineId: string,
 ): Promise<RoutineRecordV1 | undefined> {

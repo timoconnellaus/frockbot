@@ -5,6 +5,7 @@
 // into a mounted runtime, so both an admitted Turn (`app/shell/turn.ts`) and an
 // isolate's `ai` grant (`app/isolates/bot.ts`) resolve the same way.
 
+import type { StoredRunCauseV1 } from "@frockbot/core/durable";
 import { createBotGroupChatsHost } from "./backend-groups.js";
 import {
   PLUGIN_MODEL_PROVIDER_UNAVAILABLE_REASON_V1,
@@ -223,6 +224,8 @@ export async function agentRuntime(
     turnId: string;
     sessionId: string;
     fromBotName: string;
+    /** What this Turn's spending is charged to. */
+    cause?: StoredRunCauseV1;
     /**
      * The generation this Turn pinned, and the type it was admitted as. A
      * dispatched subagent runs on the generation its parent pinned, and the
@@ -741,13 +744,20 @@ export async function agentRuntime(
         : {}),
       packageSettings,
       // Only the account is taken from it: a platform-paid tool names the
-      // Bot and Session from its own call when it charges.
+      // Bot and Session from its own call when it charges, and the account
+      // records the Turn and its cause beside each charge.
       ...(state.env.BILLING
         ? {
             billing: state.env.BILLING(
               identity.userId,
               identity.botId,
               turn?.sessionId ?? "",
+              turn
+                ? {
+                    runId: turn.runId,
+                    ...(turn.cause ? { cause: turn.cause } : {}),
+                  }
+                : undefined,
             ).account,
           }
         : {}),

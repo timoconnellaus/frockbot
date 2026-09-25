@@ -1,3 +1,10 @@
+import {
+  createSpendingTablesV1,
+  recordAttributionV1,
+  rollUpSettlementV1,
+  spentSinceV1,
+} from "./spending.js";
+
 export const BILLING_PLAN = {
   currency: "usd",
   monthlyCents: 2000,
@@ -68,6 +75,51 @@ export interface UsageReservation {
   description: string;
   pricingVersion: string;
   unitRates?: Record<string, number>;
+  /**
+   * Why the money was spent, for the Spending page. Descriptive only: it is
+   * not part of the charge's identity, so a retry that resolves it
+   * differently — a Routine renamed in between — is still the same charge.
+   */
+  attribution?: UsageAttributionV1;
+}
+
+/**
+ * What started the work a charge paid for. The four a Turn can have (see
+ * `StoredRunCauseV1`), plus two that are not a Turn: a person using the
+ * Computer directly, and a Plugin calling a model from its own page.
+ */
+export type SpendCauseKindV1 =
+  "chat" | "routine" | "group" | "voice" | "desktop" | "plugin";
+export const SPEND_CAUSE_KINDS_V1: readonly SpendCauseKindV1[] = [
+  "chat",
+  "routine",
+  "group",
+  "voice",
+  "desktop",
+  "plugin",
+];
+export interface SpendCauseV1 {
+  kind: SpendCauseKindV1;
+  /** The Bot whose conversation, Routine or Computer it was. */
+  botId: string;
+  /** A Routine's, a Group Chat's or a Plugin's id. */
+  id?: string;
+  label?: string;
+  /** How a Routine was fired. */
+  trigger?: string;
+}
+/** What a charge bought, as a person reads it. */
+export type SpendCategoryV1 = "model" | "summary" | "search" | "computer";
+export interface UsageAttributionV1 {
+  /** The Turn the charge was made in. */
+  runId?: string;
+  cause?: SpendCauseV1;
+  /** A model call that summarised the conversation rather than answering. */
+  summary?: boolean;
+  /** The Plugin that made the call, when it was not the Bot's own loop. */
+  pluginId?: string;
+  /** The model the call asked for. */
+  model?: string;
 }
 /**
  * How a hosted model call was priced. `served`: at the rate of the model that
@@ -171,6 +223,7 @@ export class BillingLedger {
     sql.exec(
       `CREATE INDEX IF NOT EXISTS billing_operations_created ON billing_operations(created)`,
     );
+    createSpendingTablesV1(sql);
   }
   private rows<T extends SqlRow>(
     query: string,
@@ -315,8 +368,9 @@ export class BillingLedger {
       !input.pricingVersion
     )
       throw new BillingError("Invalid usage reservation", 400);
+    const { attribution, ...charge } = input;
     return this.storage.transactionSync(() => {
-      const fingerprint = stable(input);
+      const fingerprint = stable(charge);
       const old = this.rows<Operation>(
         "SELECT * FROM billing_operations WHERE id = ?",
         input.id,
@@ -364,6 +418,7 @@ export class BillingLedger {
         input.pricingVersion,
         this.now(),
       );
+      recordAttributionV1(this.storage.sql, input, attribution);
       return { status: "reserved" as const, created: true };
     });
   }
@@ -428,6 +483,13 @@ export class BillingLedger {
         settlement,
         input.id,
       );
+      // The rollup is what the Spending page reads, and nothing else: a
+      // failure there leaves a gap in it, never an unsettled charge.
+      try {
+        rollUpSettlementV1(this.storage.sql, input);
+      } catch {
+        // Recorded on the operation all the same.
+      }
     });
   }
   reconcile(command: {
@@ -515,9 +577,9 @@ export class BillingLedger {
     return {
       ...this.balance(),
       paidAccess: this.get<PaidAccessState>("paidAccess") ?? null,
-      summaries: this.rows<SqlRow>(
-        "SELECT kind, bot_id AS botId, date(created / 1000, 'unixepoch') AS day, SUM(COALESCE(json_extract(settlement, '$.chargeMicros'), 0)) AS chargeMicros, COUNT(*) AS operations FROM billing_operations WHERE created >= ? GROUP BY day, kind, bot_id ORDER BY day DESC LIMIT 100",
-        now - 31 * 86_400_000,
+      spentLast30DaysMicros: spentSinceV1(
+        this.storage.sql,
+        now - 30 * 86_400_000,
       ),
       payments: this.rows<SqlRow>(
         "SELECT id, kind, original AS creditMicros, expires, created FROM billing_grants ORDER BY created DESC LIMIT 100",

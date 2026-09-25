@@ -3,10 +3,16 @@ import 'package:url_launcher/url_launcher.dart';
 
 import '../client/transport.dart';
 import '../shell/desktop_layout.dart';
+import '../shell/semantics.dart';
+import 'spending.dart';
 
 class BillingPage extends StatefulWidget {
   final NativeApi api;
-  const BillingPage({super.key, required this.api});
+
+  /// Opens the Spending page; the shell supplies it so a Turn listed there
+  /// can open its conversation.
+  final VoidCallback? onOpenSpending;
+  const BillingPage({super.key, required this.api, this.onOpenSpending});
 
   @override
   State<BillingPage> createState() => _BillingPageState();
@@ -106,7 +112,6 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
         !{'canceled', 'incomplete_expired'}.contains(subscription['status']);
     final available = data?['paymentsAvailable'] == true && !busy;
     final usage = data?['usage'] as List? ?? const [];
-    final summaries = data?['summaries'] as List? ?? const [];
     final rates = data?['modelRates'] as Map? ?? const {};
     final computerRate = data?['computerRate'] as Map? ?? const {};
     return Scaffold(
@@ -220,18 +225,27 @@ class _BillingPageState extends State<BillingPage> with WidgetsBindingObserver {
                 ),
               ),
             const SizedBox(height: 24),
-            Text(
-              'Usage by day & Bot',
-              style: Theme.of(context).textTheme.titleLarge,
-            ),
-            const Text('Settled charges over the past 31 days.'),
-            for (final row in summaries.whereType<Map>())
-              ListTile(
-                contentPadding: EdgeInsets.zero,
-                title: Text('${row['day']} · ${row['botId'] ?? 'Account'}'),
-                subtitle: Text('${row['kind']}'),
-                trailing: Text(_money(row['chargeMicros'])),
+            identified(
+              SpendingIds.billingEntry,
+              Card(
+                child: ListTile(
+                  title: const Text('Spent in the last 30 days'),
+                  subtitle: Text(
+                    data == null
+                        ? '—'
+                        : '${spendMoney(data['spentLast30DaysMicros'])} · See where it went, by Bot, Routine, model and more',
+                  ),
+                  trailing: const Icon(Icons.chevron_right_rounded),
+                  onTap:
+                      widget.onOpenSpending ??
+                      () => Navigator.of(context).push(
+                        MaterialPageRoute<void>(
+                          builder: (_) => SpendingPage(api: widget.api),
+                        ),
+                      ),
+                ),
               ),
+            ),
             const SizedBox(height: 24),
             Text('Recent usage', style: Theme.of(context).textTheme.titleLarge),
             if (usage.isEmpty)

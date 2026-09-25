@@ -1,4 +1,8 @@
-import { BillingError, BILLING_PLAN } from "@frockbot/app/billing/ledger";
+import {
+  BillingError,
+  BILLING_PLAN,
+  type UsageAttributionV1,
+} from "@frockbot/app/billing/ledger";
 import {
   COMPUTER_TARIFF,
   computerChargeMicros,
@@ -140,11 +144,26 @@ async function responseWithSettlement(
   );
 }
 
+/**
+ * What a Computer charge is recorded against. Watching or taking control is
+ * the person at the Computer, whatever the Bot is doing meanwhile; anything
+ * else is the Turn the Bot is running, when it is running one.
+ */
+export type ComputerSpendV1 = (
+  botId: string,
+  personal: boolean,
+) => Promise<UsageAttributionV1 | undefined>;
+
+function personalOperation(operation: ComputerHostOperationV1): boolean {
+  return operation.kind === "viewer" || operation.kind === "control";
+}
+
 /** Authorize and settle fixed-rate Computer time at the existing host seam. */
 export function prepaidComputerHost(
   host: Fetcher,
   account: (userId: string) => BillingAccountRpc,
   now: () => number = Date.now,
+  spend?: ComputerSpendV1,
 ): Fetcher {
   return new Proxy(host, {
     get(target, property) {
@@ -163,6 +182,11 @@ export function prepaidComputerHost(
         if (cleanupOperation(operation)) return target.fetch(request);
 
         const billing = account(identity.userId);
+        // Attribution never stops the Computer.
+        const attribution = await spend?.(
+          tenant.botId,
+          personalOperation(operation),
+        ).catch(() => undefined);
         let reservation:
           | {
               status: "reserved" | "settled" | "released";
@@ -182,6 +206,7 @@ export function prepaidComputerHost(
               unitRates: {
                 activeMicrosPerHour: COMPUTER_ACTIVE_MICROS_PER_HOUR,
               },
+              ...(attribution ? { attribution } : {}),
             },
           });
         } catch (error) {

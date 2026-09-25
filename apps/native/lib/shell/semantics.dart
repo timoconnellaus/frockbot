@@ -359,6 +359,14 @@ abstract final class PluginIds {
   static const refresh = 'plugins-refresh';
 }
 
+/// Where an account's credit went.
+abstract final class SpendingIds {
+  static const page = 'spending-page';
+  static const billingEntry = 'billing-spending';
+  static const botEntry = 'bot-settings-spending';
+  static const routineEntry = 'routine-run-log-spending';
+}
+
 /// Routines: what a Bot does on its own, and what it left behind.
 ///
 /// The names follow what `routines.e2e.ts` selects on — the section, a

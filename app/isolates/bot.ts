@@ -7,6 +7,9 @@
 // `capabilities.ts` beside this file is the isolate-side host; this is the
 // Bot-side authority that mints it.
 
+import type { UsageAttributionV1 } from "@frockbot/app/billing/ledger";
+import { runCauseV1 } from "@frockbot/app/billing/run-cause";
+import { runCauseReadersV1 } from "@frockbot/app/shell/run-cause";
 import type {
   FoundationAgentPackage,
   RuntimeModelSelection,
@@ -77,7 +80,11 @@ import type { ShellIsolateMountOptions } from "@frockbot/app/shell/backend-compo
 import { createBotMemoryHost } from "@frockbot/app/shell/backend-memory";
 import { agentRuntime } from "@frockbot/app/shell/runtime-mount";
 import { admitRunEffect } from "@frockbot/app/shell/turn";
-import { activeIsolateTurn, isolateCallAdmittedV1 } from "./authority.js";
+import {
+  activeIsolateTurn,
+  isolateCallAdmittedV1,
+  type IsolateCallIdentityV1,
+} from "./authority.js";
 import { notificationIdV1 } from "@frockbot/app/shell/notification-id";
 import {
   approvalKeyV1,
@@ -452,6 +459,7 @@ export async function isolateInvokeModel(
             packageId: input.packageId,
             sessionId: input.sessionId,
             record: (usage) => recordPluginModelUsageV1(state, input, usage),
+            spend: () => pluginSpendV1(state, identity, input),
           }),
         }
       : undefined,
@@ -1156,6 +1164,36 @@ function isolateCapabilities(
 }
 
 /**
+ * What a Plugin's model call is charged to: the Turn it serves, when the call
+ * names the resident Turn, and otherwise the Plugin itself — a standalone
+ * mount, its own page, with no Turn behind it.
+ */
+async function pluginSpendV1(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+  call: IsolateCallIdentityV1,
+): Promise<UsageAttributionV1> {
+  const resident = activeIsolateTurn(state, call);
+  const run = resident
+    ? await state.authority.readRunHeader(call.runId).catch(() => undefined)
+    : undefined;
+  if (resident && run)
+    return {
+      runId: call.runId,
+      cause: await runCauseV1(
+        identity.botId,
+        run.admission?.origin,
+        runCauseReadersV1(state),
+      ),
+      pluginId: call.packageId,
+    };
+  return {
+    cause: { kind: "plugin", botId: identity.botId, id: call.packageId },
+    pluginId: call.packageId,
+  };
+}
+
+/**
  * Streams through the pinned Composition's mounted `ctx.llm` — the same
  * provider path a Turn uses, so whichever provider Plugin serves the request is
  * the one that takes the credential lease.
@@ -1173,6 +1211,8 @@ function isolateModelPath(
     /** The Session the call is for: the ledger's join key to the Turn. */
     sessionId: string;
     record: (usage: PluginModelUsageV1) => Promise<void>;
+    /** What the call's charge is recorded against. */
+    spend: () => Promise<UsageAttributionV1>;
   },
 ): IsolateModelPath {
   return {
@@ -1193,6 +1233,7 @@ function isolateModelPath(
         identity.userId,
         identity.botId,
         call.sessionId,
+        await call.spend(),
       );
       // What the account was charged for this call, as its settlement says:
       // the hosted price depends on which model answered, which only the

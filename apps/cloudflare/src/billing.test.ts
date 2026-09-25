@@ -33,7 +33,7 @@ function account(
         purchasedMicros: 0,
         complimentaryMicros: 0,
         reservedMicros: 0,
-        summaries: [],
+        spentLast30DaysMicros: 0,
         payments: [],
         usage: [],
       };
@@ -51,6 +51,20 @@ function account(
     },
     async settleUsage() {},
     async requirePaidAccount() {},
+    async readSpending(input) {
+      return {
+        since: 0,
+        until: 1,
+        timezone: "UTC",
+        groupBy: input.groupBy,
+        filters: [],
+        totalMicros: 0,
+        operations: 0,
+        days: [],
+        groups: [],
+        topTurns: null,
+      };
+    },
     ...overrides,
   };
 }
@@ -71,7 +85,7 @@ describe("billing HTTP routes", () => {
       "US$25",
       "US$50",
       "Hosted model rates",
-      "Usage by day &amp; Bot",
+      "Spent in the last 30 days",
       "Credit history",
       "Recent usage",
     ])
@@ -121,6 +135,53 @@ describe("billing HTTP routes", () => {
       paymentsAvailable: true,
       launchBlockers: [],
     });
+  });
+
+  test("reads one Spending view for the signed-in account, and refuses one it cannot name", async () => {
+    const asked: unknown[] = [];
+    const routes = billingRoutes(
+      env,
+      () =>
+        account({
+          async readSpending(input) {
+            asked.push(input);
+            return {
+              since: 0,
+              until: 1,
+              timezone: "UTC",
+              groupBy: input.groupBy,
+              filters: [],
+              totalMicros: 0,
+              operations: 0,
+              days: [],
+              groups: [],
+              topTurns: null,
+            };
+          },
+        }),
+      rates,
+    );
+    const view = async (query: string) => {
+      const request = new Request(
+        `https://app.frockbot.com/api/billing/spending${query}`,
+      );
+      return routes.route(request, new URL(request.url), signedIn);
+    };
+    const ok = await view("?period=7d&groupBy=cause&bot=bot-1&model=x");
+    expect(ok?.status).toBe(200);
+    expect(ok?.headers.get("cache-control")).toBe("no-store");
+    expect(asked).toEqual([
+      {
+        userId: "user-one",
+        period: "7d",
+        groupBy: "cause",
+        filters: { bot: "bot-1", model: "x" },
+      },
+    ]);
+    expect((await view(""))?.status).toBe(200);
+    expect(asked[1]).toMatchObject({ period: "30d", groupBy: "bot" });
+    expect((await view("?period=forever"))?.status).toBe(400);
+    expect((await view("?groupBy=colour"))?.status).toBe(400);
   });
 
   test("lists each billable model's customer rate once, from the rate table", async () => {

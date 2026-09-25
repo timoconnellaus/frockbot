@@ -1,3 +1,4 @@
+import type { UsageAttributionV1 } from "../billing/ledger.js";
 import type { ModelBilling } from "../billing/model.js";
 import {
   type RoutineEventJudgeV1,
@@ -42,7 +43,12 @@ import type {
 } from "./durable-rpc-targets.js";
 
 export interface BotStateEnv {
-  BILLING?: (userId: string, botId: string, sessionId: string) => ModelBilling;
+  BILLING?: (
+    userId: string,
+    botId: string,
+    sessionId: string,
+    spend?: UsageAttributionV1,
+  ) => ModelBilling;
   MEMORY_FILES: R2Bucket;
   /** Object-storage file surfaces constructed by the Cloudflare adapter. */
   WORKSPACE_FILES?: WorkspaceFilesV1;

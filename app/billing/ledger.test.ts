@@ -328,7 +328,7 @@ describe("the billing ledger", () => {
     }
   });
 
-  test("row cursors do not skip equal-timestamp usage and summaries count settlement once", () => {
+  test("row cursors do not skip equal-timestamp usage and the rollup counts settlement once", () => {
     const ledger = new BillingLedger(storage(), () => NOW);
     active(ledger);
     ledger.grant("topup:pagination", "purchased", 101, null);
@@ -360,12 +360,7 @@ describe("the billing ledger", () => {
         ),
       ).size,
     ).toBe(101);
-    expect(
-      first.summaries.reduce((sum, row) => sum + Number(row.chargeMicros), 0),
-    ).toBe(101);
-    expect(
-      first.summaries.reduce((sum, row) => sum + Number(row.operations), 0),
-    ).toBe(101);
+    expect(first.spentLast30DaysMicros).toBe(101);
   });
 
   test("revoking a grant keeps later hold refunds expired and unspendable", () => {

@@ -13,6 +13,7 @@ import 'dart:async';
 import 'package:flutter/material.dart';
 
 import '../client/transport.dart';
+import '../settings/spending.dart';
 import '../shell/chat_pane.dart';
 import '../shell/semantics.dart';
 import '../shell/desktop_layout.dart';
@@ -154,6 +155,27 @@ class _RoutineRunsPageState extends State<RoutineRunsPage> {
       child: AppBar(
         title: const Text('Run log'),
         actions: [
+          identified(
+            SpendingIds.routineEntry,
+            IconButton(
+              tooltip: 'What this Routine has cost',
+              onPressed: () => Navigator.of(context).push(
+                MaterialPageRoute<void>(
+                  builder: (_) => SpendingPage(
+                    api: widget.api,
+                    filters: [
+                      SpendFilter(
+                        'cause',
+                        'routine|${widget.botId}|${widget.routineId}',
+                        'This Routine',
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+              icon: const Icon(Icons.account_balance_wallet_outlined),
+            ),
+          ),
           IconButton(
             tooltip: 'Refresh the run log',
             onPressed: loading ? null : load,

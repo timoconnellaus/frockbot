@@ -55,6 +55,7 @@ import '../settings/bot_quick_writes.dart';
 import '../settings/bot_settings.dart';
 import '../settings/look_settings.dart';
 import '../settings/page.dart';
+import '../settings/spending.dart';
 import '../settings/voice_settings.dart';
 import '../templates/page.dart';
 import '../theme/document.dart';
@@ -825,9 +826,30 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Future<void> _openBilling() async {
     push.reading(null);
     await Navigator.of(context).push(
-      MaterialPageRoute<void>(builder: (_) => BillingPage(api: widget.api)),
+      MaterialPageRoute<void>(
+        builder: (_) =>
+            BillingPage(api: widget.api, onOpenSpending: _openSpending),
+      ),
     );
     await _readCredit();
+  }
+
+  /// Where the account's credit went, narrowed to wherever it was opened
+  /// from.
+  void _openSpending([List<SpendFilter> filters = const []]) => unawaited(
+    _push(
+      SpendingPage(api: widget.api, filters: filters, onOpenBot: _openSpentBot),
+    ),
+  );
+
+  /// A Turn on the Spending page opens the conversation it ran in.
+  void _openSpentBot(String botId) {
+    Navigator.of(context).popUntil((route) => route.isFirst);
+    if (searchableBots.every((bot) => bot.botId.value != botId)) {
+      _say('That Bot is no longer available.');
+      return;
+    }
+    _select(botId);
   }
 
   /// Reads the directory, and completes when a read the caller asked for has
@@ -1862,6 +1884,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
                   onOpenPlugins: () => _openPanel('plugins', push: true),
                   onOpenVoice: () => _openPanel('voice', push: true),
                   onOpenLook: () => _openPanel('look', push: true),
+                  onOpenSpending: () =>
+                      _openSpending([SpendFilter('bot', botId, name)]),
                   dangerZone: _dangerZone(botId, name),
                 ),
               ],
@@ -3159,6 +3183,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           if (computer?.available == true)
             const SearchAction('computer', 'Computer', 'Current chat'),
           const SearchAction('billing', 'Settings: Usage & Billing', 'Account'),
+          const SearchAction('spending', 'Spending', 'Account'),
           const SearchAction(
             'marketplace',
             'Marketplace',
@@ -3191,6 +3216,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             SettingsIds.profileBilling,
             () => unawaited(_openBilling()),
           );
+        case 'spending':
+          _openSpending();
         case 'marketplace':
           _openMarketplace();
         case 'machines':
@@ -3436,7 +3463,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               id: SettingsIds.profileBilling,
               icon: Icons.account_balance_wallet_outlined,
               title: 'Billing & usage',
-              page: () => BillingPage(api: widget.api),
+              page: () =>
+                  BillingPage(api: widget.api, onOpenSpending: _openSpending),
               onLeave: _readCredit,
             ),
             ProfileSection(

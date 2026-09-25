@@ -16,6 +16,7 @@
 // HIBERNATION. Nothing here reaches the Computer registry, a Computer
 // provider, or the Computer: identity is Durable Object state, so self-management
 // works while the Computer is hibernated and does not wake it.
+import type { StoredRunCauseV1 } from "@frockbot/core/durable";
 import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import type {
   BotSettingsViewV1,
@@ -48,6 +49,8 @@ export interface BotSelfManagementTurn {
   sessionId: string;
   /** This Turn's pinned profile name, stable across effect recovery. */
   fromBotName: string;
+  /** What this Turn's spending is charged to; a Bot it asks is charged the same. */
+  cause?: StoredRunCauseV1;
   inboundAgent?: FlockSelfRuntimeHostV1["inboundAgent"];
   groupChat?: FlockSelfRuntimeHostV1["groupChat"];
   /**
@@ -107,6 +110,7 @@ export interface BotSelfManagementAuthorities {
         fromBotId: string;
         fromBotName: string;
         messageId: string;
+        cause?: StoredRunCauseV1;
       };
     };
   }): Promise<{ text: string }>;
@@ -316,6 +320,7 @@ export function createBotSelfManagementHost(
               fromBotId: identity.botId,
               fromBotName: turn.fromBotName,
               messageId: runId,
+              ...(turn.cause ? { cause: turn.cause } : {}),
             },
           },
         });

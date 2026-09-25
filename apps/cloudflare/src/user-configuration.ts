@@ -2,9 +2,18 @@ import {
   BillingLedger,
   type BillingBalance,
   type ComplimentaryGrant,
+  type PaidAccessState,
   type UsageReservation,
   type UsageSettlement,
 } from "@frockbot/app/billing/ledger";
+import {
+  readSpendingRowsV1,
+  spendingReportV1,
+  spendWindowV1,
+  type SpendDimensionV1,
+  type SpendingReportV1,
+  type SpendPeriodV1,
+} from "@frockbot/app/billing/spending";
 import { accountPayments, type BillingEnv } from "./billing.js";
 import { isPublicIdentifier } from "@frockbot/core/configuration";
 import {
@@ -453,6 +462,43 @@ export class UserConfiguration
   async readBilling(input: { userId: string; before?: number }) {
     await this.assertUserIdentity(input.userId);
     return this.billing().snapshot(input.before);
+  }
+  /** Where the account's credit went, from the ledger's rollups. */
+  async readSpending(input: {
+    userId: string;
+    period: SpendPeriodV1;
+    groupBy: SpendDimensionV1;
+    filters: Partial<Record<SpendDimensionV1, string>>;
+  }): Promise<SpendingReportV1> {
+    await this.assertUserIdentity(input.userId);
+    const ledger = this.billing();
+    const [timezone, directory] = await Promise.all([
+      this.routineTimezone(input.userId),
+      (await this.flockContribution()).listBots(),
+    ]);
+    const query = {
+      ...spendWindowV1(
+        input.period,
+        Date.now(),
+        ledger.get<PaidAccessState>("paidAccess")?.periodStart,
+      ),
+      groupBy: input.groupBy,
+      filters: input.filters,
+    };
+    return spendingReportV1(
+      query,
+      readSpendingRowsV1(this.ctx.storage.sql, query),
+      {
+        userId: input.userId,
+        bots: Object.fromEntries(
+          directory.bots.map((bot) => [
+            bot.botId,
+            bot.currentProfile?.name ?? bot.initialName,
+          ]),
+        ),
+      },
+      timezone,
+    );
   }
   async readBillingBalance(input: { userId: string }): Promise<BillingBalance> {
     await this.assertUserIdentity(input.userId);

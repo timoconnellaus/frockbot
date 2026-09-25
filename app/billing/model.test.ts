@@ -19,6 +19,7 @@ import {
 } from "@frockbot/providers/frock-ai/runtime";
 import type { UsageReservation, UsageSettlement } from "./ledger";
 import {
+  SUMMARY_EFFECT_PREFIX_V1,
   BilledLlmRegistry,
   type AccountUsage,
   type ModelBilling,
@@ -194,6 +195,7 @@ describe("model billing", () => {
         cachedInputMicrosPerToken: 2,
         outputMicrosPerToken: 10,
       },
+      attribution: { model: "model-a" },
     });
     // No Frock AI provider said which model answered, so the ceiling is
     // charged and the settlement says the answer was not priced.
@@ -674,6 +676,36 @@ describe("hosted calls, billed by the model that answered", () => {
     const { account, run } = hosted(TOGETHER, { settled });
     await run();
     expect(settled).toEqual(account.settlements);
+  });
+
+  test("records the Turn, its cause and the model beside each charge, and marks a summary", async () => {
+    const account = new UsageSpy();
+    const spend = {
+      runId: "run-1",
+      cause: {
+        kind: "routine" as const,
+        botId: "bot-1",
+        id: "digest",
+        label: "Morning digest",
+        trigger: "cron",
+      },
+    };
+    const llm = new BilledLlmRegistry(
+      new LoopHookListV1(),
+      billing(account, { spend }),
+    );
+    llm.register({
+      id: "flock-ai",
+      async *stream() {
+        yield { type: "finish", reason: "completed" } as LlmStreamEvent;
+      },
+    });
+    await collect(llm);
+    await collect(llm, request("flock-ai", `${SUMMARY_EFFECT_PREFIX_V1}one`));
+    expect(account.reservations.map((r) => r.attribution)).toEqual([
+      { ...spend, model: "model-a" },
+      { ...spend, model: "model-a", summary: true },
+    ]);
   });
 });
 
