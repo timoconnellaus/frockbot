@@ -6,7 +6,11 @@
 // recorded the decision, because a proposal is a cross-object call, and it is
 // idempotent on what the Composition already holds: a crash between the
 // commit and this call is a retry, never a second generation.
-import { canonicalJson, pluginPageKeyV1 } from "@frockbot/core/contracts";
+import {
+  canonicalJson,
+  pluginModuleKeyV1,
+  pluginPageKeyV1,
+} from "@frockbot/core/contracts";
 import type { BotIdentity } from "@frockbot/core/durable";
 import {
   CompositionPinConflictError,
@@ -125,6 +129,11 @@ export async function pluginAuthoringRuntimeHost(
       putPackageUiArtifact: async (contentHash, html) => {
         await bucket.put(pluginPageKeyV1(contentHash), html, {
           httpMetadata: { contentType: "text/html; charset=utf-8" },
+        });
+      },
+      putPluginModuleArtifact: async (contentHash, code) => {
+        await bucket.put(pluginModuleKeyV1(contentHash), code, {
+          httpMetadata: { contentType: "application/javascript" },
         });
       },
     },

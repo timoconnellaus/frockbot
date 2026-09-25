@@ -54,9 +54,39 @@ export const PLUGIN_DEVICE_ABILITIES_V1 = ["microphone"] as const;
 
 export type PluginDeviceAbilityV1 = (typeof PLUGIN_DEVICE_ABILITIES_V1)[number];
 
-/** The shape of the `device` grant: the abilities the User approves. */
+/** Where a device module can run (ADR 0037). Desktop only. */
+export const PLUGIN_DEVICE_MODULE_PLATFORMS_V1 = ["macos"] as const;
+
+export type PluginDeviceModulePlatformV1 =
+  (typeof PLUGIN_DEVICE_MODULE_PLATFORMS_V1)[number];
+
+/**
+ * Code a Plugin ships for the desktop to run (ADR 0037). Everything it may
+ * reach is named here: its process is started with exactly these reads,
+ * these hosts and these Apple Event targets, and nothing else.
+ */
+export interface PluginDeviceModuleV1 {
+  /** The module's source is `modules/<id>.ts`. */
+  id: string;
+  platforms: PluginDeviceModulePlatformV1[];
+  /** Absolute or `~/` paths it may read and watch. */
+  read: string[];
+  /** `host:port` it may reach; today only the loopback. */
+  net: string[];
+  /** Applications it may script, by bundle id. */
+  appleEvents: string[];
+  /** What the Plugin's cloud code may ask it to do. */
+  calls: string[];
+  /** Events it may send, each one of the Plugin's `triggers`. */
+  events: string[];
+}
+
+/** The shape of the `device` grant: what the User approves. */
 export interface PluginDeviceV1 {
+  /** Abilities the host opens for the Plugin's page. May be empty. */
   abilities: PluginDeviceAbilityV1[];
+  /** Code the desktop runs for the Plugin (ADR 0037). */
+  modules?: PluginDeviceModuleV1[];
 }
 
 /** Where a plugin may render. Trust chrome is never a slot. */
@@ -233,6 +263,16 @@ const MAX_PLUGIN_CARDS_V1 = 16;
 const MAX_PLUGIN_CARD_ACTIONS_V1 = 16;
 const MAX_PLUGIN_CARD_SCHEMA_BYTES_V1 = 65_536;
 const MAX_PLUGIN_MODEL_PROVIDERS_V1 = 4;
+const MAX_PLUGIN_DEVICE_MODULES_V1 = 4;
+const MAX_PLUGIN_DEVICE_MODULE_ENTRIES_V1 = 32;
+/** A module id: its source file is `modules/<id>.ts`. */
+const PLUGIN_DEVICE_MODULE_ID = /^[a-z][a-z0-9-]{0,31}$/;
+const PLUGIN_DEVICE_MODULE_CALL = /^[a-z][a-z0-9_-]{0,63}$/;
+/** `~/…` or `/…`, with no `..` segment, no `//` and no control characters. */
+const PLUGIN_DEVICE_MODULE_PATH =
+  /^(?!.*\/\.\.(?:\/|$))(?!.*\/\/)(?:~\/|\/)[^\u0000-\u001f]{0,510}$/;
+const PLUGIN_DEVICE_MODULE_NET = /^(?:localhost|127\.0\.0\.1):([0-9]{1,5})$/;
+const PLUGIN_BUNDLE_ID = /^[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)+$/;
 const PLUGIN_DESCRIPTOR_TEXT_ENCODER_V1 = new TextEncoder();
 /** A model provider type: the id a model binding names. */
 const PLUGIN_PROVIDER_ID = /^[a-z][a-z0-9-]{0,63}$/;
@@ -440,6 +480,87 @@ function decodePluginServicesV1(
     throw new Error(`${label} contains duplicate names`);
   }
   return services;
+}
+
+function decodeModuleNamesV1(
+  input: unknown,
+  label: string,
+  valid: (entry: string) => boolean,
+): string[] {
+  const names = boundedArray(
+    input,
+    label,
+    MAX_PLUGIN_DEVICE_MODULE_ENTRIES_V1,
+  ).map((entry, index) => {
+    const name = boundedString(entry, `${label}[${index}]`, 512);
+    if (!valid(name)) throw new Error(`${label}[${index}] is invalid`);
+    return name;
+  });
+  if (new Set(names).size !== names.length) {
+    throw new Error(`${label} contains duplicates`);
+  }
+  return names;
+}
+
+function decodePluginDeviceModulesV1(
+  input: unknown,
+  label: string,
+): PluginDeviceModuleV1[] {
+  const modules = boundedArray(input, label, MAX_PLUGIN_DEVICE_MODULES_V1).map(
+    (module, index) => {
+      const itemLabel = `${label}[${index}]`;
+      const value = record(module, itemLabel);
+      exactKeys(
+        value,
+        ["id", "platforms", "read", "net", "appleEvents", "calls", "events"],
+        [],
+        itemLabel,
+      );
+      const id = boundedString(value.id, `${itemLabel}.id`, 32);
+      if (!PLUGIN_DEVICE_MODULE_ID.test(id)) {
+        throw new Error(`${itemLabel}.id is invalid`);
+      }
+      const platforms = vocabulary(
+        value.platforms,
+        PLUGIN_DEVICE_MODULE_PLATFORMS_V1,
+        `${itemLabel}.platforms`,
+      );
+      if (platforms.length === 0) {
+        throw new Error(`${itemLabel}.platforms names no platform`);
+      }
+      return {
+        id,
+        platforms,
+        read: decodeModuleNamesV1(value.read, `${itemLabel}.read`, (path) =>
+          PLUGIN_DEVICE_MODULE_PATH.test(path),
+        ),
+        net: decodeModuleNamesV1(value.net, `${itemLabel}.net`, (address) => {
+          const port = PLUGIN_DEVICE_MODULE_NET.exec(address)?.[1];
+          return (
+            port !== undefined && Number(port) >= 1 && Number(port) <= 65_535
+          );
+        }),
+        appleEvents: decodeModuleNamesV1(
+          value.appleEvents,
+          `${itemLabel}.appleEvents`,
+          (bundleId) =>
+            bundleId.length <= 255 && PLUGIN_BUNDLE_ID.test(bundleId),
+        ),
+        calls: decodeModuleNamesV1(value.calls, `${itemLabel}.calls`, (call) =>
+          PLUGIN_DEVICE_MODULE_CALL.test(call),
+        ),
+        events: decodeModuleNamesV1(
+          value.events,
+          `${itemLabel}.events`,
+          (event) => PLUGIN_TRIGGER_NAME.test(event),
+        ),
+      };
+    },
+  );
+  if (new Set(modules.map((module) => module.id)).size !== modules.length) {
+    throw new Error(`${label} contains duplicate ids`);
+  }
+  return modules;
 }
 
 function decodePluginTriggersV1(
@@ -744,16 +865,20 @@ export function decodePluginDescriptorV1(
   let device: PluginDeviceV1 | undefined;
   if (value.device !== undefined) {
     const shape = record(value.device, `${label}.device`);
-    exactKeys(shape, ["abilities"], [], `${label}.device`);
+    exactKeys(shape, ["abilities"], ["modules"], `${label}.device`);
     const abilities = vocabulary(
       shape.abilities,
       PLUGIN_DEVICE_ABILITIES_V1,
       `${label}.device.abilities`,
     );
-    if (abilities.length === 0) {
-      throw new Error(`${label}.device.abilities names no ability`);
+    const modules =
+      shape.modules === undefined
+        ? undefined
+        : decodePluginDeviceModulesV1(shape.modules, `${label}.device.modules`);
+    if (abilities.length === 0 && !modules?.length) {
+      throw new Error(`${label}.device names no ability and no module`);
     }
-    device = { abilities };
+    device = { abilities, ...(modules?.length ? { modules } : {}) };
   }
   if ((device !== undefined) !== grants.includes("device")) {
     throw new Error(
@@ -854,9 +979,24 @@ export function decodePluginDescriptorV1(
       }
     }
   }
+  // A module's events feed the Plugin's own triggers, so an event the Plugin
+  // exports no trigger for would arrive at nothing.
+  const triggerNames = new Set((triggers ?? []).map((trigger) => trigger.name));
+  for (const [index, module] of (device?.modules ?? []).entries()) {
+    const unknown = module.events.find((event) => !triggerNames.has(event));
+    if (unknown !== undefined) {
+      throw new Error(
+        `${label}.device.modules[${index}].events names "${unknown}", which is not one of the Plugin's triggers`,
+      );
+    }
+  }
   // A device ability is opened by the host for a page, so a Plugin with no
   // page has nothing to open one for.
-  if (device && !views?.some((view) => view.page !== undefined)) {
+  if (
+    device &&
+    device.abilities.length > 0 &&
+    !views?.some((view) => view.page !== undefined)
+  ) {
     throw new Error(
       `${label}.device needs a conversation.panel view that names a page`,
     );

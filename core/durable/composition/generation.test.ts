@@ -114,3 +114,56 @@ describe("a member's pages", () => {
     );
   });
 });
+
+describe("a member's device modules", () => {
+  const MODULE_HASH = "c".repeat(64);
+  function withModule(modules?: unknown): Record<string, unknown> {
+    const base = member(undefined);
+    return {
+      ...base,
+      descriptor: {
+        ...(base.descriptor as Record<string, unknown>),
+        grants: ["device"],
+        device: {
+          abilities: [],
+          modules: [
+            {
+              id: "bridge",
+              platforms: ["macos"],
+              read: [],
+              net: ["localhost:23373"],
+              appleEvents: [],
+              calls: ["search"],
+              events: [],
+            },
+          ],
+        },
+      },
+      ...(modules === undefined ? {} : { modules }),
+    };
+  }
+
+  test("carry one stored module for each module the descriptor declares", () => {
+    const modules = [{ id: "bridge", contentHash: MODULE_HASH, size: 9 }];
+    expect(
+      decodeCompositionMemberV1(withModule(modules), "member").modules,
+    ).toEqual(modules);
+  });
+
+  test("refuse a missing, extra or renamed module", () => {
+    for (const modules of [
+      undefined,
+      [],
+      [{ id: "other", contentHash: MODULE_HASH, size: 9 }],
+      [
+        { id: "bridge", contentHash: MODULE_HASH, size: 9 },
+        { id: "bridge", contentHash: MODULE_HASH, size: 9 },
+      ],
+      [{ id: "bridge", contentHash: "short", size: 9 }],
+    ]) {
+      expect(() =>
+        decodeCompositionMemberV1(withModule(modules), "member"),
+      ).toThrow();
+    }
+  });
+});

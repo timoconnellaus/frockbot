@@ -2,8 +2,9 @@ FROM node:24-slim
 
 WORKDIR /app
 
-# The Plugin SDK's runtime dependencies — the type checker, esbuild and
-# Miniflare. `npm ci` runs before the sources are copied so a source change
+# The Plugin SDK's runtime dependencies — the type checker, esbuild,
+# Miniflare, and Node's declarations a device module is checked against.
+# `npm ci` runs before the sources are copied so a source change
 # does not reinstall them.
 COPY apps/applet-build/container/package.json apps/applet-build/container/package-lock.json ./
 RUN npm ci --omit=dev

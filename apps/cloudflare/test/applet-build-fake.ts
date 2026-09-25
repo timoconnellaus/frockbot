@@ -96,9 +96,11 @@ export function createAppletBuildFake(): {
       views: [],
       cards: [],
       modelProviders: [],
+      modules: [],
       hashes: { module: sha256Hex(MODULE) },
     },
     module: MODULE,
+    modules: [],
   };
 
   return {

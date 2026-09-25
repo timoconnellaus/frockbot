@@ -23,6 +23,7 @@ import {
   MAX_PLUGIN_PAGE_BYTES_V1,
   withPluginPageBridgeV1,
   type PluginDescriptorV1,
+  type PluginModuleArtifactV1,
   type PluginPageArtifactV1,
   type SendToUserApprovalRiskV1,
   type WorkspaceFilesV1,
@@ -139,6 +140,8 @@ export interface PluginAuthoringSeamsV1 {
     putPackageArtifact(contentHash: string, module: string): Promise<void>;
     /** A Plugin page, bridge included, under the hash of its bytes. */
     putPackageUiArtifact(contentHash: string, html: string): Promise<void>;
+    /** One device module's code, stored under its content hash (ADR 0037). */
+    putPluginModuleArtifact(contentHash: string, code: string): Promise<void>;
   };
   composition: { current(): Promise<CompositionGenerationV1> };
   /** The Bot's own storage: its enable map and its intents. */
@@ -309,6 +312,22 @@ export function pluginManifestDisagreementV1(
   );
   if (!sameNames(modelProviders, manifest.modelProviders ?? [])) {
     return `plugin.json declares model providers [${modelProviders.join(", ")}] but plugin.ts exports model providers [${(manifest.modelProviders ?? []).join(", ")}]`;
+  }
+  const modules = descriptor.device?.modules ?? [];
+  const built = manifest.modules ?? [];
+  if (
+    !sameNames(
+      modules.map((module) => module.id),
+      built.map((module) => module.id),
+    )
+  ) {
+    return `plugin.json declares device modules [${modules.map((module) => module.id).join(", ")}] but the build produced [${built.map((module) => module.id).join(", ")}]`;
+  }
+  for (const module of modules) {
+    const exported = built.find((candidate) => candidate.id === module.id)!;
+    if (!sameNames(module.calls, exported.calls)) {
+      return `plugin.json declares calls [${module.calls.join(", ")}] for device module "${module.id}" but modules/${module.id}.ts exports calls [${exported.calls.join(", ")}]`;
+    }
   }
   return undefined;
 }
@@ -674,7 +693,27 @@ export function createPluginAuthoringHostV1(
       }
       const pages = await pluginPagesFromSourceV1(descriptor, built.files);
       if ("failure" in pages) return fail(pages.failure);
+      const modules: PluginModuleArtifactV1[] = [];
+      for (const [index, code] of built.response.modules.entries()) {
+        const moduleHash = await sha256Hex(code.code);
+        if (moduleHash !== manifest.modules[index]!.hash) {
+          return fail(
+            `the build service's manifest does not match device module "${code.id}"`,
+          );
+        }
+        modules.push({
+          id: code.id,
+          contentHash: moduleHash,
+          size: new TextEncoder().encode(code.code).byteLength,
+        });
+      }
       await seams.artifacts.putPackageArtifact(contentHash, module);
+      for (const [index, code] of built.response.modules.entries()) {
+        await seams.artifacts.putPluginModuleArtifact(
+          modules[index]!.contentHash,
+          code.code,
+        );
+      }
       for (const page of pages.pages) {
         await seams.artifacts.putPackageUiArtifact(
           page.artifact.contentHash,
@@ -705,6 +744,7 @@ export function createPluginAuthoringHostV1(
         ...(pages.pages.length === 0
           ? {}
           : { pages: pages.pages.map((page) => page.artifact) }),
+        ...(modules.length === 0 ? {} : { modules }),
       };
       const asked = await ask(
         effectId,

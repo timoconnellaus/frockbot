@@ -8,6 +8,7 @@
   },
   "//": "The Plugin SDK's runtime dependencies, installed beside the SDK rather than with it: the image copies `applets/sdk` in from the repository, so the release is not gated on an npm publish and the pipeline in the container is the one in this commit.",
   "dependencies": {
+    "@types/node": "26.6.1",
     "esbuild": "0.28.2",
     "miniflare": "5.20260828.0-alpha",
     "typescript": "npm:typescript-native-bridge@6.0.3-bridge.16.tsgo.7.0.2"

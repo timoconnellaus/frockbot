@@ -81,6 +81,11 @@ async function buildPlugin(
   }
   const checks: [string, number, number][] = [
     ["module.js", outcome.module.length, PLUGIN_BUILD_LIMITS.moduleBytes],
+    ...outcome.modules.map((module): [string, number, number] => [
+      `modules/${module.id}.js`,
+      module.code.length,
+      PLUGIN_BUILD_LIMITS.moduleBytes,
+    ]),
     [
       "manifest.json",
       JSON.stringify(manifest).length,
@@ -99,7 +104,12 @@ async function buildPlugin(
   if (diagnostics.length > 0) {
     return { status: "failed", stage: "bundle", diagnostics };
   }
-  return { status: "built", manifest, module: outcome.module };
+  return {
+    status: "built",
+    manifest,
+    module: outcome.module,
+    modules: outcome.modules,
+  };
 }
 
 export async function buildPluginRequestV1(

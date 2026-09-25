@@ -70,6 +70,10 @@ export const PLUGIN_BUILD_LIMITS = {
   cards: 16,
   /** Model providers one Plugin may serve, matching the descriptor's bound. */
   modelProviders: 4,
+  /** Device modules one Plugin may ship, matching the descriptor's bound. */
+  modules: 4,
+  /** Calls one device module may export. */
+  moduleCalls: 32,
   /** Diagnostics one failure may carry. */
   diagnostics: 200,
   /** Failure text on a diagnostic or a problem response. */
@@ -187,7 +191,22 @@ export interface PluginBuildManifestV1 {
   cards: string[];
   /** The model providers the module serves, by provider id (ADR 0032). */
   modelProviders: string[];
+  /** Each device module (ADR 0037): the calls it exports and its hash. */
+  modules: PluginBuildModuleDeclarationV1[];
   hashes: { module: string };
+}
+
+/** What one built device module exports, and the hash of its code. */
+export interface PluginBuildModuleDeclarationV1 {
+  id: string;
+  calls: string[];
+  hash: string;
+}
+
+/** One built device module's code. */
+export interface PluginBuildModuleArtifactV1 {
+  id: string;
+  code: string;
 }
 
 export interface PluginBuildDiagnosticV1 {
@@ -212,6 +231,8 @@ export interface PluginBuiltResponseV1 {
   status: "built";
   manifest: PluginBuildManifestV1;
   module: string;
+  /** One per device module the manifest declares, in the same order. */
+  modules: PluginBuildModuleArtifactV1[];
 }
 
 export interface PluginBuildFailedResponseV1 {
@@ -604,6 +625,7 @@ export function decodePluginBuildManifestV1(
       // A build that predates model providers reports none, which is what a
       // Plugin that serves none also reports.
       "modelProviders",
+      "modules",
       "hashes",
     ],
     label,
@@ -668,8 +690,45 @@ export function decodePluginBuildManifestV1(
       PLUGIN_BUILD_LIMITS.modelProviders,
       `${label} model providers`,
     ),
+    modules: decodeModuleDeclarationsV1(value.modules ?? [], label),
     hashes: { module: hash(hashes.module, `${label} module hash`) },
   };
+}
+
+const MODULE_ID = /^[a-z][a-z0-9-]{0,31}$/;
+const MODULE_CALL = /^[a-z][a-z0-9_-]{0,63}$/;
+
+function decodeModuleDeclarationsV1(
+  input: unknown,
+  label: string,
+): PluginBuildModuleDeclarationV1[] {
+  if (!Array.isArray(input)) fail(`${label} modules must be an array`);
+  if (input.length > PLUGIN_BUILD_LIMITS.modules) {
+    exceeded(
+      `${label} declares more than ${PLUGIN_BUILD_LIMITS.modules} modules`,
+    );
+  }
+  const modules = input.map((entry, index) => {
+    const itemLabel = `${label} module ${index}`;
+    const value = object(entry, itemLabel);
+    exactly(value, ["id", "calls", "hash"], itemLabel);
+    const id = boundedString(value.id, 32, `${itemLabel} id`);
+    if (!MODULE_ID.test(id)) fail(`${itemLabel} id is invalid`);
+    return {
+      id,
+      calls: boundedNames(
+        value.calls,
+        MODULE_CALL,
+        PLUGIN_BUILD_LIMITS.moduleCalls,
+        `${itemLabel} calls`,
+      ),
+      hash: hash(value.hash, `${itemLabel} hash`),
+    };
+  });
+  if (new Set(modules.map((module) => module.id)).size !== modules.length) {
+    fail(`${label} repeats a module id`);
+  }
+  return modules;
 }
 
 export function decodePluginBuildDiagnosticV1(
@@ -728,15 +787,37 @@ export function decodePluginBuildResponseV1(
     exactly(value, ["status"], label);
     return { status: "built" };
   }
-  exactly(value, ["status", "manifest", "module"], label);
+  exactly(value, ["status", "manifest", "module", "modules"], label);
+  const manifest = decodePluginBuildManifestV1(value.manifest);
+  const module = boundedText(
+    value.module,
+    PLUGIN_BUILD_LIMITS.moduleBytes,
+    "Plugin build module artifact",
+  );
+  const code = value.modules ?? [];
+  if (!Array.isArray(code) || code.length !== manifest.modules.length) {
+    fail(`${label} modules must carry one artifact per declared module`);
+  }
   return {
     status: "built",
-    manifest: decodePluginBuildManifestV1(value.manifest),
-    module: boundedText(
-      value.module,
-      PLUGIN_BUILD_LIMITS.moduleBytes,
-      "Plugin build module artifact",
-    ),
+    manifest,
+    module,
+    modules: code.map((entry, index) => {
+      const itemLabel = `Plugin build device module ${index}`;
+      const artifact = object(entry, itemLabel);
+      exactly(artifact, ["id", "code"], itemLabel);
+      if (artifact.id !== manifest.modules[index]!.id) {
+        fail(`${itemLabel} is not the module the manifest declares there`);
+      }
+      return {
+        id: manifest.modules[index]!.id,
+        code: boundedText(
+          artifact.code,
+          PLUGIN_BUILD_LIMITS.moduleBytes,
+          `${itemLabel} code`,
+        ),
+      };
+    }),
   };
 }
 
@@ -762,6 +843,7 @@ export function encodePluginBuildResponseV1(
     status: "built",
     manifest: response.manifest,
     module: response.module,
+    modules: response.modules,
   };
 }
 

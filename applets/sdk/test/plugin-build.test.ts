@@ -231,3 +231,94 @@ describe("build", () => {
     expect(outcome.manifest.hooks).toEqual(["system-prompt/assemble"]);
   }, 180_000);
 });
+
+describe("a device module", () => {
+  async function withModule(source: string): Promise<string> {
+    const directory = await scaffold();
+    const descriptor = JSON.parse(
+      await Bun.file(join(directory, "plugin.json")).text(),
+    ) as Record<string, unknown>;
+    await writeFile(
+      join(directory, "plugin.json"),
+      JSON.stringify({
+        ...descriptor,
+        grants: [...(descriptor.grants as string[]), "device"],
+        device: {
+          abilities: [],
+          modules: [
+            {
+              id: "bridge",
+              platforms: ["macos"],
+              read: ["~/notes"],
+              net: [],
+              appleEvents: [],
+              calls: ["count"],
+              events: [],
+            },
+          ],
+        },
+      }),
+      "utf8",
+    );
+    await mkdir(join(directory, "modules"), { recursive: true });
+    await writeFile(join(directory, "modules", "bridge.ts"), source, "utf8");
+    return directory;
+  }
+
+  const MODULE_SOURCE = [
+    'import { readdir } from "node:fs/promises";',
+    'import type { ModuleCalls } from "@frockbot/applet-sdk/module";',
+    "export const calls = {",
+    "  count: async (input: unknown, context) => {",
+    '    context.log("log", "counting");',
+    "    return (await readdir(String(input))).length;",
+    "  },",
+    "} satisfies ModuleCalls;",
+    "",
+  ].join("\n");
+
+  it("is checked against Node and the module SDK, apart from the Worker", async () => {
+    const directory = await withModule(MODULE_SOURCE);
+    expect(await runPluginBuildV1(directory, { mode: "check" })).toEqual({
+      status: "checked",
+    });
+  }, 120_000);
+
+  it("is bundled for Deno, and its calls are read from its type", async () => {
+    const directory = await withModule(MODULE_SOURCE);
+    const outcome = await runPluginBuildV1(directory, { mode: "build" });
+    if (outcome.status !== "built") {
+      throw new Error(`expected a build: ${JSON.stringify(outcome)}`);
+    }
+    expect(outcome.manifest.modules).toEqual([
+      {
+        id: "bridge",
+        calls: ["count"],
+        hash: expect.stringMatching(/^[0-9a-f]{64}$/),
+      },
+    ]);
+    const code = outcome.modules[0]!.code;
+    expect(code).toContain('from "node:fs/promises"');
+    expect(code).not.toContain("@frockbot/applet-sdk");
+  }, 180_000);
+
+  it("reports a missing source and a missing calls export", async () => {
+    const missing = await scaffold();
+    const descriptor = await withModule("export {};\n");
+    const noCalls = await runPluginBuildV1(descriptor, { mode: "check" });
+    expect(noCalls).toMatchObject({ status: "failed", stage: "typecheck" });
+    if (noCalls.status === "failed") {
+      expect(noCalls.diagnostics[0]!.message).toContain('export "calls"');
+    }
+    await writeFile(
+      join(missing, "plugin.json"),
+      await Bun.file(join(descriptor, "plugin.json")).text(),
+      "utf8",
+    );
+    const absent = await runPluginBuildV1(missing, { mode: "check" });
+    expect(absent).toMatchObject({ status: "failed", stage: "typecheck" });
+    if (absent.status === "failed") {
+      expect(absent.diagnostics[0]!.message).toContain("does not exist");
+    }
+  }, 120_000);
+});

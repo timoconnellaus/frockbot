@@ -28,7 +28,7 @@ import { convertV4MiniflareOptions, Miniflare } from "miniflare";
 import ts from "typescript";
 
 import { stableModulePaths } from "./module-paths.js";
-import { SDK_PLUGIN_TYPES } from "./paths.js";
+import { SDK_MODULE_TYPES, SDK_PLUGIN_TYPES, SDK_ROOT } from "./paths.js";
 
 /** Pinned with the SDK: the runtime a Plugin build is checked against. */
 const PLUGIN_COMPATIBILITY_DATE = "2026-08-27";
@@ -78,6 +78,15 @@ export interface PluginDiagnostic {
 /** The Plugin's `plugin.json`, as far as the build reads it. */
 export interface PluginBuildDescriptorV1 {
   id: string;
+  /** The device modules it declares, by id (ADR 0037). */
+  modules: string[];
+}
+
+/** One built device module: its id, what it exports as calls, and its code. */
+export interface PluginBuiltModuleV1 {
+  id: string;
+  calls: string[];
+  code: string;
 }
 
 /** What the built module exports, read by running it. */
@@ -99,12 +108,19 @@ export interface PluginDescriptionV1 {
 
 export interface PluginBuildManifestV1 extends PluginDescriptionV1 {
   contract: 1;
+  /** Each device module, with the calls it exports and its hash. */
+  modules: { id: string; calls: string[]; hash: string }[];
   hashes: { module: string };
 }
 
 export type PluginBuildOutcome =
   | { status: "checked" }
-  | { status: "built"; manifest: PluginBuildManifestV1; module: string }
+  | {
+      status: "built";
+      manifest: PluginBuildManifestV1;
+      module: string;
+      modules: { id: string; code: string }[];
+    }
   | {
       status: "failed";
       stage: PluginBuildStage;
@@ -112,7 +128,9 @@ export type PluginBuildOutcome =
     };
 
 const PLUGIN_ID = /^[a-z][a-z0-9-]{0,63}$/;
+const MODULE_ID = /^[a-z][a-z0-9-]{0,31}$/;
 const MAX_TOOLS = 64;
+const MODULES_DIRECTORY = "modules";
 
 const COMPILER_OPTIONS: ts.CompilerOptions = {
   target: ts.ScriptTarget.ES2022,
@@ -127,6 +145,16 @@ const COMPILER_OPTIONS: ts.CompilerOptions = {
   // `Response`, which the Workers runtime provides under the same names.
   lib: ["lib.es2022.d.ts", "lib.dom.d.ts", "lib.dom.iterable.d.ts"],
   types: [],
+};
+
+/**
+ * A device module runs in Deno on the desktop, not in a Worker: it gets Node's
+ * built-in modules as well as the web platform, and its own declarations.
+ */
+const MODULE_COMPILER_OPTIONS: ts.CompilerOptions = {
+  ...COMPILER_OPTIONS,
+  types: ["node"],
+  typeRoots: [join(SDK_ROOT, "node_modules/@types")],
 };
 
 function thrown(error: unknown, file = "plugin.json"): PluginDiagnostic[] {
@@ -169,14 +197,30 @@ export async function readPluginDescriptor(
   if (typeof id !== "string" || !PLUGIN_ID.test(id)) {
     throw new Error('plugin.json "id" must match /^[a-z][a-z0-9-]{0,63}$/');
   }
-  return { id };
+  // Only the ids: the app decodes the rest of the declaration.
+  const declared = (parsed as { device?: { modules?: unknown } }).device
+    ?.modules;
+  const modules = (Array.isArray(declared) ? declared : []).map((module) => {
+    const moduleId = (module as { id?: unknown } | null)?.id;
+    if (typeof moduleId !== "string" || !MODULE_ID.test(moduleId)) {
+      throw new Error(
+        'plugin.json "device.modules" ids must match /^[a-z][a-z0-9-]{0,31}$/',
+      );
+    }
+    return moduleId;
+  });
+  return { id, modules };
 }
 
-async function pluginSources(directory: string): Promise<string[]> {
+async function pluginSources(
+  directory: string,
+  skip: readonly string[] = [],
+): Promise<string[]> {
   const found: string[] = [];
   const walk = async (current: string): Promise<void> => {
     for (const entry of await readdir(current, { withFileTypes: true })) {
       if (entry.name === "node_modules" || entry.name.startsWith(".")) continue;
+      if (current === directory && skip.includes(entry.name)) continue;
       const path = join(current, entry.name);
       if (entry.isDirectory()) await walk(path);
       else if (/\.ts$/.test(entry.name) && !entry.name.endsWith(".d.ts")) {
@@ -193,7 +237,8 @@ export async function typeCheckPlugin(
   directory: string,
 ): Promise<PluginDiagnostic[]> {
   const root = resolve(directory);
-  const files = await pluginSources(root);
+  // A device module runs in Deno, not in the Worker, and is checked as such.
+  const files = await pluginSources(root, [MODULES_DIRECTORY]);
   if (!files.some((file) => relative(root, file) === "plugin.ts")) {
     return [
       {
@@ -209,6 +254,13 @@ export async function typeCheckPlugin(
     ...COMPILER_OPTIONS,
     paths: { "@frockbot/applet-sdk/plugin": [SDK_PLUGIN_TYPES] },
   });
+  return programDiagnostics(program, root);
+}
+
+function programDiagnostics(
+  program: ts.Program,
+  root: string,
+): PluginDiagnostic[] {
   return ts
     .getPreEmitDiagnostics(program)
     .filter(
@@ -243,6 +295,126 @@ export async function typeCheckPlugin(
             : ("warning" as const),
       };
     });
+}
+
+/**
+ * Type-check the Plugin's device modules and read the calls each exports.
+ *
+ * One program over `modules/`, with Node's declarations and the module SDK's.
+ * The calls are read from the checker, so `calls` may be built however the
+ * module likes as long as its type names them.
+ */
+export async function typeCheckModules(
+  directory: string,
+  moduleIds: readonly string[],
+): Promise<
+  | { status: "ok"; calls: Map<string, string[]> }
+  | { status: "failed"; diagnostics: PluginDiagnostic[] }
+> {
+  const root = resolve(directory);
+  const modulesRoot = join(root, MODULES_DIRECTORY);
+  const entries = moduleIds.map((id) => join(modulesRoot, `${id}.ts`));
+  let files: string[] = [];
+  try {
+    files = await pluginSources(modulesRoot);
+  } catch {
+    // No modules directory: every declared entry is missing, said below.
+  }
+  const missing = entries.filter((entry) => !files.includes(entry));
+  if (missing.length > 0) {
+    return {
+      status: "failed",
+      diagnostics: missing.map((entry) => ({
+        file: relative(root, entry),
+        line: 1,
+        column: 1,
+        message: `plugin.json declares a device module whose source ${relative(root, entry)} does not exist`,
+        severity: "error" as const,
+      })),
+    };
+  }
+  const program = ts.createProgram(files, {
+    ...MODULE_COMPILER_OPTIONS,
+    paths: { "@frockbot/applet-sdk/module": [SDK_MODULE_TYPES] },
+  });
+  const diagnostics = programDiagnostics(program, root);
+  if (diagnostics.some((diagnostic) => diagnostic.severity === "error")) {
+    return { status: "failed", diagnostics };
+  }
+  const checker = program.getTypeChecker();
+  const calls = new Map<string, string[]>();
+  const problems: PluginDiagnostic[] = [];
+  for (const [index, entry] of entries.entries()) {
+    const source = program.getSourceFile(entry);
+    const symbol = source && checker.getSymbolAtLocation(source);
+    const exported = symbol
+      ? checker
+          .getExportsOfModule(symbol)
+          .find((candidate) => candidate.name === "calls")
+      : undefined;
+    if (!source || !exported) {
+      problems.push({
+        file: relative(root, entry),
+        line: 1,
+        column: 1,
+        message: 'a device module must export "calls"',
+        severity: "error",
+      });
+      continue;
+    }
+    const type = checker.getTypeOfSymbolAtLocation(exported, source);
+    calls.set(
+      moduleIds[index]!,
+      checker.getPropertiesOfType(type).map((property) => property.name),
+    );
+  }
+  return problems.length > 0
+    ? { status: "failed", diagnostics: problems }
+    : { status: "ok", calls };
+}
+
+/**
+ * One ES module per device module, for Deno. Node's built-ins stay imports,
+ * resolved by the runtime; everything else is inlined, so the module needs
+ * nothing fetched at start.
+ */
+export async function bundleModule(
+  directory: string,
+  moduleId: string,
+): Promise<string> {
+  const result = await esbuild({
+    entryPoints: [join(directory, MODULES_DIRECTORY, `${moduleId}.ts`)],
+    bundle: true,
+    write: false,
+    format: "esm",
+    platform: "node",
+    target: "es2022",
+    minify: false,
+    legalComments: "none",
+    external: ["node:*"],
+    plugins: [
+      {
+        name: "module-sdk-is-types-only",
+        setup(build) {
+          build.onResolve(
+            { filter: /^@frockbot\/applet-sdk\/module$/ },
+            () => ({
+              errors: [
+                {
+                  text: '"@frockbot/applet-sdk/module" is types only; import it with `import type`.',
+                },
+              ],
+            }),
+          );
+        },
+      },
+    ],
+    metafile: true,
+    logLevel: "silent",
+  });
+  const file = result.outputFiles?.[0];
+  if (!file) throw new Error("The bundler produced no output");
+  return stableModulePaths(file.text, result.metafile, directory);
 }
 
 /**
@@ -498,6 +670,18 @@ export async function runPluginBuildV1(
   if (types.some((diagnostic) => diagnostic.severity === "error")) {
     return { status: "failed", stage: "typecheck", diagnostics: types };
   }
+  let moduleCalls = new Map<string, string[]>();
+  if (descriptor.modules.length > 0) {
+    const checked = await typeCheckModules(directory, descriptor.modules);
+    if (checked.status === "failed") {
+      return {
+        status: "failed",
+        stage: "typecheck",
+        diagnostics: checked.diagnostics,
+      };
+    }
+    moduleCalls = checked.calls;
+  }
   if (options.mode === "check") return { status: "checked" };
 
   let moduleCode: string;
@@ -509,6 +693,19 @@ export async function runPluginBuildV1(
       stage: "bundle",
       diagnostics: thrown(error, "plugin.ts"),
     };
+  }
+
+  const modules: { id: string; code: string }[] = [];
+  for (const id of descriptor.modules) {
+    try {
+      modules.push({ id, code: await bundleModule(directory, id) });
+    } catch (error) {
+      return {
+        status: "failed",
+        stage: "bundle",
+        diagnostics: thrown(error, `${MODULES_DIRECTORY}/${id}.ts`),
+      };
+    }
   }
 
   let description: PluginDescriptionV1;
@@ -526,8 +723,14 @@ export async function runPluginBuildV1(
     manifest: {
       contract: 1,
       ...description,
+      modules: modules.map((module) => ({
+        id: module.id,
+        calls: moduleCalls.get(module.id) ?? [],
+        hash: sha256(module.code),
+      })),
       hashes: { module: sha256(moduleCode) },
     },
     module: moduleCode,
+    modules,
   };
 }

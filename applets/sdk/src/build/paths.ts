@@ -42,3 +42,6 @@ export const SDK_ROOT = findSdkRoot();
 
 /** The Plugin declarations (`@frockbot/applet-sdk/plugin`), types only. */
 export const SDK_PLUGIN_TYPES = join(SDK_ROOT, "plugin/index.d.ts");
+
+/** The device module declarations (`@frockbot/applet-sdk/module`), types only. */
+export const SDK_MODULE_TYPES = join(SDK_ROOT, "module/index.d.ts");
