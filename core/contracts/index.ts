@@ -8,6 +8,7 @@ export * from "./isolate.js";
 export * from "./isolate-context-catalog.generated.js";
 export * from "./json-schema.js";
 export * from "./loop-events.js";
+export * from "./runtime-note.js";
 export * from "./loop-hooks.js";
 export * from "./message-attachments.js";
 export * from "./model-invocation.js";

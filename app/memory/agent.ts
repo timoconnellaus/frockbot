@@ -81,6 +81,7 @@ import {
   productScopeToEngineV1,
   type MemoryAuthorityV1,
   type MemoryScopeRefV1,
+  type MemoryHitV1,
 } from "./records.js";
 import type {
   EmbedMemory,
@@ -139,6 +140,15 @@ export interface MemoryRuntimeHostV1 {
    * it. The Markdown store is not a second source of truth on that path.
    */
   records?: MemoryRecordsV1;
+  /**
+   * Orders what recall found by how much each bears on the request, dropping
+   * what bears on nothing. Absent, or when it cannot say, recall keeps its
+   * own order.
+   */
+  rankRecall?(input: {
+    request: string;
+    hits: readonly MemoryHitV1[];
+  }): Promise<readonly MemoryHitV1[]>;
 }
 
 export const sha256HexV1 = sha256HexTextV1;
@@ -384,11 +394,11 @@ export class MemoryProjection {
       ...(dates.occurredFrom ? { filters: dates } : {}),
     });
     this.#recallStatus = recalled.status;
-    noteMemoryRecallV1(
-      this.#recall,
-      signature,
-      recallBlocksFromHitsV1(recalled.hits),
-    );
+    const hits =
+      this.#host.rankRecall && recalled.hits.length > 1
+        ? await this.#host.rankRecall({ request: query, hits: recalled.hits })
+        : recalled.hits;
+    noteMemoryRecallV1(this.#recall, signature, recallBlocksFromHitsV1(hits));
   }
 
   renderMessages(

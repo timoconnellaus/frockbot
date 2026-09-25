@@ -25,6 +25,11 @@ import type { MemoryRuntimeHostV1 } from "@frockbot/app/memory/agent";
 import type { MemoryGroupsV1 } from "@frockbot/app/memory/groups";
 import { groupIdOfSessionV1 } from "@frockbot/app/groups/shared";
 import { MemoryStore } from "@frockbot/app/memory/store";
+import { hostedJevClientV1 } from "@frockbot/app/supervision";
+import {
+  judgeMemoryRecallV1,
+  rankRecalledV1,
+} from "@frockbot/app/supervision/memory-recall";
 import type { MemoryChunkIndexWriterV1 } from "@frockbot/app/memory/chunk-index";
 import type { MemoryRecordsV1 } from "@frockbot/app/memory/owner";
 
@@ -75,6 +80,7 @@ export function createBotMemoryHost(
   if (!files) return undefined;
   const owner = { userId: identity.userId, botId: identity.botId };
   const group = groupIdOfSessionV1(turn.sessionId);
+  const jev = hostedJevClientV1(env as Record<string, string | undefined>);
   return {
     owner,
     store: new MemoryStore({
@@ -97,5 +103,20 @@ export function createBotMemoryHost(
       ? { chunkIndex: bindings.MEMORY_CHUNK_INDEX }
       : {}),
     ...(bindings.MEMORY_RECORDS ? { records: bindings.MEMORY_RECORDS } : {}),
+    ...(jev
+      ? {
+          rankRecall: async ({ request, hits }) =>
+            rankRecalledV1(
+              hits,
+              await judgeMemoryRecallV1(jev, {
+                request,
+                candidates: hits.map((hit) => ({
+                  id: hit.item.id,
+                  text: hit.item.text,
+                })),
+              }),
+            ),
+        }
+      : {}),
   };
 }
