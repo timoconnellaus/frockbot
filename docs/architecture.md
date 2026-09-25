@@ -520,7 +520,7 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
   and the conversation's bar is GrokBot's — Back, the Bot's name as the way to
   its page, the Computer
 - `ShellSidebar` — `lib/shell/sidebar.dart`: pinned tiles in pin order, one
-  list in `sidebarOrder` that a drag reorders, unread badges, hidden Bots, and
+  list in `sidebarOrder` that a drag reorders, unread badges, the folded Hidden and Archived groups, and
   the list's own controls: You, What’s New, search, create
 - `ProfilePage` — `lib/shell/profile_page.dart`: You, the account's
   destinations. Below 640 a list whose rows each push their page; wider, the
