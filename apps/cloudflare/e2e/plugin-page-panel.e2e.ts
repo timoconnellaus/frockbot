@@ -227,10 +227,14 @@ test("a Plugin's own page runs in the conversation panel docked, in a drawer and
     pageFrame(page).contentFrame().getByText("score:3", { exact: true }),
   ).toBeVisible({ timeout: 30_000 });
   await expectNoHorizontalOverflow(page);
-  const box = await pageFrame(page).boundingBox();
-  expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
-  expect(
-    (box?.x ?? 0) + (box?.width ?? Number.POSITIVE_INFINITY),
-  ).toBeLessThanOrEqual(PHONE.width);
+  // The panel's page slides in, and its frame's content can be visible before
+  // the slide ends: only where the frame comes to rest is the claim.
+  await expect(async () => {
+    const box = await pageFrame(page).boundingBox();
+    expect(box?.x ?? -1).toBeGreaterThanOrEqual(0);
+    expect(
+      (box?.x ?? 0) + (box?.width ?? Number.POSITIVE_INFINITY),
+    ).toBeLessThanOrEqual(PHONE.width);
+  }).toPass({ timeout: 5_000 });
   await page.screenshot({ path: testInfo.outputPath("plugin-page-phone.png") });
 });

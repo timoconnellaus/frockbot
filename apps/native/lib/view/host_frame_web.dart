@@ -30,6 +30,10 @@ class HostFrameView extends StatefulWidget {
   final ValueChanged<Map<String, Object?>>? onMessage;
   final Stream<Map<String, Object?>>? outbox;
   final VoidCallback? onLoaded;
+
+  /// Honoured by the native frame only: a browser reloads an iframe that
+  /// leaves the page whatever the host keeps, and caches it well anyway.
+  final String? keepAs;
   const HostFrameView({
     super.key,
     required this.url,
@@ -38,6 +42,7 @@ class HostFrameView extends StatefulWidget {
     this.onMessage,
     this.outbox,
     this.onLoaded,
+    this.keepAs,
   });
 
   @override

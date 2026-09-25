@@ -314,7 +314,8 @@ Cards build on:
 - A panel's frame survives a tab switch or a closed panel and is shown again
   rather than reloaded. At most two frames are kept, the same bound as live
   Cards. A kept frame that leaves the screen still gives up every device
-  ability, as before.
+  ability, as before. Only native clients keep one: a browser reloads an
+  iframe that leaves the page anyway, and caches it well.
 - A Card whose frame is torn down keeps a picture of what it last drew, and
   shows it until it is live again. Scrolling back shows the Card as it was
   without running anything off screen.

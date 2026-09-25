@@ -32,6 +32,35 @@ const hostFrameInspectableV1 =
     bool.fromEnvironment('FROCKBOT_LOCAL_DEV') ||
     bool.fromEnvironment('FROCKBOT_PAGE_INSPECTION');
 
+/// A loaded page kept after its frame left the screen, so showing the frame
+/// again reattaches the same document rather than loading it anew (ADR 0036,
+/// amended 2026-09-25). Whoever shows it now hears what it says.
+class _KeptPage {
+  final WebViewController web;
+  final String url;
+  bool loaded = false;
+  _HostFrameViewState? owner;
+  _KeptPage(this.web, this.url);
+}
+
+/// At most two, the same bound as live HTML Cards; the oldest is let go.
+const _keptPagesMaxV1 = 2;
+final _keptPages = <String, _KeptPage>{};
+
+void _keep(String key, _KeptPage page) {
+  _keptPages.remove(key);
+  _keptPages[key] = page;
+  _trimKeptPages();
+}
+
+/// Lets go of the oldest pages nobody is showing until at most two are kept.
+void _trimKeptPages() {
+  for (final key in [..._keptPages.keys]) {
+    if (_keptPages.length <= _keptPagesMaxV1) return;
+    if (_keptPages[key]?.owner == null) _keptPages.remove(key);
+  }
+}
+
 class HostFrameView extends StatefulWidget {
   final String url;
 
@@ -42,6 +71,10 @@ class HostFrameView extends StatefulWidget {
   final ValueChanged<Map<String, Object?>>? onMessage;
   final Stream<Map<String, Object?>>? outbox;
   final VoidCallback? onLoaded;
+
+  /// Keeps the loaded page under this key when the frame leaves, and shows
+  /// it again when a frame with the same key and URL comes back.
+  final String? keepAs;
   const HostFrameView({
     super.key,
     required this.url,
@@ -50,6 +83,7 @@ class HostFrameView extends StatefulWidget {
     this.onMessage,
     this.outbox,
     this.onLoaded,
+    this.keepAs,
   });
 
   @override
@@ -58,8 +92,10 @@ class HostFrameView extends StatefulWidget {
 
 class _HostFrameViewState extends State<HostFrameView> {
   WebViewController? _web;
+  _KeptPage? _page;
   int _epoch = 0;
   bool _loaded = false;
+  bool _reopened = false;
   StreamSubscription<Map<String, Object?>>? _outbox;
   final _waiting = <Map<String, Object?>>[];
 
@@ -109,15 +145,18 @@ class _HostFrameViewState extends State<HostFrameView> {
   }
 
   /// Forwards what the page posts to its parent. Only a trusted event is the
-  /// page's own `postMessage`; the host's deliveries are synthetic.
-  Future<void> _forward(WebViewController web, int epoch) async {
-    if (widget.onMessage == null || epoch != _epoch) return;
+  /// page's own `postMessage`; the host's deliveries are synthetic. Once per
+  /// document, whichever frame shows it by then.
+  static Future<void> _forward(WebViewController web) async {
     try {
       await web.runJavaScript('''
-window.addEventListener("message", (event) => {
-  if (!event.isTrusted || !event.data || typeof event.data !== "object") return;
-  try { $_channel.postMessage(JSON.stringify(event.data)); } catch (_) {}
-});
+if (!window.__frockbotForwarding) {
+  window.__frockbotForwarding = true;
+  window.addEventListener("message", (event) => {
+    if (!event.isTrusted || !event.data || typeof event.data !== "object") return;
+    try { $_channel.postMessage(JSON.stringify(event.data)); } catch (_) {}
+  });
+}
 ''');
     } catch (_) {
       // A page the listener cannot reach has said nothing.
@@ -137,10 +176,50 @@ window.addEventListener("message", (event) => {
     } catch (_) {}
   }
 
+  /// The document is loaded and its messages are heard: deliver what
+  /// waited, then say so.
+  void _ready() {
+    final web = _web;
+    if (!mounted || web == null) return;
+    _loaded = true;
+    final epoch = _epoch;
+    final waiting = [..._waiting];
+    _waiting.clear();
+    unawaited(() async {
+      for (final message in waiting) {
+        await _post(web, epoch, message);
+      }
+      if (mounted && epoch == _epoch) widget.onLoaded?.call();
+    }());
+  }
+
+  void _letGo() {
+    final page = _page;
+    if (page != null && page.owner == this) page.owner = null;
+    _page = null;
+    _trimKeptPages();
+  }
+
   Future<void> _open() async {
     final epoch = ++_epoch;
     _loaded = false;
+    _letGo();
     if (mounted) setState(() => _web = null);
+    final keepAs = widget.keepAs;
+    final kept = keepAs == null ? null : _keptPages[keepAs];
+    if (kept != null && kept.url == widget.url && kept.owner == null) {
+      kept.owner = this;
+      _keep(keepAs!, kept);
+      setState(() {
+        _page = kept;
+        _web = kept.web;
+      });
+      // Already loaded, it is greeted again at once with what it missed.
+      if (kept.loaded) {
+        WidgetsBinding.instance.addPostFrameCallback((_) => _ready());
+      }
+      return;
+    }
     try {
       final params =
           defaultTargetPlatform == TargetPlatform.macOS ||
@@ -170,15 +249,20 @@ window.addEventListener("message", (event) => {
         await webkit.setAllowsLinkPreview(false);
       }
       if (hostFrameInspectableV1) await _inspectable(web);
-      if (widget.onMessage != null) {
+      final page = _KeptPage(web, widget.url)..owner = this;
+      final hasChannel = widget.onMessage != null;
+      if (hasChannel) {
         await web.addJavaScriptChannel(
           _channel,
           onMessageReceived: (message) {
-            if (epoch != _epoch) return;
+            // Whoever shows the page now hears it; a page nobody shows, or
+            // one its frame has moved on from, says nothing.
+            final owner = page.owner;
+            if (owner == null || owner._page != page) return;
             try {
               final decoded = jsonDecode(message.message);
               if (decoded is Map) {
-                widget.onMessage!(decoded.cast<String, Object?>());
+                owner.widget.onMessage?.call(decoded.cast<String, Object?>());
               }
             } catch (_) {
               // A page that says something unreadable has said nothing.
@@ -195,21 +279,38 @@ window.addEventListener("message", (event) => {
               ? NavigationDecision.navigate
               : NavigationDecision.prevent,
           onHttpAuthRequest: (request) => request.onCancel(),
-          onPageFinished: (url) async {
-            if (url != widget.url || epoch != _epoch) return;
-            await _forward(web, epoch);
-            _loaded = true;
-            final waiting = [..._waiting];
-            _waiting.clear();
-            for (final message in waiting) {
-              await _post(web, epoch, message);
+          onWebResourceError: (error) {
+            if (error.isForMainFrame == false) return;
+            _keptPages.removeWhere((_, kept) => kept == page);
+            final owner = page.owner;
+            if (error.errorType ==
+                    WebResourceErrorType.webContentProcessTerminated &&
+                page.loaded &&
+                owner != null &&
+                owner.mounted &&
+                owner._page == page &&
+                !owner._reopened) {
+              owner._reopened = true;
+              unawaited(owner._open());
             }
-            if (mounted && epoch == _epoch) widget.onLoaded?.call();
+          },
+          onPageFinished: (url) async {
+            if (url != page.url) return;
+            final owner = page.owner;
+            if (hasChannel) await _forward(web);
+            page.loaded = true;
+            if (owner == null || owner._page != page) return;
+            owner._ready();
           },
         ),
       );
       if (!mounted || epoch != _epoch) return;
-      setState(() => _web = web);
+      final keepAs = widget.keepAs;
+      if (keepAs != null) _keep(keepAs, page);
+      setState(() {
+        _page = page;
+        _web = web;
+      });
       // Anonymous: no session header ever accompanies a framed page.
       await web.loadRequest(Uri.parse(widget.url));
     } catch (_) {
@@ -221,6 +322,7 @@ window.addEventListener("message", (event) => {
   @override
   void dispose() {
     ++_epoch;
+    _letGo();
     unawaited(_outbox?.cancel());
     super.dispose();
   }

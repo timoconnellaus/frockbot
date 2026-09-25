@@ -413,6 +413,9 @@ void main() {
       await tester.pumpWidget(const MaterialApp(home: SizedBox()));
       await tester.pumpAndSettle();
       expect(microphone.closes, 2);
+      // A page kept for the panel's return is told it no longer hears.
+      expect(heard.last['status'], 'closed');
+      expect(heard.last['reason'], 'You left the panel.');
       expect(uses.map((use) => use.ending), [
         PluginPageDeviceEndingV1.background,
         PluginPageDeviceEndingV1.left,
