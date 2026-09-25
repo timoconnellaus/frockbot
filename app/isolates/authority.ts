@@ -66,6 +66,26 @@ export function activeIsolateTurn(
 }
 
 /**
+ * Whether the Plugin an admitted call names declared `grant`. The wrapper
+ * builds only a declared grant's member; this is the authority saying so too.
+ */
+export function admittedPluginHoldsV1(
+  state: ShellBotStateV1,
+  input: IsolateCallIdentityV1,
+  grant: string,
+): boolean {
+  if (!isolateCallAdmittedV1(state, input)) return false;
+  const members =
+    activeIsolateTurn(state, input)?.mounted.generation.members ??
+    state.turn.standalone(input.runId)?.members ??
+    [];
+  const member = members.find(
+    (candidate) => candidate.packageId === input.packageId,
+  );
+  return member?.descriptor?.grants.some((held) => held === grant) ?? false;
+}
+
+/**
  * Whether the Plugin an admitted call names wraps a loop event. A call that
  * is not admitted wraps nothing.
  */

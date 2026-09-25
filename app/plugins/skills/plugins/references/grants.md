@@ -1,7 +1,7 @@
 # Grants
 
 `grants` is what the module may use, from `storage`, `http`, `schedule`,
-`ai`, `files`, `memory`, `workspace`, `computer`, `device`.
+`ai`, `jev`, `files`, `memory`, `workspace`, `computer`, `device`.
 
 `ctx` always names the User, the Bot and the Session, this Plugin's
 `packageId`, `deadlineMs`, `bindings`, `capabilities.list()`,
@@ -38,6 +38,17 @@ member per grant the descriptor declares that actually opens a handle:
   at the Bot's rates. Each call is itemised under your Plugin's name on
   the Turn's Work view, tokens and cost. You cannot name another model.
   This is not a model _provider_; see `providers.md` for serving one.
+- `ctx.jev` (`jev`) — `decide({ state, questions })` asks Jev, a decision
+  model, typed questions about one JSON `state`: `choice` (one label of a
+  closed set, with probabilities), `noul` (the probability a condition
+  holds) or `score` (a level on an ordered rubric). Use it to classify,
+  route, rank or check inside your own code, where a threshold you choose
+  decides; Jev never writes text. Questions are Jev's wire shape, named
+  by key: `{ type: "noul", instructions: { target, decision, requirements },
+criteria: { true, false } }`. At most 32 questions and 64 KB a call, 64
+  calls a run; each is itemised under your Plugin's name on the Turn's Work
+  view. The answers are yours alone: nothing the kernel decides, such as
+  an approval, ever reads them.
 - `ctx.memory` (`memory`) — `read` / `write` / `forget` with `scope`
   `bot` | `user` and optional `tier` `profile` | `log` | `note`. Facts are
   strings. Never a secret.

@@ -472,8 +472,9 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     const stub = probe(`trigger-${crypto.randomUUID()}`);
     const artifact = await stub.seedArtifact(PROBE_TRIGGER_SOURCE);
 
+    const userId = `user-${crypto.randomUUID()}`;
     const result = await stub.probeTriggers({
-      userId: `user-${crypto.randomUUID()}`,
+      userId,
       botId: "bot-1",
       artifact,
       deliveries: [
@@ -492,9 +493,9 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     expect(JSON.parse(fired?.status === "fire" ? fired.text : "null")).toEqual({
       packageId: PROBE_TRIGGER_ID,
       botId: "bot-1",
-      // A trigger runs outside any Turn: the index synthesises the identity
-      // from the routine it was delivered for.
-      sessionId: "trigger:routine-1",
+      // A trigger runs outside any Turn: the index narrows with the
+      // standalone call's identity it was delivered under.
+      sessionId: `${userId}:bot-1`,
       signature: "sig-1",
       city: "Wollongong",
     });

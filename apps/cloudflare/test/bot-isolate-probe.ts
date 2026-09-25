@@ -251,7 +251,7 @@ function probePackageDescriptor(hooks: string[]) {
     // previous contract still mounts.
     contractVersion: ISOLATE_CONTRACT_VERSION - 1,
     hooks,
-    grants: ["ai", "http", "schedule", "memory", "workspace", "storage"],
+    grants: ["ai", "jev", "http", "schedule", "memory", "workspace", "storage"],
     // The probe's `reach_network` tool reaches for a host outside this list,
     // so the egress loopback minted from it refuses the request.
     network: { hosts: ["example.com"] },
@@ -1126,6 +1126,10 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
             headers: delivery.headers ?? {},
             body: delivery.body ?? "{}",
             botId: input.botId,
+            sessionId: `${input.userId}:${input.botId}`,
+            runId: "trigger:routine-1",
+            turnId: "trigger:routine-1",
+            generationId: generation.generationId,
             routineId: "routine-1",
             deadlineMs: delivery.deadlineMs ?? 2_000,
           }),

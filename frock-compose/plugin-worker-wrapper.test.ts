@@ -355,6 +355,10 @@ describe("the generated wrapper's invocation decoders", () => {
       headers: { "x-signature": "abc" },
       body: "{}",
       botId: "bot-1",
+      sessionId: "user-1:bot-1",
+      runId: "trigger:routine-1",
+      turnId: "trigger:routine-1",
+      generationId: "gen-1",
       routineId: "routine-1",
       deadlineMs: 1_000,
     };
@@ -657,7 +661,15 @@ describe("the generated wrapper's narrowed context", () => {
       invocation,
       {
         pluginId: "weather",
-        grants: ["ai", "memory", "workspace", "http", "schedule", "storage"],
+        grants: [
+          "ai",
+          "jev",
+          "memory",
+          "workspace",
+          "http",
+          "schedule",
+          "storage",
+        ],
         services: {},
       },
       1_000,
@@ -677,7 +689,15 @@ describe("the generated wrapper's narrowed context", () => {
       invocation,
       {
         pluginId: "weather",
-        grants: ["ai", "memory", "workspace", "http", "schedule", "storage"],
+        grants: [
+          "ai",
+          "jev",
+          "memory",
+          "workspace",
+          "http",
+          "schedule",
+          "storage",
+        ],
         services: {},
       },
       1_000,
@@ -810,6 +830,10 @@ describe("the generated wrapper's trigger delivery", () => {
       headers: { "x-source": "hook" },
       body: '{"city":"Wollongong"}',
       botId: "bot-1",
+      sessionId: "user-1:bot-1",
+      runId: "trigger:routine-1",
+      turnId: "trigger:routine-1",
+      generationId: "gen-1",
       routineId: "routine-1",
       deadlineMs: 1_000,
       ...overrides,
@@ -830,7 +854,7 @@ describe("the generated wrapper's trigger delivery", () => {
     };
   }
 
-  const identities: Record<string, string>[] = [];
+  const identities: Record<string, unknown>[] = [];
   function contextFor(
     identity: Record<string, string>,
     _plugin: unknown,
@@ -840,7 +864,7 @@ describe("the generated wrapper's trigger delivery", () => {
     return { deadlineMs };
   }
 
-  test("a returned string fires whole, with the event and a routine identity", async () => {
+  test("a returned string fires whole, with the event and the call's identity", async () => {
     identities.length = 0;
     const seen: { event: unknown; ctx: unknown }[] = [];
     const result = await runTrigger(
@@ -866,15 +890,7 @@ describe("the generated wrapper's trigger delivery", () => {
         ctx: { deadlineMs: 1_000 },
       },
     ]);
-    expect(identities).toEqual([
-      {
-        botId: "bot-1",
-        sessionId: "trigger:routine-1",
-        runId: "trigger:routine-1",
-        turnId: "trigger:routine-1",
-        generationId: "trigger",
-      },
-    ]);
+    expect(identities).toEqual([triggerInvocation()]);
   });
 
   test("an explicit drop keeps its reason and an implicit one names the silence", async () => {

@@ -192,6 +192,10 @@ var TRIGGER_INVOCATION_KEYS = [
   "headers",
   "body",
   "botId",
+  "sessionId",
+  "runId",
+  "turnId",
+  "generationId",
   "routineId",
   "deadlineMs",
 ];
@@ -355,10 +359,9 @@ function decodeTriggerInvocation(value) {
   if (!isRecord(value.headers) || typeof value.body !== "string") {
     throw new Error("plugin worker trigger invocation event is invalid");
   }
-  for (const key of ["botId", "routineId"]) {
-    if (typeof value[key] !== "string" || value[key].length === 0) {
-      throw new Error("plugin worker trigger invocation " + key + " is invalid");
-    }
+  identityFields(value, "plugin worker trigger invocation");
+  if (typeof value.routineId !== "string" || value.routineId.length === 0) {
+    throw new Error("plugin worker trigger invocation routineId is invalid");
   }
   return value;
 }`;
@@ -438,6 +441,16 @@ const BOT_ISOLATE_GRANT_PROPERTY_SOURCE_V1 = {
           requestId: outcome.requestId,
           events: modelEvents(outcome.events),
         };
+      },
+    }`,
+    ],
+  ],
+  jev: [
+    [
+      "jev",
+      `{
+      decide: function (request) {
+        return capabilities.jevDecide(scope, request);
       },
     }`,
     ],
@@ -763,7 +776,7 @@ async function runHookChain(plugins, invocation, contextFor) {
 /**
  * One trigger delivered to one Plugin, shared verbatim between the generated
  * wrapper and the Bun test that proves it. A trigger runs outside any Turn, so
- * the identity it narrows its context with is synthesised from the routine.
+ * it narrows its context with the standalone call's identity the Bot sent.
  * The fired text is returned whole: the Durable Object holds the contract's
  * bound and names the Plugin when a body exceeds it.
  */
@@ -773,17 +786,7 @@ export const BOT_ISOLATE_TRIGGER_SOURCE = `async function runTrigger(invocation,
     if (!plugin.triggers.includes(invocation.trigger)) {
       throw new Error('plugin "' + invocation.pluginId + '" did not declare trigger "' + invocation.trigger + '"');
     }
-    const context = contextFor(
-      {
-        botId: invocation.botId,
-        sessionId: "trigger:" + invocation.routineId,
-        runId: "trigger:" + invocation.routineId,
-        turnId: "trigger:" + invocation.routineId,
-        generationId: "trigger",
-      },
-      plugin,
-      invocation.deadlineMs,
-    );
+    const context = contextFor(invocation, plugin, invocation.deadlineMs);
     const value = await withIsolateDeadline(function () {
       return plugin.module.triggers[invocation.trigger](
         { headers: invocation.headers, body: invocation.body },
@@ -1461,7 +1464,7 @@ export default class extends WorkerEntrypoint {
  * Bumped with any change to the generated text; folded into the module-set
  * hash beside the contract version, so a wrapper change is a new worker.
  */
-export const PLUGIN_WORKER_INDEX_VERSION = "index-v11";
+export const PLUGIN_WORKER_INDEX_VERSION = "index-v12";
 
 /** The module map a Plugin worker mounts: the index and one module per Plugin. */
 export function pluginWorkerModuleMap(

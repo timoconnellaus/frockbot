@@ -138,6 +138,7 @@ import {
   isolateStoragePut,
   type IsolateCallScopeV1,
   isolateMemoryForget,
+  isolateJevDecide,
   isolateMemoryRead,
   isolateMemoryWrite,
   isolateEmail,
@@ -237,6 +238,7 @@ import {
   type CardActionCommandV1,
 } from "@frockbot/app/shell/cards";
 import {
+  decodeIsolateJevRequestV1,
   decodeIsolateMemoryReadRequestV1,
   decodeIsolateStorageDeleteRequestV1,
   decodeIsolateStorageGetRequestV1,
@@ -2132,6 +2134,13 @@ export class BotState
         input,
         (value) => value ?? null,
       ) as unknown as IsolateCallScopeV1,
+    );
+  }
+
+  async isolateJevDecide(input: unknown) {
+    return isolateJevDecide(
+      (await this.contribution()).state,
+      decodeIsolateCallRpcV1(input, decodeIsolateJevRequestV1) as never,
     );
   }
 
