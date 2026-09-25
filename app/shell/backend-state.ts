@@ -32,6 +32,8 @@ import {
   createHostedRoutineReportJudgeV1,
   type RoutineReportJudgeV1,
 } from "@frockbot/app/supervision/routine-report";
+import { createHostedCompactionChooserV1 } from "@frockbot/app/supervision/compaction-choice";
+import type { CompactionChooserV1 } from "@frockbot/app/shell/compaction";
 import {
   createHostedEmailTriageJudgeV1,
   type EmailTriageJudgeV1,
@@ -215,6 +217,11 @@ export interface ShellBotBackendHost extends ShellApplicationV1 {
    * the hosted Jev judge built from `env`, or none when there is no key.
    */
   routineReportJudge?: RoutineReportJudgeV1;
+  /**
+   * Chooses which older messages compaction carries word for word. Absent,
+   * the hosted Jev chooser, or none when there is no key.
+   */
+  compactionChooser?: CompactionChooserV1;
   /**
    * Judges whether an email the person sent asks the Bot anything. Absent,
    * the hosted Jev judge, or none when there is no key.
@@ -408,6 +415,7 @@ export class ShellBotStateV1 {
   readonly routineEventJudge: RoutineEventJudgeV1;
   readonly turnSupervisor: TurnSupervisor;
   readonly routineReportJudge: RoutineReportJudgeV1 | undefined;
+  readonly compactionChooser: CompactionChooserV1 | undefined;
   readonly emailTriageJudge: EmailTriageJudgeV1 | undefined;
   readonly pageJudge: ComputerPageJudgeV1 | undefined;
   readonly pluginFitJudge: PluginFitJudgeV1 | undefined;
@@ -466,6 +474,12 @@ export class ShellBotStateV1 {
     this.pageJudge =
       host.pageJudge ??
       createHostedPageJudgeV1({
+        JEV_API_KEY: host.env.JEV_API_KEY,
+        JEV_BASE_URL: host.env.JEV_BASE_URL,
+      });
+    this.compactionChooser =
+      host.compactionChooser ??
+      createHostedCompactionChooserV1({
         JEV_API_KEY: host.env.JEV_API_KEY,
         JEV_BASE_URL: host.env.JEV_BASE_URL,
       });

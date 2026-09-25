@@ -5,6 +5,8 @@ import {
 } from "../supervision/memory-recall.js";
 import { routineAttributionV1 } from "../routines/inbox.js";
 import { createJevPageJudgeV1 } from "../supervision/page-state.js";
+import { createJevCompactionChooserV1 } from "../supervision/compaction-choice.js";
+import type { CompactionItemV1 } from "../shell/compaction.js";
 import { judgeMemoryWriteV1 } from "../supervision/memory-write.js";
 import { createJevEmailTriageJudgeV1 } from "../supervision/email-triage.js";
 import { createJevRoutineReportJudgeV1 } from "../supervision/routine-report.js";
@@ -60,6 +62,12 @@ export type ContextFixtureV1 =
       readonly title: string;
       readonly snapshot: string;
       readonly expected: "ready" | "sign_in" | "captcha" | "error" | "loading";
+    }
+  | {
+      readonly kind: "compaction";
+      readonly name: string;
+      readonly items: readonly CompactionItemV1[];
+      readonly expected: readonly ("summarise" | "keep" | "drop")[];
     }
   | {
       readonly kind: "skills";
@@ -136,6 +144,18 @@ export async function runContextCaseV1(
       passed: state === fixture.expected,
       expected: fixture.expected,
       actual: state ?? "undecided",
+    };
+  }
+  if (fixture.kind === "compaction") {
+    const choices = await createJevCompactionChooserV1(client)(
+      fixture.items,
+      new AbortController().signal,
+    );
+    const actual = choices ? choices.join(",") : "undecided";
+    return {
+      passed: actual === fixture.expected.join(","),
+      expected: fixture.expected.join(","),
+      actual,
     };
   }
   if (fixture.kind === "recall") {
@@ -247,6 +267,41 @@ export const contextFixturesV1: readonly ContextFixtureV1[] = [
     title: "Dashboard",
     snapshot: '- progressbar "Loading"\n- text: Loading…',
     expected: "loading",
+  },
+  {
+    kind: "compaction",
+    name: "compaction-keeps-exact-words",
+    items: [
+      {
+        role: "user",
+        text: "My new address is 12 Beach Rd, Thirroul NSW 2515. Use exactly that on the council form when you get to it.",
+      },
+      {
+        role: "tool",
+        tool: "web_search",
+        text: "1. Council forms - Wollongong City Council https://wollongong.nsw.gov.au/forms\n2. Forms and applications https://www.nsw.gov.au/forms\n3. Rates notices https://wollongong.nsw.gov.au/rates\n4. Contact us https://wollongong.nsw.gov.au/contact\n5. Pet registration https://www.olg.nsw.gov.au/pets",
+      },
+      {
+        role: "user",
+        text: "Thanks, that's great. Let's carry on with the next bit whenever you're ready, no rush at all.",
+      },
+      {
+        role: "tool",
+        tool: "computer_exec",
+        text: "npm ERR! code ENOENT\nnpm ERR! syscall open\nnpm ERR! path /workspace/bot-1/package.json\nnpm ERR! enoent Could not read package.json",
+      },
+      {
+        role: "user",
+        text: "Yes, send exactly this and nothing else: 'Hi Sam, we'll go with option B for the kitchen. Thanks, Tim'",
+      },
+      {
+        role: "tool",
+        tool: "weather",
+        text: "Sydney, Thursday: 22°C, sunny, light north-easterly winds, UV index high. Friday: 19°C, showers developing in the afternoon.",
+      },
+    ],
+    // Only unmistakable noise is dropped; a searched listing is summarised.
+    expected: ["keep", "summarise", "summarise", "drop", "keep", "summarise"],
   },
   {
     kind: "write",

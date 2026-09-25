@@ -459,6 +459,9 @@ export async function executeTurn(
               input.command.sessionId,
             ),
             compactionScope: state.ctx,
+            ...(state.compactionChooser
+              ? { compactionChooser: state.compactionChooser }
+              : {}),
           },
         ),
         billing: state.env.BILLING?.(
