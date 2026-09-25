@@ -11,6 +11,7 @@
 import type { BotIdentity } from "@frockbot/core/durable";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import { currentUserCompositionV1 } from "@frockbot/app/composition/bot";
+import { oweThemeAssembleV1 } from "@frockbot/app/theme/assemble";
 import {
   DEPLOYMENT_PLUGIN_CATALOG_V1,
   FIRST_PARTY_TOGGLEABLE_PLUGINS_V1,
@@ -169,6 +170,7 @@ export async function setBotPluginEnabledV1(
     if (command.enabled) {
       await clearPluginHealthV1(state.ctx.storage, command.pluginId);
     }
+    await oweThemeAssembleV1(state.ctx.storage, new Date());
     return { status: "applied", revision: next.revision };
   } catch (error) {
     if (error instanceof PluginEnablementConflictError) {

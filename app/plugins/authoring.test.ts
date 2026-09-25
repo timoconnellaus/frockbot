@@ -25,6 +25,7 @@ import {
   pluginApprovalIdV1,
   pluginIntentKeyV1,
 } from "./approval.js";
+import { THEME_ASSEMBLE_DUE_KEY_V1 } from "@frockbot/app/theme/assemble";
 import { PLUGIN_ENABLEMENT_KEY_V1 } from "./enablement.js";
 import { pluginsSourceRootV1 } from "./root.js";
 
@@ -604,6 +605,11 @@ describe("enabling, disabling and settings", () => {
     expect(storage.get(PLUGIN_ENABLEMENT_KEY_V1)).toMatchObject({
       enabled: { notes: false },
     });
+    // The Plugin may have been wrapping the look: the Bot re-assembles now,
+    // not at the next hour.
+    expect(storage.get(THEME_ASSEMBLE_DUE_KEY_V1)).toBeLessThanOrEqual(
+      Date.now(),
+    );
     // Only a Plugin this Bot could run has a switch: an id nothing installed
     // and a first-party feature are both refused, so the map cannot grow past
     // what it can hold.

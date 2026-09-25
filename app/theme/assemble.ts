@@ -29,7 +29,11 @@ import {
   type BotPluginRosterV1,
 } from "@frockbot/app/plugins/worker-bot";
 
-/** When the next cadence assemble is owed. Absent means none. */
+/**
+ * When the next assemble is owed: the next hour's cadence, or now after a
+ * Plugin switch (`oweThemeAssembleV1`). An assemble that finds it rewritten
+ * while it ran leaves it for the alarm. Absent means none.
+ */
 export const THEME_ASSEMBLE_DUE_KEY_V1 = "theme:assemble-due:v1";
 
 /** How long one assemble may run inside the Plugin worker. */
@@ -50,6 +54,19 @@ export function rosterDeclaresThemeAssembleV1(
   roster: BotPluginRosterV1,
 ): boolean {
   return themeAssemblersV1(roster).length > 0;
+}
+
+/**
+ * Owes an assemble now. Switching a Plugin, or approving a new generation of
+ * one, can change which Plugins wrap the look, and the Bot would otherwise
+ * wear the old one until the next hour. Owed rather than run, so the alarm
+ * the Bot re-arms after the write carries it through an eviction.
+ */
+export async function oweThemeAssembleV1(
+  storage: { put(key: string, value: unknown): Promise<void> },
+  now: Date,
+): Promise<void> {
+  await storage.put(THEME_ASSEMBLE_DUE_KEY_V1, now.getTime());
 }
 
 export async function themeAssembleDeadlineV1(storage: {
@@ -101,6 +118,7 @@ export async function assembleBotThemeV1(
   const original = look.document ?? compiled;
   const roster = host.roster ?? (await readBotPluginRosterV1(state, identity));
   const declares = rosterDeclaresThemeAssembleV1(roster);
+  const owed = await state.ctx.storage.get<unknown>(THEME_ASSEMBLE_DUE_KEY_V1);
   let assembled = original;
   if (declares) {
     const payload: LoopEventPayloadMapV1["theme/assemble"] = {
@@ -180,6 +198,9 @@ export async function assembleBotThemeV1(
         nextLook,
       );
   await host.mirror(next.look, next.document);
+  const reowed =
+    (await state.ctx.storage.get<unknown>(THEME_ASSEMBLE_DUE_KEY_V1)) !== owed;
+  if (reowed) return next;
   if (declares) {
     await state.ctx.storage.put(
       THEME_ASSEMBLE_DUE_KEY_V1,

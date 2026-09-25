@@ -167,6 +167,10 @@ interface BotRpc {
     input: unknown,
   ): Promise<Array<{ notificationId: string; title: string; body: string }>>;
   assembleTheme(input: unknown): Promise<unknown>;
+  readLook(input: unknown): Promise<{
+    look: unknown;
+    document?: { tokens: { surfaces: { window: string } } };
+  }>;
   executeRoutineCommand(input: unknown): Promise<{
     status: string;
     hook?: { token: string; keyVersion: number };
@@ -2030,6 +2034,104 @@ export async function execute() {
     expect((await notices()).map((notice) => notice.body)).toContain(
       'The plugin "dusk" failed to set this Bot\'s theme 3 times in a row and is now off for this Bot. Turn it on again under Plugins to try it once more.',
     );
+  });
+
+  test("approving a theme Plugin re-assembles the look through the Bot's own alarm, not at the next hour", async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    const author = { userId, botId: "bot-1" };
+    const sibling = { userId, botId: "bot-2" };
+    await provisionBot(author);
+    await provisionSiblingBot(sibling);
+    await features(userId).setFeatures({
+      schemaVersion: 1,
+      userId,
+      command: {
+        schemaVersion: 1,
+        type: "user/set-features",
+        pluginAuthoring: true,
+      },
+      updatedBy: "test",
+    });
+    await turn(author, "run-0");
+    const bootstrap = (
+      await user(userId).readComposition({ schemaVersion: 1, userId })
+    ).current;
+    const CANARY_ID = "canary";
+    const CANARY_SOURCE = `
+export const tools = [];
+export const hooks = {
+  "theme/assemble": async function (payload) {
+    const tokens = payload.document.tokens;
+    return {
+      ...payload.document,
+      tokens: { ...tokens, surfaces: {
+        window: "#ffef00", surface: "#fff7a8", raised: "#fffbd0",
+        text: "#1a1a1a", muted: "#4d4a00", line: "#c9bd00",
+        accent: "#1a1a1a", onAccent: "#ffef00",
+      } },
+    };
+  },
+};
+export async function execute() {
+  return "ok";
+}
+`;
+    await seedPlugin(
+      author,
+      bootstrap.generationId,
+      "2026-09-12T06:00:00.000Z",
+      CANARY_ID,
+      CANARY_SOURCE,
+      decodePluginDescriptorV1({
+        id: CANARY_ID,
+        displayName: "Canary",
+        version: "0.0.1",
+        contractVersion: ISOLATE_CONTRACT_VERSION,
+        tools: [],
+        hooks: ["theme/assemble"],
+        grants: [],
+        contextKeys: ["user", "bot", "session"],
+      }),
+    );
+    const window = async () =>
+      (await bot(sibling).readLook({ schemaVersion: 1, ...sibling })).document
+        ?.tokens.surfaces.window;
+    expect(await window()).not.toBe("#ffef00");
+
+    await bot(sibling).run({
+      schemaVersion: 1,
+      ...sibling,
+      command: {
+        runId: "ask-1",
+        sessionId: `${userId}:bot-2`,
+        acceptedAt: new Date().toISOString(),
+        text: toolCallTriggerPrompt([
+          "call_dynamic_tool",
+          dynamicToolInputV1({
+            namespace: "frockbot",
+            toolName: "plugin_enable",
+            input: { pluginId: CANARY_ID },
+          }),
+        ]),
+      },
+    });
+    const [card] = (
+      await bot(sibling).listApprovals({ schemaVersion: 1, ...sibling })
+    ).approvals;
+    await bot(sibling).decideApproval({
+      schemaVersion: 1,
+      ...sibling,
+      approvalId: card!.approvalId,
+      command: { schemaVersion: 1, decision: "approved" },
+    });
+
+    // Nothing calls assembleTheme: the approval owes one, and the alarms
+    // that settle its delivery Turn run it instead of waiting for the hour.
+    await settledApprovalDelivery(sibling);
+    await vi.waitFor(async () => expect(await window()).toBe("#ffef00"), {
+      timeout: 5_000,
+      interval: 25,
+    });
   });
 
   /**
