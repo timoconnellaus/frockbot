@@ -184,7 +184,7 @@ describe("the admission record names what produced the Turn", () => {
           admission: {
             schemaVersion: 1,
             turnType: "chat",
-            origin: { ...origin, quiet: false },
+            origin: { ...origin, quiet: false } as unknown as typeof origin,
           },
         }),
       ),
