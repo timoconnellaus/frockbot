@@ -60,6 +60,10 @@ describe("Bot identity codecs", () => {
         settings({ name: "Housework", hiddenFromSidebar: "yes" }),
       ),
     ).toThrow("profile.hiddenFromSidebar must be a boolean");
+    // The sidebar label is gone; the stored records that had one are cleaned.
+    expect(() =>
+      decodeBotSettingsViewV1(settings({ name: "Housework", label: "Work" })),
+    ).toThrow("profile has invalid fields");
   });
 });
 
@@ -143,6 +147,25 @@ describe("bot/set-profile", () => {
     ).toThrow("profile has invalid fields");
   });
 
+  test("drops the retired label an installed app still sends", () => {
+    const command = {
+      schemaVersion: 1,
+      type: "bot/set-profile",
+      commandId: "command-1",
+      botId: "primary",
+      expectedRevision: 3,
+    } as const;
+    expect(
+      decodeConfigurationCommandV1({
+        ...command,
+        profile: { name: "Atlas", label: "" },
+      }),
+    ).toEqual({ ...command, profile: { name: "Atlas" } });
+    expect(
+      decodeConfigurationCommandV1({ ...command, profile: { label: "Work" } }),
+    ).toEqual({ ...command, profile: {} });
+  });
+
   test("changes only the fields the patch carries", () => {
     const current: BotProfile = {
       name: "Housework",
@@ -192,15 +215,10 @@ describe("bot/set-profile", () => {
         settings({ name: "Housework", sidebarOrder: 1.5 }),
       ),
     ).toThrow("profile.sidebarOrder must be an integer");
-    const current: BotProfile = { name: "Housework", label: "Work" };
-    // A drop into another label is one patch: the label and the place in it.
+    const current: BotProfile = { name: "Housework" };
     expect(
-      applyBotProfilePatchV1(
-        current,
-        { label: "Home", sidebarOrder: 1000 },
-        "user",
-      ),
-    ).toEqual({ name: "Housework", label: "Home", sidebarOrder: 1000 });
+      applyBotProfilePatchV1(current, { sidebarOrder: 1000 }, "user"),
+    ).toEqual({ name: "Housework", sidebarOrder: 1000 });
     // An unrelated edit leaves the position where the drop put it.
     expect(
       applyBotProfilePatchV1(

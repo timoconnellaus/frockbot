@@ -1,14 +1,14 @@
 /// Where a dragged Bot row landed, and the profile writes that make it so.
 ///
 /// A Bot's place in the list is a profile field, `sidebarOrder`, the way its
-/// label and its pin are: the Bot Durable Object holds it, the identity
-/// directory reads it through, and the sidebar draws whatever it reads. So a
-/// drop is a command to the authority, not a rearrangement the client keeps
-/// for itself, and it comes back the same on every device and every reload.
+/// pin is: the Bot Durable Object holds it, the identity directory reads it
+/// through, and the sidebar draws whatever it reads. So a drop is a command to
+/// the authority, not a rearrangement the client keeps for itself, and it
+/// comes back the same on every device and every reload.
 ///
 /// The number is sparse. Neighbours are spaced a thousand apart, a drop takes
 /// the midpoint between the rows it landed between, and only when there is no
-/// room left does the row after it move too. The first drop into a group that
+/// room left does the row after it move too. The first drop into a list that
 /// was never ordered numbers the rows above the drop as well, because a Bot
 /// without a number sits after every Bot with one.
 library;
@@ -22,37 +22,30 @@ const int sidebarOrderStride = 1000;
 class SidebarDrop {
   final String botId;
 
-  /// The label of the group it landed in; the empty string is Unassigned, or
-  /// the plain list before anything is labelled.
-  final String label;
-
-  /// The Bot it landed above, or null for the end of the group.
+  /// The Bot it landed above, or null for the end of the list.
   final String? beforeBotId;
 
-  /// The group's Bots as they were drawn, top to bottom, which is the order
+  /// The list's rows as they were drawn, top to bottom, which is the order
   /// the person was looking at when they let go.
-  final List<String> group;
+  final List<String> rows;
   const SidebarDrop({
     required this.botId,
-    required this.label,
     required this.beforeBotId,
-    required this.group,
+    required this.rows,
   });
 
   @override
   bool operator ==(Object other) =>
       other is SidebarDrop &&
       other.botId == botId &&
-      other.label == label &&
       other.beforeBotId == beforeBotId &&
-      _sameList(other.group, group);
+      _sameList(other.rows, rows);
 
   @override
-  int get hashCode => Object.hash(botId, label, beforeBotId, group.length);
+  int get hashCode => Object.hash(botId, beforeBotId, rows.length);
 
   @override
-  String toString() =>
-      'SidebarDrop($botId into "$label" before $beforeBotId of $group)';
+  String toString() => 'SidebarDrop($botId before $beforeBotId of $rows)';
 }
 
 bool _sameList(List<String> left, List<String> right) {
@@ -86,16 +79,14 @@ class SidebarProfileWrite {
 /// The writes a drop needs, the dragged Bot's own first.
 ///
 /// Empty when the drop changes nothing: a row let go where it already was, or
-/// on itself. A drop into another label carries the label on the dragged
-/// Bot's own patch, so the move is one command and never a Bot that changed
-/// group without a place in it.
+/// on itself.
 List<SidebarProfileWrite> planSidebarDropV1(
   SidebarDrop drop,
   Map<String, SidebarProfile> profiles,
 ) {
   if (drop.beforeBotId == drop.botId) return const [];
   final sequence = [
-    for (final id in drop.group)
+    for (final id in drop.rows)
       if (id != drop.botId) id,
   ];
   final at = drop.beforeBotId == null
@@ -140,18 +131,9 @@ List<SidebarProfileWrite> planSidebarDropV1(
   }
 
   final writes = <SidebarProfileWrite>[];
-  final dragged = profiles[drop.botId];
-  final from = (dragged?.label ?? '').trim();
-  final to = drop.label.trim();
-  final relabel = from.toLowerCase() != to.toLowerCase();
   final draggedOrder = assigned[drop.botId]!;
-  if (relabel || draggedOrder != dragged?.sidebarOrder) {
-    writes.add(
-      SidebarProfileWrite(drop.botId, {
-        if (relabel) 'label': to,
-        'sidebarOrder': draggedOrder,
-      }),
-    );
+  if (draggedOrder != profiles[drop.botId]?.sidebarOrder) {
+    writes.add(SidebarProfileWrite(drop.botId, {'sidebarOrder': draggedOrder}));
   }
   for (final id in sequence) {
     if (id == drop.botId) continue;

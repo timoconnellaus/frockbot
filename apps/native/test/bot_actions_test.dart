@@ -27,7 +27,6 @@ void main() {
         BotAction.markRead,
         BotAction.pin,
         BotAction.mute,
-        BotAction.label,
         BotAction.hide,
         BotAction.archive,
       ]);
@@ -39,7 +38,6 @@ void main() {
           BotAction.markUnread,
           BotAction.unpin,
           BotAction.unmute,
-          BotAction.label,
           BotAction.show,
           BotAction.archive,
         ],
@@ -424,36 +422,6 @@ void main() {
       await tester.tap(byIdentifier(BotActionIds.item(BotAction.hide)));
       await tester.pumpAndSettle();
       expect(chosen, BotAction.hide);
-    });
-
-    testWidgets('the label picker offers what the list already groups by', (
-      tester,
-    ) async {
-      String? chosen;
-      await tester.pumpWidget(
-        host(
-          Builder(
-            builder: (context) => TextButton(
-              onPressed: () async {
-                chosen = await showBotLabelPicker(
-                  context: context,
-                  botName: 'Scout',
-                  current: 'Work',
-                  existing: const ['Work', 'home', ' ', 'Work'],
-                );
-              },
-              child: const Text('open'),
-            ),
-          ),
-        ),
-      );
-      await tester.tap(find.text('open'));
-      await tester.pumpAndSettle();
-      expect(byIdentifier(BotActionIds.labelChoice('work')), findsOneWidget);
-      expect(byIdentifier(BotActionIds.labelChoice('home')), findsOneWidget);
-      await tester.tap(byIdentifier(BotActionIds.labelClear));
-      await tester.pumpAndSettle();
-      expect(chosen, '');
     });
   });
 }

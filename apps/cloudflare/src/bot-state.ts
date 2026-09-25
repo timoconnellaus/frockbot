@@ -14,6 +14,7 @@ import { cleanHiddenBotNotifications } from "./hidden-bot-notifications-cleanup.
 import { cleanRetiredRoutineStateV1 } from "./routine-state-cleanup.js";
 import { cleanUnpreparedRunsV1 } from "./prepared-input-cleanup.js";
 import { cleanSupersedeStateV1 } from "./supersede-cleanup.js";
+import { cleanBotLabelV1 } from "./sidebar-label-cleanup.js";
 import { cleanProjectEventsV1 } from "./project-events-cleanup.js";
 import { cleanUndecodableSkillIndexesV1 } from "./skill-index-cleanup.js";
 import {
@@ -641,6 +642,9 @@ export class BotState
       // A deleted Bot has no conversation left to clean, and a receipt
       // written here would be the only thing in it besides its tombstone.
       if (await isBotTombstoneV1(this.ctx.storage)) return;
+      // Before anything decodes the settings or a run: a profile `label` no
+      // longer parses.
+      await cleanBotLabelV1(this.ctx.storage);
       await cleanIncidentTestChatsV1(this.ctx.storage);
       await cleanNotificationTestState(this.ctx.storage);
       await cleanHiddenBotNotifications(this.ctx.storage);

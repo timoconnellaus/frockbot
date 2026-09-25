@@ -396,47 +396,6 @@ void main() {
     });
   });
 
-  group('the sidebar groups by label', () {
-    String id(wire.BotRegistration value) => value.botId.value;
-
-    test('stays one plain list until a visible Bot has a label', () {
-      final grouped = groupSidebarBots([bot('a', 'A'), bot('b', 'B')], id, {});
-
-      expect(grouped.showHeadings, isFalse);
-      expect(grouped.groups.single.key, 'all');
-      expect(grouped.groups.single.bots.length, 2);
-    });
-
-    test('folds case and keeps the first spelling, unassigned last', () {
-      final grouped = groupSidebarBots(
-        [bot('a', 'A'), bot('b', 'B'), bot('c', 'C')],
-        id,
-        {
-          'a': const SidebarProfile(label: 'Work'),
-          'b': const SidebarProfile(label: ' work '),
-        },
-      );
-
-      expect(grouped.showHeadings, isTrue);
-      expect(
-        [for (final group in grouped.groups) group.label],
-        ['Work', 'Unassigned'],
-      );
-      expect(grouped.groups.first.bots.length, 2);
-      expect(grouped.groups.last.bots.single.botId.value, 'c');
-    });
-
-    test('offers no Unassigned group when every Bot has a label', () {
-      final grouped = groupSidebarBots(
-        [bot('a', 'A')],
-        id,
-        {'a': const SidebarProfile(label: 'Work')},
-      );
-
-      expect(grouped.groups.length, 1);
-    });
-  });
-
   group('the sidebar row', () {
     test('says how many unread, and nothing at zero', () {
       String? label(wire.UnreadView? view) =>
@@ -551,28 +510,6 @@ void main() {
       expect(rosemary.top - scout.bottom, 4);
     });
 
-    test('draws each group in its sidebar order', () {
-      final grouped = groupSidebarBots(
-        [bot('a', 'A'), bot('b', 'B'), bot('c', 'C'), bot('d', 'D')],
-        (value) => value.botId.value,
-        {
-          'a': const SidebarProfile(label: 'Work'),
-          'b': const SidebarProfile(label: 'Work', sidebarOrder: 0),
-          'd': const SidebarProfile(sidebarOrder: 5),
-        },
-      );
-      expect(
-        [
-          for (final group in grouped.groups)
-            [for (final value in group.bots) value.botId.value],
-        ],
-        [
-          ['b', 'a'],
-          ['d', 'c'],
-        ],
-      );
-    });
-
     ShellSidebar sidebar({
       required List<wire.BotRegistration> bots,
       Map<String, SidebarProfile> profiles = const {},
@@ -601,6 +538,35 @@ void main() {
       onMove: onMove,
       phone: phone,
     );
+
+    testWidgets('draws one list in its sidebar order, with no headings', (
+      tester,
+    ) async {
+      await tester.pumpWidget(
+        host(
+          sidebar(
+            bots: [bot('a', 'A'), bot('b', 'B'), bot('c', 'C'), bot('d', 'D')],
+            profiles: const {
+              'b': SidebarProfile(sidebarOrder: 0),
+              'd': SidebarProfile(sidebarOrder: 5),
+            },
+            onMove: (_) {},
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      final drawn = ['a', 'b', 'c', 'd']
+        ..sort(
+          (left, right) => tester
+              .getTopLeft(byIdentifier(ShellIds.sidebarBot(left)))
+              .dy
+              .compareTo(
+                tester.getTopLeft(byIdentifier(ShellIds.sidebarBot(right))).dy,
+              ),
+        );
+      expect(drawn, ['b', 'd', 'a', 'c']);
+    });
 
     testWidgets('a pointer drags a row above another, and the drop says so', (
       tester,
@@ -637,9 +603,8 @@ void main() {
       expect(drops, [
         const SidebarDrop(
           botId: 'rosemary',
-          label: '',
           beforeBotId: 'scout',
-          group: ['scout', 'rosemary'],
+          rows: ['scout', 'rosemary'],
         ),
       ]);
       // The lift did not disturb the list's own spacing.
@@ -647,49 +612,6 @@ void main() {
         byIdentifier(ShellIds.sidebarBot('rosemary')),
       );
       expect(settled.top - scout.bottom, 4);
-      debugDefaultTargetPlatformOverride = null;
-    });
-
-    testWidgets('dropping a row on a heading moves it into that label', (
-      tester,
-    ) async {
-      debugDefaultTargetPlatformOverride = TargetPlatform.macOS;
-      final drops = <SidebarDrop>[];
-      await tester.pumpWidget(
-        host(
-          sidebar(
-            bots: [bot('scout', 'Scout'), bot('rosemary', 'Rosemary')],
-            profiles: {'scout': const SidebarProfile(label: 'Work')},
-            onMove: drops.add,
-          ),
-        ),
-      );
-      await tester.pumpAndSettle();
-
-      final from = tester.getCenter(
-        byIdentifier(ShellIds.sidebarBot('rosemary')),
-      );
-      final heading = tester.getCenter(find.text('WORK'));
-      final gesture = await tester.startGesture(
-        from,
-        kind: PointerDeviceKind.mouse,
-      );
-      await tester.pump();
-      await gesture.moveTo(from + const Offset(0, -24));
-      await tester.pump();
-      await gesture.moveTo(heading);
-      await tester.pump();
-      await gesture.up();
-      await tester.pumpAndSettle();
-
-      expect(drops, [
-        const SidebarDrop(
-          botId: 'rosemary',
-          label: 'Work',
-          beforeBotId: 'scout',
-          group: ['scout'],
-        ),
-      ]);
       debugDefaultTargetPlatformOverride = null;
     });
 
@@ -838,7 +760,7 @@ void main() {
       debugDefaultTargetPlatformOverride = null;
     });
 
-    testWidgets('carries a stable identifier per Bot and per group', (
+    testWidgets('carries a stable identifier per Bot and per control', (
       tester,
     ) async {
       await tester.pumpWidget(
@@ -846,7 +768,6 @@ void main() {
           ShellSidebar(
             bots: [bot('scout', 'Scout'), bot('rosemary', 'Rosemary')],
             profiles: const {
-              'scout': SidebarProfile(label: 'Work'),
               'rosemary': SidebarProfile(pinnedAt: '2026-01-01T00:00:00.000Z'),
             },
             unread: {'scout': unread(botId: 'scout', count: 2, isUnread: true)},
@@ -871,7 +792,6 @@ void main() {
 
       expect(byIdentifier(ShellIds.sidebarBot('scout')), findsOneWidget);
       expect(byIdentifier(ShellIds.sidebarPinned('rosemary')), findsOneWidget);
-      expect(byIdentifier(ShellIds.sidebarGroup('label:work')), findsOneWidget);
       expect(byIdentifier(ShellIds.sidebarCreateBot), findsOneWidget);
       expect(byIdentifier(ShellIds.sidebarSearch), findsOneWidget);
       expect(byIdentifier(ShellIds.sidebarProfile), findsOneWidget);

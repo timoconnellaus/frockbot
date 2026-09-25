@@ -675,23 +675,25 @@ the rows whose status the code moved:
   `initializeBotSettingsV1` now matches it, and the Create Bot gesture asks for
   browser notification permission without blocking or changing that durable
   intent when the browser refuses.
-  The same hosted sidebar now matches GrokBot's
-  organisational shape: Search sits below the Create Bot header, visible Bots
-  group by the case-insensitive trimmed `BotProfile.label` with Unassigned last,
-  and each row reads a bounded `shell:preview` written atomically with settled
-  unread activity for its latest message and time. Labels remain presentation
-  state and are not injected into a Bot's Turn.
+  The same hosted sidebar keeps GrokBot's
+  header shape: Search sits below the Create Bot header, and each row reads a
+  bounded `shell:preview` written atomically with settled unread activity for
+  its latest message and time. **Owner decision 2026-09-25: no labels.**
+  GrokBot groups its Bots under label headings; FrockBot draws one list, in
+  `BotProfile.sidebarOrder`, which a drag reorders, because a label was a
+  redundant and confusing third way to arrange the list beside the pin and
+  the order.
   Pinning matches GrokBot's pinned "General" chat: `BotProfile.pinnedAt` — an
-  ISO 8601 instant beside `label`, `title` and `hiddenFromSidebar`, decoded by
-  the same strict codec and patched the same way, where the empty string unpins
-  — puts the Bot in a wrapping row of large round avatar tiles above the
-  labelled groups, earliest pin first, and takes it out of the list below so it
-  never appears twice. The instant rather than a flag is what keeps that order
-  stable across later edits. A tile carries the Bot's name and, because it has
-  no preview line to go bold, an unread dot wherever the row would have shown
-  one; clicking it selects exactly as the row does. The pin is a layout choice
-  like `hiddenFromSidebar`, so it is presentation state and, like a label, is
-  never part of a Bot's instructions.
+  ISO 8601 instant beside `title` and `hiddenFromSidebar`, decoded by the same
+  strict codec and patched the same way, where the empty string unpins — puts
+  the Bot in a wrapping row of large round avatar tiles above the list,
+  earliest pin first, and takes it out of the list below so it never appears
+  twice. The instant rather than a flag is what keeps that order stable across
+  later edits. A tile carries the Bot's name and, because it has no preview
+  line to go bold, an unread dot wherever the row would have shown one;
+  clicking it selects exactly as the row does. The pin and the order are layout
+  choices like `hiddenFromSidebar`, so they are presentation state and never
+  part of a Bot's instructions.
 - **5** — **owner decision 2026-09-01: sheep avatars, no image upload.** The
   Flock's generated sheep recipe is the Bot avatar and Tailor sheep is its only
   editor. The former uploaded-image DTO, object-storage route, and client upload

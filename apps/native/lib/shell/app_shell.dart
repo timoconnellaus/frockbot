@@ -1015,8 +1015,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     _select(general);
   }
 
-  /// A deployment with no identity directory leaves the sidebar one plain
-  /// list, which is exactly what it looks like before anything is labelled.
+  /// A deployment with no identity directory leaves the sidebar in directory
+  /// order under each Bot's creation name, with nothing pinned or hidden.
   Future<void> _loadIdentities() async {
     try {
       final answer = await widget.api.request('/api/bots/identities');
@@ -1029,7 +1029,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         };
       });
     } catch (_) {
-      // The registration seed is still a name; nothing is lost but the label.
+      // The registration seed is still a name; what is lost is the Bot's
+      // current name, its place, its pin and whether it is hidden.
     }
   }
 
@@ -2041,15 +2042,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
         );
       case BotAction.show:
         await _patchProfile(botId, {'hiddenFromSidebar': false});
-      case BotAction.label:
-        final label = await showBotLabelPicker(
-          context: context,
-          botName: name,
-          current: profiles[botId]?.label?.trim() ?? '',
-          existing: [for (final profile in profiles.values) ?profile.label],
-        );
-        if (label == null || !mounted) return;
-        await _patchProfile(botId, {'label': label});
       case BotAction.mute:
         await _setNotifications(botId, enabled: false);
       case BotAction.unmute:
@@ -2111,12 +2103,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       // A group's place is the group's to keep; the directory draws it at
       // once and puts it back itself if the group refuses.
       if (sidebarGroupIdOf(write.botId) case final String groupId) {
-        final label = write.patch['label'] as String?;
         try {
           await groupDirectory.arrange(
             groupId,
-            label: label == null || label.isEmpty ? null : label,
-            clearLabel: label != null && label.isEmpty,
             sidebarOrder: write.patch['sidebarOrder'] as num?,
           );
         } catch (failure) {
@@ -2420,13 +2409,12 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   // ------------------------------------------------------------ Group Chats
 
   /// Bots' profiles and groups' arrangements in the one map the list's order
-  /// and labels are planned over, keyed by sidebar entry id.
+  /// is planned over, keyed by sidebar entry id.
   Map<String, SidebarProfile> get _entryProfiles => {
     ...profiles,
     for (final group in groupDirectory.active)
       sidebarGroupEntryId(group.groupId): SidebarProfile(
         name: group.name,
-        label: group.label,
         pinnedAt: group.pinnedAt,
         hiddenFromSidebar: group.hidden,
         sidebarOrder: group.sidebarOrder?.toInt(),
@@ -2683,7 +2671,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           const BotActionItem(BotAction.unpin, 'Unpin', Icons.push_pin)
         else
           const BotActionItem(BotAction.pin, 'Pin', Icons.push_pin_outlined),
-        const BotActionItem(BotAction.label, 'Label…', Icons.label_outline),
         if (group.hidden)
           const BotActionItem(
             BotAction.show,
@@ -2724,22 +2711,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           await groupDirectory.arrange(
             groupId,
             hidden: action == BotAction.hide,
-          );
-        case BotAction.label:
-          final label = await showBotLabelPicker(
-            context: context,
-            botName: _groupName(group),
-            current: group.label ?? '',
-            maxLength: 40,
-            existing: [
-              for (final profile in _entryProfiles.values) ?profile.label,
-            ],
-          );
-          if (label == null || !mounted) return;
-          await groupDirectory.arrange(
-            groupId,
-            label: label.isEmpty ? null : label,
-            clearLabel: label.isEmpty,
           );
         case BotAction.archive:
           final confirmed = await showDialog<bool>(

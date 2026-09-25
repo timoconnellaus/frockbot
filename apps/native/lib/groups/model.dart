@@ -10,7 +10,6 @@ class GroupRecord {
   final String createdAt;
   final String updatedAt;
   final String? archivedAt;
-  final String? label;
   final String? pinnedAt;
   final num? sidebarOrder;
   final bool hidden;
@@ -22,7 +21,6 @@ class GroupRecord {
     required this.createdAt,
     required this.updatedAt,
     this.archivedAt,
-    this.label,
     this.pinnedAt,
     this.sidebarOrder,
     this.hidden = false,
@@ -39,7 +37,6 @@ class GroupRecord {
       createdAt: json['createdAt'] as String,
       updatedAt: json['updatedAt'] as String,
       archivedAt: json['archivedAt'] as String?,
-      label: json['label'] as String?,
       pinnedAt: json['pinnedAt'] as String?,
       sidebarOrder: json['sidebarOrder'] as num?,
       hidden: json['hiddenFromSidebar'] == true,
@@ -47,10 +44,8 @@ class GroupRecord {
   }
 
   /// This group with an arrangement change applied, as the server will
-  /// apply it: a pin is stamped now, and an empty label clears the label.
+  /// apply it: a pin is stamped now.
   GroupRecord arranged({
-    String? label,
-    bool clearLabel = false,
     bool? pinned,
     num? sidebarOrder,
     bool clearOrder = false,
@@ -63,7 +58,6 @@ class GroupRecord {
     createdAt: createdAt,
     updatedAt: updatedAt,
     archivedAt: archivedAt,
-    label: clearLabel ? null : (label ?? this.label),
     pinnedAt: pinned == null
         ? pinnedAt
         : pinned

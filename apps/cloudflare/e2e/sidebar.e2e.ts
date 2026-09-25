@@ -1,10 +1,9 @@
-// The sidebar's own header, and the one rule about grouping the Bot list: a
-// label group is not a thing a person configures, it appears the moment a
-// visible Bot has a label and not before. The grouping arithmetic is
-// `groupSidebarBots`'s and its unit tests cover it; what only a browser can
-// show is that the durable field the settings panel writes is the field the
-// sidebar reads back, and that search is a sidebar control rather than a
-// second one hidden in the header.
+// The sidebar's own header, and the one list beneath it. Search is a sidebar
+// control rather than a second one hidden in the header, and the Bots are one
+// list in their sidebar order: there are no label headings. An installed app
+// still sends the retired label on every settings save, and what only a
+// browser can show is that the save is accepted and changes nothing the
+// sidebar draws.
 import {
   closeOverlay,
   createBot,
@@ -15,7 +14,7 @@ import {
 } from "./fixtures.ts";
 import type { Page } from "@playwright/test";
 
-/** The Bot rows the sidebar is showing, whichever group they are drawn in. */
+/** The Bot rows the sidebar is showing. */
 function rows(page: Page) {
   return sem(page, "shell-sidebar").locator(
     '[flt-semantics-identifier^="sidebar-bot-"]',
@@ -31,7 +30,7 @@ async function botIdOf(page: Page, name: string): Promise<string> {
   return identifier.slice("sidebar-bot-".length);
 }
 
-test("the sidebar searches from the top and groups Bots only after a label exists", async ({
+test("the sidebar searches from the top and lists every Bot in one list", async ({
   page,
   userId,
 }) => {
@@ -65,22 +64,14 @@ test("the sidebar searches from the top and groups Bots only after a label exist
   await createBot(page, "Alpha");
   await createBot(page, "Beta");
 
-  // Two unlabelled Bots are one plain list: a single group, and no heading.
-  const groups = sidebar.locator(
-    '[flt-semantics-identifier^="sidebar-group-"]',
-  );
-  await expect(groups).toHaveCount(1);
-  await expect(groups).not.toHaveAttribute("aria-label", /\S/);
-
-  // The label is written the way the settings panel writes it. A heading is
-  // what the sidebar does with it, and that is what this test is about.
+  // The save an installed app makes: the whole profile, the label included.
   const botId = await botIdOf(page, "Beta");
   const settingsResponse = await page.request.get(
     `/api/bots/${encodeURIComponent(botId)}/settings`,
   );
   expect(settingsResponse.ok()).toBe(true);
   const settings = (await settingsResponse.json()) as { revision: number };
-  const labelled = await page.request.post(
+  const saved = await page.request.post(
     `/api/bots/${encodeURIComponent(botId)}/settings`,
     {
       data: {
@@ -89,20 +80,22 @@ test("the sidebar searches from the top and groups Bots only after a label exist
         commandId: `label-${crypto.randomUUID()}`,
         expectedRevision: settings.revision,
         botId,
-        profile: { label: "Personal" },
+        profile: { name: "Beta", label: "Personal" },
       },
     },
   );
-  expect(labelled.ok()).toBe(true);
+  expect(saved.ok()).toBe(true);
+  const reread = await page.request.get(
+    `/api/bots/${encodeURIComponent(botId)}/settings`,
+  );
+  expect(
+    ((await reread.json()) as { profile: object }).profile,
+  ).not.toHaveProperty("label");
 
   await page.reload();
   await expect(sidebar).toBeVisible();
-  // A heading is prose the group carries as its label rather than as text, so
-  // it is read off `aria-label` — and the engine lists the groups in traversal
-  // order, which is the order they are drawn in. Unassigned is always last.
-  await expect(groups).toHaveCount(2);
-  await expect(groups.nth(0)).toHaveAttribute("aria-label", "PERSONAL");
-  await expect(groups.nth(1)).toHaveAttribute("aria-label", "UNASSIGNED");
-  await expect(groups.nth(0).getByText("Beta")).toBeVisible();
-  await expect(groups.nth(1).getByText("Alpha")).toBeVisible();
+  // The rows are where they were, and no heading is drawn for the label.
+  await expect(rows(page).filter({ hasText: "Alpha" })).toHaveCount(1);
+  await expect(rows(page).filter({ hasText: "Beta" })).toHaveCount(1);
+  await expect(sidebar.getByText("PERSONAL")).toHaveCount(0);
 });

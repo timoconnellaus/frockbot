@@ -56,7 +56,6 @@ class BotSettingsController extends ChangeNotifier {
   int loads = 0;
 
   String name = '';
-  String label = '';
   String description = '';
   String title = '';
   bool pinned = false;
@@ -65,7 +64,7 @@ class BotSettingsController extends ChangeNotifier {
 
   /// Where the sidebar draws the Bot. This page never changes it — a drag on
   /// the list does — but it saves the whole profile, so it carries the value
-  /// it read rather than saving the Bot back to the end of its group.
+  /// it read rather than saving the Bot back to the end of the list.
   int? sidebarOrder;
   bool notifications = true;
 
@@ -113,7 +112,6 @@ class BotSettingsController extends ChangeNotifier {
       final profile = (answer['profile'] as Map).cast<String, Object?>();
       revision = answer['revision']! as int;
       name = profile['name'] as String? ?? '';
-      label = profile['label'] as String? ?? '';
       description = profile['description'] as String? ?? '';
       title = profile['title'] as String? ?? '';
       hidden = profile['hiddenFromSidebar'] == true;
@@ -211,7 +209,6 @@ class BotSettingsController extends ChangeNotifier {
 
   Map<String, Object?> _profileBody(String pinInstant) => {
     'name': name.trim(),
-    'label': label.trim(),
     'description': description,
     'title': title.trim(),
     'hiddenFromSidebar': hidden,
@@ -231,7 +228,6 @@ class BotSettingsController extends ChangeNotifier {
   static SidebarProfile _profileOf(Map<String, Object?> body) => SidebarProfile(
     name: body['name'] as String?,
     title: body['title'] as String?,
-    label: body['label'] as String?,
     pinnedAt: body['pinnedAt'] as String?,
     hiddenFromSidebar: body['hiddenFromSidebar'] == true,
     sidebarOrder: (body['sidebarOrder'] as num?)?.toInt(),
@@ -879,14 +875,6 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                         maxLength: 100,
                         required: true,
                         onChanged: (next) => state.name = next,
-                      ),
-                      _field(
-                        id: SettingsIds.botLabel,
-                        label: 'Label',
-                        hint: 'Research, marketing, admin',
-                        value: state.label,
-                        maxLength: 120,
-                        onChanged: (next) => state.label = next,
                       ),
                       _field(
                         id: SettingsIds.botTitle,

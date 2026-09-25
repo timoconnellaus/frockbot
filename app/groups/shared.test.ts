@@ -88,6 +88,21 @@ describe("decoding what a client sends", () => {
     }
   });
 
+  test("an arrangement drops the retired label an installed app still sends", () => {
+    const arrange = {
+      type: "group/arrange",
+      commandId: "a1",
+      groupId: "g-0123456789abcdef0123",
+      pinned: true,
+    } as const;
+    expect(decodeGroupChatCommandV1({ ...arrange, label: "Work" })).toEqual(
+      arrange,
+    );
+    expect(decodeGroupChatCommandV1({ ...arrange, label: null })).toEqual(
+      arrange,
+    );
+  });
+
   test("a post is trimmed and bounded", () => {
     expect(
       decodeGroupPostCommandV1({

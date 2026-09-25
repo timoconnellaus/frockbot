@@ -61,7 +61,6 @@ abstract final class ShellIds {
 
   static String sidebarBot(String botId) => 'sidebar-bot-$botId';
   static String sidebarPinned(String botId) => 'sidebar-pinned-$botId';
-  static String sidebarGroup(String key) => 'sidebar-group-$key';
   static String message(String id) => 'message-$id';
   static String retryTurn(String runId) => 'retry-turn-$runId';
 
@@ -136,10 +135,6 @@ abstract final class BotActionIds {
   static String swipeHide(String botId) => 'bot-swipe-hide-$botId';
   static String item(Object action) =>
       'bot-action-${action.toString().split('.').last}';
-  static const labelPicker = 'bot-label-picker';
-  static const labelClear = 'bot-label-clear';
-  static String labelChoice(String label) =>
-      'bot-label-choice-${label.toLowerCase()}';
 }
 
 /// Names a widget for the browser specs without changing how it is drawn, or
@@ -280,7 +275,6 @@ abstract final class SettingsIds {
   static const botSettings = 'bot-settings';
   static const botAvatar = 'bot-avatar';
   static const botName = 'bot-name';
-  static const botLabel = 'bot-label';
   static const botPinned = 'bot-pinned';
   static const botDescription = 'bot-description';
   static const botNotifications = 'bot-notifications';

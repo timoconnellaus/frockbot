@@ -1,4 +1,4 @@
-/// The Bot list: pinned tiles, label groups, unread, and the way out of it.
+/// The Bot list: pinned tiles, one ordered list, unread, and the way out of it.
 ///
 /// Every row also offers its Bot's quick actions — the list of them is
 /// `bot_actions.dart`'s — reached the way each tier reaches a row: a phone
@@ -9,10 +9,11 @@
 /// pointer and on focus.
 ///
 /// A pinned Bot is a tile above the list instead of a row inside it, never
-/// both — the tile *is* the row, moved — so grouping runs over what is left.
+/// both — the tile *is* the row, moved — so the list orders what is left.
 /// Hidden and archived are different states: archiving stops a Bot
 /// working, hiding only takes it out of this list, so a hidden Bot stays
-/// selectable and its own group is how a person reaches it again.
+/// selectable and the hidden rows below the list are how a person reaches it
+/// again.
 library;
 
 import 'package:flutter/gestures.dart' show kTouchSlop;
@@ -40,17 +41,15 @@ import 'sidebar_order.dart';
 class SidebarProfile {
   final String? name;
   final String? title;
-  final String? label;
   final String? pinnedAt;
   final bool hiddenFromSidebar;
 
-  /// Where the Bot sits among the Bots of its label, lower first. Absent
-  /// puts it after every Bot that has one, in the order the directory lists.
+  /// Where the Bot sits in the list, lower first. Absent puts it after every
+  /// Bot that has one, in the order the directory lists.
   final int? sidebarOrder;
   const SidebarProfile({
     this.name,
     this.title,
-    this.label,
     this.pinnedAt,
     this.hiddenFromSidebar = false,
     this.sidebarOrder,
@@ -62,7 +61,6 @@ class SidebarProfile {
     return SidebarProfile(
       name: value['name'] as String?,
       title: value['title'] as String?,
-      label: value['label'] as String?,
       pinnedAt: value['pinnedAt'] as String?,
       hiddenFromSidebar: value['hiddenFromSidebar'] == true,
       sidebarOrder: order is num ? order.toInt() : null,
@@ -75,7 +73,6 @@ class SidebarProfile {
   SidebarProfile patched(Map<String, Object?> patch) => SidebarProfile(
     name: patch.containsKey('name') ? patch['name'] as String? : name,
     title: patch.containsKey('title') ? patch['title'] as String? : title,
-    label: patch.containsKey('label') ? patch['label'] as String? : label,
     pinnedAt: patch.containsKey('pinnedAt')
         ? patch['pinnedAt'] as String?
         : pinnedAt,
@@ -88,9 +85,9 @@ class SidebarProfile {
   );
 }
 
-/// The Bots of one group in the order the sidebar draws them: by
-/// `sidebarOrder`, lowest first, with the Bots that have none after them in
-/// the order they arrived. Stable, so two equal numbers keep directory order.
+/// The Bots in the order the sidebar draws them: by `sidebarOrder`, lowest
+/// first, with the Bots that have none after them in the order they arrived.
+/// Stable, so two equal numbers keep directory order.
 List<T> orderSidebarBots<T>(
   List<T> bots,
   String Function(T) idOf,
@@ -153,62 +150,6 @@ PinnedSidebarBots<T> partitionPinnedSidebarBots<T>(
   return PinnedSidebarBots([for (final entry in pinned) entry.bot], rest);
 }
 
-class SidebarBotGroup<T> {
-  final String key;
-  final String label;
-  final List<T> bots;
-  const SidebarBotGroup(this.key, this.label, this.bots);
-}
-
-class GroupedSidebarBots<T> {
-  final bool showHeadings;
-  final List<SidebarBotGroup<T>> groups;
-  const GroupedSidebarBots(this.showHeadings, this.groups);
-}
-
-/// Groups labels by their case-insensitive trimmed value while preserving the
-/// spelling of the first Bot in each group. Unassigned is always last. Until a
-/// visible Bot has a label, the sidebar remains one plain list with no heading.
-GroupedSidebarBots<T> groupSidebarBots<T>(
-  List<T> bots,
-  String Function(T) idOf,
-  Map<String, SidebarProfile> profiles,
-) {
-  final labelled = <String, SidebarBotGroup<T>>{};
-  final unassigned = <T>[];
-  for (final bot in bots) {
-    final label = profiles[idOf(bot)]?.label?.trim() ?? '';
-    if (label.isEmpty) {
-      unassigned.add(bot);
-      continue;
-    }
-    final key = label.toLowerCase();
-    final group = labelled[key];
-    if (group != null) {
-      group.bots.add(bot);
-    } else {
-      labelled[key] = SidebarBotGroup('label:$key', label, [bot]);
-    }
-  }
-  List<T> ordered(List<T> group) => orderSidebarBots(group, idOf, profiles);
-  if (labelled.isEmpty) {
-    return GroupedSidebarBots(false, [
-      SidebarBotGroup('all', '', ordered(bots)),
-    ]);
-  }
-  return GroupedSidebarBots(true, [
-    for (final group in labelled.values)
-      SidebarBotGroup(group.key, group.label, ordered(group.bots)),
-    if (unassigned.isNotEmpty)
-      SidebarBotGroup('unassigned', 'Unassigned', ordered(unassigned)),
-  ]);
-}
-
-/// The label a drop into [group] writes: the group's own spelling, or the
-/// empty string for Unassigned and for the plain list.
-String sidebarGroupDropLabel<T>(SidebarBotGroup<T> group) =>
-    group.key.startsWith('label:') ? group.label : '';
-
 /// The local time label beside the latest message: a time today, a weekday
 /// inside the last week, a date beyond it.
 String formatSidebarMessageTime(String at, [DateTime? clock]) {
@@ -236,8 +177,8 @@ String formatSidebarMessageTime(String at, [DateTime? clock]) {
   return dateLabel(message, now: now);
 }
 
-/// A Group Chat as the list draws it: among the Bots, labelled, pinned,
-/// ordered and hidden the same way.
+/// A Group Chat as the list draws it: among the Bots, pinned, ordered and
+/// hidden the same way.
 class SidebarGroupChat {
   final String groupId;
   final String name;
@@ -258,7 +199,7 @@ class SidebarGroupChat {
 }
 
 /// The id a Group Chat's row answers to, in the one id space the list's
-/// order, labels and drops share with Bot ids. No Bot id has a colon.
+/// order and drops share with Bot ids. No Bot id has a colon.
 String sidebarGroupEntryId(String groupId) => 'group:$groupId';
 
 /// The group an entry id names, or null for a Bot's.
@@ -337,10 +278,9 @@ class ShellSidebar extends StatelessWidget {
   /// A phone's swipe towards the leading edge, then the button it reveals.
   final void Function(String botId)? onSwipeHide;
 
-  /// A row dragged and let go over the list: above or below another row, or
-  /// on a group's heading. Reordering and moving between labels are the one
-  /// gesture; a pointer drags a row outright, a finger holds it first. Null
-  /// leaves the rows where they are.
+  /// A row dragged and let go over the list, above or below another row. A
+  /// pointer drags a row outright, a finger holds it first. Null leaves the
+  /// rows where they are.
   final void Function(SidebarDrop drop)? onMove;
   const ShellSidebar({
     super.key,
@@ -390,7 +330,7 @@ class ShellSidebar extends StatelessWidget {
   };
 
   /// Bots' profiles and groups' arrangements in one map, keyed by entry id,
-  /// which is what ordering, pinning and labelling read.
+  /// which is what ordering and pinning read.
   Map<String, SidebarProfile> get _entryProfiles => groupChats.isEmpty
       ? profiles
       : {
@@ -443,7 +383,8 @@ class ShellSidebar extends StatelessWidget {
       _entryId,
       entryProfiles,
     );
-    final grouped = groupSidebarBots(partitioned.rest, _entryId, entryProfiles);
+    final listed = orderSidebarBots(partitioned.rest, _entryId, entryProfiles);
+    final listedIds = [for (final entry in listed) _entryId(entry)];
     final hiddenUnread = hidden.fold(
       0,
       (total, entry) => total + _entryUnread(entry),
@@ -519,40 +460,8 @@ class ShellSidebar extends StatelessWidget {
                         ],
                       ),
                     ),
-                  for (final group in grouped.groups)
-                    identified(
-                      ShellIds.sidebarGroup(group.key),
-                      Column(
-                        crossAxisAlignment: CrossAxisAlignment.stretch,
-                        children: [
-                          if (grouped.showHeadings && group.label.isNotEmpty)
-                            _HeadingTarget(
-                              label: sidebarGroupDropLabel(group),
-                              groupIds: [
-                                for (final entry in group.bots) _entryId(entry),
-                              ],
-                              onMove: onMove,
-                              child: Padding(
-                                padding: const EdgeInsets.fromLTRB(
-                                  20,
-                                  14,
-                                  16,
-                                  4,
-                                ),
-                                child: Text(
-                                  group.label.toUpperCase(),
-                                  style: theme.textTheme.labelSmall?.copyWith(
-                                    color: theme.colorScheme.onSurfaceVariant
-                                        .withValues(alpha: 0.85),
-                                  ),
-                                ),
-                              ),
-                            ),
-                          for (final entry in group.bots)
-                            _entryRow(context, entry, group: group),
-                        ],
-                      ),
-                    ),
+                  for (final entry in listed)
+                    _entryRow(context, entry, list: listedIds),
                   if (hidden.isNotEmpty)
                     Padding(
                       padding: const EdgeInsets.fromLTRB(12, 6, 12, 0),
@@ -621,18 +530,15 @@ class ShellSidebar extends StatelessWidget {
     return ColoredBox(color: ground, child: column);
   }
 
-  /// One row. In a [group] it can be dragged to another place or another
-  /// group, and is where another row can be dropped; a hidden Bot's row is
-  /// outside every group, so it is neither.
-  Widget _entryRow(
-    BuildContext context,
-    Object entry, {
-    SidebarBotGroup<Object>? group,
-  }) => switch (entry) {
-    final SidebarGroupChat chat => _groupRow(context, chat, group: group),
-    final wire.BotRegistration bot => _row(context, bot, group: group),
-    _ => const SizedBox.shrink(),
-  };
+  /// One row. In the [list] — the ids of its rows as drawn — it can be
+  /// dragged to another place, and is where another row can be dropped; a
+  /// hidden Bot's row is outside the list, so it is neither.
+  Widget _entryRow(BuildContext context, Object entry, {List<String>? list}) =>
+      switch (entry) {
+        final SidebarGroupChat chat => _groupRow(context, chat, list: list),
+        final wire.BotRegistration bot => _row(context, bot, list: list),
+        _ => const SizedBox.shrink(),
+      };
 
   Widget _pinned(Object entry) {
     final actions = onActions;
@@ -681,12 +587,12 @@ class ShellSidebar extends StatelessWidget {
   }
 
   /// A Group Chat's row: its members' faces, its name, and who is in it.
-  /// It moves, labels and hides the way a Bot's row does; it has no read
-  /// cursor to mark back to unread, so its swipe only marks it read.
+  /// It moves and hides the way a Bot's row does; it has no read cursor to
+  /// mark back to unread, so its swipe only marks it read.
   Widget _groupRow(
     BuildContext context,
     SidebarGroupChat chat, {
-    SidebarBotGroup<Object>? group,
+    List<String>? list,
   }) {
     final theme = Theme.of(context);
     final id = sidebarGroupEntryId(chat.groupId);
@@ -697,7 +603,7 @@ class ShellSidebar extends StatelessWidget {
         : ({Offset? position}) => onActions!(id, position: position);
     final move = onMove;
     final touchDrag =
-        move != null && group != null && sidebarDragIsHeld(context);
+        move != null && list != null && sidebarDragIsHeld(context);
     final names = [for (final face in chat.faces) face.name];
     final named = chat.profile.name?.trim().isNotEmpty == true;
     final faces = _GroupFaces(
@@ -747,7 +653,7 @@ class ShellSidebar extends StatelessWidget {
           ? Badge(label: Text(count > 99 ? '99+' : '$count'))
           : null,
     );
-    final Widget lifted = move == null || group == null
+    final Widget lifted = move == null || list == null
         ? row
         : _DragSource(
             botId: id,
@@ -776,12 +682,11 @@ class ShellSidebar extends StatelessWidget {
             onHide: onHide,
             child: lifted,
           );
-    if (move == null || group == null) return swiped;
+    if (move == null || list == null) return swiped;
     return _RowDropTarget(
       key: ValueKey('drop-$id'),
       botId: id,
-      label: sidebarGroupDropLabel(group),
-      groupIds: [for (final member in group.bots) _entryId(member)],
+      rows: list,
       onMove: move,
       child: swiped,
     );
@@ -790,7 +695,7 @@ class ShellSidebar extends StatelessWidget {
   Widget _row(
     BuildContext context,
     wire.BotRegistration bot, {
-    SidebarBotGroup<Object>? group,
+    List<String>? list,
   }) {
     final theme = Theme.of(context);
     final botId = _id(bot);
@@ -811,7 +716,7 @@ class ShellSidebar extends StatelessWidget {
     // hold keeps both meanings.
     final touchDrag =
         move != null &&
-        group != null &&
+        list != null &&
         !isArchived &&
         sidebarDragIsHeld(context);
     final row = _BotRow(
@@ -893,7 +798,7 @@ class ShellSidebar extends StatelessWidget {
     );
     // An archived Bot has stopped: it is not dragged about, though the rows
     // around it still are, so it stays a place another row can land beside.
-    final Widget lifted = move == null || group == null || isArchived
+    final Widget lifted = move == null || list == null || isArchived
         ? row
         : _DragSource(
             botId: botId,
@@ -914,12 +819,11 @@ class ShellSidebar extends StatelessWidget {
             child: row,
           );
     final Widget swiped = _swipeRow(bot, lifted, isArchived, isUnread, view);
-    if (move == null || group == null) return swiped;
+    if (move == null || list == null) return swiped;
     return _RowDropTarget(
       key: ValueKey('drop-$botId'),
       botId: botId,
-      label: sidebarGroupDropLabel(group),
-      groupIds: [for (final member in group.bots) _entryId(member)],
+      rows: list,
       onMove: move,
       child: swiped,
     );
@@ -1091,15 +995,15 @@ class _DragSourceState extends State<_DragSource> {
 /// that row, its lower half below. The line says which before letting go.
 class _RowDropTarget extends StatefulWidget {
   final String botId;
-  final String label;
-  final List<String> groupIds;
+
+  /// The list's rows as drawn, top to bottom.
+  final List<String> rows;
   final void Function(SidebarDrop drop) onMove;
   final Widget child;
   const _RowDropTarget({
     super.key,
     required this.botId,
-    required this.label,
-    required this.groupIds,
+    required this.rows,
     required this.onMove,
     required this.child,
   });
@@ -1118,10 +1022,10 @@ class _RowDropTargetState extends State<_RowDropTarget> {
     return box.globalToLocal(global).dy > box.size.height / 2;
   }
 
-  /// The row a drop below this one lands above: the next in the group that
-  /// is not the row in the air, or nothing at the group's end.
+  /// The row a drop below this one lands above: the next in the list that is
+  /// not the row in the air, or nothing at the list's end.
   String? _after(String dragged) {
-    final ids = widget.groupIds;
+    final ids = widget.rows;
     for (
       var index = ids.indexOf(widget.botId) + 1;
       index < ids.length;
@@ -1149,9 +1053,8 @@ class _RowDropTargetState extends State<_RowDropTarget> {
       widget.onMove(
         SidebarDrop(
           botId: details.data,
-          label: widget.label,
           beforeBotId: below ? _after(details.data) : widget.botId,
-          group: widget.groupIds,
+          rows: widget.rows,
         ),
       );
     },
@@ -1169,69 +1072,6 @@ class _RowDropTargetState extends State<_RowDropTarget> {
       ],
     ),
   );
-}
-
-/// A group's heading as a place to land: the row goes to the top of that
-/// group, and into its label.
-class _HeadingTarget extends StatefulWidget {
-  final String label;
-  final List<String> groupIds;
-  final void Function(SidebarDrop drop)? onMove;
-  final Widget child;
-  const _HeadingTarget({
-    required this.label,
-    required this.groupIds,
-    required this.onMove,
-    required this.child,
-  });
-
-  @override
-  State<_HeadingTarget> createState() => _HeadingTargetState();
-}
-
-class _HeadingTargetState extends State<_HeadingTarget> {
-  bool _over = false;
-
-  @override
-  Widget build(BuildContext context) {
-    final move = widget.onMove;
-    if (move == null) return widget.child;
-    return DragTarget<String>(
-      onWillAcceptWithDetails: (_) => true,
-      onMove: (_) {
-        if (!_over) setState(() => _over = true);
-      },
-      onLeave: (_) {
-        if (_over) setState(() => _over = false);
-      },
-      onAcceptWithDetails: (details) {
-        setState(() => _over = false);
-        final first = widget.groupIds
-            .where((id) => id != details.data)
-            .firstOrNull;
-        move(
-          SidebarDrop(
-            botId: details.data,
-            label: widget.label,
-            beforeBotId: first,
-            group: widget.groupIds,
-          ),
-        );
-      },
-      builder: (context, candidates, rejected) => Stack(
-        children: [
-          widget.child,
-          if (_over)
-            const Positioned(
-              left: 16,
-              right: 16,
-              bottom: 0,
-              child: _DropLine(),
-            ),
-        ],
-      ),
-    );
-  }
 }
 
 class _DropLine extends StatelessWidget {

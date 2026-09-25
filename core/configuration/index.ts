@@ -105,7 +105,6 @@ export interface BotSelfWriterV1 {
 
 export interface BotProfile {
   name: string;
-  label?: string;
   description?: string;
   /** A short role line shown under the Bot's name. */
   title?: string;
@@ -120,11 +119,10 @@ export interface BotProfile {
    */
   pinnedAt?: string;
   /**
-   * Where the sidebar draws this Bot among the Bots of its label: lower
-   * first. A Bot without one sits after every Bot with one, in directory
-   * order, which is what the list looked like before anything was dragged.
-   * The gaps between neighbours are the client's to choose, so a drop is
-   * usually one write.
+   * Where the sidebar draws this Bot in its list: lower first. A Bot without
+   * one sits after every Bot with one, in directory order, which is what the
+   * list looked like before anything was dragged. The gaps between neighbours
+   * are the client's to choose, so a drop is usually one write.
    */
   sidebarOrder?: number;
 }
@@ -136,7 +134,6 @@ export interface BotProfile {
  */
 export interface BotProfilePatchV1 {
   name?: string;
-  label?: string;
   description?: string;
   title?: string;
   hiddenFromSidebar?: boolean;
@@ -1181,7 +1178,6 @@ function flag(value: unknown, label: string): boolean {
 }
 
 const BOT_PROFILE_OPTIONAL_FIELDS = [
-  "label",
   "description",
   "title",
   "namedBy",
@@ -1207,7 +1203,6 @@ function botProfile(value: unknown): BotProfile {
   );
   return {
     name: text(profile.name, "profile.name", 100),
-    label: optionalText(profile.label, "profile.label", 120),
     description: optionalText(
       profile.description,
       "profile.description",
@@ -1276,6 +1271,8 @@ function botProfilePatch(value: unknown): BotProfilePatchV1 {
     [],
     [
       "name",
+      // Installed apps still send the retired sidebar label on every save. It
+      // is accepted and dropped until those apps have updated.
       "label",
       "description",
       "title",
@@ -1287,7 +1284,7 @@ function botProfilePatch(value: unknown): BotProfilePatchV1 {
   if (Reflect.ownKeys(patch).length === 0) {
     throw new ConfigurationDecodeError("profile has invalid fields");
   }
-  const optional = (key: "label" | "description" | "title", maximum: number) =>
+  const optional = (key: "description" | "title", maximum: number) =>
     patch[key] === undefined
       ? {}
       : { [key]: patchText(patch[key], `profile.${key}`, maximum) };
@@ -1296,7 +1293,6 @@ function botProfilePatch(value: unknown): BotProfilePatchV1 {
     ...(patch.name === undefined
       ? {}
       : { name: text(patch.name, "profile.name", 100) }),
-    ...optional("label", 120),
     ...optional("description", 10_000),
     ...optional("title", 120),
     ...(patch.hiddenFromSidebar === undefined
@@ -1343,7 +1339,7 @@ export function applyBotProfilePatchV1(
     next.name = patch.name;
     next.namedBy = namedBy;
   }
-  for (const key of ["label", "description", "title", "pinnedAt"] as const) {
+  for (const key of ["description", "title", "pinnedAt"] as const) {
     const value = patch[key];
     if (value === undefined) continue;
     if (value === "") delete next[key];

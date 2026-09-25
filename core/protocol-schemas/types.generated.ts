@@ -806,7 +806,6 @@ export type BotIdentity = {
   name: string;
   namedBy: "user" | "bot";
   hiddenFromSidebar: boolean;
-  label?: string;
   title?: string;
   pinnedAt?: Instant;
   sidebarOrder?: number;
@@ -1021,7 +1020,6 @@ export type GroupChatRecord = {
   createdAt: Instant;
   updatedAt: Instant;
   archivedAt?: Instant;
-  label?: string;
   pinnedAt?: Instant;
   sidebarOrder?: number;
   hiddenFromSidebar?: true;
@@ -1112,7 +1110,6 @@ export type GroupChatCommand =
       type: "group/arrange";
       commandId: Identifier;
       groupId: GroupId;
-      label?: string | null;
       pinned?: boolean;
       sidebarOrder?: number | null;
       hidden?: boolean;

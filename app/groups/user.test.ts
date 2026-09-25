@@ -259,7 +259,6 @@ describe("the User object's Group Chats", () => {
         type: "group/arrange",
         commandId: "arrange-1",
         groupId: receipt.groupId,
-        label: "Work",
         pinned: true,
         sidebarOrder: 2,
         hidden: true,
@@ -268,7 +267,6 @@ describe("the User object's Group Chats", () => {
     );
     expect(arranged.change).toBeUndefined();
     expect(arranged.receipt.group).toMatchObject({
-      label: "Work",
       pinnedAt: "2026-09-23T10:00:00.000Z",
       sidebarOrder: 2,
       hiddenFromSidebar: true,

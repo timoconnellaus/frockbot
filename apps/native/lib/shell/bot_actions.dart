@@ -1,8 +1,7 @@
 /// Quick actions on one Bot in the list, without opening it.
 ///
 /// Every action here is a state a Bot already has — read, pinned, muted,
-/// labelled, hidden, archived — flipped from the row instead of from the
-/// Bot's page. What the sheet offers is decided once, from that state, by
+/// hidden, archived — flipped from the row instead of from the Bot's page. What the sheet offers is decided once, from that state, by
 /// [botActionsFor]; the shell decides what each one does.
 ///
 /// A phone reaches them by a long press and by two swipes; a desktop by a
@@ -13,8 +12,6 @@ library;
 
 import 'package:flutter/material.dart';
 
-import '../theme/caret.dart';
-import '../theme/dialogs.dart';
 import 'semantics.dart';
 
 /// What one Bot row can be asked to do.
@@ -25,7 +22,6 @@ enum BotAction {
   unpin,
   mute,
   unmute,
-  label,
   hide,
   show,
   archive,
@@ -72,8 +68,8 @@ class BotActionItem {
 ///
 /// Each pair is one item whose direction follows the state, so the sheet
 /// never offers to pin a pinned Bot. An archived Bot is not read, pinned or
-/// labelled from here: it has stopped, and the one thing to do with it is
-/// bring it back.
+/// muted from here: it has stopped, and the one thing to do with it is bring
+/// it back.
 List<BotActionItem> botActionsFor(BotActionState state) {
   if (state.archived) {
     return const [
@@ -109,7 +105,6 @@ List<BotActionItem> botActionsFor(BotActionState state) {
         'Mute notifications',
         Icons.notifications_off_outlined,
       ),
-    const BotActionItem(BotAction.label, 'Label…', Icons.label_outline),
     if (state.hidden)
       const BotActionItem(
         BotAction.show,
@@ -202,128 +197,4 @@ Future<BotAction?> showBotActions({
       ),
     ),
   );
-}
-
-/// Chooses a label for one Bot: one of the labels the list already groups by,
-/// a new one, or none. Returns null when nothing was chosen and the empty
-/// string for no label, the way the profile stores it.
-Future<String?> showBotLabelPicker({
-  required BuildContext context,
-  required String botName,
-  required String current,
-  required Iterable<String> existing,
-  int maxLength = 120,
-}) {
-  final choices = <String>{
-    for (final label in existing)
-      if (label.trim().isNotEmpty) label.trim(),
-  }.toList()..sort((a, b) => a.toLowerCase().compareTo(b.toLowerCase()));
-  return showDialog<String>(
-    context: context,
-    builder: (dialog) => _LabelPicker(
-      botName: botName,
-      current: current,
-      choices: choices,
-      maxLength: maxLength,
-    ),
-  );
-}
-
-class _LabelPicker extends StatefulWidget {
-  final String botName;
-  final String current;
-  final List<String> choices;
-  final int maxLength;
-  const _LabelPicker({
-    required this.botName,
-    required this.current,
-    required this.choices,
-    required this.maxLength,
-  });
-
-  @override
-  State<_LabelPicker> createState() => _LabelPickerState();
-}
-
-class _LabelPickerState extends State<_LabelPicker> {
-  late final TextEditingController controller = TextEditingController(
-    text: widget.current,
-  );
-
-  @override
-  void dispose() {
-    controller.dispose();
-    super.dispose();
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final current = widget.current;
-    return AlertDialog(
-      insetPadding: frockDialogInset,
-      title: frockDialogTitle(Text('Label ${widget.botName}')),
-      content: identified(
-        BotActionIds.labelPicker,
-        frockDialogBody(
-          Column(
-            mainAxisSize: MainAxisSize.min,
-            crossAxisAlignment: CrossAxisAlignment.stretch,
-            children: [
-              if (widget.choices.isNotEmpty) ...[
-                Wrap(
-                  spacing: 6,
-                  runSpacing: 6,
-                  children: [
-                    for (final label in widget.choices)
-                      identified(
-                        BotActionIds.labelChoice(label),
-                        ChoiceChip(
-                          label: Text(label),
-                          selected:
-                              label.toLowerCase() == current.toLowerCase(),
-                          onSelected: (_) => Navigator.pop(context, label),
-                        ),
-                      ),
-                  ],
-                ),
-                const SizedBox(height: 12),
-              ],
-              SteadyCaret(
-                child: TextField(
-                  controller: controller,
-                  autofocus: widget.choices.isEmpty,
-                  maxLength: widget.maxLength,
-                  textInputAction: TextInputAction.done,
-                  decoration: const InputDecoration(
-                    labelText: 'Label',
-                    hintText: 'Work, Home, Projects…',
-                    counterText: '',
-                  ),
-                  onSubmitted: (value) => Navigator.pop(context, value.trim()),
-                ),
-              ),
-            ],
-          ),
-        ),
-      ),
-      actions: [
-        if (current.isNotEmpty)
-          identified(
-            BotActionIds.labelClear,
-            TextButton(
-              onPressed: () => Navigator.pop(context, ''),
-              child: const Text('Remove label'),
-            ),
-          ),
-        TextButton(
-          onPressed: () => Navigator.pop(context),
-          child: const Text('Cancel'),
-        ),
-        FilledButton(
-          onPressed: () => Navigator.pop(context, controller.text.trim()),
-          child: const Text('Save'),
-        ),
-      ],
-    );
-  }
 }

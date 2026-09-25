@@ -26,6 +26,7 @@ import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { DurableObject } from "cloudflare:workers";
 import { cleanUserAvatarTestState } from "./avatar-state-cleanup.js";
 import { cleanDirectoryProfileTestState } from "./directory-profile-cleanup.js";
+import { cleanGroupChatLabelsV1 } from "./sidebar-label-cleanup.js";
 import {
   decodeNativeSessionOperation,
   nativeSessionOperation,
@@ -327,6 +328,7 @@ export class UserConfiguration
       await cleanUserAppletsV1(this.ctx.storage);
       await cleanUserAvatarTestState(this.ctx.storage);
       await cleanDirectoryProfileTestState(this.ctx.storage);
+      await cleanGroupChatLabelsV1(this.ctx.storage);
       await cleanDefaultPackagesMarkerV1(this.ctx.storage);
       await cleanUndecodableSkillIndexesV1(this.ctx.storage);
       await cleanUndecodableConnectCatalogsV1(this.ctx.storage);
