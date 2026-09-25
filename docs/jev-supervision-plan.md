@@ -307,6 +307,24 @@ model.
 Every specialist Turn is supervised. A specialist's mutating call crosses the
 same approval path as a call proposed by the main Bot.
 
+## Context selection
+
+Jev also chooses what a Turn reads, without touching the cached prefix. Both
+are context quality, not safety: a judgment that fails leaves things as they
+were, and neither is enforced.
+
+- **Memory recall.** After hybrid recall finds candidates for a Turn, Jev
+  judges up to 12 against the request; code drops those below 0.2 and orders
+  the rest (`app/supervision/memory-recall.ts`). They land in the existing
+  `<memory-recall>` message.
+- **Skills.** At the Turn's first request, Jev judges each Skill in a catalog
+  of up to 24 against the request, and up to three strong matches are named
+  in the tail runtime note (`app/supervision/skill-nomination.ts`). The
+  catalog in the system prompt is unchanged.
+- Runtime notes from several features share one trailing message
+  (`appendRuntimeNoteV1`), since some providers refuse two user messages in a
+  row. Labelled in `bun run eval:context`.
+
 ## Mentor and failure score
 
 Step review produces independently meaningful failure signals such as:
