@@ -8,16 +8,20 @@
 // refused with a 422, which each of them reads as Jev being unavailable: a
 // harness that sets a key for supervision leaves them as they were without one.
 
-import {
-  responseReviewQuestionsV1,
-  sendReviewQuestionsV1,
-} from "./response-review.js";
-import { turnStartQuestionsV1 } from "./turn-start.js";
-
-const SUPERVISION_QUESTION_SETS_V1: readonly (readonly string[])[] = [
-  Object.keys(turnStartQuestionsV1),
-  Object.keys(responseReviewQuestionsV1),
-  Object.keys(sendReviewQuestionsV1),
+// Written out rather than imported: the integration harness loads this from
+// its Vitest config in plain Node, which cannot resolve the questions' own
+// imports. `testing.test.ts` holds these to the real question sets.
+export const SUPERVISION_QUESTION_SETS_V1: readonly (readonly string[])[] = [
+  [
+    "acknowledge",
+    "complexity",
+    "objective",
+    "ambiguity",
+    "consequence",
+    "capability",
+  ],
+  ["alignment"],
+  ["messageNeeded", "messageKind"],
 ];
 
 /** Whether a body asks exactly one of Turn supervision's question sets. */
