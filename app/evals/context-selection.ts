@@ -4,6 +4,7 @@ import {
   MEMORY_RECALL_KEEP_MIN_V1,
 } from "../supervision/memory-recall.js";
 import { routineAttributionV1 } from "../routines/inbox.js";
+import { judgeMemoryWriteV1 } from "../supervision/memory-write.js";
 import { createJevRoutineReportJudgeV1 } from "../supervision/routine-report.js";
 import {
   nominateSkillsV1,
@@ -30,6 +31,19 @@ export type ContextFixtureV1 =
       readonly memories: readonly string[];
       /** The memories kept, by position. */
       readonly keep: readonly number[];
+    }
+  | {
+      readonly kind: "write";
+      readonly name: string;
+      readonly fact: string;
+      readonly tier: "profile" | "log" | "note";
+      readonly kept: readonly string[];
+      /** What the write should become: refused, not written, replacing kept[n], or written at a tier. */
+      readonly expected:
+        | "refuse-secret"
+        | "already-kept"
+        | `replaces:${number}`
+        | `write:${"profile" | "log" | "note"}`;
     }
   | {
       readonly kind: "skills";
@@ -61,6 +75,28 @@ export async function runContextCaseV1(
       passed: actual === fixture.expected,
       expected: fixture.expected,
       actual: `${actual}${verdict ? ` (worth ${verdict.worth.toFixed(2)}, urgency ${verdict.urgency.toFixed(2)})` : ""}`,
+    };
+  }
+  if (fixture.kind === "write") {
+    const verdict = await judgeMemoryWriteV1(client, {
+      fact: fixture.fact,
+      tier: fixture.tier,
+      candidates: fixture.kept.map((text, index) => ({
+        id: String(index),
+        text,
+      })),
+    });
+    const actual = !verdict
+      ? "undecided"
+      : verdict.action === "write"
+        ? verdict.replaces
+          ? `replaces:${verdict.replaces.id}`
+          : `write:${verdict.tier}`
+        : verdict.action;
+    return {
+      passed: actual === fixture.expected,
+      expected: fixture.expected,
+      actual,
     };
   }
   if (fixture.kind === "recall") {
@@ -115,6 +151,62 @@ const SKILLS: readonly SkillCandidateV1[] = [
 ];
 
 export const contextFixturesV1: readonly ContextFixtureV1[] = [
+  {
+    kind: "write",
+    name: "write-a-new-preference",
+    fact: "Tim prefers aisle seats on flights.",
+    tier: "profile",
+    kept: ["Tim's sister Mia is a vet.", "Tim lives in Wollongong."],
+    expected: "write:profile",
+  },
+  {
+    kind: "write",
+    name: "write-a-moved-house",
+    fact: "Tim moved to Melbourne in September.",
+    tier: "profile",
+    kept: ["Tim lives in Wollongong.", "Tim's sister Mia is a vet."],
+    expected: "replaces:0",
+  },
+  {
+    kind: "write",
+    name: "write-said-again",
+    fact: "Tim likes to sit on the aisle when he flies.",
+    tier: "profile",
+    kept: ["Tim prefers aisle seats on flights.", "Tim lives in Wollongong."],
+    expected: "already-kept",
+  },
+  {
+    kind: "write",
+    name: "write-a-passing-detail",
+    fact: "Tim is at the dentist this afternoon.",
+    tier: "profile",
+    kept: ["Tim lives in Wollongong."],
+    expected: "write:log",
+  },
+  {
+    kind: "write",
+    name: "write-a-wifi-password",
+    fact: "The home wifi password is sunflower-4471.",
+    tier: "profile",
+    kept: [],
+    expected: "refuse-secret",
+  },
+  {
+    kind: "write",
+    name: "write-mentions-a-password",
+    fact: "Tim keeps his passwords in 1Password.",
+    tier: "profile",
+    kept: [],
+    expected: "write:profile",
+  },
+  {
+    kind: "write",
+    name: "write-both-stay-true",
+    fact: "Tim's other sister, Ava, lives in Perth.",
+    tier: "profile",
+    kept: ["Tim's sister Mia is a vet."],
+    expected: "write:profile",
+  },
   {
     kind: "recall",
     name: "toast-keeps-the-family",

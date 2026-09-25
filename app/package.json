@@ -279,6 +279,7 @@
     "./supervision/testing": "./supervision/testing.ts",
     "./supervision/jev": "./supervision/jev.ts",
     "./supervision/memory-recall": "./supervision/memory-recall.ts",
+    "./supervision/memory-write": "./supervision/memory-write.ts",
     "./supervision/skill-nomination": "./supervision/skill-nomination.ts",
     "./supervision/routine-report": "./supervision/routine-report.ts",
     "./supervision/plugin-fit": "./supervision/plugin-fit.ts",

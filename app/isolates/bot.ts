@@ -920,6 +920,7 @@ export async function isolateMemoryWrite(
         owner: memory.owner,
         records: memory.records,
         writer: memory.writer,
+        ...(memory.judgeWrite ? { judgeWrite: memory.judgeWrite } : {}),
       },
       {
         scope: request.scope,
