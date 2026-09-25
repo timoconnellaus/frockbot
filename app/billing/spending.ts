@@ -119,8 +119,8 @@ export function attributionRowV1(
     trigger: kind
       ? kind === "routine"
         ? (text(cause?.trigger, 32) ?? "")
-        : kind === "plugin"
-          ? "plugin"
+        : kind === "plugin" || kind === "email"
+          ? kind
           : "person"
       : "",
     category:
@@ -483,6 +483,7 @@ const TRIGGER_LABELS: Record<string, string> = {
   manual: "Run by hand",
   connection: "Connected app",
   plugin: "Plugin",
+  email: "Email",
 };
 const CATEGORY_LABELS: Record<string, string> = {
   model: "Model replies",
@@ -514,6 +515,8 @@ export function spendLabelV1(
           return { label: named ?? "A Group Chat" };
         case "voice":
           return { label: "Voice" };
+        case "email":
+          return { label: `Email to ${bot(botId)}` };
         case "desktop":
           return { label: `You, on ${bot(botId)}'s Computer` };
         case "plugin":
