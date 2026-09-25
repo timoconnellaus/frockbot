@@ -114,7 +114,7 @@ final class DeviceHostBridge {
   private func send(_ message: [String: Any]) {
     guard let data = try? JSONSerialization.data(withJSONObject: message) else { return }
     do { try input?.write(contentsOf: data + Data([10])) } catch {
-      error = "Device modules stopped. Reopen FrockBot to restart them."
+      self.error = "Device modules stopped. Reopen FrockBot to restart them."
       publish()
     }
   }
