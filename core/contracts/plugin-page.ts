@@ -178,7 +178,13 @@ export const PLUGIN_PAGE_HELPER_JS_V1 = `(() => {
     let text;
     try {
       text = parts
-        .map((p) => (p instanceof Error ? p.stack || String(p) : typeof p === "string" ? p : JSON.stringify(p)))
+        .map((p) => {
+          if (typeof p === "string") return p;
+          if (!(p instanceof Error)) return JSON.stringify(p);
+          const head = String(p);
+          const stack = p.stack || "";
+          return stack.startsWith(head) ? stack : stack ? head + "\\n" + stack : head;
+        })
         .join(" ");
     } catch (_) {
       text = String(parts[0]);

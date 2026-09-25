@@ -485,6 +485,16 @@ describe("what a page reports to its Bot", () => {
     }
   });
 
+  test("a thrown error keeps its message when the stack holds only frames", () => {
+    const page = pageWindow();
+    const error = new TypeError("a4 is undefined");
+    error.stack = "detector@https://ui.example/tuner.html:40:12";
+    page.raise("error", { error });
+    expect(reports(page.posted)[0]?.text).toBe(
+      "TypeError: a4 is undefined\ndetector@https://ui.example/tuner.html:40:12",
+    );
+  });
+
   test("is cut to length and to twenty a minute", () => {
     const page = pageWindow();
     page.frockbot.log("x".repeat(PLUGIN_PAGE_REPORT_TEXT_MAX_V1 + 50));
