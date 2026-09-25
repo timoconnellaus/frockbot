@@ -14,7 +14,7 @@ import {
   reviewRoutineEventV1,
   routineEventVerdictOfV1,
 } from "../evals/routine-event.js";
-import { createJevClientV1 } from "./jev.js";
+import { hostedJevClientV1, type createJevClientV1 } from "./jev.js";
 
 /**
  * The hosted rejector. Service failure and timeout are `is_or_might_be`:
@@ -63,9 +63,7 @@ export function createHostedRoutineEventJudgeV1(
   env: Record<string, string | undefined>,
   fetch?: Fetch,
 ): RoutineEventJudgeV1 {
-  const apiKey = (env.JEV_API_KEY ?? "").trim();
-  if (!apiKey) return createUnavailableRoutineEventJudgeV1();
-  return createJevRoutineEventJudgeV1({
-    client: createJevClientV1({ apiKey, fetch }),
-  });
+  const client = hostedJevClientV1(env, fetch);
+  if (!client) return createUnavailableRoutineEventJudgeV1();
+  return createJevRoutineEventJudgeV1({ client });
 }

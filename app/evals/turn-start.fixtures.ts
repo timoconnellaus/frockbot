@@ -581,6 +581,28 @@ export const turnStartFixturesV1: readonly TurnStartFixtureV1[] = [
     },
   },
   {
+    name: "email-me-the-notes",
+    intent:
+      "Emailing the person what the Bot already has is one send whose receipt shows it: no word first. The 2026-09-25 narration incident started here.",
+    evidence: {
+      input: { text: "Email me those meeting notes.", origin: "user" },
+      conversation: [
+        { speaker: "user", text: "Summarise this morning's meeting." },
+        {
+          speaker: "bot",
+          text: "Three decisions: ship on Friday, hire a designer, and move standup to 9:30.",
+        },
+      ],
+      openWork: [],
+    },
+    expected: {
+      acknowledge: "no",
+      complexity: "simple",
+      objective: "new_request",
+      capability: "none",
+    },
+  },
+  {
     name: "thanks-no-rush-mid-work",
     intent: "Thanks while work is open asks for nothing.",
     evidence: {

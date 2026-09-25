@@ -44,6 +44,15 @@ export interface LoopAssistantTextPositionV1 {
   toolNames?: readonly string[];
 }
 
+/** One complete model response, journaled and not yet acted on. */
+export interface LoopProposedResponseV1 {
+  turn: number;
+  step: number;
+  requestId: string;
+  text: string;
+  toolCalls: readonly ToolCall[];
+}
+
 /**
  * Every seam, optional. A hook that takes `next` wraps the value the rest of
  * the list would produce; one that does not is run in order and awaited.
@@ -129,6 +138,17 @@ export interface LoopHooksV1 {
     agent: LoopAgentRuntimeV1,
     text: string,
     position: LoopAssistantTextPositionV1,
+  ): Promise<void>;
+  /**
+   * A response that calls tools, raised after it is journaled and before any
+   * of its calls is prepared — including when a resumed Turn picks the step
+   * back up. It is how Turn supervision judges the whole response in one
+   * piece; a hook that throws fails the Turn with nothing of it run.
+   */
+  reviewResponse?(
+    agent: LoopAgentRuntimeV1,
+    response: LoopProposedResponseV1,
+    signal: AbortSignal,
   ): Promise<void>;
   /**
    * The request id is handed back to whoever holds something for it — a
@@ -325,6 +345,16 @@ export class LoopHookListV1 {
   ): Promise<void> {
     for (const hook of [...this.#hooks]) {
       await hook.assistantText?.(agent, text, position);
+    }
+  }
+
+  async reviewResponse(
+    agent: LoopAgentRuntimeV1,
+    response: LoopProposedResponseV1,
+    signal: AbortSignal,
+  ): Promise<void> {
+    for (const hook of [...this.#hooks]) {
+      await hook.reviewResponse?.(agent, response, signal);
     }
   }
 

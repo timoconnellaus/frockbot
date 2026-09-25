@@ -11,7 +11,7 @@ import {
   type DictationCleanupEvidenceV1,
   type DictationCleanupVerdictV1,
 } from "../evals/dictation-cleanup.js";
-import { createJevClientV1 } from "./jev.js";
+import { hostedJevClientV1, type createJevClientV1 } from "./jev.js";
 
 /**
  * Did Groq's tidy still say what the person said?
@@ -81,11 +81,9 @@ export function createHostedDictationCleanupJudgeV1(
   env: Record<string, string | undefined>,
   fetch?: Fetch,
 ): DictationCleanupJudgeV1 {
-  const apiKey = (env.JEV_API_KEY ?? "").trim();
-  if (!apiKey) return createUnavailableDictationCleanupJudgeV1();
-  return createJevDictationCleanupJudgeV1({
-    client: createJevClientV1({ apiKey, fetch }),
-  });
+  const client = hostedJevClientV1(env, fetch);
+  if (!client) return createUnavailableDictationCleanupJudgeV1();
+  return createJevDictationCleanupJudgeV1({ client });
 }
 
 export function createUnavailableDictationCleanupJudgeV1(): DictationCleanupJudgeV1 {
