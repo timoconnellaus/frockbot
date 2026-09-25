@@ -502,3 +502,158 @@ export function composeSendDecisionV1(input: {
     ...(input.model === undefined ? {} : { model: input.model }),
   };
 }
+
+// ---------------------------------------------------------------------------
+// Faithful relay: when a subagent produced the work, is it what the person
+// gets?
+
+/**
+ * The Noul at or above which the person asked for the work itself — a draft,
+ * a document, a piece of writing — rather than for news about it.
+ */
+export const RELAY_WANTS_WORK_YES_V1 = 0.6;
+
+/** The probability a rewriting `relay` label needs before it counts. */
+export const RELAY_REWRITES_MIN_V1 = 0.6;
+
+/** How much of a subagent's work Jev is shown. */
+export const RELAY_WORK_CHARS_V1 = 2_000;
+
+export interface RelayJudgmentEvidenceV1 {
+  readonly request: {
+    readonly text: string;
+    readonly origin: TurnInputOriginV1;
+  };
+  /** What a subagent produced this Turn, most recent last. */
+  readonly work: readonly string[];
+  readonly message: string;
+}
+
+function clipWork(text: string): string {
+  return text.length <= RELAY_WORK_CHARS_V1
+    ? text
+    : `${text.slice(0, RELAY_WORK_CHARS_V1)}…`;
+}
+
+export function relayEvidenceV1(
+  evidence: SendReviewEvidenceV1,
+): RelayJudgmentEvidenceV1 {
+  return {
+    request: { text: clip(evidence.objective), origin: evidence.origin },
+    work: evidence.work.slice(-2).map(clipWork),
+    message: clipWork(evidence.message),
+  };
+}
+
+export function relayStateV1(
+  evidence: RelayJudgmentEvidenceV1,
+): Record<string, JsonValue> {
+  return {
+    request: {
+      text: evidence.request.text,
+      origin: evidence.request.origin,
+    },
+    work: [...evidence.work],
+    message: evidence.message,
+  };
+}
+
+/**
+ * Two judgments: whether the person wanted the work itself, and what this
+ * message does with it. A message is withheld only when both say it
+ * rewrote work the person asked for.
+ */
+export const relayQuestionsV1 = {
+  wantsTheWork: noul(
+    {
+      target: "`request.text`, what the person asked for",
+      decision:
+        "Did the person ask for a piece of text they will read, keep or send themselves — a draft, a document, a message, a post, a speech?",
+      requirements: [
+        "The words themselves are what they asked for, not work done on their behalf",
+      ],
+    },
+    {
+      true: "They asked for the words themselves",
+      false:
+        "They asked a question, for news or findings, or for work done for them — a fix, a build, a booking — whose result is reported",
+    },
+  ),
+  relay: choice(
+    {
+      target:
+        "`message`, against the latest entry in `work` and the person's latest message in `request.text`",
+      decision: "What does `message` do with the work?",
+      rules: [
+        "A short line before or after the work, framing it, still gives it as written.",
+        "A change to the work that the person asked for in `request.text` is edits_as_asked.",
+        "When more than one fits, pick the one listed first.",
+      ],
+    },
+    {
+      relays:
+        "Gives the work as it was written, whole, perhaps with a short line around it",
+      edits_as_asked:
+        "Changes the work the way the person asked it to be changed - shorter, punchier, another tone - in their latest message",
+      unrelated: "Says something else, not the work",
+      condenses: "Gives a shortened or summarised version of the work",
+      rewrites:
+        "Gives the work reworded, restructured or replaced with its own version",
+    },
+  ),
+} as const;
+
+export type RelayAnswersV1 = SystemOneResult<
+  typeof relayQuestionsV1
+>["answers"];
+export type RelayV1 = JevReviewV1<RelayAnswersV1>;
+
+export async function reviewRelayV1(
+  client: TypeSafeClient,
+  evidence: RelayJudgmentEvidenceV1,
+  options: {
+    readonly signal?: AbortSignal;
+    readonly budget?: JevCallBudgetV1;
+  } = {},
+): Promise<RelayV1> {
+  const budget = options.budget ?? RESPONSE_REVIEW_EVAL_BUDGET_V1;
+  const { data, requestId } = await client
+    .systemOne(
+      {
+        state: relayStateV1(evidence),
+        questions: relayQuestionsV1,
+        model: RESPONSE_REVIEW_MODEL_V1,
+      },
+      { retry: budget.retry, timeout: budget.timeout, signal: options.signal },
+    )
+    .withResponse();
+  return {
+    model: data.model,
+    usage: data.usage,
+    requestId,
+    answers: data.answers,
+  };
+}
+
+export function relayJudgmentsV1(
+  answers: RelayAnswersV1,
+): SupervisionJudgmentV1[] {
+  return [
+    { question: "wantsTheWork", value: answers.wantsTheWork.noul },
+    {
+      question: "relay",
+      answer: answers.relay.choice,
+      value: probability(answers.relay, answers.relay.choice),
+    },
+  ];
+}
+
+/** Whether the message rewrote work the person asked for, both judgments agreeing. */
+export function relayRewroteV1(answers: RelayAnswersV1): boolean {
+  return (
+    answers.wantsTheWork.noul >= RELAY_WANTS_WORK_YES_V1 &&
+    (answers.relay.choice === "condenses" ||
+      answers.relay.choice === "rewrites") &&
+    probability(answers.relay, answers.relay.choice) >= RELAY_REWRITES_MIN_V1
+  );
+}

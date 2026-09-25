@@ -480,8 +480,19 @@ _Done, enforced._
   runs on its task's pinned model; the start-of-Turn judgment names the
   specialty (`bun run eval:turn-start`, 32/32 on `jev-1.13.0`) and the tail
   note hands the work over.
-- Next: catch a specialist's work paraphrased instead of passed on (per-send
-  review), and let a subagent ask its parent a question mid-task.
+- _Done._ Faithful relay: when a subagent's work is in the Turn — a blocking
+  `Task` result, or the completion a Turn was opened for — each send is first
+  asked whether the person wanted the words themselves and whether it gives
+  them as written. A condensed or reworded version is withheld with feedback,
+  and the Turn goes on to send the work; a change the person asked for
+  ("make it punchier") passes, and a Turn withholds a rewrite at most once.
+- _Done._ `task_ask`: a subagent hands its parent one question and ends its
+  Turn; the parent's notice says to answer with `task_resume`. When a Turn
+  opens on such a question, Jev judges whether what the person already said
+  answers it or only the person can, recorded as `supervision/question`, and
+  the tail note steers the Turn accordingly (`bun run eval:response-review`,
+  33/33 on `jev-1.13.0` before the `toast-made-punchier` case was added; that
+  case has not yet been run live).
 
 ### 6. Mentor and continuation
 

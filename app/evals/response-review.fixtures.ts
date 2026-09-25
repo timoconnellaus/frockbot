@@ -1,4 +1,6 @@
 import type {
+  QuestionFixtureV1,
+  RelayFixtureV1,
   ResponseReviewFixtureV1,
   SendFixtureV1,
 } from "./response-review.js";
@@ -33,6 +35,52 @@ function send(
       message: evidence.message,
     },
     expected,
+  };
+}
+
+const TOAST =
+  "Friends, family, and anyone Mia has ever rescued: I'm Jo, Mia's big sister. Mia became a vet because she cannot walk past an animal in trouble. Last spring that meant climbing onto a neighbour's shed roof to talk down a goat called Doris, who had no plan and no regrets. Then she met Ben at a climbing gym, and I think Doris taught her everything she needed to know about getting to the top and coming down safely. Ben, you're the calmest person on any wall, and you make my sister laugh the way she did as a kid. Please raise your glasses to Mia and Ben: may every roof you climb have a way down.";
+
+const DRAFT =
+  "Hi Sam, thanks for sending the proposal through. We'd like to go ahead with option B at the quoted price, starting on 6 October. Could you send the contract to Dana so she can sign this week? Best, Tim";
+
+function relay(
+  name: string,
+  intent: string,
+  evidence: { request: string; work: string; message: string },
+  send: "release" | "withhold",
+): RelayFixtureV1 {
+  return {
+    kind: "relay",
+    name,
+    intent,
+    evidence: {
+      request: { text: evidence.request, origin: "user" },
+      work: [evidence.work],
+      message: evidence.message,
+    },
+    expected: { send },
+  };
+}
+
+function question(
+  name: string,
+  intent: string,
+  evidence: {
+    question: string;
+    said: readonly (readonly ["user" | "bot", string])[];
+  },
+  answerer: "conversation" | "person",
+): QuestionFixtureV1 {
+  return {
+    kind: "question",
+    name,
+    intent,
+    evidence: {
+      question: evidence.question,
+      conversation: evidence.said.map(([speaker, text]) => ({ speaker, text })),
+    },
+    expected: { answerer },
   };
 }
 
@@ -374,4 +422,122 @@ export const responseReviewFixturesV1: readonly ResponseReviewFixtureV1[] = [
     },
     expected: "off_topic_message",
   },
+  relay(
+    "toast-condensed",
+    "A toast the person asked for, cut down to a sentence, is not the toast.",
+    {
+      request: "Write me a warm, funny toast for my sister Mia's wedding.",
+      work: TOAST,
+      message:
+        "Here's your toast: it thanks everyone, mentions Mia saving Doris the goat and meeting Ben at the climbing gym, and ends by raising a glass to them.",
+    },
+    "withhold",
+  ),
+  relay(
+    "toast-as-written",
+    "The toast word for word, with a line before it, is the toast.",
+    {
+      request: "Write me a warm, funny toast for my sister Mia's wedding.",
+      work: TOAST,
+      message: `Here's the toast:\n\n${TOAST}`,
+    },
+    "release",
+  ),
+  relay(
+    "toast-made-punchier",
+    "Asked to make the drafted toast punchier, a punchier rewrite is what they asked for.",
+    {
+      request: "Make it punchier.",
+      work: TOAST,
+      message:
+        "Here's a punchier one:\n\nI'm Jo, Mia's big sister. Mia can't walk past an animal in trouble - last spring that meant a shed roof and a goat called Doris. Then she met Ben at a climbing gym, the calmest man on any wall. Glasses up to Mia and Ben: may every roof you climb have a way down.",
+    },
+    "release",
+  ),
+  relay(
+    "draft-reworded",
+    "A reply the person asked to have drafted, reworded by the Bot, is not the draft.",
+    {
+      request: "Draft a reply to Sam saying we'll go with option B.",
+      work: DRAFT,
+      message:
+        "Hi Sam, great news: we've picked option B and would love to kick off on 6 October. Please get the paperwork over to Dana when you can. Cheers, Tim",
+    },
+    "withhold",
+  ),
+  relay(
+    "draft-as-written",
+    "The draft as written is what they asked for.",
+    {
+      request: "Draft a reply to Sam saying we'll go with option B.",
+      work: DRAFT,
+      message: `Draft for Sam:\n\n${DRAFT}`,
+    },
+    "release",
+  ),
+  relay(
+    "findings-summarised",
+    "Asked what the research found, a summary of the report is the answer.",
+    {
+      request: "What did the research on e-bike batteries find?",
+      work: "Report: Across 14 sources, lithium iron phosphate packs lasted 2,000-3,000 cycles against 500-1,000 for NMC; NMC packs were 30% lighter; cold weather cut range by 20-40% for both; the Bosch and Shimano systems had the lowest failure rates in owner surveys; replacement packs cost $500-$900.",
+      message:
+        "In short: LFP batteries last two to three times as long, NMC ones are lighter, cold weather cuts range a lot, and Bosch and Shimano packs fail least.",
+    },
+    "release",
+  ),
+  relay(
+    "fix-reported",
+    "Asked to fix a bug, a line on what was fixed is the answer, not the diff.",
+    {
+      request: "Fix the crash when I open the tuner Plugin.",
+      work: "Changed pitch.ts: guard against an empty audio buffer before computing the FFT (the crash was a divide by zero on the first frame). Added a test for an empty buffer. All 12 tests pass.",
+      message:
+        "Fixed: the tuner crashed on its first, empty audio frame. It now waits for sound, and there's a test for it.",
+    },
+    "release",
+  ),
+  question(
+    "choice-already-made",
+    "The person already picked; asking them again would be pestering.",
+    {
+      question: "Nomad at 7pm or Ester at 8:30pm?",
+      said: [
+        [
+          "bot",
+          "Two tables are free on Friday: Nomad at 7pm, Ester at 8:30pm.",
+        ],
+        ["user", "Book Ester, the later one."],
+      ],
+    },
+    "conversation",
+  ),
+  question(
+    "budget-already-given",
+    "A limit the person stated answers a question about it.",
+    {
+      question: "What is the most I should spend on the e-bike?",
+      said: [["user", "Find me an e-bike. My budget is $2,000, no more."]],
+    },
+    "conversation",
+  ),
+  question(
+    "a-preference-nobody-gave",
+    "A matter of taste the person never raised is theirs to decide.",
+    {
+      question:
+        "Should the toast mention how Mia and Ben broke up once before?",
+      said: [["user", "Write me a warm, funny toast for Mia's wedding."]],
+    },
+    "person",
+  ),
+  question(
+    "a-permission-not-given",
+    "Asked to draft, permission to send is still the person's to give.",
+    {
+      question: "May I email the draft to Sam directly?",
+      said: [["user", "Draft a reply to Sam saying we'll go with option B."]],
+    },
+    "person",
+  ),
 ];

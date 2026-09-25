@@ -10,6 +10,7 @@ import {
   SUPERVISION_WITHHELD_SEND_PREFIX_V1,
   type CallDecisionV1,
   type ConversationEvidenceV1,
+  type QuestionRouteV1,
   type LlmMessage,
   type LoopHooksV1,
   type ProposedCallV1,
@@ -24,6 +25,7 @@ import {
 } from "@frockbot/core/contracts";
 import type { StoredRunOriginV1 } from "@frockbot/core/durable";
 import { resolveDynamicToolNameV1 } from "../audit/classify.js";
+import { SUBAGENT_SUMMARY_END_V1 } from "../routines/inbox.js";
 import type { FoundationFeature } from "../runtime.js";
 
 // Turn supervision, mounted into the loop. Jev judges; this file enforces.
@@ -99,6 +101,42 @@ export const SUPERVISION_CONVERSATION_MAX_V1 = 8;
 /** Runtime notes carry a label so the model reads them as the platform's. */
 export const ACKNOWLEDGE_NOTE_V1 =
   '[FrockBot runtime: acknowledge first]\nThis will take some work. Before you start it, send the person one short line with send_to_user (disposition "continue") saying what you are about to do. Then do the work.';
+
+/** How a Turn is steered to answer a question its subagent asked. */
+export function questionNoteV1(answerer: "conversation" | "person"): string {
+  return answerer === "conversation"
+    ? "[FrockBot runtime: subagent question]\nWhat the person has already said answers your subagent's question. Answer it from that with task_resume; do not ask the person."
+    : "[FrockBot runtime: subagent question]\nOnly the person can answer your subagent's question. Ask them in your own words, then pass their answer on with task_resume.";
+}
+
+/**
+ * The question a subagent asked, when this Turn was opened for it: read off
+ * the notice `app/subagents` writes when a task hands off a question.
+ */
+export function subagentQuestionOfTurnV1(
+  events: readonly SessionEvent[],
+  turn: number,
+): string | undefined {
+  const notice =
+    /subagent "[^"\n]*" asked a question\. It asks: ([\s\S]+?) It is waiting: answer with task_resume/;
+  for (const event of turnEvents(events, turn)) {
+    if (event.type !== "user/message") continue;
+    const question = notice.exec(event.text)?.[1]?.trim();
+    if (question) return question;
+  }
+  return undefined;
+}
+
+function questionRouteOf(
+  events: readonly SessionEvent[],
+  turn: number,
+): QuestionRouteV1 | undefined {
+  const event = events.findLast(
+    (candidate) =>
+      candidate.type === "supervision/question" && candidate.turn === turn,
+  );
+  return event?.type === "supervision/question" ? event.route : undefined;
+}
 
 /** Where a Turn is steered when Jev names a specialist it is offered. */
 export function specialistNoteV1(specialist: {
@@ -329,8 +367,58 @@ export function withheldFinishV1(
       event.turn === turn &&
       event.step === step &&
       event.finish &&
-      event.decision.send === "withhold",
+      event.decision.send === "withhold" &&
+      // A rewrite of the work is withheld so the work itself goes instead.
+      event.decision.reason !== "paraphrased_work",
   );
+}
+
+/** Whether a send this Turn was already withheld as a rewrite of the work. */
+function withheldRewriteV1(
+  events: readonly SessionEvent[],
+  turn: number,
+): boolean {
+  return events.some(
+    (event) =>
+      event.type === "supervision/send" &&
+      event.turn === turn &&
+      event.decision.send === "withhold" &&
+      event.decision.reason === "paraphrased_work",
+  );
+}
+
+/**
+ * The work a subagent handed back this Turn: a blocking dispatch's result,
+ * or a background task's completion the Turn was opened for. Read off the
+ * words `app/subagents` writes for each; anything else is not a subagent's.
+ */
+export function subagentWorkV1(
+  events: readonly SessionEvent[],
+  turn: number,
+): string[] {
+  const settled =
+    /^(?:\w+ subagent \S+|Subagent \S+ resumed and) completed\. ([\s\S]+)$/;
+  const notice = new RegExp(
+    `(?:^|\\n)\\w+ subagent "[^"\\n]*" completed\\. ([\\s\\S]+?)\\n${escapeRegExp(SUBAGENT_SUMMARY_END_V1)}`,
+    "g",
+  );
+  return turnEvents(events, turn).flatMap((event) => {
+    const matches =
+      event.type === "tool/result" && !event.isError
+        ? [settled.exec(event.content)]
+        : event.type === "user/message"
+          ? [...event.text.matchAll(notice)]
+          : [];
+    return matches.flatMap((match) => {
+      const work = match?.[1]?.trim();
+      // A question the subagent asked is not work it made.
+      return work && !work.startsWith("It asks: ") ? [work] : [];
+    });
+  });
+}
+
+function escapeRegExp(text: string): string {
+  return text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
 function clip(text: string, max = 280): string {
@@ -338,10 +426,13 @@ function clip(text: string, max = 280): string {
 }
 
 function withheldResult(
-  reason: "off_task" | "redundant_text",
+  reason: "off_task" | "redundant_text" | "paraphrased_work",
   finish: boolean,
   addressed: boolean,
 ): string {
+  if (reason === "paraphrased_work") {
+    return `${SUPERVISION_WITHHELD_SEND_PREFIX_V1} because the person asked for the work itself and this rewrites it. Send what the subagent produced as it was written, whole; one short line before it is fine.`;
+  }
   const why =
     reason === "redundant_text"
       ? "because the person can already see what it says."
@@ -420,9 +511,29 @@ export function createSupervisionRuntimeFeatureV1(
             host.specialists?.().find((offered) => offered.name === name),
           )
           .find((offered) => offered !== undefined);
+        const question = subagentQuestionOfTurnV1(
+          session.activeRunJournal,
+          turn,
+        );
+        let route = questionRouteOf(session.activeRunJournal, turn);
+        if (question !== undefined && !route) {
+          const started = Date.now();
+          route = await host.supervisor.routeQuestion(
+            { question, conversation: conversationBefore(session) },
+            signal,
+          );
+          session.append({
+            type: "supervision/question",
+            turn,
+            route,
+            latencyMs: elapsed(started),
+          });
+          await session.flush();
+        }
         const notes = [
           ...(directive.acknowledge ? [ACKNOWLEDGE_NOTE_V1] : []),
           ...(specialist ? [specialistNoteV1(specialist)] : []),
+          ...(route ? [questionNoteV1(route.answerer)] : []),
         ];
         if (notes.length === 0) return request;
         return {
@@ -578,6 +689,9 @@ export function createSupervisionRuntimeFeatureV1(
                     priorResults: priorResults(events, at.turn),
                     message: send.text,
                     finish: send.finish,
+                    work: withheldRewriteV1(events, at.turn)
+                      ? []
+                      : subagentWorkV1(events, at.turn),
                   },
                   context.signal,
                 );
@@ -605,8 +719,9 @@ export function createSupervisionRuntimeFeatureV1(
           call,
           result: {
             content: withheldResult(
-              verdict.reason === "redundant_text"
-                ? "redundant_text"
+              verdict.reason === "redundant_text" ||
+                verdict.reason === "paraphrased_work"
+                ? verdict.reason
                 : "off_task",
               send.finish,
               callerAddressed(events, at.turn),

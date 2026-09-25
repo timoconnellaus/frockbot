@@ -41,6 +41,7 @@ import {
 } from "@frockbot/core/contracts";
 import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import { rpcJsonSnapshotV1, rpcRecordV1 } from "@frockbot/app/durable-rpc";
+import { routineHandoffTextV1 } from "@frockbot/app/routines/inbox";
 
 /** The parent Turn that dispatched a task, as the child records it. */
 export interface SubagentParentV1 {
@@ -431,7 +432,14 @@ export async function subagentTaskIdV1(
 
 /** The outcome a settled child run hands its parent. */
 export function subagentOutcomeForRunV1(
-  run: { status: string; responseText?: string; failure?: string } | undefined,
+  run:
+    | {
+        status: string;
+        responseText?: string;
+        failure?: string;
+        events?: readonly { type: string }[];
+      }
+    | undefined,
   settledAt: string,
   thrown?: unknown,
 ): TaskOutcomeV1 {
@@ -457,7 +465,11 @@ export function subagentOutcomeForRunV1(
     };
   }
   if (run.status === "completed") {
-    const summary = run.responseText?.trim();
+    // A child that handed off (`wake_parent`, `task_ask`) ended its Turn on a
+    // tool call and wrote no reply, so its hand-off message is the summary.
+    const summary = (
+      routineHandoffTextV1(run.events ?? []) ?? run.responseText
+    )?.trim();
     return {
       status: "completed",
       settledAt,

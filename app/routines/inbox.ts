@@ -697,6 +697,9 @@ export function routineHandoffTextV1(
   return handoff?.message;
 }
 
+/** The line that closes a subagent's summary in the drained preamble. */
+export const SUBAGENT_SUMMARY_END_V1 = "[End of the subagent's summary]";
+
 /**
  * How the drained hand-offs are rendered into the next chat Turn's input.
  *
@@ -716,6 +719,7 @@ export function pendingBotInputPreambleV1(
           ? `[${input.title}] While you were away, the subagent "${input.routineId}" you dispatched finished. Its summary — not its transcript, which you cannot see — is:`
           : `[${input.title}] While you were away, your Routine "${input.routineId}" finished and handed off:`,
         input.text,
+        ...(input.source === "subagent" ? [SUBAGENT_SUMMARY_END_V1] : []),
         "",
       );
       continue;

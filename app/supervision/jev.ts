@@ -14,7 +14,11 @@ import {
 import {
   composeSendDecisionV1,
   composeStepDecisionV1,
+  relayEvidenceV1,
+  relayJudgmentsV1,
+  relayRewroteV1,
   responseReviewEvidenceV1,
+  reviewRelayV1,
   reviewResponseV1,
   reviewSendV1,
   sendReviewEvidenceV1,
@@ -24,6 +28,10 @@ import {
   RESPONSE_REVIEW_RETRY_V1,
   type JevCallBudgetV1,
 } from "./response-review.js";
+import {
+  composeQuestionRouteV1,
+  reviewQuestionRouteV1,
+} from "./question-route.js";
 import {
   callReviewEvidenceV1,
   composeCallDecisionV1,
@@ -131,16 +139,48 @@ export function createJevTurnSupervisorV1(
     },
     async reviewSend(evidence, signal) {
       signal?.throwIfAborted();
-      if (sendVetoV1(evidence) !== undefined) {
-        return { send: "release", judgments: [] };
-      }
       try {
+        // Work a subagent produced is judged first, and whatever the vetoes
+        // say: a long message or a question can still be a rewrite of it.
+        if (evidence.work.length > 0) {
+          const relay = await reviewRelayV1(
+            options.client,
+            relayEvidenceV1(evidence),
+            { signal, budget },
+          );
+          if (relayRewroteV1(relay.answers)) {
+            return {
+              send: "withhold",
+              reason: "paraphrased_work",
+              judgments: relayJudgmentsV1(relay.answers),
+              model: relay.model,
+            };
+          }
+        }
+        if (sendVetoV1(evidence) !== undefined) {
+          return { send: "release", judgments: [] };
+        }
         const review = await reviewSendV1(
           options.client,
           sendReviewEvidenceV1(evidence),
           { signal, budget },
         );
         return composeSendDecisionV1({
+          answers: review.answers,
+          model: review.model,
+        });
+      } catch (error) {
+        throw classifyJevFailure(error);
+      }
+    },
+    async routeQuestion(evidence, signal) {
+      signal?.throwIfAborted();
+      try {
+        const review = await reviewQuestionRouteV1(options.client, evidence, {
+          signal,
+          budget,
+        });
+        return composeQuestionRouteV1({
           answers: review.answers,
           model: review.model,
         });

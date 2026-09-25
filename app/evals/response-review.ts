@@ -1,5 +1,9 @@
 import {
   composeSendDecisionV1,
+  relayRewroteV1,
+  relayStateV1,
+  type RelayJudgmentEvidenceV1,
+  type RelayV1,
   RESPONSE_REVIEW_ALIGNMENT_MIN_V1,
   responseReviewStateV1,
   sendReviewStateV1,
@@ -11,6 +15,12 @@ import {
   type SendReviewV1,
 } from "../supervision/response-review.js";
 import { describeFailureV1 } from "./failure.js";
+import {
+  composeQuestionRouteV1,
+  questionRouteStateV1,
+  type QuestionRouteReviewV1,
+} from "../supervision/question-route.js";
+import type { QuestionRouteEvidenceV1 } from "@frockbot/core/contracts";
 
 // Grading for the labeled response-review suite. The questions and the
 // thresholds code decides by live in `app/supervision/response-review.ts`;
@@ -41,8 +51,29 @@ export interface SendFixtureV1 {
   };
 }
 
+/** One send after a subagent's work: is it the work, as written? */
+export interface RelayFixtureV1 {
+  readonly kind: "relay";
+  readonly name: string;
+  readonly intent: string;
+  readonly evidence: RelayJudgmentEvidenceV1;
+  readonly expected: { readonly send: "release" | "withhold" };
+}
+
+/** A subagent's question: can the conversation answer it, or only the person? */
+export interface QuestionFixtureV1 {
+  readonly kind: "question";
+  readonly name: string;
+  readonly intent: string;
+  readonly evidence: QuestionRouteEvidenceV1;
+  readonly expected: { readonly answerer: "conversation" | "person" };
+}
+
 export type ResponseReviewFixtureV1 =
-  ResponseAlignmentFixtureV1 | SendFixtureV1;
+  | ResponseAlignmentFixtureV1
+  | SendFixtureV1
+  | RelayFixtureV1
+  | QuestionFixtureV1;
 
 export interface ResponseReviewCheckV1 {
   readonly question: string;
@@ -74,6 +105,38 @@ export function gradeResponseAlignmentV1(
       expected: fixture.expected,
       actual: `${answer.choice} (p ${round(answer.probabilities[answer.choice] ?? 0)}, acts as ${acted})`,
       passed: acted === fixture.expected,
+    },
+  ];
+}
+
+export function gradeRelayV1(
+  fixture: RelayFixtureV1,
+  review: RelayV1,
+): ResponseReviewCheckV1[] {
+  const rewrote = relayRewroteV1(review.answers);
+  const relay = review.answers.relay;
+  return [
+    {
+      question: "relay",
+      expected: fixture.expected.send,
+      actual: `${rewrote ? "withhold" : "release"} (wants work ${round(review.answers.wantsTheWork.noul)}, relay ${relay.choice} p ${round(relay.probabilities[relay.choice] ?? 0)})`,
+      passed: (rewrote ? "withhold" : "release") === fixture.expected.send,
+    },
+  ];
+}
+
+export function gradeQuestionV1(
+  fixture: QuestionFixtureV1,
+  review: QuestionRouteReviewV1,
+): ResponseReviewCheckV1[] {
+  const route = composeQuestionRouteV1({ answers: review.answers });
+  const answer = review.answers.answeredBy;
+  return [
+    {
+      question: "answeredBy",
+      expected: fixture.expected.answerer,
+      actual: `${route.answerer} (conversation p ${round(answer.probabilities.conversation ?? 0)})`,
+      passed: route.answerer === fixture.expected.answerer,
     },
   ];
 }
@@ -111,7 +174,8 @@ export function responseReviewReportCaseV1(
   fixture: ResponseReviewFixtureV1,
   outcome:
     | {
-        readonly review: ResponseReviewV1 | SendReviewV1;
+        readonly review:
+          ResponseReviewV1 | SendReviewV1 | RelayV1 | QuestionRouteReviewV1;
         readonly checks: readonly ResponseReviewCheckV1[];
       }
     | { readonly failure: unknown },
@@ -123,7 +187,11 @@ export function responseReviewReportCaseV1(
     state:
       fixture.kind === "response"
         ? responseReviewStateV1(fixture.evidence)
-        : sendReviewStateV1(fixture.evidence),
+        : fixture.kind === "relay"
+          ? relayStateV1(fixture.evidence)
+          : fixture.kind === "question"
+            ? questionRouteStateV1(fixture.evidence)
+            : sendReviewStateV1(fixture.evidence),
     expected: fixture.expected,
   };
   if ("failure" in outcome)
