@@ -105,7 +105,8 @@ async function settleTask(identity: Identity, taskId: string): Promise<void> {
   throw new Error(`task ${taskId} never settled`);
 }
 
-const QUESTION = "Which ledger did you mean, the personal one or the business one?";
+const QUESTION =
+  "Which ledger did you mean, the personal one or the business one?";
 
 function askingPrompt(): string {
   return toolCallTriggerPrompt(["task_ask", { question: QUESTION }]);
@@ -252,7 +253,10 @@ describe("a subagent asking the conversation that dispatched it", () => {
 
   test("a Turn opened on a finished subagent's work runs the relay check on its send", async () => {
     const suffix = crypto.randomUUID();
-    const identity = { userId: `relay-${suffix}`, botId: `relay-bot-${suffix}` };
+    const identity = {
+      userId: `relay-${suffix}`,
+      botId: `relay-bot-${suffix}`,
+    };
     await provisionBot(identity);
 
     await turn(
