@@ -145,9 +145,14 @@
     "apps/device-host": {
       "name": "@frockbot/device-host",
       "version": "0.0.1",
+      "dependencies": {
+        "@frockbot/app": "workspace:*",
+        "@frockbot/core": "workspace:*",
+      },
       "devDependencies": {
         "@types/bun": "1.4.2",
         "@types/node": "26.6.1",
+        "esbuild": "0.28.2",
       },
     },
     "apps/marketing": {

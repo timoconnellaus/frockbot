@@ -40,6 +40,7 @@ import '../groups/model.dart';
 import '../groups/pane.dart';
 import '../groups/sheets.dart';
 import '../groups/thread.dart';
+import '../machines/device_host.dart';
 import '../machines/page.dart';
 import '../secrets/page.dart';
 import '../plugins/page.dart';
@@ -347,6 +348,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
+    unawaited(deviceHost.configure(widget.userId, widget.api));
     WidgetsBinding.instance.addObserver(this);
     microphone.assistantLive = () => voiceSession?.active == true;
     microphone.holdAssistant = (held) async =>
@@ -3738,6 +3740,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   @override
   void dispose() {
+    unawaited(deviceHost.stop(widget.userId));
     unawaited(appBadge.clear());
     push.onFocus = null;
     push.onNotificationsChanged = null;
