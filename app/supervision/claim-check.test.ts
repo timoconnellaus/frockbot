@@ -32,12 +32,10 @@ test("a long Turn's early calls still reach the claim check", () => {
 
   expect(actions).toHaveLength(results.length);
   expect(actions[0]).toMatchObject({ tool: "email_send", outcome: "done" });
-  expect(actions[0]!.result.length).toBeLessThan(
-    actions.at(-1)!.result.length,
-  );
+  expect(actions[0]!.result.length).toBeLessThan(actions.at(-1)!.result.length);
   expect(
-    actions.slice(-CLAIM_RECENT_ACTIONS_V1).every(
-      (action) => action.result.length === 241,
-    ),
+    actions
+      .slice(-CLAIM_RECENT_ACTIONS_V1)
+      .every((action) => action.result.length === 241),
   ).toBe(true);
 });
