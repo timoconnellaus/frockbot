@@ -3,6 +3,8 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { TypeSafeClient } from "@typesafe-ai/sdk";
 import { responseReviewFixturesV1 } from "./response-review.fixtures.js";
 import {
+  gradeClaimV1,
+  gradeProgressV1,
   gradeQuestionV1,
   gradeRelayV1,
   gradeResponseAlignmentV1,
@@ -11,6 +13,15 @@ import {
 } from "./response-review.js";
 import { describeFailureV1 } from "./failure.js";
 import { reviewQuestionRouteV1 } from "../supervision/question-route.js";
+import {
+  CLAIM_UNSUPPORTED_MIN_V1,
+  reviewClaimV1,
+} from "../supervision/claim-check.js";
+import {
+  PROGRESS_SIGNALLED_STUCK_NO_V1,
+  PROGRESS_STUCK_NO_V1,
+  reviewProgressV1,
+} from "../supervision/loop-health.js";
 import {
   RESPONSE_REVIEW_ALIGNMENT_MIN_V1,
   RESPONSE_REVIEW_ATTEMPT_TIMEOUT_MS_V1,
@@ -87,6 +98,22 @@ async function runResponseReviewEvalV1() {
           review,
           checks: gradeQuestionV1(fixture, review),
         });
+      } else if (fixture.kind === "claim") {
+        const review = await reviewClaimV1(client, fixture.evidence, {
+          signal,
+        });
+        entry = responseReviewReportCaseV1(fixture, {
+          review,
+          checks: gradeClaimV1(fixture, review),
+        });
+      } else if (fixture.kind === "progress") {
+        const review = await reviewProgressV1(client, fixture.evidence, {
+          signal,
+        });
+        entry = responseReviewReportCaseV1(fixture, {
+          review,
+          checks: gradeProgressV1(fixture, review),
+        });
       } else if (fixture.kind === "relay") {
         const review = await reviewRelayV1(client, fixture.evidence, {
           signal,
@@ -133,11 +160,16 @@ async function runResponseReviewEvalV1() {
       alignmentMin: RESPONSE_REVIEW_ALIGNMENT_MIN_V1,
       neededNo: RESPONSE_REVIEW_NEEDED_NO_V1,
       redundantKindMin: RESPONSE_REVIEW_REDUNDANT_KIND_MIN_V1,
+      claimUnsupportedMin: CLAIM_UNSUPPORTED_MIN_V1,
+      progressStuckNo: PROGRESS_STUCK_NO_V1,
+      progressSignalledStuckNo: PROGRESS_SIGNALLED_STUCK_NO_V1,
     },
     commit: git("rev-parse", "HEAD"),
     workingTreeStatus: git("status", "--porcelain"),
     patchHash: createHash("sha256").update(git("diff", "HEAD")).digest("hex"),
     questionsSourceHash: await sourceHash("../supervision/response-review.ts"),
+    claimSourceHash: await sourceHash("../supervision/claim-check.ts"),
+    progressSourceHash: await sourceHash("../supervision/loop-health.ts"),
     gradingSourceHash: await sourceHash("./response-review.ts"),
     fixturesSourceHash: await sourceHash("./response-review.fixtures.ts"),
     createdAt: new Date().toISOString(),

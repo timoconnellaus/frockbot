@@ -12,6 +12,11 @@ import {
 import { turnStartQuestionsV1 } from "./turn-start.js";
 import { questionRouteQuestionsV1 } from "./question-route.js";
 import { callReviewQuestionsV1, composeCallDecisionV1 } from "./call-review.js";
+import { claimQuestionsV1, claimUnsupportedV1 } from "./claim-check.js";
+import {
+  composeProgressDecisionV1,
+  progressQuestionsV1,
+} from "./loop-health.js";
 
 test("the fake knows exactly Turn supervision's question sets", () => {
   expect(SUPERVISION_QUESTION_SETS_V1).toEqual([
@@ -19,6 +24,8 @@ test("the fake knows exactly Turn supervision's question sets", () => {
     Object.keys(responseReviewQuestionsV1),
     Object.keys(sendReviewQuestionsV1),
     Object.keys(relayQuestionsV1),
+    Object.keys(claimQuestionsV1),
+    Object.keys(progressQuestionsV1),
     Object.keys(questionRouteQuestionsV1),
     Object.keys(callReviewQuestionsV1),
   ]);
@@ -58,4 +65,16 @@ test("the fake's call answers let a harness Turn's calls run", () => {
       >[0]["answers"],
     }).decision,
   ).toBe("allow");
+});
+
+test("a harness Turn's claims are released and its long Turns never stuck", () => {
+  const claim = fakeJevAnswersV1({ questions: claimQuestionsV1 });
+  expect(claimUnsupportedV1(claim.answers as never)).toBe(false);
+  const progress = fakeJevAnswersV1({ questions: progressQuestionsV1 });
+  expect(
+    composeProgressDecisionV1({
+      answers: progress.answers as never,
+      signals: ["repeated_call", "repeated_error"],
+    }).stuck,
+  ).toBe(false);
 });

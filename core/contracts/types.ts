@@ -21,11 +21,13 @@ import {
 } from "./structured-output.js";
 import {
   decodeCallDecisionV1,
+  decodeProgressDecisionV1,
   decodeQuestionRouteV1,
   decodeSendDecisionV1,
   decodeStepDecisionV1,
   decodeTurnDirectiveV1,
   type CallDecisionV1,
+  type ProgressDecisionV1,
   type QuestionRouteV1,
   type SendDecisionV1,
   type StepDecision,
@@ -469,11 +471,6 @@ export interface SessionEventMap {
     latencyMs: number;
   };
   /**
-   * What Turn supervision decided about one `mutate` call, written before
-   * the call runs. A refused call is settled as a tool result the model
-   * reads; it never runs.
-   */
-  /**
    * Who answers the question a subagent asked, decided when a Turn opens on
    * it: the conversation, from what the person already said, or the person.
    */
@@ -482,6 +479,21 @@ export interface SessionEventMap {
     route: QuestionRouteV1;
     latencyMs: number;
   };
+  /**
+   * Whether a long Turn was still getting anywhere, checked before the model
+   * call of `step`. A stuck Turn is told to change course in that request.
+   */
+  "supervision/progress": {
+    turn: number;
+    step: number;
+    decision: ProgressDecisionV1;
+    latencyMs: number;
+  };
+  /**
+   * What Turn supervision decided about one `mutate` call, written before
+   * the call runs. A refused call is settled as a tool result the model
+   * reads; it never runs.
+   */
   "supervision/call": {
     turn: number;
     step: number;
@@ -1838,6 +1850,17 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       );
       turn();
       decodeQuestionRouteV1(event.route, "session event.route");
+      eventInteger(event.latencyMs, "session event.latencyMs", 0);
+      break;
+    case "supervision/progress":
+      requireEventKeys(
+        event,
+        keys("turn", "step", "decision", "latencyMs"),
+        "session event",
+      );
+      turn();
+      step();
+      decodeProgressDecisionV1(event.decision, "session event.decision");
       eventInteger(event.latencyMs, "session event.latencyMs", 0);
       break;
     case "supervision/call":

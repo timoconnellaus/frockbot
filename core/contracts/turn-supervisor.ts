@@ -32,6 +32,7 @@ export const SUPERVISION_REASON_CODES_V1 = [
   "off_task",
   "redundant_text",
   "paraphrased_work",
+  "unsupported_claim",
   "text_depends_on_rejected_effect",
   "supervisor_unavailable",
   "supervisor_timeout",
@@ -219,7 +220,10 @@ export interface ProposedCallV1 {
 
 export interface PriorToolResultV1 {
   callId: string;
+  /** The tool as the model named it. */
+  tool: string;
   content: string;
+  isError: boolean;
 }
 
 /**
@@ -299,6 +303,12 @@ export interface SendReviewEvidenceV1 {
   finish: boolean;
   /** What a subagent produced for this Turn, oldest first. */
   work: readonly string[];
+  /**
+   * Whether to check what the message says was done against the results.
+   * Off once a send this Turn was withheld for it, so a Turn is corrected
+   * once and never held in a loop.
+   */
+  checkClaim: boolean;
 }
 
 export interface SendDecisionV1 {
@@ -344,6 +354,53 @@ export interface CallDecisionV1 {
   model?: string;
 }
 
+/**
+ * Whether a withheld finishing send is still the Turn's last word. It is when
+ * the person already has what it said; it is not when it was withheld so the
+ * Turn says something else instead: the work as written, or the truth about
+ * what was done.
+ */
+export function withheldSendEndsTurnV1(
+  reason: SupervisionReasonCode | undefined,
+): boolean {
+  return reason !== "paraphrased_work" && reason !== "unsupported_claim";
+}
+
+/** What code saw a long Turn doing, before Jev is asked about it. */
+export const LOOP_SIGNALS_V1 = ["repeated_call", "repeated_error"] as const;
+
+export type LoopSignalV1 = (typeof LOOP_SIGNALS_V1)[number];
+
+/** One call a Turn made, as its progress is judged. */
+export interface LoopActionV1 {
+  tool: string;
+  arguments: string;
+  result: string;
+  isError: boolean;
+}
+
+/**
+ * A long Turn, checked for progress before its next model call: what was
+ * asked, and what its latest calls did.
+ */
+export interface ProgressEvidenceV1 {
+  objective: string;
+  origin: TurnInputOriginV1;
+  /** The step about to run. */
+  step: number;
+  /** The Turn's latest calls, oldest first. */
+  actions: readonly LoopActionV1[];
+  signals: readonly LoopSignalV1[];
+}
+
+/** Whether the Turn is stuck, and so steered to change course. */
+export interface ProgressDecisionV1 {
+  stuck: boolean;
+  signals: LoopSignalV1[];
+  judgments: SupervisionJudgmentV1[];
+  model?: string;
+}
+
 /** A question a subagent asked, and what the person said before it came. */
 export interface QuestionRouteEvidenceV1 {
   question: string;
@@ -383,6 +440,11 @@ export interface TurnSupervisor {
     evidence: QuestionRouteEvidenceV1,
     signal?: AbortSignal,
   ): Promise<QuestionRouteV1>;
+  /** Whether a long Turn is still getting anywhere. */
+  reviewProgress(
+    evidence: ProgressEvidenceV1,
+    signal?: AbortSignal,
+  ): Promise<ProgressDecisionV1>;
 }
 
 export type SupervisionFailureKindV1 = "unavailable" | "timeout";
@@ -774,6 +836,29 @@ export function decodeQuestionRouteV1(
   };
 }
 
+export function decodeProgressDecisionV1(
+  value: unknown,
+  label = "progress decision",
+): ProgressDecisionV1 {
+  const decision = record(value, label);
+  exactKeys(decision, ["stuck", "signals", "judgments"], ["model"], label);
+  if (typeof decision.stuck !== "boolean") {
+    throw new Error(`${label}.stuck must be a boolean`);
+  }
+  return {
+    stuck: decision.stuck,
+    signals: list(decision.signals, `${label}.signals`, (signal, at) =>
+      oneOf(signal, LOOP_SIGNALS_V1, at),
+    ),
+    judgments: decodeJudgmentsV1(decision.judgments, `${label}.judgments`),
+    ...(decision.model === undefined
+      ? {}
+      : {
+          model: text(decision.model, `${label}.model`, JUDGMENT_TEXT_MAX_V1),
+        }),
+  };
+}
+
 export function allowCallDecisionV1(): CallDecisionV1 {
   return { decision: "allow", reasonCode: "authorized", judgments: [] };
 }
@@ -814,6 +899,7 @@ export function createFakeTurnSupervisorV1(options?: {
   reviewSend?: TurnSupervisor["reviewSend"];
   reviewCall?: TurnSupervisor["reviewCall"];
   routeQuestion?: TurnSupervisor["routeQuestion"];
+  reviewProgress?: TurnSupervisor["reviewProgress"];
 }): TurnSupervisor {
   return {
     async startTurn(evidence, signal) {
@@ -843,6 +929,13 @@ export function createFakeTurnSupervisorV1(options?: {
       }
       return { answerer: "person", judgments: [] };
     },
+    async reviewProgress(evidence, signal) {
+      throwIfAborted(signal);
+      if (options?.reviewProgress) {
+        return options.reviewProgress(evidence, signal);
+      }
+      return { stuck: false, signals: [...evidence.signals], judgments: [] };
+    },
   };
 }
 
@@ -860,5 +953,6 @@ export function createUnavailableTurnSupervisorV1(
     reviewSend: fail,
     reviewCall: fail,
     routeQuestion: fail,
+    reviewProgress: fail,
   };
 }

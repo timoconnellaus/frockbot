@@ -14,6 +14,7 @@ import {
   type QuestionRouteV1,
   type LlmMessage,
   type LoopHooksV1,
+  type ProgressDecisionV1,
   type ProposedCallV1,
   type SendDecisionV1,
   type Session,
@@ -23,11 +24,13 @@ import {
   type TurnDirective,
   type TurnInputOriginV1,
   type TurnSupervisor,
+  withheldSendEndsTurnV1,
 } from "@frockbot/core/contracts";
 import type { StoredRunOriginV1 } from "@frockbot/core/durable";
 import { resolveDynamicToolNameV1 } from "../audit/classify.js";
 import { SUBAGENT_SUMMARY_END_V1 } from "../routines/inbox.js";
 import type { FoundationFeature } from "../runtime.js";
+import { loopSignalsV1, progressCheckDueV1 } from "./loop-health.js";
 
 // Turn supervision, mounted into the loop. Jev judges; this file enforces.
 //
@@ -40,9 +43,13 @@ import type { FoundationFeature } from "../runtime.js";
 // - Once per response that calls tools, before any of them runs: is it
 //   working on what was asked. A response pursuing something else has every
 //   call that is not the Bot speaking refused, and its text sends withheld.
-// - Right before each text send runs: would the person miss it. A withheld
-//   send is never delivered; its draft is cleared; and a withheld finish
-//   still ends the Turn, because the person already has what it would say.
+// - Right before each text send runs: does it say something was done that
+//   the Turn did not do, and would the person miss it. A withheld send is
+//   never delivered and its draft is cleared. A redundant finish still ends
+//   the Turn, because the person already has what it would say; one that
+//   claimed undone work does not, so the Turn can do it or say so.
+// - Every few steps of a long Turn, before its model call: is it still
+//   getting anywhere. A stuck Turn is told, in that request, to change course.
 // - Right before each `mutate` call runs — a Plugin a User installed or a Bot
 //   wrote, a remote MCP server, a connected app: did the person ask for it,
 //   with these particulars. A refused call never runs; the model reads why
@@ -102,6 +109,14 @@ export const SUPERVISION_CONVERSATION_MAX_V1 = 8;
 /** Runtime notes carry a label so the model reads them as the platform's. */
 export const ACKNOWLEDGE_NOTE_V1 =
   '[FrockBot runtime: acknowledge first]\nThis will take some work. Before you start it, send the person one short line with send_to_user (disposition "continue") saying what you are about to do. Then do the work.';
+
+/** How a stuck Turn is steered, offered the thinking specialist when it has it. */
+export function stuckNoteV1(thinking?: { slug: string }): string {
+  const mentor = thinking
+    ? `, hand the problem to the thinking specialist (call Task with model "${thinking.slug}" and a brief of what you tried and what happened)`
+    : "";
+  return `[FrockBot runtime: not getting anywhere]\nYour last few steps have not moved the work forward. Stop repeating what has not worked. Try a different approach${mentor}, or tell the person what is blocking you and ask how to go on.`;
+}
 
 /** How a Turn is steered to answer a question its subagent asked. */
 export function questionNoteV1(answerer: "conversation" | "person"): string {
@@ -254,7 +269,42 @@ function shownThisTurn(
 function priorResults(events: readonly SessionEvent[], turn: number) {
   return turnEvents(events, turn).flatMap((event) =>
     event.type === "tool/result"
-      ? [{ callId: event.occurrenceId, content: event.content }]
+      ? [
+          {
+            callId: event.occurrenceId,
+            tool: event.name,
+            content: event.content,
+            isError: event.isError,
+          },
+        ]
+      : [],
+  );
+}
+
+/** The Turn's settled calls, oldest first, each with what it was given. */
+function settledCalls(events: readonly SessionEvent[], turn: number) {
+  const inputs = new Map<string, unknown>();
+  return turnEvents(events, turn).flatMap((event) => {
+    if (event.type === "tool/call") inputs.set(event.occurrenceId, event.input);
+    if (event.type !== "tool/result") return [];
+    return [
+      {
+        tool: event.name,
+        input: JSON.stringify(inputs.get(event.occurrenceId) ?? null),
+        result: event.content,
+        isError: event.isError,
+      },
+    ];
+  });
+}
+
+function progressChecksOf(
+  events: readonly SessionEvent[],
+  turn: number,
+): { step: number; decision: ProgressDecisionV1 }[] {
+  return events.flatMap((event) =>
+    event.type === "supervision/progress" && event.turn === turn
+      ? [{ step: event.step, decision: event.decision }]
       : [],
   );
 }
@@ -369,22 +419,22 @@ export function withheldFinishV1(
       event.step === step &&
       event.finish &&
       event.decision.send === "withhold" &&
-      // A rewrite of the work is withheld so the work itself goes instead.
-      event.decision.reason !== "paraphrased_work",
+      withheldSendEndsTurnV1(event.decision.reason),
   );
 }
 
-/** Whether a send this Turn was already withheld as a rewrite of the work. */
-function withheldRewriteV1(
+/** Whether a send this Turn was already withheld for `reason`. */
+function withheldForV1(
   events: readonly SessionEvent[],
   turn: number,
+  reason: "paraphrased_work" | "unsupported_claim",
 ): boolean {
   return events.some(
     (event) =>
       event.type === "supervision/send" &&
       event.turn === turn &&
       event.decision.send === "withhold" &&
-      event.decision.reason === "paraphrased_work",
+      event.decision.reason === reason,
   );
 }
 
@@ -427,10 +477,14 @@ function clip(text: string, max = 280): string {
 }
 
 function withheldResult(
-  reason: "off_task" | "redundant_text" | "paraphrased_work",
+  reason:
+    "off_task" | "redundant_text" | "paraphrased_work" | "unsupported_claim",
   finish: boolean,
   addressed: boolean,
 ): string {
+  if (reason === "unsupported_claim") {
+    return `${SUPERVISION_WITHHELD_SEND_PREFIX_V1} because it says something was done that this Turn's results do not show done. Do it now, or tell the person plainly that it is not done and why.`;
+  }
   if (reason === "paraphrased_work") {
     return `${SUPERVISION_WITHHELD_SEND_PREFIX_V1} because the person asked for the work itself and this rewrites it. Send what the subagent produced as it was written, whole; one short line before it is fine.`;
   }
@@ -475,10 +529,66 @@ export function createSupervisionRuntimeFeatureV1(
       return session;
     };
 
+    /** Whether `step` opens stuck, asking Jev only when a check is due. */
+    const checkProgress = async (
+      session: Session,
+      turn: number,
+      step: number,
+      signal: AbortSignal | undefined,
+    ): Promise<boolean> => {
+      const events = session.activeRunJournal;
+      const checks = progressChecksOf(events, turn);
+      const recorded = checks.find((check) => check.step === step);
+      if (recorded) return recorded.decision.stuck;
+      const calls = settledCalls(events, turn);
+      const signals = loopSignalsV1(calls);
+      if (
+        !progressCheckDueV1({
+          step,
+          lastChecked: checks.at(-1)?.step ?? 0,
+          signals,
+        })
+      ) {
+        return false;
+      }
+      const started = Date.now();
+      const decision = await host.supervisor.reviewProgress(
+        {
+          objective: inputText(events, turn),
+          origin: host.origin,
+          step,
+          actions: calls.map((call) => ({
+            tool: call.tool,
+            arguments: call.input,
+            result: call.result,
+            isError: call.isError,
+          })),
+          signals,
+        },
+        signal,
+      );
+      session.append({
+        type: "supervision/progress",
+        turn,
+        step,
+        decision,
+        latencyMs: elapsed(started),
+      });
+      await session.flush();
+      return decision.stuck;
+    };
+
     const hooks: LoopHooksV1 = {
       async request(agent, _request, turn, step, signal, next) {
         const request = await next();
-        if (step !== 1) return request;
+        if (step !== 1) {
+          const stuck = await checkProgress(agent.session, turn, step, signal);
+          if (!stuck) return request;
+          const thinking = host
+            .specialists?.()
+            .find((offered) => offered.name === "thinking");
+          return appendRuntimeNoteV1(request, stuckNoteV1(thinking));
+        }
         const session = agent.session;
         let directive = directiveOf(session.activeRunJournal, turn);
         if (!directive) {
@@ -683,9 +793,14 @@ export function createSupervisionRuntimeFeatureV1(
                     priorResults: priorResults(events, at.turn),
                     message: send.text,
                     finish: send.finish,
-                    work: withheldRewriteV1(events, at.turn)
+                    work: withheldForV1(events, at.turn, "paraphrased_work")
                       ? []
                       : subagentWorkV1(events, at.turn),
+                    checkClaim: !withheldForV1(
+                      events,
+                      at.turn,
+                      "unsupported_claim",
+                    ),
                   },
                   context.signal,
                 );
@@ -714,7 +829,8 @@ export function createSupervisionRuntimeFeatureV1(
           result: {
             content: withheldResult(
               verdict.reason === "redundant_text" ||
-                verdict.reason === "paraphrased_work"
+                verdict.reason === "paraphrased_work" ||
+                verdict.reason === "unsupported_claim"
                 ? verdict.reason
                 : "off_task",
               send.finish,

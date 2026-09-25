@@ -20,7 +20,21 @@ import {
   questionRouteStateV1,
   type QuestionRouteReviewV1,
 } from "../supervision/question-route.js";
-import type { QuestionRouteEvidenceV1 } from "@frockbot/core/contracts";
+import type {
+  ProgressEvidenceV1,
+  QuestionRouteEvidenceV1,
+} from "@frockbot/core/contracts";
+import {
+  claimStateV1,
+  claimUnsupportedV1,
+  type ClaimJudgmentEvidenceV1,
+  type ClaimReviewV1,
+} from "../supervision/claim-check.js";
+import {
+  composeProgressDecisionV1,
+  progressStateV1,
+  type ProgressReviewV1,
+} from "../supervision/loop-health.js";
 
 // Grading for the labeled response-review suite. The questions and the
 // thresholds code decides by live in `app/supervision/response-review.ts`;
@@ -69,11 +83,31 @@ export interface QuestionFixtureV1 {
   readonly expected: { readonly answerer: "conversation" | "person" };
 }
 
+/** A message: does it say something was done that the Turn did not do? */
+export interface ClaimFixtureV1 {
+  readonly kind: "claim";
+  readonly name: string;
+  readonly intent: string;
+  readonly evidence: ClaimJudgmentEvidenceV1;
+  readonly expected: { readonly send: "release" | "withhold" };
+}
+
+/** A long Turn's latest calls: is it getting anywhere? */
+export interface ProgressFixtureV1 {
+  readonly kind: "progress";
+  readonly name: string;
+  readonly intent: string;
+  readonly evidence: ProgressEvidenceV1;
+  readonly expected: { readonly stuck: boolean };
+}
+
 export type ResponseReviewFixtureV1 =
   | ResponseAlignmentFixtureV1
   | SendFixtureV1
   | RelayFixtureV1
-  | QuestionFixtureV1;
+  | QuestionFixtureV1
+  | ClaimFixtureV1
+  | ProgressFixtureV1;
 
 export interface ResponseReviewCheckV1 {
   readonly question: string;
@@ -141,6 +175,40 @@ export function gradeQuestionV1(
   ];
 }
 
+export function gradeClaimV1(
+  fixture: ClaimFixtureV1,
+  review: ClaimReviewV1,
+): ResponseReviewCheckV1[] {
+  const withheld = claimUnsupportedV1(review.answers);
+  const claim = review.answers.claim;
+  return [
+    {
+      question: "claim",
+      expected: fixture.expected.send,
+      actual: `${withheld ? "withhold" : "release"} (claim ${claim.choice} p ${round(claim.probabilities[claim.choice] ?? 0)})`,
+      passed: (withheld ? "withhold" : "release") === fixture.expected.send,
+    },
+  ];
+}
+
+export function gradeProgressV1(
+  fixture: ProgressFixtureV1,
+  review: ProgressReviewV1,
+): ResponseReviewCheckV1[] {
+  const decision = composeProgressDecisionV1({
+    answers: review.answers,
+    signals: fixture.evidence.signals,
+  });
+  return [
+    {
+      question: "progressing",
+      expected: fixture.expected.stuck ? "stuck" : "moving",
+      actual: `${decision.stuck ? "stuck" : "moving"} (progressing ${round(review.answers.progressing.noul)})`,
+      passed: decision.stuck === fixture.expected.stuck,
+    },
+  ];
+}
+
 export function gradeSendV1(
   fixture: SendFixtureV1,
   review: SendReviewV1,
@@ -175,7 +243,12 @@ export function responseReviewReportCaseV1(
   outcome:
     | {
         readonly review:
-          ResponseReviewV1 | SendReviewV1 | RelayV1 | QuestionRouteReviewV1;
+          | ResponseReviewV1
+          | SendReviewV1
+          | RelayV1
+          | QuestionRouteReviewV1
+          | ClaimReviewV1
+          | ProgressReviewV1;
         readonly checks: readonly ResponseReviewCheckV1[];
       }
     | { readonly failure: unknown },
@@ -191,7 +264,11 @@ export function responseReviewReportCaseV1(
           ? relayStateV1(fixture.evidence)
           : fixture.kind === "question"
             ? questionRouteStateV1(fixture.evidence)
-            : sendReviewStateV1(fixture.evidence),
+            : fixture.kind === "claim"
+              ? claimStateV1(fixture.evidence)
+              : fixture.kind === "progress"
+                ? progressStateV1(fixture.evidence)
+                : sendReviewStateV1(fixture.evidence),
     expected: fixture.expected,
   };
   if ("failure" in outcome)

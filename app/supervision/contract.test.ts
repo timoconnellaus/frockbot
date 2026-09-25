@@ -74,10 +74,18 @@ const sendEvidence: SendReviewEvidenceV1 = {
   origin: "user",
   conversation: [],
   shown: ["Showed a card: Emailed Dana the March invoice"],
-  priorResults: [{ callId: "tool:1:1:0", content: "Emailed Dana." }],
+  priorResults: [
+    {
+      callId: "tool:1:1:0",
+      tool: "email_owner",
+      content: "Emailed Dana.",
+      isError: false,
+    },
+  ],
   message: "I've emailed Dana the March invoice.",
   finish: true,
   work: [],
+  checkClaim: false,
 };
 
 const callEvidence: CallReviewEvidenceV1 = {
@@ -270,7 +278,12 @@ describe("the Jev adapter's call review", () => {
     await jevSupervisor(jevFetch(undefined, seen)).reviewCall({
       ...callEvidence,
       priorResults: [
-        { callId: "tool:1:1:0", content: "Notes: shipped the invoice fix." },
+        {
+          callId: "tool:1:1:0",
+          tool: "read_notes",
+          content: "Notes: shipped the invoice fix.",
+          isError: false,
+        },
       ],
     });
     expect((seen[0] as { state: unknown }).state).toEqual({
@@ -368,6 +381,121 @@ describe("the Jev adapter's relay check", () => {
         Object.keys((body as { questions: object }).questions),
       ),
     ).toEqual([["messageNeeded", "messageKind"]]);
+  });
+});
+
+describe("the Jev adapter's claim check", () => {
+  const claim = (chosen: string, sure = 0.9) =>
+    choice(["no_claim", "supported", "unsupported"], chosen, sure);
+  const failed = {
+    ...sendEvidence,
+    checkClaim: true,
+    priorResults: [
+      {
+        callId: "tool:1:1:0",
+        tool: "email_owner",
+        content: "SMTP 550: mailbox unavailable",
+        isError: true,
+      },
+    ],
+  };
+
+  test("withholds a claim the results do not show, whatever the vetoes say", async () => {
+    const decision = await jevSupervisor(
+      jevFetch((answers) =>
+        "claim" in answers ? { claim: claim("unsupported") } : answers,
+      ),
+    ).reviewSend({ ...failed, message: `${failed.message} Anything else?` });
+    expect(decision).toMatchObject({
+      send: "withhold",
+      reason: "unsupported_claim",
+    });
+    expect(decision.judgments.map((judgment) => judgment.question)).toEqual([
+      "claim",
+    ]);
+  });
+
+  test("an unsure claim is released, and both questions go out together", async () => {
+    const seen: unknown[] = [];
+    const decision = await jevSupervisor(
+      jevFetch(
+        (answers) =>
+          "claim" in answers ? { claim: claim("unsupported", 0.6) } : answers,
+        seen,
+      ),
+    ).reviewSend(failed);
+    expect(decision.send).toBe("release");
+    expect(
+      seen
+        .map((body) =>
+          Object.keys((body as { questions: object }).questions).join(","),
+        )
+        .sort(),
+    ).toEqual(["claim", "messageNeeded,messageKind"]);
+    expect(decision.judgments.map((judgment) => judgment.question)).toEqual([
+      "messageNeeded",
+      "messageKind",
+      "claim",
+    ]);
+  });
+
+  test("shows Jev each call's tool and whether it failed", async () => {
+    const seen: unknown[] = [];
+    await jevSupervisor(jevFetch(undefined, seen)).reviewSend({
+      ...failed,
+      shown: [],
+    });
+    expect(seen).toHaveLength(1);
+    expect((seen[0] as { state: unknown }).state).toEqual({
+      request: { text: failed.objective, origin: "user" },
+      conversation: [],
+      actionsThisTurn: [
+        {
+          tool: "email_owner",
+          outcome: "failed",
+          result: "SMTP 550: mailbox unavailable",
+        },
+      ],
+      message: failed.message,
+    });
+  });
+});
+
+describe("the Jev adapter's progress check", () => {
+  const evidence = {
+    objective: "Get the build green.",
+    origin: "user" as const,
+    step: 5,
+    actions: [
+      {
+        tool: "computer_exec",
+        arguments: '{"command":"bun test"}',
+        result: "1 fail",
+        isError: true,
+      },
+    ],
+  };
+  const progress = (
+    noul: number,
+    signals: ("repeated_call" | "repeated_error")[],
+  ) =>
+    jevSupervisor(
+      jevFetch(() => ({ progressing: { type: "noul", noul } })),
+    ).reviewProgress({ ...evidence, signals });
+
+  test("is stuck when Jev says it is getting nowhere", async () => {
+    expect((await progress(0.2, [])).stuck).toBe(true);
+    expect((await progress(0.6, [])).stuck).toBe(false);
+  });
+
+  test("takes less to be stuck once code saw it looping", async () => {
+    expect((await progress(0.4, [])).stuck).toBe(false);
+    const looping = await progress(0.4, ["repeated_error"]);
+    expect(looping).toMatchObject({
+      stuck: true,
+      signals: ["repeated_error"],
+      judgments: [{ question: "progressing", value: 0.4 }],
+    });
   });
 });
 
