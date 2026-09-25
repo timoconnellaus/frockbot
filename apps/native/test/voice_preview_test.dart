@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/settings/voice_settings.dart';
 import 'package:frockbot_native/voice/appearance.dart';
@@ -116,6 +117,58 @@ void main() {
     addTearDown(preview.dispose);
     await preview.hear('Iapetus');
     expect(preview.playing, isNull);
+  });
+
+  test('the playing mark clears when the clip ends', () async {
+    final device = _FakePlayer();
+    final preview = VoicePreviewPlayer(
+      createPlayer: () => device,
+      loadClip: (_) async => pcmToWavV1(Uint8List.fromList([1, 0])),
+    );
+    addTearDown(preview.dispose);
+
+    await preview.hear('Kore');
+    expect(preview.playing, 'Kore');
+    device.pendingDrain!.complete(true);
+    device.pendingDrain = null;
+    await Future<void>.delayed(Duration.zero);
+    expect(preview.playing, isNull);
+  });
+
+  test('dispose releases the speaker', () async {
+    final device = _FakePlayer();
+    final preview = VoicePreviewPlayer(
+      createPlayer: () => device,
+      loadClip: (_) async => pcmToWavV1(Uint8List.fromList([1, 0])),
+    );
+
+    await preview.hear('Kore');
+    preview.dispose();
+    await Future<void>.delayed(Duration.zero);
+    expect(device.interrupts, 1);
+    expect(device.pendingDrain, isNull);
+  });
+
+  test('every bundled clip is 24 kHz mono PCM16 speech', () async {
+    for (final voice in geminiVoicesV1) {
+      final data = await rootBundle.load(voicePreviewAssetV1(voice.voiceName));
+      final wav = data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+      final format = ByteData.sublistView(wav);
+      expect(format.getUint16(20, Endian.little), 1, reason: voice.voiceName);
+      expect(format.getUint16(22, Endian.little), 1, reason: voice.voiceName);
+      expect(format.getUint16(34, Endian.little), 16, reason: voice.voiceName);
+      final clip = wavToPcmV1(wav);
+      expect(clip?.sampleRate, 24000, reason: voice.voiceName);
+      final samples = ByteData.sublistView(clip!.pcm);
+      final seconds = clip.pcm.length / 2 / clip.sampleRate;
+      expect(seconds, inInclusiveRange(1, 15), reason: voice.voiceName);
+      var peak = 0;
+      for (var i = 0; i + 1 < clip.pcm.length; i += 2) {
+        final sample = samples.getInt16(i, Endian.little).abs();
+        if (sample > peak) peak = sample;
+      }
+      expect(peak, greaterThan(1000), reason: voice.voiceName);
+    }
   });
 
   test('every Gemini voice has a minted preview clip', () {
