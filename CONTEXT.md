@@ -119,7 +119,7 @@ How the deployment ships a Plugin: `locked` (on for every Bot, no switch), `defa
 _Avoid_: Tier, preinstall flag
 
 **Plugin trigger**:
-A Routine trigger kind whose event arrives on the app-owned Routine webhook door — the same signed, keyed, replay-guarded route a webhook Routine uses — is verified and shaped by the trigger the Plugin exports under `triggers`, and is enqueued as a firing by the app, or dropped with the Plugin's reason. The Plugin never binds a route and never enqueues a Turn.
+A Routine trigger kind whose event arrives on the app-owned Routine webhook door — the same signed, keyed, replay-guarded route a webhook Routine uses — or from the Plugin's own device module, is verified and shaped by the trigger the Plugin exports under `triggers`, and is enqueued as a firing by the app, or dropped with the Plugin's reason. The Plugin never binds a route and never enqueues a Turn.
 _Avoid_: Webhook plugin, inbound handler
 
 **Connection trigger**:
@@ -187,8 +187,12 @@ A Plugin `sidebar.sections` view: a host-drawn block in the Bot list, beneath th
 _Avoid_: Sidebar entry, Bot list row
 
 **Device ability**:
-Something on the person's device the host opens for a Plugin's page, never the page itself — today the microphone. Declared under the `device` grant, approved on the Plugin's card, and shown in host chrome with a Stop while in use ([ADR 0035](docs/adr/0035-device-bridge.md), [ADR 0036](docs/adr/0036-plugin-html-surfaces.md)).
+Something on the person's device the host opens for a Plugin's page, never the page itself — today the microphone. Declared under the `device` grant, approved on the Plugin's card, and shown in host chrome with a Stop while in use ([ADR 0035](docs/adr/0035-device-bridge.md), [ADR 0036](docs/adr/0036-plugin-html-surfaces.md)). A Plugin's device module may provide one too ([ADR 0037](docs/adr/0037-plugin-device-modules.md)).
 _Avoid_: Permission, capability (that is a Package's)
+
+**Device module**:
+Code a Plugin ships for the desktop to run while the app is open: its own Deno process inside a Seatbelt profile, both generated from what it declares — paths to read, hosts to reach, applications to send Apple Events to through the host. It answers its Plugin's `device.call` inside the Turn that made it — a call to an absent or silent Device fails, and a claimed mutation that never answered is `unknown` — and emits events that feed its Plugin's triggers over the Device's hibernating socket ([ADR 0037](docs/adr/0037-plugin-device-modules.md)).
+_Avoid_: Helper, agent, bridge, machine integration
 
 **Panel focus**:
 The Session's selected conversation-panel tab, `{ pluginId, surfaceId }`, or closed. Written by a tab click, a bot-nav press, or the Bot's `panel_focus` tool. The cloud is the authority.

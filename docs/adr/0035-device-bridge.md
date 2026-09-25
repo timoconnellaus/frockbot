@@ -7,6 +7,13 @@ shell commands decided by Jev, and the Bot list opening to Plugins under host
 rules ([ADR 0034](0034-plugin-panels.md), amended the same day). The shapes
 below are the proposal that discussion asked for.
 
+> Amended by [ADR 0037](0037-plugin-device-modules.md), 2026-09-25: a device
+> ability may be provided by a Plugin's device module, and the own-machine tier
+> is no longer first-party only. A module call runs inside the Turn that made
+> it: a call to an absent Device fails rather than queueing, and its result is
+> never a Pending input. First-party Messages is deleted, and the long poll
+> gives way to one hibernating socket per desktop.
+
 ## Context
 
 The marketing site names a **device bridge**: "The same Bot on every client.

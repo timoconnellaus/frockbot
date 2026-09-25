@@ -1,6 +1,6 @@
 # ADR 0037: A Plugin may run a module on the desktop
 
-Status: proposed, 2026-09-25. Numbered after ADR 0036; nothing on `main` or in
+Status: accepted, 2026-09-25. Numbered after ADR 0036; nothing on `main` or in
 an open pull request holds 0037. Decisions are Tim's from the 2026-09-25
 discussion:
 
@@ -322,7 +322,7 @@ reference and the responses its first calls return.
 
 ## Amendments to the constitution
 
-On acceptance, `AGENTS.md` changes as follows:
+`AGENTS.md` changes as follows:
 
 - **Extension points** gains **Device modules**: code a Plugin ships for the
   desktop to run, reaching what it declares, answering its Plugin's calls and
