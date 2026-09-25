@@ -109,6 +109,7 @@ void main() {
       Map<String, Object?> state, {
       String url = 'https://ui.bot.example/packages/a.html',
       PluginPageToolRunnerV1? runTool,
+      PluginPageReporterV1? onReport,
     }) => PluginPageFrame(
       url: url,
       state: state,
@@ -116,6 +117,7 @@ void main() {
       botId: 'bot-1',
       surfaceId: 'score',
       label: 'Score',
+      onReport: onReport,
       runTool:
           runTool ??
           (tool, arguments) async => const PluginPageToolAnswerV1.ran('ok'),
@@ -223,6 +225,40 @@ void main() {
         'ok': true,
         'output': 'added',
       });
+    });
+
+    testWidgets('passes on what the page reports, twenty a minute', (
+      tester,
+    ) async {
+      final reports = <PluginPageReportV1>[];
+      await tester.pumpWidget(
+        MaterialApp(home: frame({}, onReport: reports.add)),
+      );
+      say({
+        'frockbotPage': 1,
+        'type': 'report',
+        'level': 'error',
+        'text': 'TypeError: a4 is undefined',
+      });
+      await tester.pump();
+      expect(reports.single.level, 'error');
+      expect(reports.single.text, 'TypeError: a4 is undefined');
+      // A page that posts past the helper's own cap is not echoed.
+      for (var index = 0; index < 40; index++) {
+        say({
+          'frockbotPage': 1,
+          'type': 'report',
+          'level': 'log',
+          'text': 'level $index',
+        });
+      }
+      await tester.pump();
+      expect(reports, hasLength(pluginPageReportsPerMinuteV1));
+      // Nothing else is a report, and nothing is posted back.
+      say({'frockbotPage': 1, 'type': 'report', 'level': 'warn', 'text': 'x'});
+      await tester.pump();
+      expect(reports, hasLength(pluginPageReportsPerMinuteV1));
+      expect(heard, isEmpty);
     });
 
     testWidgets('ignores what it does not understand', (tester) async {

@@ -49,6 +49,15 @@ export interface PluginPageArtifactV1 {
 /** The bridge version a page speaks; carried on every message both ways. */
 export const PLUGIN_PAGE_BRIDGE_VERSION_V1 = 1 as const;
 
+/**
+ * The most one report from a page says, and how many a page sends a minute.
+ * A report is a debugging aid for the Bot, never a channel: a page that
+ * throws in a loop is heard, not echoed.
+ */
+export const PLUGIN_PAGE_REPORT_TEXT_MAX_V1 = 500;
+export const PLUGIN_PAGE_REPORTS_PER_MINUTE_V1 = 20;
+export const PLUGIN_PAGE_REPORT_LEVELS_V1 = ["error", "log"] as const;
+
 /** A tool call's id, minted by the page and echoed on its result. */
 export const PLUGIN_PAGE_CALL_ID_V1 = /^[A-Za-z0-9_-]{1,64}$/;
 
@@ -103,7 +112,13 @@ export type PluginPagePageMessageV1 =
       tool: string;
       input: Record<string, unknown>;
     }
-  | { frockbotPage: 1; type: "device"; ability: "microphone"; open: boolean };
+  | { frockbotPage: 1; type: "device"; ability: "microphone"; open: boolean }
+  | {
+      frockbotPage: 1;
+      type: "report";
+      level: (typeof PLUGIN_PAGE_REPORT_LEVELS_V1)[number];
+      text: string;
+    };
 
 /**
  * The page side of the bridge, as `window.frockbot`:
@@ -126,6 +141,10 @@ export type PluginPagePageMessageV1 =
  *   `close()`. `close()` resolves once the host has let go; a host that never
  *   answers is taken as having let go after a few seconds.
  *
+ * - `frockbot.log(text)` reports a reading to the Bot. The page's errors,
+ *   unhandled rejections and `console.error` are reported without asking,
+ *   at most twenty a minute and 500 characters each.
+ *
  * Only messages from `parent` are read. In a phone WebView the page is its own
  * parent and the host delivers with `window.postMessage`, so the one check
  * serves both renderers.
@@ -146,6 +165,34 @@ export const PLUGIN_PAGE_HELPER_JS_V1 = `(() => {
     fail = reject;
   });
   const post = (m) => parent.postMessage(Object.assign({ frockbotPage: V }, m), "*");
+  let reports = 0;
+  let minute = 0;
+  const report = (level, parts) => {
+    const now = Date.now();
+    if (now - minute >= 60000) {
+      minute = now;
+      reports = 0;
+    }
+    if (reports >= ${PLUGIN_PAGE_REPORTS_PER_MINUTE_V1}) return;
+    reports += 1;
+    let text;
+    try {
+      text = parts
+        .map((p) => (p instanceof Error ? p.stack || String(p) : typeof p === "string" ? p : JSON.stringify(p)))
+        .join(" ");
+    } catch (_) {
+      text = String(parts[0]);
+    }
+    text = String(text || "").slice(0, ${PLUGIN_PAGE_REPORT_TEXT_MAX_V1});
+    if (text) post({ type: "report", level, text });
+  };
+  addEventListener("error", (e) => report("error", [e.error || e.message || "An error with no message"]));
+  addEventListener("unhandledrejection", (e) => report("error", ["Unhandled rejection:", e.reason]));
+  const consoleError = console.error;
+  console.error = (...args) => {
+    report("error", args);
+    return consoleError.apply(console, args);
+  };
   const pcm = (text) => {
     const bytes = Uint8Array.from(atob(text), (c) => c.charCodeAt(0));
     const view = new DataView(bytes.buffer);
@@ -242,6 +289,9 @@ export const PLUGIN_PAGE_HELPER_JS_V1 = `(() => {
         post({ type: "device", ability: "microphone", open: true });
       });
     },
+    log(text) {
+      report("log", [text]);
+    },
     closeMicrophone() {
       const use = mic;
       if (!use) return Promise.resolve();
@@ -310,6 +360,21 @@ export function decodePluginPageMessageV1(
       type: "device",
       ability: "microphone",
       open: value.open,
+    };
+  }
+  if (
+    value.type === "report" &&
+    keys === "frockbotPage,level,text,type" &&
+    PLUGIN_PAGE_REPORT_LEVELS_V1.some((level) => level === value.level) &&
+    typeof value.text === "string" &&
+    value.text.length > 0 &&
+    value.text.length <= PLUGIN_PAGE_REPORT_TEXT_MAX_V1
+  ) {
+    return {
+      frockbotPage: 1,
+      type: "report",
+      level: value.level as (typeof PLUGIN_PAGE_REPORT_LEVELS_V1)[number],
+      text: value.text,
     };
   }
   if (

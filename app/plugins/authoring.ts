@@ -58,6 +58,10 @@ import {
   type PluginEnablementStorageV1,
 } from "./enablement.js";
 import {
+  pluginPageReportsTextV1,
+  readPluginPageReportsV1,
+} from "./page-reports.js";
+import {
   assertPluginIdV1,
   pluginIdFromDisplayNameV1,
   pluginSourceFilePathV1,
@@ -185,6 +189,8 @@ export interface PluginAuthoringHostV1 {
     pluginId: string;
     values: Record<string, unknown>;
   }): Promise<{ status: "written" | "refused"; reason?: string }>;
+  /** What this Plugin's pages reported, in words, newest first. */
+  pageReports(input: { pluginId: string }): Promise<string>;
 }
 
 const TEXT = new TextDecoder("utf-8", { fatal: true });
@@ -748,6 +754,19 @@ export function createPluginAuthoringHostV1(
       }
       await switchPluginForBotV1(seams.storage, pluginId, false, now());
       return { status: "off" };
+    },
+
+    async pageReports(input) {
+      const pluginId = assertPluginIdV1(input.pluginId);
+      const current = await seams.composition.current();
+      const member = current.members.find(
+        (candidate) => candidate.packageId === pluginId,
+      );
+      return pluginPageReportsTextV1(
+        pluginId,
+        await readPluginPageReportsV1(seams.storage, pluginId),
+        member?.version,
+      );
     },
 
     async readSettings(input) {

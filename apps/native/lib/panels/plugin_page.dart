@@ -44,6 +44,19 @@ class PluginPageDeviceV1 extends PluginPageMessageV1 {
   const PluginPageDeviceV1(this.ability, this.open);
 }
 
+/// Something the page reported for its Bot: an error it hit, or a reading it
+/// chose to log (ADR 0036, amended 2026-09-25).
+class PluginPageReportV1 extends PluginPageMessageV1 {
+  final String level;
+  final String text;
+  const PluginPageReportV1(this.level, this.text);
+}
+
+/// The most one report says, and how many a page is heard a minute. The
+/// helper keeps to both; a page that posts past it is not echoed.
+const pluginPageReportTextMaxV1 = 500;
+const pluginPageReportsPerMinuteV1 = 20;
+
 class PluginPageCallV1 extends PluginPageMessageV1 {
   final String callId;
   final String tool;
@@ -74,6 +87,17 @@ PluginPageMessageV1? decodePluginPageMessageV1(Map<String, Object?> message) {
         return null;
       }
       return PluginPageCallV1(callId, tool, input.cast<String, Object?>());
+    case 'report':
+      final level = message['level'];
+      final text = message['text'];
+      if (keys.join(',') != 'frockbotPage,level,text,type' ||
+          (level != 'error' && level != 'log') ||
+          text is! String ||
+          text.isEmpty ||
+          text.length > pluginPageReportTextMaxV1) {
+        return null;
+      }
+      return PluginPageReportV1(level as String, text);
     case 'device':
       final open = message['open'];
       if (keys.join(',') != 'ability,frockbotPage,open,type' ||
@@ -188,6 +212,8 @@ Future<Map<String, Object?>?> pluginPageAnswerV1(
     case PluginPageDeviceV1():
       // The frame owns the device; it is never a request/answer exchange.
       return null;
+    case PluginPageReportV1():
+      return null;
     case PluginPageCallV1(:final callId, :final tool, :final input):
       final arguments = jsonEncode(input);
       if (utf8.encode(arguments).length > pluginPageArgumentsMaxBytesV1) {
@@ -291,6 +317,8 @@ class PluginPageDeviceUseV1 {
 
 typedef PluginPageDeviceUseReporterV1 = void Function(PluginPageDeviceUseV1);
 
+typedef PluginPageReporterV1 = void Function(PluginPageReportV1);
+
 /// What kind of device this client is, as an audit row names it.
 String pluginPageDeviceKindV1() =>
     kIsWeb ? 'web' : defaultTargetPlatform.name.toLowerCase();
@@ -314,6 +342,9 @@ class PluginPageFrame extends StatefulWidget {
 
   /// Told once each use has ended, whichever way it ended.
   final PluginPageDeviceUseReporterV1? onDeviceUse;
+
+  /// Told what the page reported for its Bot, within the per-minute cap.
+  final PluginPageReporterV1? onReport;
   final DateTime Function() now;
   final PluginPageFrameBuilderV1 frameBuilder;
   const PluginPageFrame({
@@ -328,6 +359,7 @@ class PluginPageFrame extends StatefulWidget {
     this.abilities = const [],
     this.microphone,
     this.onDeviceUse,
+    this.onReport,
     this.now = DateTime.now,
     this.frameBuilder = _hostFrame,
   });
@@ -402,9 +434,30 @@ class _PluginPageFrameState extends State<PluginPageFrame>
     _post(_init());
   }
 
+  /// The reports heard this minute, and when the minute began.
+  int _reports = 0;
+  DateTime? _minute;
+
+  void _report(PluginPageReportV1 report) {
+    final now = widget.now();
+    final minute = _minute;
+    if (minute == null ||
+        now.difference(minute) >= const Duration(minutes: 1)) {
+      _minute = now;
+      _reports = 0;
+    }
+    if (_reports >= pluginPageReportsPerMinuteV1) return;
+    _reports += 1;
+    widget.onReport?.call(report);
+  }
+
   Future<void> _onMessage(Map<String, Object?> raw) async {
     final message = decodePluginPageMessageV1(raw);
     if (message == null) return;
+    if (message is PluginPageReportV1) {
+      _report(message);
+      return;
+    }
     if (message is PluginPageHelloV1) _greeted = true;
     if (message is PluginPageDeviceV1) {
       if (message.open) {

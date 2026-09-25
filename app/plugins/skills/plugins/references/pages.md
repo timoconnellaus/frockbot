@@ -45,6 +45,9 @@ A bridge is added to the page when you publish, as `window.frockbot`:
   each new one and returns its unsubscribe.
 - `await frockbot.callTool(name, input)` — runs one of this Plugin's tools
   outside any Turn and resolves with its text, or rejects with the reason.
+- `frockbot.log(text)` — reports a reading to you, such as the input level a
+  tuner hears. Errors the page throws or leaves unhandled, and every
+  `console.error`, are reported the same way without you asking.
 
 ```html
 <!doctype html>
@@ -80,6 +83,16 @@ new state. Keep the truth in `ctx.storage`, never only in the page: the frame
 is torn down when the person leaves the panel.
 
 A page may listen to the microphone through the host: see `microphone.md`.
+
+## Seeing it fail
+
+The page runs on the person's device, never here, and you cannot open it
+yourself. `plugin_page_reports` with the Plugin's id is how you see it: the
+errors and logs its pages reported, newest first, with the device and the
+version each came from. Read it after the person has used a page, and before
+you change one they say misbehaves. Something that is wrong but throws
+nothing, like a threshold the room never reaches, only shows up if the page
+logs the reading: log what you would want to know.
 
 `plugin_check` and `plugin_publish` refuse a view whose page file is missing.
 The approval card tells the User the Plugin draws its own page.

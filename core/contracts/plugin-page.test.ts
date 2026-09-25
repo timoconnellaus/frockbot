@@ -3,6 +3,8 @@ import {
   decodePluginPageMessageV1,
   MAX_PLUGIN_PAGE_STATE_BYTES_V1,
   PLUGIN_PAGE_HELPER_JS_V1,
+  PLUGIN_PAGE_REPORT_TEXT_MAX_V1,
+  PLUGIN_PAGE_REPORTS_PER_MINUTE_V1,
   pluginPageStateV1,
   withPluginPageBridgeV1,
 } from "./plugin-page.js";
@@ -106,6 +108,16 @@ describe("a page view's state", () => {
 /** A window just rich enough to run the helper, with the page as its own parent. */
 function pageWindow() {
   const listeners: ((event: { source: unknown; data: unknown }) => void)[] = [];
+  const others = new Map<
+    string,
+    ((event: Record<string, unknown>) => void)[]
+  >();
+  const logged: unknown[][] = [];
+  const pageConsole = {
+    error: (...args: unknown[]) => {
+      logged.push(args);
+    },
+  };
   const posted: Record<string, unknown>[] = [];
   const properties = new Map<string, string>();
   const timers: (() => void)[] = [];
@@ -118,10 +130,15 @@ function pageWindow() {
   Object.assign(win, {
     parent,
     addEventListener(
-      _type: string,
+      type: string,
       listener: (event: { source: unknown; data: unknown }) => void,
     ) {
-      listeners.push(listener);
+      if (type === "message") listeners.push(listener);
+      else
+        others.set(type, [
+          ...(others.get(type) ?? []),
+          listener as (event: Record<string, unknown>) => void,
+        ]);
     },
     document: {
       documentElement: {
@@ -145,6 +162,7 @@ function pageWindow() {
     "document",
     "setTimeout",
     "clearTimeout",
+    "console",
     PLUGIN_PAGE_HELPER_JS_V1,
   )(
     win,
@@ -153,6 +171,7 @@ function pageWindow() {
     win.document,
     win.setTimeout,
     win.clearTimeout,
+    pageConsole,
   );
   const frockbot = win.frockbot as {
     ready: Promise<Record<string, unknown>>;
@@ -163,12 +182,18 @@ function pageWindow() {
       onSamples: (samples: Float32Array) => void,
       onClosed?: (reason: string) => void,
     ): Promise<{ sampleRate: number; close(): Promise<void> }>;
+    log(text: string): void;
   };
   return {
     frockbot,
     posted,
     properties,
     timers,
+    pageConsole,
+    logged,
+    raise(type: string, event: Record<string, unknown>) {
+      for (const listener of others.get(type) ?? []) listener(event);
+    },
     deliver(data: unknown, source: unknown = parent) {
       for (const listener of listeners) listener({ source, data });
     },
@@ -429,5 +454,62 @@ describe("the microphone, as a page asks for it", () => {
       reason: "You stopped the microphone.",
     });
     expect(closed).toHaveLength(1);
+  });
+});
+
+describe("what a page reports to its Bot", () => {
+  const reports = (posted: Record<string, unknown>[]) =>
+    posted.filter((message) => message.type === "report");
+
+  test("a log, a thrown error, an unhandled rejection and console.error", () => {
+    const page = pageWindow();
+    page.frockbot.log("input peaks at 0.004");
+    page.raise("error", { error: new Error("detector blew up") });
+    page.raise("unhandledrejection", { reason: "init timed out" });
+    page.pageConsole.error("no state", { a4: 440 });
+    const sent = reports(page.posted);
+    expect(sent[0]).toEqual({
+      frockbotPage: 1,
+      type: "report",
+      level: "log",
+      text: "input peaks at 0.004",
+    });
+    expect(sent[1]?.level).toBe("error");
+    expect(String(sent[1]?.text)).toContain("detector blew up");
+    expect(sent[2]?.text).toBe("Unhandled rejection: init timed out");
+    expect(sent[3]?.text).toBe('no state {"a4":440}');
+    // The page's own console still hears what it logged.
+    expect(page.logged).toEqual([["no state", { a4: 440 }]]);
+    for (const message of sent) {
+      expect(decodePluginPageMessageV1(message) as unknown).toEqual(message);
+    }
+  });
+
+  test("is cut to length and to twenty a minute", () => {
+    const page = pageWindow();
+    page.frockbot.log("x".repeat(PLUGIN_PAGE_REPORT_TEXT_MAX_V1 + 50));
+    expect(reports(page.posted)[0]?.text).toHaveLength(
+      PLUGIN_PAGE_REPORT_TEXT_MAX_V1,
+    );
+    for (let index = 0; index < 40; index += 1) page.frockbot.log(`${index}`);
+    expect(reports(page.posted)).toHaveLength(
+      PLUGIN_PAGE_REPORTS_PER_MINUTE_V1,
+    );
+  });
+
+  test("a report is decoded exactly", () => {
+    for (const message of [
+      { frockbotPage: 1, type: "report", level: "warn", text: "x" },
+      { frockbotPage: 1, type: "report", level: "log", text: "" },
+      {
+        frockbotPage: 1,
+        type: "report",
+        level: "log",
+        text: "x".repeat(PLUGIN_PAGE_REPORT_TEXT_MAX_V1 + 1),
+      },
+      { frockbotPage: 1, type: "report", level: "log", text: "x", at: 1 },
+    ]) {
+      expect(decodePluginPageMessageV1(message)).toBeUndefined();
+    }
   });
 });

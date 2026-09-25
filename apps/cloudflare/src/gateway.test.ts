@@ -547,6 +547,16 @@ class MemoryConfiguration
       : { status: "recorded" };
   }
 
+  readonly pageReports: unknown[] = [];
+  async recordPanelPageReport(request: {
+    report: { pluginId: string };
+  }): Promise<{ status: "recorded" } | { status: "refused"; reason: string }> {
+    this.pageReports.push(request);
+    return request.report.pluginId === "stranger"
+      ? { status: "refused", reason: '"stranger" has no page "tuner".' }
+      : { status: "recorded" };
+  }
+
   async readSettingsFrame(): Promise<SettingsFrame> {
     throw new Error("Settings frame not configured in this fixture");
   }
@@ -1404,6 +1414,42 @@ describe("Cloudflare user application gateway", () => {
     expect(await refused.text()).toContain("has no page");
     expect(
       (await gateway(request("/api/bots/bot-1/panels/device-use", "alice")))
+        .status,
+    ).toBe(405);
+  });
+
+  test("a page's report reaches its Bot, once decoded, and refused words are said", async () => {
+    const { gateway, configurations } = createTestGateway();
+    const report = {
+      schemaVersion: 1,
+      pluginId: "tuner",
+      surfaceId: "tuner",
+      device: "macos",
+      level: "log",
+      text: "input peaks at 0.004",
+    };
+    const post = (body: unknown) =>
+      gateway(
+        request("/api/bots/bot-1/panels/page-report", "alice", {
+          method: "POST",
+          body: JSON.stringify(body),
+          headers: { "content-type": "application/json" },
+        }),
+      );
+    const recorded = await post(report);
+    expect(recorded.status).toBe(200);
+    expect((await recorded.json()) as unknown).toEqual({ status: "recorded" });
+    const { schemaVersion: _, ...decoded } = report;
+    expect(configurations.get("alice")?.pageReports).toEqual([
+      { schemaVersion: 1, userId: "alice", botId: "bot-1", report: decoded },
+    ]);
+    expect((await post({ ...report, level: "warn" })).status).toBe(400);
+    expect((await post({ ...report, text: "x".repeat(501) })).status).toBe(400);
+    const refused = await post({ ...report, pluginId: "stranger" });
+    expect(refused.status).toBe(400);
+    expect(await refused.text()).toContain("has no page");
+    expect(
+      (await gateway(request("/api/bots/bot-1/panels/page-report", "alice")))
         .status,
     ).toBe(405);
   });

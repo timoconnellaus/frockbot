@@ -85,6 +85,24 @@ class PanelCanvasController extends ChangeNotifier
     } catch (_) {}
   }
 
+  /// What a page reported for its Bot. Best effort, like a device use: a
+  /// report that does not land is one the Bot does not read.
+  Future<void> reportPage(
+    String pluginId,
+    String surfaceId,
+    PluginPageReportV1 report,
+  ) async {
+    try {
+      await panels.reportPage(
+        botId,
+        pluginId: pluginId,
+        surfaceId: surfaceId,
+        device: pluginPageDeviceKindV1(),
+        report: report,
+      );
+    } catch (_) {}
+  }
+
   /// A page's tool call. The panel is read again after it, so the page is
   /// handed whatever state the call left behind.
   Future<PluginPageToolAnswerV1> runPageTool(
@@ -317,6 +335,8 @@ class PanelCanvas extends StatelessWidget {
         microphone: microphone,
         onDeviceUse: (use) =>
             unawaited(controller.reportDeviceUse(pluginId, surfaceId, use)),
+        onReport: (report) =>
+            unawaited(controller.reportPage(pluginId, surfaceId, report)),
       ),
     );
   }

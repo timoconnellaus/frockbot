@@ -393,6 +393,22 @@ export function pluginTools(
       },
     }),
     tool({
+      name: "plugin_page_reports",
+      description:
+        "Read what a Plugin's pages reported from the person's devices, newest first: every error a page threw or left unhandled, every console.error, and whatever it passed to frockbot.log(text). A page runs on their device, not here, so this is the only way to see it fail. Read it after the person has used a page, and before you change one they say misbehaves.",
+      inputSchema: {
+        type: "object",
+        properties: { ...PLUGIN_ID_PROPERTY },
+        required: ["pluginId"],
+        additionalProperties: false,
+      },
+      idempotent: true,
+      async answer(input) {
+        const pluginId = requireString(input, "pluginId");
+        return host.plugins.pageReports({ pluginId });
+      },
+    }),
+    tool({
       name: "plugin_settings",
       description:
         "Read a Plugin's settings for this Bot — the values its plugin.json settingsSchema declares — or write them. Pass `values` to write; omit it to read. Never a secret.",

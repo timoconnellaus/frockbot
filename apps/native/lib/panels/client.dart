@@ -4,7 +4,8 @@ library;
 import '../client/transport.dart';
 import '../plugins/page.dart' show pluginToolReceiptV1;
 import '../protocol/client_wire.generated.dart' as wire;
-import 'plugin_page.dart' show PluginPageDeviceUseV1, PluginPageToolAnswerV1;
+import 'plugin_page.dart'
+    show PluginPageDeviceUseV1, PluginPageReportV1, PluginPageToolAnswerV1;
 
 class PanelsApi {
   final NativeApi api;
@@ -95,6 +96,28 @@ class PanelsApi {
         'startedAt': _instant(use.startedAt),
         'endedAt': _instant(use.endedAt),
         'ending': use.ending.name,
+      },
+    );
+  }
+
+  /// Hands the Bot what its page reported, for it to read back with
+  /// `plugin_page_reports`. The Bot stamps it.
+  Future<void> reportPage(
+    String botId, {
+    required String pluginId,
+    required String surfaceId,
+    required String device,
+    required PluginPageReportV1 report,
+  }) async {
+    await api.request(
+      '/api/bots/${Uri.encodeComponent(botId)}/panels/page-report',
+      body: {
+        'schemaVersion': 1,
+        'pluginId': pluginId,
+        'surfaceId': surfaceId,
+        'device': device,
+        'level': report.level,
+        'text': report.text,
       },
     );
   }

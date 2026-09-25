@@ -404,6 +404,12 @@ import {
   panelDeviceUserV1,
   readFocusedPanelV1,
 } from "@frockbot/app/plugins/panels-bot";
+import {
+  decodePluginPageReportCommandV1,
+  recordPluginPageReportV1,
+  type PluginPageReportCommandV1,
+} from "@frockbot/app/plugins/page-reports";
+import { readBotPluginRosterV1 } from "@frockbot/app/plugins/worker-bot";
 import { cleanBotAppletsV1 } from "./plugin-panels-cleanup.js";
 import { cleanPackagePageShapesV1 } from "./package-page-shapes-cleanup.js";
 import {
@@ -1588,6 +1594,27 @@ export class BotState
       await this.drainAuditOutbox();
     }
     return { status: "recorded" as const };
+  }
+
+  /** What a Plugin's page reported, kept for its Bot to read back. */
+  async recordPanelPageReport(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      report: rpcDecoded(decodePluginPageReportCommandV1),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    return recordPluginPageReportV1(
+      this.ctx.storage,
+      await readBotPluginRosterV1(shell.state, identity),
+      request.report as PluginPageReportCommandV1,
+      new Date(),
+    );
   }
 
   async setFocusedPanel(input: unknown) {
