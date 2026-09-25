@@ -416,7 +416,8 @@ conversation or policy content is not needed for diagnosis.
 
 Keep live evaluation separate from unit tests. Pin the calibrated Jev version.
 Run the labeled suites with `bun run eval:turn-start`,
-`bun run eval:response-review`, `bun run eval:call-review` and
+`bun run eval:response-review`, `bun run eval:call-review`,
+`bun run eval:plugin-fit` and
 `bun run eval:context`; each reads
 `JEV_API_KEY` from the main checkout's `.dev.vars` (the runners still accept
 `TYPESAFE_API_KEY` as a local alias) and writes traces to `.eval-results/`.
@@ -536,6 +537,18 @@ _Done, enforced._
 
 ### 7. Plugin judgment binding
 
+- Built: the Plugin authoring check. Before the User is asked to run a
+  Plugin the Bot wrote, code lints its source for what the SDK documents: a
+  page must style with the `--frockbot-*` theme variables and load nothing
+  from the network, and cloud code must name only hosts `plugin.json`
+  declares. `plugin_check` reports the lint to the Bot. `plugin_publish` takes
+  the Bot's `purpose`. Jev (`app/supervision/plugin-fit.ts`) judges whether
+  the Plugin is built for what the person asked this Turn, and which of its
+  parts (tools, hooks, grants, hosts, device abilities) nothing asked for
+  needs. The check is advisory and runs once per new card. What it finds ends
+  the approval card's rationale under "Before you approve" and goes back to
+  the Bot. Jev failing leaves the lint alone. Labelled in
+  `bun run eval:plugin-fit`.
 - Add a named grant and loopback binding for metered Plugin judgments.
 - Attribute spend and calls to the Plugin, Bot and Turn.
 - Enforce quotas, data bounds and the prohibition on self-approval.

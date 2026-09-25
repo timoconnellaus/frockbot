@@ -54,7 +54,31 @@ function checkText(pluginId: string, result: PluginCheckResultV1): string {
       "Fix every line above with plugin_write_file, then run plugin_check again. Do not publish over a failing check.",
     ].join("\n");
   }
+  if (result.findings.length > 0) {
+    return [
+      `${pluginId} builds, but the check found what the User will be warned about:`,
+      ...result.findings.map((finding) => `- ${finding}`),
+      "Fix these with plugin_write_file and check again, or publish and tell the User why they stand.",
+    ].join("\n");
+  }
   return `${pluginId} builds. Call plugin_publish when it is what you want; the User will be asked to approve it.`;
+}
+
+/** What the person said in the Turn this call runs in, oldest first. */
+function turnRequestV1(
+  sessions: { get(sessionId: string): Session | undefined },
+  context: ToolExecutionContext,
+): string {
+  const session = sessions.get(context.sessionId);
+  const position = session ? latestOpenStepPositionV1(session) : undefined;
+  if (!session || !position) return "";
+  return session.activeRunJournal
+    .flatMap((event) =>
+      event.type === "user/message" && event.turn === position.turn
+        ? [event.text]
+        : [],
+    )
+    .join("\n\n");
 }
 
 /**
@@ -304,8 +328,15 @@ export function pluginTools(
         "Build a Plugin's current source, store it, and ask the User to approve running it on this Bot with a card in the conversation. Nothing runs until they approve; their answer opens a Turn of yours that carries the decision, and an approved Plugin is already live in it. Run plugin_check first; a publish that does not build is refused with the same diagnostics.",
       inputSchema: {
         type: "object",
-        properties: { ...PLUGIN_ID_PROPERTY },
-        required: ["pluginId"],
+        properties: {
+          ...PLUGIN_ID_PROPERTY,
+          purpose: {
+            type: "string",
+            description:
+              "What the person asked this Plugin to do, in a sentence or two. The User is shown a check of the Plugin against it.",
+          },
+        },
+        required: ["pluginId", "purpose"],
         additionalProperties: false,
       },
       idempotent: false,
@@ -313,8 +344,13 @@ export function pluginTools(
       orderedEffect: true,
       async answer(input, context) {
         const pluginId = requireString(input, "pluginId");
+        const purpose = requireString(input, "purpose");
         const result = await host.plugins.publish(
-          { pluginId },
+          {
+            pluginId,
+            purpose,
+            request: turnRequestV1(sessions, context),
+          },
           context.effectId,
         );
         if (result.status === "failed") {
@@ -333,6 +369,11 @@ export function pluginTools(
         );
         return [
           `Built ${pluginId} and asked the User to approve it (approval ${result.ask.approvalId}).`,
+          ...(result.ask.check === undefined
+            ? []
+            : [
+                `The card warns them:\n${result.ask.check}\nSay plainly what you will do about each point.`,
+              ]),
           "Tell the User in your own words what it does and why you built it, then end your Turn.",
           "Their answer opens a Turn of yours that carries the decision; approved, the Plugin is already running on this Bot in that Turn, so tell them it is ready.",
         ].join(" ");

@@ -30,6 +30,12 @@ import {
 } from "@frockbot/core/contracts";
 import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import { oweThemeAssembleV1 } from "@frockbot/app/theme/owed";
+import {
+  checkPluginAuthoringV1,
+  lintPluginSourceV1,
+  pluginCheckRationaleV1,
+  type PluginFitJudgeV1,
+} from "./authoring-check.js";
 import type {
   CompositionGenerationV1,
   CompositionMemberV1,
@@ -101,7 +107,8 @@ export interface PluginSourceFileV1 {
 
 /** What `plugin_check` answers. */
 export type PluginCheckResultV1 =
-  | { status: "checked" }
+  /** `findings`: what the advisory lint says, each a sentence to act on. */
+  | { status: "checked"; findings: string[] }
   | { status: "failed"; reason: string; diagnostics: string[] };
 
 /** The card the feature appends to the Turn's log, and its identity. */
@@ -112,6 +119,8 @@ export interface PluginApprovalAskV1 {
   risk: SendToUserApprovalRiskV1;
   /** True when this Turn already asked under the same effect: send nothing twice. */
   replayed: boolean;
+  /** What the advisory check found, as the card says it; absent when clean. */
+  check?: string;
 }
 
 export type PluginPublishResultV1 =
@@ -154,6 +163,8 @@ export interface PluginAuthoringSeamsV1 {
     write(pluginId: string, values: Record<string, unknown>): Promise<void>;
   };
   catalog: readonly SeededPluginV1[];
+  /** Judges whether a published Plugin does what was asked; advisory. */
+  fitJudge?: PluginFitJudgeV1;
   now?: () => Date;
 }
 
@@ -176,7 +187,13 @@ export interface PluginAuthoringHostV1 {
     effectId: string,
   ): Promise<PluginCheckResultV1>;
   publish(
-    input: { pluginId: string },
+    input: {
+      pluginId: string;
+      /** What the Bot says the Plugin is for. */
+      purpose: string;
+      /** What the person said this Turn, for the advisory check. */
+      request: string;
+    },
     effectId: string,
   ): Promise<PluginPublishResultV1>;
   enable(
@@ -542,6 +559,8 @@ export function createPluginAuthoringHostV1(
     action: PluginIntentRecordV1["action"],
     member: Pick<CompositionMemberV1, "descriptor">,
     verb: "Run" | "Turn on",
+    /** The advisory check, asked only when the card is new. */
+    review?: () => Promise<string | undefined>,
   ): Promise<PluginApprovalAskV1> {
     const approvalId = await pluginApprovalIdV1(seams.turn.runId, effectId);
     const key = pluginIntentKeyV1(approvalId);
@@ -556,7 +575,9 @@ export function createPluginAuthoringHostV1(
       rationale,
       risk: pluginApprovalRiskV1(member),
     };
+    // A replayed card is already on the log; it is neither sent nor checked again.
     if (existing !== undefined) return { ...card, replayed: true };
+    const check = await review?.();
     // Intent first, and durable before anybody is asked.
     const intent: PluginIntentRecordV1 = {
       schemaVersion: 1,
@@ -569,7 +590,14 @@ export function createPluginAuthoringHostV1(
       action,
     };
     await seams.storage.put(key, intent);
-    return { ...card, replayed: false };
+    return check === undefined
+      ? { ...card, replayed: false }
+      : {
+          ...card,
+          rationale: `${rationale}\n\n${check}`,
+          replayed: false,
+          check,
+        };
   }
 
   return {
@@ -660,7 +688,10 @@ export function createPluginAuthoringHostV1(
       if ("failure" in pages) {
         return { status: "failed", reason: pages.failure, diagnostics: [] };
       }
-      return { status: "checked" };
+      return {
+        status: "checked",
+        findings: lintPluginSourceV1(descriptor, built.files),
+      };
     },
 
     async publish(input, effectId) {
@@ -751,6 +782,16 @@ export function createPluginAuthoringHostV1(
         { kind: "publish", member },
         member,
         "Run",
+        async () =>
+          pluginCheckRationaleV1(
+            await checkPluginAuthoringV1({
+              descriptor,
+              files: built.files,
+              request: input.request,
+              purpose: input.purpose,
+              ...(seams.fitJudge ? { judge: seams.fitJudge } : {}),
+            }),
+          ),
       );
       return { status: "pending-approval", pluginId, ask: asked };
     },

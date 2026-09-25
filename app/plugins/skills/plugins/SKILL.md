@@ -37,16 +37,21 @@ files, not as extra paths. The one other file is an HTML page a
    declared there.
 4. **`plugin_check`** with the Plugin's id. It type-checks the module against
    the SDK and answers with every problem as `path:line:col message`, or with
-   "builds". Fix every line. Do not publish over a failing check. The SDK's
+   "builds", plus anything the check warns about: a page with colours written
+   out instead of the `--frockbot-*` variables, a page that loads from the
+   network, or code that reaches a host `plugin.json` does not declare. Fix every line. Do not publish over a failing check. The SDK's
    types are not on the Computer: `plugin_check` is what resolves
    `@frockbot/applet-sdk/plugin`, so never hunt for them there. Every type it
    declares is in `types.md`.
-5. **`plugin_publish`** with the Plugin's id. It builds the module, runs it
+5. **`plugin_publish`** with the Plugin's id and its `purpose`: what the
+   person asked it to do, in a sentence or two. It builds the module, runs it
    once to read what it exports, compares that with `plugin.json`, stores the
    artifact, and asks the User to approve it with a card in the conversation
-   that lists its tools, hooks, grants, hosts and model providers. Say in
-   your own words what the Plugin does and why you built it, then end your
-   Turn. Their answer opens a Turn of yours that carries the decision;
+   that lists its tools, hooks, grants, hosts and model providers. The card
+   also warns the User when the Plugin may not do what they asked, holds a
+   part nothing they asked for needs, or fails the check above; the result
+   tells you what it warned, so answer each point. Say in your own words what
+   the Plugin does and why you built it, then end your Turn. Their answer opens a Turn of yours that carries the decision;
    approved, the Plugin is already live on this Bot in that Turn — never the
    one in flight — so tell them it is ready.
 

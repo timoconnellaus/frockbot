@@ -32,7 +32,7 @@ async function runPluginTool(name: string, effectId: string) {
     step: 1,
     occurrenceId: effectId,
     name,
-    input: { pluginId: "demo" },
+    input: { pluginId: "demo", purpose: "A demo." },
   });
   await session.flush();
   const host = {
@@ -57,7 +57,7 @@ async function runPluginTool(name: string, effectId: string) {
   const call: ToolCall = {
     id: "call-1",
     name,
-    input: { pluginId: "demo" },
+    input: { pluginId: "demo", purpose: "A demo." },
   };
   const context: ToolExecutionContext = {
     botId: "bot",
