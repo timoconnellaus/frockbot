@@ -268,8 +268,11 @@ native client. The page never got its theme tokens or its state, and `ready`
 timed out, silently. The web iframe was not affected, which is why the browser
 suite passed. The host now answers without waiting to be asked: it posts the
 same `init` when the document has loaded, and a `hello` after that is answered
-again. A page may be greeted twice: the first greeting resolves `ready`, and a
-later one is new state for `onState`.
+again. A page may be greeted more than once: the first greeting resolves
+`ready`, and a later one resets the `--frockbot-*` variables and is new state
+for `onState`. The native host greets a loaded page again when the Bot's look
+changes, once the Theme has settled, so a page styled with the variables
+follows the look without a republish.
 
 **Closing is closing, whoever does it.** `onClosed` heard the host close the
 microphone, but not the page's own `close()`. A page that reset its button in

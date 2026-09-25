@@ -126,8 +126,9 @@ export type PluginPagePageMessageV1 =
  * - `ready` resolves with `{pluginId, botId, surfaceId, themeTokens, state}`
  *   once the host greets the page, and sets every theme token as a
  *   `--frockbot-<name>` custom property on the document. The host greets each
- *   document when it has loaded and answers `hello` as well, so a page may be
- *   greeted twice: the first resolves `ready`, a later one is new state.
+ *   document when it has loaded, answers `hello` as well, and greets it again
+ *   when the Bot's look changes, so a page may be greeted more than once: the
+ *   first resolves `ready`, a later one resets the properties and is new state.
  * - `state` is the latest state; `onState(fn)` is called with each new one and
  *   returns its unsubscribe.
  * - `callTool(name, input)` runs one of this Plugin's own tools and resolves
