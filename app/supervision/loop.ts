@@ -10,6 +10,7 @@ import {
   SUPERVISION_WITHHELD_SEND_PREFIX_V1,
   type CallDecisionV1,
   type ConversationEvidenceV1,
+  type QuestionRouteV1,
   type LlmMessage,
   type LoopHooksV1,
   type ProposedCallV1,
@@ -99,6 +100,42 @@ export const SUPERVISION_CONVERSATION_MAX_V1 = 8;
 /** Runtime notes carry a label so the model reads them as the platform's. */
 export const ACKNOWLEDGE_NOTE_V1 =
   '[FrockBot runtime: acknowledge first]\nThis will take some work. Before you start it, send the person one short line with send_to_user (disposition "continue") saying what you are about to do. Then do the work.';
+
+/** How a Turn is steered to answer a question its subagent asked. */
+export function questionNoteV1(answerer: "conversation" | "person"): string {
+  return answerer === "conversation"
+    ? "[FrockBot runtime: subagent question]\nWhat the person has already said answers your subagent's question. Answer it from that with task_resume; do not ask the person."
+    : "[FrockBot runtime: subagent question]\nOnly the person can answer your subagent's question. Ask them in your own words, then pass their answer on with task_resume.";
+}
+
+/**
+ * The question a subagent asked, when this Turn was opened for it: read off
+ * the notice `app/subagents` writes when a task hands off a question.
+ */
+export function subagentQuestionOfTurnV1(
+  events: readonly SessionEvent[],
+  turn: number,
+): string | undefined {
+  const notice =
+    /subagent "[^"\n]*" asked a question\. It asks: ([\s\S]+?) It is waiting: answer with task_resume/;
+  for (const event of turnEvents(events, turn)) {
+    if (event.type !== "user/message") continue;
+    const question = notice.exec(event.text)?.[1]?.trim();
+    if (question) return question;
+  }
+  return undefined;
+}
+
+function questionRouteOf(
+  events: readonly SessionEvent[],
+  turn: number,
+): QuestionRouteV1 | undefined {
+  const event = events.findLast(
+    (candidate) =>
+      candidate.type === "supervision/question" && candidate.turn === turn,
+  );
+  return event?.type === "supervision/question" ? event.route : undefined;
+}
 
 /** Where a Turn is steered when Jev names a specialist it is offered. */
 export function specialistNoteV1(specialist: {
@@ -355,7 +392,8 @@ export function subagentWorkV1(
           ? notice.exec(event.text)
           : null;
     const work = match?.[1]?.trim();
-    return work ? [work] : [];
+    // A question the subagent asked is not work it made.
+    return work && !work.startsWith("It asks: ") ? [work] : [];
   });
 }
 
@@ -449,9 +487,29 @@ export function createSupervisionRuntimeFeatureV1(
             host.specialists?.().find((offered) => offered.name === name),
           )
           .find((offered) => offered !== undefined);
+        const question = subagentQuestionOfTurnV1(
+          session.activeRunJournal,
+          turn,
+        );
+        let route = questionRouteOf(session.activeRunJournal, turn);
+        if (question !== undefined && !route) {
+          const started = Date.now();
+          route = await host.supervisor.routeQuestion(
+            { question, conversation: conversationBefore(session) },
+            signal,
+          );
+          session.append({
+            type: "supervision/question",
+            turn,
+            route,
+            latencyMs: elapsed(started),
+          });
+          await session.flush();
+        }
         const notes = [
           ...(directive.acknowledge ? [ACKNOWLEDGE_NOTE_V1] : []),
           ...(specialist ? [specialistNoteV1(specialist)] : []),
+          ...(route ? [questionNoteV1(route.answerer)] : []),
         ];
         if (notes.length === 0) return request;
         return {

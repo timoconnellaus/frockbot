@@ -49,6 +49,8 @@ import {
   taskPromptDigestV1,
   type TaskOutcomeV1,
   type TaskRecordV1,
+  subagentQuestionTextV1,
+  subagentQuestionV1,
 } from "@frockbot/app/subagents/records";
 import {
   taskViewV1,
@@ -643,6 +645,16 @@ function taskCompletionTextV1(
   task: TaskRecordV1,
   outcome: TaskOutcomeV1,
 ): string {
+  const question =
+    outcome.status === "completed"
+      ? subagentQuestionV1(outcome.summary)
+      : undefined;
+  if (question !== undefined) {
+    return `${task.type} subagent "${task.description}" asked a question. ${subagentQuestionTextV1(task.taskId, question)}`.slice(
+      0,
+      ROUTINE_INBOX_TEXT_MAX,
+    );
+  }
   const head = `${task.type} subagent "${task.description}" ${outcome.status}.`;
   const body =
     outcome.status === "completed"

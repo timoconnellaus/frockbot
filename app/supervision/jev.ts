@@ -29,6 +29,10 @@ import {
   type JevCallBudgetV1,
 } from "./response-review.js";
 import {
+  composeQuestionRouteV1,
+  reviewQuestionRouteV1,
+} from "./question-route.js";
+import {
   callReviewEvidenceV1,
   composeCallDecisionV1,
   reviewCallV1,
@@ -162,6 +166,21 @@ export function createJevTurnSupervisorV1(
           { signal, budget },
         );
         return composeSendDecisionV1({
+          answers: review.answers,
+          model: review.model,
+        });
+      } catch (error) {
+        throw classifyJevFailure(error);
+      }
+    },
+    async routeQuestion(evidence, signal) {
+      signal?.throwIfAborted();
+      try {
+        const review = await reviewQuestionRouteV1(options.client, evidence, {
+          signal,
+          budget,
+        });
+        return composeQuestionRouteV1({
           answers: review.answers,
           model: review.model,
         });

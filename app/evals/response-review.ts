@@ -15,6 +15,12 @@ import {
   type SendReviewV1,
 } from "../supervision/response-review.js";
 import { describeFailureV1 } from "./failure.js";
+import {
+  composeQuestionRouteV1,
+  questionRouteStateV1,
+  type QuestionRouteReviewV1,
+} from "../supervision/question-route.js";
+import type { QuestionRouteEvidenceV1 } from "@frockbot/core/contracts";
 
 // Grading for the labeled response-review suite. The questions and the
 // thresholds code decides by live in `app/supervision/response-review.ts`;
@@ -54,8 +60,20 @@ export interface RelayFixtureV1 {
   readonly expected: { readonly send: "release" | "withhold" };
 }
 
+/** A subagent's question: can the conversation answer it, or only the person? */
+export interface QuestionFixtureV1 {
+  readonly kind: "question";
+  readonly name: string;
+  readonly intent: string;
+  readonly evidence: QuestionRouteEvidenceV1;
+  readonly expected: { readonly answerer: "conversation" | "person" };
+}
+
 export type ResponseReviewFixtureV1 =
-  ResponseAlignmentFixtureV1 | SendFixtureV1 | RelayFixtureV1;
+  | ResponseAlignmentFixtureV1
+  | SendFixtureV1
+  | RelayFixtureV1
+  | QuestionFixtureV1;
 
 export interface ResponseReviewCheckV1 {
   readonly question: string;
@@ -107,6 +125,22 @@ export function gradeRelayV1(
   ];
 }
 
+export function gradeQuestionV1(
+  fixture: QuestionFixtureV1,
+  review: QuestionRouteReviewV1,
+): ResponseReviewCheckV1[] {
+  const route = composeQuestionRouteV1({ answers: review.answers });
+  const answer = review.answers.answeredBy;
+  return [
+    {
+      question: "answeredBy",
+      expected: fixture.expected.answerer,
+      actual: `${route.answerer} (conversation p ${round(answer.probabilities.conversation ?? 0)})`,
+      passed: route.answerer === fixture.expected.answerer,
+    },
+  ];
+}
+
 export function gradeSendV1(
   fixture: SendFixtureV1,
   review: SendReviewV1,
@@ -140,7 +174,8 @@ export function responseReviewReportCaseV1(
   fixture: ResponseReviewFixtureV1,
   outcome:
     | {
-        readonly review: ResponseReviewV1 | SendReviewV1 | RelayV1;
+        readonly review:
+          ResponseReviewV1 | SendReviewV1 | RelayV1 | QuestionRouteReviewV1;
         readonly checks: readonly ResponseReviewCheckV1[];
       }
     | { readonly failure: unknown },
@@ -154,7 +189,9 @@ export function responseReviewReportCaseV1(
         ? responseReviewStateV1(fixture.evidence)
         : fixture.kind === "relay"
           ? relayStateV1(fixture.evidence)
-          : sendReviewStateV1(fixture.evidence),
+          : fixture.kind === "question"
+            ? questionRouteStateV1(fixture.evidence)
+            : sendReviewStateV1(fixture.evidence),
     expected: fixture.expected,
   };
   if ("failure" in outcome)

@@ -24,7 +24,9 @@ import type { FoundationFeature } from "../runtime.js";
 import {
   ACKNOWLEDGE_NOTE_V1,
   createSupervisionRuntimeFeatureV1,
+  questionNoteV1,
   specialistNoteV1,
+  subagentQuestionOfTurnV1,
   subagentWorkV1,
   turnInputOriginV1,
 } from "./loop.js";
@@ -740,4 +742,51 @@ test("a send that rewrites the work is withheld, and the Turn goes on to send th
     type: "turn/end",
     outcome: "completed",
   });
+});
+
+const QUESTION_NOTICE =
+  'executor subagent "Book the table" asked a question. It asks: Nomad at 7pm or Ester at 8:30pm? It is waiting: answer with task_resume {"resume":"task-1","prompt":"<your answer>"}.';
+
+test("a Turn opened on a subagent's question is steered to whoever can answer it", async () => {
+  const seen: NormalizedModelRequest[] = [];
+  const asked: string[] = [];
+  const events = await run(
+    scripted(
+      [
+        [
+          {
+            id: "a",
+            name: "send_to_user",
+            input: text("Which one?", "finish"),
+          },
+        ],
+      ],
+      seen,
+    ),
+    createFakeTurnSupervisorV1({
+      routeQuestion: async (evidence) => {
+        asked.push(evidence.question);
+        return { answerer: "person", judgments: [] };
+      },
+    }),
+    { initialText: QUESTION_NOTICE },
+  );
+  expect(asked).toEqual(["Nomad at 7pm or Ester at 8:30pm?"]);
+  expect(seen[0]?.messages.at(-1)?.content).toBe(questionNoteV1("person"));
+  expect(
+    events.filter((event) => event.type === "supervision/question"),
+  ).toMatchObject([{ route: { answerer: "person" } }]);
+});
+
+test("only the notice a subagent's question writes is read as one", () => {
+  const message = (text: string) =>
+    [
+      { type: "user/message", turn: 1, step: 1, messageId: "m", text },
+    ] as unknown as SessionEvent[];
+  expect(subagentQuestionOfTurnV1(message(QUESTION_NOTICE), 1)).toBe(
+    "Nomad at 7pm or Ester at 8:30pm?",
+  );
+  expect(
+    subagentQuestionOfTurnV1(message("It asks: anything? no notice"), 1),
+  ).toBeUndefined();
 });

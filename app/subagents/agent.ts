@@ -47,6 +47,8 @@ import {
   TASK_MESSAGE_MAX_V1,
   TASK_PROMPT_MAX_BYTES_V1,
   TASK_TYPES_V1,
+  subagentQuestionTextV1,
+  subagentQuestionV1,
   utf8ByteLengthV1,
   type TaskModelV1,
   type TaskStatusV1,
@@ -676,10 +678,18 @@ function toolRefusal(tool: string, reason: string): ToolExecutionResult {
 const DO_NOT_POLL = "You are notified on completion; do not poll for it.";
 
 function settledSummaryV1(outcome: {
+  taskId?: string;
   taskStatus: TaskStatusV1;
   summary?: string;
   failure?: string;
 }): string {
+  const question =
+    outcome.taskStatus === "completed"
+      ? subagentQuestionV1(outcome.summary)
+      : undefined;
+  if (question !== undefined && outcome.taskId !== undefined) {
+    return subagentQuestionTextV1(outcome.taskId, question);
+  }
   if (outcome.taskStatus === "completed") {
     return outcome.summary ?? "It finished without leaving a summary.";
   }

@@ -344,6 +344,20 @@ export interface CallDecisionV1 {
   model?: string;
 }
 
+/** A question a subagent asked, and what the person said before it came. */
+export interface QuestionRouteEvidenceV1 {
+  question: string;
+  /** The conversation, oldest first; only the person's words answer it. */
+  conversation: readonly ConversationEvidenceV1[];
+}
+
+/** Whether the conversation already answers it, or only the person can. */
+export interface QuestionRouteV1 {
+  answerer: "conversation" | "person";
+  judgments: SupervisionJudgmentV1[];
+  model?: string;
+}
+
 export interface TurnSupervisor {
   startTurn(
     evidence: TurnStartEvidence,
@@ -364,6 +378,11 @@ export interface TurnSupervisor {
     evidence: CallReviewEvidenceV1,
     signal?: AbortSignal,
   ): Promise<CallDecisionV1>;
+
+  routeQuestion(
+    evidence: QuestionRouteEvidenceV1,
+    signal?: AbortSignal,
+  ): Promise<QuestionRouteV1>;
 }
 
 export type SupervisionFailureKindV1 = "unavailable" | "timeout";
@@ -736,6 +755,25 @@ export function decodeCallDecisionV1(
   };
 }
 
+export function decodeQuestionRouteV1(
+  value: unknown,
+  label = "question route",
+): QuestionRouteV1 {
+  const route = record(value, label);
+  exactKeys(route, ["answerer", "judgments"], ["model"], label);
+  return {
+    answerer: oneOf(
+      route.answerer,
+      ["conversation", "person"] as const,
+      `${label}.answerer`,
+    ),
+    judgments: decodeJudgmentsV1(route.judgments, `${label}.judgments`),
+    ...(route.model === undefined
+      ? {}
+      : { model: text(route.model, `${label}.model`, JUDGMENT_TEXT_MAX_V1) }),
+  };
+}
+
 export function allowCallDecisionV1(): CallDecisionV1 {
   return { decision: "allow", reasonCode: "authorized", judgments: [] };
 }
@@ -775,6 +813,7 @@ export function createFakeTurnSupervisorV1(options?: {
   reviewStep?: TurnSupervisor["reviewStep"];
   reviewSend?: TurnSupervisor["reviewSend"];
   reviewCall?: TurnSupervisor["reviewCall"];
+  routeQuestion?: TurnSupervisor["routeQuestion"];
 }): TurnSupervisor {
   return {
     async startTurn(evidence, signal) {
@@ -797,6 +836,13 @@ export function createFakeTurnSupervisorV1(options?: {
       if (options?.reviewCall) return options.reviewCall(evidence, signal);
       return allowCallDecisionV1();
     },
+    async routeQuestion(evidence, signal) {
+      throwIfAborted(signal);
+      if (options?.routeQuestion) {
+        return options.routeQuestion(evidence, signal);
+      }
+      return { answerer: "person", judgments: [] };
+    },
   };
 }
 
@@ -813,5 +859,6 @@ export function createUnavailableTurnSupervisorV1(
     reviewStep: fail,
     reviewSend: fail,
     reviewCall: fail,
+    routeQuestion: fail,
   };
 }

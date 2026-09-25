@@ -21,10 +21,12 @@ import {
 } from "./structured-output.js";
 import {
   decodeCallDecisionV1,
+  decodeQuestionRouteV1,
   decodeSendDecisionV1,
   decodeStepDecisionV1,
   decodeTurnDirectiveV1,
   type CallDecisionV1,
+  type QuestionRouteV1,
   type SendDecisionV1,
   type StepDecision,
   type TurnDirective,
@@ -471,6 +473,15 @@ export interface SessionEventMap {
    * the call runs. A refused call is settled as a tool result the model
    * reads; it never runs.
    */
+  /**
+   * Who answers the question a subagent asked, decided when a Turn opens on
+   * it: the conversation, from what the person already said, or the person.
+   */
+  "supervision/question": {
+    turn: number;
+    route: QuestionRouteV1;
+    latencyMs: number;
+  };
   "supervision/call": {
     turn: number;
     step: number;
@@ -1817,6 +1828,16 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
         throw new Error("session event.finish must be a boolean");
       }
       decodeSendDecisionV1(event.decision, "session event.decision");
+      eventInteger(event.latencyMs, "session event.latencyMs", 0);
+      break;
+    case "supervision/question":
+      requireEventKeys(
+        event,
+        keys("turn", "route", "latencyMs"),
+        "session event",
+      );
+      turn();
+      decodeQuestionRouteV1(event.route, "session event.route");
       eventInteger(event.latencyMs, "session event.latencyMs", 0);
       break;
     case "supervision/call":

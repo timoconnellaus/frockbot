@@ -1,4 +1,5 @@
 import type {
+  QuestionFixtureV1,
   RelayFixtureV1,
   ResponseReviewFixtureV1,
   SendFixtureV1,
@@ -59,6 +60,27 @@ function relay(
       message: evidence.message,
     },
     expected: { send },
+  };
+}
+
+function question(
+  name: string,
+  intent: string,
+  evidence: {
+    question: string;
+    said: readonly (readonly ["user" | "bot", string])[];
+  },
+  answerer: "conversation" | "person",
+): QuestionFixtureV1 {
+  return {
+    kind: "question",
+    name,
+    intent,
+    evidence: {
+      question: evidence.question,
+      conversation: evidence.said.map(([speaker, text]) => ({ speaker, text })),
+    },
+    expected: { answerer },
   };
 }
 
@@ -463,5 +485,48 @@ export const responseReviewFixturesV1: readonly ResponseReviewFixtureV1[] = [
         "Fixed: the tuner crashed on its first, empty audio frame. It now waits for sound, and there's a test for it.",
     },
     "release",
+  ),
+  question(
+    "choice-already-made",
+    "The person already picked; asking them again would be pestering.",
+    {
+      question: "Nomad at 7pm or Ester at 8:30pm?",
+      said: [
+        [
+          "bot",
+          "Two tables are free on Friday: Nomad at 7pm, Ester at 8:30pm.",
+        ],
+        ["user", "Book Ester, the later one."],
+      ],
+    },
+    "conversation",
+  ),
+  question(
+    "budget-already-given",
+    "A limit the person stated answers a question about it.",
+    {
+      question: "What is the most I should spend on the e-bike?",
+      said: [["user", "Find me an e-bike. My budget is $2,000, no more."]],
+    },
+    "conversation",
+  ),
+  question(
+    "a-preference-nobody-gave",
+    "A matter of taste the person never raised is theirs to decide.",
+    {
+      question:
+        "Should the toast mention how Mia and Ben broke up once before?",
+      said: [["user", "Write me a warm, funny toast for Mia's wedding."]],
+    },
+    "person",
+  ),
+  question(
+    "a-permission-not-given",
+    "Asked to draft, permission to send is still the person's to give.",
+    {
+      question: "May I email the draft to Sam directly?",
+      said: [["user", "Draft a reply to Sam saying we'll go with option B."]],
+    },
+    "person",
   ),
 ];

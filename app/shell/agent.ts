@@ -1,6 +1,7 @@
 // The Shell owns reply delivery and conversation completion. Final sends end
 // the Turn; interim sends continue work; background Turns hand off to a parent.
 import { packageAdmissionCeilingV1 } from "@frockbot/core/contracts";
+import { SUBAGENT_QUESTION_PREFIX_V1 } from "@frockbot/app/subagents/records";
 import {
   decodeSendToUserPayloadV1,
   SEND_TO_USER_PAYLOAD_TYPES_V1,
@@ -375,10 +376,18 @@ export const HANDOFF_PROMPT_TEXT_V1 = [
  */
 export function conversationPromptTextV1(turnType: TurnTypeV1): string {
   const ceiling = shellAdmissionCeilingV1(USER_VOICE_CAPABILITY_V1);
-  return ceiling === undefined || ceiling.includes(turnType)
-    ? CONVERSATION_PROMPT_TEXT_V1
+  if (ceiling === undefined || ceiling.includes(turnType)) {
+    return CONVERSATION_PROMPT_TEXT_V1;
+  }
+  return turnType === "subagent"
+    ? `${HANDOFF_PROMPT_TEXT_V1}\n${SUBAGENT_ASK_PROMPT_TEXT_V1}`
     : HANDOFF_PROMPT_TEXT_V1;
 }
+
+export const TASK_ASK_TOOL_V1 = "task_ask";
+
+/** A subagent may ask once instead of guessing; it is resumed with the answer. */
+export const SUBAGENT_ASK_PROMPT_TEXT_V1 = `When you cannot finish without an answer only the conversation that dispatched you has — which of two things the person meant, a detail nobody gave you — call \`${TASK_ASK_TOOL_V1}\` with that one question instead of guessing. It ends this Turn; you are resumed with the answer and keep everything you learned.`;
 
 const SEND_TO_USER_DESCRIPTION = [
   "Speak to the user. This is the only way to say anything the user sees.",
@@ -707,33 +716,94 @@ function createWakeParentTool(sessions: {
           `${WAKE_PARENT_TOOL_V1} was refused: message exceeds ${WAKE_PARENT_MESSAGE_LIMIT_V1} characters`,
         );
       }
-      const session = sessions.get(context.sessionId);
-      if (!session) {
+      return handOffToParentV1(sessions, context, WAKE_PARENT_TOOL_V1, message);
+    },
+  };
+}
+
+/**
+ * Records one hand-off and ends the Turn. `wake_parent` and `task_ask` both
+ * leave through here: the parent reads what the Turn handed over, nothing else.
+ */
+async function handOffToParentV1(
+  sessions: { get(sessionId: string): Session | undefined },
+  context: ToolExecutionContext,
+  tool: string,
+  message: string,
+): Promise<ToolExecutionResult> {
+  const session = sessions.get(context.sessionId);
+  if (!session) {
+    return refusal(
+      `${tool} was refused: session "${context.sessionId}" is unavailable, so the hand-off cannot be recorded`,
+    );
+  }
+  let position: { turn: number; step: number };
+  try {
+    position = openStepPositionV1(session, tool);
+  } catch (error) {
+    return refusal(
+      `${tool} was refused: ${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+  session.append({
+    type: "wake/parent",
+    ...position,
+    occurrenceId: context.effectId,
+    message,
+  });
+  await session.flush();
+  // §2.13: calling it ends the turn, whatever the parent later does with it.
+  return {
+    content: "Handed off to the parent conversation. This Turn is over.",
+    isError: false,
+    endsTurn: true,
+  };
+}
+
+function createTaskAskTool(sessions: {
+  get(sessionId: string): Session | undefined;
+}): ToolDefinition {
+  return {
+    name: TASK_ASK_TOOL_V1,
+    description:
+      "Ask the conversation that dispatched you one question you cannot finish without, and end this Turn. You are resumed with the answer and keep everything you have learned. `question` must stand alone: the asker sees only what you write here.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        question: {
+          type: "string",
+          description:
+            "The one question, with what you have found so far that it depends on.",
+        },
+      },
+      required: ["question"],
+      additionalProperties: false,
+    },
+    admission: { turnTypes: ["subagent"] },
+    orderedEffect: true,
+    validate: (input: unknown) =>
+      typeof input === "object" && input !== null && !Array.isArray(input),
+    execute: async (
+      input: unknown,
+      context: ToolExecutionContext,
+    ): Promise<ToolExecutionResult> => {
+      const question = (input as Record<string, unknown>).question;
+      if (typeof question !== "string" || question.trim().length === 0) {
         return refusal(
-          `${WAKE_PARENT_TOOL_V1} was refused: session "${context.sessionId}" is unavailable, so the hand-off cannot be recorded`,
+          `${TASK_ASK_TOOL_V1} was refused: question must be a non-empty string`,
         );
       }
-      let position: { turn: number; step: number };
-      try {
-        position = openStepPositionV1(session, WAKE_PARENT_TOOL_V1);
-      } catch (error) {
+      if (question.length > WAKE_PARENT_MESSAGE_LIMIT_V1) {
         return refusal(
-          `${WAKE_PARENT_TOOL_V1} was refused: ${error instanceof Error ? error.message : String(error)}`,
+          `${TASK_ASK_TOOL_V1} was refused: question exceeds ${WAKE_PARENT_MESSAGE_LIMIT_V1} characters`,
         );
       }
-      session.append({
-        type: "wake/parent",
-        ...position,
-        occurrenceId: context.effectId,
-        message,
-      });
-      await session.flush();
-      // §2.13: calling it ends the turn, whatever the parent later does with it.
-      return {
-        content: "Handed off to the parent conversation. This Turn is over.",
-        isError: false,
-        endsTurn: true,
-      };
+      return handOffToParentV1(
+        sessions,
+        context,
+        TASK_ASK_TOOL_V1,
+        `${SUBAGENT_QUESTION_PREFIX_V1}${question.trim()}`,
+      );
     },
   };
 }
@@ -804,6 +874,10 @@ export const shellAgentFeature: RuntimeFeatureV1<AgentRuntimeV1> = (
     ),
     runtime.tools.register(
       createWakeParentTool(runtime.sessions),
+      parentHandoff ? { admissionCeiling: parentHandoff } : undefined,
+    ),
+    runtime.tools.register(
+      createTaskAskTool(runtime.sessions),
       parentHandoff ? { admissionCeiling: parentHandoff } : undefined,
     ),
     runtime.hooks.add(conversationDeliveryHooksV1),

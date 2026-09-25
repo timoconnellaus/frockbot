@@ -31,8 +31,14 @@ import {
   TURN_BUDGET_NOTE_LABEL_V1,
   turnBudgetHooksV1,
   USER_VOICE_CAPABILITY_V1,
+  SUBAGENT_ASK_PROMPT_TEXT_V1,
+  TASK_ASK_TOOL_V1,
   WAKE_PARENT_TOOL_V1,
 } from "./agent.ts";
+import {
+  SUBAGENT_QUESTION_PREFIX_V1,
+  subagentQuestionV1,
+} from "@frockbot/app/subagents/records";
 
 const SESSION_ID = "user-1:bot-1";
 
@@ -154,6 +160,7 @@ describe("the Shell's tool admission", () => {
       ]);
       expect(subagent).toEqual([
         WAKE_PARENT_TOOL_V1,
+        TASK_ASK_TOOL_V1,
         "batch",
         "get_dynamic_tools",
         "call_dynamic_tool",
@@ -182,11 +189,41 @@ describe("the Shell's tool admission", () => {
         expect(names).not.toContain(SEND_TO_USER_TOOL_V1);
         expect(names).toEqual([
           WAKE_PARENT_TOOL_V1,
+          TASK_ASK_TOOL_V1,
           "batch",
           "get_dynamic_tools",
           "call_dynamic_tool",
         ]);
       }
+    } finally {
+      await mounted.dispose();
+    }
+  });
+
+  test("a subagent asks its one question by handing it off, and is told how", async () => {
+    expect(conversationPromptTextV1("subagent")).toContain(TASK_ASK_TOOL_V1);
+    expect(conversationPromptTextV1("automation")).not.toContain(
+      TASK_ASK_TOOL_V1,
+    );
+    const mounted = await mount();
+    try {
+      const result = await invoke(
+        mounted,
+        "subagent",
+        call(TASK_ASK_TOOL_V1, { question: "  Nomad or Ester?  " }),
+      );
+      expect(result).toMatchObject({ isError: false, endsTurn: true });
+      expect(
+        mounted.session.activeRunJournal.find(
+          (event) => event.type === "wake/parent",
+        ),
+      ).toMatchObject({
+        message: `${SUBAGENT_QUESTION_PREFIX_V1}Nomad or Ester?`,
+      });
+      expect(
+        subagentQuestionV1(`${SUBAGENT_QUESTION_PREFIX_V1}Nomad or Ester?`),
+      ).toBe("Nomad or Ester?");
+      expect(subagentQuestionV1("Booked Ester.")).toBeUndefined();
     } finally {
       await mounted.dispose();
     }
@@ -576,7 +613,7 @@ describe("the conversation prompt section", () => {
       chat: CONVERSATION_PROMPT_TEXT_V1,
       agent: CONVERSATION_PROMPT_TEXT_V1,
       automation: HANDOFF_PROMPT_TEXT_V1,
-      subagent: HANDOFF_PROMPT_TEXT_V1,
+      subagent: `${HANDOFF_PROMPT_TEXT_V1}\n${SUBAGENT_ASK_PROMPT_TEXT_V1}`,
     };
     for (const [turnType, text] of Object.entries(expected) as ReadonlyArray<
       [TurnTypeV1, string]

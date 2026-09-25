@@ -338,6 +338,31 @@ describe("the Jev adapter's relay check", () => {
   });
 });
 
+describe("the Jev adapter's question routing", () => {
+  const evidence = {
+    question: "Nomad at 7pm or Ester at 8:30pm?",
+    conversation: [
+      { speaker: "user" as const, text: "Book Ester, the later one." },
+    ],
+  };
+  test("answers from the conversation only when sure, and otherwise asks the person", async () => {
+    const route = (conversation: number) =>
+      jevSupervisor(
+        jevFetch(() => ({
+          answeredBy: {
+            type: "choice",
+            choice: conversation > 0.5 ? "conversation" : "person",
+            confidence: 0.9,
+            probabilities: { person: 1 - conversation, conversation },
+          },
+        })),
+      ).routeQuestion(evidence);
+    expect((await route(0.9)).answerer).toBe("conversation");
+    expect((await route(0.7)).answerer).toBe("person");
+    expect((await route(0.1)).answerer).toBe("person");
+  });
+});
+
 describe("the Jev adapter", () => {
   test("releases a message the person would miss", async () => {
     const decision = await jevSupervisor().reviewSend(sendEvidence);

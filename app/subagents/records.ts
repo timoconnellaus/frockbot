@@ -67,6 +67,30 @@ export const TASK_MAX_DEPTH_V1 = 1;
 export const TASK_PROMPT_MAX_BYTES_V1 = 32_768;
 /** Most attachments one task may carry. */
 export const TASK_ATTACHMENT_LIMIT_V1 = 4;
+/**
+ * How a subagent's question begins, where its parent reads it: the hand-off
+ * `task_ask` writes, and the one thing the parent's notice and a blocking
+ * `Task`'s result read it by.
+ */
+export const SUBAGENT_QUESTION_PREFIX_V1 = "[Question for you] ";
+
+/** The question a settled task's hand-off asks, if it asks one. */
+export function subagentQuestionV1(
+  summary: string | undefined,
+): string | undefined {
+  return summary?.startsWith(SUBAGENT_QUESTION_PREFIX_V1)
+    ? summary.slice(SUBAGENT_QUESTION_PREFIX_V1.length).trim()
+    : undefined;
+}
+
+/** What a parent is told to do with a question its subagent asked. */
+export function subagentQuestionTextV1(
+  taskId: string,
+  question: string,
+): string {
+  return `It asks: ${question} It is waiting: answer with task_resume {"resume":"${taskId}","prompt":"<your answer>"}.`;
+}
+
 /** Most `task_message` payloads that may wait on a running task (G2 drains them). */
 export const TASK_MESSAGE_QUEUE_LIMIT_V1 = 16;
 /** How long a child Turn may live before its parent reconciles it. */
