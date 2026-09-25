@@ -50,7 +50,9 @@ async function frockAiBot(): Promise<Identity> {
     userId: `specialist-user-${suffix}`,
     botId: `specialist-bot-${suffix}`,
   };
-  const user = env.USER_CONFIGURATIONS.getByName(identity.userId) as unknown as {
+  const user = env.USER_CONFIGURATIONS.getByName(
+    identity.userId,
+  ) as unknown as {
     readConfiguration(input: unknown): Promise<unknown>;
     createBot(input: unknown): Promise<{ status: string }>;
   };
@@ -72,7 +74,10 @@ async function frockAiBot(): Promise<Identity> {
   return identity;
 }
 
-async function chat(identity: Identity, runId: string): Promise<SessionEvent[]> {
+async function chat(
+  identity: Identity,
+  runId: string,
+): Promise<SessionEvent[]> {
   const name = `${identity.userId}:${identity.botId}`;
   const result = await stub(name).run({
     schemaVersion: 1,
@@ -156,9 +161,11 @@ async function childRunOn(
   const binding = pin(original.model.binding);
   const name = subagentDurableObjectNameV1({ ...identity, taskId });
   const child = () => env.BOT_STATES.getByName(name);
-  await (child() as unknown as {
-    runTask(input: unknown): Promise<unknown>;
-  }).runTask({
+  await (
+    child() as unknown as {
+      runTask(input: unknown): Promise<unknown>;
+    }
+  ).runTask({
     schemaVersion: 1,
     ...identity,
     request: {
@@ -222,7 +229,9 @@ describe("Frock AI specialists", () => {
       /<available_subagent_models>[\s\S]*?<\/available_subagent_models>[^\n]*\n[^\n]*(\n[^\n]*)?/,
     )?.[0];
     expect(catalog).toBeDefined();
-    expect(catalog).toContain(`${FROCK_AI_PACKAGE_ID}/${FROCK_AI_DEFAULT_MODEL}`);
+    expect(catalog).toContain(
+      `${FROCK_AI_PACKAGE_ID}/${FROCK_AI_DEFAULT_MODEL}`,
+    );
     expect(catalog).not.toContain("specialty");
     expect(catalog).not.toContain("@frock/writing");
   });
