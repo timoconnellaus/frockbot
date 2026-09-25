@@ -544,10 +544,8 @@ export function decodeStepDecisionV1(
             SUPERVISION_REASON_CODES_V1,
             `${at}.reasonCode`,
           ),
-          policyRefs: list(
-            call.policyRefs,
-            `${at}.policyRefs`,
-            (ref, where) => text(ref, where, 128),
+          policyRefs: list(call.policyRefs, `${at}.policyRefs`, (ref, where) =>
+            text(ref, where, 128),
           ),
         };
       },
