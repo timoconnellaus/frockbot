@@ -8,7 +8,7 @@ import '../shell/desktop_layout.dart';
 import '../shell/semantics.dart';
 import '../theme/controls.dart';
 import '../theme/frock_theme.dart';
-import '../theme/states.dart';
+import '../theme/rows.dart';
 
 /// The ways the page slices spending, in the order a drill-down reaches for
 /// them. The keys are the API's.
@@ -147,12 +147,11 @@ List<Color> _seriesColors(ColorScheme scheme) => [
   const Color(0xff5e5e6e),
 ];
 
-/// Where an account's credit went: one page, sliced and narrowed in place.
+/// Where the account's credit went, filtered to where it was opened from:
+/// a Bot's settings open it narrowed to that Bot, a Routine's run log to that
+/// Routine. Unfiltered, the same view is the Spending section of Billing.
 class SpendingPage extends StatefulWidget {
   final NativeApi api;
-
-  /// Where the page opens: a Bot's settings open it narrowed to that Bot, a
-  /// Routine's run log to that Routine.
   final List<SpendFilter> filters;
   final String? groupBy;
 
@@ -171,6 +170,87 @@ class SpendingPage extends StatefulWidget {
 }
 
 class _SpendingPageState extends State<SpendingPage> {
+  final _view = GlobalKey<SpendingViewState>();
+
+  @override
+  Widget build(BuildContext context) => Scaffold(
+    appBar: DesktopHeader(
+      child: AppBar(
+        title: const Text('Spending'),
+        actions: [
+          IconButton(
+            tooltip: 'Refresh spending',
+            onPressed: () => _view.currentState?.reload(),
+            icon: const Icon(Icons.refresh_rounded),
+          ),
+        ],
+      ),
+    ),
+    body: SafeArea(
+      top: false,
+      child: RefreshIndicator(
+        onRefresh: () => _view.currentState?.reload() ?? Future.value(),
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            final wide = constraints.maxWidth >= 900;
+            return ListView(
+              physics: const AlwaysScrollableScrollPhysics(),
+              padding: wide
+                  ? const EdgeInsets.fromLTRB(32, 16, 32, 40)
+                  : const EdgeInsets.fromLTRB(16, 12, 16, 32),
+              children: [
+                SpendingView(
+                  key: _view,
+                  api: widget.api,
+                  filters: widget.filters,
+                  groupBy: widget.groupBy,
+                  onOpenBot: widget.onOpenBot,
+                ),
+              ],
+            );
+          },
+        ),
+      ),
+    ),
+  );
+}
+
+/// Where an account's credit went, sliced and narrowed in place. It does not
+/// scroll: it sits in its own page's list or in Billing's.
+class SpendingView extends StatefulWidget {
+  final NativeApi api;
+
+  /// Where the view opens.
+  final List<SpendFilter> filters;
+  final String? groupBy;
+
+  /// Billing heads the view with its section title, and shows the credit
+  /// left in its own balance card rather than here.
+  final String? heading;
+  final bool showCredit;
+
+  /// The account's credit and its pace, as each answer reports it.
+  /// Account-wide whatever the view, so Billing can say how long it lasts.
+  final void Function(Map? credit)? onCredit;
+
+  /// Opens the conversation a Turn ran in, when the shell can.
+  final void Function(String botId)? onOpenBot;
+  const SpendingView({
+    super.key,
+    required this.api,
+    this.filters = const [],
+    this.groupBy,
+    this.heading,
+    this.showCredit = true,
+    this.onCredit,
+    this.onOpenBot,
+  });
+
+  @override
+  State<SpendingView> createState() => SpendingViewState();
+}
+
+class SpendingViewState extends State<SpendingView> {
   String period = '30d';
   late String groupBy;
   late List<SpendFilter> filters;
@@ -185,10 +265,11 @@ class _SpendingPageState extends State<SpendingPage> {
     filters = [...widget.filters];
     groupBy =
         widget.groupBy ?? nextSpendGroupBy(filters.map((f) => f.dimension));
-    unawaited(_load());
+    unawaited(reload());
   }
 
-  Future<void> _load() async {
+  /// Reads the view again, as it stands.
+  Future<void> reload() async {
     final request = ++_request;
     setState(() {
       loading = true;
@@ -216,6 +297,7 @@ class _SpendingPageState extends State<SpendingPage> {
             SpendFilter(f.dimension, f.value, named[f.dimension] ?? f.label),
         ];
       });
+      widget.onCredit?.call(answer['credit'] as Map?);
     } catch (_) {
       if (mounted && request == _request) {
         setState(
@@ -233,7 +315,7 @@ class _SpendingPageState extends State<SpendingPage> {
       if (groupBy != null) this.groupBy = groupBy;
       if (filters != null) this.filters = filters;
     });
-    unawaited(_load());
+    unawaited(reload());
   }
 
   void _narrow(Map group) {
@@ -265,7 +347,7 @@ class _SpendingPageState extends State<SpendingPage> {
           'dailyMicros': result.remove ? null : result.micros,
         },
       );
-      await _load();
+      await reload();
     } catch (_) {
       if (mounted) {
         setState(
@@ -285,53 +367,93 @@ class _SpendingPageState extends State<SpendingPage> {
   }
 
   @override
-  Widget build(BuildContext context) {
-    final data = report;
-    return Scaffold(
-      appBar: DesktopHeader(
-        child: AppBar(
-          title: const Text('Spending'),
-          actions: [
-            IconButton(
-              tooltip: 'Refresh spending',
-              onPressed: loading ? null : _load,
-              icon: const Icon(Icons.refresh_rounded),
-            ),
-          ],
-        ),
-      ),
-      body: SafeArea(
-        top: false,
-        child: identified(
-          SpendingIds.page,
-          data == null && loading
-              ? const FrockLoading(label: 'Loading your spending')
-              : data == null
-              ? FrockEmptyState(
-                  icon: Icons.cloud_off_rounded,
-                  title: 'Spending couldn’t load',
-                  detail: message ?? '',
-                  action: 'Try again',
-                  onAction: _load,
-                )
-              : RefreshIndicator(
-                  onRefresh: _load,
-                  child: LayoutBuilder(
-                    builder: (context, constraints) =>
-                        _body(context, data, wide: constraints.maxWidth >= 900),
-                  ),
-                ),
-        ),
-      ),
-    );
-  }
+  Widget build(BuildContext context) => identified(
+    SpendingIds.page,
+    LayoutBuilder(
+      builder: (context, constraints) =>
+          _body(context, width: constraints.maxWidth),
+    ),
+  );
 
-  Widget _body(
-    BuildContext context,
-    Map<String, dynamic> data, {
-    required bool wide,
-  }) {
+  Widget _body(BuildContext context, {required double width}) {
     final theme = Theme.of(context);
+    // A table's columns fit from a narrow desktop pane up; the breakdown and
+    // the Turns sit side by side only when both still read.
+    final wide = width >= 600;
+    final sideBySide = width >= 1000;
+    final data = report;
+    final heading = widget.heading;
+    final periods = FrockSegmented(
+      label: 'Period',
+      selected: period,
+      options: wide ? spendPeriods : _shortPeriods,
+      onChosen: (slug) => _choose(period: slug),
+    );
+    final chips = [
+      for (final filter in filters)
+        InputChip(
+          label: Text(filter.label),
+          avatar: Icon(
+            Icons.filter_alt_outlined,
+            size: 16,
+            color: theme.colorScheme.primary,
+          ),
+          onDeleted: () => _widen(filter),
+          deleteButtonTooltipMessage: 'Show all again',
+        ),
+    ];
+    final title = heading == null
+        ? null
+        : Text(
+            heading,
+            style: theme.textTheme.titleLarge?.copyWith(
+              fontWeight: FontWeight.w600,
+            ),
+          );
+    final controls = title != null && wide
+        ? Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              Row(
+                children: [
+                  Expanded(child: title),
+                  periods,
+                ],
+              ),
+              if (chips.isNotEmpty) ...[
+                const SizedBox(height: 12),
+                Wrap(spacing: 12, runSpacing: 12, children: chips),
+              ],
+            ],
+          )
+        : Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              if (title != null) ...[title, const SizedBox(height: 12)],
+              Wrap(
+                spacing: 12,
+                runSpacing: 12,
+                crossAxisAlignment: WrapCrossAlignment.center,
+                children: [periods, ...chips],
+              ),
+            ],
+          );
+    if (data == null) {
+      return Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          controls,
+          const SizedBox(height: 16),
+          if (loading)
+            const _SpendingSkeleton()
+          else
+            _Failure(
+              message: message ?? '',
+              onRetry: () => unawaited(reload()),
+            ),
+        ],
+      );
+    }
     final colors = _seriesColors(theme.colorScheme);
     final groups = (data['groups'] as List? ?? const [])
         .whereType<Map>()
@@ -342,30 +464,6 @@ class _SpendingPageState extends State<SpendingPage> {
         if (!pinned.contains(d.key)) d,
     ];
     final canNarrow = tabs.length > 1;
-    final controls = Wrap(
-      spacing: 12,
-      runSpacing: 12,
-      crossAxisAlignment: WrapCrossAlignment.center,
-      children: [
-        FrockSegmented(
-          label: 'Period',
-          selected: period,
-          options: wide ? spendPeriods : _shortPeriods,
-          onChosen: (slug) => _choose(period: slug),
-        ),
-        for (final filter in filters)
-          InputChip(
-            label: Text(filter.label),
-            avatar: Icon(
-              Icons.filter_alt_outlined,
-              size: 16,
-              color: theme.colorScheme.primary,
-            ),
-            onDeleted: () => _widen(filter),
-            deleteButtonTooltipMessage: 'Show all again',
-          ),
-      ],
-    );
     final breakdown = _Breakdown(
       groups: groups,
       total: data['totalMicros'] as num? ?? 0,
@@ -388,44 +486,41 @@ class _SpendingPageState extends State<SpendingPage> {
       title: 'Each day, by ${_dimensionLower(groupBy)}',
       wide: wide,
     );
-    if (wide) {
-      return ListView(
-        physics: const AlwaysScrollableScrollPhysics(),
-        padding: const EdgeInsets.fromLTRB(32, 16, 32, 40),
+    return AnimatedOpacity(
+      // A new slice is on its way: the old one stays, quieter, until then.
+      opacity: loading ? 0.6 : 1,
+      duration: FrockTheme.fast,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           controls,
           if (message != null) _error(context),
-          const SizedBox(height: 20),
-          _Headline(data: data, period: period, wide: true),
+          SizedBox(height: wide ? 20 : 16),
+          _Headline(
+            data: data,
+            period: period,
+            wide: wide,
+            showCredit: widget.showCredit,
+          ),
           const SizedBox(height: 16),
           chart,
           const SizedBox(height: 16),
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Expanded(flex: 3, child: breakdown),
-              const SizedBox(width: 16),
-              Expanded(flex: 2, child: turns),
-            ],
-          ),
+          if (sideBySide)
+            Row(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Expanded(flex: 3, child: breakdown),
+                const SizedBox(width: 16),
+                Expanded(flex: 2, child: turns),
+              ],
+            )
+          else ...[
+            breakdown,
+            const SizedBox(height: 16),
+            turns,
+          ],
         ],
-      );
-    }
-    return ListView(
-      physics: const AlwaysScrollableScrollPhysics(),
-      padding: const EdgeInsets.fromLTRB(16, 12, 16, 32),
-      children: [
-        controls,
-        if (message != null) _error(context),
-        const SizedBox(height: 16),
-        _Headline(data: data, period: period, wide: false),
-        const SizedBox(height: 16),
-        chart,
-        const SizedBox(height: 16),
-        breakdown,
-        const SizedBox(height: 16),
-        turns,
-      ],
+      ),
     );
   }
 
@@ -438,23 +533,131 @@ class _SpendingPageState extends State<SpendingPage> {
   );
 }
 
+/// The shape of the view while its first answer is on its way.
+class _SpendingSkeleton extends StatelessWidget {
+  const _SpendingSkeleton();
+
+  @override
+  Widget build(BuildContext context) => Semantics(
+    label: 'Loading your spending',
+    liveRegion: true,
+    child: const Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        FrockSkeleton(height: 96),
+        SizedBox(height: 16),
+        FrockSkeleton(height: 180),
+        SizedBox(height: 16),
+        FrockSkeleton(height: 160),
+      ],
+    ),
+  );
+}
+
+/// The view's first answer did not come: say so where it would have been.
+class _Failure extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+  const _Failure({required this.message, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return _Panel(
+      children: [
+        Row(
+          children: [
+            Icon(
+              Icons.cloud_off_rounded,
+              size: 20,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'Spending couldn’t load',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ],
+        ),
+        _Caption(message),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: OutlinedButton(
+            style: frockCompactButton(context),
+            onPressed: onRetry,
+            child: const Text('Try again'),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+/// How long the account's credit lasts at its recent pace, from a Spending
+/// answer's `credit`, or null while nothing is being spent.
+InlineSpan? spendRunway(BuildContext context, Map credit) {
+  final daily = credit['dailyMicros'] as num? ?? 0;
+  final runsOut = credit['runsOutAt'] as num?;
+  final renews = credit['renewsAt'] as num?;
+  if (runsOut == null) return null;
+  if (renews == null) {
+    return TextSpan(
+      text:
+          'At ${spendMoney(daily)} a day, it lasts until about ${_date(runsOut)}.',
+    );
+  }
+  if (runsOut >= renews) {
+    return TextSpan(
+      text:
+          'At ${spendMoney(daily)} a day, it lasts past renewal on ${_date(renews)}.',
+    );
+  }
+  final theme = Theme.of(context);
+  final warn = theme.brightness == Brightness.dark
+      ? FrockTheme.warning
+      : FrockTheme.warningInk;
+  return TextSpan(
+    children: [
+      TextSpan(text: 'At ${spendMoney(daily)} a day, it runs out '),
+      TextSpan(
+        text: 'around ${_date(runsOut)}',
+        style: TextStyle(color: warn, fontWeight: FontWeight.w600),
+      ),
+      TextSpan(
+        text:
+            ' — ${((renews - runsOut) / 86400000).ceil()} days before it renews.',
+      ),
+    ],
+  );
+}
+
+/// `Oct 12`, for a moment in milliseconds.
+String spendDate(num at) => _date(at);
+
 /// The answer before the detail: what was spent, how long the credit lasts,
 /// and what drove it.
 class _Headline extends StatelessWidget {
   final Map<String, dynamic> data;
   final String period;
   final bool wide;
+  final bool showCredit;
   const _Headline({
     required this.data,
     required this.period,
     required this.wide,
+    required this.showCredit,
   });
 
   @override
   Widget build(BuildContext context) {
     final cards = [
       _total(context),
-      if (data['credit'] is Map) _credit(context, data['credit'] as Map),
+      if (showCredit && data['credit'] is Map)
+        _credit(context, data['credit'] as Map),
       if (wide && data['topCause'] is Map)
         _driver(context, data['topCause'] as Map),
     ];
@@ -526,49 +729,20 @@ class _Headline extends StatelessWidget {
 
   Widget _credit(BuildContext context, Map credit) {
     final theme = Theme.of(context);
-    final available = credit['availableMicros'] as num? ?? 0;
-    final daily = credit['dailyMicros'] as num? ?? 0;
-    final runsOut = credit['runsOutAt'] as num?;
-    final renews = credit['renewsAt'] as num?;
-    final short = runsOut != null && renews != null && runsOut < renews;
-    final warn = theme.brightness == Brightness.dark
-        ? FrockTheme.warning
-        : FrockTheme.warningInk;
-    final line = runsOut == null
-        ? 'Nothing spent in the last week.'
-        : short
-        ? null
-        : renews != null
-        ? 'At ${spendMoney(daily)} a day it lasts past renewal on ${_date(renews)}.'
-        : 'At ${spendMoney(daily)} a day it lasts until about ${_date(runsOut)}.';
+    final runway = spendRunway(context, credit);
     return _Panel(
       children: [
         const _Caption('Credit left'),
         Text(
-          spendMoney(available),
+          spendMoney(credit['availableMicros']),
           style: theme.textTheme.headlineLarge?.copyWith(
             fontWeight: FontWeight.w700,
           ),
         ),
-        if (line != null || runsOut == null || renews == null)
-          Text(line ?? '', style: theme.textTheme.bodyMedium)
-        else
-          Text.rich(
-            TextSpan(
-              style: theme.textTheme.bodyMedium,
-              children: [
-                TextSpan(text: 'At ${spendMoney(daily)} a day it runs out '),
-                TextSpan(
-                  text: 'around ${_date(runsOut)}',
-                  style: TextStyle(color: warn, fontWeight: FontWeight.w600),
-                ),
-                TextSpan(
-                  text:
-                      ' — ${((renews - runsOut) / 86400000).ceil()} days before it renews.',
-                ),
-              ],
-            ),
-          ),
+        Text.rich(
+          runway ?? const TextSpan(text: 'Nothing spent in the last week.'),
+          style: theme.textTheme.bodyMedium,
+        ),
       ],
     );
   }

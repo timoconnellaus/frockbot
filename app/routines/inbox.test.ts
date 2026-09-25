@@ -831,7 +831,7 @@ describe("what a Routine's daily limit and spike say", () => {
         usualMicros: 220_000,
       }),
     ).toBe(
-      '"Inbox triage" has spent US$0.91 today, about 4× its usual US$0.22 a day. You can set a daily limit on the Spending page.',
+      '"Inbox triage" has spent US$0.91 today, about 4× its usual US$0.22 a day. You can set a daily limit under Spending in Billing.',
     );
   });
 });

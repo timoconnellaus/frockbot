@@ -884,27 +884,31 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     }
   }
 
-  /// The Billing page, and a fresh balance when it is left.
-  Future<void> _openBilling() async {
+  /// The Billing page, and a fresh balance when it is left. [spending] opens
+  /// it scrolled to where the credit went.
+  Future<void> _openBilling({bool spending = false}) async {
     push.reading(null);
     await Navigator.of(context).push(
       MaterialPageRoute<void>(
-        builder: (_) =>
-            BillingPage(api: widget.api, onOpenSpending: _openSpending),
+        builder: (_) => BillingPage(
+          api: widget.api,
+          onOpenBot: _openSpentBot,
+          showSpending: spending,
+        ),
       ),
     );
     await _readCredit();
   }
 
-  /// Where the account's credit went, narrowed to wherever it was opened
-  /// from.
-  void _openSpending([List<SpendFilter> filters = const []]) => unawaited(
+  /// Where one Bot's or Routine's credit went, on its own page: the account's
+  /// balance is Billing's, and not what was asked.
+  void _openSpending(List<SpendFilter> filters) => unawaited(
     _push(
       SpendingPage(api: widget.api, filters: filters, onOpenBot: _openSpentBot),
     ),
   );
 
-  /// A Turn on the Spending page opens the conversation it ran in.
+  /// A Turn listed under Spending opens the conversation it ran in.
   void _openSpentBot(String botId) {
     Navigator.of(context).popUntil((route) => route.isFirst);
     if (searchableBots.every((bot) => bot.botId.value != botId)) {
@@ -3244,8 +3248,8 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
           ),
           if (computer?.available == true)
             const SearchAction('computer', 'Computer', 'Current chat'),
-          const SearchAction('billing', 'Settings: Usage & Billing', 'Account'),
-          const SearchAction('spending', 'Spending', 'Account'),
+          const SearchAction('billing', 'Settings: Billing', 'Account'),
+          const SearchAction('spending', 'Billing: Spending', 'Account'),
           const SearchAction(
             'marketplace',
             'Marketplace',
@@ -3279,7 +3283,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             () => unawaited(_openBilling()),
           );
         case 'spending':
-          _openSpending();
+          unawaited(_openBilling(spending: true));
         case 'marketplace':
           _openMarketplace();
         case 'machines':
@@ -3531,9 +3535,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             ProfileSection(
               id: SettingsIds.profileBilling,
               icon: Icons.account_balance_wallet_outlined,
-              title: 'Billing & usage',
+              title: 'Billing',
               page: () =>
-                  BillingPage(api: widget.api, onOpenSpending: _openSpending),
+                  BillingPage(api: widget.api, onOpenBot: _openSpentBot),
               onLeave: _readCredit,
             ),
             ProfileSection(
