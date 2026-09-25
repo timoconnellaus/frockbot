@@ -2301,8 +2301,10 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     if (selected?.botId.value == botId) await botSettings?.load();
   }
 
-  String? _botNameOf(String botId) =>
-      bots.where((bot) => bot.botId.value == botId).map(_name).firstOrNull;
+  String? _botNameOf(String botId) => searchableBots
+      .where((bot) => bot.botId.value == botId)
+      .map(_name)
+      .firstOrNull;
 
   /// The same doors, as a phone's pages.
   ///
