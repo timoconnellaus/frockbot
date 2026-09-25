@@ -91,8 +91,9 @@ const PAGE = withPluginPageBridgeV1(
 /** Pins a generation holding the tuner at `version`. */
 async function pinTuner(identity: Identity, version: string, runId: string) {
   const { userId } = identity;
-  const parent = (await user(userId).readComposition({ schemaVersion: 1, userId }))
-    .current;
+  const parent = (
+    await user(userId).readComposition({ schemaVersion: 1, userId })
+  ).current;
   const descriptor = decodePluginDescriptorV1({
     id: TUNER_ID,
     displayName: "Tuner",
@@ -241,9 +242,7 @@ describe("a Plugin page's reports", () => {
     const read = await readReports(identity);
     const lines = read.split("\n");
     console.log(`plugin_page_reports answered:\n${read}`);
-    expect(lines[0]).toBe(
-      "50 report(s) from tuner's pages, newest first:",
-    );
+    expect(lines[0]).toBe("50 report(s) from tuner's pages, newest first:");
     expect(lines).toHaveLength(51);
     expect(lines[1]).toMatch(
       /^\d{4}-\d\d-\d\dT[\d:.]+Z log \(tuner on macos\): new reading 0\.2$/,

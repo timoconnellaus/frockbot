@@ -75,16 +75,19 @@ async function installRoutes(
   const reports: Wire[] = [];
   let focused = false;
   // Watched, not answered: the real Worker and the real Bot answer it.
-  await page.route(/\/api\/bots\/[^/]+\/panels\/page-report$/, async (route) => {
-    const response = await route.fetch();
-    const answer = await response.text();
-    reports.push({
-      request: route.request().postDataJSON() as Record<string, unknown>,
-      status: response.status(),
-      answer,
-    });
-    await route.fulfill({ response, body: answer });
-  });
+  await page.route(
+    /\/api\/bots\/[^/]+\/panels\/page-report$/,
+    async (route) => {
+      const response = await route.fetch();
+      const answer = await response.text();
+      reports.push({
+        request: route.request().postDataJSON() as Record<string, unknown>,
+        status: response.status(),
+        answer,
+      });
+      await route.fulfill({ response, body: answer });
+    },
+  );
   await page.route(
     /\/api\/bots\/[^/]+\/panels\/(open|focus)$/,
     async (route) => {
@@ -104,7 +107,12 @@ async function installRoutes(
         headers: { "cache-control": "no-store" },
         body: JSON.stringify(
           !runs
-            ? { schemaVersion: 1, bag: [], focus: { pluginId: null }, doors: [] }
+            ? {
+                schemaVersion: 1,
+                bag: [],
+                focus: { pluginId: null },
+                doors: [],
+              }
             : {
                 schemaVersion: 1,
                 bag: [
@@ -210,8 +218,16 @@ test("a page's errors, console.error and log reach its Bot through the helper, t
   );
   expect(texts).toContain("input peaks at 0.004, threshold 0.02");
   expect(texts).toContain('greeting lost {"after":5000}');
-  expect(texts.some((text) => text.startsWith("Unhandled rejection: Error: lost greeting"))).toBe(true);
-  expect(texts.some((text) => text.startsWith("TypeError: detector is not a function"))).toBe(true);
+  expect(
+    texts.some((text) =>
+      text.startsWith("Unhandled rejection: Error: lost greeting"),
+    ),
+  ).toBe(true);
+  expect(
+    texts.some((text) =>
+      text.startsWith("TypeError: detector is not a function"),
+    ),
+  ).toBe(true);
   expect(texts).toContain("x".repeat(500));
   for (const wire of reports) {
     expect(wire.request).toMatchObject({
@@ -229,10 +245,14 @@ test("a page's errors, console.error and log reach its Bot through the helper, t
     ]);
     // The real Bot answered, from its own Composition: it holds no "score".
     expect(wire.status).toBe(400);
-    expect(JSON.parse(wire.answer)).toEqual({ error: '"score" has no page "score".' });
+    expect(JSON.parse(wire.answer)).toEqual({
+      error: '"score" has no page "score".',
+    });
   }
   // The original console.error still ran.
-  expect(consoleErrors.some((text) => text.includes("greeting lost"))).toBe(true);
+  expect(consoleErrors.some((text) => text.includes("greeting lost"))).toBe(
+    true,
+  );
 
   // Thirty more in the same minute: the helper sends fifteen and drops the rest.
   await content.locator("#flood").click();
@@ -245,7 +265,9 @@ test("a page's errors, console.error and log reach its Bot through the helper, t
       .map((wire) => wire.request.text as string)
       .filter((text) => text.startsWith("flood "))
       .sort(),
-  ).toEqual(Array.from({ length: 15 }, (_, index) => `flood ${index + 1}`).sort());
+  ).toEqual(
+    Array.from({ length: 15 }, (_, index) => `flood ${index + 1}`).sort(),
+  );
 
   // Nothing came back to the page for any of it.
   expect(await content.locator("#heard").textContent()).toBe(heardBefore);
