@@ -4452,10 +4452,6 @@
         "hiddenFromSidebar": {
           "type": "boolean"
         },
-        "label": {
-          "type": "string",
-          "maxLength": 120
-        },
         "title": {
           "type": "string",
           "maxLength": 120
@@ -5466,11 +5462,6 @@
         "archivedAt": {
           "$ref": "#/$defs/Instant"
         },
-        "label": {
-          "type": "string",
-          "minLength": 1,
-          "maxLength": 40
-        },
         "pinnedAt": {
           "$ref": "#/$defs/Instant"
         },
@@ -6022,17 +6013,6 @@
             },
             "groupId": {
               "$ref": "#/$defs/GroupId"
-            },
-            "label": {
-              "oneOf": [
-                {
-                  "type": "string",
-                  "maxLength": 40
-                },
-                {
-                  "type": "null"
-                }
-              ]
             },
             "pinned": {
               "type": "boolean"

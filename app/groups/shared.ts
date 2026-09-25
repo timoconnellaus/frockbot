@@ -14,7 +14,6 @@ export const GROUP_CHAT_MEMBERS_MAX_V1 = 8;
 /** Archived groups count: the User restores or deletes one to make room. */
 export const GROUP_CHAT_LIMIT_V1 = 100;
 export const GROUP_CHAT_NAME_MAX_V1 = 80;
-export const GROUP_CHAT_LABEL_MAX_V1 = 40;
 export const GROUP_MESSAGE_TEXT_MAX_V1 = 8_000;
 export const GROUP_MESSAGE_PAGE_MAX_V1 = 100;
 /**
@@ -110,7 +109,6 @@ export async function groupTurnRunIdV1(input: {
 
 /** Where a group sits in the User's sidebar. */
 export interface GroupChatArrangementV1 {
-  label?: string;
   pinnedAt?: string;
   sidebarOrder?: number;
   hiddenFromSidebar?: true;
@@ -258,7 +256,6 @@ export type GroupChatCommandV1 =
       type: "group/arrange";
       commandId: string;
       groupId: string;
-      label?: string | null;
       pinned?: boolean;
       sidebarOrder?: number | null;
       hidden?: boolean;
@@ -422,6 +419,8 @@ export function decodeGroupChatCommandV1(input: unknown): GroupChatCommandV1 {
       exactKeys(
         value,
         ["type", "commandId", "groupId"],
+        // Installed apps may still send the retired sidebar label. It is
+        // accepted and dropped until those apps have updated.
         ["label", "pinned", "sidebarOrder", "hidden"],
         label,
       );
@@ -430,13 +429,6 @@ export function decodeGroupChatCommandV1(input: unknown): GroupChatCommandV1 {
         commandId: identifier(value.commandId, `${label}.commandId`),
         groupId: decodeGroupIdV1(value.groupId),
       };
-      if (value.label !== undefined) {
-        command.label = nameOrNull(
-          value.label,
-          GROUP_CHAT_LABEL_MAX_V1,
-          `${label}.label`,
-        );
-      }
       if (value.pinned !== undefined) {
         if (typeof value.pinned !== "boolean") {
           throw new GroupChatDecodeError(`${label}.pinned must be a boolean`);

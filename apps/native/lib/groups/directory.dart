@@ -8,8 +8,8 @@ import 'model.dart';
 
 /// The User's Group Chats: the list the sidebar draws, how many unread
 /// messages each has, and the commands that change them. An arrangement —
-/// a pin, a label, an order, hiding — shows at once and is rolled back if
-/// the group refuses it.
+/// a pin, an order, hiding — shows at once and is rolled back if the group
+/// refuses it.
 class GroupDirectoryController extends ChangeNotifier {
   final GroupChatApi api;
   final String Function() nextId;
@@ -128,12 +128,10 @@ class GroupDirectoryController extends ChangeNotifier {
     _notify();
   }
 
-  /// Pins, labels, orders or hides a group. The change shows at once; a
-  /// refusal puts the group back and says why.
+  /// Pins, orders or hides a group. The change shows at once; a refusal puts
+  /// the group back and says why.
   Future<void> arrange(
     String groupId, {
-    String? label,
-    bool clearLabel = false,
     bool? pinned,
     num? sidebarOrder,
     bool clearOrder = false,
@@ -143,8 +141,6 @@ class GroupDirectoryController extends ChangeNotifier {
     if (before == null) return;
     _put(
       before.arranged(
-        label: label,
-        clearLabel: clearLabel,
         pinned: pinned,
         sidebarOrder: sidebarOrder,
         clearOrder: clearOrder,
@@ -154,7 +150,6 @@ class GroupDirectoryController extends ChangeNotifier {
     try {
       await _command(groupId, {
         'type': 'group/arrange',
-        if (clearLabel) 'label': null else 'label': ?label,
         'pinned': ?pinned,
         if (clearOrder) 'sidebarOrder': null else 'sidebarOrder': ?sidebarOrder,
         'hidden': ?hidden,

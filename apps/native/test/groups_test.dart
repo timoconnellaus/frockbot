@@ -23,7 +23,6 @@ Map<String, Object?> record({
   String? name,
   List<String> members = const ['general', 'xero'],
   String? pinnedAt,
-  String? label,
 }) => {
   'schemaVersion': 1,
   'groupId': groupId,
@@ -32,7 +31,6 @@ Map<String, Object?> record({
   'createdAt': at,
   'updatedAt': at,
   'pinnedAt': ?pinnedAt,
-  'label': ?label,
 };
 
 Map<String, Object?> view({
@@ -453,7 +451,7 @@ void main() {
             'commandId': (body as Map)['commandId'],
             'groupId': groupId,
             'status': 'applied',
-            'group': record(pinnedAt: at, label: 'Work'),
+            'group': record(pinnedAt: at),
             'revision': 2,
           };
         }
@@ -464,10 +462,9 @@ void main() {
         nextId: () => 'arrange-1',
       );
       await directory.load();
-      await directory.arrange(groupId, pinned: true, label: 'Work');
+      await directory.arrange(groupId, pinned: true);
       expect(native.requests.last.body, {
         'type': 'group/arrange',
-        'label': 'Work',
         'pinned': true,
         'commandId': 'arrange-1',
         'groupId': groupId,

@@ -1522,7 +1522,6 @@ describe("Cloudflare user application gateway", () => {
           expectedRevision: 0,
           profile: {
             name: "Housework",
-            label: "Research, marketing, admin",
             description: "Keeps the household organized.",
           },
         }),

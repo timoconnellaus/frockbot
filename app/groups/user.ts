@@ -331,10 +331,6 @@ export class GroupChatUserStoreV1 {
       }
       case "group/arrange": {
         const before = canonicalJson(group);
-        if (command.label !== undefined) {
-          if (command.label) group.label = command.label;
-          else delete group.label;
-        }
         if (command.pinned !== undefined) {
           if (command.pinned) group.pinnedAt ??= at;
           else delete group.pinnedAt;

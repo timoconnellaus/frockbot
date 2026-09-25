@@ -905,6 +905,18 @@
     "value": null
   },
   {
+    "name": "BotIdentity with the retired label",
+    "schema": "BotIdentity",
+    "value": {
+      "schemaVersion": 1,
+      "botId": "default",
+      "name": "Atlas",
+      "namedBy": "user",
+      "hiddenFromSidebar": false,
+      "label": "Work"
+    }
+  },
+  {
     "name": "bad cursor -1",
     "schema": "StateFrame",
     "value": {
@@ -2182,6 +2194,18 @@
       "createdAt": "2026-09-23T10:00:00.000Z",
       "updatedAt": "2026-09-23T10:00:00.000Z",
       "projectId": "acme"
+    }
+  },
+  {
+    "name": "GroupChatRecord with the retired label",
+    "schema": "GroupChatRecord",
+    "value": {
+      "schemaVersion": 1,
+      "groupId": "g-0123456789abcdef0123",
+      "members": ["general", "xero"],
+      "createdAt": "2026-09-23T10:00:00.000Z",
+      "updatedAt": "2026-09-23T10:00:00.000Z",
+      "label": "Work"
     }
   },
   {

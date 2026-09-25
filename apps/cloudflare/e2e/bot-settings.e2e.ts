@@ -61,7 +61,6 @@ test("Settings is one level under the Bot page, in one card grammar", async ({
   // is read after a click rather than off the painted field.
   await name.click();
   await expect(name).toHaveValue("Inspected");
-  await expect(sem(page, "bot-label")).toBeVisible();
   await expect(sem(page, "bot-description")).toBeVisible();
   // Title is an About field like the others now; there is no Advanced to open.
   await expect(sem(page, "bot-title")).toBeVisible();

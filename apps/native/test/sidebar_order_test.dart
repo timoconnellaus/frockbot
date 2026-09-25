@@ -7,16 +7,15 @@ import 'package:frockbot_native/shell/sidebar_order.dart';
 
 void main() {
   group('planSidebarDropV1', () {
-    test('numbers a group that was never ordered, the drop included', () {
+    test('numbers a list that was never ordered, the drop included', () {
       // Nobody has dragged anything: every row is where the directory put
       // it. Dropping d above c must number a and b too, because a Bot with no
       // number sits after every Bot that has one.
       final writes = planSidebarDropV1(
         const SidebarDrop(
           botId: 'd',
-          label: '',
           beforeBotId: 'c',
-          group: ['a', 'b', 'c', 'd'],
+          rows: ['a', 'b', 'c', 'd'],
         ),
         const {},
       );
@@ -30,12 +29,7 @@ void main() {
 
     test('takes the midpoint between ordered neighbours, one write', () {
       final writes = planSidebarDropV1(
-        const SidebarDrop(
-          botId: 'c',
-          label: '',
-          beforeBotId: 'b',
-          group: ['a', 'b', 'c'],
-        ),
+        const SidebarDrop(botId: 'c', beforeBotId: 'b', rows: ['a', 'b', 'c']),
         const {
           'a': SidebarProfile(sidebarOrder: 0),
           'b': SidebarProfile(sidebarOrder: 1000),
@@ -49,12 +43,7 @@ void main() {
 
     test('goes to the end with room to spare after it', () {
       final writes = planSidebarDropV1(
-        const SidebarDrop(
-          botId: 'a',
-          label: '',
-          beforeBotId: null,
-          group: ['a', 'b'],
-        ),
+        const SidebarDrop(botId: 'a', beforeBotId: null, rows: ['a', 'b']),
         const {
           'a': SidebarProfile(sidebarOrder: 0),
           'b': SidebarProfile(sidebarOrder: 1000),
@@ -67,12 +56,7 @@ void main() {
 
     test('moves the row after it along only when there is no room left', () {
       final writes = planSidebarDropV1(
-        const SidebarDrop(
-          botId: 'c',
-          label: '',
-          beforeBotId: 'b',
-          group: ['a', 'b', 'c'],
-        ),
+        const SidebarDrop(botId: 'c', beforeBotId: 'b', rows: ['a', 'b', 'c']),
         const {
           'a': SidebarProfile(sidebarOrder: 5),
           'b': SidebarProfile(sidebarOrder: 6),
@@ -85,61 +69,6 @@ void main() {
       ]);
     });
 
-    test('a drop into another label carries the label on the same patch', () {
-      final writes = planSidebarDropV1(
-        const SidebarDrop(
-          botId: 'x',
-          label: 'Work',
-          beforeBotId: 'b',
-          group: ['a', 'b'],
-        ),
-        const {
-          'x': SidebarProfile(label: 'Home', sidebarOrder: 0),
-          'a': SidebarProfile(label: 'Work', sidebarOrder: 0),
-          'b': SidebarProfile(label: 'Work', sidebarOrder: 1000),
-        },
-      );
-      expect(writes, [
-        const SidebarProfileWrite('x', {'label': 'Work', 'sidebarOrder': 500}),
-      ]);
-    });
-
-    test('a drop into Unassigned clears the label', () {
-      final writes = planSidebarDropV1(
-        const SidebarDrop(
-          botId: 'x',
-          label: '',
-          beforeBotId: null,
-          group: ['a'],
-        ),
-        const {
-          'x': SidebarProfile(label: 'Work', sidebarOrder: 0),
-          'a': SidebarProfile(sidebarOrder: 0),
-        },
-      );
-      expect(writes, [
-        const SidebarProfileWrite('x', {'label': '', 'sidebarOrder': 1000}),
-      ]);
-    });
-
-    test('the same label in another case is not a move between labels', () {
-      final writes = planSidebarDropV1(
-        const SidebarDrop(
-          botId: 'x',
-          label: 'Work',
-          beforeBotId: null,
-          group: ['a', 'x'],
-        ),
-        const {
-          'x': SidebarProfile(label: ' work ', sidebarOrder: 0),
-          'a': SidebarProfile(label: 'Work', sidebarOrder: 1000),
-        },
-      );
-      expect(writes, [
-        const SidebarProfileWrite('x', {'sidebarOrder': 2000}),
-      ]);
-    });
-
     test('a row let go where it was, or on itself, writes nothing', () {
       const profiles = {
         'a': SidebarProfile(sidebarOrder: 0),
@@ -147,37 +76,22 @@ void main() {
       };
       expect(
         planSidebarDropV1(
-          const SidebarDrop(
-            botId: 'a',
-            label: '',
-            beforeBotId: 'b',
-            group: ['a', 'b'],
-          ),
+          const SidebarDrop(botId: 'a', beforeBotId: 'b', rows: ['a', 'b']),
           profiles,
         ),
         isEmpty,
       );
       expect(
         planSidebarDropV1(
-          const SidebarDrop(
-            botId: 'a',
-            label: '',
-            beforeBotId: 'a',
-            group: ['a', 'b'],
-          ),
+          const SidebarDrop(botId: 'a', beforeBotId: 'a', rows: ['a', 'b']),
           profiles,
         ),
         isEmpty,
       );
-      // A target the group does not hold is not a place.
+      // A target the list does not hold is not a place.
       expect(
         planSidebarDropV1(
-          const SidebarDrop(
-            botId: 'a',
-            label: '',
-            beforeBotId: 'zed',
-            group: ['a', 'b'],
-          ),
+          const SidebarDrop(botId: 'a', beforeBotId: 'zed', rows: ['a', 'b']),
           profiles,
         ),
         isEmpty,
@@ -218,13 +132,8 @@ void main() {
   test(
     'a profile patch is drawn over the profile the way the authority reads it',
     () {
-      const before = SidebarProfile(
-        name: 'Scout',
-        label: 'Work',
-        sidebarOrder: 3,
-      );
-      expect(before.patched({'label': '', 'sidebarOrder': 9}).label, '');
-      expect(before.patched({'label': '', 'sidebarOrder': 9}).sidebarOrder, 9);
+      const before = SidebarProfile(name: 'Scout', sidebarOrder: 3);
+      expect(before.patched({'sidebarOrder': 9}).sidebarOrder, 9);
       expect(before.patched({'pinnedAt': 'x'}).sidebarOrder, 3);
       expect(before.patched({'pinnedAt': 'x'}).name, 'Scout');
       expect(

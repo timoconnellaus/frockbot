@@ -469,7 +469,6 @@ describe("configuration DTO seam", () => {
         expectedRevision: 3,
         profile: {
           name: "Housework",
-          label: "Research, marketing, admin",
           description: "Keeps the household organized.",
         },
       }),
@@ -481,7 +480,6 @@ describe("configuration DTO seam", () => {
       expectedRevision: 3,
       profile: {
         name: "Housework",
-        label: "Research, marketing, admin",
         description: "Keeps the household organized.",
       },
     });

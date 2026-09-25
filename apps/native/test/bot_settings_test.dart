@@ -117,7 +117,6 @@ void main() {
     expect(find.text('Inspected avatar'), findsOneWidget);
     expect(find.text('ABOUT'), findsOneWidget);
     expect(find.text('Name'), findsOneWidget);
-    expect(find.text('Label'), findsOneWidget);
     // Title is an About field like the others: there is no Advanced to open.
     expect(find.text('Title'), findsOneWidget);
     expect(find.text('Description'), findsOneWidget);
