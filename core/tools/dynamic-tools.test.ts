@@ -991,3 +991,85 @@ describe("namespaces resolved one tool at a time", () => {
     expect(result.content).toContain('"namespace":"github"');
   });
 });
+
+describe("the effect a call reaches", () => {
+  async function effectOf(
+    register: (tools: ToolRegistry) => void,
+    name: string,
+    input: unknown,
+  ) {
+    const { hooks, tools } = toolsFixture();
+    register(tools);
+    let seen: string | undefined;
+    hooks.add({
+      prepareTool: async (_call, context, next) => {
+        seen = context.effect;
+        return next();
+      },
+    });
+    await invoke(tools, name, input);
+    return seen;
+  }
+
+  const native: ToolDefinition = {
+    name: "lookup",
+    description: "Looks something up.",
+    inputSchema: { type: "object" },
+    execute: async () => ({ content: "ok", isError: false }),
+  };
+
+  test("a native tool that declares nothing is read, and one the host marks is mutate", async () => {
+    expect(
+      await effectOf((tools) => tools.register(native), "lookup", {}),
+    ).toBe("read");
+    expect(
+      await effectOf(
+        (tools) => tools.register({ ...native, effect: "mutate" }),
+        "lookup",
+        {},
+      ),
+    ).toBe("mutate");
+  });
+
+  test("a namespace is mutate unless its host says otherwise, and a tool's own mark wins", async () => {
+    const call = {
+      namespace: "outside",
+      toolName: "act",
+      arguments: {},
+    };
+    expect(
+      await effectOf(
+        (tools) => {
+          tools.registerNamespace({ name: "outside", status: "ready" });
+          tools.register(dynamicTool("outside", "act"));
+        },
+        CALL_DYNAMIC_TOOL_NAME,
+        call,
+      ),
+    ).toBe("mutate");
+    expect(
+      await effectOf(
+        (tools) => {
+          tools.registerNamespace({
+            name: "outside",
+            status: "ready",
+            effect: "read",
+          });
+          tools.register(dynamicTool("outside", "act"));
+        },
+        CALL_DYNAMIC_TOOL_NAME,
+        call,
+      ),
+    ).toBe("read");
+    expect(
+      await effectOf(
+        (tools) => {
+          tools.registerNamespace({ name: "outside", status: "ready" });
+          tools.register({ ...dynamicTool("outside", "act"), effect: "read" });
+        },
+        CALL_DYNAMIC_TOOL_NAME,
+        call,
+      ),
+    ).toBe("read");
+  });
+});

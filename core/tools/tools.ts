@@ -18,6 +18,7 @@ import {
   type ToolSchema,
   type TurnTypeV1,
   TURN_TYPES_V1,
+  type ToolEffectV1,
 } from "@frockbot/core/contracts";
 
 export { BATCH_MAX_CALLS_V1, BATCH_TOOL_NAME };
@@ -472,6 +473,7 @@ export class ToolRegistry implements ToolExecution {
     this.namespaces.set(FROCKBOT_TOOL_NAMESPACE, {
       name: FROCKBOT_TOOL_NAMESPACE,
       external: false,
+      effect: "read",
       useInstructions: FROCKBOT_NAMESPACE_USE_INSTRUCTIONS,
     });
     this.installMetaTool({
@@ -706,6 +708,21 @@ export class ToolRegistry implements ToolExecution {
     );
   }
 
+  /**
+   * The effect of the definition a call reaches. A native tool that declares
+   * none is `read`; a namespaced one takes its namespace's, and a namespace
+   * that declares none is `mutate`.
+   */
+  private effectOf(
+    registered: RegisteredTool | undefined,
+  ): ToolEffectV1 | undefined {
+    if (!registered) return undefined;
+    const { definition } = registered;
+    if (definition.effect) return definition.effect;
+    if (definition.namespace === undefined) return "read";
+    return this.namespaces.get(definition.namespace)?.effect ?? "mutate";
+  }
+
   private denied(call: ToolCall, content: string): ToolPreparation {
     return { kind: "denied", call, result: { content, isError: true } };
   }
@@ -756,64 +773,69 @@ export class ToolRegistry implements ToolExecution {
     registered: RegisteredTool | undefined,
     context: ToolExecutionContext,
   ): Promise<ToolPreparation> {
-    const prepared = await this.hooks.prepareTool(call, context, async () => {
-      if (!registered) {
+    const effect = this.effectOf(registered);
+    const prepared = await this.hooks.prepareTool(
+      call,
+      effect === undefined ? context : { ...context, effect },
+      async () => {
+        if (!registered) {
+          return {
+            kind: "denied",
+            call,
+            result: {
+              content: this.unknownToolRefusal(call.name),
+              isError: true,
+            },
+          };
+        }
+        // Defence in depth: the catalog was already trimmed, so a call that
+        // arrives here names a tool the model was never offered.
+        if (!registered.admitted.includes(context.turnType)) {
+          return {
+            kind: "denied",
+            call,
+            result: {
+              content: `Tool is not available on a ${context.turnType} turn: ${call.name}`,
+              isError: true,
+            },
+          };
+        }
+        // The same defence on the second dimension. A `browserUse` subagent that
+        // names `computer_exec` was never offered it, and the ceiling says so
+        // here as well as in the catalog.
+        if (
+          !isSubagentRoleAdmittedV1(
+            registered.admittedRoles,
+            context.subagentRole,
+          )
+        ) {
+          return {
+            kind: "denied",
+            call,
+            result: {
+              content: `Tool is not available to a ${context.subagentRole} subagent: ${call.name}`,
+              isError: true,
+            },
+          };
+        }
+        const definition = registered.definition;
+        if (definition.validate && !definition.validate(call.input)) {
+          return {
+            kind: "denied",
+            call,
+            result: {
+              content: `Invalid input for tool: ${call.name}`,
+              isError: true,
+            },
+          };
+        }
         return {
-          kind: "denied",
+          kind: "ready",
           call,
-          result: {
-            content: this.unknownToolRefusal(call.name),
-            isError: true,
-          },
+          idempotent: definition.idempotent ?? false,
         };
-      }
-      // Defence in depth: the catalog was already trimmed, so a call that
-      // arrives here names a tool the model was never offered.
-      if (!registered.admitted.includes(context.turnType)) {
-        return {
-          kind: "denied",
-          call,
-          result: {
-            content: `Tool is not available on a ${context.turnType} turn: ${call.name}`,
-            isError: true,
-          },
-        };
-      }
-      // The same defence on the second dimension. A `browserUse` subagent that
-      // names `computer_exec` was never offered it, and the ceiling says so
-      // here as well as in the catalog.
-      if (
-        !isSubagentRoleAdmittedV1(
-          registered.admittedRoles,
-          context.subagentRole,
-        )
-      ) {
-        return {
-          kind: "denied",
-          call,
-          result: {
-            content: `Tool is not available to a ${context.subagentRole} subagent: ${call.name}`,
-            isError: true,
-          },
-        };
-      }
-      const definition = registered.definition;
-      if (definition.validate && !definition.validate(call.input)) {
-        return {
-          kind: "denied",
-          call,
-          result: {
-            content: `Invalid input for tool: ${call.name}`,
-            isError: true,
-          },
-        };
-      }
-      return {
-        kind: "ready",
-        call,
-        idempotent: definition.idempotent ?? false,
-      };
-    });
+      },
+    );
     // A prepare hook can add a denial. Once denied, neither a guard
     // nor anything registered later can turn the call back into executable
     // work. Guards themselves return only a reason, so they have no vocabulary

@@ -1,4 +1,5 @@
 import type { ModelBilling } from "../billing/model.js";
+import { isSeededPluginArtifactV1 } from "@frockbot/app/plugins/catalog";
 // The Shell Package owns the Composition a Turn runs on. First-party code is
 // the foundation runtime, ordinary imports in this bundle and never a
 // Composition member; every member is untrusted and mounts through the
@@ -307,6 +308,7 @@ export function createShellCompositionHost(
               ...(options.subagentRole === undefined
                 ? {}
                 : { subagentRole: options.subagentRole }),
+              deploymentArtifact: isSeededPluginArtifactV1,
               // A Plugin's card tool draws a Card the same way the Bot's own
               // `send_to_user` does: the messages are decoded at the seam
               // every payload is decoded at, the Approvals the surface asks

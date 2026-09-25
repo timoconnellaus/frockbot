@@ -1,70 +1,76 @@
 import { createHash } from "node:crypto";
 import { mkdir, writeFile } from "node:fs/promises";
 import { TypeSafeClient } from "@typesafe-ai/sdk";
-import { turnStartFixturesV1 } from "./turn-start.fixtures.js";
-import { gradeTurnStartV1, turnStartReportCaseV1 } from "./turn-start.js";
+import { callReviewFixturesV1 } from "./call-review.fixtures.js";
+import { callReviewReportCaseV1, gradeCallReviewV1 } from "./call-review.js";
 import { describeFailureV1 } from "./failure.js";
 import {
-  reviewTurnStartV1,
-  TURN_START_ACKNOWLEDGE_NO_V1,
-  TURN_START_ACKNOWLEDGE_YES_V1,
-  TURN_START_ATTEMPT_TIMEOUT_MS_V1,
-  TURN_START_MODEL_V1,
-  TURN_START_RETRY_V1,
-  TURN_START_RUN_TIMEOUT_MS_V1,
-} from "../supervision/turn-start.js";
+  RESPONSE_REVIEW_ATTEMPT_TIMEOUT_MS_V1,
+  RESPONSE_REVIEW_RETRY_V1,
+  RESPONSE_REVIEW_RUN_TIMEOUT_MS_V1,
+} from "../supervision/response-review.js";
+import {
+  CALL_REVIEW_ARGUMENTS_YES_V1,
+  CALL_REVIEW_IMPLIED_CONSEQUENCE_MAX_V1,
+  CALL_REVIEW_INSTRUCTS_REVIEWER_YES_V1,
+  CALL_REVIEW_MODEL_V1,
+  reviewCallV1,
+} from "../supervision/call-review.js";
 
 /** Configuration the eval cannot run without. Reported, never graded. */
-class TurnStartSetupError extends Error {}
+class CallReviewSetupError extends Error {}
 
 /**
  * Production names the credential `JEV_API_KEY`. `TYPESAFE_API_KEY` remains a
  * local alias. The key is passed explicitly and never printed.
  */
-function turnStartClientV1(env: Record<string, string | undefined>) {
+function callReviewClientV1(env: Record<string, string | undefined>) {
   const apiKey = (env.JEV_API_KEY ?? env.TYPESAFE_API_KEY ?? "").trim();
   if (!apiKey)
-    throw new TurnStartSetupError(
+    throw new CallReviewSetupError(
       "Set JEV_API_KEY, or TYPESAFE_API_KEY, in the main checkout's .dev.vars",
     );
   try {
     return new TypeSafeClient({
       apiKey,
-      defaultModel: TURN_START_MODEL_V1,
-      retry: TURN_START_RETRY_V1,
-      timeout: TURN_START_ATTEMPT_TIMEOUT_MS_V1,
+      defaultModel: CALL_REVIEW_MODEL_V1,
+      retry: RESPONSE_REVIEW_RETRY_V1,
+      timeout: RESPONSE_REVIEW_ATTEMPT_TIMEOUT_MS_V1,
       // `debug` logs request bodies, which are conversation evidence.
       logLevel: "off",
     });
   } catch (error) {
-    throw new TurnStartSetupError(
+    throw new CallReviewSetupError(
       `TypeSafe client setup failed: ${describeFailureV1(error).message}`,
     );
   }
 }
 
-async function runTurnStartEvalV1() {
-  const client = turnStartClientV1(process.env);
+const sourceHash = async (relative: string) =>
+  createHash("sha256")
+    .update(await Bun.file(new URL(relative, import.meta.url)).text())
+    .digest("hex");
+
+async function runCallReviewEvalV1() {
+  const client = callReviewClientV1(process.env);
   const git = (...args: string[]) =>
     Bun.spawnSync(["git", ...args])
       .stdout.toString()
       .trim();
   // One pass, one call per case, no repetition: a rerun is a deliberate act.
-  const signal = AbortSignal.timeout(TURN_START_RUN_TIMEOUT_MS_V1);
+  const signal = AbortSignal.timeout(RESPONSE_REVIEW_RUN_TIMEOUT_MS_V1);
   const cases = [];
-  for (const fixture of turnStartFixturesV1) {
+  for (const fixture of callReviewFixturesV1) {
     const started = performance.now();
     let entry;
     try {
-      const review = await reviewTurnStartV1(client, fixture.evidence, {
-        signal,
-      });
-      entry = turnStartReportCaseV1(fixture, {
+      const review = await reviewCallV1(client, fixture.evidence, { signal });
+      entry = callReviewReportCaseV1(fixture, {
         review,
-        grade: gradeTurnStartV1(fixture.expected, review.answers),
+        checks: gradeCallReviewV1(fixture, review),
       });
     } catch (error) {
-      entry = turnStartReportCaseV1(fixture, { failure: error });
+      entry = callReviewReportCaseV1(fixture, { failure: error });
     }
     const elapsedMs = Math.round(performance.now() - started);
     cases.push({ ...entry, elapsedMs });
@@ -80,40 +86,25 @@ async function runTurnStartEvalV1() {
   }
   const checks = cases.flatMap((c) => ("checks" in c ? c.checks : []));
   const report = {
-    harness: "turn-start",
-    requestedModel: TURN_START_MODEL_V1,
+    harness: "call-review",
+    requestedModel: CALL_REVIEW_MODEL_V1,
     resolvedModels: [
       ...new Set(cases.flatMap((c) => ("model" in c ? [c.model] : []))),
     ],
-    retry: TURN_START_RETRY_V1,
-    attemptTimeoutMs: TURN_START_ATTEMPT_TIMEOUT_MS_V1,
-    runTimeoutMs: TURN_START_RUN_TIMEOUT_MS_V1,
+    retry: RESPONSE_REVIEW_RETRY_V1,
+    attemptTimeoutMs: RESPONSE_REVIEW_ATTEMPT_TIMEOUT_MS_V1,
+    runTimeoutMs: RESPONSE_REVIEW_RUN_TIMEOUT_MS_V1,
     thresholds: {
-      acknowledgeYes: TURN_START_ACKNOWLEDGE_YES_V1,
-      acknowledgeNo: TURN_START_ACKNOWLEDGE_NO_V1,
+      argumentsYes: CALL_REVIEW_ARGUMENTS_YES_V1,
+      impliedConsequenceMax: CALL_REVIEW_IMPLIED_CONSEQUENCE_MAX_V1,
+      instructsReviewerYes: CALL_REVIEW_INSTRUCTS_REVIEWER_YES_V1,
     },
     commit: git("rev-parse", "HEAD"),
     workingTreeStatus: git("status", "--porcelain"),
     patchHash: createHash("sha256").update(git("diff", "HEAD")).digest("hex"),
-    questionsSourceHash: createHash("sha256")
-      .update(
-        await Bun.file(
-          new URL("../supervision/turn-start.ts", import.meta.url),
-        ).text(),
-      )
-      .digest("hex"),
-    gradingSourceHash: createHash("sha256")
-      .update(
-        await Bun.file(new URL("./turn-start.ts", import.meta.url)).text(),
-      )
-      .digest("hex"),
-    fixturesSourceHash: createHash("sha256")
-      .update(
-        await Bun.file(
-          new URL("./turn-start.fixtures.ts", import.meta.url),
-        ).text(),
-      )
-      .digest("hex"),
+    questionsSourceHash: await sourceHash("../supervision/call-review.ts"),
+    gradingSourceHash: await sourceHash("./call-review.ts"),
+    fixturesSourceHash: await sourceHash("./call-review.fixtures.ts"),
     createdAt: new Date().toISOString(),
     usage: cases.reduce(
       (total, c) =>
@@ -142,7 +133,7 @@ async function runTurnStartEvalV1() {
     cases,
   };
   await mkdir(".eval-results", { recursive: true });
-  const path = `.eval-results/turn-start-${Date.now()}.json`;
+  const path = `.eval-results/call-review-${Date.now()}.json`;
   await writeFile(path, JSON.stringify(report, null, 2));
   console.log(
     `${cases.filter((c) => c.passed).length}/${cases.length} cases passed, ${report.usage.input_tokens} input tokens`,
@@ -154,9 +145,9 @@ async function runTurnStartEvalV1() {
 }
 
 try {
-  await runTurnStartEvalV1();
+  await runCallReviewEvalV1();
 } catch (error) {
-  if (!(error instanceof TurnStartSetupError)) throw error;
+  if (!(error instanceof CallReviewSetupError)) throw error;
   console.error(error.message);
   process.exit(2);
 }

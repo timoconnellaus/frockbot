@@ -12,7 +12,7 @@ import {
   type TurnStartObjectiveV1,
   type TurnStartReviewV1,
 } from "../supervision/turn-start.js";
-import { describeFailureV1 } from "./tool-approval.js";
+import { describeFailureV1 } from "./failure.js";
 
 // Grading for the labeled start-of-Turn suite. The questions and the
 // thresholds code decides by live in `app/supervision/turn-start.ts`; this

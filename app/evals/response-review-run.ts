@@ -7,7 +7,7 @@ import {
   gradeSendV1,
   responseReviewReportCaseV1,
 } from "./response-review.js";
-import { describeFailureV1 } from "./tool-approval.js";
+import { describeFailureV1 } from "./failure.js";
 import {
   RESPONSE_REVIEW_ALIGNMENT_MIN_V1,
   RESPONSE_REVIEW_ATTEMPT_TIMEOUT_MS_V1,

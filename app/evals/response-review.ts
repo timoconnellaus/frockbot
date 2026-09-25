@@ -10,7 +10,7 @@ import {
   type SendReviewMessageKindV1,
   type SendReviewV1,
 } from "../supervision/response-review.js";
-import { describeFailureV1 } from "./tool-approval.js";
+import { describeFailureV1 } from "./failure.js";
 
 // Grading for the labeled response-review suite. The questions and the
 // thresholds code decides by live in `app/supervision/response-review.ts`;

@@ -1,4 +1,3 @@
-export { composeCallDecisionV1 } from "./compose.js";
 export {
   createHostedTurnSupervisorV1,
   createJevClientV1,

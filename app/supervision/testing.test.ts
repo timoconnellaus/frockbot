@@ -9,12 +9,14 @@ import {
   SUPERVISION_QUESTION_SETS_V1,
 } from "./testing.js";
 import { turnStartQuestionsV1 } from "./turn-start.js";
+import { callReviewQuestionsV1, composeCallDecisionV1 } from "./call-review.js";
 
 test("the fake knows exactly Turn supervision's question sets", () => {
   expect(SUPERVISION_QUESTION_SETS_V1).toEqual([
     Object.keys(turnStartQuestionsV1),
     Object.keys(responseReviewQuestionsV1),
     Object.keys(sendReviewQuestionsV1),
+    Object.keys(callReviewQuestionsV1),
   ]);
 });
 
@@ -41,4 +43,15 @@ test("answers supervision with the safe reading and refuses every other judge", 
   expect(
     fakeJevAnswersV1({ questions: turnStartQuestionsV1 }).answers,
   ).toMatchObject({ capability: { choice: "none" } });
+});
+
+test("the fake's call answers let a harness Turn's calls run", () => {
+  const { answers } = fakeJevAnswersV1({ questions: callReviewQuestionsV1 });
+  expect(
+    composeCallDecisionV1({
+      answers: answers as Parameters<
+        typeof composeCallDecisionV1
+      >[0]["answers"],
+    }).decision,
+  ).toBe("allow");
 });

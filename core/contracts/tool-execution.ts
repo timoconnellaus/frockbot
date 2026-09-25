@@ -5,6 +5,7 @@ import {
   type ToolSchema,
   type TurnTypeV1,
 } from "./types.js";
+import type { ToolEffectV1 } from "./turn-supervisor.js";
 
 export interface ToolExecutionContext {
   botId: string;
@@ -28,6 +29,11 @@ export interface ToolExecutionContext {
    * means is Package policy.
    */
   subagentRole?: string;
+  /**
+   * The effect of the definition this call reaches, resolved by the registry
+   * from host-owned metadata before any hook sees the call.
+   */
+  effect?: ToolEffectV1;
   signal: AbortSignal;
 }
 
@@ -146,6 +152,12 @@ export interface ToolDefinition extends ToolSchema {
   orderedEffect?: boolean;
   /** The turn types this tool is offered on. Absent means all of them. */
   admission?: TurnAdmissionV1;
+  /**
+   * Whether a call is reviewed before it runs, set by the host that registers
+   * the tool and never by the tool's author. Absent: a native tool is `read`,
+   * and a tool in a namespace takes its namespace's effect.
+   */
+  effect?: ToolEffectV1;
   validate?(input: unknown): boolean;
   execute(
     input: unknown,
@@ -234,6 +246,12 @@ export interface ToolNamespaceRegistration {
   status?: "ready" | "needsAuth" | "error";
   /** External namespaces require call metadata before an effect is admitted. */
   external?: boolean;
+  /**
+   * The effect of a tool in this namespace that declares none. Absent is
+   * `mutate`: a namespace is code from outside the deployment, and only the
+   * host that registers it may say its calls need no review.
+   */
+  effect?: ToolEffectV1;
   /** Namespace-level instructions rendered in the dynamic catalog prompt. */
   useInstructions?: string;
   /**

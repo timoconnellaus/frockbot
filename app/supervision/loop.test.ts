@@ -5,12 +5,15 @@ import {
   createFakeTurnSupervisorV1,
   createUnavailableTurnSupervisorV1,
   defaultTurnDirectiveV1,
+  SUPERVISION_NOT_AUTHORIZED_PREFIX_V1,
   SUPERVISION_WITHHELD_SEND_PREFIX_V1,
   type LlmProvider,
   type NormalizedModelRequest,
   type SendReviewEvidenceV1,
   type SessionEvent,
+  type CallReviewEvidenceV1,
   type ToolCall,
+  type ToolDefinition,
   type TurnSupervisor,
 } from "@frockbot/core/contracts";
 import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
@@ -56,6 +59,8 @@ async function run(
     voice?: boolean;
     /** Folded into the Turn as a later message before step 2. */
     followUp?: string;
+    /** More tools, registered as a host would. */
+    tools?: readonly ToolDefinition[];
   } = {},
 ): Promise<SessionEvent[]> {
   const root = createAgentRuntimeHarness({});
@@ -88,6 +93,7 @@ async function run(
   if (options.voice) {
     root.tools.register(createReplyToRequestToolV1("voice", root.sessions));
   }
+  for (const tool of options.tools ?? []) root.tools.register(tool);
   root.tools.register(
     createWebFetchToolDefinitionV1({
       fetch: async () =>
@@ -449,3 +455,159 @@ test("a run's origin names who is on the other end of its Turn", () => {
 export const mountable: (
   host: Parameters<typeof createSupervisionRuntimeFeatureV1>[0],
 ) => FoundationFeature = createSupervisionRuntimeFeatureV1;
+
+/** A tool that records whether it ran, with the effect its host gave it. */
+function effectTool(
+  name: string,
+  effect: "read" | "mutate" | undefined,
+  ran: string[],
+): ToolDefinition {
+  return {
+    name,
+    description: `The ${name} tool.`,
+    inputSchema: { type: "object", additionalProperties: true },
+    ...(effect === undefined ? {} : { effect }),
+    execute: async () => {
+      ran.push(name);
+      return { content: `${name} done`, isError: false };
+    },
+  };
+}
+
+test("a mutate call the person did not ask for never runs, and the Bot is told to ask", async () => {
+  const ran: string[] = [];
+  const reviewed: CallReviewEvidenceV1[] = [];
+  const events = await run(
+    scripted([
+      [{ id: "post", name: "post_to_slack", input: { channel: "#all" } }],
+      [
+        {
+          id: "a",
+          name: "send_to_user",
+          input: text("Shall I post it?", "finish"),
+        },
+      ],
+    ]),
+    createFakeTurnSupervisorV1({
+      reviewCall: async (evidence) => {
+        reviewed.push(evidence);
+        return {
+          decision: "reject",
+          reasonCode: "no_authorization",
+          judgments: [
+            { question: "authorization", answer: "none", value: 0.9 },
+          ],
+        };
+      },
+    }),
+    { tools: [effectTool("post_to_slack", "mutate", ran)] },
+  );
+  expect(ran).toEqual([]);
+  expect(reviewed).toHaveLength(1);
+  expect(reviewed[0]?.call).toEqual({
+    tool: "post_to_slack",
+    arguments: { channel: "#all" },
+  });
+  // The person's own request is the evidence an authorization comes from.
+  expect(reviewed[0]?.conversation.at(-1)).toEqual({
+    speaker: "user",
+    text: "Email Dana the March invoice.",
+  });
+  expect(
+    events.find(
+      (event) => event.type === "tool/result" && event.name === "post_to_slack",
+    ),
+  ).toMatchObject({
+    isError: true,
+    content: expect.stringMatching(
+      new RegExp(
+        `^${SUPERVISION_NOT_AUTHORIZED_PREFIX_V1.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}`,
+      ),
+    ),
+  });
+  expect(
+    events.filter((event) => event.type === "supervision/call"),
+  ).toMatchObject([
+    {
+      tool: "post_to_slack",
+      decision: { decision: "reject", reasonCode: "no_authorization" },
+    },
+  ]);
+});
+
+test("an allowed mutate call runs once, and a read call is never reviewed", async () => {
+  const ran: string[] = [];
+  let reviews = 0;
+  const events = await run(
+    scripted([
+      [
+        { id: "look", name: "lookup", input: {} },
+        { id: "post", name: "post_to_slack", input: { channel: "#team" } },
+      ],
+      [{ id: "a", name: "send_to_user", input: text("Posted.", "finish") }],
+    ]),
+    createFakeTurnSupervisorV1({
+      reviewCall: async () => {
+        reviews++;
+        return { decision: "allow", reasonCode: "authorized", judgments: [] };
+      },
+    }),
+    {
+      tools: [
+        effectTool("lookup", undefined, ran),
+        effectTool("post_to_slack", "mutate", ran),
+      ],
+    },
+  );
+  expect(ran).toEqual(["lookup", "post_to_slack"]);
+  expect(reviews).toBe(1);
+  expect(
+    events.filter((event) => event.type === "supervision/call"),
+  ).toHaveLength(1);
+});
+
+test("a namespaced mutate call is reviewed and recorded under its namespace", async () => {
+  const ran: string[] = [];
+  const reviewed: CallReviewEvidenceV1[] = [];
+  const events = await run(
+    scripted([
+      [
+        {
+          id: "send",
+          name: "call_dynamic_tool",
+          input: {
+            namespace: "composio-gmail",
+            toolName: "GMAIL_SEND_EMAIL",
+            arguments: { to: "dana@example.com" },
+            mcpDetails: { description: "Email Dana the invoice." },
+          },
+        },
+      ],
+      [{ id: "a", name: "send_to_user", input: text("Sent.", "finish") }],
+    ]),
+    createFakeTurnSupervisorV1({
+      reviewCall: async (evidence) => {
+        reviewed.push(evidence);
+        return { decision: "allow", reasonCode: "authorized", judgments: [] };
+      },
+    }),
+    {
+      tools: [
+        {
+          ...effectTool("GMAIL_SEND_EMAIL", "mutate", ran),
+          namespace: "composio-gmail",
+        },
+      ],
+    },
+  );
+  expect(ran).toEqual(["GMAIL_SEND_EMAIL"]);
+  expect(reviewed.map((evidence) => evidence.call)).toEqual([
+    {
+      tool: "composio-gmail/GMAIL_SEND_EMAIL",
+      arguments: { to: "dana@example.com" },
+    },
+  ]);
+  expect(
+    events.filter((event) => event.type === "supervision/call"),
+  ).toMatchObject([{ tool: "composio-gmail/GMAIL_SEND_EMAIL" }]);
+});
