@@ -1,0 +1,17 @@
+{
+  // The desktop's module host. It runs under Deno on the person's Mac, and is
+  // written against Node's built-ins, which Deno serves, so the same code runs
+  // under Bun in tests.
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "allowImportingTsExtensions": true,
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "lib": ["ES2023"],
+    "types": ["bun", "node"]
+  },
+  "include": ["src/**/*.ts"]
+}

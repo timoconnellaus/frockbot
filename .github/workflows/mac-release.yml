@@ -5,8 +5,10 @@ on:
     paths:
       - "apps/native/**"
       - "app/machine/**"
+      - "apps/device-host/**"
       - "core/machine-protocol/**"
       - "scripts/mac-release*"
+      - "scripts/fetch-deno.py"
       - "scripts/mac-appcast*"
       - ".github/workflows/mac-release.yml"
   push:
@@ -30,6 +32,12 @@ jobs:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
       - run: bun test app/machine/device.test.ts app/machine/device-runner.test.ts
+      # The module sandbox, proved where it runs: Deno under the Seatbelt
+      # profile a module gets, reaching what it declared and nothing else.
+      - run: python3 scripts/fetch-deno.py aarch64-apple-darwin "$RUNNER_TEMP/deno/deno"
+      - run: bun test apps/device-host
+        env:
+          FROCKBOT_TEST_DENO: ${{ runner.temp }}/deno/deno
       - run: python3 scripts/mac-release-test.py
       - run: python3 scripts/mac-appcast-test.py
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
