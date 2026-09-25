@@ -20,6 +20,7 @@ interface Rpc {
 
 interface StoredRunProbe {
   runId: string;
+  sessionId: string;
   admission?: { origin?: { kind?: string; quiet?: boolean } };
 }
 
