@@ -141,7 +141,7 @@ export class AuditUserBackendContribution {
     };
   }
 
-  /** Every entry of one Bot leaves the table. The archive saga calls this. */
+  /** Every entry of one Bot leaves the table. Deleting a Bot calls this. */
   purgeAuditForBot(botId: string): { removed: number } {
     return { removed: this.store.purge(botId) };
   }

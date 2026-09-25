@@ -4,12 +4,15 @@ import {
   decodeAuditRequestQueryV1,
   type AuditGatewayHost,
 } from "./backend.ts";
-import type {
-  AuditEntryV1,
-  AuditQueryV1,
-  AuditRebuildReceiptV1,
-  ClientAuditPageV1,
+import {
+  decodeClientAuditPageV1,
+  type AuditEntryV1,
+  type AuditQueryV1,
+  type AuditRebuildReceiptV1,
+  type ClientAuditPageV1,
 } from "./shared.ts";
+import { FakeAuditSql } from "./testing.ts";
+import { AuditUserBackendContribution } from "./user.ts";
 
 function url(query: string): URL {
   return new URL(`https://bot.frockbot.com/api/audit?${query}`);
@@ -53,7 +56,7 @@ describe("the audit query decoder", () => {
     expect(() => decodeAuditRequestQueryV1(url("limit=0"))).toThrow();
     expect(() => decodeAuditRequestQueryV1(url("limit=abc"))).toThrow();
     expect(() =>
-      decodeAuditRequestQueryV1(url(`before=${"p".repeat(200)}`)),
+      decodeAuditRequestQueryV1(url(`before=${"p".repeat(2_000)}`)),
     ).toThrow();
   });
 });
@@ -248,5 +251,71 @@ describe("the audit gateway route", () => {
     expect(await response!.json<unknown>()).toEqual({
       error: "the User object is away",
     });
+  });
+});
+
+describe("paging the audit route with real ids", () => {
+  test("walks every page past the first, cursor and all", async () => {
+    // Real ids, not "p50": a Bot id is a UUID and a native run id is 33
+    // characters, and the cursor carries both. A bound that fit a toy cursor
+    // refused the second page of every real account.
+    const botId = crypto.randomUUID();
+    const entries = Array.from({ length: 120 }, (_, index) => {
+      const occurrenceId = `tool:${index + 1}:1:0`;
+      return {
+        ...ENTRY,
+        botId,
+        runId: `n${btoa(String(index).padStart(24, "x")).replaceAll("=", "")}`,
+        occurrenceId,
+        turn: index + 1,
+        effectId: occurrenceId,
+        at: new Date(Date.UTC(2026, 8, 1) + index * 60_000).toISOString(),
+      };
+    });
+    expect(entries[0]!.runId).toHaveLength(33);
+    const audit = new AuditUserBackendContribution({
+      sql: new FakeAuditSql(),
+      readDirectory: async () => ({ botIds: [botId] }),
+      projectBotEntries: async () => ({ schemaVersion: 1, botId, entries: [] }),
+    });
+    await audit.indexAuditEntries(entries);
+    // The same answer the User Durable Object gives, through the same decoder
+    // the Worker reads it with.
+    const route = createAuditBackendContribution(
+      host({
+        readAudit: async (_userId, query) => {
+          const page = audit.query(query);
+          return decodeClientAuditPageV1({
+            schemaVersion: 1,
+            entries: page.entries,
+            page: {
+              truncated: page.nextCursor !== undefined,
+              ...(page.nextCursor === undefined
+                ? {}
+                : { nextCursor: page.nextCursor }),
+            },
+            total: page.total,
+            indexState: audit.state(),
+          });
+        },
+      }),
+    );
+    const context = { userId: "alice", client: "browser" as const };
+    const seen: string[] = [];
+    let before: string | undefined;
+    let pages = 0;
+    do {
+      const { request, url: target } = get(
+        `/api/audit?${new URLSearchParams(before === undefined ? {} : { before })}`,
+      );
+      const response = await route.route(request, target, context);
+      expect(response?.status).toBe(200);
+      const page = await response!.json<ClientAuditPageV1>();
+      seen.push(...page.entries.map((entry) => entry.runId));
+      before = page.page.nextCursor;
+      pages += 1;
+    } while (before !== undefined && pages < 10);
+    expect(pages).toBe(3);
+    expect(new Set(seen).size).toBe(120);
   });
 });

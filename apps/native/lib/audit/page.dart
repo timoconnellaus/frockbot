@@ -110,7 +110,14 @@ class AuditController extends ViewSurfaceController {
       '/api/audit/rebuild',
       body: const <String, Object?>{},
     );
-    return ((answer as Map?) ?? const {}).cast<String, Object?>();
+    // The route answers with a rebuild receipt, not a command receipt, so the
+    // command it settles is named here.
+    return {
+      'commandId': command['commandId'],
+      'status': (answer as Map?)?['status'] == 'rebuilt'
+          ? 'applied'
+          : 'rejected',
+    };
   }
 
   @override

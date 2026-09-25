@@ -20,6 +20,7 @@ import {
 import { MONTHS } from "@frockbot/app/routines/routines-document";
 import {
   AUDIT_KINDS_V1,
+  AUDIT_MAX_CURSOR_LENGTH_V1,
   AUDIT_TARGET_COMPUTER_V1,
   AUDIT_TARGET_MACHINE_PREFIX_V1,
   AUDIT_TARGET_REMOTE_PREFIX_V1,
@@ -365,7 +366,7 @@ export function auditDocumentV1(frame: AuditFrameV1): ViewDocument {
           type: "object",
           properties: {
             kind: KIND,
-            cursor: { type: "string", maxLength: 512 },
+            cursor: { type: "string", maxLength: AUDIT_MAX_CURSOR_LENGTH_V1 },
           },
           required: ["kind", "cursor"],
           additionalProperties: false,

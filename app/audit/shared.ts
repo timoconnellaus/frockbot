@@ -28,8 +28,15 @@ export const AUDIT_MAX_PREVIEW_LENGTH_V1 = 200;
 export const AUDIT_MAX_OUTBOX_V1 = 512;
 /** Most entries one contribution or rebuild page carries. */
 export const AUDIT_MAX_ENTRY_PAGE_V1 = 512;
-/** Longest accepted paging cursor. */
-export const AUDIT_MAX_CURSOR_LENGTH_V1 = 64;
+/**
+ * Longest accepted paging cursor.
+ *
+ * The cursor is the base64 of a row's sort key, so it grows with the ids in
+ * it: an instant plus three ids of up to 128 characters is at most 548.
+ */
+export const AUDIT_MAX_CURSOR_LENGTH_V1 = 1024;
+/** Longest cursor a Bot's own entry projection pages by. */
+const AUDIT_MAX_ENTRY_PAGE_CURSOR_LENGTH_V1 = 512;
 /** Most entries one query page returns. */
 export const AUDIT_MAX_RESULTS_V1 = 100;
 
@@ -497,7 +504,7 @@ export function decodeAuditEntryPageV1(input: unknown): AuditEntryPageV1 {
           nextCursor: text(
             page,
             "nextCursor",
-            AUDIT_MAX_CURSOR_LENGTH_V1 * 8,
+            AUDIT_MAX_ENTRY_PAGE_CURSOR_LENGTH_V1,
             "audit entry page",
           ),
         }),
