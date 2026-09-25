@@ -304,10 +304,16 @@ declined to cache it, despite `immutable`), and drew a white page before the
 theme arrived. The fixes form one frame layer that panels use now and HTML
 Cards build on:
 
-- The HTML is cached by the WebView's own HTTP cache, on the page's hash. The
-  page is never loaded from a string: its `sandbox` policy is a response header
-  a `<meta>` tag cannot carry, and without it the page would run as the app's
-  origin.
+- The HTML is not cached across launches on Apple platforms, by decision. The
+  vendored WebKit plugin gives every WebView a fresh non-persistent store, so
+  no frame inherits cookies, and that store has no disk cache. The fetch was
+  about a tenth of a second of a three-second first open, most of which is
+  WebKit starting and the Bot rendering the page's state, and a kept frame
+  already spares every later open. A dedicated persistent store for Plugin
+  pages is the way to cache if a slow network ever makes the fetch matter; it
+  is native and needs a full release. A page is never loaded from a string:
+  its `sandbox` policy is a response header a `<meta>` tag cannot carry, and
+  without it the page would run as the app's origin.
 - A panel opens on the last state this device saw and is replaced when the
   read lands. A Card's state is already in its record, so a Card needs no read
   at all.
@@ -324,11 +330,17 @@ Cards build on:
   of its own, so nothing passes between Plugins.
 - The frame stays hidden until the page has painted, so no page flashes white.
 
-**Trying a page before publishing is still open.** A Bot could test a page in a
-headless browser, with the exact published page, the real helper and a stand-in
-host built from the same contract, and a scripted microphone. Where that browser
-runs (Browser Rendering or the Bot's Computer) is a later decision. Either way,
-the stand-in host belongs to the platform, never to the Bot.
+**A Bot tries a page on its Computer before publishing it.** Tim chose the
+Computer over Browser Rendering: it adds no binding and no cost line, and the
+Computer already has a browser. What the Bot tries is the page `plugin_publish`
+would store, with the real helper, loaded beside a stand-in host that speaks the
+same bridge contract the app does: it greets the page, hands it a state,
+answers its tool calls with what the Bot scripts, and feeds a scripted
+microphone (a tone at a frequency and level, or noise). The Bot gets back what
+the page drew, its visible text, and everything it reported. The stand-in host
+and the harness belong to the platform, never to the Bot, so they cannot drift
+from the real host, and the browser suite runs the same stand-in. A Bot with no
+Computer publishes without trying, as before.
 
 ## Amendments to the constitution
 
@@ -384,6 +396,7 @@ After the 2026-09-25 amendment:
 7. The greeting that cannot be lost, `close()` ending in `onClosed`, and
    inspectable pages in Debug and Dev builds.
 8. Page errors and logs, recorded against the Plugin and read by its Bot.
-9. The frame layer for panels: the cached page, the last state first, kept
-   frames and no flash. Step 5 uses the same layer, with the Card's picture and
-   reused WebViews.
+9. The frame layer for panels: the last state first, kept frames and no flash.
+   Step 5 uses the same layer, with the Card's picture and reused WebViews.
+10. Trying a page on the Bot's Computer: the stand-in host from the contract,
+    the harness, and a step in the managed `plugins` Skill.
