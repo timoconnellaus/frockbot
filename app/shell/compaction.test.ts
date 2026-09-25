@@ -24,6 +24,7 @@ import {
   type CompactionLogV1,
   type ParkedCompactionV1,
   COMPACTION_INPUT_MAX_BYTES_V1,
+  COMPACTION_KEEP_ITEM_MAX_CHARS_V1,
   COMPACTION_KEEP_MAX_CHARS_V1,
   COMPACTION_TRIGGER_RATIO_V1,
   compactionChoicesV1,
@@ -625,6 +626,33 @@ describe("running a compaction", () => {
     expect(transcripts[0]).toContain("(keep word for word)");
   });
 
+  test("a chooser that runs out its time leaves the summariser all of its own", async () => {
+    const session = await sessionFrom([
+      MODEL_REQUEST,
+      ...Array.from({ length: 10 }, (_, index) =>
+        turnEvents({
+          turn: index + 1,
+          say: "S".repeat(300),
+          reply: "W".repeat(400),
+        }),
+      ).flat(),
+    ]);
+    const outcome = await runCompactionV1({
+      ...runner(session, async (request) => {
+        const { signal } = request as unknown as { signal: AbortSignal };
+        await new Promise((resolve) => setTimeout(resolve, 20));
+        signal.throwIfAborted();
+        return SUMMARY;
+      }),
+      deadlineMs: 30,
+      choose: (_items, signal) =>
+        new Promise((resolve) =>
+          signal.addEventListener("abort", () => resolve(undefined)),
+        ),
+    });
+    expect(outcome.kind).toBe("compacted");
+  });
+
   test("runs on the model it is given rather than the Turn's own", async () => {
     const session = await sessionFrom([MODEL_REQUEST, ...wordy(10, 400)]);
     const seen: { provider: string; model: string }[] = [];
@@ -1050,7 +1078,7 @@ describe("what compaction carries word for word", () => {
 
   test("what is kept stops at its budget, and a chooser that fails keeps nothing", async () => {
     const messages = Array.from({ length: 6 }, (_, index) =>
-      person("x".repeat(1_500) + index),
+      person("x".repeat(1_400) + index),
     );
     const choices = await compactionChoicesV1(
       messages,
@@ -1058,7 +1086,7 @@ describe("what compaction carries word for word", () => {
       signal,
     );
     const kept = [...(choices ?? new Map()).values()].length;
-    expect(kept).toBe(Math.floor(COMPACTION_KEEP_MAX_CHARS_V1 / 1_500));
+    expect(kept).toBe(Math.floor(COMPACTION_KEEP_MAX_CHARS_V1 / 1_401));
     expect(
       await compactionChoicesV1(
         messages,
@@ -1071,5 +1099,17 @@ describe("what compaction carries word for word", () => {
     expect(
       await compactionChoicesV1(messages, async () => ["keep"], signal),
     ).toBeUndefined();
+  });
+
+  test("a message too long to keep whole is summarised whole", async () => {
+    const draft = person("d".repeat(COMPACTION_KEEP_ITEM_MAX_CHARS_V1) + "END");
+    const choices = await compactionChoicesV1(
+      [draft],
+      async () => ["keep"],
+      signal,
+    );
+    expect(choices?.get(draft)).toBeUndefined();
+    const transcript = compactionTranscriptV1([draft], choices);
+    expect(transcript).toBe(`USER: ${draft.content}`);
   });
 });

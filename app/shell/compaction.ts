@@ -344,7 +344,7 @@ export function compactionTranscriptV1(
       const choice = choices?.get(message);
       if (message.role === "user") {
         return choice === "keep"
-          ? `USER (keep word for word): ${message.content.slice(0, COMPACTION_KEEP_ITEM_MAX_CHARS_V1)}`
+          ? `USER (keep word for word): ${message.content}`
           : `USER: ${message.content}`;
       }
       if (message.role === "tool") {
@@ -353,7 +353,7 @@ export function compactionTranscriptV1(
           return `[tool-result ${message.name}${error}: omitted, nothing in it matters later]`;
         }
         if (choice === "keep") {
-          return `[tool-result ${message.name}${error} (keep word for word): ${message.content.slice(0, COMPACTION_KEEP_ITEM_MAX_CHARS_V1)}]`;
+          return `[tool-result ${message.name}${error} (keep word for word): ${message.content}]`;
         }
         const content =
           message.content.length > COMPACTION_TOOL_RESULT_MAX_CHARS_V1
@@ -717,17 +717,22 @@ export async function runCompactionV1(
     model: binding.model,
   });
   if (!intended) return { kind: "yielded" };
+  const deadlineMs = input.deadlineMs ?? COMPACTION_DEADLINE_MS_V1;
+  const choices = input.choose
+    ? await compactionChoicesV1(
+        covered,
+        input.choose,
+        AbortSignal.timeout(deadlineMs),
+      )
+    : undefined;
   const controller = new AbortController();
   const deadline = setTimeout(
     () => controller.abort(new Error("The summariser ran past its deadline.")),
-    input.deadlineMs ?? COMPACTION_DEADLINE_MS_V1,
+    deadlineMs,
   );
   let outcome: ParkedCompactionV1;
   let result: CompactionOutcomeV1;
   try {
-    const choices = input.choose
-      ? await compactionChoicesV1(covered, input.choose, controller.signal)
-      : undefined;
     const text = await input.summarise({
       ...binding,
       effectId,
@@ -808,11 +813,12 @@ export async function compactionChoicesV1(
     let choice = answers[index]!;
     if (choice === "drop" && message.role !== "tool") choice = "summarise";
     if (choice === "keep") {
-      const size = Math.min(
-        message.content.length,
-        COMPACTION_KEEP_ITEM_MAX_CHARS_V1,
-      );
-      if (kept + size > COMPACTION_KEEP_MAX_CHARS_V1) choice = "summarise";
+      const size = message.content.length;
+      if (
+        size > COMPACTION_KEEP_ITEM_MAX_CHARS_V1 ||
+        kept + size > COMPACTION_KEEP_MAX_CHARS_V1
+      )
+        choice = "summarise";
       else kept += size;
     }
     if (choice !== "summarise") choices.set(message, choice);
