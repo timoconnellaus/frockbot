@@ -205,7 +205,6 @@ import {
   type UploadRouteDependenciesV1,
 } from "./uploads.js";
 import {
-  decodeInboundEmailRecipientV1,
   decodeInboundEmailRouteDecisionV1,
   decodeInboundEmailStateV1,
   inboundEmailDomainV1,
@@ -779,7 +778,10 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
 }
 
 interface DeploymentPolicyRpc {
-  resolveInboundEmailAddress(input: unknown): Promise<unknown>;
+  claimEmailUsername(input: unknown): Promise<unknown>;
+  releaseEmailUsername(input: unknown): Promise<unknown>;
+  resolveEmailUsername(input: unknown): Promise<unknown>;
+  readEmailUsername(input: unknown): Promise<unknown>;
   readPolicy(input: unknown): Promise<unknown>;
   setAdmissionMode(input: unknown): Promise<unknown>;
   readAccountAccess(input: unknown): Promise<unknown>;
@@ -1026,7 +1028,7 @@ interface UserAuditRpc {
 /** The User Durable Object's inbound email RPCs. */
 interface UserInboundEmailRpc {
   readInboundEmail(input: unknown): Promise<unknown>;
-  commandInboundEmailAddress(input: unknown): Promise<unknown>;
+  setInboundEmailReceiving(input: unknown): Promise<unknown>;
   commandInboundEmailSender(input: unknown): Promise<unknown>;
   routeInboundEmail(input: unknown): Promise<unknown>;
 }
@@ -1079,17 +1081,15 @@ function inboundEmailHostV1(env: Env): InboundEmailHostV1 {
   const domain = inboundEmailDomainV1(env);
   return {
     ...(domain ? { domain } : {}),
-    resolveAddress: async (tokenDigest) =>
-      decodeInboundEmailRecipientV1(
-        (
-          rpcJsonSnapshotV1(
-            await deploymentPolicyStub(env).resolveInboundEmailAddress({
-              schemaVersion: 1,
-              tokenDigest,
-            }),
-          ) as { recipient?: unknown }
-        ).recipient,
-      ),
+    resolveUsername: async (username) => {
+      const { userId } = rpcJsonSnapshotV1(
+        await deploymentPolicyStub(env).resolveEmailUsername({
+          schemaVersion: 1,
+          username,
+        }),
+      ) as { userId?: unknown };
+      return typeof userId === "string" ? userId : undefined;
+    },
     signInEmail: (userId) => inboundEmailSignInV1(env, userId),
     accountRefusal: async (userId) =>
       (await externalAccountRefusal(env, userId))?.message,
@@ -2405,7 +2405,7 @@ const createGatewayBackendContributions = (env: Env) =>
           }),
         ),
       ),
-    // Each Bot's inbound address and the account's senders. The messages
+    // The account's username and senders, and each Bot's switch. The messages
     // themselves arrive at `email()` below, never through the gateway.
     ...(() => {
       const domain = inboundEmailDomainV1(env);
@@ -2422,13 +2422,39 @@ const createGatewayBackendContributions = (env: Env) =>
           }),
         ),
       ),
-    commandInboundEmailAddress: async (userId, botId, action) =>
+    readEmailUsername: async (userId) => {
+      const { username } = rpcJsonSnapshotV1(
+        await deploymentPolicyStub(env).readEmailUsername({
+          schemaVersion: 1,
+          userId,
+        }),
+      ) as { username?: unknown };
+      return typeof username === "string" ? username : undefined;
+    },
+    claimEmailUsername: async (userId, username) => {
+      if (username === undefined) {
+        await deploymentPolicyStub(env).releaseEmailUsername({
+          schemaVersion: 1,
+          userId,
+        });
+        return { status: "claimed" };
+      }
+      const { status } = rpcJsonSnapshotV1(
+        await deploymentPolicyStub(env).claimEmailUsername({
+          schemaVersion: 1,
+          userId,
+          username,
+        }),
+      ) as { status?: unknown };
+      return { status: status === "claimed" ? "claimed" : "taken" };
+    },
+    setInboundEmailReceiving: async (userId, botId, receiving) =>
       inboundEmailCommandOutcomeV1(
-        await userInboundEmailStub(env, userId).commandInboundEmailAddress({
+        await userInboundEmailStub(env, userId).setInboundEmailReceiving({
           schemaVersion: 1,
           userId,
           botId,
-          action,
+          receiving,
         }),
       ),
     commandInboundEmailSender: async (userId, command) =>

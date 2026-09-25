@@ -1,10 +1,12 @@
 // Email your Bot: the person writing to one of their Bots from their own
 // mailbox.
 //
-// Each Bot may have one inbound address, `<token>@<domain>`, on the domain the
-// deployment routes to this Worker. The token is random and rotatable, and it
-// is only half of the door: mail reaches the Bot only from one of the User's
-// confirmed sender addresses, and only when the receiving server's own
+// A Bot's address is `<bot-slug>.<username>@<domain>`: the slug is the Bot's
+// name, the username is the account's, and the domain is the one the
+// deployment routes to this Worker. Addresses are meant to be remembered, so
+// they are guessable by design and are no credential at all. What keeps a
+// stranger out is the sender: mail reaches a Bot only from the User's sign-in
+// address or one they confirmed, and only when the receiving server's own
 // authentication verdict says the domain in `From` sent it. What crosses the
 // seams between the Worker's `email()` handler, the deployment's directory,
 // the User Durable Object and the Bot Durable Object is defined here, with the
@@ -13,9 +15,12 @@
 import { isPublicIdentifier } from "@frockbot/core/configuration";
 import { accessEmailV1 } from "../admin/shared.js";
 
-/** Every authenticated route lives under a Bot: `/api/bots/:botId/email`. */
+/** One Bot's email: `/api/bots/:botId/email`, and its `/switch` and `/senders`. */
 export const INBOUND_EMAIL_ROUTE_V1 =
   /^\/api\/bots\/([^/]+)\/email(\/[a-z]+)?$/;
+
+/** The account's email username. */
+export const EMAIL_USERNAME_ROUTE_V1 = "/api/email/username";
 
 /**
  * The largest message read. Cloudflare delivers up to 25 MiB; a message is
@@ -43,15 +48,41 @@ export const INBOUND_EMAIL_TRUSTED_AUTHSERV_IDS_V1: readonly string[] = [
 ];
 
 /**
- * An address token: 26 base32 characters, 130 random bits. Lowercase only,
- * because mail systems fold a local part's case more often than they keep it.
+ * Usernames nobody may hold: the mailboxes a domain is expected to answer
+ * for, and names that would read as the product speaking.
  */
-const ADDRESS_TOKEN = /^[a-z2-7]{26}$/;
+export const RESERVED_EMAIL_USERNAMES_V1: ReadonlySet<string> = new Set([
+  "admin",
+  "support",
+  "postmaster",
+  "abuse",
+  "noreply",
+  "no-reply",
+  "bot",
+  "bots",
+  "frockbot",
+  "help",
+  "security",
+  "hostmaster",
+  "webmaster",
+  "mailer-daemon",
+]);
+
+/** A username's shape: a letter, then letters, digits and single dashes. */
+const EMAIL_USERNAME = /^[a-z][a-z0-9]*(?:-[a-z0-9]+)*$/;
+
+/** A slug's shape, which is also why a local part splits at its last dot. */
+const BOT_SLUG = /^[a-z0-9]+(?:-[a-z0-9]+)*$/;
+
+/**
+ * The longest slug. With a dot and the longest username it leaves the local
+ * part inside the 64 characters mail allows.
+ */
+const BOT_SLUG_MAX_LENGTH = 32;
 
 /** A confirmation code as stored: eight characters of Crockford's base32. */
 const SENDER_CODE = /^[0-9A-HJKMNP-TV-Z]{8}$/;
 
-const BASE32 = "abcdefghijklmnopqrstuvwxyz234567";
 const CROCKFORD = "0123456789ABCDEFGHJKMNPQRSTVWXYZ";
 
 /** The deployment's inbound domain, or nothing: then email is off. */
@@ -72,17 +103,117 @@ export class InboundEmailDecodeError extends Error {
   override readonly name = "InboundEmailDecodeError";
 }
 
-export function isInboundAddressTokenV1(value: unknown): value is string {
-  return typeof value === "string" && ADDRESS_TOKEN.test(value);
+/** Why a username cannot be held, in the person's words, or nothing. */
+export function emailUsernameProblemV1(value: unknown): string | undefined {
+  if (typeof value !== "string") return "Choose a username.";
+  if (value.length < 3 || value.length > 30) {
+    return "A username is 3 to 30 characters.";
+  }
+  if (!EMAIL_USERNAME.test(value)) {
+    return "A username starts with a letter and has only lowercase letters, digits and single dashes between them.";
+  }
+  if (RESERVED_EMAIL_USERNAMES_V1.has(value)) {
+    return "That username is reserved. Choose another.";
+  }
+  return undefined;
 }
 
-/** A fresh address token. */
-export function mintInboundAddressTokenV1(): string {
-  let token = "";
-  for (const byte of crypto.getRandomValues(new Uint8Array(26))) {
-    token += BASE32[byte & 31];
+export function isEmailUsernameV1(value: unknown): value is string {
+  return emailUsernameProblemV1(value) === undefined;
+}
+
+export function isBotEmailSlugV1(value: unknown): value is string {
+  return (
+    typeof value === "string" &&
+    value.length <= BOT_SLUG_MAX_LENGTH &&
+    BOT_SLUG.test(value)
+  );
+}
+
+/** Letters a name commonly carries that do not decompose into ASCII. */
+const TRANSLITERATED: Readonly<Record<string, string>> = {
+  ß: "ss",
+  æ: "ae",
+  ø: "o",
+  œ: "oe",
+  đ: "d",
+  ð: "d",
+  ł: "l",
+  þ: "th",
+  ı: "i",
+};
+
+function slugOf(text: string, maximum: number): string {
+  return text
+    .toLowerCase()
+    .normalize("NFKD")
+    .replace(/\p{M}+/gu, "")
+    .replace(/[ßæøœđðłþı]/g, (letter) => TRANSLITERATED[letter] ?? "")
+    .replace(/[\s_.]+/g, "-")
+    .replace(/[^a-z0-9-]+/g, "")
+    .replace(/-{2,}/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, maximum)
+    .replace(/-+$/g, "");
+}
+
+/** One Bot as its address is derived: its current name and when it came. */
+export interface BotEmailNameV1 {
+  botId: string;
+  name: string;
+  registeredAt: string;
+}
+
+/**
+ * Every Bot's slug, from its current name: lowercased, spaces as dashes,
+ * accents folded, anything else dropped. A name that leaves nothing is
+ * `bot-` and the start of the Bot's id. Two Bots that come out the same are
+ * told apart in the order they were created: the later one is `-2`, then
+ * `-3`, so a Bot's address changes only when a name does.
+ */
+export function botEmailSlugsV1(
+  bots: readonly BotEmailNameV1[],
+): Map<string, string> {
+  const ordered = [...bots].sort(
+    (a, b) =>
+      Date.parse(a.registeredAt) - Date.parse(b.registeredAt) ||
+      (a.botId < b.botId ? -1 : a.botId > b.botId ? 1 : 0),
+  );
+  const taken = new Set<string>();
+  const slugs = new Map<string, string>();
+  for (const bot of ordered) {
+    const base =
+      slugOf(bot.name, BOT_SLUG_MAX_LENGTH) ||
+      `bot-${slugOf(bot.botId.slice(0, 6), 6) || "0"}`;
+    let slug = base;
+    for (let suffix = 2; taken.has(slug); suffix += 1) {
+      const tail = `-${suffix}`;
+      slug = `${base.slice(0, BOT_SLUG_MAX_LENGTH - tail.length).replace(/-+$/g, "")}${tail}`;
+    }
+    taken.add(slug);
+    slugs.set(bot.botId, slug);
   }
-  return token;
+  return slugs;
+}
+
+/**
+ * The slug and username a recipient's local part names, or nothing. It splits
+ * at the last dot, and neither half may hold one, so the split is the only
+ * reading. A local part with no dot is never a Bot's: a plain mailbox at the
+ * same domain is not something this handler touches. `+anything` is the same
+ * address, as a person would expect.
+ */
+export function parseBotEmailLocalPartV1(
+  local: string,
+): { slug: string; username: string } | undefined {
+  const plain = local.toLowerCase().split("+")[0]!;
+  const dot = plain.lastIndexOf(".");
+  if (dot <= 0) return undefined;
+  const slug = plain.slice(0, dot);
+  const username = plain.slice(dot + 1);
+  return isBotEmailSlugV1(slug) && isEmailUsernameV1(username)
+    ? { slug, username }
+    : undefined;
 }
 
 /** A fresh confirmation code, as stored: `7K3P9QXM`. */
@@ -125,12 +256,6 @@ export function addressDomainV1(address: string): string {
   return address.slice(address.lastIndexOf("@") + 1);
 }
 
-/** One Bot's inbound address as the User object keeps it. */
-export interface InboundAddressV1 {
-  token: string;
-  createdAt: string;
-}
-
 /** One address the User added, confirmed or waiting for its code. */
 export interface InboundEmailSenderV1 {
   address: string;
@@ -145,7 +270,10 @@ export interface InboundEmailSenderV1 {
 /** What the User object answers about one Bot's email. */
 export interface InboundEmailStateV1 {
   schemaVersion: 1;
-  address?: InboundAddressV1;
+  /** The Bot's slug now: it follows the Bot's name. */
+  slug: string;
+  /** Whether the Bot receives email. Off until the person turns it on. */
+  receiving: boolean;
   senders: InboundEmailSenderV1[];
 }
 
@@ -166,16 +294,31 @@ export interface InboundEmailViewV1 {
   schemaVersion: 1;
   /** Whether this deployment receives email at all. */
   available: boolean;
-  /** `<token>@<domain>`, once the person made one. */
+  /** The account's username, once the person chose one. */
+  username?: string;
+  /** `<slug>.<username>@<domain>`, once there is a username. */
   address?: string;
-  createdAt?: string;
+  receiving: boolean;
   senders: InboundEmailSenderViewV1[];
+}
+
+/** What `GET /api/email/username` answers. */
+export interface EmailUsernameViewV1 {
+  schemaVersion: 1;
+  available: boolean;
+  domain?: string;
+  username?: string;
 }
 
 /** The view, from the User object's state and what only the gateway knows. */
 export function inboundEmailViewV1(
   state: InboundEmailStateV1,
-  options: { domain?: string; signInEmail?: string; now: number },
+  options: {
+    domain?: string;
+    username?: string;
+    signInEmail?: string;
+    now: number;
+  },
 ): InboundEmailViewV1 {
   const senders: InboundEmailSenderViewV1[] = [];
   if (options.signInEmail) {
@@ -205,26 +348,26 @@ export function inboundEmailViewV1(
   return {
     schemaVersion: 1,
     available: options.domain !== undefined,
-    ...(options.domain && state.address
-      ? {
-          address: `${state.address.token}@${options.domain}`,
-          createdAt: state.address.createdAt,
-        }
+    ...(options.username ? { username: options.username } : {}),
+    ...(options.domain && options.username
+      ? { address: `${state.slug}.${options.username}@${options.domain}` }
       : {}),
+    receiving: state.receiving,
     senders,
   };
 }
 
-/** What the User object decided about one message for one of its Bots. */
+/** Why the User object refused one message. */
+export type InboundEmailRefusalV1 =
+  "unverified-sender" | "unknown-address" | "bot-unavailable" | "not-receiving";
+
+/** What the User object decided about one message to one of its Bots. */
 export type InboundEmailRouteDecisionV1 =
-  /** A confirmed sender, to a live address of an active Bot. */
-  | { kind: "admit" }
+  /** A confirmed sender, to the address of an active Bot that receives. */
+  | { kind: "admit"; botId: string }
   /** The message carried the code for a waiting address: it is confirmed. */
   | { kind: "confirmed" }
-  | {
-      kind: "refused";
-      code: "unknown-address" | "bot-unavailable" | "unverified-sender";
-    };
+  | { kind: "refused"; code: InboundEmailRefusalV1 };
 
 function record(value: unknown, label: string): Record<string, unknown> {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
@@ -267,18 +410,6 @@ function senderAddress(value: unknown, label: string): string {
   return address;
 }
 
-export function decodeInboundAddressV1(value: unknown): InboundAddressV1 {
-  const candidate = record(value, "inbound address");
-  exactKeys(candidate, ["token", "createdAt"], [], "inbound address");
-  if (!isInboundAddressTokenV1(candidate.token)) {
-    throw new InboundEmailDecodeError("inbound address.token is invalid");
-  }
-  return {
-    token: candidate.token,
-    createdAt: instant(candidate.createdAt, "inbound address.createdAt"),
-  };
-}
-
 export function decodeInboundEmailSenderV1(
   value: unknown,
   label = "sender",
@@ -313,11 +444,16 @@ export function decodeInboundEmailStateV1(value: unknown): InboundEmailStateV1 {
   const candidate = record(value, "inbound email");
   exactKeys(
     candidate,
-    ["schemaVersion", "senders"],
-    ["address"],
+    ["schemaVersion", "slug", "receiving", "senders"],
+    [],
     "inbound email",
   );
-  if (candidate.schemaVersion !== 1 || !Array.isArray(candidate.senders)) {
+  if (
+    candidate.schemaVersion !== 1 ||
+    !isBotEmailSlugV1(candidate.slug) ||
+    typeof candidate.receiving !== "boolean" ||
+    !Array.isArray(candidate.senders)
+  ) {
     throw new InboundEmailDecodeError("inbound email is invalid");
   }
   if (candidate.senders.length > INBOUND_EMAIL_SENDERS_MAX_V1) {
@@ -325,58 +461,47 @@ export function decodeInboundEmailStateV1(value: unknown): InboundEmailStateV1 {
   }
   return {
     schemaVersion: 1,
-    ...(candidate.address === undefined
-      ? {}
-      : { address: decodeInboundAddressV1(candidate.address) }),
+    slug: candidate.slug,
+    receiving: candidate.receiving,
     senders: candidate.senders.map((sender, index) =>
       decodeInboundEmailSenderV1(sender, `inbound email.senders[${index}]`),
     ),
   };
 }
 
+const REFUSALS: ReadonlySet<string> = new Set([
+  "unverified-sender",
+  "unknown-address",
+  "bot-unavailable",
+  "not-receiving",
+]);
+
 export function decodeInboundEmailRouteDecisionV1(
   value: unknown,
 ): InboundEmailRouteDecisionV1 {
   const candidate = record(value, "inbound email decision");
-  if (candidate.kind === "admit" || candidate.kind === "confirmed") {
+  if (candidate.kind === "admit") {
+    exactKeys(candidate, ["kind", "botId"], [], "inbound email decision");
+    if (!isPublicIdentifier(candidate.botId)) {
+      throw new InboundEmailDecodeError("inbound email decision.botId");
+    }
+    return { kind: "admit", botId: candidate.botId };
+  }
+  if (candidate.kind === "confirmed") {
     exactKeys(candidate, ["kind"], [], "inbound email decision");
-    return { kind: candidate.kind };
+    return { kind: "confirmed" };
   }
   if (candidate.kind === "refused") {
     exactKeys(candidate, ["kind", "code"], [], "inbound email decision");
-    if (
-      candidate.code !== "unknown-address" &&
-      candidate.code !== "bot-unavailable" &&
-      candidate.code !== "unverified-sender"
-    ) {
+    if (typeof candidate.code !== "string" || !REFUSALS.has(candidate.code)) {
       throw new InboundEmailDecodeError("inbound email refusal is unknown");
     }
-    return { kind: "refused", code: candidate.code };
+    return {
+      kind: "refused",
+      code: candidate.code as InboundEmailRefusalV1,
+    };
   }
   throw new InboundEmailDecodeError("inbound email decision kind is unknown");
-}
-
-/** Which User and Bot a token names, as the directory answers it. */
-export interface InboundEmailRecipientV1 {
-  userId: string;
-  botId: string;
-}
-
-export function decodeInboundEmailRecipientV1(
-  value: unknown,
-): InboundEmailRecipientV1 | undefined {
-  if (value === null || value === undefined) return undefined;
-  const candidate = record(value, "inbound email recipient");
-  exactKeys(candidate, ["userId", "botId"], [], "inbound email recipient");
-  if (
-    typeof candidate.userId !== "string" ||
-    candidate.userId.length === 0 ||
-    candidate.userId.length > 128 ||
-    !isPublicIdentifier(candidate.botId)
-  ) {
-    throw new InboundEmailDecodeError("inbound email recipient is invalid");
-  }
-  return { userId: candidate.userId, botId: candidate.botId };
 }
 
 /**

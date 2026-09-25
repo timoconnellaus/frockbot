@@ -331,7 +331,11 @@ describe("foundation application", () => {
         Promise.reject(new Error("not used while composing")),
       readInboundEmail: () =>
         Promise.reject(new Error("not used while composing")),
-      commandInboundEmailAddress: () =>
+      readEmailUsername: () =>
+        Promise.reject(new Error("not used while composing")),
+      claimEmailUsername: () =>
+        Promise.reject(new Error("not used while composing")),
+      setInboundEmailReceiving: () =>
         Promise.reject(new Error("not used while composing")),
       commandInboundEmailSender: () =>
         Promise.reject(new Error("not used while composing")),

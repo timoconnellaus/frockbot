@@ -44,11 +44,6 @@ class MemoryStorage {
       this.values.set(key, structuredClone(value));
     },
     delete: (key: string): boolean => this.values.delete(key),
-    list: <T>({ prefix }: { prefix: string }): Iterable<[string, T]> =>
-      [...this.values.entries()]
-        .filter(([key]) => key.startsWith(prefix))
-        .sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0))
-        .map(([key, value]) => [key, structuredClone(value) as T]),
   };
 
   transactionSync<T>(callback: () => T): T {
@@ -544,45 +539,47 @@ describe("hosted model rates", () => {
   });
 });
 
-describe("the inbound email directory", () => {
-  const first = "a".repeat(64);
-  const second = "b".repeat(64);
-
-  test("names a Bot by its token's digest until the address rotates, and forgets a deleted account's", async () => {
+describe("email usernames", () => {
+  test("one account per username, released by a change and by deleting the account", async () => {
     const { policy } = authority();
-    const resolve = (tokenDigest: string) =>
-      policy.resolveInboundEmailAddress({ schemaVersion: 1, tokenDigest });
-    await policy.registerInboundEmailAddress({
+    const claim = (userId: string, username: string) =>
+      policy.claimEmailUsername({ schemaVersion: 1, userId, username });
+    const resolve = (username: string) =>
+      policy.resolveEmailUsername({ schemaVersion: 1, username });
+    expect(await claim("alice", "tim")).toEqual({
       schemaVersion: 1,
-      userId: "alice",
-      botId: "fox",
-      tokenDigest: first,
+      status: "claimed",
     });
-    expect(await resolve(first)).toEqual({
+    expect(await claim("bob", "tim")).toEqual({
       schemaVersion: 1,
-      recipient: { userId: "alice", botId: "fox" },
+      status: "taken",
     });
-    await policy.registerInboundEmailAddress({
-      schemaVersion: 1,
-      userId: "alice",
-      botId: "fox",
-      tokenDigest: second,
-    });
-    expect(await resolve(first)).toEqual({ schemaVersion: 1, recipient: null });
+    expect(await resolve("tim")).toEqual({ schemaVersion: 1, userId: "alice" });
+
+    expect((await claim("alice", "timo")).status).toBe("claimed");
+    expect(await resolve("tim")).toEqual({ schemaVersion: 1, userId: null });
+    expect((await claim("bob", "tim")).status).toBe("claimed");
+    expect(
+      await policy.readEmailUsername({ schemaVersion: 1, userId: "alice" }),
+    ).toEqual({ schemaVersion: 1, username: "timo" });
+
     await policy.forgetAccount({ schemaVersion: 1, userId: "alice" });
-    expect(await resolve(second)).toEqual({
-      schemaVersion: 1,
-      recipient: null,
-    });
+    expect(await resolve("timo")).toEqual({ schemaVersion: 1, userId: null });
+    expect(
+      await policy.readEmailUsername({ schemaVersion: 1, userId: "alice" }),
+    ).toEqual({ schemaVersion: 1, username: null });
   });
 
-  test("refuses a token that is not a digest", async () => {
+  test("refuses a username out of shape or reserved", async () => {
     const { policy } = authority();
-    await expect(
-      policy.resolveInboundEmailAddress({
-        schemaVersion: 1,
-        tokenDigest: "abcdefghijklmnopqrstuvwxyz",
-      }),
-    ).rejects.toThrow();
+    for (const username of ["ab", "Tim", "tim.o", "-tim", "postmaster"]) {
+      await expect(
+        policy.claimEmailUsername({
+          schemaVersion: 1,
+          userId: "alice",
+          username,
+        }),
+      ).rejects.toThrow();
+    }
   });
 });

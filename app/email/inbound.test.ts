@@ -10,8 +10,7 @@ import { INBOUND_EMAIL_MAX_BYTES_V1 } from "./shared.ts";
 import { pngBytesV1, rawEmailV1, type RawEmailV1 } from "./testing.ts";
 
 const DOMAIN = "in.frock.test";
-const TOKEN = "abcdefghijklmnopqrstuvwxyz";
-const TO = `${TOKEN}@${DOMAIN}`;
+const TO = `fox.tim@${DOMAIN}`;
 
 function message(
   raw: Uint8Array,
@@ -47,9 +46,9 @@ function host(overrides: Partial<InboundEmailHostV1> = {}) {
   const stored: string[] = [];
   const value: InboundEmailHostV1 = {
     domain: DOMAIN,
-    resolveAddress: async (digest) => {
+    resolveUsername: async (username) => {
       calls.push("resolve");
-      return digest.length === 64 ? { userId: "u1", botId: "fox" } : undefined;
+      return username === "tim" ? "u1" : undefined;
     },
     signInEmail: async () => {
       calls.push("sign-in");
@@ -61,9 +60,12 @@ function host(overrides: Partial<InboundEmailHostV1> = {}) {
     },
     route: async (_userId, request) => {
       calls.push("route");
-      return request.sender === request.signInEmail
-        ? { kind: "admit" }
-        : { kind: "refused", code: "unverified-sender" };
+      if (request.sender !== request.signInEmail) {
+        return { kind: "refused", code: "unverified-sender" };
+      }
+      return request.slug === "fox"
+        ? { kind: "admit", botId: "b-fox" }
+        : { kind: "refused", code: "unknown-address" };
     },
     storeAttachment: async (_userId, _botId, file) => {
       calls.push("store");
@@ -72,8 +74,8 @@ function host(overrides: Partial<InboundEmailHostV1> = {}) {
         ? { status: "refused", reason: "ZIP files can't be sent." }
         : { status: "stored", uploadId: `${stored.length}`.padStart(64, "0") };
     },
-    admit: async (_userId, _botId, command) => {
-      calls.push("admit");
+    admit: async (_userId, botId, command) => {
+      calls.push(`admit ${botId}`);
       admitted.push(command);
     },
     ...overrides,
@@ -280,8 +282,11 @@ describe("a message that may not reach the Bot", () => {
       ],
       [message(email(), { from: "" }), "automatic"],
       [message(email({ subject: undefined, text: "" })), "empty"],
-      [message(email(), { to: `${TOKEN}@elsewhere.test` }), "unknown-address"],
-      [message(email(), { to: `short@${DOMAIN}` }), "unknown-address"],
+      [message(email(), { to: `fox.tim@elsewhere.test` }), "unknown-address"],
+      // No dot: a plain mailbox at the domain is never a Bot's.
+      [message(email(), { to: `tim@${DOMAIN}` }), "unknown-address"],
+      [message(email(), { to: `red.fox.tim@${DOMAIN}` }), "unknown-address"],
+      [message(email(), { to: `fox.postmaster@${DOMAIN}` }), "unknown-address"],
       [
         message(email(), { rawSize: INBOUND_EMAIL_MAX_BYTES_V1 + 1 }),
         "too-large",
@@ -308,12 +313,30 @@ describe("a message that may not reach the Bot", () => {
     expect(outcome).toEqual({ status: "rejected", code: "too-large" });
   });
 
-  test("an address nobody holds is refused after the directory is asked", async () => {
-    const { outcome, calls } = await refused(message(email()), {
-      resolveAddress: async () => undefined,
-    });
+  test("a username nobody holds is refused after the directory is asked", async () => {
+    const { outcome, calls } = await refused(
+      message(email({ to: `fox.nobody@${DOMAIN}` }), {
+        to: `fox.nobody@${DOMAIN}`,
+      }),
+    );
     expect(outcome).toEqual({ status: "rejected", code: "unknown-address" });
-    expect(calls).toEqual([]);
+    expect(calls).toEqual(["resolve"]);
+  });
+
+  test("a slug none of the User's Bots holds, or a Bot that does not receive, is refused", async () => {
+    const unknown = await refused(
+      message(email({ to: `owl.tim@${DOMAIN}` }), { to: `owl.tim@${DOMAIN}` }),
+    );
+    expect(unknown.outcome).toEqual({
+      status: "rejected",
+      code: "unknown-address",
+    });
+    expect(unknown.calls).toEqual(["resolve", "account", "sign-in", "route"]);
+    const off = await refused(message(email()), {
+      route: async () => ({ kind: "refused", code: "not-receiving" }),
+    });
+    expect(off.outcome).toEqual({ status: "rejected", code: "not-receiving" });
+    expect(off.reason).toBe("This address does not accept mail right now.");
   });
 
   test("an authenticated sender who is not the User's is refused without a file stored", async () => {

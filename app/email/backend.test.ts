@@ -4,54 +4,145 @@ import {
   type InboundEmailGatewayHostV1,
 } from "./backend.ts";
 import {
+  botEmailSlugsV1,
+  emailUsernameProblemV1,
   inboundEmailDomainV1,
   inboundEmailViewV1,
   inboundMessageIdV1,
+  parseBotEmailLocalPartV1,
   senderCodesInV1,
   type InboundEmailStateV1,
 } from "./shared.ts";
 
 const NOW = Date.parse("2026-09-24T10:00:00.000Z");
 
+describe("a Bot's address", () => {
+  const slugs = (...names: string[]) =>
+    [
+      ...botEmailSlugsV1(
+        names.map((name, index) => ({
+          botId: `b${index}xyz789`,
+          name,
+          registeredAt: new Date(NOW + index * 1000).toISOString(),
+        })),
+      ).values(),
+    ].sort();
+
+  test("is the Bot's name, lowercased, with spaces as dashes", () => {
+    expect(slugs("Fox")).toEqual(["fox"]);
+    expect(slugs("  Red   Fox!  ")).toEqual(["red-fox"]);
+    expect(slugs("Zoë's Café")).toEqual(["zoes-cafe"]);
+    expect(slugs("Straße Ærø Łódź")).toEqual(["strasse-aero-lodz"]);
+    expect(slugs("mr.robot_2 -- ok")).toEqual(["mr-robot-2-ok"]);
+    expect(slugs("a".repeat(40))).toEqual(["a".repeat(32)]);
+  });
+
+  test("falls back to the Bot's id, and tells two alike apart by age", () => {
+    expect(slugs("🦊")).toEqual(["bot-b0xyz7"]);
+    const map = botEmailSlugsV1([
+      { botId: "late", name: "Fox", registeredAt: "2026-09-03T00:00:00Z" },
+      { botId: "first", name: "fox", registeredAt: "2026-09-01T00:00:00Z" },
+      { botId: "middle", name: "FOX", registeredAt: "2026-09-02T00:00:00Z" },
+    ]);
+    expect(Object.fromEntries(map)).toEqual({
+      first: "fox",
+      middle: "fox-2",
+      late: "fox-3",
+    });
+    // A suffix stays inside the longest slug.
+    const long = "b".repeat(32);
+    expect(slugs(long, long)).toEqual([`${"b".repeat(30)}-2`, long]);
+  });
+
+  test("splits at the last dot into slug and username", () => {
+    expect(parseBotEmailLocalPartV1("fox.tim")).toEqual({
+      slug: "fox",
+      username: "tim",
+    });
+    expect(parseBotEmailLocalPartV1("Red-Fox.Tim+notes")).toEqual({
+      slug: "red-fox",
+      username: "tim",
+    });
+    for (const local of [
+      "tim",
+      ".tim",
+      "fox.",
+      "fox.t",
+      "red.fox.tim",
+      "fox.abuse",
+      "-fox.tim",
+      "fox.ti-",
+    ]) {
+      expect(parseBotEmailLocalPartV1(local)).toBeUndefined();
+    }
+    // A reserved name never names an account, so it never reaches a Bot.
+    expect(parseBotEmailLocalPartV1("fox.postmaster")).toBeUndefined();
+  });
+
+  test("a username is 3 to 30 of letters, digits and single dashes, and not reserved", () => {
+    for (const ok of ["tim", "tim-o", "t1m", "a".repeat(30)]) {
+      expect(emailUsernameProblemV1(ok)).toBeUndefined();
+    }
+    for (const bad of [
+      undefined,
+      "ti",
+      "a".repeat(31),
+      "1tim",
+      "-tim",
+      "tim-",
+      "tim--o",
+      "tim.o",
+      "Tim",
+      "tïm",
+      "admin",
+      "no-reply",
+      "mailer-daemon",
+    ]) {
+      expect(emailUsernameProblemV1(bad)).toBeString();
+    }
+  });
+});
+
 describe("the email view", () => {
-  test("names the address on the deployment's domain and every sender's standing", () => {
-    const state: InboundEmailStateV1 = {
-      schemaVersion: 1,
-      address: {
-        token: "abcdefghijklmnopqrstuvwxyz",
-        createdAt: "2026-09-24T09:00:00.000Z",
+  const state: InboundEmailStateV1 = {
+    schemaVersion: 1,
+    slug: "fox",
+    receiving: true,
+    senders: [
+      {
+        address: "tim@work.example",
+        addedAt: "2026-09-23T09:00:00.000Z",
+        verifiedAt: "2026-09-23T09:05:00.000Z",
       },
-      senders: [
-        {
-          address: "tim@work.example",
-          addedAt: "2026-09-23T09:00:00.000Z",
-          verifiedAt: "2026-09-23T09:05:00.000Z",
-        },
-        {
-          address: "tim@home.example",
-          addedAt: "2026-09-24T09:00:00.000Z",
-          code: "7K3P9QXM",
-          expiresAt: "2026-09-25T09:00:00.000Z",
-        },
-        {
-          address: "old@home.example",
-          addedAt: "2026-09-20T09:00:00.000Z",
-          code: "ABCDEFGH",
-          expiresAt: "2026-09-21T09:00:00.000Z",
-        },
-      ],
-    };
+      {
+        address: "tim@home.example",
+        addedAt: "2026-09-24T09:00:00.000Z",
+        code: "7K3P9QXM",
+        expiresAt: "2026-09-25T09:00:00.000Z",
+      },
+      {
+        address: "old@home.example",
+        addedAt: "2026-09-20T09:00:00.000Z",
+        code: "ABCDEFGH",
+        expiresAt: "2026-09-21T09:00:00.000Z",
+      },
+    ],
+  };
+
+  test("names the address from the slug and username, and every sender's standing", () => {
     expect(
       inboundEmailViewV1(state, {
-        domain: "in.frock.test",
+        domain: "frock.test",
+        username: "tim",
         signInEmail: "tim@example.com",
         now: NOW,
       }),
     ).toEqual({
       schemaVersion: 1,
       available: true,
-      address: "abcdefghijklmnopqrstuvwxyz@in.frock.test",
-      createdAt: "2026-09-24T09:00:00.000Z",
+      username: "tim",
+      address: "fox.tim@frock.test",
+      receiving: true,
       senders: [
         { address: "tim@example.com", status: "sign-in" },
         {
@@ -72,11 +163,18 @@ describe("the email view", () => {
         },
       ],
     });
-    // No domain: nothing to write to, whatever is stored.
-    expect(inboundEmailViewV1(state, { now: NOW })).toMatchObject({
-      available: false,
+  });
+
+  test("has no address without a username or a domain", () => {
+    const noUsername = inboundEmailViewV1(state, {
+      domain: "frock.test",
+      now: NOW,
     });
-    expect(inboundEmailViewV1(state, { now: NOW }).address).toBeUndefined();
+    expect(noUsername).toMatchObject({ available: true, receiving: true });
+    expect(noUsername.address).toBeUndefined();
+    const noDomain = inboundEmailViewV1(state, { username: "tim", now: NOW });
+    expect(noDomain).toMatchObject({ available: false, username: "tim" });
+    expect(noDomain.address).toBeUndefined();
   });
 
   test("reads a domain, a code and a Message-ID only in their shapes", () => {
@@ -102,16 +200,29 @@ describe("the email view", () => {
 
 function gateway(overrides: Partial<InboundEmailGatewayHostV1> = {}) {
   const commands: unknown[] = [];
+  let username: string | undefined;
   const host: InboundEmailGatewayHostV1 = {
-    inboundEmailDomain: "in.frock.test",
+    inboundEmailDomain: "frock.test",
     inboundEmailSignIn: async () => "tim@example.com",
-    readInboundEmail: async () => ({ schemaVersion: 1, senders: [] }),
-    commandInboundEmailAddress: async (...args) => {
-      commands.push(args);
+    readEmailUsername: async () => username,
+    claimEmailUsername: async (userId, wanted) => {
+      commands.push(["username", userId, wanted]);
+      if (wanted === "taken") return { status: "taken" };
+      username = wanted;
+      return { status: "claimed" };
+    },
+    readInboundEmail: async () => ({
+      schemaVersion: 1,
+      slug: "fox",
+      receiving: false,
+      senders: [],
+    }),
+    setInboundEmailReceiving: async (...args) => {
+      commands.push(["switch", ...args]);
       return { status: "applied" };
     },
     commandInboundEmailSender: async (...args) => {
-      commands.push(args);
+      commands.push(["sender", ...args]);
       return { status: "applied" };
     },
     ...overrides,
@@ -130,16 +241,60 @@ function gateway(overrides: Partial<InboundEmailGatewayHostV1> = {}) {
 }
 
 describe("the email settings routes", () => {
-  test("answer the view, and carry each command to the User's object", async () => {
+  test("claim a username, and a Bot's address follows it", async () => {
     const { call, commands } = gateway();
-    const read = await call("/api/bots/fox/email");
-    expect(read?.status).toBe(200);
-    expect((await read!.json()) as unknown).toMatchObject({
+    const before = await call("/api/bots/fox/email");
+    expect((await before!.json()) as unknown).toEqual({
+      schemaVersion: 1,
       available: true,
+      receiving: false,
       senders: [{ address: "tim@example.com", status: "sign-in" }],
     });
+    const claimed = await call("/api/email/username", { username: " Tim " });
+    expect(claimed?.status).toBe(200);
+    expect((await claimed!.json()) as unknown).toEqual({
+      schemaVersion: 1,
+      available: true,
+      domain: "frock.test",
+      username: "tim",
+    });
+    const after = await call("/api/bots/fox/email");
+    expect((await after!.json()) as unknown).toMatchObject({
+      username: "tim",
+      address: "fox.tim@frock.test",
+    });
+    const released = await call("/api/email/username", { username: null });
+    expect((await released!.json()) as unknown).toEqual({
+      schemaVersion: 1,
+      available: true,
+      domain: "frock.test",
+    });
+    expect(commands).toEqual([
+      ["username", "u1", "tim"],
+      ["username", "u1", undefined],
+    ]);
+  });
+
+  test("refuse a username out of shape, reserved or taken", async () => {
+    const { call, commands } = gateway();
+    for (const [username, status] of [
+      ["ab", 400],
+      ["fox.tim", 400],
+      ["abuse", 400],
+      [7, 400],
+      ["taken", 409],
+    ] as const) {
+      const answer = await call("/api/email/username", { username });
+      expect(answer?.status).toBe(status);
+      expect(((await answer!.json()) as { error: string }).error).toBeString();
+    }
+    expect(commands).toEqual([["username", "u1", "taken"]]);
+  });
+
+  test("carry the switch and the senders to the User's object", async () => {
+    const { call, commands } = gateway();
     expect(
-      (await call("/api/bots/fox/email/address", { action: "rotate" }))?.status,
+      (await call("/api/bots/fox/email/switch", { receiving: true }))?.status,
     ).toBe(200);
     expect(
       (
@@ -150,8 +305,9 @@ describe("the email settings routes", () => {
       )?.status,
     ).toBe(200);
     expect(commands).toEqual([
-      ["u1", "fox", "rotate"],
+      ["switch", "u1", "fox", true],
       [
+        "sender",
         "u1",
         {
           action: "add",
@@ -171,12 +327,18 @@ describe("the email settings routes", () => {
       }),
     });
     expect(
-      (await call("/api/bots/fox/email/address", { action: "create" }))?.status,
+      (await call("/api/bots/fox/email/switch", { receiving: true }))?.status,
     ).toBe(503);
     expect(
-      (await call("/api/bots/fox/email/address", { action: "explode" }))
-        ?.status,
+      (await call("/api/email/username", { username: "tim" }))?.status,
+    ).toBe(503);
+    expect(
+      (await call("/api/bots/fox/email/switch", { receiving: "yes" }))?.status,
     ).toBe(400);
+    // Turning off needs no domain.
+    expect(
+      (await call("/api/bots/fox/email/switch", { receiving: false }))?.status,
+    ).toBe(200);
     const full = await call("/api/bots/fox/email/senders", {
       action: "add",
       address: "a@b.example",
@@ -194,5 +356,6 @@ describe("the email settings routes", () => {
       )?.status,
     ).toBe(400);
     expect(await call("/api/bots/fox/settings")).toBeUndefined();
+    expect((await call("/api/bots/fox/email/address"))?.status).toBe(405);
   });
 });

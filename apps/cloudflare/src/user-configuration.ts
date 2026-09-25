@@ -272,8 +272,6 @@ import {
   type InboundEmailRouteDecisionV1,
   type InboundEmailStateV1,
 } from "@frockbot/app/email/shared";
-import { sha256HexTextV1 } from "@frockbot/core/crypto";
-import { DEPLOYMENT_POLICY_SINGLETON_NAME } from "./deployment-policy.js";
 
 /** The durable key pinning the User this object was provisioned for. */
 const USER_IDENTITY_KEY = "user:identity";
@@ -2674,12 +2672,12 @@ export class UserConfiguration
    */
   private async forgetDeletedBot(botId: string): Promise<void> {
     const contributions = await this.contributions();
-    const userId = await this.provenIdentity();
     contributions.search.purge(botId);
     contributions.audit.purgeAuditForBot(botId);
     // Before the to-do entry goes, so a sweep interrupted here runs again.
-    await this.inboundEmail(userId).removeAddress(botId);
+    await this.inboundEmail().forgetBot(botId);
     await contributions.flock.forgetDeletedBot(botId);
+    const userId = await this.provenIdentity();
     if (userId) {
       for (const change of await this.groupChats().forgetBot(botId)) {
         await this.carryGroupChange(userId, change);
@@ -3872,54 +3870,36 @@ export class UserConfiguration
 
   // --- Inbound email -----------------------------------------------------------
   //
-  // Each Bot's address and the account's confirmed senders. The `email()`
-  // handler asks `routeInboundEmail` about every message that got past its
-  // own checks; the settings routes read and change the rest.
+  // Which Bots receive email, and the account's confirmed senders. The
+  // `email()` handler asks `routeInboundEmail` about every message that got
+  // past its own checks; the settings routes read and change the rest. The
+  // username is the deployment directory's, not this object's.
 
-  /** The User's inbound email, over this object's storage and the directory. */
-  private inboundEmail(userId: string | undefined): InboundEmailUserStoreV1 {
-    const policy = () => {
-      const namespace = this.env.DEPLOYMENT_POLICY;
-      if (!namespace || !userId) {
-        throw new Error("the inbound email directory is unavailable");
-      }
-      // SAFETY: the binding names DeploymentPolicy; these are its inbound email doors.
-      return namespace.get(
-        namespace.idFromName(DEPLOYMENT_POLICY_SINGLETON_NAME),
-      ) as unknown as {
-        registerInboundEmailAddress(input: unknown): Promise<unknown>;
-        releaseInboundEmailAddress(input: unknown): Promise<unknown>;
-      };
-    };
+  /** The User's inbound email, over this object's storage and Bot directory. */
+  private inboundEmail(): InboundEmailUserStoreV1 {
     return new InboundEmailUserStoreV1({
       storage: this.ctx.storage as unknown as InboundEmailUserHostV1["storage"],
-      botActive: async (botId) =>
-        (
-          await (await this.flockContribution()).listBotLifecycles()
-        ).lifecycles.some(
-          (lifecycle) =>
-            lifecycle.botId === botId && lifecycle.status === "active",
-        ),
-      directory: {
-        register: async (botId, token) => {
-          await policy().registerInboundEmailAddress({
-            schemaVersion: 1,
-            userId,
-            botId,
-            tokenDigest: await sha256HexTextV1(token),
-          });
-        },
-        release: async (botId) => {
-          // A deployment without the directory never registered anything.
-          if (!this.env.DEPLOYMENT_POLICY || !userId) return;
-          await policy().releaseInboundEmailAddress({
-            schemaVersion: 1,
-            userId,
-            botId,
-          });
-        },
+      bots: async () => {
+        const flock = await this.flockContribution();
+        const [directory, lifecycles] = await Promise.all([
+          flock.listBots(),
+          flock.listBotLifecycles(),
+        ]);
+        const status = new Map(
+          lifecycles.lifecycles.map((lifecycle) => [
+            lifecycle.botId,
+            lifecycle.status,
+          ]),
+        );
+        return directory.bots
+          .filter((bot) => status.get(bot.botId) !== "deleted")
+          .map((bot) => ({
+            botId: bot.botId,
+            name: bot.currentProfile?.name ?? bot.initialName,
+            registeredAt: bot.registeredAt,
+            active: status.get(bot.botId) === "active",
+          }));
       },
-      exclusive: (closure) => this.ctx.blockConcurrencyWhile(closure),
     });
   }
 
@@ -3935,31 +3915,26 @@ export class UserConfiguration
       userId: rpcIdentifier,
       botId: rpcBotId,
     });
-    const userId = await this.assertUserIdentity(request.userId as string);
+    await this.assertUserIdentity(request.userId as string);
     await this.requireInboundEmailBot(request.botId as string);
-    return this.inboundEmail(userId).state(request.botId as string);
+    return this.inboundEmail().state(request.botId as string);
   }
 
-  /** Give a Bot an address, a new one, or none. */
-  async commandInboundEmailAddress(input: unknown) {
+  /** Whether a Bot receives email. */
+  async setInboundEmailReceiving(input: unknown) {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
       botId: rpcBotId,
-      action: rpcEnum(["create", "rotate", "remove"] as const),
+      receiving: rpcBoolean,
     });
-    const userId = await this.assertUserIdentity(request.userId as string);
+    await this.assertUserIdentity(request.userId as string);
     const botId = request.botId as string;
     await this.requireInboundEmailBot(botId);
-    const store = this.inboundEmail(userId);
     try {
-      if (request.action === "remove") {
-        await store.removeAddress(botId);
-      } else {
-        await store.setAddress(botId, {
-          rotate: request.action === "rotate",
-          now: new Date().toISOString(),
-        });
-      }
+      await this.inboundEmail().setReceiving(
+        botId,
+        request.receiving as boolean,
+      );
     } catch (error) {
       if (error instanceof Error && error.name === "InboundEmailCommandError") {
         return {
@@ -3984,8 +3959,8 @@ export class UserConfiguration
       },
       { signInEmail: rpcDecoded(requiredSenderAddress) },
     );
-    const userId = await this.assertUserIdentity(request.userId as string);
-    const store = this.inboundEmail(userId);
+    await this.assertUserIdentity(request.userId as string);
+    const store = this.inboundEmail();
     const address = request.address as string;
     try {
       if (request.action === "remove") {
@@ -4012,9 +3987,10 @@ export class UserConfiguration
   }
 
   /**
-   * Whether one authenticated message may reach one of this User's Bots. The
-   * `email()` handler asks only after the receiving server's DMARC verdict
-   * passed for `sender`.
+   * Whether one authenticated message may reach one of this User's Bots, and
+   * which. The `email()` handler asks only after the receiving server's DMARC
+   * verdict passed for `sender`, and after the directory said the username
+   * the message names is this User's.
    */
   async routeInboundEmail(
     input: unknown,
@@ -4023,17 +3999,15 @@ export class UserConfiguration
       input,
       {
         userId: rpcIdentifier,
-        botId: rpcBotId,
-        token: rpcPattern(/^[a-z2-7]{26}$/, 26),
+        slug: rpcPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 32),
         sender: rpcDecoded(requiredSenderAddress),
         codes: rpcArray(rpcPattern(/^[0-9A-HJKMNP-TV-Z]{8}$/, 8), 3),
       },
       { signInEmail: rpcDecoded(requiredSenderAddress) },
     );
-    const userId = await this.assertUserIdentity(request.userId as string);
-    return this.inboundEmail(userId).route({
-      botId: request.botId as string,
-      token: request.token as string,
+    await this.assertUserIdentity(request.userId as string);
+    return this.inboundEmail().route({
+      slug: request.slug as string,
       sender: request.sender as string,
       ...(request.signInEmail
         ? { signInEmail: request.signInEmail as string }

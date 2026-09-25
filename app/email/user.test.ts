@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
   InboundEmailUserStoreV1,
+  type InboundEmailBotV1,
   type InboundEmailUserHostV1,
 } from "./user.ts";
 import { displaySenderCodeV1, INBOUND_EMAIL_CODE_TTL_MS_V1 } from "./shared.ts";
 
-function memoryHost(options: { active?: Set<string> } = {}) {
+function memoryHost() {
   const map = new Map<string, unknown>();
   const storage = {
     get: async <T>(key: string) => structuredClone(map.get(key)) as T,
@@ -13,120 +14,143 @@ function memoryHost(options: { active?: Set<string> } = {}) {
       void map.set(key, structuredClone(value)),
     delete: async (key: string) => map.delete(key),
   };
-  const directory = new Map<string, string>();
-  const calls: string[] = [];
-  const active = options.active ?? new Set(["fox", "owl"]);
+  const bots: InboundEmailBotV1[] = [
+    {
+      botId: "b-fox",
+      name: "Fox",
+      registeredAt: "2026-09-01T00:00:00.000Z",
+      active: true,
+    },
+    {
+      botId: "b-owl",
+      name: "Owl",
+      registeredAt: "2026-09-02T00:00:00.000Z",
+      active: true,
+    },
+  ];
+  let reads = 0;
   const host: InboundEmailUserHostV1 = {
     storage: { ...storage, transaction: (closure) => closure(storage) },
-    botActive: async (botId) => active.has(botId),
-    directory: {
-      register: async (botId, token) => {
-        calls.push(`register ${botId}`);
-        directory.set(botId, token);
-      },
-      release: async (botId) => {
-        calls.push(`release ${botId}`);
-        directory.delete(botId);
-      },
+    bots: async () => {
+      reads += 1;
+      return structuredClone(bots);
     },
-    exclusive: (closure) => closure(),
   };
-  return { host, map, directory, calls, active };
+  return { host, map, bots, botReads: () => reads };
 }
 
 const NOW = Date.parse("2026-09-24T10:00:00.000Z");
+const TIM = "tim@example.com";
 
-describe("each Bot's address", () => {
-  test("is made once, rotated on request, and the directory always holds the one kept", async () => {
-    const { host, directory } = memoryHost();
+describe("each Bot's email", () => {
+  test("follows the Bot's name, and is off until turned on", async () => {
+    const { host, bots } = memoryHost();
     const store = new InboundEmailUserStoreV1(host);
-    await store.setAddress("fox", {
-      rotate: false,
-      now: "2026-09-24T10:00:00Z",
+    expect(await store.state("b-fox")).toEqual({
+      schemaVersion: 1,
+      slug: "fox",
+      receiving: false,
+      senders: [],
     });
-    const first = (await store.state("fox")).address;
-    expect(first?.token).toMatch(/^[a-z2-7]{26}$/);
-    expect(directory.get("fox")).toBe(first?.token);
-
-    await store.setAddress("fox", {
-      rotate: false,
-      now: "2026-09-24T11:00:00Z",
-    });
-    expect((await store.state("fox")).address).toEqual(first);
-
-    await store.setAddress("fox", {
-      rotate: true,
-      now: "2026-09-24T12:00:00Z",
-    });
-    const second = (await store.state("fox")).address;
-    expect(second?.token).not.toBe(first?.token);
-    expect(directory.get("fox")).toBe(second?.token);
-
-    await store.removeAddress("fox");
-    expect((await store.state("fox")).address).toBeUndefined();
-    expect(directory.has("fox")).toBe(false);
+    await store.setReceiving("b-fox", true);
+    expect((await store.state("b-fox")).receiving).toBe(true);
+    bots[0]!.name = "Red Fox";
+    expect((await store.state("b-fox")).slug).toBe("red-fox");
+    await store.setReceiving("b-fox", false);
+    expect((await store.state("b-fox")).receiving).toBe(false);
   });
 
-  test("only an active Bot gets one", async () => {
-    const { host, calls } = memoryHost({ active: new Set() });
+  test("only an active Bot can be turned on, and a deleted one leaves nothing", async () => {
+    const { host, bots, map } = memoryHost();
     const store = new InboundEmailUserStoreV1(host);
-    await expect(
-      store.setAddress("fox", { rotate: false, now: "2026-09-24T10:00:00Z" }),
-    ).rejects.toThrow("Only an active Bot");
-    expect(calls).toEqual([]);
+    await store.setReceiving("b-owl", true);
+    bots[1]!.active = false;
+    await expect(store.setReceiving("b-owl", true)).rejects.toThrow(
+      "Only an active Bot",
+    );
+    await expect(store.setReceiving("b-gone", true)).rejects.toThrow(
+      "Only an active Bot",
+    );
+    await expect(store.state("b-gone")).rejects.toThrow("isn’t yours");
+    await store.forgetBot("b-owl");
+    expect([...map.keys()]).toEqual([]);
+  });
+});
+
+describe("which message reaches which Bot", () => {
+  async function receiving() {
+    const memory = memoryHost();
+    const store = new InboundEmailUserStoreV1(memory.host);
+    await store.setReceiving("b-fox", true);
+    const route = (slug: string, sender = TIM, codes: string[] = []) =>
+      store.route({ slug, sender, signInEmail: TIM, codes, now: NOW });
+    return { ...memory, store, route };
+  }
+
+  test("the slug names the Bot by its name now", async () => {
+    const { route, bots } = await receiving();
+    expect(await route("fox")).toEqual({ kind: "admit", botId: "b-fox" });
+    bots[0]!.name = "Red Fox";
+    expect(await route("fox")).toEqual({
+      kind: "refused",
+      code: "unknown-address",
+    });
+    expect(await route("red-fox")).toEqual({
+      kind: "admit",
+      botId: "b-fox",
+    });
   });
 
-  test("removing an address that is not there asks the directory nothing", async () => {
-    const { host, calls } = memoryHost();
-    await new InboundEmailUserStoreV1(host).removeAddress("fox");
-    expect(calls).toEqual([]);
+  test("a Bot that does not receive, or is archived, is refused", async () => {
+    const { route, bots } = await receiving();
+    expect(await route("owl")).toEqual({
+      kind: "refused",
+      code: "not-receiving",
+    });
+    bots[0]!.active = false;
+    expect(await route("fox")).toEqual({
+      kind: "refused",
+      code: "bot-unavailable",
+    });
+  });
+
+  test("the later of two Bots with one name is -2", async () => {
+    const { store, route, bots } = await receiving();
+    bots[1]!.name = "fox";
+    await store.setReceiving("b-owl", true);
+    expect(await route("fox")).toEqual({ kind: "admit", botId: "b-fox" });
+    expect(await route("fox-2")).toEqual({ kind: "admit", botId: "b-owl" });
+    expect((await store.state("b-owl")).slug).toBe("fox-2");
+  });
+
+  test("a stranger learns nothing about which Bots there are", async () => {
+    const { route, botReads } = await receiving();
+    const before = botReads();
+    for (const slug of ["fox", "owl", "nobody"]) {
+      expect(await route(slug, "eve@evil.example")).toEqual({
+        kind: "refused",
+        code: "unverified-sender",
+      });
+    }
+    expect(botReads()).toBe(before);
   });
 });
 
 describe("who may write to the User's Bots", () => {
-  async function withAddress() {
-    const memory = memoryHost();
-    const store = new InboundEmailUserStoreV1(memory.host);
-    await store.setAddress("fox", {
-      rotate: false,
-      now: "2026-09-24T10:00:00Z",
-    });
-    const token = (await store.state("fox")).address!.token;
-    return { ...memory, store, token };
-  }
-
-  test("the sign-in address writes without a code", async () => {
-    const { store, token } = await withAddress();
-    expect(
-      await store.route({
-        botId: "fox",
-        token,
-        sender: "tim@example.com",
-        signInEmail: "tim@example.com",
-        codes: [],
-        now: NOW,
-      }),
-    ).toEqual({ kind: "admit" });
-  });
-
   test("an added address writes only once its code came back from it", async () => {
-    const { store, token } = await withAddress();
+    const { host } = memoryHost();
+    const store = new InboundEmailUserStoreV1(host);
+    await store.setReceiving("b-fox", true);
     await store.addSender("tim@work.example", { now: NOW });
-    const pending = (await store.state("fox")).senders[0]!;
+    const pending = (await store.state("b-fox")).senders[0]!;
     expect(pending).toMatchObject({ address: "tim@work.example" });
     const code = pending.code!;
     expect(displaySenderCodeV1(code)).toMatch(
       /^FROCK-[0-9A-Z]{4}-[0-9A-Z]{4}$/,
     );
 
-    const route = (codes: string[], now = NOW) =>
-      store.route({
-        botId: "fox",
-        token,
-        sender: "tim@work.example",
-        codes,
-        now,
-      });
+    const route = (codes: string[], now = NOW, slug = "fox") =>
+      store.route({ slug, sender: "tim@work.example", codes, now });
     expect(await route([])).toEqual({
       kind: "refused",
       code: "unverified-sender",
@@ -137,26 +161,26 @@ describe("who may write to the User's Bots", () => {
     });
     // Too late.
     expect(await route([code], NOW + INBOUND_EMAIL_CODE_TTL_MS_V1 + 1)).toEqual(
-      {
-        kind: "refused",
-        code: "unverified-sender",
-      },
+      { kind: "refused", code: "unverified-sender" },
     );
-    expect(await route(["ZZZZZZZZ", code])).toEqual({ kind: "confirmed" });
-    const confirmed = (await store.state("fox")).senders[0]!;
+    // The code confirms the address whichever Bot's address it went to.
+    expect(await route(["ZZZZZZZZ", code], NOW, "owl")).toEqual({
+      kind: "confirmed",
+    });
+    const confirmed = (await store.state("b-fox")).senders[0]!;
     expect(confirmed.verifiedAt).toBeDefined();
     expect(confirmed.code).toBeUndefined();
-    expect(await route([])).toEqual({ kind: "admit" });
+    expect(await route([])).toEqual({ kind: "admit", botId: "b-fox" });
   });
 
   test("another address's code confirms nothing", async () => {
-    const { store, token } = await withAddress();
+    const { host } = memoryHost();
+    const store = new InboundEmailUserStoreV1(host);
     await store.addSender("tim@work.example", { now: NOW });
-    const code = (await store.state("fox")).senders[0]!.code!;
+    const code = (await store.state("b-fox")).senders[0]!.code!;
     expect(
       await store.route({
-        botId: "fox",
-        token,
+        slug: "fox",
         sender: "eve@evil.example",
         codes: [code],
         now: NOW,
@@ -164,44 +188,11 @@ describe("who may write to the User's Bots", () => {
     ).toEqual({ kind: "refused", code: "unverified-sender" });
   });
 
-  test("a rotated token, another Bot's token and an archived Bot are refused", async () => {
-    const { store, token, active } = await withAddress();
-    const route = (botId: string, presented: string) =>
-      store.route({
-        botId,
-        token: presented,
-        sender: "tim@example.com",
-        signInEmail: "tim@example.com",
-        codes: [],
-        now: NOW,
-      });
-    expect(await route("owl", token)).toEqual({
-      kind: "refused",
-      code: "unknown-address",
-    });
-    await store.setAddress("fox", {
-      rotate: true,
-      now: "2026-09-24T11:00:00Z",
-    });
-    expect(await route("fox", token)).toEqual({
-      kind: "refused",
-      code: "unknown-address",
-    });
-    const current = (await store.state("fox")).address!.token;
-    active.delete("fox");
-    expect(await route("fox", current)).toEqual({
-      kind: "refused",
-      code: "bot-unavailable",
-    });
-  });
-
   test("the sign-in address cannot be added, and the list is bounded", async () => {
-    const { store } = await withAddress();
+    const { host } = memoryHost();
+    const store = new InboundEmailUserStoreV1(host);
     await expect(
-      store.addSender("tim@example.com", {
-        signInEmail: "tim@example.com",
-        now: NOW,
-      }),
+      store.addSender(TIM, { signInEmail: TIM, now: NOW }),
     ).rejects.toThrow("sign in with");
     for (let index = 0; index < 10; index += 1) {
       await store.addSender(`tim+${index}@example.com`, { now: NOW });
@@ -210,12 +201,12 @@ describe("who may write to the User's Bots", () => {
       store.addSender("one-more@example.com", { now: NOW }),
     ).rejects.toThrow("Up to 10");
     // Adding one already waiting is a fresh code, not another row.
-    const before = (await store.state("fox")).senders[0]!.code;
+    const before = (await store.state("b-fox")).senders[0]!.code;
     await store.addSender("tim+0@example.com", { now: NOW + 1000 });
-    const senders = (await store.state("fox")).senders;
+    const senders = (await store.state("b-fox")).senders;
     expect(senders).toHaveLength(10);
     expect(senders[0]!.code).not.toBe(before);
     await store.removeSender("tim+0@example.com");
-    expect((await store.state("fox")).senders).toHaveLength(9);
+    expect((await store.state("b-fox")).senders).toHaveLength(9);
   });
 });

@@ -113,34 +113,39 @@ carries it as a repository secret, which is why `hosted.json` omits it.
 Email your Bot is off until a profile names a domain for it:
 
 ```json
-"inboundEmail": { "domain": "in.frockbot.com" }
+"inboundEmail": { "domain": "frockbot.com" }
 ```
 
 That becomes the app Worker's `INBOUND_EMAIL_DOMAIN` var, and each Bot's
-address is a random token at it (`docs/architecture.md`, "By email"). The
-generator writes the var; the mail itself is routed in Cloudflare, by hand,
-once per deployment:
+address is its name and the account's username at it, `fox.tim@frockbot.com`
+(`docs/architecture.md`, "By email"). The generator writes the var; the mail
+itself is routed in Cloudflare, by hand, once per deployment:
 
-1. Use a domain, or a subdomain, that receives no other mail — every address
-   at it is a Bot's. A subdomain of the app's zone (`in.frockbot.com`) is the
-   simple choice.
+1. Choose the domain. It may be the apex (`frockbot.com`): a Bot's address
+   always has a dot before the `@`, so a plain mailbox like `hello@` is never
+   a Bot's and the Worker refuses it. Email Routing takes over the domain's
+   MX records, though, so the domain must receive no mail through another
+   provider; if it does, use a subdomain (`in.frockbot.com`) instead.
 2. In the Cloudflare dashboard, open that zone → **Email** → **Email
    Routing** and enable it for the domain (for a subdomain, add it under
    **Settings → Subdomains**). Cloudflare adds the MX and SPF records it asks
    for; accept them. No destination address is needed.
 3. Under **Routing rules**, set the **Catch-all address** to **Send to a
    Worker** and choose the app Worker (`frockbot-cloudflare` for the hosted
-   profile), then enable the catch-all.
+   profile), then enable the catch-all. A plain mailbox that should reach a
+   person, such as `postmaster@`, gets its own custom address above it; no
+   username can be one of those names.
 4. Add `inboundEmail` to the profile, and deploy. Until this deploy lands,
    the Worker has no domain and refuses every message it is handed.
-5. Check it: in the app, open a Bot's settings → Email → Create address, and
-   send it a message from your sign-in address. The Worker logs one
-   `inbound-email` line per message with its outcome; a `rejected` with code
-   `unauthenticated` means the message carried no DMARC verdict the Worker
-   believes (`docs/known-issues.md` 51).
+5. Check it: in the app, choose a username under Account → Email username,
+   turn on a Bot's settings → Email → Receive email, and send it a message
+   from your sign-in address. The Worker logs one `inbound-email` line per
+   message with its outcome; a `rejected` with code `unauthenticated` means
+   the message carried no DMARC verdict the Worker believes
+   (`docs/known-issues.md` 51).
 
 Removing `inboundEmail` turns email off again: every message is refused, and
-the addresses already made start working again when it comes back.
+the addresses start working again when it comes back.
 
 ## The equivalence gate
 

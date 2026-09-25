@@ -1,7 +1,8 @@
 // Email your Bot, as Email Routing delivers it: each message handed to the
 // Worker's own `email()` export, with the receiving server's ARC verdict on
-// top, exactly as the deployed Worker receives it. The address and the
-// senders are made through the gateway, as the settings page makes them.
+// top, exactly as the deployed Worker receives it. The username, each Bot's
+// switch and the senders are set through the gateway, as the settings pages
+// set them.
 import {
   env,
   runDurableObjectAlarm,
@@ -10,7 +11,10 @@ import {
 import { describe, expect, it } from "vitest";
 import { ACCOUNT_DELETED_KEY_V1 } from "@frockbot/app/account/deletion";
 import { inboundEmailRunIdV1 } from "@frockbot/app/email/inbound";
-import type { InboundEmailViewV1 } from "@frockbot/app/email/shared";
+import type {
+  EmailUsernameViewV1,
+  InboundEmailViewV1,
+} from "@frockbot/app/email/shared";
 import {
   pngBytesV1,
   rawEmailV1,
@@ -21,6 +25,7 @@ import { DEPLOYMENT_POLICY_SINGLETON_NAME } from "../../src/deployment-policy.ts
 import {
   asUser,
   expectOkJson,
+  flockRevision,
   freshUserId,
   postAsUser,
   provisionThroughGateway,
@@ -65,7 +70,23 @@ async function readView(userId: string, botId: string) {
   )) as InboundEmailViewV1;
 }
 
-/** An account whose sign-in address the identity provider verified. */
+/** A username no other test in this file holds. */
+function freshUsername(): string {
+  return `t-${crypto.randomUUID().slice(0, 8)}`;
+}
+
+function claimUsername(userId: string, username: string | null) {
+  return postAsUser(userId, "/api/email/username", { username });
+}
+
+function setReceiving(userId: string, botId: string, receiving: boolean) {
+  return postAsUser(userId, `/api/bots/${botId}/email/switch`, { receiving });
+}
+
+/**
+ * An account whose sign-in address the identity provider verified, with a
+ * username, and its Bot — "Integration Bot" — receiving.
+ */
 async function account(label: string) {
   const userId = freshUserId(label);
   const botId = `${label}-bot`;
@@ -76,13 +97,45 @@ async function account(label: string) {
   )
     .bind(userId, "Owner", owner, "2026-09-24", "2026-09-24")
     .run();
+  // Off, and without a username there is no address at all.
+  const before = await readView(userId, botId);
+  expect(before).toMatchObject({ available: true, receiving: false });
+  expect(before.address).toBeUndefined();
+
+  const username = freshUsername();
+  expect(
+    (await expectOkJson(
+      await claimUsername(userId, username),
+    )) as EmailUsernameViewV1,
+  ).toEqual({
+    schemaVersion: 1,
+    available: true,
+    domain: "in.frock.test",
+    username,
+  });
   const view = (await expectOkJson(
-    await postAsUser(userId, `/api/bots/${botId}/email/address`, {
-      action: "create",
-    }),
+    await setReceiving(userId, botId, true),
   )) as InboundEmailViewV1;
-  expect(view.address).toMatch(/^[a-z2-7]{26}@in\.frock\.test$/);
-  return { userId, botId, owner, address: view.address! };
+  expect(view).toMatchObject({
+    receiving: true,
+    username,
+    address: `integration-bot.${username}@in.frock.test`,
+  });
+  return { userId, botId, owner, username, address: view.address! };
+}
+
+/** The Bot's address, once its directory has caught up with a rename. */
+async function addressBecomes(
+  userId: string,
+  botId: string,
+  address: string,
+): Promise<void> {
+  const deadline = Date.now() + 30_000;
+  while (Date.now() < deadline) {
+    if ((await readView(userId, botId)).address === address) return;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  expect((await readView(userId, botId)).address).toBe(address);
 }
 
 function message(
@@ -163,7 +216,8 @@ describe("emailing a Bot", () => {
   });
 
   it("refuses a forged sender, a stranger, an unknown address and an oversized message", async () => {
-    const { userId, botId, owner, address } = await account("em-refuse");
+    const { userId, botId, owner, username, address } =
+      await account("em-refuse");
     const before = (await expectOkJson(
       await asUser(userId, `/api/bots/${botId}/turns`),
     )) as { runs: unknown[] };
@@ -184,12 +238,23 @@ describe("emailing a Bot", () => {
         })
       ).rejected,
     ).toMatch(/confirmed addresses/);
-    // A well-formed token nobody holds.
-    const nobody = `${"a".repeat(26)}@in.frock.test`;
+    // A username nobody holds, a Bot this account has not, and no dot at all.
+    for (const nobody of [
+      `integration-bot.${freshUsername()}@in.frock.test`,
+      `nobody.${username}@in.frock.test`,
+      `${username}@in.frock.test`,
+    ]) {
+      expect(
+        (await deliver(message({ from: owner, to: nobody }), { to: nobody }))
+          .rejected,
+      ).toBe("No such address.");
+    }
+    // A Bot of theirs that was never switched on: General.
+    const general = `general.${username}@in.frock.test`;
     expect(
-      (await deliver(message({ from: owner, to: nobody }), { to: nobody }))
+      (await deliver(message({ from: owner, to: general }), { to: general }))
         .rejected,
-    ).toBe("No such address.");
+    ).toBe("This address does not accept mail right now.");
     expect(
       (
         await deliver(message({ from: owner, to: address }), {
@@ -205,7 +270,7 @@ describe("emailing a Bot", () => {
     expect(after.runs).toHaveLength(before.runs.length);
   });
 
-  it("confirms an added address by the code it sends back, and forgets a rotated address", async () => {
+  it("confirms an added address by the code it sends back, and stops when switched off", async () => {
     const { userId, botId, owner, address } = await account("em-confirm");
     const work = `work-${crypto.randomUUID()}@work.example`;
     const added = (await expectOkJson(
@@ -249,20 +314,109 @@ describe("emailing a Bot", () => {
       await inboundEmailRunIdV1(address, messageId),
     );
 
-    const rotated = (await expectOkJson(
-      await postAsUser(userId, `/api/bots/${botId}/email/address`, {
-        action: "rotate",
-      }),
+    const off = (await expectOkJson(
+      await setReceiving(userId, botId, false),
     )) as InboundEmailViewV1;
-    expect(rotated.address).not.toBe(address);
+    expect(off).toMatchObject({ receiving: false, address });
+    expect(
+      (await deliver(message({ from: owner, to: address }), { to: address }))
+        .rejected,
+    ).toBe("This address does not accept mail right now.");
+  });
+
+  it("keeps a username to one account, and every address follows a change", async () => {
+    const first = await account("em-username");
+    const other = freshUserId("em-username-other");
+    await provisionThroughGateway({ userId: other, botId: "em-other-bot" });
+    const taken = await claimUsername(other, first.username);
+    expect(taken.status).toBe(409);
+    expect(await taken.json()).toEqual({
+      error: "That username is taken. Choose another.",
+    });
+    for (const refused of ["postmaster", "ab", "tim.o", "-tim"]) {
+      expect((await claimUsername(other, refused)).status).toBe(400);
+    }
+
+    const renamed = freshUsername();
+    await expectOkJson(await claimUsername(first.userId, renamed));
+    const moved = `integration-bot.${renamed}@in.frock.test`;
+    expect((await readView(first.userId, first.botId)).address).toBe(moved);
+    expect(
+      (
+        await deliver(message({ from: first.owner, to: first.address }), {
+          to: first.address,
+        })
+      ).rejected,
+    ).toBe("No such address.");
+    const messageId = `${crypto.randomUUID()}@mail.example.com`;
+    expect(
+      await deliver(message({ from: first.owner, to: moved, messageId }), {
+        to: moved,
+      }),
+    ).toEqual({});
+    await waitForRun(
+      first.userId,
+      first.botId,
+      await inboundEmailRunIdV1(moved, messageId),
+    );
+    // The name given up is anyone's.
+    expect((await claimUsername(other, first.username)).status).toBe(200);
+  });
+
+  it("follows a rename, and the later of two Bots with one name is -2", async () => {
+    const { userId, botId, owner, username, address } =
+      await account("em-rename");
+    const rename = async (target: string, name: string) => {
+      const settings = (await expectOkJson(
+        await asUser(userId, `/api/bots/${target}/settings`),
+      )) as { revision: number };
+      expect(
+        (
+          await postAsUser(userId, `/api/bots/${target}/settings`, {
+            schemaVersion: 1,
+            type: "bot/set-profile",
+            commandId: `rename-${crypto.randomUUID()}`,
+            expectedRevision: settings.revision,
+            botId: target,
+            profile: { name },
+          })
+        ).status,
+      ).toBe(200);
+    };
+    await rename(botId, "Fox");
+    const fox = `fox.${username}@in.frock.test`;
+    await addressBecomes(userId, botId, fox);
     expect(
       (await deliver(message({ from: owner, to: address }), { to: address }))
         .rejected,
     ).toBe("No such address.");
+
+    const twin = "em-rename-twin";
+    const created = await postAsUser(userId, "/api/bots", {
+      schemaVersion: 1,
+      type: "bot/create",
+      commandId: `create-${twin}`,
+      expectedRevision: await flockRevision(userId),
+      botId: twin,
+      name: "fox",
+    });
+    expect(created.status).toBe(201);
+    await expectOkJson(await setReceiving(userId, twin, true));
+    const fox2 = `fox-2.${username}@in.frock.test`;
+    await addressBecomes(userId, twin, fox2);
+    expect((await readView(userId, botId)).address).toBe(fox);
+
+    const messageId = `${crypto.randomUUID()}@mail.example.com`;
+    expect(
+      await deliver(message({ from: owner, to: fox2, messageId }), {
+        to: fox2,
+      }),
+    ).toEqual({});
+    await waitForRun(userId, twin, await inboundEmailRunIdV1(fox2, messageId));
   });
 
-  it("a deleted account's addresses go with it", async () => {
-    const { userId, owner, address } = await account("em-deleted");
+  it("a deleted account's username goes with it", async () => {
+    const { userId, owner, username, address } = await account("em-deleted");
     const policy = env.DEPLOYMENT_POLICY.getByName(
       DEPLOYMENT_POLICY_SINGLETON_NAME,
     );
@@ -270,9 +424,11 @@ describe("emailing a Bot", () => {
       runInDurableObject(policy, async (_instance, state) =>
         [...state.storage.kv.list({ prefix: "email:" })]
           .map(([key]) => key)
-          .filter((key) => key.includes(userId)),
+          .filter(
+            (key) => key.endsWith(`:${userId}`) || key.endsWith(`:${username}`),
+          ),
       );
-    expect(await directoryKeys()).toHaveLength(1);
+    expect(await directoryKeys()).toHaveLength(2);
 
     const accepted = await asUser(userId, "/api/account/delete", {
       method: "POST",

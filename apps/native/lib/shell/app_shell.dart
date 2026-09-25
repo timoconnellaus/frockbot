@@ -27,6 +27,7 @@ import '../client/transport.dart';
 import '../computer/card.dart';
 import '../computer/client.dart';
 import '../connections/page.dart';
+import '../email/username.dart';
 import '../flock/avatar.dart';
 import '../flock/create.dart';
 import '../flock/lifecycle.dart';
@@ -3479,6 +3480,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               icon: Icons.settings_outlined,
               title: 'Personal details',
               page: _settingsPage,
+            ),
+            // The end of every Bot's email address, so it is the account's.
+            ProfileSection(
+              id: EmailIds.profileEntry,
+              icon: Icons.alternate_email_rounded,
+              title: 'Email username',
+              page: () => EmailUsernamePage(api: widget.api),
             ),
             ProfileSection(
               id: SecretIds.profileEntry,

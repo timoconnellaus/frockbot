@@ -5,9 +5,10 @@
 // So the order is the point. The size is checked, the recipient read, the
 // message parsed and its sender authenticated — every one of those touching
 // nothing but the message itself — and only a message whose `From` domain the
-// receiving server verified is looked up in the directory. Then the User's
-// object decides whether that address is one of theirs. Only then is anything
-// written: the files, and the Turn.
+// receiving server verified has its username looked up in the directory. Then
+// the User's object decides whether that sender is one of theirs, and which of
+// their Bots the slug names. Only then is anything written: the files, and the
+// Turn.
 //
 // A refusal is `setReject`, a permanent SMTP error the sending server reports
 // to its own sender, so a forged `From` is never written back to. A failure
@@ -28,9 +29,8 @@ import {
   INBOUND_EMAIL_MAX_BYTES_V1,
   INBOUND_EMAIL_TEXT_MAX_CHARS_V1,
   inboundMessageIdV1,
-  isInboundAddressTokenV1,
+  parseBotEmailLocalPartV1,
   senderCodesInV1,
-  type InboundEmailRecipientV1,
   type InboundEmailRouteDecisionV1,
 } from "./shared.js";
 
@@ -50,9 +50,8 @@ export type InboundAttachmentStoreV1 =
 export interface InboundEmailHostV1 {
   /** Absent: this deployment receives no email, and every message is refused. */
   domain?: string;
-  resolveAddress(
-    tokenDigest: string,
-  ): Promise<InboundEmailRecipientV1 | undefined>;
+  /** The User a username belongs to, if anyone's. */
+  resolveUsername(username: string): Promise<string | undefined>;
   /** The User's verified sign-in address, which may always write to their Bots. */
   signInEmail(userId: string): Promise<string | undefined>;
   /**
@@ -64,8 +63,7 @@ export interface InboundEmailHostV1 {
   route(
     userId: string,
     request: {
-      botId: string;
-      token: string;
+      slug: string;
       sender: string;
       signInEmail?: string;
       codes: string[];
@@ -106,6 +104,7 @@ export type InboundEmailRejectionV1 =
   | "no-message-id"
   | "account"
   | "bot-unavailable"
+  | "not-receiving"
   | "unverified-sender"
   | "empty"
   | "busy";
@@ -126,6 +125,7 @@ const REJECTION_TEXT: Readonly<Record<InboundEmailRejectionV1, string>> = {
   "no-message-id": "Message has no usable Message-ID.",
   account: "This address does not accept mail right now.",
   "bot-unavailable": "This address does not accept mail right now.",
+  "not-receiving": "This address does not accept mail right now.",
   "unverified-sender":
     "This address only accepts mail from its owner's confirmed addresses.",
   empty: "Message is empty.",
@@ -172,17 +172,16 @@ async function readBounded(
   return bytes;
 }
 
-/** The token a recipient carries, on this deployment's domain. */
-function recipientToken(
+/** The Bot address a recipient names, on this deployment's domain. */
+function recipientAddress(
   to: string,
   domain: string,
-): { recipient: string; token: string } | undefined {
+): { recipient: string; slug: string; username: string } | undefined {
   const recipient = to.trim().replace(/^<|>$/g, "").toLowerCase();
   const at = recipient.lastIndexOf("@");
   if (at <= 0 || recipient.slice(at + 1) !== domain) return undefined;
-  // `token+anything@` is the same address, as a person would expect.
-  const token = recipient.slice(0, at).split("+")[0]!;
-  return isInboundAddressTokenV1(token) ? { recipient, token } : undefined;
+  const named = parseBotEmailLocalPartV1(recipient.slice(0, at));
+  return named ? { recipient, ...named } : undefined;
 }
 
 /**
@@ -253,7 +252,7 @@ export async function receiveInboundEmailV1(
   const domain = host.domain;
   if (!domain) return reject("off");
   if (message.rawSize > INBOUND_EMAIL_MAX_BYTES_V1) return reject("too-large");
-  const addressed = recipientToken(message.to, domain);
+  const addressed = recipientAddress(message.to, domain);
   if (!addressed) return reject("unknown-address");
   // A bounce carries the null sender; nothing a Bot should answer.
   const envelope = message.from.trim();
@@ -268,6 +267,10 @@ export async function receiveInboundEmailV1(
   }
   if (email.automatic) return reject("automatic");
   if (!email.from) return reject("bad-from");
+  // Addresses are guessable by design — a Bot's name and the account's
+  // username — so this check, with the sender allowlist behind it, is the
+  // only lock on a Bot's inbox. Never relax it, never skip it, and never let
+  // anything past it before it has passed.
   const authentication = senderAuthenticationV1(
     email.headers,
     addressDomainV1(email.from),
@@ -280,22 +283,19 @@ export async function receiveInboundEmailV1(
   }
 
   // Authenticated: from here the directory and the User's object are asked.
-  const recipient = await host.resolveAddress(
-    await sha256HexTextV1(addressed.token),
-  );
-  if (!recipient) return reject("unknown-address");
-  const { userId, botId } = recipient;
+  const userId = await host.resolveUsername(addressed.username);
+  if (!userId) return reject("unknown-address");
   if (await host.accountRefusal(userId)) return reject("account");
   const signInEmail = await host.signInEmail(userId);
   const decision = await host.route(userId, {
-    botId,
-    token: addressed.token,
+    slug: addressed.slug,
     sender: email.from,
     ...(signInEmail ? { signInEmail } : {}),
     codes: senderCodesInV1(`${email.subject}\n${email.body.slice(0, 4_000)}`),
   });
   if (decision.kind === "confirmed") return { status: "confirmed" };
   if (decision.kind === "refused") return reject(decision.code);
+  const botId = decision.botId;
 
   // A confirmed sender, to a live address: the files, then the Turn.
   const attachments: { uploadId: string }[] = [];

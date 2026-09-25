@@ -1,11 +1,10 @@
-// The User Durable Object's half of inbound email: each Bot's address, the
-// addresses allowed to write to the User's Bots, and the decision about each
-// message that arrives.
+// The User Durable Object's half of inbound email: which of the User's Bots
+// receive email, the addresses allowed to write to them, and the decision
+// about each message that arrives.
 //
-// The User object is the authority. The deployment directory only says which
-// User and Bot a token claims to be; every message is checked here against
-// the address this User holds for that Bot now and against their confirmed
-// senders, so a directory entry that outlived a rotation is refused.
+// The User object is the authority. The deployment directory only says whose
+// username a message names; the slug before it is matched here against the
+// Bots' names as they are now, and the sender against this User's addresses.
 //
 // A sender is confirmed by a code shown in the app, sent back from that
 // mailbox — never by a link in an email. Receiving the code from the address,
@@ -13,19 +12,19 @@
 
 import { constantTimeEqualsV1 } from "@frockbot/core/crypto";
 import {
-  decodeInboundAddressV1,
+  botEmailSlugsV1,
   decodeInboundEmailSenderV1,
   INBOUND_EMAIL_CODE_TTL_MS_V1,
   INBOUND_EMAIL_SENDERS_MAX_V1,
-  mintInboundAddressTokenV1,
   mintSenderCodeV1,
-  type InboundAddressV1,
+  type BotEmailNameV1,
   type InboundEmailRouteDecisionV1,
   type InboundEmailSenderV1,
   type InboundEmailStateV1,
 } from "./shared.js";
 
-const ADDRESS_PREFIX = "email:address:";
+/** Present while the Bot receives email. */
+const RECEIVING_PREFIX = "email:receiving:";
 const SENDERS_KEY = "email:senders";
 
 export interface InboundEmailUserStorageV1 {
@@ -34,24 +33,19 @@ export interface InboundEmailUserStorageV1 {
   delete(key: string): Promise<boolean>;
 }
 
+/** One of the User's Bots, as its address is derived and its door decided. */
+export interface InboundEmailBotV1 extends BotEmailNameV1 {
+  active: boolean;
+}
+
 export interface InboundEmailUserHostV1 {
   storage: InboundEmailUserStorageV1 & {
     transaction<T>(
       closure: (transaction: InboundEmailUserStorageV1) => Promise<T>,
     ): Promise<T>;
   };
-  /** Whether this Bot is one of the User's active Bots. */
-  botActive(botId: string): Promise<boolean>;
-  /** The deployment directory: where a token is looked up by the handler. */
-  directory: {
-    register(botId: string, token: string): Promise<void>;
-    release(botId: string): Promise<void>;
-  };
-  /**
-   * Runs an address change with nothing else let in: it writes this object
-   * and the directory, and the two must not interleave with another change.
-   */
-  exclusive<T>(closure: () => Promise<T>): Promise<T>;
+  /** Every Bot the User has, archived ones too: their names hold slugs. */
+  bots(): Promise<InboundEmailBotV1[]>;
 }
 
 interface StoredSendersV1 {
@@ -75,57 +69,48 @@ function storedSenders(value: unknown): InboundEmailSenderV1[] {
 export class InboundEmailUserStoreV1 {
   constructor(private readonly host: InboundEmailUserHostV1) {}
 
-  private async address(botId: string): Promise<InboundAddressV1 | undefined> {
-    const stored = await this.host.storage.get<unknown>(ADDRESS_PREFIX + botId);
-    return stored === undefined ? undefined : decodeInboundAddressV1(stored);
-  }
-
   private async senders(): Promise<InboundEmailSenderV1[]> {
     return storedSenders(await this.host.storage.get<unknown>(SENDERS_KEY));
   }
 
+  private async receiving(botId: string): Promise<boolean> {
+    return (
+      (await this.host.storage.get<unknown>(RECEIVING_PREFIX + botId)) === true
+    );
+  }
+
+  /** One Bot's email: its slug now, whether it receives, and the senders. */
   async state(botId: string): Promise<InboundEmailStateV1> {
-    const [address, senders] = await Promise.all([
-      this.address(botId),
+    const [bots, receiving, senders] = await Promise.all([
+      this.host.bots(),
+      this.receiving(botId),
       this.senders(),
     ]);
-    return { schemaVersion: 1, ...(address ? { address } : {}), senders };
+    const slug = botEmailSlugsV1(bots).get(botId);
+    if (!slug) throw new InboundEmailCommandError("That Bot isn’t yours.");
+    return { schemaVersion: 1, slug, receiving, senders };
   }
 
-  /**
-   * Give this Bot an address, or a new one in place of the old. The directory
-   * learns the new token before this object keeps it, and forgets the old one
-   * in the same write, so from then on only the new address resolves.
-   */
-  async setAddress(
-    botId: string,
-    options: { rotate: boolean; now: string },
-  ): Promise<void> {
-    await this.host.exclusive(async () => {
-      if (!options.rotate && (await this.address(botId))) return;
-      if (!(await this.host.botActive(botId))) {
+  /** Whether this Bot receives email. Off until the person turns it on. */
+  async setReceiving(botId: string, receiving: boolean): Promise<void> {
+    if (receiving) {
+      const bot = (await this.host.bots()).find(
+        (candidate) => candidate.botId === botId,
+      );
+      if (!bot?.active) {
         throw new InboundEmailCommandError(
-          "Only an active Bot can have an email address.",
+          "Only an active Bot can receive email.",
         );
       }
-      const token = mintInboundAddressTokenV1();
-      await this.host.directory.register(botId, token);
-      await this.host.storage.put(ADDRESS_PREFIX + botId, {
-        token,
-        createdAt: options.now,
-      } satisfies InboundAddressV1);
-    });
+      await this.host.storage.put(RECEIVING_PREFIX + botId, true);
+      return;
+    }
+    await this.host.storage.delete(RECEIVING_PREFIX + botId);
   }
 
-  /** This Bot stops receiving email. Also what deleting the Bot does. */
-  async removeAddress(botId: string): Promise<void> {
-    // The directory is released before this object forgets, so an address
-    // still here is one whose release may not have happened yet.
-    if (!(await this.address(botId))) return;
-    await this.host.exclusive(async () => {
-      await this.host.directory.release(botId);
-      await this.host.storage.delete(ADDRESS_PREFIX + botId);
-    });
+  /** What deleting the Bot leaves of its email: nothing. */
+  async forgetBot(botId: string): Promise<void> {
+    await this.host.storage.delete(RECEIVING_PREFIX + botId);
   }
 
   /**
@@ -191,28 +176,49 @@ export class InboundEmailUserStoreV1 {
   }
 
   /**
-   * What one message is: words from a confirmed sender for this Bot, the
-   * code that confirms a waiting address, or nothing that may reach it.
+   * What one message is: words from one of this User's senders for one of
+   * their Bots, the code that confirms a waiting address, or nothing that may
+   * reach them.
    *
    * The caller has already checked the message's DMARC verdict for `sender`;
-   * this decides only whether that address is one of this User's.
+   * this decides whether that address is one of this User's, and it decides
+   * that first. An address is guessable, so anyone else learns nothing here
+   * about which Bots there are, or which receive.
    */
   async route(request: {
-    botId: string;
-    token: string;
+    slug: string;
     sender: string;
     signInEmail?: string;
     codes: readonly string[];
     now: number;
   }): Promise<InboundEmailRouteDecisionV1> {
-    const address = await this.address(request.botId);
-    if (!address || !constantTimeEqualsV1(address.token, request.token)) {
-      return { kind: "refused", code: "unknown-address" };
+    const known =
+      request.sender === request.signInEmail ||
+      (await this.confirmSender(request));
+    if (known === "confirmed") return { kind: "confirmed" };
+    if (!known) return { kind: "refused", code: "unverified-sender" };
+    const bots = await this.host.bots();
+    const slugs = botEmailSlugsV1(bots);
+    const bot = bots.find(
+      (candidate) => slugs.get(candidate.botId) === request.slug,
+    );
+    if (!bot) return { kind: "refused", code: "unknown-address" };
+    if (!bot.active) return { kind: "refused", code: "bot-unavailable" };
+    if (!(await this.receiving(bot.botId))) {
+      return { kind: "refused", code: "not-receiving" };
     }
-    if (!(await this.host.botActive(request.botId))) {
-      return { kind: "refused", code: "bot-unavailable" };
-    }
-    if (request.sender === request.signInEmail) return { kind: "admit" };
+    return { kind: "admit", botId: bot.botId };
+  }
+
+  /**
+   * Whether the sender is a confirmed address of this User's — or, when it
+   * is waiting and the message carries its unexpired code, confirms it now.
+   */
+  private async confirmSender(request: {
+    sender: string;
+    codes: readonly string[];
+    now: number;
+  }): Promise<boolean | "confirmed"> {
     return this.host.storage.transaction(async (transaction) => {
       const senders = storedSenders(
         await transaction.get<unknown>(SENDERS_KEY),
@@ -220,7 +226,7 @@ export class InboundEmailUserStoreV1 {
       const sender = senders.find(
         (candidate) => candidate.address === request.sender,
       );
-      if (sender?.verifiedAt) return { kind: "admit" } as const;
+      if (sender?.verifiedAt) return true;
       const code = sender?.code;
       if (
         !sender ||
@@ -230,7 +236,7 @@ export class InboundEmailUserStoreV1 {
           constantTimeEqualsV1(candidate, code),
         )
       ) {
-        return { kind: "refused", code: "unverified-sender" } as const;
+        return false;
       }
       await transaction.put(SENDERS_KEY, {
         schemaVersion: 1,
@@ -244,7 +250,7 @@ export class InboundEmailUserStoreV1 {
             : candidate,
         ),
       } satisfies StoredSendersV1);
-      return { kind: "confirmed" } as const;
+      return "confirmed";
     });
   }
 }

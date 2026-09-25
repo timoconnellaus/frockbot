@@ -1,11 +1,14 @@
-/// Email this Bot: its inbound address, and the addresses allowed to write to
-/// it.
+/// Email this Bot: whether it receives email, its address, and the addresses
+/// allowed to write to it.
 ///
 /// The server holds all of it (`app/email/backend.ts`); every command answers
-/// the whole view, and this page draws what came back. The senders are the
-/// account's — one list for every Bot — and are here because this is where the
-/// address they write to is. A sender is confirmed by mailing the code shown
-/// here from that address, never by a link sent to it.
+/// the whole view, and this page draws what came back. A Bot's address is its
+/// name and the account's username, `fox.tim@frockbot.com`, so it is never
+/// made here: it follows the Bot's name, and the username has its own page
+/// ([EmailUsernamePage]). The senders are the account's — one list for every
+/// Bot — and are here because this is where the address they write to is. A
+/// sender is confirmed by mailing the code shown here from that address,
+/// never by a link sent to it.
 library;
 
 import 'dart:async';
@@ -16,9 +19,9 @@ import 'package:flutter/services.dart';
 import '../client/transport.dart';
 import '../shell/desktop_layout.dart';
 import '../shell/semantics.dart';
-import '../theme/dialogs.dart';
 import '../theme/rows.dart';
 import '../theme/states.dart';
+import 'username.dart';
 
 /// One address that may write to the User's Bots, as the view names it.
 class BotEmailSender {
@@ -66,8 +69,14 @@ class BotEmailController extends ChangeNotifier {
   /// Whether this deployment receives email at all.
   bool available = false;
 
-  /// `<token>@<domain>`, once there is one.
+  /// The account's username, once the person chose one.
+  String? username;
+
+  /// `<bot-slug>.<username>@<domain>`, once there is a username.
   String? address;
+
+  /// Whether mail to [address] reaches this Bot. Off until turned on.
+  bool receiving = false;
   List<BotEmailSender> senders = const [];
 
   String get _path => '/api/bots/${Uri.encodeComponent(botId)}/email';
@@ -79,8 +88,11 @@ class BotEmailController extends ChangeNotifier {
   void _adopt(Object? answer) {
     if (answer is! Map) throw const FormatException('email view');
     available = answer['available'] == true;
+    final named = answer['username'];
+    username = named is String && named.isNotEmpty ? named : null;
     final held = answer['address'];
     address = held is String && held.contains('@') ? held : null;
+    receiving = answer['receiving'] == true;
     senders = [
       for (final entry in (answer['senders'] as List? ?? const []))
         if (BotEmailSender.fromJson(entry) case final BotEmailSender sender)
@@ -111,9 +123,9 @@ class BotEmailController extends ChangeNotifier {
 
   Future<bool> load() => _run(() => api.request(_path));
 
-  /// `create`, `rotate` or `remove`.
-  Future<bool> addressCommand(String action) =>
-      _run(() => api.request('$_path/address', body: {'action': action}));
+  /// Turn this Bot's email on or off.
+  Future<bool> setReceiving(bool on) =>
+      _run(() => api.request('$_path/switch', body: {'receiving': on}));
 
   /// `add` (again, for a fresh code) or `remove`.
   Future<bool> senderCommand(String action, String sender) => _run(
@@ -183,39 +195,20 @@ class _BotEmailPageState extends State<BotEmailPage> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(said)));
   }
 
-  Future<bool> _confirm({
-    required String id,
-    required String title,
-    required String body,
-    required String action,
-  }) async =>
-      await showDialog<bool>(
-        context: context,
-        builder: (dialog) => identified(
-          id,
-          AlertDialog(
-            insetPadding: frockDialogInset,
-            title: frockDialogTitle(Text(title)),
-            content: frockDialogBody(Text(body)),
-            actions: [
-              TextButton(
-                onPressed: () => Navigator.pop(dialog, false),
-                child: const Text('Cancel'),
-              ),
-              FilledButton(
-                onPressed: () => Navigator.pop(dialog, true),
-                child: Text(action),
-              ),
-            ],
-          ),
-        ),
-      ) ??
-      false;
-
   Future<void> _add() async {
     final typed = senderField.text.trim();
     if (typed.isEmpty) return;
     if (await controller.senderCommand('add', typed)) senderField.clear();
+  }
+
+  /// The account's username page, and this Bot's address as it left it.
+  Future<void> _chooseUsername() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute<void>(
+        builder: (_) => EmailUsernamePage(api: widget.api),
+      ),
+    );
+    if (mounted) await controller.load();
   }
 
   @override
@@ -292,50 +285,91 @@ class _BotEmailPageState extends State<BotEmailPage> {
 
   Widget _address(BuildContext context) {
     final theme = Theme.of(context);
+    final quiet = theme.textTheme.bodySmall?.copyWith(
+      fontSize: 12.5,
+      color: theme.colorScheme.onSurfaceVariant,
+    );
     final address = controller.address;
     final busy = controller.busy;
     return Card(
       margin: EdgeInsets.zero,
-      child: Padding(
-        padding: const EdgeInsets.all(16),
-        child: address == null
-            ? Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    'This Bot has no email address yet.',
-                    style: theme.textTheme.bodyMedium,
-                  ),
-                  const SizedBox(height: 12),
-                  identified(
-                    EmailIds.create,
-                    FilledButton(
-                      onPressed: busy
-                          ? null
-                          : () =>
-                                unawaited(controller.addressCommand('create')),
-                      child: const Text('Create address'),
-                    ),
-                  ),
-                ],
-              )
-            : Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  identified(
-                    EmailIds.address,
-                    SelectableText(
-                      address,
-                      style: theme.textTheme.bodyLarge?.copyWith(
-                        fontWeight: FontWeight.w500,
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 12),
-                  Wrap(
-                    spacing: 8,
-                    runSpacing: 8,
+      clipBehavior: Clip.antiAlias,
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          FrockRow(
+            icon: Icons.mark_email_read_outlined,
+            title: 'Receive email',
+            subtitle: controller.receiving
+                ? 'Mail to this address reaches the Bot'
+                : 'Mail to this address is refused',
+            chevron: false,
+            onTap: busy
+                ? null
+                : () =>
+                      unawaited(controller.setReceiving(!controller.receiving)),
+            trailing: identified(
+              EmailIds.receiving,
+              Semantics(
+                label: 'Receive email',
+                child: Switch(
+                  value: controller.receiving,
+                  onChanged: busy
+                      ? null
+                      : (next) => unawaited(controller.setReceiving(next)),
+                ),
+              ),
+            ),
+          ),
+          const Divider(height: 1),
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 14, 16, 16),
+            // Keyed apart, so the Copy button is never the Choose button
+            // restyled in place.
+            child: address == null
+                ? Column(
+                    key: const ValueKey('no-username'),
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      identified(
+                        EmailIds.noUsername,
+                        Text(
+                          'Your account has no email username yet, so this '
+                          'Bot has no address. Choose one under Account → '
+                          'Email username.',
+                          style: theme.textTheme.bodyMedium,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      identified(
+                        EmailIds.chooseUsername,
+                        FilledButton(
+                          onPressed: () => unawaited(_chooseUsername()),
+                          child: const Text('Choose a username'),
+                        ),
+                      ),
+                    ],
+                  )
+                : Column(
+                    key: const ValueKey('address'),
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      identified(
+                        EmailIds.address,
+                        SelectableText(
+                          address,
+                          style: theme.textTheme.bodyLarge?.copyWith(
+                            fontWeight: FontWeight.w500,
+                          ),
+                        ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        'This Bot’s name and your username. Rename either and '
+                        'the address changes; the old one stops working.',
+                        style: quiet,
+                      ),
+                      const SizedBox(height: 12),
                       identified(
                         EmailIds.copy,
                         FilledButton.tonalIcon(
@@ -354,48 +388,10 @@ class _BotEmailPageState extends State<BotEmailPage> {
                           label: const Text('Copy'),
                         ),
                       ),
-                      identified(
-                        EmailIds.rotate,
-                        OutlinedButton(
-                          style: frockCompactButton(context),
-                          onPressed: busy
-                              ? null
-                              : () async {
-                                  if (await _confirm(
-                                    id: EmailIds.rotateConfirm,
-                                    title: 'Get a new address?',
-                                    body: 'The old address stops working now. Anyone you gave it to will need the new one.',
-                                    action: 'New address',
-                                  )) {
-                                    await controller.addressCommand('rotate');
-                                  }
-                                },
-                          child: const Text('New address'),
-                        ),
-                      ),
-                      identified(
-                        EmailIds.remove,
-                        OutlinedButton(
-                          style: frockCompactButton(context),
-                          onPressed: busy
-                              ? null
-                              : () async {
-                                  if (await _confirm(
-                                    id: EmailIds.removeConfirm,
-                                    title: 'Turn off email?',
-                                    body: 'Mail to this address is refused from now on. You can make a new address later.',
-                                    action: 'Turn off',
-                                  )) {
-                                    await controller.addressCommand('remove');
-                                  }
-                                },
-                          child: const Text('Turn off'),
-                        ),
-                      ),
                     ],
                   ),
-                ],
-              ),
+          ),
+        ],
       ),
     );
   }
@@ -524,9 +520,10 @@ class _BotEmailPageState extends State<BotEmailPage> {
           ),
         );
     }
-    // Waiting for its code.
+    // Waiting for its code. Any of the User's Bots' addresses takes it,
+    // whether or not that Bot receives email.
     final code = sender.code ?? '';
-    final to = controller.address ?? 'this Bot’s address';
+    final to = controller.address ?? 'any of your Bots’ email addresses';
     return identified(
       EmailIds.sender(sender.address),
       Padding(

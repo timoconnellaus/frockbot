@@ -43,7 +43,9 @@ void main() {
       (_, _) async => {
         'schemaVersion': 1,
         'available': true,
-        'address': 'k3vq7m2xhwancz4rdtpbye5fgs@in.frockbot.com',
+        'username': 'tim',
+        'address': 'fox.tim@frockbot.com',
+        'receiving': true,
         'senders': [
           {'address': 'tim@example.com', 'status': 'sign-in'},
           {
@@ -81,9 +83,8 @@ void main() {
                   as RenderRepaintBoundary)
               .toImage(pixelRatio: 2);
       final bytes = await image.toByteData(format: ui.ImageByteFormat.png);
-      await File(
-        '$_out/email-your-bot.png',
-      ).writeAsBytes(bytes!.buffer.asUint8List());
+      await File('$_out/email-your-bot.png')
+          .writeAsBytes(bytes!.buffer.asUint8List());
       image.dispose();
     });
   });

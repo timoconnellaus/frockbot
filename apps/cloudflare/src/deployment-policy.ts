@@ -18,11 +18,12 @@ import {
   type EmailInvitationV1,
 } from "@frockbot/app/admin/shared";
 import {
-  forgetInboundEmailUserV1,
-  registerInboundAddressV1,
-  releaseInboundAddressV1,
-  resolveInboundAddressV1,
+  claimEmailUsernameV1,
+  readEmailUsernameV1,
+  releaseEmailUsernameV1,
+  resolveEmailUsernameV1,
 } from "@frockbot/app/email/directory";
+import { isEmailUsernameV1 } from "@frockbot/app/email/shared";
 import { DurableObject } from "cloudflare:workers";
 import {
   evaluateAdmissionV1,
@@ -41,20 +42,18 @@ import {
   seedHostedModelRatesStorageV1,
   type ModelRatesWriteV1,
 } from "./model-rates.js";
-import {
-  decodeRpcEnvelopeV1,
-  rpcBotId,
-  rpcIdentifier,
-  rpcPattern,
-} from "./durable-rpc.js";
+import { decodeRpcEnvelopeV1, rpcIdentifier } from "./durable-rpc.js";
 
 const POLICY_KEY = "deployment:admission:v1";
 const ACCESS_PREFIX = "account:access:v1:";
 const INVITATION_PREFIX = "invitation:email:v1:";
 export const DEPLOYMENT_POLICY_SINGLETON_NAME = "frockbot-deployment-policy";
 
-/** A SHA-256 digest, as the inbound email directory keys a Bot's token. */
-const INBOUND_EMAIL_DIGEST = rpcPattern(/^[0-9a-f]{64}$/, 64);
+/** An email username, in the shape and outside the names nobody may hold. */
+const EMAIL_USERNAME = (value: unknown, label: string): unknown => {
+  if (!isEmailUsernameV1(value)) throw new Error(`${label} is invalid`);
+  return value;
+};
 
 /** Written by admission itself, so an audit can tell a sign-in from an admin. */
 export const ADMISSION_UPDATED_BY = "admission";
@@ -121,10 +120,10 @@ function nextRevision(current: number, label: string): number {
  * The deployment's beta-access authority: the admission mode, each account's
  * access record and the email invitations not yet redeemed. It also holds the
  * versioned hosted model rate table (`./model-rates.ts`), which is equally
- * deployment-wide and equally an administrator's to change, and the inbound
- * email directory (`app/email/directory.ts`), because a message names only
- * its recipient's token, and something the whole deployment shares has to say
- * whose it is before any User's object may be addressed.
+ * deployment-wide and equally an administrator's to change, and the email
+ * usernames (`app/email/directory.ts`): one account per username across the
+ * deployment, and the one object the whole deployment shares is what can say
+ * whose a message's username is before any User's object is addressed.
  *
  * One object, and every read-decide-write in it is a synchronous storage
  * transaction, so two sign-ins, or a sign-in racing an admin, are serialized
@@ -299,57 +298,54 @@ export class DeploymentPolicy extends DurableObject<Record<string, never>> {
   }
 
   /**
-   * One Bot's inbound address is now this token's digest. The User object
-   * that holds the token is the only caller; the Bot's previous digest stops
-   * resolving in the same write.
+   * The User's email username is now this one, unless another account holds
+   * it; the one they held before is released in the same write.
    */
-  async registerInboundEmailAddress(
+  async claimEmailUsername(
     input: unknown,
-  ): Promise<{ schemaVersion: 1 }> {
+  ): Promise<{ schemaVersion: 1; status: "claimed" | "taken" }> {
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
-      botId: rpcBotId,
-      tokenDigest: INBOUND_EMAIL_DIGEST,
+      username: EMAIL_USERNAME,
     });
-    this.ctx.storage.transactionSync(() =>
-      registerInboundAddressV1(this.kv, {
+    const claim = this.ctx.storage.transactionSync(() =>
+      claimEmailUsernameV1(this.kv, {
         userId: request.userId as string,
-        botId: request.botId as string,
-        tokenDigest: request.tokenDigest as string,
+        username: request.username as string,
       }),
+    );
+    return { schemaVersion: 1, status: claim.status };
+  }
+
+  /** The User has no email username any more. */
+  async releaseEmailUsername(input: unknown): Promise<{ schemaVersion: 1 }> {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    this.ctx.storage.transactionSync(() =>
+      releaseEmailUsernameV1(this.kv, request.userId as string),
     );
     return { schemaVersion: 1 };
   }
 
-  /** One Bot has no inbound address any more. */
-  async releaseInboundEmailAddress(
+  /** The User a username belongs to, or `null`. */
+  async resolveEmailUsername(
     input: unknown,
-  ): Promise<{ schemaVersion: 1 }> {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      botId: rpcBotId,
-    });
-    this.ctx.storage.transactionSync(() =>
-      releaseInboundAddressV1(this.kv, {
-        userId: request.userId as string,
-        botId: request.botId as string,
-      }),
-    );
-    return { schemaVersion: 1 };
-  }
-
-  /** The User and Bot an address token's digest names, or `null`. */
-  async resolveInboundEmailAddress(input: unknown): Promise<{
-    schemaVersion: 1;
-    recipient: { userId: string; botId: string } | null;
-  }> {
-    const request = decodeRpcEnvelopeV1(input, {
-      tokenDigest: INBOUND_EMAIL_DIGEST,
-    });
+  ): Promise<{ schemaVersion: 1; userId: string | null }> {
+    const request = decodeRpcEnvelopeV1(input, { username: EMAIL_USERNAME });
     return {
       schemaVersion: 1,
-      recipient:
-        resolveInboundAddressV1(this.kv, request.tokenDigest as string) ?? null,
+      userId:
+        resolveEmailUsernameV1(this.kv, request.username as string) ?? null,
+    };
+  }
+
+  /** A User's email username, or `null`. */
+  async readEmailUsername(
+    input: unknown,
+  ): Promise<{ schemaVersion: 1; username: string | null }> {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    return {
+      schemaVersion: 1,
+      username: readEmailUsernameV1(this.kv, request.userId as string) ?? null,
     };
   }
 
@@ -412,9 +408,9 @@ export class DeploymentPolicy extends DurableObject<Record<string, never>> {
 
   /**
    * The last trace of a deleted account here: its access record, any
-   * invitation still waiting under its address, and its Bots' inbound
-   * addresses. Called only once the identity itself is gone, so no session is
-   * left that could be admitted afresh.
+   * invitation still waiting under its address, and its email username, which
+   * anyone may take again. Called only once the identity itself is gone, so no
+   * session is left that could be admitted afresh.
    */
   async forgetAccount(input: unknown): Promise<{ schemaVersion: 1 }> {
     const request = decodeAccountDeletionAccessRequestV1(input);
@@ -423,7 +419,7 @@ export class DeploymentPolicy extends DurableObject<Record<string, never>> {
       if (request.email !== undefined) {
         this.kv.delete(INVITATION_PREFIX + request.email);
       }
-      forgetInboundEmailUserV1(this.kv, request.userId);
+      releaseEmailUsernameV1(this.kv, request.userId);
     });
     return { schemaVersion: 1 };
   }

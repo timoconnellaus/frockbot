@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_native/client/transport.dart';
 import 'package:frockbot_native/email/page.dart';
+import 'package:frockbot_native/email/username.dart';
 import 'package:frockbot_native/shell/semantics.dart';
 import 'package:frockbot_native/shell/transcript.dart';
 import 'package:frockbot_native/theme/frock_theme.dart';
@@ -10,22 +11,36 @@ import 'package:frockbot_native/theme/frock_theme.dart';
 import 'settings_test.dart' show SettingsApi;
 import 'widget_test.dart' show MemoryStore;
 
-const _address = 'abcdefghijklmnopqrstuvwxyz@in.frock.test';
+const _address = 'fox.tim@frock.test';
 
 /// The shape `inboundEmailViewV1` answers, by hand, so the page is pinned to
 /// the server's contract.
 Map<String, Object?> view({
   bool available = true,
-  String? address,
+  String? username = 'tim',
+  bool receiving = false,
   List<Map<String, Object?>> senders = const [
     {'address': 'tim@example.com', 'status': 'sign-in'},
   ],
 }) => {
   'schemaVersion': 1,
   'available': available,
-  'address': ?address,
+  'username': ?username,
+  'address': ?(available && username != null
+      ? 'fox.$username@frock.test'
+      : null),
+  'receiving': receiving,
   'senders': senders,
 };
+
+/// What `GET /api/email/username` answers.
+Map<String, Object?> usernameView({String? username, bool available = true}) =>
+    {
+      'schemaVersion': 1,
+      'available': available,
+      if (available) 'domain': 'frock.test',
+      'username': ?username,
+    };
 
 Finder byId(String id) => find.bySemanticsIdentifier(id);
 
@@ -40,13 +55,17 @@ Future<void> pumpPage(WidgetTester tester, SettingsApi api) async {
 }
 
 void main() {
-  testWidgets('makes the Bot an address, and copies it', (tester) async {
+  testWidgets('turns the Bot’s email on, and copies its address', (
+    tester,
+  ) async {
     final calls = <List<Object?>>[];
-    String? address;
+    var receiving = false;
     final api = SettingsApi(MemoryStore(), (path, body) async {
       calls.add([path, body]);
-      if (path == '/api/bots/fox/email/address') address = _address;
-      return view(address: address);
+      if (path == '/api/bots/fox/email/switch') {
+        receiving = (body as Map)['receiving'] == true;
+      }
+      return view(receiving: receiving);
     });
     final copied = <String>[];
     tester.binding.defaultBinaryMessenger.setMockMethodCallHandler(
@@ -59,15 +78,18 @@ void main() {
       },
     );
     await pumpPage(tester, api);
-    expect(find.text('This Bot has no email address yet.'), findsOneWidget);
+    expect(find.text(_address), findsOneWidget);
+    expect(find.text('Mail to this address is refused'), findsOneWidget);
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isFalse);
 
-    await tester.tap(find.text('Create address'));
+    await tester.tap(byId(EmailIds.receiving));
     await tester.pumpAndSettle();
     expect(calls.last, [
-      '/api/bots/fox/email/address',
-      {'action': 'create'},
+      '/api/bots/fox/email/switch',
+      {'receiving': true},
     ]);
-    expect(find.text(_address), findsOneWidget);
+    expect(tester.widget<Switch>(find.byType(Switch)).value, isTrue);
+    expect(find.text('Mail to this address reaches the Bot'), findsOneWidget);
 
     await tester.tap(find.text('Copy'));
     await tester.pumpAndSettle();
@@ -77,33 +99,48 @@ void main() {
     api.close();
   });
 
-  testWidgets('asks before a new address makes the old one stop working', (
-    tester,
-  ) async {
-    final posted = <Object?>[];
-    final api = SettingsApi(MemoryStore(), (path, body) async {
-      if (body != null) posted.add(body);
-      return view(address: _address);
-    });
-    await pumpPage(tester, api);
+  testWidgets(
+    'without a username there is no address, and it says where to choose one',
+    (tester) async {
+      String? username;
+      final posted = <List<Object?>>[];
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        if (path == '/api/email/username') {
+          if (body != null) {
+            posted.add([path, body]);
+            username = (body as Map)['username'] as String?;
+          }
+          return usernameView(username: username);
+        }
+        return view(username: username);
+      });
+      await pumpPage(tester, api);
+      expect(byId(EmailIds.noUsername), findsOneWidget);
+      expect(find.text('Copy'), findsNothing);
 
-    await tester.tap(find.text('New address'));
-    await tester.pumpAndSettle();
-    expect(find.text('Get a new address?'), findsOneWidget);
-    await tester.tap(find.text('Cancel'));
-    await tester.pumpAndSettle();
-    expect(posted, isEmpty);
+      await tester.tap(find.text('Choose a username'));
+      await tester.pumpAndSettle();
+      expect(byId(EmailIds.usernamePage), findsOneWidget);
+      await tester.enterText(find.byType(TextField), 'Tim');
+      await tester.pumpAndSettle();
+      expect(find.textContaining('fox.tim@frock.test'), findsOneWidget);
+      // The first username changes no address, so nothing asks first.
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(posted, [
+        [
+          '/api/email/username',
+          {'username': 'tim'},
+        ],
+      ]);
 
-    await tester.tap(find.text('New address'));
-    await tester.pumpAndSettle();
-    await tester.tap(find.widgetWithText(FilledButton, 'New address'));
-    await tester.pumpAndSettle();
-    expect(posted, [
-      {'action': 'rotate'},
-    ]);
-    await tester.pumpWidget(const SizedBox());
-    api.close();
-  });
+      await tester.pageBack();
+      await tester.pumpAndSettle();
+      expect(find.text(_address), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+      api.close();
+    },
+  );
 
   testWidgets('adds a sender and shows the code to send back from it', (
     tester,
@@ -133,7 +170,7 @@ void main() {
           ];
         }
       }
-      return view(address: _address, senders: senders);
+      return view(senders: senders);
     });
     await pumpPage(tester, api);
     expect(find.text('The address you sign in with'), findsOneWidget);
@@ -175,7 +212,7 @@ void main() {
           409,
         );
       }
-      return view(address: _address);
+      return view();
     });
     await pumpPage(tester, api);
     await tester.enterText(find.byType(TextField), 'one@more.example');
@@ -198,10 +235,113 @@ void main() {
     );
     await pumpPage(tester, api);
     expect(find.text('Email isn’t set up on this deployment.'), findsOneWidget);
-    expect(find.text('Create address'), findsNothing);
+    expect(find.byType(Switch), findsNothing);
     expect(byId(EmailIds.unavailable), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     api.close();
+  });
+
+  group('the account’s username', () {
+    Future<void> pumpUsername(WidgetTester tester, SettingsApi api) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: FrockTheme.theme(Brightness.dark),
+          home: EmailUsernamePage(api: api),
+        ),
+      );
+      await tester.pumpAndSettle();
+    }
+
+    testWidgets('asks before a change moves every Bot’s address', (
+      tester,
+    ) async {
+      var username = 'tim';
+      final posted = <Object?>[];
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        if (body != null) {
+          posted.add(body);
+          username = (body as Map)['username'] as String;
+        }
+        return usernameView(username: username);
+      });
+      await pumpUsername(tester, api);
+      expect(
+        tester.widget<TextField>(find.byType(TextField)).controller?.text,
+        'tim',
+      );
+      expect(
+        find.textContaining('changes every Bot’s address'),
+        findsOneWidget,
+      );
+
+      await tester.enterText(find.byType(TextField), 'timo');
+      await tester.pumpAndSettle();
+      expect(find.textContaining('fox.timo@frock.test'), findsOneWidget);
+      await tester.tap(find.text('Change username'));
+      await tester.pumpAndSettle();
+      expect(byId(EmailIds.usernameConfirm), findsOneWidget);
+      expect(find.textContaining('.timo@frock.test'), findsWidgets);
+      await tester.tap(find.text('Cancel'));
+      await tester.pumpAndSettle();
+      expect(posted, isEmpty);
+
+      await tester.tap(find.text('Change username'));
+      await tester.pumpAndSettle();
+      await tester.tap(find.widgetWithText(FilledButton, 'Change'));
+      await tester.pumpAndSettle();
+      expect(posted, [
+        {'username': 'timo'},
+      ]);
+      await tester.pumpWidget(const SizedBox());
+      api.close();
+    });
+
+    testWidgets('says why a username was refused', (tester) async {
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        if (body != null) {
+          throw const RequestFailure(
+            'That username is taken. Choose another.',
+            409,
+          );
+        }
+        return usernameView();
+      });
+      await pumpUsername(tester, api);
+      await tester.enterText(find.byType(TextField), 'tim');
+      await tester.pump();
+      await tester.tap(find.text('Save'));
+      await tester.pumpAndSettle();
+      expect(
+        find.text('That username is taken. Choose another.'),
+        findsOneWidget,
+      );
+      await tester.pumpWidget(const SizedBox());
+      api.close();
+    });
+
+    testWidgets('gives the username up once asked', (tester) async {
+      String? username = 'tim';
+      final posted = <Object?>[];
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        if (body != null) {
+          posted.add(body);
+          username = null;
+        }
+        return usernameView(username: username);
+      });
+      await pumpUsername(tester, api);
+      await tester.tap(find.text('Remove'));
+      await tester.pumpAndSettle();
+      expect(byId(EmailIds.usernameRemoveConfirm), findsOneWidget);
+      await tester.tap(find.widgetWithText(FilledButton, 'Remove'));
+      await tester.pumpAndSettle();
+      expect(posted, [
+        {'username': null},
+      ]);
+      expect(find.text('Remove'), findsNothing);
+      await tester.pumpWidget(const SizedBox());
+      api.close();
+    });
   });
 
   group('a message written by email', () {

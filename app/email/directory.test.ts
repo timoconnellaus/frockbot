@@ -1,96 +1,78 @@
 import { describe, expect, test } from "bun:test";
 import {
-  forgetInboundEmailUserV1,
-  registerInboundAddressV1,
-  releaseInboundAddressV1,
-  resolveInboundAddressV1,
-  type InboundEmailDirectoryKvV1,
+  claimEmailUsernameV1,
+  readEmailUsernameV1,
+  releaseEmailUsernameV1,
+  resolveEmailUsernameV1,
+  type EmailUsernameDirectoryKvV1,
 } from "./directory.ts";
 
-function memoryKv(): InboundEmailDirectoryKvV1 & { keys(): string[] } {
+function memoryKv(): EmailUsernameDirectoryKvV1 & { keys(): string[] } {
   const map = new Map<string, unknown>();
   return {
     get: <T>(key: string) => map.get(key) as T | undefined,
     put: (key, value) => void map.set(key, structuredClone(value)),
     delete: (key) => map.delete(key),
-    list: <T>({ prefix }: { prefix: string }) =>
-      [...map.entries()]
-        .filter(([key]) => key.startsWith(prefix))
-        .sort(([a], [b]) => a.localeCompare(b)) as [string, T][],
     keys: () => [...map.keys()].sort(),
   };
 }
 
-const A = "a".repeat(64);
-const B = "b".repeat(64);
-const C = "c".repeat(64);
-
-describe("the inbound email directory", () => {
-  test("a token's digest names its User and Bot until the Bot's address rotates", () => {
+describe("the email username directory", () => {
+  test("keeps a username to one account", () => {
     const kv = memoryKv();
-    registerInboundAddressV1(kv, {
-      userId: "user-1",
-      botId: "fox",
-      tokenDigest: A,
-    });
-    expect(resolveInboundAddressV1(kv, A)).toEqual({
-      userId: "user-1",
-      botId: "fox",
-    });
-    registerInboundAddressV1(kv, {
-      userId: "user-1",
-      botId: "fox",
-      tokenDigest: B,
-    });
-    expect(resolveInboundAddressV1(kv, A)).toBeUndefined();
-    expect(resolveInboundAddressV1(kv, B)).toEqual({
-      userId: "user-1",
-      botId: "fox",
-    });
+    expect(
+      claimEmailUsernameV1(kv, { userId: "user-1", username: "tim" }),
+    ).toEqual({ status: "claimed" });
+    expect(
+      claimEmailUsernameV1(kv, { userId: "user-2", username: "tim" }),
+    ).toEqual({ status: "taken" });
+    expect(resolveEmailUsernameV1(kv, "tim")).toBe("user-1");
+    expect(readEmailUsernameV1(kv, "user-2")).toBeUndefined();
+    // Claiming the one already held changes nothing.
+    expect(
+      claimEmailUsernameV1(kv, { userId: "user-1", username: "tim" }),
+    ).toEqual({ status: "claimed" });
+    expect(readEmailUsernameV1(kv, "user-1")).toBe("tim");
   });
 
-  test("releasing a Bot's address forgets it, and only its own", () => {
+  test("a change releases the old username in the same write", () => {
     const kv = memoryKv();
-    registerInboundAddressV1(kv, { userId: "u", botId: "fox", tokenDigest: A });
-    registerInboundAddressV1(kv, { userId: "u", botId: "owl", tokenDigest: B });
-    expect(releaseInboundAddressV1(kv, { userId: "u", botId: "fox" })).toBe(
-      true,
-    );
-    expect(resolveInboundAddressV1(kv, A)).toBeUndefined();
-    expect(resolveInboundAddressV1(kv, B)).toEqual({
-      userId: "u",
-      botId: "owl",
-    });
-    expect(releaseInboundAddressV1(kv, { userId: "u", botId: "fox" })).toBe(
-      false,
-    );
+    claimEmailUsernameV1(kv, { userId: "user-1", username: "tim" });
+    claimEmailUsernameV1(kv, { userId: "user-1", username: "timo" });
+    expect(resolveEmailUsernameV1(kv, "tim")).toBeUndefined();
+    expect(resolveEmailUsernameV1(kv, "timo")).toBe("user-1");
+    expect(
+      claimEmailUsernameV1(kv, { userId: "user-2", username: "tim" }),
+    ).toEqual({ status: "claimed" });
+    expect(kv.keys()).toEqual([
+      "email:user:v1:user-1",
+      "email:user:v1:user-2",
+      "email:username:v1:tim",
+      "email:username:v1:timo",
+    ]);
   });
 
-  test("a deleted account's addresses go, and no one else's", () => {
+  test("releasing leaves nothing behind, and a taken claim leaves the old one", () => {
     const kv = memoryKv();
-    registerInboundAddressV1(kv, {
-      userId: "google:1",
-      botId: "fox",
-      tokenDigest: A,
-    });
-    registerInboundAddressV1(kv, {
-      userId: "google:1",
-      botId: "owl",
-      tokenDigest: B,
-    });
-    // A User id that the first one is a prefix of.
-    registerInboundAddressV1(kv, {
-      userId: "google:10",
-      botId: "fox",
-      tokenDigest: C,
-    });
-    forgetInboundEmailUserV1(kv, "google:1");
-    expect(resolveInboundAddressV1(kv, A)).toBeUndefined();
-    expect(resolveInboundAddressV1(kv, B)).toBeUndefined();
-    expect(resolveInboundAddressV1(kv, C)).toEqual({
-      userId: "google:10",
-      botId: "fox",
-    });
-    expect(kv.keys().filter((key) => key.includes("google:1/"))).toEqual([]);
+    claimEmailUsernameV1(kv, { userId: "user-1", username: "tim" });
+    claimEmailUsernameV1(kv, { userId: "user-2", username: "ada" });
+    expect(
+      claimEmailUsernameV1(kv, { userId: "user-2", username: "tim" }),
+    ).toEqual({ status: "taken" });
+    expect(readEmailUsernameV1(kv, "user-2")).toBe("ada");
+    releaseEmailUsernameV1(kv, "user-1");
+    releaseEmailUsernameV1(kv, "user-2");
+    releaseEmailUsernameV1(kv, "user-3");
+    expect(kv.keys()).toEqual([]);
+  });
+
+  test("refuses to store a username out of shape", () => {
+    const kv = memoryKv();
+    for (const username of ["ti", "Tim", "fox.tim", "tim-", "abuse"]) {
+      expect(() =>
+        claimEmailUsernameV1(kv, { userId: "user-1", username }),
+      ).toThrow();
+    }
+    expect(kv.keys()).toEqual([]);
   });
 });

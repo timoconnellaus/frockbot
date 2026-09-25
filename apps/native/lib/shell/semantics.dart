@@ -468,18 +468,17 @@ abstract final class MachineIds {
   static const pairingDismiss = 'machine-pairing-dismiss';
 }
 
-/// Email: one Bot's inbound address, and the addresses allowed to write to it.
+/// Email: one Bot's switch and address, the addresses allowed to write to it,
+/// and the account's username.
 abstract final class EmailIds {
   static const settingsRow = 'bot-email';
   static const page = 'bot-email-page';
   static const unavailable = 'bot-email-unavailable';
   static const address = 'bot-email-address';
-  static const create = 'bot-email-create';
   static const copy = 'bot-email-copy';
-  static const rotate = 'bot-email-rotate';
-  static const rotateConfirm = 'bot-email-rotate-confirm';
-  static const remove = 'bot-email-remove';
-  static const removeConfirm = 'bot-email-remove-confirm';
+  static const receiving = 'bot-email-receiving';
+  static const noUsername = 'bot-email-no-username';
+  static const chooseUsername = 'bot-email-choose-username';
   static const senderField = 'bot-email-sender-field';
   static const senderAdd = 'bot-email-sender-add';
   static const check = 'bot-email-check';
@@ -489,6 +488,16 @@ abstract final class EmailIds {
   static String senderRenew(String address) =>
       'bot-email-sender-renew-$address';
   static String code(String address) => 'bot-email-code-$address';
+
+  // The account's username, on its own page under Account.
+  static const profileEntry = 'profile-email-username';
+  static const usernamePage = 'email-username-page';
+  static const usernameField = 'email-username-field';
+  static const usernamePreview = 'email-username-preview';
+  static const usernameSave = 'email-username-save';
+  static const usernameConfirm = 'email-username-confirm';
+  static const usernameRemove = 'email-username-remove';
+  static const usernameRemoveConfirm = 'email-username-remove-confirm';
 }
 
 /// Audit: every effect a Bot performed, and what the log can and cannot say.

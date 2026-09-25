@@ -1,109 +1,96 @@
-// The deployment's inbound email directory: which User and Bot an address
-// token names.
+// The deployment's email usernames: which User each one belongs to.
 //
 // Email Routing hands every message for the deployment's domain to one
-// handler, naming only the recipient. A User Durable Object is addressed by
-// User, so something deployment-wide has to answer "whose is this?" first.
-// That is this directory, kept by the singleton `DeploymentPolicy` object
-// inside one synchronous transaction per call. It is an index, not the
-// authority: the User's own object holds each Bot's address and checks the
-// token again, so an entry this directory kept too long only ever costs a
-// refusal.
-//
-// A token is stored as its digest, never as itself.
+// handler, naming only the recipient, `<bot-slug>.<username>@<domain>`. A User
+// Durable Object is addressed by User, so something deployment-wide has to
+// answer "whose username is this?" first — and has to keep a username to one
+// account. That is this directory, kept by the singleton `DeploymentPolicy`
+// object inside one synchronous transaction per call, so two accounts
+// claiming one name are serialized rather than reconciled. Which Bot a slug
+// names is the User's own object's to say.
+
+import { isEmailUsernameV1 } from "./shared.js";
 
 /** The synchronous key-value half of SQLite-backed Durable Object storage. */
-export interface InboundEmailDirectoryKvV1 {
+export interface EmailUsernameDirectoryKvV1 {
   get<T>(key: string): T | undefined;
   put(key: string, value: unknown): void;
   delete(key: string): boolean;
-  list<T>(options: { prefix: string }): Iterable<[string, T]>;
 }
 
-const ADDRESS_PREFIX = "email:address:v1:";
-/**
- * Each Bot's digest the other way round, so a rotation can retire the old
- * one and a deleted account's entries can be found by User. A User id may
- * hold `:`, never `/`.
- */
-const BOT_PREFIX = "email:bot:v1:";
+const USERNAME_PREFIX = "email:username:v1:";
+/** Each User's username the other way round, so a change can release it. */
+const USER_PREFIX = "email:user:v1:";
 
-interface StoredAddressV1 {
+interface StoredUsernameV1 {
   schemaVersion: 1;
   userId: string;
-  botId: string;
 }
 
-function userPrefix(userId: string): string {
-  return `${BOT_PREFIX}${userId}/`;
-}
-
-function botKey(userId: string, botId: string): string {
-  return `${userPrefix(userId)}${botId}`;
-}
-
-function storedAddress(value: unknown): StoredAddressV1 | undefined {
-  const address = value as StoredAddressV1 | undefined;
-  return address?.schemaVersion === 1 &&
-    typeof address.userId === "string" &&
-    typeof address.botId === "string"
-    ? address
+function storedUsername(value: unknown): StoredUsernameV1 | undefined {
+  const held = value as StoredUsernameV1 | undefined;
+  return held?.schemaVersion === 1 && typeof held.userId === "string"
+    ? held
     : undefined;
 }
 
-/** This Bot's address is now this digest; the one before it stops working. */
-export function registerInboundAddressV1(
-  kv: InboundEmailDirectoryKvV1,
-  entry: { userId: string; botId: string; tokenDigest: string },
-): void {
-  releaseInboundAddressV1(kv, entry);
-  kv.put(ADDRESS_PREFIX + entry.tokenDigest, {
-    schemaVersion: 1,
-    userId: entry.userId,
-    botId: entry.botId,
-  } satisfies StoredAddressV1);
-  kv.put(botKey(entry.userId, entry.botId), entry.tokenDigest);
-}
+export type EmailUsernameClaimV1 = { status: "claimed" } | { status: "taken" };
 
-/** This Bot has no address any more. */
-export function releaseInboundAddressV1(
-  kv: InboundEmailDirectoryKvV1,
-  entry: { userId: string; botId: string },
-): boolean {
-  const key = botKey(entry.userId, entry.botId);
-  const digest = kv.get<string>(key);
-  if (typeof digest !== "string") return false;
-  const held = storedAddress(kv.get(ADDRESS_PREFIX + digest));
-  if (held?.userId === entry.userId && held.botId === entry.botId) {
-    kv.delete(ADDRESS_PREFIX + digest);
+/**
+ * This User's username is now `username`, unless another account holds it.
+ * The one they held before is released in the same write; claiming the one
+ * they hold already changes nothing.
+ */
+export function claimEmailUsernameV1(
+  kv: EmailUsernameDirectoryKvV1,
+  claim: { userId: string; username: string },
+): EmailUsernameClaimV1 {
+  if (!isEmailUsernameV1(claim.username)) {
+    throw new Error("email username is invalid");
   }
-  kv.delete(key);
-  return true;
-}
-
-/** The User and Bot a token's digest names, if any. */
-export function resolveInboundAddressV1(
-  kv: InboundEmailDirectoryKvV1,
-  tokenDigest: string,
-): { userId: string; botId: string } | undefined {
-  const held = storedAddress(kv.get(ADDRESS_PREFIX + tokenDigest));
-  return held ? { userId: held.userId, botId: held.botId } : undefined;
+  const holder = storedUsername(kv.get(USERNAME_PREFIX + claim.username));
+  if (holder && holder.userId !== claim.userId) return { status: "taken" };
+  releaseEmailUsernameV1(kv, claim.userId);
+  kv.put(USERNAME_PREFIX + claim.username, {
+    schemaVersion: 1,
+    userId: claim.userId,
+  } satisfies StoredUsernameV1);
+  kv.put(USER_PREFIX + claim.userId, claim.username);
+  return { status: "claimed" };
 }
 
 /**
- * Everything the directory holds for a User. Deleting an account ends here,
- * so a deleted User's addresses are simply addresses nobody has.
+ * This User has no username any more, and anyone may take the one they had.
+ * Deleting an account ends here too.
  */
-export function forgetInboundEmailUserV1(
-  kv: InboundEmailDirectoryKvV1,
+export function releaseEmailUsernameV1(
+  kv: EmailUsernameDirectoryKvV1,
   userId: string,
 ): void {
-  const keys = [...kv.list<string>({ prefix: userPrefix(userId) })];
-  for (const [key, digest] of keys) {
-    if (typeof digest === "string") {
-      const held = storedAddress(kv.get(ADDRESS_PREFIX + digest));
-      if (held?.userId === userId) kv.delete(ADDRESS_PREFIX + digest);
-    }
-    kv.delete(key);
+  const username = kv.get<string>(USER_PREFIX + userId);
+  if (typeof username === "string") {
+    const holder = storedUsername(kv.get(USERNAME_PREFIX + username));
+    if (holder?.userId === userId) kv.delete(USERNAME_PREFIX + username);
   }
+  kv.delete(USER_PREFIX + userId);
+}
+
+/** The User a username belongs to, if anyone's. */
+export function resolveEmailUsernameV1(
+  kv: EmailUsernameDirectoryKvV1,
+  username: string,
+): string | undefined {
+  return storedUsername(kv.get(USERNAME_PREFIX + username))?.userId;
+}
+
+/** A User's username, if they chose one. */
+export function readEmailUsernameV1(
+  kv: EmailUsernameDirectoryKvV1,
+  userId: string,
+): string | undefined {
+  const username = kv.get<string>(USER_PREFIX + userId);
+  return typeof username === "string" &&
+    storedUsername(kv.get(USERNAME_PREFIX + username))?.userId === userId
+    ? username
+    : undefined;
 }
