@@ -284,7 +284,7 @@ class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
     icon: icon,
   );
 
-  /// The Bot's name, with what it is doing and its title under it. Where the
+  /// The Bot's name, with what it is doing under it. Where the
   /// shell opens the Bot page from the name, the name is that door.
   Widget _overlayName(BuildContext context) {
     final status = chatHeaderStatusFor(connection, working: working);
