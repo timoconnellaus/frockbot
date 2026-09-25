@@ -8,7 +8,7 @@ import {
   groupReplyDecisionOfV1,
   reviewGroupReplyV1,
 } from "../evals/group-reply.js";
-import { createJevClientV1 } from "./jev.js";
+import { hostedJevClientV1, type createJevClientV1 } from "./jev.js";
 
 /**
  * The hosted judge. A failure or a timeout asks nobody extra and lets a
@@ -45,9 +45,7 @@ export function createHostedGroupReplyJudgeV1(
   env: Record<string, string | undefined>,
   fetch?: Fetch,
 ): GroupReplyJudgeV1 {
-  const apiKey = (env.JEV_API_KEY ?? "").trim();
-  if (!apiKey) return createUnavailableGroupReplyJudgeV1();
-  return createJevGroupReplyJudgeV1({
-    client: createJevClientV1({ apiKey, fetch }),
-  });
+  const client = hostedJevClientV1(env, fetch);
+  if (!client) return createUnavailableGroupReplyJudgeV1();
+  return createJevGroupReplyJudgeV1({ client });
 }

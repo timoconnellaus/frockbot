@@ -19,6 +19,14 @@ import {
   type ResponseFormatNoteV1,
   type StructuredOutputFailureV1,
 } from "./structured-output.js";
+import {
+  decodeStepDecisionV1,
+  decodeTurnDirectiveV1,
+  decodeWithheldSendsV1,
+  type StepDecision,
+  type TurnDirective,
+  type WithheldSendV1,
+} from "./turn-supervisor.js";
 
 export interface ToolCall {
   id: string;
@@ -419,6 +427,31 @@ export interface SessionEventMap {
    * they replay as `chat`.
    */
   "turn/admission": { turn: number; turnType: TurnTypeV1 };
+  /**
+   * What Turn supervision decided before the Turn's first model call: the
+   * typed directive with the judge's raw answers, and how long it took.
+   * Written once per Turn, before the request it steers; a resumed Turn reads
+   * it back rather than asking again.
+   */
+  "supervision/turn-start": {
+    turn: number;
+    directive: TurnDirective;
+    latencyMs: number;
+  };
+  /**
+   * What Turn supervision decided about one complete model response, written
+   * once the response is journaled and before any of its calls runs.
+   * `withheld` is the text it kept from the person, word for word: never
+   * posted, and read here.
+   */
+  "supervision/step": {
+    turn: number;
+    step: number;
+    requestId: string;
+    decision: StepDecision;
+    withheld: WithheldSendV1[];
+    latencyMs: number;
+  };
   /**
    * A user-facing send, recorded on the step whose tool call produced it.
    * Row 57b: one send tool carries every typed payload, so the log holds the
@@ -1721,6 +1754,29 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       requireEventKeys(event, keys("turn", "turnType"), "session event");
       turn();
       decodeTurnTypeV1(event.turnType, "session event.turnType");
+      break;
+    case "supervision/turn-start":
+      requireEventKeys(
+        event,
+        keys("turn", "directive", "latencyMs"),
+        "session event",
+      );
+      turn();
+      decodeTurnDirectiveV1(event.directive, "session event.directive");
+      eventInteger(event.latencyMs, "session event.latencyMs", 0);
+      break;
+    case "supervision/step":
+      requireEventKeys(
+        event,
+        keys("turn", "step", "requestId", "decision", "withheld", "latencyMs"),
+        "session event",
+      );
+      turn();
+      step();
+      requestId();
+      decodeStepDecisionV1(event.decision, "session event.decision");
+      decodeWithheldSendsV1(event.withheld, "session event.withheld");
+      eventInteger(event.latencyMs, "session event.latencyMs", 0);
       break;
     case "send/to-user":
       requireEventKeys(
