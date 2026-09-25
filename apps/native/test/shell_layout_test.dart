@@ -809,6 +809,66 @@ void main() {
       },
     );
 
+    testWidgets(
+      'archiving beside a hidden Bot gives the Archived head a node of its own',
+      (tester) async {
+        // The web engine can keep an identifier on a node the framework
+        // reuses, so the Hidden head must not be recycled as the Archived one.
+        var archived = const <String>{};
+        late StateSetter update;
+        await tester.pumpWidget(
+          host(
+            StatefulBuilder(
+              builder: (context, setState) {
+                update = setState;
+                return ShellSidebar(
+                  bots: [
+                    bot('scout', 'Scout'),
+                    bot('rosemary', 'Rosemary'),
+                    bot('atlas', 'Atlas'),
+                  ],
+                  profiles: const {
+                    'atlas': SidebarProfile(hiddenFromSidebar: true),
+                  },
+                  unread: const {},
+                  archived: archived,
+                  activeBotId: null,
+                  focusedBotId: null,
+                  workingBotId: null,
+                  loaded: true,
+                  showHidden: false,
+                  onSelect: (_) {},
+                  onCreateBot: () {},
+                  onSearch: () {},
+                  onProfile: () {},
+                  onWhatsNew: () {},
+                  onMarketplace: () {},
+                  onToggleHidden: () {},
+                  onRetry: () async {},
+                );
+              },
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        final hiddenNode = tester
+            .getSemantics(byIdentifier(ShellIds.sidebarHiddenToggle))
+            .id;
+
+        update(() => archived = const {'rosemary'});
+        await tester.pumpAndSettle();
+        expect(find.text('Archived · 1'), findsOneWidget);
+        expect(
+          tester.getSemantics(byIdentifier(ShellIds.sidebarHiddenToggle)).id,
+          hiddenNode,
+        );
+        expect(
+          tester.getSemantics(byIdentifier(ShellIds.sidebarArchivedToggle)).id,
+          isNot(hiddenNode),
+        );
+      },
+    );
+
     testWidgets('carries a stable identifier per Bot and per control', (
       tester,
     ) async {
