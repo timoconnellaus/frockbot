@@ -1053,7 +1053,7 @@ export function routineSpikeMessageV1(
 ): string {
   const usd = (micros: number) => `US$${(micros / 1_000_000).toFixed(2)}`;
   const times = Math.round(spike.todayMicros / spike.usualMicros);
-  return `"${routineName}" has spent ${usd(spike.todayMicros)} today, about ${times}× its usual ${usd(spike.usualMicros)} a day. You can set a daily limit on the Spending page.`;
+  return `"${routineName}" has spent ${usd(spike.todayMicros)} today, about ${times}× its usual ${usd(spike.usualMicros)} a day. You can set a daily limit under Spending in Billing.`;
 }
 
 export async function readRoutineRecordV1(

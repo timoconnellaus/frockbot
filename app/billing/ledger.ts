@@ -27,7 +27,7 @@ export const CREDIT_EXHAUSTED_REASON_V1 =
  * it: the message about a Routine already names the Routine.
  */
 export const DAILY_LIMIT_REASON_V1 =
-  "It reached its daily spending limit and is paused until midnight. You can raise the limit on the Spending page.";
+  "It reached its daily spending limit and is paused until midnight. You can raise the limit under Spending in Billing.";
 
 export type GrantKind = "included" | "purchased" | "complimentary";
 

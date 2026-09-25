@@ -641,7 +641,7 @@ void creditTests() {
     // Wider, the balance opens Billing beside the rows.
     await tester.tap(credit);
     await tester.pumpAndSettle();
-    expect(find.widgetWithText(AppBar, 'Billing & usage'), findsOneWidget);
+    expect(find.widgetWithText(AppBar, 'Billing'), findsOneWidget);
     expect(identifiedBy(SettingsIds.profileMenu), findsOneWidget);
     await tester.pumpWidget(const SizedBox());
     sessions.clear();
@@ -696,7 +696,7 @@ void creditTests() {
       find.descendant(of: banner, matching: find.text('Open Billing')),
     );
     await tester.pumpAndSettle();
-    expect(find.text('Billing & usage'), findsOneWidget);
+    expect(find.widgetWithText(AppBar, 'Billing'), findsOneWidget);
     // And the Profile says the same, in red.
     await tester.pageBack();
     await tester.pumpAndSettle();

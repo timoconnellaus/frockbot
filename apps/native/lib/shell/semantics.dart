@@ -363,9 +363,17 @@ abstract final class PluginIds {
 /// Where an account's credit went.
 abstract final class SpendingIds {
   static const page = 'spending-page';
-  static const billingEntry = 'billing-spending';
   static const botEntry = 'bot-settings-spending';
   static const routineEntry = 'routine-run-log-spending';
+}
+
+/// Billing: what the account can spend, how to add more, and where it went.
+abstract final class BillingIds {
+  static const balance = 'billing-balance';
+  static const blocked = 'billing-blocked';
+  static const plan = 'billing-plan';
+  static const spending = 'billing-spending';
+  static const prices = 'billing-prices';
 }
 
 /// Routines: what a Bot does on its own, and what it left behind.
