@@ -139,17 +139,6 @@ import {
   type AuditQueryV1,
 } from "@frockbot/app/audit";
 import {
-  decodeTemplateImportListViewV1,
-  decodeTemplateImportRecordV1,
-  decodeTemplateShareListViewV1,
-  decodeTemplateShareReceiptV1,
-  type TemplateCommandV1,
-} from "@frockbot/app/bot-template/shared";
-import {
-  parseTemplateShareIdV1,
-  type TemplateVisibilityV1,
-} from "@frockbot/core/template";
-import {
   accessEmailV1,
   ADMISSION_REFUSAL_COPY_V1,
   decodeAccountAdmissionDecisionV1,
@@ -772,11 +761,6 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
     getConnection: (request) => rpc.getConnection(request),
     leaseModelCredential: (request) => rpc.leaseModelCredential(request),
     settleModelCredential: (request) => rpc.settleModelCredential(request),
-    listTemplateShares: (request) => rpc.listTemplateShares(request),
-    executeTemplateCommand: (request) => rpc.executeTemplateCommand(request),
-    resolveTemplateShare: (request) => rpc.resolveTemplateShare(request),
-    listTemplateImports: (request) => rpc.listTemplateImports(request),
-    executeTemplateImport: (request) => rpc.executeTemplateImport(request),
   };
 }
 
@@ -1795,52 +1779,6 @@ async function openOwnedBotStateChannel(
   );
 }
 
-/**
- * One published template, for the unauthenticated `GET /templates/v1/:shareId`.
- *
- * The share id names its owner, so the route needs no index and no lookup
- * table: it derives the one User Durable Object that could answer, and that
- * object refuses a `private` or revoked share exactly as it refuses one it has
- * never heard of. A malformed id is `undefined` here, so it is a 404 at the
- * route rather than an error a prober could tell apart.
- */
-async function readPublishedTemplate(
-  env: Env,
-  shareId: string,
-): Promise<
-  | { hash: string; visibility: TemplateVisibilityV1; document: string }
-  | undefined
-> {
-  let ownerId: string;
-  try {
-    ownerId = parseTemplateShareIdV1(shareId).ownerId;
-  } catch {
-    return undefined;
-  }
-  const answered = await userConfigurationStub(
-    env,
-    ownerId,
-  ).resolveTemplateShare({ schemaVersion: 1, shareId });
-  // A share that is missing, private, or revoked all answer the same way, and
-  // that answer is not a JSON value, so it is checked before the snapshot.
-  if (answered === undefined || answered === null) return undefined;
-  const found = rpcJsonSnapshotV1(answered);
-  if (!found || typeof found !== "object") return undefined;
-  const value = found as Record<string, unknown>;
-  if (
-    typeof value.hash !== "string" ||
-    typeof value.document !== "string" ||
-    (value.visibility !== "link" && value.visibility !== "public")
-  ) {
-    return undefined;
-  }
-  return {
-    hash: value.hash,
-    visibility: value.visibility,
-    document: value.document,
-  };
-}
-
 interface RuntimeExports {
   UserBotState(options: { props: UserScopedProps }): RpcBoundary<UserBotState>;
 }
@@ -1977,49 +1915,6 @@ const createGatewayBackendContributions = (env: Env) =>
         ),
       );
     },
-    listTemplateShares: async (userId: string) =>
-      decodeTemplateShareListViewV1(
-        rpcJsonSnapshotV1(
-          await userConfigurationStub(env, userId).listTemplateShares({
-            schemaVersion: 1,
-            userId,
-          }),
-        ),
-      ),
-    executeTemplateCommand: async (
-      userId: string,
-      command: TemplateCommandV1,
-    ) =>
-      decodeTemplateShareReceiptV1(
-        rpcJsonSnapshotV1(
-          await userConfigurationStub(env, userId).executeTemplateCommand({
-            schemaVersion: 1,
-            userId,
-            command,
-          }),
-        ),
-      ),
-    readPublishedTemplate: (shareId: string) =>
-      readPublishedTemplate(env, shareId),
-    listTemplateImports: async (userId: string) =>
-      decodeTemplateImportListViewV1(
-        rpcJsonSnapshotV1(
-          await userConfigurationStub(env, userId).listTemplateImports({
-            schemaVersion: 1,
-            userId,
-          }),
-        ),
-      ),
-    executeTemplateImport: async (userId: string, command: TemplateCommandV1) =>
-      decodeTemplateImportRecordV1(
-        rpcJsonSnapshotV1(
-          await userConfigurationStub(env, userId).executeTemplateImport({
-            schemaVersion: 1,
-            userId,
-            command,
-          }),
-        ),
-      ),
     listBots: async (userId) =>
       decodeDirectoryViewV1(
         rpcJsonSnapshotV1(

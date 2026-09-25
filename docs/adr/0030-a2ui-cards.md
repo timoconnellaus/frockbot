@@ -5,6 +5,10 @@ Status: proposed, 2026-09-17. Numbered after ADR 0029 (PR #537); nothing on
 2026-09-17 discussion; the shapes below are the proposal that discussion asked
 for.
 
+> **Note, 2026-09-25.** Bot templates were removed, and with them the
+> Bot-template card that step 7 counts among the first-party draws. They will
+> return as "Share a Bot", a link from the Bot itself.
+
 ## Context
 
 A Bot that drafts an email has to show the draft — who it is to, who is

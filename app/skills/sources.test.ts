@@ -69,8 +69,6 @@ describe("the managed Skill source", () => {
     expect(loaded.refusals).toEqual([]);
     expect(loaded.skills.map((skill) => skill.ref?.slug)).toEqual([
       "add-connector",
-      "export-bot-template",
-      "import-bot-template",
       "write-skill",
       "plugins",
       "a2ui",
@@ -391,8 +389,6 @@ describe("a Turn's whole catalog", () => {
 
     expect(catalog.current().skills.map((skill) => skill.ref?.source)).toEqual([
       "bot",
-      "managed",
-      "managed",
       "managed",
       "managed",
       "managed",

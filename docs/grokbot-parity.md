@@ -525,7 +525,7 @@ primary-source evidence, the Package proposed to own it, and status against `doc
 | 3   | Bot deletion is a user-only permanent UI action; no archive, no hide                                                                                                                                                                                            | sidebar right-click → Delete, removes transcript                                                                                                                   | §2A                | `plugin-flock` + settings UI                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      | divergent                                           |
 | 4   | Per-Bot settings: `hidden_from_sidebar` (still reachable by palette), `notify_on_updates`                                                                                                                                                                       | `update_state settings set` → `settings.json`                                                                                                                      | §2.18              | `plugin-settings`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | landed                                              |
 | 5   | Per-Bot avatar set from a file on disk or cleared; self-rename announced, provenance recorded                                                                                                                                                                   | `update_state avatar`; `profile.json.namedBy`                                                                                                                      | §2.2, §2.18        | `plugin-flock`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                    | divergent                                           |
-| 6   | Export/import a Bot as a shareable template: scrubbed prose, visibility scope, review card                                                                                                                                                                      | `export-bot-template` + `create_bot_share_json`; `import-bot-template`                                                                                             | §2.11, §2A         | `plugin-bot-template`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                             | landed                                              |
+| 6   | Export/import a Bot as a shareable template: scrubbed prose, visibility scope, review card                                                                                                                                                                      | `export-bot-template` + `create_bot_share_json`; `import-bot-template`                                                                                             | §2.11, §2A         | Removed 2026-09-25; returns as "Share a Bot", a link from the Bot                                                                                                                                                                                                                                                                                                                                                                                                                                                                 | not started                                         |
 | 7   | **Memory** — profile tier: enduring facts, one per line, injected every turn                                                                                                                                                                                    | `agents/<id>/memory/profile.md`                                                                                                                                    | §5, §2.2           | `plugin-memory`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | landed                                              |
 | 8   | Log tier: dated monthly file, `- (YYYY-MM-DD) <fact>`, read on demand rather than injected                                                                                                                                                                      | `memory/log/YYYY-MM.md`                                                                                                                                            | §2.2, §2.3         | `plugin-memory`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | landed                                              |
 | 9   | Note tier that "fades fast" and is excluded from exports; fact dedupe on write; `forget` by exact text                                                                                                                                                          | `tier: note`; `update_state memory write`/`forget`                                                                                                                 | §2.2, §2.11        | `plugin-memory`                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   | landed                                              |
@@ -703,20 +703,11 @@ the rows whose status the code moved:
   This row is therefore deliberately divergent only on GrokBot's file-avatar
   behavior.
 
-- **6** — landed, with the departures recorded in ADR 0015 rather than here.
-  `BotTemplateV1` matches GrokBot's share document section for section except
-  that **`memory[]` does not exist**: a template crosses to a stranger and
-  there is no scrub that makes a User's remembered facts safe, so
-  `decodeBotTemplateV1` refuses a document carrying `memory` and the export
-  path never reads a Memory root. A marketplace `pluginId` becomes
-  `packageId` + `version` resolved against the importing deployment's own
-  compiled-in Packages, and visibility is a User click on a revocable
-  share record rather than a tool argument, because publication beyond the
-  authoring User is a User act. Export is `bot_export_template` staging at
-  `visibility: "private"` and reporting an `agent-card`; import is a review
-  card the User confirms before anything is written
-  (`plugin-bot-template/src/{scrub,import}.ts`,
-  `apps/native/lib/templates/page.dart`).
+- **6** — not started. Bot templates were removed on 2026-09-25: the export
+  tool, the share records, the import and the templates page are gone. Sharing
+  a Bot returns as "Share a Bot", a link on the Bot itself, built fresh. A
+  shared Bot still carries no Memory: there is no scrub that makes a User's
+  remembered facts safe for a stranger.
 - **7** — landed. `profile.md` per shard (`plugin-memory/src/roots.ts`) is
   read and rendered on every Turn by `renderMemoryPromptV1`
   (`plugin-memory/src/render.ts`) under GrokBot's own caps — own 200/30,
@@ -731,10 +722,7 @@ the rows whose status the code moved:
   tier is accepted and stored (`[note] ` prefix into the monthly log,
   `plugin-memory/src/agent.ts`), dedupe-on-write and forget-by-exact-text are
   landed and tested, and the export half of the row is satisfied from the other
-  direction: a Bot template carries no Memory at all (ADR 0015,
-  `plugin-bot-template/src/scrub.ts` adds `memory` to the omissions
-  unconditionally and never reads a Memory root), so a note cannot leak into an
-  export because nothing can. The fade is now real: `MEMORY_NOTE_TTL_DAYS = 14`
+  direction: nothing exports a Bot, so a note cannot leak into an export. The fade is now real: `MEMORY_NOTE_TTL_DAYS = 14`
   in `plugin-memory/src/render.ts`, applied at **render time and purely** —
   a marked fact older than the Turn's `noteCutoff` is dropped before any cap,
   so a faded note never occupies a slot a live fact could have used, and the
@@ -842,10 +830,10 @@ connectionId, triggerType }` on a Routine, an instance at the provider, and
   the wider `PendingBotInputV1`; row 53's approval decisions now produce its
   `approval` variant through `enqueuePendingBotInputV1`, inside the caller's own
   transaction — a second producer, never a second queue.
-- **21** — all three halves are landed. **Managed** Skills are six
+- **21** — all three halves are landed. **Managed** Skills are four
   first-party directories compiled into the Skills Package
-  (`app/skills/managed.ts`): `add-connector`, `export-bot-template`,
-  `import-bot-template` and `write-skill`, plus `plugins` and `a2ui`. GrokBot's `learn-from-demonstration` is not shipped: its recipe
+  (`app/skills/managed.ts`): `add-connector` and `write-skill`, plus
+  `plugins` and `a2ui`. GrokBot's `learn-from-demonstration` is not shipped: its recipe
   claims a video from a teach-queue this product does not have. Row 54's
   FrockBot path is `write-skill`'s `demonstration.md` reference instead. They are read-only in the strongest sense — there is no write path to an
   artifact at all, so `skill_write{scope:"managed"}` is refused with GrokBot's

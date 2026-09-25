@@ -13,7 +13,6 @@ import {
 import { adminDefinitionV1 } from "@frockbot/app/admin/definition";
 import { auditDefinitionV1 } from "@frockbot/app/audit/definition";
 import { authDefinitionV1 } from "@frockbot/app/auth/definition";
-import { botTemplateDefinitionV1 } from "@frockbot/app/bot-template/definition";
 import { computerDefinitionV1 } from "@frockbot/computer/definition";
 import { connectDefinitionV1 } from "@frockbot/app/connect/definition";
 import { credentialsDefinitionV1 } from "@frockbot/app/credentials/definition";
@@ -65,7 +64,6 @@ export const FOUNDATION_PACKAGE_CATALOG_V1 = indexPackageCatalogV1(
     providerFlockAiDefinitionV1,
     ...catalogProviderDefinitionsV1,
     flockDefinitionV1,
-    botTemplateDefinitionV1,
     searchDefinitionV1,
     auditDefinitionV1,
     { id: "clock", displayName: "Clock" },
