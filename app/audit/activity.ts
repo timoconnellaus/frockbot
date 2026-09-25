@@ -84,10 +84,11 @@ function isReadToolV1(toolName: string): boolean {
 export function serviceNameV1(target: string): string {
   const where = target.slice(AUDIT_TARGET_REMOTE_PREFIX_V1.length);
   // An unresolved namespace, `mcp-<name>`, still says which server it was.
-  if (where.startsWith("mcp-")) {
+  if (/^mcp-[^.:]+$/.test(where)) {
     return capitalise(where.slice(4).replace(/-/g, " "));
   }
   const host = where.replace(/:\d+$/, "");
+  if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return host;
   const labels = host.split(".").filter((label) => label.length > 0);
   while (labels.length > 2 && HOST_NOISE.has(labels[0]!)) labels.shift();
   return capitalise(labels.length >= 2 ? labels[0]! : host);

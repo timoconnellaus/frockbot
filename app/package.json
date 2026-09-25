@@ -14,7 +14,6 @@
     "./authoring/source-repository": "./authoring/source-repository.ts",
     "./cards/bot": "./cards/bot.ts",
     "./audit": "./audit/index.ts",
-    "./audit/audit-document": "./audit/audit-document.ts",
     "./audit/backend": "./audit/backend.ts",
     "./audit/bot": "./audit/bot.ts",
     "./audit/classify": "./audit/classify.ts",

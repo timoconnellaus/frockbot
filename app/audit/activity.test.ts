@@ -310,6 +310,8 @@ describe("an Activity row", () => {
     expect(serviceNameV1("remote:mcp.notion.com")).toBe("Notion");
     expect(serviceNameV1("remote:api.linear.app")).toBe("Linear");
     expect(serviceNameV1("remote:mcp-google-drive")).toBe("Google drive");
+    expect(serviceNameV1("remote:mcp-proxy.acme.com")).toBe("Mcp-proxy");
+    expect(serviceNameV1("remote:192.168.1.10:3000")).toBe("192.168.1.10");
   });
 
   test("a page names each Bot, and a Bot it cannot name is still a Bot", () => {
