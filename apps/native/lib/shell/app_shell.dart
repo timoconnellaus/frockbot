@@ -2963,7 +2963,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       List<Widget> below = const [],
     }) => ChatHeader(
       name: _name(bot!),
-      subtitle: profiles[bot.botId.value]?.title,
       working: _workingRunId != null,
       companion: companion,
       below: below,
@@ -3321,10 +3320,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
             SearchBot(
               id: bot.botId.value,
               name: _name(bot),
-              description:
-                  profiles[bot.botId.value]?.title ??
-                  bot.initialDescription ??
-                  '',
+              description: bot.initialDescription ?? '',
               background: bot.avatar.characterId,
               primary: bot.avatar.primary,
               unread: activity.unread[bot.botId.value]?.unread == true,

@@ -70,12 +70,6 @@ export const SETTINGS_ANCHORS_V1: readonly SettingsAnchorV1[] = [
   },
   { anchor: "bot-name", surface: "bot-settings", label: "Name", scope: "bot" },
   {
-    anchor: "bot-title",
-    surface: "bot-settings",
-    label: "Title",
-    scope: "bot",
-  },
-  {
     anchor: "bot-pinned",
     surface: "bot-settings",
     label: "Pinned",

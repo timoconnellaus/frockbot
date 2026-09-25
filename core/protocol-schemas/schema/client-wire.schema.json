@@ -4440,10 +4440,6 @@
         "hiddenFromSidebar": {
           "type": "boolean"
         },
-        "title": {
-          "type": "string",
-          "maxLength": 120
-        },
         "pinnedAt": {
           "$ref": "#/$defs/Instant"
         },

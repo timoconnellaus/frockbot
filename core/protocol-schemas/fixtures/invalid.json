@@ -925,6 +925,18 @@
     }
   },
   {
+    "name": "BotIdentity with the retired title",
+    "schema": "BotIdentity",
+    "value": {
+      "schemaVersion": 1,
+      "botId": "default",
+      "name": "Atlas",
+      "namedBy": "user",
+      "hiddenFromSidebar": false,
+      "title": "Chief of staff"
+    }
+  },
+  {
     "name": "bad cursor -1",
     "schema": "StateFrame",
     "value": {

@@ -78,7 +78,7 @@ function toolResult(turn: ClientTurn, name: string): string {
 }
 
 describe("Bot self-management through the gateway", () => {
-  it("renames and retitles itself, and the change reaches the directory and the Session", async () => {
+  it("renames and redescribes itself, and the change reaches the directory and the Session", async () => {
     const userId = freshUserId("bot-self-update");
     const botId = "self-managing-bot";
     await provisionThroughGateway({ userId, botId });
@@ -90,7 +90,7 @@ describe("Bot self-management through the gateway", () => {
       "bot_update",
       {
         name: "Atlas",
-        title: "Chief of staff",
+        description: "Chief of staff",
       },
     );
 
@@ -101,7 +101,6 @@ describe("Bot self-management through the gateway", () => {
       expect.objectContaining({
         botId,
         name: "Atlas",
-        title: "Chief of staff",
         // The provenance says the Bot renamed itself, not its User.
         namedBy: "bot",
       }),

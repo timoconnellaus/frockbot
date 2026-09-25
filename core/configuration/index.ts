@@ -106,8 +106,6 @@ export interface BotSelfWriterV1 {
 export interface BotProfile {
   name: string;
   description?: string;
-  /** A short role line shown under the Bot's name. */
-  title?: string;
   /** Provenance of the current `name`. Absent on records written before it. */
   namedBy?: BotNameProvenanceV1;
   /** Keeps the Bot out of the default sidebar list without archiving it. */
@@ -135,7 +133,6 @@ export interface BotProfile {
 export interface BotProfilePatchV1 {
   name?: string;
   description?: string;
-  title?: string;
   hiddenFromSidebar?: boolean;
   /** An ISO 8601 instant pins the Bot; the empty string unpins it. */
   pinnedAt?: string;
@@ -1179,7 +1176,6 @@ function flag(value: unknown, label: string): boolean {
 
 const BOT_PROFILE_OPTIONAL_FIELDS = [
   "description",
-  "title",
   "namedBy",
   "hiddenFromSidebar",
   "pinnedAt",
@@ -1208,9 +1204,6 @@ function botProfile(value: unknown): BotProfile {
       "profile.description",
       10_000,
     ),
-    ...(profile.title === undefined
-      ? {}
-      : { title: text(profile.title, "profile.title", 120) }),
     ...(profile.namedBy === undefined
       ? {}
       : { namedBy: nameProvenance(profile.namedBy, "profile.namedBy") }),
@@ -1271,11 +1264,12 @@ function botProfilePatch(value: unknown): BotProfilePatchV1 {
     [],
     [
       "name",
-      // Installed apps still send the retired sidebar label on every save. It
-      // is accepted and dropped until those apps have updated.
+      // Installed apps still send the retired sidebar label and title on
+      // every save. They are accepted and dropped until those apps have
+      // updated.
       "label",
-      "description",
       "title",
+      "description",
       "hiddenFromSidebar",
       "pinnedAt",
       "sidebarOrder",
@@ -1284,17 +1278,20 @@ function botProfilePatch(value: unknown): BotProfilePatchV1 {
   if (Reflect.ownKeys(patch).length === 0) {
     throw new ConfigurationDecodeError("profile has invalid fields");
   }
-  const optional = (key: "description" | "title", maximum: number) =>
-    patch[key] === undefined
-      ? {}
-      : { [key]: patchText(patch[key], `profile.${key}`, maximum) };
   return {
     // The name is the one field a partial update may not blank.
     ...(patch.name === undefined
       ? {}
       : { name: text(patch.name, "profile.name", 100) }),
-    ...optional("description", 10_000),
-    ...optional("title", 120),
+    ...(patch.description === undefined
+      ? {}
+      : {
+          description: patchText(
+            patch.description,
+            "profile.description",
+            10_000,
+          ),
+        }),
     ...(patch.hiddenFromSidebar === undefined
       ? {}
       : {
@@ -1339,7 +1336,7 @@ export function applyBotProfilePatchV1(
     next.name = patch.name;
     next.namedBy = namedBy;
   }
-  for (const key of ["description", "title", "pinnedAt"] as const) {
+  for (const key of ["description", "pinnedAt"] as const) {
     const value = patch[key];
     if (value === undefined) continue;
     if (value === "") delete next[key];

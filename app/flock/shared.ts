@@ -241,8 +241,8 @@ export interface StoredFlockReceiptV1 {
  * One Bot's live identity, as the Flock directory surfaces it.
  *
  * The registration seed in the User Durable Object is immutable, so the mutable
- * half of a Bot's identity — the current name, its provenance, a title and
- * whether the sidebar hides it — is read through from the Bot Durable Object
+ * half of a Bot's identity — the current name, its provenance and whether the
+ * sidebar hides it — is read through from the Bot Durable Object
  * that owns it rather than copied into the seed.
  */
 export interface BotIdentityViewV1 {
@@ -251,7 +251,6 @@ export interface BotIdentityViewV1 {
   name: string;
   namedBy: BotNameProvenanceV1;
   hiddenFromSidebar: boolean;
-  title?: string;
   /**
    * When the User pinned this Bot, as an ISO 8601 instant. A pinned Bot is
    * shown as a tile above the list instead of a row inside it, earliest pin
@@ -873,7 +872,7 @@ export function decodeBotIdentityViewV1(input: unknown): BotIdentityViewV1 {
   exact(
     value,
     ["schemaVersion", "botId", "name", "namedBy", "hiddenFromSidebar"],
-    ["title", "pinnedAt", "sidebarOrder"],
+    ["pinnedAt", "sidebarOrder"],
   );
   if (value.schemaVersion !== 1 || typeof value.hiddenFromSidebar !== "boolean")
     throw new FlockDecodeError("Bot identity is invalid");
@@ -883,9 +882,6 @@ export function decodeBotIdentityViewV1(input: unknown): BotIdentityViewV1 {
     name: boundedText(value.name, "name", 100),
     namedBy: nameProvenance(value.namedBy),
     hiddenFromSidebar: value.hiddenFromSidebar,
-    ...(value.title === undefined
-      ? {}
-      : { title: boundedText(value.title, "title", 120) }),
     ...(value.pinnedAt === undefined
       ? {}
       : { pinnedAt: timestampText(value.pinnedAt, "pinnedAt") }),

@@ -210,7 +210,6 @@ describe("Flock v1 contracts", () => {
       name: "Atlas",
       namedBy: "bot" as const,
       hiddenFromSidebar: true,
-      title: "Chief of staff",
     };
     expect(decodeBotIdentityViewV1(structuredClone(identity))).toEqual(
       identity,
@@ -232,6 +231,9 @@ describe("Flock v1 contracts", () => {
     ).toThrow("unknown or missing field");
     expect(() =>
       decodeBotIdentityViewV1({ ...identity, label: "Personal" }),
+    ).toThrow("unknown or missing field");
+    expect(() =>
+      decodeBotIdentityViewV1({ ...identity, title: "Chief of staff" }),
     ).toThrow("unknown or missing field");
     expect(() =>
       decodeBotIdentityDirectoryViewV1({

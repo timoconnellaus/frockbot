@@ -40,7 +40,6 @@ import 'sidebar_order.dart';
 /// The mutable half of a Bot's identity, as the sidebar reads it.
 class SidebarProfile {
   final String? name;
-  final String? title;
   final String? pinnedAt;
   final bool hiddenFromSidebar;
 
@@ -49,7 +48,6 @@ class SidebarProfile {
   final int? sidebarOrder;
   const SidebarProfile({
     this.name,
-    this.title,
     this.pinnedAt,
     this.hiddenFromSidebar = false,
     this.sidebarOrder,
@@ -60,7 +58,6 @@ class SidebarProfile {
     final order = value['sidebarOrder'];
     return SidebarProfile(
       name: value['name'] as String?,
-      title: value['title'] as String?,
       pinnedAt: value['pinnedAt'] as String?,
       hiddenFromSidebar: value['hiddenFromSidebar'] == true,
       sidebarOrder: order is num ? order.toInt() : null,
@@ -72,7 +69,6 @@ class SidebarProfile {
   /// a text field, the way the authority reads it.
   SidebarProfile patched(Map<String, Object?> patch) => SidebarProfile(
     name: patch.containsKey('name') ? patch['name'] as String? : name,
-    title: patch.containsKey('title') ? patch['title'] as String? : title,
     pinnedAt: patch.containsKey('pinnedAt')
         ? patch['pinnedAt'] as String?
         : pinnedAt,
@@ -794,9 +790,7 @@ class ShellSidebar extends StatelessWidget {
             : theme.colorScheme.onSurface,
       ),
       time: at == null || isArchived ? null : formatSidebarMessageTime(at),
-      preview: isArchived
-          ? 'Archived'
-          : preview ?? profiles[botId]?.title ?? 'No messages yet',
+      preview: isArchived ? 'Archived' : preview ?? 'No messages yet',
       previewStyle: theme.textTheme.bodySmall?.copyWith(
         fontSize: 12.5,
         color: isUnread

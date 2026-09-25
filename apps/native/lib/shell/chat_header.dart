@@ -65,14 +65,14 @@ ChatHeaderStatus? chatHeaderStatusFor(
 /// On a call this is still an [AppBar]: the thread is gone, and the bar is
 /// the name, a mark that says why, and the Computer. In a conversation it is
 /// a band above the thread: the Bot's companion, its name with what it is
-/// doing and its title under it, and the conversation's actions on the right.
+/// doing under it, and the conversation's actions on the right.
 /// A phone keeps Back and the panel switch, because the conversation is a
 /// page over the list.
 class ChatHeader extends StatelessWidget implements PreferredSizeWidget {
   final String name;
   final double textScale;
 
-  /// The line under the name: the Bot's title, or who is in a group.
+  /// The line under a group's name: who is in it.
   final String? subtitle;
 
   /// Whether a Turn is running here, which the status line says.
