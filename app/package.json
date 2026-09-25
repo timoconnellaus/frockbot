@@ -283,6 +283,7 @@
     "./supervision/skill-nomination": "./supervision/skill-nomination.ts",
     "./supervision/routine-report": "./supervision/routine-report.ts",
     "./supervision/email-triage": "./supervision/email-triage.ts",
+    "./supervision/page-state": "./supervision/page-state.ts",
     "./supervision/plugin-fit": "./supervision/plugin-fit.ts",
     "./subagents": "./subagents/index.ts",
     "./subagents/agent": "./subagents/agent.ts",

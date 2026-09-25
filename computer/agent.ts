@@ -129,6 +129,56 @@ export interface ComputerWriterIdentityV1 {
   runId: string;
 }
 
+/** What a browser page is showing, as a judge reads it. */
+export type ComputerPageStateV1 =
+  "ready" | "sign_in" | "captcha" | "error" | "loading";
+
+/**
+ * Reads what a page is showing from its address, title and accessibility
+ * snapshot, already redacted. `undefined` when it cannot say.
+ */
+export type ComputerPageJudgeV1 = (
+  page: { url?: string; title?: string; snapshot: string },
+  signal?: AbortSignal,
+) => Promise<ComputerPageStateV1 | undefined>;
+
+const PAGE_STATE_NOTES_V1: Readonly<
+  Record<Exclude<ComputerPageStateV1, "ready">, string>
+> = {
+  sign_in:
+    "State: a sign-in wall. The page wants an account before it shows anything. Fill a saved secret if the person gave you one for this site; otherwise ask them.",
+  captcha:
+    "State: a CAPTCHA or bot check. Do not try to solve or get around it. Tell the person, who can complete it on the Computer.",
+  error:
+    "State: an error page. The site did not show what was asked for; check the address, or try again later.",
+  loading:
+    'State: still loading. Wait ({"action":"wait","milliseconds":1000}) and take a snapshot before acting on it.',
+};
+
+/**
+ * A browser action's result as the model reads it: where the page is, what a
+ * judge says it is showing when that is not the page itself, then the
+ * snapshot.
+ */
+export function browserResultTextV1(input: {
+  url?: string;
+  title?: string;
+  snapshot: string;
+  state?: ComputerPageStateV1;
+}): string {
+  const where = [input.title?.trim(), input.url?.trim()]
+    .filter((part): part is string => !!part)
+    .join(" — ");
+  return [
+    ...(where ? [`Page: ${where}`] : []),
+    ...(input.state && input.state !== "ready"
+      ? [PAGE_STATE_NOTES_V1[input.state]]
+      : []),
+    ...(where || (input.state && input.state !== "ready") ? [""] : []),
+    input.snapshot,
+  ].join("\n");
+}
+
 export interface ComputerAgentPluginConfig {
   userId: string;
   defaultProviderId: string;
@@ -192,6 +242,12 @@ export interface ComputerAgentPluginConfig {
   demonstrations?: ComputerDemonstrationDeletionV1;
   /** Where `plugin_page_try` gets the page it tries. */
   pluginPages?: ComputerPluginPagesSeamV1;
+  /**
+   * Says what each page `computer_browser` lands on is showing: a sign-in
+   * wall, a CAPTCHA, an error, a page still loading. Absent, or when it
+   * cannot say, the result carries the page's address and snapshot alone.
+   */
+  judgePage?: ComputerPageJudgeV1;
 }
 
 /**
@@ -2104,8 +2160,17 @@ export function createComputerAgentFeature(
               const origin = localPreviewOriginV1(action.url);
               if (origin) previewOrigins.add(origin);
             }
+            const page = {
+              ...(result.url ? { url: result.url } : {}),
+              ...(result.title ? { title: result.title } : {}),
+              snapshot: result.accessibilitySnapshot,
+            };
+            const state = await config.judgePage?.(page, context.signal);
             return {
-              content: result.accessibilitySnapshot,
+              content: browserResultTextV1({
+                ...page,
+                ...(state ? { state } : {}),
+              }),
               isError: false,
             };
           });

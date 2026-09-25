@@ -643,6 +643,9 @@ export async function agentRuntime(
               : computerFrameSinkV1(state.ctx.storage),
             // A saved secret is filled only inside a Turn: its Approval's
             // intent names the run that asked, and its lease the call.
+            // A page the browser lands on is named when it is not the page:
+            // a sign-in wall, a CAPTCHA, an error, one still loading.
+            ...(state.pageJudge ? { computerPageJudge: state.pageJudge } : {}),
             computerSecrets: createBotSecretFillSeamV1({
               identity,
               runId: turn.runId,

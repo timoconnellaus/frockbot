@@ -4,6 +4,7 @@ import {
   MEMORY_RECALL_KEEP_MIN_V1,
 } from "../supervision/memory-recall.js";
 import { routineAttributionV1 } from "../routines/inbox.js";
+import { createJevPageJudgeV1 } from "../supervision/page-state.js";
 import { judgeMemoryWriteV1 } from "../supervision/memory-write.js";
 import { createJevEmailTriageJudgeV1 } from "../supervision/email-triage.js";
 import { createJevRoutineReportJudgeV1 } from "../supervision/routine-report.js";
@@ -51,6 +52,14 @@ export type ContextFixtureV1 =
       readonly name: string;
       readonly text: string;
       readonly expected: "quiet" | "loud";
+    }
+  | {
+      readonly kind: "page";
+      readonly name: string;
+      readonly url: string;
+      readonly title: string;
+      readonly snapshot: string;
+      readonly expected: "ready" | "sign_in" | "captcha" | "error" | "loading";
     }
   | {
       readonly kind: "skills";
@@ -117,6 +126,18 @@ export async function runContextCaseV1(
       actual: `${actual}${verdict ? ` (fyi ${verdict.fyi.toFixed(2)})` : ""}`,
     };
   }
+  if (fixture.kind === "page") {
+    const state = await createJevPageJudgeV1(client)({
+      url: fixture.url,
+      title: fixture.title,
+      snapshot: fixture.snapshot,
+    });
+    return {
+      passed: state === fixture.expected,
+      expected: fixture.expected,
+      actual: state ?? "undecided",
+    };
+  }
   if (fixture.kind === "recall") {
     const scores = await judgeMemoryRecallV1(client, {
       request: fixture.request,
@@ -169,6 +190,64 @@ const SKILLS: readonly SkillCandidateV1[] = [
 ];
 
 export const contextFixturesV1: readonly ContextFixtureV1[] = [
+  {
+    kind: "page",
+    name: "page-a-news-article",
+    url: "https://www.abc.net.au/news/2026-09-25/rates-hold",
+    title: "Reserve Bank holds rates steady - ABC News",
+    snapshot: [
+      '- banner:\n  - link "ABC News"\n  - link "Sign in"',
+      '- main:\n  - heading "Reserve Bank holds rates steady" [level=1]',
+      "  - paragraph: The Reserve Bank has left the cash rate unchanged at 3.6 per cent for a third month.",
+      "  - paragraph: Governor Michele Bullock said inflation was easing but remained above target.",
+    ].join("\n"),
+    expected: "ready",
+  },
+  {
+    kind: "page",
+    name: "page-a-sign-in-wall",
+    url: "https://accounts.google.com/v3/signin/identifier?continue=https://mail.google.com",
+    title: "Gmail",
+    snapshot: [
+      '- heading "Sign in" [level=1]',
+      "- text: to continue to Gmail",
+      '- textbox "Email or phone"',
+      '- button "Forgot email?"',
+      '- button "Create account"',
+      '- button "Next"',
+    ].join("\n"),
+    expected: "sign_in",
+  },
+  {
+    kind: "page",
+    name: "page-a-bot-check",
+    url: "https://www.ticketek.com.au/events/coldplay",
+    title: "Just a moment...",
+    snapshot: [
+      '- heading "www.ticketek.com.au" [level=1]',
+      '- heading "Verify you are human by completing the action below." [level=2]',
+      '- checkbox "Verify you are human"',
+      "- text: www.ticketek.com.au needs to review the security of your connection before proceeding.",
+    ].join("\n"),
+    expected: "captcha",
+  },
+  {
+    kind: "page",
+    name: "page-not-found",
+    url: "https://example.com/pricing-2024",
+    title: "404 Not Found",
+    snapshot:
+      '- heading "Not Found" [level=1]\n- paragraph: The requested URL was not found on this server.',
+    expected: "error",
+  },
+  {
+    kind: "page",
+    name: "page-still-loading",
+    url: "https://app.example.com/dashboard",
+    title: "Dashboard",
+    snapshot: '- progressbar "Loading"\n- text: Loading…',
+    expected: "loading",
+  },
   {
     kind: "write",
     name: "write-a-new-preference",

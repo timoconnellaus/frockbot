@@ -334,6 +334,13 @@ were, and neither is enforced.
   (`app/supervision/email-triage.ts`). A message it is sure only passes
   something on (at 0.8) is `quiet` on its email origin, so the Bot's answer
   lands unread and wakes no device. Labelled in `bun run eval:context`.
+- **Browser pages.** After each `computer_browser` action, Jev reads the
+  page's address, title and redacted accessibility snapshot and says what it
+  is showing (`app/supervision/page-state.ts`). A sign-in wall, CAPTCHA,
+  error or page still loading it is sure of (at 0.7) gets a plain line
+  above the snapshot, with what to do. A CAPTCHA is handed to the person,
+  never solved. The result also names the page's title and address, which it
+  used to drop. Labelled in `bun run eval:context`.
 - **Skills.** At the Turn's first request, Jev judges each Skill in a catalog
   of up to 24 against the request, and up to three strong matches are named
   in the tail runtime note (`app/supervision/skill-nomination.ts`). The
