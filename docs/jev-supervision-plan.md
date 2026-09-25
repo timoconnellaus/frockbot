@@ -491,7 +491,8 @@ _Done, enforced._
   opens on such a question, Jev judges whether what the person already said
   answers it or only the person can, recorded as `supervision/question`, and
   the tail note steers the Turn accordingly (`bun run eval:response-review`,
-  33/33 on `jev-1.13.0`).
+  33/33 on `jev-1.13.0` before the `toast-made-punchier` case was added; that
+  case has not yet been run live).
 
 ### 6. Mentor and continuation
 
