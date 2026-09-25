@@ -585,19 +585,22 @@ export class UserConfiguration
     setSpendLimitV1(this.ctx.storage.sql, input.scope, input.dailyMicros);
   }
 
-  /** Whether a Routine's or Bot's daily limit has paused it today. */
+  /**
+   * Whether any of these Routine or Bot limits has paused them today. An
+   * account with no limits answers without reading anything else.
+   */
   async readSpendingPaused(input: {
     userId: string;
-    scope: string;
+    scopes: string[];
   }): Promise<boolean> {
     await this.assertUserIdentity(input.userId);
-    if (!isSpendLimitScopeV1(input.scope)) return false;
     this.billing();
-    return spendScopePausedV1(
-      this.ctx.storage.sql,
-      input.scope,
-      await this.dayStart(input.userId),
-    );
+    const sql = this.ctx.storage.sql;
+    if (readSpendLimitsV1(sql).size === 0) return false;
+    const dayStart = await this.dayStart(input.userId);
+    return input.scopes
+      .filter(isSpendLimitScopeV1)
+      .some((scope) => spendScopePausedV1(sql, scope, dayStart));
   }
 
   /**
@@ -614,9 +617,10 @@ export class UserConfiguration
     const dayStart = await this.dayStart(input.userId);
     const spike = spendSpikeV1(this.ctx.storage.sql, input.scope, dayStart);
     if (!spike) return null;
-    const told = `spike:${input.scope}:${dayStart}`;
-    if (ledger.get<boolean>(told)) return null;
-    ledger.set(told, true);
+    // One key per scope, holding the day it was last told.
+    const told = `spike:${input.scope}`;
+    if (ledger.get<number>(told) === dayStart) return null;
+    ledger.set(told, dayStart);
     return spike;
   }
   /**

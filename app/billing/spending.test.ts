@@ -520,16 +520,32 @@ describe("the Spending rollups", () => {
     expect(
       spendScopePausedV1(db.sql, "routine|bot-1|digest", NOW + 13 * HOUR),
     ).toBe(false);
-    // A Bot's limit stops mail and Routines on that Bot, not its chat.
+    // A Bot's limit counts and stops its background work, never its chat.
     charge(
       "model:e",
       250,
       { runId: "c1", cause: { kind: "chat", botId: "bot-2" } },
-      {
-        botId: "bot-2",
-      },
+      { botId: "bot-2" },
+    );
+    expect(spendScopePausedV1(db.sql, "bot|bot-2", dayStart)).toBe(false);
+    charge(
+      "model:e2",
+      250,
+      { runId: "m0", cause: { kind: "email", botId: "bot-2" } },
+      { botId: "bot-2" },
     );
     expect(spendScopePausedV1(db.sql, "bot|bot-2", dayStart)).toBe(true);
+    // A Plugin's own page is the person in front of it.
+    expect(
+      reserve(
+        "model:p",
+        {
+          cause: { kind: "plugin", botId: "bot-2", id: "notes" },
+          pluginId: "notes",
+        },
+        "bot-2",
+      ),
+    ).toMatchObject({ created: true });
     expect(
       reserve(
         "model:f",
@@ -590,6 +606,35 @@ describe("the Spending rollups", () => {
     );
   });
 
+  test("a new Routine has no usual yet, so it raises no spike", () => {
+    const { charge, db } = setup();
+    const dayStart = NOW - 12 * HOUR;
+    charge(
+      "model:y",
+      100_000,
+      { runId: "y", cause: digest },
+      {
+        at: dayStart - 24 * HOUR + HOUR,
+      },
+    );
+    charge("model:t", 600_000, { runId: "t", cause: digest });
+    expect(spendSpikeV1(db.sql, "routine|bot-1|digest", dayStart)).toBeNull();
+    // With three days behind it, its usual is theirs, not a week's.
+    for (const d of [2, 3])
+      charge(
+        `model:y${d}`,
+        100_000,
+        { runId: `y${d}`, cause: digest },
+        {
+          at: dayStart - d * 24 * HOUR + HOUR,
+        },
+      );
+    expect(spendSpikeV1(db.sql, "routine|bot-1|digest", dayStart)).toEqual({
+      todayMicros: 600_000,
+      usualMicros: 100_000,
+    });
+  });
+
   test("a spike is three times the week's usual and at least fifty cents", () => {
     const { charge, db } = setup();
     const dayStart = NOW - 12 * HOUR;
@@ -618,7 +663,14 @@ describe("the Spending rollups", () => {
     expect(localDayStartV1(NOW, "UTC")).toBe(NOW - 12 * HOUR);
     // Adelaide is half an hour off the hour.
     expect(localDayStartV1(NOW, "Australia/Adelaide")).toBe(NOW - 21.5 * HOUR);
+    // On the day Sydney's clocks go forward (Oct 4 2026), 10:00 local is
+    // nine hours after midnight, not ten.
+    const tenAm = Date.UTC(2026, 9, 3, 23);
+    expect(localDayStartV1(tenAm, "Australia/Sydney")).toBe(
+      Date.UTC(2026, 9, 3, 14),
+    );
     expect(isSpendLimitScopeV1("routine|bot-1|digest")).toBe(true);
+    expect(isSpendLimitScopeV1("routine|bot-1|")).toBe(false);
     expect(isSpendLimitScopeV1("bot|bot-1")).toBe(true);
     expect(isSpendLimitScopeV1("chat|bot-1|")).toBe(false);
     expect(isSpendLimitScopeV1("bot|a|b")).toBe(false);

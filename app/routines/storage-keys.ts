@@ -203,11 +203,11 @@ export function routineSpikeMessageKeyV1(fireId: string): string {
 }
 
 /**
- * That a Routine's daily limit has been told today. The first firing a limit
- * stops is a message; the rest of that day's are skipped quietly.
+ * The day a Routine's daily limit was last told, as `2026-09-25`. The first
+ * firing a limit stops that day is a message; the rest are skipped quietly.
  */
-export function routineLimitToldKeyV1(routineId: string, day: string): string {
-  return `routine-limit-told:${routineId}:${day}`;
+export function routineLimitToldKeyV1(routineId: string): string {
+  return `routine-limit-told:${routineId}`;
 }
 
 /** One `RoutineInboxEntryV1`, newest first. */

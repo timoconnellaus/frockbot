@@ -112,7 +112,7 @@ export interface BillingAccountRpc {
   }): Promise<void>;
   readSpendingPaused(input: {
     userId: string;
-    scope: string;
+    scopes: string[];
   }): Promise<boolean>;
   claimSpendingSpike(input: {
     userId: string;

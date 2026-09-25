@@ -262,6 +262,22 @@ export function rollUpSettlementV1(
 }
 
 /**
+ * Work a person started by being there — including a Plugin's own page in
+ * front of them: a daily limit never stops it. A limit is for what runs
+ * while nobody is watching.
+ */
+const PERSONAL_CAUSES: readonly string[] = [
+  "chat",
+  "group",
+  "voice",
+  "desktop",
+  "plugin",
+];
+const PERSONAL_CAUSE_LIST = PERSONAL_CAUSES.map((kind) => `'${kind}'`).join(
+  ", ",
+);
+
+/**
  * What a daily limit applies to: one Bot (`bot|<botId>`), or one Routine and
  * everything it sets going (`routine|<botId>|<routineId>`, its cause key).
  */
@@ -304,19 +320,27 @@ export function readSpendLimitsV1(sql: BillingSql): Map<string, number> {
   );
 }
 
-/** What one limit's scope has spent since `since`. */
+/**
+ * What one limit's scope has spent since `since`: a Routine everything its
+ * chain spent, a Bot only its background work, because the person's own
+ * chatting is never what a limit is guarding against.
+ *
+ * The rollup is hourly, so `since` is rounded up to the hour: where a day
+ * starts on the half hour, its first minutes go uncounted rather than
+ * yesterday's last ones keeping a limit reached past midnight.
+ */
 export function spentOnScopeSinceV1(
   sql: BillingSql,
   scope: string,
   since: number,
 ): number {
   const [kind, botId = "", id = ""] = scope.split("|");
-  const hour = Math.floor(since / HOUR_MS);
+  const hour = Math.ceil(since / HOUR_MS);
   const row =
     kind === "bot"
       ? sql
           .exec<{ micros: number }>(
-            "SELECT COALESCE(SUM(charge), 0) AS micros FROM billing_spend_hourly WHERE hour >= ? AND bot_id = ?",
+            `SELECT COALESCE(SUM(charge), 0) AS micros FROM billing_spend_hourly WHERE hour >= ? AND bot_id = ? AND cause_kind NOT IN (${PERSONAL_CAUSE_LIST})`,
             hour,
             botId,
           )
@@ -332,24 +356,13 @@ export function spentOnScopeSinceV1(
   return row?.micros ?? 0;
 }
 
-/**
- * Work a person started by being there: a daily limit never stops it. A
- * limit is for what runs while nobody is watching.
- */
-const PERSONAL_CAUSES: ReadonlySet<string> = new Set([
-  "chat",
-  "group",
-  "voice",
-  "desktop",
-]);
-
 /** The limits one charge is held to. */
 export function spendLimitScopesV1(
   reservation: Pick<UsageReservation, "kind" | "botId">,
   attribution: UsageAttributionV1 | undefined,
 ): string[] {
   const row = attributionRowV1(reservation, attribution);
-  if (!row.causeKind || PERSONAL_CAUSES.has(row.causeKind)) return [];
+  if (!row.causeKind || PERSONAL_CAUSES.includes(row.causeKind)) return [];
   return [
     ...(row.causeKind === "routine" && row.causeId ? [causeKeyV1(row)] : []),
     ...(reservation.botId ? [`bot|${reservation.botId}`] : []),
@@ -367,9 +380,10 @@ export function spendLimitReachedV1(
   attribution: UsageAttributionV1 | undefined,
   dayStart: number,
 ): boolean {
+  const scopes = spendLimitScopesV1(reservation, attribution);
+  if (scopes.length === 0) return false;
   const limits = readSpendLimitsV1(sql);
-  if (limits.size === 0) return false;
-  return spendLimitScopesV1(reservation, attribution).some((scope) => {
+  return scopes.some((scope) => {
     const limit = limits.get(scope);
     return (
       limit !== undefined && spentOnScopeSinceV1(sql, scope, dayStart) >= limit
@@ -390,18 +404,36 @@ export function spendScopePausedV1(
 }
 
 /**
- * A day well above a scope's usual: three times its average over the seven
- * days before, and at least fifty cents. A scope with no history has no
- * usual to be above.
+ * A day well above a scope's usual: three times its average over up to the
+ * seven days before, and at least fifty cents. Its usual is measured over
+ * the days it has existed, and a scope with fewer than three of them has no
+ * usual yet to be above.
  */
 export function spendSpikeV1(
   sql: BillingSql,
   scope: string,
   dayStart: number,
 ): { todayMicros: number; usualMicros: number } | null {
+  const [kind, botId = "", id = ""] = scope.split("|");
+  const first =
+    sql
+      .exec<{ hour: number | null }>(
+        kind === "bot"
+          ? "SELECT MIN(hour) AS hour FROM billing_spend_hourly WHERE bot_id = ?"
+          : "SELECT MIN(hour) AS hour FROM billing_spend_hourly WHERE cause_kind = 'routine' AND cause_bot_id = ? AND cause_id = ?",
+        ...(kind === "bot" ? [botId] : [botId, id]),
+      )
+      .toArray()[0]?.hour ?? null;
+  if (first === null) return null;
+  const days = Math.min(
+    7,
+    Math.ceil((Math.ceil(dayStart / HOUR_MS) - first) / 24),
+  );
+  if (days < 3) return null;
   const today = spentOnScopeSinceV1(sql, scope, dayStart);
-  const week = spentOnScopeSinceV1(sql, scope, dayStart - 7 * DAY_MS) - today;
-  const usual = Math.round(week / 7);
+  const before =
+    spentOnScopeSinceV1(sql, scope, dayStart - days * DAY_MS) - today;
+  const usual = Math.round(before / days);
   if (today < 500_000 || usual <= 0 || today < 3 * usual) return null;
   return { todayMicros: today, usualMicros: usual };
 }
@@ -427,7 +459,24 @@ export function localDayStartV1(now: number, timezone: string): number {
   const part = (type: string) =>
     Number(parts.find((p) => p.type === type)?.value ?? 0);
   const minute = now - (now % 60_000);
-  return minute - (part("hour") * 60 + part("minute")) * 60_000;
+  const guess = minute - (part("hour") * 60 + part("minute")) * 60_000;
+  // Wall-clock minutes since midnight are not elapsed minutes on a day the
+  // clocks change: the guess then lands an hour off midnight, and moves back.
+  const hourAt = (at: number) =>
+    Number(
+      dayFormatter(timezone, { hour: "numeric", hourCycle: "h23" })
+        .formatToParts(at)
+        .find((p) => p.type === "hour")?.value ?? 0,
+    );
+  const off = hourAt(guess);
+  if (off === 23) return guess + HOUR_MS;
+  if (off === 1) return guess - HOUR_MS;
+  return guess;
+}
+
+/** The person's calendar day at `now`, as `2026-09-25`. */
+export function localDayKeyV1(now: number, timezone: string): string {
+  return dayFormatter(timezone).format(now);
 }
 
 /** What the account has been charged since `since`, from the rollup. */
@@ -741,21 +790,18 @@ export function spendLabelV1(
   }
 }
 
-function dayFormatter(timezone: string) {
+function dayFormatter(
+  timezone: string,
+  options: Intl.DateTimeFormatOptions = {
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  },
+) {
   try {
-    return new Intl.DateTimeFormat("en-CA", {
-      timeZone: timezone,
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    });
+    return new Intl.DateTimeFormat("en-CA", { ...options, timeZone: timezone });
   } catch {
-    return new Intl.DateTimeFormat("en-CA", {
-      timeZone: "UTC",
-      year: "numeric",
-      month: "2-digit",
-      day: "2-digit",
-    });
+    return new Intl.DateTimeFormat("en-CA", { ...options, timeZone: "UTC" });
   }
 }
 
@@ -779,7 +825,7 @@ export function spendingReportV1(
         : undefined;
   const withLimit = (group: SpendingGroupV1): SpendingGroupV1 => {
     const scope = limitScope(group.key);
-    if (!scope) return group;
+    if (!scope || !isSpendLimitScopeV1(scope)) return group;
     const limit = limits.get(scope);
     return {
       ...group,

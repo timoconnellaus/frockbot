@@ -1356,7 +1356,7 @@ class _LimitDialogState extends State<_LimitDialog> {
 
   void _save() {
     final value = double.tryParse(amount.text.trim().replaceAll(r'$', ''));
-    if (value == null || value <= 0 || value > 1000) {
+    if (value == null || value < 0.01 || value > 1000) {
       setState(() => error = 'Enter an amount between US\$0.01 and US\$1000.');
       return;
     }

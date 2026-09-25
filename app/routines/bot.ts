@@ -85,6 +85,7 @@ import type {
 import type { RoutineWriterV1 } from "@frockbot/app/routines/records";
 import { readBotSettingsV1 } from "@frockbot/app/settings/bot";
 import { DAILY_LIMIT_REASON_V1 } from "@frockbot/app/billing/ledger";
+import { localDayKeyV1 } from "@frockbot/app/billing/spending";
 import type { StoredRun } from "@frockbot/app/shell/backend-contracts";
 import { expireDueApprovals } from "@frockbot/app/approvals/bot";
 import {
@@ -761,13 +762,15 @@ async function settleRoutineFirings(state: ShellBotStateV1): Promise<void> {
       const paused = await pausedFiring(state, identity, fire);
       if (paused?.status === "skipped") return paused;
       const outcome = paused ?? (await runOneFiring(state, identity, fire));
-      // A limit reached part-way through a firing is told by that firing;
-      // the rest of the day's are skipped quietly, as after a refused one.
-      if (!paused && outcome.summary?.includes(DAILY_LIMIT_REASON_V1))
-        await state.ctx.storage.put(await limitToldKey(state, fire), {
-          schemaVersion: 1,
-        });
       await notifyFailedFiring(state, identity, fire, outcome);
+      // Told once, whether the limit stopped the firing or was reached part
+      // way through it, and only once the message is written: the rest of
+      // the day's firings are skipped quietly.
+      if (
+        outcome.status === "failed" &&
+        outcome.summary?.includes(DAILY_LIMIT_REASON_V1)
+      )
+        await markLimitTold(state, fire);
       if (outcome.status === "ok")
         await notifySpendingSpike(state, identity, fire);
       return outcome;
@@ -981,40 +984,38 @@ async function pausedFiring(
     "",
   ).limits;
   if (!limits) return undefined;
-  const scopes = [
-    `routine|${identity.botId}|${fire.routineId}`,
-    `bot|${identity.botId}`,
-  ];
-  const paused = await Promise.all(
-    scopes.map((scope) => limits.paused(scope).catch(() => false)),
+  const paused = await limits
+    .paused([
+      `routine|${identity.botId}|${fire.routineId}`,
+      `bot|${identity.botId}`,
+    ])
+    .catch(() => false);
+  if (!paused) return undefined;
+  const told = await state.ctx.storage.get<string>(
+    routineLimitToldKeyV1(fire.routineId),
   );
-  if (!paused.some(Boolean)) return undefined;
-  const told = await limitToldKey(state, fire);
-  if (await state.ctx.storage.get(told))
-    return { status: "skipped", summary: DAILY_LIMIT_REASON_V1 };
-  await state.ctx.storage.put(told, { schemaVersion: 1 });
-  return { status: "failed", summary: DAILY_LIMIT_REASON_V1 };
+  return told === (await localDayOfBotV1(state))
+    ? { status: "skipped", summary: DAILY_LIMIT_REASON_V1 }
+    : { status: "failed", summary: DAILY_LIMIT_REASON_V1 };
 }
 
-/** Today's "the limit has been told" receipt for one Routine. */
-async function limitToldKey(
+/** That today's limit message about this Routine has been written. */
+async function markLimitTold(
   state: ShellBotStateV1,
   fire: RoutineFireV1,
-): Promise<string> {
-  const day = localDateV1(
-    state.now(),
-    await routineAccountTimezoneV1(state.ctx.storage),
+): Promise<void> {
+  await state.ctx.storage.put(
+    routineLimitToldKeyV1(fire.routineId),
+    await localDayOfBotV1(state),
   );
-  return routineLimitToldKeyV1(fire.routineId, day);
 }
 
-/** A calendar day in the person's timezone, as `2026-09-25`. */
-function localDateV1(now: Date, timezone: string): string {
-  try {
-    return new Intl.DateTimeFormat("en-CA", { timeZone: timezone }).format(now);
-  } catch {
-    return now.toISOString().slice(0, 10);
-  }
+/** The person's calendar day, by the account clock this Bot holds. */
+async function localDayOfBotV1(state: ShellBotStateV1): Promise<string> {
+  return localDayKeyV1(
+    state.now().getTime(),
+    await routineAccountTimezoneV1(state.ctx.storage),
+  );
 }
 
 /**

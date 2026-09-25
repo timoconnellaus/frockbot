@@ -789,8 +789,8 @@ export class BotState
                 sessionId,
                 ...(spend ? { spend } : {}),
                 limits: {
-                  paused: (scope: string) =>
-                    account.readSpendingPaused({ userId, scope }),
+                  paused: (scopes: string[]) =>
+                    account.readSpendingPaused({ userId, scopes }),
                   claimSpike: (scope: string) =>
                     account.claimSpendingSpike({ userId, scope }),
                 },

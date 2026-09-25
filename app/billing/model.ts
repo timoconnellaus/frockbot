@@ -66,8 +66,8 @@ export interface ModelBilling {
 
 /** What a Bot asks the account about its daily limits. */
 export interface SpendingLimitsV1 {
-  /** Whether a Bot's or a Routine's limit is reached today. */
-  paused(scope: string): Promise<boolean>;
+  /** Whether any of these Bot or Routine limits is reached today. */
+  paused(scopes: string[]): Promise<boolean>;
   /** Today's spike for a scope, handed to the first asker of the day. */
   claimSpike(
     scope: string,
