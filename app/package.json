@@ -276,6 +276,8 @@
     "./skills/write": "./skills/write.ts",
     "./supervision": "./supervision/index.ts",
     "./supervision/testing": "./supervision/testing.ts",
+    "./supervision/memory-recall": "./supervision/memory-recall.ts",
+    "./supervision/skill-nomination": "./supervision/skill-nomination.ts",
     "./subagents": "./subagents/index.ts",
     "./subagents/agent": "./subagents/agent.ts",
     "./subagents/backend": "./subagents/backend.ts",

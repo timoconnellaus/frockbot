@@ -21,7 +21,10 @@
 //
 // It never calls the Computer interface and never wakes a Computer; see the
 // hibernation seam documented in `./catalog.ts`.
-import { latestOpenStepPositionV1 } from "@frockbot/core/contracts";
+import {
+  appendRuntimeNoteV1,
+  latestOpenStepPositionV1,
+} from "@frockbot/core/contracts";
 import { sha256HexBytesV1, sha256HexTextV1 } from "@frockbot/core/crypto";
 import type {
   Session,
@@ -108,6 +111,15 @@ export interface SkillsRuntimeHostV1 {
    * Absent, the Turn has no Workspace Skills rather than scanning the root.
    */
   skillIndexes?: SkillIndexSourceV1;
+  /**
+   * The Skills a request is likely to need, named at the tail of the Turn's
+   * first request. Absent, or when it cannot say, nothing is named.
+   */
+  nominate?(input: {
+    request: string;
+    skills: readonly { load: string; name: string; description: string }[];
+    signal?: AbortSignal;
+  }): Promise<readonly { load: string; name: string }[]>;
 }
 
 export interface SkillIndexSourceV1 {
@@ -945,6 +957,42 @@ export function createSkillsRuntimeFeature(
       }),
     );
     disposers.push(runtime.tools.register(createSkillLoadTool(catalog)));
+    const nominate = host.nominate;
+    if (nominate) {
+      disposers.push(
+        runtime.hooks.add({
+          async request(agent, _request, turn, step, signal, next) {
+            const request = await next();
+            if (step !== 1) return request;
+            const asked = agent.session.activeRunJournal
+              .flatMap((event) =>
+                event.type === "user/message" && event.turn === turn
+                  ? [event.text]
+                  : [],
+              )
+              .join("\n\n");
+            const named = await nominate({
+              request: asked,
+              skills: catalog.current().skills.map((skill) => ({
+                load: skill.ref ? formatSkillRefV1(skill.ref) : skill.path,
+                name: skill.name,
+                description: skill.description,
+              })),
+              signal,
+            });
+            if (named.length === 0) return request;
+            return appendRuntimeNoteV1(
+              request,
+              `[FrockBot runtime: skills]\nLikely useful for this request: ${named
+                .map((skill) => `${skill.name} (skill_load "${skill.load}")`)
+                .join(
+                  ", ",
+                )}. Load what you need before you start, unless you already have.`,
+            );
+          },
+        }),
+      );
+    }
     if (host.files && host.writer) {
       disposers.push(
         runtime.tools.register(

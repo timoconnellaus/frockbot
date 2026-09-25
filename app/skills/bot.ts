@@ -22,6 +22,8 @@
 // instruction root loads no instructions, visibly, rather than inventing a
 // second store to read them from.
 
+import { hostedJevClientV1 } from "@frockbot/app/supervision";
+import { nominateSkillsV1 } from "@frockbot/app/supervision/skill-nomination";
 import type {
   WorkspaceFilesV1,
   WorkspaceReadsV1,
@@ -187,6 +189,9 @@ export async function createBotSkillsHost(
         pluginSkills,
       }
     : await botSkillGatesV1(state, identity, features);
+  const jev = hostedJevClientV1(
+    state.env as unknown as Record<string, string | undefined>,
+  );
   return {
     owner: { userId: identity.userId, botId: identity.botId },
     reads: files,
@@ -200,6 +205,7 @@ export async function createBotSkillsHost(
     },
     ...gates,
     skillIndexes: skillIndexSourceForTurnV1(state, identity, admitted),
+    ...(jev ? { nominate: (input) => nominateSkillsV1(jev, input) } : {}),
   };
 }
 

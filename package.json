@@ -63,6 +63,7 @@
     "eval:turn-start": "bun scripts/eval-turn-start.ts",
     "eval:response-review": "bun scripts/eval-response-review.ts",
     "eval:call-review": "bun scripts/eval-call-review.ts",
+    "eval:context": "bun scripts/eval-context.ts",
     "eval:routine-event": "bun scripts/eval-routine-event.ts",
     "eval:dictation-cleanup": "bun scripts/eval-dictation-cleanup.ts"
   },

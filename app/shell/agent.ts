@@ -1,6 +1,9 @@
 // The Shell owns reply delivery and conversation completion. Final sends end
 // the Turn; interim sends continue work; background Turns hand off to a parent.
-import { packageAdmissionCeilingV1 } from "@frockbot/core/contracts";
+import {
+  appendRuntimeNoteV1,
+  packageAdmissionCeilingV1,
+} from "@frockbot/core/contracts";
 import {
   SUBAGENT_QUESTION_PREFIX_V1,
   TASK_QUESTION_MAX_V1,
@@ -318,13 +321,10 @@ export const turnBudgetHooksV1: LoopHooksV1 = {
       .filter(Boolean)
       .join("\n\n");
     if (!note) return request;
-    return {
-      ...request,
-      messages: [
-        ...request.messages,
-        { role: "user", content: `${TURN_BUDGET_NOTE_LABEL_V1}\n${note}` },
-      ],
-    };
+    return appendRuntimeNoteV1(
+      request,
+      `${TURN_BUDGET_NOTE_LABEL_V1}\n${note}`,
+    );
   },
 };
 

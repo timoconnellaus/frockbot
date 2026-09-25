@@ -926,4 +926,89 @@ describe("the Skills runtime feature", () => {
     expect(assembled.text).toContain('ref="plugin/email-card/drafting"');
     await runtime.dispose();
   });
+
+  test("names the Skills a request likely needs at the first request's tail, and only there", async () => {
+    const asked: string[] = [];
+    const runtime = createAgentRuntimeHarness();
+    await runtime.mount(
+      createSkillsRuntimeFeature({
+        owner: OWNER,
+        reads: new FakeWorkspace(),
+        pluginSkills: [
+          {
+            pluginId: "email-card",
+            displayName: "Email",
+            skills: [
+              {
+                slug: "drafting",
+                text: skillMarkdown(
+                  "Draft an email",
+                  "Use this when drafting.",
+                  "Body.",
+                ),
+              },
+            ],
+          },
+        ],
+        nominate: async ({ request, skills }) => {
+          asked.push(request);
+          return skills
+            .filter(({ load }) => load.startsWith("plugin/"))
+            .map(({ load, name }) => ({ load, name }));
+        },
+      }),
+    );
+    const session = runtime.sessions.create("user-1:bot-1");
+    session.appendBatch([
+      { type: "turn/start", turn: 1 },
+      {
+        type: "user/message",
+        turn: 1,
+        step: 1,
+        messageId: "m",
+        text: "Draft a reply to Sam.",
+      },
+    ]);
+    const agent = {
+      id: "bot-1",
+      botId: "bot-1",
+      session,
+      status: "running",
+    } as const;
+    await runtime.hooks.preStep(agent, [], 1, 1, async () => ({
+      kind: "enter",
+      inputs: [],
+    }));
+    const base = {
+      requestId: "r",
+      provider: "fixture",
+      model: "fixture",
+      system: "system",
+      messages: [{ role: "user" as const, content: "Draft a reply to Sam." }],
+      tools: [],
+    };
+    const first = await runtime.hooks.request(
+      agent,
+      base,
+      1,
+      1,
+      new AbortController().signal,
+      async () => base,
+    );
+    expect(asked).toEqual(["Draft a reply to Sam."]);
+    expect(first.messages.at(-1)?.content).toBe(
+      '[FrockBot runtime: skills]\nLikely useful for this request: Draft an email (skill_load "plugin/email-card/drafting"). Load what you need before you start, unless you already have.',
+    );
+    expect(first.system).toBe(base.system);
+    const later = await runtime.hooks.request(
+      agent,
+      base,
+      1,
+      2,
+      new AbortController().signal,
+      async () => base,
+    );
+    expect(later).toEqual(base);
+    await runtime.dispose();
+  });
 });

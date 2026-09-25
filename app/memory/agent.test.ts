@@ -457,6 +457,43 @@ describe("a Group Chat's Memory", () => {
     ]);
     await dispose();
   });
+
+  test("a lone recall hit is judged, so one bearing on nothing stays out", async () => {
+    const { userEngine, records } = canonical();
+    const scope = groupChatScopeV1("user-1", GROUP_ID);
+    const authority = createTestMemoryAuthorityV1({
+      joinedGroupChatIds: [GROUP_ID],
+    });
+    userEngine.write({
+      authority,
+      scope,
+      content: "The offsite is in Bowral.",
+      operationKey: "g-1",
+    });
+    const groups = createInMemoryMemoryGroupsV1([GROUP_ID]);
+    const request = { role: "user" as const, content: "Where is the offsite?" };
+    const recalled = async (rankRecall?: MemoryRuntimeHostV1["rankRecall"]) => {
+      const projection = new MemoryProjection({
+        ...hostFor(),
+        records,
+        groups,
+        group: GROUP_ID,
+        ...(rankRecall ? { rankRecall } : {}),
+      });
+      await projection.recallForTurn(request.content, "sig-1");
+      return projection.renderMessages([request]);
+    };
+
+    expect((await recalled())[0]?.content).toContain("Bowral");
+    const judged: number[] = [];
+    expect(
+      await recalled(async ({ hits }) => {
+        judged.push(hits.length);
+        return [];
+      }),
+    ).toEqual([request]);
+    expect(judged).toEqual([1]);
+  });
 });
 
 describe("the Turn's Memory read", () => {

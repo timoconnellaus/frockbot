@@ -307,6 +307,24 @@ model.
 Every specialist Turn is supervised. A specialist's mutating call crosses the
 same approval path as a call proposed by the main Bot.
 
+## Context selection
+
+Jev also chooses what a Turn reads, without touching the cached prefix. Both
+are context quality, not safety: a judgment that fails leaves things as they
+were, and neither is enforced.
+
+- **Memory recall.** After hybrid recall finds candidates for a Turn, Jev
+  judges up to 12 against the request; code drops those below 0.2 and orders
+  the rest (`app/supervision/memory-recall.ts`). They land in the existing
+  `<memory-recall>` message.
+- **Skills.** At the Turn's first request, Jev judges each Skill in a catalog
+  of up to 24 against the request, and up to three strong matches are named
+  in the tail runtime note (`app/supervision/skill-nomination.ts`). The
+  catalog in the system prompt is unchanged.
+- Runtime notes from several features share one trailing message
+  (`appendRuntimeNoteV1`), since some providers refuse two user messages in a
+  row. Labelled in `bun run eval:context`.
+
 ## Mentor and failure score
 
 Step review produces independently meaningful failure signals such as:
@@ -384,7 +402,8 @@ conversation or policy content is not needed for diagnosis.
 
 Keep live evaluation separate from unit tests. Pin the calibrated Jev version.
 Run the labeled suites with `bun run eval:turn-start`,
-`bun run eval:response-review` and `bun run eval:call-review`; each reads
+`bun run eval:response-review`, `bun run eval:call-review` and
+`bun run eval:context`; each reads
 `JEV_API_KEY` from the main checkout's `.dev.vars` (the runners still accept
 `TYPESAFE_API_KEY` as a local alias) and writes traces to `.eval-results/`.
 Neither is part of ordinary tests or the pre-push gate.

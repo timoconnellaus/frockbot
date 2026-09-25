@@ -1,5 +1,7 @@
 // Hybrid recall: lexical, semantic and time channels fused by reciprocal
-// rank, then one hop of relationship neighbors. No second model reranks.
+// rank, then one hop of relationship neighbors. A Turn's automatic recall is
+// then judged against the request by the host's `rankRecall`, when it has one
+// (`app/supervision/memory-recall.ts`); this file does not rerank.
 
 import {
   MEMORY_POLICY_V1,

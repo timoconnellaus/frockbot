@@ -1,4 +1,5 @@
 import {
+  appendRuntimeNoteV1,
   BATCH_TOOL_NAME,
   decodeBatchCallsV1,
   defaultTurnDirectiveV1,
@@ -535,14 +536,7 @@ export function createSupervisionRuntimeFeatureV1(
           ...(specialist ? [specialistNoteV1(specialist)] : []),
           ...(route ? [questionNoteV1(route.answerer)] : []),
         ];
-        if (notes.length === 0) return request;
-        return {
-          ...request,
-          messages: [
-            ...request.messages,
-            { role: "user", content: notes.join("\n\n") },
-          ],
-        };
+        return notes.reduce(appendRuntimeNoteV1, request);
       },
 
       async reviewResponse(agent, response, signal) {
