@@ -616,7 +616,8 @@ describe("running a compaction", () => {
     const transcripts: string[] = [];
     await runCompactionV1({
       ...runner(session, async (request) => {
-        transcripts.push(String(request.messages[0]?.content));
+        const { messages } = request as unknown as { messages: LlmMessage[] };
+        transcripts.push(String(messages[0]?.content));
         return SUMMARY;
       }),
       choose: async (items) => items.map(() => "keep" as const),
@@ -1009,6 +1010,7 @@ describe("what compaction carries word for word", () => {
     callId: `call-${name}`,
     name,
     content,
+    isError: false,
   });
   const long = (text: string) => text.padEnd(200, ".");
   const signal = new AbortController().signal;
