@@ -168,10 +168,6 @@ window.addEventListener("message", (event) => {
       if (web.platform case final WebKitWebViewController webkit) {
         await webkit.setAllowsBackForwardNavigationGestures(false);
         await webkit.setAllowsLinkPreview(false);
-        if (hostFrameInspectableV1) await webkit.setInspectable(true);
-      }
-      if (hostFrameInspectableV1 && web.platform is AndroidWebViewController) {
-        await AndroidWebViewController.enableDebugging(true);
       }
       if (hostFrameInspectableV1) await _inspectable(web);
       if (widget.onMessage != null) {
