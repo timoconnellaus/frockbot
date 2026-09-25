@@ -9,6 +9,7 @@ import {
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import {
   assembleBotThemeV1,
+  oweThemeAssembleV1,
   rosterDeclaresThemeAssembleV1,
   THEME_ASSEMBLE_DUE_KEY_V1,
 } from "./assemble.js";
@@ -240,6 +241,36 @@ describe("assembleBotThemeV1", () => {
     );
     expect(kept.look).toBe("custom");
     expect(kept.document).toEqual(STUDIO_DOCUMENT_V1);
+  });
+
+  test("a Plugin switched while it assembles leaves the next assemble owed", async () => {
+    const storage = new MemoryStorage();
+    const flock = createFlockBotBackendContribution({
+      storage,
+      materializeSettings: () => Promise.resolve(),
+      archiveEligible: () => Promise.resolve(true),
+      tearDown: () => Promise.resolve("complete"),
+    });
+    await flock.readLook(registration, "user-1");
+    const now = new Date("2026-09-18T10:15:00.000Z");
+    await assembleBotThemeV1(
+      stateOf(storage),
+      { userId: "user-1", botId: "alpha" },
+      {
+        flock,
+        registration,
+        appearance: "paper",
+        timezone: "UTC",
+        now,
+        roster: roster(["theme/assemble"]),
+        assemble: async () => {
+          await oweThemeAssembleV1(storage, now);
+          throw new Error("third failure quarantines the Plugin");
+        },
+        mirror: () => Promise.resolve(),
+      },
+    );
+    expect(storage.values.get(THEME_ASSEMBLE_DUE_KEY_V1)).toBe(now.getTime());
   });
 
   test("the named presets are what Inherit and Studio compile to", () => {

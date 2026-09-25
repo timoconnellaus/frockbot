@@ -114,6 +114,7 @@ export async function assembleBotThemeV1(
   const original = look.document ?? compiled;
   const roster = host.roster ?? (await readBotPluginRosterV1(state, identity));
   const declares = rosterDeclaresThemeAssembleV1(roster);
+  const owed = await state.ctx.storage.get<unknown>(THEME_ASSEMBLE_DUE_KEY_V1);
   let assembled = original;
   if (declares) {
     const payload: LoopEventPayloadMapV1["theme/assemble"] = {
@@ -193,6 +194,9 @@ export async function assembleBotThemeV1(
         nextLook,
       );
   await host.mirror(next.look, next.document);
+  const reowed =
+    (await state.ctx.storage.get<unknown>(THEME_ASSEMBLE_DUE_KEY_V1)) !== owed;
+  if (reowed) return next;
   if (declares) {
     await state.ctx.storage.put(
       THEME_ASSEMBLE_DUE_KEY_V1,
