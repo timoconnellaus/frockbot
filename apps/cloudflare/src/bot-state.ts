@@ -405,7 +405,7 @@ import {
   readFocusedPanelV1,
 } from "@frockbot/app/plugins/panels-bot";
 import {
-  decodePluginPageReportCommandV1,
+  decodePluginPageReportV1,
   recordPluginPageReportV1,
   type PluginPageReportCommandV1,
 } from "@frockbot/app/plugins/page-reports";
@@ -1601,7 +1601,7 @@ export class BotState
     const request = decodeRpcEnvelopeV1(input, {
       userId: rpcIdentifier,
       botId: rpcBotId,
-      report: rpcDecoded(decodePluginPageReportCommandV1),
+      report: rpcDecoded(decodePluginPageReportV1),
     });
     const identity = {
       userId: request.userId as string,

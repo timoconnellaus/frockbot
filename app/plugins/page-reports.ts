@@ -57,8 +57,8 @@ function matched(
   return field;
 }
 
-/** The client's report, decoded exactly. */
-export function decodePluginPageReportCommandV1(
+/** A report, decoded exactly. */
+export function decodePluginPageReportV1(
   input: unknown,
 ): PluginPageReportCommandV1 {
   if (!input || typeof input !== "object" || Array.isArray(input)) {
@@ -67,14 +67,9 @@ export function decodePluginPageReportCommandV1(
   const value = input as Record<string, unknown>;
   if (
     Object.keys(value).sort().join(",") !==
-    "device,level,pluginId,schemaVersion,surfaceId,text"
+    "device,level,pluginId,surfaceId,text"
   ) {
     throw new PluginPageReportDecodeError("page report has invalid fields");
-  }
-  if (value.schemaVersion !== 1) {
-    throw new PluginPageReportDecodeError(
-      "page report.schemaVersion must be 1",
-    );
   }
   const level = PLUGIN_PAGE_REPORT_LEVELS_V1.find(
     (candidate) => candidate === value.level,
@@ -97,6 +92,22 @@ export function decodePluginPageReportCommandV1(
     level,
     text,
   };
+}
+
+/** The client's report: a report and the wire version it was written for. */
+export function decodePluginPageReportCommandV1(
+  input: unknown,
+): PluginPageReportCommandV1 {
+  if (!input || typeof input !== "object" || Array.isArray(input)) {
+    throw new PluginPageReportDecodeError("page report must be an object");
+  }
+  const { schemaVersion, ...report } = input as Record<string, unknown>;
+  if (schemaVersion !== 1) {
+    throw new PluginPageReportDecodeError(
+      "page report.schemaVersion must be 1",
+    );
+  }
+  return decodePluginPageReportV1(report);
 }
 
 interface ReportStorageV1 {
