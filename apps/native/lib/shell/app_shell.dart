@@ -183,6 +183,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   Set<String> archived = {};
   wire.BotRegistration? selected;
 
+  /// The newest `/look` read started for each Bot held live but not open.
+  final Map<String, int> _lookReads = {};
+
   /// The User's Group Chats, drawn among the Bots in the list.
   late final GroupDirectoryController groupDirectory = GroupDirectoryController(
     GroupChatApi(widget.api),
@@ -420,11 +423,13 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
       unawaited(settings.reloadLook());
       return;
     }
+    final read = (_lookReads[botId] ?? 0) + 1;
+    _lookReads[botId] = read;
     unawaited(() async {
       try {
         final answer =
             (await widget.api.request('/api/bots/$botId/look'))! as Map;
-        if (!mounted) return;
+        if (!mounted || _lookReads[botId] != read) return;
         setState(
           () =>
               _adoptLook(botId, answer['look'] as String?, answer['document']),
