@@ -47,6 +47,10 @@ class BotSessions {
   final int limit;
   final _live = <String, BotSession>{};
   bool _paused = false;
+
+  /// Told the Bot whose look changed without this client asking, for any Bot
+  /// held live here, not only the one on screen.
+  void Function(String userId, String botId)? lookChanged;
   BotSessions({required this.api, required this.store, this.limit = 4});
 
   int get live => _live.length;
@@ -87,6 +91,7 @@ class BotSessions {
         controller.changed();
       },
     );
+    controller.lookNotices.addListener(() => lookChanged?.call(userId, botId));
     final session = BotSession(
       api: api,
       userId: userId,

@@ -82,9 +82,14 @@ import { agentRuntime } from "@frockbot/app/shell/runtime-mount";
 import { admitRunEffect } from "@frockbot/app/shell/turn";
 import {
   activeIsolateTurn,
+  admittedPluginWrapsV1,
   isolateCallAdmittedV1,
   type IsolateCallIdentityV1,
 } from "./authority.js";
+import {
+  oweThemeAssembleV1,
+  THEME_ASSEMBLE_RUN_PREFIX_V1,
+} from "@frockbot/app/theme/owed";
 import { notificationIdV1 } from "@frockbot/app/shell/notification-id";
 import {
   approvalKeyV1,
@@ -231,6 +236,25 @@ export async function isolateAuthority(
   };
 }
 
+/**
+ * A Plugin that wraps the look usually reads it from its own storage, so a
+ * write there is a new look the Bot should wear now rather than on the hour.
+ * The assemble's own writes owe nothing, or it would owe itself forever.
+ */
+async function oweThemeAfterPluginWriteV1(
+  state: ShellBotStateV1,
+  input: IsolateCallScopeV1,
+): Promise<void> {
+  if (input.runId.startsWith(THEME_ASSEMBLE_RUN_PREFIX_V1)) return;
+  if (!admittedPluginWrapsV1(state, input, "theme/assemble")) return;
+  await oweThemeAssembleV1(state.ctx.storage, new Date());
+  // A Turn re-arms the alarm when it settles; a call outside one does not.
+  if (activeIsolateTurn(state, input)) return;
+  await state.ctx.storage.transaction((transaction) =>
+    state.authority.refreshRecoveryAlarm(transaction),
+  );
+}
+
 export async function isolateStorageGet(
   state: ShellBotStateV1,
   input: IsolateCallScopeV1,
@@ -255,6 +279,7 @@ export async function isolateStoragePut(
   const request = decodeIsolateStoragePutRequestV1(input.request);
   const key = pluginStorageKeyV1(input.packageId, request.key);
   await state.ctx.storage.put(key, request.value);
+  await oweThemeAfterPluginWriteV1(state, input);
   return { status: "available", value: request.value };
 }
 
@@ -269,6 +294,7 @@ export async function isolateStorageDelete(
   const deleted = await state.ctx.storage.delete(
     pluginStorageKeyV1(input.packageId, request.key),
   );
+  if (deleted) await oweThemeAfterPluginWriteV1(state, input);
   return { status: "available", value: deleted };
 }
 

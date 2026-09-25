@@ -12,6 +12,7 @@ import {
   commitPublicationsV1,
   COMPUTER_ENTITY_ID_V1,
   drainPendingPublicationV1,
+  LOOK_ENTITY_ID_V1,
   PUBLICATION_REPLAY_MAX_EVENTS_V1,
   readPublicationHeadV1,
   readReplayUpdatesV1,
@@ -71,9 +72,19 @@ interface ChannelAttachmentV1 {
   protocol?: number;
 }
 
+/**
+ * The first client protocol that knows a `look` update. An older client
+ * decodes every frame against a schema without it and would drop its socket.
+ */
+export const LOOK_NOTICE_PROTOCOL_V1 = 4;
+
 /** Whether a socket is sent a Run's files, or a Run without them. */
 function currentProtocol(attachment: ChannelAttachmentV1): boolean {
   return (attachment.protocol ?? 2) >= RUN_ATTACHMENTS_PROTOCOL_V1;
+}
+
+function isLookUpdate(frame: CursoredFrameV1): boolean {
+  return frame.type === "state/update" && frame.kind === "look";
 }
 
 /** The frames for one socket's protocol, stripped once and only if needed. */
@@ -86,6 +97,14 @@ class ProtocolFrames {
     this.current = framesFor(frame);
   }
   for(attachment: ChannelAttachmentV1): string[] {
+    // The cursor still advances past it: the update is an invalidation, and
+    // a client that cannot read it reads the look when it next opens the Bot.
+    if (
+      isLookUpdate(this.frame) &&
+      (attachment.protocol ?? 2) < LOOK_NOTICE_PROTOCOL_V1
+    ) {
+      return [];
+    }
     if (currentProtocol(attachment)) return this.current;
     this.legacy ??= framesFor(withoutRunAttachmentsV1(this.frame));
     return this.legacy;
@@ -439,6 +458,21 @@ export class BotStateChannel {
       .finally(() => {
         this.computerNotice = undefined;
       });
+  }
+
+  /**
+   * Append and broadcast one `look` invalidation: what this Bot wears changed
+   * without the client asking, so an attached client reads it again.
+   */
+  async noticeLook(): Promise<void> {
+    if (this.silenced) return;
+    await this.state.storage.transaction(async (transaction) => {
+      await commitPublicationsV1(transaction, [
+        { kind: "look", entityId: LOOK_ENTITY_ID_V1, payload: {} },
+      ]);
+      await this.refreshAlarm(transaction);
+    });
+    await this.drainBroadcast();
   }
 
   /**

@@ -214,7 +214,11 @@ export interface StandaloneIsolateCallV1 {
   sessionId: string;
   turnId: string;
   generationId: string;
-  members: readonly { packageId: string; artifact?: unknown }[];
+  members: readonly {
+    packageId: string;
+    artifact?: unknown;
+    descriptor?: { hooks: readonly string[] };
+  }[];
 }
 
 /**

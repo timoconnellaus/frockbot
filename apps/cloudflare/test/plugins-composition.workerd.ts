@@ -17,6 +17,7 @@ import worker from "../src/index.ts";
 import { describe, expect, test, vi } from "vitest";
 import { provisionBot, provisionSiblingBot } from "./provision-bot.ts";
 import { hydratedStoredRunsV1 } from "./session-log-probe.ts";
+import { THEME_ASSEMBLE_DUE_KEY_V1 } from "@frockbot/app/theme/owed";
 import { toolCallTriggerPrompt } from "./harness/miniflare.ts";
 import { dynamicToolInputV1 } from "./dynamic-tools.ts";
 import {
@@ -2128,6 +2129,107 @@ export async function execute() {
     // Nothing calls assembleTheme: the approval owes one, and the alarms
     // that settle its delivery Turn run it instead of waiting for the hour.
     await settledApprovalDelivery(sibling);
+    await vi.waitFor(async () => expect(await window()).toBe("#ffef00"), {
+      timeout: 5_000,
+      interval: 25,
+    });
+  });
+
+  test("a theme Plugin's tool writing its storage re-assembles the look when the Turn settles", async () => {
+    const userId = `user-${crypto.randomUUID()}`;
+    const identity = { userId, botId: "bot-1" };
+    await provisionBot(identity);
+    await turn(identity, "run-0");
+    const bootstrap = (
+      await user(userId).readComposition({ schemaVersion: 1, userId })
+    ).current;
+    const PAINT_ID = "paint";
+    // Bob's shape: the tool stores the colour, the hook reads it back.
+    const PAINT_SOURCE = `
+export const tools = [
+  { name: "paint_set", description: "Stores the window colour", inputSchema: { type: "object" }, idempotent: false },
+];
+export const hooks = {
+  "theme/assemble": async function (payload, ctx) {
+    const stored = await ctx.storage.get({ key: "window" });
+    if (typeof stored.value !== "string") return payload.document;
+    const tokens = payload.document.tokens;
+    return {
+      ...payload.document,
+      tokens: { ...tokens, surfaces: {
+        window: stored.value, surface: "#fff7a8", raised: "#fffbd0",
+        text: "#1a1a1a", muted: "#4d4a00", line: "#c9bd00",
+        accent: "#1a1a1a", onAccent: "#ffef00",
+      } },
+    };
+  },
+};
+export async function execute(tool, input, ctx) {
+  await ctx.storage.put({ key: "window", value: input.window });
+  return "Set.";
+}
+`;
+    await seedPlugin(
+      identity,
+      bootstrap.generationId,
+      "2026-09-12T07:00:00.000Z",
+      PAINT_ID,
+      PAINT_SOURCE,
+      decodePluginDescriptorV1({
+        id: PAINT_ID,
+        displayName: "Paint",
+        version: "0.0.1",
+        contractVersion: ISOLATE_CONTRACT_VERSION,
+        tools: [
+          {
+            name: "paint_set",
+            description: "Stores the window colour",
+            inputSchema: { type: "object" },
+          },
+        ],
+        hooks: ["theme/assemble"],
+        grants: ["storage"],
+        contextKeys: ["user", "bot", "session"],
+      }),
+    );
+    await switchPlugin(identity, PAINT_ID, true);
+    const window = async () =>
+      (await bot(identity).readLook({ schemaVersion: 1, ...identity })).document
+        ?.tokens.surfaces.window;
+    // Let the assemble the switch owed settle before the Turn writes.
+    await vi.waitFor(
+      async () =>
+        expect(
+          await runInDurableObject(
+            env.BOT_STATES.getByName(`${userId}:bot-1`),
+            (_instance, state) =>
+              state.storage.get<number>(THEME_ASSEMBLE_DUE_KEY_V1),
+          ),
+        ).toBeGreaterThan(Date.now()),
+      { timeout: 5_000, interval: 25 },
+    );
+    expect(await window()).not.toBe("#ffef00");
+
+    await bot(identity).run({
+      schemaVersion: 1,
+      ...identity,
+      command: {
+        runId: "paint-1",
+        sessionId: `${userId}:bot-1`,
+        acceptedAt: new Date().toISOString(),
+        text: toolCallTriggerPrompt([
+          "call_dynamic_tool",
+          dynamicToolInputV1({
+            namespace: PAINT_ID,
+            toolName: "paint_set",
+            input: { window: "#ffef00" },
+          }),
+        ]),
+      },
+    });
+
+    // Nothing calls assembleTheme: the write owed one, and the alarm the
+    // settled Turn re-armed runs it rather than the next hour.
     await vi.waitFor(async () => expect(await window()).toBe("#ffef00"), {
       timeout: 5_000,
       interval: 25,

@@ -298,6 +298,60 @@ void main() {
     state.dispose();
   });
 
+  test(
+    'a look changed elsewhere is read again, behind a save of ours',
+    () async {
+      var served = 'inherit';
+      var revision = 1;
+      final landed = Completer<void>();
+      final state = BotSettingsController(
+        SettingsApi(MemoryStore(), (path, body) async {
+          if (body != null) {
+            await landed.future;
+            served = (body as Map)['look'] as String;
+            revision += 1;
+            return {
+              'schemaVersion': 1,
+              'commandId': body['commandId'],
+              'status': 'applied',
+              'revision': revision,
+            };
+          }
+          if (path.startsWith('/api/settings')) return account();
+          if (path.endsWith('/look')) {
+            return {
+              'schemaVersion': 1,
+              'botId': 'alpha',
+              'revision': revision,
+              'look': served,
+            };
+          }
+          return botSettings();
+        }),
+        'alpha',
+      );
+      await state.load();
+      expect(state.look, BotLook.inherit);
+
+      served = 'studio';
+      revision = 2;
+      await state.reloadLook();
+      expect(state.look, BotLook.studio);
+      expect(state.lookRevision, 2);
+
+      final saved = state.saveLook(BotLook.inherit);
+      final reread = state.reloadLook();
+      await Future<void>.delayed(Duration.zero);
+      expect(state.look, BotLook.inherit);
+      landed.complete();
+      expect(await saved, isTrue);
+      await reread;
+      expect(state.look, BotLook.inherit);
+      expect(state.lookRevision, 3);
+      state.dispose();
+    },
+  );
+
   testWidgets('Custom refuses a contrast-floor edit without writing', (
     tester,
   ) async {

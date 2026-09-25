@@ -3114,7 +3114,8 @@
         "run-status",
         "announcement",
         "card-revision",
-        "computer"
+        "computer",
+        "look"
       ]
     },
     "ConversationMessageUpdate": {
@@ -6204,7 +6205,7 @@
   },
   "x-frockbot-compatibility": {
     "protocolMin": 2,
-    "protocolMax": 3,
+    "protocolMax": 4,
     "catalogs": []
   },
   "x-frockbot-state-channel": {

@@ -64,3 +64,22 @@ export function activeIsolateTurn(
   }
   return active;
 }
+
+/**
+ * Whether the Plugin an admitted call names wraps a loop event. A call that
+ * is not admitted wraps nothing.
+ */
+export function admittedPluginWrapsV1(
+  state: ShellBotStateV1,
+  input: IsolateCallIdentityV1,
+  hook: string,
+): boolean {
+  const members =
+    activeIsolateTurn(state, input)?.mounted.generation.members ??
+    state.turn.standalone(input.runId)?.members ??
+    [];
+  const member = members.find(
+    (candidate) => candidate.packageId === input.packageId,
+  );
+  return member?.descriptor?.hooks.includes(hook) ?? false;
+}

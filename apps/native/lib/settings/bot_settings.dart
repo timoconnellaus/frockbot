@@ -408,6 +408,29 @@ class BotSettingsController extends ChangeNotifier {
     return write;
   }
 
+  /// Reads the look again because it changed without this controller: a
+  /// Plugin that wraps it assembled a new one, or another device saved one.
+  /// Queued behind any save of ours, so it never undoes one in flight.
+  Future<void> reloadLook() {
+    final read = _lookWrites.then((_) => _readLook());
+    _lookWrites = read.then((_) => true);
+    return read;
+  }
+
+  Future<void> _readLook() async {
+    if (!loaded || _closed) return;
+    try {
+      final answer = (await api.request('/api/bots/$botId/look'))! as Map;
+      if (_closed) return;
+      lookRevision = (answer['revision'] as num?)?.toInt() ?? lookRevision;
+      look = parseBotLook(answer['look'] as String?);
+      lookDocument = decodeThemeDocument(answer['document']);
+      _changed();
+    } catch (_) {
+      // The Bot keeps the look it was wearing; the next open reads it again.
+    }
+  }
+
   Future<bool> _writeLook(BotLook next, {ThemeDocument? document}) async {
     saving = true;
     message = null;

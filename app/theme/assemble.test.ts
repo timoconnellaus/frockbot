@@ -9,10 +9,14 @@ import {
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import {
   assembleBotThemeV1,
-  oweThemeAssembleV1,
   rosterDeclaresThemeAssembleV1,
-  THEME_ASSEMBLE_DUE_KEY_V1,
 } from "./assemble.js";
+import {
+  deferThemeAssembleV1,
+  oweThemeAssembleV1,
+  THEME_ASSEMBLE_DUE_KEY_V1,
+  THEME_ASSEMBLE_TURN_DEFERRAL_MS_V1,
+} from "./owed.js";
 import type { BotPluginRosterV1 } from "@frockbot/app/plugins/worker-bot";
 
 class MemoryStorage {
@@ -118,6 +122,7 @@ describe("assembleBotThemeV1", () => {
   });
 
   test("a Plugin patch is persisted; a throw leaves the last good document", async () => {
+    let changes = 0;
     const storage = new MemoryStorage();
     const flock = createFlockBotBackendContribution({
       storage,
@@ -154,10 +159,14 @@ describe("assembleBotThemeV1", () => {
         roster: roster(["theme/assemble"]),
         assemble: () => Promise.resolve(patched),
         mirror: () => Promise.resolve(),
+        changed: () => {
+          changes += 1;
+        },
       },
     );
     expect(first.document?.tokens.surfaces.accent).toBe("#9c1a44");
     expect(first.look).toBe("custom");
+    expect(changes).toBe(1);
     const kept = await assembleBotThemeV1(
       stateOf(storage),
       { userId: "user-1", botId: "alpha" },
@@ -169,9 +178,14 @@ describe("assembleBotThemeV1", () => {
         roster: roster(["theme/assemble"]),
         assemble: () => Promise.reject(new Error("plugin threw")),
         mirror: () => Promise.resolve(),
+        changed: () => {
+          changes += 1;
+        },
       },
     );
     expect(kept.document?.tokens.surfaces.accent).toBe("#9c1a44");
+    // The look it already wore is not news to a client.
+    expect(changes).toBe(1);
     expect(storage.values.get(THEME_ASSEMBLE_DUE_KEY_V1)).toBeGreaterThan(
       Date.now(),
     );
@@ -286,5 +300,22 @@ describe("assembleBotThemeV1", () => {
     expect(rosterDeclaresThemeAssembleV1(roster(["theme/assemble"]))).toBe(
       true,
     );
+  });
+});
+
+describe("deferThemeAssembleV1", () => {
+  test("pushes an assemble already due past a running Turn, and leaves a later one", async () => {
+    const storage = new MemoryStorage();
+    await storage.put(THEME_ASSEMBLE_DUE_KEY_V1, 1_000);
+    await deferThemeAssembleV1(storage, 5_000);
+    expect(storage.values.get(THEME_ASSEMBLE_DUE_KEY_V1)).toBe(
+      5_000 + THEME_ASSEMBLE_TURN_DEFERRAL_MS_V1,
+    );
+    await storage.put(THEME_ASSEMBLE_DUE_KEY_V1, 9_000);
+    await deferThemeAssembleV1(storage, 5_000);
+    expect(storage.values.get(THEME_ASSEMBLE_DUE_KEY_V1)).toBe(9_000);
+    storage.values.delete(THEME_ASSEMBLE_DUE_KEY_V1);
+    await deferThemeAssembleV1(storage, 5_000);
+    expect(storage.values.has(THEME_ASSEMBLE_DUE_KEY_V1)).toBe(false);
   });
 });

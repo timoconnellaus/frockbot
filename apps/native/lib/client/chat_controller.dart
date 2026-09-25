@@ -670,6 +670,10 @@ class ChatController extends ChangeNotifier {
   /// card should read the projection again.
   final ValueNotifier<int> computerNotices = ValueNotifier(0);
 
+  /// Bumped once per `look` notice: this Bot's look changed without this
+  /// client asking, and it should be read again.
+  final ValueNotifier<int> lookNotices = ValueNotifier(0);
+
   Future<void> invalidate() async {
     await refresh();
     if (!_disposed) invalidations.value++;
@@ -777,6 +781,10 @@ class ChatController extends ChangeNotifier {
     }
     if (kind == 'computer') {
       if (!_disposed) computerNotices.value++;
+      return;
+    }
+    if (kind == 'look') {
+      if (!_disposed) lookNotices.value++;
       return;
     }
   }
@@ -1207,6 +1215,7 @@ class ChatController extends ChangeNotifier {
     _questionTimer?.cancel();
     invalidations.dispose();
     computerNotices.dispose();
+    lookNotices.dispose();
     super.dispose();
   }
 }

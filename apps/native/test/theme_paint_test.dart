@@ -15,6 +15,20 @@ import 'bot_switch_test.dart' show LatchedStore, registration, session;
 
 /// Theme paint never needs a live observer; refuse the socket at once so the
 /// test does not leave WebSocket connect timers pending after dispose.
+/// Answers the reads a Bot switch makes without a socket or a client.
+class _LookApi extends ThemePaintApi {
+  _LookApi(super.store, this.answer);
+  final Future<Object?> Function(String path) answer;
+
+  @override
+  Future<Object?> request(
+    String path, {
+    Object? body,
+    int limit = 512000,
+    bool authenticated = true,
+  }) => answer(path);
+}
+
 class ThemePaintApi extends NativeApi {
   ThemePaintApi(super.store, {super.client});
 
@@ -274,6 +288,77 @@ void main() {
         threadTheme(tester, 'bot-two').data.colorScheme.primary,
         const Color(0xff9c1a44),
       );
+    },
+  );
+
+  testWidgets(
+    'a look read while a Bot was open is what it paints first next time',
+    (tester) async {
+      final store = LatchedStore();
+      store.values['session'] = session('user-1');
+      // The directory is read once; this one says Studio from before the
+      // Bot changed its look.
+      store.values['directory/user-1'] = jsonEncode({
+        'schemaVersion': 1,
+        'revision': 1,
+        'bots': [
+          registration('bot-one', 'Rosemary'),
+          {
+            ...registration('bot-two', 'Clementine'),
+            'look': 'studio',
+            'document': studioDocument(),
+          },
+        ],
+      });
+      store.values['selection.user-1'] = 'bot-one';
+      var lookGate = Completer<void>();
+      final api = _LookApi(store, (path) async {
+        switch (path) {
+          case '/api/bots/bot-two/settings':
+            return {
+              'schemaVersion': 1,
+              'botId': 'bot-two',
+              'revision': 1,
+              'profile': {'name': 'Clementine'},
+              'notifications': {'enabled': true},
+              'packageValues': <String, Object?>{},
+            };
+          case '/api/bots/bot-two/voice':
+            return {'schemaVersion': 1, 'revision': 0};
+          case '/api/bots/bot-two/look':
+            await lookGate.future;
+            return {
+              'schemaVersion': 1,
+              'botId': 'bot-two',
+              'revision': 2,
+              'look': 'inherit',
+            };
+        }
+        throw RequestFailure('held', 503);
+      });
+      await tester.pumpWidget(FrockBotApp(store: store, api: api));
+      await tester.pump();
+      await tester.pump();
+      await tester.tap(find.byKey(const ValueKey('bot-bot-two')));
+      await tester.pump();
+      // The stale row paints until the Bot's own read lands.
+      expect(
+        find.byKey(const ValueKey('thread-theme-bot-two')),
+        findsOneWidget,
+      );
+      lookGate.complete();
+      await tester.pump();
+      await tester.pump();
+      expect(find.byKey(const ValueKey('thread-theme-bot-two')), findsNothing);
+
+      await tester.tap(find.byKey(const ValueKey('bot-bot-one')));
+      await tester.pump();
+      lookGate = Completer<void>();
+      await tester.tap(find.byKey(const ValueKey('bot-bot-two')));
+      await tester.pump();
+      // Before the read answers again, the row already wears Inherit.
+      expect(find.byKey(const ValueKey('thread-theme-bot-two')), findsNothing);
+      lookGate.complete();
     },
   );
 }

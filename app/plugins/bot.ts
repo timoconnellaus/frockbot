@@ -11,7 +11,7 @@
 import type { BotIdentity } from "@frockbot/core/durable";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import { currentUserCompositionV1 } from "@frockbot/app/composition/bot";
-import { oweThemeAssembleV1 } from "@frockbot/app/theme/assemble";
+import { oweThemeAssembleV1 } from "@frockbot/app/theme/owed";
 import {
   DEPLOYMENT_PLUGIN_CATALOG_V1,
   FIRST_PARTY_TOGGLEABLE_PLUGINS_V1,

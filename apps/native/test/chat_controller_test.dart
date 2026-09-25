@@ -150,9 +150,7 @@ void main() {
       'reason': 'initial',
       'conversation': {
         'schemaVersion': 1,
-        'runs': [
-          run(runId: 'run-1', events: const []),
-        ],
+        'runs': [run(runId: 'run-1', events: const [])],
         'page': {'truncated': false},
       },
     });
@@ -178,7 +176,9 @@ void main() {
     expect(transport.pages, 0);
     expect(controller.runs.single['events'], isNotEmpty);
     expect(controller.publicationCursor, '1');
-    final cached = decodePageCache(store.values[pageCacheKey('user-1', 'bot-1')]);
+    final cached = decodePageCache(
+      store.values[pageCacheKey('user-1', 'bot-1')],
+    );
     expect(cached?.cursor, '1');
     expect(cached?.epoch, '1');
     controller.dispose();
@@ -297,73 +297,98 @@ void main() {
         },
       });
       await controller.refresh();
-      expect(
-        [
-          for (final event in controller.runs.single['events'] as List)
-            if ((event as Map)['type'] == 'send/to-user') event,
-        ],
-        expected,
-      );
+      expect([
+        for (final event in controller.runs.single['events'] as List)
+          if ((event as Map)['type'] == 'send/to-user') event,
+      ], expected);
       controller.dispose();
     }
   });
 
-  test('stale revisions and computer updates leave the transcript alone', () async {
-    final store = MemoryStore();
+  test(
+    'stale revisions and computer updates leave the transcript alone',
+    () async {
+      final store = MemoryStore();
+      final controller = ChatController(
+        transport: RecordingTransport(),
+        store: store,
+        userId: 'user-1',
+        botId: 'bot-1',
+      );
+      await controller.initialize(liveChannel: true);
+      await controller.applyFrame({
+        'type': 'state/update',
+        'epoch': '1',
+        'cursor': '1',
+        'kind': 'message',
+        'entityId': 'msg:s:run-1:occ-1',
+        'revision': 2,
+        'payload': {
+          'runId': 'run-1',
+          'sessionId': 's',
+          'occurrenceId': 'occ-1',
+          'event': {
+            'type': 'send/to-user',
+            'payload': {'type': 'text', 'text': 'First'},
+            'ordinal': 0,
+          },
+        },
+      });
+      await controller.applyFrame({
+        'type': 'state/update',
+        'epoch': '1',
+        'cursor': '2',
+        'kind': 'message',
+        'entityId': 'msg:s:run-1:occ-1',
+        'revision': 1,
+        'payload': {
+          'runId': 'run-1',
+          'sessionId': 's',
+          'occurrenceId': 'occ-1',
+          'event': {
+            'type': 'send/to-user',
+            'payload': {'type': 'text', 'text': 'Stale'},
+            'ordinal': 0,
+          },
+        },
+      });
+      await controller.applyFrame({
+        'type': 'state/update',
+        'epoch': '1',
+        'cursor': '3',
+        'kind': 'computer',
+        'entityId': 'computer',
+        'revision': 3,
+        'payload': <String, Object?>{},
+      });
+      final events = controller.runs.single['events'] as List;
+      expect((events.single as Map)['payload']['text'], 'First');
+      expect(controller.invalidations.value, 0);
+      controller.dispose();
+    },
+  );
+
+  test('a look update is a notice, and a repeat of it is not', () async {
     final controller = ChatController(
       transport: RecordingTransport(),
-      store: store,
+      store: MemoryStore(),
       userId: 'user-1',
       botId: 'bot-1',
     );
     await controller.initialize(liveChannel: true);
-    await controller.applyFrame({
+    Map<String, Object?> look(int revision) => {
       'type': 'state/update',
       'epoch': '1',
-      'cursor': '1',
-      'kind': 'message',
-      'entityId': 'msg:s:run-1:occ-1',
-      'revision': 2,
-      'payload': {
-        'runId': 'run-1',
-        'sessionId': 's',
-        'occurrenceId': 'occ-1',
-        'event': {
-          'type': 'send/to-user',
-          'payload': {'type': 'text', 'text': 'First'},
-          'ordinal': 0,
-        },
-      },
-    });
-    await controller.applyFrame({
-      'type': 'state/update',
-      'epoch': '1',
-      'cursor': '2',
-      'kind': 'message',
-      'entityId': 'msg:s:run-1:occ-1',
-      'revision': 1,
-      'payload': {
-        'runId': 'run-1',
-        'sessionId': 's',
-        'occurrenceId': 'occ-1',
-        'event': {
-          'type': 'send/to-user',
-          'payload': {'type': 'text', 'text': 'Stale'},
-          'ordinal': 0,
-        },
-      },
-    });
-    await controller.applyFrame({
-      'type': 'state/update',
-      'epoch': '1',
-      'cursor': '3',
-      'kind': 'computer',
-      'entityId': 'computer',
-      'revision': 3,
+      'cursor': '$revision',
+      'kind': 'look',
+      'entityId': 'look',
+      'revision': revision,
       'payload': <String, Object?>{},
-    });
-    final events = controller.runs.single['events'] as List;
-    expect((events.single as Map)['payload']['text'], 'First');
+    };
+    await controller.applyFrame(look(1));
+    await controller.applyFrame(look(1));
+    await controller.applyFrame(look(2));
+    expect(controller.lookNotices.value, 2);
     expect(controller.invalidations.value, 0);
     controller.dispose();
   });
@@ -404,41 +429,44 @@ void main() {
     expect(kept.last.sends, isEmpty);
   });
 
-  test('a replacement snapshot bumps cards and keeps pending commands', () async {
-    final store = MemoryStore();
-    store.values['chat/user-1/bot-1'] = jsonEncode({
-      'version': 1,
-      'draft': '',
-      'pending': [
-        {'id': 'pending-1', 'text': 'still sending'},
-      ],
-    });
-    final transport = RecordingTransport();
-    final controller = ChatController(
-      transport: transport,
-      store: store,
-      userId: 'user-1',
-      botId: 'bot-1',
-    );
-    await controller.initialize(liveChannel: true);
-    expect(controller.draft, contains('still sending'));
-    await controller.applyFrame({
-      'schemaVersion': 1,
-      'type': 'state/snapshot',
-      'epoch': '2',
-      'cursor': '4',
-      'reason': 'epoch',
-      'conversation': {
+  test(
+    'a replacement snapshot bumps cards and keeps pending commands',
+    () async {
+      final store = MemoryStore();
+      store.values['chat/user-1/bot-1'] = jsonEncode({
+        'version': 1,
+        'draft': '',
+        'pending': [
+          {'id': 'pending-1', 'text': 'still sending'},
+        ],
+      });
+      final transport = RecordingTransport();
+      final controller = ChatController(
+        transport: transport,
+        store: store,
+        userId: 'user-1',
+        botId: 'bot-1',
+      );
+      await controller.initialize(liveChannel: true);
+      expect(controller.draft, contains('still sending'));
+      await controller.applyFrame({
         'schemaVersion': 1,
-        'runs': [run(runId: 'run-9')],
-        'page': {'truncated': false},
-      },
-    });
-    expect(controller.runs.single['runId'], 'run-9');
-    expect(controller.publicationEpoch, '2');
-    expect(controller.invalidations.value, 1);
-    controller.dispose();
-  });
+        'type': 'state/snapshot',
+        'epoch': '2',
+        'cursor': '4',
+        'reason': 'epoch',
+        'conversation': {
+          'schemaVersion': 1,
+          'runs': [run(runId: 'run-9')],
+          'page': {'truncated': false},
+        },
+      });
+      expect(controller.runs.single['runId'], 'run-9');
+      expect(controller.publicationEpoch, '2');
+      expect(controller.invalidations.value, 1);
+      controller.dispose();
+    },
+  );
 
   test('a card revision refreshes cards without a transcript GET', () async {
     final store = MemoryStore();
@@ -523,22 +551,25 @@ void main() {
           '${line.id}${line.isDraft ? ' (draft)' : ''}: ${send.payload?['text']}',
     ];
 
-    test('is drawn where its message will be, which then replaces it', () async {
-      final store = MemoryStore();
-      final controller = await running(store);
-      final cached = store.values[pageCacheKey('user-1', 'bot-1')];
+    test(
+      'is drawn where its message will be, which then replaces it',
+      () async {
+        final store = MemoryStore();
+        final controller = await running(store);
+        final cached = store.values[pageCacheKey('user-1', 'bot-1')];
 
-      await controller.applyFrame(draft(0, ['Hel']));
-      await controller.applyFrame(draft(0, ['Hello the']));
-      expect(said(controller), ['run-1:send:0 (draft): Hello the']);
-      // A draft moves no cursor and writes nothing down.
-      expect(controller.publicationCursor, '1');
-      expect(store.values[pageCacheKey('user-1', 'bot-1')], cached);
+        await controller.applyFrame(draft(0, ['Hel']));
+        await controller.applyFrame(draft(0, ['Hello the']));
+        expect(said(controller), ['run-1:send:0 (draft): Hello the']);
+        // A draft moves no cursor and writes nothing down.
+        expect(controller.publicationCursor, '1');
+        expect(store.values[pageCacheKey('user-1', 'bot-1')], cached);
 
-      await controller.applyFrame(message(0, 'Hello there.', 2));
-      expect(said(controller), ['run-1:send:0: Hello there.']);
-      controller.dispose();
-    });
+        await controller.applyFrame(message(0, 'Hello there.', 2));
+        expect(said(controller), ['run-1:send:0: Hello there.']);
+        controller.dispose();
+      },
+    );
 
     test('a batch draws each send it is writing, in order', () async {
       final controller = await running(MemoryStore());
@@ -560,32 +591,35 @@ void main() {
       controller.dispose();
     });
 
-    test('an empty draft, a settled Turn or a dropped socket clears it', () async {
-      final controller = await running(MemoryStore());
-      await controller.applyFrame(draft(0, ['Maybe']));
-      await controller.applyFrame(draft(0, []));
-      expect(controller.replyDrafts, isEmpty);
+    test(
+      'an empty draft, a settled Turn or a dropped socket clears it',
+      () async {
+        final controller = await running(MemoryStore());
+        await controller.applyFrame(draft(0, ['Maybe']));
+        await controller.applyFrame(draft(0, []));
+        expect(controller.replyDrafts, isEmpty);
 
-      await controller.applyFrame(draft(0, ['Maybe']));
-      controller.connection = ConnectionState.disconnected;
-      expect(controller.replyDrafts, isEmpty);
+        await controller.applyFrame(draft(0, ['Maybe']));
+        controller.connection = ConnectionState.disconnected;
+        expect(controller.replyDrafts, isEmpty);
 
-      controller.connection = ConnectionState.connected;
-      await controller.applyFrame(draft(0, ['Maybe']));
-      await controller.applyFrame({
-        'type': 'state/update',
-        'epoch': '1',
-        'cursor': '2',
-        'kind': 'run-status',
-        'entityId': 'run:run-1',
-        'revision': 2,
-        'payload': {
-          'run': {...run(runId: 'run-1'), 'status': 'completed'},
-        },
-      });
-      expect(controller.replyDrafts, isEmpty);
-      expect(said(controller), isEmpty);
-      controller.dispose();
-    });
+        controller.connection = ConnectionState.connected;
+        await controller.applyFrame(draft(0, ['Maybe']));
+        await controller.applyFrame({
+          'type': 'state/update',
+          'epoch': '1',
+          'cursor': '2',
+          'kind': 'run-status',
+          'entityId': 'run:run-1',
+          'revision': 2,
+          'payload': {
+            'run': {...run(runId: 'run-1'), 'status': 'completed'},
+          },
+        });
+        expect(controller.replyDrafts, isEmpty);
+        expect(said(controller), isEmpty);
+        controller.dispose();
+      },
+    );
   });
 }

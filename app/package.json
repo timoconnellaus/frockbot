@@ -197,6 +197,7 @@
     "./routines/testing": "./routines/testing.ts",
     "./runtime": "./runtime.ts",
     "./theme/assemble": "./theme/assemble.ts",
+    "./theme/owed": "./theme/owed.ts",
     "./search": "./search/index.ts",
     "./search/backend": "./search/backend.ts",
     "./search/bot": "./search/bot.ts",

@@ -16,9 +16,16 @@ import {
   cardApprovalBindingKeyV1,
   cardValuesDigestV1,
 } from "../shell/cards.js";
+import { MemoryStorage } from "@frockbot/core/durable/testing";
+import {
+  THEME_ASSEMBLE_DUE_KEY_V1,
+  THEME_ASSEMBLE_RUN_PREFIX_V1,
+} from "../theme/owed.js";
 import {
   isolateEmail,
   isolateSchedule,
+  isolateStorageDelete,
+  isolateStoragePut,
   isolateWorkspaceRead,
   type IsolateCallScopeV1,
 } from "./bot.ts";
@@ -42,7 +49,11 @@ function scope(
 }
 
 function state(
-  members: { packageId: string; artifact?: unknown }[],
+  members: {
+    packageId: string;
+    artifact?: unknown;
+    descriptor?: { hooks: readonly string[] };
+  }[],
   standalone?: StandaloneIsolateCallV1,
 ) {
   const active = {
@@ -463,5 +474,95 @@ describe("one email, sent for the Bot that asked", () => {
     expect(await isolateEmail(subject.state, request)).toMatchObject({
       reason: "this deployment has no sender bound, so it sends no email",
     });
+  });
+});
+
+describe("a Plugin that wraps the look writing its own storage", () => {
+  const wraps = {
+    packageId: "greeter",
+    artifact: { contentHash: "a" },
+    descriptor: { hooks: ["theme/assemble"] },
+  };
+  function storageState(
+    members: {
+      packageId: string;
+      artifact?: unknown;
+      descriptor?: { hooks: readonly string[] };
+    }[],
+    standalone?: StandaloneIsolateCallV1,
+  ) {
+    const storage = new MemoryStorage();
+    const refreshed: unknown[] = [];
+    const subject = state(members, standalone) as unknown as {
+      ctx: { storage: MemoryStorage };
+      authority: { refreshRecoveryAlarm(transaction: unknown): Promise<void> };
+    };
+    subject.ctx = { storage };
+    subject.authority = {
+      refreshRecoveryAlarm: (transaction) => {
+        refreshed.push(transaction);
+        return Promise.resolve();
+      },
+    };
+    return {
+      bot: subject as unknown as ShellBotStateV1,
+      storage,
+      refreshed,
+    };
+  }
+  const put = { key: "accent", value: "#ffd400" };
+
+  test("owes an assemble now, and a Turn re-arms the alarm when it settles", async () => {
+    const { bot, storage, refreshed } = storageState([wraps]);
+    await isolateStoragePut(bot, scope({ request: put }));
+    expect(storage.values.get(THEME_ASSEMBLE_DUE_KEY_V1)).toBeNumber();
+    expect(refreshed).toHaveLength(0);
+  });
+
+  test("outside a Turn, re-arms the alarm itself", async () => {
+    const call: StandaloneIsolateCallV1 = {
+      runId: "views:bot-1",
+      sessionId: "user-1:bot-1",
+      turnId: "views:bot-1",
+      generationId: GENERATION,
+      members: [wraps],
+    };
+    const { bot, storage, refreshed } = storageState([], call);
+    await isolateStoragePut(
+      bot,
+      scope({ runId: "views:bot-1", turnId: "views:bot-1", request: put }),
+    );
+    expect(storage.values.get(THEME_ASSEMBLE_DUE_KEY_V1)).toBeNumber();
+    expect(refreshed).toHaveLength(1);
+  });
+
+  test("a delete of something it held owes one too", async () => {
+    const { bot, storage } = storageState([wraps]);
+    await isolateStoragePut(bot, scope({ request: put }));
+    storage.values.delete(THEME_ASSEMBLE_DUE_KEY_V1);
+    await isolateStorageDelete(bot, scope({ request: { key: "accent" } }));
+    expect(storage.values.get(THEME_ASSEMBLE_DUE_KEY_V1)).toBeNumber();
+  });
+
+  test("owes nothing for a Plugin that does not wrap the look", async () => {
+    const { bot, storage } = storageState([
+      { ...wraps, descriptor: { hooks: ["tools/pre-execute"] } },
+    ]);
+    await isolateStoragePut(bot, scope({ request: put }));
+    expect(storage.values.has(THEME_ASSEMBLE_DUE_KEY_V1)).toBe(false);
+  });
+
+  test("owes nothing for the assemble's own write, or it would owe itself forever", async () => {
+    const runId = `${THEME_ASSEMBLE_RUN_PREFIX_V1}one`;
+    const call: StandaloneIsolateCallV1 = {
+      runId,
+      sessionId: "user-1:bot-1",
+      turnId: runId,
+      generationId: GENERATION,
+      members: [wraps],
+    };
+    const { bot, storage } = storageState([], call);
+    await isolateStoragePut(bot, scope({ runId, turnId: runId, request: put }));
+    expect(storage.values.has(THEME_ASSEMBLE_DUE_KEY_V1)).toBe(false);
   });
 });
