@@ -4,8 +4,11 @@ import {
   defaultTurnDirectiveV1,
   emptyFailureStateV1,
   emptyPolicySnapshotV1,
+  SUPERVISION_ARGUMENTS_CHANGED_PREFIX_V1,
+  SUPERVISION_NOT_AUTHORIZED_PREFIX_V1,
   SUPERVISION_OFF_TASK_PREFIX_V1,
   SUPERVISION_WITHHELD_SEND_PREFIX_V1,
+  type CallDecisionV1,
   type ConversationEvidenceV1,
   type LlmMessage,
   type LoopHooksV1,
@@ -35,6 +38,10 @@ import type { FoundationFeature } from "../runtime.js";
 // - Right before each text send runs: would the person miss it. A withheld
 //   send is never delivered; its draft is cleared; and a withheld finish
 //   still ends the Turn, because the person already has what it would say.
+// - Right before each `mutate` call runs — a Plugin a User installed or a Bot
+//   wrote, a remote MCP server, a connected app: did the person ask for it,
+//   with these particulars. A refused call never runs; the model reads why
+//   and asks the person in conversation.
 //
 // Every decision is a session event, read back rather than asked again when a
 // Turn resumes, and inspectable per Turn through `/api/debug`. Mounted first,
@@ -265,6 +272,32 @@ function sendDecisionOf(
   return event?.type === "supervision/send" ? event.decision : undefined;
 }
 
+function callDecisionOf(
+  events: readonly SessionEvent[],
+  occurrenceId: string,
+): CallDecisionV1 | undefined {
+  const event = events.findLast(
+    (candidate) =>
+      candidate.type === "supervision/call" &&
+      candidate.occurrenceId === occurrenceId,
+  );
+  return event?.type === "supervision/call" ? event.decision : undefined;
+}
+
+/** The Turn's own requests and what the Bot has said in it, in order. */
+function conversationThisTurn(
+  events: readonly SessionEvent[],
+  turn: number,
+): ConversationEvidenceV1[] {
+  return turnEvents(events, turn).flatMap((event): ConversationEvidenceV1[] => {
+    if (event.type === "user/message") {
+      return [{ speaker: "user", text: event.text }];
+    }
+    const shown = describeShown(event);
+    return shown === undefined ? [] : [{ speaker: "bot", text: shown }];
+  });
+}
+
 /**
  * Whether a step withheld a send that would have ended the Turn. A Turn that
  * owes a caller its answer is not ended by a send, withheld or not.
@@ -307,6 +340,12 @@ function withheldResult(
           : " Carry on without repeating it."
         : " Go back to what they asked.";
   return `${SUPERVISION_WITHHELD_SEND_PREFIX_V1} ${why}${next}`;
+}
+
+function refusedCallResult(reason: string): string {
+  return reason === "arguments_changed"
+    ? `${SUPERVISION_ARGUMENTS_CHANGED_PREFIX_V1} A recipient, destination or the substance is not what they asked for. Match what they asked, or check with them in conversation first, saying exactly what the call will do.`
+    : `${SUPERVISION_NOT_AUTHORIZED_PREFIX_V1} If it is needed, ask them in conversation first, saying exactly what it will do, and make the call once they agree.`;
 }
 
 function offTaskResult(objective: string): string {
@@ -448,6 +487,49 @@ export function createSupervisionRuntimeFeatureV1(
                 isError: true,
               },
             };
+          }
+          if (context.effect === "mutate") {
+            let verdict = callDecisionOf(events, context.effectId);
+            if (!verdict) {
+              const started = Date.now();
+              verdict = await host.supervisor.reviewCall(
+                {
+                  objective: inputText(events, at.turn),
+                  origin: host.origin,
+                  call: {
+                    tool: call.name,
+                    arguments: isRecord(call.input) ? call.input : {},
+                  },
+                  conversation: [
+                    ...conversationBefore(session),
+                    ...conversationThisTurn(events, at.turn),
+                  ],
+                  priorResults: priorResults(events, at.turn),
+                  policies: emptyPolicySnapshotV1(),
+                },
+                context.signal,
+              );
+              session.append({
+                type: "supervision/call",
+                turn: at.turn,
+                step: at.step,
+                occurrenceId: context.effectId,
+                tool: call.name,
+                decision: verdict,
+                latencyMs: elapsed(started),
+              });
+              await session.flush();
+            }
+            if (verdict.decision === "reject") {
+              return {
+                kind: "denied",
+                call,
+                result: {
+                  content: refusedCallResult(verdict.reasonCode),
+                  isError: true,
+                },
+              };
+            }
           }
           return next();
         }

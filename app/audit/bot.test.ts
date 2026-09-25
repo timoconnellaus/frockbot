@@ -103,6 +103,55 @@ describe("projecting a settled run", () => {
     ]);
   });
 
+  test("a call supervision refused is a row naming the tool it would have reached", async () => {
+    const entries = await auditEntriesFromStoredRunV1(
+      "foreman",
+      run([
+        {
+          type: "supervision/call",
+          turn: 1,
+          step: 1,
+          occurrenceId: "tool:1:1:0",
+          decision: { decision: "reject", reasonCode: "no_authorization" },
+        },
+        call("tool:1:1:0", "call_dynamic_tool", {
+          namespace: "composio-gmail",
+          toolName: "GMAIL_SEND_EMAIL",
+          arguments: { to: "sam@example.com" },
+        }),
+        result("tool:1:1:0", {
+          content:
+            "Not run: supervision found no request from the person for this call.",
+          isError: true,
+        }),
+        {
+          type: "supervision/call",
+          turn: 1,
+          step: 2,
+          occurrenceId: "tool:1:2:0",
+          decision: { decision: "allow", reasonCode: "authorized" },
+        },
+        call("tool:1:2:0", "call_dynamic_tool", {
+          namespace: "composio-gmail",
+          toolName: "GMAIL_FETCH_EMAILS",
+          arguments: {},
+        }),
+        result("tool:1:2:0", { content: "3 emails" }),
+      ]),
+    );
+    expect(
+      entries
+        .filter((entry) => entry.kind === "supervision")
+        .map((entry) => [entry.toolName, entry.preview, entry.outcome]),
+    ).toEqual([
+      [
+        "composio-gmail/GMAIL_SEND_EMAIL",
+        "composio-gmail/GMAIL_SEND_EMAIL, not asked for",
+        "refused",
+      ],
+    ]);
+  });
+
   test("a tool's own output cannot make its row a supervision refusal", async () => {
     const entries = await auditEntriesFromStoredRunV1(
       "foreman",

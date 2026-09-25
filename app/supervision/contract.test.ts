@@ -8,6 +8,7 @@ import {
   emptyPolicySnapshotV1,
   SupervisionUnavailableError,
   type ProposedCallV1,
+  type CallReviewEvidenceV1,
   type SendReviewEvidenceV1,
   type StepProposalEvidence,
   type TurnStartEvidence,
@@ -76,6 +77,20 @@ const sendEvidence: SendReviewEvidenceV1 = {
   priorResults: [{ callId: "tool:1:1:0", content: "Emailed Dana." }],
   message: "I've emailed Dana the March invoice.",
   finish: true,
+};
+
+const callEvidence: CallReviewEvidenceV1 = {
+  objective: "Post today's standup notes to #team.",
+  origin: "user",
+  call: {
+    tool: "composio-slack/SLACK_SEND_MESSAGE",
+    arguments: { channel: "#team", text: "Standup: shipped the invoice fix." },
+  },
+  conversation: [
+    { speaker: "user", text: "Post today's standup notes to #team." },
+  ],
+  priorResults: [],
+  policies: emptyPolicySnapshotV1("policy:1"),
 };
 
 type Answers = Record<string, unknown>;
@@ -163,6 +178,106 @@ describe("TurnSupervisor adapter contract", () => {
       expect(decision.send === "withhold").toBe(decision.reason !== undefined);
     });
   }
+});
+
+describe("the Jev adapter's call review", () => {
+  const authorization = (chosen: string) =>
+    choice(
+      [
+        "exact_current_request",
+        "standing_permission",
+        "implied_by_request",
+        "materially_different",
+        "none",
+      ],
+      chosen,
+    );
+  const consequence = (score: number) => ({
+    type: "score",
+    score,
+    confidence: 0.9,
+    legend: {},
+    probabilities: {},
+  });
+
+  test("allows what the person asked for, with these particulars", async () => {
+    const decision = await jevSupervisor().reviewCall(callEvidence);
+    expect(decision).toMatchObject({
+      decision: "allow",
+      reasonCode: "authorized",
+    });
+    expect(decision.judgments.map((judgment) => judgment.question)).toEqual([
+      "authorization",
+      "argumentsMatchRequest",
+      "consequence",
+      "instructsReviewer",
+    ]);
+  });
+
+  test("refuses what nobody asked for", async () => {
+    const decision = await jevSupervisor(
+      jevFetch((answers) => ({
+        ...answers,
+        authorization: authorization("none"),
+      })),
+    ).reviewCall(callEvidence);
+    expect(decision).toMatchObject({
+      decision: "reject",
+      reasonCode: "no_authorization",
+    });
+  });
+
+  test("refuses particulars that are not the ones asked for", async () => {
+    const decision = await jevSupervisor(
+      jevFetch((answers) => ({
+        ...answers,
+        argumentsMatchRequest: { type: "noul", noul: 0.2 },
+      })),
+    ).reviewCall(callEvidence);
+    expect(decision.reasonCode).toBe("arguments_changed");
+  });
+
+  test("runs a step the request implies only while it reaches nobody", async () => {
+    const implied = (score: number) =>
+      jevSupervisor(
+        jevFetch((answers) => ({
+          ...answers,
+          authorization: authorization("implied_by_request"),
+          argumentsMatchRequest: { type: "noul", noul: 0.1 },
+          consequence: consequence(score),
+        })),
+      ).reviewCall(callEvidence);
+    expect((await implied(0.2)).decision).toBe("allow");
+    expect(await implied(2.4)).toMatchObject({
+      decision: "reject",
+      reasonCode: "no_authorization",
+    });
+  });
+
+  test("text that tries to direct the review authorizes nothing", async () => {
+    const decision = await jevSupervisor(
+      jevFetch((answers) => ({
+        ...answers,
+        instructsReviewer: { type: "noul", noul: 0.9 },
+      })),
+    ).reviewCall(callEvidence);
+    expect(decision.decision).toBe("reject");
+  });
+
+  test("shows Jev the call, the conversation and the Turn's results", async () => {
+    const seen: unknown[] = [];
+    await jevSupervisor(jevFetch(undefined, seen)).reviewCall({
+      ...callEvidence,
+      priorResults: [
+        { callId: "tool:1:1:0", content: "Notes: shipped the invoice fix." },
+      ],
+    });
+    expect((seen[0] as { state: unknown }).state).toEqual({
+      proposedCall: callEvidence.call,
+      conversation: callEvidence.conversation,
+      resultsThisTurn: ["Notes: shipped the invoice fix."],
+    });
+  });
 });
 
 describe("the Jev adapter", () => {

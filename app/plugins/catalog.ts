@@ -315,6 +315,19 @@ export function seededPluginWordsV1(pluginId: string): SeededPluginWordsV1 {
  * artifact nobody built. The words each card shows are here, because they are
  * the deployment's, not the Plugin's.
  */
+const SEEDED_CONTENT_HASHES_V1 = new Set(
+  SEEDED_PLUGIN_ARTIFACTS_V1.map((artifact) => artifact.contentHash),
+);
+
+/**
+ * Whether an artifact is one this deployment built and seeded, by its content
+ * address: a Plugin that took a seeded Plugin's id is still not the
+ * deployment's code.
+ */
+export function isSeededPluginArtifactV1(contentHash: string): boolean {
+  return SEEDED_CONTENT_HASHES_V1.has(contentHash);
+}
+
 export const DEPLOYMENT_PLUGIN_CATALOG_V1: readonly SeededPluginV1[] =
   SEEDED_PLUGIN_ARTIFACTS_V1.map((artifact) =>
     decodeSeededPluginV1({

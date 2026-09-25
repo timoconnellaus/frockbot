@@ -31,7 +31,7 @@ const child = Bun.spawn(
   [
     process.execPath,
     ...(envFile ? [`--env-file=${envFile}`] : []),
-    "app/evals/tool-approval-run.ts",
+    "app/evals/call-review-run.ts",
   ],
   {
     cwd: root,

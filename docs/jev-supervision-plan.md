@@ -16,10 +16,10 @@ The first enforced behavior is plan step 4: the start-of-Turn judgment with
 acknowledgement steering, whole-response alignment, and review of each text
 send. It is enforced rather than shadowed, even below the eval gate, so it is
 tuned in use; every decision is a session event, inspectable per Turn through
-`/api/debug`, and a withheld send is an audit row. Approval of mutating tool
-calls follows once tools carry a trusted read/mutate classification (steps 2
-and 3). Specialist routing, Mentor escalation and continuation state are built
-against the same interface.
+`/api/debug`, and a withheld send is an audit row. Approval of mutating calls
+(steps 2 and 3) is enforced the same way for calls from outside the
+deployment. Specialist routing, Mentor escalation and continuation state are
+built against the same interface.
 
 ## Product decisions
 
@@ -208,23 +208,31 @@ represented as a User message.
 
 ## Tool effects
 
-Add host-owned effect metadata to registered tools:
+Host-owned effect metadata on registered tools
+(`core/contracts/tool-execution.ts`):
 
 ```ts
 type ToolEffectV1 = "read" | "mutate";
 ```
 
-- Every mutating call requires a positive review decision before dispatch.
-- Unknown and Plugin-provided tools default to `mutate`.
-- A Plugin declaration cannot confer read-only status on itself.
-- Only a trusted host catalog may classify a tool as `read`.
+- `mutate` is code from outside the deployment acting on the world: a Plugin
+  a User installed or a Bot wrote, a remote MCP server, a connected app. Every
+  such call needs a positive review decision, made right before it runs.
+- `read` is everything a review would only slow down: reads, changes the
+  person can see and undo inside FrockBot, work on the Bot's own Computer, and
+  first-party effects that carry their own human gate (the approval card for
+  the person's machine, an approved email draft, Plugin publishing).
+- A native tool that declares nothing is `read`. A namespace that declares
+  nothing is `mutate`, and a tool's own declaration wins over its namespace's.
+  The registry resolves the effect into the call's `ToolExecutionContext`
+  before any hook sees it.
+- A Plugin cannot confer `read` on itself: the Plugin host marks a Plugin's
+  namespace `read` only when its artifact's content hash is one the
+  deployment seeded, and marks its card draws `read` because drawing a card is
+  the Bot speaking.
 - `orderedEffect` and `idempotent` retain their current meanings; neither is a
   substitute for effect classification.
-- A batch is reviewed as one response but admitted per occurrence. Allowed
-  occurrences run and rejected occurrences receive results in declared order.
-
-Read calls are included in whole-response review from the start. Individual
-authorization enforcement initially applies only to mutations.
+- A batch's sub-calls are reviewed one by one, as each runs.
 
 ## Policy model
 
@@ -375,10 +383,9 @@ conversation or policy content is not needed for diagnosis.
 
 ## Evaluation
 
-Build on `app/evals/tool-approval.ts` and keep live evaluation separate from unit
-tests. Pin the calibrated Jev version. Run the labeled suites with
-`bun run eval:tool-approval`, `bun run eval:turn-start` and
-`bun run eval:response-review`; each reads
+Keep live evaluation separate from unit tests. Pin the calibrated Jev version.
+Run the labeled suites with `bun run eval:turn-start`,
+`bun run eval:response-review` and `bun run eval:call-review`; each reads
 `JEV_API_KEY` from the main checkout's `.dev.vars` (the runners still accept
 `TYPESAFE_API_KEY` as a local alias) and writes traces to `.eval-results/`.
 Neither is part of ordinary tests or the pre-push gate.
@@ -414,12 +421,9 @@ _Done for step 4._ The loop is wired (`app/supervision/loop.ts`).
 
 - _Done._ `TurnSupervisor`, its domain types, a fake adapter, a hard-unavailable
   adapter and the hosted Jev adapter (`core/contracts/turn-supervisor.ts`,
-  `app/supervision/`). `startTurn` returns the conservative typed default until
-  the start-of-Turn questions pass their labeled suite. `reviewStep` reuses the tool-approval
-  questions for each mutating call and allows reads without a judgment.
-- _Done._ The labeled tool-approval eval and adapter contract tests. The Node
-  report runner lives in `app/evals/tool-approval-run.ts` so the Worker does
-  not import it.
+  `app/supervision/`).
+- _Done._ Labeled evals and adapter contract tests. Each Node report runner
+  lives beside its suite in `app/evals/` so the Worker does not import it.
 - _Done._ Production owns `JEV_API_KEY` from the GitHub secret of that name:
   required in `production-secrets.ts`, declared on Worker `Env`, and carried
   by the release and staging deploys.
@@ -430,21 +434,29 @@ _Done for step 4._ The loop is wired (`app/supervision/loop.ts`).
 
 ### 2. Tool classification and policy storage
 
-- Add trusted `read`/`mutate` metadata and conservative defaults.
+- _Done._ Trusted `read`/`mutate` metadata with conservative defaults (see
+  Tool effects).
 - Add platform, global User and per-Bot policy stores and deterministic
-  precedence.
+  precedence. Until they exist every Turn is reviewed under an empty policy
+  snapshot, and the call questions carry no policy judgment.
 - Pin the effective policy generation on admitted Turns.
 - Add supervised policy-management tools.
 
 ### 3. Enforced mutation review
 
-- Review every complete response before tool execution.
-- Enforce mutating-call decisions.
-- Settle rejected calls as model-visible results without throwing.
-- Preserve partial admission and ordering for batches.
-- Verify conversational re-authorization in text and voice paths.
+_Done, enforced._
 
-This is the first production enforcement milestone.
+- Each `mutate` call is reviewed right before it runs
+  (`TurnSupervisor.reviewCall`, `app/supervision/call-review.ts`), with the
+  conversation, the Turn's own requests and its results so far. A labeled
+  suite of 16 cases (`bun run eval:call-review`, 16/16 on `jev-1.13.0`).
+- Code allows a call the person asked for, or gave lasting permission for,
+  whose particulars match; and a step their request plainly needs only while
+  it reaches nobody outside FrockBot. Text trying to direct the review
+  authorizes nothing.
+- A refused call is a tool result the model reads, telling it to ask the
+  person in conversation; it never runs. Each decision is a `supervision/call`
+  session event, and a refused call an audit row.
 
 ### 4. Whole-response review and acknowledgement
 

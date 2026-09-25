@@ -25,6 +25,11 @@ import {
   type JevCallBudgetV1,
 } from "./response-review.js";
 import {
+  callReviewEvidenceV1,
+  composeCallDecisionV1,
+  reviewCallV1,
+} from "./call-review.js";
+import {
   composeTurnDirectiveV1,
   reviewTurnStartV1,
   turnStartJudgmentEvidenceV1,
@@ -82,10 +87,8 @@ function classifyJevFailure(error: unknown): SupervisionUnavailableError {
 
 /**
  * The hosted supervision adapter: one Jev call before a Turn's first model
- * call, one per model response that calls tools, and one per text send that
- * code's vetoes leave open to judgment. Per-call mutation approval
- * (`app/evals/tool-approval.ts`) is not asked yet: it needs the host's
- * read/mutate catalog first.
+ * call, one per model response that calls tools, one per text send that
+ * code's vetoes leave open to judgment, and one per `mutate` call.
  */
 export function createJevTurnSupervisorV1(
   options: JevTurnSupervisorOptionsV1,
@@ -138,6 +141,22 @@ export function createJevTurnSupervisorV1(
           { signal, budget },
         );
         return composeSendDecisionV1({
+          answers: review.answers,
+          model: review.model,
+        });
+      } catch (error) {
+        throw classifyJevFailure(error);
+      }
+    },
+    async reviewCall(evidence, signal) {
+      signal?.throwIfAborted();
+      try {
+        const review = await reviewCallV1(
+          options.client,
+          callReviewEvidenceV1(evidence),
+          { signal, budget },
+        );
+        return composeCallDecisionV1({
           answers: review.answers,
           model: review.model,
         });

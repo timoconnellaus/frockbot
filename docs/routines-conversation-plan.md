@@ -92,7 +92,7 @@ it as the inbox filter would still occupy the Bot with a Turn identity, a cue,
 and the one-run lock for work we intend to skip.
 
 Do not add this question to `startTurn`. Add a narrow judge beside the existing
-tool-approval eval:
+call-review eval:
 
 ```ts
 type RoutineEventVerdictV1 = "clearly_unrelated" | "is_or_might_be";
@@ -106,7 +106,7 @@ interface RoutineEventJudgeV1 {
 ```
 
 Hosted adapter: one Choice question, same Jev pin style as
-`app/evals/tool-approval.ts`. Tests: a fake. Unavailable: the hard-unavailable
+`app/evals/call-review.ts`. Tests: a fake. Unavailable: the hard-unavailable
 adapter that never returns `clearly_unrelated`.
 
 The scheduler's `execute` closure (`settleRoutineFirings` in
@@ -227,7 +227,7 @@ Jev runs. Drops are recorded, not enforced.
 - Labeled fixtures (shipping vs newsletter, invoice vs lunch, "Yes." /
   `Re: your order` / empty body must be `is_or_might_be`, clear newsletter
   `clearly_unrelated`).
-- Runner beside `tool-approval-run.ts`. `bun run eval:routine-event`. Not in
+- Runner beside `call-review-run.ts`. `bun run eval:routine-event`. Not in
   the pre-push gate. Reads `JEV_API_KEY`.
 - Hosted adapter implements the judge. Shadow: classify, write a skipped
   _summary that did not happen_ only to logs / a non-user record, still
@@ -260,7 +260,7 @@ Jev runs. Drops are recorded, not enforced.
 
 ## Evaluation
 
-Same rules as the tool-approval suite. Pin the Jev version to the fixtures.
+Same rules as the call-review suite. Pin the Jev version to the fixtures.
 Thresholds do not move between questions or Jev versions without a new label
 pass.
 

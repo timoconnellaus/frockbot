@@ -11,7 +11,16 @@
  * precedence and arithmetic, then returns these typed decisions.
  */
 
-/** Host-owned classification. A Plugin cannot confer `read` on itself. */
+/**
+ * Host-owned classification. A Plugin cannot confer `read` on itself.
+ *
+ * `mutate` is a call Turn supervision reviews before it runs: code from
+ * outside the deployment — a Plugin a User installed or a Bot wrote, a remote
+ * MCP server, a connected app — acting on the world. `read` is everything a
+ * review would only slow down: reads, changes the person can see and undo
+ * inside FrockBot, work on the Bot's own Computer, and first-party effects
+ * that carry their own human gate (an approval card, an approved draft).
+ */
 export type ToolEffectV1 = "read" | "mutate";
 
 export const SUPERVISION_REASON_CODES_V1 = [
@@ -304,6 +313,39 @@ export interface SendDecisionV1 {
   model?: string;
 }
 
+/**
+ * One `mutate` call, reviewed right before it runs: whether the person asked
+ * for it, with these particulars. Judged per call, with the Turn's results so
+ * far, because a call's arguments are often filled in from them.
+ */
+export interface CallReviewEvidenceV1 {
+  objective: string;
+  origin: TurnInputOriginV1;
+  /** The tool as the model named it, and exactly what it would be given. */
+  call: {
+    tool: string;
+    arguments: Readonly<Record<string, unknown>>;
+  };
+  /**
+   * What the person and the Bot said, oldest first: the conversation before
+   * this Turn, then the Turn's own requests. Only the person's words can
+   * authorize anything.
+   */
+  conversation: readonly ConversationEvidenceV1[];
+  /** This Turn's tool results so far, oldest first. */
+  priorResults: readonly PriorToolResultV1[];
+  policies: PolicySnapshotV1;
+}
+
+export interface CallDecisionV1 {
+  decision: "allow" | "reject";
+  reasonCode: SupervisionReasonCode;
+  /** What the judge answered. Empty for an adapter that asked nobody. */
+  judgments: SupervisionJudgmentV1[];
+  /** The judge's resolved model version, when one was asked. */
+  model?: string;
+}
+
 export interface TurnSupervisor {
   startTurn(
     evidence: TurnStartEvidence,
@@ -319,6 +361,11 @@ export interface TurnSupervisor {
     evidence: SendReviewEvidenceV1,
     signal?: AbortSignal,
   ): Promise<SendDecisionV1>;
+
+  reviewCall(
+    evidence: CallReviewEvidenceV1,
+    signal?: AbortSignal,
+  ): Promise<CallDecisionV1>;
 }
 
 export type SupervisionFailureKindV1 = "unavailable" | "timeout";
@@ -340,6 +387,10 @@ export class SupervisionUnavailableError extends Error {
 /** How a result Turn supervision wrote begins, for the model to read. */
 export const SUPERVISION_WITHHELD_SEND_PREFIX_V1 =
   "Not sent: supervision withheld this message";
+export const SUPERVISION_NOT_AUTHORIZED_PREFIX_V1 =
+  "Not run: supervision found no request from the person for this call.";
+export const SUPERVISION_ARGUMENTS_CHANGED_PREFIX_V1 =
+  "Not run: supervision found this call differs from what the person asked for.";
 export const SUPERVISION_OFF_TASK_PREFIX_V1 =
   "Not run: supervision judged this response to be working on something the person did not ask for.";
 
@@ -656,6 +707,41 @@ export function defaultTurnDirectiveV1(): TurnDirective {
   };
 }
 
+export function decodeCallDecisionV1(
+  value: unknown,
+  label = "call decision",
+): CallDecisionV1 {
+  const decision = record(value, label);
+  exactKeys(
+    decision,
+    ["decision", "reasonCode", "judgments"],
+    ["model"],
+    label,
+  );
+  return {
+    decision: oneOf(
+      decision.decision,
+      ["allow", "reject"] as const,
+      `${label}.decision`,
+    ),
+    reasonCode: oneOf(
+      decision.reasonCode,
+      SUPERVISION_REASON_CODES_V1,
+      `${label}.reasonCode`,
+    ),
+    judgments: decodeJudgmentsV1(decision.judgments, `${label}.judgments`),
+    ...(decision.model === undefined
+      ? {}
+      : {
+          model: text(decision.model, `${label}.model`, JUDGMENT_TEXT_MAX_V1),
+        }),
+  };
+}
+
+export function allowCallDecisionV1(): CallDecisionV1 {
+  return { decision: "allow", reasonCode: "authorized", judgments: [] };
+}
+
 export function releaseSendDecisionV1(): SendDecisionV1 {
   return { send: "release", judgments: [] };
 }
@@ -690,6 +776,7 @@ export function createFakeTurnSupervisorV1(options?: {
   startTurn?: TurnSupervisor["startTurn"];
   reviewStep?: TurnSupervisor["reviewStep"];
   reviewSend?: TurnSupervisor["reviewSend"];
+  reviewCall?: TurnSupervisor["reviewCall"];
 }): TurnSupervisor {
   return {
     async startTurn(evidence, signal) {
@@ -707,6 +794,11 @@ export function createFakeTurnSupervisorV1(options?: {
       if (options?.reviewSend) return options.reviewSend(evidence, signal);
       return releaseSendDecisionV1();
     },
+    async reviewCall(evidence, signal) {
+      throwIfAborted(signal);
+      if (options?.reviewCall) return options.reviewCall(evidence, signal);
+      return allowCallDecisionV1();
+    },
   };
 }
 
@@ -718,5 +810,10 @@ export function createUnavailableTurnSupervisorV1(
   const fail = async (): Promise<never> => {
     throw new SupervisionUnavailableError(kind, reason);
   };
-  return { startTurn: fail, reviewStep: fail, reviewSend: fail };
+  return {
+    startTurn: fail,
+    reviewStep: fail,
+    reviewSend: fail,
+    reviewCall: fail,
+  };
 }

@@ -65,7 +65,13 @@ export interface AuditProjectableRunV1 {
     status?: string;
     turn?: number;
     step?: number;
-    decision?: { send?: string; reason?: string; responseAlignment?: string };
+    decision?: {
+      send?: string;
+      reason?: string;
+      responseAlignment?: string;
+      decision?: string;
+      reasonCode?: string;
+    };
   }[];
   /** Used only when an event carries no timestamp of its own. */
   acceptedAt?: string;
@@ -135,6 +141,18 @@ function supervisionRefusalsV1(
         event.decision.reason === "redundant_text"
           ? "already shown"
           : "off task",
+      );
+    }
+    if (
+      event.type === "supervision/call" &&
+      event.occurrenceId &&
+      event.decision?.decision === "reject"
+    ) {
+      withheld.set(
+        event.occurrenceId,
+        event.decision.reasonCode === "arguments_changed"
+          ? "not what was asked"
+          : "not asked for",
       );
     }
     if (
@@ -220,7 +238,7 @@ export async function auditEntriesFromStoredRunV1(
     const { occurrenceId, name } = event;
     if (!occurrenceId || !name) continue;
     const supervised = supervisionAuditV1(
-      name,
+      resolveDynamicToolNameV1(name, event.input),
       event.input,
       refusedBySupervision(occurrenceId, name),
     );

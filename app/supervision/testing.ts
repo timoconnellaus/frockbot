@@ -22,7 +22,23 @@ export const SUPERVISION_QUESTION_SETS_V1: readonly (readonly string[])[] = [
   ],
   ["alignment"],
   ["messageNeeded", "messageKind"],
+  [
+    "authorization",
+    "argumentsMatchRequest",
+    "consequence",
+    "instructsReviewer",
+  ],
 ];
+
+/**
+ * The Nouls whose fence-sitting answer is not the safe reading: a call's
+ * particulars match what was asked, and nothing is directing the review, so
+ * a harness Turn's calls run.
+ */
+const SAFE_NOULS_V1: Readonly<Record<string, number>> = {
+  argumentsMatchRequest: 1,
+  instructsReviewer: 0,
+};
 
 /** Whether a body asks exactly one of Turn supervision's question sets. */
 export function isSupervisionBodyV1(body: unknown): boolean {
@@ -75,7 +91,7 @@ export function fakeJevAnswersV1(body: unknown): JsonRecord {
         confidence: 1,
       };
     } else {
-      answers[key] = { type: "noul", noul: 0.5 };
+      answers[key] = { type: "noul", noul: SAFE_NOULS_V1[key] ?? 0.5 };
     }
   }
   return {

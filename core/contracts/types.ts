@@ -20,9 +20,11 @@ import {
   type StructuredOutputFailureV1,
 } from "./structured-output.js";
 import {
+  decodeCallDecisionV1,
   decodeSendDecisionV1,
   decodeStepDecisionV1,
   decodeTurnDirectiveV1,
+  type CallDecisionV1,
   type SendDecisionV1,
   type StepDecision,
   type TurnDirective,
@@ -462,6 +464,19 @@ export interface SessionEventMap {
     occurrenceId: string;
     finish: boolean;
     decision: SendDecisionV1;
+    latencyMs: number;
+  };
+  /**
+   * What Turn supervision decided about one `mutate` call, written before
+   * the call runs. A refused call is settled as a tool result the model
+   * reads; it never runs.
+   */
+  "supervision/call": {
+    turn: number;
+    step: number;
+    occurrenceId: string;
+    tool: string;
+    decision: CallDecisionV1;
     latencyMs: number;
   };
   /**
@@ -1802,6 +1817,19 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
         throw new Error("session event.finish must be a boolean");
       }
       decodeSendDecisionV1(event.decision, "session event.decision");
+      eventInteger(event.latencyMs, "session event.latencyMs", 0);
+      break;
+    case "supervision/call":
+      requireEventKeys(
+        event,
+        keys("turn", "step", "occurrenceId", "tool", "decision", "latencyMs"),
+        "session event",
+      );
+      turn();
+      step();
+      eventString(event.occurrenceId, "session event.occurrenceId");
+      eventString(event.tool, "session event.tool");
+      decodeCallDecisionV1(event.decision, "session event.decision");
       eventInteger(event.latencyMs, "session event.latencyMs", 0);
       break;
     case "send/to-user":

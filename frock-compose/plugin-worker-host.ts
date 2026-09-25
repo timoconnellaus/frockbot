@@ -281,6 +281,13 @@ export interface PluginWorkerHostOptions {
   generationId: string;
   turnType: TurnTypeV1;
   subagentRole?: string;
+  /**
+   * Whether an artifact is one this deployment built and seeded. Its tools
+   * are the deployment's own code behind the Plugin boundary, so Turn
+   * supervision does not review each call; every other Plugin's tools are
+   * `mutate`. Absent, every Plugin's are.
+   */
+  deploymentArtifact?(contentHash: string): boolean;
   /** Durably records a hook the worker skipped, before the loop continues. */
   recordHookFailure(failure: IsolateHookFailureV1): Promise<void>;
   /**
@@ -1031,6 +1038,14 @@ export class PluginWorkerHost {
               // reason onto a call that leaves for a third-party MCP server.
               // A Plugin is this account's own code reached over no network.
               external: false,
+              // A Plugin cannot confer `read` on itself: only the deployment's
+              // own seeded artifacts go unreviewed.
+              effect:
+                this.options.deploymentArtifact?.(
+                  member.artifact.contentHash,
+                ) === true
+                  ? "read"
+                  : "mutate",
               status: "ready",
             }),
           );
@@ -1929,6 +1944,9 @@ export class PluginWorkerHost {
       // A card is a bubble in the conversation, and two of them are read in
       // the order they landed in.
       orderedEffect: true,
+      // Drawing a card is the Bot speaking; what a card may do is gated by
+      // its own actions (ADR 0030).
+      effect: "read",
       execute: async (
         input: unknown,
         context: ToolExecutionContext,
