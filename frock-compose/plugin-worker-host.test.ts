@@ -187,6 +187,7 @@ function harness(
     receiveTrigger?: PluginWorkerEntrypoint["receiveTrigger"];
     view?: PluginWorkerEntrypoint["view"];
     cardAction?: PluginWorkerEntrypoint["cardAction"];
+    reviseCard?: PluginWorkerEntrypoint["reviseCard"];
     renderCard?: PluginWorkerEntrypoint["renderCard"];
     sendCard?: PluginWorkerHostOptions["sendCard"];
     healthThrows?: string;
@@ -257,6 +258,13 @@ function harness(
         schemaVersion: 1 as const,
         status: "drop" as const,
         reason: "this fake runs no card handlers",
+      }),
+    reviseCard: (invocation) =>
+      input.reviseCard?.(invocation) ??
+      Promise.resolve({
+        schemaVersion: 1 as const,
+        status: "drop" as const,
+        reason: "this fake revises no cards",
       }),
     renderCard: (invocation) =>
       input.renderCard?.(invocation) ??

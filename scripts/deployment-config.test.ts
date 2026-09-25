@@ -138,6 +138,9 @@ function fixtureStagingShape(): Config {
   ).toBeDefined();
   const inherited = structuredClone(config);
   delete inherited.env;
+  // Not inherited by a named environment either, and staging binds no sender,
+  // so `wrangler deploy --env staging` resolves none.
+  delete inherited.send_email;
   for (const key of NON_INHERITED_KEYS) {
     if (key in inherited) {
       expect(
@@ -417,6 +420,45 @@ describe("the generator", () => {
       });
       expect(app.config.alias).toBeUndefined();
     }
+  });
+
+  test("gives the app Worker the email domain and a sender for it", () => {
+    const hosted = generateWorkerConfigV1("app", {
+      profile: loadProfileV1("hosted"),
+    });
+    expect((hosted.config.vars as Config).EMAIL_DOMAIN).toBe(
+      "bots.frockbot.com",
+    );
+    // The binding cannot name a domain, so it names no sender at all and the
+    // sender holds every `from` to `EMAIL_DOMAIN` itself.
+    expect(hosted.config.send_email).toEqual([{ name: "SEND_EMAIL" }]);
+    // The app Worker is the only one that receives or sends.
+    const portal = generateWorkerConfigV1("adminPortal", {
+      profile: loadProfileV1("hosted"),
+    });
+    expect(portal.config.send_email).toBeUndefined();
+    // A profile that names no domain has neither: staging today.
+    const staging = generateWorkerConfigV1("app", {
+      profile: loadProfileV1("staging"),
+      d1DatabaseId: STAGING_D1_PLACEHOLDER,
+    });
+    expect(staging.config.send_email).toBeUndefined();
+    expect(staging.config.vars as Config).not.toHaveProperty("EMAIL_DOMAIN");
+    expect(() =>
+      validateProfileV1(
+        { ...loadProfileV1("hosted"), email: { domain: "not a domain" } },
+        "hosted",
+      ),
+    ).toThrow(/email/);
+    expect(() =>
+      validateProfileV1(
+        {
+          ...loadProfileV1("hosted"),
+          email: { senderAddress: "bot@frockbot.com" },
+        },
+        "hosted",
+      ),
+    ).toThrow();
   });
 
   test("names the artifact the deployment uploaded, not the placeholder", () => {

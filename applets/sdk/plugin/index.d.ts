@@ -401,31 +401,55 @@ export interface PluginContext {
     connectionId: string,
   ) => Promise<ConnectionLease | CapabilityFailure>;
   /**
-   * The `http` grant, second half: the deployment's own sender, sending for
-   * this Bot. The Plugin holds no credential and names no provider; a
-   * deployment that has bound no sender answers unavailable.
+   * The `http` grant, second half: the deployment's own sender, sending from
+   * this Bot's own address. The Plugin holds no credential, names no provider
+   * and never names the sender; a deployment that has bound no sender, or a
+   * Bot with no address yet, answers unavailable. One call is one message to
+   * every recipient: `unavailable` means nothing left and the decision is
+   * still good, while `unknown` means it may have left — the decision is
+   * spent, and sending again could deliver it twice.
+   *
+   * Two kinds. Mail a person approved on a draft card goes to anyone, with
+   * their decision's id; a reply to it reaches the person, not the Bot. A
+   * note to the Bot's owner (`owner: true`) needs no decision: the kernel
+   * holds it to one of the owner's own addresses, to at most one message per
+   * `key` and to a daily count per Bot.
    */
-  readonly email?: (request: {
-    /**
-     * The Approval whose decision authorizes this send. The kernel refuses a
-     * send whose Approval is missing, undecided, denied, expired or already
-     * spent, so one decision sends at most one message.
-     */
-    approvalId: string;
-    /**
-     * The Card that decision was given on. The Approval is bound to the
-     * surface and to the values it was showing, so a send whose message is
-     * not the one that was approved is refused.
-     */
-    surfaceId: string;
-    to: string[];
-    cc?: string[];
-    subject: string;
-    body: string;
-    /** The `Message-Id` this answers, when it answers one. */
-    inReplyTo?: string;
-  }) => Promise<
-    | { status: "sent"; messageId: string; undelivered?: string[] }
+  readonly email?: (
+    request:
+      | {
+          /**
+           * The Approval whose decision authorizes this send. The kernel
+           * refuses a send whose Approval is missing, undecided, denied,
+           * expired or already spent, so one decision sends at most one
+           * message.
+           */
+          approvalId: string;
+          /**
+           * The Card that decision was given on. The Approval is bound to the
+           * surface and to the values it was showing, so a send whose message
+           * is not the one that was approved is refused.
+           */
+          surfaceId: string;
+          to: string[];
+          cc?: string[];
+          subject: string;
+          body: string;
+          /** The `Message-Id` this answers, when it answers one. */
+          inReplyTo?: string;
+        }
+      | {
+          owner: true;
+          /** What makes a retry the same send, such as the card's surface. */
+          key: string;
+          /** One of the owner's own addresses; absent, their sign-in one. */
+          to?: string;
+          subject: string;
+          body: string;
+        },
+  ) => Promise<
+    | { status: "sent"; messageId: string; to?: string }
+    | { status: "unknown"; reason: string }
     | CapabilityFailure
   >;
   /** The `schedule` grant: a durable Routine operation attributed to this call. */
@@ -900,6 +924,20 @@ export interface PluginCardPress {
   record?: { [key: string]: unknown };
 }
 
+/**
+ * What a card's `revise` is handed: the fields of a card the person edited
+ * and then approved, before the kernel records that decision.
+ */
+export interface PluginCardEdit {
+  /** The card the decided surface was drawn from. */
+  cardId: string;
+  surfaceId: string;
+  /** The surface's data model as the person left it when they pressed. */
+  dataModel: { [key: string]: unknown };
+  /** The Card's data model as the kernel stores it. */
+  record: { [key: string]: unknown };
+}
+
 /** A card handler's refusal: the Card is left exactly as it was. */
 export interface PluginCardDrop {
   drop: true;
@@ -941,6 +979,21 @@ export type PluginCardDraw =
   | void;
 
 /**
+ * What a card's `revise` answers with: what the decision now covers, the
+ * words it is recorded with, and optionally messages that settle the card's
+ * face onto those values — which, like a press's, may not ask for a
+ * decision. Return `{ drop: true, reason }` to refuse the edit: the person is
+ * told why, and nothing is decided.
+ */
+export type PluginCardRevision =
+  | {
+      covers: { [key: string]: unknown };
+      decision: PluginCardDecision;
+      messages?: CardMessage[];
+    }
+  | PluginCardDrop;
+
+/**
  * The words the decision a card asks for is recorded with. They are stated
  * here rather than on the `ApprovalActions` component because the Frock
  * catalog allows that component an `approvalId` and its two labels and
@@ -975,6 +1028,18 @@ export interface PluginCard {
       ctx: PluginContext,
     ) => Promise<PluginCardAnswer> | PluginCardAnswer
   >;
+  /**
+   * The person edited this card's fields and approved it. Say what the
+   * decision now covers: the kernel binds the Approval to those `covers`
+   * before it records the decision, so what you later act on has to be
+   * exactly them. A surface only sends its fields back when it was created
+   * with `sendDataModel: true`. A card with no `revise` is decided as it was
+   * drawn, whatever its fields hold.
+   */
+  revise?(
+    edit: PluginCardEdit,
+    ctx: PluginContext,
+  ): Promise<PluginCardRevision> | PluginCardRevision;
 }
 
 /**

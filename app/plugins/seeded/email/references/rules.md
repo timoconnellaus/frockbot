@@ -1,5 +1,9 @@
 # Rules
 
+- `email_owner` reaches your person's own addresses and nobody else's. An
+  address that is not theirs is refused with nothing sent: draw a draft card
+  for it instead. It sends a few notes a day at most; past that it answers
+  that today's limit is reached, and you tell them in the conversation.
 - One card per email, and one email per card. A card that already holds a
   draft is redrawn as it stands: to change what you are sending, call
   `email_draft` with **no** `surfaceId` and draw a fresh card, because the
@@ -8,6 +12,11 @@
   email you are answering, when you are answering one, and nothing otherwise.
 - `body` is plain text. What you write is what is sent; there is no template
   and nothing is added to it.
+- The person may change To, Cc, Subject and the message on the card before
+  they press Send, and a long message they may only read. Their Send is a
+  decision about what they left there: that is what `email_send` sends, and
+  the kernel holds it to exactly that. The thread it answers is not theirs to
+  change.
 - Never call `email_send` for a card the person has not approved. The kernel
   refuses an Approval that is undecided, denied, expired or already spent, and
   it refuses one that was given on a different card or for different values,
@@ -17,5 +26,7 @@
 - A send that fails answers with its own reason, and the reason says which
   kind of failure it is: the draft was refused (an address that is not an
   address, a decision that does not cover this message), or this deployment
-  has no sender bound at all. Read it, tell the person plainly what it says,
+  has no sender set up at all. Read it, tell the person plainly what it says,
   and do not retry it in a loop.
+- A send whose outcome is unknown may have arrived. It is never sent again:
+  tell the person it may have reached them, and settle the card.

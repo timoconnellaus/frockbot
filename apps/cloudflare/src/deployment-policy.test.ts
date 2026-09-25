@@ -538,3 +538,48 @@ describe("hosted model rates", () => {
     );
   });
 });
+
+describe("email usernames", () => {
+  test("one account per username, released by a change and by deleting the account", async () => {
+    const { policy } = authority();
+    const claim = (userId: string, username: string) =>
+      policy.claimEmailUsername({ schemaVersion: 1, userId, username });
+    const resolve = (username: string) =>
+      policy.resolveEmailUsername({ schemaVersion: 1, username });
+    expect(await claim("alice", "tim")).toEqual({
+      schemaVersion: 1,
+      status: "claimed",
+    });
+    expect(await claim("bob", "tim")).toEqual({
+      schemaVersion: 1,
+      status: "taken",
+    });
+    expect(await resolve("tim")).toEqual({ schemaVersion: 1, userId: "alice" });
+
+    expect((await claim("alice", "timo")).status).toBe("claimed");
+    expect(await resolve("tim")).toEqual({ schemaVersion: 1, userId: null });
+    expect((await claim("bob", "tim")).status).toBe("claimed");
+    expect(
+      await policy.readEmailUsername({ schemaVersion: 1, userId: "alice" }),
+    ).toEqual({ schemaVersion: 1, username: "timo" });
+
+    await policy.forgetAccount({ schemaVersion: 1, userId: "alice" });
+    expect(await resolve("timo")).toEqual({ schemaVersion: 1, userId: null });
+    expect(
+      await policy.readEmailUsername({ schemaVersion: 1, userId: "alice" }),
+    ).toEqual({ schemaVersion: 1, username: null });
+  });
+
+  test("refuses a username out of shape or reserved", async () => {
+    const { policy } = authority();
+    for (const username of ["ab", "Tim", "tim.o", "-tim", "postmaster"]) {
+      await expect(
+        policy.claimEmailUsername({
+          schemaVersion: 1,
+          userId: "alice",
+          username,
+        }),
+      ).rejects.toThrow();
+    }
+  });
+});

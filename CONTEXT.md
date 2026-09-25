@@ -46,6 +46,10 @@ _Avoid_: DM, room, channel, thread
 : A conversation between the User and two to eight of their Bots. Every message reaches every member, and a member asked to reply — by an @mention, or by Jev judging the message is theirs — runs a Turn in its own Bot under the group's Session, whose sends are posted to the group. Its members share its Memory.
 _Avoid_: Channel, room, project, team
 
+**Channel**
+: A way a User and their Bots reach each other from outside the app — email today. Each Bot that has email switched on has its own address, its name and the account's username, `fox.tim@bots.frockbot.com`: mail to it arrives there and mail from it leaves from there. The address is guessable by design, and only the User's sign-in address and the addresses they confirmed, authenticated by their provider, may write to it. What arrives is the person speaking: an ordinary user-lane Turn in that Bot's conversation, its origin naming the channel. The Bot answers in the app, and may email its own person directly; mail to anyone else is a draft the person approves, and a reply to it reaches the person, not the Bot.
+_Avoid_: Connector, integration, bridge; and never a Group Chat, which is the User's own Bots
+
 **Hand-off**
 : A Turn a Bot admitted on its own `agent` lane with the `subagent` tool, so the Turn that asked could answer the person straight away. It is an ordinary Turn of that Bot — its own tools, its own Session — and it speaks for itself with `send_to_user` rather than answering a caller; its origin names the run that handed it over and how deep the chain is. One level only, and a chat Turn may hand off four times.
 _Avoid_: Background job, async task, child agent (that is the Subagents Package's `Task`)
@@ -251,7 +255,7 @@ A durable input the Bot's next conversational Turn is owed — a Routine hand-of
 _Avoid_: Queued message, pending wake
 
 **Approval**:
-A durable pending decision the User answers: what the Bot proposes to do, its risk, and a deadline past which it expires. Recorded once — a replayed answer reads back the decision already stored — and never a grant of authority the Bot did not already hold.
+A durable pending decision the User answers: what the Bot proposes to do, its risk, and a deadline past which it expires. Recorded once — a replayed answer reads back the decision already stored — and never a grant of authority the Bot did not already hold. Given on a card whose fields the User changed, it is a decision about what they left there, not about what the Bot proposed.
 _Avoid_: Permission, consent prompt, confirmation
 
 **Saved secret**:

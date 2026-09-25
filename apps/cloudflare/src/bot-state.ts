@@ -373,6 +373,7 @@ import {
   decodeVoiceChatResultRpcV1,
   decodeVoiceCallTranscriptRpcV1,
   decodeBotGroupTurnRpcV1,
+  decodeBotEmailTurnRpcV1,
   decodeRpcEnvelopeV1,
   rpcBoolean,
   rpcBotId,
@@ -2365,6 +2366,34 @@ export class BotState
       turnType: "agent",
       lane: "agent",
       origin: request.command.origin,
+    });
+    const work = shell.pendingWork();
+    if (work) this.ctx.waitUntil(work);
+    return receipt;
+  }
+
+  /**
+   * The person, writing to this Bot's inbound address from one of their
+   * confirmed mailboxes.
+   *
+   * The user lane, like a typed message. The `email()` handler returns only
+   * once this does, so the message is durable before Email Routing is told it
+   * arrived, and a redelivery — the same run id — replays this admission. Its
+   * files are refs to uploads the handler recorded here first, resolved like a
+   * composer's.
+   */
+  async admitEmailTurn(input: unknown) {
+    const request = decodeBotEmailTurnRpcV1(input);
+    const identity = { userId: request.userId, botId: request.botId };
+    const { shell } = await this.materialized(identity);
+    await shell.validateIdentity(identity);
+    const { origin, ...command } = request.command;
+    const receipt = await shell.admit({
+      ...identity,
+      ...(await this.withAttachments(command)),
+      turnType: "chat",
+      lane: "user",
+      origin,
     });
     const work = shell.pendingWork();
     if (work) this.ctx.waitUntil(work);

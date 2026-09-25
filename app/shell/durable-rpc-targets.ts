@@ -33,6 +33,10 @@ export interface BotUserConfigurationRpcTargetV1
   extends Rpc.DurableObjectBranded {
   readFeatures(input: UserRpcEnvelopeV1): Promise<object>;
   readConfiguration(input: UserRpcEnvelopeV1<{ view: 2 }>): Promise<object>;
+  /** What this Bot sends email as, or why it cannot yet. */
+  readBotEmailSender(
+    input: UserRpcEnvelopeV1<{ botId: string }>,
+  ): Promise<object>;
   prepareAccount(input: UserRpcEnvelopeV1): Promise<object>;
   readAccountPreparationStamp(input: UserRpcEnvelopeV1): Promise<object>;
   beginSkillIndex(

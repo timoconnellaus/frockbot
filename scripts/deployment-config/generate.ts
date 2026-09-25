@@ -282,7 +282,31 @@ function identityVarsV1(
     vars.ACCESS_TEAM_DOMAIN = profile.access.teamDomain;
     vars.ACCESS_AUD = profile.access.aud;
   }
+  if (profile.email) vars.EMAIL_DOMAIN = profile.email.domain;
   return vars;
+}
+
+/**
+ * The app Worker's outbound sender, Cloudflare Email Service, when the
+ * profile names the email domain (`app/email/sender.ts`).
+ *
+ * Every Bot sends from its own address on that domain, and the binding cannot
+ * say "any address on one domain": `allowed_sender_addresses` is a list of
+ * exact addresses, with no wildcard or domain form
+ * (developers.cloudflare.com/email-service/configuration/send-bindings/,
+ * read 2026-09-25). So the binding carries no sender restriction and the
+ * sender enforces the domain instead: it composes every `from` itself, on
+ * `EMAIL_DOMAIN`, and refuses any other before the binding is reached. The
+ * platform refuses any domain the account has not onboarded for Email
+ * Sending. No destination restriction either: a Bot writes to its owner, and a
+ * draft card to whoever the person approved.
+ */
+function emailBindingsV1(
+  worker: DeployableWorkerV1,
+  profile: DeploymentProfileV1,
+): Record<string, unknown>[] {
+  if (worker !== "app" || !profile.email) return [];
+  return [{ name: "SEND_EMAIL" }];
 }
 
 export function generateWorkerConfigV1(
@@ -372,6 +396,11 @@ export function generateWorkerConfigV1(
       ...((config.alias as Record<string, unknown>) ?? {}),
       [AUTH_PACKAGE_ALIAS_V1]: AUTH_PACKAGE_CHOOSERS_V1[profile.authPackage],
     };
+  }
+
+  const email = emailBindingsV1(worker, profile);
+  if (email.length > 0) {
+    config.send_email = [...asArray(config.send_email), ...email];
   }
 
   const identity = identityVarsV1(worker, profile);

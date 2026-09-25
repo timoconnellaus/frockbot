@@ -24,6 +24,8 @@ interface IntegrationTestEnv {
    * widening the deployed `Env`.
    */
   AI_PROBE: Service;
+  /** The email fake's RPC entrypoint, as `SEND_EMAIL` is: what was sent. */
+  EMAIL_PROBE: Service;
   /** Each Group Chat's own object, for reading its storage in a test. */
   GROUP_CHATS: DurableObjectNamespace;
 }

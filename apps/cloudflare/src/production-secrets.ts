@@ -278,6 +278,10 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] 
         "every dictation session would be sent to that host instead of the speech provider",
     },
     { name: "FROCK_AI_AUTO_ROUTE", why: "A `vars` entry." },
+    {
+      name: "EMAIL_DOMAIN",
+      why: "The `vars` entry the profile's `email` writes: the domain Email Routing hands to `email()` and every Bot sends from. Absent, every message is refused and nothing is sent.",
+    },
     { name: "FROCK_AI_ACCOUNT_ID", why: "A `vars` entry." },
     {
       name: "FLOCK_AI_GATEWAY_ID",

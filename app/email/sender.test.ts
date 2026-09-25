@@ -1,41 +1,37 @@
 // What the deployment's sender reports, which is what a caller may retry.
-import { describe, expect, mock, test } from "bun:test";
-import { composeEmailMessageV1, createBindingEmailSenderV1 } from "./sender.ts";
-
-// The platform module the sender imports only when it actually sends. It does
-// not exist outside workerd, so the envelope class stands in for it here.
-mock.module("cloudflare:email", () => ({
-  EmailMessage: class {
-    constructor(
-      readonly from: string,
-      readonly to: string,
-      readonly raw: string,
-    ) {}
-  },
-}));
+import { describe, expect, test } from "bun:test";
+import { createBindingEmailSenderV1, type EmailBindingV1 } from "./sender.ts";
 
 const request = {
+  from: { address: "fox.tim@bots.example.com", name: "Fox" },
   to: ["nick@example.com", "sam@example.com"],
-  subject: "Re: Following up",
+  subject: "Café — update",
   body: "The whole message.",
 };
 
-/** The platform binding, refusing whichever envelope recipients are named. */
-function binding(refuse: readonly string[] = []) {
-  const sent: string[] = [];
+/** The platform binding: records each message, or throws what it is told to. */
+function binding(failure?: unknown) {
+  const sent: Parameters<EmailBindingV1["send"]>[0][] = [];
   return {
     sent,
-    send: (message: unknown) => {
-      // `EmailMessage` is the platform class; under Bun the dynamic import
-      // fails, so this only ever sees what the sender handed the constructor.
-      const recipient = String((message as { to?: unknown }).to ?? "");
-      if (refuse.includes(recipient)) {
-        return Promise.reject(new Error(`${recipient} is not verified`));
-      }
-      sent.push(recipient);
-      return Promise.resolve();
+    send: (message: Parameters<EmailBindingV1["send"]>[0]) => {
+      if (failure !== undefined) return Promise.reject(failure);
+      sent.push(message);
+      return Promise.resolve({ messageId: "<cf-1@example.com>" });
     },
   };
+}
+
+/** An error the way the binding throws one: a message and a `code`. */
+function platformError(code: string, message: string): Error {
+  return Object.assign(new Error(message), { code });
+}
+
+function sender(platform: EmailBindingV1) {
+  return createBindingEmailSenderV1({
+    SEND_EMAIL: platform,
+    EMAIL_DOMAIN: "Bots.Example.com",
+  })!;
 }
 
 describe("the deployment's binding sender", () => {
@@ -44,120 +40,116 @@ describe("the deployment's binding sender", () => {
       createBindingEmailSenderV1({ SEND_EMAIL: binding() }),
     ).toBeUndefined();
     expect(
-      createBindingEmailSenderV1({ EMAIL_SENDER_ADDRESS: "bot@example.com" }),
+      createBindingEmailSenderV1({ EMAIL_DOMAIN: "bots.example.com" }),
     ).toBeUndefined();
+    expect(
+      createBindingEmailSenderV1({ SEND_EMAIL: binding(), EMAIL_DOMAIN: "  " }),
+    ).toBeUndefined();
+    expect(sender(binding()).domain).toBe("bots.example.com");
   });
 
-  // The message left. Reporting that as a failure invites a retry, and a
-  // retry would deliver it to whoever did receive it a second time.
-  test("one envelope out is a send, with the refused addresses named", async () => {
-    const platform = binding(["sam@example.com"]);
-    const sender = createBindingEmailSenderV1({
-      SEND_EMAIL: platform,
-      EMAIL_SENDER_ADDRESS: "bot@example.com",
-    })!;
-    const outcome = await sender.send(request);
-    expect(outcome.status).toBe("sent");
-    expect(outcome).toMatchObject({ undelivered: ["sam@example.com"] });
-    expect(platform.sent).toEqual(["nick@example.com"]);
-  });
-
-  test("nothing out at all is unavailable, and may be tried again", async () => {
-    const platform = binding(["nick@example.com", "sam@example.com"]);
-    const sender = createBindingEmailSenderV1({
-      SEND_EMAIL: platform,
-      EMAIL_SENDER_ADDRESS: "bot@example.com",
-    })!;
-    const outcome = await sender.send(request);
-    expect(outcome).toMatchObject({ status: "unavailable" });
+  // The binding cannot be told one domain, so the sender is what holds it.
+  test("sends from nowhere but the deployment's email domain", async () => {
+    const platform = binding();
+    for (const address of [
+      "fox.tim@example.com",
+      "fox.tim@evil.bots.example.com",
+      "fox.tim@bots.example.com.evil",
+    ]) {
+      expect(
+        await sender(platform).send({
+          ...request,
+          from: { address, name: "Fox" },
+        }),
+      ).toMatchObject({ status: "unavailable" });
+    }
     expect(platform.sent).toEqual([]);
   });
 
-  test("every recipient accepted is a send with nothing undelivered", async () => {
+  test("names the Bot, and sends a reply to whoever it is meant for", async () => {
     const platform = binding();
-    const sender = createBindingEmailSenderV1({
-      SEND_EMAIL: platform,
-      EMAIL_SENDER_ADDRESS: "bot@example.com",
-    })!;
-    const outcome = await sender.send({ ...request, cc: ["cc@example.com"] });
-    expect(outcome.status).toBe("sent");
-    expect(outcome).not.toHaveProperty("undelivered");
+    await sender(platform).send({
+      ...request,
+      from: { address: "Fox.Tim@bots.example.com", name: "Fox\r\nBcc: x" },
+      replyTo: "tim@example.com",
+    });
+    expect(platform.sent[0]).toMatchObject({
+      from: { email: "fox.tim@bots.example.com", name: "Fox Bcc: x" },
+      replyTo: "tim@example.com",
+    });
+  });
+
+  // One message to everyone on it: the provider takes it or refuses it whole,
+  // so there is no partial send for a caller to reason about.
+  test("sends one message to every recipient, as plain text", async () => {
+    const platform = binding();
+    const outcome = await sender(platform).send({
+      ...request,
+      cc: ["cc@example.com"],
+    });
+    expect(outcome).toEqual({
+      status: "sent",
+      messageId: "<cf-1@example.com>",
+    });
     expect(platform.sent).toEqual([
-      "nick@example.com",
-      "sam@example.com",
-      "cc@example.com",
+      {
+        from: { email: "fox.tim@bots.example.com", name: "Fox" },
+        to: ["nick@example.com", "sam@example.com"],
+        cc: ["cc@example.com"],
+        subject: "Café — update",
+        text: "The whole message.",
+      },
     ]);
   });
-});
 
-/**
- * The composed message is this module's own byte contract: an RFC 5322
- * message a recipient's client parses, so what the header block says is
- * asserted here directly.
- */
-describe("the composed message's headers", () => {
-  const from = { address: "bot@example.com", messageId: "<id@example.com>" };
-
-  function headerBlock(raw: string): string {
-    return raw.slice(0, raw.indexOf("\r\n\r\n"));
-  }
-
-  /** What a client makes of an encoded-word header: the text that was meant. */
-  function decodeHeader(value: string): string {
-    return value
-      .replace(/\r\n /g, "")
-      .replace(/=\?utf-8\?B\?([^?]*)\?=/g, (_match, encoded: string) =>
-        new TextDecoder().decode(
-          Uint8Array.from(atob(encoded), (character) =>
-            character.charCodeAt(0),
-          ),
-        ),
-      );
-  }
-
-  test("a subject with an accent and an em dash travels as an encoded-word", () => {
-    const raw = composeEmailMessageV1(
-      { ...request, subject: "Café — update" },
-      from,
-    );
-    expect(headerBlock(raw)).toContain(
-      "Subject: =?utf-8?B?Q2Fmw6kg4oCUIHVwZGF0ZQ==?=",
-    );
+  test("an answer threads under the message it answers", async () => {
+    const platform = binding();
+    await sender(platform).send({
+      ...request,
+      cc: [],
+      inReplyTo: "<earlier@example.com>",
+    });
+    expect(platform.sent[0]).toEqual({
+      from: { email: "fox.tim@bots.example.com", name: "Fox" },
+      to: request.to,
+      subject: request.subject,
+      text: request.body,
+      headers: {
+        "In-Reply-To": "<earlier@example.com>",
+        References: "<earlier@example.com>",
+      },
+    });
   });
 
-  test("a plain ASCII subject is the bytes it always was", () => {
-    const raw = composeEmailMessageV1(request, from);
-    expect(headerBlock(raw)).toContain("Subject: Re: Following up");
-    expect(headerBlock(raw)).not.toContain("=?utf-8?B?");
-  });
-
-  test("a long encoded subject folds, and every line stays under 998 octets", () => {
-    const subject = `Résumé ${"x".repeat(400)}`;
-    const raw = composeEmailMessageV1({ ...request, subject }, from);
-    const lines = headerBlock(raw).split("\r\n");
-    expect(lines.filter((line) => line.startsWith(" ")).length).toBeGreaterThan(
-      0,
-    );
-    for (const line of lines) {
-      expect(new TextEncoder().encode(line).length).toBeLessThanOrEqual(998);
-      // No encoded-word may pass 75 octets, folded or not.
-      for (const word of line.match(/=\?utf-8\?B\?[^?]*\?=/g) ?? []) {
-        expect(word.length).toBeLessThanOrEqual(75);
-      }
+  test("a message the provider refused before accepting it may be tried again", async () => {
+    for (const code of [
+      "E_SENDER_NOT_VERIFIED",
+      "E_RATE_LIMIT_EXCEEDED",
+      "E_RECIPIENT_SUPPRESSED",
+    ]) {
+      const outcome = await sender(
+        binding(platformError(code, "refused")),
+      ).send(request);
+      expect(outcome).toEqual({
+        status: "unavailable",
+        reason: `the message was not sent: ${code}: refused`,
+      });
     }
-    const folded = headerBlock(raw)
-      .split("\r\nSubject: ")[1]!
-      .split(/\r\n(?! )/)[0]!;
-    expect(decodeHeader(folded)).toBe(subject);
   });
 
-  test("addresses are emitted as the bare addresses they are", () => {
-    const raw = composeEmailMessageV1(
-      { ...request, to: ["zoe@example.com"], cc: ["cc@example.com"] },
-      from,
-    );
-    const block = headerBlock(raw);
-    expect(block).toContain("To: zoe@example.com");
-    expect(block).toContain("Cc: cc@example.com");
+  // A failure that does not say whether the message left is never a failure
+  // a caller retries: a retry could deliver it to everyone a second time.
+  test("a failure that does not say is unknown, never unavailable", async () => {
+    for (const failure of [
+      platformError("E_DELIVERY_FAILED", "could not deliver"),
+      platformError("E_INTERNAL_SERVER_ERROR", "internal"),
+      new Error("the connection was reset"),
+    ]) {
+      const outcome = await sender(binding(failure)).send(request);
+      expect(outcome.status).toBe("unknown");
+      expect((outcome as { reason: string }).reason).toMatch(
+        /^the message may have been sent: /,
+      );
+    }
   });
 });

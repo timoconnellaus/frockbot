@@ -199,7 +199,21 @@ import {
   type VoiceDictationCleanupV1,
 } from "./voice-dictation.js";
 import { createFrockAiGatewayHostV1 } from "./frock-ai.js";
-import { uploadRoutes, type UploadRouteDependenciesV1 } from "./uploads.js";
+import {
+  storeUploadV1,
+  uploadRoutes,
+  type UploadRouteDependenciesV1,
+} from "./uploads.js";
+import {
+  decodeInboundEmailRouteDecisionV1,
+  decodeInboundEmailStateV1,
+  emailDomainV1,
+  normalizeSenderAddressV1,
+} from "@frockbot/app/email/shared";
+import {
+  receiveInboundEmailV1,
+  type InboundEmailHostV1,
+} from "@frockbot/app/email/inbound";
 import type { DocumentConverterV1 } from "@frockbot/app/uploads/extract";
 import { createHostedDictationCleanupJudgeV1 } from "@frockbot/app/supervision";
 import { VOICE_DICTATION_CLEANUP_MODEL_V1 } from "@frockbot/app/voice/dictation-cleanup";
@@ -328,6 +342,13 @@ interface Env {
   CREDENTIAL_KEYRING?: string;
   /** Signs every Routine webhook key. Absent closes the webhook door. */
   ROUTINE_HOOK_SECRET?: string;
+  /**
+   * The domain Email Routing hands to this Worker's `email()` handler, from
+   * the deployment profile's `email`, and the one every Bot sends from.
+   * Absent, no Bot has an address, every message is refused and nothing is
+   * sent.
+   */
+  EMAIL_DOMAIN?: string;
   /** The Connected apps provider key. Absent, no app can be connected. */
   COMPOSIO_API_KEY?: string;
   /**
@@ -758,6 +779,10 @@ function userConfigurationStub(env: Env, userId: string): UserConfigurationRpc {
 }
 
 interface DeploymentPolicyRpc {
+  claimEmailUsername(input: unknown): Promise<unknown>;
+  releaseEmailUsername(input: unknown): Promise<unknown>;
+  resolveEmailUsername(input: unknown): Promise<unknown>;
+  readEmailUsername(input: unknown): Promise<unknown>;
   readPolicy(input: unknown): Promise<unknown>;
   setAdmissionMode(input: unknown): Promise<unknown>;
   readAccountAccess(input: unknown): Promise<unknown>;
@@ -999,6 +1024,122 @@ function userMachineStub(env: Env, userId: string): UserMachineRpc {
 interface UserAuditRpc {
   readAuditEntries(input: unknown): Promise<unknown>;
   rebuildAuditIndex(input: unknown): Promise<unknown>;
+}
+
+/** The User Durable Object's inbound email RPCs. */
+interface UserInboundEmailRpc {
+  readInboundEmail(input: unknown): Promise<unknown>;
+  setBotEmailEnabled(input: unknown): Promise<unknown>;
+  commandInboundEmailSender(input: unknown): Promise<unknown>;
+  routeInboundEmail(input: unknown): Promise<unknown>;
+}
+
+function userInboundEmailStub(env: Env, userId: string): UserInboundEmailRpc {
+  // SAFETY: Wrangler binds USER_CONFIGURATIONS to UserConfiguration; workers-types cannot infer its RPC surface.
+  return env.USER_CONFIGURATIONS.get(
+    env.USER_CONFIGURATIONS.idFromName(userId),
+  ) as unknown as UserInboundEmailRpc;
+}
+
+/**
+ * The address the User signs in with, when the identity provider verified
+ * it: the one sender that needs no code, because signing in already proved it.
+ */
+async function emailSignInV1(
+  env: Env,
+  userId: string,
+): Promise<string | undefined> {
+  const identity = await authIdentitiesV1(env).storedIdentity?.(userId);
+  return identity?.emailVerified
+    ? normalizeSenderAddressV1(identity.email)
+    : undefined;
+}
+
+/** A command's answer from the User object, as the settings route reads it. */
+function inboundEmailCommandOutcomeV1(
+  answer: unknown,
+): { status: "applied" } | { status: "rejected"; reason: string } {
+  const outcome = rpcJsonSnapshotV1(answer) as {
+    status?: unknown;
+    reason?: unknown;
+  };
+  if (outcome.status === "applied") return { status: "applied" };
+  return {
+    status: "rejected",
+    reason:
+      typeof outcome.reason === "string"
+        ? outcome.reason.slice(0, 300)
+        : "That couldn’t be changed.",
+  };
+}
+
+/**
+ * What the `email()` handler reaches: the directory, the User's object, the
+ * uploads store and the Bot's email door. The handler itself decides the
+ * order (`app/email/inbound.ts`).
+ */
+function inboundEmailHostV1(env: Env): InboundEmailHostV1 {
+  const domain = emailDomainV1(env);
+  return {
+    ...(domain ? { domain } : {}),
+    resolveUsername: async (username) => {
+      const { userId } = rpcJsonSnapshotV1(
+        await deploymentPolicyStub(env).resolveEmailUsername({
+          schemaVersion: 1,
+          username,
+        }),
+      ) as { userId?: unknown };
+      return typeof userId === "string" ? userId : undefined;
+    },
+    signInEmail: (userId) => emailSignInV1(env, userId),
+    accountRefusal: async (userId) =>
+      (await externalAccountRefusal(env, userId))?.message,
+    route: async (userId, request) =>
+      decodeInboundEmailRouteDecisionV1(
+        rpcJsonSnapshotV1(
+          await userInboundEmailStub(env, userId).routeInboundEmail({
+            schemaVersion: 1,
+            userId,
+            ...request,
+          }),
+        ),
+      ),
+    storeAttachment: async (userId, botId, file) => {
+      const stored = await storeUploadV1(uploadRouteDependenciesV1(env), {
+        userId,
+        botId,
+        name: file.name,
+        declaredType: file.mediaType,
+        bytes: file.bytes,
+      });
+      return stored.status === "stored"
+        ? { status: "stored", uploadId: stored.upload.uploadId }
+        : { status: "refused", reason: stored.reason };
+    },
+    admit: async (userId, botId, command) => {
+      // SAFETY: Wrangler binds BOT_STATES to BotState; this is its reviewed email door.
+      const bot = env.BOT_STATES.get(
+        env.BOT_STATES.idFromName(
+          `${userId}:${decodeBotIdV1(botId, "bot id")}`,
+        ),
+      ) as unknown as { admitEmailTurn(input: unknown): Promise<unknown> };
+      await bot.admitEmailTurn({
+        schemaVersion: 1,
+        userId,
+        botId,
+        command: {
+          runId: command.runId,
+          sessionId: `${userId}:${botId}`,
+          acceptedAt: new Date().toISOString(),
+          text: command.text,
+          ...(command.attachments.length > 0
+            ? { attachments: command.attachments }
+            : {}),
+          origin: { kind: "email", messageId: command.messageId },
+        },
+      });
+    },
+  };
 }
 
 function userAuditStub(env: Env, userId: string): UserAuditRpc {
@@ -2265,6 +2406,66 @@ const createGatewayBackendContributions = (env: Env) =>
           }),
         ),
       ),
+    // The account's username and senders, and each Bot's switch. The messages
+    // themselves arrive at `email()` below, never through the gateway.
+    ...(() => {
+      const domain = emailDomainV1(env);
+      return domain ? { emailDomain: domain } : {};
+    })(),
+    emailSignIn: (userId) => emailSignInV1(env, userId),
+    readInboundEmail: async (userId, botId) =>
+      decodeInboundEmailStateV1(
+        rpcJsonSnapshotV1(
+          await userInboundEmailStub(env, userId).readInboundEmail({
+            schemaVersion: 1,
+            userId,
+            botId,
+          }),
+        ),
+      ),
+    readEmailUsername: async (userId) => {
+      const { username } = rpcJsonSnapshotV1(
+        await deploymentPolicyStub(env).readEmailUsername({
+          schemaVersion: 1,
+          userId,
+        }),
+      ) as { username?: unknown };
+      return typeof username === "string" ? username : undefined;
+    },
+    claimEmailUsername: async (userId, username) => {
+      if (username === undefined) {
+        await deploymentPolicyStub(env).releaseEmailUsername({
+          schemaVersion: 1,
+          userId,
+        });
+        return { status: "claimed" };
+      }
+      const { status } = rpcJsonSnapshotV1(
+        await deploymentPolicyStub(env).claimEmailUsername({
+          schemaVersion: 1,
+          userId,
+          username,
+        }),
+      ) as { status?: unknown };
+      return { status: status === "claimed" ? "claimed" : "taken" };
+    },
+    setBotEmailEnabled: async (userId, botId, enabled) =>
+      inboundEmailCommandOutcomeV1(
+        await userInboundEmailStub(env, userId).setBotEmailEnabled({
+          schemaVersion: 1,
+          userId,
+          botId,
+          enabled,
+        }),
+      ),
+    commandInboundEmailSender: async (userId, command) =>
+      inboundEmailCommandOutcomeV1(
+        await userInboundEmailStub(env, userId).commandInboundEmailSender({
+          schemaVersion: 1,
+          userId,
+          ...command,
+        }),
+      ),
     // The secret the gateway verifies a presented webhook key against. It
     // never leaves the Worker; a Bot only ever sees a digest.
     ...(typeof env.ROUTINE_HOOK_SECRET === "string"
@@ -2397,6 +2598,41 @@ try {
 }
 
 export default {
+  /**
+   * One message from Email Routing, for the deployment's inbound domain. A
+   * refusal is a permanent SMTP rejection; a failure to reach durable state
+   * throws, and Email Routing delivers the message again.
+   */
+  async email(message: ForwardableEmailMessage, env: Env) {
+    try {
+      const outcome = await receiveInboundEmailV1(
+        message,
+        inboundEmailHostV1(env),
+      );
+      // The outcome and nothing about who: no address reaches the log.
+      console.log(
+        JSON.stringify({
+          event: "inbound-email",
+          status: outcome.status,
+          ...(outcome.status === "rejected" ? { code: outcome.code } : {}),
+        }),
+      );
+    } catch (error) {
+      const name =
+        typeof error === "object" && error !== null && "name" in error
+          ? String(error.name)
+          : "unknown";
+      // Nothing the account held will read this, and no redelivery changes it.
+      if (name === "AccountDeletedError") {
+        message.setReject("This address does not accept mail.");
+        return;
+      }
+      console.error(
+        JSON.stringify({ event: "inbound-email-failed", error: name }),
+      );
+      throw error;
+    }
+  },
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
     let mountedBackend:
       Awaited<ReturnType<typeof createGatewayBackendContributions>> | undefined;

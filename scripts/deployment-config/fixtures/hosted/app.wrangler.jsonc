@@ -163,7 +163,13 @@
     // The `flock-auto` dynamic route's target model is configured and deployed
     // in the Cloudflare AI Gateway dashboard, never selected in application code.
     "FROCK_AI_AUTO_ROUTE": "flock-auto",
+    // Email to and from Bots: `<bot>.<username>@bots.frockbot.com`, received
+    // by `email()` and sent through `SEND_EMAIL`.
+    "EMAIL_DOMAIN": "bots.frockbot.com",
   },
+  // Cloudflare Email Service. No sender restriction: the binding cannot name a
+  // domain, so the sender holds every `from` to `EMAIL_DOMAIN` itself.
+  "send_email": [{ "name": "SEND_EMAIL" }],
   "env": {
     "development": {
       // Never deployed, and without an empty list `wrangler dev` inherits the

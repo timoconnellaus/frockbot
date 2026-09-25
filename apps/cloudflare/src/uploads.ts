@@ -134,19 +134,122 @@ function botIdOf(segment: string): string | undefined {
   }
 }
 
+export type StoredUploadOutcomeV1 =
+  | { status: "stored"; upload: StoredUploadV1 }
+  | { status: "refused"; httpStatus: number; reason: string };
+
+/**
+ * One file into a Bot's uploads: classified, its text read, counted, written
+ * and recorded, in that order — the composer's upload and a file an email
+ * carried both come through here. The Bot's own membership is the caller's
+ * to have checked.
+ */
+export async function storeUploadV1(
+  dependencies: Omit<UploadRouteDependenciesV1, "botRegistered">,
+  file: {
+    userId: string;
+    botId: string;
+    name: string;
+    declaredType: string | null;
+    bytes: Uint8Array;
+  },
+): Promise<StoredUploadOutcomeV1> {
+  const { userId, botId, bytes } = file;
+  const bucket = dependencies.bucket;
+  if (!bucket) {
+    return {
+      status: "refused",
+      httpStatus: 503,
+      reason: "Files can't be sent on this deployment.",
+    };
+  }
+  if (bytes.byteLength > UPLOAD_MAX_BYTES_V1) {
+    return { status: "refused", httpStatus: 413, reason: TOO_LARGE_MESSAGE_V1 };
+  }
+  if (bytes.byteLength === 0) {
+    return {
+      status: "refused",
+      httpStatus: 400,
+      reason: "That file is empty.",
+    };
+  }
+  const name = normalizeUploadNameV1(file.name);
+  const classified = classifyUploadV1({
+    name,
+    declaredType: file.declaredType,
+    bytes,
+  });
+  if (classified.status === "refused") {
+    return { status: "refused", httpStatus: 415, reason: classified.reason };
+  }
+  // Read before anything is stored or counted: a document with no text is
+  // refused on the composer, not accepted and then shown to the Bot as
+  // nothing.
+  const text =
+    classified.kind === "document"
+      ? await extractDocumentTextV1({
+          name,
+          mediaType: classified.mediaType,
+          bytes,
+          ...(dependencies.converter
+            ? { converter: dependencies.converter }
+            : {}),
+        })
+      : undefined;
+  if (text?.status === "refused") {
+    return { status: "refused", httpStatus: 422, reason: text.reason };
+  }
+  const uploadId = await sha256HexV1(bytes);
+  const quota = await dependencies.reserveQuota({
+    userId,
+    botId,
+    uploadId,
+    bytes: bytes.byteLength,
+  });
+  if (quota.status === "full") {
+    return {
+      status: "refused",
+      httpStatus: 413,
+      reason: UPLOAD_QUOTA_FULL_MESSAGE_V1,
+    };
+  }
+  await bucket.put(uploadObjectKeyV1(userId, botId, uploadId), bytes, {
+    httpMetadata: { contentType: classified.mediaType },
+  });
+  if (text?.status === "ok") {
+    await bucket.put(uploadTextKeyV1(userId, botId, uploadId), text.text, {
+      httpMetadata: { contentType: "text/markdown; charset=utf-8" },
+      customMetadata: { chars: String(text.chars) },
+    });
+  }
+  const now = dependencies.now ?? (() => new Date());
+  const upload = await dependencies.recordUpload({
+    userId,
+    botId,
+    upload: {
+      schemaVersion: 1,
+      uploadId,
+      kind: classified.kind,
+      name,
+      mediaType: classified.mediaType,
+      bytes: bytes.byteLength,
+      uploadedAt: now().toISOString(),
+      ...(text?.status === "ok" ? { textChars: text.chars } : {}),
+    },
+  });
+  return { status: "stored", upload };
+}
+
 export function uploadRoutes(
   dependencies: UploadRouteDependenciesV1,
 ): BackendRouteContribution {
-  const now = dependencies.now ?? (() => new Date());
-
   async function upload(
     request: Request,
     url: URL,
     userId: string,
     botId: string,
   ): Promise<Response> {
-    const bucket = dependencies.bucket;
-    if (!bucket) {
+    if (!dependencies.bucket) {
       return refusal(503, "Files can't be sent on this deployment.");
     }
     if (!(await dependencies.botRegistered(userId, botId))) {
@@ -154,64 +257,17 @@ export function uploadRoutes(
     }
     const body = await readBoundedBodyV1(request);
     if (body === "too-large") return refusal(413, TOO_LARGE_MESSAGE_V1);
-    if (body.byteLength === 0) return refusal(400, "That file is empty.");
-    const name = normalizeUploadNameV1(url.searchParams.get("name"));
-    const classified = classifyUploadV1({
-      name,
+    const stored = await storeUploadV1(dependencies, {
+      userId,
+      botId,
+      name: url.searchParams.get("name") ?? "",
       declaredType: request.headers.get("content-type"),
       bytes: body,
     });
-    if (classified.status === "refused") {
-      return refusal(415, classified.reason);
+    if (stored.status === "refused") {
+      return refusal(stored.httpStatus, stored.reason);
     }
-    // Read before anything is stored or counted: a document with no text is
-    // refused on the composer, not accepted and then shown to the Bot as
-    // nothing.
-    const text =
-      classified.kind === "document"
-        ? await extractDocumentTextV1({
-            name,
-            mediaType: classified.mediaType,
-            bytes: body,
-            ...(dependencies.converter
-              ? { converter: dependencies.converter }
-              : {}),
-          })
-        : undefined;
-    if (text?.status === "refused") return refusal(422, text.reason);
-    const uploadId = await sha256HexV1(body);
-    const quota = await dependencies.reserveQuota({
-      userId,
-      botId,
-      uploadId,
-      bytes: body.byteLength,
-    });
-    if (quota.status === "full") {
-      return refusal(413, UPLOAD_QUOTA_FULL_MESSAGE_V1);
-    }
-    await bucket.put(uploadObjectKeyV1(userId, botId, uploadId), body, {
-      httpMetadata: { contentType: classified.mediaType },
-    });
-    if (text?.status === "ok") {
-      await bucket.put(uploadTextKeyV1(userId, botId, uploadId), text.text, {
-        httpMetadata: { contentType: "text/markdown; charset=utf-8" },
-        customMetadata: { chars: String(text.chars) },
-      });
-    }
-    const recorded = await dependencies.recordUpload({
-      userId,
-      botId,
-      upload: {
-        schemaVersion: 1,
-        uploadId,
-        kind: classified.kind,
-        name,
-        mediaType: classified.mediaType,
-        bytes: body.byteLength,
-        uploadedAt: now().toISOString(),
-        ...(text?.status === "ok" ? { textChars: text.chars } : {}),
-      },
-    });
+    const recorded = stored.upload;
     return Response.json(
       {
         schemaVersion: 1,

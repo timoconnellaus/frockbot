@@ -24,6 +24,7 @@ import {
   AUDIT_TARGET_MACHINE_PREFIX_V1,
   AUDIT_TARGET_REMOTE_PREFIX_V1,
   AUDIT_TARGET_DEVICE_PREFIX_V1,
+  AUDIT_TARGET_EMAIL_V1,
   AUDIT_TARGET_WORKSPACE_V1,
   type AuditEntryV1,
   type AuditIndexStateV1,
@@ -66,6 +67,7 @@ const KIND_LABELS: Record<AuditKindV1, string> = {
   file: "Files",
   process: "Processes",
   device: "Device",
+  email: "Email",
 };
 
 /** The device kinds a client reports, in the words the person uses. */
@@ -97,6 +99,7 @@ export function auditTargetLabelV1(target: string): string {
   if (target === AUDIT_TARGET_COMPUTER_V1) return "Hosted Computer";
   // Memory and Skills are files in the Workspace, not on the Computer.
   if (target === AUDIT_TARGET_WORKSPACE_V1) return "Workspace";
+  if (target === AUDIT_TARGET_EMAIL_V1) return "Email";
   if (target.startsWith(AUDIT_TARGET_MACHINE_PREFIX_V1)) {
     return `Machine ${target.slice(AUDIT_TARGET_MACHINE_PREFIX_V1.length)}`;
   }

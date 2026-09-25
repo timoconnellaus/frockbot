@@ -21,8 +21,17 @@ import {
   decodeA2uiAgentMessageV1,
   type A2uiAgentMessageV1,
   type PluginWorkerCardActionInvocationV1,
+  type PluginWorkerReviseCardResultV1,
 } from "@frockbot/core/contracts";
-import { decideApproval } from "@frockbot/app/approvals/bot";
+import {
+  ApprovalRevisionConflictError,
+  decideApproval,
+  type ApprovalRevisionV1,
+} from "@frockbot/app/approvals/bot";
+import {
+  approvalKeyV1,
+  decodeApprovalRecordV1,
+} from "@frockbot/app/shell/approvals";
 import { enqueuePendingBotInputV1 } from "@frockbot/app/routines/inbox-store";
 import {
   CARD_ACTION_CONTEXT_MAX_V1,
@@ -42,7 +51,10 @@ import {
   bindCardConnectAppsV1,
   bindCardSecretFieldsV1,
   cardActionRouteV1,
+  cardApprovalBindingKeyV1,
   cardKeyV1,
+  cardValuesDigestV1,
+  decodeCardApprovalRecordV1,
   CARD_APPROVAL_COMPONENT_V1,
   decodeCardIndexV1,
   CardBudgetError,
@@ -317,13 +329,77 @@ export async function cardAction(
         "an approval action must carry a decision of approved or denied",
       );
     }
+    // A Send pressed on fields the person changed is a decision about what
+    // they changed, so the Plugin restates it before anything is recorded.
+    // A decline sends nothing and needs no restating.
+    const revised =
+      decision === "approved"
+        ? await reviseEditedCardV1(
+            state,
+            identity,
+            command,
+            card,
+            route.approvalId,
+          )
+        : ({ status: "unedited" } as const);
+    if (revised.status === "refused") {
+      return {
+        schemaVersion: 1,
+        routed: "approval",
+        card: projectCardV1(card),
+        failure: revised.failure,
+      };
+    }
     // `decideApproval` refuses an id the kernel never recorded, which is what
     // stops a Card minting its own approval: the record is the authority and
     // the Card is only its face.
-    await decideApproval(state, identity, route.approvalId, {
-      schemaVersion: 1,
-      decision,
-    });
+    let decided;
+    try {
+      decided = await decideApproval(
+        state,
+        identity,
+        route.approvalId,
+        { schemaVersion: 1, decision },
+        revised.status === "revised" ? revised.revision : undefined,
+      );
+    } catch (error) {
+      if (!(error instanceof ApprovalRevisionConflictError)) throw error;
+      return {
+        schemaVersion: 1,
+        routed: "approval",
+        card: projectCardV1(await readCard(state, command.surfaceId)),
+        failure: cardFailureV1(
+          "this card changed while it was being answered, so nothing was decided",
+        ),
+      };
+    }
+    if (revised.status === "revised" && decided.status === "replayed") {
+      // Somebody answered first, about the values the card was drawn with.
+      return {
+        schemaVersion: 1,
+        routed: "approval",
+        card: projectCardV1(await readCard(state, command.surfaceId)),
+        failure: cardFailureV1(
+          "this was already decided, so your changes were not applied",
+        ),
+      };
+    }
+    if (revised.status === "revised" && revised.messages !== undefined) {
+      // The face follows the decision rather than deciding it: a fold the
+      // Card refuses leaves the old face over a decision that stands, and is
+      // charged to the Plugin that answered it.
+      const folded = await foldHandlerMessages(
+        state,
+        command.surfaceId,
+        revised.runId,
+        revised.messages,
+      );
+      if (folded.failure === undefined) {
+        await state.authority.drainCommittedPublication();
+      } else {
+        await chargeCardFailureV1(state, card, revised, folded.failure);
+      }
+    }
     return {
       schemaVersion: 1,
       routed: "approval",
@@ -350,32 +426,14 @@ export async function cardAction(
         ),
       };
     }
-    const runId = `card-action:${command.surfaceId}:${card.revision}`;
-    /**
-     * A handler that threw, overran or answered with something the Card
-     * cannot take is charged to its Plugin, the way a hook failure is (ADR
-     * 0030): three in a row and the Plugin is off for this Bot. The verdict
-     * is not acted on here — a press is not a Turn, and there is nothing to
-     * fail — but the count and the notice are the same ones.
-     */
-    const chargeFailure = async (reason: string): Promise<void> => {
-      try {
-        await notePluginFailureV1(
-          state,
-          { runId, generationId: card.runId },
-          {
-            pluginId: route.pluginId,
-            phase: "hook",
-            message: reason,
-            // A press is not a Turn, and the notice the person reads must
-            // not tell them one was lost.
-            kind: "press",
-          },
-        );
-      } catch {
-        // Recording a failure must not be what fails the press.
-      }
-    };
+    const runId = cardPressRunIdV1(command.surfaceId, card);
+    const chargeFailure = (reason: string): Promise<void> =>
+      chargeCardFailureV1(
+        state,
+        card,
+        { runId, pluginId: route.pluginId },
+        reason,
+      );
     // A Plugin that cannot be reached at all is the same answer as one whose
     // handler threw: the Card is left exactly as it was and the person is
     // told why. A press on a card must not be able to fail a read of it.
@@ -388,7 +446,7 @@ export async function cardAction(
       // declaring an action, or before it was turned off, still carries its
       // button, and pressing it must not count against a Plugin that never
       // ran. The worker still refuses it too.
-      const refusal = await pluginCardActionRefusalV1(state, roster, {
+      const refusal = await pluginCardRefusalV1(state, roster, {
         pluginId: route.pluginId,
         cardId,
         action: route.action,
@@ -524,6 +582,182 @@ export async function cardAction(
   };
 }
 
+/** The run a press on a Plugin's card is attributed to. A press, not a Turn. */
+function cardPressRunIdV1(surfaceId: string, card: CardRecordV1): string {
+  return `card-action:${surfaceId}:${card.revision}`;
+}
+
+/**
+ * A handler that threw, overran or answered with something the Card cannot
+ * take is charged to its Plugin, the way a hook failure is (ADR 0030): three
+ * in a row and the Plugin is off for this Bot. The verdict is not acted on
+ * here — a press is not a Turn, and there is nothing to fail — but the count
+ * and the notice are the same ones.
+ */
+async function chargeCardFailureV1(
+  state: ShellBotStateV1,
+  card: CardRecordV1,
+  press: { runId: string; pluginId: string },
+  reason: string,
+): Promise<void> {
+  try {
+    await notePluginFailureV1(
+      state,
+      { runId: press.runId, generationId: card.runId },
+      {
+        pluginId: press.pluginId,
+        phase: "hook",
+        message: reason,
+        // A press is not a Turn, and the notice the person reads must not
+        // tell them one was lost.
+        kind: "press",
+      },
+    );
+  } catch {
+    // Recording a failure must not be what fails the press.
+  }
+}
+
+/** What approving one card comes to, once any edit on it has been restated. */
+type CardRevisionOutcomeV1 =
+  | { status: "unedited" }
+  | { status: "refused"; failure: string }
+  | {
+      status: "revised";
+      revision: ApprovalRevisionV1;
+      messages?: Record<string, unknown>[];
+      runId: string;
+      pluginId: string;
+    };
+
+/**
+ * What a Send pressed on an edited card is a decision about (ADR 0030,
+ * amended 2026-09-24).
+ *
+ * A Plugin's card whose surface asks for its data model can carry fields the
+ * person edits — a draft's recipients, subject and body. Its decision is
+ * bound to the digest of the values it was drawn with, so a Send over changed
+ * fields is put back to the Plugin, which alone knows what its fields mean,
+ * and it answers with what the decision now covers. The kernel moves the
+ * binding to the digest of *that* in the transaction that records the
+ * decision, so the capability that later acts on it is held to what the
+ * person actually sent rather than to the draft they changed.
+ *
+ * Nothing is asked of the Plugin when nothing changed, or when there is
+ * nothing to move: a decision already given, or one this surface's binding
+ * does not hold. An edit the Plugin refuses, or cannot be asked about at all,
+ * decides nothing — the person is told why, and the draft they changed is
+ * never sent in place of the one they wrote.
+ */
+async function reviseEditedCardV1(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+  command: CardActionCommandV1,
+  card: CardRecordV1,
+  approvalId: string,
+): Promise<CardRevisionOutcomeV1> {
+  const unedited = { status: "unedited" } as const;
+  const pluginId = cardSurfacePluginIdV1(command.surfaceId);
+  const cardId = cardSurfaceCardIdV1(command.surfaceId);
+  if (
+    pluginId === undefined ||
+    cardId === undefined ||
+    card.sendDataModel !== true ||
+    command.dataModel === undefined
+  ) {
+    return unedited;
+  }
+  // Compared the way the binding's own digest is taken, so a field the
+  // renderer wrote back exactly as it was drawn is no edit.
+  if (
+    (await cardValuesDigestV1(command.dataModel)) ===
+    (await cardValuesDigestV1(card.dataModel))
+  ) {
+    return unedited;
+  }
+  const stored = await state.ctx.storage.get<unknown>(
+    approvalKeyV1(approvalId),
+  );
+  if (
+    stored === undefined ||
+    decodeApprovalRecordV1(stored).decision !== "pending"
+  ) {
+    return unedited;
+  }
+  const binding = decodeCardApprovalRecordV1(
+    await state.ctx.storage.get<unknown>(
+      cardApprovalBindingKeyV1(pluginId, command.surfaceId),
+    ),
+  );
+  if (!binding?.approvalIds.includes(approvalId)) return unedited;
+  const runId = cardPressRunIdV1(command.surfaceId, card);
+  const refuse = (reason: string) => ({
+    status: "refused" as const,
+    failure: cardFailureV1(
+      `your changes could not be applied, so nothing was decided: ${reason}`,
+    ),
+  });
+  let outcome:
+    PluginWorkerReviseCardResultV1 | { status: "unavailable"; reason: string };
+  try {
+    const roster = await readBotPluginRosterV1(state, identity);
+    const refusal = await pluginCardRefusalV1(state, roster, {
+      pluginId,
+      cardId,
+    });
+    if (refusal !== undefined) return refuse(refusal);
+    outcome = await withPluginWorkerV1(
+      state,
+      identity,
+      roster,
+      { runId, deadlineMs: CARD_ACTION_DEADLINE_MS },
+      (worker) =>
+        worker.active.reviseCard({
+          schemaVersion: 1,
+          pluginId,
+          cardId,
+          surfaceId: command.surfaceId,
+          dataModel: command.dataModel!,
+          record: card.dataModel,
+          botId: identity.botId,
+          sessionId: `${identity.userId}:${identity.botId}`,
+          runId,
+          turnId: runId,
+          generationId: roster.generationId,
+          deadlineMs: CARD_ACTION_DEADLINE_MS,
+        }),
+    );
+  } catch (error) {
+    outcome = {
+      status: "unavailable",
+      reason:
+        error instanceof Error ? error.message : "the plugin was unavailable",
+    };
+  }
+  if (outcome.status === "unchanged") return unedited;
+  if (outcome.status !== "revised") {
+    const reason = outcome.reason ?? "the plugin could not restate the card";
+    // A Plugin refusing the edit in as many words is not a Plugin that broke.
+    if (!(outcome.status === "drop" && outcome.deliberate === true)) {
+      await chargeCardFailureV1(state, card, { runId, pluginId }, reason);
+    }
+    return refuse(reason);
+  }
+  return {
+    status: "revised",
+    revision: {
+      pluginId,
+      surfaceId: command.surfaceId,
+      from: binding.digest,
+      digest: await cardValuesDigestV1(outcome.covers),
+      wording: outcome.decision,
+    },
+    ...(outcome.messages === undefined ? {} : { messages: outcome.messages }),
+    runId,
+    pluginId,
+  };
+}
+
 /**
  * The invocation one press builds for the Plugin handler behind it.
  *
@@ -569,13 +803,14 @@ export function cardActionInvocationV1(
  * it will. Three different things are said apart, the way an admission
  * refusal and a missing capability are: a Plugin the Composition no longer
  * carries, a member this Bot has switched off, and a member that is on but
- * whose descriptor declares no such action. None is the Plugin failing — it
- * never ran — so none is charged to it.
+ * whose descriptor declares no such card or action. None is the Plugin
+ * failing — it never ran — so none is charged to it. With no `action`, the
+ * question is about the card: an edit put back to the Plugin that drew it.
  */
-async function pluginCardActionRefusalV1(
+async function pluginCardRefusalV1(
   state: ShellBotStateV1,
   roster: BotPluginRosterV1,
-  handler: { pluginId: string; cardId: string; action: string },
+  handler: { pluginId: string; cardId: string; action?: string },
 ): Promise<string | undefined> {
   const member = roster.members.find(
     (candidate) => candidate.packageId === handler.pluginId,
@@ -597,14 +832,18 @@ async function pluginCardActionRefusalV1(
       ? `plugin "${handler.pluginId}" was turned off for this Bot after it failed repeatedly, so this card's controls do nothing until it is turned on again under Plugins`
       : `plugin "${handler.pluginId}" is switched off for this Bot, so this card's controls do nothing until it is turned back on under Plugins`;
   }
-  const declared = (member.descriptor.cards ?? []).some(
-    (card) =>
-      card.id === handler.cardId &&
-      card.actions.some((action) => action.name === handler.action),
+  const card = (member.descriptor.cards ?? []).find(
+    (candidate) => candidate.id === handler.cardId,
   );
-  return declared
+  if (handler.action === undefined) {
+    return card === undefined
+      ? `plugin "${handler.pluginId}" no longer declares card "${handler.cardId}"`
+      : undefined;
+  }
+  const action = handler.action;
+  return card?.actions.some((candidate) => candidate.name === action)
     ? undefined
-    : `plugin "${handler.pluginId}" card "${handler.cardId}" declares no action "${handler.action}"`;
+    : `plugin "${handler.pluginId}" card "${handler.cardId}" declares no action "${action}"`;
 }
 
 /** The Plugin handler behind one `plugin/<pluginId>/<action>` name. */

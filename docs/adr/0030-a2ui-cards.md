@@ -386,9 +386,9 @@ serve`), the platform model over the remote Workers AI binding, asked
    > because a seeded artifact has no publisher to put it in R2, and is read
    > back through the same content address by
    > `createR2PackageArtifactStore`. Sending is a kernel loopback —
-   > `ctx.email` to `isolateEmail` to `app/email/sender.ts` — attributed to
-   > the Bot and holding no credential the Plugin can see, and inert until a
-   > deployment binds `SEND_EMAIL` and `EMAIL_SENDER_ADDRESS`. An Approval a
+   > `ctx.email` to `isolateEmail` to `app/email/sender.ts` — from the Bot's
+   > own address and holding no credential the Plugin can see, and inert until
+   > a deployment binds `SEND_EMAIL` and `EMAIL_DOMAIN`. An Approval a
    > Card asks for is bound to what it authorizes: `renderCard` answers with
    > `covers` — the canonical values the Plugin drew and will act on — beside
    > its messages, and the kernel records the Plugin, the surface and a digest
@@ -581,3 +581,24 @@ serve`), the platform model over the remote Workers AI binding, asked for
    > way, so the two never fight over a drag — and `data.md` says three
    > columns is what fits a phone. `docs/screenshots/cards/card-report-phone.png`
    > and `card-report-desktop.png` are the card after that fix, at 412 and 1440.
+
+## Amendment, 2026-09-24: an edited card is decided about its edits
+
+The email draft had no way to be changed: a card holding a draft redraws from
+what it holds, a redraw of a decided card is refused, and a handler may not
+ask for a decision. So the person could only send the Bot's words or discard
+them.
+
+A card now says what an edit means. Its optional `revise(edit, ctx)` — the
+Plugin worker's `reviseCard` — is called when a person approves a Plugin's
+card whose surface sent its data model back and whose fields differ from the
+Card's stored model, while the decision is still pending and bound to that
+surface. It answers the decision's new `covers`, the words it is recorded
+with, and optionally messages settling the face; `decideApproval` moves the
+binding to the digest of those `covers` and rewrites the Approval's words in
+the transaction that records the decision, and refuses if the binding moved
+since the Plugin was asked. One press, one decision, about exactly what the
+person left on the card — rather than a new card and a second Approval, which
+would have cost a Turn and put the edit back through the model. An edit the
+Plugin refuses, or cannot be asked about, decides nothing; a card with no
+`revise` is decided as it was drawn. `docs/architecture.md` §5 has the shape.

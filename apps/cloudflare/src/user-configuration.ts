@@ -263,6 +263,18 @@ import {
 } from "./computer-host.js";
 import type { AuthPackageEnvironmentV1 } from "#auth-package";
 import type { VoiceAssistant } from "./voice-assistant.js";
+import {
+  InboundEmailUserStoreV1,
+  type InboundEmailUserHostV1,
+} from "@frockbot/app/email/user";
+import {
+  emailDomainV1,
+  normalizeSenderAddressV1,
+  type BotEmailSenderV1,
+  type InboundEmailRouteDecisionV1,
+  type InboundEmailStateV1,
+} from "@frockbot/app/email/shared";
+import { DEPLOYMENT_POLICY_SINGLETON_NAME } from "./deployment-policy.js";
 
 /** The durable key pinning the User this object was provisioned for. */
 const USER_IDENTITY_KEY = "user:identity";
@@ -275,6 +287,8 @@ interface UserConfigurationEnv
   extends BillingEnv, AccountDeletionEnvV1, AuthPackageEnvironmentV1 {
   FCM_SERVICE_ACCOUNT?: string;
   ALLOW_DEVELOPMENT_AUTH?: string;
+  /** Where every Bot's email address is, and what it sends from. */
+  EMAIL_DOMAIN?: string;
   BETTER_AUTH_URL?: string;
   CREDENTIAL_KEYRING?: string;
   /** The Connected apps provider key. Absent, nothing can be connected. */
@@ -310,6 +324,15 @@ interface UserConfigurationEnv
    * which is what decides whether the seeded catalog is reconciled in.
    */
   BOT_PACKAGES?: WorkerLoader;
+}
+
+/** A mailbox exactly as normalized, or a refusal of the whole request. */
+function requiredSenderAddress(value: unknown): string {
+  const address = normalizeSenderAddressV1(value);
+  if (address === undefined || address !== value) {
+    throw new Error("RPC request address is invalid");
+  }
+  return address;
 }
 
 /** The page of a Bot's projected rows a rebuild pulls, one Bot at a time. */
@@ -2656,6 +2679,8 @@ export class UserConfiguration
     const contributions = await this.contributions();
     contributions.search.purge(botId);
     contributions.audit.purgeAuditForBot(botId);
+    // Before the to-do entry goes, so a sweep interrupted here runs again.
+    await this.inboundEmail().forgetBot(botId);
     await contributions.flock.forgetDeletedBot(botId);
     const userId = await this.provenIdentity();
     if (userId) {
@@ -3846,5 +3871,207 @@ export class UserConfiguration
     await (
       await this.settingsContribution()
     ).readConfiguration({ schemaVersion: 1, userId });
+  }
+
+  // --- Inbound email -----------------------------------------------------------
+  //
+  // Which Bots receive email, and the account's confirmed senders. The
+  // `email()` handler asks `routeInboundEmail` about every message that got
+  // past its own checks; the settings routes read and change the rest. The
+  // username is the deployment directory's, not this object's.
+
+  /** The User's inbound email, over this object's storage and Bot directory. */
+  private inboundEmail(): InboundEmailUserStoreV1 {
+    return new InboundEmailUserStoreV1({
+      storage: this.ctx.storage as unknown as InboundEmailUserHostV1["storage"],
+      bots: async () => {
+        const flock = await this.flockContribution();
+        const [directory, lifecycles] = await Promise.all([
+          flock.listBots(),
+          flock.listBotLifecycles(),
+        ]);
+        const status = new Map(
+          lifecycles.lifecycles.map((lifecycle) => [
+            lifecycle.botId,
+            lifecycle.status,
+          ]),
+        );
+        return directory.bots
+          .filter((bot) => status.get(bot.botId) !== "deleted")
+          .map((bot) => ({
+            botId: bot.botId,
+            name: bot.currentProfile?.name ?? bot.initialName,
+            registeredAt: bot.registeredAt,
+            active: status.get(bot.botId) === "active",
+          }));
+      },
+    });
+  }
+
+  /** One of the User's Bots, or `BotNotFoundError`. */
+  private async requireInboundEmailBot(botId: string): Promise<void> {
+    if (!(await (await this.flockContribution()).hasBot(botId))) {
+      throw new BotNotFoundError(botId);
+    }
+  }
+
+  async readInboundEmail(input: unknown): Promise<InboundEmailStateV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+    });
+    await this.assertUserIdentity(request.userId as string);
+    await this.requireInboundEmailBot(request.botId as string);
+    return this.inboundEmail().state(request.botId as string);
+  }
+
+  /** Whether a Bot receives email. */
+  async setBotEmailEnabled(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      enabled: rpcBoolean,
+    });
+    await this.assertUserIdentity(request.userId as string);
+    const botId = request.botId as string;
+    await this.requireInboundEmailBot(botId);
+    try {
+      await this.inboundEmail().setEnabled(botId, request.enabled as boolean);
+    } catch (error) {
+      if (error instanceof Error && error.name === "InboundEmailCommandError") {
+        return {
+          schemaVersion: 1 as const,
+          status: "rejected" as const,
+          reason: error.message,
+        };
+      }
+      throw error;
+    }
+    return { schemaVersion: 1 as const, status: "applied" as const };
+  }
+
+  /**
+   * What one of the User's Bots sends email as, for that Bot's kernel: its
+   * address, which needs the account's username and the Bot's switch, and the
+   * owner's own addresses it may write to without a draft card.
+   */
+  async readBotEmailSender(input: unknown): Promise<BotEmailSenderV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+    });
+    const userId = request.userId as string;
+    await this.assertUserIdentity(userId);
+    const domain = emailDomainV1(this.env);
+    if (!domain) {
+      return this.inboundEmail().sender(request.botId as string, {});
+    }
+    const [username, signInEmail] = await Promise.all([
+      this.emailUsername(userId),
+      this.emailSignIn(userId),
+    ]);
+    return this.inboundEmail().sender(request.botId as string, {
+      domain,
+      ...(username ? { username } : {}),
+      ...(signInEmail ? { signInEmail } : {}),
+    });
+  }
+
+  /** The account's email username, which the deployment's directory holds. */
+  private async emailUsername(userId: string): Promise<string | undefined> {
+    const policy = this.env.DEPLOYMENT_POLICY;
+    if (!policy) return undefined;
+    // SAFETY: the binding names DeploymentPolicy; this is its username read.
+    const directory = policy.get(
+      policy.idFromName(DEPLOYMENT_POLICY_SINGLETON_NAME),
+    ) as unknown as { readEmailUsername(input: unknown): Promise<unknown> };
+    const { username } = (await directory.readEmailUsername({
+      schemaVersion: 1,
+      userId,
+    })) as { username?: unknown };
+    return typeof username === "string" ? username : undefined;
+  }
+
+  /**
+   * The address the identity provider verified, read from the stored identity
+   * and never from a session: the one owner address that needs no code.
+   */
+  private async emailSignIn(userId: string): Promise<string | undefined> {
+    const { AUTH_PACKAGE_V1 } = await import("#auth-package");
+    const identity = await AUTH_PACKAGE_V1.create(this.env).storedIdentity?.(
+      userId,
+    );
+    return identity?.emailVerified
+      ? normalizeSenderAddressV1(identity.email)
+      : undefined;
+  }
+
+  /** Add an address that may email the User's Bots, or take one away. */
+  async commandInboundEmailSender(input: unknown) {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      {
+        userId: rpcIdentifier,
+        action: rpcEnum(["add", "remove"] as const),
+        address: rpcDecoded(requiredSenderAddress),
+      },
+      { signInEmail: rpcDecoded(requiredSenderAddress) },
+    );
+    await this.assertUserIdentity(request.userId as string);
+    const store = this.inboundEmail();
+    const address = request.address as string;
+    try {
+      if (request.action === "remove") {
+        await store.removeSender(address);
+      } else {
+        await store.addSender(address, {
+          ...(request.signInEmail
+            ? { signInEmail: request.signInEmail as string }
+            : {}),
+          now: Date.now(),
+        });
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name === "InboundEmailCommandError") {
+        return {
+          schemaVersion: 1 as const,
+          status: "rejected" as const,
+          reason: error.message,
+        };
+      }
+      throw error;
+    }
+    return { schemaVersion: 1 as const, status: "applied" as const };
+  }
+
+  /**
+   * Whether one authenticated message may reach one of this User's Bots, and
+   * which. The `email()` handler asks only after the receiving server's DMARC
+   * verdict passed for `sender`, and after the directory said the username
+   * the message names is this User's.
+   */
+  async routeInboundEmail(
+    input: unknown,
+  ): Promise<InboundEmailRouteDecisionV1> {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      {
+        userId: rpcIdentifier,
+        slug: rpcPattern(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, 32),
+        sender: rpcDecoded(requiredSenderAddress),
+        codes: rpcArray(rpcPattern(/^[0-9A-HJKMNP-TV-Z]{8}$/, 8), 3),
+      },
+      { signInEmail: rpcDecoded(requiredSenderAddress) },
+    );
+    await this.assertUserIdentity(request.userId as string);
+    return this.inboundEmail().route({
+      slug: request.slug as string,
+      sender: request.sender as string,
+      ...(request.signInEmail
+        ? { signInEmail: request.signInEmail as string }
+        : {}),
+      codes: request.codes as string[],
+      now: Date.now(),
+    });
   }
 }

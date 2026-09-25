@@ -946,6 +946,171 @@ void main() {
     });
   });
 
+  /// The email Plugin's draft, component for component as
+  /// `app/plugins/seeded/email/plugin.ts` draws it: the headers and the body
+  /// are fields bound into a data model the surface sends back, so a Send is
+  /// a decision about what the person left there.
+  Map<String, Object?> emailDraftJson({int revision = 1}) => cardJson(
+    revision: revision,
+    sendDataModel: true,
+    components: [
+      {
+        'id': 'root',
+        'component': 'Column',
+        'children': ['status', 'to', 'cc', 'subject', 'body', 'actions'],
+      },
+      {
+        'id': 'status',
+        'component': 'StatusPill',
+        'label': 'Ready to send',
+        'tone': 'ready',
+      },
+      {
+        'id': 'to',
+        'component': 'TextField',
+        'label': 'To',
+        'value': {'path': '/to'},
+      },
+      {
+        'id': 'cc',
+        'component': 'TextField',
+        'label': 'Cc',
+        'value': {'path': '/cc'},
+      },
+      {
+        'id': 'subject',
+        'component': 'TextField',
+        'label': 'Subject',
+        'value': {'path': '/subject'},
+      },
+      {
+        'id': 'body',
+        'component': 'TextField',
+        'label': 'Message',
+        'value': {'path': '/body'},
+        'variant': 'longText',
+      },
+      {
+        'id': 'actions',
+        'component': 'ApprovalActions',
+        'approvalId': 'ap-1',
+        'approveLabel': 'Send',
+        'declineLabel': 'Discard',
+      },
+    ],
+    dataModel: {
+      'to': 'nick@example.com',
+      'cc': '',
+      'subject': 'Re: The retainer',
+      'body':
+          'Hi Nick,\n\nThanks for the call today. The retainer starts on the '
+          'first of the month, and I will send the paperwork on Friday.\n\n'
+          'Tim',
+    },
+  );
+
+  group('the email draft the person edits before sending', () {
+    setUpAll(() async {
+      if (cardVisualOutput.isNotEmpty) await loadInter();
+    });
+
+    testWidgets('draws every header and the message as a field', (
+      tester,
+    ) async {
+      final api = SettingsApi(
+        MemoryStore(),
+        (path, body) async => emailDraftJson(),
+      );
+      await tester.pumpWidget(host(api));
+      await tester.pumpAndSettle();
+      expect(find.byType(TextField), findsNWidgets(4));
+      expect(find.text('nick@example.com'), findsOneWidget);
+      expect(find.text('Re: The retainer'), findsOneWidget);
+      expect(find.text('Send'), findsOneWidget);
+      expect(find.text('Discard'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    // What the kernel puts to the Plugin's `revise` is what this press
+    // carries, so the edits have to be in it and nowhere else.
+    testWidgets('Send carries the draft as the person left it', (tester) async {
+      Map<String, Object?>? sent;
+      final api = SettingsApi(MemoryStore(), (path, body) async {
+        if (body == null) return emailDraftJson();
+        sent = (body as Map).cast<String, Object?>();
+        return {
+          'schemaVersion': 1,
+          'routed': 'approval',
+          'card': emailDraftJson(revision: 2),
+        };
+      });
+      await tester.pumpWidget(host(api));
+      await tester.pumpAndSettle();
+      await tester.enterText(
+        find.widgetWithText(TextField, 'nick@example.com'),
+        'nick@example.com, ana@example.com',
+      );
+      await tester.enterText(
+        find.widgetWithText(TextField, 'Re: The retainer'),
+        'Re: The retainer, signed',
+      );
+      await tester.pumpAndSettle();
+      await tester.tap(find.text('Send'));
+      await tester.pumpAndSettle();
+      expect((sent!['event']! as Map)['name'], 'approval/ap-1');
+      expect((sent!['event']! as Map)['context'], {'decision': 'approved'});
+      expect(sent!['dataModel'], {
+        'to': 'nick@example.com, ana@example.com',
+        'cc': '',
+        'subject': 'Re: The retainer, signed',
+        'body':
+            'Hi Nick,\n\nThanks for the call today. The retainer starts on the '
+            'first of the month, and I will send the paperwork on Friday.\n\n'
+            'Tim',
+      });
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    for (final width in [412.0, 680.0]) {
+      testWidgets('draws in the thread at $width', (tester) async {
+        tester.view.physicalSize = Size(width * 2, 1000 * 2);
+        tester.view.devicePixelRatio = 2;
+        addTearDown(tester.view.reset);
+        final api = SettingsApi(
+          MemoryStore(),
+          (path, body) async => emailDraftJson(),
+        );
+        await tester.pumpWidget(
+          MaterialApp(
+            theme: FrockTheme.theme(Brightness.dark),
+            home: Scaffold(
+              body: Center(
+                child: SingleChildScrollView(
+                  padding: const EdgeInsets.all(16),
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxWidth: 680),
+                    child: RepaintBoundary(
+                      child: CardChatScope(
+                        api: api,
+                        botId: 'bot-1',
+                        child: const CardChatCard(surfaceId: 'draft-1'),
+                      ),
+                    ),
+                  ),
+                ),
+              ),
+            ),
+          ),
+        );
+        await tester.pumpAndSettle();
+        expect(tester.takeException(), isNull);
+        expect(find.text('Ready to send'), findsOneWidget);
+        await capture(tester, 'email-draft-${width.toInt()}');
+        await tester.pumpWidget(const SizedBox());
+      });
+    }
+  });
+
   group('a Bot-authored card, at the widths it is read at', () {
     setUpAll(() async {
       if (cardVisualOutput.isNotEmpty) await loadInter();

@@ -26,6 +26,14 @@
     }
   },
   {
+    "name": "RunVia email carrying the sender",
+    "schema": "RunVia",
+    "value": {
+      "kind": "email",
+      "from": "tim@example.com"
+    }
+  },
+  {
     "name": "Digest wrong shape",
     "schema": "Digest",
     "value": null

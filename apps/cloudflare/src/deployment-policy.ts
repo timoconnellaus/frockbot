@@ -17,6 +17,13 @@ import {
   type DeploymentPolicyV1,
   type EmailInvitationV1,
 } from "@frockbot/app/admin/shared";
+import {
+  claimEmailUsernameV1,
+  readEmailUsernameV1,
+  releaseEmailUsernameV1,
+  resolveEmailUsernameV1,
+} from "@frockbot/app/email/directory";
+import { isEmailUsernameV1 } from "@frockbot/app/email/shared";
 import { DurableObject } from "cloudflare:workers";
 import {
   evaluateAdmissionV1,
@@ -35,11 +42,18 @@ import {
   seedHostedModelRatesStorageV1,
   type ModelRatesWriteV1,
 } from "./model-rates.js";
+import { decodeRpcEnvelopeV1, rpcIdentifier } from "./durable-rpc.js";
 
 const POLICY_KEY = "deployment:admission:v1";
 const ACCESS_PREFIX = "account:access:v1:";
 const INVITATION_PREFIX = "invitation:email:v1:";
 export const DEPLOYMENT_POLICY_SINGLETON_NAME = "frockbot-deployment-policy";
+
+/** An email username, in the shape and outside the names nobody may hold. */
+const EMAIL_USERNAME = (value: unknown, label: string): unknown => {
+  if (!isEmailUsernameV1(value)) throw new Error(`${label} is invalid`);
+  return value;
+};
 
 /** Written by admission itself, so an audit can tell a sign-in from an admin. */
 export const ADMISSION_UPDATED_BY = "admission";
@@ -106,7 +120,10 @@ function nextRevision(current: number, label: string): number {
  * The deployment's beta-access authority: the admission mode, each account's
  * access record and the email invitations not yet redeemed. It also holds the
  * versioned hosted model rate table (`./model-rates.ts`), which is equally
- * deployment-wide and equally an administrator's to change.
+ * deployment-wide and equally an administrator's to change, and the email
+ * usernames (`app/email/directory.ts`): one account per username across the
+ * deployment, and the one object the whole deployment shares is what can say
+ * whose a message's username is before any User's object is addressed.
  *
  * One object, and every read-decide-write in it is a synchronous storage
  * transaction, so two sign-ins, or a sign-in racing an admin, are serialized
@@ -280,6 +297,58 @@ export class DeploymentPolicy extends DurableObject<Record<string, never>> {
     );
   }
 
+  /**
+   * The User's email username is now this one, unless another account holds
+   * it; the one they held before is released in the same write.
+   */
+  async claimEmailUsername(
+    input: unknown,
+  ): Promise<{ schemaVersion: 1; status: "claimed" | "taken" }> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      username: EMAIL_USERNAME,
+    });
+    const claim = this.ctx.storage.transactionSync(() =>
+      claimEmailUsernameV1(this.kv, {
+        userId: request.userId as string,
+        username: request.username as string,
+      }),
+    );
+    return { schemaVersion: 1, status: claim.status };
+  }
+
+  /** The User has no email username any more. */
+  async releaseEmailUsername(input: unknown): Promise<{ schemaVersion: 1 }> {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    this.ctx.storage.transactionSync(() =>
+      releaseEmailUsernameV1(this.kv, request.userId as string),
+    );
+    return { schemaVersion: 1 };
+  }
+
+  /** The User a username belongs to, or `null`. */
+  async resolveEmailUsername(
+    input: unknown,
+  ): Promise<{ schemaVersion: 1; userId: string | null }> {
+    const request = decodeRpcEnvelopeV1(input, { username: EMAIL_USERNAME });
+    return {
+      schemaVersion: 1,
+      userId:
+        resolveEmailUsernameV1(this.kv, request.username as string) ?? null,
+    };
+  }
+
+  /** A User's email username, or `null`. */
+  async readEmailUsername(
+    input: unknown,
+  ): Promise<{ schemaVersion: 1; username: string | null }> {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    return {
+      schemaVersion: 1,
+      username: readEmailUsernameV1(this.kv, request.userId as string) ?? null,
+    };
+  }
+
   async mayCreateIdentity(input: unknown): Promise<boolean> {
     const request = decodeIdentityCreationRequestV1(input);
     return identityMayBeCreatedV1(
@@ -338,9 +407,10 @@ export class DeploymentPolicy extends DurableObject<Record<string, never>> {
   }
 
   /**
-   * The last trace of a deleted account here: its access record and any
-   * invitation still waiting under its address. Called only once the identity
-   * itself is gone, so no session is left that could be admitted afresh.
+   * The last trace of a deleted account here: its access record, any
+   * invitation still waiting under its address, and its email username, which
+   * anyone may take again. Called only once the identity itself is gone, so no
+   * session is left that could be admitted afresh.
    */
   async forgetAccount(input: unknown): Promise<{ schemaVersion: 1 }> {
     const request = decodeAccountDeletionAccessRequestV1(input);
@@ -349,6 +419,7 @@ export class DeploymentPolicy extends DurableObject<Record<string, never>> {
       if (request.email !== undefined) {
         this.kv.delete(INVITATION_PREFIX + request.email);
       }
+      releaseEmailUsernameV1(this.kv, request.userId);
     });
     return { schemaVersion: 1 };
   }

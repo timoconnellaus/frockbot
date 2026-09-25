@@ -327,6 +327,17 @@ describe("foundation application", () => {
       listMachines: () => Promise.reject(new Error("not used while composing")),
       revokeMachine: () =>
         Promise.reject(new Error("not used while composing")),
+      emailSignIn: () => Promise.reject(new Error("not used while composing")),
+      readInboundEmail: () =>
+        Promise.reject(new Error("not used while composing")),
+      readEmailUsername: () =>
+        Promise.reject(new Error("not used while composing")),
+      claimEmailUsername: () =>
+        Promise.reject(new Error("not used while composing")),
+      setBotEmailEnabled: () =>
+        Promise.reject(new Error("not used while composing")),
+      commandInboundEmailSender: () =>
+        Promise.reject(new Error("not used while composing")),
       readTask: () => Promise.reject(new Error("not used while composing")),
       stopTask: () => Promise.reject(new Error("not used while composing")),
     });
@@ -339,6 +350,7 @@ describe("foundation application", () => {
       "bot-template",
       "computer",
       "connect",
+      "email",
       "flock",
       "groups",
       "mcp",

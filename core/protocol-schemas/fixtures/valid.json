@@ -26,6 +26,13 @@
     }
   },
   {
+    "name": "RunVia the person writing by email",
+    "schema": "RunVia",
+    "value": {
+      "kind": "email"
+    }
+  },
+  {
     "name": "Digest valid",
     "schema": "Digest",
     "value": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"

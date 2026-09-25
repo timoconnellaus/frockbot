@@ -1,7 +1,7 @@
 {
   "id": "email",
   "displayName": "Email",
-  "version": "1",
+  "version": "2",
   "contractVersion": 7,
   "tools": [
     {
@@ -10,8 +10,12 @@
       "inputSchema": {
         "type": "object",
         "properties": {
-          "surfaceId": { "type": "string" },
-          "approvalId": { "type": "string" }
+          "surfaceId": {
+            "type": "string"
+          },
+          "approvalId": {
+            "type": "string"
+          }
         },
         "required": ["surfaceId", "approvalId"]
       }
@@ -21,38 +25,89 @@
       "description": "Discard the email a draft card is showing, after the person declined it. Takes the card's surfaceId.",
       "inputSchema": {
         "type": "object",
-        "properties": { "surfaceId": { "type": "string" } },
+        "properties": {
+          "surfaceId": {
+            "type": "string"
+          }
+        },
         "required": ["surfaceId"]
       }
     }
   ],
   "hooks": [],
   "grants": ["http", "storage"],
-  "network": { "hosts": [] },
+  "network": {
+    "hosts": []
+  },
   "cards": [
     {
       "id": "draft",
       "displayName": "Email draft",
-      "description": "Show the person an email you have drafted and ask them to send or discard it.",
+      "description": "Show the person an email you have drafted. They can edit it, then send or discard it.",
       "dataSchema": {
         "type": "object",
         "properties": {
           "to": {
             "type": "array",
-            "items": { "type": "string", "maxLength": 320 },
+            "items": {
+              "type": "string",
+              "maxLength": 320
+            },
             "minItems": 1,
             "maxItems": 16
           },
           "cc": {
             "type": "array",
-            "items": { "type": "string", "maxLength": 320 },
+            "items": {
+              "type": "string",
+              "maxLength": 320
+            },
             "maxItems": 16
           },
-          "subject": { "type": "string", "minLength": 1, "maxLength": 512 },
-          "inReplyTo": { "type": "string", "maxLength": 512 },
-          "body": { "type": "string", "minLength": 1, "maxLength": 64000 }
+          "subject": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "inReplyTo": {
+            "type": "string",
+            "maxLength": 512
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64000
+          }
         },
         "required": ["to", "subject", "body"],
+        "additionalProperties": false
+      },
+      "actions": []
+    },
+    {
+      "id": "owner",
+      "displayName": "Email to you",
+      "description": "Email your person directly, from your own address, at one of their own addresses: no draft and no Send to press. The card shows that it went. Anyone else is an email_draft.",
+      "dataSchema": {
+        "type": "object",
+        "properties": {
+          "subject": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 512
+          },
+          "body": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 64000
+          },
+          "to": {
+            "type": "string",
+            "maxLength": 320,
+            "description": "One of your person's own addresses. Leave it out for the one they sign in with."
+          }
+        },
+        "required": ["subject", "body"],
         "additionalProperties": false
       },
       "actions": []

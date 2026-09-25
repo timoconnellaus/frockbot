@@ -68,7 +68,15 @@
     "./durable-rpc": "./durable-rpc.ts",
     "./echo": "./echo/index.ts",
     "./echo/agent": "./echo/agent.ts",
+    "./email/authentication": "./email/authentication.ts",
+    "./email/backend": "./email/backend.ts",
+    "./email/directory": "./email/directory.ts",
+    "./email/inbound": "./email/inbound.ts",
+    "./email/message": "./email/message.ts",
     "./email/sender": "./email/sender.ts",
+    "./email/shared": "./email/shared.ts",
+    "./email/testing": "./email/testing.ts",
+    "./email/user": "./email/user.ts",
     "./flock": "./flock/index.ts",
     "./flock/agent": "./flock/agent.ts",
     "./flock/backend": "./flock/backend.ts",
@@ -341,7 +349,8 @@
     "@modelcontextprotocol/client": "2.0.0",
     "@typesafe-ai/sdk": "0.6.0",
     "better-auth": "1.7.5",
-    "croner": "10.0.1"
+    "croner": "10.0.1",
+    "postal-mime": "3.0.0"
   },
   "devDependencies": {
     "@cloudflare/workers-types": "5.20260916.1",

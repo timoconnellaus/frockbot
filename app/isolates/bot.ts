@@ -45,6 +45,7 @@ import {
   type IsolateModelInvocationV1,
   type IsolateCapabilityFailureV1,
   type IsolateEmailOutcomeV1,
+  type IsolateEmailRequestV1,
   type IsolateScheduleOutcomeV1,
   type IsolateSettingsOutcomeV1,
   type IsolateStorageListOutcomeV1,
@@ -62,7 +63,13 @@ import {
   resolveEffectiveBotModelV1,
   type BotSettingsViewV1,
 } from "@frockbot/core/configuration";
-import type { BotIdentity } from "@frockbot/core/durable";
+import { RUN_PREFIX, type BotIdentity } from "@frockbot/core/durable";
+import {
+  decodeBotEmailSenderV1,
+  normalizeSenderAddressV1,
+  type BotEmailSenderV1,
+} from "@frockbot/app/email/shared";
+import type { EmailSenderV1 } from "@frockbot/app/email/sender";
 import { frockbotToolCallV1 } from "@frockbot/core/tools";
 import { estimateModelUsageV1 } from "@frockbot/core/agent-loop";
 import { FROCK_AI_PROVIDER_TYPE } from "@frockbot/providers/frock-ai/catalog";
@@ -954,12 +961,14 @@ export async function isolateConnection(
 }
 
 /**
- * One email, sent by the deployment for the Bot that asked (ADR 0030).
+ * One email, sent by the deployment from the Bot that asked (ADR 0030).
  *
  * The plugin holds no credential and names no provider: it hands over a
  * message and learns whether it went. The send is attributed to the Bot whose
  * Turn asked for it, which is why the call is admitted like every other
- * grant before the sender is reached at all.
+ * grant before the sender is reached at all; and it leaves from that Bot's own
+ * address, `<bot>.<username>@<domain>`, which the kernel composes and the
+ * Plugin never names.
  */
 export async function isolateEmail(
   state: ShellBotStateV1,
@@ -978,9 +987,17 @@ export async function isolateEmail(
       reason: "this deployment has no sender bound, so it sends no email",
     };
   }
-  const { approvalId, surfaceId, ...message } = decodeIsolateEmailRequestV1(
-    input.request,
-  );
+  const request = decodeIsolateEmailRequestV1(input.request);
+  // Asked before any decision is claimed: a Bot with no address yet spends
+  // nothing, and is told in words it can pass on.
+  const from = await botEmailSenderV1(state, input);
+  if (from.status !== "ready") {
+    return { status: "unavailable", reason: from.reason };
+  }
+  if ("owner" in request) {
+    return emailOwnerV1(state, input, sender, from, request);
+  }
+  const { approvalId, surfaceId, ...message } = request;
   // The decision is the kernel's to require, not the model's to remember: a
   // Bot that misread a denial, or that called before anybody answered, gets
   // no message out. And the decision has to be the one that covers *this*
@@ -996,13 +1013,184 @@ export async function isolateEmail(
     digest: await cardValuesDigestV1(message),
   });
   if (claim.status !== "claimed") return claim.failure;
-  const outcome = await sender.send(message);
+  const outcome = await sender.send({
+    ...message,
+    from: { address: from.address, name: from.name },
+    // Mail to someone else is the person's: a reply reaches them, never the
+    // Bot, whose address takes mail from its owner alone.
+    ...(from.signInEmail === undefined ? {} : { replyTo: from.signInEmail }),
+  });
   // Nothing left, so nothing was spent: the decision is still good and the
-  // Bot may try again once the deployment can send.
-  if (outcome.status !== "sent") {
+  // Bot may try again once the deployment can send. An outcome nobody can
+  // vouch for keeps the claim: the decision may have sent its message, and
+  // it sends at most one.
+  if (outcome.status === "unavailable") {
     await state.ctx.storage.delete(cardApprovalUseKeyV1(approvalId));
   }
   return outcome;
+}
+
+/** What this Bot sends as, from its User's object, or why it cannot. */
+async function botEmailSenderV1(
+  state: ShellBotStateV1,
+  input: IsolateCallScopeV1,
+): Promise<BotEmailSenderV1> {
+  try {
+    const user = state.env.USER_CONFIGURATIONS.get(
+      state.env.USER_CONFIGURATIONS.idFromName(input.userId),
+    );
+    return decodeBotEmailSenderV1(
+      await user.readBotEmailSender({
+        schemaVersion: 1,
+        userId: input.userId,
+        botId: input.botId,
+      }),
+    );
+  } catch {
+    return {
+      status: "unavailable",
+      reason: "which address you send from could not be read just now",
+    };
+  }
+}
+
+/** How many notes a Bot may send its owner in one UTC day. */
+export const EMAIL_OWNER_DAILY_LIMIT_V1 = 20;
+
+/** Today's count of notes to the owner: one record, reset by the day. */
+export const EMAIL_OWNER_COUNT_KEY_V1 = "email:owner:count";
+
+/** One note's send, recorded under its key before the sender is reached. */
+export function emailOwnerNoteKeyV1(keyDigest: string): string {
+  return `email:owner:note:${keyDigest}`;
+}
+
+interface EmailOwnerNoteRecordV1 {
+  schemaVersion: 1;
+  status: "claimed" | "sent" | "unknown";
+  to: string;
+  messageId?: string;
+}
+
+interface EmailOwnerCountRecordV1 {
+  schemaVersion: 1;
+  day: string;
+  count: number;
+}
+
+/**
+ * A note from the Bot to its owner, with no card to decide on. What stands in
+ * for the decision is who it can reach: only an address the owner signs in
+ * with or confirmed, so the worst a confused Bot can do is write to its own
+ * person — at most once per key, and at most
+ * {@link EMAIL_OWNER_DAILY_LIMIT_V1} times a day, so a loop cannot run up
+ * cost. Anyone else is a draft card.
+ */
+async function emailOwnerV1(
+  state: ShellBotStateV1,
+  input: IsolateCallScopeV1,
+  sender: EmailSenderV1,
+  from: Extract<BotEmailSenderV1, { status: "ready" }>,
+  request: Extract<IsolateEmailRequestV1, { owner: true }>,
+): Promise<IsolateEmailOutcomeV1> {
+  const unavailable = (reason: string): IsolateEmailOutcomeV1 => ({
+    status: "unavailable",
+    reason,
+  });
+  const to =
+    request.to === undefined
+      ? from.owner[0]
+      : normalizeSenderAddressV1(request.to);
+  if (to === undefined) {
+    return unavailable(
+      "your person has no email address you know: they sign in without one and have confirmed none, so draw a draft card for them to send instead",
+    );
+  }
+  if (!from.owner.includes(to)) {
+    return unavailable(
+      `${to} is not one of your person's own addresses, so a message to it is a draft card they approve`,
+    );
+  }
+  const key = emailOwnerNoteKeyV1(await sha256HexTextV1(request.key));
+  const day = new Date().toISOString().slice(0, 10);
+  const claim = await state.ctx.storage.transaction(async (transaction) => {
+    const prior = await transaction.get<EmailOwnerNoteRecordV1>(key);
+    if (prior !== undefined) return { status: "prior" as const, prior };
+    const stored = await transaction.get<EmailOwnerCountRecordV1>(
+      EMAIL_OWNER_COUNT_KEY_V1,
+    );
+    const count = stored?.day === day ? stored.count : 0;
+    if (count >= EMAIL_OWNER_DAILY_LIMIT_V1) {
+      return { status: "limit" as const };
+    }
+    await transaction.put(EMAIL_OWNER_COUNT_KEY_V1, {
+      schemaVersion: 1,
+      day,
+      count: count + 1,
+    } satisfies EmailOwnerCountRecordV1);
+    await transaction.put(key, {
+      schemaVersion: 1,
+      status: "claimed",
+      to,
+    } satisfies EmailOwnerNoteRecordV1);
+    return { status: "claimed" as const };
+  });
+  if (claim.status === "prior") {
+    // The same note, asked again: never a second message. A claim with no
+    // outcome is a send whose answer was lost, which may have left.
+    return claim.prior.status === "sent" && claim.prior.messageId
+      ? { status: "sent", messageId: claim.prior.messageId, to: claim.prior.to }
+      : {
+          status: "unknown",
+          reason:
+            "this note was already sent once and may have arrived, so it was not sent again",
+        };
+  }
+  if (claim.status === "limit") {
+    return unavailable(
+      `you have emailed your person ${EMAIL_OWNER_DAILY_LIMIT_V1} times today, the most a Bot may in a day; tell them here instead`,
+    );
+  }
+  // A Turn the owner started by email is answered in that thread.
+  const run = await state.ctx.storage.get<{
+    admission?: { origin?: { kind?: unknown; messageId?: unknown } };
+  }>(`${RUN_PREFIX}${input.runId}`);
+  const origin = run?.admission?.origin;
+  const inReplyTo =
+    origin?.kind === "email" && typeof origin.messageId === "string"
+      ? `<${origin.messageId}>`
+      : undefined;
+  const outcome = await sender.send({
+    from: { address: from.address, name: from.name },
+    to: [to],
+    subject: request.subject,
+    body: request.body,
+    ...(inReplyTo === undefined ? {} : { inReplyTo }),
+  });
+  if (outcome.status === "unavailable") {
+    // Nothing left: the key and the day's count are given back, so the same
+    // note can go once the reason is fixed.
+    await state.ctx.storage.transaction(async (transaction) => {
+      await transaction.delete(key);
+      const stored = await transaction.get<EmailOwnerCountRecordV1>(
+        EMAIL_OWNER_COUNT_KEY_V1,
+      );
+      if (stored?.day === day && stored.count > 0) {
+        await transaction.put(EMAIL_OWNER_COUNT_KEY_V1, {
+          ...stored,
+          count: stored.count - 1,
+        });
+      }
+    });
+    return outcome;
+  }
+  await state.ctx.storage.put(key, {
+    schemaVersion: 1,
+    status: outcome.status,
+    to,
+    ...(outcome.status === "sent" ? { messageId: outcome.messageId } : {}),
+  } satisfies EmailOwnerNoteRecordV1);
+  return outcome.status === "sent" ? { ...outcome, to } : outcome;
 }
 
 /**

@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  decodeIsolateEmailRequestV1,
   decodeIsolateCapabilityFailureV1,
   decodeIsolateCapabilityListV1,
   decodeIsolateHealthV1,
@@ -441,6 +442,44 @@ describe("isolate identity and capabilities", () => {
         packageId: "package-local-authority",
       }),
     ).toThrow(/invalid fields/);
+  });
+});
+
+describe("isolate email request v1", () => {
+  test("a note to the owner names no decision and one address at most", () => {
+    expect(
+      decodeIsolateEmailRequestV1({
+        owner: true,
+        key: "email_owner.1",
+        subject: "Agenda",
+        body: "Done.",
+      }),
+    ).toEqual({
+      owner: true,
+      key: "email_owner.1",
+      subject: "Agenda",
+      body: "Done.",
+    });
+    for (const bad of [
+      { owner: false, key: "k", subject: "s", body: "b" },
+      { owner: true, key: "k", subject: "two\nlines", body: "b" },
+      { owner: true, key: "k", subject: "s", body: "b", to: ["a@b.co"] },
+      { owner: true, key: "k", subject: "s", body: "b", to: "not an address" },
+      { owner: true, key: "k", subject: "s", body: "b", approvalId: "a" },
+      { owner: true, subject: "s", body: "b" },
+    ]) {
+      expect(() => decodeIsolateEmailRequestV1(bad)).toThrow();
+    }
+  });
+
+  test("mail to anyone still names its decision", () => {
+    expect(() =>
+      decodeIsolateEmailRequestV1({
+        to: ["nick@example.com"],
+        subject: "s",
+        body: "b",
+      }),
+    ).toThrow();
   });
 });
 

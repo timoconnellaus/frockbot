@@ -36,6 +36,11 @@ describe("the classifier table", () => {
     ["mcp-beeper/send_message", {}, "mcp", "remote:mcp-beeper"],
     // A connected app's namespace is not a remote MCP server.
     ["gmail/GMAIL_SEND_EMAIL", {}, undefined],
+    // Mail from the Bot's own address: a note to its person, and a draft
+    // the person approved. Drawing a draft sends nothing.
+    ["email/email_owner", { data: { subject: "Hi" } }, "email", "email"],
+    ["email/email_send", { surfaceId: "s" }, "email", "email"],
+    ["email/email_draft", { data: {} }, undefined],
     // Read-only and product tools perform no audited effect at all. An audit
     // surface that logged them would be a transcript.
     ["current_time", {}, undefined],

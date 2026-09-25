@@ -121,6 +121,15 @@
         "enum": ["android", "macos", "macos-dev", "ios", "ios-dev"]
       }
     },
+    "email": {
+      "description": "Email to and from Bots, both directions on one domain. Each Bot's address is `<bot-slug>.<username>@<domain>`. The domain becomes the app Worker's `EMAIL_DOMAIN` var, which the `email()` handler receives mail for, and the app Worker gains a `send_email` binding named `SEND_EMAIL`, through which each Bot sends from its own address on that domain and no other. Absent, no Bot has an address, every message is refused and nothing is sent. The domain's Email Routing catch-all and its onboarding for Email Sending are set up in Cloudflare by hand: see `scripts/deployment-config/README.md`.",
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["domain"],
+      "properties": {
+        "domain": { "$ref": "#/$defs/hostname" }
+      }
+    },
     "resources": {
       "description": "Names that carry identity. Each is derived from `prefix` when absent.",
       "type": "object",

@@ -10,16 +10,22 @@ import type {
 /**
  * Email: the first seeded Plugin, and the first Card (ADR 0030).
  *
- * The Bot drafts; the person decides; the deployment sends. The draft card is
- * the whole of the Plugin's face — who it is to, what it says, and one
- * control that sends it and one that discards it — and when it is sent the
- * card settles into a receipt rather than disappearing.
+ * Mail to anyone: the Bot drafts; the person edits and decides; the
+ * deployment sends. The draft card is the whole of the Plugin's face for it —
+ * who it is to, what it says, each of them a field the person can change, and
+ * one control that sends it and one that discards it — and when it is sent
+ * the card settles into a receipt rather than disappearing.
  *
- * Two things are deliberately not here. The Plugin never sends by itself: the
- * approval the card asks for is the kernel's, and the tool that sends is
- * called on the Turn after the person decided. And the Plugin holds no
- * credential: `ctx.email` is the deployment's own sender, reached through the
- * kernel and attributed to the Bot that asked.
+ * Mail to the Bot's own person: the `owner` card sends as it is drawn and is
+ * only ever a receipt. No decision stands in front of it because the kernel
+ * holds it to the owner's own addresses and to a few a day.
+ *
+ * Two things are deliberately not here. The Plugin never sends to anyone else
+ * by itself: the approval the draft card asks for is the kernel's, and the
+ * tool that sends is called on the Turn after the person decided. And the
+ * Plugin holds no credential and never names the sender: `ctx.email` is the
+ * deployment's own sender, reached through the kernel, sending from the Bot's
+ * own address.
  */
 
 export const tools: PluginTool[] = [
@@ -65,9 +71,22 @@ interface Draft {
   inReplyTo?: string;
 }
 
+/**
+ * What happened to one surface's mail. `edited` says the person changed the
+ * draft before sending it, so the Bot is told that what left is theirs.
+ * `unclear` is a send whose outcome nobody can vouch for: it may have
+ * reached its recipients, so it is never sent again.
+ */
 type DraftState =
-  | { status: "drafted"; draft: Draft }
-  | { status: "sent"; draft: Draft; messageId: string; at: string }
+  | { status: "drafted"; draft: Draft; edited?: true }
+  | {
+      status: "sent";
+      draft: Draft;
+      messageId: string;
+      at: string;
+      edited?: true;
+    }
+  | { status: "unclear"; draft: Draft; reason: string; at: string }
   | { status: "discarded"; draft: Draft; at: string };
 
 /** One surface's state. Keyed by the surface, because the card is the state. */
@@ -99,15 +118,44 @@ async function writeState(
 /**
  * A mailbox, as loosely as one may be written and still be one. The same
  * shape the kernel's own email request holds addresses to: an address the
- * kernel would refuse is refused here, when the card is drawn, rather than
- * after a person has read it and pressed Send.
+ * kernel would refuse is refused here, when the card is drawn or edited,
+ * rather than after a person has read it and pressed Send.
  */
 const ADDRESS = /^[^\s@,<>]+@[^\s@,<>.]+(?:\.[^\s@,<>.]+)+$/;
 
-function malformedAddress(draft: Draft): string | undefined {
-  return [...draft.to, ...(draft.cc ?? [])].find(
-    (address) => !ADDRESS.test(address),
+/** The kernel's own bounds on one message (`ISOLATE_EMAIL_LIMITS_V1`). */
+const LIMITS = { recipients: 16, address: 320, subject: 512, body: 64_000 };
+
+/**
+ * Why this draft could not be sent, or nothing. The card tool's schema holds
+ * the Bot's values to the same bounds before `render` sees them; an edit
+ * reaches `revise` with nothing in front of it, so both ask this.
+ */
+function draftProblem(draft: Draft): string | undefined {
+  if (draft.to.length === 0) return "a draft needs at least one recipient";
+  const recipients = [...draft.to, ...(draft.cc ?? [])];
+  if (draft.to.length > LIMITS.recipients) {
+    return `a draft is sent to at most ${LIMITS.recipients} people`;
+  }
+  if ((draft.cc ?? []).length > LIMITS.recipients) {
+    return `a draft copies at most ${LIMITS.recipients} people`;
+  }
+  const malformed = recipients.find(
+    (address) => address.length > LIMITS.address || !ADDRESS.test(address),
   );
+  if (malformed !== undefined) {
+    return `"${malformed}" is not an email address`;
+  }
+  if (draft.subject.length === 0) return "a draft needs a subject";
+  if (draft.subject.length > LIMITS.subject) {
+    return `a subject is at most ${LIMITS.subject} characters`;
+  }
+  if (/[\r\n]/.test(draft.subject)) return "a subject is one line";
+  if (draft.body.trim().length === 0) return "a draft needs a message";
+  if (draft.body.length > LIMITS.body) {
+    return `a message is at most ${LIMITS.body} characters`;
+  }
+  return undefined;
 }
 
 function readDraft(data: { [key: string]: unknown }): Draft {
@@ -126,6 +174,74 @@ function readDraft(data: { [key: string]: unknown }): Draft {
 }
 
 /**
+ * The draft's fields as the card's data model holds them: one line of
+ * addresses per header, because a text field edits text. The body is a field
+ * only while it fits the Card's data-model budget beside the headers; a
+ * longer one is shown whole and sent as the Bot wrote it.
+ */
+interface DraftFields {
+  to: string;
+  cc: string;
+  subject: string;
+  body?: string;
+}
+
+/** A Card's data model is at most 16,000 bytes; this leaves the headers room. */
+const EDITABLE_FIELDS_BYTES = 15_000;
+
+function fieldsOf(draft: Draft): DraftFields {
+  const headers = {
+    to: draft.to.join(", "),
+    cc: (draft.cc ?? []).join(", "),
+    subject: draft.subject,
+  };
+  const whole = { ...headers, body: draft.body };
+  return new TextEncoder().encode(JSON.stringify(whole)).length <=
+    EDITABLE_FIELDS_BYTES
+    ? whole
+    : headers;
+}
+
+/** Addresses as a person types them: commas, semicolons, spaces or lines. */
+function addressList(value: unknown): string[] {
+  return typeof value === "string"
+    ? value.split(/[\s,;]+/).filter((address) => address.length > 0)
+    : [];
+}
+
+/**
+ * The draft the person's fields describe. Whatever the card did not offer as
+ * a field — the thread it answers, a body too long to edit — is the draft it
+ * was drawn with.
+ */
+function draftFromFields(
+  fields: { [key: string]: unknown },
+  drawn: Draft,
+): Draft {
+  const cc = addressList(fields.cc);
+  return {
+    to: addressList(fields.to),
+    ...(cc.length > 0 ? { cc } : {}),
+    subject: typeof fields.subject === "string" ? fields.subject.trim() : "",
+    body: typeof fields.body === "string" ? fields.body : drawn.body,
+    ...(drawn.inReplyTo === undefined ? {} : { inReplyTo: drawn.inReplyTo }),
+  };
+}
+
+/** Whether two drafts are the same message. */
+function sameDraft(left: Draft, right: Draft): boolean {
+  const canonical = (draft: Draft) =>
+    JSON.stringify([
+      draft.to,
+      draft.cc ?? [],
+      draft.subject,
+      draft.body,
+      draft.inReplyTo ?? "",
+    ]);
+  return canonical(left) === canonical(right);
+}
+
+/**
  * The catalog every Frock card is drawn from:
  * `core/protocol-schemas/schema/frock-catalog.json`. The client registers
  * A2UI's standard components and the Frock family as one catalog under this
@@ -133,13 +249,37 @@ function readDraft(data: { [key: string]: unknown }): Draft {
  */
 const FROCK_CATALOG_ID = "https://frockbot.com/a2ui/catalogs/frock/v1.json";
 
-function surface(surfaceId: string, components: unknown[]): CardMessage[] {
+function surface(
+  surfaceId: string,
+  components: unknown[],
+  dataModel?: DraftFields,
+): CardMessage[] {
   return [
     {
       version: "v1.0",
-      createSurface: { surfaceId, catalogId: FROCK_CATALOG_ID, components },
+      createSurface: {
+        surfaceId,
+        catalogId: FROCK_CATALOG_ID,
+        components,
+        ...(dataModel === undefined
+          ? {}
+          : {
+              dataModel,
+              // The fields are bound into the data model, so the press has to
+              // carry them back for the kernel to put an edit to `revise`.
+              sendDataModel: true,
+            }),
+      },
     },
   ];
+}
+
+/** What the person is asked. The words the Approval is recorded with. */
+function decisionFor(draft: Draft): PluginCardDecision {
+  return {
+    action: `Send an email to ${draft.to.join(", ")} — ${draft.subject}`,
+    risk: "medium",
+  };
 }
 
 /**
@@ -157,40 +297,43 @@ function drawDraft(
   covers: { [key: string]: unknown };
   decision: PluginCardDecision;
 } {
+  const fields = fieldsOf(draft);
   return {
-    messages: surface(surfaceId, draftComponents(draft)),
+    messages: surface(surfaceId, draftComponents(draft, fields), fields),
     covers: { ...draft },
     // What the person is actually asked. The catalog's ApprovalActions holds
     // an id and two labels, so the words the Approval is recorded with are
     // declared here, beside the values that decision covers.
-    decision: {
-      action: `Send an email to ${draft.to.join(", ")} — ${draft.subject}`,
-      risk: "medium",
-    },
+    decision: decisionFor(draft),
   };
 }
 
-/** The rows a person reads before deciding: who, and about what. */
-function addressRows(draft: Draft): unknown {
-  const rows: { label: string; value: string }[] = [
-    { label: "To", value: draft.to.join(", ") },
-  ];
-  if (draft.cc && draft.cc.length > 0) {
-    rows.push({ label: "Cc", value: draft.cc.join(", ") });
-  }
-  rows.push({ label: "Subject", value: draft.subject });
-  if (draft.inReplyTo) {
-    rows.push({ label: "In reply to", value: draft.inReplyTo });
-  }
-  return { id: "rows", component: "KeyValueRows", rows };
+/** One header the person can change, bound to its field. */
+function field(id: keyof DraftFields, label: string): unknown {
+  return {
+    id,
+    component: "TextField",
+    label,
+    value: { path: `/${id}` },
+    ...(id === "body" ? { variant: "longText" } : {}),
+  };
 }
 
-function draftComponents(draft: Draft): unknown[] {
+function draftComponents(draft: Draft, fields: DraftFields): unknown[] {
+  const editableBody = fields.body !== undefined;
   return [
     {
       id: "root",
       component: "Column",
-      children: ["status", "rows", "body", "actions"],
+      children: [
+        "status",
+        "to",
+        "cc",
+        "subject",
+        ...(draft.inReplyTo ? ["thread"] : []),
+        "body",
+        "actions",
+      ],
     },
     {
       id: "status",
@@ -199,13 +342,28 @@ function draftComponents(draft: Draft): unknown[] {
       // The catalog's tone for a card waiting on the person.
       tone: "ready",
     },
-    addressRows(draft),
-    {
-      id: "body",
-      component: "CollapsibleText",
-      text: draft.body,
-      collapsedLines: 6,
-    },
+    field("to", "To"),
+    field("cc", "Cc"),
+    field("subject", "Subject"),
+    // The thread it answers is a fact about the draft, not a field: changing
+    // it would send the reply into a conversation nobody chose.
+    ...(draft.inReplyTo
+      ? [
+          {
+            id: "thread",
+            component: "KeyValueRows",
+            rows: [{ label: "In reply to", value: draft.inReplyTo }],
+          },
+        ]
+      : []),
+    editableBody
+      ? field("body", "Message")
+      : {
+          id: "body",
+          component: "CollapsibleText",
+          text: draft.body,
+          collapsedLines: 6,
+        },
     {
       id: "actions",
       component: "ApprovalActions",
@@ -221,7 +379,7 @@ function draftComponents(draft: Draft): unknown[] {
 function receiptComponents(
   title: string,
   status: string,
-  tone: "neutral" | "success",
+  tone: "neutral" | "success" | "warning",
   summary: string,
 ): unknown[] {
   return [
@@ -239,6 +397,14 @@ function settledComponents(state: DraftState): unknown[] | undefined {
       `Sent to ${state.draft.to.join(", ")} — ${state.draft.subject}`,
     );
   }
+  if (state.status === "unclear") {
+    return receiptComponents(
+      state.draft.subject,
+      "May have sent",
+      "warning",
+      `May have reached ${state.draft.to.join(", ")} — ${state.draft.subject}. It was not sent again.`,
+    );
+  }
   if (state.status === "discarded") {
     return receiptComponents(
       state.draft.subject,
@@ -252,8 +418,8 @@ function settledComponents(state: DraftState): unknown[] | undefined {
 
 const draftCard: PluginCard = {
   /**
-   * The card, in whichever of its three states this surface is in. A surface
-   * the Plugin has already sent or discarded never draws the controls again,
+   * The card, in whichever of its states this surface is in. A surface the
+   * Plugin has already sent or discarded never draws the controls again,
    * however the Bot calls the tool: what happened to the mail is the
    * Plugin's own record, not a value the model can rewrite.
    */
@@ -270,22 +436,134 @@ const draftCard: PluginCard = {
       return drawDraft(surfaceId, existing.draft);
     }
     const draft = readDraft(data);
-    if (draft.to.length === 0) {
-      return { drop: true, reason: "a draft needs at least one recipient" };
-    }
-    const malformed = malformedAddress(draft);
-    if (malformed !== undefined) {
-      return {
-        drop: true,
-        reason: `"${malformed}" is not an email address, so nothing was drawn`,
-      };
+    const problem = draftProblem(draft);
+    if (problem !== undefined) {
+      return { drop: true, reason: `${problem}, so nothing was drawn` };
     }
     await writeState(ctx, surfaceId, { status: "drafted", draft });
     return drawDraft(surfaceId, draft);
   },
+  /**
+   * The person changed the fields and pressed Send. The draft this surface
+   * holds becomes what they left there — held to exactly the checks the
+   * Bot's own draft was — and that is what the decision covers from now on,
+   * so `email_send` sends their words and the kernel holds it to them. An
+   * edit that could not be sent is refused before anything is decided, with
+   * the reason the person reads on the card.
+   */
+  async revise({ surfaceId, dataModel }, ctx) {
+    const existing = await readState(ctx, surfaceId);
+    if (!existing) {
+      return { drop: true, reason: `no draft is on card "${surfaceId}"` };
+    }
+    if (existing.status !== "drafted") {
+      return { drop: true, reason: "this email has already been settled" };
+    }
+    const draft = draftFromFields(dataModel, existing.draft);
+    const problem = draftProblem(draft);
+    if (problem !== undefined) return { drop: true, reason: problem };
+    const edited =
+      existing.edited === true || !sameDraft(draft, existing.draft);
+    await writeState(ctx, surfaceId, {
+      status: "drafted",
+      draft,
+      ...(edited ? { edited: true as const } : {}),
+    });
+    return {
+      covers: { ...draft },
+      decision: decisionFor(draft),
+      // The card now holds what the decision covers, spelled the way the
+      // fields spell it, so every device reads the message that was approved.
+      messages: [
+        {
+          version: "v1.0",
+          updateDataModel: { surfaceId, value: fieldsOf(draft) },
+        },
+      ],
+    };
+  },
 };
 
-export const cards = { draft: draftCard };
+/**
+ * One note to the Bot's own person, as it went. Keyed by its surface, which
+ * the kernel minted from the Turn's tool call: a draw repeated after an
+ * interruption finds it here, and the kernel holds the send to the same key,
+ * so the note is sent at most once however often it is drawn.
+ */
+type NoteState =
+  | { status: "sent"; subject: string; to: string; at: string }
+  | { status: "unclear"; subject: string; reason: string; at: string };
+
+function noteKey(surfaceId: string): string {
+  return `note:${surfaceId}`;
+}
+
+function noteReceipt(surfaceId: string, note: NoteState): CardMessage[] {
+  return surface(
+    surfaceId,
+    note.status === "sent"
+      ? receiptComponents(
+          note.subject,
+          "Emailed you",
+          "success",
+          `Emailed you at ${note.to} — ${note.subject}`,
+        )
+      : receiptComponents(
+          note.subject,
+          "May have sent",
+          "warning",
+          `May have reached you — ${note.subject}. It was not sent again.`,
+        ),
+  );
+}
+
+const ownerCard: PluginCard = {
+  /**
+   * Sends the note, then draws what happened to it. A note that could not go
+   * — no address yet, not one of the person's own, today's limit — draws
+   * nothing and tells the Bot why, in words it can pass on.
+   */
+  async render({ surfaceId, data }, ctx) {
+    const storage = ctx.storage;
+    if (!storage) throw new Error("the storage grant is not open");
+    const stored = await storage.get({ key: noteKey(surfaceId) });
+    if (stored.status === "available" && stored.value) {
+      return noteReceipt(surfaceId, stored.value as NoteState);
+    }
+    const subject = String(data.subject ?? "").trim();
+    const body = String(data.body ?? "");
+    if (subject.length === 0 || /[\r\n]/.test(subject)) {
+      return { drop: true, reason: "a note needs a one-line subject" };
+    }
+    if (body.trim().length === 0) {
+      return { drop: true, reason: "a note needs a message" };
+    }
+    const send = ctx.email;
+    if (!send) throw new Error("the http grant is not open");
+    const outcome = await send({
+      owner: true,
+      key: surfaceId,
+      ...(typeof data.to === "string" && data.to.trim().length > 0
+        ? { to: data.to.trim() }
+        : {}),
+      subject,
+      body,
+    });
+    const at = new Date().toISOString();
+    let note: NoteState;
+    if (outcome.status === "sent") {
+      note = { status: "sent", subject, to: outcome.to ?? "", at };
+    } else if (outcome.status === "unknown") {
+      note = { status: "unclear", subject, reason: outcome.reason, at };
+    } else {
+      return { drop: true, reason: `nothing was sent: ${outcome.reason}` };
+    }
+    await storage.put({ key: noteKey(surfaceId), value: note });
+    return noteReceipt(surfaceId, note);
+  },
+};
+
+export const cards = { draft: draftCard, owner: ownerCard };
 
 /**
  * A string answer goes to the Bot as it is; throwing answers with an error it
@@ -301,9 +579,14 @@ export const execute: PluginExecute = async (tool, input, ctx) => {
   if (surfaceId.length === 0) throw new Error("surfaceId is required");
   const state = await readState(ctx, surfaceId);
   if (!state) throw new Error(`no draft is on card "${surfaceId}"`);
+  const settle =
+    "Draw the card again with email_draft, the same surfaceId and the same values to settle it into a receipt.";
   if (tool === "email_discard") {
     if (state.status === "sent") {
       throw new Error("that email has already been sent");
+    }
+    if (state.status === "unclear") {
+      throw new Error("that email may already have been sent");
     }
     await writeState(ctx, surfaceId, {
       status: "discarded",
@@ -315,6 +598,9 @@ export const execute: PluginExecute = async (tool, input, ctx) => {
   if (tool !== "email_send") throw new Error(`unknown tool ${tool}`);
   if (state.status === "sent") {
     return `Already sent to ${state.draft.to.join(", ")}. Nothing was sent twice.`;
+  }
+  if (state.status === "unclear") {
+    return `Whether it reached ${state.draft.to.join(", ")} is not known, so it was not sent again. Tell the person it may have arrived.`;
   }
   if (state.status === "discarded") {
     throw new Error("that draft was discarded");
@@ -328,22 +614,29 @@ export const execute: PluginExecute = async (tool, input, ctx) => {
   const send = ctx.email;
   if (!send) throw new Error("the http grant is not open");
   const outcome = await send({ ...state.draft, approvalId, surfaceId });
+  if (outcome.status === "unknown") {
+    // It may have left, so it is written as if it did: a second email_send
+    // on this surface answers rather than delivering the mail twice.
+    await writeState(ctx, surfaceId, {
+      status: "unclear",
+      draft: state.draft,
+      reason: outcome.reason,
+      at: new Date().toISOString(),
+    });
+    return `The send's outcome is unknown (${outcome.reason}). It may have reached ${state.draft.to.join(", ")}; do not send it again, tell the person instead. ${settle}`;
+  }
   if (outcome.status !== "sent") {
     throw new Error(outcome.reason);
   }
-  // Written the moment anything left. A partial send is still a send, and a
-  // second email_send on this surface answers "already sent" rather than
-  // delivering the mail again to whoever did receive it.
   await writeState(ctx, surfaceId, {
     status: "sent",
     draft: state.draft,
     messageId: outcome.messageId,
     at: new Date().toISOString(),
+    ...(state.edited ? { edited: true as const } : {}),
   });
-  const undelivered = outcome.undelivered ?? [];
-  const missed =
-    undelivered.length === 0
-      ? ""
-      : ` It did not reach ${undelivered.join(", ")}; do not send it again, tell the person instead.`;
-  return `Sent to ${state.draft.to.join(", ")} — ${state.draft.subject}.${missed} Draw the card again with email_draft, the same surfaceId and the same values to settle it into a receipt.`;
+  const theirs = state.edited
+    ? " The person edited the draft before sending it: what left is their version, not yours."
+    : "";
+  return `Sent to ${state.draft.to.join(", ")} — ${state.draft.subject}.${theirs} ${settle}`;
 };

@@ -67,6 +67,20 @@ describe("the audit preview", () => {
     ).toBe("mcp-example/echo (chatId, message)");
   });
 
+  test("says what mail left, never what it said or where", () => {
+    expect(
+      auditPreviewV1("email", "email/email_owner", {
+        data: { subject: "Agenda", body: "private words", to: "tim@x.co" },
+      }),
+    ).toBe("Emailed you: Agenda");
+    expect(
+      auditPreviewV1("email", "email/email_send", {
+        surfaceId: "email_draft.1",
+        approvalId: "card-approval-1",
+      }),
+    ).toBe("Sent an email the person approved");
+  });
+
   test("is bounded and deterministic", () => {
     const input = { command: "x".repeat(5_000) };
     const once = auditPreviewV1("shell", "computer_exec", input);
