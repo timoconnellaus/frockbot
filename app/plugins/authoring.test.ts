@@ -226,6 +226,7 @@ function harness(
         storage.set(key, structuredClone(value));
         return Promise.resolve();
       },
+      delete: (key: string) => Promise.resolve(storage.delete(key)),
     },
     settings: {
       read: async (pluginId) => settings.get(pluginId) ?? {},
@@ -480,6 +481,7 @@ describe("checking and publishing", () => {
         put: async (key, value) => {
           storage.set(key, value);
         },
+        delete: async (key) => storage.delete(key),
       },
       settings: { read: async () => ({}), write: async () => {} },
       catalog: [],
