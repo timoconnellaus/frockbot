@@ -481,27 +481,36 @@ class ShellSidebar extends StatelessWidget {
                     _entryRow(context, entry, list: listedIds),
                   if (hidden.isNotEmpty || stopped.isNotEmpty)
                     const SizedBox(height: 10),
+                  // Keyed apart, so neither head's element is reused for the
+                  // other when one appears beside it: the web engine can keep a
+                  // reused node's old identifier.
                   if (hidden.isNotEmpty)
-                    identified(
-                      ShellIds.sidebarHiddenToggle,
-                      _FoldToggle(
-                        label: 'Hidden',
-                        count: hidden.length,
-                        open: showHidden,
-                        unread: hiddenUnread,
-                        onPressed: onToggleHidden,
+                    KeyedSubtree(
+                      key: const ValueKey('fold-hidden'),
+                      child: identified(
+                        ShellIds.sidebarHiddenToggle,
+                        _FoldToggle(
+                          label: 'Hidden',
+                          count: hidden.length,
+                          open: showHidden,
+                          unread: hiddenUnread,
+                          onPressed: onToggleHidden,
+                        ),
                       ),
                     ),
                   if (showHidden)
                     for (final entry in hidden) _entryRow(context, entry),
                   if (stopped.isNotEmpty)
-                    identified(
-                      ShellIds.sidebarArchivedToggle,
-                      _FoldToggle(
-                        label: 'Archived',
-                        count: stopped.length,
-                        open: showArchived,
-                        onPressed: onToggleArchived,
+                    KeyedSubtree(
+                      key: const ValueKey('fold-archived'),
+                      child: identified(
+                        ShellIds.sidebarArchivedToggle,
+                        _FoldToggle(
+                          label: 'Archived',
+                          count: stopped.length,
+                          open: showArchived,
+                          onPressed: onToggleArchived,
+                        ),
                       ),
                     ),
                   if (showArchived)
