@@ -542,6 +542,11 @@ export interface UserConfigurationRpcV1 {
     commandId: string;
     routineId: string;
   }): Promise<void>;
+  /** Tells the User object whether this Bot's Routine listens to a Plugin. */
+  syncPluginTriggerRoutine(input: {
+    routineId: string;
+    listening?: { pluginId: string; trigger: string };
+  }): Promise<void>;
 }
 
 /**
@@ -816,6 +821,13 @@ export function userConfigurationV1(
     },
     deleteConnectTrigger: (input) =>
       rpc.deleteConnectTrigger({
+        schemaVersion: 1,
+        userId: identity.userId,
+        botId: identity.botId,
+        ...input,
+      }),
+    syncPluginTriggerRoutine: (input) =>
+      rpc.syncPluginTriggerRoutine({
         schemaVersion: 1,
         userId: identity.userId,
         botId: identity.botId,

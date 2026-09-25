@@ -61,6 +61,7 @@ import { decodeAgentTurnSlotReceiptV1 } from "@frockbot/app/flock/quota";
 import { createBotMachineHost, machineSeam } from "@frockbot/app/machine/bot";
 import {
   connectionTriggersFromUserV1,
+  pluginTriggerIndexFromUserV1,
   createBotRoutinesHost,
   executeRoutineCommand,
   listRoutines,
@@ -578,6 +579,9 @@ export async function agentRuntime(
                   command,
                   writer,
                   connectionTriggersFromUserV1(
+                    userConfigurationV1(state, identity),
+                  ),
+                  pluginTriggerIndexFromUserV1(
                     userConfigurationV1(state, identity),
                   ),
                 ),

@@ -27,6 +27,7 @@ import {
   RoutineStore,
   type RoutineHookDeliveryReceiptV1,
   type RoutineHookMinterV1,
+  type RoutineModuleEventDeliveryV1,
   type RoutinePluginTriggerSeamV1,
   type RoutineStorageV1,
 } from "@frockbot/app/routines/store";
@@ -58,6 +59,7 @@ import {
   routineLimitToldKeyV1,
   routineSpikeMessageKeyV1,
   routineKeyV1,
+  ROUTINE_PREFIX,
 } from "@frockbot/app/routines/storage-keys";
 import { isRoutineTimezoneV1 } from "@frockbot/app/routines/cron";
 import {
@@ -1122,6 +1124,79 @@ export async function deliverConnectEvent(
   return accepted;
 }
 
+/**
+ * One device module's event, after the User object admitted it and found
+ * this Routine listening (ADR 0037).
+ */
+export async function deliverRoutineModuleEvent(
+  state: ShellBotStateV1,
+  input: RoutineModuleEventDeliveryV1,
+): Promise<RoutineHookDeliveryReceiptV1> {
+  const accepted = await state.routines.deliverModuleEvent(input);
+  await state.ctx.storage.transaction((transaction) =>
+    state.authority.refreshRecoveryAlarm(transaction),
+  );
+  return accepted;
+}
+
+/** A Routine a device module's event can fire, as the User object indexes it. */
+export interface PluginTriggerRoutineV1 {
+  routineId: string;
+  pluginId: string;
+  trigger: string;
+}
+
+function listeningPluginTriggerV1(
+  record: RoutineRecordV1 | undefined,
+): PluginTriggerRoutineV1 | undefined {
+  return record?.enabled && record.trigger?.kind === "plugin"
+    ? {
+        routineId: record.routineId,
+        pluginId: record.trigger.pluginId,
+        trigger: record.trigger.trigger,
+      }
+    : undefined;
+}
+
+/**
+ * Every enabled Plugin-triggered Routine this Bot holds: what the User object
+ * rebuilds its index from when it has none.
+ */
+export async function listPluginTriggerRoutines(
+  state: ShellBotStateV1,
+): Promise<PluginTriggerRoutineV1[]> {
+  const stored = await state.ctx.storage.list<unknown>({
+    prefix: ROUTINE_PREFIX,
+  });
+  return [...stored.values()].flatMap((value) => {
+    try {
+      const listening = listeningPluginTriggerV1(decodeRoutineRecordV1(value));
+      return listening ? [listening] : [];
+    } catch {
+      return [];
+    }
+  });
+}
+
+/**
+ * The User object's index of Plugin-triggered Routines (ADR 0037). Only the
+ * User object sees every Bot, so it is what routes a device module's event;
+ * a Routine tells it whether it listens each time it changes.
+ */
+export interface RoutinePluginTriggerIndexV1 {
+  sync(input: {
+    routineId: string;
+    listening?: { pluginId: string; trigger: string };
+  }): Promise<void>;
+}
+
+/** The User object's index, as a Routine command sees it. */
+export function pluginTriggerIndexFromUserV1(user: {
+  syncPluginTriggerRoutine: RoutinePluginTriggerIndexV1["sync"];
+}): RoutinePluginTriggerIndexV1 {
+  return { sync: (input) => user.syncPluginTriggerRoutine(input) };
+}
+
 /** Every Routine this Bot holds. Bot-scoped: the caller proved membership. */
 export async function listRoutines(
   state: ShellBotStateV1,
@@ -1212,6 +1287,7 @@ export async function executeRoutineCommand(
   command: RoutineCommandV1,
   writer: RoutineWriterV1 = { kind: "user" },
   connectionTriggers?: RoutineConnectionTriggerSeamV1,
+  pluginTriggerIndex?: RoutinePluginTriggerIndexV1,
 ): Promise<RoutineCommandReceiptV1> {
   if (command.botId !== identity.botId) {
     throw new RoutineNotFoundError(command.routineId ?? command.botId);
@@ -1290,6 +1366,34 @@ export async function executeRoutineCommand(
         routineId: command.routineId ?? current?.routineId ?? "",
       })
       .catch(() => undefined);
+  }
+  const touched =
+    receipt.status === "applied"
+      ? receipt.routine.routineId
+      : receipt.status === "deleted"
+        ? receipt.routineId
+        : undefined;
+  if (pluginTriggerIndex && touched !== undefined) {
+    // Read back rather than taken from the receipt: a replayed command
+    // answers with the record as it was, and the index must hold it as it is.
+    const now = await readRoutineRecordV1(state, touched);
+    if (
+      current?.trigger?.kind === "plugin" ||
+      now?.trigger?.kind === "plugin"
+    ) {
+      const listening = listeningPluginTriggerV1(now);
+      await pluginTriggerIndex.sync({
+        routineId: touched,
+        ...(listening === undefined
+          ? {}
+          : {
+              listening: {
+                pluginId: listening.pluginId,
+                trigger: listening.trigger,
+              },
+            }),
+      });
+    }
   }
   // A created, re-timed, resumed or manually fired Routine changes what the
   // object is owed next, so the alarm is re-armed in the same call that wrote

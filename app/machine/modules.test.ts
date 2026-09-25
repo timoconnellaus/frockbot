@@ -9,7 +9,7 @@ const bridge = {
   net: ["localhost:23373"],
   appleEvents: [],
   calls: ["send"],
-  events: ["message"],
+  events: ["message", "typing"],
 };
 
 const generation = {
@@ -35,9 +35,24 @@ describe("the modules a desktop runs", () => {
         net: ["localhost:23373"],
         appleEvents: [],
         calls: ["send"],
-        events: ["message"],
+        events: ["message", "typing"],
+        listening: [],
+        lastKeys: {},
       },
     ]);
+  });
+
+  test("flags the events a Routine listens to, and each one's last key", () => {
+    const [module] = machineModulesV1(generation, "macos", {
+      listening: new Set(["beeper/message", "tuner/message"]),
+      lastKeys: {
+        "beeper/bridge": { message: "evt-9", gone: "evt-1" },
+        "beeper/other": { typing: "evt-2" },
+      },
+    });
+    expect(module?.listening).toEqual(["message"]);
+    // An event the module no longer declares is not handed back to it.
+    expect(module?.lastKeys).toEqual({ message: "evt-9" });
   });
 
   test("gives a machine only the modules declared for its platform", () => {

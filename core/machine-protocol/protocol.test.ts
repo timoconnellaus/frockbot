@@ -10,6 +10,8 @@ import {
   decodeMachineIdV1,
   decodeMachineListEntryV1,
   decodeMachineListViewV1,
+  decodeMachineModuleEventsReceiptV1,
+  decodeMachineModuleEventsV1,
   decodeMachineModuleReportsReceiptV1,
   decodeMachineModuleReportsV1,
   decodeMachineModuleV1,
@@ -59,6 +61,16 @@ const module = {
   appleEvents: [],
   calls: ["send"],
   events: ["message"],
+  listening: ["message"],
+  lastKeys: { message: "$evt-41:beeper.local" },
+};
+
+const moduleEvent = {
+  pluginId: "beeper",
+  moduleId: "bridge",
+  event: "message",
+  key: "$evt-42:beeper.local",
+  payload: { chat: "Family", text: "dinner?" },
 };
 
 const record: MachineRecordV1 = {
@@ -162,6 +174,19 @@ const DTOS: {
     name: "module reports receipt",
     decode: decodeMachineModuleReportsReceiptV1,
     valid: { schemaVersion: 1, recorded: 2, dropped: 0 },
+  },
+  {
+    name: "module events",
+    decode: decodeMachineModuleEventsV1,
+    valid: { events: [{ ...moduleEvent }] },
+  },
+  {
+    name: "module events receipt",
+    decode: decodeMachineModuleEventsReceiptV1,
+    valid: {
+      schemaVersion: 1,
+      receipts: [{ status: "admitted" }, { status: "duplicate" }],
+    },
   },
   {
     name: "claim receipt",
@@ -374,6 +399,43 @@ describe("bounds", () => {
     expect(
       over(
         {
+          events: Array.from(
+            { length: MACHINE_LIMITS_V1.moduleEvents + 1 },
+            () => ({ ...moduleEvent }),
+          ),
+        },
+        decodeMachineModuleEventsV1,
+      ).code,
+    ).toBe("limit-exceeded");
+    expect(
+      over(
+        {
+          events: [
+            {
+              ...moduleEvent,
+              key: "k".repeat(MACHINE_LIMITS_V1.moduleEventKey + 1),
+            },
+          ],
+        },
+        decodeMachineModuleEventsV1,
+      ).code,
+    ).toBe("limit-exceeded");
+    expect(
+      over(
+        {
+          events: [
+            {
+              ...moduleEvent,
+              payload: "x".repeat(MACHINE_LIMITS_V1.moduleEventPayloadBytes),
+            },
+          ],
+        },
+        decodeMachineModuleEventsV1,
+      ).code,
+    ).toBe("limit-exceeded");
+    expect(
+      over(
+        {
           schemaVersion: 1,
           machines: Array.from(
             { length: MACHINE_LIMITS_V1.maxMachinesPerUser + 1 },
@@ -411,6 +473,51 @@ describe("bounds", () => {
     expect(() =>
       decodeMachineCommandResultV1({ ...result, bytesBase64: "not base64!" }),
     ).toThrow(/not valid base64/);
+  });
+});
+
+describe("module events", () => {
+  test("a payload is any JSON up to the ceiling, counted as encoded bytes", () => {
+    // Two quotes, so the largest string that fits is two bytes short.
+    const fits = "x".repeat(MACHINE_LIMITS_V1.moduleEventPayloadBytes - 2);
+    expect(
+      decodeMachineModuleEventsV1({
+        events: [{ ...moduleEvent, payload: fits }],
+      }).events[0]!.payload,
+    ).toBe(fits);
+    expect(
+      decodeMachineModuleEventsV1({
+        events: [{ ...moduleEvent, payload: null }],
+      }).events[0]!.payload,
+    ).toBeNull();
+  });
+
+  test("an event names a trigger, carries a one-line key and a payload", () => {
+    const refused = (event: Record<string, unknown>) => () =>
+      decodeMachineModuleEventsV1({ events: [event] });
+    const { payload: _payload, ...withoutPayload } = moduleEvent;
+    expect(refused(withoutPayload)).toThrow(/payload is missing/);
+    expect(refused({ ...moduleEvent, key: "" })).toThrow(MachineDecodeError);
+    expect(refused({ ...moduleEvent, key: "a\nb" })).toThrow(
+      /control characters/,
+    );
+    expect(refused({ ...moduleEvent, event: "Message" })).toThrow(/invalid/);
+    expect(refused({ ...moduleEvent, moduleId: "Bridge" })).toThrow(/invalid/);
+  });
+
+  test("a receipt is one of three, and a drop says why", () => {
+    expect(
+      decodeMachineModuleEventsReceiptV1({
+        schemaVersion: 1,
+        receipts: [{ status: "dropped", reason: "no such module" }],
+      }).receipts,
+    ).toEqual([{ status: "dropped", reason: "no such module" }]);
+    expect(() =>
+      decodeMachineModuleEventsReceiptV1({
+        schemaVersion: 1,
+        receipts: [{ status: "fired" }],
+      }),
+    ).toThrow(MachineDecodeError);
   });
 });
 

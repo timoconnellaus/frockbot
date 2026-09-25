@@ -166,7 +166,10 @@ import {
 } from "@frockbot/app/notifications/bot";
 import {
   connectionTriggersFromUserV1,
+  pluginTriggerIndexFromUserV1,
   deliverConnectEvent,
+  deliverRoutineModuleEvent,
+  listPluginTriggerRoutines,
   deliverRoutineHook,
   executeRoutineCommand,
   executeRoutineInboxCommand,
@@ -277,8 +280,10 @@ import {
 } from "@frockbot/app/routines/shared";
 import {
   decodeRoutineHookDeliveryV1,
+  ROUTINE_HOOK_BODY_MAX_BYTES,
   type RoutineHookDeliveryV1,
 } from "@frockbot/app/routines/hook";
+import type { RoutineModuleEventDeliveryV1 } from "@frockbot/app/routines/store";
 import {
   decodeSubagentRunTaskRequestV1,
   type SubagentRunTaskRequestV1,
@@ -381,6 +386,7 @@ import {
   rpcBoolean,
   rpcBotId,
   rpcDecoded,
+  rpcEnum,
   rpcIdentifier,
   rpcInteger,
   rpcJsonSnapshotV1,
@@ -3357,6 +3363,7 @@ export class BotState
       request.command as RoutineCommandV1,
       { kind: "user" },
       connectionTriggersFromUserV1(userConfigurationV1(shell.state, identity)),
+      pluginTriggerIndexFromUserV1(userConfigurationV1(shell.state, identity)),
     );
   }
 
@@ -3383,6 +3390,56 @@ export class BotState
       eventId: request.eventId as string,
       payload: request.payload,
     });
+  }
+
+  /**
+   * One device module's event (ADR 0037), after the User object admitted it
+   * against the active generation and found this Routine in its index. Like
+   * a connected-app event, the User object's routing is the credential.
+   */
+  async deliverPluginModuleEvent(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+      routineId: rpcIdentifier,
+      deliveryId: rpcPattern(/^[0-9a-f]{64}$/, 64),
+      pluginId: rpcPattern(/^[a-z][a-z0-9-]{0,63}$/, 64),
+      trigger: rpcPattern(/^[a-z][a-z0-9_-]{0,63}$/, 64),
+      body: rpcString(ROUTINE_HOOK_BODY_MAX_BYTES),
+      source: rpcObject({
+        kind: rpcEnum(["device-module"] as const),
+        moduleId: rpcString(64),
+        machineId: rpcString(200),
+        key: rpcString(256),
+      }),
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    return deliverRoutineModuleEvent(shell.state, {
+      routineId: request.routineId as string,
+      deliveryId: request.deliveryId as string,
+      pluginId: request.pluginId as string,
+      trigger: request.trigger as string,
+      body: request.body as string,
+      source: request.source as RoutineModuleEventDeliveryV1["source"],
+    });
+  }
+
+  /** What the User object rebuilds its Plugin-trigger index from. */
+  async listPluginTriggerRoutines(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      botId: rpcBotId,
+    });
+    const identity = {
+      userId: request.userId as string,
+      botId: request.botId as string,
+    };
+    const { shell } = await this.materialized(identity);
+    return listPluginTriggerRoutines(shell.state);
   }
 
   /** Adopt a Profile timezone pushed by this User's authoritative object. */

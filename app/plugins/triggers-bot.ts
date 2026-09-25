@@ -75,6 +75,7 @@ export async function deliverPluginTriggerV1(
         trigger: input.trigger,
         headers: input.headers,
         body: input.body,
+        ...(input.source === undefined ? {} : { source: input.source }),
         botId: identity.botId,
         sessionId: `${identity.userId}:${identity.botId}`,
         runId,

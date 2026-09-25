@@ -381,6 +381,8 @@ describe("machine device agent connection", () => {
       appleEvents: [],
       calls: ["send"],
       events: ["message"],
+      listening: ["message"],
+      lastKeys: {},
     };
     const lists: MachineModuleV1[][] = [];
     const backend = server(() => CLAIMED);

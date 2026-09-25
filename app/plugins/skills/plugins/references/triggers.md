@@ -18,7 +18,9 @@ export const triggers: PluginTriggers = {
 ```
 
 `delivery` is `{ headers, body }`, headers lower-cased and without the door's
-own credential. Return a string and a Routine fires with that text as its
+own credential. When the Plugin's own device module emitted the event,
+`delivery.source` is `{ kind: "device-module", moduleId, machineId, key }`,
+the body is the payload as JSON text, and there are no headers. Return a string and a Routine fires with that text as its
 delivered payload; return `{ drop: true, reason }` (or nothing) and it does
 not. Then create the Routine with `routine_manage`:
 

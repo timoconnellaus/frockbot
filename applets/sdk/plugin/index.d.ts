@@ -852,11 +852,20 @@ export type PluginHooks = {
 
 /**
  * One delivery handed to a trigger: the posted body as it arrived, and the
- * headers lower-cased with the door's own credential removed.
+ * headers lower-cased with the door's own credential removed. An event the
+ * Plugin's own device module emitted carries `source`: its payload is the
+ * body as JSON text, and there are no headers.
  */
 export interface PluginTriggerDelivery {
   headers: Record<string, string>;
   body: string;
+  source?: {
+    kind: "device-module";
+    moduleId: string;
+    machineId: string;
+    /** The key the module emitted with: the source's id for the occurrence. */
+    key: string;
+  };
 }
 
 /** A trigger's refusal: the Routine does not fire, and the receipt says why. */

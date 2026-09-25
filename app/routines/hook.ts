@@ -322,6 +322,22 @@ export async function routineDeliveryIdV1(
 }
 
 /**
+ * The delivery id one device-module event is remembered by at one Routine
+ * (ADR 0037). The source's key is the idempotency claim, scoped to the machine
+ * that made it, so a module that reconnects and replays fires nothing twice.
+ */
+export function moduleEventDeliveryIdV1(input: {
+  routineId: string;
+  machineId: string;
+  pluginId: string;
+  key: string;
+}): Promise<string> {
+  return sha256HexTextV1(
+    `module\u0000${input.routineId}\u0000${input.machineId}\u0000${input.pluginId}\u0000${input.key}`,
+  );
+}
+
+/**
  * What the Bot is told a webhook delivered. The body is data, never
  * instructions: it is fenced and labelled, and truncated to 4 KiB so a large
  * delivery cannot crowd out the Routine's own prompt.
@@ -329,6 +345,7 @@ export async function routineDeliveryIdV1(
 export function renderRoutineDeliveryV1(
   body: string,
   contentType?: string | null,
+  origin = "Webhook POST",
 ): string {
   const bytes = TEXT.encode(body);
   const truncated = bytes.length > ROUTINE_HOOK_CUE_MAX_BYTES;
@@ -336,7 +353,7 @@ export function renderRoutineDeliveryV1(
     ? new TextDecoder().decode(bytes.slice(0, ROUTINE_HOOK_CUE_MAX_BYTES))
     : body;
   return [
-    `Webhook POST${contentType ? ` (${contentType.slice(0, 100)})` : ""}:`,
+    `${origin}${contentType ? ` (${contentType.slice(0, 100)})` : ""}:`,
     rendered,
     ...(truncated
       ? [`… truncated at ${ROUTINE_HOOK_CUE_MAX_BYTES} bytes.`]
