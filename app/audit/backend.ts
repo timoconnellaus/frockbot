@@ -215,7 +215,10 @@ export function createAuditBackendContribution(
           activityPageV1(
             page,
             Object.fromEntries(
-              directory.bots.map((bot) => [bot.botId, bot.initialName]),
+              directory.bots.map((bot) => [
+                bot.botId,
+                bot.currentProfile?.name ?? bot.initialName,
+              ]),
             ),
           ),
         );

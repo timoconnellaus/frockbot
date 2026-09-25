@@ -435,7 +435,8 @@ class _AuditPageState extends State<AuditPage> {
                             bots: bots,
                             selected: controller.botId,
                             nameOf: (bot) =>
-                                widget.nameOf?.call(bot) ?? bot.initialName,
+                                widget.nameOf?.call(bot) ??
+                                (bot.currentProfile?.name ?? bot.initialName),
                             fallbackName: widget.botName,
                             onChosen: (botId) =>
                                 controller.choose(botId: botId),

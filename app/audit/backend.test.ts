@@ -256,6 +256,26 @@ describe("the audit gateway route", () => {
     expect(await raw!.json<{ total: number }>()).toMatchObject({ total: 1 });
   });
 
+  test("Activity names a renamed Bot by its current name", async () => {
+    const plain = host();
+    const directory = await plain.listBots("alice");
+    const route = createAuditBackendContribution(
+      host({
+        listBots: async () => ({
+          ...directory,
+          bots: directory.bots.map((bot) => ({
+            ...bot,
+            currentProfile: { name: "Gaffer", sourceRevision: 2 },
+          })),
+        }),
+      }),
+    );
+    const { request, url: target } = get("/api/audit?as=activity");
+    const response = await route.route(request, target, context);
+    const page = await response!.json<ActivityPage>();
+    expect(page.rows.map((row) => row.botName)).toEqual(["Gaffer"]);
+  });
+
   test("Activity refuses the entry filters, and the entry read refuses Activity's", async () => {
     const route = createAuditBackendContribution(host());
     for (const path of [
