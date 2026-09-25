@@ -380,6 +380,10 @@ describe("plugin worker triggers", () => {
     headers: { "X-Signature": "abc", "Content-Type": "application/json" },
     body: '{"city":"Wollongong"}',
     botId: "bot-1",
+    sessionId: "user-1:bot-1",
+    runId: "trigger:routine-1",
+    turnId: "trigger:routine-1",
+    generationId: "gen-1",
     routineId: "routine-1",
     deadlineMs: 5_000,
   };

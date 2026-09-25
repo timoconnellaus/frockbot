@@ -207,6 +207,10 @@ export interface PluginWorkerTriggerInvocationV1 {
   headers: Record<string, string>;
   body: string;
   botId: string;
+  sessionId: string;
+  runId: string;
+  turnId: string;
+  generationId: string;
   routineId: string;
   deadlineMs: number;
 }
@@ -916,6 +920,10 @@ export function decodePluginWorkerTriggerInvocationV1(
       "headers",
       "body",
       "botId",
+      "sessionId",
+      "runId",
+      "turnId",
+      "generationId",
       "routineId",
       "deadlineMs",
     ],
@@ -969,6 +977,14 @@ export function decodePluginWorkerTriggerInvocationV1(
       true,
     ),
     botId: boundedString(value.botId, `${label}.botId`, 256),
+    sessionId: boundedString(value.sessionId, `${label}.sessionId`, 256),
+    runId: boundedString(value.runId, `${label}.runId`, 256),
+    turnId: boundedString(value.turnId, `${label}.turnId`, 256),
+    generationId: boundedString(
+      value.generationId,
+      `${label}.generationId`,
+      256,
+    ),
     routineId: boundedString(value.routineId, `${label}.routineId`, 256),
     deadlineMs: deadlineMs as number,
   };

@@ -4,8 +4,8 @@
 // door — the same signed key, the same digest, the same replay guard — but
 // before the firing is enqueued the delivery is handed to the Plugin, which
 // answers with the text the Routine should read or drops it. The worker is
-// mounted for the delivery alone, with a synthetic Turn identity that names
-// the Routine, and disposed when the answer is in.
+// mounted for the delivery alone, under the standalone call it registers
+// (a run that names the Routine), and disposed when the answer is in.
 import type { PluginWorkerTriggerResultV1 } from "@frockbot/core/contracts";
 import type { BotIdentity } from "@frockbot/core/durable";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
@@ -76,6 +76,10 @@ export async function deliverPluginTriggerV1(
         headers: input.headers,
         body: input.body,
         botId: identity.botId,
+        sessionId: `${identity.userId}:${identity.botId}`,
+        runId,
+        turnId: runId,
+        generationId: roster.generationId,
         routineId: input.routineId,
         deadlineMs: PLUGIN_TRIGGER_DEADLINE_MS,
       });
