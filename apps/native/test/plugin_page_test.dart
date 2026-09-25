@@ -196,6 +196,19 @@ void main() {
       expect(heard.last, containsPair('type', 'init'));
     });
 
+    testWidgets('covers the page until it has been greeted and has drawn', (
+      tester,
+    ) async {
+      await tester.pumpWidget(MaterialApp(home: frame({'score': 1})));
+      final cover = find.byKey(const ValueKey('plugin-page-cover'));
+      expect(cover, findsOneWidget);
+      loaded();
+      await tester.pump();
+      expect(cover, findsOneWidget);
+      await tester.pump(pluginPageRevealDelayV1);
+      expect(cover, findsNothing);
+    });
+
     testWidgets('answers a tool call with a result naming it', (tester) async {
       final calls = <String>[];
       await tester.pumpWidget(

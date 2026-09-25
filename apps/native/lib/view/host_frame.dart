@@ -33,6 +33,11 @@ class HostFrame extends StatelessWidget {
   /// host greets it here rather than waiting to be asked.
   final VoidCallback? onLoaded;
 
+  /// Keeps the loaded page when the frame leaves the screen, so showing it
+  /// again is instant. Only for a page whose document is worth keeping and
+  /// which gives up everything it holds when it leaves.
+  final bool keepAlive;
+
   /// The frame is remade rather than reused when this changes: a new
   /// generation, or a new viewer session, is a new document.
   final String identity;
@@ -45,6 +50,7 @@ class HostFrame extends StatelessWidget {
     this.onMessage,
     this.outbox,
     this.onLoaded,
+    this.keepAlive = false,
     this.borderRadius = const BorderRadius.all(Radius.circular(12)),
   });
 
@@ -61,6 +67,7 @@ class HostFrame extends StatelessWidget {
         onMessage: onMessage,
         outbox: outbox,
         onLoaded: onLoaded,
+        keepAs: keepAlive ? identity : null,
       ),
     ),
   );

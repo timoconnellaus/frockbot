@@ -289,8 +289,12 @@ Widget _hostFrame(
   onMessage: onMessage,
   outbox: outbox,
   onLoaded: onLoaded,
+  keepAlive: true,
   borderRadius: BorderRadius.zero,
 );
+
+/// How long a greeted page has to draw before the host's cover lifts.
+const pluginPageRevealDelayV1 = Duration(milliseconds: 120);
 
 /// What the page is told when it closed the microphone itself.
 const pluginPageMicrophoneStoppedByPageV1 = 'You stopped the microphone.';
@@ -370,7 +374,9 @@ class PluginPageFrame extends StatefulWidget {
 
 class _PluginPageFrameState extends State<PluginPageFrame>
     with WidgetsBindingObserver {
-  final _outbox = StreamController<Map<String, Object?>>.broadcast();
+  // Synchronous, so a message posted as the page leaves still reaches the
+  // frame before it unsubscribes; the frame only queues what it hears.
+  final _outbox = StreamController<Map<String, Object?>>.broadcast(sync: true);
   bool _greeted = false;
 
   /// Set while the host holds the microphone for this page.
@@ -405,6 +411,7 @@ class _PluginPageFrameState extends State<PluginPageFrame>
     // A new URL is a new document, which will say hello again.
     if (old.url != widget.url) {
       _greeted = false;
+      _shown = false;
       unawaited(_closeMicrophone(null, PluginPageDeviceEndingV1.left));
       return;
     }
@@ -432,6 +439,32 @@ class _PluginPageFrameState extends State<PluginPageFrame>
     if (!mounted) return;
     _greeted = true;
     _post(_init());
+    _revealSoon();
+  }
+
+  /// Shown once the page has had a moment to draw what it was just handed,
+  /// so nobody sees it blank or unthemed.
+  void _revealSoon() {
+    if (_shown) return;
+    _reveal?.cancel();
+    _reveal = Timer(pluginPageRevealDelayV1, () {
+      if (mounted) setState(() => _shown = true);
+    });
+  }
+
+  /// Whether the page has drawn since its document was last greeted; until
+  /// then the host's own surface covers it.
+  bool _shown = false;
+  Timer? _reveal;
+
+  /// A page kept for when the panel comes back would otherwise still think it
+  /// is listening, so it is told before its frame lets go of it.
+  @override
+  void deactivate() {
+    if (_hearing != null) {
+      _post(pluginPageMicrophoneClosedMessageV1('You left the panel.'));
+    }
+    super.deactivate();
   }
 
   /// The reports heard this minute, and when the minute began.
@@ -458,7 +491,10 @@ class _PluginPageFrameState extends State<PluginPageFrame>
       _report(message);
       return;
     }
-    if (message is PluginPageHelloV1) _greeted = true;
+    if (message is PluginPageHelloV1) {
+      _greeted = true;
+      _revealSoon();
+    }
     if (message is PluginPageDeviceV1) {
       if (message.open) {
         _stoppedWhileOpening = false;
@@ -586,6 +622,7 @@ class _PluginPageFrameState extends State<PluginPageFrame>
 
   @override
   void dispose() {
+    _reveal?.cancel();
     WidgetsBinding.instance.removeObserver(this);
     // Nobody is left to tell and nothing is left to redraw.
     final hearing = _hearing;
@@ -606,7 +643,7 @@ class _PluginPageFrameState extends State<PluginPageFrame>
       url: widget.url,
       label: widget.label,
       identity:
-          'plugin-page:${widget.pluginId}:${widget.surfaceId}:${widget.url}',
+          'plugin-page:${widget.botId}:${widget.pluginId}:${widget.surfaceId}:${widget.url}',
       onMessage: (message) => unawaited(_onMessage(message)),
       outbox: _outbox.stream,
       onLoaded: _loaded,
@@ -627,7 +664,22 @@ class _PluginPageFrameState extends State<PluginPageFrame>
               ),
             ),
           ),
-        Expanded(key: const ValueKey('plugin-page-frame'), child: frame),
+        Expanded(
+          key: const ValueKey('plugin-page-frame'),
+          child: Stack(
+            fit: StackFit.expand,
+            children: [
+              frame,
+              if (!_shown)
+                IgnorePointer(
+                  child: ColoredBox(
+                    key: const ValueKey('plugin-page-cover'),
+                    color: Theme.of(context).colorScheme.surface,
+                  ),
+                ),
+            ],
+          ),
+        ),
       ],
     );
   }
