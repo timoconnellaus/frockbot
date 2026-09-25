@@ -12,6 +12,8 @@ import type {
 } from "@frockbot/core/contracts";
 import type { MemoryRecordsV1 } from "./owner.js";
 import {
+  MEMORY_MAX_TEXT_CHARS_V1,
+  createdByPrincipalV1,
   engineScopeToProductV1,
   productScopeToEngineV1,
   toolKindFromTierV1,
@@ -24,6 +26,7 @@ import { isGroupIdV1 } from "@frockbot/app/groups/shared";
 import type { MemoryOwnerV1 } from "./roots.js";
 import type { MemoryGroupsV1 } from "./groups.js";
 import { MEMORY_MAX_FACT_LENGTH } from "./store.js";
+import { refuseMemorySecretV1 } from "./secrets.js";
 
 /** A fact about to be remembered, and what is kept near it. */
 export interface MemoryWriteEvidenceV1 {
@@ -200,7 +203,15 @@ async function judgedWriteV1(
   input: { tier: "profile" | "log" | "note"; fact: string },
 ): Promise<MemoryWriteVerdictV1 | undefined> {
   if (!host.judgeWrite) return undefined;
-  let candidates: { id: string; text: string }[] = [];
+  const text = input.fact.trim();
+  if (
+    !text ||
+    text.length > MEMORY_MAX_TEXT_CHARS_V1 ||
+    refuseMemorySecretV1(text)
+  ) {
+    return undefined;
+  }
+  let candidates: { id: string; text: string; createdBy: string }[] = [];
   try {
     const recalled = await host.records.recall({
       authority,
@@ -212,11 +223,23 @@ async function judgedWriteV1(
     candidates = recalled.hits
       .filter((hit) => hit.item.status === "active")
       .slice(0, MEMORY_WRITE_RECALL_V1)
-      .map((hit) => ({ id: hit.item.id, text: hit.item.text }));
+      .map((hit) => ({
+        id: hit.item.id,
+        text: hit.item.text,
+        createdBy: hit.item.createdBy,
+      }));
   } catch {
     // Nothing recalled to compare with; the secret and lasting questions stand.
   }
-  return host.judgeWrite({ fact: input.fact, tier: input.tier, candidates });
+  const verdict = await host.judgeWrite({
+    fact: input.fact,
+    tier: input.tier,
+    candidates: candidates.map(({ id, text }) => ({ id, text })),
+  });
+  if (verdict?.action !== "write" || !verdict.replaces) return verdict;
+  const replaced = candidates.find((kept) => kept.id === verdict.replaces?.id);
+  if (replaced?.createdBy === createdByPrincipalV1(authority)) return verdict;
+  return { action: "write", tier: verdict.tier };
 }
 
 export async function executeRecordsForgetV1(

@@ -293,6 +293,55 @@ describe("a judged Memory write", () => {
     );
   });
 
+  test("a credential-shaped fact is refused without asking the judge", async () => {
+    let asked = false;
+    const host = {
+      ...recordsHost(),
+      judgeWrite: async () => {
+        asked = true;
+        return undefined;
+      },
+    };
+    const written = await executeRecordsWriteV1(
+      host,
+      {
+        scope: "user",
+        tier: "profile",
+        fact: "The deploy key is ghp_0123456789abcdefghijABCDEFGHIJ012345.",
+      },
+      "w-token",
+    );
+    expect(written).toMatchObject({ isError: true });
+    expect(asked).toBe(false);
+  });
+
+  test("another Bot's kept fact is not replaced, and the new one is still kept", async () => {
+    const host = recordsHost();
+    await executeRecordsWriteV1(
+      { ...host, owner: { userId: "user-1", botId: "bot-2" } },
+      { scope: "user", tier: "profile", fact: "Tim lives in Wollongong." },
+      "w-other",
+    );
+    const written = await executeRecordsWriteV1(
+      {
+        ...host,
+        judgeWrite: async (evidence: {
+          candidates: readonly { id: string; text: string }[];
+        }) => ({
+          action: "write" as const,
+          tier: "profile" as const,
+          replaces: evidence.candidates[0]!,
+        }),
+      },
+      { scope: "user", tier: "profile", fact: "Tim moved to Melbourne." },
+      "w-moved",
+    );
+    expect(written).toEqual({ content: "Remembered.", isError: false });
+    const found = await search(host, "Tim");
+    expect(found).toContain("Melbourne");
+    expect(found).toContain("Wollongong");
+  });
+
   test("a judge that cannot say leaves the write as asked", async () => {
     const host = { ...recordsHost(), judgeWrite: async () => undefined };
     expect(
