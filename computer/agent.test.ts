@@ -11,6 +11,7 @@ import {
 } from "@frockbot/app/testkit";
 import { createFakeComputerHostV1 } from "@frockbot/computer/fake";
 import {
+  browserResultTextV1,
   COMPUTER_OVERLOADED_TOOL_MESSAGE_V1,
   createComputerAgentFeature,
   HUMAN_CONTROL_PROMPT_LINE,
@@ -603,5 +604,87 @@ describe("computer_browser filling a saved secret", () => {
     expect(unwired.isError).toBe(true);
     expect(unwired.content).toContain("cannot be filled here");
     await bare.dispose();
+  });
+});
+
+describe("what a browser page is showing", () => {
+  test("a page the judge names is said plainly, above where it is and its snapshot", async () => {
+    const judged: unknown[] = [];
+    const provider: ComputerHostV1 = {
+      id: "fixture",
+      capabilities: TEST_HOST_CAPABILITIES,
+      open: async (identity, tenant, assignment) => ({
+        assignment,
+        identity,
+        tenant,
+        capabilities: TEST_HOST_CAPABILITIES,
+        exec: {
+          execute: async () => ({
+            exitCode: 0,
+            stdout: new Uint8Array(),
+            stderr: new Uint8Array(),
+            outputTruncated: false,
+          }),
+        },
+        browser: {
+          perform: async () => ({
+            url: "https://accounts.example.com/login",
+            title: "Sign in",
+            accessibilitySnapshot: 'textbox "Email"\nbutton "Continue"',
+          }),
+        },
+        close: () => Promise.resolve(),
+      }),
+    };
+    const harness = createAgentRuntimeHarness();
+    harness.computers.register(provider);
+    await harness.mount(
+      createComputerAgentFeature({
+        userId: "user-1",
+        defaultProviderId: "fixture",
+        judgePage: async (page) => {
+          judged.push(page);
+          return "sign_in";
+        },
+      }),
+    );
+    const result = await execute(harness, "computer_browser", {
+      action: "navigate",
+      url: "https://example.com/inbox",
+    });
+    expect(judged).toEqual([
+      {
+        url: "https://accounts.example.com/login",
+        title: "Sign in",
+        snapshot: 'textbox "Email"\nbutton "Continue"',
+      },
+    ]);
+    expect(result.isError).toBe(false);
+    const lines = String(result.content).split("\n");
+    expect(lines[0]).toBe("Page: Sign in — https://accounts.example.com/login");
+    expect(lines[1]).toContain("sign-in wall");
+    expect(lines.slice(2)).toEqual([
+      "",
+      'textbox "Email"',
+      'button "Continue"',
+    ]);
+    await harness.dispose();
+  });
+
+  test("a page that is itself, or that nobody judged, is its address and snapshot", () => {
+    expect(
+      browserResultTextV1({
+        url: "https://example.com",
+        title: "Example",
+        snapshot: 'heading "Example"',
+        state: "ready",
+      }),
+    ).toBe('Page: Example — https://example.com\n\nheading "Example"');
+    expect(browserResultTextV1({ snapshot: 'button "Go"' })).toBe(
+      'button "Go"',
+    );
+    expect(browserResultTextV1({ snapshot: "", state: "captcha" })).toContain(
+      "Do not try to solve or get around it",
+    );
   });
 });
