@@ -412,6 +412,8 @@ try {
           result.shots.push({ label: step.screenshot, file });
         }
       })(), left());
+      // What a click asks of the host is still on its way by postMessage.
+      if (kind === "click") await page.waitForTimeout(150);
       const listening = await within(page.evaluate(() => window.frockbotStandIn.listening()), 5000);
       result.steps.push({ step: kind, ok: true, listening });
     } catch (error) {
