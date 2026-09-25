@@ -2,20 +2,21 @@
 //
 // The browser half is a session: `POST /api/machines/pair` through the
 // gateway's authenticated door. The machine half is not a session at all — the
-// stub device agent enrols and polls through `SELF.fetch` with a bearer token
-// and nothing else, over the gateway's pre-authentication `publicRoute` seam.
+// stub device agent enrols and opens its socket through `SELF.fetch` with a
+// bearer token and nothing else, over the gateway's pre-authentication `publicRoute` seam.
 //
 // `MachineAgentDriverV1` is the whole device agent minus `child_process`: it
 // speaks the real protocol, decodes every answer with the shipped decoders,
 // and is the same driver the desktop agent's own handlers will be checked
 // against.
-import { env, runInDurableObject, SELF } from "cloudflare:test";
+import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import {
   MACHINE_LIMITS_V1,
   machineRoutePathV1,
 } from "@frockbot/core/machine-protocol";
 import { MachineAgentDriverV1 } from "@frockbot/app/machine/testing";
+import { fetchUpgradeMachineWebSocketV1 } from "@frockbot/app/machine/device";
 import {
   asUser,
   expectOkJson,
@@ -43,6 +44,9 @@ function agent(label: string): MachineAgentDriverV1 {
   return new MachineAgentDriverV1({
     origin: ORIGIN,
     fetch: (input, init) => SELF.fetch(input, init),
+    webSocket: fetchUpgradeMachineWebSocketV1((input, init) =>
+      SELF.fetch(input, init),
+    ),
     label,
     platform: "macos",
     agentVersion: "0.4.1",
@@ -50,30 +54,19 @@ function agent(label: string): MachineAgentDriverV1 {
   });
 }
 
-/**
- * Age the machine's presence past its TTL.
- *
- * `connected` is arithmetic over `lastSeenAt` and the TTL is ninety seconds,
- * so the honest way to prove "a laptop that stops polling goes offline on its
- * own" without sleeping is to move the stored timestamp back. Nothing else in
- * the record is touched, and the answer still comes from the product's own
- * projection.
- */
-async function stopPolling(userId: string, machineId: string): Promise<void> {
-  await runInDurableObject(
-    env.USER_CONFIGURATIONS.getByName(userId),
-    async (_instance, state) => {
-      const key = `machine:${machineId}`;
-      const record = await state.storage.get<{ lastSeenAt: string }>(key);
-      expect(record).toBeDefined();
-      await state.storage.put(key, {
-        ...record!,
-        lastSeenAt: new Date(
-          Date.now() - MACHINE_LIMITS_V1.presenceTtlMs - 1_000,
-        ).toISOString(),
-      });
-    },
-  );
+/** A socket close reaches the User Durable Object asynchronously. */
+async function eventually(
+  userId: string,
+  connected: boolean,
+): Promise<MachineListProbe> {
+  for (let attempt = 0; attempt < 100; attempt++) {
+    const listed = (await expectOkJson(
+      await asUser(userId, machineRoutePathV1("list")),
+    )) as MachineListProbe;
+    if (listed.machines[0]?.connected === connected) return listed;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error(`the machine never read connected: ${connected}`);
 }
 
 describe("registering a machine", () => {
@@ -96,8 +89,8 @@ describe("registering a machine", () => {
     const token = await device.enroll(offer.code);
     expect(device.machineId).toBe(offer.machineId);
 
-    // 3. The registry is the `ListMachines` projection, and it says connected
-    //    because the machine has just been seen.
+    // 3. The registry is the `ListMachines` projection. Registered is not
+    //    connected: presence is an open socket.
     const listed = (await expectOkJson(
       await asUser(userId, machineRoutePathV1("list")),
     )) as MachineListProbe;
@@ -105,27 +98,21 @@ describe("registering a machine", () => {
       {
         machineId: offer.machineId,
         label: "Tims-M5-MacBook-Pro.local",
-        connected: true,
+        connected: false,
         platform: "macos",
         capabilities: ["exec", "files"],
       },
     ]);
 
-    // 4. A poll refreshes presence; a machine that stops polling goes offline
-    //    with nothing to clean up.
-    expect(await device.poll()).toEqual([]);
-    await stopPolling(userId, offer.machineId);
-    const offline = (await expectOkJson(
-      await asUser(userId, machineRoutePathV1("list")),
-    )) as MachineListProbe;
-    expect(offline.machines).toMatchObject([{ connected: false }]);
-    // …and polling again brings it back, because presence is nothing but the
-    // last time this machine spoke.
-    await device.poll();
-    const back = (await expectOkJson(
-      await asUser(userId, machineRoutePathV1("list")),
-    )) as MachineListProbe;
-    expect(back.machines).toMatchObject([{ connected: true }]);
+    // 4. Opening the socket is connecting, and it is sent the empty queue;
+    //    closing it is going offline, with nothing to clean up.
+    expect(await device.next()).toEqual([]);
+    await eventually(userId, true);
+    device.disconnect();
+    await eventually(userId, false);
+    // …and reconnecting brings it back.
+    expect(await device.next()).toEqual([]);
+    await eventually(userId, true);
 
     // 5. Revocation bumps the key version, so the token the machine holds is
     //    dead at the very next call — at every machine route.
@@ -138,9 +125,16 @@ describe("registering a machine", () => {
     )) as MachineListProbe;
     expect(revoked.machines[0]).toMatchObject({ connected: false });
     expect(revoked.machines[0]?.revokedAt).toBeDefined();
+    // The socket the machine held is closed as revoked.
+    await expect(device.next()).rejects.toMatchObject({ status: 4001 });
 
+    expect(
+      await device.attempt(
+        machineRoutePathV1("socket", { machineId: offer.machineId }),
+        { token, headers: { upgrade: "websocket" } },
+      ),
+    ).toBe(401);
     for (const [path, method] of [
-      [machineRoutePathV1("poll", { machineId: offer.machineId }), "GET"],
       [
         machineRoutePathV1("claim", {
           machineId: offer.machineId,

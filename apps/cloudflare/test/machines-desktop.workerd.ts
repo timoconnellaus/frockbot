@@ -11,8 +11,8 @@
 //
 // The gateway Contribution is mounted here as production mounts it, over the
 // real `UserConfiguration` RPCs, so "the real routes" means the route table,
-// the `publicRoute` seam, the token verification and the digest re-check —
-// everything but the HTTP server itself.
+// the `publicRoute` seam, the token verification, the forwarded upgrade and
+// the digest re-check — everything but the HTTP server itself.
 
 import { env } from "cloudflare:workers";
 import { describe, expect, test } from "vitest";
@@ -21,7 +21,6 @@ import {
   decodeMachineEnrollmentReceiptV1,
   decodeMachineListViewV1,
   decodeMachinePairingOfferV1,
-  decodeMachinePollResultV1,
   decodeMachineResultReceiptV1,
   machineRoutePathV1,
   type MachineCommandV1,
@@ -33,16 +32,17 @@ import {
 import {
   MachineDeviceAgentV1,
   createMemoryMachineSecretStoreV1,
+  fetchUpgradeMachineWebSocketV1,
 } from "@frockbot/app/machine/device";
 import { createMachineDeviceRunnerV1 } from "@frockbot/app/machine/device-runner";
 import { MachineAgentDriverV1 } from "@frockbot/app/machine/testing";
+import { internalMachineSocketRequestV1 } from "../src/machine-socket.ts";
 
 const ORIGIN = "https://bot.frockbot.com";
 
 interface MachineRpc {
   createMachinePairing(input: unknown): Promise<unknown>;
   enrollMachine(input: unknown): Promise<unknown>;
-  pollMachine(input: unknown): Promise<unknown>;
   claimMachineCommand(input: unknown): Promise<unknown>;
   recordMachineResult(input: unknown): Promise<unknown>;
   dispatchMachineCommand(input: unknown): Promise<{ status: string }>;
@@ -89,18 +89,9 @@ function gateway(userId: string): MachineBackendRouteContribution {
           }),
         ),
       ),
-    pollMachine: async (owner, call) =>
-      decodeMachinePollResultV1(
-        snapshot(
-          await rpc.pollMachine({
-            schemaVersion: 1,
-            userId: owner,
-            machineId: call.machineId,
-            claims: call.claims,
-            tokenDigest: call.tokenDigest,
-            waitSeconds: call.waitSeconds,
-          }),
-        ),
+    openMachineSocket: (owner, call, request) =>
+      env.USER_CONFIGURATIONS.getByName(owner).fetch(
+        internalMachineSocketRequestV1(owner, call, request),
       ),
     claimMachineCommand: async (owner, call) =>
       decodeMachineClaimReceiptV1(
@@ -188,6 +179,23 @@ function pair(
     .then((response) => response ?? new Response("not found", { status: 404 }));
 }
 
+/** Presence, as the settings surface reads it. */
+async function connected(userId: string): Promise<boolean | undefined> {
+  const view = decodeMachineListViewV1(
+    snapshot(await machines(userId).listMachines({ schemaVersion: 1, userId })),
+  );
+  return view.machines[0]?.connected;
+}
+
+/** Wait, boundedly, for a machine's socket to open. */
+async function eventuallyConnected(userId: string): Promise<void> {
+  for (let attempt = 0; attempt < 250; attempt++) {
+    if (await connected(userId)) return;
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+  throw new Error("the machine never connected");
+}
+
 function command(machineId: string, commandId: string): MachineCommandV1 {
   return {
     schemaVersion: 1,
@@ -251,6 +259,7 @@ describe("the desktop device agent against the real machine routes", () => {
     const agent = new MachineDeviceAgentV1({
       origin: ORIGIN,
       fetch: desktopFetch,
+      webSocket: fetchUpgradeMachineWebSocketV1(desktopFetch),
       secrets: createMemoryMachineSecretStoreV1(),
       runner: createMachineDeviceRunnerV1({
         host: laptop.host,
@@ -262,20 +271,18 @@ describe("the desktop device agent against the real machine routes", () => {
       capabilities: ["exec", "files"],
     });
     await agent.pair(offer.code);
-    // Nothing queued: an agent that polls an empty queue reports an empty
-    // cycle and does not claim anything.
-    expect(await agent.runOnce(0)).toMatchObject({
-      paired: true,
-      delivered: 0,
-      claimed: 0,
-      reported: 0,
-    });
+    // The first frame finds nothing queued; the second is the dispatch,
+    // pushed down the socket the agent already holds.
+    const session = agent.connectOnce({ frames: 2 });
+    await eventuallyConnected(desktopUser);
     await machines(desktopUser).dispatchMachineCommand({
       schemaVersion: 1,
       userId: desktopUser,
       command: command(offer.machineId, "tool:1:1:0"),
     });
-    expect(await agent.runOnce(0)).toMatchObject({
+    expect(await session).toMatchObject({
+      paired: true,
+      frames: 2,
       delivered: 1,
       claimed: 1,
       alreadyClaimed: 0,
@@ -290,9 +297,11 @@ describe("the desktop device agent against the real machine routes", () => {
     const stubOffer = decodeMachinePairingOfferV1(
       await (await pair(stubGateway, stubUser, "Desktop-Mac.local")).json(),
     );
+    const stubFetch = machineFetch(stubGateway, stubCalls);
     const stub = new MachineAgentDriverV1({
       origin: ORIGIN,
-      fetch: machineFetch(stubGateway, stubCalls),
+      fetch: stubFetch,
+      webSocket: fetchUpgradeMachineWebSocketV1(stubFetch),
       label: "Desktop-Mac.local",
       platform: "macos",
       agentVersion: "0.0.1",
@@ -311,13 +320,14 @@ describe("the desktop device agent against the real machine routes", () => {
         }),
     });
     await stub.enroll(stubOffer);
-    await stub.runOnce(0);
+    await stub.runOnce();
     await machines(stubUser).dispatchMachineCommand({
       schemaVersion: 1,
       userId: stubUser,
       command: command(stubOffer.machineId, "tool:1:1:0"),
     });
-    await stub.runOnce(0);
+    await stub.runOnce();
+    stub.disconnect();
 
     // ---- the same trace ----------------------------------------------------
     const anonymise = (calls: string[], machineId: string): string[] =>
@@ -366,9 +376,11 @@ describe("the desktop device agent against the real machine routes", () => {
       await (await pair(contribution, userId, "Doomed-Mac.local")).json(),
     );
     const laptop = fakeHost("");
+    const doomedFetch = machineFetch(contribution, []);
     const agent = new MachineDeviceAgentV1({
       origin: ORIGIN,
-      fetch: machineFetch(contribution, []),
+      fetch: doomedFetch,
+      webSocket: fetchUpgradeMachineWebSocketV1(doomedFetch),
       secrets,
       runner: createMachineDeviceRunnerV1({
         host: laptop.host,
@@ -388,9 +400,67 @@ describe("the desktop device agent against the real machine routes", () => {
       machineId: offer.machineId,
     });
 
-    const cycle = await agent.runOnce(0);
+    const cycle = await agent.connectOnce();
     expect(cycle.unenrolled).toBe(true);
     expect(await secrets.read()).toBeUndefined();
     expect(agent.status()).toMatchObject({ enrolled: false, running: false });
+  });
+
+  test("revoking a connected machine closes its socket, and its agent un-enrols", async () => {
+    const userId = `machines-closed-${crypto.randomUUID()}`;
+    const contribution = gateway(userId);
+    const secrets = createMemoryMachineSecretStoreV1();
+    const offer = decodeMachinePairingOfferV1(
+      await (await pair(contribution, userId, "Closed-Mac.local")).json(),
+    );
+    const closedFetch = machineFetch(contribution, []);
+    const agent = new MachineDeviceAgentV1({
+      origin: ORIGIN,
+      fetch: closedFetch,
+      webSocket: fetchUpgradeMachineWebSocketV1(closedFetch),
+      secrets,
+      runner: createMachineDeviceRunnerV1({
+        host: fakeHost("").host,
+        capabilities: ["exec", "files"],
+      }),
+      label: "Closed-Mac.local",
+      platform: "macos",
+      agentVersion: "0.0.1",
+      capabilities: ["exec", "files"],
+    });
+    await agent.pair(offer.code);
+    const session = agent.connectOnce();
+    await eventuallyConnected(userId);
+
+    await machines(userId).revokeMachine({
+      schemaVersion: 1,
+      userId,
+      machineId: offer.machineId,
+    });
+
+    expect(await session).toMatchObject({ frames: 1, unenrolled: true });
+    expect(await secrets.read()).toBeUndefined();
+    expect(await connected(userId)).toBe(false);
+  });
+
+  test("the socket door refuses a missing token, and a plain GET is told to upgrade", async () => {
+    const userId = `machines-door-${crypto.randomUUID()}`;
+    const contribution = gateway(userId);
+    const offer = decodeMachinePairingOfferV1(
+      await (await pair(contribution, userId, "Door-Mac.local")).json(),
+    );
+    const doorFetch = machineFetch(contribution, []);
+    const stub = new MachineAgentDriverV1({
+      origin: ORIGIN,
+      fetch: doorFetch,
+      webSocket: fetchUpgradeMachineWebSocketV1(doorFetch),
+    });
+    const token = await stub.enroll(offer);
+    const path = machineRoutePathV1("socket", { machineId: offer.machineId });
+    expect(
+      await stub.attempt(path, { headers: { upgrade: "websocket" } }),
+    ).toBe(401);
+    expect(await stub.attempt(path, { token })).toBe(426);
+    expect(await connected(userId)).toBe(false);
   });
 });

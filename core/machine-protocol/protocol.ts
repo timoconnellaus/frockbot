@@ -5,10 +5,10 @@
  * The machine is not the Computer and not the Workspace: it is a separate
  * filesystem the backend can never dial. `127.0.0.1` from the box is the box,
  * and a laptop behind NAT has no inbound address, so every exchange here is
- * one the *machine* starts: it enrolls, it long-polls for work, it claims a
- * command, it posts a result. Nothing in this module opens a socket, reads a
- * clock it was not handed, or touches storage; it is DTOs, their decoders, and
- * the arithmetic that turns a stored timestamp into `connected`.
+ * one the *machine* starts: it enrolls, it opens the socket work is pushed
+ * down, it claims a command, it posts a result. Nothing in this module opens a
+ * socket, reads a clock it was not handed, or touches storage; it is DTOs and
+ * their decoders.
  *
  * "Cross-runtime communication uses narrow, versioned DTOs, and every inbound
  * value is decoded at its seam." Three runtimes import this one module and
@@ -71,18 +71,12 @@ export const MACHINE_LIMITS_V1 = {
   maxMachinesPerUser: 8,
   /** Commands one User may dispatch across all machines in a day. */
   commandsPerDay: 500,
-  /** How stale `lastSeenAt` may be before a machine reads as disconnected. */
-  presenceTtlMs: 90_000,
   /** How long a pairing offer stands before it is spent or expires. */
   pairingTtlMs: 5 * 60_000,
-  /** The longest a long poll is held before it answers empty. */
-  pollMaxWaitSeconds: 25,
   /** How long a claim holds a command before the lease may be reclaimed. */
   leaseMs: 120_000,
 } as const;
 
-/** `now - lastSeenAt` past this and the machine is no longer connected. */
-export const MACHINE_PRESENCE_TTL_MS = MACHINE_LIMITS_V1.presenceTtlMs;
 /** Commands one machine may hold queued at once. */
 export const MACHINE_MAX_QUEUE = MACHINE_LIMITS_V1.maxQueue;
 /** Machines one User may hold registered at once. */
@@ -598,9 +592,11 @@ export function decodeMachineEnrollmentReceiptV1(
  *
  * `tokenDigest` and not the token: "no secrets client-side" has a mirror on
  * the server, which is that durable state holds what *proves* a secret and
- * never the secret. `connected` is absent on purpose — it is arithmetic over
- * `lastSeenAt` (see `machineConnectedV1`), so a machine that stops polling
- * goes offline by itself with nothing to clean up after an eviction.
+ * never the secret. `connected` is absent on purpose — it is whether the
+ * machine holds an open socket to the User Durable Object, which the object's
+ * own socket list answers and which an eviction cannot leave stale.
+ * `lastSeenAt` is the last time the machine connected, disconnected, claimed
+ * or reported.
  */
 export interface MachineRecordV1 {
   schemaVersion: 1;
@@ -684,30 +680,6 @@ export function decodeMachineRecordV1(
   };
 }
 
-/**
- * `connected`, derived and never stored.
- *
- * A stored flag would need a writer on every disconnection, and the one event
- * that matters — a laptop that closes its lid — sends nothing. Presence is
- * therefore the absence of a revocation and the freshness of the last poll,
- * which is still true after an eviction with no recovery step at all.
- */
-export function machineConnectedV1(
-  record: Pick<MachineRecordV1, "lastSeenAt" | "revokedAt">,
-  now: number | Date,
-  ttlMs: number = MACHINE_PRESENCE_TTL_MS,
-): boolean {
-  if (record.revokedAt !== undefined) return false;
-  const seen = Date.parse(record.lastSeenAt);
-  if (Number.isNaN(seen)) return false;
-  const at = typeof now === "number" ? now : now.getTime();
-  const age = at - seen;
-  // Two clocks are involved, so a `lastSeenAt` slightly ahead of the reader is
-  // ordinary skew and still counts as present — but only within the same TTL,
-  // so a wildly future timestamp cannot read as connected forever.
-  return age >= -ttlMs && age <= ttlMs;
-}
-
 // ---------------------------------------------------------------------------
 // The command queue
 // ---------------------------------------------------------------------------
@@ -789,22 +761,30 @@ export function decodeMachineCommandV1(
 }
 
 /**
- * What a long poll answers with. `serverTime` is carried so the agent can hold
- * its own backoff against the backend's clock rather than its laptop's, which
- * may have been asleep.
+ * A frame the User Durable Object sends down a machine's socket.
+ *
+ * The channel is server-push only, so this is the one direction that carries
+ * frames. `commands` is sent on connect with everything still waiting, and
+ * after each dispatch or lease lapse with what became claimable. A command may
+ * arrive twice; the claim is what stops it running twice. `serverTime` is the
+ * backend's clock, since the laptop's may have been asleep.
  */
-export interface MachinePollResultV1 {
-  schemaVersion: 1;
+/** The close code a revoked machine's socket is ended with. */
+export const MACHINE_SOCKET_REVOKED_CODE_V1 = 4001;
+
+export interface MachineSocketFrameV1 {
+  type: "commands";
   commands: MachineCommandV1[];
   serverTime: string;
 }
 
-export function decodeMachinePollResultV1(
+export function decodeMachineSocketFrameV1(
   input: unknown,
-  label = "machine poll result",
-): MachinePollResultV1 {
+  label = "machine socket frame",
+): MachineSocketFrameV1 {
   const value = object(input, label);
-  exactly(value, ["schemaVersion", "commands", "serverTime"], label);
+  exactly(value, ["type", "commands", "serverTime"], label);
+  if (value.type !== "commands") fail(`${label} type is unsupported`);
   if (!Array.isArray(value.commands))
     fail(`${label} commands must be an array`);
   if (value.commands.length > MACHINE_LIMITS_V1.maxQueue) {
@@ -814,7 +794,7 @@ export function decodeMachinePollResultV1(
     );
   }
   return {
-    schemaVersion: schemaVersion(value, label),
+    type: "commands",
     commands: value.commands.map((command, index) =>
       decodeMachineCommandV1(command, `${label} command ${index}`),
     ),
@@ -824,7 +804,7 @@ export function decodeMachinePollResultV1(
 
 /**
  * The answer to a claim. `already-claimed` is not an error: a duplicate
- * delivery is expected on a protocol that survives dropped polls, and saying
+ * delivery is expected on a protocol that survives dropped sockets, and saying
  * so plainly is what stops the same command running twice.
  */
 export interface MachineClaimReceiptV1 {
@@ -998,18 +978,20 @@ export interface MachineListViewV1 {
   serverTime: string;
 }
 
-/** The projection, pure: the same record and clock give the same row. */
+/**
+ * The projection, pure. `connected` is the caller's: whether the machine holds
+ * an open socket is something only the User Durable Object can see.
+ */
 export function machineListEntryV1(
   record: MachineRecordV1,
-  now: number | Date,
-  ttlMs: number = MACHINE_PRESENCE_TTL_MS,
+  connected: boolean,
 ): MachineListEntryV1 {
   return {
     machineId: record.machineId,
     label: record.label,
     platform: record.platform,
     capabilities: [...record.capabilities],
-    connected: machineConnectedV1(record, now, ttlMs),
+    connected: record.revokedAt === undefined && connected,
     lastSeenAt: record.lastSeenAt,
     registeredAt: record.registeredAt,
     ...(record.revokedAt === undefined ? {} : { revokedAt: record.revokedAt }),

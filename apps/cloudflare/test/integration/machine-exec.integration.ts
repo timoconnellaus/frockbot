@@ -8,8 +8,9 @@
 //      empty — nothing has run;
 //   3. `POST …/approvals/:id {approved}` records the decision, and only then
 //      is the command queued;
-//   4. the stub device agent polls, claims and answers with exit 0, over the
-//      pre-authentication machine routes, with a bearer token and no session;
+//   4. the command is pushed down the stub device agent's socket, and it
+//      claims and answers with exit 0 over the pre-authentication machine
+//      routes, with a bearer token and no session;
 //   5. the Bot's next chat Turn is run on a request that carries the result as
 //      a preamble line, and `machine_command_check` reads the whole thing;
 //   6. `GET /api/audit?target=machine:<id>` has the one shell row, with the
@@ -18,6 +19,7 @@ import { SELF } from "cloudflare:test";
 import { describe, expect, it } from "vitest";
 import { machineRoutePathV1 } from "@frockbot/core/machine-protocol";
 import { MachineAgentDriverV1 } from "@frockbot/app/machine/testing";
+import { fetchUpgradeMachineWebSocketV1 } from "@frockbot/app/machine/device";
 import type { AuditEntryV1 } from "@frockbot/app/audit";
 import { frockbotToolCallPrompt } from "../harness/miniflare.ts";
 import {
@@ -104,6 +106,9 @@ describe("running a command on a registered machine", () => {
     const device = new MachineAgentDriverV1({
       origin: ORIGIN,
       fetch: (input, init) => SELF.fetch(input, init),
+      webSocket: fetchUpgradeMachineWebSocketV1((input, init) =>
+        SELF.fetch(input, init),
+      ),
       label: "Tims-M5-MacBook-Pro.local",
       platform: "macos",
       agentVersion: "0.4.1",
@@ -120,6 +125,8 @@ describe("running a command on a registered machine", () => {
       }),
     });
     await device.enroll(offer.code);
+    // The agent connects; a machine with no socket is not asked about.
+    expect(await device.next()).toEqual([]);
 
     // 1. The Bot asks to run something. The Turn ends there.
     const asked = await turn(
@@ -146,9 +153,10 @@ describe("running a command on a registered machine", () => {
     expect(card?.payload?.action).toContain(COMMAND);
     const approvalId = card!.payload!.approvalId!;
 
-    // 2. Nothing has run. The machine's own poll is the only way a command
-    //    reaches it, and it answers empty.
-    expect(await device.poll()).toEqual([]);
+    // 2. Nothing has run. A reconnect is sent everything still waiting, and
+    //    nothing is.
+    device.disconnect();
+    expect(await device.next()).toEqual([]);
 
     // 3. The person approves, and only then is the command queued.
     const recorded = await postAsUser(
@@ -162,8 +170,9 @@ describe("running a command on a registered machine", () => {
       approval: { approvalId, decision: "approved" },
     });
 
-    // 4. The agent polls, claims and answers — the whole protocol, anonymous,
-    //    with a bearer token and no session.
+    // 4. The command is pushed down the socket, and the agent claims and
+    //    answers — the whole protocol, anonymous, with a bearer token and no
+    //    session.
     const ran = await device.runOnce();
     expect(ran.delivered.map((command) => command.commandId)).toEqual([
       approvalId,
@@ -228,12 +237,16 @@ describe("running a command on a registered machine", () => {
     const device = new MachineAgentDriverV1({
       origin: ORIGIN,
       fetch: (input, init) => SELF.fetch(input, init),
+      webSocket: fetchUpgradeMachineWebSocketV1((input, init) =>
+        SELF.fetch(input, init),
+      ),
       label: "Denied.local",
       platform: "macos",
       agentVersion: "0.4.1",
       capabilities: ["exec", "files"],
     });
     await device.enroll(offer.code);
+    expect(await device.next()).toEqual([]);
 
     const asked = await turn(
       userId,
@@ -259,7 +272,8 @@ describe("running a command on a registered machine", () => {
     ).toBe(200);
 
     // A denial reaches the laptop as silence: there was never a command.
-    expect(await device.poll()).toEqual([]);
+    device.disconnect();
+    expect(await device.next()).toEqual([]);
     const checked = await turn(
       userId,
       botId,

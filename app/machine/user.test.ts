@@ -1,21 +1,58 @@
-// The User Contribution's own two facts: a hold that ends early, and a door
-// that stays shut without the deployment secret.
+// The User Contribution over an in-memory socket list: what a machine is sent
+// when it connects and when work is dispatched, presence, and revocation.
 import { describe, expect, test } from "bun:test";
 import { MachineUserBackendContribution } from "./user.ts";
-import { createMemoryMachineStorageV1 } from "./testing.ts";
-import { machineTokenDigestV1 } from "@frockbot/core/machine-protocol";
+import {
+  createMemoryMachineSocketsV1,
+  createMemoryMachineStorageV1,
+  type MemoryMachineSocketsV1,
+} from "./testing.ts";
+import type { MachineSocketV1 } from "./device.ts";
+import {
+  MACHINE_LIMITS_V1,
+  MACHINE_SOCKET_REVOKED_CODE_V1,
+  decodeMachineSocketFrameV1,
+  machineTokenDigestV1,
+  type MachineTokenClaimsV1,
+} from "@frockbot/core/machine-protocol";
 
 const SECRET = "machine-user-secret-0123456789abcdef";
 const T0 = Date.parse("2026-09-01T00:00:00.000Z");
 
+let now = T0;
+let sockets: MemoryMachineSocketsV1;
+
 function contribution(secret: string | undefined) {
+  now = T0;
+  sockets = createMemoryMachineSocketsV1();
   return new MachineUserBackendContribution({
     storage: createMemoryMachineStorageV1(),
     readSecret: () => secret,
-    now: () => T0,
-    // A hold that never ends on its own, so only a dispatch can end it.
-    sleep: () => new Promise<void>(() => {}),
+    sockets,
+    now: () => now,
   });
+}
+
+/** Connect as the Durable Object does: authorize, then accept and send. */
+async function connect(
+  authority: MachineUserBackendContribution,
+  machine: { machineId: string; claims: MachineTokenClaimsV1; digest: string },
+): Promise<MachineSocketV1> {
+  const opened = await authority.connect(
+    machine.claims,
+    machine.digest,
+    machine.machineId,
+  );
+  return sockets.accept(machine.machineId, opened.frame);
+}
+
+/** The command ids in the next frame down a socket. */
+async function nextFrame(socket: MachineSocketV1): Promise<string[]> {
+  const event = await socket.receive();
+  if (event.type !== "message") throw new Error(`closed: ${event.code}`);
+  return decodeMachineSocketFrameV1(JSON.parse(event.data)).commands.map(
+    (command) => command.commandId,
+  );
 }
 
 /** Pair, enroll, and hand back what a machine needs to speak. */
@@ -63,49 +100,86 @@ function command(machineId: string, commandId: string) {
 }
 
 describe("the User Contribution", () => {
-  test("a long poll ends the moment a command is queued", async () => {
+  test("a connecting machine is sent every command still waiting", async () => {
     const authority = contribution(SECRET);
-    const offer = await authority.createPairing("hold-user", {});
-    const receipt = await authority.enroll(
-      { userId: "hold-user", machineId: offer.machineId, nonce: "n" },
-      {
-        schemaVersion: 1,
-        code: offer.code,
-        label: "held.local",
-        platform: "macos",
-        agentVersion: "0.0.1",
-        capabilities: ["exec"],
-      },
-    );
-    const held = authority.poll(
-      { u: "hold-user", m: offer.machineId, v: receipt.keyVersion },
-      await machineTokenDigestV1(receipt.token),
-      offer.machineId,
-      25,
-    );
-    // The `sleep` above never resolves, so this only returns because the
-    // dispatch woke it — which is the whole claim.
-    await authority.dispatch({
-      schemaVersion: 1,
-      commandId: "tool:1:1:0",
-      machineId: offer.machineId,
-      botId: "bot",
-      runId: "run",
-      turn: 1,
-      approvalId: "tool:1:1:0",
-      op: {
-        kind: "exec",
-        command: "uname -a",
-        timeoutMs: 1_000,
-        maxOutputBytes: 1_024,
-      },
-      issuedAt: new Date(T0).toISOString(),
-      status: "queued",
+    const machine = await enrolled(authority, "connect-user");
+    await authority.dispatch(command(machine.machineId, "tool:1:1:0"));
+    const socket = await connect(authority, machine);
+    expect(await nextFrame(socket)).toEqual(["tool:1:1:0"]);
+  });
+
+  test("a dispatch is pushed down an open socket at once", async () => {
+    const authority = contribution(SECRET);
+    const machine = await enrolled(authority, "push-user");
+    const socket = await connect(authority, machine);
+    expect(await nextFrame(socket)).toEqual([]);
+    await authority.dispatch(command(machine.machineId, "tool:1:1:0"));
+    expect(await nextFrame(socket)).toEqual(["tool:1:1:0"]);
+  });
+
+  test("a connect with a revoked or foreign token is refused", async () => {
+    const authority = contribution(SECRET);
+    const machine = await enrolled(authority, "refused-user");
+    await expect(
+      authority.connect(machine.claims, "0".repeat(64), machine.machineId),
+    ).rejects.toThrow(/invalid/);
+    await authority.revoke(machine.machineId);
+    await expect(connect(authority, machine)).rejects.toThrow(/invalid/);
+  });
+
+  test("presence is an open socket, and revocation closes it", async () => {
+    const authority = contribution(SECRET);
+    const machine = await enrolled(authority, "presence-user");
+    expect((await authority.list()).machines[0]?.connected).toBe(false);
+    const socket = await connect(authority, machine);
+    await nextFrame(socket);
+    expect((await authority.list()).machines[0]?.connected).toBe(true);
+    expect(
+      (await authority.describeTarget(machine.machineId)).entry?.connected,
+    ).toBe(true);
+    socket.close();
+    expect((await authority.list()).machines[0]?.connected).toBe(false);
+    const again = await connect(authority, machine);
+    await nextFrame(again);
+    await authority.revoke(machine.machineId);
+    expect(await again.receive()).toMatchObject({
+      type: "close",
+      code: MACHINE_SOCKET_REVOKED_CODE_V1,
     });
-    const answered = await held;
-    expect(answered.commands.map((command) => command.commandId)).toEqual([
+    expect((await authority.list()).machines[0]?.connected).toBe(false);
+  });
+
+  test("a lease that lapses while the machine stays connected is offered again", async () => {
+    const authority = contribution(SECRET);
+    const machine = await enrolled(authority, "lease-user");
+    const socket = await connect(authority, machine);
+    await nextFrame(socket);
+    await authority.dispatch(command(machine.machineId, "tool:1:1:0"));
+    expect(await nextFrame(socket)).toEqual(["tool:1:1:0"]);
+    await authority.claim(
+      machine.claims,
+      machine.digest,
+      machine.machineId,
       "tool:1:1:0",
-    ]);
+    );
+    // The agent stalled. The next dispatch sweeps the lapsed lease and
+    // offers both.
+    now = T0 + MACHINE_LIMITS_V1.leaseMs + 1;
+    await authority.dispatch(command(machine.machineId, "tool:1:2:0"));
+    expect(await nextFrame(socket)).toEqual(["tool:1:2:0"]);
+    expect(await nextFrame(socket)).toEqual(["tool:1:1:0"]);
+  });
+
+  test("a closed socket records when the machine was last seen", async () => {
+    const authority = contribution(SECRET);
+    const machine = await enrolled(authority, "seen-user");
+    now = T0 + 5_000;
+    await authority.disconnected(machine.machineId);
+    expect((await authority.readMachine(machine.machineId))?.lastSeenAt).toBe(
+      new Date(T0 + 5_000).toISOString(),
+    );
+    // A machine this User does not hold is nothing to record.
+    await authority.disconnected("mac-nobody");
   });
 
   test("without a secret nothing can be paired", async () => {
@@ -119,7 +193,8 @@ describe("the User Contribution", () => {
     const { machineId } = await enrolled(authority, "target-user");
     const target = await authority.describeTarget(machineId);
     expect(target.entry?.machineId).toBe(machineId);
-    expect(target.entry?.connected).toBe(true);
+    // Registered, but no socket is open.
+    expect(target.entry?.connected).toBe(false);
     expect(target.entry?.capabilities).toEqual(["exec"]);
     expect(target.queuedCommands).toBe(0);
     expect(target.commandsToday).toBe(0);

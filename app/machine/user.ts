@@ -12,19 +12,18 @@
 //  * **The secret.** `MACHINE_TOKEN_SECRET` is read from the host, never
 //    stored, and used only to mint. The token is handed back exactly once, on
 //    the enrollment response; what stays here is `SHA-256(token)`.
-//  * **The clock.** Injected, so presence arithmetic and lease expiry are
-//    testable without waiting ninety seconds.
-//  * **The transport.** Nothing here is an HTTP response. The gateway
-//    Contribution turns these answers into one.
-//
-// The long poll is the one place this object holds something in memory: a set
-// of waiters, so an enqueue can cut a hold short. That memory is a latency
-// optimisation and never a fact — an evicted object simply drops the hold, the
-// agent's request fails, and its next poll finds the same queue. "Client
-// disconnect detaches an observer."
+//  * **The clock.** Injected, so lease expiry is testable without waiting two
+//    minutes.
+//  * **The transport.** Nothing here is an HTTP response or a socket. The
+//    gateway Contribution turns these answers into a response, and the
+//    Durable Object owns the hibernating sockets a machine holds, handing this
+//    Contribution only `push`, `connected` and `close`. A socket is never a
+//    fact: the queue is durable, so a machine that reconnects is sent the same
+//    commands it would have been sent before the drop.
 
 import {
   MACHINE_LIMITS_V1,
+  MACHINE_SOCKET_REVOKED_CODE_V1,
   MachineTokenError,
   decodeMachineEnrollmentV1,
   machineListEntryV1,
@@ -36,9 +35,10 @@ import {
   type MachineEnrollmentReceiptV1,
   type MachineListViewV1,
   type MachinePairingOfferV1,
-  type MachinePollResultV1,
+  type MachineCommandV1,
   type MachineRecordV1,
   type MachineResultReceiptV1,
+  type MachineSocketFrameV1,
   type MachineTokenClaimsV1,
 } from "@frockbot/core/machine-protocol";
 import {
@@ -78,6 +78,20 @@ import {
 } from "./store.js";
 import { defineUserBackendContribution } from "@frockbot/core/contracts/contributions";
 
+/**
+ * The sockets registered machines hold to the User Durable Object, tagged by
+ * machine. Implemented by the Durable Object, which is the only thing that
+ * can see them.
+ */
+export interface MachineSocketsV1 {
+  /** Send one frame to every open socket this machine holds. */
+  push(machineId: string, frame: MachineSocketFrameV1): void;
+  /** Whether this machine holds any open socket. This is presence. */
+  connected(machineId: string): boolean;
+  /** Close every socket this machine holds. */
+  close(machineId: string, code: number, reason: string): void;
+}
+
 export interface MachineUserBackendHost {
   /** The User Durable Object's own storage. */
   storage: MachineStorageV1;
@@ -87,19 +101,13 @@ export interface MachineUserBackendHost {
    * signature nothing could verify.
    */
   readSecret(name: "MACHINE_TOKEN_SECRET"): string | undefined;
-  /** Injected so presence and leases are testable without real time. */
+  sockets: MachineSocketsV1;
+  /** Injected so leases are testable without real time. */
   now?(): number;
-  /** Injected so a test can drive a hold without waiting twenty-five seconds. */
-  sleep?(ms: number): Promise<void>;
 }
-
-const defaultSleep = (ms: number): Promise<void> =>
-  new Promise((resolve) => setTimeout(resolve, ms));
 
 export class MachineUserBackendContribution {
   readonly packageId = "user-machine";
-  /** One set of waiting long polls per machine. Memory, never a fact. */
-  private readonly waiting = new Map<string, Set<() => void>>();
 
   constructor(private readonly host: MachineUserBackendHost) {}
 
@@ -219,60 +227,66 @@ export class MachineUserBackendContribution {
   }
 
   /**
-   * One bounded long poll.
+   * A machine opening its socket.
    *
-   * Presence is refreshed first, so a machine that is holding a poll is
-   * connected for as long as it holds it. The hold ends on the first of: a
-   * command being queued, the wait elapsing, or the object being evicted —
-   * and the last of those costs nothing, because the queue is durable and the
-   * agent polls again.
+   * Authorized exactly as a claim is, and answered with every command still
+   * waiting — including any whose lease lapsed while the machine was away —
+   * for the Durable Object to send once the socket is accepted.
    */
-  async poll(
+  async connect(
     claims: MachineTokenClaimsV1,
     tokenDigest: string,
     machineId: string,
-    waitSeconds: number,
-  ): Promise<MachinePollResultV1> {
+  ): Promise<{ record: MachineRecordV1; frame: MachineSocketFrameV1 }> {
     await this.authorize(claims, tokenDigest, machineId);
-    await touchMachineV1(this.host.storage, machineId, this.now());
-    await sweepMachineLeasesV1(this.host.storage, machineId, this.now());
-    let commands = await pendingMachineCommandsV1(this.host.storage, machineId);
-    const wait = Math.min(
-      Math.max(waitSeconds, 0),
-      MACHINE_LIMITS_V1.pollMaxWaitSeconds,
-    );
-    if (commands.length === 0 && wait > 0) {
-      await this.hold(machineId, wait * 1_000);
-      commands = await pendingMachineCommandsV1(this.host.storage, machineId);
-    }
+    const now = this.now();
+    const record = await touchMachineV1(this.host.storage, machineId, now);
+    await sweepMachineLeasesV1(this.host.storage, machineId, now);
     return {
-      schemaVersion: 1,
+      record,
+      frame: this.frame(
+        await pendingMachineCommandsV1(this.host.storage, machineId),
+      ),
+    };
+  }
+
+  /** A socket closed: the moment is kept as `lastSeenAt`. */
+  async disconnected(machineId: string): Promise<void> {
+    if ((await readMachineRecordV1(this.host.storage, machineId)) === undefined)
+      return;
+    await touchMachineV1(this.host.storage, machineId, this.now());
+  }
+
+  private frame(commands: MachineCommandV1[]): MachineSocketFrameV1 {
+    return {
+      type: "commands",
       commands,
       serverTime: new Date(this.now()).toISOString(),
     };
   }
 
-  private async hold(machineId: string, ms: number): Promise<void> {
-    const sleep = this.host.sleep ?? defaultSleep;
-    let wake: (() => void) | undefined;
-    const waiters = this.waiting.get(machineId) ?? new Set<() => void>();
-    this.waiting.set(machineId, waiters);
-    const woken = new Promise<void>((resolve) => {
-      wake = resolve;
-      waiters.add(resolve);
-    });
-    try {
-      await Promise.race([sleep(ms), woken]);
-    } finally {
-      if (wake) waiters.delete(wake);
-      if (waiters.size === 0) this.waiting.delete(machineId);
-    }
-  }
-
-  private notify(machineId: string): void {
-    const waiters = this.waiting.get(machineId);
-    if (!waiters) return;
-    for (const wake of [...waiters]) wake();
+  /**
+   * Expire this machine's lapsed leases and offer what was re-queued to its
+   * open sockets, so a command whose agent stalled is offered again without
+   * the machine having to reconnect.
+   */
+  private async sweep(machineId: string, now: number): Promise<void> {
+    const { requeued } = await sweepMachineLeasesV1(
+      this.host.storage,
+      machineId,
+      now,
+    );
+    if (requeued.length === 0) return;
+    const pending = await pendingMachineCommandsV1(
+      this.host.storage,
+      machineId,
+    );
+    this.host.sockets.push(
+      machineId,
+      this.frame(
+        pending.filter((command) => requeued.includes(command.commandId)),
+      ),
+    );
   }
 
   async claim(
@@ -284,7 +298,7 @@ export class MachineUserBackendContribution {
     await this.authorize(claims, tokenDigest, machineId);
     const now = this.now();
     await touchMachineV1(this.host.storage, machineId, now);
-    await sweepMachineLeasesV1(this.host.storage, machineId, now);
+    await this.sweep(machineId, now);
     return claimMachineCommandV1(this.host.storage, machineId, commandId, now);
   }
 
@@ -331,14 +345,19 @@ export class MachineUserBackendContribution {
     return machineListViewV1(
       await listMachineRecordsV1(this.host.storage),
       this.now(),
+      (machineId) => this.host.sockets.connected(machineId),
     );
   }
 
   async revoke(machineId: string): Promise<MachineListViewV1> {
     await revokeMachineV1(this.host.storage, machineId, this.now());
-    // A revoked machine's waiting poll is woken so it stops holding a request
-    // it will never be answered on; its next poll is a 401.
-    this.notify(machineId);
+    // Its token is already dead, so the socket it holds is closed rather than
+    // left to receive nothing; its next connect is a 401.
+    this.host.sockets.close(
+      machineId,
+      MACHINE_SOCKET_REVOKED_CODE_V1,
+      "revoked",
+    );
     return this.list();
   }
 
@@ -346,16 +365,22 @@ export class MachineUserBackendContribution {
    * Put one approved command on a machine's queue.
    *
    * R3's approval settlement is the caller that matters. It is here in R2
-   * because the queue, its quota and its idempotency are this object's rules,
-   * and the stub agent has to have something to poll for.
+   * because the queue, its quota and its idempotency are this object's rules.
+   * A queued command is pushed down the machine's socket at once; a machine
+   * with none is sent it when it next connects.
    */
   async dispatch(command: unknown): Promise<MachineDispatchOutcomeV1> {
+    const now = this.now();
     const outcome = await dispatchMachineCommandV1(
       this.host.storage,
       command,
-      this.now(),
+      now,
     );
-    if (outcome.status === "queued") this.notify(outcome.command.machineId);
+    if (outcome.status === "queued") {
+      const machineId = outcome.command.machineId;
+      this.host.sockets.push(machineId, this.frame([outcome.command]));
+      await this.sweep(machineId, now);
+    }
     return outcome;
   }
 
@@ -418,7 +443,12 @@ export class MachineUserBackendContribution {
       machineId,
       ...(record === undefined
         ? {}
-        : { entry: machineListEntryV1(record, now) }),
+        : {
+            entry: machineListEntryV1(
+              record,
+              this.host.sockets.connected(machineId),
+            ),
+          }),
       queuedCommands: counters.queuedCommands,
       commandsToday: counters.commandsToday,
       serverTime: new Date(now).toISOString(),
@@ -430,7 +460,7 @@ export class MachineUserBackendContribution {
     const record = await readMachineRecordV1(this.host.storage, machineId);
     return record === undefined
       ? undefined
-      : machineListEntryV1(record, this.now());
+      : machineListEntryV1(record, this.host.sockets.connected(machineId));
   }
 }
 

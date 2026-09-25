@@ -5,7 +5,6 @@
 // `userId` for the browser door and nothing at all for the machine's.
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
-  MACHINE_LIMITS_V1,
   machineRoutePathV1,
   mintMachineTokenV1,
 } from "@frockbot/core/machine-protocol";
@@ -16,9 +15,13 @@ import {
 import { MachineUserBackendContribution } from "./user.ts";
 import { verifyMachinePairingCodeV1 } from "./pairing.ts";
 import {
+  createMemoryMachineSocketsV1,
   createMemoryMachineStorageV1,
   MachineAgentDriverV1,
+  MachineAgentError,
+  type MemoryMachineSocketsV1,
 } from "./testing.ts";
+import type { MachineSocketV1 } from "./device.ts";
 
 const SECRET = "machine-route-secret-0123456789abcdef";
 const USER = "route-user";
@@ -26,6 +29,9 @@ const ORIGIN = "https://bot.frockbot.com";
 
 let authority: MachineUserBackendContribution;
 let contribution: MachineBackendRouteContribution;
+let sockets: MemoryMachineSocketsV1;
+/** The socket the host accepted, waiting for the agent's seam to take it. */
+let accepted: MachineSocketV1 | undefined;
 let now = Date.parse("2026-09-01T00:00:00.000Z");
 
 /** One request through whichever door matches, as the gateway routes it. */
@@ -64,18 +70,34 @@ function agent(
     ConstructorParameters<typeof MachineAgentDriverV1>[0]
   > = {},
 ) {
+  const fetch = async (input: string, requestInit?: RequestInit) => {
+    const request = new Request(input, requestInit);
+    const url = new URL(request.url);
+    return (
+      (await contribution.publicRoute?.(request, url, {
+        client: "browser",
+      })) ??
+      (await contribution.route(request, url, { client: "browser" })) ??
+      Response.json({ error: "no route" }, { status: 404 })
+    );
+  };
   return new MachineAgentDriverV1({
     origin: ORIGIN,
-    fetch: async (input, requestInit) => {
-      const request = new Request(input, requestInit);
-      const url = new URL(request.url);
-      return (
-        (await contribution.publicRoute?.(request, url, {
-          client: "browser",
-        })) ??
-        (await contribution.route(request, url, { client: "browser" })) ??
-        Response.json({ error: "no route" }, { status: 404 })
-      );
+    fetch,
+    // The upgrade goes through the real gateway door; the host below stands
+    // a 200 in for the 101 only workerd can answer, and hands the socket over.
+    webSocket: async (url, token) => {
+      const target = new URL(url);
+      target.protocol = "https:";
+      const response = await fetch(target.toString(), {
+        headers: { upgrade: "websocket", authorization: `Bearer ${token}` },
+      });
+      const socket = accepted;
+      accepted = undefined;
+      if (response.status !== 200 || !socket) {
+        throw new MachineAgentError(response.status, await response.text());
+      }
+      return socket;
     },
     now: () => now,
     ...overrides,
@@ -85,11 +107,13 @@ function agent(
 beforeEach(() => {
   now = Date.parse("2026-09-01T00:00:00.000Z");
   const storage = createMemoryMachineStorageV1();
+  sockets = createMemoryMachineSocketsV1();
+  accepted = undefined;
   authority = new MachineUserBackendContribution({
     storage,
     readSecret: () => SECRET,
+    sockets,
     now: () => now,
-    sleep: () => Promise.resolve(),
   });
   contribution = createMachineBackendContribution({
     machineTokenSecret: SECRET,
@@ -100,13 +124,15 @@ beforeEach(() => {
         { userId, machineId: input.machineId, nonce: "n" },
         input.enrollment,
       ),
-    pollMachine: (_userId, callInput) =>
-      authority.poll(
+    openMachineSocket: async (_userId, callInput) => {
+      const opened = await authority.connect(
         callInput.claims,
         callInput.tokenDigest,
         callInput.machineId,
-        callInput.waitSeconds,
-      ),
+      );
+      accepted = sockets.accept(callInput.machineId, opened.frame);
+      return new Response(null, { status: 200 });
+    },
     claimMachineCommand: (_userId, callInput) =>
       authority.claim(
         callInput.claims,
@@ -165,21 +191,21 @@ describe("the browser door", () => {
     ).toBe(400);
   });
 
-  test("the registry reports connected, then not, on the presence TTL alone", async () => {
+  test("the registry reports connected while the machine's socket is open", async () => {
     const offer = await pair();
     const driver = agent();
     await driver.enroll(offer.code);
-    const connected = (await (
-      await call("GET", machineRoutePathV1("list"), { userId: USER })
-    ).json()) as { machines: Array<{ connected: boolean; label: string }> };
-    expect(connected.machines).toMatchObject([
-      { connected: true, label: "Stub-Machine.local" },
+    const list = async () =>
+      (await (
+        await call("GET", machineRoutePathV1("list"), { userId: USER })
+      ).json()) as { machines: Array<{ connected: boolean; label: string }> };
+    expect((await list()).machines).toMatchObject([
+      { connected: false, label: "Stub-Machine.local" },
     ]);
-    now += MACHINE_LIMITS_V1.presenceTtlMs + 1;
-    const offline = (await (
-      await call("GET", machineRoutePathV1("list"), { userId: USER })
-    ).json()) as { machines: Array<{ connected: boolean }> };
-    expect(offline.machines).toMatchObject([{ connected: false }]);
+    await driver.connect();
+    expect((await list()).machines).toMatchObject([{ connected: true }]);
+    driver.disconnect();
+    expect((await list()).machines).toMatchObject([{ connected: false }]);
   });
 });
 
@@ -227,14 +253,17 @@ describe("the machine door", () => {
     ).toBe(401);
   });
 
-  test("poll, claim and result refuse a missing, forged or foreign token", async () => {
+  test("the socket refuses a missing, forged or foreign token", async () => {
     const offer = await pair();
     const driver = agent();
     await driver.enroll(offer.code);
     const machineId = driver.machineId!;
-    const poll = machineRoutePathV1("poll", { machineId });
-    expect(await driver.attempt(poll)).toBe(401);
-    expect(await driver.attempt(poll, { token: "not-a-token" })).toBe(401);
+    const socket = machineRoutePathV1("socket", { machineId });
+    const upgrade = { headers: { upgrade: "websocket" } };
+    expect(await driver.attempt(socket, upgrade)).toBe(401);
+    expect(
+      await driver.attempt(socket, { ...upgrade, token: "not-a-token" }),
+    ).toBe(401);
     // A well-formed token for another machine, signed with the real secret:
     // the path and the claims must agree.
     const foreign = await mintMachineTokenV1(SECRET, {
@@ -242,13 +271,30 @@ describe("the machine door", () => {
       m: crypto.randomUUID(),
       v: 1,
     });
-    expect(await driver.attempt(poll, { token: foreign })).toBe(401);
+    expect(await driver.attempt(socket, { ...upgrade, token: foreign })).toBe(
+      401,
+    );
     // …and one signed with another deployment's secret.
     const elsewhere = await mintMachineTokenV1(
       "another-deployment-secret-0123456789",
       { u: USER, m: machineId, v: 1 },
     );
-    expect(await driver.attempt(poll, { token: elsewhere })).toBe(401);
+    expect(await driver.attempt(socket, { ...upgrade, token: elsewhere })).toBe(
+      401,
+    );
+    expect(accepted).toBeUndefined();
+  });
+
+  test("a live token without an upgrade is told to upgrade", async () => {
+    const offer = await pair();
+    const driver = agent();
+    const token = await driver.enroll(offer.code);
+    expect(
+      await driver.attempt(
+        machineRoutePathV1("socket", { machineId: driver.machineId! }),
+        { token },
+      ),
+    ).toBe(426);
   });
 
   test("the wrong method and an unknown query parameter are refused", async () => {
@@ -257,14 +303,14 @@ describe("the machine door", () => {
     const token = await driver.enroll(offer.code);
     const machineId = driver.machineId!;
     expect(
-      await driver.attempt(machineRoutePathV1("poll", { machineId }), {
+      await driver.attempt(machineRoutePathV1("socket", { machineId }), {
         method: "POST",
         token,
       }),
     ).toBe(405);
     expect(
       await driver.attempt(
-        `${machineRoutePathV1("poll", { machineId })}?nope=1`,
+        `${machineRoutePathV1("socket", { machineId })}?nope=1`,
         {
           token,
         },
@@ -275,7 +321,7 @@ describe("the machine door", () => {
     ).toBe(405);
   });
 
-  test("a poll, a claim, a result and a replay, end to end", async () => {
+  test("a pushed command, a claim, a result and a replay, end to end", async () => {
     const offer = await pair();
     const driver = agent();
     await driver.enroll(offer.code);
@@ -307,8 +353,9 @@ describe("the machine door", () => {
       outcome: "ok",
       exitCode: 0,
     });
-    // The queue is empty, and a second claim of a settled command is a 404.
-    expect(await driver.poll()).toEqual([]);
+    // The queue is empty: a reconnect is sent nothing.
+    driver.disconnect();
+    expect(await driver.next()).toEqual([]);
   });
 
   test("a revoked machine's token fails every machine route", async () => {
@@ -323,16 +370,21 @@ describe("the machine door", () => {
         })
       ).status,
     ).toBe(200);
+    expect(
+      await driver.attempt(machineRoutePathV1("socket", { machineId }), {
+        token,
+        headers: { upgrade: "websocket" },
+      }),
+    ).toBe(401);
     for (const path of [
-      machineRoutePathV1("poll", { machineId }),
       machineRoutePathV1("claim", { machineId, commandId: "c" }),
       machineRoutePathV1("result", { machineId, commandId: "c" }),
     ]) {
       expect(
         await driver.attempt(path, {
           token,
-          method: path.endsWith("poll") ? "GET" : "POST",
-          body: path.endsWith("poll") ? undefined : JSON.stringify({}),
+          method: "POST",
+          body: JSON.stringify({}),
         }),
       ).toBe(401);
     }
@@ -346,7 +398,7 @@ describe("the machine door", () => {
       enrollMachine: () => {
         throw new Error("unreachable");
       },
-      pollMachine: () => {
+      openMachineSocket: () => {
         throw new Error("unreachable");
       },
       claimMachineCommand: () => {

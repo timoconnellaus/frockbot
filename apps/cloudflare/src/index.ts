@@ -2,6 +2,7 @@ import { billingRoutes, type BillingAccountRpc } from "./billing.js";
 import { decodeHostedModelRatesV1 } from "@frockbot/app/billing/rates";
 import { WorkerEntrypoint } from "cloudflare:workers";
 import { BOT_STATE_CHANNEL_INTERNAL_PATH } from "./bot-state-channel.js";
+import { internalMachineSocketRequestV1 } from "./machine-socket.js";
 import {
   decodeMachineResultDeliveryV1,
   type MachineResultDeliveryV1,
@@ -125,7 +126,6 @@ import {
   decodeMachineEnrollmentReceiptV1,
   decodeMachineListViewV1,
   decodeMachinePairingOfferV1,
-  decodeMachinePollResultV1,
   decodeMachineResultReceiptV1,
 } from "@frockbot/core/machine-protocol";
 import {
@@ -956,7 +956,6 @@ interface UserSearchRpc {
 interface UserMachineRpc {
   createMachinePairing(input: unknown): Promise<unknown>;
   enrollMachine(input: unknown): Promise<unknown>;
-  pollMachine(input: unknown): Promise<unknown>;
   claimMachineCommand(input: unknown): Promise<unknown>;
   recordMachineResult(input: unknown): Promise<unknown>;
   takeMachineDeliveries(input: unknown): Promise<unknown>;
@@ -2252,19 +2251,11 @@ const createGatewayBackendContributions = (env: Env) =>
         ),
       );
     },
-    pollMachine: async (userId, call) =>
-      decodeMachinePollResultV1(
-        rpcJsonSnapshotV1(
-          await userMachineStub(env, userId).pollMachine({
-            schemaVersion: 1,
-            userId,
-            machineId: call.machineId,
-            claims: call.claims,
-            tokenDigest: call.tokenDigest,
-            waitSeconds: call.waitSeconds,
-          }),
-        ),
-      ),
+    // An upgrade cannot cross RPC, so the socket goes to the object's `fetch`.
+    openMachineSocket: (userId, call, request) =>
+      env.USER_CONFIGURATIONS.get(
+        env.USER_CONFIGURATIONS.idFromName(userId),
+      ).fetch(internalMachineSocketRequestV1(userId, call, request)),
     claimMachineCommand: async (userId, call) =>
       decodeMachineClaimReceiptV1(
         rpcJsonSnapshotV1(

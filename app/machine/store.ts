@@ -8,10 +8,10 @@
 //
 // Four invariants this module exists to hold:
 //
-//  1. **Presence is arithmetic.** `connected` is never stored. A laptop that
-//     stops polling goes offline on its own, and an evicted Durable Object has
-//     nothing to reconcile when it wakes.
-//  2. **A claim is first-write-wins.** A duplicate delivery — a poll answered
+//  1. **Presence is not stored.** `connected` is whether the machine holds an
+//     open socket, which the caller reads from the Durable Object's own socket
+//     list, so an evicted object has nothing to reconcile when it wakes.
+//  2. **A claim is first-write-wins.** A duplicate delivery — a command pushed
 //     twice, an agent that retried — cannot run a command twice, because the
 //     second claim answers `already-claimed` and the agent stops.
 //  3. **A lease expiry re-queues once, then terminates.** A machine that
@@ -29,7 +29,6 @@ import {
   decodeMachineCommandResultV1,
   decodeMachineCommandV1,
   decodeMachineRecordV1,
-  machineConnectedV1,
   machineListEntryV1,
   machineQuotaRefusalV1,
   machineOpCapabilityV1,
@@ -178,10 +177,13 @@ export async function readMachineRecordV1(
 export function machineListViewV1(
   records: readonly MachineRecordV1[],
   now: number | Date,
+  connected: (machineId: string) => boolean,
 ): MachineListViewV1 {
   return {
     schemaVersion: 1,
-    machines: records.map((record) => machineListEntryV1(record, now)),
+    machines: records.map((record) =>
+      machineListEntryV1(record, connected(record.machineId)),
+    ),
     serverTime: iso(now),
   };
 }
@@ -247,7 +249,7 @@ export async function enrollMachineV1(
       "machine record",
     );
     await transaction.put(machineKeyV1(record.machineId), record);
-    // One-time: the offer is gone whether or not the agent ever polls.
+    // One-time: the offer is gone whether or not the agent ever connects.
     await transaction.delete(machinePairingKeyV1(input.machineId));
     return record;
   });
@@ -278,7 +280,7 @@ export async function revokeMachineV1(
   });
 }
 
-/** Every poll refreshes presence. This is the whole of how `connected` is fed. */
+/** When the machine last connected, disconnected, claimed or reported. */
 export async function touchMachineV1(
   storage: MachineStorageV1,
   machineId: string,
@@ -317,7 +319,7 @@ async function readQueueV1(
       });
     } catch {
       // Same rule as the registry: an undecodable row is not delivered and is
-      // not a reason a poll fails.
+      // not a reason a connect fails.
     }
   }
   return commands;
@@ -405,9 +407,10 @@ export async function dispatchMachineCommandV1(
 /**
  * Expire the leases a vanished agent left behind.
  *
- * Run before every poll and every claim, so the sweep needs no alarm of its
- * own: the only party who can be harmed by a stuck lease is the machine whose
- * queue it is on, and that machine is the one asking.
+ * Run when the machine connects, claims, or is dispatched to, so the sweep
+ * needs no alarm of its own: the only party who can be harmed by a stuck lease
+ * is the machine whose queue it is on, and each of those is a moment it is
+ * either asking or about to be offered work.
  */
 export async function sweepMachineLeasesV1(
   storage: MachineStorageV1,
@@ -473,7 +476,7 @@ export async function sweepMachineLeasesV1(
   });
 }
 
-/** What a poll answers with: every command still waiting for this machine. */
+/** Every command still waiting to be claimed on this machine. */
 export async function pendingMachineCommandsV1(
   storage: MachineStorageWritesV1,
   machineId: string,
@@ -614,6 +617,3 @@ export async function readMachineResultV1(
   if (stored === undefined) return undefined;
   return decodeMachineCommandResultV1(stored, "stored machine result");
 }
-
-/** Re-exported so a caller reads presence from one place. */
-export { machineConnectedV1 };

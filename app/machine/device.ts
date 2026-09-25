@@ -3,12 +3,16 @@
 // This is the real agent — the one the Electron shell runs — and it is written
 // here rather than in `src/desktop.ts` for one reason: everything that decides
 // *what happens* must run in CI. So the loop holds no `child_process`, no
-// `node:fs`, no `electron` and no ambient clock. It is handed four seams:
+// `node:fs`, no `electron` and no ambient clock. It is handed five seams:
 //
 //   fetch      how a request leaves the laptop
+//   webSocket  how the one socket to the backend is opened
 //   secrets    where the machine token rests between runs (the OS keychain)
 //   runner     what actually executes an op (the only untested surface)
 //   clock      `now` and `sleep`, so backoff is asserted rather than waited on
+//
+// Commands arrive down one WebSocket the User Durable Object holds while it
+// hibernates; claims and results go back as ordinary POSTs.
 //
 // `MachineAgentDriverV1` in `./testing.ts` is the *stub* agent: it speaks the
 // same wire but scripts its answers. This is the shipped one. They are checked
@@ -18,9 +22,10 @@
 // Two behaviours are worth naming because they are policy, not plumbing:
 //
 //  1. **A 401 un-enrols.** Revocation bumps `keyVersion`, so a revoked token
-//     fails every route forever. An agent that kept retrying it would poll a
-//     door that will never open again and would keep a dead secret on disk.
-//     The stored token is cleared and the loop stops.
+//     fails every route forever, and a revoked machine's socket is closed with
+//     `4001`. An agent that kept retrying would knock on a door that will never
+//     open again and would keep a dead secret on disk. The stored token is
+//     cleared and the loop stops.
 //  2. **A command is claimed before it is run and answered after.** A claim
 //     that loses the race answers `already-claimed` and the agent does not
 //     run it: first claim wins is the protocol's guarantee against a duplicate
@@ -32,8 +37,9 @@ import {
   decodeMachineClaimReceiptV1,
   decodeMachineEnrollmentReceiptV1,
   decodeMachineIdV1,
-  decodeMachinePollResultV1,
   decodeMachineResultReceiptV1,
+  decodeMachineSocketFrameV1,
+  MACHINE_SOCKET_REVOKED_CODE_V1,
   machineRoutePathV1,
   type MachineCapabilityV1,
   type MachineCommandResultV1,
@@ -203,13 +209,14 @@ export const MACHINE_AGENT_BACKOFF_V1 = {
 export const MACHINE_AGENT_IDLE_MS_V1 = 5_000;
 
 /**
- * How long to wait before the next poll after `failures` consecutive failures.
+ * How long to wait before reconnecting after `failures` consecutive failures.
  *
  * Pure, and jittered from an injected `random`, so a test asserts the exact
- * number rather than a range. `failures` of 0 is "the last poll worked": the
- * agent does not sleep at all, because the long poll is its own pacing.
+ * number rather than a range, and so a deploy that closes every socket at once
+ * is not answered by every desktop at once. A socket that opened and later
+ * closed counts as one failure.
  */
-export function machinePollBackoffV1(
+export function machineReconnectBackoffV1(
   failures: number,
   random: () => number = Math.random,
   bounds: {
@@ -237,8 +244,8 @@ export interface MachineDeviceAgentStatusV1 {
   machineId?: string;
   label?: string;
   origin?: string;
-  /** When the last poll was answered, successfully or not. */
-  lastPollAt?: string;
+  /** When the socket last opened. */
+  lastConnectedAt?: string;
   /** Why the last cycle failed, if it did. Never carries a token. */
   lastError?: string;
   /** Consecutive failures, which is what the backoff is a function of. */
@@ -269,7 +276,7 @@ export function decodeMachineDeviceAgentStatusV1(
     "machineId",
     "label",
     "origin",
-    "lastPollAt",
+    "lastConnectedAt",
     "lastError",
     "failures",
   ];
@@ -297,7 +304,7 @@ export function decodeMachineDeviceAgentStatusV1(
     throw new MachineDecodeError(`${label} failures must be a counter`);
   }
   const optional = (
-    key: "machineId" | "label" | "origin" | "lastPollAt" | "lastError",
+    key: "machineId" | "label" | "origin" | "lastConnectedAt" | "lastError",
   ): Record<string, string> | Record<string, never> =>
     value[key] === undefined
       ? {}
@@ -309,17 +316,137 @@ export function decodeMachineDeviceAgentStatusV1(
     ...optional("machineId"),
     ...optional("label"),
     ...optional("origin"),
-    ...optional("lastPollAt"),
+    ...optional("lastConnectedAt"),
     ...optional("lastError"),
     failures: value.failures as number,
   };
 }
+
+/**
+ * The one socket, as the agent reads it: frames pulled in order, so a command
+ * that takes a minute to run holds the next frame rather than racing it.
+ */
+export interface MachineSocketV1 {
+  /** The next event. After a `close`, every later call answers it again. */
+  receive(): Promise<MachineSocketEventV1>;
+  send(text: string): void;
+  close(code?: number, reason?: string): void;
+}
+
+export type MachineSocketEventV1 =
+  | { type: "message"; data: string }
+  | { type: "close"; code: number; reason: string };
+
+/** What a platform WebSocket offers, whichever runtime built it. */
+export interface MachineWebSocketLikeV1 {
+  addEventListener(
+    type: "message" | "close" | "error",
+    listener: (event: {
+      data?: unknown;
+      code?: number;
+      reason?: string;
+    }) => void,
+  ): void;
+  send(text: string): void;
+  close(code?: number, reason?: string): void;
+}
+
+/** A platform WebSocket, already open, as a `MachineSocketV1`. */
+export function machineSocketFromWebSocketV1(
+  socket: MachineWebSocketLikeV1,
+): MachineSocketV1 {
+  const queued: MachineSocketEventV1[] = [];
+  const waiting: ((event: MachineSocketEventV1) => void)[] = [];
+  let closed: MachineSocketEventV1 | undefined;
+  const deliver = (event: MachineSocketEventV1): void => {
+    if (closed) return;
+    if (event.type === "close") closed = event;
+    const waiter = waiting.shift();
+    if (waiter) waiter(event);
+    else queued.push(event);
+    if (closed) for (const next of waiting.splice(0)) next(closed);
+  };
+  socket.addEventListener("message", (event) => {
+    if (typeof event.data === "string") {
+      deliver({ type: "message", data: event.data });
+    }
+  });
+  socket.addEventListener("close", (event) => {
+    deliver({
+      type: "close",
+      code: event.code ?? 1006,
+      reason: event.reason ?? "",
+    });
+  });
+  socket.addEventListener("error", () => {
+    deliver({ type: "close", code: 1006, reason: "socket error" });
+  });
+  return {
+    receive: () => {
+      const next = queued.shift() ?? closed;
+      if (next) return Promise.resolve(next);
+      return new Promise((resolve) => waiting.push(resolve));
+    },
+    send: (text) => socket.send(text),
+    close: (code, reason) => {
+      try {
+        socket.close(code, reason);
+      } catch {
+        // Already closed.
+      }
+    },
+  };
+}
+
+/**
+ * The `webSocket` seam over a `fetch` that can upgrade, as workerd's does: the
+ * handshake is an ordinary request, so the token rides in the same header as
+ * every other machine route and a refusal arrives with its status.
+ */
+export function fetchUpgradeMachineWebSocketV1(
+  fetch: (input: string, init?: RequestInit) => Promise<Response>,
+): (url: string, token: string) => Promise<MachineSocketV1> {
+  return async (url, token) => {
+    const target = new URL(url);
+    target.protocol = target.protocol === "wss:" ? "https:" : "http:";
+    const response = await fetch(target.toString(), {
+      headers: { upgrade: "websocket", authorization: `Bearer ${token}` },
+    });
+    const socket = (
+      response as Response & {
+        webSocket?: MachineWebSocketLikeV1 & { accept(): void };
+      }
+    ).webSocket;
+    if (response.status !== 101 || !socket) {
+      const body = await response.text();
+      throw new MachineDeviceAgentError(
+        response.status,
+        `machine socket was refused with ${response.status}: ${body.slice(0, 200)}`,
+      );
+    }
+    socket.accept();
+    return machineSocketFromWebSocketV1(socket);
+  };
+}
+
+/** How often the agent sends the keep-alive the backend answers unwoken. */
+export const MACHINE_AGENT_PING_MS_V1 = 30_000;
 
 export interface MachineDeviceAgentOptionsV1 {
   /** The deployment the machine dials. */
   origin: string;
   /** Injected: the platform's `fetch`. */
   fetch(input: string, init?: RequestInit): Promise<Response>;
+  /**
+   * Open the socket at `url` (`wss:` for an `https:` origin) and resolve once
+   * it is open. The token is presented as `Authorization: Bearer <token>`,
+   * exactly as on every other machine route: the agent is never a browser,
+   * and every runtime it runs in (workerd's fetch upgrade, Bun, Deno, Node,
+   * Dart) can set a header on a WebSocket handshake. A refused upgrade
+   * rejects, with a `MachineDeviceAgentError` carrying the status when the
+   * runtime can see it.
+   */
+  webSocket(url: string, token: string): Promise<MachineSocketV1>;
   secrets: MachineSecretStoreV1;
   runner: MachineCommandRunnerV1;
   /** The machine's own name for itself — a hostname. */
@@ -343,10 +470,12 @@ export class MachineDeviceAgentError extends Error {
   }
 }
 
-/** One poll-claim-run-report cycle's outcome, for tests and for the status. */
+/** One connection's outcome, for tests and for the status. */
 export interface MachineDeviceAgentCycleV1 {
   /** False when there is no stored enrollment: nothing was attempted. */
   paired: boolean;
+  /** Frames the backend sent while this connection was open. */
+  frames: number;
   delivered: number;
   claimed: number;
   alreadyClaimed: number;
@@ -366,7 +495,7 @@ export class MachineDeviceAgentV1 {
   private loaded = false;
   private running = false;
   private failures = 0;
-  private lastPollAt: string | undefined;
+  private lastConnectedAt: string | undefined;
   private lastError: string | undefined;
   private loop: Promise<void> | undefined;
   private controller: AbortController | undefined;
@@ -459,7 +588,9 @@ export class MachineDeviceAgentV1 {
             label: this.state.label,
             origin: this.state.origin,
           }),
-      ...(this.lastPollAt === undefined ? {} : { lastPollAt: this.lastPollAt }),
+      ...(this.lastConnectedAt === undefined
+        ? {}
+        : { lastConnectedAt: this.lastConnectedAt }),
       ...(this.lastError === undefined ? {} : { lastError: this.lastError }),
       failures: this.failures,
     };
@@ -547,18 +678,68 @@ export class MachineDeviceAgentV1 {
     return this.status();
   }
 
+  /** The socket's URL: this origin, as `wss:` for `https:`. */
+  private socketUrl(machineId: string): string {
+    const url = new URL(
+      machineRoutePathV1("socket", { machineId }),
+      this.options.origin,
+    );
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    return url.toString();
+  }
+
   /**
-   * One cycle: poll, then claim, run and answer everything the poll returned.
+   * Open the socket, or say why not.
+   *
+   * A runtime's WebSocket often cannot report the status of a refused upgrade.
+   * The gateway checks the token before the upgrade, so a plain GET of the same
+   * route answers `426` for a live token and `401` for a dead one — which is
+   * the one distinction the agent must not miss.
+   */
+  private async open(
+    state: MachineEnrollmentStateV1,
+  ): Promise<MachineSocketV1> {
+    try {
+      return await this.options.webSocket(
+        this.socketUrl(state.machineId),
+        state.token,
+      );
+    } catch (error) {
+      if (!(error instanceof MachineDeviceAgentError)) {
+        try {
+          await this.call(
+            machineRoutePathV1("socket", { machineId: state.machineId }),
+            { token: state.token },
+          );
+        } catch (probed) {
+          if (
+            probed instanceof MachineDeviceAgentError &&
+            (probed.status === 401 || probed.status === 403)
+          ) {
+            throw probed;
+          }
+        }
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * One connection: open the socket, then claim, run and answer every command
+   * it delivers, until it closes, `signal` aborts, or `frames` frames have
+   * been handled.
    *
    * Never throws. Every failure is a value, because the loop's job is to keep
-   * polling and a thrown error in a background loop is a silently dead agent.
+   * reconnecting and a thrown error in a background loop is a silently dead
+   * agent.
    */
-  async runOnce(
-    waitSeconds: number = MACHINE_LIMITS_V1.pollMaxWaitSeconds,
-    signal: AbortSignal = new AbortController().signal,
+  async connectOnce(
+    options: { signal?: AbortSignal; frames?: number } = {},
   ): Promise<MachineDeviceAgentCycleV1> {
+    const signal = options.signal ?? new AbortController().signal;
     const cycle: MachineDeviceAgentCycleV1 = {
       paired: true,
+      frames: 0,
       delivered: 0,
       claimed: 0,
       alreadyClaimed: 0,
@@ -570,61 +751,49 @@ export class MachineDeviceAgentV1 {
       cycle.error = this.lastError ?? "this machine is not paired";
       return cycle;
     }
+    let socket: MachineSocketV1 | undefined;
+    let pinger: ReturnType<typeof setInterval> | undefined;
+    let stopped = (): void => {};
+    const aborted = new Promise<MachineSocketEventV1>((resolve) => {
+      stopped = () => resolve({ type: "close", code: 1000, reason: "stopped" });
+      if (signal.aborted) stopped();
+      else signal.addEventListener("abort", stopped, { once: true });
+    });
     try {
-      const answered = decodeMachinePollResultV1(
-        await this.call(
-          machineRoutePathV1("poll", {
-            machineId: state.machineId,
-            waitSeconds: Math.min(
-              waitSeconds,
-              MACHINE_LIMITS_V1.pollMaxWaitSeconds,
-            ),
-          }),
-          { token: state.token, signal },
-        ),
-      );
-      this.lastPollAt = new Date(this.now()).toISOString();
-      cycle.delivered = answered.commands.length;
-      for (const command of answered.commands) {
-        if (signal.aborted) break;
-        const receipt = decodeMachineClaimReceiptV1(
-          await this.call(
-            machineRoutePathV1("claim", {
-              machineId: state.machineId,
-              commandId: command.commandId,
-            }),
-            { method: "POST", token: state.token, body: JSON.stringify({}) },
-          ),
-        );
-        if (receipt.status !== "claimed") {
-          // Somebody else holds the lease. Running it anyway is the one thing
-          // "recovery never silently duplicates" forbids.
-          cycle.alreadyClaimed += 1;
-          continue;
-        }
-        cycle.claimed += 1;
-        const report = await this.execute(command, signal);
-        decodeMachineResultReceiptV1(
-          await this.call(
-            machineRoutePathV1("result", {
-              machineId: state.machineId,
-              commandId: command.commandId,
-            }),
-            {
-              method: "POST",
-              token: state.token,
-              body: JSON.stringify({
-                schemaVersion: 1,
-                commandId: command.commandId,
-                ...report,
-              }),
-            },
-          ),
-        );
-        cycle.reported += 1;
-      }
+      socket = await this.open(state);
+      const open = socket;
+      this.lastConnectedAt = new Date(this.now()).toISOString();
       this.failures = 0;
       this.lastError = undefined;
+      this.announce();
+      pinger = setInterval(() => {
+        try {
+          open.send("ping");
+        } catch {
+          // A socket that cannot take a ping is closing, and says so.
+        }
+      }, MACHINE_AGENT_PING_MS_V1);
+      while (options.frames === undefined || cycle.frames < options.frames) {
+        const event = await Promise.race([open.receive(), aborted]);
+        if (event.type === "close") {
+          if (signal.aborted) break;
+          if (event.code === MACHINE_SOCKET_REVOKED_CODE_V1) {
+            throw new MachineDeviceAgentError(401, "this machine was revoked");
+          }
+          throw new MachineDeviceAgentError(
+            0,
+            `the socket closed (${event.code})`,
+          );
+        }
+        if (event.data === "pong") continue;
+        const frame = decodeMachineSocketFrameV1(JSON.parse(event.data));
+        cycle.frames += 1;
+        cycle.delivered += frame.commands.length;
+        for (const command of frame.commands) {
+          if (signal.aborted) break;
+          await this.handle(state, command, signal, cycle);
+        }
+      }
     } catch (error) {
       cycle.error = message(error);
       this.lastError = cycle.error;
@@ -640,9 +809,61 @@ export class MachineDeviceAgentV1 {
         cycle.unenrolled = true;
         this.lastError = "this machine was revoked; pair it again to reconnect";
       }
+    } finally {
+      signal.removeEventListener("abort", stopped);
+      if (pinger !== undefined) clearInterval(pinger);
+      try {
+        socket?.close(1000, "done");
+      } catch {
+        // Already closed.
+      }
     }
     this.announce();
     return cycle;
+  }
+
+  /** Claim one delivered command, run it if the claim won, and answer it. */
+  private async handle(
+    state: MachineEnrollmentStateV1,
+    command: MachineCommandV1,
+    signal: AbortSignal,
+    cycle: MachineDeviceAgentCycleV1,
+  ): Promise<void> {
+    const receipt = decodeMachineClaimReceiptV1(
+      await this.call(
+        machineRoutePathV1("claim", {
+          machineId: state.machineId,
+          commandId: command.commandId,
+        }),
+        { method: "POST", token: state.token, body: JSON.stringify({}) },
+      ),
+    );
+    if (receipt.status !== "claimed") {
+      // Somebody else holds the lease. Running it anyway is the one thing
+      // "recovery never silently duplicates" forbids.
+      cycle.alreadyClaimed += 1;
+      return;
+    }
+    cycle.claimed += 1;
+    const report = await this.execute(command, signal);
+    decodeMachineResultReceiptV1(
+      await this.call(
+        machineRoutePathV1("result", {
+          machineId: state.machineId,
+          commandId: command.commandId,
+        }),
+        {
+          method: "POST",
+          token: state.token,
+          body: JSON.stringify({
+            schemaVersion: 1,
+            commandId: command.commandId,
+            ...report,
+          }),
+        },
+      ),
+    );
+    cycle.reported += 1;
   }
 
   /**
@@ -692,14 +913,11 @@ export class MachineDeviceAgentV1 {
 
   private async pump(signal: AbortSignal): Promise<void> {
     while (!signal.aborted) {
-      const cycle = await this.runOnce(
-        MACHINE_LIMITS_V1.pollMaxWaitSeconds,
-        signal,
-      );
+      const cycle = await this.connectOnce({ signal });
       if (cycle.unenrolled) return;
       if (signal.aborted) return;
       const delay = cycle.paired
-        ? machinePollBackoffV1(this.failures, () => this.random())
+        ? machineReconnectBackoffV1(this.failures, () => this.random())
         : MACHINE_AGENT_IDLE_MS_V1;
       if (delay > 0) await this.sleep(delay, signal);
     }

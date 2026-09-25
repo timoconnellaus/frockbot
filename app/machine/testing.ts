@@ -2,25 +2,25 @@
 //
 // `MachineAgentDriverV1` is the honest half of "no native binary in slice R".
 // It is not a mock of the protocol: it speaks the real wire, over an injected
-// `fetch`, against the real routes — pair, enroll, poll, claim, result — and
-// decodes every answer with the same decoders the desktop agent will. What it
+// `fetch` and an injected socket, against the real routes — pair, enroll,
+// socket, claim, result — and decodes every answer and frame with the same
+// decoders the desktop agent does. What it
 // does *not* do is shell out. So the untested surface is `child_process` and
 // nothing else, and the day a real agent lands it can be checked byte for byte
 // against this one.
 //
 // It is deliberately scriptable in the ways a laptop actually fails: a command
 // it claims and never answers (the machine slept), one it never claims (the
-// poll was lost), one it answers twice (the POST was retried), and one it
+// frame was lost), one it answers twice (the POST was retried), and one it
 // claims twice (two agents, or one agent and its own retry).
 
 import {
-  MACHINE_LIMITS_V1,
   decodeMachineClaimReceiptV1,
   decodeMachineEnrollmentReceiptV1,
   decodeMachineListViewV1,
   decodeMachinePairingOfferV1,
-  decodeMachinePollResultV1,
   decodeMachineResultReceiptV1,
+  decodeMachineSocketFrameV1,
   machineRoutePathV1,
   type MachineCapabilityV1,
   type MachineClaimReceiptV1,
@@ -30,8 +30,15 @@ import {
   type MachinePairingOfferV1,
   type MachinePlatformV1,
   type MachineResultReceiptV1,
+  type MachineSocketFrameV1,
 } from "@frockbot/core/machine-protocol";
 import type { MachineStorageV1, MachineStorageWritesV1 } from "./store.js";
+import type { MachineSocketsV1 } from "./user.js";
+import {
+  machineSocketFromWebSocketV1,
+  type MachineSocketV1,
+  type MachineWebSocketLikeV1,
+} from "./device.js";
 import { createTransactionalMapStorageV1 } from "../testkit/transactional-map.js";
 
 // ---------------------------------------------------------------------------
@@ -46,6 +53,71 @@ export interface MemoryMachineStorageV1 extends MachineStorageV1 {
 /** The Durable Object's storage contract and nothing more. */
 export function createMemoryMachineStorageV1(): MemoryMachineStorageV1 {
   return createTransactionalMapStorageV1<MachineStorageWritesV1>();
+}
+
+// ---------------------------------------------------------------------------
+// Sockets
+// ---------------------------------------------------------------------------
+
+export interface MemoryMachineSocketsV1 extends MachineSocketsV1 {
+  /**
+   * Accept one socket for `machineId`, as the Durable Object does, sending
+   * `first` down it. Answers the machine's end.
+   */
+  accept(machineId: string, first: MachineSocketFrameV1): MachineSocketV1;
+}
+
+/** The Durable Object's socket list, in memory, for a test with no workerd. */
+export function createMemoryMachineSocketsV1(): MemoryMachineSocketsV1 {
+  type Listener = Parameters<MachineWebSocketLikeV1["addEventListener"]>[1];
+  interface Held {
+    emit(type: "message" | "close", event: Parameters<Listener>[0]): void;
+  }
+  const held = new Map<string, Set<Held>>();
+  const sockets = (machineId: string): Set<Held> => {
+    const set = held.get(machineId) ?? new Set<Held>();
+    held.set(machineId, set);
+    return set;
+  };
+  return {
+    accept(machineId, first) {
+      const listeners = new Map<string, Listener[]>();
+      const entry: Held = {
+        emit: (type, event) => {
+          for (const listener of listeners.get(type) ?? []) listener(event);
+        },
+      };
+      const end = (code: number, reason: string): void => {
+        if (!sockets(machineId).delete(entry)) return;
+        entry.emit("close", { code, reason });
+      };
+      const client = machineSocketFromWebSocketV1({
+        addEventListener: (type, listener) => {
+          listeners.set(type, [...(listeners.get(type) ?? []), listener]);
+        },
+        send: (text) => {
+          if (text === "ping") entry.emit("message", { data: "pong" });
+        },
+        close: (code = 1000, reason = "") => end(code, reason),
+      });
+      sockets(machineId).add(entry);
+      entry.emit("message", { data: JSON.stringify(first) });
+      return client;
+    },
+    push(machineId, frame) {
+      if (frame.commands.length === 0) return;
+      for (const entry of sockets(machineId)) {
+        entry.emit("message", { data: JSON.stringify(frame) });
+      }
+    },
+    connected: (machineId) => sockets(machineId).size > 0,
+    close(machineId, code, reason) {
+      for (const entry of [...sockets(machineId)]) {
+        sockets(machineId).delete(entry);
+        entry.emit("close", { code, reason });
+      }
+    },
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -67,12 +139,16 @@ export type MachineAgentActionV1 =
       kind: "double-claim";
       result: Omit<MachineCommandResultV1, "schemaVersion" | "commandId">;
     }
-  /** Leave it queued: the poll answer was lost before it was acted on. */
+  /** Leave it queued: the frame was lost before it was acted on. */
   | { kind: "ignore" };
 
 export interface MachineAgentDriverOptionsV1 {
   /** Injected: `SELF.fetch` in workerd, a stub in a unit test. */
   fetch(input: string, init?: RequestInit): Promise<Response>;
+  /** Injected: the same seam the desktop agent is handed. */
+  webSocket(url: string, token: string): Promise<MachineSocketV1>;
+  /** How long `next` waits for a frame before failing the test. */
+  frameTimeoutMs?: number;
   /** The origin every path is resolved against. */
   origin: string;
   label?: string;
@@ -183,23 +259,59 @@ export class MachineAgentDriverV1 {
     return { machineId: this.machineId, token: this.token };
   }
 
-  /** One long poll. `waitSeconds` of 0 answers immediately. */
-  async poll(waitSeconds = 0): Promise<MachineCommandV1[]> {
+  private socket: MachineSocketV1 | undefined;
+
+  /** Open the machine's socket. Its first frame is waiting on `next`. */
+  async connect(): Promise<void> {
     const { machineId, token } = this.identity();
-    const answered = decodeMachinePollResultV1(
-      await this.call(
-        machineRoutePathV1("poll", {
-          machineId,
-          waitSeconds: Math.min(
-            waitSeconds,
-            MACHINE_LIMITS_V1.pollMaxWaitSeconds,
-          ),
-        }),
-        { token },
-      ),
+    const url = new URL(
+      machineRoutePathV1("socket", { machineId }),
+      this.options.origin,
     );
-    this.delivered.push(...answered.commands);
-    return answered.commands;
+    url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+    this.socket = await this.options.webSocket(url.toString(), token);
+  }
+
+  /** Close the socket, as a laptop that quits does. */
+  disconnect(): void {
+    this.socket?.close(1000, "done");
+    this.socket = undefined;
+  }
+
+  /**
+   * The commands in the next frame the backend sends. Fails on a closed
+   * socket, and on a frame that never comes, rather than hanging the test.
+   */
+  async next(): Promise<MachineCommandV1[]> {
+    if (!this.socket) await this.connect();
+    const socket = this.socket!;
+    const timeoutMs = this.options.frameTimeoutMs ?? 5_000;
+    for (;;) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      const event = await Promise.race([
+        socket.receive(),
+        new Promise<never>((_, reject) => {
+          timer = setTimeout(
+            () =>
+              reject(
+                new MachineAgentError(0, `no frame within ${timeoutMs}ms`),
+              ),
+            timeoutMs,
+          );
+        }),
+      ]).finally(() => clearTimeout(timer));
+      if (event.type === "close") {
+        this.socket = undefined;
+        throw new MachineAgentError(
+          event.code,
+          `the socket closed: ${event.reason}`,
+        );
+      }
+      if (event.data === "pong") continue;
+      const frame = decodeMachineSocketFrameV1(JSON.parse(event.data));
+      this.delivered.push(...frame.commands);
+      return frame.commands;
+    }
   }
 
   async claim(commandId: string): Promise<MachineClaimReceiptV1> {
@@ -242,11 +354,11 @@ export class MachineAgentDriverV1 {
   }
 
   /**
-   * One turn of the agent's loop: poll, then claim, run and answer each
-   * command the script says to.
+   * One turn of the agent's loop: the next frame, then claim, run and answer
+   * each command in it the script says to. Connects first if it has to.
    */
-  async runOnce(waitSeconds = 0): Promise<MachineAgentRunSummaryV1> {
-    const commands = await this.poll(waitSeconds);
+  async runOnce(): Promise<MachineAgentRunSummaryV1> {
+    const commands = await this.next();
     const summary: MachineAgentRunSummaryV1 = {
       delivered: commands,
       claimed: [],

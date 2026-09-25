@@ -1,23 +1,32 @@
 // The device agent's loop, proved without a laptop.
 //
 // The wire is real — every request is built by `machineRoutePathV1` and every
-// answer decoded by the shipped decoders — and only the socket is a fake. What
+// answer and frame decoded by the shipped decoders — and only the transport is
+// a fake. What
 // is asserted here is the behaviour the plan calls for in R4: backoff and
 // jitter, output bounds and timeouts reaching the result, token load and store
-// failure paths, and the two policies that are the agent's own (a 401 forgets
-// the token; a lost claim does not run the command).
+// failure paths, and the two policies that are the agent's own (a 401 or a
+// revoked socket forgets the token; a lost claim does not run the command).
 
 import { describe, expect, test } from "bun:test";
-import type { MachineCommandV1 } from "@frockbot/core/machine-protocol";
+import {
+  MACHINE_SOCKET_REVOKED_CODE_V1,
+  type MachineCommandV1,
+} from "@frockbot/core/machine-protocol";
 import {
   MACHINE_AGENT_BACKOFF_V1,
+  MachineDeviceAgentError,
   MachineDeviceAgentV1,
   createMemoryMachineSecretStoreV1,
   decodeMachineDeviceAgentStatusV1,
   decodeMachineEnrollmentStateV1,
-  machinePollBackoffV1,
+  fetchUpgradeMachineWebSocketV1,
+  machineReconnectBackoffV1,
+  machineSocketFromWebSocketV1,
   type MachineCommandReportV1,
   type MachineSecretStoreV1,
+  type MachineSocketEventV1,
+  type MachineSocketV1,
 } from "./device.js";
 
 const ORIGIN = "https://bot.example.com";
@@ -91,14 +100,65 @@ const ENROLLED = {
   keyVersion: 1,
 };
 
+/** A socket that plays a script, then stays open with nothing to say. */
+function scripted(events: (MachineSocketEventV1 | unknown)[]): {
+  socket: MachineSocketV1;
+  sent: string[];
+  closed: number[];
+} {
+  const queue = events.map((event) =>
+    typeof event === "object" &&
+    event !== null &&
+    "type" in event &&
+    (event.type === "close" || event.type === "message")
+      ? (event as MachineSocketEventV1)
+      : ({ type: "message", data: JSON.stringify(event) } as const),
+  );
+  const sent: string[] = [];
+  const closed: number[] = [];
+  return {
+    sent,
+    closed,
+    socket: {
+      receive: () => {
+        const next = queue.shift();
+        return next ? Promise.resolve(next) : new Promise(() => {});
+      },
+      send: (text) => sent.push(text),
+      close: (code = 1000) => closed.push(code),
+    },
+  };
+}
+
+function frame(...commands: MachineCommandV1[]) {
+  return {
+    type: "commands",
+    commands,
+    serverTime: "2026-09-01T00:00:00.000Z",
+  };
+}
+
+interface Opened {
+  url: string;
+  token: string;
+}
+
 function agent(options: {
   fetch(input: string, init?: RequestInit): Promise<Response>;
+  webSocket?(url: string, token: string): Promise<MachineSocketV1>;
+  opened?: Opened[];
   secrets?: MachineSecretStoreV1;
   run?(command: MachineCommandV1): Promise<MachineCommandReportV1>;
 }): MachineDeviceAgentV1 {
   return new MachineDeviceAgentV1({
     origin: ORIGIN,
     fetch: options.fetch,
+    webSocket: (url, token) => {
+      options.opened?.push({ url, token });
+      return options.webSocket
+        ? options.webSocket(url, token)
+        : Promise.reject(new Error("no socket in this test"));
+    },
     secrets: options.secrets ?? createMemoryMachineSecretStoreV1(),
     runner: {
       run: (received) =>
@@ -122,25 +182,29 @@ function agent(options: {
 }
 
 describe("machine device agent backoff", () => {
-  test("a working poll does not sleep, and failures grow to a ceiling", () => {
-    expect(machinePollBackoffV1(0, () => 0.5)).toBe(0);
+  test("a working connection does not wait, and failures grow to a ceiling", () => {
+    expect(machineReconnectBackoffV1(0, () => 0.5)).toBe(0);
     // random() of 0.5 is the midpoint of the jitter window: no jitter at all,
     // so the exponential itself is asserted rather than a range.
-    expect(machinePollBackoffV1(1, () => 0.5)).toBe(
+    expect(machineReconnectBackoffV1(1, () => 0.5)).toBe(
       MACHINE_AGENT_BACKOFF_V1.baseMs,
     );
-    expect(machinePollBackoffV1(2, () => 0.5)).toBe(2_000);
-    expect(machinePollBackoffV1(3, () => 0.5)).toBe(4_000);
-    expect(machinePollBackoffV1(20, () => 0.5)).toBe(
+    expect(machineReconnectBackoffV1(2, () => 0.5)).toBe(2_000);
+    expect(machineReconnectBackoffV1(3, () => 0.5)).toBe(4_000);
+    expect(machineReconnectBackoffV1(20, () => 0.5)).toBe(
       MACHINE_AGENT_BACKOFF_V1.maxMs,
     );
   });
 
   test("jitter spreads a delay either side and never below zero", () => {
-    expect(machinePollBackoffV1(1, () => 0)).toBe(800);
-    expect(machinePollBackoffV1(1, () => 0.999)).toBe(1_200);
+    expect(machineReconnectBackoffV1(1, () => 0)).toBe(800);
+    expect(machineReconnectBackoffV1(1, () => 0.999)).toBe(1_200);
     expect(
-      machinePollBackoffV1(1, () => 0, { baseMs: 10, maxMs: 10, jitter: 4 }),
+      machineReconnectBackoffV1(1, () => 0, {
+        baseMs: 10,
+        maxMs: 10,
+        jitter: 4,
+      }),
     ).toBe(0);
   });
 });
@@ -184,13 +248,15 @@ describe("machine device agent enrollment", () => {
         enrolledAt: "2026-09-01T00:00:00.000Z",
       }),
     );
-    const backend = server(() => ({ json: { commands: [] } }));
-    const device = agent({ fetch: backend.fetch, secrets });
+    const backend = server(() => ({}));
+    const opened: Opened[] = [];
+    const device = agent({ fetch: backend.fetch, secrets, opened });
 
-    const cycle = await device.runOnce(0);
+    const cycle = await device.connectOnce();
 
     expect(cycle.paired).toBe(false);
     expect(backend.calls).toEqual([]);
+    expect(opened).toEqual([]);
     expect(await secrets.read()).toBeUndefined();
   });
 
@@ -200,25 +266,24 @@ describe("machine device agent enrollment", () => {
       write: () => Promise.resolve(),
       clear: () => Promise.resolve(),
     };
-    const backend = server(() => ({ json: { commands: [] } }));
-    const device = agent({ fetch: backend.fetch, secrets });
+    const backend = server(() => ({}));
+    const opened: Opened[] = [];
+    const device = agent({ fetch: backend.fetch, secrets, opened });
 
-    const cycle = await device.runOnce(0);
+    const cycle = await device.connectOnce();
 
     expect(cycle.paired).toBe(false);
     expect(cycle.error).toContain("the keychain is locked");
     expect(device.status().enrolled).toBe(false);
     expect(backend.calls).toEqual([]);
+    expect(opened).toEqual([]);
   });
 
   test("stored nonsense is discarded rather than presented", async () => {
     const secrets = createMemoryMachineSecretStoreV1("{not json");
-    const device = agent({
-      fetch: server(() => ({ json: { commands: [] } })).fetch,
-      secrets,
-    });
+    const device = agent({ fetch: server(() => ({})).fetch, secrets });
 
-    expect((await device.runOnce(0)).paired).toBe(false);
+    expect((await device.connectOnce()).paired).toBe(false);
     expect(await secrets.read()).toBeUndefined();
   });
 });
@@ -236,82 +301,86 @@ function pairedStore(): MachineSecretStoreV1 {
   );
 }
 
-describe("machine device agent cycle", () => {
-  test("polls, claims, runs and reports one command in order", async () => {
+const CLAIMED = {
+  json: {
+    schemaVersion: 1,
+    commandId: "tool-0-1-0",
+    status: "claimed",
+    leaseExpiresAt: "2026-09-01T00:02:00.000Z",
+  },
+};
+
+const RECORDED = {
+  json: { schemaVersion: 1, commandId: "tool-0-1-0", status: "recorded" },
+};
+
+describe("machine device agent connection", () => {
+  test("dials the socket, then claims, runs and reports a pushed command in order", async () => {
     const reports: string[] = [];
     const backend = server((call) => {
-      if (call.path.startsWith("/api/machines/m-1/poll")) {
-        return {
-          json: {
-            schemaVersion: 1,
-            commands: [command()],
-            serverTime: "2026-09-01T00:00:00.000Z",
-          },
-        };
-      }
-      if (call.path.endsWith("/claim")) {
-        return {
-          json: {
-            schemaVersion: 1,
-            commandId: "tool-0-1-0",
-            status: "claimed",
-            leaseExpiresAt: "2026-09-01T00:02:00.000Z",
-          },
-        };
-      }
+      if (call.path.endsWith("/claim")) return CLAIMED;
       reports.push(call.body ?? "");
-      return {
-        json: { schemaVersion: 1, commandId: "tool-0-1-0", status: "recorded" },
-      };
+      return RECORDED;
     });
-    const device = agent({ fetch: backend.fetch, secrets: pairedStore() });
+    const opened: Opened[] = [];
+    const line = scripted([
+      { type: "message", data: "pong" },
+      frame(command()),
+    ]);
+    const device = agent({
+      fetch: backend.fetch,
+      secrets: pairedStore(),
+      opened,
+      webSocket: () => Promise.resolve(line.socket),
+    });
 
-    const cycle = await device.runOnce(25);
+    const cycle = await device.connectOnce({ frames: 1 });
 
+    expect(opened).toEqual([
+      {
+        url: "wss://bot.example.com/api/machines/m-1/socket",
+        token: "machine-token",
+      },
+    ]);
     expect(cycle).toMatchObject({
       paired: true,
+      frames: 1,
       delivered: 1,
       claimed: 1,
       alreadyClaimed: 0,
       reported: 1,
     });
+    expect(cycle.error).toBeUndefined();
     expect(backend.calls.map((call) => call.path)).toEqual([
-      "/api/machines/m-1/poll?wait=25",
       "/api/machines/m-1/commands/tool-0-1-0/claim",
       "/api/machines/m-1/commands/tool-0-1-0/result",
     ]);
+    expect(backend.calls[0]?.authorization).toBe("Bearer machine-token");
     expect(JSON.parse(reports[0] ?? "{}")).toMatchObject({
       commandId: "tool-0-1-0",
       outcome: "ok",
       exitCode: 0,
       stdout: "hi\n",
     });
+    // The connection is closed once the agent is done with it.
+    expect(line.closed).toEqual([1000]);
+    expect(device.status().lastConnectedAt).toBe("2026-09-01T00:00:02.000Z");
   });
 
   test("a claim that lost the race does not run the command", async () => {
     let ran = 0;
-    const backend = server((call) => {
-      if (call.path.startsWith("/api/machines/m-1/poll")) {
-        return {
-          json: {
-            schemaVersion: 1,
-            commands: [command()],
-            serverTime: "2026-09-01T00:00:00.000Z",
-          },
-        };
-      }
-      return {
-        json: {
-          schemaVersion: 1,
-          commandId: "tool-0-1-0",
-          status: "already-claimed",
-          leaseExpiresAt: "2026-09-01T00:02:00.000Z",
-        },
-      };
-    });
+    const backend = server(() => ({
+      json: {
+        schemaVersion: 1,
+        commandId: "tool-0-1-0",
+        status: "already-claimed",
+        leaseExpiresAt: "2026-09-01T00:02:00.000Z",
+      },
+    }));
     const device = agent({
       fetch: backend.fetch,
       secrets: pairedStore(),
+      webSocket: () => Promise.resolve(scripted([frame(command())]).socket),
       run: () => {
         ran += 1;
         return Promise.resolve({
@@ -322,7 +391,7 @@ describe("machine device agent cycle", () => {
       },
     });
 
-    const cycle = await device.runOnce(0);
+    const cycle = await device.connectOnce({ frames: 1 });
 
     expect(ran).toBe(0);
     expect(cycle.alreadyClaimed).toBe(1);
@@ -335,52 +404,36 @@ describe("machine device agent cycle", () => {
   test("a runner that throws still answers, so the lease is never orphaned", async () => {
     const bodies: string[] = [];
     const backend = server((call) => {
-      if (call.path.startsWith("/api/machines/m-1/poll")) {
-        return {
-          json: {
-            schemaVersion: 1,
-            commands: [command()],
-            serverTime: "2026-09-01T00:00:00.000Z",
-          },
-        };
-      }
-      if (call.path.endsWith("/claim")) {
-        return {
-          json: {
-            schemaVersion: 1,
-            commandId: "tool-0-1-0",
-            status: "claimed",
-            leaseExpiresAt: "2026-09-01T00:02:00.000Z",
-          },
-        };
-      }
+      if (call.path.endsWith("/claim")) return CLAIMED;
       bodies.push(call.body ?? "");
-      return {
-        json: { schemaVersion: 1, commandId: "tool-0-1-0", status: "recorded" },
-      };
+      return RECORDED;
     });
     const device = agent({
       fetch: backend.fetch,
       secrets: pairedStore(),
+      webSocket: () => Promise.resolve(scripted([frame(command())]).socket),
       run: () => Promise.reject(new Error("spawn ENOENT")),
     });
 
-    expect((await device.runOnce(0)).reported).toBe(1);
+    expect((await device.connectOnce({ frames: 1 })).reported).toBe(1);
     expect(JSON.parse(bodies[0] ?? "{}")).toMatchObject({
       outcome: "error",
       message: "spawn ENOENT",
     });
   });
 
-  test("a 401 forgets the token and stops the loop", async () => {
+  test("a refused upgrade with a 401 forgets the token and stops the loop", async () => {
     const secrets = pairedStore();
-    const backend = server(() => ({
-      status: 401,
-      json: { error: "machine token is invalid" },
-    }));
-    const device = agent({ fetch: backend.fetch, secrets });
+    const device = agent({
+      fetch: server(() => ({})).fetch,
+      secrets,
+      webSocket: () =>
+        Promise.reject(
+          new MachineDeviceAgentError(401, "machine token is invalid"),
+        ),
+    });
 
-    const cycle = await device.runOnce(0);
+    const cycle = await device.connectOnce();
 
     expect(cycle.unenrolled).toBe(true);
     expect(await secrets.read()).toBeUndefined();
@@ -391,21 +444,129 @@ describe("machine device agent cycle", () => {
     });
   });
 
-  test("an ordinary failure is counted, not forgotten", async () => {
+  test("an opaque refusal is told apart by a plain GET of the same route", async () => {
     const secrets = pairedStore();
-    const backend = server(() => ({ status: 503, json: { error: "closed" } }));
-    const device = agent({ fetch: backend.fetch, secrets });
+    let status = 426;
+    const backend = server(() => ({ status, json: { error: "no" } }));
+    const device = agent({
+      fetch: backend.fetch,
+      secrets,
+      webSocket: () => Promise.reject(new Error("WebSocket connection failed")),
+    });
 
-    await device.runOnce(0);
-    await device.runOnce(0);
+    // A live token: the socket failed for some other reason, so back off.
+    const live = await device.connectOnce();
+    expect(live.unenrolled).toBeUndefined();
+    expect(live.error).toBe("WebSocket connection failed");
+    expect(backend.calls).toMatchObject([
+      {
+        path: "/api/machines/m-1/socket",
+        method: "GET",
+        authorization: "Bearer machine-token",
+      },
+    ]);
+
+    // A dead one: un-enrol.
+    status = 401;
+    expect((await device.connectOnce()).unenrolled).toBe(true);
+    expect(await secrets.read()).toBeUndefined();
+  });
+
+  test("a socket closed as revoked forgets the token", async () => {
+    const secrets = pairedStore();
+    const device = agent({
+      fetch: server(() => ({})).fetch,
+      secrets,
+      webSocket: () =>
+        Promise.resolve(
+          scripted([
+            frame(),
+            {
+              type: "close",
+              code: MACHINE_SOCKET_REVOKED_CODE_V1,
+              reason: "revoked",
+            },
+          ]).socket,
+        ),
+    });
+
+    const cycle = await device.connectOnce();
+
+    expect(cycle.frames).toBe(1);
+    expect(cycle.unenrolled).toBe(true);
+    expect(await secrets.read()).toBeUndefined();
+  });
+
+  test("a 401 on a claim forgets the token", async () => {
+    const secrets = pairedStore();
+    const device = agent({
+      fetch: server(() => ({ status: 401, json: { error: "invalid" } })).fetch,
+      secrets,
+      webSocket: () => Promise.resolve(scripted([frame(command())]).socket),
+    });
+
+    expect((await device.connectOnce()).unenrolled).toBe(true);
+    expect(await secrets.read()).toBeUndefined();
+  });
+
+  test("a dropped socket is one failure; a connection that opens resets the count", async () => {
+    const secrets = pairedStore();
+    const device = agent({
+      fetch: server(() => ({})).fetch,
+      secrets,
+      webSocket: () =>
+        Promise.resolve(
+          scripted([{ type: "close", code: 1006, reason: "" }]).socket,
+        ),
+    });
+
+    const first = await device.connectOnce();
+    const second = await device.connectOnce();
+
+    expect(first.error).toBe("the socket closed (1006)");
+    expect(second.unenrolled).toBeUndefined();
+    expect(device.status().failures).toBe(1);
+    expect(await secrets.read()).not.toBeUndefined();
+  });
+
+  test("a failure to connect at all is counted each time, not forgotten", async () => {
+    const secrets = pairedStore();
+    const device = agent({
+      fetch: server(() => ({ status: 503, json: { error: "closed" } })).fetch,
+      secrets,
+      webSocket: () => Promise.reject(new Error("network is down")),
+    });
+
+    await device.connectOnce();
+    await device.connectOnce();
 
     expect(device.status().failures).toBe(2);
     expect(await secrets.read()).not.toBeUndefined();
   });
 
+  test("stopping closes the socket without counting a failure", async () => {
+    const line = scripted([frame()]);
+    const device = agent({
+      fetch: server(() => ({})).fetch,
+      secrets: pairedStore(),
+      webSocket: () => Promise.resolve(line.socket),
+    });
+    const controller = new AbortController();
+
+    const running = device.connectOnce({ signal: controller.signal });
+    await new Promise((resolve) => setTimeout(resolve, 5));
+    controller.abort();
+    const cycle = await running;
+
+    expect(cycle.frames).toBe(1);
+    expect(cycle.error).toBeUndefined();
+    expect(device.status().failures).toBe(0);
+    expect(line.closed).toEqual([1000]);
+  });
+
   test("unpairing clears the token and leaves the registry alone", async () => {
     const secrets = pairedStore();
-    const backend = server(() => ({ json: { commands: [] } }));
+    const backend = server(() => ({}));
     const device = agent({ fetch: backend.fetch, secrets });
 
     const status = await device.unpair();
@@ -414,5 +575,46 @@ describe("machine device agent cycle", () => {
     expect(await secrets.read()).toBeUndefined();
     // Nothing was asked of the backend: revocation is the browser's.
     expect(backend.calls).toEqual([]);
+  });
+});
+
+describe("machine socket adapters", () => {
+  test("a platform socket's frames are read in order, then its close forever", async () => {
+    const listeners = new Map<
+      string,
+      (event: { data?: unknown; code?: number; reason?: string }) => void
+    >();
+    const socket = machineSocketFromWebSocketV1({
+      addEventListener: (type, listener) => listeners.set(type, listener),
+      send: () => {},
+      close: () => {},
+    });
+    const waiting = socket.receive();
+    listeners.get("message")?.({ data: "one" });
+    listeners.get("message")?.({ data: "two" });
+    listeners.get("close")?.({ code: 1001, reason: "going away" });
+    listeners.get("message")?.({ data: "after" });
+    expect(await waiting).toEqual({ type: "message", data: "one" });
+    expect(await socket.receive()).toEqual({ type: "message", data: "two" });
+    const closed = { type: "close", code: 1001, reason: "going away" } as const;
+    expect(await socket.receive()).toEqual(closed);
+    expect(await socket.receive()).toEqual(closed);
+  });
+
+  test("a fetch upgrade that is refused carries its status", async () => {
+    const seen: Headers[] = [];
+    const open = fetchUpgradeMachineWebSocketV1((input, init) => {
+      expect(input).toBe("https://bot.example.com/api/machines/m-1/socket");
+      seen.push(new Headers(init?.headers));
+      return Promise.resolve(Response.json({ error: "no" }, { status: 401 }));
+    });
+    const refused = await open(
+      "wss://bot.example.com/api/machines/m-1/socket",
+      "machine-token",
+    ).catch((error: unknown) => error);
+    expect(refused).toBeInstanceOf(MachineDeviceAgentError);
+    expect((refused as MachineDeviceAgentError).status).toBe(401);
+    expect(seen[0]?.get("authorization")).toBe("Bearer machine-token");
+    expect(seen[0]?.get("upgrade")).toBe("websocket");
   });
 });

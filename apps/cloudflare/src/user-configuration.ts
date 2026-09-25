@@ -153,6 +153,13 @@ import { cleanDefaultPackagesMarkerV1 } from "./default-packages-marker-cleanup.
 import { cleanRetiredOllamaWebSearchV1 } from "./ollama-web-search-cleanup.js";
 import { cleanUserMachineMessagesV1 } from "./machine-messages-cleanup.js";
 import { ComputerLoginsLedgerV1 } from "@frockbot/app/shell/computer-logins";
+import {
+  MACHINE_SOCKET_INTERNAL_PATH_V1,
+  durableObjectMachineSocketsV1,
+  machineSocketTagV1,
+  readMachineSocketCallV1,
+  type MachineSocketAttachmentV1,
+} from "./machine-socket.js";
 import type { FlockUserTransaction } from "@frockbot/app/flock/user";
 import {
   decodeWorkspaceGenerationRecordV1,
@@ -219,7 +226,7 @@ import {
   rpcJsonSnapshotV1,
   rpcObject,
 } from "./durable-rpc.js";
-import { loggedEntryV1 } from "./entry-boundary.js";
+import { answeredEntryV1, loggedEntryV1 } from "./entry-boundary.js";
 import {
   releaseBotUploadQuotaV1,
   releaseUploadQuotaV1,
@@ -443,6 +450,11 @@ export class UserConfiguration
         }
       }
     });
+    // A desktop's keep-alive is answered without waking this object, so an
+    // idle machine socket costs nothing while it hibernates.
+    this.ctx.setWebSocketAutoResponse(
+      new WebSocketRequestResponsePair("ping", "pong"),
+    );
   }
 
   /** This User's Profile timezone, for deciding whether a save moved it. */
@@ -874,6 +886,7 @@ export class UserConfiguration
     if (!this.mounted) {
       this.mounted = createFoundationUserBackendContributions({
         storage: this.ctx.storage,
+        machineSockets: durableObjectMachineSocketsV1(this.ctx),
         readSecret: (name) =>
           name === "MACHINE_TOKEN_SECRET"
             ? this.env.MACHINE_TOKEN_SECRET
@@ -3499,15 +3512,15 @@ export class UserConfiguration
   /**
    * The registered-machine RPCs (parity register rows 48, 49, 57g).
    *
-   * The four a machine reaches — poll, claim, result, and the enrollment that
-   * precedes them — arrive from the gateway's pre-session `publicRoute`, so
-   * this object is the first place a *session* was never involved. That is
-   * exactly why each carries the token's own claims and its digest rather than
-   * a caller's assertion: the claims were verified against the deployment
-   * secret at the edge, and the digest is checked here against the machine
-   * record, which is the authority. `assertUserIdentity` still runs, so a
-   * token naming another User cannot reach this object's state even if the
-   * gateway addressed it wrongly.
+   * The four a machine reaches — its socket, claim, result, and the
+   * enrollment that precedes them — arrive from the gateway's pre-session
+   * `publicRoute`, so this object is the first place a *session* was never
+   * involved. That is exactly why each carries the token's own claims and its
+   * digest rather than a caller's assertion: the claims were verified against
+   * the deployment secret at the edge, and the digest is checked here against
+   * the machine record, which is the authority. `assertUserIdentity` still
+   * runs, so a token naming another User cannot reach this object's state even
+   * if the gateway addressed it wrongly.
    */
   async createMachinePairing(input: unknown) {
     const request = decodeRpcEnvelopeV1(
@@ -3539,21 +3552,102 @@ export class UserConfiguration
     );
   }
 
-  async pollMachine(input: unknown) {
-    const request = decodeRpcEnvelopeV1(input, {
-      userId: rpcIdentifier,
-      machineId: rpcIdentifier,
-      claims: rpcDecodedValue,
-      tokenDigest: rpcPattern(/^[0-9a-f]{64}$/, 64),
-      waitSeconds: rpcInteger({ minimum: 0, maximum: 25 }),
-    });
-    await this.assertUserIdentity(request.userId as string);
-    return (await this.machineContribution()).poll(
-      machineTokenClaimsV1(request.claims),
-      request.tokenDigest as string,
-      request.machineId as string,
-      request.waitSeconds as number,
+  /**
+   * A registered machine's socket: the only request this object answers over
+   * `fetch`, because RPC cannot hand over a WebSocket.
+   *
+   * The gateway verified the token against the deployment secret; this is the
+   * authoritative check against the machine record, then the socket is
+   * accepted to hibernate and sent every command still waiting.
+   */
+  fetch(request: Request): Promise<Response> {
+    return answeredEntryV1("Machine socket failed", () =>
+      this.openMachineSocket(request),
     );
+  }
+
+  private async openMachineSocket(request: Request): Promise<Response> {
+    if (new URL(request.url).pathname !== MACHINE_SOCKET_INTERNAL_PATH_V1) {
+      return Response.json({ error: "not found" }, { status: 404 });
+    }
+    if (request.headers.get("upgrade")?.toLowerCase() !== "websocket") {
+      return Response.json(
+        { error: "WebSocket upgrade required" },
+        { status: 426 },
+      );
+    }
+    const machines = await this.machineContribution();
+    let opened: Awaited<ReturnType<typeof machines.connect>>;
+    let machineId: string;
+    let tokenDigest: string;
+    try {
+      const { userId, call } = readMachineSocketCallV1(request);
+      await this.assertUserIdentity(userId);
+      machineId = call.machineId;
+      tokenDigest = call.tokenDigest;
+      opened = await machines.connect(call.claims, tokenDigest, machineId);
+    } catch (error) {
+      const status =
+        typeof error === "object" &&
+        error !== null &&
+        "status" in error &&
+        typeof error.status === "number"
+          ? error.status
+          : 401;
+      return Response.json({ error: "machine token is invalid" }, { status });
+    }
+    // Nothing is awaited from here to the send, so a dispatch cannot land
+    // between the pending read above and the socket being registered.
+    const [client, server] = Object.values(new WebSocketPair());
+    this.ctx.acceptWebSocket(server!, [machineSocketTagV1(machineId)]);
+    server!.serializeAttachment({
+      machineId,
+      tokenDigest,
+      keyVersion: opened.record.keyVersion,
+    } satisfies MachineSocketAttachmentV1);
+    server!.send(JSON.stringify(opened.frame));
+    return new Response(null, { status: 101, webSocket: client });
+  }
+
+  // The machine socket is server-push only: anything but the auto-answered
+  // keep-alive is a client that does not speak this protocol.
+  webSocketMessage(socket: WebSocket): Promise<void> {
+    return loggedEntryV1("Machine socket message", () =>
+      socket.close(1003, "server-push channel"),
+    );
+  }
+
+  webSocketClose(
+    socket: WebSocket,
+    code: number,
+    reason: string,
+  ): Promise<void> {
+    return loggedEntryV1("Machine socket close", async () => {
+      try {
+        socket.close(code, reason);
+      } catch {
+        // Already closed.
+      }
+      await this.machineSocketClosed(socket);
+    });
+  }
+
+  webSocketError(socket: WebSocket): Promise<void> {
+    return loggedEntryV1("Machine socket error", async () => {
+      try {
+        socket.close(1011, "socket error");
+      } catch {
+        // Already closed.
+      }
+      await this.machineSocketClosed(socket);
+    });
+  }
+
+  private async machineSocketClosed(socket: WebSocket): Promise<void> {
+    const attachment =
+      socket.deserializeAttachment() as MachineSocketAttachmentV1 | null;
+    if (!attachment) return;
+    await (await this.machineContribution()).disconnected(attachment.machineId);
   }
 
   async claimMachineCommand(input: unknown) {
