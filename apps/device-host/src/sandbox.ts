@@ -140,7 +140,12 @@ export function seatbeltProfileV1(
 export function moduleCommandV1(
   reach: ModuleReachV1,
   paths: ModulePathsV1,
-): { command: string; args: string[]; env: Record<string, string> } {
+): {
+  command: string;
+  args: string[];
+  env: Record<string, string>;
+  cwd: string;
+} {
   return {
     command: "/usr/bin/sandbox-exec",
     args: [
@@ -150,5 +155,8 @@ export function moduleCommandV1(
       ...denoRunArgsV1(reach, paths),
     ],
     env: moduleEnvironmentV1(paths),
+    // Deno reads its working directory as it starts, and the profile lets it
+    // read nowhere but what was declared and its own data.
+    cwd: paths.data,
   };
 }

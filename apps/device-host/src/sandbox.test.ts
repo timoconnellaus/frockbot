@@ -99,6 +99,7 @@ describe("a module's Seatbelt profile", () => {
     expect(command.command).toBe("/usr/bin/sandbox-exec");
     expect(command.args.slice(0, 1)).toEqual(["-p"]);
     expect(command.args[2]).toBe(PATHS.deno);
+    expect(command.cwd).toBe(PATHS.data);
     expect(command.env).toEqual({
       DENO_DIR: PATHS.data,
       DENO_NO_UPDATE_CHECK: "1",

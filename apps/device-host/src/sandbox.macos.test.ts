@@ -76,6 +76,7 @@ describe.skipIf(process.platform !== "darwin" || !DENO)(
         {
           encoding: "utf8",
           env: { DENO_DIR: data, NO_COLOR: "1", HOME: root },
+          cwd: data,
         },
       );
       open.close();
