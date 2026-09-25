@@ -25,7 +25,7 @@ import {
   pluginApprovalIdV1,
   pluginIntentKeyV1,
 } from "./approval.js";
-import { THEME_ASSEMBLE_DUE_KEY_V1 } from "@frockbot/app/theme/assemble";
+import { THEME_ASSEMBLE_DUE_KEY_V1 } from "@frockbot/app/theme/owed";
 import { PLUGIN_ENABLEMENT_KEY_V1 } from "./enablement.js";
 import { pluginsSourceRootV1 } from "./root.js";
 

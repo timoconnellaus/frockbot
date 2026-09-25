@@ -423,10 +423,11 @@ import {
   groupWaitingKeyV1,
 } from "@frockbot/app/groups/bot";
 import { groupChatObjectNameV1 } from "@frockbot/app/groups/shared";
+import { assembleBotThemeV1 } from "@frockbot/app/theme/assemble";
 import {
-  assembleBotThemeV1,
+  deferThemeAssembleV1,
   themeAssembleDeadlineV1,
-} from "@frockbot/app/theme/assemble";
+} from "@frockbot/app/theme/owed";
 import { decodeThemeDocumentV1, decodeBotLookV1 } from "@frockbot/core/theme";
 
 function isFrockAiGatewayBindingV1(
@@ -957,10 +958,12 @@ export class BotState
               mountedContributions
                 .get(computerBotContribution)
                 ?.scheduledWorkInFlight() ?? false,
-            deferScheduledWork: (transaction) =>
-              mountedContributions
+            deferScheduledWork: async (transaction) => {
+              await (mountedContributions
                 .get(computerBotContribution)
-                ?.deferScheduledWork(transaction) ?? Promise.resolve(),
+                ?.deferScheduledWork(transaction) ?? Promise.resolve());
+              await deferThemeAssembleV1(transaction, Date.now());
+            },
             settleScheduledWork: async () => {
               await (mountedContributions
                 .get(computerBotContribution)
@@ -1883,6 +1886,8 @@ export class BotState
       request.command as ReturnType<typeof decodeUpdateLookCommandV1>,
     );
     if (receipt.status === "applied") {
+      // Another of the person's devices may have this Bot open.
+      this.ctx.waitUntil(this.stateChannel.noticeLook().catch(() => undefined));
       this.ctx.waitUntil(
         this.assembleTheme({
           schemaVersion: 1,
@@ -1939,6 +1944,11 @@ export class BotState
           identity.botId,
           look,
           document,
+        );
+      },
+      changed: () => {
+        this.ctx.waitUntil(
+          this.stateChannel.noticeLook().catch(() => undefined),
         );
       },
     });

@@ -30,6 +30,7 @@ export const CONVERSATION_KINDS_V1 = [
   "announcement",
   "card-revision",
   "computer",
+  "look",
 ] as const;
 
 export type ConversationKindV1 = (typeof CONVERSATION_KINDS_V1)[number];
@@ -275,6 +276,8 @@ export function cardEntityIdV1(surfaceId: string): string {
 }
 
 export const COMPUTER_ENTITY_ID_V1 = "computer";
+
+export const LOOK_ENTITY_ID_V1 = "look";
 
 function pushBounded(ids: string[], entityId: string, limit: number): string[] {
   const next = ids.filter((id) => id !== entityId);

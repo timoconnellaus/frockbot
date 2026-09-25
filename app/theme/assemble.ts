@@ -28,13 +28,10 @@ import {
   withPluginWorkerV1,
   type BotPluginRosterV1,
 } from "@frockbot/app/plugins/worker-bot";
-
-/**
- * When the next assemble is owed: the next hour's cadence, or now after a
- * Plugin switch (`oweThemeAssembleV1`). An assemble that finds it rewritten
- * while it ran leaves it for the alarm. Absent means none.
- */
-export const THEME_ASSEMBLE_DUE_KEY_V1 = "theme:assemble-due:v1";
+import {
+  THEME_ASSEMBLE_DUE_KEY_V1,
+  THEME_ASSEMBLE_RUN_PREFIX_V1,
+} from "@frockbot/app/theme/owed";
 
 /** How long one assemble may run inside the Plugin worker. */
 export const THEME_ASSEMBLE_DEADLINE_MS_V1 = 10_000;
@@ -56,26 +53,6 @@ export function rosterDeclaresThemeAssembleV1(
   return themeAssemblersV1(roster).length > 0;
 }
 
-/**
- * Owes an assemble now. Switching a Plugin, or approving a new generation of
- * one, can change which Plugins wrap the look, and the Bot would otherwise
- * wear the old one until the next hour. Owed rather than run, so the alarm
- * the Bot re-arms after the write carries it through an eviction.
- */
-export async function oweThemeAssembleV1(
-  storage: { put(key: string, value: unknown): Promise<void> },
-  now: Date,
-): Promise<void> {
-  await storage.put(THEME_ASSEMBLE_DUE_KEY_V1, now.getTime());
-}
-
-export async function themeAssembleDeadlineV1(storage: {
-  get<T>(key: string): Promise<T | undefined>;
-}): Promise<number[]> {
-  const due = await storage.get<unknown>(THEME_ASSEMBLE_DUE_KEY_V1);
-  return typeof due === "number" && Number.isFinite(due) ? [due] : [];
-}
-
 export interface AssembleBotThemeHostV1 {
   flock: FlockBotBackendContribution;
   registration: BotRegistrationV1;
@@ -92,6 +69,8 @@ export interface AssembleBotThemeHostV1 {
     look: BotLookV1,
     document: ThemeDocumentV1 | undefined,
   ) => Promise<void>;
+  /** Called once the look this Bot wears has changed and been mirrored. */
+  changed?: () => void;
 }
 
 /**
@@ -138,7 +117,7 @@ export async function assembleBotThemeV1(
     } else {
       // One run per assembly, so each failure counts once. The identity the
       // run carries already names the Bot, and a run id is bounded.
-      const runId = `theme:${crypto.randomUUID()}`;
+      const runId = `${THEME_ASSEMBLE_RUN_PREFIX_V1}${crypto.randomUUID()}`;
       const outcome = await withPluginWorkerV1(
         state,
         identity,
@@ -198,6 +177,7 @@ export async function assembleBotThemeV1(
         nextLook,
       );
   await host.mirror(next.look, next.document);
+  if (!same) host.changed?.();
   const reowed =
     (await state.ctx.storage.get<unknown>(THEME_ASSEMBLE_DUE_KEY_V1)) !== owed;
   if (reowed) return next;

@@ -519,7 +519,12 @@ export type StopReceipt = {
 export type ObserverCursor = string;
 export type ConversationEntityId = string;
 export type ConversationKind =
-  "message" | "run-status" | "announcement" | "card-revision" | "computer";
+  | "message"
+  | "run-status"
+  | "announcement"
+  | "card-revision"
+  | "computer"
+  | "look";
 export type ConversationMessageUpdate = {
   runId: Identifier;
   sessionId: string;

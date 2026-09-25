@@ -28,7 +28,7 @@ import {
   type WorkspaceFilesV1,
 } from "@frockbot/core/contracts";
 import { sha256HexTextV1 } from "@frockbot/core/crypto";
-import { oweThemeAssembleV1 } from "@frockbot/app/theme/assemble";
+import { oweThemeAssembleV1 } from "@frockbot/app/theme/owed";
 import type {
   CompositionGenerationV1,
   CompositionMemberV1,

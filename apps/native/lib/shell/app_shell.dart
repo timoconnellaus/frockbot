@@ -347,6 +347,7 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     microphone.stopDictation = _stopDictation;
     activity.addListener(_repaint);
     activity.addListener(_reconcileBadge);
+    widget.sessions.lookChanged = _lookChanged;
     groupDirectory.addListener(_groupsChanged);
     unawaited(groupDirectory.load());
     // Read once, now, so the first press on a voice control answers at once.
@@ -405,7 +406,64 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   /// Settings writes that should paint now — a Look chosen beside the
   /// thread — without treating the conversation as unread-sync work.
   void _paintFromSettings() {
-    if (mounted) setState(() {});
+    if (mounted) setState(_adoptSettingsLook);
+  }
+
+  /// A Bot's look changed without this client: a Plugin that wraps it
+  /// assembled a new one, or another device saved one. The open Bot's
+  /// settings read it again and the directory follows them; any other Bot
+  /// held live is read here, so opening it next paints the new look first.
+  void _lookChanged(String userId, String botId) {
+    if (!mounted || userId != widget.userId) return;
+    final settings = botSettings;
+    if (settings != null && settings.botId == botId) {
+      unawaited(settings.reloadLook());
+      return;
+    }
+    unawaited(() async {
+      try {
+        final answer =
+            (await widget.api.request('/api/bots/$botId/look'))! as Map;
+        if (!mounted) return;
+        setState(
+          () =>
+              _adoptLook(botId, answer['look'] as String?, answer['document']),
+        );
+      } catch (_) {
+        // The directory keeps what it had; opening the Bot reads the look.
+      }
+    }());
+  }
+
+  /// The directory row wears what the settings controller last read or
+  /// saved. The directory is read once, so without this the next open of the
+  /// Bot paints the look it had then before the controller's read lands.
+  void _adoptSettingsLook() {
+    final settings = botSettings;
+    if (settings == null || !settings.loaded) return;
+    final document = settings.lookDocument;
+    _adoptLook(
+      settings.botId,
+      settings.look.name,
+      document == null ? null : encodeThemeDocument(document),
+    );
+  }
+
+  void _adoptLook(String botId, String? look, Object? document) {
+    final index = bots.indexWhere((bot) => bot.botId.value == botId);
+    if (index < 0 || look == null) return;
+    final row = Map<String, Object?>.from(bots[index].toJson()! as Map);
+    final next = {...row, 'look': look}..remove('document');
+    if (document != null) next['document'] = document;
+    if (jsonEncode(next) == jsonEncode(row)) return;
+    final wire.BotRegistration adopted;
+    try {
+      adopted = wire.BotRegistration.fromJson(next);
+    } catch (_) {
+      return;
+    }
+    bots = [...bots]..[index] = adopted;
+    if (selected?.botId.value == botId) selected = adopted;
   }
 
   ChatController? get _selectedChat => _selectedSession?.controller;
@@ -3598,6 +3656,9 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
     unawaited(appBadge.clear());
     push.onFocus = null;
     push.onNotificationsChanged = null;
+    if (widget.sessions.lookChanged == _lookChanged) {
+      widget.sessions.lookChanged = null;
+    }
     WidgetsBinding.instance.removeObserver(this);
     widget.botLinks.removeListener(_followBotLink);
     _activityTimer?.cancel();

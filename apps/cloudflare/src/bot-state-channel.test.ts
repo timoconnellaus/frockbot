@@ -237,6 +237,64 @@ describe("Bot-state channel committed updates", () => {
     expect(runOf("installed")).not.toHaveProperty("attachments");
   });
 
+  test("a look notice reaches a protocol 4 socket and only moves an older one's cursor", async () => {
+    const sent = new Map<string, string[]>();
+    const lastSent = new Map<string, string>();
+    const socket = (name: string, protocol?: number) => {
+      sent.set(name, []);
+      lastSent.set(name, "0");
+      return {
+        deserializeAttachment: () => ({
+          schemaVersion: 1,
+          userId: "user-1",
+          botId: "scout",
+          epoch: "1",
+          lastSent: lastSent.get(name),
+          ...(protocol === undefined ? {} : { protocol }),
+        }),
+        serializeAttachment: (value: { lastSent: string }) => {
+          lastSent.set(name, value.lastSent);
+        },
+        send: (frame: string) => sent.get(name)!.push(frame),
+        close: () => undefined,
+      };
+    };
+    const sockets = [
+      socket("current", 4),
+      socket("attachments", 3),
+      socket("installed"),
+    ];
+    const storage = new ChannelStorage();
+    const state = {
+      storage,
+      getWebSockets: () => sockets,
+    } as unknown as DurableObjectState;
+
+    await new BotStateChannel(state).noticeLook();
+
+    expect(
+      sent.get("current")!.map((frame) => JSON.parse(frame) as unknown),
+    ).toEqual([
+      {
+        schemaVersion: 1,
+        type: "state/update",
+        epoch: "1",
+        cursor: "1",
+        kind: "look",
+        entityId: "look",
+        revision: 1,
+        payload: {},
+      },
+    ]);
+    expect(sent.get("attachments")).toEqual([]);
+    expect(sent.get("installed")).toEqual([]);
+    expect([...lastSent.values()]).toEqual(["1", "1", "1"]);
+    expect(await readPublicationHeadV1(storage)).toMatchObject({
+      lastCursor: 1,
+      broadcastThrough: 1,
+    });
+  });
+
   test("duplicate delivery is skipped by the observer cursor", async () => {
     const { channel, sent } = attachedChannel();
     await channel.computerStorage.put("computer:one", 1);
