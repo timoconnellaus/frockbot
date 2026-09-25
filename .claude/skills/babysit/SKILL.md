@@ -176,17 +176,24 @@ create it with `gh label create`.
 
 ## Sessions
 
-A session is done when every pull request it opened has merged and nothing
-else is pending in it: no question waiting on Tim, no branch still to open,
-no verification it is waiting on. Mark it by putting `DONE ` in front of
-its title, once, so Tim can see which sessions he can close:
+Once every pull request a session opened has merged, its title tells Tim
+whether he can close it. Read the end of its conversation (`list_events`
+for a local session, `RemoteTrigger get_run_log` for a cloud one) for
+anything it left open: a question waiting on Tim, a follow-up it named, a
+branch still to open, a verification it is waiting on.
+
+- Nothing open: put `DONE ` in front of its title.
+- Something open: put `TODO ` in front, and name the items in the report
+  under "needs Tim". When they clear, change `TODO ` to `DONE `.
+
+Rename each session once per state, not every tick:
 
 - A local desktop session: `set_session_title` (the `ccd_session_mgmt`
   tools) with the sessionId from `list_sessions`.
 - A cloud session is not visible to those tools. `SendMessage` it asking it
-  to rename itself with the `DONE ` prefix and do nothing else. It then
-  drops out of `ListAgents`, and its run log may return 404; neither means
-  it was deleted.
+  to rename itself with the prefix and do nothing else. It then drops out
+  of `ListAgents`, and its run log may return 404; neither means it was
+  deleted.
 
 Only FrockBot sessions, and never a title Tim prefixed himself (`zzz`).
 
