@@ -176,15 +176,17 @@ create it with `gh label create`.
 
 ## Sessions
 
-Once every pull request a session opened has merged, its title tells Tim
-whether he can close it. Read the end of its conversation (`list_events`
-for a local session, `RemoteTrigger get_run_log` for a cloud one) for
-anything it left open: a question waiting on Tim, a follow-up it named, a
-branch still to open, a verification it is waiting on.
+`DONE ` at the front of a session's title says its goal is complete: every
+pull request it opened has merged. `DONE-TODO ` says the same, and that the
+session also surfaced things still to do, perhaps as separate work: a
+follow-up it named, a question waiting on Tim, a branch still to open, a
+verification it is waiting on. Tim reads the prefix to decide what to close.
 
-- Nothing open: put `DONE ` in front of its title.
-- Something open: put `DONE-TODO ` in front, and name the items in the
-  report under "needs Tim". When they clear, change it to `DONE `.
+Once a session's pull requests have all merged, read the end of its
+conversation (`list_events` for a local session, `RemoteTrigger
+get_run_log` for a cloud one). Give it `DONE ` when nothing is left, or
+`DONE-TODO ` and name the items in the report under "needs Tim". When they
+clear, change `DONE-TODO ` to `DONE `.
 
 Rename each session once per state, not every tick:
 
