@@ -251,7 +251,7 @@ function probePackageDescriptor(hooks: string[]) {
     // previous contract still mounts.
     contractVersion: ISOLATE_CONTRACT_VERSION - 1,
     hooks,
-    grants: ["ai", "http", "schedule", "memory", "workspace", "storage"],
+    grants: ["ai", "jev", "http", "schedule", "memory", "workspace", "storage"],
     // The probe's `reach_network` tool reaches for a host outside this list,
     // so the egress loopback minted from it refuses the request.
     network: { hosts: ["example.com"] },
