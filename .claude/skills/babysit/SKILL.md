@@ -141,9 +141,18 @@ The snapshot gives each open pull request an action:
   30 minutes means its session is probably on it. Idle longer: check out
   the branch in a worktree (`gh pr checkout <n>`), fix it, push, and say
   so on the pull request.
-- **rebase** — conflicts with `main`. Same idle rule. In a worktree:
+- **rebase** — conflicts with `main`. Merge conflicts are the
+  babysitter's, not the author's, and are resolved only when it is that
+  pull request's turn: green apart from the conflict, `main` green, and
+  nothing ready ahead of it. An earlier rebase is often wasted, because the
+  merges before it bring the conflict back. If an authoring session is
+  rebasing its own pull request for a conflict, message it to stop and hand
+  off at green. No idle wait. In a worktree:
   `git fetch origin main && git rebase origin/main`, resolve,
-  `bun install --frozen-lockfile`, `git push --force-with-lease`. A
+  `bun install --frozen-lockfile`, typecheck and the unit tier,
+  `git push --force-with-lease`, and say what you resolved on the pull
+  request. Renumbered lists such as `docs/known-issues.md` need their
+  cross-references moved too. A
   conflict in a generated file (`*.generated.ts`) is resolved by taking
   either side and running its generator — `bun app/whats-new/generate.ts`
   for What's New — never by hand.
@@ -164,6 +173,22 @@ Dependabot pull requests go through the same actions; a bump that breaks
 The labels are `hold` (leave it alone), `fix-main` (repairs a red `main`),
 `flaky` (issues) and `main-red` (the repair claim). If one is missing,
 create it with `gh label create`.
+
+## Sessions
+
+A session is done when every pull request it opened has merged and nothing
+else is pending in it: no question waiting on Tim, no branch still to open,
+no verification it is waiting on. Mark it by putting `DONE ` in front of
+its title, once, so Tim can see which sessions he can close:
+
+- A local desktop session: `set_session_title` (the `ccd_session_mgmt`
+  tools) with the sessionId from `list_sessions`.
+- A cloud session is not visible to those tools. `SendMessage` it asking it
+  to rename itself with the `DONE ` prefix and do nothing else. It then
+  drops out of `ListAgents`, and its run log may return 404; neither means
+  it was deleted.
+
+Only FrockBot sessions, and never a title Tim prefixed himself (`zzz`).
 
 ## Boundaries
 
