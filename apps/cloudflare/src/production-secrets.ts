@@ -278,6 +278,8 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] 
     {
       name: "JEV_BASE_URL",
       why: "Points Turn supervision at a local stand-in for Jev; set by the test harness only.",
+      forbiddenLive:
+        "every Turn's supervision would be sent to that host instead of Jev",
     },
     { name: "FROCK_AI_AUTO_ROUTE", why: "A `vars` entry." },
     {

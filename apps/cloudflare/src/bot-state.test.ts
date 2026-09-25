@@ -10,6 +10,7 @@ import {
   accountPreparationRpcV1,
   memoryUserCompositionV1,
 } from "@frockbot/app/composition/user.fixture";
+import { createFakeTurnSupervisorV1 } from "@frockbot/core/contracts";
 import type { BotStateEnv } from "./bot-state.js";
 import { hydrateStoredRunEventsV1 } from "../test/session-log-probe.js";
 
@@ -295,6 +296,7 @@ describe("BotState Ollama execution", () => {
         env,
         {
           outboundFetch,
+          turnSupervisor: createFakeTurnSupervisorV1(),
         },
       );
 

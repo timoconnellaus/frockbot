@@ -66,7 +66,10 @@ import {
   shellBotContribution,
 } from "@frockbot/app/contributions";
 import { ComputerRegistry } from "@frockbot/computer/core/host";
-import { mountRuntimeFeaturesV1 } from "@frockbot/core/contracts";
+import {
+  mountRuntimeFeaturesV1,
+  type TurnSupervisor,
+} from "@frockbot/core/contracts";
 import {
   computerHostBindingV1,
   createComputerHostV1,
@@ -524,6 +527,8 @@ export type { BotStateEnv, OwnedBotTurnCommand };
 
 export interface BotStateDependencies {
   outboundFetch?: typeof fetch;
+  /** A test's stand-in for Turn supervision; production builds it from env. */
+  turnSupervisor?: TurnSupervisor;
 }
 
 function decodeBotIdentityRpcV1(input: unknown): {
@@ -564,6 +569,7 @@ export class BotState
   implements BotStateRpcTargetV1
 {
   private readonly outboundFetch?: typeof fetch;
+  private readonly turnSupervisor?: TurnSupervisor;
   /**
    * The environment the Shell Package runs under: the Durable Object's
    * bindings plus the Workspace file surface built over them. `WORKSPACE_FILES`
@@ -740,6 +746,7 @@ export class BotState
       }
     });
     this.outboundFetch = dependencies.outboundFetch;
+    this.turnSupervisor = dependencies.turnSupervisor;
     const emailSender = createBindingEmailSenderV1(
       env as Parameters<typeof createBindingEmailSenderV1>[0],
     );
@@ -882,6 +889,9 @@ export class BotState
             state: this.ctx,
             env: this.backendEnv,
             outboundFetch: this.outboundFetch,
+            ...(this.turnSupervisor
+              ? { turnSupervisor: this.turnSupervisor }
+              : {}),
             messagesCommitted: () => {
               this.ctx.waitUntil(this.drainPush());
               this.ctx.waitUntil(

@@ -1,3 +1,4 @@
+import { createFakeTurnSupervisorV1 } from "@frockbot/core/contracts";
 import { foundationShellApplicationV1 } from "../runtime.js";
 import { describe, expect, test } from "bun:test";
 import type {
@@ -135,6 +136,7 @@ function host(storage: MemoryStorage, readUser: () => UserSettingsViewV1) {
   const userComposition = memoryUserCompositionV1();
   return createShellBotBackendContribution({
     ...foundationShellApplicationV1,
+    turnSupervisor: createFakeTurnSupervisorV1(),
     state: { storage } as unknown as DurableObjectState,
     env: {
       CREDENTIAL_KEYRING:

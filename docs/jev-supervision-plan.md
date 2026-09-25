@@ -12,10 +12,14 @@ scheduled Turn, subagent or tool call runs. There is no unsupervised fallback.
 Conversation history and settings may remain readable while agent execution is
 unavailable.
 
-The first enforced behavior is approval of mutating tool calls. Whole-response
-review, acknowledgement steering, specialist routing, Mentor escalation and
-continuation state are built against the same interface and initially run in
-shadow mode until their evaluations support enforcement.
+The first enforced behavior is plan step 4: the start-of-Turn judgment with
+acknowledgement steering, whole-response alignment, and review of each text
+send. It is enforced rather than shadowed, even below the eval gate, so it is
+tuned in use; every decision is a session event, inspectable per Turn through
+`/api/debug`, and a withheld send is an audit row. Approval of mutating tool
+calls follows once tools carry a trusted read/mutate classification (steps 2
+and 3). Specialist routing, Mentor escalation and continuation state are built
+against the same interface.
 
 ## Product decisions
 
@@ -27,8 +31,11 @@ shadow mode until their evaluations support enforcement.
   Profiles express durable capabilities such as planning or code diagnosis;
   provider model names remain deployment configuration.
 - One Jev request assesses an admitted Turn before its first conversational
-  model call. One Jev request reviews each complete model response, including all
-  text and tool calls proposed in that response.
+  model call. One Jev request reviews each complete model response that calls
+  tools, for whether it works on what was asked. One more reviews each text
+  send right before it runs, with everything the Turn has already shown, for
+  whether the person would miss it: what makes a message redundant is often a
+  result that landed earlier in the same step.
 - A rejected tool call is a normal model-visible result with a reason. It does
   not throw and does not fail unrelated calls from the same response.
 - Whole-response review may withhold the complete proposal when the Bot pursues
@@ -90,7 +97,7 @@ behind this seam.
 Input admitted durably
         |
         v
-TurnSupervisor.startTurn
+TurnSupervisor.startTurn            (request hook, step 1, recorded once)
         |
         v
 Fast conversational model
@@ -99,22 +106,29 @@ Fast conversational model
 Complete proposal: private text + tool calls
         |
         v
-TurnSupervisor.reviewStep
+TurnSupervisor.reviewStep           (reviewResponse hook, recorded per step)
         |
-        +--> release independently safe text
-        +--> execute allowed calls
-        +--> settle rejected calls with model-visible feedback
-        +--> withhold the whole proposal when it is off-task
+        +--> off task: refuse every call but the Bot speaking
+        |
+        v
+Each call, in order                 (prepareTool hook, outermost)
+        |
+        +--> a text send: TurnSupervisor.reviewSend, recorded per send
+        |        +--> release: the send runs
+        |        +--> withhold: never delivered, draft cleared, audited;
+        |             a withheld finish still ends the Turn
+        +--> any other call runs
         |
         v
 Next model step or Turn settlement
 ```
 
-The response-review seam belongs between model completion and the current
-assistant-message/tool-execution path in `core/agent-loop`. A model proposal is
-durable but private until review. Only released text enters the visible
-conversation. Tool execution still begins only after the provider has completed
-the response.
+`app/supervision/loop.ts` mounts this first on every Turn, so its hooks are
+outermost: no Plugin hook sees a call it refused, and nothing after it reopens
+a Turn it ended. A Bot's visible words are its `send_to_user` and
+`reply_to_request` calls; assistant text is private. `reply_to_request` is
+never withheld, because a caller is waiting for it. Reply drafts stream while
+the model writes; a withheld send's draft is cleared.
 
 ### Start-of-Turn judgment
 
@@ -247,6 +261,12 @@ that begins the work. The main model supplies the words. Jev only judges whether
 the Turn should acknowledge before doing longer work and later checks whether
 the directive was followed.
 
+The steering is a labeled runtime note at the tail of the first request only.
+It never touches the system prompt or the tool list: those are the cached
+prefix, and a note that changed them per Turn would miss the cache on the
+whole history. The same rule holds for every later Jev use: supervision appends
+at the tail, or answers through a tool result, and never edits the prefix.
+
 This keeps acknowledgement behavior identical over text and voice.
 
 ## Specialist subagents
@@ -315,7 +335,11 @@ set becomes a compact prompt section on the next conversational Turn.
 
 ## Availability and recovery
 
-The supervisor has no permissive failure mode.
+The supervisor has no permissive failure mode. Each Jev call is retried once;
+a second failure fails the Turn before anything it would have judged runs, and
+the person is told the reply failed. `JEV_API_KEY` is a required production
+secret; without it no Turn runs. Test harnesses answer through a
+supervision-only Jev fake (`app/supervision/testing.ts`).
 
 - The request path does not acknowledge new work as accepted unless its durable
   input admission succeeds.
@@ -353,7 +377,8 @@ conversation or policy content is not needed for diagnosis.
 
 Build on `app/evals/tool-approval.ts` and keep live evaluation separate from unit
 tests. Pin the calibrated Jev version. Run the labeled suites with
-`bun run eval:tool-approval` and `bun run eval:turn-start`; each reads
+`bun run eval:tool-approval`, `bun run eval:turn-start` and
+`bun run eval:response-review`; each reads
 `JEV_API_KEY` from the main checkout's `.dev.vars` (the runners still accept
 `TYPESAFE_API_KEY` as a local alias) and writes traces to `.eval-results/`.
 Neither is part of ordinary tests or the pre-push gate.
@@ -385,8 +410,7 @@ Each change leaves production Bots able to reply when Jev is healthy.
 
 ### 1. Contracts, adapter and journal
 
-_In progress._ The seam exists; the agent loop is not wired, so production Bots
-still reply.
+_Done for step 4._ The loop is wired (`app/supervision/loop.ts`).
 
 - _Done._ `TurnSupervisor`, its domain types, a fake adapter, a hard-unavailable
   adapter and the hosted Jev adapter (`core/contracts/turn-supervisor.ts`,
@@ -397,12 +421,12 @@ still reply.
   report runner lives in `app/evals/tool-approval-run.ts` so the Worker does
   not import it.
 - _Done._ Production owns `JEV_API_KEY` from the GitHub secret of that name:
-  optional in `production-secrets.ts`, declared on Worker `Env`, and carried
-  by the release and staging deploys. Absent, the chooser is unavailable.
-  The loop is still unwired, so a missing key does not fail the deploy.
+  required in `production-secrets.ts`, declared on Worker `Env`, and carried
+  by the release and staging deploys.
 - Add durable supervision effects and usage records.
 - Buffer private model proposals until review.
-- Implement the hard unavailable state and recovery behavior in the loop.
+- _Done._ The hard unavailable state: one retry, then the Turn fails. A resumed
+  Turn reads recorded decisions back rather than asking again.
 
 ### 2. Tool classification and policy storage
 
@@ -422,21 +446,22 @@ still reply.
 
 This is the first production enforcement milestone.
 
-### 4. Whole-response shadowing and acknowledgement
+### 4. Whole-response review and acknowledgement
 
-- _In progress._ The start-of-Turn questions and their thresholds
-  (`app/supervision/turn-start.ts`) and a labeled suite of 28 cases
-  (`app/evals/turn-start.fixtures.ts`, `bun run eval:turn-start`), including
-  the 2026-09-23 incident's mid-work messages and negative controls for them.
-  `composeTurnDirectiveV1` maps the answers onto a `TurnDirective`. The first
-  run on `jev-1.13.0` passed 21 of 28: telling a short message about open
-  work from one that asks for nothing is the judgment still missing. The
-  adapter returns the default and the loop does not call it.
-- Record response alignment, text dependency and communication judgments without
-  changing outcomes.
-- Inject start-of-Turn acknowledgement steering.
-- Measure the two-second target and tune question boundaries.
-- Enable text withholding and whole-response repair only after the eval gate.
+_Done, enforced._
+
+- The start-of-Turn questions and their thresholds
+  (`app/supervision/turn-start.ts`), with a labeled suite of 29 cases
+  (`bun run eval:turn-start`, 29/29 on `jev-1.13.0`), steer an acknowledgement
+  from the tail of the first request.
+- Whole-response alignment and per-send redundancy
+  (`app/supervision/response-review.ts`), with a labeled suite of 23 cases
+  (`bun run eval:response-review`, 23/23 on `jev-1.13.0`). Every threshold and
+  veto lives in that file.
+- Every decision is a `supervision/turn-start`, `supervision/step` or
+  `supervision/send` session event; a withheld send is a `supervision` audit
+  row with the words it would have said.
+- Still to do: measure the two-second acknowledgement target.
 
 ### 5. Specialist profiles and routing
 
