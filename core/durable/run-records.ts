@@ -171,6 +171,8 @@ export interface StoredRunVoiceOriginV1 {
 export interface StoredRunRoutineDeliveryOriginV1 {
   kind: "routine-delivery";
   wakeRunId: string;
+  /** Judged able to wait: its messages land unread and wake no device. */
+  quiet?: true;
 }
 
 /**
@@ -795,13 +797,23 @@ function decodeStoredRunOrigin(
     return { kind: "email", messageId: candidate.messageId };
   }
   if (candidate.kind === "routine-delivery") {
-    requireExactOriginFields(candidate, ["kind", "wakeRunId"], runId);
-    if (!boundedString(candidate.wakeRunId, 256)) {
+    requireExactOriginFields(
+      candidate,
+      candidate.quiet === undefined
+        ? ["kind", "wakeRunId"]
+        : ["kind", "wakeRunId", "quiet"],
+      runId,
+    );
+    if (
+      !boundedString(candidate.wakeRunId, 256) ||
+      (candidate.quiet !== undefined && candidate.quiet !== true)
+    ) {
       throw new Error(`run "${runId}" has an invalid admission origin id`);
     }
     return {
       kind: "routine-delivery",
       wakeRunId: candidate.wakeRunId,
+      ...(candidate.quiet === true ? { quiet: true as const } : {}),
     };
   }
   if (candidate.kind === "input-delivery") {

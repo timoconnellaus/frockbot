@@ -278,6 +278,7 @@
     "./supervision/testing": "./supervision/testing.ts",
     "./supervision/memory-recall": "./supervision/memory-recall.ts",
     "./supervision/skill-nomination": "./supervision/skill-nomination.ts",
+    "./supervision/routine-report": "./supervision/routine-report.ts",
     "./subagents": "./subagents/index.ts",
     "./subagents/agent": "./subagents/agent.ts",
     "./subagents/backend": "./subagents/backend.ts",

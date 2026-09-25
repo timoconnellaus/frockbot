@@ -166,6 +166,31 @@ describe("the admission record names what produced the Turn", () => {
     expect(codec.require(structuredClone(decoded))).toEqual(decoded);
   });
 
+  test("round-trips a quiet routine delivery, and refuses a quiet that is not true", () => {
+    const origin = {
+      kind: "routine-delivery" as const,
+      wakeRunId: "fire-1",
+      quiet: true as const,
+    };
+    const decoded = codec.require(
+      legacyRun({
+        admission: { schemaVersion: 1, turnType: "chat", origin },
+      }),
+    );
+    expect(decoded.admission?.origin).toEqual(origin);
+    expect(() =>
+      codec.require(
+        legacyRun({
+          admission: {
+            schemaVersion: 1,
+            turnType: "chat",
+            origin: { ...origin, quiet: false },
+          },
+        }),
+      ),
+    ).toThrow();
+  });
+
   test("an admission with no origin decodes without the key", () => {
     const decoded = codec.require(
       legacyRun({ admission: { schemaVersion: 1, turnType: "automation" } }),

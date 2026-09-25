@@ -28,6 +28,10 @@ import { PluginModelDispatchRegistryV1 } from "@frockbot/app/isolates/model-disp
 import type { ShellMountedComposition } from "./backend-composition.js";
 import type { ReplyDraftV1 } from "./reply-draft.js";
 import type { TurnSupervisor } from "@frockbot/core/contracts";
+import {
+  createHostedRoutineReportJudgeV1,
+  type RoutineReportJudgeV1,
+} from "@frockbot/app/supervision/routine-report";
 import { storedRunCodecV1 } from "./backend-contracts.js";
 import type { NativeAiBindingV1 } from "./backend-image.js";
 import type { EmailSenderV1 } from "@frockbot/app/email/sender";
@@ -198,6 +202,11 @@ export interface ShellBotBackendHost extends ShellApplicationV1 {
    * which refuses every Turn when no `JEV_API_KEY` is set.
    */
   turnSupervisor?: TurnSupervisor;
+  /**
+   * Judges whether a Routine's report is worth telling, and how soon. Absent,
+   * the hosted Jev judge built from `env`, or none when there is no key.
+   */
+  routineReportJudge?: RoutineReportJudgeV1;
 }
 
 /** The Turn currently executing on this object, for durable Stop. */
@@ -375,6 +384,7 @@ export class ShellBotStateV1 {
    */
   readonly routineEventJudge: RoutineEventJudgeV1;
   readonly turnSupervisor: TurnSupervisor;
+  readonly routineReportJudge: RoutineReportJudgeV1 | undefined;
 
   constructor(
     host: ShellBotBackendHost,
@@ -406,6 +416,12 @@ export class ShellBotStateV1 {
     this.routineEventJudge =
       host.routineEventJudge ??
       createHostedRoutineEventJudgeV1({
+        JEV_API_KEY: host.env.JEV_API_KEY,
+        JEV_BASE_URL: host.env.JEV_BASE_URL,
+      });
+    this.routineReportJudge =
+      host.routineReportJudge ??
+      createHostedRoutineReportJudgeV1({
         JEV_API_KEY: host.env.JEV_API_KEY,
         JEV_BASE_URL: host.env.JEV_BASE_URL,
       });

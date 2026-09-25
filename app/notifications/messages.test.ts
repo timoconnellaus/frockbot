@@ -211,6 +211,34 @@ describe("message-time unread and notification records", () => {
     });
   });
 
+  test("a Routine report judged able to wait counts unread but wakes no device", async () => {
+    const event = send(1, "Your weekly digest is ready.");
+    const delivered = (quiet: boolean) => ({
+      ...run([event]),
+      admission: {
+        schemaVersion: 1 as const,
+        turnType: "chat" as const,
+        origin: {
+          kind: "routine-delivery" as const,
+          wakeRunId: "fire-1",
+          ...(quiet ? { quiet: true as const } : {}),
+        },
+      },
+    });
+    const notice = async (quiet: boolean) =>
+      (
+        await messageRecords({
+          run: delivered(quiet),
+          events: [event],
+          read: reader(),
+        })
+      )[
+        `${PUSH_OUTBOX_PREFIX}message-${"1".padStart(20, "0")}`
+      ] as MessageNotice;
+    expect((await notice(true)).notify).toBe(false);
+    expect((await notice(false)).notify).toBe(true);
+  });
+
   test("a subagent send does not create user unread or push records", async () => {
     const event = send(1, "Internal");
     const subagent = {

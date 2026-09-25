@@ -92,6 +92,7 @@ import {
   APPROVAL_PREFIX,
   decodeApprovalRecordV1,
 } from "@frockbot/app/shell/approvals";
+import type { RoutineReportJudgeV1 } from "@frockbot/app/supervision/routine-report";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import { admitTurnV1 } from "@frockbot/app/composition/bot";
 import { notificationIdV1 } from "@frockbot/app/shell/notification-id";
@@ -634,6 +635,35 @@ export async function settleScheduledWork(
 }
 
 /**
+ * Which owed hand-offs a delivery Turn carries, and whether it may land
+ * without waking a device. A report the judge is sure nobody needs is
+ * dismissed; a delivery is quiet only when every report it carries can wait;
+ * a report the judge cannot say about is told, loudly, as it always was.
+ */
+export async function judgedRoutineDeliveryV1<
+  Owed extends { wake: { title: string; text: string } },
+>(
+  owed: readonly Owed[],
+  judge: RoutineReportJudgeV1 | undefined,
+): Promise<{ told: Owed[]; dismissed: Owed[]; quiet: boolean }> {
+  const told: Owed[] = [];
+  const dismissed: Owed[] = [];
+  let quiet = judge !== undefined;
+  for (const entry of owed) {
+    const verdict = judge
+      ? await judge({ routine: entry.wake.title, report: entry.wake.text })
+      : undefined;
+    if (verdict && !verdict.tell) {
+      dismissed.push(entry);
+      continue;
+    }
+    if (!verdict?.quiet) quiet = false;
+    told.push(entry);
+  }
+  return { told, dismissed, quiet: quiet && told.length > 0 };
+}
+
+/**
  * Open the conversational Turn a waiting hand-off is owed.
  *
  * A firing hands off with `wake_parent`, and that hand-off is drained into the
@@ -678,13 +708,23 @@ async function deliverPendingHandoffs(state: ShellBotStateV1): Promise<void> {
     // alarm opens the Turn, and a conversation the person started in the
     // meantime drains the queue itself, which is the better delivery anyway.
     if (await state.authority.readActiveRunId()) return;
-    const { wake } = routineOwed.at(-1)!;
+    // Judged before a Turn is opened for them: a report nobody needs stays in
+    // its Routine's log and comes to no one, and a delivery whose every report
+    // can wait lands unread without waking a device. When the judge cannot
+    // say, the report is delivered as it always was.
+    const { told, dismissed, quiet } = await judgedRoutineDeliveryV1(
+      routineOwed,
+      state.routineReportJudge,
+    );
+    for (const { key } of dismissed) await state.routineInbox.dismiss(key);
+    if (told.length === 0) return;
+    const { wake } = told.at(-1)!;
     // Marked before the Turn is admitted, and for every hand-off this Turn is
     // being opened for rather than only the newest: a delivery that throws must
     // not leave the alarm opening a fresh Turn for the same hand-offs for ever.
     // Only those, because `deliveredAt` says a delivery Turn was opened for
     // this wake, and none is ever opened for a subagent's.
-    for (const { key } of routineOwed) {
+    for (const { key } of told) {
       await state.routineInbox.markDelivered(key);
     }
     await admitTurnV1(state, {
@@ -700,6 +740,7 @@ async function deliverPendingHandoffs(state: ShellBotStateV1): Promise<void> {
       origin: {
         kind: "routine-delivery" as const,
         wakeRunId: wake.runId,
+        ...(quiet ? { quiet: true as const } : {}),
       },
     });
   } catch {
