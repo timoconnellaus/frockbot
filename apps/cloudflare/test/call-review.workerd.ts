@@ -98,11 +98,10 @@ async function runEvents(
   const runs = await runInDurableObject(
     env.BOT_STATES.getByName(`${identity.userId}:${identity.botId}`),
     (_instance, state) =>
-      hydratedStoredRunsV1<{ runId: string; events: StoredEvent[] }>(
-        state.storage,
-      ),
+      hydratedStoredRunsV1<{ runId: string; sessionId: string }>(state.storage),
   );
-  return runs.find((candidate) => candidate.runId === runId)?.events ?? [];
+  return (runs.find((candidate) => candidate.runId === runId)?.events ??
+    []) as StoredEvent[];
 }
 
 async function storedNote(identity: Identity): Promise<unknown> {
