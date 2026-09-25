@@ -256,6 +256,75 @@ Plugins in one User's worker share a realm, but pages do not share one: each
 page is its own frame. A page a Bot wrote runs with exactly what its Plugin was
 approved for.
 
+## Amended 2026-09-25: what the first page taught
+
+Bob wrote the first Plugin page anyone used, a guitar tuner, and it failed in
+ways the design had not covered. Tim chose what follows on 2026-09-25.
+
+**The greeting could be lost.** The bridge helper says `hello` while the page
+is still parsing. A phone or desktop WebView only started forwarding the page's
+messages once the document had loaded, so the greeting was dropped on every
+native client. The page never got its theme tokens or its state, and `ready`
+timed out, silently. The web iframe was not affected, which is why the browser
+suite passed. The host now answers without waiting to be asked: it posts the
+same `init` when the document has loaded, and a `hello` after that is answered
+again. A page may be greeted twice, and the helper takes whichever arrives
+first.
+
+**Closing is closing, whoever does it.** `onClosed` heard the host close the
+microphone, but not the page's own `close()`. A page that reset its button in
+`onClosed`, which is the natural way to write it, stayed on "Stop" for good.
+Now `close()` ends in `onClosed` too, with the reason "You stopped the
+microphone.", and returns a promise that settles once the host has let go. The
+API is what prevents the mistake. The Skill's wording only describes it.
+
+**A page's failures reach its Bot.** A page's errors used to go nowhere. The
+helper now forwards `error`, `unhandledrejection` and `console.error`, and a
+page may call `frockbot.log(text)` for a reading it chooses to report, such as
+the input level a tuner hears. The host records these against the Plugin
+generation and the kind of device. Each record is bounded: a capped count per
+page per minute, a capped length per entry, and the newest kept. The Bot reads
+them with its Plugin tools. A Bot that cannot see its page fail cannot fix it,
+and the tuner's too-quiet threshold was not an error at all: only a reported
+reading would have shown it.
+
+**A page can be inspected.** Pages are inspectable in Debug builds and in the
+`FrockBot Dev` app: Safari's Develop menu on Apple platforms, `chrome://inspect`
+over ADB on Android. Release builds are not. Every host frame holds no
+credential, so the exposure is small, but it is still the production app on a
+person's device.
+
+**Opening a page should feel instant.** Every open re-read the panel from the
+Bot, built a fresh WebView, fetched the HTML over the network (the WebView
+declined to cache it, despite `immutable`), and drew a white page before the
+theme arrived. The fixes form one frame layer that panels use now and HTML
+Cards build on:
+
+- The HTML is cached by the WebView's own HTTP cache, on the page's hash. The
+  page is never loaded from a string: its `sandbox` policy is a response header
+  a `<meta>` tag cannot carry, and without it the page would run as the app's
+  origin.
+- A panel opens on the last state this device saw and is replaced when the
+  read lands. A Card's state is already in its record, so a Card needs no read
+  at all.
+- A panel's frame survives a tab switch or a closed panel and is shown again
+  rather than reloaded. At most two frames are kept, the same bound as live
+  Cards. A kept frame that leaves the screen still gives up every device
+  ability, as before.
+- A Card whose frame is torn down keeps a picture of what it last drew, and
+  shows it until it is live again. Scrolling back shows the Card as it was
+  without running anything off screen.
+- A few WebViews are reused across pages, as a list reuses its rows. A new
+  page in a reused WebView starts with a fresh script realm and has no storage
+  of its own, so nothing passes between Plugins.
+- The frame stays hidden until the page has painted, so no page flashes white.
+
+**Trying a page before publishing is still open.** A Bot could test a page in a
+headless browser, with the exact published page, the real helper and a stand-in
+host built from the same contract, and a scripted microphone. Where that browser
+runs (Browser Rendering or the Bot's Computer) is a later decision. Either way,
+the stand-in host belongs to the platform, never to the Bot.
+
 ## Amendments to the constitution
 
 On acceptance, `AGENTS.md` changes as follows:
@@ -304,3 +373,12 @@ Each step leaves `main` shippable.
    grant.
 5. HTML Cards: the host card frame and the live-frame limit.
 6. The managed `plugins` Skill.
+
+After the 2026-09-25 amendment:
+
+7. The greeting that cannot be lost, `close()` ending in `onClosed`, and
+   inspectable pages in Debug and Dev builds.
+8. Page errors and logs, recorded against the Plugin and read by its Bot.
+9. The frame layer for panels: the cached page, the last state first, kept
+   frames and no flash. Step 5 uses the same layer, with the Card's picture and
+   reused WebViews.
