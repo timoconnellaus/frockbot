@@ -54,12 +54,13 @@ interface ProbeEvent {
   content?: string;
   isError?: boolean;
   route?: { answerer: string; judgments: unknown[] };
-  decision?: { send: string; reason?: string };
+  decision?: { send?: string; reason?: string; judgments: unknown[] };
   call?: { name?: string };
 }
 
 interface StoredRunProbe {
   runId: string;
+  sessionId: string;
   status: string;
   events: ProbeEvent[];
 }

@@ -666,6 +666,7 @@ test("work Jev names for a specialist the Turn is offered is handed to it from t
 function drainedToast(...works: string[]): string {
   return pendingBotInputPreambleV1(
     works.map((work, index) => ({
+      schemaVersion: 1 as const,
       kind: "wake" as const,
       wakeId: `tw-task-${index + 2}`,
       runId: `task-${index + 2}`,
