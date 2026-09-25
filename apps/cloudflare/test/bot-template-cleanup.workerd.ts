@@ -84,9 +84,9 @@ test("a template-era account comes back without templates, and still reads", asy
       0,
     );
     const stored = (await state.storage.get<Settings>("user-configuration"))!;
-    expect(stored.packages.some((row) => row.packageId === "bot-template")).toBe(
-      false,
-    );
+    expect(
+      stored.packages.some((row) => row.packageId === "bot-template"),
+    ).toBe(false);
     const keys = [...(await state.storage.list()).keys()];
     for (const key of keptKeys) expect(keys).toContain(key);
     expect(await state.storage.get(RECEIPT)).toMatchObject({
