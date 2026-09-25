@@ -1216,7 +1216,7 @@ All from `computer/`; neither implementation registers one.
 - `computer_screenshot`
 - `computer_doctor`
 - `computer_process_check` / `computer_process_logs` / `computer_process_stop`
-- `computer_browser` — actions `snapshot | navigate | click | fill | press | wait`, returning an accessibility snapshot over CDP; a `fill` may name a saved secret's reference in place of text (below)
+- `computer_browser` — actions `snapshot | navigate | click | fill | press | wait`, returning the page's title and address and an accessibility snapshot over CDP, with a line naming a sign-in wall, CAPTCHA, error or loading page when the optional `judgePage` seam is sure of one (Jev's reading, `app/supervision/page-state.ts`); a `fill` may name a saved secret's reference in place of text (below)
 - `plugin_page_try` — offered only with the Plugin authoring host's `pluginPages` seam; see §9
 - `demonstration_delete` — the Bot's own conversation only; deletes a demonstration the person sent it, and opens no Computer
 

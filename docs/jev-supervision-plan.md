@@ -340,7 +340,10 @@ were, and neither is enforced.
   error or page still loading it is sure of (at 0.7) gets a plain line
   above the snapshot, with what to do. A CAPTCHA is handed to the person,
   never solved. The result also names the page's title and address, which it
-  used to drop. Labelled in `bun run eval:context`.
+  used to drop. Labelled in `bun run eval:context`. Jev does not pre-rank
+  the elements to act on: clicks resolve by role and name on the live page,
+  the snapshot is already the candidate list, and ranking would need the
+  Turn's goal, which the tool does not see.
 - **Skills.** At the Turn's first request, Jev judges each Skill in a catalog
   of up to 24 against the request, and up to three strong matches are named
   in the tail runtime note (`app/supervision/skill-nomination.ts`). The
