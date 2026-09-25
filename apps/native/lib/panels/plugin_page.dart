@@ -547,10 +547,9 @@ class _PluginPageFrameState extends State<PluginPageFrame>
       }
       return;
     }
-    final init = _init();
     final answer = await pluginPageAnswerV1(
       message,
-      init: () => init,
+      init: _init,
       runTool: widget.runTool,
     );
     if (answer != null && mounted) _post(answer);

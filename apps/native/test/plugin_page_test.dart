@@ -223,6 +223,34 @@ void main() {
       expect(identities.toSet(), hasLength(1));
     });
 
+    testWidgets('restyles a page that calls a tool while its look settles', (
+      tester,
+    ) async {
+      Widget themed(Color accent) => MaterialApp(
+        theme: ThemeData(colorScheme: ColorScheme.fromSeed(seedColor: accent)),
+        home: frame({'score': 1}),
+      );
+      await tester.pumpWidget(themed(const Color(0xff65a30d)));
+      loaded();
+      await tester.pump();
+      await tester.pumpWidget(themed(const Color(0xffffd400)));
+      await tester.pumpAndSettle();
+      say({
+        'frockbotPage': 1,
+        'type': 'callTool',
+        'callId': 'c1',
+        'tool': 'go',
+        'input': <String, Object?>{},
+      });
+      await tester.pump();
+      await tester.pump(pluginPageRestyleDelayV1);
+      expect(heard.map((message) => message['type']), [
+        'init',
+        'result',
+        'init',
+      ]);
+    });
+
     testWidgets('covers the page until it has been greeted and has drawn', (
       tester,
     ) async {
