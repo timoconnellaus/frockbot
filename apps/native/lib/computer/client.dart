@@ -41,6 +41,9 @@ const computerCommandTypesV1 = <String>{
   'startDemonstration',
   'stopDemonstration',
   'discardDemonstration',
+  'saveCheckpoint',
+  'resetComputer',
+  'updateComputer',
 };
 
 /// How often the viewer renews the person's hold on the desktop. The lease
@@ -174,6 +177,9 @@ class ComputerProjection {
 
   /// A recording running, or kept and waiting to be sent or discarded.
   final ComputerDemonstration? demonstration;
+  /// The newest checkpoint this Bot knows of: what Reset returns the Computer
+  /// to. Absent before the first is saved.
+  final DateTime? checkpointAt;
   const ComputerProjection({
     required this.phase,
     required this.message,
@@ -183,6 +189,7 @@ class ComputerProjection {
     this.controlHeld = false,
     this.screenshots = const [],
     this.demonstration,
+    this.checkpointAt,
   });
 
   bool get running =>
@@ -202,6 +209,7 @@ class ComputerProjection {
     }
     final progress = json['progress'] as Map?;
     final session = json['viewerSession'] as Map?;
+    final checkpoint = (json['checkpoint'] as Map?)?['createdAt'];
     return ComputerProjection(
       phase: phase,
       message: json['message']! as String,
@@ -209,6 +217,7 @@ class ComputerProjection {
       viewerUrl: session?['url'] as String?,
       controlHeld: json['controlLease'] != null,
       demonstration: ComputerDemonstration.decode(json['demonstration']),
+      checkpointAt: checkpoint is String ? DateTime.tryParse(checkpoint) : null,
       progress: progress == null
           ? null
           : ComputerProgress(
@@ -274,6 +283,11 @@ bool botComputerRunningV1(Iterable<Map<String, dynamic>> runs) {
 /// What the opening card and overlay call this run.
 String computerOpeningHeadingV1(ComputerProjection state) {
   final progress = state.progress;
+  // A Reset is an update of the whole machine in the projection's words; its
+  // own step is what tells the two apart.
+  if (progress?.steps.any((step) => step.id == 'resetting') ?? false) {
+    return 'Resetting your computer';
+  }
   if (state.phase == 'updating' ||
       progress?.kind == 'update' ||
       progress?.provisioningKind == 'update') {

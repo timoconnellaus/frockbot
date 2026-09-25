@@ -48,6 +48,7 @@ import {
   decodeComputerCommandReceiptV1,
   decodeComputerCommandV1,
   decodeComputerProgressViewV1,
+  isComputerScheduledCommandV1,
   type ComputerCommandReceiptV1,
   type ComputerCommandResponse,
   type ComputerCommandV1,
@@ -56,9 +57,18 @@ import {
   type ComputerPhase,
   type ComputerProjectionV1,
   type ComputerProgressViewV1,
+  type ComputerProvisioningProgressViewV1,
   type ComputerScreenshotViewV1,
   type ComputerViewerSessionViewV1,
 } from "./protocol.js";
+import {
+  COMPUTER_CHECKPOINT_RECORD_KEY,
+  decodeStoredComputerCheckpointV1,
+  keepComputerLoginsV1,
+  noteComputerCheckpointV1,
+  restoreOwedComputerLoginsV1,
+  type ComputerLoginVaultV1,
+} from "./upkeep.js";
 import {
   COMPUTER_CONTROL_RECORD_KEY,
   decodeStoredComputerControlV1,
@@ -122,6 +132,11 @@ export const COMPUTER_VIEWER_RECORD_KEY = "computer:viewer:v1";
 export const COMPUTER_PROVIDER_RECORD_KEY = "computer:provider:v1";
 export const COMPUTER_INTENT_PREFIX = "computer:intent:v1:";
 export const COMPUTER_RECEIPT_PREFIX = "computer:receipt:v1:";
+/**
+ * The one scheduled command this Bot owes. Always a connect in the end: an
+ * Update or a Reset is a connect with the whole machine changed in front of
+ * it, which is why it is held under the connect's key and settles like one.
+ */
 export const COMPUTER_PENDING_CONNECT_KEY = "computer:pending-connect:v1";
 /** Keep a freshly armed alarm pending past the command's output gate. */
 export const COMPUTER_CONNECT_START_DELAY_MS = 1_000;
@@ -158,6 +173,12 @@ export interface ComputerBotBackendHost {
   ): Promise<ComputerHostSessionV1>;
   /** Where a stopped recording's files go. Absent, and nothing is recorded. */
   demonstrations?: ComputerDemonstrationStoreV1;
+  /**
+   * Where this User's browser sign-ins are kept, sealed. Absent, and nothing
+   * is carried off the Computer: an Update or a Reset then loses them, and
+   * says nothing it cannot keep.
+   */
+  loginVault?(userId: string): ComputerLoginVaultV1 | undefined;
   now?(): Date;
   newId?(): string;
 }
@@ -235,6 +256,13 @@ interface StoredPendingConnectV1 {
   commandId: string;
   admittedAt: string;
   deferredUntil?: string;
+  /**
+   * When an Update or a Reset finished changing the machine. A replay after
+   * eviction goes straight to bringing the new machine up: discarding or
+   * resetting it a second time would throw away what the first attempt
+   * already started.
+   */
+  machineAt?: string;
 }
 
 interface LiveViewer {
@@ -419,6 +447,79 @@ function connectProjectionRecord(startedAt: string): StoredProviderAnswerV2 {
   };
 }
 
+/**
+ * The four steps of an Update and of a Reset, as the card lists them. Both
+ * are an `update` in the projection's vocabulary — the machine is changing
+ * under every Bot of the User — and the step names say which.
+ */
+const MACHINE_PROGRESS_STEPS = {
+  updateComputer: [
+    { id: "keeping-sign-ins", label: "Keeping your browser sign-ins" },
+    { id: "replacing", label: "Replacing the machine" },
+    { id: "preparing", label: "Setting up the new machine" },
+    { id: "restoring-sign-ins", label: "Restoring your browser sign-ins" },
+  ],
+  resetComputer: [
+    { id: "keeping-sign-ins", label: "Keeping your browser sign-ins" },
+    { id: "resetting", label: "Resetting to the checkpoint" },
+    { id: "preparing", label: "Starting the Computer" },
+    { id: "restoring-sign-ins", label: "Restoring your browser sign-ins" },
+  ],
+} as const;
+
+type MachineCommandTypeV1 = keyof typeof MACHINE_PROGRESS_STEPS;
+
+function machineProjectionRecord(
+  type: MachineCommandTypeV1,
+  index: number,
+  startedAt: string,
+  updatedAt: string,
+  provisioning?: ComputerProvisioningProgressViewV1,
+): StoredProviderAnswerV2 {
+  const steps = MACHINE_PROGRESS_STEPS[type];
+  return {
+    version: 2,
+    phase: "updating",
+    message: steps[index - 1]?.label ?? steps[0].label,
+    recordedAt: updatedAt,
+    progress: {
+      version: 1,
+      kind: "update",
+      startedAt,
+      updatedAt,
+      index,
+      total: steps.length,
+      ...(provisioning ? { provisioning } : {}),
+      steps: steps.map((step, position) => ({
+        version: 1,
+        ...step,
+        status:
+          position + 1 < index
+            ? ("complete" as const)
+            : position + 1 === index
+              ? ("active" as const)
+              : ("pending" as const),
+      })),
+    },
+  };
+}
+
+const COMPUTER_DELETED_BEFORE =
+  "The Computer was deleted after this was asked for, so nothing was changed. The next time a Bot uses the Computer, it starts a new one.";
+const COMPUTER_DELETED_DURING =
+  "The Computer was deleted while this was under way. The next time a Bot uses the Computer, it starts a new one.";
+
+/** A refusal after which the machine is exactly as it was. */
+function machineUntouched(error: unknown): boolean {
+  return (
+    error instanceof ComputerError &&
+    (error.code === "human-control-active" ||
+      error.code === "not-found" ||
+      error.code === "conflict" ||
+      error.code === "updating")
+  );
+}
+
 function decodeStoredIntent(value: unknown): StoredIntentV1 {
   const record = object(value, "Computer intent");
   exact(
@@ -473,7 +574,7 @@ function decodeStoredPendingConnect(value: unknown): StoredPendingConnectV1 {
   exact(
     record,
     ["version", "userId", "commandId", "admittedAt"],
-    ["deferredUntil"],
+    ["deferredUntil", "machineAt"],
     "Computer pending connect",
   );
   if (record.version !== 1) {
@@ -496,6 +597,14 @@ function decodeStoredPendingConnect(value: unknown): StoredPendingConnectV1 {
           deferredUntil: storedTimestamp(
             record.deferredUntil,
             "Computer pending connect deferredUntil",
+          ),
+        }),
+    ...(record.machineAt === undefined
+      ? {}
+      : {
+          machineAt: storedTimestamp(
+            record.machineAt,
+            "Computer pending connect machineAt",
           ),
         }),
   };
@@ -728,8 +837,24 @@ export class ComputerBotBackendContribution {
     | { replay: ComputerCommandReceiptV1 }
     | { intent: StoredIntentV1; fingerprint: string }
     | { joined: string }
+    | { busy: true }
   > {
     const fingerprint = computerCommandFingerprintV1(command);
+    const scheduled = isComputerScheduledCommandV1(command.type);
+    const startedRecord = (admittedAt: string): StoredProviderAnswerV2 =>
+      command.type === "updateComputer" || command.type === "resetComputer"
+        ? machineProjectionRecord(command.type, 1, admittedAt, admittedAt)
+        : connectProjectionRecord(admittedAt);
+    // A second Open during a slow start is the same connect. An Update or a
+    // Reset is never folded into whatever is already starting: it would
+    // silently not happen.
+    const alongside = async (
+      storage: ComputerBotTransaction,
+      pending: StoredPendingConnectV1,
+    ): Promise<{ joined: string } | { busy: true }> =>
+      command.type === "connect"
+        ? { joined: await this.joinPendingConnect(storage, pending) }
+        : { busy: true };
     return this.host.storage.transaction(async (storage) => {
       const receiptValue = await storage.get<unknown>(
         `${COMPUTER_RECEIPT_PREFIX}${command.commandId}`,
@@ -752,7 +877,7 @@ export class ComputerBotBackendContribution {
             `command ID collision: ${command.commandId}`,
           );
         }
-        if (command.type === "connect") {
+        if (scheduled) {
           const pendingValue = await storage.get<unknown>(
             COMPUTER_PENDING_CONNECT_KEY,
           );
@@ -772,14 +897,12 @@ export class ComputerBotBackendContribution {
             await storage.put(COMPUTER_PENDING_CONNECT_KEY, pending);
             await storage.put(
               COMPUTER_PROVIDER_RECORD_KEY,
-              connectProjectionRecord(intent.admittedAt),
+              startedRecord(intent.admittedAt),
             );
           } else {
             pending = decodeStoredPendingConnect(pendingValue);
             if (pending.commandId !== command.commandId) {
-              return {
-                joined: await this.joinPendingConnect(storage, pending),
-              };
+              return alongside(storage, pending);
             }
             if (pendingConnectDeadline(pending) <= this.now().getTime()) {
               pending = {
@@ -794,10 +917,9 @@ export class ComputerBotBackendContribution {
         }
         return { intent, fingerprint };
       }
-      const pendingValue =
-        command.type === "connect"
-          ? await storage.get<unknown>(COMPUTER_PENDING_CONNECT_KEY)
-          : undefined;
+      const pendingValue = scheduled
+        ? await storage.get<unknown>(COMPUTER_PENDING_CONNECT_KEY)
+        : undefined;
       const pendingConnect =
         pendingValue === undefined
           ? undefined
@@ -805,9 +927,7 @@ export class ComputerBotBackendContribution {
       // No intent for a joined connect: an intent without a receipt is a
       // connect still owed, and this one is owed nothing of its own.
       if (pendingConnect && pendingConnect.commandId !== command.commandId) {
-        return {
-          joined: await this.joinPendingConnect(storage, pendingConnect),
-        };
+        return alongside(storage, pendingConnect);
       }
       const admittedAt = this.now().toISOString();
       const intent = {
@@ -822,7 +942,7 @@ export class ComputerBotBackendContribution {
       // The durable intent is committed by this transaction before the
       // provider-neutral Computer can be asked to perform an effect.
       await storage.put(intentKey, intent);
-      if (command.type === "connect") {
+      if (scheduled) {
         let pending: StoredPendingConnectV1;
         if (pendingConnect !== undefined) {
           pending = pendingConnect;
@@ -849,7 +969,7 @@ export class ComputerBotBackendContribution {
         }
         await storage.put(
           COMPUTER_PROVIDER_RECORD_KEY,
-          connectProjectionRecord(admittedAt),
+          startedRecord(admittedAt),
         );
       }
       return { intent, fingerprint };
@@ -918,7 +1038,7 @@ export class ComputerBotBackendContribution {
       // while its connect is still pending invites a retry that joins a
       // connect about to settle, and then nothing happens.
       if (provider) await storage.put(COMPUTER_PROVIDER_RECORD_KEY, provider);
-      if (command.type === "connect") {
+      if (isComputerScheduledCommandV1(command.type)) {
         const pendingValue = await storage.get<unknown>(
           COMPUTER_PENDING_CONNECT_KEY,
         );
@@ -989,6 +1109,17 @@ export class ComputerBotBackendContribution {
     }
     const admitted = await this.admit(userId, command);
     if ("replay" in admitted) return admitted.replay;
+    if ("busy" in admitted) {
+      return {
+        version: 1,
+        commandId: command.commandId,
+        type: command.type,
+        status: "rejected",
+        completedAt: this.now().toISOString(),
+        failure:
+          "The Computer is already starting. Try again once it is ready.",
+      };
+    }
     if ("joined" in admitted) {
       return {
         version: 2,
@@ -998,11 +1129,11 @@ export class ComputerBotBackendContribution {
         admittedAt: admitted.joined,
       };
     }
-    if (command.type === "connect") {
+    if (isComputerScheduledCommandV1(command.type)) {
       return {
         version: 2,
         commandId: command.commandId,
-        type: "connect",
+        type: command.type,
         status: "accepted",
         admittedAt: admitted.intent.admittedAt,
       };
@@ -1019,6 +1150,14 @@ export class ComputerBotBackendContribution {
       switch (command.type) {
         case "connect":
           await this.connect(userId, command);
+          await this.restoreOwedLogins(userId, command);
+          break;
+        case "updateComputer":
+        case "resetComputer":
+          await this.renewMachine(userId, command, command.type);
+          break;
+        case "saveCheckpoint":
+          await this.saveCheckpoint(userId, command);
           break;
         case "takeControl":
           await this.takeControl(userId, command, admitted.intent);
@@ -1204,7 +1343,7 @@ export class ComputerBotBackendContribution {
       throw new Error("Computer pending connect has no durable intent");
     }
     const intent = decodeStoredIntent(intentValue);
-    if (intent.command.type !== "connect") {
+    if (!isComputerScheduledCommandV1(intent.command.type)) {
       throw new Error("Computer pending connect does not match its Bot");
     }
     await this.executeAdmitted(pending.userId, intent.command, {
@@ -1524,17 +1663,21 @@ export class ComputerBotBackendContribution {
       (entry) =>
         entry.status === "recording" && entry.ownerId === current.ownerId,
     );
-    if (!recording || recording.status !== "recording") return;
-    try {
-      await this.collect(recording, (run) =>
-        this.withComputer(userId, command, (computer, effectId) =>
-          run(computer, `${effectId}:collect-demonstration`),
-        ),
-      );
-    } catch {
-      // The release happened; a recording the Computer would not hand back
-      // yet is the alarm's to collect.
+    if (recording?.status === "recording") {
+      try {
+        await this.collect(recording, (run) =>
+          this.withComputer(userId, command, (computer, effectId) =>
+            run(computer, `${effectId}:collect-demonstration`),
+          ),
+        );
+      } catch {
+        // The release happened; a recording the Computer would not hand back
+        // yet is the alarm's to collect.
+      }
     }
+    // A person who took the desktop over is the likeliest to have just signed
+    // in to something, so this is when the sign-ins are worth keeping.
+    await this.keepLogins(userId, command);
   }
 
   // --- demonstrations (parity row 54) --------------------------------------
@@ -1868,6 +2011,250 @@ export class ComputerBotBackendContribution {
     }
   }
 
+  /** Captures and keeps the sign-ins. Never fails the command it follows. */
+  private async keepLogins(
+    userId: string,
+    command: ComputerCommandV1,
+  ): Promise<void> {
+    const vault = this.host.loginVault?.(userId);
+    if (!vault) return;
+    try {
+      await this.withComputer(userId, command, (computer, effectId) =>
+        keepComputerLoginsV1({
+          computer,
+          vault,
+          effectId: `${effectId}:keep-sign-ins`,
+          now: () => this.now(),
+        }),
+      );
+    } catch {
+      // What was kept before stays kept.
+    }
+  }
+
+  /**
+   * Puts the kept sign-ins into a machine that is owed them. The machine an
+   * Update or a Reset left behind is owed them until this runs, whichever of
+   * the User's Bots opens it first. Never fails the command it follows.
+   */
+  private async restoreOwedLogins(
+    userId: string,
+    command: ComputerCommandV1,
+  ): Promise<void> {
+    const vault = this.host.loginVault?.(userId);
+    if (!vault) return;
+    try {
+      await this.withComputer(userId, command, (computer, effectId) =>
+        restoreOwedComputerLoginsV1({
+          computer,
+          vault,
+          effectId: `${effectId}:restore-sign-ins`,
+        }),
+      );
+    } catch {
+      // An unpaid debt is paid by the next open.
+    }
+  }
+
+  private async saveCheckpoint(
+    userId: string,
+    command: ComputerCommandV1,
+  ): Promise<void> {
+    const { checkpoint } = await this.withComputer(
+      userId,
+      command,
+      (computer, effectId) => {
+        if (!computer.machine) {
+          throw new Error("This Computer cannot record checkpoints");
+        }
+        return computer.machine.checkpoint({
+          effectId: `${effectId}:checkpoint`,
+        });
+      },
+    );
+    await noteComputerCheckpointV1(this.host.storage, checkpoint);
+  }
+
+  /**
+   * Update and Reset: keep the sign-ins, change the whole machine, bring the
+   * new one up with a viewer, and put the sign-ins back.
+   *
+   * It runs in the scheduled path, like a connect, because the new machine
+   * takes minutes to come up. Every step names its host request after the
+   * command, and `machineAt` records the one step that cannot be repeated,
+   * so a replay after eviction resumes rather than discarding the machine it
+   * already started.
+   *
+   * "Delete my Computer" outranks it. One asked for before this command ran
+   * refuses it before any machine changes, and one that lands while it runs
+   * stops it before it opens a new machine: the vault is the fence, because
+   * the User's object records the deletion there before the teardown. A
+   * replacement the host could not make — there was no machine, or a
+   * teardown overtook it — owes the sign-ins to the next open rather than
+   * settling them, since the machine that held them is gone.
+   */
+  private async renewMachine(
+    userId: string,
+    command: ComputerCommandV1,
+    type: MachineCommandTypeV1,
+  ): Promise<void> {
+    const intentValue = await this.host.storage.get<unknown>(
+      `${COMPUTER_INTENT_PREFIX}${command.commandId}`,
+    );
+    const startedAt =
+      intentValue === undefined
+        ? this.now().toISOString()
+        : decodeStoredIntent(intentValue).admittedAt;
+    const report = (
+      index: number,
+      provisioning?: ComputerProvisioningProgressViewV1,
+    ): Promise<void> =>
+      this.host.storage.put(
+        COMPUTER_PROVIDER_RECORD_KEY,
+        machineProjectionRecord(
+          type,
+          index,
+          startedAt,
+          this.now().toISOString(),
+          provisioning,
+        ),
+      );
+    const vault = this.host.loginVault?.(userId);
+
+    const pendingValue = await this.host.storage.get<unknown>(
+      COMPUTER_PENDING_CONNECT_KEY,
+    );
+    const pending =
+      pendingValue === undefined
+        ? undefined
+        : decodeStoredPendingConnect(pendingValue);
+    if (!pending?.machineAt) {
+      await report(1);
+      if (vault) {
+        // Checked before the capture as well as by the debt, so that a
+        // Computer the User deleted is not even opened to be captured.
+        if (await vault.deletedSince(startedAt)) {
+          throw new ComputerError("not-found", COMPUTER_DELETED_BEFORE);
+        }
+        await this.keepLogins(userId, command);
+        // Owed before the machine goes, so that no capture of the browser
+        // that replaces it — which holds none of them — is kept instead.
+        if ((await vault.owe(startedAt)) === "deleted") {
+          throw new ComputerError("not-found", COMPUTER_DELETED_BEFORE);
+        }
+      }
+      await report(2);
+      try {
+        await this.withComputer(userId, command, async (computer, effectId) => {
+          if (!computer.machine) {
+            throw new Error("This Computer cannot be reset or replaced");
+          }
+          if (type === "resetComputer") {
+            const checkpoint = await computer.machine.reset({
+              effectId: `${effectId}:reset`,
+            });
+            await noteComputerCheckpointV1(this.host.storage, checkpoint);
+          } else {
+            await computer.machine.replace({ effectId: `${effectId}:replace` });
+            // Its checkpoints went with it.
+            await this.host.storage.put(COMPUTER_CHECKPOINT_RECORD_KEY, {
+              version: 1,
+            });
+          }
+        });
+      } catch (error) {
+        const gone =
+          error instanceof ComputerError && error.code === "not-found";
+        // Refused before anything changed: the machine still holds its
+        // sign-ins, so it is owed nothing. A replacement that found no
+        // machine is the exception — whatever held them is already gone.
+        if (
+          vault &&
+          machineUntouched(error) &&
+          !(gone && type === "updateComputer")
+        ) {
+          await vault.settle(startedAt).catch(() => undefined);
+        }
+        // Nothing to reset to is what Reset will find next time too.
+        if (gone && type === "resetComputer") {
+          await this.host.storage.put(COMPUTER_CHECKPOINT_RECORD_KEY, {
+            version: 1,
+          });
+        }
+        throw error;
+      }
+      // The viewer belonged to the machine that is gone.
+      this.#liveViewer = undefined;
+      await this.host.storage.delete(COMPUTER_VIEWER_RECORD_KEY);
+      if (pending) {
+        await this.host.storage.put(COMPUTER_PENDING_CONNECT_KEY, {
+          ...pending,
+          machineAt: this.now().toISOString(),
+        } satisfies StoredPendingConnectV1);
+      }
+    }
+
+    // The one step that would provision a machine: never for a Computer the
+    // User deleted after asking for this.
+    if (vault && (await vault.deletedSince(startedAt))) {
+      throw new ComputerError("not-found", COMPUTER_DELETED_DURING);
+    }
+    await report(3);
+    const session = await this.withComputer(
+      userId,
+      command,
+      (computer, effectId) => {
+        if (!computer.presence) {
+          throw new Error("The selected Computer does not support presence");
+        }
+        return computer.presence.connect({
+          effectId: `${effectId}:connect`,
+          onProgress: (progress) =>
+            report(
+              3,
+              progress.provisioning
+                ? { ...progress.provisioning, version: 1 }
+                : undefined,
+            ),
+        });
+      },
+    );
+    if (!session.expiresAt) {
+      throw new Error("The Computer returned a viewer session with no expiry");
+    }
+
+    await report(4);
+    await this.restoreOwedLogins(userId, command);
+    if (type === "updateComputer") {
+      // A fresh machine keeps none of the old one's checkpoints; this one is
+      // where its first Reset goes.
+      try {
+        const { checkpoint } = await this.withComputer(
+          userId,
+          command,
+          (computer, effectId) =>
+            computer.machine
+              ? computer.machine.checkpoint({
+                  effectId: `${effectId}:checkpoint`,
+                })
+              : Promise.reject(new Error("no machine")),
+        );
+        await noteComputerCheckpointV1(
+          this.host.storage,
+          checkpoint,
+          this.now().toISOString(),
+        );
+      } catch {
+        // The weekly checkpoint at a Turn's end records one later.
+      }
+    }
+    await this.recordViewer({
+      id: session.id,
+      url: session.url,
+      expiresAt: session.expiresAt,
+    });
+  }
+
   /**
    * Keeps the frame the User just stopped watching as the card's, without
    * making close depend on a best-effort capture. A resident, fresh viewer is
@@ -2023,6 +2410,7 @@ export class ComputerBotBackendContribution {
       controlValue,
       providerValue,
       frameValue,
+      checkpointValue,
       doctor,
       demonstrations,
     ] = await Promise.all([
@@ -2030,9 +2418,12 @@ export class ComputerBotBackendContribution {
       this.host.storage.get<unknown>(COMPUTER_CONTROL_RECORD_KEY),
       this.host.storage.get<unknown>(COMPUTER_PROVIDER_RECORD_KEY),
       this.host.storage.get<unknown>(COMPUTER_FRAME_RECORD_KEY),
+      this.host.storage.get<unknown>(COMPUTER_CHECKPOINT_RECORD_KEY),
       this.doctor(userId, botId),
       this.demonstrations(),
     ]);
+    const checkpoint =
+      decodeStoredComputerCheckpointV1(checkpointValue)?.checkpoint;
     // A record the codec refuses is treated as absent, the way `doctor()`
     // above and `ComputerProcessStore.list` already do. These three decoders
     // throw on any unexpected shape — a field a future version adds included —
@@ -2115,6 +2506,9 @@ export class ComputerBotBackendContribution {
       screenshots: frame ? [computerFrameViewV1(botId, frame)] : [],
       ...(doctor ? { doctor } : {}),
       ...(demonstration ? { demonstration } : {}),
+      ...(checkpoint
+        ? { checkpoint: { version: 1, createdAt: checkpoint.createdAt } }
+        : {}),
     };
   }
 }

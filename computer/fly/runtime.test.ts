@@ -20,6 +20,8 @@ import {
   browserHelper,
   BROWSER_ENSURE_ACTION,
   BROWSER_FOCUS_ACTION,
+  BROWSER_LOGINS_CAPTURE_ACTION,
+  BROWSER_LOGINS_RESTORE_ACTION,
   BROWSER_SURVEY_ACTION,
   browserWatchdogScript,
   CHROME_LAUNCHER,
@@ -52,6 +54,9 @@ import {
   DOCTOR_REPORT_SCHEMA_VERSION,
   DOCTOR_SCRIPT,
   guiShimScript,
+  loginsCaptureScript,
+  loginsRestoreScript,
+  NO_BROWSER_MARKER,
   REFERENCE_DOCS,
   REFERENCE_DOCS_VERSION,
   REFERENCE_ROOT,
@@ -1013,12 +1018,33 @@ describe("installed shell scripts", () => {
       [BROWSER_ENSURE_ACTION, "ensure"],
       [BROWSER_FOCUS_ACTION, "focus"],
       [BROWSER_SURVEY_ACTION, "survey"],
+      [BROWSER_LOGINS_CAPTURE_ACTION, "logins-capture"],
+      [BROWSER_LOGINS_RESTORE_ACTION, "logins-restore"],
     ] as const) {
       expect(
         JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")),
       ).toEqual({ action });
       expect(browserHelper).toContain(`action.action === "${action}"`);
     }
+  });
+
+  test("the sign-in scripts are valid bash and carry the capture on stdin", async () => {
+    await expectValidShell(loginsCaptureScript);
+    // Every byte base64 can produce, so no capture can end the heredoc early.
+    const state = Buffer.from(
+      Uint8Array.from({ length: 256 }, (_, index) => index),
+    ).toString("base64");
+    const restore = loginsRestoreScript(state);
+    await expectValidShell(restore);
+    expect(restore).toContain(`\n${state}\n__FROCKBOT_LOGINS__\n`);
+    expect(state).not.toContain("_");
+    // A capture of a machine with no browser says so rather than answering
+    // with an empty jar.
+    expect(loginsCaptureScript).toContain(NO_BROWSER_MARKER);
+    // The helper refuses a document it cannot read without quoting it.
+    expect(browserHelper).toContain(
+      "this is not a sign-in capture this Computer made",
+    );
   });
 
   test("every script the provisioning document installs is valid bash", async () => {

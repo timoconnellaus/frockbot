@@ -36,12 +36,21 @@ const DEFAULT_MAXIMUM_MS = 60_000;
 const OPEN_MAXIMUM_MS = 10 * 60_000;
 const SERVICE_MAXIMUM_MS = 120_000;
 const EXEC_SETTLEMENT_GRACE_MS = 6_000;
+/** A checkpoint or a restore, which the host bounds at four minutes. */
+const CHECKPOINT_MAXIMUM_MS = 5 * 60_000;
+/** A sign-in restore may start the browser before it writes. */
+const LOGINS_MAXIMUM_MS = 2 * 60_000;
+/** A replacement discards the machine and waits for its name to free. */
+const REPLACE_MAXIMUM_MS = 3 * 60_000;
 
 function maximumDuration(operation: ComputerHostOperationV1): number {
   if (operation.kind === "exec")
     return operation.timeoutMs + EXEC_SETTLEMENT_GRACE_MS;
   if (operation.kind === "open") return OPEN_MAXIMUM_MS;
   if (operation.kind === "service") return SERVICE_MAXIMUM_MS;
+  if (operation.kind === "checkpoint") return CHECKPOINT_MAXIMUM_MS;
+  if (operation.kind === "logins") return LOGINS_MAXIMUM_MS;
+  if (operation.kind === "replace") return REPLACE_MAXIMUM_MS;
   if (operation.kind === "viewer")
     return operation.action === "open"
       ? VIEWER_OPEN_MS

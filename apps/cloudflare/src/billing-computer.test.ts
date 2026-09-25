@@ -305,6 +305,39 @@ describe("prepaidComputerHost", () => {
     expect(account.settlements).toEqual([]);
   });
 
+  test("reserves each machine-wide operation's own bound and settles its active time", async () => {
+    const account = new AccountSpy();
+    let now = 0;
+    const computer = host(() => {
+      now += 42_300;
+      return Response.json({});
+    });
+    const billed = prepaidComputerHost(
+      computer.fetcher,
+      () => account.rpc(),
+      () => now,
+    );
+
+    for (const operation of [
+      { kind: "checkpoint", action: "restore" },
+      { kind: "logins", action: "capture" },
+      { kind: "replace" },
+    ] as const) {
+      await billed.fetch(request(operation, `effect-${operation.kind}`));
+    }
+
+    // Five minutes for a checkpoint or restore, two for the sign-ins, three
+    // for a replacement: the host's own bounds, so a slow restore is never
+    // cut off by its own reservation.
+    expect(account.reservations.map((entry) => entry.maximumMicros)).toEqual([
+      229_167, 91_667, 137_500,
+    ]);
+    // What was used is what is charged: 43 active seconds each.
+    expect(
+      account.settlements.map((entry) => entry.quantities.activeSeconds),
+    ).toEqual([43, 43, 43]);
+  });
+
   test("settles a streaming response only after its body completes", async () => {
     const account = new AccountSpy();
     let now = 0;

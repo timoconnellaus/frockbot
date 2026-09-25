@@ -152,6 +152,7 @@ import { cleanUserAppletsV1 } from "./plugin-panels-cleanup.js";
 import { cleanDefaultPackagesMarkerV1 } from "./default-packages-marker-cleanup.js";
 import { cleanRetiredOllamaWebSearchV1 } from "./ollama-web-search-cleanup.js";
 import { cleanUserMachineMessagesV1 } from "./machine-messages-cleanup.js";
+import { ComputerLoginsLedgerV1 } from "@frockbot/app/shell/computer-logins";
 import type { FlockUserTransaction } from "@frockbot/app/flock/user";
 import {
   decodeWorkspaceGenerationRecordV1,
@@ -1217,7 +1218,13 @@ export class UserConfiguration
     const host = binding ? createComputerHostV1(binding) : undefined;
     if (!host?.teardown)
       return { schemaVersion: 1 as const, status: "unavailable" as const };
+    // The kept sign-ins go with the Computer, on both sides of the teardown:
+    // before it, so an Update under way stops before it opens a new machine;
+    // after it, so a capture a Turn's end kept in between is dropped too.
+    const logins = this.computerLogins();
+    await logins.forget(new Date().toISOString());
     await host.teardown({ userId });
+    await logins.forget(new Date().toISOString());
     await this.ctx.storage.put(receiptKey, {
       schemaVersion: 1,
       deletedAt: new Date().toISOString(),
@@ -2640,6 +2647,54 @@ export class UserConfiguration
       { kind: "user-instructions", userId },
       held.revisions,
     );
+  }
+
+  /**
+   * The User's sealed browser sign-ins and the debt an Update or a Reset
+   * leaves. This object never holds the key: a Bot's object seals before it
+   * calls and opens after it reads (`@frockbot/app/shell/computer-logins`).
+   */
+  async readComputerLogins(input: unknown): Promise<object> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      capture: rpcBoolean,
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return this.computerLogins().answer(request.capture as boolean);
+  }
+
+  async keepComputerLogins(input: unknown): Promise<object> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      kept: rpcDecodedValue,
+    });
+    await this.assertUserIdentity(request.userId as string);
+    // A closing account keeps nothing new: its deletion wipes this object.
+    await this.assertAccountOpen();
+    return { outcome: await this.computerLogins().keep(request.kept) };
+  }
+
+  async oweComputerLogins(input: unknown): Promise<object> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      at: rpcString(64),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    await this.assertAccountOpen();
+    return { outcome: await this.computerLogins().owe(request.at as string) };
+  }
+
+  async settleComputerLogins(input: unknown): Promise<void> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      owedSince: rpcString(64),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    await this.computerLogins().settle(request.owedSince as string);
+  }
+
+  private computerLogins(): ComputerLoginsLedgerV1 {
+    return new ComputerLoginsLedgerV1(this.ctx.storage);
   }
 
   /** The Group Chats a Bot is in: the group Memory scopes it may use. */

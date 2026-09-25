@@ -15,13 +15,16 @@ import {
   ComputerHostExecFrameReaderV1,
   ComputerHostOpenFrameReaderV1,
   decodeComputerHostCancelResultV1,
+  decodeComputerHostCheckpointResultV1,
   decodeComputerHostControlResultV1,
   decodeComputerHostExecResultV1,
   decodeComputerHostFileListResultV1,
   decodeComputerHostFileReadResultV1,
   decodeComputerHostHttpRequestV1,
+  decodeComputerHostLoginsResultV1,
   decodeComputerHostOpenResultV1,
   decodeComputerHostProblemV1,
+  decodeComputerHostReplaceResultV1,
   decodeComputerHostServiceResultV1,
   decodeComputerHostTeardownResultV1,
   type ComputerHostExecFrameV1,
@@ -61,6 +64,7 @@ import {
   WORKSPACE_SYNC_SERVICE,
 } from "@frockbot/computer/fly/runtime";
 import {
+  CHECKPOINT_COMMENT_PREFIX,
   ComputerHost,
   COMPUTER_HOST_STATE_PATH,
   computerHostExecScriptV1,
@@ -2348,5 +2352,330 @@ describe("the decoder in front of the host", () => {
       await (await host.handle(decoded.value)).json(),
     );
     expect(result.exitCode).toBe(0);
+  });
+});
+
+describe("the machine", () => {
+  const humanLease = `${BOTS_ROOT}/${DESKTOP_GUI_LEASE_KEY}/human-control`;
+
+  test("records a marked checkpoint, and a retry of the effect answers the same one", async () => {
+    const { host, sprite } = provisioned();
+
+    const first = decodeComputerHostCheckpointResultV1(
+      await (
+        await host.handle(
+          request(
+            { kind: "checkpoint", action: "create" },
+            { effectId: "c-1" },
+          ),
+        )
+      ).json(),
+    );
+    const retried = decodeComputerHostCheckpointResultV1(
+      await (
+        await host.handle(
+          request(
+            { kind: "checkpoint", action: "create" },
+            { effectId: "c-1" },
+          ),
+        )
+      ).json(),
+    );
+
+    expect(first).toMatchObject({
+      action: "create",
+      created: true,
+      checkpoint: { id: "v1", createdAt: "2026-08-31T00:00:00.000Z" },
+    });
+    expect(retried).toMatchObject({ created: false, checkpoint: { id: "v1" } });
+    expect(sprite.checkpointCalls).toEqual([
+      `create:${CHECKPOINT_COMMENT_PREFIX}c-1`,
+    ]);
+  });
+
+  test("a checkpoint younger than the asked age answers instead of another", async () => {
+    const { host, sprite } = provisioned();
+    await host.handle(
+      request({ kind: "checkpoint", action: "create" }, { effectId: "c-1" }),
+    );
+
+    const answered = decodeComputerHostCheckpointResultV1(
+      await (
+        await host.handle(
+          request(
+            { kind: "checkpoint", action: "create", maxAgeSeconds: 3_600 },
+            { effectId: "c-2" },
+          ),
+        )
+      ).json(),
+    );
+
+    expect(answered).toMatchObject({
+      created: false,
+      checkpoint: { id: "v1" },
+    });
+    expect(sprite.checkpoints).toHaveLength(1);
+  });
+
+  test("a checkpoint stream that fails is a failure, not a checkpoint", async () => {
+    const { host, sprite } = provisioned();
+    sprite.checkpointFailure = "disk busy";
+
+    const response = await host.handle(
+      request({ kind: "checkpoint", action: "create" }),
+    );
+
+    expect(response.status).toBe(502);
+    expect(
+      decodeComputerHostProblemV1(await response.json()).message,
+    ).toContain("disk busy");
+  });
+
+  test("resets to the newest checkpoint it recorded, and never to one the platform took", async () => {
+    const { host, sprite } = provisioned();
+    await host.handle(request({ kind: "open" }));
+    await host.handle(
+      request({ kind: "checkpoint", action: "create" }, { effectId: "c-1" }),
+    );
+    writeFile(sprite, "/home/box/installed-since", "a package\n");
+    // The platform's own checkpoint, newer and unmarked.
+    sprite.checkpointClock += 60_000;
+    await sprite.createCheckpoint();
+    const commandsBefore = sprite.commands.length;
+
+    const reset = decodeComputerHostCheckpointResultV1(
+      await (
+        await host.handle(request({ kind: "checkpoint", action: "restore" }))
+      ).json(),
+    );
+
+    expect(reset).toMatchObject({
+      action: "restore",
+      created: false,
+      checkpoint: { id: "v1" },
+    });
+    expect(sprite.checkpointCalls.at(-1)).toBe("restore:v1");
+    expect(sprite.files.has("/home/box/installed-since")).toBe(false);
+    // What the container knew about the machine is gone with it: the next
+    // open reads the restored machine's own record again.
+    await host.handle(request({ kind: "open" }));
+    expect(
+      sprite.commands
+        .slice(commandsBefore)
+        .some((command) => command.stdin.includes("frockbot-adoption-state:")),
+    ).toBe(true);
+  });
+
+  test("a machine with no checkpoint of its own has nothing to reset to", async () => {
+    const { host, sprite } = provisioned();
+    await sprite.createCheckpoint();
+
+    const response = await host.handle(
+      request({ kind: "checkpoint", action: "restore" }),
+    );
+
+    expect(response.status).toBe(404);
+    expect(decodeComputerHostProblemV1(await response.json()).code).toBe(
+      "not-found",
+    );
+  });
+
+  test("refuses to reset or replace a desktop somebody holds", async () => {
+    const { client, host, sprite } = provisioned();
+    await host.handle(
+      request({ kind: "checkpoint", action: "create" }, { effectId: "c-1" }),
+    );
+    writeFile(sprite, humanLease, "owner-1\n");
+
+    for (const operation of [
+      { kind: "checkpoint", action: "restore" },
+      { kind: "replace" },
+    ] as const) {
+      const response = await host.handle(request(operation));
+      expect(response.status).toBe(409);
+      expect(decodeComputerHostProblemV1(await response.json()).code).toBe(
+        "human-control-active",
+      );
+    }
+    expect(sprite.checkpointCalls).not.toContain("restore:v1");
+    expect(client.deleted).toEqual([]);
+  });
+
+  test("replaces the machine, and the next open provisions a fresh one", async () => {
+    const { client, host } = provisioned();
+    await host.handle(request({ kind: "open" }));
+    client.onCreate = (fresh) => {
+      fresh.scripts = [report("stopped", ready)];
+    };
+
+    const replaced = decodeComputerHostReplaceResultV1(
+      await (await host.handle(request({ kind: "replace" }))).json(),
+    );
+    const opened = decodeComputerHostOpenResultV1(
+      await (await host.handle(request({ kind: "open" }))).json(),
+    );
+
+    expect(replaced.effectId).toBe("effect-1");
+    expect(client.deleted).toEqual([host.spriteNameFor("user-1")]);
+    expect(client.created).toEqual([host.spriteNameFor("user-1")]);
+    expect(opened.provisioning).toMatchObject({
+      kind: "provision",
+      status: "complete",
+    });
+    expect(opened.generation).toBe(1);
+  });
+
+  test("refuses to replace a machine that is not there, and creates nothing", async () => {
+    const client = new FakeSpritesClient();
+    const host = hostWith(client);
+
+    const response = await host.handle(request({ kind: "replace" }));
+
+    expect(response.status).toBe(404);
+    expect(decodeComputerHostProblemV1(await response.json()).code).toBe(
+      "not-found",
+    );
+    expect(client.deleted).toEqual([]);
+    expect(client.created).toEqual([]);
+  });
+
+  test("a replace after a teardown is refused, and brings nothing back", async () => {
+    const { client, host } = provisioned();
+    await host.handle(request({ kind: "open" }));
+    await host.handle(request({ kind: "teardown" }));
+
+    const replaced = await host.handle(request({ kind: "replace" }));
+    const captured = await host.handle(
+      request({ kind: "logins", action: "capture" }),
+    );
+    const reset = await host.handle(
+      request({ kind: "checkpoint", action: "restore" }),
+    );
+
+    for (const response of [replaced, captured, reset]) {
+      expect(response.status).toBe(404);
+    }
+    expect(client.created).toEqual([]);
+    expect(await client.listAllSprites()).toEqual([]);
+  });
+
+  test("a teardown that lands while a replace runs outranks it", async () => {
+    const { client, host } = provisioned();
+    await host.handle(request({ kind: "open" }));
+    const discard = client.deleteSprite.bind(client);
+    let tornDown: Promise<Response> | undefined;
+    client.deleteSprite = async (name: string) => {
+      await discard(name);
+      // "Delete my Computer" arrives while the replacement waits for the
+      // old machine's name to come free.
+      tornDown ??= host.handle(
+        request({ kind: "teardown" }, { effectId: "effect-teardown" }),
+      );
+      await tornDown;
+    };
+
+    const response = await host.handle(request({ kind: "replace" }));
+
+    expect(response.status).toBe(404);
+    expect(decodeComputerHostProblemV1(await response.json()).message).toMatch(
+      /deleted while it was being updated/,
+    );
+    expect((await tornDown!).status).toBe(200);
+    // Refused, not answered: nothing took it as leave to open a new machine.
+    expect(client.created).toEqual([]);
+    expect(await client.listAllSprites()).toEqual([]);
+  });
+
+  test("captures the browser's cookies as one opaque document", async () => {
+    const { host, sprite } = provisioned();
+    sprite.services.set(BROWSER_SERVICE, "running");
+    sprite.cookies = [
+      { name: "sid", value: "secret", domain: ".example.com", path: "/" },
+    ];
+
+    const captured = decodeComputerHostLoginsResultV1(
+      await (
+        await host.handle(request({ kind: "logins", action: "capture" }))
+      ).json(),
+    );
+
+    expect(captured.count).toBe(1);
+    expect(
+      JSON.parse(
+        Buffer.from(captured.stateBase64 ?? "", "base64").toString("utf8"),
+      ),
+    ).toEqual({ version: 1, cookies: sprite.cookies });
+  });
+
+  test("a machine with no browser running answers no capture rather than an empty one", async () => {
+    const { host } = provisioned();
+
+    const captured = decodeComputerHostLoginsResultV1(
+      await (
+        await host.handle(request({ kind: "logins", action: "capture" }))
+      ).json(),
+    );
+
+    expect(captured).toMatchObject({ action: "capture", count: 0 });
+    expect(captured.stateBase64).toBeUndefined();
+  });
+
+  test("a helper that answers something else is refused, not kept", async () => {
+    const { host, sprite } = provisioned();
+    sprite.services.set(BROWSER_SERVICE, "running");
+    // A helper from before the runtime that knows this action takes a
+    // snapshot of a page instead, and exits 0.
+    sprite.loginsAnswer = {
+      stdout: ['{"url":"about:blank","title":"","snapshot":""}\n'],
+      exitCode: 0,
+    };
+
+    const response = await host.handle(
+      request({ kind: "logins", action: "capture" }),
+    );
+
+    expect(response.status).toBe(502);
+  });
+
+  test("a capture never sets up a machine that is not there", async () => {
+    const client = new FakeSpritesClient();
+    const host = hostWith(client);
+
+    const response = await host.handle(
+      request({ kind: "logins", action: "capture" }),
+    );
+
+    expect(response.status).toBe(404);
+    expect(client.created).toEqual([]);
+  });
+
+  test("a restore starts the browser and puts the cookies back", async () => {
+    const { host, sprite } = provisioned();
+    const cookies = [
+      { name: "sid", value: "secret", domain: ".example.com", path: "/" },
+    ];
+
+    const restored = decodeComputerHostLoginsResultV1(
+      await (
+        await host.handle(
+          request({
+            kind: "logins",
+            action: "restore",
+            stateBase64: Buffer.from(
+              JSON.stringify({ version: 1, cookies }),
+            ).toString("base64"),
+          }),
+        )
+      ).json(),
+    );
+
+    expect(restored).toMatchObject({ action: "restore", count: 1 });
+    expect(sprite.services.get(SCREEN_SERVICE)).toBe("running");
+    expect(sprite.services.get(BROWSER_SERVICE)).toBe("running");
+    expect(sprite.cookies).toEqual(cookies);
+    // The capture travels on stdin, never on a command's argv.
+    for (const command of sprite.commands) {
+      expect(command.args).toEqual(["-s"]);
+    }
   });
 });

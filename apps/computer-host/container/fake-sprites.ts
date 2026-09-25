@@ -13,6 +13,8 @@ import { PassThrough } from "node:stream";
 import {
   BOTS_ROOT,
   BROWSER_LIVE_MARKER,
+  BROWSER_LOGINS_CAPTURE_ACTION,
+  BROWSER_LOGINS_RESTORE_ACTION,
   BROWSER_SERVICE,
   DESKTOP_LIVE_MARKER,
   DESKTOP_SERVICE,
@@ -21,6 +23,7 @@ import {
   ENSURE_WINDOW_SCRIPT,
   FOCUS_WINDOW_SCRIPT,
   LEASE_MAX_AGE_SECONDS,
+  NO_BROWSER_MARKER,
   PROVISION_DIGEST,
   runtimeDocumentDigestV1,
   TARGET_ID_FILE,
@@ -28,6 +31,8 @@ import {
   WINDOW_LIVE_MARKER,
 } from "@frockbot/computer/fly/runtime";
 import type {
+  SpriteCheckpointHandle,
+  SpriteCheckpointStreamHandle,
   SpriteCommandHandle,
   SpriteDirentHandle,
   SpriteFilesystemHandle,
@@ -174,6 +179,26 @@ export class FakeSprite implements SpriteHandle {
   urlSettings?: { auth: string };
   /** Queue of scripted commands; the last one repeats once exhausted. */
   scripts: ScriptedCommand[] = [{ exitCode: 0 }];
+  /**
+   * The browser's cookies, as CDP names them. The browser answers for them
+   * only while its service runs, which is what the capture probe asks.
+   */
+  cookies: Record<string, unknown>[] = [];
+  /** What the browser helper prints for a capture, overriding the cookies. */
+  loginsAnswer?: ScriptedCommand;
+  /** Checkpoints, oldest first, each holding the files it caught. */
+  readonly checkpoints: Array<{
+    id: string;
+    createTime: Date;
+    comment?: string;
+    files: Map<string, FakeFile>;
+  }> = [];
+  /** Every checkpoint operation, as `create:<comment>` or `restore:<id>`. */
+  readonly checkpointCalls: string[] = [];
+  /** Fail the next checkpoint or restore stream with this message. */
+  checkpointFailure?: string;
+  /** The time a new checkpoint is stamped with. */
+  checkpointClock = Date.parse("2026-08-31T00:00:00.000Z");
 
   constructor(readonly name: string) {}
 
@@ -228,6 +253,50 @@ export class FakeSprite implements SpriteHandle {
         });
       }
       return { exitCode: this.windowExitCode };
+    }
+    // The sign-in scripts and the browser probe answer from the browser this
+    // fake runs, which is running exactly when its service is.
+    const browserRunning = this.services.get(BROWSER_SERVICE) === "running";
+    if (stdin.includes(BROWSER_LOGINS_CAPTURE_ACTION)) {
+      if (!browserRunning) {
+        return { stdout: [`${NO_BROWSER_MARKER}\n`], exitCode: 0 };
+      }
+      return (
+        this.loginsAnswer ?? {
+          stdout: [
+            `${JSON.stringify({ version: 1, cookies: this.cookies })}\n`,
+          ],
+          exitCode: 0,
+        }
+      );
+    }
+    if (stdin.includes(BROWSER_LOGINS_RESTORE_ACTION)) {
+      if (!browserRunning) {
+        return { stderr: ["no browser on 9222\n"], exitCode: 1 };
+      }
+      const encoded = /<<'__FROCKBOT_LOGINS__'\n([^\n]*)\n/.exec(stdin)?.[1];
+      const document = JSON.parse(
+        Buffer.from(encoded ?? "", "base64").toString("utf8"),
+      ) as { cookies: Record<string, unknown>[] };
+      this.cookies = document.cookies;
+      return {
+        stdout: [
+          `${JSON.stringify({
+            restored: document.cookies.length,
+            total: document.cookies.length,
+          })}\n`,
+        ],
+        exitCode: 0,
+      };
+    }
+    if (
+      !stdin.includes(ENSURE_AGENT_SCRIPT) &&
+      stdin.includes(`echo ${BROWSER_LIVE_MARKER}`)
+    ) {
+      return {
+        stdout: browserRunning ? [`${BROWSER_LIVE_MARKER}\n`] : [],
+        exitCode: 0,
+      };
     }
     const selected =
       this.scripts.length > 1 ? this.scripts.shift()! : (this.scripts[0] ?? {});
@@ -430,6 +499,44 @@ export class FakeSprite implements SpriteHandle {
 
   async updateURLSettings(settings: { auth: string }): Promise<void> {
     this.urlSettings = settings;
+  }
+
+  async createCheckpoint(
+    comment?: string,
+  ): Promise<SpriteCheckpointStreamHandle> {
+    this.checkpointCalls.push(`create:${comment ?? ""}`);
+    const failure = this.checkpointFailure;
+    this.checkpointFailure = undefined;
+    if (failure) return serviceStream([{ type: "error", error: failure }]);
+    this.checkpoints.push({
+      id: `v${this.checkpoints.length + 1}`,
+      createTime: new Date(this.checkpointClock),
+      ...(comment ? { comment } : {}),
+      files: new Map(this.files),
+    });
+    return serviceStream([{ type: "info", data: "checkpoint complete" }]);
+  }
+
+  async listCheckpoints(): Promise<SpriteCheckpointHandle[]> {
+    return this.checkpoints.map(({ id, createTime, comment }) => ({
+      id,
+      createTime,
+      ...(comment ? { comment } : {}),
+    }));
+  }
+
+  async restoreCheckpoint(id: string): Promise<SpriteCheckpointStreamHandle> {
+    this.checkpointCalls.push(`restore:${id}`);
+    const failure = this.checkpointFailure;
+    this.checkpointFailure = undefined;
+    if (failure) return serviceStream([{ type: "error", error: failure }]);
+    const checkpoint = this.checkpoints.find((entry) => entry.id === id);
+    if (!checkpoint) throw new Error(`Checkpoint not found: ${id}`);
+    this.files.clear();
+    for (const [path, file] of checkpoint.files) this.files.set(path, file);
+    // A restored machine has restarted: nothing it was running still runs.
+    for (const name of this.services.keys()) this.services.set(name, "failed");
+    return serviceStream([{ type: "info", data: "restore complete" }]);
   }
 }
 

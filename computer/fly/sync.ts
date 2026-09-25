@@ -5,7 +5,7 @@
 // bucket into the sandbox with tigrisfs. That cannot be what FrockBot does,
 // for three reasons that are constitutional rather than aesthetic:
 //
-//  1. "No secret lives on the Workspace except the User's browser profile." A
+//  1. "Secrets stay server-side. ... Memory and the Workspace hold none." A
 //     FUSE mount needs object-storage credentials *inside* the Computer. There
 //     is no way to mount a bucket without giving the Workspace a key to it.
 //  2. "a write that would overwrite a generation its writer has not seen is

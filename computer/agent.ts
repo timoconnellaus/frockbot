@@ -98,6 +98,11 @@ import {
   computerFrameFromCaptureV1,
   type ComputerFrameSinkV1,
 } from "./frame.js";
+import {
+  restoreOwedComputerLoginsV1,
+  upkeepComputerAfterTurnV1,
+  type ComputerTurnUpkeepV1,
+} from "./upkeep.js";
 
 export {
   COMPUTER_DOCTOR_ROOT_ID,
@@ -170,6 +175,13 @@ export interface ComputerAgentPluginConfig {
    * Absent, and such a fill is refused: nothing else can reach a value.
    */
   secrets?: ComputerSecretFillSeamV1;
+  /**
+   * What a Turn keeps for the Computer: the User's sign-ins, put back into a
+   * machine that is owed them at the Turn's first Computer call and carried
+   * off at the end of a Turn that drove the browser, and a weekly
+   * checkpoint. Absent, and a Turn does neither.
+   */
+  upkeep?: ComputerTurnUpkeepV1;
   /** The Package's clock. Tests set it; production takes `Date.now`. */
   now?: () => number;
   /**
@@ -911,6 +923,11 @@ export function createComputerAgentFeature(
      * the durable captures only then, so a Turn that filed none lists nothing.
      */
     let screenshotFiledThisTurn = false;
+    /** Whether this Turn drove the browser: its end keeps the sign-ins then. */
+    let browserUsedThisTurn = false;
+    /** Whether this Turn already asked if the machine is owed the sign-ins. */
+    let owedAskedThisTurn = false;
+    const upkeep = config.upkeep;
     const projectionWrites = new Set<ComputerProjectionFileKindV1>();
     const noteProjectionWrite = (kind: ComputerProjectionFileKindV1): void => {
       projectionWrites.add(kind);
@@ -1008,6 +1025,20 @@ export function createComputerAgentFeature(
         context.signal,
         timing,
       );
+      const vault = upkeep?.vault;
+      if (vault && !owedAskedThisTurn) {
+        // A machine an Update or a Reset left behind gets the sign-ins back
+        // before this Turn looks at a single page.
+        owedAskedThisTurn = true;
+        const effectId = await computerOperationIdV1({
+          botId: context.botId,
+          runId: config.writer?.runId ?? context.sessionId,
+          effectId: `turn:${turnOf(context)}:restore-sign-ins`,
+        });
+        await timing.phase("operation", () =>
+          restoreOwedComputerLoginsV1({ computer, vault, effectId }),
+        );
+      }
       await selfCheck(computer, context.botId, context.signal, timing);
       return computer;
     };
@@ -2052,6 +2083,7 @@ export function createComputerAgentFeature(
         const action = decodeBrowser(input);
         if (!action)
           return { content: browserInputRefusalV1(input), isError: true };
+        browserUsedThisTurn = true;
         if (action.type === "fill-by-secret") {
           return fillSecret(action, context);
         }
@@ -2171,6 +2203,20 @@ export function createComputerAgentFeature(
           }
         }
         await turnSync.afterTurn(computer, sessionId, timing);
+        if (upkeep) {
+          const browserUsed = browserUsedThisTurn;
+          browserUsedThisTurn = false;
+          await timing.phase("operation", () =>
+            upkeepComputerAfterTurnV1({
+              computer,
+              records: upkeep.records,
+              ...(upkeep.vault ? { vault: upkeep.vault } : {}),
+              browserUsed,
+              effectIdOf: turnEndIdOf,
+              now: () => new Date(now()),
+            }),
+          );
+        }
       } catch (error) {
         await turnSync.unavailable(sessionId, error);
       } finally {
@@ -2433,6 +2479,8 @@ export function createComputerAgentFeature(
             projectionWrites.clear();
             previewOrigins.clear();
             screenshotFiledThisTurn = false;
+            browserUsedThisTurn = false;
+            owedAskedThisTurn = false;
           }
           currentTurn = turn;
           turnSync.beginTurn(turn);

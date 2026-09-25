@@ -225,6 +225,7 @@
     "./shell/backend-authoring": "./shell/backend-authoring.ts",
     "./shell/backend-composition": "./shell/backend-composition.ts",
     "./shell/backend-computer": "./shell/backend-computer.ts",
+    "./shell/computer-logins": "./shell/computer-logins.ts",
     "./shell/backend-contracts": "./shell/backend-contracts.ts",
     "./shell/backend-image": "./shell/backend-image.ts",
     "./shell/backend-memory": "./shell/backend-memory.ts",

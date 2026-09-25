@@ -647,6 +647,10 @@ class BotSettingsView extends StatefulWidget {
 
   /// The Spending page, narrowed to this Bot.
   final VoidCallback? onOpenSpending;
+  /// Opens the Computer's own settings, where the deployment has one: a
+  /// checkpoint, Reset, and Update. The Computer is the User's, shared by
+  /// every Bot, so the page is the same whichever Bot it is opened from.
+  final VoidCallback? onOpenComputer;
 
   /// Archiving, restoring and deleting belong to the Flock, whose directory
   /// they change, so the card is handed in rather than rebuilt here. It is
@@ -664,6 +668,7 @@ class BotSettingsView extends StatefulWidget {
     this.onOpenVoice,
     this.onOpenLook,
     this.onOpenSpending,
+    this.onOpenComputer,
     this.dangerZone,
   });
 
@@ -1002,6 +1007,16 @@ class _BotSettingsViewState extends State<BotSettingsView> {
                   // Writing to this Bot from a mailbox: its own page, which
                   // reads the address when it opens.
                   botEmailRow(context, api: state.api, botId: state.botId),
+                  if (widget.onOpenComputer case final VoidCallback open)
+                    identified(
+                      SettingsIds.botComputer,
+                      FrockRow(
+                        icon: Icons.computer_rounded,
+                        title: 'Computer',
+                        subtitle: 'Checkpoint, reset and update',
+                        onTap: open,
+                      ),
+                    ),
                 ],
               ),
               if (widget.dangerZone case final Widget zone) ...[

@@ -668,6 +668,53 @@ export const BROWSER_ENSURE_ACTION = "eyJhY3Rpb24iOiJlbnN1cmUifQ";
 export const BROWSER_FOCUS_ACTION = "eyJhY3Rpb24iOiJmb2N1cyJ9";
 /** What box-doctor asks it, to report every tenant's window at once. */
 export const BROWSER_SURVEY_ACTION = "eyJhY3Rpb24iOiJzdXJ2ZXkifQ";
+/** What the host asks it to carry the User's sign-ins off the Computer. */
+export const BROWSER_LOGINS_CAPTURE_ACTION =
+  "eyJhY3Rpb24iOiJsb2dpbnMtY2FwdHVyZSJ9";
+/** What the host asks it to put a capture back. */
+export const BROWSER_LOGINS_RESTORE_ACTION =
+  "eyJhY3Rpb24iOiJsb2dpbnMtcmVzdG9yZSJ9";
+/** Printed by the capture when no browser is running to be asked. */
+export const NO_BROWSER_MARKER = "__FROCKBOT_NO_BROWSER__";
+/** Delimits the capture a restore hands the helper on its stdin. */
+const LOGINS_HEREDOC = "__FROCKBOT_LOGINS__";
+
+/**
+ * Reads the browser's sign-ins, or says there is no browser to read.
+ *
+ * "No browser" is its own answer rather than an empty capture: a browser that
+ * is not running holds no evidence about the User's sign-ins, and an empty
+ * document kept in its place would overwrite the ones worth keeping.
+ */
+export const loginsCaptureScript = `set -eu
+export ${SANCTIONED_SURFACE_ENV}=1
+if ! (exec 3<>/dev/tcp/127.0.0.1/${COMPUTER_CDP_PORT}) 2>/dev/null; then
+  echo ${NO_BROWSER_MARKER}
+  exit 0
+fi
+exec timeout 60 node ${RUNTIME_ROOT}/browser.mjs ${COMPUTER_CDP_PORT} ${BROWSER_LOGINS_CAPTURE_ACTION}
+`;
+
+/**
+ * Puts one capture back into the running browser.
+ *
+ * The capture travels base64 inside a quoted heredoc, so its bytes reach the
+ * helper unexpanded and the delimiter — which has an underscore base64 never
+ * produces — cannot occur inside it. The browser is started by the host
+ * beforehand when it is not running; the wait covers its CDP port coming up.
+ */
+export function loginsRestoreScript(stateBase64: string): string {
+  return `set -eu
+export ${SANCTIONED_SURFACE_ENV}=1
+for _ in $(seq 1 60); do
+  (exec 3<>/dev/tcp/127.0.0.1/${COMPUTER_CDP_PORT}) 2>/dev/null && break
+  sleep 0.5
+done
+exec timeout 60 node ${RUNTIME_ROOT}/browser.mjs ${COMPUTER_CDP_PORT} ${BROWSER_LOGINS_RESTORE_ACTION} <<'${LOGINS_HEREDOC}'
+${stateBase64}
+${LOGINS_HEREDOC}
+`;
+}
 
 /** Where the Bot's own browser window is recorded, under its Bot directory. */
 export const TARGET_ID_FILE = "target-id";
@@ -1118,6 +1165,67 @@ if (action.action === "ensure") {
   await done(await ensureWindow(botKey));
 }
 
+// The User's sign-ins, carried off this Computer so a fresh one can have them
+// back. Cookies over CDP rather than the profile's files: they leave
+// decrypted and the receiving browser encrypts them under its own key, so
+// nothing depends on which password store either browser used, and nothing
+// reads a database the running browser holds open. Expired ones stay behind.
+if (action.action === "logins-capture") {
+  const { cookies } = await cdp.send("Storage.getCookies");
+  const now = Date.now() / 1000;
+  await done({
+    version: 1,
+    cookies: cookies.filter((cookie) => cookie.session || !(cookie.expires > 0) || cookie.expires > now),
+  });
+}
+
+// A capture, put back. One refused cookie must not cost the rest, so a batch
+// the browser refuses is retried one cookie at a time.
+if (action.action === "logins-restore") {
+  // A parse error quotes its input, and this input is the User's sign-ins:
+  // it is refused in a sentence of its own, never in the parser's words.
+  let document;
+  try {
+    document = JSON.parse(Buffer.from(readFileSync(0, "utf8").trim(), "base64").toString("utf8"));
+  } catch {
+    document = undefined;
+  }
+  if (document?.version !== 1 || !Array.isArray(document.cookies)) {
+    console.error("this is not a sign-in capture this Computer made");
+    await browser.close();
+    process.exit(65);
+  }
+  const params = document.cookies.map((cookie) => ({
+    name: cookie.name,
+    value: cookie.value,
+    domain: cookie.domain,
+    path: cookie.path,
+    secure: cookie.secure,
+    httpOnly: cookie.httpOnly,
+    ...(cookie.sameSite ? { sameSite: cookie.sameSite } : {}),
+    ...(cookie.session || !(cookie.expires > 0) ? {} : { expires: cookie.expires }),
+    ...(cookie.priority ? { priority: cookie.priority } : {}),
+    ...(cookie.sourceScheme ? { sourceScheme: cookie.sourceScheme } : {}),
+    ...(cookie.partitionKey ? { partitionKey: cookie.partitionKey } : {}),
+  }));
+  let restored = 0;
+  for (let index = 0; index < params.length; index += 100) {
+    const batch = params.slice(index, index + 100);
+    try {
+      await cdp.send("Storage.setCookies", { cookies: batch });
+      restored += batch.length;
+    } catch {
+      for (const one of batch) {
+        try {
+          await cdp.send("Storage.setCookies", { cookies: [one] });
+          restored += 1;
+        } catch {}
+      }
+    }
+  }
+  await done({ restored, total: params.length });
+}
+
 const anchor = botKey ? await ensureWindow(botKey) : undefined;
 
 // A human is taking this Computer over: raise the Bot's window so the screen
@@ -1489,7 +1597,7 @@ export const CLOCK_FLOOR_EPOCH = 1_756_684_800;
  * corrected. The version is compared on every adoption instead, and the whole
  * set is rewritten when it moves. Bump it whenever a document below changes.
  */
-export const REFERENCE_DOCS_VERSION = "2026-09-23.2";
+export const REFERENCE_DOCS_VERSION = "2026-09-24.1";
 
 /**
  * What a Bot reads to debug its own Computer.
@@ -1565,6 +1673,13 @@ here, never the only copy of anything.
 
 \`/tmp\` is the same story with a shorter life: assume a restart empties it.
 
+## Update and Reset — what the machine keeps
+
+Your User can put this Computer back to its last checkpoint (Reset) or swap it
+for a fresh machine (Update). Both keep the durable roots above and the
+browser's sign-ins, and nothing else: installed packages, your workspace, the
+scratch, and every other file are the machine's, and go with it.
+
 ## The runtime — not yours
 
 \`${RUNTIME_ROOT}\` holds the Computer runtime and its live state. The files an
@@ -1581,6 +1696,12 @@ One profile — \`${HOME_ROOT}/chrome-profile\` — shared by every Bot of your
 User. A cookie one Bot earns is a cookie all of them have, which is why the
 profile is treated as a User-scoped secret and why a human takeover exists for
 a login you should not watch.
+
+The sign-ins — the profile's cookies — outlive this machine. They are carried
+off it and kept sealed, outside this Computer and outside every durable root,
+when a human hands the desktop back and around an Update or Reset, and are put
+back into the browser of whichever machine comes next. The rest of the profile
+— history, open tabs, saved passwords — is the machine's.
 
 ## Driving it
 

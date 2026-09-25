@@ -18,12 +18,16 @@
  */
 import { createHash } from "node:crypto";
 import { WORKSPACE_MAX_FILE_BYTES } from "@frockbot/core/contracts";
+import { ComputerError } from "@frockbot/computer/core";
 import {
   COMPUTER_HOST_LIMITS,
+  type ComputerHostCheckpointResultV1,
   type ComputerHostControlResultV1,
   type ComputerHostFileReadResultV1,
+  type ComputerHostLoginsResultV1,
   type ComputerHostOpenResultV1,
   type ComputerHostProvisioningV1,
+  type ComputerHostReplaceResultV1,
   type ComputerHostTeardownResultV1,
   type ComputerHostViewerResultV1,
 } from "@frockbot/computer/host-protocol";
@@ -93,6 +97,19 @@ const HUMAN_CONTROL_MESSAGE = "The user is controlling this agent's computer";
 
 const encoder = new TextEncoder();
 
+/** A browser signed in to nothing, as the host's capture document. */
+function emptyLogins(): Uint8Array {
+  return encoder.encode(JSON.stringify({ version: 1, cookies: [] }));
+}
+
+/** What the host answers for a Computer that is not there. */
+function noComputer(): ComputerError {
+  return new ComputerError(
+    "not-found",
+    "This Computer has not been set up yet",
+  );
+}
+
 /**
  * A Computer host whose Computer is whatever the suite's runner says.
  *
@@ -122,6 +139,19 @@ export class FakeComputerHost {
   exists = true;
   /** How many teardowns reached the host, including repeats. */
   teardowns = 0;
+  /** Checkpoints of this machine, oldest first, keyed by the recording effect. */
+  readonly checkpoints: Array<{
+    id: string;
+    createdAt: string;
+    effectId: string;
+  }> = [];
+  /** Every machine-wide operation, as `checkpoint:create`, `replace`, and so on. */
+  readonly machineCalls: string[] = [];
+  /**
+   * What the browser holds, as the host's opaque capture document, or
+   * `undefined` for a machine with no browser running.
+   */
+  browserLogins: Uint8Array | undefined = emptyLogins();
 
   constructor(private runner: FakeComputerRunnerV1 = () => ({})) {}
 
@@ -148,8 +178,11 @@ export class FakeComputerHost {
         options?.signal?.throwIfAborted();
         if (host.openFailure) throw host.openFailure;
         if (!host.exists) {
+          // A new Computer: nothing of the old one, and a browser signed in
+          // to nothing.
           host.exists = true;
           host.generation += 1;
+          host.browserLogins = emptyLogins();
         }
         for (const progress of host.openProgress) {
           await options?.onProgress?.(progress);
@@ -280,6 +313,8 @@ export class FakeComputerHost {
         host.teardowns += 1;
         host.exists = false;
         host.leases.clear();
+        host.checkpoints.splice(0);
+        host.browserLogins = undefined;
         return Promise.resolve({
           version: 1,
           effectId: options?.effectId ?? "effect-teardown",
@@ -305,6 +340,103 @@ export class FakeComputerHost {
                   expiresAt: new Date(Date.now() + 900_000).toISOString(),
                 },
               }),
+        });
+      },
+
+      checkpoint(
+        action: "create" | "restore",
+        options?: ComputerHostCallOptions & { maxAgeSeconds?: number },
+      ): Promise<ComputerHostCheckpointResultV1> {
+        options?.signal?.throwIfAborted();
+        const effectId = options?.effectId ?? "effect-checkpoint";
+        host.machineCalls.push(`checkpoint:${action}`);
+        if (!host.exists) return Promise.reject(noComputer());
+        const newest = host.checkpoints.at(-1);
+        const answer = (
+          checkpoint: { id: string; createdAt: string },
+          created: boolean,
+        ): Promise<ComputerHostCheckpointResultV1> =>
+          Promise.resolve({
+            version: 1,
+            effectId,
+            action,
+            checkpoint: { id: checkpoint.id, createdAt: checkpoint.createdAt },
+            created,
+          });
+        if (action === "restore") {
+          if (!newest) {
+            return Promise.reject(
+              new ComputerError(
+                "not-found",
+                "This Computer has no checkpoint to reset to yet",
+              ),
+            );
+          }
+          return answer(newest, false);
+        }
+        const same = host.checkpoints.find(
+          (checkpoint) => checkpoint.effectId === effectId,
+        );
+        if (same) return answer(same, false);
+        if (
+          newest &&
+          options?.maxAgeSeconds !== undefined &&
+          Date.now() - Date.parse(newest.createdAt) <
+            options.maxAgeSeconds * 1_000
+        ) {
+          return answer(newest, false);
+        }
+        const recorded = {
+          id: `v${host.checkpoints.length + 1}`,
+          createdAt: new Date().toISOString(),
+          effectId,
+        };
+        host.checkpoints.push(recorded);
+        return answer(recorded, true);
+      },
+
+      replace(
+        options?: ComputerHostCallOptions,
+      ): Promise<ComputerHostReplaceResultV1> {
+        options?.signal?.throwIfAborted();
+        host.machineCalls.push("replace");
+        // Nothing to discard is a refusal: after a teardown there is no
+        // Computer to update, and answering would let an Update open one.
+        if (!host.exists) return Promise.reject(noComputer());
+        // A fresh machine keeps none of the old one's checkpoints.
+        host.checkpoints.splice(0);
+        return Promise.resolve({
+          version: 1,
+          effectId: options?.effectId ?? "effect-replace",
+        });
+      },
+
+      logins(
+        action: "capture" | "restore",
+        options?: ComputerHostCallOptions & { state?: Uint8Array },
+      ): Promise<ComputerHostLoginsResultV1> {
+        options?.signal?.throwIfAborted();
+        host.machineCalls.push(`logins:${action}`);
+        if (!host.exists) return Promise.reject(noComputer());
+        const effectId = options?.effectId ?? "effect-logins";
+        if (action === "restore") {
+          host.browserLogins = options?.state;
+          return Promise.resolve({
+            version: 1,
+            effectId,
+            action,
+            count: countLogins(options?.state),
+          });
+        }
+        const held = host.browserLogins;
+        return Promise.resolve({
+          version: 1,
+          effectId,
+          action,
+          ...(held
+            ? { stateBase64: Buffer.from(held).toString("base64") }
+            : {}),
+          count: countLogins(held),
         });
       },
     };
@@ -335,6 +467,19 @@ export class FakeComputerHost {
       if (lease && !lease.fresh) this.leases.delete(key);
     }
     return undefined;
+  }
+}
+
+/** How many cookies one capture document holds; the host's own reading. */
+function countLogins(state: Uint8Array | undefined): number {
+  if (!state) return 0;
+  try {
+    const document = JSON.parse(new TextDecoder().decode(state)) as {
+      cookies?: unknown[];
+    };
+    return Array.isArray(document.cookies) ? document.cookies.length : 0;
+  } catch {
+    return 0;
   }
 }
 

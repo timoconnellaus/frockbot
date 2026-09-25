@@ -45,6 +45,9 @@ import {
   FOCUS_WINDOW_SCRIPT,
   HOME_ROOT,
   LEASE_MAX_AGE_SECONDS,
+  loginsCaptureScript,
+  loginsRestoreScript,
+  NO_BROWSER_MARKER,
   NO_SLOTS_MARKER,
   PROVISION_DIGEST,
   PROVISION_MARKERS,
@@ -78,8 +81,14 @@ import {
   encodeComputerHostExecFrameV1,
   encodeComputerHostOpenFrameV1,
   problem,
+  type ComputerHostCheckpointOperationV1,
+  type ComputerHostCheckpointResultV1,
+  type ComputerHostCheckpointV1,
   type ComputerHostControlResultV1,
   type ComputerHostErrorCodeV1,
+  type ComputerHostLoginsOperationV1,
+  type ComputerHostLoginsResultV1,
+  type ComputerHostReplaceResultV1,
   type ComputerHostExecOperationV1,
   type ComputerHostExecResultV1,
   type ComputerHostFileEntryV1,
@@ -154,6 +163,20 @@ export interface SpriteFilesystemHandle {
 
 export interface SpriteServiceStreamHandle extends AsyncIterable<unknown> {}
 
+/** One checkpoint as the SDK lists it: `createTime` is already a `Date`. */
+export interface SpriteCheckpointHandle {
+  id: string;
+  createTime: Date;
+  comment?: string;
+}
+
+/**
+ * The progress of a checkpoint or a restore. The SDK answers messages of
+ * `{type: "info" | "stdout" | "stderr" | "error", data?, error?}` until the
+ * operation ends, and the end of the stream is the end of the operation.
+ */
+export interface SpriteCheckpointStreamHandle extends AsyncIterable<unknown> {}
+
 export interface SpriteHandle {
   readonly name: string;
   readonly url?: string;
@@ -203,6 +226,9 @@ export interface SpriteHandle {
   deleteService(name: string): Promise<void>;
   listServices(): Promise<{ name: string }[]>;
   updateURLSettings(settings: { auth: string }): Promise<void>;
+  createCheckpoint(comment?: string): Promise<SpriteCheckpointStreamHandle>;
+  listCheckpoints(): Promise<SpriteCheckpointHandle[]>;
+  restoreCheckpoint(id: string): Promise<SpriteCheckpointStreamHandle>;
 }
 
 export interface SpritesClientHandle {
@@ -250,7 +276,30 @@ export const COMPUTER_HOST_PHASE_TIMEOUTS = {
   termination: 5_000,
   /** How long the last bytes of output may lag the exit code. */
   drain: 1_000,
+  /** Recording or restoring a checkpoint of the whole machine. */
+  checkpoint: 4 * 60_000,
+  /** Reading or writing the browser's sign-ins, the browser start included. */
+  logins: 90_000,
 } as const;
+
+/**
+ * Marks a checkpoint this host recorded, followed by the effect that asked.
+ *
+ * Only a checkpoint carrying it is ever restored — one the platform took on
+ * its own is a state nobody here chose — and the effect after it is what
+ * makes a retried `create` answer the checkpoint the first attempt made.
+ */
+export const CHECKPOINT_COMMENT_PREFIX = "frockbot:";
+
+/**
+ * The most sign-in capture one `logins` answer carries, before base64. The
+ * app compresses and seals it into one Durable Object value, so a browser
+ * holding more than this is refused rather than kept in part.
+ */
+export const LOGINS_CAPTURE_MAX_BYTES = 5 * 1_024 * 1_024;
+
+/** How many times a replacement asks whether the old machine's name is free. */
+const REPLACE_SETTLE_POLLS = 60;
 
 /** A second caller waits this long for an in-place update before retrying. */
 export const COMPUTER_UPDATE_WAIT_MS =
@@ -608,6 +657,129 @@ async function settleService(
   }
 }
 
+/** Reads a checkpoint or restore stream to its end, refusing on an error. */
+async function settleCheckpointStream(
+  stream: SpriteCheckpointStreamHandle,
+  label: string,
+): Promise<void> {
+  for await (const message of stream) {
+    if (typeof message !== "object" || message === null) continue;
+    const value = message as {
+      type?: unknown;
+      data?: unknown;
+      error?: unknown;
+    };
+    if (value.type === "error") {
+      throw new ComputerHostError(
+        "provider-failure",
+        `${label} failed: ${String(value.error ?? value.data ?? "unknown error")}`,
+        502,
+        true,
+      );
+    }
+  }
+}
+
+/**
+ * The capture the browser helper printed, checked before it leaves.
+ *
+ * A helper from before the runtime that knows this action answers something
+ * else entirely — a page snapshot — and exits 0, so the shape is the only
+ * evidence this is a capture. Only the cookie list crosses back, and only
+ * cookies that name themselves: a document is kept whole or not at all.
+ */
+function loginsDocument(
+  outcome: ComputerHostExecOutcome,
+  label: string,
+): { version: 1; cookies: Record<string, unknown>[] } {
+  const detail = () =>
+    outcome.stderr.toString("utf8").trim().slice(0, 512) ||
+    `exit ${String(outcome.exitCode)}`;
+  if (outcome.exitCode !== 0) {
+    throw new ComputerHostError(
+      "provider-failure",
+      `The browser's sign-in ${label} failed: ${detail()}`,
+      502,
+      true,
+    );
+  }
+  const line = outcome.stdout
+    .toString("utf8")
+    .split("\n")
+    .reverse()
+    .find((candidate) => candidate.trim().startsWith("{"));
+  let parsed: unknown;
+  try {
+    parsed = line ? JSON.parse(line) : undefined;
+  } catch {
+    parsed = undefined;
+  }
+  const value = parsed as { version?: unknown; cookies?: unknown } | undefined;
+  if (
+    !value ||
+    value.version !== 1 ||
+    !Array.isArray(value.cookies) ||
+    !value.cookies.every(
+      (cookie: unknown) =>
+        typeof cookie === "object" &&
+        cookie !== null &&
+        typeof (cookie as Record<string, unknown>).name === "string" &&
+        typeof (cookie as Record<string, unknown>).value === "string" &&
+        typeof (cookie as Record<string, unknown>).domain === "string" &&
+        typeof (cookie as Record<string, unknown>).path === "string",
+    )
+  ) {
+    throw new ComputerHostError(
+      "provider-failure",
+      `The browser answered the sign-in ${label} with something else; the Computer's runtime may still be updating`,
+      502,
+      true,
+    );
+  }
+  return {
+    version: 1,
+    cookies: value.cookies as Record<string, unknown>[],
+  };
+}
+
+/** What a restore reported, or the refusal that says why it did not. */
+function loginsRestoreAnswer(outcome: ComputerHostExecOutcome): {
+  restored: number;
+} {
+  const detail =
+    outcome.stderr.toString("utf8").trim().slice(0, 512) ||
+    `exit ${String(outcome.exitCode)}`;
+  if (outcome.exitCode !== 0) {
+    throw new ComputerHostError(
+      "provider-failure",
+      `The browser's sign-in restore failed: ${detail}`,
+      502,
+      true,
+    );
+  }
+  const line = outcome.stdout
+    .toString("utf8")
+    .split("\n")
+    .reverse()
+    .find((candidate) => candidate.trim().startsWith("{"));
+  let parsed: unknown;
+  try {
+    parsed = line ? JSON.parse(line) : undefined;
+  } catch {
+    parsed = undefined;
+  }
+  const restored = (parsed as { restored?: unknown } | undefined)?.restored;
+  if (!Number.isSafeInteger(restored) || (restored as number) < 0) {
+    throw new ComputerHostError(
+      "provider-failure",
+      "The browser answered the sign-in restore with something else; the Computer's runtime may still be updating",
+      502,
+      true,
+    );
+  }
+  return { restored: restored as number };
+}
+
 export interface ComputerHostExecOutcome {
   exitCode: number | null;
   signal?: string;
@@ -772,6 +944,16 @@ export class ComputerHost {
   private readonly openings = new Map<string, Promise<ComputerRecord>>();
   /** One update per User; every other operation waits only its declared bound. */
   private readonly updates = new Map<string, ActiveUpdate>();
+  /**
+   * Users whose machine is being checkpointed, restored, or replaced. One at
+   * a time per machine, and nothing opens it meanwhile: an open halfway
+   * through a restore would attach a tenant to a machine that is about to
+   * stop being the one it describes.
+   */
+  private readonly machineOperations = new Map<
+    string,
+    "checkpoint" | "reset" | "replace"
+  >();
   /**
    * Sprites whose superseded per-slot desktop services this container has
    * already retired. The migration is idempotent, so this is a cost
@@ -961,6 +1143,12 @@ export class ComputerHost {
         return this.service(request);
       case "teardown":
         return this.teardown(request);
+      case "checkpoint":
+        return this.checkpoint(request);
+      case "replace":
+        return this.replace(request);
+      case "logins":
+        return this.logins(request, signal, effect);
       case "cancel":
         throw new ComputerHostError(
           "invalid-request",
@@ -1100,7 +1288,7 @@ export class ComputerHost {
     let record: ComputerRecord;
     let ensured: ComputerHostExecOutcome;
     const cached = this.computers.get(userId);
-    if (cached && !this.updates.has(userId)) {
+    if (cached && !this.updates.has(userId) && !this.machineChanging(userId)) {
       const sprite = await this.spriteFor(cached.spriteName);
       const combined = await this.run(
         sprite,
@@ -1336,6 +1524,16 @@ export class ComputerHost {
     inspectRuntime = false,
     onProgress?: (progress: ComputerHostProvisioningV1) => void,
   ): Promise<ComputerRecord> {
+    if (this.machineChanging(userId)) {
+      return Promise.reject(
+        new ComputerHostError(
+          "computer-updating",
+          "The Computer is being reset or replaced",
+          409,
+          true,
+        ),
+      );
+    }
     const updating = this.updates.get(userId);
     if (updating) {
       onProgress?.(updating.progress);
@@ -1993,6 +2191,371 @@ export class ComputerHost {
         throw error;
       }
     }
+  }
+
+  // --- the machine ---------------------------------------------------------
+
+  /** True while this User's machine is being put back or swapped out. */
+  private machineChanging(userId: string): boolean {
+    const held = this.machineOperations.get(userId);
+    return held === "reset" || held === "replace";
+  }
+
+  /**
+   * Holds this User's machine for one machine-wide operation.
+   *
+   * Refused while the machine is still being set up or updated — a
+   * checkpoint of a half-installed runtime is not a state worth returning to,
+   * and replacing a machine mid-install races the installer — and while
+   * another machine-wide operation holds it.
+   */
+  private claimMachine(
+    userId: string,
+    operation: "checkpoint" | "reset" | "replace",
+  ): () => void {
+    if (this.updates.has(userId) || this.openings.has(userId)) {
+      throw new ComputerHostError(
+        "computer-updating",
+        "The Computer is being set up; try again once it is ready",
+        409,
+        true,
+      );
+    }
+    if (this.machineOperations.has(userId)) {
+      throw new ComputerHostError(
+        "conflict",
+        "Another change to this Computer is still running",
+        409,
+        true,
+      );
+    }
+    this.machineOperations.set(userId, operation);
+    return () => {
+      this.machineOperations.delete(userId);
+    };
+  }
+
+  /**
+   * The User's machine if there is one. Never creates one: a checkpoint, a
+   * reset, or a capture of a machine that does not exist has nothing to act
+   * on, and provisioning one to find that out would cost the User minutes.
+   */
+  private async existingSprite(userId: string): Promise<SpriteHandle> {
+    try {
+      return await this.spriteFor(this.spriteNameFor(userId));
+    } catch (error) {
+      if (!isNotFound(error)) throw error;
+      throw new ComputerHostError(
+        "not-found",
+        "This Computer has not been set up yet",
+        404,
+      );
+    }
+  }
+
+  /**
+   * Drops everything this container learned about a machine that has just
+   * been put back or discarded. The next open reads the machine that is
+   * there, whose state file and runtime digest are whatever it now holds.
+   */
+  private forgetMachine(userId: string, spriteName: string): void {
+    this.computers.delete(userId);
+    this.spriteHandles.delete(spriteName);
+    this.retired.delete(spriteName);
+  }
+
+  /**
+   * A reset or a replacement takes the desktop out from under whoever holds
+   * it, so a fresh human-control lease refuses both. A machine whose leases
+   * cannot be read holds nobody's desktop: that machine is exactly the one
+   * somebody is trying to reset.
+   */
+  private async refuseWhileDesktopHeld(sprite: SpriteHandle): Promise<void> {
+    let inspection: AdoptionInspection;
+    try {
+      inspection = await this.inspectAdoption(sprite);
+    } catch {
+      return;
+    }
+    if (inspection.humanControlFresh) {
+      throw new ComputerHostError(
+        "human-control-active",
+        "Someone is controlling this Computer's desktop. Release it, then try again.",
+        409,
+      );
+    }
+  }
+
+  /** The checkpoints this host recorded on one machine, newest first. */
+  private async recordedCheckpoints(
+    sprite: SpriteHandle,
+  ): Promise<Array<ComputerHostCheckpointV1 & { comment: string }>> {
+    const listed = await withTimeout(
+      sprite.listCheckpoints(),
+      "checkpoint list",
+      COMPUTER_HOST_PHASE_TIMEOUTS.control,
+    );
+    const recorded: Array<ComputerHostCheckpointV1 & { comment: string }> = [];
+    for (const checkpoint of listed) {
+      const comment = checkpoint.comment;
+      const time = new Date(checkpoint.createTime).getTime();
+      if (
+        typeof comment !== "string" ||
+        !comment.startsWith(CHECKPOINT_COMMENT_PREFIX) ||
+        !Number.isFinite(time)
+      ) {
+        continue;
+      }
+      recorded.push({
+        id: checkpoint.id,
+        createdAt: new Date(time).toISOString(),
+        comment,
+      });
+    }
+    return recorded.sort(
+      (left, right) => Date.parse(right.createdAt) - Date.parse(left.createdAt),
+    );
+  }
+
+  private async checkpoint(request: ComputerHostRequestV1): Promise<Response> {
+    const operation = request.operation as ComputerHostCheckpointOperationV1;
+    const userId = request.identity.userId;
+    const release = this.claimMachine(
+      userId,
+      operation.action === "restore" ? "reset" : "checkpoint",
+    );
+    try {
+      const sprite = await this.existingSprite(userId);
+      const answer = (
+        checkpoint: ComputerHostCheckpointV1,
+        created: boolean,
+      ): Response =>
+        Response.json({
+          version: 1,
+          effectId: request.effectId,
+          action: operation.action,
+          checkpoint: { id: checkpoint.id, createdAt: checkpoint.createdAt },
+          created,
+        } satisfies ComputerHostCheckpointResultV1);
+
+      if (operation.action === "restore") {
+        await this.refuseWhileDesktopHeld(sprite);
+        const [newest] = await this.recordedCheckpoints(sprite);
+        if (!newest) {
+          throw new ComputerHostError(
+            "not-found",
+            "This Computer has no checkpoint to reset to yet",
+            404,
+          );
+        }
+        await withTimeout(
+          settleCheckpointStream(
+            await sprite.restoreCheckpoint(newest.id),
+            "Checkpoint restore",
+          ),
+          "checkpoint restore",
+          COMPUTER_HOST_PHASE_TIMEOUTS.checkpoint,
+        );
+        this.forgetMachine(userId, sprite.name);
+        return answer(newest, false);
+      }
+
+      const comment = `${CHECKPOINT_COMMENT_PREFIX}${request.effectId}`;
+      const recorded = await this.recordedCheckpoints(sprite);
+      const same = recorded.find(
+        (checkpoint) => checkpoint.comment === comment,
+      );
+      if (same) return answer(same, false);
+      const [newest] = recorded;
+      if (
+        newest &&
+        operation.maxAgeSeconds !== undefined &&
+        this.now() - Date.parse(newest.createdAt) <
+          operation.maxAgeSeconds * 1_000
+      ) {
+        return answer(newest, false);
+      }
+      await withTimeout(
+        settleCheckpointStream(
+          await sprite.createCheckpoint(comment),
+          "Checkpoint",
+        ),
+        "checkpoint",
+        COMPUTER_HOST_PHASE_TIMEOUTS.checkpoint,
+      );
+      const made = (await this.recordedCheckpoints(sprite)).find(
+        (checkpoint) => checkpoint.comment === comment,
+      );
+      if (!made) {
+        throw new ComputerHostError(
+          "provider-failure",
+          "The checkpoint finished but the Computer does not list it",
+          502,
+          true,
+        );
+      }
+      return answer(made, true);
+    } finally {
+      release();
+    }
+  }
+
+  /**
+   * Discards the User's machine. The next open provisions a fresh one under
+   * the same name, in the configured region, and the durable roots return
+   * to it through the sync; its checkpoints go with it.
+   *
+   * Only ever a machine that is there. With none — the User deleted the
+   * Computer, or it was never set up — there is nothing to update, and a
+   * teardown that lands while this runs outranks it: both are refused, so
+   * that no caller takes a replacement as leave to open a new Computer.
+   */
+  private async replace(request: ComputerHostRequestV1): Promise<Response> {
+    const userId = request.identity.userId;
+    const release = this.claimMachine(userId, "replace");
+    const name = this.spriteNameFor(userId);
+    const torn = this.torn.get(userId) ?? 0;
+    try {
+      let sprite: SpriteHandle;
+      try {
+        sprite = await this.spriteFor(name);
+      } catch (error) {
+        if (!isNotFound(error)) throw error;
+        this.forgetMachine(userId, name);
+        throw new ComputerHostError(
+          "not-found",
+          "There is no Computer to update. The next time a Bot uses the Computer, it starts a new one.",
+          404,
+        );
+      }
+      await this.refuseWhileDesktopHeld(sprite);
+      try {
+        await withTimeout(
+          this.client.deleteSprite(name),
+          "machine replacement",
+          COMPUTER_HOST_PHASE_TIMEOUTS.service,
+        );
+      } catch (error) {
+        if (!isNotFound(error)) throw error;
+      }
+      this.forgetMachine(userId, name);
+      await this.untilGone(name);
+      if ((this.torn.get(userId) ?? 0) !== torn) {
+        throw new ComputerHostError(
+          "not-found",
+          "The Computer was deleted while it was being updated. The next time a Bot uses the Computer, it starts a new one.",
+          404,
+        );
+      }
+      return Response.json({
+        version: 1,
+        effectId: request.effectId,
+      } satisfies ComputerHostReplaceResultV1);
+    } finally {
+      release();
+    }
+  }
+
+  /**
+   * Waits, boundedly, for a discarded machine's name to stop answering.
+   *
+   * Creating a machine under a name the platform is still tearing down finds
+   * the old one, so the replacement is not finished until a lookup misses.
+   * Out of polls, it returns anyway: the next open's own lookup and create
+   * then say what the platform thinks.
+   */
+  private async untilGone(name: string): Promise<void> {
+    for (let poll = 0; poll < REPLACE_SETTLE_POLLS; poll += 1) {
+      try {
+        await this.client.getSprite(name);
+      } catch (error) {
+        if (isNotFound(error)) return;
+      }
+      await delay(this.provisionPollMs);
+    }
+  }
+
+  /**
+   * The browser's sign-ins, carried off the machine or put back.
+   *
+   * Neither provisions a machine that is not there. A capture of a machine
+   * with no browser running answers no document at all; a restore starts the
+   * browser first, because the only way into a running profile's cookie
+   * store is the browser holding it.
+   */
+  private async logins(
+    request: ComputerHostRequestV1,
+    signal: AbortSignal | undefined,
+    effect: InFlightEffect,
+  ): Promise<Response> {
+    const operation = request.operation as ComputerHostLoginsOperationV1;
+    const userId = request.identity.userId;
+    const sprite = await this.existingSprite(userId);
+    const run = (script: string, maxOutputBytes: number) =>
+      this.spawn(sprite, script, {
+        effectId: request.effectId,
+        userId,
+        admitted: effect,
+        timeoutMs: COMPUTER_HOST_PHASE_TIMEOUTS.logins,
+        maxOutputBytes,
+        ...(signal ? { signal } : {}),
+      });
+
+    if (operation.action === "capture") {
+      const outcome = await run(
+        loginsCaptureScript,
+        LOGINS_CAPTURE_MAX_BYTES + 1_024,
+      );
+      const text = outcome.stdout.toString("utf8");
+      if (outcome.exitCode === 0 && text.includes(NO_BROWSER_MARKER)) {
+        return Response.json({
+          version: 1,
+          effectId: request.effectId,
+          action: "capture",
+          count: 0,
+        } satisfies ComputerHostLoginsResultV1);
+      }
+      if (outcome.outputTruncated) {
+        throw new ComputerHostError(
+          "limit-exceeded",
+          "The browser holds more sign-in data than FrockBot keeps",
+          413,
+        );
+      }
+      const document = loginsDocument(outcome, "capture");
+      const line = Buffer.from(JSON.stringify(document));
+      return Response.json({
+        version: 1,
+        effectId: request.effectId,
+        action: "capture",
+        stateBase64: line.toString("base64"),
+        count: document.cookies.length,
+      } satisfies ComputerHostLoginsResultV1);
+    }
+
+    const state = operation.stateBase64 ?? "";
+    const probe = await this.run(
+      sprite,
+      `if (exec 3<>/dev/tcp/127.0.0.1/${COMPUTER_CDP_PORT}) 2>/dev/null; then echo ${BROWSER_LIVE_MARKER}; fi\n`,
+      "browser probe",
+      COMPUTER_HOST_PHASE_TIMEOUTS.control,
+    );
+    if (!probe.stdout.toString("utf8").includes(BROWSER_LIVE_MARKER)) {
+      await this.declareService(sprite, SCREEN_SERVICE, {
+        cmd: `${RUNTIME_ROOT}/start-screen.sh`,
+      });
+      await this.declareService(sprite, BROWSER_SERVICE, {
+        cmd: `${RUNTIME_ROOT}/start-browser.sh`,
+      });
+    }
+    const outcome = await run(loginsRestoreScript(state), 64 * 1_024);
+    const answered = loginsRestoreAnswer(outcome);
+    return Response.json({
+      version: 1,
+      effectId: request.effectId,
+      action: "restore",
+      count: answered.restored,
+    } satisfies ComputerHostLoginsResultV1);
   }
 
   // --- exec ----------------------------------------------------------------

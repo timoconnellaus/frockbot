@@ -130,6 +130,10 @@ _Avoid_: Integration trigger, Composio trigger (the provider is plumbing)
 A User's working environment: one persistent Workspace with compute attached on demand, shared by all of that User's Bots, each with its own directories and desktop, all sharing the User's browser profile.
 _Avoid_: Sandbox, box, Sprite (a provider)
 
+**Checkpoint**:
+A point the whole Computer can be put back to, recorded by FrockBot after every Update, whenever the User saves one, and weekly. Reset returns the Computer to the newest; Update swaps in a fresh machine that has none. Both keep the Workspace's durable roots and the User's browser sign-ins, and nothing else on the machine.
+_Avoid_: Snapshot, backup, restore point
+
 **Workspace**:
 The durable disk of a Computer. Declared durable roots on it survive hibernation, cold start, migration, and image rebuild; the rest is scratch.
 _Avoid_: Volume, filesystem, box
