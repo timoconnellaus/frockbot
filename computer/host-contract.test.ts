@@ -11,8 +11,9 @@
  *
  * It is deliberately the *interface's* behaviour and not the implementations'
  * detail: open and close, a Workspace round-trip, the shape of an exec result,
- * screenshot bytes, a viewer's open/renew/revoke, a control lease taken and
- * given back, and a teardown that is idempotent where a host offers one. A
+ * screenshot bytes, a secret typed only on its origin and never answered back,
+ * a viewer's open/renew/revoke, a control lease taken and given back, and a
+ * teardown that is idempotent where a host offers one. A
  * third host is a third entry in `HOSTS` and no new assertion.
  */
 import { afterEach, describe, expect, test } from "bun:test";
@@ -178,6 +179,44 @@ for (const build of HOSTS) {
         137, 80, 78, 71, 13, 10, 26, 10,
       ]);
       expect(Date.parse(captured.capturedAt)).not.toBeNaN();
+    });
+
+    test("types a secret only on its origin, and never answers it back", async () => {
+      const session = await open();
+      expect(session.browser).toBeDefined();
+      const browser = session.browser!;
+      const secret = "contract-secret-9f3a1c7e";
+
+      await browser.perform({
+        type: "navigate",
+        url: "https://shop.example/login",
+      });
+      const filled = await browser.perform({
+        type: "fill-secret",
+        label: "Password",
+        origin: "https://shop.example",
+        value: secret,
+      });
+      // Whether the field was filled, and nothing that could be the value: a
+      // snapshot of a filled form is the value.
+      expect(filled.accessibilitySnapshot).toBe("");
+      expect(JSON.stringify(filled)).not.toContain(secret);
+
+      // The origin is the host's to enforce at the moment it types: a page
+      // anywhere else is refused, and the refusal does not carry the value.
+      const elsewhere = await browser
+        .perform({
+          type: "fill-secret",
+          label: "Password",
+          origin: "https://other.example",
+          value: secret,
+        })
+        .then(
+          () => undefined,
+          (error: unknown) => error,
+        );
+      expect(elsewhere).toBeInstanceOf(Error);
+      expect(String((elsewhere as Error).message)).not.toContain(secret);
     });
 
     test("mints, renews and revokes a viewer session on an opaque URL", async () => {

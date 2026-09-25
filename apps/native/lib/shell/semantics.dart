@@ -80,6 +80,8 @@ abstract final class ShellIds {
   static String approve(String approvalId) => 'approval-approve-$approvalId';
   static String deny(String approvalId) => 'approval-deny-$approvalId';
   static String connectApp(String app) => 'connect-app-$app';
+  static String secretField(String requestId) => 'secret-field-$requestId';
+  static String secretSave(String requestId) => 'secret-save-$requestId';
   static String skillOption(String ref) => 'skill-option-$ref';
   static String skillChip(String ref) => 'skill-chip-$ref';
   static String slot(String name) => 'shell-slot-$name';
@@ -449,6 +451,12 @@ abstract final class TemplateIds {
 /// The pairing code is host chrome rather than a node, for the same reason a
 /// `SettingField.secret` is never seeded: it exists once, on a receipt, and is
 /// never in a document the server could send twice.
+abstract final class SecretIds {
+  static const document = 'secrets-document';
+  static const refresh = 'secrets-refresh';
+  static const profileEntry = 'profile-secrets';
+}
+
 abstract final class MachineIds {
   static const document = 'machines-document';
   static const refresh = 'machines-refresh';

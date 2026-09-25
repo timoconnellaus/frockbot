@@ -40,6 +40,8 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
     listCards: ({ botId }) => state.listCards(botId),
     readCard: ({ botId, surfaceId }) => state.readCard(botId, surfaceId),
     cardAction: ({ botId, command }) => state.cardAction(botId, command),
+    submitSecret: ({ botId, requestId, command }) =>
+      state.submitSecret(botId, requestId, command),
     acknowledgeNotification: ({ botId, notificationId }) =>
       state.acknowledgeNotification(botId, notificationId),
     stopRun: ({ botId, command }) => state.stopRun(botId, command),
@@ -263,6 +265,7 @@ describe("user application Bot seam", () => {
         Promise.resolve({ schemaVersion: 1 as const, botId, cards: [] }),
       readCard: () => Promise.reject(new Error("unexpected")),
       cardAction: () => Promise.reject(new Error("unexpected")),
+      submitSecret: () => Promise.reject(new Error("unexpected")),
       acknowledgeNotification: () => Promise.resolve(),
       stopRun: () => Promise.reject(new Error("must not stop")),
     };
@@ -931,6 +934,7 @@ describe("the cards route", () => {
       listCards: (botId: string) =>
         Promise.resolve({ schemaVersion: 1 as const, botId, cards: [card] }),
       cardAction: () => Promise.reject(new Error("unexpected")),
+      submitSecret: () => Promise.reject(new Error("unexpected")),
       acknowledgeNotification: () => Promise.resolve(),
       stopRun: () => Promise.reject(new Error("unexpected")),
       ...overrides,
@@ -1120,6 +1124,94 @@ describe("the cards route", () => {
     );
     expect(response.status).toBe(405);
   });
+
+  const REQUEST_PATH = `https://frockbot.test/api/bots/primary/secret-requests/secret-request-${"a".repeat(32)}`;
+  const VALUE = "hunter2-correct-horse-9f3a1c7e";
+
+  test("a typed secret reaches the Bot that asked, and no answer repeats it", async () => {
+    const submitted: unknown[] = [];
+    const response = await createUserApplication()(
+      new Request(REQUEST_PATH, {
+        method: "POST",
+        body: JSON.stringify({
+          schemaVersion: 1,
+          commandId: "save-1",
+          value: VALUE,
+        }),
+      }),
+      envFor({
+        submitSecret: (botId, requestId, command) => {
+          submitted.push({ botId, requestId, command });
+          return Promise.resolve({ schemaVersion: 1, status: "saved" });
+        },
+      }),
+    );
+    expect(response.status).toBe(200);
+    expect(response.headers.get("cache-control")).toBe("no-store");
+    const body = await response.text();
+    expect(body).not.toContain(VALUE);
+    expect(submitted).toEqual([
+      {
+        botId: "primary",
+        requestId: `secret-request-${"a".repeat(32)}`,
+        command: { schemaVersion: 1, commandId: "save-1", value: VALUE },
+      },
+    ]);
+  });
+
+  test("a refused or failed save answers in fixed words", async () => {
+    const tooLong = await createUserApplication()(
+      new Request(REQUEST_PATH, {
+        method: "POST",
+        body: JSON.stringify({
+          schemaVersion: 1,
+          commandId: "save-1",
+          value: `${VALUE}${"x".repeat(5_000)}`,
+        }),
+      }),
+      envFor({}),
+    );
+    expect(tooLong.status).toBe(400);
+    expect(await tooLong.text()).not.toContain(VALUE);
+
+    const failed = await createUserApplication()(
+      new Request(REQUEST_PATH, {
+        method: "POST",
+        body: JSON.stringify({
+          schemaVersion: 1,
+          commandId: "save-1",
+          value: VALUE,
+        }),
+      }),
+      envFor({
+        submitSecret: () =>
+          Promise.reject(new Error(`storage said ${VALUE} was bad`)),
+      }),
+    );
+    expect(failed.status).toBe(500);
+    expect(await failed.text()).not.toContain(VALUE);
+
+    const unknown = await createUserApplication()(
+      new Request(REQUEST_PATH, {
+        method: "POST",
+        body: JSON.stringify({
+          schemaVersion: 1,
+          commandId: "save-1",
+          value: VALUE,
+        }),
+      }),
+      envFor({
+        submitSecret: () =>
+          Promise.reject(
+            namedError(
+              "SecretRequestNotFoundError",
+              "That secret request was not found.",
+            ),
+          ),
+      }),
+    );
+    expect(unknown.status).toBe(404);
+  });
 });
 
 describe("run list failures", () => {
@@ -1146,6 +1238,7 @@ describe("run list failures", () => {
         Promise.resolve({ schemaVersion: 1 as const, botId, cards: [] }),
       readCard: () => Promise.reject(new Error("unexpected")),
       cardAction: () => Promise.reject(new Error("unexpected")),
+      submitSecret: () => Promise.reject(new Error("unexpected")),
       acknowledgeNotification: () => Promise.resolve(),
       stopRun: () => Promise.reject(new Error("unexpected")),
     };

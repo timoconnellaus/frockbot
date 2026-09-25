@@ -207,6 +207,16 @@ import {
 } from "@frockbot/app/uploads/quota";
 import { isUploadIdV1, UPLOAD_MAX_BYTES_V1 } from "@frockbot/core/contracts";
 import {
+  createSecretVaultV1,
+  type SecretVaultV1,
+} from "@frockbot/app/secrets/user";
+import {
+  isSecretIdV1,
+  isSecretRequestIdV1,
+  SECRET_LIMITS_V1,
+  secretOriginV1,
+} from "@frockbot/app/secrets/shared";
+import {
   GroupChatUserStoreV1,
   type GroupChatChangeV1,
   type GroupChatUserStorageV1,
@@ -851,7 +861,8 @@ export class UserConfiguration
 
   /**
    * Refuses work that would start something while the account is being
-   * deleted: a Turn, a spend, a Bot, a group, a connection, a payment, a push.
+   * deleted: a Turn, a spend, a Bot, a group, a connection, a payment, a push,
+   * a saved secret or a fill of one.
    * Each would either reach something the deletion already removed or leave
    * something behind it. The saga's own calls — a Bot reading its
    * registration to tear itself down — do not come through here.
@@ -1897,6 +1908,121 @@ export class UserConfiguration
       connectionId: request.connectionId as string,
       effectId: request.effectId as string,
     });
+  }
+
+  private async secretVault(): Promise<SecretVaultV1> {
+    return createSecretVaultV1({
+      storage: this.ctx.storage,
+      credentials: (await this.contributions()).credentials,
+    });
+  }
+
+  /**
+   * Seals one value a person typed on a Bot's secret-request card.
+   *
+   * The Bot Durable Object is the caller, having checked the request it
+   * recorded; this object is the one that holds the value, sealed, and
+   * answers only what the secret is called and where it may be used. A
+   * refusal names the field, never what was in it.
+   */
+  async storeSecret(input: unknown) {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      {
+        userId: rpcIdentifier,
+        botId: rpcBotId,
+        requestId: rpcPattern(/^secret-request-[0-9a-f]{32}$/, 128),
+        label: rpcString(SECRET_LIMITS_V1.label),
+        payment: rpcBoolean,
+        value: rpcString(SECRET_LIMITS_V1.value),
+      },
+      {
+        origin: (value, label) => secretOriginV1(value, label),
+      },
+    );
+    const userId = await this.assertUserIdentity(request.userId as string);
+    await this.assertAccountOpen();
+    if (!isSecretRequestIdV1(request.requestId)) {
+      throw new Error("RPC request.requestId is invalid");
+    }
+    const { status: _, ...secret } = await (
+      await this.secretVault()
+    ).store({
+      accountId: userId,
+      botId: request.botId as string,
+      requestId: request.requestId,
+      label: request.label as string,
+      ...(request.origin === undefined
+        ? {}
+        : { origin: request.origin as string }),
+      payment: request.payment as boolean,
+      value: request.value as string,
+    });
+    return secret;
+  }
+
+  /** What a saved secret is called and where it may be filled; never its value. */
+  async describeSecret(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      secretId: rpcPattern(/^secret-[0-9a-f]{32}$/, 64),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    const secret = isSecretIdV1(request.secretId)
+      ? await (await this.secretVault()).describe(request.secretId)
+      : undefined;
+    return { schemaVersion: 1 as const, secret: secret ?? null };
+  }
+
+  /** An expiring lease over one secret's sealed value, for one fill. */
+  async leaseSecret(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      secretId: rpcPattern(/^secret-[0-9a-f]{32}$/, 64),
+      effectId: rpcString(256),
+    });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    await this.assertAccountOpen();
+    return (await this.secretVault()).lease({
+      accountId: userId,
+      secretId: request.secretId as string,
+      effectId: request.effectId as string,
+    });
+  }
+
+  async settleSecret(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      secretId: rpcPattern(/^secret-[0-9a-f]{32}$/, 64),
+      effectId: rpcString(256),
+    });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    await (
+      await this.secretVault()
+    ).settle({
+      accountId: userId,
+      secretId: request.secretId as string,
+      effectId: request.effectId as string,
+    });
+  }
+
+  /** The User's saved secrets, for Settings. */
+  async listSecrets(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
+    await this.assertUserIdentity(request.userId as string);
+    return (await this.secretVault()).list();
+  }
+
+  async deleteSecret(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      secretId: rpcPattern(/^secret-[0-9a-f]{32}$/, 64),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    return {
+      schemaVersion: 1 as const,
+      ...(await (await this.secretVault()).remove(request.secretId as string)),
+    };
   }
 
   async settleModelCredential(input: unknown) {

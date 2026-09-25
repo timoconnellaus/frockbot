@@ -51,6 +51,7 @@ import 'json.dart';
 import 'approvals.dart';
 import 'press.dart';
 import 'schema_client.dart';
+import 'secrets.dart';
 import 'surface.dart';
 
 /// The transport, the Bot whose transcript the cards are in, and the signal
@@ -87,7 +88,8 @@ class CardChatCard extends StatefulWidget {
 }
 
 class _CardChatCardState extends State<CardChatCard>
-    with AutomaticKeepAliveClientMixin {
+    with AutomaticKeepAliveClientMixin
+    implements CardSecretsV1 {
   CardsApi? api;
   String? botId;
   Listenable? invalidations;
@@ -388,6 +390,40 @@ class _CardChatCardState extends State<CardChatCard>
     }
   }
 
+  /// What is typed into this card's secret fields, kept across renderer
+  /// rebuilds and never anywhere but memory.
+  final Map<String, TextEditingController> secretDrafts = {};
+
+  @override
+  TextEditingController draftV1(String requestId) =>
+      secretDrafts.putIfAbsent(requestId, TextEditingController.new);
+
+  /// A secret typed into this card's `SecretField`. It is not a press: the
+  /// card is not frozen for it, the value is not the renderer's, and the
+  /// receipt carries the card back without it.
+  @override
+  Future<void> saveSecretV1({
+    required String requestId,
+    required String value,
+    required String commandId,
+  }) async {
+    final client = api;
+    final bot = botId;
+    if (client == null || bot == null) {
+      throw const RequestFailure('Secrets can’t be saved here.');
+    }
+    final receipt = await client.saveSecret(
+      bot,
+      requestId: requestId,
+      value: value,
+      commandId: commandId,
+    );
+    final card = receipt.card;
+    if (mounted && card != null && card.surfaceId == widget.surfaceId) {
+      adopt(card);
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -437,8 +473,11 @@ class _CardChatCardState extends State<CardChatCard>
                 child: AnimatedOpacity(
                   opacity: pending == null ? 1 : 0.6,
                   duration: FrockTheme.motion(context, FrockTheme.fast),
-                  child: Surface(
-                    surfaceContext: live.contextFor(widget.surfaceId),
+                  child: CardSecretsScope(
+                    secrets: this,
+                    child: Surface(
+                      surfaceContext: live.contextFor(widget.surfaceId),
+                    ),
                   ),
                 ),
               ),
@@ -467,6 +506,9 @@ class _CardChatCardState extends State<CardChatCard>
     invalidations?.removeListener(_invalidated);
     unawaited(interactions?.cancel());
     controller?.dispose();
+    for (final draft in secretDrafts.values) {
+      draft.dispose();
+    }
     super.dispose();
   }
 }

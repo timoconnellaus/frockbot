@@ -119,9 +119,46 @@ class CardActionReceipt {
   }
 }
 
+/// What the secret route answered: whether this post saved it, and the card
+/// as it stands after it, when the Bot still holds that card.
+class SecretSaveReceipt {
+  final String status;
+  final CardView? card;
+  const SecretSaveReceipt({required this.status, this.card});
+
+  factory SecretSaveReceipt.fromJson(Object? value) {
+    if (value is! Map) throw const FormatException('Invalid secret receipt');
+    final json = value.cast<String, Object?>();
+    final status = json['status'];
+    if (json['schemaVersion'] != 1 ||
+        (status != 'saved' && status != 'replayed')) {
+      throw const FormatException('Invalid secret receipt');
+    }
+    return SecretSaveReceipt(
+      status: status! as String,
+      card: json['card'] == null ? null : CardView.fromJson(json['card']),
+    );
+  }
+}
+
 class CardsApi {
   final NativeApi api;
   const CardsApi(this.api);
+
+  /// One value typed into a secret request's field. It goes to this route
+  /// and nowhere else; the answer never carries it back.
+  Future<SecretSaveReceipt> saveSecret(
+    String botId, {
+    required String requestId,
+    required String value,
+    required String commandId,
+  }) async {
+    final answer = await api.request(
+      '/api/bots/${_bot(botId)}/secret-requests/${Uri.encodeComponent(requestId)}',
+      body: {'schemaVersion': 1, 'commandId': commandId, 'value': value},
+    );
+    return SecretSaveReceipt.fromJson(answer);
+  }
 
   Future<CardView> read(String botId, String surfaceId) async {
     final answer = await api.request(

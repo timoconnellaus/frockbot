@@ -37,6 +37,7 @@ import {
   type ToolAttachmentV1,
   type ToolDefinition,
   type ToolExecutionContext,
+  type ToolExecutionResult,
   type WorkspaceFilesV1,
   type WorkspaceRootV1,
 } from "@frockbot/core/contracts";
@@ -157,6 +158,11 @@ export interface ComputerAgentPluginConfig {
    * its durable capture, and nothing else photographs the desktop.
    */
   frames?: ComputerFrameSinkV1;
+  /**
+   * How `computer_browser` fills a secret the person saved, by reference.
+   * Absent, and such a fill is refused: nothing else can reach a value.
+   */
+  secrets?: ComputerSecretFillSeamV1;
   /** The Package's clock. Tests set it; production takes `Date.now`. */
   now?: () => number;
   /**
@@ -241,6 +247,36 @@ export function createDemonstrationDeleteToolV1(
       };
     },
   };
+}
+
+/**
+ * The Bot's authority over its User's saved secrets, as the browser tool
+ * reaches it. The policy — which fills need the person's approval, and on
+ * which site — is the authority's; this Package only does the typing.
+ */
+export interface ComputerSecretFillSeamV1 {
+  /**
+   * Whether this fill may go ahead, and on which origin only. `asked` means
+   * the person was asked to approve it and the Turn is over; `content` is
+   * what the Bot reads either way.
+   */
+  authorize(request: {
+    secretId: string;
+    field: string;
+    approvalId?: string;
+    /** The page's origin now, read only when the decision needs it. */
+    pageOrigin(): Promise<string | undefined>;
+    context: ToolExecutionContext;
+    runtime: Pick<AgentRuntimeV1, "sessions" | "firstPartyCards">;
+  }): Promise<
+    | { status: "granted"; origin: string; label: string }
+    | { status: "asked"; content: string }
+    | { status: "refused"; content: string }
+  >;
+  /** The value, leased for one action under `effectId`. */
+  open(request: { secretId: string; effectId: string }): Promise<string>;
+  /** Settles that lease, whatever became of the action. */
+  release(request: { secretId: string; effectId: string }): Promise<void>;
 }
 
 export const HUMAN_CONTROL_PROMPT_LINE =
@@ -448,7 +484,7 @@ export const BROWSER_ACTION_SHAPES_V1: Readonly<Record<string, string>> = {
   navigate: '{"action":"navigate","url":"http://127.0.0.1:8944/"}',
   click:
     '{"action":"click","role":"button","name":"Add"} — role and name are both required; take them from the snapshot line (button "Add" → role "button", name "Add"; a checkbox line → role "checkbox")',
-  fill: '{"action":"fill","label":"New todo","text":"Buy milk"} — label is the field\'s accessible label from the snapshot',
+  fill: '{"action":"fill","label":"New todo","text":"Buy milk"} — label is the field\'s accessible label from the snapshot; for a password or card number the user saved, {"action":"fill","label":"Password","secret":"secret-…"} with the reference in place of text',
   press: '{"action":"press","key":"Enter"}',
   wait: '{"action":"wait","milliseconds":500} (0 to 30000)',
 };
@@ -472,8 +508,58 @@ function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.length > 0 ? value : undefined;
 }
 
-function decodeBrowser(input: unknown): ComputerBrowserAction | undefined {
+/** The origin of a page's address, or nothing for one that is not a web page. */
+function webOriginV1(url: string | undefined): string | undefined {
+  if (url === undefined) return undefined;
+  try {
+    const parsed = new URL(url);
+    return parsed.protocol === "https:" || parsed.protocol === "http:"
+      ? parsed.origin
+      : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * A fill that names a saved secret instead of text. Decoded apart from the
+ * host's own actions, because the value is never the model's to supply: the
+ * Bot's authority leases it for the one action this becomes.
+ */
+interface SecretFillInputV1 {
+  type: "fill-by-secret";
+  label: string;
+  secretId: string;
+  approvalId?: string;
+  exact?: boolean;
+}
+
+function decodeBrowser(
+  input: unknown,
+): ComputerBrowserAction | SecretFillInputV1 | undefined {
   const value = record(input);
+  if (value?.action === "fill" && value.secret !== undefined) {
+    const label = optionalString(value.label) ?? optionalString(value.name);
+    return label !== undefined &&
+      value.text === undefined &&
+      typeof value.secret === "string" &&
+      value.secret.length > 0 &&
+      value.secret.length <= 128 &&
+      (value.approval === undefined ||
+        (typeof value.approval === "string" &&
+          value.approval.length > 0 &&
+          value.approval.length <= 128))
+      ? {
+          type: "fill-by-secret",
+          label,
+          secretId: value.secret,
+          ...(typeof value.approval === "string"
+            ? { approvalId: value.approval }
+            : {}),
+          ...(typeof value.exact === "boolean" ? { exact: value.exact } : {}),
+        }
+      : undefined;
+  }
   switch (value?.action) {
     case "snapshot":
       return { type: "snapshot" };
@@ -1775,6 +1861,113 @@ export function createComputerAgentFeature(
       },
     };
 
+    /**
+     * One fill of a secret the person saved, by its reference.
+     *
+     * The authority decides first — the secret's own site, or a fresh
+     * approval of this page and field — and names the one origin the page
+     * may be on. Only then is the value leased, for this action and nothing
+     * else, typed by the host, and the lease settled whatever happened. What
+     * comes back is whether the field was filled: never a snapshot, and never
+     * anything carrying the value, which is scrubbed from a failure's words
+     * too in case a browser echoed it.
+     */
+    const fillSecret = async (
+      action: SecretFillInputV1,
+      context: ToolExecutionContext,
+    ): Promise<ToolExecutionResult> => {
+      const secrets = config.secrets;
+      if (!secrets) {
+        return {
+          content:
+            "Saved secrets cannot be filled here. Ask the user to type it into the page themselves.",
+          isError: true,
+        };
+      }
+      try {
+        const effectId = await operationIdOf(context);
+        return await useComputer(await open(context), async (computer) => {
+          const browser = computer.browser;
+          if (!browser) {
+            throw new ComputerError(
+              "capability-unavailable",
+              "The selected Computer does not support browser automation",
+            );
+          }
+          const grant = await secrets.authorize({
+            secretId: action.secretId,
+            field: action.label,
+            ...(action.approvalId === undefined
+              ? {}
+              : { approvalId: action.approvalId }),
+            context,
+            runtime,
+            pageOrigin: async () => {
+              const where = await operation(context, async () =>
+                browser.perform(
+                  { type: "snapshot" },
+                  {
+                    signal: context.signal,
+                    effectId: await computerOperationIdV1({
+                      botId: context.botId,
+                      runId: config.writer?.runId ?? context.sessionId,
+                      effectId: `${context.effectId}:page-origin`,
+                    }),
+                  },
+                ),
+              );
+              return webOriginV1(where.url);
+            },
+          });
+          if (grant.status === "refused") {
+            return { content: grant.content, isError: true };
+          }
+          if (grant.status === "asked") {
+            return { content: grant.content, isError: false, endsTurn: true };
+          }
+          const value = await secrets.open({
+            secretId: action.secretId,
+            effectId,
+          });
+          try {
+            await operation(context, () =>
+              browser.perform(
+                {
+                  type: "fill-secret",
+                  label: action.label,
+                  ...(action.exact === undefined
+                    ? {}
+                    : { exact: action.exact }),
+                  origin: grant.origin,
+                  value,
+                },
+                { signal: context.signal, effectId },
+              ),
+            );
+            return {
+              content: `Filled "${action.label}" with the saved secret "${grant.label}". Its value is not shown to you; take a snapshot to see the page, where the field reads as hidden.`,
+              isError: false,
+            };
+          } catch (error) {
+            const told = failure(error);
+            return {
+              ...told,
+              content:
+                value.length === 0
+                  ? told.content
+                  : told.content.split(value).join("[secret]"),
+            };
+          } finally {
+            await secrets
+              .release({ secretId: action.secretId, effectId })
+              .catch(() => undefined);
+          }
+        });
+      } catch (error) {
+        return failure(error);
+      }
+    };
+
     const browserTool: ToolDefinition = {
       name: "computer_browser",
       namespace: "frockbot",
@@ -1785,7 +1978,7 @@ export function createComputerAgentFeature(
       },
       idempotent: config.idempotentEffects === true,
       description:
-        'Control the browser in the Bot\'s selected Computer and return an accessibility snapshot. Shapes: {"action":"snapshot"}; {"action":"navigate","url":...}; {"action":"click","role":"button","name":"Add"} (role AND name, both from the snapshot line, e.g. checkbox "Mark done"); {"action":"fill","label":"New todo","text":...}; {"action":"press","key":"Enter"}; {"action":"wait","milliseconds":500}.',
+        'Control the browser in the Bot\'s selected Computer and return an accessibility snapshot. Shapes: {"action":"snapshot"}; {"action":"navigate","url":...}; {"action":"click","role":"button","name":"Add"} (role AND name, both from the snapshot line, e.g. checkbox "Mark done"); {"action":"fill","label":"New todo","text":...}; {"action":"press","key":"Enter"}; {"action":"wait","milliseconds":500}. For a password, card number or other secret the user saved, fill by its reference instead of text: {"action":"fill","label":"Password","secret":"secret-…"}. You are never given the value, and must not read it back from the page; the result says only whether the field was filled. A payment detail, or a secret used on a site other than its own, first asks the user to approve that page and field; once they have, repeat the same fill with "approval" set to the id you were given.',
       inputSchema: {
         type: "object",
         properties: {
@@ -1809,6 +2002,16 @@ export function createComputerAgentFeature(
             description: "fill: the field's accessible label from the snapshot",
           },
           text: { type: "string" },
+          secret: {
+            type: "string",
+            description:
+              "fill: a saved secret's reference (secret-…), in place of text",
+          },
+          approval: {
+            type: "string",
+            description:
+              "fill with a secret: the approval id the user approved this fill under",
+          },
           key: { type: "string" },
           exact: { type: "boolean" },
           milliseconds: { type: "number", minimum: 0, maximum: 30_000 },
@@ -1825,6 +2028,9 @@ export function createComputerAgentFeature(
         const action = decodeBrowser(input);
         if (!action)
           return { content: browserInputRefusalV1(input), isError: true };
+        if (action.type === "fill-by-secret") {
+          return fillSecret(action, context);
+        }
         try {
           const effectId = await operationIdOf(context);
           return await useComputer(await open(context), async (computer) => {

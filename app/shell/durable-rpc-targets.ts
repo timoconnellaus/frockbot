@@ -101,6 +101,26 @@ export interface BotUserConfigurationRpcTargetV1
   settleToolCredential(
     input: UserRpcEnvelopeV1<{ connectionId: string; effectId: string }>,
   ): Promise<void>;
+  /** Seals a value a person typed on this Bot's secret-request card. */
+  storeSecret(
+    input: UserRpcEnvelopeV1<{
+      botId: string;
+      requestId: string;
+      label: string;
+      origin?: string;
+      payment: boolean;
+      value: string;
+    }>,
+  ): Promise<object>;
+  describeSecret(
+    input: UserRpcEnvelopeV1<{ secretId: string }>,
+  ): Promise<object>;
+  leaseSecret(
+    input: UserRpcEnvelopeV1<{ secretId: string; effectId: string }>,
+  ): Promise<unknown>;
+  settleSecret(
+    input: UserRpcEnvelopeV1<{ secretId: string; effectId: string }>,
+  ): Promise<void>;
   listBots(input: UserRpcEnvelopeV1): Promise<object>;
   listGroupChats(input: UserRpcEnvelopeV1): Promise<object>;
   executeGroupChatCommand(

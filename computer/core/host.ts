@@ -92,6 +92,21 @@ export type ComputerBrowserAction =
   | { type: "close-origins"; origins: readonly string[] }
   | { type: "click"; role: string; name: string; exact?: boolean }
   | { type: "fill"; label: string; text: string; exact?: boolean }
+  /**
+   * Internal: the model-facing tool names a saved secret by reference, and
+   * the Bot's own authority leases its value for this one action. A host
+   * types `value` into the field only while the page's origin is `origin`,
+   * carries it apart from the action's own description — never in a command
+   * line, a log or an error — and answers with no snapshot, because a
+   * snapshot of a filled form is the value.
+   */
+  | {
+      type: "fill-secret";
+      label: string;
+      exact?: boolean;
+      origin: string;
+      value: string;
+    }
   | { type: "press"; key: string }
   | { type: "wait"; milliseconds: number };
 

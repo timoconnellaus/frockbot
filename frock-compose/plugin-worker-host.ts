@@ -31,6 +31,7 @@ import {
   pluginWorkerModuleSetHashV1,
   type BotCapabilitiesStub,
   type BotIsolateEnv,
+  type FirstPartySecretRequestV1,
   type BotIsolateHookEventNameV1,
   type IsolateIdentityV1,
   type IsolateToolDescriptorV1,
@@ -398,6 +399,12 @@ export interface PluginCardSendV1 {
    * seam mints, which is what stops a Plugin naming a decision.
    */
   approvalIds?: readonly string[];
+  /**
+   * The secret request the kernel asked this draw to carry the field for.
+   * Present only on the locked first-party draw of a `secret-request`; the
+   * seam refuses a `SecretField` on any draw without it.
+   */
+  secretRequest?: FirstPartySecretRequestV1;
   context: ToolExecutionContext;
 }
 
@@ -416,6 +423,8 @@ export interface PluginCardDrawRequestV1 {
   surfaceId?: string;
   /** See `PluginCardSendV1.approvalIds`: the kernel's own, never a Plugin's. */
   approvalIds?: readonly string[];
+  /** See `PluginCardSendV1.secretRequest`: the kernel's own, never a Plugin's. */
+  secretRequest?: FirstPartySecretRequestV1;
 }
 
 /**
@@ -1827,6 +1836,9 @@ export class PluginWorkerHost {
       ...(request.approvalIds === undefined
         ? {}
         : { approvalIds: request.approvalIds }),
+      ...(request.secretRequest === undefined
+        ? {}
+        : { secretRequest: request.secretRequest }),
       messages: rendered.messages,
       context,
     });

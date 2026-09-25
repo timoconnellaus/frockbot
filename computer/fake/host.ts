@@ -9,8 +9,8 @@
  *
  * What it is made of is deliberately boring: a `Map` for the Workspace, a
  * table of scripted `exec` answers, one 1×1 PNG, viewer sessions on an
- * `https://viewer.invalid/…` URL, process records, one doctor report, and
- * leases keyed by scope. It records what it was asked, so a test asserts on
+ * `https://viewer.invalid/…` URL, process records, one doctor report, a
+ * one-page browser with two fields, and leases keyed by scope. It records what it was asked, so a test asserts on
  * the calls rather than on a filesystem.
  *
  * It imports `@frockbot/computer/core` and nothing else from this Package —
@@ -32,6 +32,8 @@ import {
   computerSyncSummaryV1,
   decodeComputerDemonstrationStepsV1,
   type ComputerBackgroundStateV1,
+  type ComputerBrowserAction,
+  type ComputerBrowserState,
   type ComputerControlLease,
   type ComputerControlRequestV1,
   type ComputerDemonstrationCaptureV1,
@@ -291,11 +293,90 @@ export class FakeComputerV1 {
     { ownerId: string; startedAt: string }
   >();
   generation = 1;
+  /**
+   * The one page this Computer's browser shows: an address and its labelled
+   * fields. A field a secret was typed into is marked, and a snapshot leaves
+   * its value out, as the real browser helper does.
+   */
+  readonly page = {
+    url: "about:blank",
+    fields: new Map<string, { value: string; secret: boolean }>([
+      ["Email", { value: "", secret: false }],
+      ["Password", { value: "", secret: false }],
+    ]),
+  };
   private sequence = 0;
 
   next(prefix: string): string {
     this.sequence += 1;
     return `${prefix}-${this.sequence}`;
+  }
+}
+
+function pageOrigin(url: string): string {
+  try {
+    const origin = new URL(url).origin;
+    return origin === "null" ? "" : origin;
+  } catch {
+    return "";
+  }
+}
+
+/** One browser action on the fake's page, answered the way a host must. */
+function browse(
+  computer: FakeComputerV1,
+  action: ComputerBrowserAction,
+): ComputerBrowserState {
+  const page = computer.page;
+  const snapshot = (): ComputerBrowserState => ({
+    url: page.url,
+    title: "Fake page",
+    accessibilitySnapshot: [...page.fields.entries()]
+      .map(
+        ([label, field]) =>
+          `- textbox "${label}"${field.value ? `: ${field.secret ? "••••" : field.value}` : ""}`,
+      )
+      .join("\n"),
+  });
+  switch (action.type) {
+    case "navigate":
+      page.url = action.url;
+      for (const field of page.fields.values()) {
+        field.value = "";
+        field.secret = false;
+      }
+      return snapshot();
+    case "fill": {
+      const field = page.fields.get(action.label);
+      if (!field) {
+        throw new ComputerError("invalid-request", "No field has that label");
+      }
+      field.value = action.text;
+      field.secret = false;
+      return snapshot();
+    }
+    case "fill-secret": {
+      const origin = pageOrigin(page.url);
+      if (origin !== action.origin) {
+        throw new ComputerError(
+          "invalid-request",
+          `Not filled: the page is ${origin ? `on ${origin}` : "not on a web address"}, not the site this secret may be filled into.`,
+        );
+      }
+      const field = page.fields.get(action.label);
+      if (!field) {
+        throw new ComputerError(
+          "invalid-request",
+          "Not filled: no field on the page has that label.",
+        );
+      }
+      field.value = action.value;
+      field.secret = true;
+      // No snapshot: a snapshot of a filled form is the value.
+      return { url: page.url, title: "Fake page", accessibilitySnapshot: "" };
+    }
+    default:
+      return snapshot();
   }
 }
 
@@ -436,6 +517,19 @@ export class FakeComputerHostV1 implements ComputerHostV1 {
       workspace: computer.workspace,
       exec: {
         execute: (request) => host.exec(computer, botId, request),
+      },
+      browser: {
+        perform: (action) => {
+          // The action's kind and field, never a secret's value.
+          host.calls.push(
+            `browser:${botId}:${action.type}${"label" in action ? `:${action.label}` : ""}`,
+          );
+          try {
+            return Promise.resolve(browse(computer, action));
+          } catch (error) {
+            return Promise.reject(error);
+          }
+        },
       },
       screenshot: {
         capture: (): Promise<ComputerScreenshotV1> => {

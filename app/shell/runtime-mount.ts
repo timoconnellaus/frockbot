@@ -100,6 +100,8 @@ import {
   type StoredComputerFrameV1,
 } from "@frockbot/computer/frame";
 import { turnToolCatalogPin } from "./tool-catalog-pin.js";
+import { createBotSecretFillSeamV1 } from "@frockbot/app/secrets/fill";
+import { userSecretsV1 } from "@frockbot/app/secrets/bot";
 
 /**
  * The model provider Plugin host for one mount (ADR 0032), or the reason a
@@ -670,6 +672,15 @@ export async function agentRuntime(
                   put: (frame) => putBotComputerFrameV1(state, identity, frame),
                 }
               : computerFrameSinkV1(state.ctx.storage),
+            // A saved secret is filled only inside a Turn: its Approval's
+            // intent names the run that asked, and its lease the call.
+            computerSecrets: createBotSecretFillSeamV1({
+              identity,
+              runId: turn.runId,
+              storage: state.ctx.storage,
+              vault: userSecretsV1(state, identity),
+              readSecret: (name) => readSecret(name),
+            }),
             ...(state.invalidateComputerProjectionFile
               ? {
                   computerProjectionFiles: {

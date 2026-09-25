@@ -1,7 +1,7 @@
 /// The core family: the card's state, its facts, its body, its decision, the
-/// app it offers to connect, and what it settles into.
+/// app it offers to connect, the secret it asks for, and what it settles into.
 ///
-/// Six components, the first family of ADR 0030's catalog. Each is a
+/// Seven components, the first family of ADR 0030's catalog. Each is a
 /// `CatalogItem` whose `dataSchema` comes from `schemas.dart` — the schema is
 /// never written twice — and whose widget is ordinary app code in the app's
 /// theme. That is the whole of the protocol's security model on this side: a
@@ -14,17 +14,21 @@
 /// names are minted here from the `approvalId` the kernel issued; `ConnectApp`
 /// draws what the kernel wrote onto it from its own catalog, and its button is
 /// the host's door rather than an action. A Plugin may compose either into a
-/// card, and may never restyle one or say what it does.
+/// card, and may never restyle one or say what it does. `SecretField` is
+/// stricter still: only the kernel's own draw of a secret request may carry
+/// it, and what is typed into it never reaches the card at all.
 library;
 
 import 'package:flutter/material.dart';
 import 'package:genui/genui.dart';
 
+import '../../client/transport.dart';
 import '../../connections/icon_tile.dart';
 import '../../shell/semantics.dart';
 import '../approvals.dart';
 import '../connections.dart';
 import '../press.dart';
+import '../secrets.dart';
 import 'common.dart';
 import 'tone.dart';
 
@@ -450,6 +454,193 @@ class FrockConnectAppView extends StatelessWidget {
   }
 }
 
+/// The field a person types a secret into, bound to a request the kernel
+/// recorded.
+///
+/// Everything on it is the kernel's: the request id, whether it is a payment
+/// detail, and whether it has been saved. The value is the person's and goes
+/// nowhere the card can see — not an action, not the data model — only to the
+/// host's save route, after which the field is emptied.
+final frockSecretField = CatalogItem(
+  name: 'SecretField',
+  dataSchema: frockSchemaOf('SecretField'),
+  widgetBuilder: (itemContext) {
+    final data = (itemContext.data as Map).cast<String, Object?>();
+    return FrockSecretFieldView(
+      requestId: frockString(data['requestId']) ?? '',
+      payment: data['payment'] == true,
+      saved: data['state'] == 'saved',
+    );
+  },
+);
+
+/// The component itself, so a test can draw one without a surface.
+class FrockSecretFieldView extends StatefulWidget {
+  final String requestId;
+  final bool payment;
+  final bool saved;
+  const FrockSecretFieldView({
+    super.key,
+    required this.requestId,
+    this.payment = false,
+    this.saved = false,
+  });
+
+  @override
+  State<FrockSecretFieldView> createState() => _FrockSecretFieldViewState();
+}
+
+class _FrockSecretFieldViewState extends State<FrockSecretFieldView> {
+  /// Used only where no card holds the draft — a test, a preview.
+  TextEditingController? own;
+  bool hidden = true;
+  bool saving = false;
+
+  /// Saved by this client before the card redrew to say so.
+  bool savedHere = false;
+  String? failure;
+
+  /// The command id of the value in the field, kept only while that exact
+  /// value is still there, so a save retried after a lost answer is the same
+  /// save.
+  String? commandId;
+  String? commandValue;
+
+  @override
+  void dispose() {
+    own?.dispose();
+    super.dispose();
+  }
+
+  TextEditingController fieldOf(CardSecretsV1? secrets) =>
+      secrets?.draftV1(widget.requestId) ?? (own ??= TextEditingController());
+
+  Future<void> save(CardSecretsV1 secrets) async {
+    final field = fieldOf(secrets);
+    final value = field.text;
+    if (value.trim().isEmpty || saving) return;
+    if (commandValue != value) {
+      commandId = randomId();
+      commandValue = value;
+    }
+    setState(() {
+      saving = true;
+      failure = null;
+    });
+    try {
+      await secrets.saveSecretV1(
+        requestId: widget.requestId,
+        value: value,
+        commandId: commandId!,
+      );
+      if (!mounted) return;
+      field.clear();
+      commandId = null;
+      commandValue = null;
+      setState(() {
+        saving = false;
+        savedHere = true;
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        saving = false;
+        failure = error is RequestFailure
+            ? error.message
+            : 'That couldn’t be saved. Try again.';
+      });
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    if (widget.saved || savedHere) {
+      return const FrockStatusPillView(
+        label: 'Saved to your account',
+        tone: FrockTone.success,
+      );
+    }
+    final secrets = CardSecretsScope.of(context);
+    final frozen = CardPressScope.pendingOf(context) != null;
+    final canSave =
+        secrets != null && widget.requestId.isNotEmpty && !saving && !frozen;
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        identified(
+          ShellIds.secretField(widget.requestId),
+          TextField(
+            controller: fieldOf(secrets),
+            enabled: canSave,
+            obscureText: hidden,
+            // Nothing that learns, suggests or remembers what is typed here.
+            autocorrect: false,
+            enableSuggestions: false,
+            enableIMEPersonalizedLearning: false,
+            smartDashesType: SmartDashesType.disabled,
+            smartQuotesType: SmartQuotesType.disabled,
+            keyboardType: widget.payment
+                ? TextInputType.number
+                : TextInputType.visiblePassword,
+            onSubmitted: canSave ? (_) => save(secrets) : null,
+            decoration: InputDecoration(
+              labelText: widget.payment
+                  ? 'Card or account details'
+                  : 'Type it here',
+              border: const OutlineInputBorder(),
+              suffixIcon: IconButton(
+                tooltip: hidden ? 'Show' : 'Hide',
+                onPressed: () => setState(() => hidden = !hidden),
+                icon: Icon(
+                  hidden
+                      ? Icons.visibility_outlined
+                      : Icons.visibility_off_outlined,
+                ),
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(height: 8),
+        Align(
+          alignment: Alignment.centerLeft,
+          child: identified(
+            ShellIds.secretSave(widget.requestId),
+            FilledButton(
+              onPressed: canSave ? () => save(secrets) : null,
+              child: Text(saving ? 'Saving…' : 'Save'),
+            ),
+          ),
+        ),
+        if (secrets == null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Text(
+              'Secrets can’t be saved here.',
+              style: theme.textTheme.bodySmall?.copyWith(
+                color: theme.colorScheme.onSurfaceVariant,
+              ),
+            ),
+          ),
+        if (failure != null)
+          Padding(
+            padding: const EdgeInsets.only(top: 8),
+            child: Semantics(
+              liveRegion: true,
+              child: Text(
+                failure!,
+                style: theme.textTheme.bodySmall?.copyWith(
+                  color: theme.colorScheme.error,
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
 /// The settled state: a title, the pill, and one line saying what happened.
 final frockReceipt = CatalogItem(
   name: 'Receipt',
@@ -512,5 +703,6 @@ final List<CatalogItem> frockCoreItemsV1 = List.unmodifiable([
   frockCollapsibleText,
   frockApprovalActions,
   frockConnectApp,
+  frockSecretField,
   frockReceipt,
 ]);

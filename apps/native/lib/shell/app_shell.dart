@@ -39,6 +39,7 @@ import '../groups/pane.dart';
 import '../groups/sheets.dart';
 import '../groups/thread.dart';
 import '../machines/page.dart';
+import '../secrets/page.dart';
 import '../machines/mac_messages.dart';
 import '../plugins/page.dart';
 import '../recovery/page.dart';
@@ -3417,6 +3418,16 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
               icon: Icons.settings_outlined,
               title: 'Personal details',
               page: _settingsPage,
+            ),
+            ProfileSection(
+              id: SecretIds.profileEntry,
+              icon: Icons.password_rounded,
+              title: 'Saved secrets',
+              page: () => SecretsPage(
+                api: widget.api,
+                store: widget.store,
+                userId: widget.userId,
+              ),
             ),
             ProfileSection(
               id: SettingsIds.profileDelete,

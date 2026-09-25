@@ -673,6 +673,22 @@ export const BROWSER_SURVEY_ACTION = "eyJhY3Rpb24iOiJzdXJ2ZXkifQ";
 export const TARGET_ID_FILE = "target-id";
 
 /**
+ * How `browser.mjs` takes a saved secret's value for one `fill-secret`: the
+ * whole of its own stdin, read to the end.
+ *
+ * Not its environment and not its argv: both are readable in `/proc/<pid>` by
+ * anything else running on the Computer for as long as the helper runs, and an
+ * environment is inherited by every child. The exec document hands the helper
+ * the stdin bash has not read yet (`FlyComputer.browserForAgent`), so the value
+ * is only ever in a pipe and in this one process's memory.
+ */
+export const BROWSER_SECRET_STDIN_READER_V1 = `async function readSecretFromStdin() {
+  const chunks = [];
+  for await (const chunk of process.stdin) chunks.push(chunk);
+  return Buffer.concat(chunks).toString("utf8");
+}`;
+
+/**
  * Gives one Bot its window on the shared screen, and pins it to its slot.
  *
  * Idempotent by construction: it re-uses the recorded target when that target
@@ -983,6 +999,8 @@ const botKey = process.argv[4] ?? "";
 const botDir = (key) => \`\${BOTS_ROOT}/\${key}\`;
 const targetPath = (key) => \`\${botDir(key)}/\${TARGET_ID_FILE}\`;
 
+${BROWSER_SECRET_STDIN_READER_V1}
+
 function slotOf(key) {
   const raw = readFileSync(\`\${botDir(key)}/slot\`, "utf8").trim();
   if (!/^\\d+$/.test(raw)) throw new Error(\`Bot "\${key}" holds no desktop slot\`);
@@ -1160,12 +1178,75 @@ if (action.action === "identity") {
   }));
   await done(identity);
 }
+// A saved secret, typed into one field. The value arrives on this process's
+// stdin and is never printed. The answer carries no snapshot, because a
+// snapshot of a filled form is the value, and a refusal says what kind it was
+// and nothing the browser said — a browser's own error is the one place the
+// value could be echoed back.
+if (action.action === "fill-secret") {
+  const value = await readSecretFromStdin();
+  const refuse = async (refused, extra = {}) => {
+    console.log(JSON.stringify({ refused, ...extra }));
+    await browser.close().catch(() => {});
+    process.exit(65);
+  };
+  let origin = "";
+  try {
+    origin = new URL(page.url()).origin;
+  } catch {}
+  if (!value || origin !== action.origin) await refuse("origin", { origin });
+  const exact = action.exact ?? false;
+  const frames = [page.mainFrame(), ...page.frames().filter((frame) => frame !== page.mainFrame())];
+  let target;
+  for (const frame of frames) {
+    let count = 0;
+    try {
+      count = await frame.getByLabel(action.label, { exact }).count();
+    } catch {}
+    if (count > 1) await refuse("many-fields");
+    if (count === 1) {
+      target = frame.getByLabel(action.label, { exact });
+      break;
+    }
+  }
+  if (!target) await refuse("no-field");
+  try {
+    await target.fill(value, { timeout: 10000 });
+    // Drawn as dots, the way a password field is, so a screenshot of the page
+    // does not show it; and marked, so every later snapshot leaves it out.
+    await target.evaluate((element) => {
+      element.setAttribute("data-frockbot-secret", "");
+      element.style.setProperty("-webkit-text-security", "disc");
+    });
+  } catch (error) {
+    await refuse(/not an <input>|contenteditable|not editable/i.test(String(error?.message ?? "")) ? "not-fillable" : "failed");
+  }
+  await done({ filled: true, url: page.url(), title: await page.title(), snapshot: "" });
+}
 if (action.action === "navigate") await page.goto(action.url, { waitUntil: "domcontentloaded" });
 if (action.action === "click") await page.getByRole(action.role, { name: action.name, exact: action.exact ?? false }).click();
 if (action.action === "fill") await page.getByLabel(action.label, { exact: action.exact ?? false }).fill(action.text);
 if (action.action === "press") await page.keyboard.press(action.key);
 if (action.action === "wait") await page.waitForTimeout(action.milliseconds ?? 1000);
-const snapshot = await page.locator("body").ariaSnapshot({ timeout: 10000 });
+// What a password field, a card field or a field a saved secret was typed
+// into holds, so the snapshot can leave it out: the page still has the value,
+// and a snapshot is what a Bot reads.
+async function sensitiveValues() {
+  const values = new Set();
+  for (const frame of page.frames()) {
+    try {
+      const found = await frame.evaluate(() =>
+        [...document.querySelectorAll('input[type="password"], [data-frockbot-secret], input[autocomplete^="cc-"]')].map((element) =>
+          "value" in element ? String(element.value) : String(element.textContent ?? ""),
+        ),
+      );
+      for (const entry of found) if (entry.length >= 3) values.add(entry);
+    } catch {}
+  }
+  return [...values].sort((left, right) => right.length - left.length);
+}
+let snapshot = await page.locator("body").ariaSnapshot({ timeout: 10000 });
+for (const hidden of await sensitiveValues()) snapshot = snapshot.split(hidden).join("••••");
 await done({ url: page.url(), title: await page.title(), snapshot });
 `;
 

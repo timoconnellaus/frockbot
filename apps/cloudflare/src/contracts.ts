@@ -4,6 +4,11 @@ import type {
   SetBotPluginEnabledCommandV1,
 } from "@frockbot/app/plugins/page";
 import type { SetBotPluginEnabledReceiptV1 } from "@frockbot/app/plugins/bot";
+import type {
+  SecretListViewV1,
+  SecretSubmitCommandV1,
+  SecretSubmitReceiptV1,
+} from "@frockbot/app/secrets/shared";
 import type { BotPluginToolReceiptV1 } from "@frockbot/app/plugins/views-bot";
 import type {
   CardActionCommandV1,
@@ -206,6 +211,11 @@ export interface BotStateBinding {
     botId: string,
     command: CardActionCommandV1,
   ): Promise<CardActionReceiptV1>;
+  submitSecret(
+    botId: string,
+    requestId: string,
+    command: SecretSubmitCommandV1,
+  ): Promise<SecretSubmitReceiptV1>;
   acknowledgeNotification(botId: string, notificationId: string): Promise<void>;
   stopRun(
     botId: string,
@@ -326,6 +336,13 @@ export interface UserBotStateBinding {
     botId: string;
     command: CardActionCommandV1;
   }): Promise<CardActionReceiptV1>;
+  /** A value typed on a secret-request card, sealed before this answers. */
+  submitSecret(input: {
+    schemaVersion: 1;
+    botId: string;
+    requestId: string;
+    command: SecretSubmitCommandV1;
+  }): Promise<SecretSubmitReceiptV1>;
   acknowledgeNotification(input: {
     schemaVersion: 1;
     botId: string;
@@ -487,6 +504,16 @@ export interface UserConfigurationBinding {
     userId: string;
     catalog?: import("@frockbot/app/settings/frame").ConnectionsCatalogQueryV1;
   }): Promise<ConnectionsFrame>;
+  /** The User's saved secrets: names and terms, never a value. */
+  listSecrets(request: {
+    schemaVersion: 1;
+    userId: string;
+  }): Promise<SecretListViewV1>;
+  deleteSecret(request: {
+    schemaVersion: 1;
+    userId: string;
+    secretId: string;
+  }): Promise<{ schemaVersion: 1; removed: boolean }>;
   readSettingsFrame(
     request: UserConfigurationReadRpcV1 & { home: "application" | "models" },
   ): Promise<SettingsFrame>;

@@ -509,6 +509,37 @@ describe("the machine-result variant", () => {
   });
 });
 
+describe("the secret-saved variant", () => {
+  const saved = {
+    schemaVersion: 1 as const,
+    kind: "secret-saved" as const,
+    requestId: `secret-request-${"a".repeat(32)}`,
+    secretId: `secret-${"b".repeat(32)}`,
+    label: "Visa",
+    payment: true,
+    origin: "https://shop.example",
+    createdAt: NOW,
+  };
+
+  test("round-trips through the codec and carries no value field", () => {
+    expect(decodePendingBotInputV1(saved)).toEqual(saved);
+    expect(() =>
+      decodePendingBotInputV1({ ...saved, value: "4242 4242 4242 4242" }),
+    ).toThrow('unknown field "value"');
+  });
+
+  test("tells the Bot the reference and the rule it fills under", () => {
+    const preamble = pendingBotInputPreambleV1([saved]);
+    expect(preamble).toContain(`Its reference is "${saved.secretId}"`);
+    expect(preamble).toContain('"secret":"' + saved.secretId + '"');
+    expect(preamble).toContain("payment detail");
+    const password = pendingBotInputPreambleV1([
+      { ...saved, payment: false, label: "Shop login" },
+    ]);
+    expect(password).toContain("fills on https://shop.example without asking");
+  });
+});
+
 describe("a Turn that yielded to the person's next message", () => {
   const yielded = {
     schemaVersion: 1 as const,

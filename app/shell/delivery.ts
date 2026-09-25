@@ -75,7 +75,8 @@ function delivery(events: readonly SessionEvent[], turn: number) {
         !addressed &&
         (finalCalls.has(event.occurrenceId) ||
           event.payload.type === "widget" ||
-          event.payload.type === "approval")
+          event.payload.type === "approval" ||
+          event.payload.type === "secret-request")
       )
         return { required: false, attempts: 0, repair: false };
       attempts = 0;

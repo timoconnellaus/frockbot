@@ -40,6 +40,7 @@ import { readPluginHealthV1 } from "@frockbot/app/plugins/health";
 import { connectCardAppV1 } from "@frockbot/app/connect/card";
 import {
   bindCardConnectAppsV1,
+  bindCardSecretFieldsV1,
   cardActionRouteV1,
   cardKeyV1,
   CARD_APPROVAL_COMPONENT_V1,
@@ -246,6 +247,10 @@ async function foldHandlerMessages(
   // an update can no more rename the app than the first draw could.
   try {
     messages = bindCardConnectAppsV1(messages, connectCardAppV1);
+    // A press runs outside a Turn, where no secret request could be
+    // recorded, so a handler may no more draw the field a secret is typed
+    // into than it may ask for a decision.
+    bindCardSecretFieldsV1(messages, undefined);
   } catch (error) {
     if (!(error instanceof CardDecodeError)) throw error;
     return {

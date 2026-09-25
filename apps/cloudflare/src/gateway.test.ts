@@ -8,6 +8,10 @@ import type {
   CardListViewV1,
   CardViewV1,
 } from "@frockbot/app/shell/cards";
+import type {
+  SecretSubmitReceiptV1,
+  SecretViewV1,
+} from "@frockbot/app/secrets/shared";
 import { describe, expect, test } from "bun:test";
 import {
   type AuthPackageV1,
@@ -256,6 +260,10 @@ class MemoryBotState implements BotStateBinding {
     return Promise.reject(new Error("cards are not wired in this test"));
   }
 
+  submitSecret(): Promise<SecretSubmitReceiptV1> {
+    return Promise.reject(new Error("secrets are not wired in this test"));
+  }
+
   listNotifications(botId: string): Promise<BotNotificationIntent[]> {
     return Promise.resolve(
       structuredClone(this.notifications.get(botId) ?? []),
@@ -325,6 +333,8 @@ function rpcBindingFor(state: BotStateBinding): UserBotStateBinding {
     listCards: ({ botId }) => state.listCards(botId),
     readCard: ({ botId, surfaceId }) => state.readCard(botId, surfaceId),
     cardAction: ({ botId, command }) => state.cardAction(botId, command),
+    submitSecret: ({ botId, requestId, command }) =>
+      state.submitSecret(botId, requestId, command),
     acknowledgeNotification: ({ botId, notificationId }) =>
       state.acknowledgeNotification(botId, notificationId),
     stopRun: ({ botId, command }) => state.stopRun(botId, command),
@@ -503,6 +513,17 @@ class MemoryConfiguration
   }
   async readBotPluginsFrame(): Promise<never> {
     throw new Error("Bot plugins frame not configured in this fixture");
+  }
+  readonly secrets: SecretViewV1[] = [];
+  async listSecrets() {
+    return { schemaVersion: 1 as const, secrets: [...this.secrets] };
+  }
+  async deleteSecret(request: { secretId: string }) {
+    const index = this.secrets.findIndex(
+      (secret) => secret.secretId === request.secretId,
+    );
+    if (index >= 0) this.secrets.splice(index, 1);
+    return { schemaVersion: 1 as const, removed: index >= 0 };
   }
   async setBotPluginEnabled(): Promise<never> {
     throw new Error("Bot plugins frame not configured in this fixture");
@@ -1716,6 +1737,36 @@ describe("Cloudflare user application gateway", () => {
         },
       },
     ]);
+  });
+
+  test("lists saved secrets as a document and deletes one, never carrying a value", async () => {
+    const { gateway, configurations } = createTestGateway();
+    const configuration = new MemoryConfiguration();
+    configuration.secrets.push({
+      secretId: `secret-${"a".repeat(32)}`,
+      label: "Visa",
+      payment: true,
+      origin: "https://shop.example",
+      botId: "bot-1",
+      createdAt: "2026-09-23T00:00:00.000Z",
+    });
+    configurations.set("alice", configuration);
+
+    const listed = await gateway(request("/api/secrets?as=document", "alice"));
+    expect(listed.status).toBe(200);
+    expect(listed.headers.get("cache-control")).toBe("no-store");
+    const document = (await listed.json()) as { surfaceId: string };
+    expect(document.surfaceId).toBe("secrets");
+    expect(JSON.stringify(document)).toContain("Visa");
+
+    const deleted = await gateway(
+      request(`/api/secrets/secret-${"a".repeat(32)}/delete`, "alice", {
+        method: "POST",
+      }),
+    );
+    const answer: unknown = await deleted.json();
+    expect(answer).toEqual({ schemaVersion: 1, removed: true });
+    expect(configuration.secrets).toEqual([]);
   });
 
   test("rejects invalid encoded Bot settings paths before configuration lookup", async () => {

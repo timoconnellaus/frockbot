@@ -116,6 +116,26 @@ const frockCoreSchemasJsonV1 = r'''
     },
     "required": ["app"]
   },
+  "SecretField": {
+    "type": "object",
+    "description": "The masked field a person types a password, card number or other secret into, with a Save button. Drawn only by the host on a secret request — ask with send_to_user type secret-request; a card you write that carries one is refused. What is typed goes to the person's account, never to the card or to you.",
+    "properties": {
+      "requestId": {
+        "type": "string",
+        "description": "Written by the host: the request the kernel recorded. Whatever a card puts here is replaced."
+      },
+      "payment": {
+        "type": "boolean",
+        "description": "Written by the host: whether the request is for a payment detail."
+      },
+      "state": {
+        "type": "string",
+        "enum": ["waiting", "saved"],
+        "description": "Written by the host: whether the person has saved it yet."
+      }
+    },
+    "required": ["requestId"]
+  },
   "Receipt": {
     "type": "object",
     "description": "What a card settles into: its title, the pill saying what happened, and one line summarising it. Use it in place of the controls once the thing is done.",

@@ -48,6 +48,15 @@ describe("the audit preview", () => {
         url: "https://example.test/login",
       }),
     ).toBe("navigate https://example.test/login");
+    // A saved secret is filled by reference: the row says which one went
+    // into which field, and the value was never an argument to show.
+    expect(
+      auditPreviewV1("browser", "computer_browser", {
+        action: "fill",
+        label: "Password",
+        secret: `secret-${"a".repeat(32)}`,
+      }),
+    ).toBe(`fill Password secret-${"a".repeat(32)}`);
     // A remote server's arguments are somebody else's schema; the preview
     // names the keys and never their values.
     expect(

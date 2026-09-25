@@ -258,7 +258,7 @@ const SEEDED_PLUGIN_WORDS_V1: Record<string, SeededPluginWordsV1> = {
   credentials: {
     displayName: "Credential cards",
     description:
-      "Draws the card that says a credential is missing and where you add it. A secret never crosses the conversation. Always on.",
+      "Draws the card a Bot uses to ask you for a password, card number or other secret, with a field you type it into. It is kept in your account and never crosses the conversation. Always on.",
     seed: "locked",
   },
   questions: {

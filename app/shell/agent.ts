@@ -35,8 +35,19 @@ import {
 import { compactionScopeV1, compactionWorkV1 } from "./compaction-scheduler.js";
 import { conversationDeliveryHooksV1 } from "./delivery.js";
 import { shellDefinitionV1 } from "./definition.js";
-import { drawFirstPartyCardV1 } from "./first-party-cards.js";
-import { bindCardConnectAppsV1, CardDecodeError } from "./cards.js";
+import {
+  drawFirstPartyCardV1,
+  type SecretRequestTermsV1,
+} from "./first-party-cards.js";
+import {
+  bindCardConnectAppsV1,
+  bindCardSecretFieldsV1,
+  CardDecodeError,
+} from "./cards.js";
+import {
+  SecretDecodeError,
+  secretOriginV1,
+} from "@frockbot/app/secrets/shared";
 import { connectCardAppV1 } from "@frockbot/app/connect/card";
 
 export const SEND_TO_USER_TOOL_V1 = "send_to_user";
@@ -105,6 +116,8 @@ export async function recordSendToUserV1(
      */
     cards?: FirstPartyCardDrawsV1;
     context?: ToolExecutionContext;
+    /** What a `secret-request` is asked under beyond its words. */
+    secretTerms?: SecretRequestTermsV1;
   },
 ): Promise<{ status: "sent" } | { status: "refused"; reason: string }> {
   const session = sessions.get(where.sessionId);
@@ -155,7 +168,12 @@ export async function recordSendToUserV1(
   // Plugin's own card tool makes, deduped by the same effect id, and a draw
   // that could not happen changes nothing about the send.
   if (where.context) {
-    await drawFirstPartyCardV1(where.cards, payload, where.context);
+    await drawFirstPartyCardV1(
+      where.cards,
+      payload,
+      where.context,
+      where.secretTerms,
+    );
   }
   return { status: "sent" };
 }
@@ -170,7 +188,8 @@ function sendAcknowledgement(payload: SendToUserPayloadV1): string {
     case "widget":
       return "Question sent to the user. This Turn is over; their answer arrives as a new Turn.";
     case "secret-request":
-      return "Secret request sent to the user.";
+      // The value never reaches the Bot; the reference does, on a later Turn.
+      return "Secret request sent to the user. This Turn is over; once they save it you receive a reference to it on a later Turn, never the value.";
     case "agent-card":
       return "Agent card sent to the user.";
     case "card":
@@ -338,7 +357,7 @@ const SEND_TO_USER_DESCRIPTION = [
   '{"type":"text","text":"…"}',
   '{"type":"attachment","url":"https://…","name":"…","mediaType":"…"}',
   '{"type":"widget","widget":{"prompt":"…","helpText":"…","options":["…"],"allowCustom":false,"dismissOnMoveOn":false}}',
-  '{"type":"secret-request","prompt":"…","secretName":"…"}',
+  '{"type":"secret-request","prompt":"…","secretName":"…","origin":"https://…","payment":false} — asks the user to type a password, card number or other secret into a field on a card. You are never given the value: once they save it you get a reference ("secret-…") on a later Turn, and computer_browser fills it into a page with {"action":"fill","label":"…","secret":"secret-…"}. origin is the site it is for; payment is true for card numbers, security codes and bank details. It ends your Turn. Never ask for a secret in plain text.',
   '{"type":"agent-card","agentId":"…","title":"…","body":"…"}',
   '{"type":"card","surfaceId":"…","messages":[{"version":"v1.0","createSurface":{"surfaceId":"…","components":[{"id":"root","component":"Column","children":["title"]},{"id":"title","component":"Text","text":"…"}],"dataModel":{}}}]} — one A2UI surface in the conversation. A later send with the same surfaceId updates it in place and does not end your Turn. Name the surface anything but an underscore followed later by a dot: "trip_summary.v1" is refused, because "<plugin>_<card>." is reserved for the cards a plugin draws. "trip-summary.v1" or "tripSummary.v1" are fine.',
   '{"type":"approval","approvalId":"…","action":"…","rationale":"…","risk":"low|medium|high","expiresInSeconds":86400}',
@@ -346,8 +365,44 @@ const SEND_TO_USER_DESCRIPTION = [
   "their answer arrives as a new Turn. An approval asks the user to allow one",
   "action you must not take without them; it also ends your Turn, and their",
   "decision — or its expiry — reaches you as input on a later Turn.",
-  'Set disposition to "finish" on the last message; it ends the Turn immediately. Use "continue" when there is more to say or do. Widgets and approvals always end the Turn.',
+  'Set disposition to "finish" on the last message; it ends the Turn immediately. Use "continue" when there is more to say or do. Widgets, approvals and secret requests always end the Turn.',
 ].join(" ");
+
+/**
+ * The terms a `secret-request` send is asked under, taken off the tool input
+ * before the payload is decoded.
+ *
+ * The payload's shape is what every installed app's exact-key decoder reads
+ * on the wire, so the site and the payment class ride beside it in the tool
+ * input and live on the request the kernel records rather than on the log's
+ * payload.
+ */
+export function splitSecretRequestTermsV1(input: unknown): {
+  payload: unknown;
+  terms?: SecretRequestTermsV1;
+} {
+  if (
+    !input ||
+    typeof input !== "object" ||
+    Array.isArray(input) ||
+    (input as { type?: unknown }).type !== "secret-request"
+  ) {
+    return { payload: input };
+  }
+  const { origin, payment, ...payload } = input as Record<string, unknown>;
+  if (payment !== undefined && typeof payment !== "boolean") {
+    throw new SecretDecodeError("payload.payment must be a boolean");
+  }
+  return {
+    payload,
+    terms: {
+      ...(origin === undefined
+        ? {}
+        : { origin: secretOriginV1(origin, "payload.origin") }),
+      payment: payment === true,
+    },
+  };
+}
 
 const SEND_TO_USER_INPUT_SCHEMA = {
   type: "object",
@@ -425,7 +480,21 @@ const SEND_TO_USER_INPUT_SCHEMA = {
           properties: {
             type: { const: "secret-request" },
             prompt: { type: "string" },
-            secretName: { type: "string" },
+            secretName: {
+              type: "string",
+              description:
+                "What to call it, e.g. 'Shop login' or 'Visa card'. The user sees this name in Settings.",
+            },
+            origin: {
+              type: "string",
+              description:
+                "The site it is for, e.g. https://shop.example. It is filled there without asking again; anywhere else needs the user's approval.",
+            },
+            payment: {
+              type: "boolean",
+              description:
+                "True for a card number, security code or bank details: every fill asks the user first.",
+            },
           },
           required: ["type", "prompt", "secretName"],
           additionalProperties: false,
@@ -515,8 +584,16 @@ function createSendToUserTool(
         );
       }
       let payload: SendToUserPayloadV1;
+      let secretTerms: SecretRequestTermsV1 | undefined;
       try {
-        payload = decodeSendToUserPayloadV1(record.payload, `${name}.payload`);
+        const split = splitSecretRequestTermsV1(record.payload);
+        secretTerms = split.terms;
+        payload = decodeSendToUserPayloadV1(split.payload, `${name}.payload`);
+        // A Bot's own card may not carry the field a secret is typed into:
+        // that field is the host's, on a secret request, and nowhere else.
+        if (payload.type === "card") {
+          bindCardSecretFieldsV1(payload.messages, undefined);
+        }
       } catch (error) {
         return refusal(
           `${name} was refused: ${error instanceof Error ? error.message : String(error)}`,
@@ -532,6 +609,7 @@ function createSendToUserTool(
           ? {}
           : { cards: runtime.firstPartyCards }),
         context,
+        ...(secretTerms === undefined ? {} : { secretTerms }),
       });
       if (recorded.status !== "sent") {
         return refusal(`${name} was refused: ${recorded.reason}`);
@@ -540,9 +618,12 @@ function createSendToUserTool(
         content: sendAcknowledgement(payload),
         isError: false,
         // User decisions always hand control back, even if labelled interim.
+        // A secret request is one: the Bot has nothing to fill until the
+        // person has typed it.
         ...(record.disposition === "finish" ||
         payload.type === "widget" ||
-        payload.type === "approval"
+        payload.type === "approval" ||
+        payload.type === "secret-request"
           ? { endsTurn: true }
           : {}),
       };

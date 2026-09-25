@@ -9,10 +9,12 @@ import {
   type AgentRuntimeHarness,
   createAgentRuntimeHarness,
 } from "@frockbot/app/testkit";
+import { createFakeComputerHostV1 } from "@frockbot/computer/fake";
 import {
   COMPUTER_OVERLOADED_TOOL_MESSAGE_V1,
   createComputerAgentFeature,
   HUMAN_CONTROL_PROMPT_LINE,
+  type ComputerSecretFillSeamV1,
 } from "./agent.js";
 import { COMPUTER_CONTROL_RECORD_KEY } from "./control-record.js";
 
@@ -451,5 +453,155 @@ describe("computer agent contribution", () => {
     expect(prompt.text).not.toContain("Persistent Computer");
     expect(prompt.text).not.toContain("computer_exec");
     await harness.dispose();
+  });
+});
+
+describe("computer_browser filling a saved secret", () => {
+  const SECRET_ID = `secret-${"a".repeat(32)}`;
+  const VALUE = "hunter2-correct-horse-9f3a1c7e";
+
+  async function mountFill(authorize: ComputerSecretFillSeamV1["authorize"]) {
+    const host = createFakeComputerHostV1();
+    const opened: string[] = [];
+    const released: string[] = [];
+    const secrets: ComputerSecretFillSeamV1 = {
+      authorize,
+      open: async ({ secretId, effectId }) => {
+        expect(secretId).toBe(SECRET_ID);
+        opened.push(effectId);
+        return VALUE;
+      },
+      release: async ({ effectId }) => {
+        released.push(effectId);
+      },
+    };
+    const harness = createAgentRuntimeHarness();
+    harness.computers.register(host);
+    await harness.mount(
+      createComputerAgentFeature({
+        userId: "user-1",
+        defaultProviderId: host.id,
+        secrets,
+      }),
+    );
+    return { harness, host, opened, released };
+  }
+
+  test("types a value the Bot is never given, and says only that it did", async () => {
+    const { harness, host, opened, released } = await mountFill(async () => ({
+      status: "granted",
+      origin: "https://shop.example",
+      label: "Shop login",
+    }));
+    await execute(harness, "computer_browser", {
+      action: "navigate",
+      url: "https://shop.example/login",
+    });
+
+    const filled = await execute(harness, "computer_browser", {
+      action: "fill",
+      label: "Password",
+      secret: SECRET_ID,
+    });
+    const after = await execute(harness, "computer_browser", {
+      action: "snapshot",
+    });
+
+    expect(filled.isError).toBe(false);
+    expect(filled.content).toContain('Filled "Password"');
+    expect(filled.content).not.toContain(VALUE);
+    // The value reached the page, and the page is the only place it went.
+    const page = host.computerFor({ userId: "user-1" }).page;
+    expect(page.fields.get("Password")).toEqual({
+      value: VALUE,
+      secret: true,
+    });
+    expect(after.content).not.toContain(VALUE);
+    // One lease for one action, settled whatever happened.
+    expect(opened).toHaveLength(1);
+    expect(released).toEqual(opened);
+    await harness.dispose();
+  });
+
+  test("a fill the person must approve asks and ends the Turn, typing nothing", async () => {
+    const { harness, opened } = await mountFill(async (request) => {
+      expect(await request.pageOrigin()).toBe("https://shop.example");
+      return { status: "asked", content: "Approval requested." };
+    });
+    await execute(harness, "computer_browser", {
+      action: "navigate",
+      url: "https://shop.example/checkout",
+    });
+
+    const asked = await execute(harness, "computer_browser", {
+      action: "fill",
+      label: "Card number",
+      secret: SECRET_ID,
+    });
+
+    expect(asked).toMatchObject({
+      content: "Approval requested.",
+      isError: false,
+      endsTurn: true,
+    });
+    expect(opened).toHaveLength(0);
+    await harness.dispose();
+  });
+
+  test("a refusal from the page never carries the value back", async () => {
+    const { harness, released } = await mountFill(async () => ({
+      status: "granted",
+      // Not where the page is: the host refuses at the moment it would type.
+      origin: "https://elsewhere.example",
+      label: "Shop login",
+    }));
+    await execute(harness, "computer_browser", {
+      action: "navigate",
+      url: "https://shop.example/login",
+    });
+
+    const refused = await execute(harness, "computer_browser", {
+      action: "fill",
+      label: "Password",
+      secret: SECRET_ID,
+    });
+
+    expect(refused.isError).toBe(true);
+    expect(refused.content).toContain("Not filled");
+    expect(refused.content).not.toContain(VALUE);
+    expect(released).toHaveLength(1);
+    await harness.dispose();
+  });
+
+  test("text and a secret together, or a secret with no authority, are refused", async () => {
+    const { harness } = await mountFill(async () => ({
+      status: "refused",
+      content: "No.",
+    }));
+    const both = await execute(harness, "computer_browser", {
+      action: "fill",
+      label: "Password",
+      text: "typed",
+      secret: SECRET_ID,
+    });
+    expect(both.isError).toBe(true);
+    await harness.dispose();
+
+    const bare = createAgentRuntimeHarness();
+    bare.computers.register(createFakeComputerHostV1());
+    await bare.mount(
+      createComputerAgentFeature({
+        userId: "user-1",
+        defaultProviderId: "fake-computer-host",
+      }),
+    );
+    const unwired = await execute(bare, "computer_browser", {
+      action: "fill",
+      label: "Password",
+      secret: SECRET_ID,
+    });
+    expect(unwired.isError).toBe(true);
+    expect(unwired.content).toContain("cannot be filled here");
+    await bare.dispose();
   });
 });

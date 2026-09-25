@@ -42,7 +42,9 @@ function isObject(value: unknown): value is Record<string, unknown> {
  */
 const PREVIEW_FIELDS: Record<AuditKindV1, readonly string[]> = {
   shell: ["command", "machineId"],
-  browser: ["action", "url", "role", "name", "label", "key"],
+  // `secret` is a saved secret's reference, never its value: the row says
+  // which one was typed where, and the value was never in the arguments.
+  browser: ["action", "url", "role", "name", "label", "secret", "key"],
   process: ["action", "command", "processId", "machineId"],
   // No `text`: it previewed up to 200 characters of a `memory_write` or
   // `skill_write` body into a durable table a person reads later. What was
