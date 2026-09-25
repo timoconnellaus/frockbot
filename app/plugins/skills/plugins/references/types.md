@@ -37,15 +37,16 @@ export type PluginHookEvent =
 
 /**
  * The grants a Plugin may declare in `plugin.json`, in the kernel's order.
- * `storage`, `http`, `schedule`, `ai`, `memory` and `workspace` each open one
- * member of `ctx`; `files` and `computer` are declared to the authority and
- * open nothing here.
+ * `storage`, `http`, `schedule`, `ai`, `jev`, `memory` and `workspace` each
+ * open one member of `ctx`; `files` and `computer` are declared to the
+ * authority and open nothing here.
  */
 export type PluginGrant =
   | "storage"
   | "http"
   | "schedule"
   | "ai"
+  | "jev"
   | "files"
   | "memory"
   | "workspace"
@@ -162,6 +163,58 @@ export interface PluginModel {
         status: "streaming";
         requestId: string;
         events: AsyncIterable<ModelStreamEvent>;
+      }
+    | CapabilityFailure
+  >;
+}
+
+/**
+ * One Jev question, in Jev's wire shape. `instructions` says what to judge,
+ * as a string or as `{ target, decision, rules? , requirements? }`. A
+ * `choice` picks one label of `criteria` (`{ label: meaning }`); a `noul`
+ * gives the probability a condition holds (`criteria` optional,
+ * `{ true, false }`); a `score` places the state on `criteria`, 2 to 10
+ * levels, lowest first.
+ */
+export type JevQuestion =
+  | {
+      type: "choice";
+      instructions: string | { [key: string]: unknown };
+      criteria: { [label: string]: unknown };
+    }
+  | {
+      type: "noul";
+      instructions: string | { [key: string]: unknown };
+      criteria?: { true?: unknown; false?: unknown };
+    }
+  | {
+      type: "score";
+      instructions: string | { [key: string]: unknown };
+      criteria: unknown[];
+    };
+
+/**
+ * The `jev` grant: Jev, a decision model, for judgments the Plugin makes for
+ * itself. At most 32 questions and 64 KB a call, and 64 calls a run. The
+ * answers are the Plugin's alone: nothing the kernel decides reads them.
+ */
+export interface PluginJev {
+  decide(request: {
+    state: { [key: string]: unknown };
+    questions: { [name: string]: JevQuestion };
+  }): Promise<
+    | {
+        status: "available";
+        value: {
+          model: string;
+          /**
+           * By question name: `{ type: "choice", choice, probabilities,
+           * confidence }`, `{ type: "noul", noul }` or `{ type: "score",
+           * score, probabilities, confidence }`.
+           */
+          answers: { [name: string]: { [key: string]: unknown } };
+          usage: { inputTokens: number; outputTokens: number };
+        };
       }
     | CapabilityFailure
   >;
@@ -394,6 +447,8 @@ export interface PluginContext {
   readonly settings: PluginSettings;
   /** The `ai` grant. */
   readonly model?: PluginModel;
+  /** The `jev` grant. */
+  readonly jev?: PluginJev;
   /**
    * The credentialed transport, present exactly while this Plugin is serving
    * one of its model provider contributions. A tool call's `ctx` has none.

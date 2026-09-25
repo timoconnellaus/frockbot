@@ -100,6 +100,7 @@ function requiredTokensFor(slug: string): readonly string[] {
         "modelProviders",
         "export const services",
         "ctx.model",
+        "ctx.jev",
         "ctx.memory",
         "ctx.workspace",
         "ctx.schedule",

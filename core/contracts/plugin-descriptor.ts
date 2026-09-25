@@ -36,6 +36,7 @@ export const PLUGIN_GRANTS_V1 = [
   "http",
   "schedule",
   "ai",
+  "jev",
   "files",
   "memory",
   "workspace",

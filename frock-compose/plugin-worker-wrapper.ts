@@ -442,6 +442,16 @@ const BOT_ISOLATE_GRANT_PROPERTY_SOURCE_V1 = {
     }`,
     ],
   ],
+  jev: [
+    [
+      "jev",
+      `{
+      decide: function (request) {
+        return capabilities.jevDecide(scope, request);
+      },
+    }`,
+    ],
+  ],
   memory: [
     [
       "memory",

@@ -277,6 +277,7 @@
     "./skills/write": "./skills/write.ts",
     "./supervision": "./supervision/index.ts",
     "./supervision/testing": "./supervision/testing.ts",
+    "./supervision/jev": "./supervision/jev.ts",
     "./supervision/memory-recall": "./supervision/memory-recall.ts",
     "./supervision/skill-nomination": "./supervision/skill-nomination.ts",
     "./supervision/routine-report": "./supervision/routine-report.ts",

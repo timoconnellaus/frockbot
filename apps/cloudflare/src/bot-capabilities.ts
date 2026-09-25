@@ -10,6 +10,7 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import type {
   IsolateCapabilityListOutcomeV1,
   IsolateConnectionOutcomeV1,
+  IsolateJevOutcomeV1,
   IsolateMemoryOutcomeV1,
   IsolateModelOutcomeV1,
   IsolateEmailOutcomeV1,
@@ -23,6 +24,7 @@ import type {
 } from "@frockbot/core/contracts";
 import {
   decodeIsolateCapabilityListV1,
+  decodeIsolateJevRequestV1,
   decodeIsolateMemoryReadRequestV1,
   decodeIsolateMemoryWriteRequestV1,
   decodeIsolateModelInvocationV1,
@@ -59,6 +61,7 @@ interface BotIsolateRpc {
   isolateAuthority(input: unknown): Promise<unknown>;
   isolateInvokeModel(input: unknown): Promise<unknown>;
   isolateMemoryRead(input: unknown): Promise<IsolateMemoryOutcomeV1>;
+  isolateJevDecide(input: unknown): Promise<IsolateJevOutcomeV1>;
   isolateMemoryWrite(input: unknown): Promise<IsolateMemoryOutcomeV1>;
   isolateMemoryForget(input: unknown): Promise<IsolateMemoryOutcomeV1>;
   isolateWorkspaceRead(input: unknown): Promise<IsolateWorkspaceOutcomeV1>;
@@ -140,6 +143,27 @@ export class BotCapabilities extends WorkerEntrypoint<
       );
     } catch {
       return unavailable("the model request could not be served");
+    }
+  }
+
+  async jevDecide(
+    scope: unknown,
+    request: unknown,
+  ): Promise<IsolateJevOutcomeV1> {
+    try {
+      const { rpc, envelope } = this.scoped(
+        scope,
+        decodeIsolateJevRequestV1(request),
+      );
+      return await rpc.isolateJevDecide(envelope);
+    } catch (error) {
+      // A malformed request is the Plugin's to fix; say what was wrong.
+      return unavailable(
+        error instanceof Error &&
+          error.message.startsWith("isolate Jev request")
+          ? error.message
+          : "Jev is unavailable",
+      );
     }
   }
 

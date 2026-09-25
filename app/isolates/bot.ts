@@ -22,6 +22,7 @@ import {
 import { productScopeToEngineV1 } from "@frockbot/app/memory/records";
 import {
   canonicalJson,
+  decodeIsolateJevRequestV1,
   decodeIsolateMemoryReadRequestV1,
   decodeIsolateMemoryWriteRequestV1,
   decodeIsolateEmailRequestV1,
@@ -58,6 +59,15 @@ import {
   type WorkspacePathV1,
 } from "@frockbot/core/contracts";
 import { latestOpenStepPositionV1 } from "@frockbot/core/contracts";
+import type {
+  IsolateJevAnswerV1,
+  IsolateJevOutcomeV1,
+} from "@frockbot/core/contracts";
+import type { JsonValue } from "@typesafe-ai/sdk";
+import {
+  hostedJevClientV1,
+  JEV_TURN_BUDGET_V1,
+} from "@frockbot/app/supervision/jev";
 import { sha256HexTextV1 } from "@frockbot/core/crypto";
 import {
   resolveEffectiveBotModelV1,
@@ -89,6 +99,7 @@ import { agentRuntime } from "@frockbot/app/shell/runtime-mount";
 import { admitRunEffect } from "@frockbot/app/shell/turn";
 import {
   activeIsolateTurn,
+  admittedPluginHoldsV1,
   admittedPluginWrapsV1,
   isolateCallAdmittedV1,
   type IsolateCallIdentityV1,
@@ -705,6 +716,106 @@ async function invokeBotToolForIsolateV1(
     content: result.content,
     isError: result.isError,
   };
+}
+
+/** Pinned, so a Plugin's thresholds stay tuned to the model they were set on. */
+export const PLUGIN_JEV_MODEL_V1 = "jev-1.13.0";
+
+/** The most Jev calls one Plugin may make in one run. */
+export const ISOLATE_JEV_CALLS_PER_RUN_V1 = 64;
+
+const jevCallsByState = new WeakMap<ShellBotStateV1, Map<string, number>>();
+
+/** Counts a Jev call against its run, or says the run has spent its calls. */
+function spendJevCallV1(
+  state: ShellBotStateV1,
+  input: IsolateCallScopeV1,
+): boolean {
+  const calls = jevCallsByState.get(state) ?? new Map<string, number>();
+  jevCallsByState.set(state, calls);
+  const key = `${input.runId}\0${input.packageId}`;
+  const spent = calls.get(key) ?? 0;
+  if (spent >= ISOLATE_JEV_CALLS_PER_RUN_V1) return false;
+  calls.delete(key);
+  calls.set(key, spent + 1);
+  // Only the latest runs matter; the oldest counts are forgotten first.
+  if (calls.size > 256) calls.delete(calls.keys().next().value!);
+  return true;
+}
+
+/**
+ * One Jev decision a Plugin asked for (the `jev` grant). The kernel pins the
+ * model, spends the deployment's key and never reads the answers: a Plugin
+ * decides only for itself, so nothing it asks can approve anything. Recorded
+ * on the Turn's log as the Plugin's, beside its model calls.
+ */
+export async function isolateJevDecide(
+  state: ShellBotStateV1,
+  input: IsolateCallScopeV1,
+): Promise<IsolateJevOutcomeV1> {
+  const request = decodeIsolateJevRequestV1(input.request);
+  if (!admittedPluginHoldsV1(state, input, "jev")) {
+    return { status: "unavailable", reason: "Jev is not granted" };
+  }
+  const client = hostedJevClientV1({
+    JEV_API_KEY: state.env.JEV_API_KEY,
+    JEV_BASE_URL: state.env.JEV_BASE_URL,
+  });
+  if (!client) return { status: "unavailable", reason: "Jev is unavailable" };
+  if (!spendJevCallV1(state, input)) {
+    return {
+      status: "unavailable",
+      reason: `this run has made its ${ISOLATE_JEV_CALLS_PER_RUN_V1} Jev calls`,
+    };
+  }
+  const started = Date.now();
+  let answer: IsolateJevAnswerV1;
+  let requestId: string | undefined;
+  try {
+    const response = await client
+      .systemOne(
+        {
+          state: request.state as Record<string, JsonValue>,
+          questions: request.questions as never,
+          model: PLUGIN_JEV_MODEL_V1,
+        },
+        {
+          retry: JEV_TURN_BUDGET_V1.retry,
+          timeout: JEV_TURN_BUDGET_V1.timeout,
+        },
+      )
+      .withResponse();
+    requestId = response.requestId;
+    answer = {
+      model: response.data.model,
+      answers: response.data.answers as Record<string, unknown>,
+      usage: {
+        inputTokens: response.data.usage.input_tokens,
+        outputTokens: response.data.usage.output_tokens,
+      },
+    };
+  } catch (error) {
+    return {
+      status: "unavailable",
+      reason:
+        `Jev refused or failed: ${error instanceof Error ? error.message : String(error)}`.slice(
+          0,
+          500,
+        ),
+    };
+  }
+  await recordPluginModelUsageV1(state, input, {
+    requestId: requestId ?? `jev:${input.runId}:${started}`,
+    provider: "jev",
+    model: answer.model,
+    usage: {
+      inputTokens: answer.usage.inputTokens,
+      outputTokens: answer.usage.outputTokens,
+    },
+    latencyMs: Date.now() - started,
+    estimated: false,
+  });
+  return { status: "available", value: answer };
 }
 
 export async function isolateMemoryRead(

@@ -244,7 +244,7 @@ export interface StandaloneIsolateCallV1 {
   members: readonly {
     packageId: string;
     artifact?: unknown;
-    descriptor?: { hooks: readonly string[] };
+    descriptor?: { hooks: readonly string[]; grants: readonly string[] };
   }[];
 }
 

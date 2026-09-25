@@ -130,6 +130,11 @@ Turn it is.
 - **Model calls** through the `ai` capability draw from the Bot's own budget at
   the Bot's rates, attributed to the Plugin id in the usage event and itemised
   on the Work view.
+- **Jev decisions** through the `jev` capability run on the deployment's Jev
+  key with the model pinned, at most 32 questions and 64 KB a call and 64
+  calls a run. Each is itemised under the Plugin like a model call. The
+  answers go back to the Plugin alone; nothing the kernel decides reads them,
+  so a Plugin can never judge its own approval.
 
 ### Contract, failure, limits
 

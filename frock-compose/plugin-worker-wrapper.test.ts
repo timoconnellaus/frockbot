@@ -657,7 +657,15 @@ describe("the generated wrapper's narrowed context", () => {
       invocation,
       {
         pluginId: "weather",
-        grants: ["ai", "memory", "workspace", "http", "schedule", "storage"],
+        grants: [
+          "ai",
+          "jev",
+          "memory",
+          "workspace",
+          "http",
+          "schedule",
+          "storage",
+        ],
         services: {},
       },
       1_000,
@@ -677,7 +685,15 @@ describe("the generated wrapper's narrowed context", () => {
       invocation,
       {
         pluginId: "weather",
-        grants: ["ai", "memory", "workspace", "http", "schedule", "storage"],
+        grants: [
+          "ai",
+          "jev",
+          "memory",
+          "workspace",
+          "http",
+          "schedule",
+          "storage",
+        ],
         services: {},
       },
       1_000,

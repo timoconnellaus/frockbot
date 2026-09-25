@@ -140,6 +140,7 @@ const OPEN_PLUGIN_GRANTS_V1: readonly PluginGrantV1[] = [
   "http",
   "schedule",
   "ai",
+  "jev",
   "memory",
   "workspace",
   "storage",

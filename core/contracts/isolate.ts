@@ -409,6 +409,34 @@ export type IsolateModelInvocationV1 =
 export type IsolateModelOutcomeV1 = IsolateModelInvocationV1;
 
 /**
+ * One Jev decision a Plugin asks for: a state and the typed questions about
+ * it, in Jev's own wire shape. The kernel pins the model and never reads the
+ * answers — a Plugin decides only for itself.
+ */
+export interface IsolateJevRequestV1 {
+  state: Record<string, unknown>;
+  questions: Record<string, unknown>;
+}
+
+export interface IsolateJevAnswerV1 {
+  model: string;
+  answers: Record<string, unknown>;
+  usage: { inputTokens: number; outputTokens: number };
+}
+
+export type IsolateJevOutcomeV1 =
+  | { status: "available"; value: IsolateJevAnswerV1 }
+  | IsolateCapabilityFailureV1;
+
+/** The most questions one Jev call from a Plugin may ask. */
+export const ISOLATE_JEV_QUESTIONS_MAX_V1 = 32;
+
+/** The most bytes of JSON one Jev call from a Plugin may send. */
+export const ISOLATE_JEV_REQUEST_BYTES_MAX_V1 = 64 * 1024;
+
+const JEV_QUESTION_TYPES_V1 = ["choice", "noul", "score"] as const;
+
+/**
  * The loopback service binding the Bot's Durable Object mints for one isolate.
  * Every method is Bot-authority-derived: nothing here can hand out authority
  * the Bot does not already hold.
@@ -423,6 +451,10 @@ export interface BotCapabilitiesStub {
     scope: IsolateScopeV1,
     request: IsolateMemoryReadRequestV1,
   ): Promise<IsolateMemoryOutcomeV1>;
+  jevDecide(
+    scope: IsolateScopeV1,
+    request: IsolateJevRequestV1,
+  ): Promise<IsolateJevOutcomeV1>;
   memoryWrite(
     scope: IsolateScopeV1,
     request: IsolateMemoryWriteRequestV1,
@@ -556,6 +588,10 @@ export interface BotPackageContextV1 {
   /** The `ai` grant. */
   readonly model?: {
     invoke(request: NormalizedModelRequest): Promise<BotPackageModelOutcomeV1>;
+  };
+  /** The `jev` grant. */
+  readonly jev?: {
+    decide(request: IsolateJevRequestV1): Promise<IsolateJevOutcomeV1>;
   };
   /** The `memory` grant. */
   readonly memory?: {
@@ -1439,6 +1475,39 @@ export function decodeIsolateScheduleRequestV1(
 
 const MEMORY_SCOPES = ["bot", "user"] as const;
 const MEMORY_TIERS = ["profile", "log", "note"] as const;
+
+export function decodeIsolateJevRequestV1(
+  input: unknown,
+  label = "isolate Jev request",
+): IsolateJevRequestV1 {
+  const value = record(input, label);
+  exactKeys(value, ["state", "questions"], label);
+  const state = record(value.state, `${label}.state`);
+  const questions = record(value.questions, `${label}.questions`);
+  const names = Object.keys(questions);
+  if (names.length === 0 || names.length > ISOLATE_JEV_QUESTIONS_MAX_V1) {
+    throw new Error(
+      `${label}.questions must hold 1 to ${ISOLATE_JEV_QUESTIONS_MAX_V1} questions`,
+    );
+  }
+  for (const name of names) {
+    const question = record(questions[name], `${label}.questions.${name}`);
+    if (!JEV_QUESTION_TYPES_V1.some((type) => type === question.type)) {
+      throw new Error(
+        `${label}.questions.${name}.type must be choice, noul or score`,
+      );
+    }
+  }
+  if (
+    new TextEncoder().encode(JSON.stringify({ state, questions })).byteLength >
+    ISOLATE_JEV_REQUEST_BYTES_MAX_V1
+  ) {
+    throw new Error(
+      `${label} is larger than ${ISOLATE_JEV_REQUEST_BYTES_MAX_V1} bytes`,
+    );
+  }
+  return { state, questions };
+}
 
 export function decodeIsolateMemoryReadRequestV1(
   input: unknown,

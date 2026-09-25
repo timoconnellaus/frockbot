@@ -1,5 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+  decodeIsolateJevRequestV1,
+  ISOLATE_JEV_QUESTIONS_MAX_V1,
+  ISOLATE_JEV_REQUEST_BYTES_MAX_V1,
   decodeIsolateEmailRequestV1,
   decodeIsolateCapabilityFailureV1,
   decodeIsolateCapabilityListV1,
@@ -602,5 +605,37 @@ describe("isolate capability failure v1", () => {
         reason: "r".repeat(513),
       }),
     ).toThrow(/reason must be a bounded string/);
+  });
+});
+
+describe("a Plugin's Jev request", () => {
+  const noul = { type: "noul", instructions: "Is it urgent?" };
+  test("carries a state and typed questions, and nothing else", () => {
+    expect(
+      decodeIsolateJevRequestV1({
+        state: { a: 1 },
+        questions: { urgent: noul },
+      }),
+    ).toEqual({ state: { a: 1 }, questions: { urgent: noul } });
+    for (const bad of [
+      { state: {}, questions: {} },
+      { state: {}, questions: { x: { type: "essay" } } },
+      { state: {}, questions: { urgent: noul }, model: "jev-2" },
+      {
+        state: { text: "x".repeat(ISOLATE_JEV_REQUEST_BYTES_MAX_V1) },
+        questions: { urgent: noul },
+      },
+      {
+        state: {},
+        questions: Object.fromEntries(
+          Array.from({ length: ISOLATE_JEV_QUESTIONS_MAX_V1 + 1 }, (_, i) => [
+            `q${i}`,
+            noul,
+          ]),
+        ),
+      },
+    ]) {
+      expect(() => decodeIsolateJevRequestV1(bad)).toThrow();
+    }
   });
 });
