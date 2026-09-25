@@ -120,6 +120,7 @@ export async function pluginAuthoringRuntimeHost(
     turn,
     workspace,
     ...(buildService ? { buildService } : {}),
+    ...(state.pluginFitJudge ? { fitJudge: state.pluginFitJudge } : {}),
     artifacts: {
       putPackageArtifact: async (contentHash, module) => {
         await bucket.put(`packages/${contentHash}.mjs`, module, {

@@ -33,6 +33,12 @@ import {
 import { PLUGIN_ENABLEMENT_KEY_V1 } from "./enablement.js";
 import { pluginsSourceRootV1 } from "./root.js";
 
+const NOTES_PUBLISH = {
+  pluginId: "notes",
+  purpose: "Keep notes for the person.",
+  request: "Make me a notes Plugin.",
+};
+
 const USER = "user-1";
 const ROOT = pluginsSourceRootV1(USER);
 const TURN = { sessionId: "user-1:bot-1", runId: "run-9", turnId: "run-9" };
@@ -204,6 +210,7 @@ function harness(
     build?: ReturnType<typeof buildsCleanly>;
     members?: CompositionMemberV1[];
     catalog?: PluginAuthoringSeamsV1["catalog"];
+    fitJudge?: PluginAuthoringSeamsV1["fitJudge"];
   } = {},
 ) {
   const storage = new Map<string, unknown>();
@@ -244,6 +251,7 @@ function harness(
       },
     },
     catalog: options.catalog ?? [],
+    ...(options.fitJudge ? { fitJudge: options.fitJudge } : {}),
     now: () => new Date("2026-09-12T01:00:00.000Z"),
   });
   return { host, storage, artifacts, settings, calls };
@@ -330,6 +338,7 @@ describe("checking and publishing", () => {
     const { host, calls } = harness({ source });
     expect(await host.check({ pluginId: "notes" }, "tool:1:1:0")).toEqual({
       status: "checked",
+      findings: [],
     });
     expect(calls[0]).toMatchObject({
       id: "notes",
@@ -344,7 +353,7 @@ describe("checking and publishing", () => {
 
   test("a publish stores the artifact, writes the intent first, and asks", async () => {
     const { host, storage, artifacts } = harness({ source });
-    const result = await host.publish({ pluginId: "notes" }, "tool:1:2:0");
+    const result = await host.publish(NOTES_PUBLISH, "tool:1:2:0");
     expect(result.status).toBe("pending-approval");
     if (result.status !== "pending-approval") return;
     const approvalId = await pluginApprovalIdV1(TURN.runId, "tool:1:2:0");
@@ -368,10 +377,35 @@ describe("checking and publishing", () => {
     expect(storage.get(PLUGIN_ENABLEMENT_KEY_V1)).toBeUndefined();
 
     // The same effect asked again is the same card, sent nowhere twice.
-    const again = await host.publish({ pluginId: "notes" }, "tool:1:2:0");
+    const again = await host.publish(NOTES_PUBLISH, "tool:1:2:0");
     expect(again.status === "pending-approval" && again.ask.replayed).toBe(
       true,
     );
+  });
+
+  test("a publish is checked against what was asked, once, and the card warns", async () => {
+    const judged: string[] = [];
+    const { host } = harness({
+      source,
+      fitJudge: {
+        async judge(evidence) {
+          judged.push(`${evidence.request} | ${evidence.purpose}`);
+          return { fits: "unlikely", unneeded: [] };
+        },
+      },
+    });
+    const result = await host.publish(NOTES_PUBLISH, "tool:1:4:0");
+    if (result.status !== "pending-approval") throw new Error(result.reason);
+    expect(judged).toEqual([
+      "Make me a notes Plugin. | Keep notes for the person.",
+    ]);
+    expect(result.ask.check).toBe(
+      "**Before you approve**\n- It may not do what you asked for.",
+    );
+    expect(result.ask.rationale).toEndWith(`\n\n${result.ask.check}`);
+    // A replayed publish is neither sent nor judged again.
+    await host.publish(NOTES_PUBLISH, "tool:1:4:0");
+    expect(judged).toHaveLength(1);
   });
 
   test("a descriptor that disagrees with the module is refused before anything is stored", async () => {
@@ -384,7 +418,7 @@ describe("checking and publishing", () => {
         }),
       },
     });
-    const result = await host.publish({ pluginId: "notes" }, "tool:1:3:0");
+    const result = await host.publish(NOTES_PUBLISH, "tool:1:3:0");
     expect(result).toMatchObject({
       status: "failed",
       reason: expect.stringContaining("plugin.json and plugin.ts disagree"),
@@ -439,9 +473,7 @@ describe("checking and publishing", () => {
         modules: [],
       })),
     });
-    expect(
-      await host.publish({ pluginId: "notes" }, "tool:1:6:0"),
-    ).toMatchObject({
+    expect(await host.publish(NOTES_PUBLISH, "tool:1:6:0")).toMatchObject({
       status: "failed",
       reason: expect.stringContaining("does not match the module"),
     });
@@ -498,9 +530,7 @@ describe("checking and publishing", () => {
       settings: { read: async () => ({}), write: async () => {} },
       catalog: [],
     });
-    expect(
-      await host.publish({ pluginId: "notes" }, "tool:1:8:0"),
-    ).toMatchObject({
+    expect(await host.publish(NOTES_PUBLISH, "tool:1:8:0")).toMatchObject({
       status: "failed",
       reason: expect.stringContaining("build service is unavailable"),
     });
@@ -745,7 +775,7 @@ describe("a Plugin with a page", () => {
       source: withPage,
       build: buildsTheView(),
     });
-    const result = await host.publish({ pluginId: "notes" }, "tool:9:1:0");
+    const result = await host.publish(NOTES_PUBLISH, "tool:9:1:0");
     expect(result.status).toBe("pending-approval");
     if (result.status !== "pending-approval") return;
     const stored = [...artifacts].find(([, text]) => text.includes("tune"));
@@ -784,9 +814,7 @@ describe("a Plugin with a page", () => {
         reason: expect.stringContaining('names the page "tuner.html"'),
       },
     );
-    expect(
-      await host.publish({ pluginId: "notes" }, "tool:9:3:0"),
-    ).toMatchObject({
+    expect(await host.publish(NOTES_PUBLISH, "tool:9:3:0")).toMatchObject({
       status: "failed",
       reason: expect.stringContaining('names the page "tuner.html"'),
     });
@@ -852,7 +880,7 @@ describe("a Plugin with a device module", () => {
       source: withModule,
       build: buildsTheModule(["search"]),
     });
-    const result = await host.publish({ pluginId: "notes" }, "tool:9:1:0");
+    const result = await host.publish(NOTES_PUBLISH, "tool:9:1:0");
     if (result.status !== "pending-approval") {
       throw new Error(`expected an approval: ${JSON.stringify(result)}`);
     }
@@ -877,7 +905,7 @@ describe("a Plugin with a device module", () => {
       source: withModule,
       build: buildsTheModule(["search", "send"]),
     });
-    const result = await host.publish({ pluginId: "notes" }, "tool:9:1:0");
+    const result = await host.publish(NOTES_PUBLISH, "tool:9:1:0");
     expect(result).toMatchObject({ status: "failed" });
     if (result.status === "failed") {
       expect(result.reason).toContain(
@@ -892,7 +920,7 @@ describe("a Plugin with a device module", () => {
       source: withModule,
       build: buildsTheModule(["search"], "d".repeat(64)),
     });
-    const result = await host.publish({ pluginId: "notes" }, "tool:9:1:0");
+    const result = await host.publish(NOTES_PUBLISH, "tool:9:1:0");
     expect(result).toMatchObject({ status: "failed" });
     expect(artifacts.size).toBe(0);
   });

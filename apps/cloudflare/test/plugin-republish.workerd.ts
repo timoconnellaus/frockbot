@@ -82,7 +82,10 @@ async function tool(
 
 /** Publishes, then approves the one card the publish left pending. */
 async function publishAndApprove(identity: Identity): Promise<void> {
-  const said = await tool(identity, "plugin_publish", { pluginId: "tuner" });
+  const said = await tool(identity, "plugin_publish", {
+    pluginId: "tuner",
+    purpose: "Tune a guitar.",
+  });
   expect(said).toContain("asked the User to approve it");
   const { approvals } = await bot(identity).listApprovals({
     schemaVersion: 1,

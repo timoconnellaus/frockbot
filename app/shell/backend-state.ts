@@ -32,6 +32,8 @@ import {
   createHostedRoutineReportJudgeV1,
   type RoutineReportJudgeV1,
 } from "@frockbot/app/supervision/routine-report";
+import { createHostedPluginFitJudgeV1 } from "@frockbot/app/supervision/plugin-fit";
+import type { PluginFitJudgeV1 } from "@frockbot/app/plugins/authoring-check";
 import { storedRunCodecV1 } from "./backend-contracts.js";
 import type { NativeAiBindingV1 } from "./backend-image.js";
 import type { EmailSenderV1 } from "@frockbot/app/email/sender";
@@ -207,6 +209,11 @@ export interface ShellBotBackendHost extends ShellApplicationV1 {
    * the hosted Jev judge built from `env`, or none when there is no key.
    */
   routineReportJudge?: RoutineReportJudgeV1;
+  /**
+   * Checks a Plugin the Bot publishes against what was asked, for its
+   * approval card. Absent, the hosted Jev judge, or none without a key.
+   */
+  pluginFitJudge?: PluginFitJudgeV1;
 }
 
 /** The Turn currently executing on this object, for durable Stop. */
@@ -385,6 +392,7 @@ export class ShellBotStateV1 {
   readonly routineEventJudge: RoutineEventJudgeV1;
   readonly turnSupervisor: TurnSupervisor;
   readonly routineReportJudge: RoutineReportJudgeV1 | undefined;
+  readonly pluginFitJudge: PluginFitJudgeV1 | undefined;
 
   constructor(
     host: ShellBotBackendHost,
@@ -422,6 +430,12 @@ export class ShellBotStateV1 {
     this.routineReportJudge =
       host.routineReportJudge ??
       createHostedRoutineReportJudgeV1({
+        JEV_API_KEY: host.env.JEV_API_KEY,
+        JEV_BASE_URL: host.env.JEV_BASE_URL,
+      });
+    this.pluginFitJudge =
+      host.pluginFitJudge ??
+      createHostedPluginFitJudgeV1({
         JEV_API_KEY: host.env.JEV_API_KEY,
         JEV_BASE_URL: host.env.JEV_BASE_URL,
       });
