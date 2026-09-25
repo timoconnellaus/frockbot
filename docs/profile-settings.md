@@ -1,6 +1,6 @@
 # Profile and account settings
 
-Profile groups personal details, Bot abilities, and activity/sharing. Site
+Profile groups personal details, Bot abilities, and activity. Site
 administration is visible only to administrators; Refresh is a page action,
 not an account destination. Personal details reads the same resolved name as
 the Profile header. The optional contact email does not change sign-in. The
@@ -54,9 +54,7 @@ and run, so it works without a previously selected conversation. Unknown
 outcomes remain explicit. Rebuilding retained history is an advanced action;
 it never re-executes the recorded effects.
 
-Templates starts at Use a template when no Bot is selected. Sharing offers a
-Bot chooser. Add Bot also offers the template route. Import keeps its preview
-and explicit apply step. Your computers distinguishes paired personal devices
+Your computers distinguishes paired personal devices
 from the hosted Computer and preserves per-action approval. Site
 administration offers the deployment's admission mode as New accounts — Closed, Invite only or Open — and below it
 lists every account with a Plugin authoring switch: Plugin authoring is off
