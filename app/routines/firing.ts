@@ -201,6 +201,13 @@ export function routineSessionIdV1(routineId: string): string {
   return `routine:${routineId}`;
 }
 
+/** The Routine whose own Session this is, when it is one's. */
+export function routineIdOfSessionV1(sessionId: string): string | undefined {
+  return sessionId.startsWith("routine:")
+    ? sessionId.slice("routine:".length)
+    : undefined;
+}
+
 /**
  * Longest fire id there is, because a fire id *is* a run id: the stored run
  * codec holds one to the public-identifier grammar and the transcript

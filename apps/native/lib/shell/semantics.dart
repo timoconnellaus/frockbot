@@ -359,13 +359,6 @@ abstract final class PluginIds {
   static const refresh = 'plugins-refresh';
 }
 
-/// Routines: what a Bot does on its own, and what it left behind.
-///
-/// The names follow what `routines.e2e.ts` selects on — the section, a
-/// Routine's row, its controls and the delete confirmation — so that spec can
-/// be rewritten against Flutter Web with the same intent. The one door to the
-/// surface is the All Routines row on the Bot page
-/// ([SettingsIds.botPageRoutinesAll]) at every tier.
 /// Where an account's credit went.
 abstract final class SpendingIds {
   static const page = 'spending-page';
@@ -374,6 +367,13 @@ abstract final class SpendingIds {
   static const routineEntry = 'routine-run-log-spending';
 }
 
+/// Routines: what a Bot does on its own, and what it left behind.
+///
+/// The names follow what `routines.e2e.ts` selects on — the section, a
+/// Routine's row, its controls and the delete confirmation — so that spec can
+/// be rewritten against Flutter Web with the same intent. The one door to the
+/// surface is the All Routines row on the Bot page
+/// ([SettingsIds.botPageRoutinesAll]) at every tier.
 abstract final class RoutineIds {
   static const document = 'routines-document';
   static const refresh = 'routines-refresh';

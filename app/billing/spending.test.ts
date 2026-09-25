@@ -43,7 +43,11 @@ const digest: UsageAttributionV1["cause"] = {
 };
 
 function setup() {
-  const db = storage();
+  return setupOn(new Database(":memory:"));
+}
+
+function setupOn(database: Database) {
+  const db = storage(database);
   let now = NOW;
   const ledger = new BillingLedger(db, () => now);
   ledger.grant("comp:1", "complimentary", 100_000_000, null);
@@ -307,6 +311,64 @@ describe("the Spending rollups", () => {
       chargeMicros: 40,
     });
     expect(view.days.length).toBeGreaterThanOrEqual(7);
+  });
+
+  test("a rollup that fails leaves a gap, never an unsettled charge", () => {
+    const database = new Database(":memory:");
+    const { ledger } = setupOn(database);
+    ledger.reserve({
+      id: "model:z",
+      kind: "model",
+      maximumMicros: 100,
+      description: "work",
+      pricingVersion: BILLING_PLAN.pricingVersion,
+    });
+    database.run("DROP TABLE billing_spend_hourly");
+    ledger.settle({
+      id: "model:z",
+      costMicros: 1,
+      chargeMicros: 100,
+      quantities: {},
+    });
+    expect(
+      database
+        .query("SELECT status FROM billing_operations WHERE id = 'model:z'")
+        .get(),
+    ).toEqual({ status: "settled" });
+  });
+
+  test("a Plugin's call is never a conversation summary, and a Turn is timed from its earliest charge", () => {
+    const { charge, report } = setup();
+    const chat = { kind: "chat" as const, botId: "bot-1" };
+    charge("model:p", 20, {
+      runId: "r",
+      cause: chat,
+      summary: true,
+      pluginId: "notes",
+    });
+    charge(
+      "model:s",
+      30,
+      { runId: "r", cause: chat, summary: true },
+      { at: NOW - 2 * HOUR },
+    );
+    expect(
+      report({ groupBy: "category" }).groups.map((g) => [
+        g.key,
+        g.chargeMicros,
+      ]),
+    ).toEqual([
+      ["summary", 30],
+      ["model", 20],
+    ]);
+    const window = spendWindowV1("7d", NOW, undefined);
+    expect(
+      report({ since: NOW - 90 * 60_000, until: window.until }).topTurns,
+    ).toEqual([]);
+    expect(report().topTurns?.[0]).toMatchObject({
+      runId: "r",
+      at: NOW - 2 * HOUR,
+    });
   });
 
   test("the billing period starts where paid access did", () => {

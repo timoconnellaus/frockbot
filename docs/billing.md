@@ -69,7 +69,7 @@ The dimensions are the Bot that spent it; **what started it** — a chat with a 
 
 Attribution is descriptive. It sits in `billing_attribution` beside the operation, it is not part of the reservation's fingerprint — a retry that names a renamed Routine is still the same charge — and a malformed one is recorded as unattributed rather than refusing the call. A Routine's and a Group Chat's name are kept as last charged, so a rename reads by its new name.
 
-Every settlement adds itself, in its own transaction, to an hourly rollup (`billing_spend_hourly`) and to its Turn's running total (`billing_spend_runs`); `GET /api/billing/spending` reads only those, never the operation log. Hours rather than days, because the person's days are in their Profile timezone: the rollup is summed into them when it is read. A Turn has one Bot, cause, trigger and conversation, so a grouping by those counts Turns; categories, models and Plugins split a Turn, so a view narrowed by them lists no Turns and counts none.
+Every settlement adds itself, in the settlement's own transaction, to an hourly rollup (`billing_spend_hourly`) and to its Turn's running total (`billing_spend_runs`); `GET /api/billing/spending` reads only those, never the operation log. A rollup that fails leaves a gap in the page, never an unsettled charge. The rollup starts empty on deploy; charges settled before it are in the usage list only. Hours rather than days, because the person's days are in their Profile timezone: the rollup is summed into them when it is read. A Turn has one Bot, cause, trigger and conversation, so a grouping by those counts Turns; categories, models and Plugins split a Turn, so a view narrowed by them lists no Turns and counts none.
 
 ## Stripe
 

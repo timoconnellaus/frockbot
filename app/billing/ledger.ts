@@ -483,7 +483,13 @@ export class BillingLedger {
         settlement,
         input.id,
       );
-      rollUpSettlementV1(this.storage.sql, input);
+      // The rollup is what the Spending page reads, and nothing else: a
+      // failure there leaves a gap in it, never an unsettled charge.
+      try {
+        rollUpSettlementV1(this.storage.sql, input);
+      } catch {
+        // Recorded on the operation all the same.
+      }
     });
   }
   reconcile(command: {

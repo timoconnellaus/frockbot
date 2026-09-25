@@ -9,7 +9,7 @@ import { runCauseOfRunV1 } from "@frockbot/app/billing/run-cause";
 import { runCauseReadersV1 } from "@frockbot/app/shell/run-cause";
 import type { TurnTypeV1 } from "@frockbot/core/contracts";
 import type { BotSettingsViewV1 } from "@frockbot/core/configuration";
-import type { BotIdentity } from "@frockbot/core/durable";
+import type { BotIdentity, StoredRunCauseV1 } from "@frockbot/core/durable";
 import {
   ROUTINE_INBOX_TEXT_MAX,
   ROUTINE_WAKE_TITLE_MAX,
@@ -262,7 +262,12 @@ export async function listTasks(
 async function dispatchSubagentTask(
   state: ShellBotStateV1,
   identity: BotIdentity,
-  turn: { runId: string; turnId: string; sessionId: string },
+  turn: {
+    runId: string;
+    turnId: string;
+    sessionId: string;
+    cause?: StoredRunCauseV1;
+  },
   compositionGenerationId: string,
   request: SubagentDispatchRequestV1,
   /** Present only on a resume: which task this continues, and in whose child. */
@@ -387,11 +392,13 @@ async function dispatchSubagentTask(
       runId: turn.runId,
       turnId: turn.turnId,
       sessionId: turn.sessionId,
-      cause: await runCauseOfRunV1(
-        identity.botId,
-        turn.runId,
-        runCauseReadersV1(state),
-      ),
+      cause:
+        turn.cause ??
+        (await runCauseOfRunV1(
+          identity.botId,
+          turn.runId,
+          runCauseReadersV1(state),
+        )),
     },
     compositionGenerationId,
     model: admission.record.model,
@@ -798,7 +805,12 @@ export async function stopTaskForUser(
 async function resumeTask(
   state: ShellBotStateV1,
   identity: BotIdentity,
-  turn: { runId: string; turnId: string; sessionId: string },
+  turn: {
+    runId: string;
+    turnId: string;
+    sessionId: string;
+    cause?: StoredRunCauseV1;
+  },
   compositionGenerationId: string,
   request: SubagentResumeRequestV1,
 ): Promise<SubagentDispatchOutcomeV1> {
@@ -1077,7 +1089,12 @@ export async function reconcileOverdueTasks(
 export function subagentsRuntimeHost(
   state: ShellBotStateV1,
   identity: BotIdentity,
-  turn: { runId: string; turnId: string; sessionId: string },
+  turn: {
+    runId: string;
+    turnId: string;
+    sessionId: string;
+    cause?: StoredRunCauseV1;
+  },
   compositionGenerationId: string,
   turnType: TurnTypeV1,
   models: () => readonly SubagentModelOptionV1[],

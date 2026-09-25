@@ -8,26 +8,19 @@
 // Hours rather than days, because a day is the person's own and their
 // timezone is not the ledger's to know: the rollup is summed into their days
 // when it is read.
-import type {
-  BillingSql,
-  SpendCauseKindV1,
-  SpendCategoryV1,
-  UsageAttributionV1,
-  UsageReservation,
-  UsageSettlement,
+import { groupIdOfSessionV1 } from "@frockbot/app/groups/shared";
+import { routineIdOfSessionV1 } from "@frockbot/app/routines/firing";
+import {
+  SPEND_CAUSE_KINDS_V1,
+  type BillingSql,
+  type SpendCategoryV1,
+  type UsageAttributionV1,
+  type UsageReservation,
+  type UsageSettlement,
 } from "./ledger.js";
 
 const HOUR_MS = 3_600_000;
 const DAY_MS = 24 * HOUR_MS;
-
-const CAUSE_KINDS: readonly SpendCauseKindV1[] = [
-  "chat",
-  "routine",
-  "group",
-  "voice",
-  "desktop",
-  "plugin",
-];
 
 /** The ways the Spending page slices an account's charges. */
 export type SpendDimensionV1 =
@@ -75,7 +68,7 @@ export function createSpendingTablesV1(sql: BillingSql) {
     `CREATE TABLE IF NOT EXISTS billing_spend_hourly (hour INTEGER NOT NULL, bot_id TEXT NOT NULL, session_id TEXT NOT NULL, cause_kind TEXT NOT NULL, cause_bot_id TEXT NOT NULL, cause_id TEXT NOT NULL, trigger TEXT NOT NULL, category TEXT NOT NULL, model TEXT NOT NULL, plugin_id TEXT NOT NULL, charge INTEGER NOT NULL, operations INTEGER NOT NULL, turns INTEGER NOT NULL, PRIMARY KEY (hour, bot_id, session_id, cause_kind, cause_bot_id, cause_id, trigger, category, model, plugin_id)) WITHOUT ROWID`,
   );
   sql.exec(
-    `CREATE TABLE IF NOT EXISTS billing_spend_runs (run_id TEXT PRIMARY KEY, bot_id TEXT NOT NULL, session_id TEXT NOT NULL, cause_kind TEXT NOT NULL, cause_bot_id TEXT NOT NULL, cause_id TEXT NOT NULL, trigger TEXT NOT NULL, first INTEGER NOT NULL, last INTEGER NOT NULL, charge INTEGER NOT NULL, operations INTEGER NOT NULL)`,
+    `CREATE TABLE IF NOT EXISTS billing_spend_runs (run_id TEXT PRIMARY KEY, bot_id TEXT NOT NULL, session_id TEXT NOT NULL, cause_kind TEXT NOT NULL, cause_bot_id TEXT NOT NULL, cause_id TEXT NOT NULL, trigger TEXT NOT NULL, first INTEGER NOT NULL, charge INTEGER NOT NULL, operations INTEGER NOT NULL)`,
   );
   sql.exec(
     `CREATE INDEX IF NOT EXISTS billing_spend_runs_first ON billing_spend_runs(first)`,
@@ -114,7 +107,7 @@ export function attributionRowV1(
   attribution: UsageAttributionV1 | undefined,
 ): AttributionRow {
   const cause = attribution?.cause;
-  const kind = CAUSE_KINDS.find((k) => k === cause?.kind);
+  const kind = SPEND_CAUSE_KINDS_V1.find((k) => k === cause?.kind);
   const causeBotId = kind ? (text(cause?.botId, 128) ?? "") : "";
   const causeId = kind ? (text(cause?.id, 256) ?? "") : "";
   return {
@@ -132,7 +125,7 @@ export function attributionRowV1(
       : "",
     category:
       reservation.kind === "model"
-        ? attribution?.summary
+        ? attribution?.summary && !attribution.pluginId
           ? "summary"
           : "model"
         : reservation.kind,
@@ -227,7 +220,7 @@ export function rollUpSettlementV1(
       .toArray().length;
     if (known)
       sql.exec(
-        "UPDATE billing_spend_runs SET charge = charge + ?, operations = operations + 1, last = MAX(last, ?) WHERE run_id = ?",
+        "UPDATE billing_spend_runs SET charge = charge + ?, operations = operations + 1, first = MIN(first, ?) WHERE run_id = ?",
         charge,
         op.created,
         op.runId,
@@ -235,7 +228,7 @@ export function rollUpSettlementV1(
     else {
       turns = 1;
       sql.exec(
-        "INSERT INTO billing_spend_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
+        "INSERT INTO billing_spend_runs VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 1)",
         op.runId,
         botId,
         sessionId,
@@ -243,7 +236,6 @@ export function rollUpSettlementV1(
         causeBotId,
         causeId,
         trigger,
-        op.created,
         op.created,
         charge,
       );
@@ -477,14 +469,15 @@ export function spendLabelV1(
       const sessionId = key.slice(split + 1);
       if (sessionId === `${names.userId}:${botId}`)
         return { label: `Chat with ${bot(botId)}` };
-      if (sessionId.startsWith("routine:")) {
-        const routine = labels[`routine|${botId}|${sessionId.slice(8)}`];
-        return { label: routine ?? "A Routine", detail: bot(botId) };
-      }
-      if (sessionId.startsWith("group:"))
+      const routineId = routineIdOfSessionV1(sessionId);
+      if (routineId !== undefined)
         return {
-          label: labels[`group||${sessionId.slice(6)}`] ?? "A Group Chat",
+          label: labels[`routine|${botId}|${routineId}`] ?? "A Routine",
+          detail: bot(botId),
         };
+      const groupId = groupIdOfSessionV1(sessionId);
+      if (groupId !== undefined)
+        return { label: labels[`group||${groupId}`] ?? "A Group Chat" };
       if (sessionId.startsWith("task:"))
         return { label: "Subagent tasks", detail: bot(botId) };
       return {
