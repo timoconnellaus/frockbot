@@ -15,7 +15,8 @@ FrockBot installs into your own Cloudflare account with one command. That is the
 - A **Cloudflare account on the Workers Paid plan**. Containers and Dynamic Workers both need it, and both are load-bearing: no Computer and no Plugins without them.
 - **One domain on that account**, its zone active. The app answers on a hostname you choose on it (`bot.example.com`).
 - A **Cloudflare Zero Trust team** (free). Its Access policy is this deployment's allowlist.
-- A **Fly Sprites token** for the Computer, from [fly.io](https://fly.io/dashboard). Fly is the one non-Cloudflare account a deployment needs.
+- A **Fly Sprites token** for the Computer, from [fly.io](https://fly.io/dashboard).
+- A **Jev API key**, from [typesafe.ai](https://typesafe.ai). Every Turn is supervised by Jev ([plan](docs/jev-supervision-plan.md)), so without it no Bot runs a Turn. Fly and Jev are the two non-Cloudflare accounts a deployment needs.
 - [**Bun**](https://bun.sh) 1.4 or newer, and `git`, `curl` and `unzip` on `PATH`. No Docker and no Flutter: the container images and the web client are published with each release and pulled. `gh` is used to fetch the release assets when it is installed; without it the same public URLs are fetched with `curl`.
 
 Optional keys. Each is asked for once and each can be skipped with Enter; a skipped key leaves that one thing shut and repairs nothing else.
@@ -60,10 +61,10 @@ It runs eight steps — account, profile, resources, internal secrets, your keys
 - Admin email addresses, which become `FROCKBOT_ADMIN_EMAILS`: the deployment's admins. They bypass admission, and the operator debug surface, which is gated on its own `DEBUG_TOKEN`, checks this list before it will send a Turn as an account.
 - The Zero Trust team domain, e.g. `yourteam.cloudflareaccess.com`.
 - The region for the R2 buckets and the Vectorize index (default `enam`).
-- The Fly Sprites token, then each optional key above.
+- The Fly Sprites token, each optional key above, then the Jev API key.
 - The Access application's Audience (AUD) tag, when it could not create the application for you.
 
-A second run offers each earlier answer as the default, so the prefix, hostname, admin emails, team domain and region are one Enter each. The keys are not stored anywhere the installer can read them back, so a later run asks for the Fly token and any optional keys again.
+A second run offers each earlier answer as the default, so the prefix, hostname, admin emails, team domain and region are one Enter each. The keys are not stored anywhere the installer can read them back, so a later run asks for the Fly token, the Jev key and any optional keys again.
 
 The answers are written to `deployments/simple.json`, and `bun run deployment:config simple` is what turns that file into the wrangler configs the deploy reads, under the git-ignored `.deployment/simple/`. Nobody writes that profile by hand.
 
@@ -95,7 +96,7 @@ The operator surface at `/api/debug` is gated by `DEBUG_TOKEN` alone and answers
 
 ### Upgrading
 
-Check out the next tag and run the installer again. It converges — nothing already there is created twice, no minted secret is replaced, and the profile's answers come back as defaults. The Fly token and any optional keys are asked for again, because the installer keeps no copy of them, and are set with the deploy.
+Check out the next tag and run the installer again. It converges — nothing already there is created twice, no minted secret is replaced, and the profile's answers come back as defaults. The Fly token, the Jev key and any optional keys are asked for again, because the installer keeps no copy of them, and are set with the deploy.
 
 ```bash
 git fetch --tags

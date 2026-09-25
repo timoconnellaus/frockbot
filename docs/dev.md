@@ -26,7 +26,8 @@ open the web client at `http://127.0.0.1:8797/?as_user=development`.
 ## Secrets
 
 `apps/cloudflare/.dev.vars` (gitignored; copied from `~/repos/grokbot-headless`
-if missing) needs `CREDENTIAL_KEYRING`. Optional:
+if missing) needs `CREDENTIAL_KEYRING` and `JEV_API_KEY` (every Turn is
+supervised by Jev; without it no Bot runs a Turn). Optional:
 
 - `OLLAMA_API_KEY` — seeds an Ollama Cloud connection and sets it as the
   account model. Without it, connect a model in Settings.

@@ -520,7 +520,7 @@ async function askOneSecretV1(
   context.runner.say(
     `  ${secret.name} — ${secret.enables}${secret.where ? ` (${secret.where})` : ""}`,
   );
-  // `--yes` skips every optional key. The one required key it cannot invent, so
+  // `--yes` skips every optional key. A required key it cannot invent, so
   // `--yes` alone stops there and says so; a dry run takes a placeholder instead,
   // because printing the whole install is the point of it and nothing is set.
   const fallback = secret.required
