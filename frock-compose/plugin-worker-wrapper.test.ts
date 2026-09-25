@@ -854,7 +854,7 @@ describe("the generated wrapper's trigger delivery", () => {
     };
   }
 
-  const identities: Record<string, string>[] = [];
+  const identities: Record<string, unknown>[] = [];
   function contextFor(
     identity: Record<string, string>,
     _plugin: unknown,
