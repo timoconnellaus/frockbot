@@ -1,5 +1,8 @@
 import type { PluginBuildSourceFileV1 } from "@frockbot/applets/build-contract";
-import type { PluginDescriptorV1 } from "@frockbot/core/contracts";
+import {
+  pluginNetworkAdmitsHostV1,
+  type PluginDescriptorV1,
+} from "@frockbot/core/contracts";
 
 // The advisory check a Bot-written Plugin gets before the User is asked to
 // run it. Code reads facts off the source and lints what the SDK documents;
@@ -135,27 +138,49 @@ function pagePaths(descriptor: PluginDescriptorV1): Set<string> {
 }
 
 /** The CSS a page carries: its `<style>` blocks and `style` attributes. */
-function pageCss(html: string): string {
+function pageCss(html: string): string[] {
   const blocks = [...html.matchAll(/<style[^>]*>([\s\S]*?)<\/style>/gi)].map(
     (match) => match[1] ?? "",
   );
   const attributes = [...html.matchAll(/\sstyle\s*=\s*"([^"]*)"/gi)].map(
     (match) => match[1] ?? "",
   );
-  return [...blocks, ...attributes].join("\n");
+  return [...blocks, ...attributes];
+}
+
+/** CSS with each `var(…)` removed, however deeply its fallback nests. */
+function withoutVars(css: string): string {
+  let out = "";
+  let index = 0;
+  for (;;) {
+    const start = css.indexOf("var(", index);
+    if (start < 0) return out + css.slice(index);
+    out += css.slice(index, start);
+    let depth = 0;
+    let end = start + 3;
+    for (; end < css.length; end++) {
+      if (css[end] === "(") depth++;
+      else if (css[end] === ")" && --depth === 0) break;
+    }
+    index = end + 1;
+  }
 }
 
 /** Colours written out rather than read from the theme's variables. */
-function literalColours(css: string): string[] {
-  // A fallback inside `var(--frockbot-…, #fff)` is still the theme's.
-  let stripped = css;
-  for (let previous = ""; previous !== stripped;) {
-    previous = stripped;
-    stripped = stripped.replace(/var\([^()]*\)/g, "");
-  }
+function literalColours(chunks: readonly string[]): string[] {
+  // A fallback inside `var(--frockbot-…, #fff)` is still the theme's, and a
+  // `#name` outside a declaration's value is a selector.
+  const values = chunks.flatMap((chunk) =>
+    [...withoutVars(chunk).matchAll(/:([^;{}]*)(?=[;}]|$)/g)].map(
+      (match) => match[1] ?? "",
+    ),
+  );
   return [
     ...new Set(
-      stripped.match(/#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?)\([^)]*\)/g) ?? [],
+      values.flatMap(
+        (value) =>
+          value.match(/#[0-9a-fA-F]{3,8}\b|\b(?:rgba?|hsla?)\([^)]*\)/g) ?? [],
+      ),
     ),
   ];
 }
@@ -199,15 +224,13 @@ export function lintPluginSourceV1(
       );
     }
   }
-  const network = descriptor.network;
-  if (network && "open" in network) return findings;
-  const declared = new Set(network?.hosts ?? []);
+  const network = descriptor.network ?? { hosts: [] };
   const undeclared = new Set<string>();
   for (const file of files) {
     if (pages.has(file.path) || !/\.(?:ts|js|mjs)$/.test(file.path)) continue;
     if (file.path.startsWith("modules/")) continue;
     for (const host of literalHosts(file.text)) {
-      if (!declared.has(host)) undeclared.add(host);
+      if (!pluginNetworkAdmitsHostV1(network, host)) undeclared.add(host);
     }
   }
   if (undeclared.size > 0) {

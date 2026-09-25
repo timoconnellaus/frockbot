@@ -44,7 +44,7 @@ test("the theme's variables, with or without a fallback, are clean", () => {
   expect(
     lintPluginSourceV1(base, [
       page(
-        "<style>body { color: var(--frockbot-text, #111); background: var(--frockbot-surface) }</style><script>document.querySelector('#ace')</script>",
+        "<style>#add-button, a:hover #feed { color: var(--frockbot-text, #111); background: var(--frockbot-surface); border-color: var(--frockbot-line, var(--x, rgb(0, 0, 0))) }</style><script>document.querySelector('#ace')</script>",
       ),
     ]),
   ).toEqual([]);
@@ -61,7 +61,7 @@ test("code reaching a host plugin.json does not declare is named", () => {
   const descriptor: PluginDescriptorV1 = {
     ...base,
     grants: ["http"],
-    network: { hosts: ["api.example.com"] },
+    network: { hosts: ["*.example.com"] },
   };
   const findings = lintPluginSourceV1(descriptor, [
     {
