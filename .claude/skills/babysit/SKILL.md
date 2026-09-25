@@ -141,9 +141,18 @@ The snapshot gives each open pull request an action:
   30 minutes means its session is probably on it. Idle longer: check out
   the branch in a worktree (`gh pr checkout <n>`), fix it, push, and say
   so on the pull request.
-- **rebase** — conflicts with `main`. Same idle rule. In a worktree:
+- **rebase** — conflicts with `main`. Merge conflicts are the
+  babysitter's, not the author's, and are resolved only when it is that
+  pull request's turn: green apart from the conflict, `main` green, and
+  nothing ready ahead of it. An earlier rebase is often wasted, because the
+  merges before it bring the conflict back. If an authoring session is
+  rebasing its own pull request for a conflict, message it to stop and hand
+  off at green. No idle wait. In a worktree:
   `git fetch origin main && git rebase origin/main`, resolve,
-  `bun install --frozen-lockfile`, `git push --force-with-lease`. A
+  `bun install --frozen-lockfile`, typecheck and the unit tier,
+  `git push --force-with-lease`, and say what you resolved on the pull
+  request. Renumbered lists such as `docs/known-issues.md` need their
+  cross-references moved too. A
   conflict in a generated file (`*.generated.ts`) is resolved by taking
   either side and running its generator — `bun app/whats-new/generate.ts`
   for What's New — never by hand.
@@ -164,6 +173,37 @@ Dependabot pull requests go through the same actions; a bump that breaks
 The labels are `hold` (leave it alone), `fix-main` (repairs a red `main`),
 `flaky` (issues) and `main-red` (the repair claim). If one is missing,
 create it with `gh label create`.
+
+## Sessions
+
+`DONE ` at the front of a session's title says its goal is complete: every
+pull request it opened has merged. `DONE-TODO ` says the same, and that the
+session also surfaced things still to do, perhaps as separate work: a
+follow-up it named, a question waiting on Tim, a branch still to open, a
+verification it is waiting on. Tim reads the prefix to decide what to close.
+
+Once a session's pull requests have all merged, read the end of its
+conversation (`list_events` for a local session, `RemoteTrigger
+get_run_log` for a cloud one). Give it `DONE ` when nothing is left, or
+`DONE-TODO ` and name the items in the report under "needs Tim". When they
+clear, change `DONE-TODO ` to `DONE `.
+
+For a `DONE-TODO ` session, also message it (`SendMessage`) to end with one
+short message listing what is still to do and whose call each item is, and
+to start none of it. That last message is what Tim reads when he opens the
+session, instead of scrolling back through the chat.
+
+Rename each session once per state, not every tick:
+
+- A local desktop session: `set_session_title` (the `ccd_session_mgmt`
+  tools) with the sessionId from `list_sessions`.
+- A cloud session is not visible to those tools. `SendMessage` it asking it
+  to rename itself with the prefix and, for `DONE-TODO `, to list its
+  to-dos as above; nothing else. It then drops out
+  of `ListAgents`, and its run log may return 404; neither means it was
+  deleted.
+
+Only FrockBot sessions, and never a title Tim prefixed himself (`zzz`).
 
 ## Boundaries
 
