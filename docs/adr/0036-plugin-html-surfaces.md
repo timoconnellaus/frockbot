@@ -268,8 +268,8 @@ native client. The page never got its theme tokens or its state, and `ready`
 timed out, silently. The web iframe was not affected, which is why the browser
 suite passed. The host now answers without waiting to be asked: it posts the
 same `init` when the document has loaded, and a `hello` after that is answered
-again. A page may be greeted twice, and the helper takes whichever arrives
-first.
+again. A page may be greeted twice: the first greeting resolves `ready`, and a
+later one is new state for `onState`.
 
 **Closing is closing, whoever does it.** `onClosed` heard the host close the
 microphone, but not the page's own `close()`. A page that reset its button in
@@ -288,11 +288,15 @@ them with its Plugin tools. A Bot that cannot see its page fail cannot fix it,
 and the tuner's too-quiet threshold was not an error at all: only a reported
 reading would have shown it.
 
-**A page can be inspected.** Pages are inspectable in Debug builds and in the
-`FrockBot Dev` app: Safari's Develop menu on Apple platforms, `chrome://inspect`
-over ADB on Android. Release builds are not. Every host frame holds no
-credential, so the exposure is small, but it is still the production app on a
-person's device.
+**A page can be inspected.** Pages are inspectable in Debug and Profile builds,
+in the `FrockBot Dev` apps on the Mac and iPhone, in `FROCKBOT_LOCAL_DEV`
+builds, and in any build given `--dart-define=FROCKBOT_PAGE_INSPECTION=true`:
+Safari's Develop menu on Apple platforms, `chrome://inspect` over ADB on
+Android. Release builds are not. Every host frame holds no credential, so the
+exposure is small, but it is still the production app on a person's device.
+The switch is Dart-only (`hostFrameInspectableV1` in `host_frame_io.dart`), so
+it ships as a patch; Android's dev identity is chosen in Gradle, so a hand-built
+Android dev APK needs the define.
 
 **Opening a page should feel instant.** Every open re-read the panel from the
 Bot, built a fresh WebView, fetched the HTML over the network (the WebView

@@ -23,6 +23,7 @@ class FakePageMicrophone implements PluginPageMicrophone {
   StreamController<Uint8List>? frames;
   Future<void> Function()? taken;
   PluginPageMicrophoneRefused? refusal;
+  Completer<void>? granting;
   int opens = 0;
   int closes = 0;
 
@@ -33,6 +34,7 @@ class FakePageMicrophone implements PluginPageMicrophone {
     opens++;
     final refused = refusal;
     if (refused != null) throw refused;
+    await granting?.future;
     this.taken = taken;
     frames = StreamController<Uint8List>.broadcast();
     return frames!.stream;
@@ -192,6 +194,7 @@ void main() {
                 required identity,
                 required onMessage,
                 required outbox,
+                required onLoaded,
               }) {
                 say = onMessage;
                 return _Listening(outbox: outbox, heard: heard);
@@ -259,6 +262,96 @@ void main() {
       // The bar came and went around one page, never a reloaded one.
       expect(framesMounted, 1);
     });
+
+    testWidgets(
+      'a page that stops the microphone itself hears that it closed',
+      (tester) async {
+        final microphone = FakePageMicrophone();
+        await tester.pumpWidget(frame(microphone));
+        say(ask);
+        await tester.pumpAndSettle();
+        const stop = {
+          'frockbotPage': 1,
+          'type': 'device',
+          'ability': 'microphone',
+          'open': false,
+        };
+        say(stop);
+        await tester.pumpAndSettle();
+        expect(microphone.closes, 1);
+        expect(heard.last, {
+          'frockbotPage': 1,
+          'type': 'device',
+          'ability': 'microphone',
+          'status': 'closed',
+          'reason': 'You stopped the microphone.',
+        });
+        expect(uses.single.ending, PluginPageDeviceEndingV1.stopped);
+        expect(find.text('Tuner is using the microphone'), findsNothing);
+
+        // Asked again with nothing open, it still answers, so a page waiting on
+        // its close is never left waiting.
+        heard.clear();
+        say(stop);
+        await tester.pumpAndSettle();
+        expect(microphone.closes, 1);
+        expect(heard.single['status'], 'closed');
+      },
+    );
+
+    testWidgets(
+      'a page that stops while the microphone is opening is never opened to',
+      (tester) async {
+        final microphone = FakePageMicrophone()..granting = Completer<void>();
+        await tester.pumpWidget(frame(microphone));
+        const stop = {
+          'frockbotPage': 1,
+          'type': 'device',
+          'ability': 'microphone',
+          'open': false,
+        };
+        say(ask);
+        await tester.pump();
+        say(stop);
+        await tester.pump();
+        microphone.granting!.complete();
+        await tester.pumpAndSettle();
+        expect(microphone.closes, 1);
+        expect(heard, isEmpty);
+        expect(uses, isEmpty);
+        expect(find.text('Tuner is using the microphone'), findsNothing);
+
+        // Asked again, it opens, rather than thinking it already has.
+        say(ask);
+        await tester.pumpAndSettle();
+        expect(microphone.opens, 2);
+        expect(heard.single['status'], 'open');
+      },
+    );
+
+    testWidgets(
+      'a page that stops and asks again while opening gets the one open',
+      (tester) async {
+        final microphone = FakePageMicrophone()..granting = Completer<void>();
+        await tester.pumpWidget(frame(microphone));
+        say(ask);
+        await tester.pump();
+        say(const {
+          'frockbotPage': 1,
+          'type': 'device',
+          'ability': 'microphone',
+          'open': false,
+        });
+        say(ask);
+        await tester.pump();
+        microphone.granting!.complete();
+        await tester.pumpAndSettle();
+        expect(microphone.opens, 1);
+        expect(microphone.closes, 0);
+        expect(heard.single['status'], 'open');
+        expect(find.text('Tuner is using the microphone'), findsOneWidget);
+      },
+    );
 
     testWidgets('opens nothing the User did not approve', (tester) async {
       final microphone = FakePageMicrophone();

@@ -11,11 +11,26 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart'
-    show TargetPlatform, defaultTargetPlatform;
+    show TargetPlatform, defaultTargetPlatform, kDebugMode, kProfileMode;
 import 'package:flutter/material.dart';
 import 'package:webview_flutter/webview_flutter.dart';
 import 'package:webview_flutter_android/webview_flutter_android.dart';
 import 'package:webview_flutter_wkwebview/webview_flutter_wkwebview.dart';
+
+import '../client/desktop_build.dart';
+import '../client/ios_build.dart';
+
+/// Whether a framed page can be inspected: Safari's Develop menu on Apple
+/// platforms, `chrome://inspect` over ADB on Android. Debug and profile builds
+/// and the Dev apps only (ADR 0036): no frame holds a credential, but a
+/// release build is still the production app on a person's device.
+const hostFrameInspectableV1 =
+    kDebugMode ||
+    kProfileMode ||
+    desktopDevelopmentBuild ||
+    iosDevelopmentBuild ||
+    bool.fromEnvironment('FROCKBOT_LOCAL_DEV') ||
+    bool.fromEnvironment('FROCKBOT_PAGE_INSPECTION');
 
 class HostFrameView extends StatefulWidget {
   final String url;
@@ -26,6 +41,7 @@ class HostFrameView extends StatefulWidget {
   final String label;
   final ValueChanged<Map<String, Object?>>? onMessage;
   final Stream<Map<String, Object?>>? outbox;
+  final VoidCallback? onLoaded;
   const HostFrameView({
     super.key,
     required this.url,
@@ -33,6 +49,7 @@ class HostFrameView extends StatefulWidget {
     this.allowSameOrigin = false,
     this.onMessage,
     this.outbox,
+    this.onLoaded,
   });
 
   @override
@@ -107,6 +124,19 @@ window.addEventListener("message", (event) => {
     }
   }
 
+  /// A frame that cannot be made inspectable, as on iOS before 16.4, still
+  /// loads.
+  Future<void> _inspectable(WebViewController web) async {
+    try {
+      switch (web.platform) {
+        case final WebKitWebViewController webkit:
+          await webkit.setInspectable(true);
+        case AndroidWebViewController():
+          await AndroidWebViewController.enableDebugging(true);
+      }
+    } catch (_) {}
+  }
+
   Future<void> _open() async {
     final epoch = ++_epoch;
     _loaded = false;
@@ -139,6 +169,7 @@ window.addEventListener("message", (event) => {
         await webkit.setAllowsBackForwardNavigationGestures(false);
         await webkit.setAllowsLinkPreview(false);
       }
+      if (hostFrameInspectableV1) await _inspectable(web);
       if (widget.onMessage != null) {
         await web.addJavaScriptChannel(
           _channel,
@@ -173,6 +204,7 @@ window.addEventListener("message", (event) => {
             for (final message in waiting) {
               await _post(web, epoch, message);
             }
+            if (mounted && epoch == _epoch) widget.onLoaded?.call();
           },
         ),
       );

@@ -29,6 +29,7 @@ class HostFrameView extends StatefulWidget {
   final String label;
   final ValueChanged<Map<String, Object?>>? onMessage;
   final Stream<Map<String, Object?>>? outbox;
+  final VoidCallback? onLoaded;
   const HostFrameView({
     super.key,
     required this.url,
@@ -36,6 +37,7 @@ class HostFrameView extends StatefulWidget {
     this.allowSameOrigin = false,
     this.onMessage,
     this.outbox,
+    this.onLoaded,
   });
 
   @override
@@ -78,6 +80,7 @@ class _HostFrameViewState extends State<HostFrameView> {
         final waiting = [..._waiting];
         _waiting.clear();
         waiting.forEach(_post);
+        if (mounted) widget.onLoaded?.call();
       }).toJS,
     );
     if (widget.onMessage != null) {
