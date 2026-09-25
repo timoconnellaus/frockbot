@@ -12,7 +12,7 @@ import { RESPONSE_REVIEW_MODEL_V1 } from "./response-review.js";
 // Routine's log and opens no Turn; one that can wait arrives without a push.
 // A judgment that fails delivers as before: telling someone is the safe side.
 
-/** At or below this, a report is judged nothing the person would want. */
+/** Below this, a report is judged nothing the person would want. */
 export const ROUTINE_REPORT_WORTH_NO_V1 = 0.2;
 
 /** Below this urgency, a delivery lands unread and wakes no device. */
@@ -90,7 +90,7 @@ export function routineReportVerdictV1(answers: {
   const worth = answers.worthTelling.noul;
   const urgency = answers.urgency.score;
   return {
-    tell: worth > ROUTINE_REPORT_WORTH_NO_V1,
+    tell: worth >= ROUTINE_REPORT_WORTH_NO_V1,
     quiet: urgency < ROUTINE_REPORT_QUIET_BELOW_V1,
     worth,
     urgency,

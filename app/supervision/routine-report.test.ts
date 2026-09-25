@@ -24,6 +24,12 @@ test("a report is dismissed only when Jev is sure nobody wants it, and quiet whi
   ).toMatchObject({ tell: false });
   expect(
     routineReportVerdictV1({
+      worthTelling: { noul: 0.2 },
+      urgency: { score: 0 },
+    }),
+  ).toMatchObject({ tell: true });
+  expect(
+    routineReportVerdictV1({
       worthTelling: { noul: 0.5 },
       urgency: { score: 0.3 },
     }),
