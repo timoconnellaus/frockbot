@@ -35,3 +35,4 @@ export * from "./working-context.js";
 export * from "./turn-supervisor.js";
 export * from "./types.js";
 export * from "./workspace.js";
+export * from "./plugin-page-try.js";

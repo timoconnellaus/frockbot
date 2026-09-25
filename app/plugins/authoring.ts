@@ -191,6 +191,22 @@ export interface PluginAuthoringHostV1 {
   }): Promise<{ status: "written" | "refused"; reason?: string }>;
   /** What this Plugin's pages reported, in words, newest first. */
   pageReports(input: { pluginId: string }): Promise<string>;
+  /**
+   * One of this Plugin's pages as `plugin_publish` would store it, bridge and
+   * all, built from its source now — for trying it before it is published.
+   */
+  pageToTry(input: {
+    pluginId: string;
+    surfaceId?: string;
+  }): Promise<PluginPageToTryV1 | { failure: string }>;
+}
+
+/** A page ready to try: its bytes, and what the stand-in host must allow. */
+export interface PluginPageToTryV1 {
+  pluginId: string;
+  surfaceId: string;
+  html: string;
+  microphone: boolean;
 }
 
 const TEXT = new TextDecoder("utf-8", { fatal: true });
@@ -767,6 +783,44 @@ export function createPluginAuthoringHostV1(
         await readPluginPageReportsV1(seams.storage, pluginId),
         member?.version,
       );
+    },
+
+    async pageToTry(input) {
+      const pluginId = assertPluginIdV1(input.pluginId);
+      const source = await sourceRepository.readBuildSource(pluginId);
+      if ("failure" in source) return source;
+      const descriptor = descriptorOf(pluginId, source.files);
+      if ("failure" in descriptor) return descriptor;
+      const pageViews = (descriptor.views ?? []).filter(
+        (view) => view.slot === "conversation.panel" && view.page !== undefined,
+      );
+      const view =
+        input.surfaceId === undefined
+          ? pageViews[0]
+          : pageViews.find(
+              (candidate) => candidate.surfaceId === input.surfaceId,
+            );
+      if (!view?.page) {
+        return {
+          failure:
+            input.surfaceId === undefined
+              ? `${pluginId} declares no page to try`
+              : `${pluginId} has no page "${input.surfaceId}"`,
+        };
+      }
+      const built = await pluginPagesFromSourceV1(descriptor, source.files);
+      if ("failure" in built) return built;
+      const page = built.pages.find(
+        (candidate) => candidate.artifact.path === view.page,
+      );
+      if (!page) return { failure: `the page "${view.page}" was not built` };
+      return {
+        pluginId,
+        surfaceId: view.surfaceId,
+        html: page.html,
+        microphone:
+          descriptor.device?.abilities.includes("microphone") ?? false,
+      };
     },
 
     async readSettings(input) {

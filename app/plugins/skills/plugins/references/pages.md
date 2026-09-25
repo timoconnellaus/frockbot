@@ -86,10 +86,46 @@ is torn down when the person leaves the panel.
 
 A page may listen to the microphone through the host: see `microphone.md`.
 
+## Try it before you publish
+
+`plugin_page_try` runs the page on your Computer exactly as `plugin_publish`
+would store it, beside a stand-in for the app: it greets the page with the
+app's theme and the `state` you give, answers its tool calls with your
+`toolAnswers`, and feeds its microphone whatever you tell it to hear. Steps
+run in order, one action each, and you get back the page's text, what it
+reported, any error it threw, which steps failed, and your screenshots.
+
+```json
+{
+  "pluginId": "tuner",
+  "state": { "a4": 440 },
+  "steps": [
+    { "click": "#listen" },
+    { "tone": { "frequency": 196, "level": 0.05, "noise": 0.02 } },
+    { "wait": 1500 },
+    { "screenshot": "a quiet G string" },
+    { "click": "#listen" },
+    { "wait": 300 },
+    { "screenshot": "after Stop" },
+    { "click": "#listen" },
+    { "hostStop": true },
+    { "screenshot": "stopped from the app" }
+  ]
+}
+```
+
+Try what a person will do, not only the happy path: press every control, stop
+and start again, stop from the app with `hostStop`, and feed the quiet, noisy
+signal a real room makes rather than a loud clean tone. Look at the
+screenshots: they show whether the page follows the theme. A try is not the
+person's device — a real microphone is quieter and dirtier than any tone — so
+log the readings you would want to see, and read them back with
+`plugin_page_reports` once someone has used it.
+
 ## Seeing it fail
 
 The page runs on the person's device, never here, and you cannot open it
-yourself. `plugin_page_reports` with the Plugin's id is how you see it: the
+there. `plugin_page_reports` with the Plugin's id is how you see it: the
 errors and logs its pages reported, newest first, with the device and the
 version each came from. Read it after the person has used a page, and before
 you change one they say misbehaves. Something that is wrong but throws
