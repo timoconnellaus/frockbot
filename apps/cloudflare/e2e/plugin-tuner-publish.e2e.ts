@@ -94,7 +94,10 @@ test("a Bot builds the guitar tuner its Skill teaches from the conversation, and
   }
   await runTool(page, "Check it.", "plugin_check", { pluginId: "tuner" });
   await expectToolSaid(page, userId, "tuner builds.");
-  await runTool(page, "Publish it.", "plugin_publish", { pluginId: "tuner" });
+  await runTool(page, "Publish it.", "plugin_publish", {
+    pluginId: "tuner",
+    purpose: "Tune a guitar by ear from the microphone.",
+  });
   await expectToolSaid(page, userId, "asked the User to approve it");
 
   // The card says what approving allows before the person allows it.

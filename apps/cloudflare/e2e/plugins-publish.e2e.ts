@@ -70,7 +70,10 @@ test("a Bot writes, checks and publishes a Plugin; the User approves it; its too
   await expectToolSaid(page, userId, "notes builds.");
 
   // The publish builds again, stores the module, and asks. Nothing runs yet.
-  await runTool(page, "Publish it.", "plugin_publish", { pluginId: "notes" });
+  await runTool(page, "Publish it.", "plugin_publish", {
+    pluginId: "notes",
+    purpose: "Keep short notes the Bot can read back.",
+  });
   await expectToolSaid(page, userId, "asked the User to approve it");
   const before = await page.request.get(
     `/api/bots/${encodeURIComponent(await botIdOf(page, userId))}/plugins`,
