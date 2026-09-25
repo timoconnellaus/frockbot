@@ -439,6 +439,13 @@ void main() {
       ]);
       expect(find.text('Please help'), findsOneWidget);
       expect(find.text("This Bot couldn't finish its reply."), findsNothing);
+      // A retry that fails too brings Retry back on the same message.
+      await draw([
+        attempt('original', retriedBy: 'retry-1'),
+        attempt('retry-1', retryOf: 'original', at: '2026-09-13T02:00:00.000Z'),
+      ]);
+      expect(find.text('Please help'), findsOneWidget);
+      expect(find.text('Retry'), findsOneWidget);
     },
   );
 }
