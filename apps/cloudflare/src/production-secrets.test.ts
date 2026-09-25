@@ -276,6 +276,7 @@ describe("the production secrets report", () => {
     ).toEqual([
       "VOICE_ASSISTANT_UPSTREAM_URL",
       "VOICE_DICTATION_UPSTREAM_URL",
+      "JEV_BASE_URL",
       "ALLOW_DEVELOPMENT_AUTH",
     ]);
   });
