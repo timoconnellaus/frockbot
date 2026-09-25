@@ -1,5 +1,8 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:frockbot_native/client/transport.dart' show RequestFailure;
 import 'package:frockbot_native/flock/avatar.dart';
 import 'package:frockbot_native/groups/api.dart';
 import 'package:frockbot_native/groups/faces.dart';
@@ -260,6 +263,60 @@ void main() {
         'runId': 'r1',
       });
     });
+
+    testWidgets('Retry goes when pressed and comes back if refused', (
+      tester,
+    ) async {
+      var answered = Completer<Object?>();
+      final base = answer;
+      answer = (path, body) =>
+          path.endsWith('/retry') ? answered.future : base(path, body);
+      await pump(tester);
+      await tester.tap(find.text('Retry'));
+      await tester.pump();
+      expect(find.text('Retry'), findsNothing);
+      answered.completeError(const RequestFailure('Couldn’t reach FrockBot.'));
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      await tester.pump();
+      expect(find.text('Retry'), findsOneWidget);
+
+      answered = Completer<Object?>();
+      await tester.tap(find.text('Retry'));
+      await tester.pump();
+      answered.complete({'schemaVersion': 1});
+      await tester.runAsync(() => Future<void>.delayed(Duration.zero));
+      await tester.pump();
+      expect(find.text('Retry'), findsNothing);
+    });
+
+    test(
+      'a failure the member has since spoken past offers no Retry',
+      () async {
+        answer = (path, body) {
+          if (path == '/api/groups/$groupId') return view(readThrough: 1);
+          return page([
+            event(1, {
+              'type': 'turn-failed',
+              'botId': 'general',
+              'runId': 'r1',
+            }),
+            text(2, 'Sorry, here it is.', botId: 'general'),
+            event(3, {'type': 'turn-failed', 'botId': 'xero', 'runId': 'r2'}),
+          ]);
+        };
+        final controller = GroupThreadController(
+          api: GroupChatApi(native),
+          store: store,
+          userId: 'user-1',
+          groupId: groupId,
+        );
+        addTearDown(controller.dispose);
+        await controller.initialize();
+        final [general, _, xero] = controller.messages;
+        expect(controller.retryable(general, 'r1'), isFalse);
+        expect(controller.retryable(xero, 'r2'), isTrue);
+      },
+    );
 
     testWidgets('@ offers the members, and choosing one writes its name', (
       tester,

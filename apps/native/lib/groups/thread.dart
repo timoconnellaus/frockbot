@@ -303,12 +303,29 @@ class GroupThreadController extends ChangeNotifier {
     }
   }
 
+  /// Failed Turns whose Retry was pressed here and not refused.
+  final Set<String> _retrying = {};
+
+  /// Whether a failed Turn still offers Retry. Not once it was pressed, and
+  /// not once its member has posted anything since: the retry answered, or
+  /// the conversation moved on. A retry that fails again says so on a line of
+  /// its own, with its own Retry.
+  bool retryable(GroupMessage failure, String runId) =>
+      !_retrying.contains(runId) &&
+      !_messages.values.any(
+        (message) =>
+            message.seq > failure.seq && message.botId == failure.botId,
+      );
+
   /// Runs a member again whose Turn did not finish.
   Future<void> retry(String botId, String runId) async {
+    if (!_retrying.add(runId)) return;
+    _notify();
     try {
       await api.retry(groupId, commandId: nextId(), botId: botId, runId: runId);
       error = null;
     } catch (failure) {
+      _retrying.remove(runId);
       error = _message(failure);
     }
     _notify();

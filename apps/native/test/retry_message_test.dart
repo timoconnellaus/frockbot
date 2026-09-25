@@ -353,6 +353,24 @@ void main() {
     },
   );
 
+  test('a retry stamped before its original still clears the Retry', () {
+    // A retry drawn before its receipt carries this device's clock, which
+    // can run behind the server's stamp on the attempt it retries.
+    final lines = projectRuns([
+      attempt(
+        'retry-1',
+        status: 'running',
+        retryOf: 'original',
+        at: '2026-09-13T00:59:00.000Z',
+      ),
+      attempt('original'),
+    ]);
+    final user = lines.singleWhere((l) => l.role == LineRole.user);
+    expect(user.runId, 'retry-1');
+    expect(user.retry, isNull);
+    expect(user.notice, isNull);
+  });
+
   testWidgets(
     'failure sits under the message, not on it, and clears with a retry',
     (tester) async {

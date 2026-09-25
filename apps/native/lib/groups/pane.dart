@@ -667,7 +667,9 @@ class _GroupChatPaneState extends State<GroupChatPane> {
                       text,
                       style: theme.textTheme.bodySmall?.copyWith(color: muted),
                     ),
-                    if (botId != null && runId != null)
+                    if (botId != null &&
+                        runId != null &&
+                        controller.retryable(message, runId))
                       link(
                         GroupIds.retry(runId),
                         'Retry',
