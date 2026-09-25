@@ -50,10 +50,14 @@ final _keptPages = <String, _KeptPage>{};
 void _keep(String key, _KeptPage page) {
   _keptPages.remove(key);
   _keptPages[key] = page;
-  while (_keptPages.length > _keptPagesMaxV1) {
-    final oldest = _keptPages.keys.first;
-    if (_keptPages[oldest]?.owner != null) break;
-    _keptPages.remove(oldest);
+  _trimKeptPages();
+}
+
+/// Lets go of the oldest pages nobody is showing until at most two are kept.
+void _trimKeptPages() {
+  for (final key in [..._keptPages.keys]) {
+    if (_keptPages.length <= _keptPagesMaxV1) return;
+    if (_keptPages[key]?.owner == null) _keptPages.remove(key);
   }
 }
 
@@ -145,10 +149,13 @@ class _HostFrameViewState extends State<HostFrameView> {
   static Future<void> _forward(WebViewController web) async {
     try {
       await web.runJavaScript('''
-window.addEventListener("message", (event) => {
-  if (!event.isTrusted || !event.data || typeof event.data !== "object") return;
-  try { $_channel.postMessage(JSON.stringify(event.data)); } catch (_) {}
-});
+if (!window.__frockbotForwarding) {
+  window.__frockbotForwarding = true;
+  window.addEventListener("message", (event) => {
+    if (!event.isTrusted || !event.data || typeof event.data !== "object") return;
+    try { $_channel.postMessage(JSON.stringify(event.data)); } catch (_) {}
+  });
+}
 ''');
     } catch (_) {
       // A page the listener cannot reach has said nothing.
@@ -189,6 +196,7 @@ window.addEventListener("message", (event) => {
     final page = _page;
     if (page != null && page.owner == this) page.owner = null;
     _page = null;
+    _trimKeptPages();
   }
 
   Future<void> _open() async {
@@ -270,8 +278,20 @@ window.addEventListener("message", (event) => {
               ? NavigationDecision.navigate
               : NavigationDecision.prevent,
           onHttpAuthRequest: (request) => request.onCancel(),
+          onWebResourceError: (error) {
+            if (error.isForMainFrame == false) return;
+            _keptPages.removeWhere((_, kept) => kept == page);
+            final owner = page.owner;
+            if (error.errorType ==
+                    WebResourceErrorType.webContentProcessTerminated &&
+                owner != null &&
+                owner.mounted &&
+                owner._page == page) {
+              unawaited(owner._open());
+            }
+          },
           onPageFinished: (url) async {
-            if (url != page.url || page.loaded) return;
+            if (url != page.url) return;
             final owner = page.owner;
             if (hasChannel) await _forward(web);
             page.loaded = true;
