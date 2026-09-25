@@ -3,10 +3,8 @@ name: Mac desktop
 on:
   pull_request:
     paths:
-      - "apps/mac-messages/**"
       - "apps/native/**"
       - "app/machine/**"
-      - "app/machine-messages/**"
       - "core/machine-protocol/**"
       - "scripts/mac-release*"
       - "scripts/mac-appcast*"
@@ -31,8 +29,7 @@ jobs:
         with:
           bun-version: 1.4.2
       - run: bun install --frozen-lockfile
-      - run: bun run --filter @frockbot/mac-messages typecheck
-      - run: bun test apps/mac-messages app/machine/device.test.ts app/machine/device-runner.test.ts app/machine-messages
+      - run: bun test app/machine/device.test.ts app/machine/device-runner.test.ts
       - run: python3 scripts/mac-release-test.py
       - run: python3 scripts/mac-appcast-test.py
       - uses: subosito/flutter-action@1a449444c387b1966244ae4d4f8c696479add0b2 # v2.23.0
@@ -48,7 +45,7 @@ jobs:
         working-directory: apps/native
       # The client names no deployment of its own, so the suite passes an origin
       # that reaches nothing (ADR 0028).
-      - run: flutter test --no-pub --dart-define=FROCKBOT_ORIGIN=https://tests.invalid test/mac_messages_test.dart test/desktop_update_test.dart
+      - run: flutter test --no-pub --dart-define=FROCKBOT_ORIGIN=https://tests.invalid test/desktop_update_test.dart
         working-directory: apps/native
       - run: python3 scripts/mac-release.py 0.0.0
 
@@ -67,5 +64,5 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           if ! gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
-            gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "FrockBot for Mac ${GITHUB_REF_NAME#mac-}" --notes "Main FrockBot Mac app with optional Messages access. Publication requires verified Developer ID signed, notarized and stapled universal Mac archive."
+            gh release create "$GITHUB_REF_NAME" --draft --verify-tag --title "FrockBot for Mac ${GITHUB_REF_NAME#mac-}" --notes "Main FrockBot Mac app. Publication requires verified Developer ID signed, notarized and stapled universal Mac archive."
           fi

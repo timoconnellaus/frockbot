@@ -10,7 +10,6 @@ import subprocess
 import tempfile
 
 ROOT = Path(__file__).resolve().parent.parent
-SOURCE = ROOT / "apps/mac-messages"
 NATIVE = ROOT / "apps/native"
 
 
@@ -48,14 +47,6 @@ def build(version, destination, identity=None, profile=None, provisioning=None):
             "ARCHS=arm64 x86_64", "ONLY_ACTIVE_ARCH=NO", "build")
         app = staging / "build/Build/Products/Release/FrockBot.app"
         contents = app / "Contents"
-        (contents / "Helpers").mkdir(exist_ok=True)
-        helper = contents / "Helpers/messages-agent"
-        parts = []
-        for arch in ["arm64", "x64"]:
-            part = staging / f"agent-{arch}"
-            run("bun", "build", "--compile", f"--target=bun-darwin-{arch}", SOURCE / "agent.ts", "--outfile", part)
-            parts.append(part)
-        run("lipo", "-create", *parts, "-output", helper)
         app_entitlements = plistlib.loads((NATIVE / "macos/Runner/Release.entitlements").read_bytes())
         if identity:
             decoded = subprocess.run(["security", "cms", "-D", "-i", str(provisioning)], check=True, capture_output=True)
@@ -88,12 +79,11 @@ def build(version, destination, identity=None, profile=None, provisioning=None):
             if item.suffix == ".xpc": args.append("--preserve-metadata=entitlements")
             if identity: args.append("--timestamp")
             run(*args, item)
-        for item, entitlements in [(helper, SOURCE / "Agent.entitlements"), (app, entitlement_file)]:
-            args = ["codesign", "--force", "--sign", identity or "-", "--options", "runtime",
-                    "--entitlements", entitlements]
-            if identity:
-                args.append("--timestamp")
-            run(*args, item)
+        args = ["codesign", "--force", "--sign", identity or "-", "--options", "runtime",
+                "--entitlements", entitlement_file]
+        if identity:
+            args.append("--timestamp")
+        run(*args, app)
         run("codesign", "--verify", "--deep", "--strict", app)
         if identity:
             # Notarize and staple the app first so the copy inside the image

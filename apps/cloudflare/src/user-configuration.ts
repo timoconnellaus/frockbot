@@ -164,6 +164,7 @@ import { createR2ObjectBucketV1 } from "./workspace.js";
 import { cleanUserAppletsV1 } from "./plugin-panels-cleanup.js";
 import { cleanDefaultPackagesMarkerV1 } from "./default-packages-marker-cleanup.js";
 import { cleanRetiredOllamaWebSearchV1 } from "./ollama-web-search-cleanup.js";
+import { cleanUserMachineMessagesV1 } from "./machine-messages-cleanup.js";
 import type { FlockUserTransaction } from "@frockbot/app/flock/user";
 import {
   decodeWorkspaceGenerationRecordV1,
@@ -382,6 +383,8 @@ export class UserConfiguration
       await cleanUndecodableSkillIndexesV1(this.ctx.storage);
       await cleanUndecodableConnectCatalogsV1(this.ctx.storage);
       await cleanRetiredOllamaWebSearchV1(this.ctx.storage);
+      // Before anything decodes a machine record or a queued command.
+      await cleanUserMachineMessagesV1(this.ctx.storage);
       const userId = await this.ctx.storage.get<string>(USER_IDENTITY_KEY);
       const objects = this.env.MEMORY_FILES
         ? createR2ObjectBucketV1(this.env.MEMORY_FILES)

@@ -58,12 +58,7 @@ import {
 import { readBotPluginRosterV1 } from "@frockbot/app/plugins/worker-bot";
 import type { PanelFocusRuntimeHostV1 } from "@frockbot/app/plugins/panel-focus";
 import { decodeAgentTurnSlotReceiptV1 } from "@frockbot/app/flock/quota";
-import {
-  createBotMachineHost,
-  createBotMachineMessagesHost,
-  machineSeam,
-  resolveBotMachineMessagesGateV1,
-} from "@frockbot/app/machine/bot";
+import { createBotMachineHost, machineSeam } from "@frockbot/app/machine/bot";
 import {
   connectionTriggersFromUserV1,
   createBotRoutinesHost,
@@ -375,30 +370,9 @@ export async function agentRuntime(
       installation?.values,
     );
   };
-  const primitivePackageSettings = (
-    packageId: string,
-  ): Record<string, string | number | boolean> =>
-    Object.fromEntries(
-      Object.entries(packageSettings(packageId)).filter(
-        (entry): entry is [string, string | number | boolean] =>
-          typeof entry[1] !== "object",
-      ),
-    );
   // The `image.model` Package setting, already checked against the enum the
   // Image Package's definition declares.
   const configuredImageModel = packageSettings("image").model;
-  // Row 57g. Resolved before the Composition is built, because the answer
-  // decides whether a Package is mounted at all: a feature gate that let the
-  // tools exist and refuse would still have told the model they were there.
-  // The registry is read only when the setting is on.
-  const machines = turn ? machineSeam(state, identity) : undefined;
-  const messagesGatePromise =
-    machines && featureOn("machine-messages")
-      ? resolveBotMachineMessagesGateV1(
-          primitivePackageSettings("machine-messages"),
-          () => machines.list(),
-        )
-      : Promise.resolve({ status: "off" } as const);
   // A Bot writes a Plugin only inside an admitted Turn, for the same reason,
   // and only behind the account's Plugin-authoring switch (ADR 0026).
   const pluginsPromise = turn
@@ -449,8 +423,7 @@ export async function agentRuntime(
   })();
   // These gates share the account-feature read above but otherwise touch
   // independent authorities. Resolve them as one preparation stage.
-  const [messagesGate, plugins, skills, panels] = await Promise.all([
-    messagesGatePromise,
+  const [plugins, skills, panels] = await Promise.all([
     pluginsPromise,
     skillsPromise,
     panelsPromise,
@@ -662,28 +635,6 @@ export async function agentRuntime(
               turn,
               state.ctx.storage,
               machineSeam(state, identity),
-            ),
-          }
-        : {}),
-      // Row 57g, mounted only behind its whole gate: the User setting on, and
-      // a connected macOS machine that reports the `messages` capability.
-      ...(turn && machines && messagesGate.status === "ready"
-        ? {
-            machineMessages: createBotMachineMessagesHost(
-              {
-                ...createBotMachineHost(
-                  identity,
-                  turn,
-                  state.ctx.storage,
-                  machines,
-                ),
-                writer: {
-                  sessionId: turn.sessionId,
-                  turnId: turn.turnId,
-                  runId: turn.runId,
-                },
-              },
-              machines,
             ),
           }
         : {}),

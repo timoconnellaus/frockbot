@@ -808,7 +808,10 @@ void main() {
       addTearDown(tester.view.resetPhysicalSize);
       addTearDown(tester.view.resetDevicePixelRatio);
       final store = MemoryStore();
-      final api = SettingsApi(store, (_, _) async => connectionsFrame());
+      final api = SettingsApi(
+        store,
+        (_, _) async => connectionsFrame(twoApps: true),
+      );
 
       tester.view.physicalSize = const Size(390, 844);
       await tester.pumpWidget(page(api, store));
@@ -816,11 +819,11 @@ void main() {
       expect(find.widgetWithText(AppBar, 'Marketplace'), findsOneWidget);
       expect(find.text('Connected apps'), findsNothing);
       // One below the other on a phone: only the connector rows are here, and
-      // Gmail sits under the Mac Messages row at the same left edge.
-      final mac = tester.getRect(find.text('Messages on your Mac'));
+      // Slack sits under Gmail at the same left edge.
       final gmail = tester.getRect(find.text('Gmail'));
-      expect(gmail.top, greaterThan(mac.bottom));
-      expect((gmail.left - mac.left).abs(), lessThan(1));
+      final slack = tester.getRect(find.text('Slack'));
+      expect(slack.top, greaterThan(gmail.bottom));
+      expect((slack.left - gmail.left).abs(), lessThan(1));
 
       tester.view.physicalSize = const Size(1280, 900);
       await tester.pumpWidget(
@@ -858,8 +861,8 @@ void main() {
         findsOneWidget,
       );
       // Two rows side by side on one line, wide.
-      final left = tester.getRect(find.text('Messages on your Mac'));
-      final right = tester.getRect(find.text('Gmail'));
+      final left = tester.getRect(find.text('Gmail'));
+      final right = tester.getRect(find.text('Slack'));
       expect(right.left, greaterThan(left.right));
       expect((right.top - left.top).abs(), lessThan(1));
       // The way out is the control the page draws, since a dialog has no bar

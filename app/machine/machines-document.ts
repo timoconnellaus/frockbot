@@ -71,7 +71,6 @@ export function machinesRevisionV1(view: MachineListViewV1): number {
 const CAPABILITY_WORDS: Record<string, string> = {
   exec: "run commands",
   files: "read and write files",
-  messages: "read Messages",
 };
 
 function status(text: string): ViewNode {
@@ -139,10 +138,6 @@ export function machinesDocumentV1(view: MachineListViewV1): ViewDocument {
         {
           type: "text",
           text: "Your computers are devices running the FrockBot desktop app. Each is separate from your Bot’s hosted Computer. A Bot can read its files and run commands on it only while that app is open, and only after you approve each action.",
-        },
-        {
-          type: "text",
-          text: "The Mac app is distributed directly, outside the Mac App Store. It connects Messages on your Mac while open. Your phone and web app control the connection remotely; they do not read the Mac’s Messages database. Requested message content is shared with FrockBot and your Bots’ AI providers only after you enable Messages sharing. Each send requires your approval.",
         },
         // The count is the summary that sits under the title.
         // With nothing registered there is nothing to summarise, and the list

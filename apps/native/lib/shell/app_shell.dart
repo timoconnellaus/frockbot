@@ -41,7 +41,6 @@ import '../groups/sheets.dart';
 import '../groups/thread.dart';
 import '../machines/page.dart';
 import '../secrets/page.dart';
-import '../machines/mac_messages.dart';
 import '../plugins/page.dart';
 import '../recovery/page.dart';
 import '../routines/page.dart';
@@ -342,7 +341,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
   @override
   void initState() {
     super.initState();
-    unawaited(macMessages.configure(widget.userId));
     WidgetsBinding.instance.addObserver(this);
     microphone.assistantLive = () => voiceSession?.active == true;
     microphone.holdAssistant = (held) async =>
@@ -3665,7 +3663,6 @@ class _AppShellState extends State<AppShell> with WidgetsBindingObserver {
 
   @override
   void dispose() {
-    unawaited(macMessages.stop(widget.userId));
     unawaited(appBadge.clear());
     push.onFocus = null;
     push.onNotificationsChanged = null;

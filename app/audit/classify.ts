@@ -78,18 +78,6 @@ const WORKSPACE_FILE_TOOLS = new Set([
  */
 const MACHINE_SHELL_TOOL = "machine_exec";
 
-/**
- * The registered Mac's Messages verbs (register row 57g).
- *
- * They are `mcp` rows and not `file` ones: reading somebody's Messages history
- * or sending as them is reaching a *service* on that machine — the shape §4.2
- * itself gives them, beside the connector tools — and the target says which
- * machine it was. Prefix-matched rather than listed one by one because the
- * seven names all belong to one Package and one classification, so a Package
- * that adds an eighth cannot accidentally add an unaudited one.
- */
-const MACHINE_MESSAGES_PREFIX = "machine_messages_";
-
 // An MCP server's tools are called through the dynamic envelope, so the
 // resolved name is `<namespace>/<tool>`, and every server's namespace is
 // `mcp-<name>`, short enough that the pair fits an audit row. A connected
@@ -143,7 +131,6 @@ export function dynamicToolInputV1(input: unknown): unknown {
 function isMachineToolV1(name: string): boolean {
   return (
     name === MACHINE_SHELL_TOOL ||
-    name.startsWith(MACHINE_MESSAGES_PREFIX) ||
     name === "machine_read" ||
     name === "machine_copy_to_computer" ||
     name === "machine_copy_from_computer"
@@ -214,9 +201,6 @@ export function auditKindForToolV1(
   }
   if (name.startsWith("computer_process_")) {
     return { kind: "process", target: onComputer };
-  }
-  if (name.startsWith(MACHINE_MESSAGES_PREFIX)) {
-    return { kind: "mcp", target: onComputer };
   }
   // Mail that left from the Bot's own address: a note to its person, or a
   // draft the person approved. Drawing a draft sends nothing, so it is not

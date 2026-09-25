@@ -20,7 +20,6 @@ import { credentialsDefinitionV1 } from "@frockbot/app/credentials/definition";
 import { customModelsDefinitionV1 } from "@frockbot/app/custom-models/definition";
 import { flockDefinitionV1 } from "@frockbot/app/flock/definition";
 import { imageDefinitionV1 } from "@frockbot/app/image/definition";
-import { machineMessagesDefinitionV1 } from "@frockbot/app/machine-messages/definition";
 import { mcpDefinitionV1 } from "@frockbot/app/mcp/definition";
 import { catalogProviderDefinitionsV1 } from "@frockbot/providers/catalog/definition";
 import { providerFlockAiDefinitionV1 } from "@frockbot/providers/frock-ai/definition";
@@ -75,7 +74,6 @@ export const FOUNDATION_PACKAGE_CATALOG_V1 = indexPackageCatalogV1(
     computerDefinitionV1,
     { id: "computer-host", displayName: "Computer" },
     userMachineDefinitionV1,
-    machineMessagesDefinitionV1,
     subagentsDefinitionV1,
   ] satisfies readonly PackageDefinitionV1[],
   ({ id }) => ({ packageId: id }),

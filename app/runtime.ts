@@ -75,9 +75,6 @@ import {
   type RoutinesRuntimeHostV1,
 } from "@frockbot/app/routines/agent";
 export type { RoutinesRuntimeHostV1 } from "@frockbot/app/routines/agent";
-import { createMachineMessagesFeature } from "@frockbot/app/machine-messages/agent";
-import type { MachineMessagesRuntimeHostV1 } from "@frockbot/app/machine-messages/agent";
-export type { MachineMessagesRuntimeHostV1 } from "@frockbot/app/machine-messages/agent";
 // The registered machine's six tools. Mounted only for an admitted Turn, whose
 // Session and Turn the intent record it writes has to name.
 import {
@@ -548,14 +545,6 @@ export function createFoundationHostedRuntimePackages(
           runtimePackage(
             "user-machine",
             createMachineRuntimeFeature(host.machines),
-          ),
-        ]
-      : []),
-    ...(host.machineMessages
-      ? [
-          runtimePackage(
-            "machine-messages",
-            createMachineMessagesFeature(host.machineMessages),
           ),
         ]
       : []),
