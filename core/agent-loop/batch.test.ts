@@ -760,11 +760,7 @@ describe("batch ordering", () => {
    * A tool whose effect has a place in the conversation, and which takes as
    * long to land as its input asks for.
    */
-  function orderedEffect(
-    name: string,
-    landed: string[],
-    timeline?: string[],
-  ): ToolDefinition {
+  function orderedEffect(name: string, landed: string[]): ToolDefinition {
     return {
       name,
       description: `${name} fixture.`,
@@ -774,7 +770,6 @@ describe("batch ordering", () => {
         const { text, delay } = input as { text: string; delay: number };
         await Bun.sleep(delay);
         landed.push(text);
-        timeline?.push(`${name}:${text}`);
         return { content: text, isError: false };
       },
     };
@@ -809,8 +804,30 @@ describe("batch ordering", () => {
     // once, and overlaps them. Serialising the whole batch would make the two
     // slow reads wait for each other and for the sends, which is the cost the
     // batch exists to avoid.
+    //
+    // The overlap is forced by the calls themselves, not by how long each one
+    // sleeps, so a loaded machine cannot reorder it: the first send cannot
+    // land until both reads are in flight, and neither read can finish until
+    // both sends have landed. A batch that serialised any of them would wait
+    // on itself, and the test would time out.
     const timeline: string[] = [];
-    const landed: string[] = [];
+    const readsStarted = Promise.withResolvers<void>();
+    const sendsLanded = Promise.withResolvers<void>();
+    let started = 0;
+    let sent = 0;
+    const send: ToolDefinition = {
+      name: "send",
+      description: "send fixture.",
+      inputSchema: { type: "object" },
+      orderedEffect: true,
+      execute: async (input) => {
+        const { text } = input as { text: string };
+        await readsStarted.promise;
+        timeline.push(`send:${text}`);
+        if (++sent === 2) sendsLanded.resolve();
+        return { content: text, isError: false };
+      },
+    };
     const slow: ToolDefinition = {
       name: "read",
       description: "read fixture.",
@@ -818,18 +835,19 @@ describe("batch ordering", () => {
       execute: async (input) => {
         const { id } = input as { id: string };
         timeline.push(`read:start:${id}`);
-        await Bun.sleep(40);
+        if (++started === 2) readsStarted.resolve();
+        await sendsLanded.promise;
         timeline.push(`read:end:${id}`);
         return { content: id, isError: false };
       },
     };
 
     await runBatch(
-      [orderedEffect("send", landed, timeline), slow],
+      [send, slow],
       [
-        { tool: "send", arguments: { text: "one", delay: 5 } },
+        { tool: "send", arguments: { text: "one" } },
         { tool: "read", arguments: { id: "a" } },
-        { tool: "send", arguments: { text: "two", delay: 5 } },
+        { tool: "send", arguments: { text: "two" } },
         { tool: "read", arguments: { id: "b" } },
       ],
     );
