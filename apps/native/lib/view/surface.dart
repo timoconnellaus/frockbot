@@ -98,7 +98,7 @@ class ViewSurfacePage extends StatefulWidget {
   /// document does not.
   ///
   /// That is one thing and always the same thing: a secret the authority
-  /// minted once, on a receipt — a webhook key, a pairing code. A document can
+  /// minted once, on a receipt — a webhook key. A document can
   /// be read twice, so a value that exists once cannot be in one; it lives
   /// here for as long as the person is looking at it and nowhere else.
   ///

@@ -60,7 +60,7 @@ async function enrolled(
   authority: MachineUserBackendContribution,
   userId: string,
 ) {
-  const offer = await authority.createPairing(userId, {});
+  const offer = await authority.createPairing(userId);
   const receipt = await authority.enroll(
     { userId, machineId: offer.machineId, nonce: "n" },
     {
@@ -183,9 +183,9 @@ describe("the User Contribution", () => {
   });
 
   test("without a secret nothing can be paired", async () => {
-    await expect(
-      contribution(undefined).createPairing("u", {}),
-    ).rejects.toThrow(/not configured/);
+    await expect(contribution(undefined).createPairing("u")).rejects.toThrow(
+      /not configured/,
+    );
   });
 
   test("one read answers the five questions a control tool has to ask", async () => {

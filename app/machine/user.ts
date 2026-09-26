@@ -155,15 +155,12 @@ export class MachineUserBackendContribution {
   }
 
   /**
-   * A pairing offer, from the authenticated settings surface.
+   * A pairing offer, for the signed-in app to hand to its own agent.
    *
-   * The browser is handed the code and the machine id it names; the backend
+   * The session is handed the code and the machine id it names; the backend
    * keeps only the digest. Five minutes, one use.
    */
-  async createPairing(
-    userId: string,
-    request: { label?: string } = {},
-  ): Promise<MachinePairingOfferV1> {
+  async createPairing(userId: string): Promise<MachinePairingOfferV1> {
     const secret = this.secret();
     const now = this.now();
     const registered = await listMachineRecordsV1(this.host.storage);
@@ -185,7 +182,6 @@ export class MachineUserBackendContribution {
     const record = await writeMachinePairingV1(this.host.storage, {
       userId,
       machineId,
-      ...(request.label === undefined ? {} : { label: request.label }),
       codeDigest: await machinePairingCodeDigestV1(code),
       now,
     });

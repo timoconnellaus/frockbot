@@ -470,25 +470,17 @@ abstract final class FlockIds {
   static String createBackgroundOption(String id) => 'flock-background-$id';
 }
 
-/// Registered machines: the computers a Bot may reach, and the code that
-/// registers one.
-///
-/// The pairing code is host chrome rather than a node, for the same reason a
-/// `SettingField.secret` is never seeded: it exists once, on a receipt, and is
-/// never in a document the server could send twice.
 abstract final class SecretIds {
   static const document = 'secrets-document';
   static const refresh = 'secrets-refresh';
   static const profileEntry = 'profile-secrets';
 }
 
+/// Your computers: this Mac's module host and the account's computers.
 abstract final class MachineIds {
   static const document = 'machines-document';
   static const refresh = 'machines-refresh';
   static const profileEntry = 'profile-machines';
-  static const pairingCode = 'machine-pairing-code';
-  static const pairingCopy = 'machine-pairing-copy';
-  static const pairingDismiss = 'machine-pairing-dismiss';
 }
 
 /// Email: one Bot's switch and address, the addresses allowed to write to it,

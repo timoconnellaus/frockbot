@@ -615,8 +615,10 @@ Screens (no router; `MaterialApp(home:)` plus `Navigator.push`):
   named
 - `CreateBotSheet` — `lib/flock/create.dart`: a character, a name and the first
   thing to say to the Bot, opened from the sidebar's own create gesture
-- `MachinesPage` — `lib/machines/page.dart`: a host over `ViewDocumentView` for
-  the computers a Bot may reach, plus the pairing code the host holds
+- `MachinesPage` — `lib/machines/page.dart`: "Your computers", a host over
+  `ViewDocumentView` for the account's computers, each with Revoke, under the
+  This Mac card (`lib/machines/device_host.dart`) that pairs the desktop
+  through its signed-in session and shows its device modules
 - `PanelCanvas` — `lib/panels/canvas.dart`: the conversation panel for this Bot. A host tab strip over the focused Plugin's `ViewDocument` or its own page, in the right column on a wide window and a pushed page on a phone. The bag, the Session focus and the `bot.nav` doors come from `GET /api/bots/:bot/panels/open`. Empty bag: the region is not offered
 - `ComputerCard` → `ComputerViewerPage` — `lib/computer/card.dart`: the Bot's
   screen, live or as its last capture, and the full-window viewer it opens
@@ -805,8 +807,7 @@ kept the way a conversation page is (`lib/client/document_cache.dart`):
 memory is what a remount paints from in the tap frame, disk is what a later
 process finds, and the host then lets the live read replace it if the
 revision moved. A shape this build cannot read is discarded wholesale. Editor
-and create documents, minted webhook keys and pairing codes are never written
-there. The Bot page prefetches the Routines list and that Bot's Plugins so those
+and create documents and minted webhook keys are never written there. The Bot page prefetches the Routines list and that Bot's Plugins so those
 doors can open on cache. `GET …/routines?as=document` is one Bot Durable
 Object read — the list and the inbox together — not two RPCs started in
 parallel. The host keeps drawing a document it already holds while a refresh
@@ -931,9 +932,10 @@ than offering a second command.
 Two more projections in the settings-document family:
 
 - `app/machine/machines-document.ts` over the registry
-  (`GET /api/machines?as=document`). Two kinds: registering a machine, and
-  revoking one. A revoked machine says so rather than that it is connected —
-  its next poll is a 401 — and is not counted among the registered.
+  (`GET /api/machines?as=document`). One kind: revoking a machine. Nothing on
+  it adds one — the desktop app enrols its own Mac through its signed-in
+  session. A revoked machine says so rather than that it is connected — its
+  next connect is a 401 — and is not counted among the registered.
 - The Routines list and the Routine detail are two documents. The list is
   what is armed and what it left behind; the detail is one Routine, named
   by `?routine=` — name, prompt, trigger in words, optional provider
@@ -948,11 +950,13 @@ Two more projections in the settings-document family:
   key for a scheduled Routine, so the control is absent rather than offered.
 
 **A secret the authority minted once is never in a document.** A webhook key
-and a pairing code are each signed once, stored only as a digest and answered
-on a receipt; a document can be read twice, so neither can be in one.
-`ViewSurfacePage` gained one seam for exactly this — a `banner` the host draws
-above the document — and the two surfaces hold their secret there for as long
-as the person is looking at it and nowhere else. It is the same reasoning
+is signed once, stored only as a digest and answered on a receipt; a document
+can be read twice, so it cannot be in one. `ViewSurfacePage` gained one seam
+for exactly this — a `banner` the host draws above the document — and the
+surface holds the key there for as long as the person is looking at it and
+nowhere else. (A machine pairing code is minted the same way, but only the
+desktop app's own session asks for one and hands it straight to its agent; no
+person sees it.) It is the same reasoning
 `SettingField.secret` already carried, from the other direction.
 
 Creating a Bot and its danger zone are host chrome rather than projections, and

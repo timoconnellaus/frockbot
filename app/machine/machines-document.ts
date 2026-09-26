@@ -2,15 +2,15 @@
 // `ViewDocument` the host renders — the same convention as
 // `app/routines/routines-document.ts`, reached with `?as=document`.
 //
-// Two commands and nothing else: register a machine, and revoke one. Neither
-// takes a revision — a machine is its own durable record, and the registry is
-// eight of them — so, as with Routines, the projection derives a revision from
-// its own bytes and no command fences on it.
+// One command and nothing else: revoke a machine. It takes no revision — a
+// machine is its own durable record, and the registry is eight of them — so,
+// as with Routines, the projection derives a revision from its own bytes and
+// no command fences on it.
 //
-// The pairing code the register command mints is deliberately not here. It is
-// signed once, stored only as a digest, and answered on the receipt: a
-// document can be read twice, so a value that exists once cannot be in one.
-// The host holds it for as long as the person is looking at it.
+// Nothing here adds a machine. A computer enrols itself when the person signs
+// in to the FrockBot desktop app on it and runs its modules; the app asks for
+// the one-time code under its own session and hands it to its own agent, so no
+// code is ever shown to a person.
 
 import {
   decodeProtocol,
@@ -24,15 +24,9 @@ import type {
 } from "@frockbot/core/machine-protocol";
 import { agoV1 } from "@frockbot/app/shell/moment";
 
-export const MACHINE_ACTION_KINDS_V1 = [
-  "pair-machine",
-  "revoke-machine",
-] as const;
+export const MACHINE_ACTION_KINDS_V1 = ["revoke-machine"] as const;
 
 export type MachineActionKindV1 = (typeof MACHINE_ACTION_KINDS_V1)[number];
-
-/** The field the register form carries: what to call the machine. */
-export const MACHINE_LABEL_FIELD_V1 = "machine.label";
 
 const KIND: ActionValueSchema = {
   type: "string",
@@ -91,7 +85,7 @@ function machineFacts(machine: MachineListEntryV1, now: string): string {
     : machine.connected
       ? "Connected"
       : `Offline · last seen ${agoV1(machine.lastSeenAt, now)}`;
-  return `${machine.platform} · ${can || "nothing yet"} · ${state}`;
+  return `${machine.platform} · ${can || "runs device modules"} · ${state}`;
 }
 
 function machineNode(machine: MachineListEntryV1, now: string): ViewNode {
@@ -104,7 +98,7 @@ function machineNode(machine: MachineListEntryV1, now: string): ViewNode {
       ...(machine.revokedAt
         ? [
             status(
-              "This machine's key is retired. Pair it again from the FrockBot Mac app to bring it back.",
+              "This computer’s key is retired. To connect it again, choose Run modules on this Mac in the FrockBot desktop app on it.",
             ),
           ]
         : [
@@ -137,7 +131,7 @@ export function machinesDocumentV1(view: MachineListViewV1): ViewDocument {
       children: [
         {
           type: "text",
-          text: "Your computers are devices running the FrockBot desktop app. Each is separate from your Bot’s hosted Computer. A Bot can read its files and run commands on it only while that app is open, and only after you approve each action.",
+          text: "Your computers are Macs signed in to the FrockBot desktop app. Each is separate from your Bot’s hosted Computer. A Mac connects itself when you sign in to the app on it, and runs your Plugins’ device modules while the app is open. Revoke one here to cut it off.",
         },
         // The count is the summary that sits under the title.
         // With nothing registered there is nothing to summarise, and the list
@@ -145,36 +139,6 @@ export function machinesDocumentV1(view: MachineListViewV1): ViewDocument {
         ...(view.machines.length === 0
           ? []
           : [status(`${live.length} registered · ${connected} connected`)]),
-        {
-          type: "group",
-          orientation: "column",
-          title: "Connect a computer",
-          collapsed: view.machines.length > 0,
-          children: [
-            {
-              type: "field",
-              field: {
-                id: MACHINE_LABEL_FIELD_V1,
-                label: "Name",
-                kind: "text",
-                value: null,
-                editable: true,
-                maxLength: 200,
-                hint: "What to call this computer. Optional.",
-              },
-            },
-            status(
-              "You get a code here, once, and paste it into the FrockBot Mac app on the machine you want to register.",
-            ),
-            {
-              type: "action",
-              actionId: "pair-machine",
-              label: "Get a pairing code",
-              style: "primary",
-              input: { kind: "pair-machine" },
-            },
-          ],
-        },
         ...(view.machines.length === 0
           ? [status("No computers are connected yet.")]
           : view.machines.map((machine) =>
@@ -183,20 +147,6 @@ export function machinesDocumentV1(view: MachineListViewV1): ViewDocument {
       ],
     },
     actions: [
-      {
-        // `label` is optional: the enrolling agent sends its own name, and the
-        // one typed here is only what to call it before it has arrived.
-        id: "pair-machine",
-        schema: {
-          type: "object",
-          properties: {
-            kind: KIND,
-            [MACHINE_LABEL_FIELD_V1]: { type: "string", maxLength: 200 },
-          },
-          required: ["kind"],
-          additionalProperties: false,
-        },
-      },
       {
         id: "revoke-machine",
         schema: {

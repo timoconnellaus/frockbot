@@ -3718,16 +3718,9 @@ export class UserConfiguration
    * if the gateway addressed it wrongly.
    */
   async createMachinePairing(input: unknown) {
-    const request = decodeRpcEnvelopeV1(
-      input,
-      { userId: rpcIdentifier },
-      { label: rpcString(200) },
-    );
+    const request = decodeRpcEnvelopeV1(input, { userId: rpcIdentifier });
     const userId = await this.assertUserIdentity(request.userId as string);
-    return (await this.machineContribution()).createPairing(
-      userId,
-      request.label === undefined ? {} : { label: request.label as string },
-    );
+    return (await this.machineContribution()).createPairing(userId);
   }
 
   async enrollMachine(input: unknown) {

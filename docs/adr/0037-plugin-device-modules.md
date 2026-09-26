@@ -384,6 +384,10 @@ absent Device and the Pending-input result.
 - The Plugin worker gains the `device` binding.
 - Frock Compose builds module artifacts with their dependencies.
 - The Plugin skill gains a module reference and the four testing tools.
+- Amended 2026-09-27: "Your computers" loses its manual pairing code; the
+  desktop pairs only through its signed-in app. The account's Devices page
+  replaces it (see the note under Order and
+  [ADR 0035](0035-device-bridge.md#consequences)).
 
 ## Order
 
@@ -394,6 +398,18 @@ Each step leaves `main` shippable.
    cleanup.
 3. The module host: Deno and the Seatbelt profile, the hibernating socket, the
    sync, a module that only logs, and `plugin_module_reports`.
+
+   > Amended 2026-09-27. Step 3 includes the account's **Devices** page,
+   > replacing "Your computers": reached from the You page's Account group, it
+   > lists every signed-in device (desktop, phone, web). A device's page holds
+   > its own switches — microphone and notifications, the Local tier — and a
+   > "Plugins on this Mac" section listing each device module with its state
+   > (running, restarting, stopped), what it may reach, and an off switch. An
+   > ability or module can be turned off from any device, and turned on only on
+   > the device itself. Until then "Your computers" shows this Mac's module
+   > host and the account's computers, and pairing happens only through the
+   > signed-in app, with no manual code.
+
 4. Module events into Plugin triggers, with the listening flags, the replay key,
    catch-up and `plugin_trigger_try`.
 5. `device.call`, with the ledger, the deadline and its outcomes, and

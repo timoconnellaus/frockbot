@@ -251,6 +251,9 @@ describe("machine_list", () => {
     try {
       const result = await invoke(empty, MACHINE_LIST_TOOL_V1, {});
       expect(result.content).toContain("No machines are registered");
+      // The only way in is the signed-in desktop app; no settings page mints one.
+      expect(result.content).toContain("FrockBot desktop app");
+      expect(result.content).not.toContain("Settings");
       expect(result.isError).toBe(false);
     } finally {
       await empty.dispose();
