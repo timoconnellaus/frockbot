@@ -35,7 +35,7 @@ import {
   CONNECT_CATALOG_UNAVAILABLE_MESSAGE_V1,
   CONNECT_STALE_CONTRACT_MESSAGE_V1,
 } from "./account-catalog.js";
-import { shapeConnectResultV1 } from "./result.js";
+import { connectResultV1 } from "./result.js";
 import { connectSafeMetadataV1 } from "./user.js";
 
 /** Longest argument bag sent to the provider. */
@@ -362,7 +362,7 @@ export async function executeConnectTool(
         isError: true,
       };
     }
-    return { content: shapeConnectResultV1(result.data), isError: false };
+    return connectResultV1(call.tool.slug, result.data);
   } catch (error) {
     // A refusal the provider gave before doing anything is safe to retry
     // after fixing the call; anything else may have gone through.
