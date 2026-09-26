@@ -393,6 +393,20 @@ export async function executeTurn(
   // The isolate bindings follow the generation actually being mounted, so a
   // fail-closed fallback loads the last known good's members, not the
   // pinned generation's.
+  // The Session is seeded with the person's recent Turns so supervision
+  // judges this one against what was said before it. A resumed run's own Turn
+  // is in its journal, not before it. Read once, outside the mount, and only
+  // as evidence: a projection that cannot be read leaves supervision without
+  // it rather than failing the Composition.
+  const supervisionContext =
+    input.contextAvailability === "ready"
+      ? await readSupervisionContextV1(
+          state.ctx.storage,
+          input.command.sessionId,
+          input.journal.find((event) => event.type === "turn/start")?.turn ??
+            input.cursor.nextTurn,
+        ).catch(() => input.context)
+      : input.context;
   const host: CompositionMountHost<ShellMountedComposition> = {
     mount: async (mounting, signal) => {
       // Skills follow this mount, including a fail-closed fallback. The array
@@ -432,18 +446,7 @@ export async function executeTurn(
         sessionId: input.command.sessionId,
         sessionSeed: {
           cursor: input.cursor,
-          // The Session is seeded with the person's recent Turns so supervision
-          // judges this one against what was said before it. A resumed run's
-          // own Turn is in its journal, not before it.
-          context:
-            input.contextAvailability === "ready"
-              ? await readSupervisionContextV1(
-                  state.ctx.storage,
-                  input.command.sessionId,
-                  input.journal.find((event) => event.type === "turn/start")
-                    ?.turn ?? input.cursor.nextTurn,
-                )
-              : input.context,
+          context: supervisionContext,
           journal: {
             startSeq: input.journal[0]?.seq ?? input.cursor.nextSeq,
             events: input.journal,

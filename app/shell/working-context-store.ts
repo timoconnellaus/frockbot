@@ -774,8 +774,9 @@ export const SUPERVISION_CONTEXT_TURNS_V1 = 4;
  * as the conversation supervision judges a Turn against.
  *
  * Only `chat` Turns: what opened an automation or agent Turn was not said by
- * the person, and supervision reads a user message as the person's own words
- * — the words that authorize a call.
+ * the person. Even a chat Turn's user messages can carry a Routine's hand-off
+ * or a card press, so this is context for judging a Turn, never authorization
+ * for a call.
  */
 export async function readSupervisionContextV1(
   storage: WorkingContextStorageV1,
@@ -795,7 +796,7 @@ export async function readSupervisionContextV1(
   const picked: TurnContextIndexV1[] = [];
   for (const index of page.values()) {
     if (index.turn >= beforeTurn || !index.messageBearing) continue;
-    if (index.turnType !== "chat" && index.turnType !== "unspecified") continue;
+    if (index.turnType !== "chat") continue;
     picked.unshift(index);
     if (picked.length >= SUPERVISION_CONTEXT_TURNS_V1) break;
   }

@@ -741,10 +741,11 @@ export function createSupervisionRuntimeFeatureV1(
                     tool,
                     arguments: isRecord(call.input) ? call.input : {},
                   },
-                  conversation: [
-                    ...conversationBefore(session),
-                    ...conversationThisTurn(events, at.turn),
-                  ],
+                  // This Turn only. An earlier Turn's user messages also carry
+                  // text the person did not type — a Routine's hand-off, a
+                  // card press, another Bot in a group — and nothing records
+                  // which, so they must not stand as authorization here.
+                  conversation: conversationThisTurn(events, at.turn),
                   priorResults: priorResults(events, at.turn),
                   policies: emptyPolicySnapshotV1(),
                 },

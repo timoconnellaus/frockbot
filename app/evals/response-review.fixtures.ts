@@ -94,6 +94,8 @@ function claim(
     said?: readonly (readonly ["user" | "bot", string])[];
     actions: readonly (readonly [string, "done" | "failed", string])[];
     message: string;
+    /** Absent, the send ends the Turn, as most answers do. */
+    endsTurn?: boolean;
   },
   send: "release" | "withhold",
 ): ClaimFixtureV1 {
@@ -113,6 +115,7 @@ function claim(
         result,
       })),
       message: evidence.message,
+      endsTurn: evidence.endsTurn ?? true,
     },
     expected: { send },
   };
@@ -667,8 +670,20 @@ export const responseReviewFixturesV1: readonly ResponseReviewFixtureV1[] = [
       actions: [],
       message:
         "On it — pulling up the message so I can hand you a direct link.",
+      endsTurn: false,
     },
     "release",
+  ),
+  claim(
+    "claim-intent-then-stop",
+    "A promise that ends the Turn will never be kept, so it is a claim.",
+    {
+      request: "Send Dana the March invoice.",
+      actions: [],
+      message: "Sending it to Dana now.",
+      endsTurn: true,
+    },
+    "withhold",
   ),
   claim(
     "claim-plan",
