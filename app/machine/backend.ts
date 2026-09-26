@@ -7,7 +7,7 @@
 //   GET  /api/machines               the `ListMachines` projection
 //   POST /api/machines/:id/revoke    kill every token this machine holds
 //
-// Six are not authenticated at all, because the caller is a program on
+// Eight are not authenticated at all, because the caller is a program on
 // somebody's laptop and has no session:
 //
 //   POST /api/machines/enroll                             bearer: pairing code
@@ -16,8 +16,10 @@
 //   POST /api/machines/:id/commands/:commandId/result     bearer: machine token
 //   GET  /api/machines/:id/modules/:contentHash           bearer: machine token
 //   POST /api/machines/:id/module-reports                 bearer: machine token
+//   POST /api/machines/:id/module-calls/:callId/claim     bearer: machine token
+//   POST /api/machines/:id/module-calls/:callId/result    bearer: machine token
 //
-// Those six are `publicRoute`s: they run at the seam in
+// Those eight are `publicRoute`s: they run at the seam in
 // `apps/cloudflare/src/gateway.ts` that executes *before* session
 // authentication, exactly where `plugin-routines`' webhook runs. Public means
 // "no session", never "no authority" — and the order of the checks is the
@@ -47,6 +49,8 @@ import {
   decodeMachineEnrollmentReceiptV1,
   decodeMachineIdV1,
   decodeMachineListViewV1,
+  decodeMachineModuleCallClaimReceiptV1,
+  decodeMachineModuleCallResultReceiptV1,
   decodeMachineModuleReportsReceiptV1,
   decodeMachineModuleReportsV1,
   decodeMachinePairingOfferV1,
@@ -58,6 +62,8 @@ import {
   type MachineClaimReceiptV1,
   type MachineEnrollmentReceiptV1,
   type MachineListViewV1,
+  type MachineModuleCallClaimReceiptV1,
+  type MachineModuleCallResultReceiptV1,
   type MachineModuleReportsReceiptV1,
   type MachineModuleReportsV1,
   type MachinePairingOfferV1,
@@ -125,6 +131,15 @@ export interface MachineGatewayHostV1 {
     userId: string,
     call: MachineCallV1 & { reports: MachineModuleReportsV1 },
   ): Promise<MachineModuleReportsReceiptV1>;
+  /** The desktop starting a Plugin's call to its device module. */
+  claimMachineModuleCall(
+    userId: string,
+    call: MachineCallV1 & { callId: string },
+  ): Promise<MachineModuleCallClaimReceiptV1>;
+  recordMachineModuleCallResult(
+    userId: string,
+    call: MachineCallV1 & { callId: string; result: unknown },
+  ): Promise<MachineModuleCallResultReceiptV1>;
   listMachines(userId: string): Promise<MachineListViewV1>;
   revokeMachine(userId: string, machineId: string): Promise<MachineListViewV1>;
 }
@@ -159,6 +174,9 @@ const MODULE = new RegExp(
 );
 const MODULE_REPORTS = new RegExp(
   `^${MACHINE_ROUTE_PREFIX_V1}/([^/]+)/module-reports$`,
+);
+const MODULE_CALL = new RegExp(
+  `^${MACHINE_ROUTE_PREFIX_V1}/([^/]+)/module-calls/([^/]+)/(claim|result)$`,
 );
 const CONTENT_HASH = /^[0-9a-f]{64}$/;
 
@@ -323,7 +341,16 @@ export function createMachineBackendContribution(
     const result = RESULT.exec(url.pathname);
     const module = MODULE.exec(url.pathname);
     const moduleReports = MODULE_REPORTS.exec(url.pathname);
-    if (!enroll && !socket && !claim && !result && !module && !moduleReports) {
+    const moduleCall = MODULE_CALL.exec(url.pathname);
+    if (
+      !enroll &&
+      !socket &&
+      !claim &&
+      !result &&
+      !module &&
+      !moduleReports &&
+      !moduleCall
+    ) {
       return undefined;
     }
     try {
@@ -407,6 +434,34 @@ export function createMachineBackendContribution(
               reports: decodeMachineModuleReportsV1(
                 await readJsonBody(request),
               ),
+            }),
+          ),
+        );
+      }
+      if (moduleCall) {
+        if (request.method !== "POST") {
+          return jsonError(405, "method not allowed");
+        }
+        const call = await machineCall(secret, request, moduleCall[1]!);
+        const callId = pathSegment(moduleCall[2]!, "callId");
+        if (moduleCall[3] === "claim") {
+          return Response.json(
+            decodeMachineModuleCallClaimReceiptV1(
+              await host.claimMachineModuleCall(call.claims.u, {
+                ...call,
+                callId,
+              }),
+            ),
+          );
+        }
+        return Response.json(
+          decodeMachineModuleCallResultReceiptV1(
+            await host.recordMachineModuleCallResult(call.claims.u, {
+              ...call,
+              callId,
+              // Decoded by the authority, after the token: a dead token is
+              // a 401 whatever it carried.
+              result: await readJsonBody(request),
             }),
           ),
         );

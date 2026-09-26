@@ -149,6 +149,7 @@ import {
   isolateWorkspaceStat,
   isolateWorkspaceWrite,
 } from "@frockbot/app/isolates/bot";
+import { isolateDeviceCall } from "@frockbot/app/isolates/device";
 import { deliverMachineResult } from "@frockbot/app/machine/bot";
 import { listSkills } from "@frockbot/app/skills/bot";
 import {
@@ -245,6 +246,7 @@ import {
   decodeIsolateStorageListRequestV1,
   decodeIsolateStoragePutRequestV1,
   decodeIsolateMemoryWriteRequestV1,
+  decodeIsolateDeviceCallRequestV1,
   decodeIsolateEmailRequestV1,
   decodeIsolateScheduleRequestV1,
   decodeIsolateWorkspaceDeleteRequestV1,
@@ -2238,6 +2240,13 @@ export class BotState
     return isolateEmail(
       (await this.contribution()).state,
       decodeIsolateCallRpcV1(input, decodeIsolateEmailRequestV1) as never,
+    );
+  }
+
+  async isolateDeviceCall(input: unknown) {
+    return isolateDeviceCall(
+      (await this.contribution()).state,
+      decodeIsolateCallRpcV1(input, decodeIsolateDeviceCallRequestV1) as never,
     );
   }
 

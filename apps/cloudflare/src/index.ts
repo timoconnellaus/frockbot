@@ -125,6 +125,8 @@ import {
   MachineTokenError,
   decodeMachineEnrollmentReceiptV1,
   decodeMachineListViewV1,
+  decodeMachineModuleCallClaimReceiptV1,
+  decodeMachineModuleCallResultReceiptV1,
   decodeMachineModuleReportsReceiptV1,
   decodeMachinePairingOfferV1,
   decodeMachineResultReceiptV1,
@@ -961,6 +963,8 @@ interface UserMachineRpc {
   recordMachineResult(input: unknown): Promise<unknown>;
   readMachineModule(input: unknown): Promise<{ found: boolean }>;
   recordMachineModuleReports(input: unknown): Promise<unknown>;
+  claimMachineModuleCall(input: unknown): Promise<unknown>;
+  recordMachineModuleCallResult(input: unknown): Promise<unknown>;
   takeMachineDeliveries(input: unknown): Promise<unknown>;
   listMachines(input: unknown): Promise<unknown>;
   revokeMachine(input: unknown): Promise<unknown>;
@@ -2318,6 +2322,33 @@ const createGatewayBackendContributions = (env: Env) =>
             claims: call.claims,
             tokenDigest: call.tokenDigest,
             reports: call.reports,
+          }),
+        ),
+      ),
+    claimMachineModuleCall: async (userId, call) =>
+      decodeMachineModuleCallClaimReceiptV1(
+        rpcJsonSnapshotV1(
+          await userMachineStub(env, userId).claimMachineModuleCall({
+            schemaVersion: 1,
+            userId,
+            machineId: call.machineId,
+            callId: call.callId,
+            claims: call.claims,
+            tokenDigest: call.tokenDigest,
+          }),
+        ),
+      ),
+    recordMachineModuleCallResult: async (userId, call) =>
+      decodeMachineModuleCallResultReceiptV1(
+        rpcJsonSnapshotV1(
+          await userMachineStub(env, userId).recordMachineModuleCallResult({
+            schemaVersion: 1,
+            userId,
+            machineId: call.machineId,
+            callId: call.callId,
+            claims: call.claims,
+            tokenDigest: call.tokenDigest,
+            result: call.result,
           }),
         ),
       ),

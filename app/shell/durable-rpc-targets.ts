@@ -36,6 +36,18 @@ export interface BotUserConfigurationRpcTargetV1
   readBotEmailSender(
     input: UserRpcEnvelopeV1<{ botId: string }>,
   ): Promise<object>;
+  /** One Plugin tool's call to its device module (ADR 0037). */
+  callDeviceModule(
+    input: UserRpcEnvelopeV1<{
+      botId: string;
+      callId: string;
+      pluginId: string;
+      moduleId: string;
+      call: string;
+      input: unknown;
+      deviceId?: string;
+    }>,
+  ): Promise<object>;
   prepareAccount(input: UserRpcEnvelopeV1): Promise<object>;
   readAccountPreparationStamp(input: UserRpcEnvelopeV1): Promise<object>;
   beginSkillIndex(

@@ -12,6 +12,7 @@ import { describe, expect, test } from "bun:test";
 import {
   MACHINE_SOCKET_REVOKED_CODE_V1,
   type MachineCommandV1,
+  type MachineModuleCallFrameV1,
   type MachineModuleV1,
 } from "@frockbot/core/machine-protocol";
 import {
@@ -151,6 +152,7 @@ function agent(options: {
   secrets?: MachineSecretStoreV1;
   run?(command: MachineCommandV1): Promise<MachineCommandReportV1>;
   onModules?(modules: MachineModuleV1[]): void;
+  onCall?(call: MachineModuleCallFrameV1): void;
 }): MachineDeviceAgentV1 {
   return new MachineDeviceAgentV1({
     origin: ORIGIN,
@@ -181,6 +183,7 @@ function agent(options: {
     sleep: () => Promise.resolve(),
     random: () => 0.5,
     ...(options.onModules ? { onModules: options.onModules } : {}),
+    ...(options.onCall ? { onCall: options.onCall } : {}),
   });
 }
 
@@ -410,6 +413,33 @@ describe("machine device agent connection", () => {
 
     expect(lists).toEqual([[bridge], []]);
     expect(cycle).toMatchObject({ frames: 3, delivered: 0, claimed: 0 });
+    expect(cycle.error).toBeUndefined();
+    expect(backend.calls).toEqual([]);
+  });
+
+  test("hands each module call to its embedder, and claims nothing itself", async () => {
+    const call: MachineModuleCallFrameV1 = {
+      type: "call",
+      callId: "mc-1",
+      pluginId: "beeper",
+      moduleId: "bridge",
+      call: "send",
+      input: { text: "hi" },
+      deadline: "2026-09-01T00:00:10.000Z",
+      serverTime: "2026-09-01T00:00:00.000Z",
+    };
+    const calls: MachineModuleCallFrameV1[] = [];
+    const backend = server(() => CLAIMED);
+    const device = agent({
+      fetch: backend.fetch,
+      secrets: pairedStore(),
+      webSocket: () => Promise.resolve(scripted([frame(), call]).socket),
+      onCall: (received) => calls.push(received),
+    });
+
+    const cycle = await device.connectOnce({ frames: 2 });
+
+    expect(calls).toEqual([call]);
     expect(cycle.error).toBeUndefined();
     expect(backend.calls).toEqual([]);
   });

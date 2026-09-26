@@ -575,6 +575,10 @@ describe("the generated wrapper's narrowed context", () => {
             calls.push({ method: "schedule", argument: { scope, request } });
             return Promise.resolve({ status: "scheduled" });
           },
+          deviceCall: (scope: unknown, request: unknown) => {
+            calls.push({ method: "deviceCall", argument: { scope, request } });
+            return Promise.resolve({ ok: true, value: 1 });
+          },
         },
       } as unknown as Record<string, unknown>,
     };
@@ -625,6 +629,52 @@ describe("the generated wrapper's narrowed context", () => {
     });
   });
 
+  test("numbers a tool call's device calls under the effect it runs as", async () => {
+    const subject = env();
+    const context = narrowContext(
+      subject.env,
+      { ...invocation, effectId: "effect-1" },
+      { pluginId: "weather", grants: ["device"], services: {} },
+      1_000,
+    );
+    const device = context.device as {
+      call: (...args: unknown[]) => Promise<unknown>;
+    };
+    await expect(
+      device.call("bridge", "send", { text: "hi" }),
+    ).resolves.toEqual({ ok: true, value: 1 });
+    await device.call("bridge", "search", undefined, { deviceId: "mac-1" });
+    expect(subject.calls).toEqual([
+      {
+        method: "deviceCall",
+        argument: {
+          scope,
+          request: {
+            moduleId: "bridge",
+            call: "send",
+            input: { text: "hi" },
+            sequence: 0,
+            effectId: "effect-1",
+          },
+        },
+      },
+      {
+        method: "deviceCall",
+        argument: {
+          scope,
+          request: {
+            moduleId: "bridge",
+            call: "search",
+            input: null,
+            sequence: 1,
+            deviceId: "mac-1",
+            effectId: "effect-1",
+          },
+        },
+      },
+    ]);
+  });
+
   test("builds exactly the declared grant's member, wired to the stub", async () => {
     const subject = env();
     const context = narrowContext(
@@ -669,6 +719,7 @@ describe("the generated wrapper's narrowed context", () => {
           "http",
           "schedule",
           "storage",
+          "device",
         ],
         services: {},
       },
@@ -697,6 +748,7 @@ describe("the generated wrapper's narrowed context", () => {
           "http",
           "schedule",
           "storage",
+          "device",
         ],
         services: {},
       },

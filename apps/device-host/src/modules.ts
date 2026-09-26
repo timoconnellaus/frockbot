@@ -4,6 +4,11 @@
 // hash is left alone; one that left the list or changed hash is stopped; a new
 // one is fetched, checked against its hash, and started under a supervisor.
 // What the supervisors report is posted back in small batches.
+//
+// A Plugin's call to a module is claimed, run and answered here. The host
+// keeps a ledger of every call it took, written before the claim, so a call
+// delivered twice — a reconnect, a replayed frame — runs at most once whatever
+// the module does.
 
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
@@ -12,7 +17,9 @@ import { join } from "node:path";
 
 import {
   MACHINE_LIMITS_V1,
+  decodeMachineModuleCallClaimReceiptV1,
   machineRoutePathV1,
+  type MachineModuleCallFrameV1,
   type MachineModuleReportV1,
   type MachineModuleV1,
 } from "@frockbot/core/machine-protocol";
@@ -20,6 +27,7 @@ import {
 import { moduleCommandV1, type ModulePathsV1 } from "./sandbox.ts";
 import {
   ModuleSupervisorV1,
+  type ModuleCallOutcomeV1,
   type ModuleStateV1,
   type ModuleSupervisorSeamsV1,
 } from "./supervisor.ts";
@@ -40,6 +48,11 @@ export interface ModuleHostEntryV1 {
 export interface RunningModuleV1 {
   start(): void;
   stop(): void;
+  call(
+    call: string,
+    input: unknown,
+    timeoutMs: number,
+  ): Promise<ModuleCallOutcomeV1>;
 }
 
 export interface ModuleHostOptionsV1 {
@@ -67,6 +80,10 @@ export const MODULE_REPORT_QUEUE_MAX_V1 = 500;
 const REPORT_ATTEMPTS = 3;
 /** A module's own store, as JSON. */
 const STORE_BYTES_MAX = 1_024 * 1_024;
+/** Call ids the ledger keeps, newest last; far more than a deadline spans. */
+export const MODULE_CALL_LEDGER_MAX_V1 = 2_000;
+/** Posts of one call's result before it is given up on. */
+const RESULT_ATTEMPTS = 3;
 
 const EVENTS_LATER = "events arrive in a later release";
 
@@ -124,7 +141,127 @@ export class ModuleHostV1 {
   private flushing = false;
   private failures = 0;
 
+  private ledger: Promise<string[]> | undefined;
+  private ledgerWrites: Promise<unknown> = Promise.resolve();
+
   constructor(private readonly options: ModuleHostOptionsV1) {}
+
+  private ledgerFile(): string {
+    return join(this.options.supportDir, "module-calls.json");
+  }
+
+  /**
+   * Take a call id into the ledger, durably, or say it was already taken.
+   * Taken before the claim: a crash between the two leaves a call this host
+   * will never run, which is `failed` in the cloud, rather than one it might
+   * run twice.
+   */
+  private take(callId: string): Promise<boolean> {
+    const taken = this.ledgerWrites.then(async () => {
+      this.ledger ??= readFile(this.ledgerFile(), "utf8")
+        .then((text) => {
+          const parsed = JSON.parse(text) as unknown;
+          return Array.isArray(parsed)
+            ? parsed.filter(
+                (entry): entry is string => typeof entry === "string",
+              )
+            : [];
+        })
+        .catch(() => []);
+      const ids = await this.ledger;
+      if (ids.includes(callId)) return false;
+      ids.push(callId);
+      if (ids.length > MODULE_CALL_LEDGER_MAX_V1) {
+        ids.splice(0, ids.length - MODULE_CALL_LEDGER_MAX_V1);
+      }
+      await mkdir(this.options.supportDir, { recursive: true });
+      await writeAtomically(this.ledgerFile(), JSON.stringify(ids));
+      return true;
+    });
+    this.ledgerWrites = taken.catch(() => undefined);
+    return taken;
+  }
+
+  /**
+   * One call a Plugin made to a module here: refused past its deadline,
+   * taken into the ledger, claimed, run and answered. Never throws; a call
+   * that could not be answered is the cloud's to settle at its deadline.
+   */
+  async handleCall(
+    frame: MachineModuleCallFrameV1,
+    receivedAt: number = Date.now(),
+  ): Promise<void> {
+    const allowed = Date.parse(frame.deadline) - Date.parse(frame.serverTime);
+    const remaining = (): number => allowed - (Date.now() - receivedAt);
+    if (remaining() <= 0) return;
+    const credential = this.options.credential();
+    if (!credential) return;
+    try {
+      if (!(await this.take(frame.callId))) return;
+      const claim = decodeMachineModuleCallClaimReceiptV1(
+        await this.post(
+          credential,
+          machineRoutePathV1("moduleCallClaim", {
+            machineId: credential.machineId,
+            callId: frame.callId,
+          }),
+          {},
+        ),
+      );
+      if (claim.status !== "claimed") return;
+      const held = this.held.get(`${frame.pluginId}/${frame.moduleId}`);
+      const left = remaining();
+      const outcome: ModuleCallOutcomeV1 =
+        !held?.running || left <= 0
+          ? { ok: false, error: "the module is not running on this computer" }
+          : await held.running.call(frame.call, frame.input, left);
+      const path = machineRoutePathV1("moduleCallResult", {
+        machineId: credential.machineId,
+        callId: frame.callId,
+      });
+      const body = outcome.ok
+        ? { ok: true, value: outcome.value ?? null }
+        : { ok: false, error: clip(outcome.error) };
+      for (let attempt = 1; attempt <= RESULT_ATTEMPTS; attempt += 1) {
+        try {
+          await this.post(credential, path, body);
+          return;
+        } catch {
+          // Posted again: a result the cloud already has answers `replayed`.
+        }
+      }
+    } catch (error) {
+      this.report(
+        { pluginId: frame.pluginId, moduleId: frame.moduleId },
+        {
+          kind: "log",
+          level: "error",
+          text: `call "${frame.call}" could not be answered: ${message(error)}`,
+        },
+      );
+    }
+  }
+
+  private async post(
+    credential: ModuleHostCredentialV1,
+    path: string,
+    body: unknown,
+  ): Promise<unknown> {
+    const response = await this.options.fetch(`${this.options.origin}${path}`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${credential.token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(body),
+      redirect: "error",
+    });
+    const text = await response.text();
+    if (!response.ok) {
+      throw new Error(`${path} answered ${response.status}`);
+    }
+    return JSON.parse(text) as unknown;
+  }
 
   /** What runs, for the app to show. */
   entries(): ModuleHostEntryV1[] {
@@ -293,7 +430,7 @@ export class ModuleHostV1 {
   }
 
   private report(
-    module: MachineModuleV1,
+    module: Pick<MachineModuleV1, "pluginId" | "moduleId">,
     report: Parameters<ModuleSupervisorSeamsV1["report"]>[0],
   ): void {
     const address = { pluginId: module.pluginId, moduleId: module.moduleId };

@@ -383,6 +383,31 @@ export const ISOLATE_EMAIL_LIMITS_V1 = {
   key: 256,
 } as const;
 
+/**
+ * One call to one of the Plugin's own device modules (ADR 0037), as the
+ * wrapper sends it. `effectId` is the tool call it runs inside and `sequence`
+ * counts the calls that tool call has made, so a Turn replayed after an
+ * eviction names the same calls and is answered from what was recorded.
+ */
+export interface IsolateDeviceCallRequestV1 {
+  moduleId: string;
+  call: string;
+  input: unknown;
+  deviceId?: string;
+  effectId?: string;
+  sequence: number;
+}
+
+/**
+ * How one device call ended. `failed` means it did not run, or ran and
+ * changed nothing it said it changed. `unknown` means it may have taken
+ * effect: check before trying again, because a retry of a send that went
+ * through is a second send.
+ */
+export type IsolateDeviceCallOutcomeV1 =
+  | { ok: true; value: unknown }
+  | { ok: false; outcome: "failed" | "unknown"; error: string };
+
 /** A durable Routine operation attributed to one Package call. */
 export interface IsolateScheduleRequestV1 {
   callId: string;
@@ -527,6 +552,10 @@ export interface BotCapabilitiesStub {
     scope: IsolateScopeV1,
     request: IsolateEmailRequestV1,
   ): Promise<IsolateEmailOutcomeV1>;
+  deviceCall(
+    scope: IsolateScopeV1,
+    request: IsolateDeviceCallRequestV1,
+  ): Promise<IsolateDeviceCallOutcomeV1>;
 }
 
 /** The model outcome Bot-authored `package.js` receives after wrapper narrowing. */
@@ -650,6 +679,19 @@ export interface BotPackageContextV1 {
     list(
       request: IsolateStorageListRequestV1,
     ): Promise<IsolateStorageListOutcomeV1>;
+  };
+  /**
+   * The `device` grant: one call to one of this Plugin's own device modules
+   * on the person's computer, from inside a tool call. Only a declared module
+   * and a declared call are reached.
+   */
+  readonly device?: {
+    call(
+      moduleId: string,
+      call: string,
+      input: unknown,
+      options?: { deviceId?: string },
+    ): Promise<IsolateDeviceCallOutcomeV1>;
   };
 }
 
@@ -1457,6 +1499,38 @@ export function decodeIsolateEmailRequestV1(
       ISOLATE_EMAIL_LIMITS_V1.body,
     ),
     ...(inReplyTo === undefined ? {} : { inReplyTo }),
+  };
+}
+
+export function decodeIsolateDeviceCallRequestV1(
+  input: unknown,
+  label = "isolate device call request",
+): IsolateDeviceCallRequestV1 {
+  const value = record(input, label);
+  exactKeys(value, ["moduleId", "call", "input", "sequence"], label, [
+    "deviceId",
+    "effectId",
+  ]);
+  jsonValue(value.input, `${label}.input`);
+  const sequence = value.sequence;
+  if (
+    !Number.isSafeInteger(sequence) ||
+    (sequence as number) < 0 ||
+    (sequence as number) > 1_000
+  ) {
+    throw new Error(`${label}.sequence is out of range`);
+  }
+  return {
+    moduleId: boundedString(value.moduleId, `${label}.moduleId`, 32),
+    call: boundedString(value.call, `${label}.call`, 64),
+    input: value.input,
+    sequence: sequence as number,
+    ...(value.deviceId === undefined
+      ? {}
+      : { deviceId: boundedString(value.deviceId, `${label}.deviceId`, 128) }),
+    ...(value.effectId === undefined
+      ? {}
+      : { effectId: boundedString(value.effectId, `${label}.effectId`, 512) }),
   };
 }
 

@@ -85,7 +85,18 @@ export const MACHINE_LIMITS_V1 = {
   moduleReports: 50,
   /** A report's text or a crash's detail. */
   moduleReportText: 2_000,
+  /** A module call's input, and its answer's value, as JSON text. */
+  moduleCallJson: 256 * 1_024,
+  /** The error a module call answers with. */
+  moduleCallError: 2_000,
 } as const;
+
+/**
+ * How long a Plugin's `device.call` waits for its module's answer (ADR 0037).
+ * Shorter than a Plugin tool's own deadline, so the tool that asked still
+ * hears how the call ended and can say so.
+ */
+export const DEVICE_CALL_WAIT_MS = 10_000;
 
 /** Commands one machine may hold queued at once. */
 export const MACHINE_MAX_QUEUE = MACHINE_LIMITS_V1.maxQueue;
@@ -871,12 +882,83 @@ export function decodeMachineModuleV1(
  * arrive twice; the claim is what stops it running twice. `modules` follows it
  * on connect and is sent again whenever the account's active Composition
  * generation changes; each one is the whole list, so the latest replaces what
- * came before. `serverTime` is the backend's clock, since the laptop's may
+ * came before. `call` carries one Plugin's call to its device module, sent
+ * to the one machine chosen to run it. `serverTime` is the backend's clock, since the laptop's may
  * have been asleep.
  */
 export type MachineSocketFrameV1 =
   | { type: "commands"; commands: MachineCommandV1[]; serverTime: string }
-  | { type: "modules"; modules: MachineModuleV1[]; serverTime: string };
+  | { type: "modules"; modules: MachineModuleV1[]; serverTime: string }
+  | MachineModuleCallFrameV1;
+
+/**
+ * One call a Plugin's cloud code makes to its device module (ADR 0037). It is
+ * sent once, to one machine; the claim is what stops it running twice, and a
+ * call claimed at or after `deadline` is refused. The desktop measures the
+ * deadline against `serverTime`, not its own clock.
+ */
+export interface MachineModuleCallFrameV1 {
+  type: "call";
+  callId: string;
+  pluginId: string;
+  moduleId: string;
+  call: string;
+  input: unknown;
+  deadline: string;
+  serverTime: string;
+}
+
+/** A JSON value no larger than `moduleCallJson` once serialized. */
+function moduleCallJson(input: unknown, label: string): unknown {
+  let text: string | undefined;
+  try {
+    text = JSON.stringify(input);
+  } catch {
+    fail(`${label} must be JSON`);
+  }
+  if (text === undefined) fail(`${label} must be JSON`);
+  if (text!.length > MACHINE_LIMITS_V1.moduleCallJson) {
+    throw new MachineDecodeError(
+      `${label} exceeds ${MACHINE_LIMITS_V1.moduleCallJson} characters of JSON`,
+      "limit-exceeded",
+    );
+  }
+  return input;
+}
+
+export function decodeMachineModuleCallFrameV1(
+  input: unknown,
+  label = "module call frame",
+): MachineModuleCallFrameV1 {
+  const value = object(input, label);
+  exactly(
+    value,
+    [
+      "type",
+      "callId",
+      "pluginId",
+      "moduleId",
+      "call",
+      "input",
+      "deadline",
+      "serverTime",
+    ],
+    label,
+  );
+  if (value.type !== "call") fail(`${label} type must be call`);
+  const call = boundedString(value.call, 64, `${label} call`);
+  if (CONTROL_CHARACTERS.test(call)) fail(`${label} call is invalid`);
+  return {
+    type: "call",
+    callId: identifier(value.callId, `${label} callId`),
+    pluginId: pattern(value.pluginId, PLUGIN_ID, `${label} pluginId`),
+    moduleId: pattern(value.moduleId, MODULE_ID, `${label} moduleId`),
+    call,
+    input: moduleCallJson(value.input ?? null, `${label} input`),
+    deadline: timestamp(value.deadline, `${label} deadline`),
+    serverTime: timestamp(value.serverTime, `${label} serverTime`),
+  };
+}
 
 function boundedList(
   input: unknown,
@@ -899,6 +981,8 @@ export function decodeMachineSocketFrameV1(
   label = "machine socket frame",
 ): MachineSocketFrameV1 {
   const value = object(input, label);
+  if (value.type === "call")
+    return decodeMachineModuleCallFrameV1(value, label);
   if (value.type === "modules") {
     exactly(value, ["type", "modules", "serverTime"], label);
     return {
@@ -1051,6 +1135,99 @@ export function decodeMachineModuleReportsReceiptV1(
       MACHINE_LIMITS_V1.moduleReports,
       `${label} dropped`,
     ),
+  };
+}
+
+/**
+ * The answer to a module call's claim. `refused` means do not run it: the
+ * call is past its deadline, already claimed, or not this machine's.
+ */
+export interface MachineModuleCallClaimReceiptV1 {
+  schemaVersion: 1;
+  status: "claimed" | "refused";
+  callId: string;
+}
+
+export const MACHINE_MODULE_CALL_CLAIM_STATUSES_V1 = [
+  "claimed",
+  "refused",
+] as const;
+
+export function decodeMachineModuleCallClaimReceiptV1(
+  input: unknown,
+  label = "module call claim receipt",
+): MachineModuleCallClaimReceiptV1 {
+  const value = object(input, label);
+  exactly(value, ["schemaVersion", "status", "callId"], label);
+  return {
+    schemaVersion: schemaVersion(value, label),
+    status: literal(
+      value.status,
+      MACHINE_MODULE_CALL_CLAIM_STATUSES_V1,
+      `${label} status`,
+    ),
+    callId: identifier(value.callId, `${label} callId`),
+  };
+}
+
+/** What the module answered, as the desktop posts it. */
+export type MachineModuleCallResultV1 =
+  { ok: true; value: unknown } | { ok: false; error: string };
+
+export function decodeMachineModuleCallResultV1(
+  input: unknown,
+  label = "module call result",
+): MachineModuleCallResultV1 {
+  const value = object(input, label);
+  if (value.ok === true) {
+    exactly(value, ["ok", "value"], label);
+    return {
+      ok: true,
+      value: moduleCallJson(value.value ?? null, `${label} value`),
+    };
+  }
+  exactly(value, ["ok", "error"], label);
+  if (value.ok !== false) fail(`${label} ok must be a boolean`);
+  return {
+    ok: false,
+    error: boundedString(
+      value.error,
+      MACHINE_LIMITS_V1.moduleCallError,
+      `${label} error`,
+    ),
+  };
+}
+
+/**
+ * The answer to a posted module result. `late` means it arrived after the
+ * call's deadline: it is kept for the Work view and never reaches the model.
+ */
+export interface MachineModuleCallResultReceiptV1 {
+  schemaVersion: 1;
+  status: "recorded" | "late" | "replayed";
+  callId: string;
+}
+
+export const MACHINE_MODULE_CALL_RESULT_STATUSES_V1 = [
+  "recorded",
+  "late",
+  "replayed",
+] as const;
+
+export function decodeMachineModuleCallResultReceiptV1(
+  input: unknown,
+  label = "module call result receipt",
+): MachineModuleCallResultReceiptV1 {
+  const value = object(input, label);
+  exactly(value, ["schemaVersion", "status", "callId"], label);
+  return {
+    schemaVersion: schemaVersion(value, label),
+    status: literal(
+      value.status,
+      MACHINE_MODULE_CALL_RESULT_STATUSES_V1,
+      `${label} status`,
+    ),
+    callId: identifier(value.callId, `${label} callId`),
   };
 }
 

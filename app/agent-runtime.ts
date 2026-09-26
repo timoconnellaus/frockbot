@@ -70,6 +70,12 @@ export interface FoundationRuntimeServices {
    * `credentials` is set by the feature that owns it.
    */
   firstPartyCards?: FirstPartyCardDrawsV1;
+  /**
+   * The Plugin tool calls running now, effect id to Plugin, kept by the
+   * Plugin host and read by the `device` grant to admit a device call only
+   * from inside the tool call it names.
+   */
+  pluginToolEffects?: Map<string, string>;
 }
 
 export type FoundationFeature = RuntimeFeatureV1<FoundationRuntimeServices>;

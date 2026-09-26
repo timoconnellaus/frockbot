@@ -144,7 +144,8 @@ const OPEN_PLUGIN_GRANTS_V1: readonly PluginGrantV1[] = [
   "memory",
   "workspace",
   "storage",
-  // Opened by the client for a page, never by the worker (ADR 0035).
+  // Opened by the client for a page (ADR 0035), and on the worker only as a
+  // call to the Plugin's own device module from its tool (ADR 0037).
   "device",
 ];
 
@@ -306,6 +307,13 @@ export interface PluginWorkerHostOptions {
    * is what a standalone mount is.
    */
   sendCard?(send: PluginCardSendV1): Promise<PluginCardSendOutcomeV1>;
+  /**
+   * The Plugin tool calls running now, effect id to Plugin. A device call
+   * names the tool call it runs inside, and the Bot's object admits it only
+   * while that Plugin's call is running here: Plugin code writes the name,
+   * so the name alone proves nothing.
+   */
+  toolEffects?: Map<string, string>;
   /**
    * The loopback `CAPABILITIES` binding, minted by the Bot's Durable Object
    * for this User. Per User, never per Turn: every call carries its scope.
@@ -2040,7 +2048,10 @@ export class PluginWorkerHost {
           turnId: options.turnId,
           generationId: context.compositionGenerationId,
           deadlineMs,
+          effectId: context.effectId,
         };
+        const effects = options.toolEffects;
+        effects?.set(context.effectId, pluginId);
         try {
           // `AbortSignal` cannot cross the RPC boundary, so the deadline is
           // carried in the invocation and raced again on this side.
@@ -2059,6 +2070,8 @@ export class PluginWorkerHost {
             content: `Tool "${descriptor.name}" failed in its plugin: ${errorMessage(error)}`,
             isError: true,
           };
+        } finally {
+          effects?.delete(context.effectId);
         }
       },
     };

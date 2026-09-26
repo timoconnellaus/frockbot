@@ -309,6 +309,7 @@ export function createShellCompositionHost(
                 ? {}
                 : { subagentRole: options.subagentRole }),
               deploymentArtifact: isSeededPluginArtifactV1,
+              toolEffects: (runtime.services.pluginToolEffects ??= new Map()),
               // A Plugin's card tool draws a Card the same way the Bot's own
               // `send_to_user` does: the messages are decoded at the seam
               // every payload is decoded at, the Approvals the surface asks

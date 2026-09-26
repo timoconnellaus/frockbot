@@ -18,6 +18,8 @@ import {
   decodeMachineClaimReceiptV1,
   decodeMachineEnrollmentReceiptV1,
   decodeMachineListViewV1,
+  decodeMachineModuleCallClaimReceiptV1,
+  decodeMachineModuleCallResultReceiptV1,
   decodeMachineModuleReportsReceiptV1,
   decodeMachinePairingOfferV1,
   decodeMachineResultReceiptV1,
@@ -28,6 +30,10 @@ import {
   type MachineCommandResultV1,
   type MachineCommandV1,
   type MachineListViewV1,
+  type MachineModuleCallClaimReceiptV1,
+  type MachineModuleCallFrameV1,
+  type MachineModuleCallResultReceiptV1,
+  type MachineModuleCallResultV1,
   type MachineModuleReportV1,
   type MachineModuleReportsReceiptV1,
   type MachineModuleV1,
@@ -364,6 +370,34 @@ export class MachineAgentDriverV1 {
         token: this.token!,
         body: JSON.stringify({ reports }),
       }),
+    );
+  }
+
+  /** The next call a Plugin makes to one of this machine's modules. */
+  async nextCall(): Promise<MachineModuleCallFrameV1> {
+    return this.nextFrame("call");
+  }
+
+  async claimCall(callId: string): Promise<MachineModuleCallClaimReceiptV1> {
+    const { machineId, token } = this.identity();
+    return decodeMachineModuleCallClaimReceiptV1(
+      await this.call(
+        machineRoutePathV1("moduleCallClaim", { machineId, callId }),
+        { method: "POST", token, body: JSON.stringify({}) },
+      ),
+    );
+  }
+
+  async answerCall(
+    callId: string,
+    result: MachineModuleCallResultV1,
+  ): Promise<MachineModuleCallResultReceiptV1> {
+    const { machineId, token } = this.identity();
+    return decodeMachineModuleCallResultReceiptV1(
+      await this.call(
+        machineRoutePathV1("moduleCallResult", { machineId, callId }),
+        { method: "POST", token, body: JSON.stringify(result) },
+      ),
     );
   }
 

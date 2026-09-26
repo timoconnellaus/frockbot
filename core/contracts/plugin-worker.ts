@@ -197,6 +197,11 @@ export type PluginWorkerHookResultV1 = IsolateHookResultV1 & {
 
 export interface PluginWorkerToolInvocationV1 extends IsolateToolInvocationV1 {
   pluginId: string;
+  /**
+   * The Turn's tool call this runs as, which a device call is keyed by.
+   * Absent for a tool run outside any Turn, such as a section's control.
+   */
+  effectId?: string;
 }
 
 /** An event arriving on the app-owned hooks route, handed to one Plugin. */
@@ -899,10 +904,19 @@ export function decodePluginWorkerToolInvocationV1(
   if (!Object.hasOwn(value, "pluginId")) {
     throw new Error(`${label} has invalid fields`);
   }
-  const { pluginId: id, ...rest } = value;
+  const { pluginId: id, effectId, ...rest } = value;
+  if (
+    effectId !== undefined &&
+    (typeof effectId !== "string" ||
+      effectId.length === 0 ||
+      effectId.length > 512)
+  ) {
+    throw new Error(`${label}.effectId is invalid`);
+  }
   return {
     ...decodeIsolateToolInvocationV1(rest, label),
     pluginId: pluginId(id, `${label}.pluginId`),
+    ...(effectId === undefined ? {} : { effectId }),
   };
 }
 

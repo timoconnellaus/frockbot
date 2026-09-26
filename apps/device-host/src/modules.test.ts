@@ -5,16 +5,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import type {
+  MachineModuleCallFrameV1,
   MachineModuleReportV1,
   MachineModuleV1,
 } from "@frockbot/core/machine-protocol";
 
 import {
+  MODULE_CALL_LEDGER_MAX_V1,
   MODULE_REPORT_QUEUE_MAX_V1,
   ModuleHostV1,
   type ModuleHostOptionsV1,
 } from "./modules.ts";
-import type { ModuleSupervisorSeamsV1 } from "./supervisor.ts";
+import type {
+  ModuleCallOutcomeV1,
+  ModuleSupervisorSeamsV1,
+} from "./supervisor.ts";
 
 const MACHINE = `mach_${"a".repeat(20)}`;
 
@@ -54,6 +59,14 @@ async function host(
   const posted: MachineModuleReportV1[][] = [];
   const seams = new Map<string, Omit<ModuleSupervisorSeamsV1, "spawn">>();
   let answer = 200;
+  const callPosts: Array<{ path: string; body: unknown }> = [];
+  let claimStatus = "claimed";
+  let calls = (
+    _call: string,
+    _input: unknown,
+    _timeoutMs: number,
+  ): Promise<ModuleCallOutcomeV1> =>
+    Promise.resolve({ ok: true, value: "done" });
   const modules = new ModuleHostV1({
     origin: "https://bot.example",
     supportDir,
@@ -63,6 +76,16 @@ async function host(
     credential: () => ({ machineId: MACHINE, token: "token" }),
     appleEvents: () => Promise.reject(new Error("not available yet")),
     fetch: async (url, init) => {
+      if (url.includes("/module-calls/")) {
+        const path = new URL(url).pathname;
+        callPosts.push({ path, body: JSON.parse(String(init?.body)) });
+        const callId = decodeURIComponent(path.split("/")[5]!);
+        return Response.json(
+          path.endsWith("/claim")
+            ? { schemaVersion: 1, status: claimStatus, callId }
+            : { schemaVersion: 1, status: "recorded", callId },
+        );
+      }
       if (url.endsWith("/module-reports")) {
         posted.push(
           (JSON.parse(String(init?.body)) as { reports: [] }).reports,
@@ -88,6 +111,10 @@ async function host(
           given.report({ kind: "state", state: "running" });
         },
         stop: () => log.push(`stop ${name}`),
+        call: async (call, input, timeoutMs) => {
+          log.push(`call ${name} ${call} ${JSON.stringify(input)}`);
+          return calls(call, input, timeoutMs);
+        },
       };
     },
     ...overrides,
@@ -101,6 +128,13 @@ async function host(
     seams,
     answer: (status: number) => {
       answer = status;
+    },
+    callPosts,
+    refuseClaims: () => {
+      claimStatus = "refused";
+    },
+    answerCalls: (next: typeof calls) => {
+      calls = next;
     },
   };
 }
@@ -245,5 +279,106 @@ describe("ModuleHostV1", () => {
     answer(200);
     await modules.flush();
     expect(modules.pendingReports()).toBe(0);
+  });
+});
+
+describe("a Plugin's call to a module", () => {
+  const serverTime = "2026-09-01T00:00:00.000Z";
+  function frame(
+    callId: string,
+    deadlineMs = 10_000,
+  ): MachineModuleCallFrameV1 {
+    return {
+      type: "call",
+      callId,
+      pluginId: "beeper",
+      moduleId: "bridge",
+      call: "send",
+      input: { text: "hi" },
+      deadline: new Date(Date.parse(serverTime) + deadlineMs).toISOString(),
+      serverTime,
+    };
+  }
+
+  test("is claimed, run once, and answered, however often it arrives", async () => {
+    const one = artifact("export const calls = {};");
+    const { modules, log, callPosts, supportDir } = await host({
+      [one.hash]: one.bytes,
+    });
+    await modules.sync([module("bridge", one.hash)]);
+    await modules.handleCall(frame("mc-1"));
+    await modules.handleCall(frame("mc-1"));
+    expect(log.filter((line) => line.startsWith("call"))).toEqual([
+      `call bridge@${one.hash.slice(0, 4)} send {"text":"hi"}`,
+    ]);
+    expect(callPosts).toEqual([
+      {
+        path: `/api/machines/${MACHINE}/module-calls/mc-1/claim`,
+        body: {},
+      },
+      {
+        path: `/api/machines/${MACHINE}/module-calls/mc-1/result`,
+        body: { ok: true, value: "done" },
+      },
+    ]);
+    // A host restarted with the same folder still remembers it.
+    const again = await host({ [one.hash]: one.bytes }, { supportDir });
+    await again.modules.sync([module("bridge", one.hash)]);
+    await again.modules.handleCall(frame("mc-1"));
+    expect(again.callPosts).toEqual([]);
+    expect(
+      JSON.parse(await readFile(join(supportDir, "module-calls.json"), "utf8")),
+    ).toEqual(["mc-1"]);
+  });
+
+  test("is refused past its deadline, and not run when the claim is refused", async () => {
+    const one = artifact("export const calls = {};");
+    const { modules, log, callPosts, refuseClaims } = await host({
+      [one.hash]: one.bytes,
+    });
+    await modules.sync([module("bridge", one.hash)]);
+    await modules.handleCall(frame("mc-late", 0));
+    expect(callPosts).toEqual([]);
+    refuseClaims();
+    await modules.handleCall(frame("mc-2"));
+    expect(callPosts.map((post) => post.path)).toEqual([
+      `/api/machines/${MACHINE}/module-calls/mc-2/claim`,
+    ]);
+    expect(log.some((line) => line.startsWith("call"))).toBe(false);
+  });
+
+  test("runs under what is left of its deadline, and answers a module that is not running", async () => {
+    const one = artifact("export const calls = {};");
+    const { modules, callPosts, answerCalls } = await host({
+      [one.hash]: one.bytes,
+    });
+    let given = 0;
+    answerCalls(async (_call, _input, timeoutMs) => {
+      given = timeoutMs;
+      return { ok: false, error: "no chat" };
+    });
+    await modules.sync([module("bridge", one.hash)]);
+    await modules.handleCall(frame("mc-3", 5_000), Date.now() - 1_000);
+    expect(given).toBeGreaterThan(3_900);
+    expect(given).toBeLessThanOrEqual(4_000);
+    expect(callPosts.at(-1)?.body).toEqual({ ok: false, error: "no chat" });
+
+    await modules.handleCall({ ...frame("mc-4"), moduleId: "absent" });
+    expect(callPosts.at(-1)?.body).toEqual({
+      ok: false,
+      error: "the module is not running on this computer",
+    });
+  });
+
+  test("keeps a bounded ledger", async () => {
+    const { modules, supportDir } = await host({});
+    for (let index = 0; index < 3; index += 1) {
+      await modules.handleCall({ ...frame(`mc-${index}`), moduleId: "absent" });
+    }
+    const kept = JSON.parse(
+      await readFile(join(supportDir, "module-calls.json"), "utf8"),
+    ) as string[];
+    expect(kept).toEqual(["mc-0", "mc-1", "mc-2"]);
+    expect(MODULE_CALL_LEDGER_MAX_V1).toBeGreaterThan(100);
   });
 });

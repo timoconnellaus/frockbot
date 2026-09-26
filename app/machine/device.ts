@@ -44,6 +44,7 @@ import {
   type MachineCapabilityV1,
   type MachineCommandResultV1,
   type MachineCommandV1,
+  type MachineModuleCallFrameV1,
   type MachineModuleV1,
   type MachinePlatformV1,
 } from "@frockbot/core/machine-protocol";
@@ -466,6 +467,12 @@ export interface MachineDeviceAgentOptionsV1 {
    * generation changes. Each list replaces the last; the agent keeps none.
    */
   onModules?(modules: MachineModuleV1[]): void;
+  /**
+   * Called with each call a Plugin makes to one of this machine's device
+   * modules. Handed over and not awaited, so a slow module never holds the
+   * frames behind it; the embedder claims, runs and answers it.
+   */
+  onCall?(call: MachineModuleCallFrameV1): void;
 }
 
 export class MachineDeviceAgentError extends Error {
@@ -797,6 +804,10 @@ export class MachineDeviceAgentV1 {
         cycle.frames += 1;
         if (frame.type === "modules") {
           this.options.onModules?.(frame.modules);
+          continue;
+        }
+        if (frame.type === "call") {
+          this.options.onCall?.(frame);
           continue;
         }
         cycle.delivered += frame.commands.length;

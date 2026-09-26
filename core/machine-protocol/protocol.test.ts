@@ -10,6 +10,9 @@ import {
   decodeMachineIdV1,
   decodeMachineListEntryV1,
   decodeMachineListViewV1,
+  decodeMachineModuleCallClaimReceiptV1,
+  decodeMachineModuleCallResultReceiptV1,
+  decodeMachineModuleCallResultV1,
   decodeMachineModuleReportsReceiptV1,
   decodeMachineModuleReportsV1,
   decodeMachineModuleV1,
@@ -490,5 +493,81 @@ describe("presence is the caller's, never stored", () => {
     expect(JSON.stringify(entry)).not.toContain(DIGEST);
     expect(JSON.stringify(entry)).not.toContain("user-1");
     expect(Object.hasOwn(entry, "keyVersion")).toBe(false);
+  });
+});
+
+describe("a module call", () => {
+  const frame = {
+    type: "call" as const,
+    callId: "mc-0123",
+    pluginId: "beeper",
+    moduleId: "bridge",
+    call: "send",
+    input: { chat: "c1", text: "hi" },
+    deadline: "2026-09-01T00:00:10.000Z",
+    serverTime: NOW,
+  };
+
+  test("arrives as a socket frame, decoded exactly", () => {
+    expect(decodeMachineSocketFrameV1(frame)).toEqual(frame);
+    expect(() => decodeMachineSocketFrameV1({ ...frame, extra: 1 })).toThrow(
+      /unknown field: extra/,
+    );
+    expect(() =>
+      decodeMachineSocketFrameV1({ ...frame, pluginId: "Beeper" }),
+    ).toThrow(/pluginId is invalid/);
+    expect(() =>
+      decodeMachineSocketFrameV1({ ...frame, deadline: "soon" }),
+    ).toThrow(/deadline must be a timestamp/);
+    expect(() =>
+      decodeMachineSocketFrameV1({
+        ...frame,
+        input: "x".repeat(MACHINE_LIMITS_V1.moduleCallJson),
+      }),
+    ).toThrow(MachineDecodeError);
+  });
+
+  test("is answered with a value or an error, and nothing else", () => {
+    expect(decodeMachineModuleCallResultV1({ ok: true, value: [1] })).toEqual({
+      ok: true,
+      value: [1],
+    });
+    expect(decodeMachineModuleCallResultV1({ ok: true })).toEqual({
+      ok: true,
+      value: null,
+    });
+    expect(decodeMachineModuleCallResultV1({ ok: false, error: "no" })).toEqual(
+      { ok: false, error: "no" },
+    );
+    expect(() =>
+      decodeMachineModuleCallResultV1({ ok: false, value: 1 }),
+    ).toThrow(MachineDecodeError);
+    expect(() => decodeMachineModuleCallResultV1({ ok: "yes" })).toThrow(
+      MachineDecodeError,
+    );
+  });
+
+  test("receipts name their status", () => {
+    expect(
+      decodeMachineModuleCallClaimReceiptV1({
+        schemaVersion: 1,
+        status: "refused",
+        callId: "mc-1",
+      }).status,
+    ).toBe("refused");
+    expect(
+      decodeMachineModuleCallResultReceiptV1({
+        schemaVersion: 1,
+        status: "late",
+        callId: "mc-1",
+      }).status,
+    ).toBe("late");
+    expect(() =>
+      decodeMachineModuleCallClaimReceiptV1({
+        schemaVersion: 1,
+        status: "already-claimed",
+        callId: "mc-1",
+      }),
+    ).toThrow(MachineDecodeError);
   });
 });
