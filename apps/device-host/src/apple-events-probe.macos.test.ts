@@ -2,7 +2,7 @@
 // exception reach Finder under Seatbelt, where a bare osascript cannot?
 import { expect, test } from "bun:test";
 import { spawnSync } from "node:child_process";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdtemp, realpath, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -30,7 +30,7 @@ const SYSTEM_EVENTS =
 test.skipIf(process.platform !== "darwin")(
   "probe",
   async () => {
-    const dir = await mkdtemp(join(tmpdir(), "ae-probe-"));
+    const dir = await realpath(await mkdtemp(join(tmpdir(), "ae-probe-")));
     await writeFile(join(dir, "helper.swift"), SOURCE);
     await writeFile(
       join(dir, "finder.plist"),
@@ -86,6 +86,12 @@ test.skipIf(process.platform !== "darwin")(
     for (const exe of ["plain", "signed"]) {
       const path = join(dir, exe);
       sh(`${exe} bare finder`, path, [], FINDER);
+      sh(
+        `${exe} allow-default system-events`,
+        "/usr/bin/sandbox-exec",
+        ["-p", "(version 1)(allow default)", path],
+        SYSTEM_EVENTS,
+      );
       sh(
         `${exe} allow-default finder`,
         "/usr/bin/sandbox-exec",
