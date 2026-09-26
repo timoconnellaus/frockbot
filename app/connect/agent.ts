@@ -35,10 +35,9 @@ import {
   CONNECT_CATALOG_UNAVAILABLE_MESSAGE_V1,
   CONNECT_STALE_CONTRACT_MESSAGE_V1,
 } from "./account-catalog.js";
+import { connectResultV1 } from "./result.js";
 import { connectSafeMetadataV1 } from "./user.js";
 
-/** Longest tool answer handed back to the model. */
-const MAX_RESULT_BYTES = 128_000;
 /** Longest argument bag sent to the provider. */
 const MAX_ARGUMENT_BYTES = 64_000;
 
@@ -363,15 +362,7 @@ export async function executeConnectTool(
         isError: true,
       };
     }
-    const content = JSON.stringify(result.data);
-    if (byteLength(content) > MAX_RESULT_BYTES) {
-      return {
-        content:
-          "The app's answer is too large to show. Ask for less at a time.",
-        isError: true,
-      };
-    }
-    return { content, isError: false };
+    return connectResultV1(call.tool.slug, result.data);
   } catch (error) {
     // A refusal the provider gave before doing anything is safe to retry
     // after fixing the call; anything else may have gone through.
