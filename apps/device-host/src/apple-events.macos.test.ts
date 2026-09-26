@@ -64,6 +64,23 @@ describe.skipIf(process.platform !== "darwin")(
         (error: Error) => error.message,
       );
       console.log(`named Finder: ${named}`);
+      if (!named.startsWith("ran:")) {
+        // What the profile refused, so a failure names the missing rule.
+        const denials = spawnSync(
+          "/usr/bin/log",
+          [
+            "show",
+            "--last",
+            "1m",
+            "--style",
+            "compact",
+            "--predicate",
+            'sender == "Sandbox" AND eventMessage CONTAINS "osascript"',
+          ],
+          { encoding: "utf8", timeout: 30_000 },
+        );
+        console.log(`sandbox denials:\n${denials.stdout}${denials.stderr}`);
+      }
       expect(named).toStartWith("ran:");
     }, 60_000);
   },
