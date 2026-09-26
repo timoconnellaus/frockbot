@@ -68,13 +68,12 @@ function gateway(userId: string): MachineBackendRouteContribution {
   const rpc = machines(userId);
   return createMachineBackendContribution({
     machineTokenSecret: env.MACHINE_TOKEN_SECRET as string,
-    createMachinePairing: async (owner, request) =>
+    createMachinePairing: async (owner) =>
       decodeMachinePairingOfferV1(
         snapshot(
           await rpc.createMachinePairing({
             schemaVersion: 1,
             userId: owner,
-            ...(request.label === undefined ? {} : { label: request.label }),
           }),
         ),
       ),

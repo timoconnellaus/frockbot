@@ -1,6 +1,6 @@
 // Registering a machine, as the product does it end to end.
 //
-// The browser half is a session: `POST /api/machines/pair` through the
+// The app half is a session: `POST /api/machines/pair` through the
 // gateway's authenticated door. The machine half is not a session at all — the
 // stub device agent enrols and opens its socket through `SELF.fetch` with a
 // bearer token and nothing else, over the gateway's pre-authentication `publicRoute` seam.
@@ -73,12 +73,10 @@ describe("registering a machine", () => {
   it("pairs from a session, enrols anonymously, reports presence, and dies on revocation", async () => {
     const userId = freshUserId("machines");
 
-    // 1. The browser asks for a code. It is the only secret a browser holds
-    //    for a machine, and it is one-time and five minutes old at most.
+    // 1. The signed-in app asks for a code. It is the only secret a session
+    //    holds for a machine, and it is one-time and five minutes old at most.
     const offer = (await expectOkJson(
-      await postAsUser(userId, machineRoutePathV1("pair"), {
-        label: "Tims-M5-MacBook-Pro.local",
-      }),
+      await postAsUser(userId, machineRoutePathV1("pair"), {}),
     )) as { code: string; machineId: string; expiresAt: string };
     expect(Date.parse(offer.expiresAt) - Date.now()).toBeLessThanOrEqual(
       MACHINE_LIMITS_V1.pairingTtlMs,

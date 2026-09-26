@@ -1,14 +1,15 @@
-// Registering a machine the way a person does: from the Machines surface.
+// Registering a machine the way the desktop app does: from its signed-in
+// session.
 //
-// The two halves of the product are both real here. The **surface's** half is
-// the three session routes the Flutter page calls — `POST /api/machines/pair`,
+// The two halves of the product are both real here. The **app's** half is the
+// three session routes the Flutter client calls — `POST /api/machines/pair`,
 // `GET /api/machines`, `POST /api/machines/:id/revoke` — driven through
 // `SELF.fetch` under a session. The **agent** is the shipped
 // `MachineDeviceAgentV1`, with only `child_process` faked.
 //
-// So "pair this computer" here does what it does on a laptop: the surface asks
-// the backend for a one-time code with the user's session, the person carries
-// it to the machine, and the agent enrols with no session at all. Nothing in
+// So "run modules on this Mac" here does what it does on a laptop: the app asks
+// the backend for a one-time code with the user's session, hands it to its own
+// agent, and the agent enrols with no session at all. Nothing in
 // this file constructs a token, and nothing reads one.
 
 import { SELF } from "cloudflare:test";
@@ -102,9 +103,7 @@ describe("the Machines surface", () => {
 
     // The code is minted under the session and spent by the agent, which holds
     // no session of its own.
-    const offerResponse = await postAsUser(userId, "/api/machines/pair", {
-      label: "Tims-M5-MacBook-Pro.local",
-    });
+    const offerResponse = await postAsUser(userId, "/api/machines/pair", {});
     expect(offerResponse.status).toBe(200);
     const offer = (await offerResponse.json()) as {
       code: string;
@@ -156,9 +155,7 @@ describe("the Machines surface", () => {
 
   it("refuses a code that was already spent", async () => {
     const userId = freshUserId("machines-replay");
-    const offerResponse = await postAsUser(userId, "/api/machines/pair", {
-      label: "Tims-M5-MacBook-Pro.local",
-    });
+    const offerResponse = await postAsUser(userId, "/api/machines/pair", {});
     const offer = (await offerResponse.json()) as { code: string };
 
     await deviceAgent().agent.pair(offer.code);

@@ -11,9 +11,10 @@ installed on the account
 `Runner/DeviceHostBridge.swift` starts the module host,
 `Contents/Resources/device-host.js`, under the bundled `Contents/Helpers/deno`,
 allowed to reach only the deployment, its own folder and `/usr/bin/sandbox-exec`.
-The host pairs this Mac through the signed-in session the first time, keeps the
-machine socket open, and starts each module in its own Deno process inside a
-Seatbelt profile built from what the module declares (`apps/device-host`). A
+The host pairs this Mac through the signed-in session the first time (there is
+no pairing code to copy; the app asks for one and hands it to its own agent),
+keeps the machine socket open, and starts each module in its own Deno process
+inside a Seatbelt profile built from what the module declares (`apps/device-host`). A
 build run from Xcode or `flutter run` carries no Deno and runs no modules.
 
 The machine token rests in Keychain under `com.frockbot.mobile.device-host`, one

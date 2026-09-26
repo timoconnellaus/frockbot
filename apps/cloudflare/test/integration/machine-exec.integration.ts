@@ -96,12 +96,10 @@ describe("running a command on a registered machine", () => {
     const botId = "machine-exec-bot";
     await provisionThroughGateway({ userId, botId });
 
-    // The User pairs their Mac from the settings surface, and the agent on it
-    // enrols with the one-time code.
+    // The signed-in app asks for a one-time code, and the agent on the Mac
+    // enrols with it.
     const offer = (await expectOkJson(
-      await postAsUser(userId, machineRoutePathV1("pair"), {
-        label: "Tims-M5-MacBook-Pro.local",
-      }),
+      await postAsUser(userId, machineRoutePathV1("pair"), {}),
     )) as { code: string; machineId: string };
     const device = new MachineAgentDriverV1({
       origin: ORIGIN,

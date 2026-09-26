@@ -454,34 +454,26 @@ export function decodeMachineOpV1(
 // Pairing and enrollment
 // ---------------------------------------------------------------------------
 
-/** What the browser asks for. The label is the machine's if it omits one. */
-export interface MachinePairingRequestV1 {
-  label?: string;
-}
+/**
+ * What the signed-in app asks for: nothing. The enrolling agent names its own
+ * machine, so the request carries no field and refuses any.
+ */
+export type MachinePairingRequestV1 = Record<string, never>;
 
 export function decodeMachinePairingRequestV1(
   input: unknown,
   label = "machine pairing request",
 ): MachinePairingRequestV1 {
-  const value = object(input, label);
-  exactly(value, ["label"], label);
-  return value.label === undefined
-    ? {}
-    : {
-        label: boundedString(
-          value.label,
-          MACHINE_LIMITS_V1.label,
-          `${label} label`,
-        ),
-      };
+  exactly(object(input, label), [], label);
+  return {};
 }
 
 /**
- * The one-time offer the browser shows and the machine presents.
+ * The one-time offer the signed-in app receives and hands to its own agent.
  *
- * The code is the only secret a browser ever holds for a machine, and it is
- * spent on first use and dead in five minutes; the long-lived machine token is
- * minted on the far side of enrollment and never reaches a browser bundle.
+ * The code is the only secret the app's session ever holds for a machine, and
+ * it is spent on first use and dead in five minutes; the long-lived machine
+ * token is minted on the far side of enrollment and never reaches the session.
  */
 export interface MachinePairingOfferV1 {
   schemaVersion: 1;
