@@ -4,6 +4,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   mintRoutineHookTokenV1,
+  moduleEventDeliveryIdV1,
   routineDeliveryIdV1,
   routineHookDigestV1,
   routineHookHeadersV1,
@@ -17,6 +18,12 @@ import {
   type RoutinePluginTriggerSeamV1,
 } from "./store.js";
 import { createMemoryRoutineStorageV1 } from "./testing.js";
+import {
+  executeRoutineCommand,
+  listPluginTriggerRoutines,
+  type RoutinePluginTriggerIndexV1,
+} from "./bot.js";
+import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import type { RoutineCommandV1 } from "./shared.js";
 
 const SECRET = "a-signing-secret-of-at-least-thirty-two-bytes";
@@ -289,6 +296,160 @@ describe("a Plugin-triggered Routine", () => {
       status: "accepted",
     });
     expect(asked).toBe(0);
+  });
+});
+
+describe("a device module's event at a Plugin-triggered Routine", () => {
+  const source = {
+    kind: "device-module" as const,
+    moduleId: "bridge",
+    machineId: "mac-1",
+    key: "evt-7",
+  };
+  const event = async (overrides: { trigger?: string; key?: string } = {}) => ({
+    routineId: "alerts",
+    deliveryId: await moduleEventDeliveryIdV1({
+      routineId: "alerts",
+      machineId: source.machineId,
+      pluginId: "weather",
+      key: overrides.key ?? source.key,
+    }),
+    pluginId: "weather",
+    trigger: overrides.trigger ?? "alert",
+    body: '{"city":"Wollongong"}',
+    source: { ...source, key: overrides.key ?? source.key },
+  });
+
+  test("the Plugin is told where it came from, and a replay fires once", async () => {
+    const seen: RoutinePluginTriggerDeliveryV1[] = [];
+    const { scheduler, store, create } = harness({
+      async deliver(input) {
+        seen.push(input);
+        return { status: "fire", text: `From ${input.source?.kind}` };
+      },
+    });
+    await store.execute(create, USER, "UTC");
+    const first = await store.deliverModuleEvent(await event());
+    expect(first).toMatchObject({ status: "accepted" });
+    expect(seen).toEqual([
+      {
+        routineId: "alerts",
+        pluginId: "weather",
+        trigger: "alert",
+        headers: {},
+        body: '{"city":"Wollongong"}',
+        source,
+      },
+    ]);
+    expect(await store.deliverModuleEvent(await event())).toEqual({
+      status: "duplicate",
+      fireId: (first as { fireId: string }).fireId,
+    });
+    expect(seen).toHaveLength(1);
+    const cues: string[] = [];
+    await scheduler.settle(async (fire) => {
+      cues.push(fire.cue);
+      return { status: "ok" };
+    }, "UTC");
+    // Carried as a delivered payload, labelled, like a webhook's.
+    expect(cues).toEqual([
+      expect.stringContaining(
+        "Delivered payload:\nDevice module event (text/plain):\nFrom device-module",
+      ),
+    ]);
+  });
+
+  test("a Routine that no longer listens drops it without asking the Plugin", async () => {
+    let asked = 0;
+    const { store, create } = harness({
+      async deliver() {
+        asked += 1;
+        return { status: "fire", text: "x" };
+      },
+    });
+    await store.execute(create, USER, "UTC");
+    expect(
+      await store.deliverModuleEvent(await event({ trigger: "other" })),
+    ).toEqual({
+      status: "dropped",
+      reason: "Routine does not listen to this event",
+    });
+    await store.execute(
+      {
+        schemaVersion: 1,
+        type: "routine/pause",
+        commandId: "cmd-pause",
+        botId: "scout",
+        routineId: "alerts",
+      },
+      USER,
+      "UTC",
+    );
+    expect(
+      await store.deliverModuleEvent(await event({ key: "evt-8" })),
+    ).toEqual({ status: "dropped", reason: "Routine is paused" });
+    expect(asked).toBe(0);
+  });
+});
+
+describe("the User object's index of Plugin-triggered Routines", () => {
+  test("hears each change to whether a Routine listens", async () => {
+    const { storage, store, create } = harness();
+    const state = {
+      routines: store,
+      ctx: { storage },
+      authority: { refreshRecoveryAlarm: async () => undefined },
+    } as unknown as ShellBotStateV1;
+    const told: Parameters<RoutinePluginTriggerIndexV1["sync"]>[0][] = [];
+    const index: RoutinePluginTriggerIndexV1 = {
+      sync: async (input) => {
+        told.push(input);
+      },
+    };
+    const run = (command: RoutineCommandV1) =>
+      executeRoutineCommand(
+        state,
+        { userId: "tim", botId: "scout" },
+        command,
+        USER,
+        undefined,
+        index,
+      );
+    const listening = {
+      routineId: "alerts",
+      listening: { pluginId: "weather", trigger: "alert" },
+    };
+    await run(create);
+    expect(await listPluginTriggerRoutines(state)).toEqual([
+      { routineId: "alerts", pluginId: "weather", trigger: "alert" },
+    ]);
+    const step = (
+      type: "routine/pause" | "routine/resume" | "routine/delete",
+    ) =>
+      run({
+        schemaVersion: 1,
+        type,
+        commandId: `cmd-${type}`,
+        botId: "scout",
+        routineId: "alerts",
+      } as RoutineCommandV1);
+    await step("routine/pause");
+    expect(await listPluginTriggerRoutines(state)).toEqual([]);
+    await step("routine/resume");
+    await step("routine/delete");
+    // A webhook Routine is none of the index's business.
+    await run({
+      ...create,
+      commandId: "cmd-brief",
+      routineId: "brief",
+      trigger: { kind: "webhook" },
+    });
+    expect(told).toEqual([
+      listening,
+      { routineId: "alerts" },
+      listening,
+      { routineId: "alerts" },
+    ]);
   });
 });
 

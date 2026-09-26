@@ -6,8 +6,8 @@
 // does not serve, and a test cannot pass against a route nobody registered.
 //
 // `audience` and `publicRoute` are the load-bearing columns. `socket`, `claim`,
-// `result`, `module` and `moduleReports` are declared public because they carry a *machine token*, not a
-// session: they run at the seam in `apps/cloudflare/src/gateway.ts` that
+// `result`, `module`, `moduleReports` and `moduleEvents` are declared public
+// because they carry a *machine token*, not a session: they run at the seam in `apps/cloudflare/src/gateway.ts` that
 // executes before session authentication, which `plugin-routines`' webhook
 // already uses. Public here means "no session", never "no authority" — the
 // token is verified at the edge and re-checked against the machine record's
@@ -25,6 +25,7 @@ export type MachineRouteNameV1 =
   | "result"
   | "module"
   | "moduleReports"
+  | "moduleEvents"
   | "list"
   | "revoke";
 
@@ -80,6 +81,12 @@ export const MACHINE_ROUTES_V1: Readonly<
   moduleReports: {
     method: "POST",
     template: `${MACHINE_ROUTE_PREFIX_V1}/:machineId/module-reports`,
+    audience: "machine",
+    publicRoute: true,
+  },
+  moduleEvents: {
+    method: "POST",
+    template: `${MACHINE_ROUTE_PREFIX_V1}/:machineId/module-events`,
     audience: "machine",
     publicRoute: true,
   },

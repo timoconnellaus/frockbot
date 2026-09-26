@@ -1,4 +1,4 @@
-// The registered-machine gateway Contribution: nine routes, on two doors.
+// The registered-machine gateway Contribution: ten routes, on two doors.
 //
 // Three are ordinary authenticated routes beside `/api/settings` — the browser
 // asks for a pairing code, reads the registry, and revokes a machine:
@@ -7,7 +7,7 @@
 //   GET  /api/machines               the `ListMachines` projection
 //   POST /api/machines/:id/revoke    kill every token this machine holds
 //
-// Six are not authenticated at all, because the caller is a program on
+// Seven are not authenticated at all, because the caller is a program on
 // somebody's laptop and has no session:
 //
 //   POST /api/machines/enroll                             bearer: pairing code
@@ -16,8 +16,9 @@
 //   POST /api/machines/:id/commands/:commandId/result     bearer: machine token
 //   GET  /api/machines/:id/modules/:contentHash           bearer: machine token
 //   POST /api/machines/:id/module-reports                 bearer: machine token
+//   POST /api/machines/:id/module-events                  bearer: machine token
 //
-// Those six are `publicRoute`s: they run at the seam in
+// Those seven are `publicRoute`s: they run at the seam in
 // `apps/cloudflare/src/gateway.ts` that executes *before* session
 // authentication, exactly where `plugin-routines`' webhook runs. Public means
 // "no session", never "no authority" — and the order of the checks is the
@@ -47,6 +48,8 @@ import {
   decodeMachineEnrollmentReceiptV1,
   decodeMachineIdV1,
   decodeMachineListViewV1,
+  decodeMachineModuleEventsReceiptV1,
+  decodeMachineModuleEventsV1,
   decodeMachineModuleReportsReceiptV1,
   decodeMachineModuleReportsV1,
   decodeMachinePairingOfferV1,
@@ -58,6 +61,8 @@ import {
   type MachineClaimReceiptV1,
   type MachineEnrollmentReceiptV1,
   type MachineListViewV1,
+  type MachineModuleEventsReceiptV1,
+  type MachineModuleEventsV1,
   type MachineModuleReportsReceiptV1,
   type MachineModuleReportsV1,
   type MachinePairingOfferV1,
@@ -125,6 +130,11 @@ export interface MachineGatewayHostV1 {
     userId: string,
     call: MachineCallV1 & { reports: MachineModuleReportsV1 },
   ): Promise<MachineModuleReportsReceiptV1>;
+  /** Device-module events, answered once each is durably admitted. */
+  recordMachineModuleEvents(
+    userId: string,
+    call: MachineCallV1 & { events: MachineModuleEventsV1 },
+  ): Promise<MachineModuleEventsReceiptV1>;
   listMachines(userId: string): Promise<MachineListViewV1>;
   revokeMachine(userId: string, machineId: string): Promise<MachineListViewV1>;
 }
@@ -159,6 +169,9 @@ const MODULE = new RegExp(
 );
 const MODULE_REPORTS = new RegExp(
   `^${MACHINE_ROUTE_PREFIX_V1}/([^/]+)/module-reports$`,
+);
+const MODULE_EVENTS = new RegExp(
+  `^${MACHINE_ROUTE_PREFIX_V1}/([^/]+)/module-events$`,
 );
 const CONTENT_HASH = /^[0-9a-f]{64}$/;
 
@@ -323,7 +336,16 @@ export function createMachineBackendContribution(
     const result = RESULT.exec(url.pathname);
     const module = MODULE.exec(url.pathname);
     const moduleReports = MODULE_REPORTS.exec(url.pathname);
-    if (!enroll && !socket && !claim && !result && !module && !moduleReports) {
+    const moduleEvents = MODULE_EVENTS.exec(url.pathname);
+    if (
+      !enroll &&
+      !socket &&
+      !claim &&
+      !result &&
+      !module &&
+      !moduleReports &&
+      !moduleEvents
+    ) {
       return undefined;
     }
     try {
@@ -407,6 +429,20 @@ export function createMachineBackendContribution(
               reports: decodeMachineModuleReportsV1(
                 await readJsonBody(request),
               ),
+            }),
+          ),
+        );
+      }
+      if (moduleEvents) {
+        if (request.method !== "POST") {
+          return jsonError(405, "method not allowed");
+        }
+        const call = await machineCall(secret, request, moduleEvents[1]!);
+        return Response.json(
+          decodeMachineModuleEventsReceiptV1(
+            await host.recordMachineModuleEvents(call.claims.u, {
+              ...call,
+              events: decodeMachineModuleEventsV1(await readJsonBody(request)),
             }),
           ),
         );

@@ -21,6 +21,7 @@ describe("machine route table", () => {
       "result",
       "module",
       "moduleReports",
+      "moduleEvents",
     ]);
     // Public means "no session", never "no authority": every public route is
     // addressed by the machine, which presents a token instead.

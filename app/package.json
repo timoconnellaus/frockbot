@@ -163,6 +163,7 @@
     "./plugins/health": "./plugins/health.ts",
     "./plugins/health-bot": "./plugins/health-bot.ts",
     "./plugins/page": "./plugins/page.ts",
+    "./plugins/module-events": "./plugins/module-events.ts",
     "./plugins/module-reports": "./plugins/module-reports.ts",
     "./plugins/page-reports": "./plugins/page-reports.ts",
     "./plugins/panel-focus": "./plugins/panel-focus.ts",

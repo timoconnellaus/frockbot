@@ -203,9 +203,11 @@ goes with the Messages helper and does not come back.
 ### In: a module event fires a Routine
 
 When the source pushes, the module calls `emit(event, payload, { key })`. The
-host sends it up the socket, keyed by `key`, the source's own id for the
-occurrence, such as Beeper's message id. The User Durable Object acknowledges
-only once it has admitted the event.
+host POSTs it to the module-events route (`POST
+/api/machines/:machineId/module-events`, under the machine's token), keyed by
+`key`, the source's own id for the occurrence, such as Beeper's message id.
+The socket stays server-push only. The User Durable Object answers each event
+`admitted`, `duplicate` or `dropped` only once it has admitted the event.
 
 From there it is the Plugin trigger path that exists:
 
