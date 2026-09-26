@@ -400,6 +400,27 @@ describe("plugin worker triggers", () => {
     ).toBe("");
   });
 
+  test("carry a device module's origin, and nothing else as one", () => {
+    const source = {
+      kind: "device-module" as const,
+      moduleId: "bridge",
+      machineId: "mac-1",
+      key: "$evt-42",
+    };
+    expect(
+      decodePluginWorkerTriggerInvocationV1({ ...invocation, source }).source,
+    ).toEqual(source);
+    expect(
+      decodePluginWorkerTriggerInvocationV1(invocation),
+    ).not.toHaveProperty("source");
+    expect(() =>
+      decodePluginWorkerTriggerInvocationV1({
+        ...invocation,
+        source: { ...source, kind: "webhook" },
+      }),
+    ).toThrow(/source/);
+  });
+
   test("refuse two header names that collide once lowercased", () => {
     expect(() =>
       decodePluginWorkerTriggerInvocationV1({

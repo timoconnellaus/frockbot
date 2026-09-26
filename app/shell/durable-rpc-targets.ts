@@ -203,6 +203,13 @@ export interface BotUserConfigurationRpcTargetV1
       routineId: string;
     }>,
   ): Promise<void>;
+  syncPluginTriggerRoutine(
+    input: UserRpcEnvelopeV1<{
+      botId: string;
+      routineId: string;
+      listening?: { pluginId: string; trigger: string };
+    }>,
+  ): Promise<void>;
   operateMemory(
     input: BotRpcEnvelopeV1<{ action: string; request: object }>,
   ): Promise<object>;

@@ -37,6 +37,7 @@ import {
   type RoutineWriterV1,
 } from "./records.js";
 import { projectRoutineEventBodyV1 } from "./event-judge.js";
+import type { PluginWorkerTriggerSourceV1 } from "@frockbot/core/contracts";
 import {
   constantTimeEqualsV1,
   decodeRoutineHookKeyV1,
@@ -156,6 +157,23 @@ export interface RoutinePluginTriggerDeliveryV1 {
   trigger: string;
   headers: Record<string, string>;
   body: string;
+  /** Absent for the webhook door; present for a device module's event. */
+  source?: PluginWorkerTriggerSourceV1;
+}
+
+/**
+ * One device module's event, after the User object admitted it and found
+ * this Routine listening (ADR 0037). It enters where a webhook delivery does
+ * once the door's key is checked: the replay guard, the Plugin, the firing.
+ */
+export interface RoutineModuleEventDeliveryV1 {
+  routineId: string;
+  deliveryId: string;
+  pluginId: string;
+  trigger: string;
+  /** The payload as JSON text. */
+  body: string;
+  source: PluginWorkerTriggerSourceV1;
 }
 
 /**
@@ -411,22 +429,63 @@ export class RoutineStore {
     contentType?: string | null;
     headers?: Record<string, string>;
   }): Promise<RoutineHookDeliveryReceiptV1> {
-    // A sender can have two copies of one event in the door at once, and the
-    // Plugin is asked between the checks and the write. Without this the
-    // second copy would ask the Plugin again for the firing the first is
-    // already making; the replay guard only catches the copy that arrives
-    // after that firing is written.
-    const joined = this.#inFlight.get(input.deliveryId);
+    return this.#joined(input.deliveryId, () =>
+      this.#deliver(
+        input,
+        (transaction) => this.#admitDelivery(transaction, input),
+        "Webhook POST",
+      ),
+    );
+  }
+
+  /**
+   * Accept one device module's event. The User object already admitted it
+   * against the active generation and routed it here; what is checked again
+   * is that this Routine still listens to exactly this Plugin's event.
+   * Refusals are drops, never throws: the event was real, and the module that
+   * sent it is answered for every Routine at once.
+   */
+  async deliverModuleEvent(
+    input: RoutineModuleEventDeliveryV1,
+  ): Promise<RoutineHookDeliveryReceiptV1> {
+    try {
+      return await this.#joined(input.deliveryId, () =>
+        this.#deliver(
+          { ...input, contentType: "application/json", headers: {} },
+          (transaction) => this.#admitModuleEvent(transaction, input),
+          "Device module event",
+        ),
+      );
+    } catch (error) {
+      if (error instanceof RoutineHookError) {
+        return { status: "dropped", reason: error.message };
+      }
+      throw error;
+    }
+  }
+
+  /**
+   * A sender can have two copies of one event in flight at once, and the
+   * Plugin is asked between the checks and the write. Without this the
+   * second copy would ask the Plugin again for the firing the first is
+   * already making; the replay guard only catches the copy that arrives
+   * after that firing is written.
+   */
+  async #joined(
+    deliveryId: string,
+    deliver: () => Promise<RoutineHookDeliveryReceiptV1>,
+  ): Promise<RoutineHookDeliveryReceiptV1> {
+    const joined = this.#inFlight.get(deliveryId);
     if (joined !== undefined) {
       const already = await joined;
       return already.status === "accepted"
         ? { status: "duplicate", fireId: already.fireId }
         : already;
     }
-    const delivering = this.#deliverHook(input).finally(() => {
-      this.#inFlight.delete(input.deliveryId);
+    const delivering = deliver().finally(() => {
+      this.#inFlight.delete(deliveryId);
     });
-    this.#inFlight.set(input.deliveryId, delivering);
+    this.#inFlight.set(deliveryId, delivering);
     return delivering;
   }
 
@@ -440,18 +499,7 @@ export class RoutineStore {
     eventId: string;
     payload: unknown;
   }): Promise<RoutineHookDeliveryReceiptV1> {
-    const joined = this.#inFlight.get(input.eventId);
-    if (joined !== undefined) {
-      const already = await joined;
-      return already.status === "accepted"
-        ? { status: "duplicate", fireId: already.fireId }
-        : already;
-    }
-    const delivering = this.#deliverConnectEvent(input).finally(() => {
-      this.#inFlight.delete(input.eventId);
-    });
-    this.#inFlight.set(input.eventId, delivering);
-    return delivering;
+    return this.#joined(input.eventId, () => this.#deliverConnectEvent(input));
   }
 
   async #deliverConnectEvent(input: {
@@ -543,15 +591,43 @@ export class RoutineStore {
     return record.trigger;
   }
 
-  async #deliverHook(input: {
-    routineId: string;
-    keyVersion?: number;
-    digest?: string;
-    deliveryId: string;
-    body: string;
-    contentType?: string | null;
-    headers?: Record<string, string>;
-  }): Promise<RoutineHookDeliveryReceiptV1> {
+  /** The module-event counterpart of the door's checks: no key, same record. */
+  async #admitModuleEvent(
+    transaction: RoutineStorageReadsV1,
+    input: RoutineModuleEventDeliveryV1,
+  ): Promise<RoutineTriggerV1> {
+    const stored = await transaction.get<unknown>(
+      routineKeyV1(input.routineId),
+    );
+    if (stored === undefined) {
+      throw new RoutineHookError(404, "Routine not found");
+    }
+    const record = decodeRoutineRecordV1(stored);
+    if (
+      record.trigger?.kind !== "plugin" ||
+      record.trigger.pluginId !== input.pluginId ||
+      record.trigger.trigger !== input.trigger
+    ) {
+      throw new RoutineHookError(409, "Routine does not listen to this event");
+    }
+    if (!record.enabled) {
+      throw new RoutineHookError(409, "Routine is paused");
+    }
+    return record.trigger;
+  }
+
+  async #deliver(
+    input: {
+      routineId: string;
+      deliveryId: string;
+      body: string;
+      contentType?: string | null;
+      headers?: Record<string, string>;
+      source?: PluginWorkerTriggerSourceV1;
+    },
+    admit: (transaction: RoutineStorageReadsV1) => Promise<RoutineTriggerV1>,
+    origin: string,
+  ): Promise<RoutineHookDeliveryReceiptV1> {
     if (!this.#firings) {
       throw new RoutineHookError(500, "this Bot cannot accept a delivery");
     }
@@ -565,7 +641,7 @@ export class RoutineStore {
         : { status: "dropped", reason: seen.dropped ?? "dropped" };
     const admitted = await this.#storage.transaction(async (transaction) => {
       const now = this.#now();
-      const trigger = await this.#admitDelivery(transaction, input);
+      const trigger = await admit(transaction);
       const seen = await transaction.get<RoutineDeliveryReceiptV1>(receiptKey);
       if (
         seen &&
@@ -579,7 +655,11 @@ export class RoutineStore {
 
     // A Plugin trigger is asked between the checks and the write, outside
     // both: the worker is another isolate, and a transaction cannot wait on it.
-    let delivery = renderRoutineDeliveryV1(input.body, input.contentType);
+    let delivery = renderRoutineDeliveryV1(
+      input.body,
+      input.contentType,
+      origin,
+    );
     let dropped: string | undefined;
     if (admitted.trigger.kind === "plugin") {
       const seam = this.#pluginTriggers;
@@ -592,6 +672,7 @@ export class RoutineStore {
         trigger: admitted.trigger.trigger,
         headers: input.headers ?? {},
         body: input.body,
+        ...(input.source === undefined ? {} : { source: input.source }),
       });
       if (answer.status === "drop") {
         dropped = (answer.reason ?? "the Plugin dropped the delivery").slice(
@@ -599,7 +680,7 @@ export class RoutineStore {
           1_024,
         );
       } else {
-        delivery = renderRoutineDeliveryV1(answer.text, "text/plain");
+        delivery = renderRoutineDeliveryV1(answer.text, "text/plain", origin);
       }
     }
 
@@ -608,7 +689,7 @@ export class RoutineStore {
       // The checks are read again: the Plugin held the delivery for as long as
       // it liked, and a Routine paused or re-keyed while it answered must not
       // be fired on the strength of a check that has gone stale.
-      await this.#admitDelivery(transaction, input);
+      await admit(transaction);
       const seen = await transaction.get<RoutineDeliveryReceiptV1>(receiptKey);
       if (
         seen &&

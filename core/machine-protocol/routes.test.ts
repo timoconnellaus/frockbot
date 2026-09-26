@@ -21,6 +21,7 @@ describe("machine route table", () => {
       "result",
       "module",
       "moduleReports",
+      "moduleEvents",
       "moduleCallClaim",
       "moduleCallResult",
     ]);

@@ -3,7 +3,8 @@
 // Each modules frame is the whole list. A module already running at the same
 // hash is left alone; one that left the list or changed hash is stopped; a new
 // one is fetched, checked against its hash, and started under a supervisor.
-// What the supervisors report is posted back in small batches.
+// What the supervisors report is posted back in small batches, and what the
+// modules emit is posted as events once a Routine listens for them.
 //
 // A Plugin's call to a module is claimed, run and answered here. The host
 // keeps a ledger of every call it took, written before the claim, so a call
@@ -16,10 +17,14 @@ import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import {
+  decodeMachineModuleEventV1,
+  decodeMachineModuleEventsReceiptV1,
   MACHINE_LIMITS_V1,
   decodeMachineModuleCallClaimReceiptV1,
   machineRoutePathV1,
   type MachineModuleCallFrameV1,
+  type MachineModuleEventReceiptV1,
+  type MachineModuleEventV1,
   type MachineModuleReportV1,
   type MachineModuleV1,
 } from "@frockbot/core/machine-protocol";
@@ -85,8 +90,6 @@ export const MODULE_CALL_LEDGER_MAX_V1 = 2_000;
 /** Posts of one call's result before it is given up on. */
 const RESULT_ATTEMPTS = 3;
 
-const EVENTS_LATER = "events arrive in a later release";
-
 function message(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
 }
@@ -131,6 +134,11 @@ interface Held {
   running?: RunningModuleV1;
 }
 
+interface Emitted {
+  event: MachineModuleEventV1;
+  settle(outcome: MachineModuleEventReceiptV1 | Error): void;
+}
+
 export class ModuleHostV1 {
   private readonly held = new Map<string, Held>();
   private wanted: MachineModuleV1[] | undefined;
@@ -138,6 +146,8 @@ export class ModuleHostV1 {
   /** Bumped by `stopAll`, so a list being applied does not outlive it. */
   private epoch = 0;
   private readonly reports: MachineModuleReportV1[] = [];
+  private readonly emitted: Emitted[] = [];
+  private posting = false;
   private flushing = false;
   private failures = 0;
 
@@ -311,6 +321,8 @@ export class ModuleHostV1 {
       const next = wanted.get(name);
       // One that never started is tried again.
       if (next?.contentHash === held.module.contentHash && held.running) {
+        // Same code; who listens and the last keys may still have moved.
+        held.module = next;
         continue;
       }
       held.running?.stop();
@@ -413,9 +425,12 @@ export class ModuleHostV1 {
     data: string,
   ): Omit<ModuleSupervisorSeamsV1, "spawn"> {
     return {
-      // Step 4 of ADR 0037 wires these to the socket.
-      emit: () => Promise.reject(new Error(EVENTS_LATER)),
-      lastKey: () => Promise.reject(new Error(EVENTS_LATER)),
+      emit: (event, payload, eventKey) =>
+        this.emit(held, { event, payload, key: eventKey }),
+      lastKey: async (event) =>
+        Object.hasOwn(held.module.lastKeys, event)
+          ? held.module.lastKeys[event]
+          : undefined,
       store: jsonStore(join(data, "store.json")),
       appleEvents: (bundleId, script) =>
         this.options.appleEvents(bundleId, script),
@@ -427,6 +442,94 @@ export class ModuleHostV1 {
         }
       },
     };
+  }
+
+  /**
+   * Resolves once the cloud has the event, or has said it never will. An
+   * event nothing listens for is not sent: an unarmed Plugin must not wake
+   * the cloud for every message the person receives.
+   */
+  private async emit(
+    held: Held,
+    occurrence: { event: string; payload: unknown; key: string },
+  ): Promise<void> {
+    const { module } = held;
+    if (!module.listening.includes(occurrence.event)) return;
+    // Checked here, so one oversized event fails alone, not its whole batch.
+    const event = decodeMachineModuleEventV1(
+      { pluginId: module.pluginId, moduleId: module.moduleId, ...occurrence },
+      `event "${occurrence.event}"`,
+    );
+    const outcome = await new Promise<MachineModuleEventReceiptV1 | Error>(
+      (settle) => {
+        this.emitted.push({ event, settle });
+        void this.postEvents();
+      },
+    );
+    if (outcome instanceof Error) throw outcome;
+    if (outcome.status === "dropped") {
+      this.report(module, {
+        kind: "log",
+        level: "error",
+        text: `the cloud dropped event "${occurrence.event}": ${outcome.reason}`,
+      });
+      return;
+    }
+    held.module = {
+      ...held.module,
+      lastKeys: { ...held.module.lastKeys, [occurrence.event]: occurrence.key },
+    };
+  }
+
+  /** Posts waiting events a batch at a time; a failed post fails its batch. */
+  private async postEvents(): Promise<void> {
+    if (this.posting) return;
+    this.posting = true;
+    try {
+      while (this.emitted.length > 0) {
+        const batch = this.emitted.splice(0, MACHINE_LIMITS_V1.moduleEvents);
+        let receipts: MachineModuleEventReceiptV1[];
+        try {
+          receipts = await this.sendEvents(batch.map((entry) => entry.event));
+          if (receipts.length !== batch.length) {
+            throw new Error("the cloud answered a different number of events");
+          }
+        } catch (error) {
+          const failed = new Error(
+            `the event could not be sent: ${message(error)}`,
+          );
+          for (const entry of batch) entry.settle(failed);
+          continue;
+        }
+        batch.forEach((entry, index) => entry.settle(receipts[index]!));
+      }
+    } finally {
+      this.posting = false;
+    }
+  }
+
+  private async sendEvents(
+    events: MachineModuleEventV1[],
+  ): Promise<MachineModuleEventReceiptV1[]> {
+    const credential = this.options.credential();
+    if (!credential) throw new Error("this Mac is not paired");
+    const path = machineRoutePathV1("moduleEvents", {
+      machineId: credential.machineId,
+    });
+    const response = await this.options.fetch(`${this.options.origin}${path}`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${credential.token}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify({ events }),
+      redirect: "error",
+    });
+    if (!response.ok) {
+      await response.body?.cancel();
+      throw new Error(`module events answered ${response.status}`);
+    }
+    return decodeMachineModuleEventsReceiptV1(await response.json()).receipts;
   }
 
   private report(

@@ -40,6 +40,7 @@ let now = Date.parse("2026-09-01T00:00:00.000Z");
 let modules: Map<string, string>;
 let moduleReports: unknown[];
 let moduleCalls: MachineModuleCallsV1;
+let moduleEvents: unknown[];
 
 /** One request through whichever door matches, as the gateway routes it. */
 async function call(
@@ -118,6 +119,7 @@ beforeEach(() => {
   accepted = undefined;
   modules = new Map();
   moduleReports = [];
+  moduleEvents = [];
   authority = new MachineUserBackendContribution({
     storage,
     readSecret: () => SECRET,
@@ -209,6 +211,20 @@ beforeEach(() => {
         callInput.callId,
         decodeMachineModuleCallResultV1(callInput.result),
       );
+    },
+    recordMachineModuleEvents: async (_userId, callInput) => {
+      await authority.authorize(
+        callInput.claims,
+        callInput.tokenDigest,
+        callInput.machineId,
+      );
+      moduleEvents.push(...callInput.events.events);
+      return {
+        schemaVersion: 1,
+        receipts: callInput.events.events.map(() => ({
+          status: "admitted" as const,
+        })),
+      };
     },
     listMachines: () => authority.list(),
     revokeMachine: (_userId, machineId) => authority.revoke(machineId),
@@ -527,6 +543,37 @@ describe("the machine door", () => {
     ).toBe(401);
   });
 
+  test("module events are decoded at the door and handed on", async () => {
+    const driver = agent();
+    await driver.enroll((await pair()).code);
+    const event = {
+      pluginId: "beeper",
+      moduleId: "bridge",
+      event: "message",
+      key: "evt-1",
+      payload: { text: "hi" },
+    };
+    expect(await driver.emitModuleEvents([event])).toEqual({
+      schemaVersion: 1,
+      receipts: [{ status: "admitted" }],
+    });
+    expect(moduleEvents).toEqual([event]);
+    const path = machineRoutePathV1("moduleEvents", {
+      machineId: driver.machineId!,
+    });
+    expect(
+      (
+        await call("POST", path, {
+          token: driver.token!,
+          body: { events: [{ ...event, key: "" }] },
+        })
+      ).status,
+    ).toBe(400);
+    expect(
+      (await call("POST", path, { body: { events: [event] } })).status,
+    ).toBe(401);
+  });
+
   test("a revoked machine's token fails every machine route", async () => {
     const offer = await pair();
     const driver = agent();
@@ -588,6 +635,9 @@ describe("the machine door", () => {
         throw new Error("unreachable");
       },
       recordMachineModuleCallResult: () => {
+        throw new Error("unreachable");
+      },
+      recordMachineModuleEvents: () => {
         throw new Error("unreachable");
       },
       listMachines: () => {

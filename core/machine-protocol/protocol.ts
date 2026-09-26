@@ -89,6 +89,16 @@ export const MACHINE_LIMITS_V1 = {
   moduleCallJson: 256 * 1_024,
   /** The error a module call answers with. */
   moduleCallError: 2_000,
+  /** Events one post may carry. */
+  moduleEvents: 20,
+  /** The source's own id for one occurrence, such as a message id. */
+  moduleEventKey: 256,
+  /**
+   * One event's payload, as JSON. The Routine webhook door's body ceiling
+   * (`ROUTINE_HOOK_BODY_MAX_BYTES`): an event becomes the body its Plugin
+   * trigger reads, and must fit what the door would admit.
+   */
+  moduleEventPayloadBytes: 64 * 1_024,
 } as const;
 
 /**
@@ -800,11 +810,46 @@ export interface MachineModuleV1 {
   appleEvents: string[];
   calls: string[];
   events: string[];
+  /**
+   * The declared events at least one active Routine listens to. A module
+   * sends nothing else, so an unarmed Plugin does not wake the cloud.
+   */
+  listening: string[];
+  /** Per event, the last key the cloud admitted, for catch-up on start. */
+  lastKeys: Record<string, string>;
 }
 
 const PLUGIN_ID = /^[a-z][a-z0-9-]{0,63}$/;
 const MODULE_ID = /^[a-z][a-z0-9-]{0,31}$/;
 const CONTENT_HASH = /^[0-9a-f]{64}$/;
+// A Plugin trigger's name, which is what a module's event is.
+const EVENT_NAME = /^[a-z][a-z0-9_-]{0,63}$/;
+
+/** The source's key for one occurrence: opaque, bounded, one line. */
+function eventKey(input: unknown, label: string): string {
+  const value = boundedString(input, MACHINE_LIMITS_V1.moduleEventKey, label);
+  if (CONTROL_CHARACTERS.test(value)) {
+    fail(`${label} must not contain control characters`);
+  }
+  return value;
+}
+
+function lastKeys(input: unknown, label: string): Record<string, string> {
+  const value = object(input, label);
+  const entries = Object.entries(value);
+  if (entries.length > MACHINE_LIMITS_V1.moduleDeclarations) {
+    throw new MachineDecodeError(
+      `${label} exceeds ${MACHINE_LIMITS_V1.moduleDeclarations} entries`,
+      "limit-exceeded",
+    );
+  }
+  return Object.fromEntries(
+    entries.map(([event, key]) => [
+      pattern(event, EVENT_NAME, `${label} event`),
+      eventKey(key, `${label} ${event}`),
+    ]),
+  );
+}
 
 function pattern(input: unknown, rule: RegExp, label: string): string {
   const value = boundedString(input, MACHINE_LIMITS_V1.identifier, label);
@@ -848,6 +893,8 @@ export function decodeMachineModuleV1(
       "appleEvents",
       "calls",
       "events",
+      "listening",
+      "lastKeys",
     ],
     label,
   );
@@ -870,6 +917,8 @@ export function decodeMachineModuleV1(
     appleEvents: declared(value.appleEvents, `${label} appleEvents`),
     calls: declared(value.calls, `${label} calls`),
     events: declared(value.events, `${label} events`),
+    listening: declared(value.listening, `${label} listening`),
+    lastKeys: lastKeys(value.lastKeys, `${label} lastKeys`),
   };
 }
 
@@ -881,9 +930,11 @@ export function decodeMachineModuleV1(
  * after each dispatch or lease lapse with what became claimable. A command may
  * arrive twice; the claim is what stops it running twice. `modules` follows it
  * on connect and is sent again whenever the account's active Composition
- * generation changes; each one is the whole list, so the latest replaces what
- * came before. `call` carries one Plugin's call to its device module, sent
- * to the one machine chosen to run it. `serverTime` is the backend's clock, since the laptop's may
+ * generation changes, a Routine starts or stops listening to a module's
+ * event, or an admitted event moves a module's last key; each one is the
+ * whole list, so the latest replaces what came before. `call` carries one
+ * Plugin's call to its device module, sent to the one machine chosen to run
+ * it. `serverTime` is the backend's clock, since the laptop's may
  * have been asleep.
  */
 export type MachineSocketFrameV1 =
@@ -1135,6 +1186,128 @@ export function decodeMachineModuleReportsReceiptV1(
       MACHINE_LIMITS_V1.moduleReports,
       `${label} dropped`,
     ),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Module events
+// ---------------------------------------------------------------------------
+
+/**
+ * One occurrence a device module emitted (ADR 0037): `emit(event, payload,
+ * { key })`. `key` is the source's own id for it, so a module that reconnects
+ * and sends it again fires nothing twice. `payload` is third-party content.
+ */
+export interface MachineModuleEventV1 {
+  pluginId: string;
+  moduleId: string;
+  event: string;
+  key: string;
+  payload: unknown;
+}
+
+export interface MachineModuleEventsV1 {
+  events: MachineModuleEventV1[];
+}
+
+const UTF8 = new TextEncoder();
+
+export function decodeMachineModuleEventV1(
+  input: unknown,
+  label = "module event",
+): MachineModuleEventV1 {
+  const value = object(input, label);
+  exactly(value, ["pluginId", "moduleId", "event", "key", "payload"], label);
+  if (!("payload" in value)) fail(`${label} payload is missing`);
+  let encoded: string | undefined;
+  try {
+    encoded = JSON.stringify(value.payload);
+  } catch {
+    encoded = undefined;
+  }
+  if (encoded === undefined) fail(`${label} payload must be JSON`);
+  if (UTF8.encode(encoded).length > MACHINE_LIMITS_V1.moduleEventPayloadBytes) {
+    throw new MachineDecodeError(
+      `${label} payload exceeds ${MACHINE_LIMITS_V1.moduleEventPayloadBytes} bytes`,
+      "limit-exceeded",
+    );
+  }
+  return {
+    pluginId: pattern(value.pluginId, PLUGIN_ID, `${label} pluginId`),
+    moduleId: pattern(value.moduleId, MODULE_ID, `${label} moduleId`),
+    event: pattern(value.event, EVENT_NAME, `${label} event`),
+    key: eventKey(value.key, `${label} key`),
+    // Re-parsed, so what travels on is plain JSON whatever the caller held.
+    payload: JSON.parse(encoded) as unknown,
+  };
+}
+
+export function decodeMachineModuleEventsV1(
+  input: unknown,
+  label = "module events",
+): MachineModuleEventsV1 {
+  const value = object(input, label);
+  exactly(value, ["events"], label);
+  return {
+    events: boundedList(
+      value.events,
+      MACHINE_LIMITS_V1.moduleEvents,
+      `${label} events`,
+    ).map((event, index) =>
+      decodeMachineModuleEventV1(event, `${label} event ${index}`),
+    ),
+  };
+}
+
+/**
+ * What became of one posted event, in the order they were posted. Each is
+ * answered only once it is durable: `admitted` has reached every Routine
+ * listening, `duplicate` was admitted before under the same key, and
+ * `dropped` names a Plugin, module or event the active generation does not
+ * carry, which a retry will not change.
+ */
+export type MachineModuleEventReceiptV1 =
+  { status: "admitted" | "duplicate" } | { status: "dropped"; reason: string };
+
+export interface MachineModuleEventsReceiptV1 {
+  schemaVersion: 1;
+  receipts: MachineModuleEventReceiptV1[];
+}
+
+export function decodeMachineModuleEventsReceiptV1(
+  input: unknown,
+  label = "module events receipt",
+): MachineModuleEventsReceiptV1 {
+  const value = object(input, label);
+  exactly(value, ["schemaVersion", "receipts"], label);
+  return {
+    schemaVersion: schemaVersion(value, label),
+    receipts: boundedList(
+      value.receipts,
+      MACHINE_LIMITS_V1.moduleEvents,
+      `${label} receipts`,
+    ).map((entry, index) => {
+      const receipt = object(entry, `${label} receipt ${index}`);
+      if (receipt.status === "dropped") {
+        exactly(receipt, ["status", "reason"], `${label} receipt ${index}`);
+        return {
+          status: "dropped" as const,
+          reason: boundedString(
+            receipt.reason,
+            MACHINE_LIMITS_V1.message,
+            `${label} receipt ${index} reason`,
+          ),
+        };
+      }
+      exactly(receipt, ["status"], `${label} receipt ${index}`);
+      return {
+        status: literal(
+          receipt.status,
+          ["admitted", "duplicate"] as const,
+          `${label} receipt ${index} status`,
+        ),
+      };
+    }),
   };
 }
 

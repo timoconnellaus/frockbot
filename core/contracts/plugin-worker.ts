@@ -204,6 +204,19 @@ export interface PluginWorkerToolInvocationV1 extends IsolateToolInvocationV1 {
   effectId?: string;
 }
 
+/**
+ * Where a trigger's event came from when it was not the webhook door: the
+ * Plugin's own device module on one of the User's machines (ADR 0037). `key`
+ * is the source's id for the occurrence; the body is the module's payload as
+ * JSON text, and there are no headers.
+ */
+export interface PluginWorkerTriggerSourceV1 {
+  kind: "device-module";
+  moduleId: string;
+  machineId: string;
+  key: string;
+}
+
 /** An event arriving on the app-owned hooks route, handed to one Plugin. */
 export interface PluginWorkerTriggerInvocationV1 {
   schemaVersion: 1;
@@ -211,6 +224,8 @@ export interface PluginWorkerTriggerInvocationV1 {
   trigger: string;
   headers: Record<string, string>;
   body: string;
+  /** Absent for a webhook delivery. */
+  source?: PluginWorkerTriggerSourceV1;
   botId: string;
   sessionId: string;
   runId: string;
@@ -942,9 +957,24 @@ export function decodePluginWorkerTriggerInvocationV1(
       "deadlineMs",
     ],
     label,
+    ["source"],
   );
   if (value.schemaVersion !== 1) {
     throw new Error(`${label}.schemaVersion is unsupported`);
+  }
+  let source: PluginWorkerTriggerSourceV1 | undefined;
+  if (value.source !== undefined) {
+    const raw = record(value.source, `${label}.source`);
+    exactKeys(raw, ["kind", "moduleId", "machineId", "key"], `${label}.source`);
+    if (raw.kind !== "device-module") {
+      throw new Error(`${label}.source.kind is unsupported`);
+    }
+    source = {
+      kind: "device-module",
+      moduleId: boundedString(raw.moduleId, `${label}.source.moduleId`, 64),
+      machineId: boundedString(raw.machineId, `${label}.source.machineId`, 200),
+      key: boundedString(raw.key, `${label}.source.key`, 256),
+    };
   }
   const trigger = boundedString(value.trigger, `${label}.trigger`, 64);
   if (!PLUGIN_TRIGGER_NAME.test(trigger)) {
@@ -1001,6 +1031,7 @@ export function decodePluginWorkerTriggerInvocationV1(
     ),
     routineId: boundedString(value.routineId, `${label}.routineId`, 256),
     deadlineMs: deadlineMs as number,
+    ...(source === undefined ? {} : { source }),
   };
 }
 

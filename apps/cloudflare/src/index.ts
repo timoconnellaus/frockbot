@@ -127,6 +127,7 @@ import {
   decodeMachineListViewV1,
   decodeMachineModuleCallClaimReceiptV1,
   decodeMachineModuleCallResultReceiptV1,
+  decodeMachineModuleEventsReceiptV1,
   decodeMachineModuleReportsReceiptV1,
   decodeMachinePairingOfferV1,
   decodeMachineResultReceiptV1,
@@ -965,6 +966,7 @@ interface UserMachineRpc {
   recordMachineModuleReports(input: unknown): Promise<unknown>;
   claimMachineModuleCall(input: unknown): Promise<unknown>;
   recordMachineModuleCallResult(input: unknown): Promise<unknown>;
+  recordMachineModuleEvents(input: unknown): Promise<unknown>;
   takeMachineDeliveries(input: unknown): Promise<unknown>;
   listMachines(input: unknown): Promise<unknown>;
   revokeMachine(input: unknown): Promise<unknown>;
@@ -2349,6 +2351,19 @@ const createGatewayBackendContributions = (env: Env) =>
             claims: call.claims,
             tokenDigest: call.tokenDigest,
             result: call.result,
+          }),
+        ),
+      ),
+    recordMachineModuleEvents: async (userId, call) =>
+      decodeMachineModuleEventsReceiptV1(
+        rpcJsonSnapshotV1(
+          await userMachineStub(env, userId).recordMachineModuleEvents({
+            schemaVersion: 1,
+            userId,
+            machineId: call.machineId,
+            claims: call.claims,
+            tokenDigest: call.tokenDigest,
+            events: call.events,
           }),
         ),
       ),

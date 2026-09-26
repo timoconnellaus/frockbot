@@ -6,6 +6,8 @@ import { join } from "node:path";
 
 import type {
   MachineModuleCallFrameV1,
+  MachineModuleEventReceiptV1,
+  MachineModuleEventV1,
   MachineModuleReportV1,
   MachineModuleV1,
 } from "@frockbot/core/machine-protocol";
@@ -35,6 +37,10 @@ function module(
   moduleId: string,
   contentHash: string,
   pluginId = "beeper",
+  events: Pick<MachineModuleV1, "listening" | "lastKeys"> = {
+    listening: [],
+    lastKeys: {},
+  },
 ): MachineModuleV1 {
   return {
     pluginId,
@@ -45,7 +51,8 @@ function module(
     net: [],
     appleEvents: [],
     calls: [],
-    events: [],
+    events: ["message"],
+    ...events,
   };
 }
 
@@ -57,6 +64,13 @@ async function host(
   const log: string[] = [];
   const downloads: string[] = [];
   const posted: MachineModuleReportV1[][] = [];
+  const sent: MachineModuleEventV1[][] = [];
+  let receipt = (
+    event: MachineModuleEventV1,
+  ): MachineModuleEventReceiptV1 | undefined =>
+    event.key.startsWith("old")
+      ? { status: "duplicate" }
+      : { status: "admitted" };
   const seams = new Map<string, Omit<ModuleSupervisorSeamsV1, "spawn">>();
   let answer = 200;
   const callPosts: Array<{ path: string; body: unknown }> = [];
@@ -85,6 +99,17 @@ async function host(
             ? { schemaVersion: 1, status: claimStatus, callId }
             : { schemaVersion: 1, status: "recorded", callId },
         );
+      }
+      if (url.endsWith(`/api/machines/${MACHINE}/module-events`)) {
+        const { events } = JSON.parse(String(init?.body)) as {
+          events: MachineModuleEventV1[];
+        };
+        sent.push(events);
+        if (answer !== 200) return new Response("no", { status: answer });
+        return Response.json({
+          schemaVersion: 1,
+          receipts: events.map(receipt).filter(Boolean),
+        });
       }
       if (url.endsWith("/module-reports")) {
         posted.push(
@@ -125,7 +150,11 @@ async function host(
     log,
     downloads,
     posted,
+    sent,
     seams,
+    receipt: (next: typeof receipt) => {
+      receipt = next;
+    },
     answer: (status: number) => {
       answer = status;
     },
@@ -228,9 +257,6 @@ describe("ModuleHostV1", () => {
         ),
       ),
     ).toEqual({ cursor: { at: 3 } });
-    await expect(seams.get("bridge")!.emit("message", {}, "k")).rejects.toThrow(
-      "events arrive in a later release",
-    );
   });
 
   test("posts reports in batches no larger than the protocol allows", async () => {
@@ -279,6 +305,108 @@ describe("ModuleHostV1", () => {
     answer(200);
     await modules.flush();
     expect(modules.pendingReports()).toBe(0);
+  });
+
+  test("sends an event only while a Routine listens, and keeps its key once the cloud has it", async () => {
+    const one = artifact("export const calls = {};");
+    const { modules, seams, sent } = await host({ [one.hash]: one.bytes });
+    await modules.sync([module("bridge", one.hash)]);
+    const bridge = seams.get("bridge")!;
+
+    // Nothing listens: nothing is sent.
+    await bridge.emit("message", { text: "hi" }, "m1");
+    expect(sent).toEqual([]);
+    expect(await bridge.lastKey("message")).toBeUndefined();
+
+    // A Routine starts listening; the same code keeps running.
+    await modules.sync([
+      module("bridge", one.hash, "beeper", {
+        listening: ["message"],
+        lastKeys: { message: "m0" },
+      }),
+    ]);
+    expect(seams.get("bridge")).toBe(bridge);
+    expect(await bridge.lastKey("message")).toBe("m0");
+
+    await bridge.emit("message", { text: "hi" }, "m2");
+    expect(sent).toEqual([
+      [
+        {
+          pluginId: "beeper",
+          moduleId: "bridge",
+          event: "message",
+          key: "m2",
+          payload: { text: "hi" },
+        },
+      ],
+    ]);
+    expect(await bridge.lastKey("message")).toBe("m2");
+    // A replay the cloud already has is settled all the same.
+    await bridge.emit("message", {}, "old-1");
+    expect(await bridge.lastKey("message")).toBe("old-1");
+  });
+
+  test("batches a burst within the protocol's bound", async () => {
+    const one = artifact("export const calls = {};");
+    const { modules, seams, sent } = await host({ [one.hash]: one.bytes });
+    await modules.sync([
+      module("bridge", one.hash, "beeper", {
+        listening: ["message"],
+        lastKeys: {},
+      }),
+    ]);
+    const bridge = seams.get("bridge")!;
+    await Promise.all(
+      Array.from({ length: 45 }, (_, index) =>
+        bridge.emit("message", { index }, `m${index}`),
+      ),
+    );
+    // The first goes alone; the rest waited behind it.
+    expect(sent.map((batch) => batch.length)).toEqual([1, 20, 20, 4]);
+    expect(await bridge.lastKey("message")).toBe("m44");
+  });
+
+  test("fails an emit the cloud did not take, and reports one it dropped", async () => {
+    const one = artifact("export const calls = {};");
+    const { modules, seams, posted, sent, answer, receipt } = await host({
+      [one.hash]: one.bytes,
+    });
+    await modules.sync([
+      module("bridge", one.hash, "beeper", {
+        listening: ["message"],
+        lastKeys: { message: "m0" },
+      }),
+    ]);
+    const bridge = seams.get("bridge")!;
+
+    await expect(
+      bridge.emit("message", "x".repeat(70 * 1_024), "m1"),
+    ).rejects.toThrow("payload exceeds");
+    expect(sent).toEqual([]);
+
+    answer(503);
+    await expect(bridge.emit("message", {}, "m1")).rejects.toThrow(
+      "the event could not be sent: module events answered 503",
+    );
+    expect(await bridge.lastKey("message")).toBe("m0");
+
+    answer(200);
+    receipt(() => undefined);
+    await expect(bridge.emit("message", {}, "m1")).rejects.toThrow(
+      "a different number of events",
+    );
+
+    receipt(() => ({ status: "dropped", reason: "no such event" }));
+    await bridge.emit("message", {}, "m2");
+    expect(await bridge.lastKey("message")).toBe("m0");
+    await modules.flush();
+    expect(posted.flat().at(-1)).toEqual({
+      pluginId: "beeper",
+      moduleId: "bridge",
+      kind: "log",
+      level: "error",
+      text: 'the cloud dropped event "message": no such event',
+    });
   });
 });
 

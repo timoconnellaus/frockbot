@@ -1,4 +1,4 @@
-// The registered-machine gateway Contribution: nine routes, on two doors.
+// The registered-machine gateway Contribution: ten routes, on two doors.
 //
 // Three are ordinary authenticated routes beside `/api/settings` — the browser
 // asks for a pairing code, reads the registry, and revokes a machine:
@@ -7,7 +7,7 @@
 //   GET  /api/machines               the `ListMachines` projection
 //   POST /api/machines/:id/revoke    kill every token this machine holds
 //
-// Eight are not authenticated at all, because the caller is a program on
+// Nine are not authenticated at all, because the caller is a program on
 // somebody's laptop and has no session:
 //
 //   POST /api/machines/enroll                             bearer: pairing code
@@ -16,10 +16,11 @@
 //   POST /api/machines/:id/commands/:commandId/result     bearer: machine token
 //   GET  /api/machines/:id/modules/:contentHash           bearer: machine token
 //   POST /api/machines/:id/module-reports                 bearer: machine token
+//   POST /api/machines/:id/module-events                  bearer: machine token
 //   POST /api/machines/:id/module-calls/:callId/claim     bearer: machine token
 //   POST /api/machines/:id/module-calls/:callId/result    bearer: machine token
 //
-// Those eight are `publicRoute`s: they run at the seam in
+// Those nine are `publicRoute`s: they run at the seam in
 // `apps/cloudflare/src/gateway.ts` that executes *before* session
 // authentication, exactly where `plugin-routines`' webhook runs. Public means
 // "no session", never "no authority" — and the order of the checks is the
@@ -51,6 +52,8 @@ import {
   decodeMachineListViewV1,
   decodeMachineModuleCallClaimReceiptV1,
   decodeMachineModuleCallResultReceiptV1,
+  decodeMachineModuleEventsReceiptV1,
+  decodeMachineModuleEventsV1,
   decodeMachineModuleReportsReceiptV1,
   decodeMachineModuleReportsV1,
   decodeMachinePairingOfferV1,
@@ -64,6 +67,8 @@ import {
   type MachineListViewV1,
   type MachineModuleCallClaimReceiptV1,
   type MachineModuleCallResultReceiptV1,
+  type MachineModuleEventsReceiptV1,
+  type MachineModuleEventsV1,
   type MachineModuleReportsReceiptV1,
   type MachineModuleReportsV1,
   type MachinePairingOfferV1,
@@ -140,6 +145,11 @@ export interface MachineGatewayHostV1 {
     userId: string,
     call: MachineCallV1 & { callId: string; result: unknown },
   ): Promise<MachineModuleCallResultReceiptV1>;
+  /** Device-module events, answered once each is durably admitted. */
+  recordMachineModuleEvents(
+    userId: string,
+    call: MachineCallV1 & { events: MachineModuleEventsV1 },
+  ): Promise<MachineModuleEventsReceiptV1>;
   listMachines(userId: string): Promise<MachineListViewV1>;
   revokeMachine(userId: string, machineId: string): Promise<MachineListViewV1>;
 }
@@ -177,6 +187,9 @@ const MODULE_REPORTS = new RegExp(
 );
 const MODULE_CALL = new RegExp(
   `^${MACHINE_ROUTE_PREFIX_V1}/([^/]+)/module-calls/([^/]+)/(claim|result)$`,
+);
+const MODULE_EVENTS = new RegExp(
+  `^${MACHINE_ROUTE_PREFIX_V1}/([^/]+)/module-events$`,
 );
 const CONTENT_HASH = /^[0-9a-f]{64}$/;
 
@@ -342,6 +355,7 @@ export function createMachineBackendContribution(
     const module = MODULE.exec(url.pathname);
     const moduleReports = MODULE_REPORTS.exec(url.pathname);
     const moduleCall = MODULE_CALL.exec(url.pathname);
+    const moduleEvents = MODULE_EVENTS.exec(url.pathname);
     if (
       !enroll &&
       !socket &&
@@ -349,7 +363,8 @@ export function createMachineBackendContribution(
       !result &&
       !module &&
       !moduleReports &&
-      !moduleCall
+      !moduleCall &&
+      !moduleEvents
     ) {
       return undefined;
     }
@@ -462,6 +477,20 @@ export function createMachineBackendContribution(
               // Decoded by the authority, after the token: a dead token is
               // a 401 whatever it carried.
               result: await readJsonBody(request),
+            }),
+          ),
+        );
+      }
+      if (moduleEvents) {
+        if (request.method !== "POST") {
+          return jsonError(405, "method not allowed");
+        }
+        const call = await machineCall(secret, request, moduleEvents[1]!);
+        return Response.json(
+          decodeMachineModuleEventsReceiptV1(
+            await host.recordMachineModuleEvents(call.claims.u, {
+              ...call,
+              events: decodeMachineModuleEventsV1(await readJsonBody(request)),
             }),
           ),
         );

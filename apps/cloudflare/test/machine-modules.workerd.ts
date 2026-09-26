@@ -7,9 +7,11 @@ import {
   applyD1Migrations,
   createExecutionContext,
   env,
+  runDurableObjectAlarm,
+  runInDurableObject,
   waitOnExecutionContext,
 } from "cloudflare:test";
-import { beforeAll, describe, expect, test } from "vitest";
+import { beforeAll, describe, expect, test, vi } from "vitest";
 import {
   ISOLATE_CONTRACT_VERSION,
   decodePluginDescriptorV1,
@@ -109,8 +111,36 @@ async function turn(identity: Identity, text: string) {
   });
 }
 
+/** The Plugin a module event reaches: it says where the event came from. */
+const TRIGGER_SOURCE = `export const tools = [];
+export async function execute() {
+  throw new Error("no tools");
+}
+export const triggers = {
+  message: async function (delivery) {
+    const payload = JSON.parse(delivery.body);
+    return "From " + delivery.source.kind + " " + delivery.source.moduleId + ": " + payload.text;
+  },
+};
+`;
+
+function bot(identity: Identity) {
+  return env.BOT_STATES.getByName(
+    `${identity.userId}:${identity.botId}`,
+  ) as unknown as {
+    readPluginEnablement(input: unknown): Promise<{ revision: number }>;
+    setBotPluginEnabled(input: unknown): Promise<{ status: string }>;
+    executeRoutineCommand(input: unknown): Promise<{ status: string }>;
+  };
+}
+
 /** Pins a generation holding a Plugin with one device module. */
-async function pinModulePlugin(identity: Identity): Promise<string> {
+async function pinModulePlugin(
+  identity: Identity,
+  options: { source?: string; events?: string[] } = {},
+): Promise<string> {
+  const source = options.source ?? SOURCE;
+  const events = options.events ?? [];
   const { userId } = identity;
   const parent = (
     await user(userId).readComposition({ schemaVersion: 1, userId })
@@ -134,15 +164,23 @@ async function pinModulePlugin(identity: Identity): Promise<string> {
           net: ["localhost:23373"],
           appleEvents: [],
           calls: ["send"],
-          events: [],
+          events,
         },
       ],
     },
+    ...(events.length === 0
+      ? {}
+      : {
+          triggers: events.map((name) => ({
+            name,
+            description: "A message arrived",
+          })),
+        }),
     contextKeys: ["user", "bot", "session"],
   });
-  const contentHash = await sha256Hex(SOURCE);
+  const contentHash = await sha256Hex(source);
   const moduleHash = await sha256Hex(MODULE);
-  await env.APPLICATION_ARTIFACTS.put(`packages/${contentHash}.mjs`, SOURCE);
+  await env.APPLICATION_ARTIFACTS.put(`packages/${contentHash}.mjs`, source);
   await env.APPLICATION_ARTIFACTS.put(pluginModuleKeyV1(moduleHash), MODULE);
   const createdAt = new Date().toISOString();
   const members: CompositionMemberV1[] = [
@@ -162,7 +200,7 @@ async function pinModulePlugin(identity: Identity): Promise<string> {
       },
       artifact: {
         contentHash,
-        size: SOURCE.length,
+        size: source.length,
         mediaType: "application/javascript",
         bundlerVersion: "probe-seed",
       },
@@ -250,6 +288,8 @@ describe("a Plugin's device modules", () => {
       appleEvents: [],
       calls: ["send"],
       events: [],
+      listening: [],
+      lastKeys: {},
     };
     expect(await desktop.nextModules()).toEqual([bridge]);
 
@@ -329,6 +369,163 @@ describe("a Plugin's device modules", () => {
     expect(lines[3]).toMatch(
       /Z error \(bridge on Modules-Mac\.local\): connect ECONNREFUSED localhost:23373$/,
     );
+    desktop.disconnect();
+  });
+});
+
+describe("a device module's event", () => {
+  test("fires the Routine that listens, once per key, and moves the module's last key", async () => {
+    const identity = {
+      userId: `module-events-${crypto.randomUUID()}`,
+      botId: "bot-1",
+    };
+    await grantNativeAccess(identity.userId);
+    await provisionBot(identity);
+    await user(identity.userId).setFeatures({
+      schemaVersion: 1,
+      userId: identity.userId,
+      command: {
+        schemaVersion: 1,
+        type: "user/set-features",
+        pluginAuthoring: true,
+      },
+      updatedBy: "workerd-admin",
+    });
+    await turn(identity, "hello");
+
+    const desktop = new MachineAgentDriverV1({
+      origin: ORIGIN,
+      fetch: workerFetch,
+      webSocket: fetchUpgradeMachineWebSocketV1(workerFetch),
+      label: "Events-Mac.local",
+      platform: "macos",
+    });
+    await desktop.enroll(
+      await user(identity.userId).createMachinePairing({
+        schemaVersion: 1,
+        userId: identity.userId,
+      }),
+    );
+    expect(await desktop.next()).toEqual([]);
+    expect(await desktop.nextModules()).toEqual([]);
+
+    await pinModulePlugin(identity, {
+      source: TRIGGER_SOURCE,
+      events: ["message"],
+    });
+    await turn(identity, "hello");
+    expect(await desktop.nextModules()).toMatchObject([
+      { moduleId: "bridge", events: ["message"], listening: [], lastKeys: {} },
+    ]);
+
+    const enablement = await bot(identity).readPluginEnablement({
+      schemaVersion: 1,
+      ...identity,
+    });
+    expect(
+      await bot(identity).setBotPluginEnabled({
+        schemaVersion: 1,
+        ...identity,
+        command: {
+          schemaVersion: 1,
+          kind: "set-plugin-enabled",
+          commandId: crypto.randomUUID(),
+          pluginId: PLUGIN_ID,
+          enabled: true,
+          expectedRevision: enablement.revision,
+        },
+      }),
+    ).toMatchObject({ status: "applied" });
+
+    // A Routine that listens arms the module without a reconnect.
+    expect(
+      await bot(identity).executeRoutineCommand({
+        schemaVersion: 1,
+        ...identity,
+        command: {
+          schemaVersion: 1,
+          type: "routine/create",
+          commandId: "create-family",
+          botId: identity.botId,
+          routineId: "family",
+          name: "Family messages",
+          prompt: "Tell the User what the family said.",
+          trigger: { kind: "plugin", pluginId: PLUGIN_ID, trigger: "message" },
+        },
+      }),
+    ).toMatchObject({ status: "applied" });
+    expect(await desktop.nextModules()).toMatchObject([
+      { moduleId: "bridge", listening: ["message"], lastKeys: {} },
+    ]);
+
+    const message = {
+      pluginId: PLUGIN_ID,
+      moduleId: "bridge",
+      event: "message",
+      key: "$evt-1:beeper.local",
+      payload: { text: "Dinner at six?" },
+    };
+    expect(await desktop.emitModuleEvents([message])).toEqual({
+      schemaVersion: 1,
+      receipts: [{ status: "admitted" }],
+    });
+    expect(await desktop.nextModules()).toMatchObject([
+      { listening: ["message"], lastKeys: { message: "$evt-1:beeper.local" } },
+    ]);
+
+    const stub = env.BOT_STATES.getByName(
+      `${identity.userId}:${identity.botId}`,
+    );
+    const cues = async () =>
+      [
+        ...(
+          await runInDurableObject(stub, (_instance, state) =>
+            state.storage.list<{
+              input: string;
+              admission?: { origin?: { routineId?: string } };
+            }>({ prefix: "run:" }),
+          )
+        ).values(),
+      ]
+        .filter((run) => run.admission?.origin?.routineId === "family")
+        .map((run) => run.input);
+    await runDurableObjectAlarm(stub);
+    await vi.waitFor(async () => expect(await cues()).toHaveLength(1), {
+      timeout: 5_000,
+      interval: 25,
+    });
+    const [cue] = await cues();
+    // The Plugin was told the event came from its module, and the Turn reads
+    // what it said as a delivered payload, never as the User speaking.
+    expect(cue).toContain(
+      "Delivered payload:\nDevice module event (text/plain):\nFrom device-module bridge: Dinner at six?",
+    );
+
+    // The module reconnects and sends it again: nothing fires twice.
+    expect(await desktop.emitModuleEvents([message])).toEqual({
+      schemaVersion: 1,
+      receipts: [{ status: "duplicate" }],
+    });
+    expect(
+      await desktop.emitModuleEvents([
+        { ...message, moduleId: "other", key: "$evt-2:beeper.local" },
+        { ...message, event: "typing", key: "$evt-3:beeper.local" },
+      ]),
+    ).toEqual({
+      schemaVersion: 1,
+      receipts: [
+        {
+          status: "dropped",
+          reason: 'plugin "beeper" carries no module "other"',
+        },
+        {
+          status: "dropped",
+          reason: 'module "bridge" declares no event "typing"',
+        },
+      ],
+    });
+    await runDurableObjectAlarm(stub);
+    expect(await cues()).toHaveLength(1);
     desktop.disconnect();
   });
 });

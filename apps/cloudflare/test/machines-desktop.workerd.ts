@@ -131,6 +131,8 @@ function gateway(userId: string): MachineBackendRouteContribution {
       Promise.reject(new Error("not used by this suite")),
     recordMachineModuleCallResult: () =>
       Promise.reject(new Error("not used by this suite")),
+    recordMachineModuleEvents: () =>
+      Promise.reject(new Error("not used by this suite")),
     listMachines: async (owner) =>
       decodeMachineListViewV1(
         snapshot(await rpc.listMachines({ schemaVersion: 1, userId: owner })),

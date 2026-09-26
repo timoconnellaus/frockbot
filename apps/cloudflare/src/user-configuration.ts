@@ -109,8 +109,11 @@ import {
 import {
   DEVICE_CALL_WAIT_MS,
   decodeMachineModuleCallResultV1,
+  decodeMachineModuleEventsV1,
   decodeMachineModuleReportsV1,
   machineTokenClaimsV1,
+  type MachineModuleEventReceiptV1,
+  type MachineModuleEventsReceiptV1,
   type MachineModuleReportsReceiptV1,
   type MachinePlatformV1,
   type MachineSocketFrameV1,
@@ -127,6 +130,21 @@ import {
   readPluginModuleReportsV1,
   recordPluginModuleReportsV1,
 } from "@frockbot/app/plugins/module-reports";
+import {
+  listeningEventsV1,
+  moduleEventDeliveryV1,
+  moduleEventSeenV1,
+  moduleEventTargetsV1,
+  pluginTriggerIndexBuiltV1,
+  readModuleRoutingV1,
+  readPluginTriggerRoutinesV1,
+  rebuildPluginTriggerIndexV1,
+  recordModuleEventV1,
+  refuseModuleEventV1,
+  syncPluginTriggerRoutineV1,
+  trimModuleEventsSeenV1,
+  type PluginTriggerRoutineEntryV1,
+} from "@frockbot/app/plugins/module-events";
 import { DurableWorkspaceGenerations } from "@frockbot/core/durable";
 import {
   COMPOSITION_CURRENT_KEY,
@@ -1156,6 +1174,14 @@ export class UserConfiguration
     return this.env.BOT_STATES.get(id) as unknown as {
       deliverConnectEvent(input: unknown): Promise<unknown>;
       executeRoutineCommand(input: unknown): Promise<unknown>;
+      deliverPluginModuleEvent(
+        input: unknown,
+      ): Promise<{ status: string; reason?: string }>;
+      listPluginTriggerRoutines(
+        input: unknown,
+      ): Promise<
+        Array<{ routineId: string; pluginId: string; trigger: string }>
+      >;
     };
   }
 
@@ -1689,15 +1715,124 @@ export class UserConfiguration
     const before = await store.lastKnownGoodId();
     await change();
     if ((await store.lastKnownGoodId()) === before) return;
+    await this.pushMachineModules();
+  }
+
+  /**
+   * Sends every open machine socket its module list again: the active
+   * generation moved, a Routine started or stopped listening, or an event
+   * moved a last key. Best-effort: a desktop that missed it is sent the list
+   * on reconnect.
+   */
+  private async pushMachineModules(): Promise<void> {
+    if (this.ctx.getWebSockets().length === 0) return;
     await loggedEntryV1("Machine modules push", async () => {
       const active = await this.activeGeneration();
+      const routing = await readModuleRoutingV1(
+        this.ctx.storage,
+        await this.pluginTriggerRoutines(),
+      );
       const serverTime = new Date().toISOString();
       broadcastMachineFrameV1(this.ctx, (platform) => ({
         type: "modules",
-        modules: machineModulesV1(active, platform),
+        modules: machineModulesV1(active, platform, routing),
         serverTime,
       }));
     });
+  }
+
+  /**
+   * Every Routine, on any of the User's Bots, whose trigger names a Plugin's
+   * trigger. Routines written before this index existed never registered, so
+   * the first read asks each Bot once; after that each Routine keeps it
+   * current itself.
+   */
+  private async pluginTriggerRoutines(): Promise<
+    PluginTriggerRoutineEntryV1[]
+  > {
+    if (!(await pluginTriggerIndexBuiltV1(this.ctx.storage))) {
+      const userId = await this.provenIdentity();
+      if (userId === undefined) return [];
+      const directory = await (await this.flockContribution()).listBots();
+      const bots = await Promise.all(
+        directory.bots.map(async (bot) => {
+          try {
+            return {
+              botId: bot.botId,
+              routines: await this.botRoutinesStub(
+                userId,
+                bot.botId,
+              ).listPluginTriggerRoutines({
+                schemaVersion: 1,
+                userId,
+                botId: bot.botId,
+              }),
+            };
+          } catch (error) {
+            // One Bot that cannot answer must not hold every other Bot's
+            // Routines out of the index; its own next change registers it.
+            console.error(
+              `Plugin trigger index rebuild failed for a Bot: ${
+                error instanceof Error ? error.message : String(error)
+              }`,
+            );
+            return { botId: bot.botId, routines: [] };
+          }
+        }),
+      );
+      await rebuildPluginTriggerIndexV1(this.ctx.storage, bots);
+    }
+    return readPluginTriggerRoutinesV1(this.ctx.storage);
+  }
+
+  /**
+   * One Routine saying whether it listens to a Plugin's trigger, each time it
+   * is created, changed, paused, resumed or deleted.
+   */
+  async syncPluginTriggerRoutine(input: unknown): Promise<void> {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      {
+        userId: rpcIdentifier,
+        botId: rpcBotId,
+        routineId: rpcIdentifier,
+      },
+      {
+        listening: rpcObject({
+          pluginId: rpcPattern(/^[a-z][a-z0-9-]{0,63}$/, 64),
+          trigger: rpcPattern(/^[a-z][a-z0-9_-]{0,63}$/, 64),
+        }),
+      },
+    );
+    await this.assertUserIdentity(request.userId as string);
+    // An unbuilt index is rebuilt from every Bot on its first read, this
+    // Routine included; nothing listens to it before then.
+    const built = await pluginTriggerIndexBuiltV1(this.ctx.storage);
+    const before = listeningEventsV1(
+      await readPluginTriggerRoutinesV1(this.ctx.storage),
+    );
+    await syncPluginTriggerRoutineV1(this.ctx.storage, {
+      botId: request.botId as string,
+      routineId: request.routineId as string,
+      ...(request.listening === undefined
+        ? {}
+        : {
+            listening: request.listening as {
+              pluginId: string;
+              trigger: string;
+            },
+          }),
+    });
+    if (!built) return;
+    const after = listeningEventsV1(
+      await readPluginTriggerRoutinesV1(this.ctx.storage),
+    );
+    if (
+      before.size !== after.size ||
+      [...after].some((event) => !before.has(event))
+    ) {
+      await this.pushMachineModules();
+    }
   }
 
   async revertComposition(input: unknown) {
@@ -3683,7 +3818,14 @@ export class UserConfiguration
   ): Promise<MachineSocketFrameV1> {
     return {
       type: "modules",
-      modules: machineModulesV1(await this.activeGeneration(), platform),
+      modules: machineModulesV1(
+        await this.activeGeneration(),
+        platform,
+        await readModuleRoutingV1(
+          this.ctx.storage,
+          await this.pluginTriggerRoutines(),
+        ),
+      ),
       serverTime: new Date().toISOString(),
     };
   }
@@ -3968,6 +4110,87 @@ export class UserConfiguration
       });
     }
     return receipt;
+  }
+
+  /**
+   * Events a machine's device modules emitted (ADR 0037), each routed to
+   * every Routine that listens and answered only once that is durable. A
+   * Bot that cannot be reached fails the post rather than the event: the
+   * desktop sends it again, and each Routine's own replay guard, keyed by the
+   * event's key, lets a retry fire only what the first attempt did not.
+   */
+  async recordMachineModuleEvents(
+    input: unknown,
+  ): Promise<MachineModuleEventsReceiptV1> {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      machineId: rpcIdentifier,
+      claims: rpcDecodedValue,
+      tokenDigest: rpcPattern(/^[0-9a-f]{64}$/, 64),
+      events: rpcDecoded(decodeMachineModuleEventsV1),
+    });
+    const userId = await this.assertUserIdentity(request.userId as string);
+    const record = await (
+      await this.machineContribution()
+    ).authorize(
+      machineTokenClaimsV1(request.claims),
+      request.tokenDigest as string,
+      request.machineId as string,
+    );
+    const { events } = request.events as ReturnType<
+      typeof decodeMachineModuleEventsV1
+    >;
+    const generation = await this.activeGeneration();
+    const routines = await this.pluginTriggerRoutines();
+    const liveBots = new Set(
+      (await (await this.flockContribution()).listBots()).bots.map(
+        (bot) => bot.botId,
+      ),
+    );
+    const receipts: MachineModuleEventReceiptV1[] = [];
+    let moved = false;
+    for (const event of events) {
+      const now = new Date();
+      const refused = refuseModuleEventV1(generation, event);
+      if (refused !== undefined) {
+        receipts.push({ status: "dropped", reason: refused });
+        continue;
+      }
+      const origin = {
+        machineId: record.machineId,
+        pluginId: event.pluginId,
+        key: event.key,
+        now,
+      };
+      if (await moduleEventSeenV1(this.ctx.storage, origin)) {
+        receipts.push({ status: "duplicate" });
+        continue;
+      }
+      await Promise.all(
+        moduleEventTargetsV1(routines, event, liveBots).map(async (routine) =>
+          this.botRoutinesStub(userId, routine.botId).deliverPluginModuleEvent({
+            schemaVersion: 1,
+            userId,
+            botId: routine.botId,
+            ...(await moduleEventDeliveryV1({
+              machineId: record.machineId,
+              event,
+              routine,
+            })),
+          }),
+        ),
+      );
+      moved =
+        (await recordModuleEventV1(this.ctx.storage, {
+          machineId: record.machineId,
+          event,
+          now,
+        })) || moved;
+      receipts.push({ status: "admitted" });
+    }
+    await trimModuleEventsSeenV1(this.ctx.storage, new Date());
+    if (moved) await this.pushMachineModules();
+    return { schemaVersion: 1, receipts };
   }
 
   /** One Plugin's module reports, for its Bot's `plugin_module_reports`. */

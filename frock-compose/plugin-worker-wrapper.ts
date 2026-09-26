@@ -356,7 +356,23 @@ function decodeReviseCardInvocation(value) {
   return value;
 }
 function decodeTriggerInvocation(value) {
-  exactKeys(value, TRIGGER_INVOCATION_KEYS, "plugin worker trigger invocation");
+  exactKeys(
+    value,
+    isRecord(value) && Object.hasOwn(value, "source")
+      ? TRIGGER_INVOCATION_KEYS.concat("source")
+      : TRIGGER_INVOCATION_KEYS,
+    "plugin worker trigger invocation",
+  );
+  if (
+    Object.hasOwn(value, "source") &&
+    (!isRecord(value.source) ||
+      value.source.kind !== "device-module" ||
+      typeof value.source.moduleId !== "string" ||
+      typeof value.source.machineId !== "string" ||
+      typeof value.source.key !== "string")
+  ) {
+    throw new Error("plugin worker trigger invocation source is invalid");
+  }
   if (value.schemaVersion !== 1) {
     throw new Error("plugin worker trigger invocation schemaVersion is unsupported");
   }
@@ -825,7 +841,18 @@ export const BOT_ISOLATE_TRIGGER_SOURCE = `async function runTrigger(invocation,
     const context = contextFor(invocation, plugin, invocation.deadlineMs);
     const value = await withIsolateDeadline(function () {
       return plugin.module.triggers[invocation.trigger](
-        { headers: invocation.headers, body: invocation.body },
+        invocation.source
+          ? {
+              headers: invocation.headers,
+              body: invocation.body,
+              source: {
+                kind: invocation.source.kind,
+                moduleId: invocation.source.moduleId,
+                machineId: invocation.source.machineId,
+                key: invocation.source.key,
+              },
+            }
+          : { headers: invocation.headers, body: invocation.body },
         context,
       );
     }, invocation.deadlineMs);

@@ -20,6 +20,7 @@ import {
   decodeMachineListViewV1,
   decodeMachineModuleCallClaimReceiptV1,
   decodeMachineModuleCallResultReceiptV1,
+  decodeMachineModuleEventsReceiptV1,
   decodeMachineModuleReportsReceiptV1,
   decodeMachinePairingOfferV1,
   decodeMachineResultReceiptV1,
@@ -34,6 +35,8 @@ import {
   type MachineModuleCallFrameV1,
   type MachineModuleCallResultReceiptV1,
   type MachineModuleCallResultV1,
+  type MachineModuleEventV1,
+  type MachineModuleEventsReceiptV1,
   type MachineModuleReportV1,
   type MachineModuleReportsReceiptV1,
   type MachineModuleV1,
@@ -398,6 +401,20 @@ export class MachineAgentDriverV1 {
         machineRoutePathV1("moduleCallResult", { machineId, callId }),
         { method: "POST", token, body: JSON.stringify(result) },
       ),
+    );
+  }
+
+  /** Posts what the desktop's modules emitted, as its host does. */
+  async emitModuleEvents(
+    events: MachineModuleEventV1[],
+  ): Promise<MachineModuleEventsReceiptV1> {
+    const { machineId } = this.identity();
+    return decodeMachineModuleEventsReceiptV1(
+      await this.call(machineRoutePathV1("moduleEvents", { machineId }), {
+        method: "POST",
+        token: this.token!,
+        body: JSON.stringify({ events }),
+      }),
     );
   }
 
