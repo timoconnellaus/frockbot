@@ -8,6 +8,7 @@
       "build.ts",
       "src/host.ts",
       "src/runtime.ts",
+      "src/try-main.ts",
       "src/**/*.test.ts"
     ],
     "project": [

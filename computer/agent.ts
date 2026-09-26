@@ -50,6 +50,10 @@ import {
 } from "@frockbot/core/contracts";
 import { shellQuote } from "./fly/shell.js";
 import {
+  createPluginModuleTryToolV1,
+  type ComputerPluginModulesSeamV1,
+} from "./module-try.js";
+import {
   computerBotPathKeyV1,
   ComputerError,
   computerOperationIdV1,
@@ -111,6 +115,7 @@ export {
 } from "./roots.js";
 
 export type { ComputerProcessStorageV1 };
+export type { ComputerPluginModulesSeamV1 } from "./module-try.js";
 export type {
   ComputerProjectionFileInvalidationV1,
   ComputerProjectionFileKindV1,
@@ -242,6 +247,8 @@ export interface ComputerAgentPluginConfig {
   demonstrations?: ComputerDemonstrationDeletionV1;
   /** Where `plugin_page_try` gets the page it tries. */
   pluginPages?: ComputerPluginPagesSeamV1;
+  /** Where `plugin_module_try` gets the device module it tries. */
+  pluginModules?: ComputerPluginModulesSeamV1;
   /**
    * Says what each page `computer_browser` lands on is showing: a sign-in
    * wall, a CAPTCHA, an error, a page still loading. Absent, or when it
@@ -2513,6 +2520,35 @@ export function createComputerAgentFeature(
       },
     };
 
+    const pluginModules = config.pluginModules;
+    const moduleTryTool = pluginModules
+      ? createPluginModuleTryToolV1(pluginModules, async (context, command) => {
+          const effectId = await operationIdOf(context);
+          return await useComputer(await open(context), async (computer) => {
+            const exec = computer.exec;
+            if (!exec) {
+              throw new ComputerError(
+                "capability-unavailable",
+                "The selected Computer cannot run a module",
+              );
+            }
+            return await operation(context, () =>
+              exec.execute(
+                {
+                  executable: "/bin/bash",
+                  args: ["-lc", command.script],
+                  stdin: command.stdin,
+                  env: command.env,
+                  timeoutMs: command.timeoutMs,
+                  maxOutputBytes: 30_000,
+                },
+                { signal: context.signal, effectId },
+              ),
+            );
+          });
+        })
+      : undefined;
+
     const demonstrations = config.demonstrations;
     return [
       ...(demonstrations
@@ -2526,6 +2562,17 @@ export function createComputerAgentFeature(
       ...(writer ? [runtime.tools.register(timed(screenshotTool))] : []),
       ...(writer && pluginPages
         ? [runtime.tools.register(timed(pageTryTool))]
+        : []),
+      ...(moduleTryTool
+        ? [
+            runtime.tools.register(
+              timed({
+                ...moduleTryTool,
+                execute: (input, context) =>
+                  moduleTryTool.execute(input, context).catch(failure),
+              }),
+            ),
+          ]
         : []),
       runtime.tools.register(timed(doctorTool)),
       ...(processes && writer

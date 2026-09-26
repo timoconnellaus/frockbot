@@ -17,10 +17,15 @@ import type {
 } from "@frockbot/core/contracts";
 import { latestOpenStepPositionV1 } from "@frockbot/core/contracts";
 import { drawFirstPartyCardV1 } from "@frockbot/app/shell/first-party-cards";
+import {
+  ROUTINE_HOOK_BODY_MAX_BYTES,
+  routineHookHeadersV1,
+} from "@frockbot/app/routines/hook";
 import type {
   PluginApprovalAskV1,
   PluginAuthoringHostV1,
   PluginCheckResultV1,
+  PluginTriggerSampleV1,
 } from "./authoring.js";
 import { requirePluginSourcePathV1 } from "./authoring.js";
 
@@ -44,6 +49,58 @@ function requireObject(input: unknown, field: string): Record<string, unknown> {
     throw new Error(`${field} must be an object`);
   }
   return value as Record<string, unknown>;
+}
+
+/**
+ * A sample delivery as the door would hand it over: headers lower-cased and
+ * without its own credential, the body bounded as the door bounds it. A
+ * module's event is its payload as JSON text, with no headers.
+ */
+function triggerSample(input: unknown): PluginTriggerSampleV1 {
+  const body = requireString(input, "body");
+  if (new TextEncoder().encode(body).byteLength > ROUTINE_HOOK_BODY_MAX_BYTES) {
+    throw new Error(
+      `body is larger than the ${ROUTINE_HOOK_BODY_MAX_BYTES} bytes the door accepts`,
+    );
+  }
+  const fields = input as Record<string, unknown>;
+  const headers = fields.headers ?? {};
+  if (
+    !headers ||
+    typeof headers !== "object" ||
+    Array.isArray(headers) ||
+    !Object.values(headers).every((value) => typeof value === "string")
+  ) {
+    throw new Error("headers maps a header's name to its value");
+  }
+  const sample = {
+    pluginId: requireString(input, "pluginId"),
+    trigger: requireString(input, "trigger"),
+    headers: routineHookHeadersV1(
+      Object.entries(headers as Record<string, string>),
+    ),
+    body,
+  };
+  if (fields.moduleEvent === undefined) return sample;
+  const moduleEvent = requireObject(input, "moduleEvent");
+  if (Object.keys(sample.headers).length > 0) {
+    throw new Error("a module's event carries no headers");
+  }
+  try {
+    JSON.parse(body);
+  } catch {
+    throw new Error("a module's event body is its payload as JSON text");
+  }
+  return {
+    ...sample,
+    source: {
+      kind: "device-module",
+      moduleId: requireString(moduleEvent, "moduleId"),
+      // No desktop sent it; this names where it came from instead.
+      machineId: "plugin-trigger-try",
+      key: requireString(moduleEvent, "key"),
+    },
+  };
 }
 
 function checkText(pluginId: string, result: PluginCheckResultV1): string {
@@ -466,6 +523,65 @@ export function pluginTools(
       },
     }),
     tool({
+      name: "plugin_trigger_try",
+      description:
+        "Feed a sample delivery to one of your Plugin's triggers and see what it returns: the text a Routine would fire with, or the drop and its reason. The trigger runs as a real delivery runs it — the Plugin published and on for this Bot, with its grants — but no Routine fires and nothing is recorded, so try it as often as you like. Pass `moduleEvent` to play an event its device module would emit.",
+      inputSchema: {
+        type: "object",
+        properties: {
+          ...PLUGIN_ID_PROPERTY,
+          trigger: {
+            type: "string",
+            description: "The trigger's name, as plugin.json declares it.",
+          },
+          body: {
+            type: "string",
+            description:
+              "The delivery's body, exactly as the sender would POST it; for a module's event, its payload as JSON text.",
+          },
+          headers: {
+            type: "object",
+            description:
+              "The headers the sender would send, by name. Lower-cased as the door does; never with moduleEvent.",
+          },
+          moduleEvent: {
+            type: "object",
+            description:
+              "Present to play the event as the Plugin's own device module would send it: { moduleId, key }, key being the source's own id for the occurrence.",
+            properties: {
+              moduleId: { type: "string" },
+              key: { type: "string" },
+            },
+            required: ["moduleId", "key"],
+            additionalProperties: false,
+          },
+        },
+        required: ["pluginId", "trigger", "body"],
+        additionalProperties: false,
+      },
+      // The trigger is code a Bot wrote, run with its grants: a handler that
+      // posts somewhere acts on the world, so review sees each try, and a
+      // second run is not assumed to be free.
+      idempotent: false,
+      effect: "mutate",
+      async answer(input) {
+        const sample = triggerSample(input);
+        const result = await host.plugins.tryTrigger(sample);
+        const which = `${sample.pluginId}'s "${sample.trigger}" trigger`;
+        return result.status === "fire"
+          ? [
+              `${which} would fire its Routine, which would read:`,
+              result.text,
+              "Nothing fired: this was a try.",
+            ].join("\n")
+          : `${which} would drop this delivery${
+              result.reason === undefined
+                ? ", without a reason"
+                : `: ${result.reason}`
+            }. Nothing fired: this was a try.`;
+      },
+    }),
+    tool({
       name: "plugin_settings",
       description:
         "Read a Plugin's settings for this Bot — the values its plugin.json settingsSchema declares — or write them. Pass `values` to write; omit it to read. Never a secret.",
@@ -507,7 +623,7 @@ export function pluginTools(
   ];
 }
 
-/** The runtime Contribution: the ten `plugin_*` tools, for one Turn. */
+/** The runtime Contribution: the `plugin_*` tools, for one Turn. */
 export function createPluginsFeature(
   host: PluginAuthoringRuntimeHostV1,
 ): RuntimeFeatureV1<{

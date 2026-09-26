@@ -19,6 +19,7 @@ import {
   pluginManifestDisagreementV1,
   pluginScaffoldV1,
   type PluginAuthoringSeamsV1,
+  type PluginTriggerSampleV1,
 } from "./authoring.js";
 import {
   decodePluginIntentRecordV1,
@@ -217,6 +218,7 @@ function harness(
   const artifacts = new Map<string, string>();
   const settings = new Map<string, Record<string, unknown>>();
   const calls: PluginBuildRequestV1[] = [];
+  const shaped: PluginTriggerSampleV1[] = [];
   const host = createPluginAuthoringHostV1({
     userId: USER,
     botId: "bot-1",
@@ -236,6 +238,16 @@ function harness(
     },
     composition: { current: async () => generation(options.members) },
     moduleReports: async () => ({ entries: [], states: [] }),
+    triggers: {
+      shape: async (sample) => {
+        shaped.push(sample);
+        return {
+          schemaVersion: 1,
+          status: "fire",
+          text: `shaped ${sample.body}`,
+        };
+      },
+    },
     storage: {
       get: <T>(key: string) =>
         Promise.resolve(storage.get(key) as T | undefined),
@@ -255,7 +267,7 @@ function harness(
     ...(options.fitJudge ? { fitJudge: options.fitJudge } : {}),
     now: () => new Date("2026-09-12T01:00:00.000Z"),
   });
-  return { host, storage, artifacts, settings, calls };
+  return { host, storage, artifacts, settings, calls, shaped };
 }
 
 describe("creating a Plugin", () => {
@@ -521,6 +533,9 @@ describe("checking and publishing", () => {
       },
       composition: { current: async () => generation() },
       moduleReports: async () => ({ entries: [], states: [] }),
+      triggers: {
+        shape: async () => ({ schemaVersion: 1, status: "drop" }),
+      },
       storage: {
         get: <T>(key: string) =>
           Promise.resolve(storage.get(key) as T | undefined),
@@ -917,6 +932,61 @@ describe("a Plugin with a device module", () => {
     expect(artifacts.size).toBe(0);
   });
 
+  test("a try builds the module from source and hands back its declaration and code", async () => {
+    const { host, artifacts, storage } = harness({
+      source: withModule,
+      build: buildsTheModule(["search"]),
+    });
+    const found = await host.moduleToTry(
+      { pluginId: "notes", action: { call: "search", input: { q: "x" } } },
+      "tool:9:2:0",
+    );
+    expect(found).toMatchObject({
+      pluginId: "notes",
+      module: { id: "bridge", net: ["localhost:23373"], calls: ["search"] },
+      code: CODE,
+    });
+    // Nothing a try builds is stored or asked about.
+    expect(artifacts.size).toBe(0);
+    expect(storage.size).toBe(0);
+  });
+
+  test("a try of a call or an event the module does not declare is refused before any build", async () => {
+    const calls: PluginBuildRequestV1[] = [];
+    const { host } = harness({
+      source: withModule,
+      build: buildsCleanly(calls),
+    });
+    expect(
+      await host.moduleToTry(
+        { pluginId: "notes", action: { call: "send", input: null } },
+        "tool:9:3:0",
+      ),
+    ).toEqual({
+      failure:
+        'the module "bridge" declares no call "send"; it declares [search], and a desktop refuses any other',
+    });
+    expect(
+      await host.moduleToTry(
+        { pluginId: "notes", action: { event: "message" } },
+        "tool:9:3:1",
+      ),
+    ).toMatchObject({ failure: expect.stringContaining('no event "message"') });
+    expect(
+      await host.moduleToTry(
+        {
+          pluginId: "notes",
+          moduleId: "other",
+          action: { call: "search", input: null },
+        },
+        "tool:9:3:2",
+      ),
+    ).toEqual({
+      failure: 'notes has no device module "other"; it declares [bridge]',
+    });
+    expect(calls).toEqual([]);
+  });
+
   test("refuses a module whose code is not what the manifest hashed", async () => {
     const { host, artifacts } = harness({
       source: withModule,
@@ -925,5 +995,24 @@ describe("a Plugin with a device module", () => {
     const result = await host.publish(NOTES_PUBLISH, "tool:9:1:0");
     expect(result).toMatchObject({ status: "failed" });
     expect(artifacts.size).toBe(0);
+  });
+});
+
+describe("trying a trigger", () => {
+  test("hands the sample to the running Plugin and answers what it said", async () => {
+    const { host, shaped, storage } = harness();
+    const sample = {
+      pluginId: "notes",
+      trigger: "inbound",
+      headers: { "x-signature": "sig" },
+      body: '{"city":"Perth"}',
+    };
+    expect(await host.tryTrigger(sample)).toEqual({
+      schemaVersion: 1,
+      status: "fire",
+      text: 'shaped {"city":"Perth"}',
+    });
+    expect(shaped).toEqual([sample]);
+    expect(storage.size).toBe(0);
   });
 });

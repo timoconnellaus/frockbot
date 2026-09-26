@@ -28,6 +28,7 @@ import type { CredentialLeaseRuntime } from "@frockbot/app/credentials/user";
 import {
   createComputerAgentFeature,
   type ComputerAgentPluginConfig,
+  type ComputerPluginModulesSeamV1,
   type ComputerProcessStorageV1,
 } from "@frockbot/computer/agent";
 import { createCredentialsFeature } from "@frockbot/app/credentials/user";
@@ -576,6 +577,10 @@ export function createFoundationHostedRuntimePackages(
                 pageToTry: (input: { pluginId: string; surfaceId?: string }) =>
                   host.plugins!.plugins.pageToTry(input),
               },
+              pluginModules: {
+                moduleToTry: (input, effectId) =>
+                  host.plugins!.plugins.moduleToTry(input, effectId),
+              } satisfies ComputerPluginModulesSeamV1,
             }
           : {}),
         ...(host.computerUpkeep ? { upkeep: host.computerUpkeep } : {}),
