@@ -16,6 +16,7 @@ import { MemoryStorage } from "@frockbot/core/durable/testing";
 import { SessionEventLog } from "@frockbot/core/durable";
 import {
   applyWorkingContextAppendV1,
+  readSupervisionContextV1,
   selectStoredWorkingContextV1,
   WorkingContextUnavailableError,
 } from "./working-context-store.js";
@@ -594,4 +595,57 @@ describe("the Turn being assembled", () => {
 
   const contents = (messages: { content: string }[]) =>
     messages.map((message) => message.content);
+});
+
+describe("the conversation supervision reads", () => {
+  function typedTurn(
+    turn: number,
+    text: string,
+    turnType: "chat" | "automation" | "agent",
+  ): SessionEventInput[] {
+    return chatTurn(turn, text).map((event) =>
+      event.type === "turn/admission" ? { ...event, turnType } : event,
+    );
+  }
+
+  async function project(inputs: SessionEventInput[]): Promise<BoundedStorage> {
+    const storage = new BoundedStorage();
+    await applyWorkingContextAppendV1(storage, SESSION, stamp(inputs));
+    return storage;
+  }
+
+  test("is the person's own recent Turns, never an automation's or another agent's", async () => {
+    const storage = await project([
+      ...typedTurn(1, "said first", "chat"),
+      ...typedTurn(2, "routine prompt", "automation"),
+      ...typedTurn(3, "said second", "chat"),
+      ...typedTurn(4, "another bot asked", "agent"),
+      ...typedTurn(5, "said third", "chat"),
+    ]);
+    const context = await readSupervisionContextV1(storage, SESSION, 6);
+    expect(context.turns.map((turn) => turn.turn)).toEqual([1, 3, 5]);
+    expect(context.turns[2]!.messages[0]).toEqual({
+      role: "user",
+      content: "said third",
+    });
+  });
+
+  test("stops before the Turn being judged and keeps only the newest few", async () => {
+    const storage = await project(
+      [1, 2, 3, 4, 5, 6].flatMap((turn) =>
+        typedTurn(turn, `said ${turn}`, "chat"),
+      ),
+    );
+    const context = await readSupervisionContextV1(storage, SESSION, 6);
+    expect(context.turns.map((turn) => turn.turn)).toEqual([2, 3, 4, 5]);
+  });
+
+  test("is empty before anything was said", async () => {
+    const context = await readSupervisionContextV1(
+      new BoundedStorage(),
+      SESSION,
+      1,
+    );
+    expect(context.turns).toEqual([]);
+  });
 });
