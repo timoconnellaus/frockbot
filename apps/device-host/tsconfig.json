@@ -13,5 +13,5 @@
     "lib": ["ES2023"],
     "types": ["bun", "node"]
   },
-  "include": ["src/**/*.ts"]
+  "include": ["build.ts", "src/**/*.ts"]
 }

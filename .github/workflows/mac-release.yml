@@ -53,8 +53,9 @@ jobs:
         working-directory: apps/native
       # The client names no deployment of its own, so the suite passes an origin
       # that reaches nothing (ADR 0028).
-      - run: flutter test --no-pub --dart-define=FROCKBOT_ORIGIN=https://tests.invalid test/desktop_update_test.dart
+      - run: flutter test --no-pub --dart-define=FROCKBOT_ORIGIN=https://tests.invalid test/desktop_update_test.dart test/device_host_test.dart
         working-directory: apps/native
+      # Fetches the pinned Deno for both architectures and bundles the module host.
       - run: python3 scripts/mac-release.py 0.0.0
 
   draft:

@@ -20,6 +20,7 @@ import '../client/transport.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import '../shell/semantics.dart';
 import '../view/surface.dart';
+import 'device_host.dart';
 
 /// The kinds `MACHINE_ACTION_KINDS_V1` declares.
 const machineActionKindsV1 = <String>{'pair-machine', 'revoke-machine'};
@@ -194,7 +195,12 @@ class _MachinesPageState extends State<MachinesPage> {
     documentId: MachineIds.document,
     refreshId: MachineIds.refresh,
     controller: controller,
-    banner: (context) => PairingCodeCard(controller: controller),
+    banner: (context) => Column(
+      children: [
+        DeviceHostCard(controller: deviceHost),
+        PairingCodeCard(controller: controller),
+      ],
+    ),
     cacheScope: 'account',
   );
 }

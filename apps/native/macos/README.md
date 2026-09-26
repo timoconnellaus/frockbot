@@ -3,6 +3,27 @@
 The main Flutter Mac app is distributed from frockbot.com, signed with Developer
 ID and notarized by Apple. It is not submitted to the Mac App Store.
 
+## Device modules
+
+While the app is open and signed in, it runs the device modules of the Plugins
+installed on the account
+([ADR 0037](../../../docs/adr/0037-plugin-device-modules.md)).
+`Runner/DeviceHostBridge.swift` starts the module host,
+`Contents/Resources/device-host.js`, under the bundled `Contents/Helpers/deno`,
+allowed to reach only the deployment, its own folder and `/usr/bin/sandbox-exec`.
+The host pairs this Mac through the signed-in session the first time, keeps the
+machine socket open, and starts each module in its own Deno process inside a
+Seatbelt profile built from what the module declares (`apps/device-host`). A
+build run from Xcode or `flutter run` carries no Deno and runs no modules.
+
+The machine token rests in Keychain under `com.frockbot.mobile.device-host`, one
+entry per deployment and account. Downloaded modules and each module's own store
+live under `~/Library/Application Support/FrockBot/device-host/<account digest>/`.
+Signing out or quitting stops the host and every module. **Forget** on **Your
+computers → This Mac** removes the Keychain entry and keeps this Mac unpaired
+until **Run modules on this Mac** is pressed; revoking the machine in the list
+invalidates its token everywhere.
+
 ## Build and qualification
 
 Use the pinned Flutter and Bun versions. Run `bun run typecheck`, `bun test`,
@@ -12,9 +33,10 @@ Use the pinned Flutter and Bun versions. Run `bun run typecheck`, `bun test`,
 python3 scripts/mac-release.py 1.1.0
 ```
 
-This builds a universal Apple silicon/Intel app and produces an ad-hoc-signed
-`FrockBot-macos-development.zip`. This is a development artifact, not a public
-download.
+This builds a universal Apple silicon/Intel app, bundles a universal Deno
+(`scripts/fetch-deno.py`, checked by hash) and the module host, and produces an
+ad-hoc-signed `FrockBot-macos-development.zip`. This is a development artifact,
+not a public download.
 
 ## Signed release
 
@@ -35,7 +57,7 @@ From the merged, tested commit:
 python3 scripts/mac-release.py 1.1.0 --release
 ```
 
-The script signs nested frameworks and the app separately with hardened
+The script signs nested frameworks, Deno and the app separately with hardened
 runtime, checks notarization is **Accepted**, staples and validates its ticket,
 and passes Gatekeeper assessment, then packages the stapled app into a
 Developer ID-signed `FrockBot-macos.dmg` with an Applications shortcut and
