@@ -41,6 +41,8 @@ function module(
     appleEvents: [],
     calls: [],
     events: [],
+    listening: [],
+    lastKeys: {},
   };
 }
 
