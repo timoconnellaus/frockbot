@@ -1,11 +1,7 @@
 import { expect, test } from "bun:test";
 import type { ViewNode } from "@frockbot/core/protocol-schemas";
 import type { MachineListViewV1 } from "@frockbot/core/machine-protocol";
-import {
-  machinesDocumentV1,
-  machinesRevisionV1,
-  MACHINE_LABEL_FIELD_V1,
-} from "./machines-document.js";
+import { machinesDocumentV1, machinesRevisionV1 } from "./machines-document.js";
 
 function walk(node: ViewNode): ViewNode[] {
   return node.type === "group"
@@ -83,24 +79,27 @@ test("a revoked machine says so rather than that it is connected, and offers no 
   ).toBe(true);
 });
 
-test("every control names the command it means, and none of them a code", () => {
+test("revoking is the one command, and nothing on the page adds a machine", () => {
+  // A computer enrols itself from the signed-in desktop app, so there is no
+  // form, no field and no code here — only a way to cut one off.
   const document = machinesDocumentV1(view());
   expect(
     walk(document.root)
       .filter((node) => node.type === "action")
       .map((node) => (node.type === "action" ? node.input?.kind : "")),
-  ).toEqual(["pair-machine", "revoke-machine"]);
-  expect(document.actions.map((action) => action.id).sort()).toEqual([
-    "pair-machine",
+  ).toEqual(["revoke-machine"]);
+  expect(document.actions.map((action) => action.id)).toEqual([
     "revoke-machine",
   ]);
-  // The register form asks for a name and nothing else: the code the command
-  // mints is on the receipt, and a document can be read twice.
-  const fields = walk(document.root).filter((node) => node.type === "field");
-  expect(
-    fields.map((node) => (node.type === "field" ? node.field.id : "")),
-  ).toEqual([MACHINE_LABEL_FIELD_V1]);
-  expect(JSON.stringify(document)).not.toContain(`"code"`);
+  expect(walk(document.root).some((node) => node.type === "field")).toBe(false);
+  expect(JSON.stringify(document)).not.toMatch(/pairing code|"code"/u);
+});
+
+test("a computer that reports no abilities says what it is for", () => {
+  // The desktop's module host enrols with none: it runs device modules.
+  expect(facts({ machines: [{ ...laptop, capabilities: [] }] })).toBe(
+    "macos · runs device modules · Connected",
+  );
 });
 
 test("a registry that has not changed keeps its revision", () => {

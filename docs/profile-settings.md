@@ -58,8 +58,10 @@ conversation. Unknown outcomes and failures remain explicit on the row. There
 is no rebuild control: rebuilding the table is upkeep, not something a person
 does.
 
-Your computers distinguishes paired personal devices
-from the hosted Computer and preserves per-action approval. Site
+Your computers lists the account's desktops, separate from the hosted
+Computer, each with Revoke; on a Mac it opens with This Mac, which pairs itself
+through the signed-in app and shows its device modules. There is no manual
+pairing code. The account's Devices page replaces it with ADR 0037 step 3. Site
 administration offers the deployment's admission mode as New accounts — Closed, Invite only or Open — and below it
 lists every account with a Plugin authoring switch: Plugin authoring is off
 for an account until an administrator turns it on there. An account whose setting could

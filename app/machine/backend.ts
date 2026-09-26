@@ -1,7 +1,8 @@
 // The registered-machine gateway Contribution: ten routes, on two doors.
 //
-// Three are ordinary authenticated routes beside `/api/settings` — the browser
-// asks for a pairing code, reads the registry, and revokes a machine:
+// Three are ordinary authenticated routes beside `/api/settings` — the
+// signed-in desktop app asks for a pairing code to hand its own agent, and the
+// app reads the registry and revokes a machine:
 //
 //   POST /api/machines/pair          mint a one-time, five-minute code
 //   GET  /api/machines               the `ListMachines` projection
@@ -99,10 +100,7 @@ export interface MachineGatewayHostV1 {
    * route answer 503 rather than admitting an unverified caller.
    */
   machineTokenSecret?: string;
-  createMachinePairing(
-    userId: string,
-    request: { label?: string },
-  ): Promise<MachinePairingOfferV1>;
+  createMachinePairing(userId: string): Promise<MachinePairingOfferV1>;
   enrollMachine(
     userId: string,
     input: { machineId: string; enrollment: unknown },
@@ -314,12 +312,10 @@ export function createMachineBackendContribution(
           if (request.method !== "POST") {
             return jsonError(405, "method not allowed");
           }
-          const requested = decodeMachinePairingRequestV1(
-            await readJsonBody(request),
-          );
+          decodeMachinePairingRequestV1(await readJsonBody(request));
           return Response.json(
             decodeMachinePairingOfferV1(
-              await host.createMachinePairing(userId, requested),
+              await host.createMachinePairing(userId),
             ),
           );
         }

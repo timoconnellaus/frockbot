@@ -1,4 +1,5 @@
-// The pairing code: the one secret a browser ever holds for a machine.
+// The pairing code: the one-time secret the desktop app's signed-in session
+// fetches for its own device agent, which no person ever sees.
 //
 // A device agent that has never enrolled has no token, so the code is the only
 // thing it can present — and `POST /api/machines/enroll` runs *before* gateway

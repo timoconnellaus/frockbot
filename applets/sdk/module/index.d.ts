@@ -40,7 +40,11 @@ export interface ModuleContext {
     set(key: string, value: unknown): Promise<void>;
     delete(key: string): Promise<void>;
   };
-  /** Runs an AppleScript against an application the descriptor names. */
+  /**
+   * Runs an AppleScript against an application the descriptor names, and
+   * answers what it returned. It runs sandboxed: Apple Events reach only
+   * `bundleId`, and a shell, the network and writes are refused.
+   */
   appleEvents: {
     run(bundleId: string, script: string): Promise<string>;
   };

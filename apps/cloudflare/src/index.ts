@@ -2235,13 +2235,12 @@ const createGatewayBackendContributions = (env: Env) =>
     ...(typeof env.MACHINE_TOKEN_SECRET === "string"
       ? { machineTokenSecret: env.MACHINE_TOKEN_SECRET }
       : {}),
-    createMachinePairing: async (userId, request) =>
+    createMachinePairing: async (userId) =>
       decodeMachinePairingOfferV1(
         rpcJsonSnapshotV1(
           await userMachineStub(env, userId).createMachinePairing({
             schemaVersion: 1,
             userId,
-            ...(request.label === undefined ? {} : { label: request.label }),
           }),
         ),
       ),

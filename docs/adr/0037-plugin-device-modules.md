@@ -151,16 +151,35 @@ Bun helper carries today.
 
 ### The one host binding: Apple Events
 
-Neither boundary can say "only Messages": allowing `osascript` would let a
-module script any application. So the host keeps one binding, reached over the
-module's local channel:
+Neither boundary can say "only Messages": allowing `osascript` in the module's
+profile would let it script any application. So the host keeps one binding,
+reached over the module's local channel:
 
 ```ts
 appleEvents.run(bundleId, script);
 ```
 
-The app runs the script only against a bundle id the module declared. The
-operating system attributes it to the app, whose Automation consent covers it.
+The host refuses a bundle id the module did not declare, then runs the script
+in its own process under a Seatbelt profile generated for that run. The
+profile admits Apple Events to the one named application and nothing else: no
+fork, no other program, no network, no writes, and no file contents but system code.
+So `do shell script` fails, and so does a nested `tell` to any other
+application. The script never runs inside the app, where it would hold the
+app's Full Disk Access. Its length, wall time and output are capped.
+
+That process is not `osascript`. macOS refuses Apple Events from a sandboxed
+sender whose signature carries no Apple Events entitlement, and `osascript`
+carries none. So the app bundles a small helper beside Deno, which runs the
+AppleScript on its stdin through `NSAppleScript` and prints the result, signed
+at release with the hardened runtime, `automation.apple-events` and the Apple
+Events sandbox exception. The exception is only leave to send: its list of
+applications does not limit where events go. What limits the target is the
+profile's one `appleevent-send` rule, so one helper serves every module and no
+module is signed on the person's Mac.
+
+The operating system attributes the run to the app, which carries the Apple
+Events entitlement, so the person grants Automation consent to FrockBot once
+per application.
 
 Every other reach is the module's own code under its two boundaries. A new host
 binding is justified only by the same test: something the operating system
@@ -356,13 +375,19 @@ absent Device and the Pending-input result.
 - The Mac app gains the module host: Deno, the Seatbelt profile generator, the
   hibernating socket, the ledger and module lifecycle, built on the device
   agent that stays.
-- `AppDelegate.swift` gains `appleEvents.run` for a declared target.
+- The module host gains `appleEvents.run`: the app's Apple Events helper under
+  a per-run Seatbelt profile that admits Apple Events to the declared target
+  alone.
 - The Device's sync gains the module list and the listening flags, and the
   Device reports each module's state and logs.
 - The machine protocol gains the `module` operation and its outcomes.
 - The Plugin worker gains the `device` binding.
 - Frock Compose builds module artifacts with their dependencies.
 - The Plugin skill gains a module reference and the four testing tools.
+- Amended 2026-09-27: "Your computers" loses its manual pairing code; the
+  desktop pairs only through its signed-in app. The account's Devices page
+  replaces it (see the note under Order and
+  [ADR 0035](0035-device-bridge.md#consequences)).
 
 ## Order
 
@@ -373,6 +398,18 @@ Each step leaves `main` shippable.
    cleanup.
 3. The module host: Deno and the Seatbelt profile, the hibernating socket, the
    sync, a module that only logs, and `plugin_module_reports`.
+
+   > Amended 2026-09-27. Step 3 includes the account's **Devices** page,
+   > replacing "Your computers": reached from the You page's Account group, it
+   > lists every signed-in device (desktop, phone, web). A device's page holds
+   > its own switches — microphone and notifications, the Local tier — and a
+   > "Plugins on this Mac" section listing each device module with its state
+   > (running, restarting, stopped), what it may reach, and an off switch. An
+   > ability or module can be turned off from any device, and turned on only on
+   > the device itself. Until then "Your computers" shows this Mac's module
+   > host and the account's computers, and pairing happens only through the
+   > signed-in app, with no manual code.
+
 4. Module events into Plugin triggers, with the listening flags, the replay key,
    catch-up and `plugin_trigger_try`.
 5. `device.call`, with the ledger, the deadline and its outcomes, and

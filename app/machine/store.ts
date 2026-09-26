@@ -94,7 +94,6 @@ export interface MachinePairingRecordV1 {
   schemaVersion: 1;
   machineId: string;
   userId: string;
-  label?: string;
   codeDigest: string;
   createdAt: string;
   expiresAt: string;
@@ -109,7 +108,6 @@ export async function writeMachinePairingV1(
   input: {
     userId: string;
     machineId: string;
-    label?: string;
     codeDigest: string;
     now: number | Date;
     ttlMs?: number;
@@ -120,7 +118,6 @@ export async function writeMachinePairingV1(
     schemaVersion: 1,
     machineId: input.machineId,
     userId: input.userId,
-    ...(input.label === undefined ? {} : { label: input.label }),
     codeDigest: input.codeDigest,
     createdAt: iso(input.now),
     expiresAt: iso(new Date(input.now).getTime() + ttl),

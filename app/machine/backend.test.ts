@@ -137,8 +137,7 @@ beforeEach(() => {
   });
   contribution = createMachineBackendContribution({
     machineTokenSecret: SECRET,
-    createMachinePairing: (userId, request) =>
-      authority.createPairing(userId, request),
+    createMachinePairing: (userId) => authority.createPairing(userId),
     enrollMachine: async (userId, input) =>
       authority.enroll(
         { userId, machineId: input.machineId, nonce: "n" },
@@ -248,6 +247,14 @@ describe("the browser door", () => {
       userId: USER,
       machineId: offer.machineId,
     });
+  });
+
+  test("pairing takes no name: the enrolling agent names its own machine", async () => {
+    const response = await call("POST", machineRoutePathV1("pair"), {
+      userId: USER,
+      body: { label: "Studio laptop" },
+    });
+    expect(response.status).toBe(400);
   });
 
   test("an unauthenticated browser route is not this Contribution's", async () => {

@@ -104,7 +104,7 @@ const DTOS: {
   {
     name: "pairing request",
     decode: decodeMachinePairingRequestV1,
-    valid: { label: "Tims-M5-MacBook-Pro.local" },
+    valid: {},
   },
   {
     name: "pairing offer",

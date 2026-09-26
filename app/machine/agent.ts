@@ -384,7 +384,7 @@ function createMachineListTool(host: MachineRuntimeHostV1): ToolDefinition {
       if (view.machines.length === 0) {
         return {
           content:
-            "No machines are registered to this account. The user registers one from Settings on the machine itself; you cannot register one for them.",
+            "No machines are registered to this account. A computer connects when the user signs in to the FrockBot desktop app on it; you cannot connect one for them.",
           isError: false,
         };
       }

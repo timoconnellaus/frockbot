@@ -68,13 +68,12 @@ function gateway(userId: string): MachineBackendRouteContribution {
   const rpc = machines(userId);
   return createMachineBackendContribution({
     machineTokenSecret: env.MACHINE_TOKEN_SECRET as string,
-    createMachinePairing: async (owner, request) =>
+    createMachinePairing: async (owner) =>
       decodeMachinePairingOfferV1(
         snapshot(
           await rpc.createMachinePairing({
             schemaVersion: 1,
             userId: owner,
-            ...(request.label === undefined ? {} : { label: request.label }),
           }),
         ),
       ),
@@ -175,7 +174,6 @@ function machineFetch(
 function pair(
   contribution: MachineBackendRouteContribution,
   userId: string,
-  label: string,
 ): Promise<Response> {
   const path = machineRoutePathV1("pair");
   const url = new URL(`${ORIGIN}${path}`);
@@ -184,7 +182,7 @@ function pair(
       new Request(url, {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ label }),
+        body: JSON.stringify({}),
       }),
       url,
       { userId, client: "browser" },
@@ -264,9 +262,7 @@ describe("the desktop device agent against the real machine routes", () => {
     const desktopCalls: string[] = [];
     const desktopFetch = machineFetch(desktopGateway, desktopCalls);
     const offer = decodeMachinePairingOfferV1(
-      await (
-        await pair(desktopGateway, desktopUser, "Desktop-Mac.local")
-      ).json(),
+      await (await pair(desktopGateway, desktopUser)).json(),
     );
     const laptop = fakeHost(stdout);
     const agent = new MachineDeviceAgentV1({
@@ -308,7 +304,7 @@ describe("the desktop device agent against the real machine routes", () => {
     const stubGateway = gateway(stubUser);
     const stubCalls: string[] = [];
     const stubOffer = decodeMachinePairingOfferV1(
-      await (await pair(stubGateway, stubUser, "Desktop-Mac.local")).json(),
+      await (await pair(stubGateway, stubUser)).json(),
     );
     const stubFetch = machineFetch(stubGateway, stubCalls);
     const stub = new MachineAgentDriverV1({
@@ -386,7 +382,7 @@ describe("the desktop device agent against the real machine routes", () => {
     const contribution = gateway(userId);
     const secrets = createMemoryMachineSecretStoreV1();
     const offer = decodeMachinePairingOfferV1(
-      await (await pair(contribution, userId, "Doomed-Mac.local")).json(),
+      await (await pair(contribution, userId)).json(),
     );
     const laptop = fakeHost("");
     const doomedFetch = machineFetch(contribution, []);
@@ -424,7 +420,7 @@ describe("the desktop device agent against the real machine routes", () => {
     const contribution = gateway(userId);
     const secrets = createMemoryMachineSecretStoreV1();
     const offer = decodeMachinePairingOfferV1(
-      await (await pair(contribution, userId, "Closed-Mac.local")).json(),
+      await (await pair(contribution, userId)).json(),
     );
     const closedFetch = machineFetch(contribution, []);
     const agent = new MachineDeviceAgentV1({
@@ -460,7 +456,7 @@ describe("the desktop device agent against the real machine routes", () => {
     const userId = `machines-door-${crypto.randomUUID()}`;
     const contribution = gateway(userId);
     const offer = decodeMachinePairingOfferV1(
-      await (await pair(contribution, userId, "Door-Mac.local")).json(),
+      await (await pair(contribution, userId)).json(),
     );
     const doorFetch = machineFetch(contribution, []);
     const stub = new MachineAgentDriverV1({

@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!--
+  The hardened runtime sends Apple Events only with `automation.apple-events`,
+  and a sender inside a Seatbelt profile only with the Apple Events exception.
+  The exception's list does not limit where events go: a signed sender reached
+  an application it did not name. What limits the target is the per-run
+  Seatbelt profile (`apps/device-host/src/apple-events.ts`), so one helper is
+  signed once, and the list holds a single harmless entry.
+-->
+<plist version="1.0"><dict>
+<key>com.apple.security.automation.apple-events</key><true/>
+<key>com.apple.security.temporary-exception.apple-events</key>
+<array><string>com.apple.MobileSMS</string></array>
+</dict></plist>

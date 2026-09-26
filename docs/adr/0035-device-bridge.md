@@ -363,6 +363,23 @@ folds into Device, and its terms go.
   tool becomes a device-listing tool, and pairing codes go. The stored records
   are cleaned up under the disposable-state rule, and a fresh conversation is
   verified.
+
+> Amended 2026-09-27. Pairing codes are no longer typed or shown anywhere.
+> After first-party Messages went (#857), the desktop app enrols its own Mac
+> through its signed-in session: it asks for the one-time code and hands it to
+> its own agent, so no code reaches a person. The manual "Get a pairing code"
+> control and the name field on the pairing request are gone; the signed code,
+> the enrol route and the machine token stay until the Device record replaces
+> them. "Your computers" stays as this Mac's module host plus the account's
+> computers, each with Revoke. With [ADR 0037](0037-plugin-device-modules.md)
+> step 3 it becomes the account's **Devices** page, reached from the You
+> page's Account group. It lists every signed-in device — desktop, phone and
+> web. Each device's page carries that device's own switches (microphone and
+> notifications, the Local tier) and, on a desktop, a "Plugins on this Mac"
+> section listing each device module with its state (running, restarting,
+> stopped), what it may reach, and an off switch. An ability or a module can be
+> turned off from any device, but turned on only on the device itself.
+
 - `TurnCommand` gains attachments, and the gateway gains an upload route that
   admits bytes durably before acknowledging.
 - APNs arrives with the iOS client. Web push is optional and not planned.
