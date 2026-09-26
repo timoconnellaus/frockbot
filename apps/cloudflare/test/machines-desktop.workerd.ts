@@ -125,6 +125,12 @@ function gateway(userId: string): MachineBackendRouteContribution {
     loadMachineModule: () => Promise.resolve(undefined),
     recordMachineModuleReports: () =>
       Promise.reject(new Error("not used by this suite")),
+    // Module calls are covered through the real Worker in
+    // `device-call.workerd.ts`.
+    claimMachineModuleCall: () =>
+      Promise.reject(new Error("not used by this suite")),
+    recordMachineModuleCallResult: () =>
+      Promise.reject(new Error("not used by this suite")),
     recordMachineModuleEvents: () =>
       Promise.reject(new Error("not used by this suite")),
     listMachines: async (owner) =>

@@ -517,6 +517,27 @@ export interface PluginContext {
   >;
   /** The `storage` grant. */
   readonly storage?: PluginStorage;
+  /**
+   * The `device` grant: one call to one of this Plugin's own device modules
+   * on the person's computer, from inside a tool call. Only a module and a
+   * call `plugin.json` declares are reached; `deviceId` names the computer
+   * when more than one runs the module. The answer comes within about ten
+   * seconds. `failed` means it did not run, or ran and threw. `unknown`
+   * means it started and did not answer in time: it may have taken effect,
+   * so check before trying again. A tool call replayed after an interruption
+   * is told the first answer, and the module is never asked twice.
+   */
+  readonly device?: {
+    call(
+      moduleId: string,
+      call: string,
+      input?: unknown,
+      options?: { deviceId?: string },
+    ): Promise<
+      | { ok: true; value: unknown }
+      | { ok: false; outcome: "failed" | "unknown"; error: string }
+    >;
+  };
 }
 
 /** `ctx` inside `execute`: the tool is named, no event is. */

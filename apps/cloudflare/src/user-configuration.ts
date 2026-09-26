@@ -107,6 +107,8 @@ import {
   type AgentTurnSlotReceiptV1,
 } from "@frockbot/app/flock/quota";
 import {
+  DEVICE_CALL_WAIT_MS,
+  decodeMachineModuleCallResultV1,
   decodeMachineModuleEventsV1,
   decodeMachineModuleReportsV1,
   machineTokenClaimsV1,
@@ -120,6 +122,10 @@ import {
   generationCarriesModuleV1,
   machineModulesV1,
 } from "@frockbot/app/machine/modules";
+import {
+  MachineModuleCallsV1,
+  type DeviceCallOutcomeV1,
+} from "@frockbot/app/machine/module-calls";
 import {
   readPluginModuleReportsV1,
   recordPluginModuleReportsV1,
@@ -188,6 +194,7 @@ import { ComputerLoginsLedgerV1 } from "@frockbot/app/shell/computer-logins";
 import {
   MACHINE_SOCKET_INTERNAL_PATH_V1,
   broadcastMachineFrameV1,
+  connectedMachinePlatformsV1,
   durableObjectMachineSocketsV1,
   machineSocketTagV1,
   readMachineSocketCallV1,
@@ -3958,6 +3965,151 @@ export class UserConfiguration
       now: new Date(),
     });
     return { schemaVersion: 1, ...receipt };
+  }
+
+  /** How long a device call waits for its module; a test may shorten it. */
+  deviceCallWaitMs = DEVICE_CALL_WAIT_MS;
+  private deviceCalls: MachineModuleCallsV1 | undefined;
+
+  /** Plugins' calls to their device modules (ADR 0037). */
+  private moduleCalls(): MachineModuleCallsV1 {
+    this.deviceCalls ??= new MachineModuleCallsV1({
+      storage: this.ctx.storage,
+      waitMs: this.deviceCallWaitMs,
+      // A machine runs the module if it is connected and was sent it: the
+      // active generation carries it for the machine's platform, with the call.
+      candidates: async (request) => {
+        const connected = connectedMachinePlatformsV1(this.ctx);
+        if (connected.size === 0) return [];
+        const active = await this.activeGeneration();
+        return [...connected]
+          .filter(([, platform]) =>
+            machineModulesV1(active, platform).some(
+              (module) =>
+                module.pluginId === request.pluginId &&
+                module.moduleId === request.moduleId &&
+                module.calls.includes(request.call),
+            ),
+          )
+          .map(([machineId]) => machineId)
+          .sort();
+      },
+      push: (machineId, frame) =>
+        durableObjectMachineSocketsV1(this.ctx).push(machineId, frame),
+    });
+    return this.deviceCalls;
+  }
+
+  /**
+   * One Plugin tool's call to its device module, from the Bot's object,
+   * which already checked the Plugin declares the module and the call. The
+   * answer waits for the desktop at most until the call's deadline.
+   */
+  async callDeviceModule(input: unknown): Promise<DeviceCallOutcomeV1> {
+    const request = decodeRpcEnvelopeV1(
+      input,
+      {
+        userId: rpcIdentifier,
+        botId: rpcBotId,
+        callId: rpcPattern(/^mc-[0-9a-f]{40}$/, 43),
+        pluginId: rpcPattern(/^[a-z][a-z0-9-]{0,63}$/, 64),
+        moduleId: rpcPattern(/^[a-z][a-z0-9-]{0,31}$/, 32),
+        call: rpcString(64),
+        // Bounded by the Bot's object, which refused an oversized one before
+        // anything was recorded.
+        input: rpcDecoded((value) => value),
+      },
+      { deviceId: rpcIdentifier },
+    );
+    await this.assertUserIdentity(request.userId as string);
+    return this.moduleCalls().call({
+      callId: request.callId as string,
+      botId: request.botId as string,
+      pluginId: request.pluginId as string,
+      moduleId: request.moduleId as string,
+      call: request.call as string,
+      input: request.input,
+      ...(request.deviceId === undefined
+        ? {}
+        : { deviceId: request.deviceId as string }),
+    });
+  }
+
+  async claimMachineModuleCall(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      machineId: rpcIdentifier,
+      callId: rpcIdentifier,
+      claims: rpcDecodedValue,
+      tokenDigest: rpcPattern(/^[0-9a-f]{64}$/, 64),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    const record = await (
+      await this.machineContribution()
+    ).authorize(
+      machineTokenClaimsV1(request.claims),
+      request.tokenDigest as string,
+      request.machineId as string,
+    );
+    return this.moduleCalls().claim(record.machineId, request.callId as string);
+  }
+
+  /**
+   * A module call's answer. One after its deadline reached nobody, so it is
+   * put in the Plugin's module reports, where the Bot and the Work view can
+   * see what happened after the Turn moved on.
+   */
+  async recordMachineModuleCallResult(input: unknown) {
+    const request = decodeRpcEnvelopeV1(input, {
+      userId: rpcIdentifier,
+      machineId: rpcIdentifier,
+      callId: rpcIdentifier,
+      claims: rpcDecodedValue,
+      tokenDigest: rpcPattern(/^[0-9a-f]{64}$/, 64),
+      result: rpcDecoded(decodeMachineModuleCallResultV1),
+    });
+    await this.assertUserIdentity(request.userId as string);
+    const record = await (
+      await this.machineContribution()
+    ).authorize(
+      machineTokenClaimsV1(request.claims),
+      request.tokenDigest as string,
+      request.machineId as string,
+    );
+    const calls = this.moduleCalls();
+    const callId = request.callId as string;
+    const result = request.result as ReturnType<
+      typeof decodeMachineModuleCallResultV1
+    >;
+    const receipt = await calls.result(record.machineId, callId, result);
+    if (receipt.status === "late") {
+      await loggedEntryV1("Late module call report", async () => {
+        const call = await calls.describe(callId);
+        if (!call) return;
+        const answer = result.ok
+          ? `answered ${JSON.stringify(result.value)}`
+          : `failed: ${result.error}`;
+        await recordPluginModuleReportsV1(this.ctx.storage, {
+          generation: await this.activeGeneration(),
+          machineId: record.machineId,
+          machineLabel: record.label,
+          reports: [
+            {
+              pluginId: call.pluginId,
+              moduleId: call.moduleId,
+              kind: "log",
+              level: "error",
+              text: `call "${call.call}" ${answer} after its deadline; the Turn that asked was not told`.slice(
+                0,
+                2_000,
+              ),
+            },
+          ],
+          now: new Date(),
+        });
+      });
+    }
+    return receipt;
   }
 
   /**

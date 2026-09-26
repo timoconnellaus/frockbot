@@ -6,8 +6,9 @@
 // does not serve, and a test cannot pass against a route nobody registered.
 //
 // `audience` and `publicRoute` are the load-bearing columns. `socket`, `claim`,
-// `result`, `module`, `moduleReports` and `moduleEvents` are declared public
-// because they carry a *machine token*, not a session: they run at the seam in `apps/cloudflare/src/gateway.ts` that
+// `result`, `module`, `moduleReports`, `moduleEvents`, `moduleCallClaim` and
+// `moduleCallResult` are declared public because they carry a *machine token*, not a
+// session: they run at the seam in `apps/cloudflare/src/gateway.ts` that
 // executes before session authentication, which `plugin-routines`' webhook
 // already uses. Public here means "no session", never "no authority" — the
 // token is verified at the edge and re-checked against the machine record's
@@ -26,6 +27,8 @@ export type MachineRouteNameV1 =
   | "module"
   | "moduleReports"
   | "moduleEvents"
+  | "moduleCallClaim"
+  | "moduleCallResult"
   | "list"
   | "revoke";
 
@@ -90,6 +93,18 @@ export const MACHINE_ROUTES_V1: Readonly<
     audience: "machine",
     publicRoute: true,
   },
+  moduleCallClaim: {
+    method: "POST",
+    template: `${MACHINE_ROUTE_PREFIX_V1}/:machineId/module-calls/:callId/claim`,
+    audience: "machine",
+    publicRoute: true,
+  },
+  moduleCallResult: {
+    method: "POST",
+    template: `${MACHINE_ROUTE_PREFIX_V1}/:machineId/module-calls/:callId/result`,
+    audience: "machine",
+    publicRoute: true,
+  },
   list: {
     method: "GET",
     template: MACHINE_ROUTE_PREFIX_V1,
@@ -112,6 +127,7 @@ export interface MachineRouteParamsV1 {
   machineId?: string;
   commandId?: string;
   contentHash?: string;
+  callId?: string;
 }
 
 const SEGMENT_SAFE = /^[A-Za-z0-9][A-Za-z0-9._:@-]*$/;
@@ -133,8 +149,8 @@ export function machineRoutePathV1(
     throw new MachineDecodeError(`unknown machine route: ${String(name)}`);
   }
   return route.template.replace(
-    /:(machineId|commandId|contentHash)/g,
-    (_match, key: "machineId" | "commandId" | "contentHash") => {
+    /:(machineId|commandId|contentHash|callId)/g,
+    (_match, key: "machineId" | "commandId" | "contentHash" | "callId") => {
       const value = params[key];
       if (
         typeof value !== "string" ||

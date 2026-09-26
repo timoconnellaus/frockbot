@@ -59,10 +59,22 @@ botId }`, `{ kind: "user-instructions" }`, or `{ kind:
   `expectedGenerationId` (null for create). Deletes take the generation
   you last read.
 
-`device` is for your page, not the module: `"device": { "abilities":
+`device` is for your page and your device modules. `"device": { "abilities":
 ["microphone"] }` lets the host open the microphone for a page a
-`conversation.panel` view names, and needs such a view. It opens nothing on
-`ctx`. See `microphone.md`.
+`conversation.panel` view names, and needs such a view. See `microphone.md`.
+
+- `ctx.device` (`device`) — `call(moduleId, call, input, { deviceId? })`
+  runs one declared `call` of one of your declared `device.modules` on the
+  person's computer, from inside one of your tool calls; a hook, a page or a
+  section is refused. It answers `{ ok: true, value }` or `{ ok: false,
+outcome, error }` within about ten seconds. `failed` means it did not run —
+  no computer running the module is connected, it was never started, or
+  the module threw. `unknown` means it started and did not answer in time:
+  it may have taken effect, so check before you try again, and never
+  repeat a send on `unknown`. Name `deviceId` when more than one computer
+  runs the module. A tool call replayed after an interruption is told the
+  first answer; the module is never asked twice. An answer that arrives
+  late reaches no model: it is in `plugin_module_reports`.
 
 `files` and `computer` are declared to the authority and open nothing on
 `ctx` today: name them only when the User is granting that reach, not

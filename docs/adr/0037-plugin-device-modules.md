@@ -281,8 +281,13 @@ depends on what could have happened:
   checks before it tries again. It is never reported as `failed`, because a
   retry of a send that went through is a second send.
 
+The host cannot tell a read from a mutation, so every call claimed and
+unanswered is `unknown`, and the Plugin's tool, which knows which it asked
+for, says how.
+
 A result that arrives after the deadline is recorded in audit and on the Work
-view, and never reaches the model. There is no Pending input for a module call:
+view, and never reaches the model. Today that record is the call's own and a
+line in the Plugin's module reports. There is no Pending input for a module call:
 the Turn that asked is the only one that hears the answer.
 
 ### How a Bot tests a module

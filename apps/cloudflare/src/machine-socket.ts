@@ -148,3 +148,17 @@ export function broadcastMachineFrameV1(
     }
   }
 }
+
+/** Every machine with an open socket, and the platform it is sent modules for. */
+export function connectedMachinePlatformsV1(
+  ctx: DurableObjectState,
+): Map<string, MachinePlatformV1> {
+  const connected = new Map<string, MachinePlatformV1>();
+  for (const socket of ctx.getWebSockets()) {
+    if (socket.readyState !== OPEN) continue;
+    const attachment =
+      socket.deserializeAttachment() as MachineSocketAttachmentV1 | null;
+    if (attachment) connected.set(attachment.machineId, attachment.platform);
+  }
+  return connected;
+}

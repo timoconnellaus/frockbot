@@ -89,7 +89,17 @@ var INVOCATION_KEYS = [
   "deadlineMs",
 ];
 function decodeInvocation(value) {
-  exactKeys(value, INVOCATION_KEYS, "plugin worker tool invocation");
+  // A tool call inside a Turn names the effect it runs as; one outside any
+  // Turn names none.
+  const withEffect = isRecord(value) && Object.hasOwn(value, "effectId");
+  exactKeys(
+    value,
+    withEffect ? INVOCATION_KEYS.concat(["effectId"]) : INVOCATION_KEYS,
+    "plugin worker tool invocation",
+  );
+  if (withEffect && (typeof value.effectId !== "string" || value.effectId.length === 0)) {
+    throw new Error("plugin worker tool invocation effectId is invalid");
+  }
   if (value.schemaVersion !== 1) {
     throw new Error("plugin worker tool invocation schemaVersion is unsupported");
   }
@@ -527,6 +537,31 @@ const BOT_ISOLATE_GRANT_PROPERTY_SOURCE_V1 = {
       "function (request) { return capabilities.schedule(scope, request); }",
     ],
   ],
+  // A call to one of the Plugin's own device modules (ADR 0037). It is keyed
+  // by the tool call it runs inside and its place among that call's device
+  // calls, so a replayed Turn is answered from the record, never sent again.
+  device: [
+    [
+      "device",
+      `{
+      call: function (moduleId, call, input, options) {
+        const request = {
+          moduleId: moduleId,
+          call: call,
+          input: input === undefined ? null : input,
+          sequence: deviceCalls++,
+        };
+        if (options && options.deviceId !== undefined) {
+          request.deviceId = options.deviceId;
+        }
+        if (typeof invocation.effectId === "string") {
+          request.effectId = invocation.effectId;
+        }
+        return capabilities.deviceCall(scope, request);
+      },
+    }`,
+    ],
+  ],
   storage: [
     [
       "storage",
@@ -685,6 +720,7 @@ export const BOT_ISOLATE_NARROW_CONTEXT_SOURCE_V1 = `function narrowContext(env,
     generationId: invocation.generationId,
     pluginId: plugin.pluginId,
   };
+  let deviceCalls = 0;
   const context = {
 ${Object.entries(BOT_ISOLATE_CONTEXT_PROPERTY_SOURCE_V1)
   .map(([key, source]) => `    ${JSON.stringify(key)}: ${source},`)

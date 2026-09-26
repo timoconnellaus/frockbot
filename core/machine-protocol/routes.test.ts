@@ -22,6 +22,8 @@ describe("machine route table", () => {
       "module",
       "moduleReports",
       "moduleEvents",
+      "moduleCallClaim",
+      "moduleCallResult",
     ]);
     // Public means "no session", never "no authority": every public route is
     // addressed by the machine, which presents a token instead.
@@ -88,7 +90,9 @@ describe("machine route table", () => {
         machineId: MACHINE_ID,
         commandId: "tool:3:1:0",
         contentHash: "a".repeat(64),
+        callId: "mc-1",
       });
+      expect(path).not.toContain(":callId");
       expect(path).not.toContain(":machineId");
       expect(path).not.toContain(":commandId");
       expect(path).not.toContain(":contentHash");

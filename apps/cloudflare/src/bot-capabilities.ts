@@ -10,6 +10,7 @@ import { WorkerEntrypoint } from "cloudflare:workers";
 import type {
   IsolateCapabilityListOutcomeV1,
   IsolateConnectionOutcomeV1,
+  IsolateDeviceCallOutcomeV1,
   IsolateJevOutcomeV1,
   IsolateMemoryOutcomeV1,
   IsolateModelOutcomeV1,
@@ -24,6 +25,7 @@ import type {
 } from "@frockbot/core/contracts";
 import {
   decodeIsolateCapabilityListV1,
+  decodeIsolateDeviceCallRequestV1,
   decodeIsolateJevRequestV1,
   decodeIsolateMemoryReadRequestV1,
   decodeIsolateMemoryWriteRequestV1,
@@ -73,6 +75,7 @@ interface BotIsolateRpc {
   isolateModelTransport(input: unknown): Promise<PluginModelTransportOutcomeV1>;
   isolateSchedule(input: unknown): Promise<IsolateScheduleOutcomeV1>;
   isolateEmail(input: unknown): Promise<IsolateEmailOutcomeV1>;
+  isolateDeviceCall(input: unknown): Promise<IsolateDeviceCallOutcomeV1>;
   isolateStorageGet(input: unknown): Promise<IsolateStorageOutcomeV1>;
   isolateStoragePut(input: unknown): Promise<IsolateStorageOutcomeV1>;
   isolateStorageDelete(input: unknown): Promise<IsolateStorageOutcomeV1>;
@@ -360,6 +363,33 @@ export class BotCapabilities extends WorkerEntrypoint<
         status: "unknown",
         reason:
           "the message may have been sent: the answer from the sender was lost",
+      };
+    }
+  }
+
+  async deviceCall(
+    scope: unknown,
+    request: unknown,
+  ): Promise<IsolateDeviceCallOutcomeV1> {
+    let scoped;
+    try {
+      scoped = this.scoped(scope, decodeIsolateDeviceCallRequestV1(request));
+    } catch (error) {
+      return {
+        ok: false,
+        outcome: "failed",
+        error: `this device call was refused: ${error instanceof Error ? error.message : String(error)}`,
+      };
+    }
+    try {
+      return await scoped.rpc.isolateDeviceCall(scoped.envelope);
+    } catch {
+      // The Bot's object may have sent the call before this answer was lost.
+      return {
+        ok: false,
+        outcome: "unknown",
+        error:
+          "the answer from the computer was lost; the call may have taken effect",
       };
     }
   }

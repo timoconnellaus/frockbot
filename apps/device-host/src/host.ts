@@ -183,6 +183,9 @@ async function start(input: Record<string, unknown>): Promise<void> {
     onModules: (list) => {
       void modules?.sync(list);
     },
+    onCall: (call) => {
+      void modules?.handleCall(call);
+    },
   });
   await agent.paired();
   agent.start();

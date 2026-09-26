@@ -5,6 +5,7 @@
 // `userId` for the browser door and nothing at all for the machine's.
 import { beforeEach, describe, expect, test } from "bun:test";
 import {
+  decodeMachineModuleCallResultV1,
   machineRoutePathV1,
   mintMachineTokenV1,
 } from "@frockbot/core/machine-protocol";
@@ -13,6 +14,7 @@ import {
   type MachineBackendRouteContribution,
 } from "./backend.ts";
 import { MachineUserBackendContribution } from "./user.ts";
+import { MachineModuleCallsV1 } from "./module-calls.ts";
 import { verifyMachinePairingCodeV1 } from "./pairing.ts";
 import {
   createMemoryMachineSocketsV1,
@@ -37,6 +39,7 @@ let now = Date.parse("2026-09-01T00:00:00.000Z");
 /** The module artifacts the active generation carries, by the hash stored. */
 let modules: Map<string, string>;
 let moduleReports: unknown[];
+let moduleCalls: MachineModuleCallsV1;
 let moduleEvents: unknown[];
 
 /** One request through whichever door matches, as the gateway routes it. */
@@ -123,6 +126,15 @@ beforeEach(() => {
     sockets,
     now: () => now,
   });
+  moduleCalls = new MachineModuleCallsV1({
+    storage,
+    candidates: async () =>
+      (await authority.list()).machines
+        .filter((machine) => machine.connected)
+        .map((machine) => machine.machineId),
+    push: (machineId, frame) => sockets.push(machineId, frame),
+    now: () => now,
+  });
   contribution = createMachineBackendContribution({
     machineTokenSecret: SECRET,
     createMachinePairing: (userId, request) =>
@@ -179,6 +191,26 @@ beforeEach(() => {
         recorded: callInput.reports.reports.length,
         dropped: 0,
       };
+    },
+    claimMachineModuleCall: async (_userId, callInput) => {
+      await authority.authorize(
+        callInput.claims,
+        callInput.tokenDigest,
+        callInput.machineId,
+      );
+      return moduleCalls.claim(callInput.machineId, callInput.callId);
+    },
+    recordMachineModuleCallResult: async (_userId, callInput) => {
+      await authority.authorize(
+        callInput.claims,
+        callInput.tokenDigest,
+        callInput.machineId,
+      );
+      return moduleCalls.result(
+        callInput.machineId,
+        callInput.callId,
+        decodeMachineModuleCallResultV1(callInput.result),
+      );
     },
     recordMachineModuleEvents: async (_userId, callInput) => {
       await authority.authorize(
@@ -472,6 +504,45 @@ describe("the machine door", () => {
     ).toBe(401);
   });
 
+  test("a module call is claimed and answered through its two routes", async () => {
+    const driver = agent();
+    await driver.enroll((await pair()).code);
+    await driver.next();
+    const answered = moduleCalls.call({
+      callId: "mc-1",
+      botId: "bot-1",
+      pluginId: "beeper",
+      moduleId: "bridge",
+      call: "send",
+      input: { text: "hi" },
+    });
+    const frame = await driver.nextCall();
+    expect(frame).toMatchObject({ callId: "mc-1", call: "send" });
+    expect(await driver.claimCall("mc-1")).toEqual({
+      schemaVersion: 1,
+      status: "claimed",
+      callId: "mc-1",
+    });
+    expect((await driver.claimCall("mc-1")).status).toBe("refused");
+    expect(await driver.answerCall("mc-1", { ok: true, value: 1 })).toEqual({
+      schemaVersion: 1,
+      status: "recorded",
+      callId: "mc-1",
+    });
+    expect(await answered).toEqual({ ok: true, value: 1 });
+    const path = machineRoutePathV1("moduleCallResult", {
+      machineId: driver.machineId!,
+      callId: "mc-1",
+    });
+    expect(
+      (await call("POST", path, { token: driver.token!, body: { ok: "yes" } }))
+        .status,
+    ).toBe(400);
+    expect(
+      (await call("POST", path, { body: { ok: true, value: 1 } })).status,
+    ).toBe(401);
+  });
+
   test("module events are decoded at the door and handed on", async () => {
     const driver = agent();
     await driver.enroll((await pair()).code);
@@ -524,6 +595,8 @@ describe("the machine door", () => {
     for (const path of [
       machineRoutePathV1("claim", { machineId, commandId: "c" }),
       machineRoutePathV1("result", { machineId, commandId: "c" }),
+      machineRoutePathV1("moduleCallClaim", { machineId, callId: "c" }),
+      machineRoutePathV1("moduleCallResult", { machineId, callId: "c" }),
     ]) {
       expect(
         await driver.attempt(path, {
@@ -556,6 +629,12 @@ describe("the machine door", () => {
         throw new Error("unreachable");
       },
       recordMachineModuleReports: () => {
+        throw new Error("unreachable");
+      },
+      claimMachineModuleCall: () => {
+        throw new Error("unreachable");
+      },
+      recordMachineModuleCallResult: () => {
         throw new Error("unreachable");
       },
       recordMachineModuleEvents: () => {

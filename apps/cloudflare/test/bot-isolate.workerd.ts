@@ -315,10 +315,13 @@ describe("a Bot Package in a loaded Dynamic Worker", () => {
     // This call is an ordinary tool call, so it holds every catalogued key
     // the probe's grants open and none of the serving-only ones: the model
     // transport exists only while the host is serving a provider
-    // contribution's own call, which this isolate is not.
+    // contribution's own call, which this isolate is not. The probe declares
+    // no `device` grant, which needs a device declaration of its own.
     expect(JSON.parse(result.content)).toEqual(
       BOT_ISOLATE_CONTEXT_KEYS_V1.filter(
-        (key) => !BOT_ISOLATE_SERVING_CONTEXT_KEYS_V1.includes(key),
+        (key) =>
+          !BOT_ISOLATE_SERVING_CONTEXT_KEYS_V1.includes(key) &&
+          key !== "device",
       ).sort(),
     );
   });
