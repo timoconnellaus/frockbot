@@ -135,6 +135,9 @@ export class ModuleSupervisorV1 {
     const child = this.seams.spawn();
     this.child = child;
     this.startedAt = this.now();
+    // A pipe that closes under a write is the process ending, which `exit`
+    // reports; it is never an error of the host's.
+    child.stdin?.on("error", () => {});
     const stderr: string[] = [];
     let announce: (
       value: { calls: string[]; start: boolean } | undefined,
@@ -274,7 +277,10 @@ export class ModuleSupervisorV1 {
   }
 
   private write(child: ChildProcess, frame: HostFrameV1): void {
-    child.stdin?.write(`${JSON.stringify(frame)}\n`);
+    // A reply can outlive the process it answers: the module exits, or is
+    // stopped, while its request is still being served.
+    if (child !== this.child || !child.stdin?.writable) return;
+    child.stdin.write(`${JSON.stringify(frame)}\n`);
   }
 
   private settleAll(error: string): void {
