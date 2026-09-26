@@ -63,7 +63,13 @@ declares, for this Bot. Never a secret. `plugin_page_reports` reads what a
 Plugin's pages reported from the person's devices, and `plugin_page_try` runs
 a page on your Computer before you publish it: see `pages.md`.
 `plugin_module_reports` reads each device module's state and logs from the
-person's desktops.
+person's desktops, and `plugin_module_try` runs a module on your Computer
+first: one call or one event, under the same Deno permissions a desktop gives
+it, against a stand-in you start there for what it talks to. Your Computer has
+no Beeper and no Messages; a mock server on the port the module declares, or a
+database at the path it declares, is how you try one. `plugin_trigger_try`
+feeds one of your triggers a sample delivery and shows the text a Routine
+would fire with, or the drop, and fires nothing.
 
 A Plugin with no tools is valid: hooks, a provider, a trigger, a card or a
 conversation panel can be the whole surface. A card's Bot-facing tool is `<pluginId>_<cardId>`;

@@ -33,6 +33,8 @@ import {
   verifyRoutineHookTokenV1,
 } from "@frockbot/app/routines/hook";
 import { decodePendingBotInputV1 } from "@frockbot/app/routines/inbox";
+import { tryPluginTriggerV1 } from "@frockbot/app/plugins/triggers-bot";
+import type { ShellBotBackendContribution } from "@frockbot/app/shell/backend";
 import { cardValuesDigestV1 } from "@frockbot/app/shell/cards";
 import {
   compositionArtifactSetHashV1,
@@ -1623,6 +1625,46 @@ export async function execute() {
       status: "dropped",
       reason: "nothing in this delivery is for me",
     });
+
+    // A try asks the same Plugin about a delivery the Bot made up, and stops
+    // at its answer: no replay key, no pending input, no firing. The storms
+    // firing above is still moving through the Bot, so what is checked is
+    // that nothing stored names the try, and no delivery was recorded.
+    const stub = env.BOT_STATES.getByName(`${userId}:bot-1`);
+    const stored = () =>
+      runInDurableObject(stub, async (_instance, state) => [
+        ...(await state.storage.list()).entries(),
+      ]);
+    const deliveries = (entries: [string, unknown][]) =>
+      entries
+        .map(([key]) => key)
+        .filter((key) => key.startsWith("routine-delivery:"));
+    const before = await stored();
+    const tried = await runInDurableObject(stub, async (instance) => {
+      // SAFETY: the test reaches the Bot's own shell state the way its RPC
+      // methods do; `contribution` is private to the Durable Object class.
+      const shell = await (
+        instance as unknown as {
+          contribution(): Promise<ShellBotBackendContribution>;
+        }
+      ).contribution();
+      return tryPluginTriggerV1(shell.state, identity, {
+        pluginId: TRIGGER_PLUGIN_ID,
+        trigger: "inbound",
+        headers: { "x-signature": "sig-try" },
+        body: '{"city":"Perth"}',
+      });
+    });
+    expect(tried).toEqual({
+      schemaVersion: 1,
+      status: "fire",
+      text: "Storm warning for Perth (signed sig-try) for bot-1",
+    });
+    const after = await stored();
+    expect(deliveries(after)).toEqual(deliveries(before));
+    for (const [key, value] of after) {
+      expect(`${key} ${JSON.stringify(value)}`).not.toMatch(/try-|Perth/);
+    }
 
     // Off for this Bot, the Plugin sees nothing and the delivery is dropped.
     await switchPlugin(identity, TRIGGER_PLUGIN_ID, false);

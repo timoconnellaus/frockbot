@@ -46,6 +46,7 @@ import {
 } from "./authoring.js";
 import { DEPLOYMENT_PLUGIN_CATALOG_V1 } from "./catalog.js";
 import type { PluginModuleReportsV1 } from "./module-reports.js";
+import { tryPluginTriggerV1 } from "./triggers-bot.js";
 import type { PluginAuthoringRuntimeHostV1 } from "./feature.js";
 
 /** How many times a proposal re-reads and retries after losing the pin race. */
@@ -156,6 +157,9 @@ export async function pluginAuthoringRuntimeHost(
         userId: identity.userId,
         pluginId,
       });
+    },
+    triggers: {
+      shape: (sample) => tryPluginTriggerV1(state, identity, sample),
     },
     storage: {
       get: <T>(key: string) => state.ctx.storage.get<T>(key),

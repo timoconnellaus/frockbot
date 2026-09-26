@@ -23,8 +23,12 @@ import {
   MAX_PLUGIN_PAGE_BYTES_V1,
   withPluginPageBridgeV1,
   type PluginDescriptorV1,
+  type PluginDeviceModuleV1,
   type PluginModuleArtifactV1,
+  type PluginModuleTryActionV1,
   type PluginPageArtifactV1,
+  type PluginWorkerTriggerResultV1,
+  type PluginWorkerTriggerSourceV1,
   type SendToUserApprovalRiskV1,
   type WorkspaceFilesV1,
 } from "@frockbot/core/contracts";
@@ -162,6 +166,16 @@ export interface PluginAuthoringSeamsV1 {
    * The User Durable Object keeps them, since it holds the desktops' sockets.
    */
   moduleReports(pluginId: string): Promise<PluginModuleReportsV1>;
+  /**
+   * Hands one sample delivery to this Bot's running Plugin, as the Routine
+   * webhook door would, and answers what the Plugin made of it. Nothing
+   * before or after the Plugin runs: no replay key, no firing.
+   */
+  triggers: {
+    shape(
+      delivery: PluginTriggerSampleV1,
+    ): Promise<PluginWorkerTriggerResultV1>;
+  };
   /** The Bot's own storage: its enable map and its intents. */
   storage: PluginEnablementStorageV1 &
     PluginIntentStorageV1 &
@@ -232,6 +246,39 @@ export interface PluginAuthoringHostV1 {
     pluginId: string;
     surfaceId?: string;
   }): Promise<PluginPageToTryV1 | { failure: string }>;
+  /**
+   * One of this Plugin's device modules as `plugin_publish` would store it,
+   * built from its source now — for trying it on the Bot's Computer. A call
+   * or an event the declaration does not name is refused before the build.
+   */
+  moduleToTry(
+    input: {
+      pluginId: string;
+      moduleId?: string;
+      action: PluginModuleTryActionV1;
+    },
+    effectId: string,
+  ): Promise<PluginModuleToTryV1 | { failure: string }>;
+  /** What this Bot's running Plugin makes of one sample delivery. */
+  tryTrigger(
+    delivery: PluginTriggerSampleV1,
+  ): Promise<PluginWorkerTriggerResultV1>;
+}
+
+/** A device module ready to try: its declaration and its built code. */
+export interface PluginModuleToTryV1 {
+  pluginId: string;
+  module: PluginDeviceModuleV1;
+  code: string;
+}
+
+/** One delivery a Bot made up for a trigger, shaped as the door shapes one. */
+export interface PluginTriggerSampleV1 {
+  pluginId: string;
+  trigger: string;
+  headers: Record<string, string>;
+  body: string;
+  source?: PluginWorkerTriggerSourceV1;
 }
 
 /** A page ready to try: its bytes, and what the stand-in host must allow. */
@@ -924,6 +971,77 @@ export function createPluginAuthoringHostV1(
         microphone:
           descriptor.device?.abilities.includes("microphone") ?? false,
       };
+    },
+
+    async moduleToTry(input, effectId) {
+      const pluginId = assertPluginIdV1(input.pluginId);
+      const source = await sourceRepository.readBuildSource(pluginId);
+      if ("failure" in source) return source;
+      const descriptor = descriptorOf(pluginId, source.files);
+      if ("failure" in descriptor) return descriptor;
+      const declared = descriptor.device?.modules ?? [];
+      const ids = declared.map((module) => module.id).join(", ");
+      const module =
+        input.moduleId === undefined
+          ? declared.length === 1
+            ? declared[0]
+            : undefined
+          : declared.find((candidate) => candidate.id === input.moduleId);
+      if (!module) {
+        return {
+          failure:
+            declared.length === 0
+              ? `${pluginId} declares no device module to try`
+              : input.moduleId === undefined
+                ? `${pluginId} declares device modules [${ids}]; name one with moduleId`
+                : `${pluginId} has no device module "${input.moduleId}"; it declares [${ids}]`,
+        };
+      }
+      const action = input.action;
+      if ("call" in action && !module.calls.includes(action.call)) {
+        return {
+          failure: `the module "${module.id}" declares no call "${action.call}"; it declares [${module.calls.join(", ")}], and a desktop refuses any other`,
+        };
+      }
+      if ("event" in action && !module.events.includes(action.event)) {
+        return {
+          failure: `the module "${module.id}" declares no event "${action.event}"; it declares [${module.events.join(", ")}], and a desktop refuses to send any other`,
+        };
+      }
+      const built = await build(pluginId, "build", effectId);
+      if ("failure" in built) {
+        return {
+          failure: [built.failure, ...(built.diagnostics ?? [])].join("\n"),
+        };
+      }
+      if (!isPluginBuiltResponseV1(built.response)) {
+        return { failure: "the build returned no module" };
+      }
+      const disagreement = pluginManifestDisagreementV1(
+        descriptor,
+        built.response.manifest,
+      );
+      if (disagreement) {
+        return {
+          failure: `plugin.json and the source disagree: ${disagreement}. Make them match and try again.`,
+        };
+      }
+      const code = built.response.modules.find(
+        (candidate) => candidate.id === module.id,
+      )?.code;
+      if (code === undefined) {
+        return {
+          failure: `the build produced no device module "${module.id}"`,
+        };
+      }
+      return { pluginId, module, code };
+    },
+
+    async tryTrigger(delivery) {
+      return seams.triggers.shape({
+        ...delivery,
+        pluginId: assertPluginIdV1(delivery.pluginId),
+      });
     },
 
     async readSettings(input) {

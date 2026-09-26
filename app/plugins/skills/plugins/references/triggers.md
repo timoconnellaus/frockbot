@@ -36,3 +36,10 @@ not. Then create the Routine with `routine_manage`:
 The Routine is keyed like a webhook one — the receipt carries the URL and the
 key the outside service posts to — and the Plugin must be on for this Bot,
 or every delivery is dropped with that reason.
+
+Try a trigger before a Routine depends on it: `plugin_trigger_try` with the
+Plugin's id, the trigger's name, a `body` as the sender would POST it and any
+`headers`, answers with the text the Routine would fire with or the drop and
+its reason. Add `moduleEvent: { moduleId, key }` to play an event your device
+module would emit, with its payload as the JSON `body`. It runs the published
+Plugin, on for this Bot, with its grants, and fires no Routine.

@@ -29,6 +29,41 @@ export async function deliverPluginTriggerV1(
   identity: BotIdentity,
   input: RoutinePluginTriggerDeliveryV1,
 ): Promise<PluginWorkerTriggerResultV1> {
+  return askPluginTriggerV1(
+    state,
+    identity,
+    input,
+    `trigger:${input.routineId}`,
+  );
+}
+
+/**
+ * `plugin_trigger_try`: a sample delivery a Bot made up, handed to the Plugin
+ * exactly as a real one is, under a Routine that does not exist. What the
+ * Plugin answers is the whole result: the door's replay guard and the firing
+ * sit around this call, not in it, so a try records no key and fires nothing.
+ */
+export async function tryPluginTriggerV1(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+  sample: Omit<RoutinePluginTriggerDeliveryV1, "routineId">,
+): Promise<PluginWorkerTriggerResultV1> {
+  // Unique, so two tries at once never share a standalone call.
+  const id = `try-${crypto.randomUUID()}`;
+  return askPluginTriggerV1(
+    state,
+    identity,
+    { ...sample, routineId: id },
+    `trigger:${id}`,
+  );
+}
+
+async function askPluginTriggerV1(
+  state: ShellBotStateV1,
+  identity: BotIdentity,
+  input: RoutinePluginTriggerDeliveryV1,
+  runId: string,
+): Promise<PluginWorkerTriggerResultV1> {
   const roster = await readBotPluginRosterV1(state, identity);
   const member = roster.members.find(
     (candidate) => candidate.packageId === input.pluginId,
@@ -50,7 +85,6 @@ export async function deliverPluginTriggerV1(
   if (!roster.enabled.includes(input.pluginId)) {
     return drop(`plugin "${input.pluginId}" is off for this Bot`);
   }
-  const runId = `trigger:${input.routineId}`;
   const outcome = await withPluginWorkerV1(
     state,
     identity,

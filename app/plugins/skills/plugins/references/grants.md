@@ -75,6 +75,8 @@ outcome, error }` within about ten seconds. `failed` means it did not run —
   runs the module. A tool call replayed after an interruption is told the
   first answer; the module is never asked twice. An answer that arrives
   late reaches no model: it is in `plugin_module_reports`.
+  `plugin_module_try` runs a module's call on your Computer, before any
+  desktop has it.
 
 `files` and `computer` are declared to the authority and open nothing on
 `ctx` today: name them only when the User is granting that reach, not
