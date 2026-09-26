@@ -100,7 +100,8 @@ function literal(value: string): string {
  * Everything is denied, then the system basics a process needs to start are
  * imported, then exactly what the module declared is added: reads under its
  * paths, connections to its loopback ports, writes to its own data directory.
- * Its Apple Events go through the app, never from here, so none are allowed.
+ * Its Apple Events go through the host (`apple-events.ts`), so none are
+ * allowed from here.
  */
 export function seatbeltProfileV1(
   reach: ModuleReachV1,

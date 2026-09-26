@@ -5,7 +5,8 @@
 // socket, and runs the account's device modules. The app speaks to it in one
 // JSON object per line over stdin and stdout, and holds what the host must not:
 // the machine token rests in the app's Keychain, read and written through
-// `native` requests, and Apple Events are the app's to send.
+// `native` requests. A module's Apple Events are sent from here, each script in
+// its own sandboxed `osascript` (`apple-events.ts`), never from inside the app.
 //
 //   app → host   start, pair, unpair, reply
 //   host → app   native, status, error
@@ -22,6 +23,7 @@ import {
   type MachineWebSocketLikeV1,
 } from "@frockbot/app/machine/device";
 
+import { runAppleEventsV1 } from "./apple-events.ts";
 import {
   ModuleHostV1,
   type ModuleHostCredentialV1,
@@ -148,8 +150,7 @@ async function start(input: Record<string, unknown>): Promise<void> {
     home: text(input.home, "home"),
     fetch: fetchOnce,
     credential: () => credential,
-    appleEvents: async (bundleId, script) =>
-      String(await native("appleEvents", { bundleId, script })),
+    appleEvents: (bundleId, script) => runAppleEventsV1(bundleId, script),
     onChange: (next) => {
       entries = next;
       announce();
