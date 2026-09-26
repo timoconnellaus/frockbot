@@ -11,9 +11,11 @@ import {
   type WorkingContextStorageV1,
 } from "@frockbot/core/durable";
 import {
+  emptyCommittedContextV1,
   emptyConversationHeadV1,
   isChunkedMessageRefV1,
   type ChunkedMessageRefV1,
+  type CommittedContextV1,
   type ConversationHeadV1,
   type LlmMessage,
   type SessionEvent,
@@ -37,6 +39,7 @@ import { CHAT_HISTORY_BUDGET_CHARS_V1, type ChatWindowV1 } from "./history.js";
 import {
   chooseWorkingTurnsV1,
   currentTurnCharsV1,
+  committedContextFromTurnsV1,
   turnOpeningMessagesV1,
   emptyVoiceExcerptV1,
   reduceWorkingContextAppendV1,
@@ -761,6 +764,49 @@ export async function readVoiceExcerptV1(
   sessionId: string,
 ): Promise<VoiceExcerptV1> {
   return loadVoice(storage, sessionId);
+}
+
+/** How many of the person's own Turns supervision reads before a Turn. */
+export const SUPERVISION_CONTEXT_TURNS_V1 = 4;
+
+/**
+ * The newest Turns the person had with the Bot before `beforeTurn`, whole,
+ * as the conversation supervision judges a Turn against.
+ *
+ * Only `chat` Turns: what opened an automation or agent Turn was not said by
+ * the person. Even a chat Turn's user messages can carry a Routine's hand-off
+ * or a card press, so this is context for judging a Turn, never authorization
+ * for a call.
+ */
+export async function readSupervisionContextV1(
+  storage: WorkingContextStorageV1,
+  sessionId: string,
+  beforeTurn: number,
+): Promise<CommittedContextV1> {
+  const head = requireConversationHeadV1(
+    await storage.get(workingContextHeadKeyV1(sessionId)),
+    sessionId,
+  );
+  if (!head || head.status !== "ready") return emptyCommittedContextV1();
+  const page = await storage.list<TurnContextIndexV1>({
+    prefix: workingContextTurnPrefixV1(sessionId),
+    reverse: true,
+    limit: TURN_LIST_LIMIT_V1,
+  });
+  const picked: TurnContextIndexV1[] = [];
+  for (const index of page.values()) {
+    if (index.turn >= beforeTurn || !index.messageBearing) continue;
+    if (index.turnType !== "chat") continue;
+    picked.unshift(index);
+    if (picked.length >= SUPERVISION_CONTEXT_TURNS_V1) break;
+  }
+  const turns = await Promise.all(
+    picked.map(async (index) => ({
+      index,
+      messages: await readMessages(storage, sessionId, index),
+    })),
+  );
+  return committedContextFromTurnsV1(head, turns);
 }
 
 registerWorkingContextProjectorV1({

@@ -457,6 +457,7 @@ describe("the Jev adapter's claim check", () => {
         },
       ],
       message: failed.message,
+      endsTurn: failed.finish,
     });
   });
 });
