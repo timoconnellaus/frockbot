@@ -117,6 +117,7 @@ export const claimQuestionsV1 = {
         "A claim is a statement that the Bot did something: sent, saved, created, booked, scheduled, changed, deleted, fixed, ran or checked.",
         'An action counts as done only when a call in `actionsThisTurn` with outcome "done" did it; an earlier turn\'s work in `conversation` counts too.',
         "Answering from knowledge, giving an opinion, planning what it will do, or asking is not a claim.",
+        'Saying it is starting or doing something now — "on it", "pulling it up", "checking now" — is not a claim; only saying something is finished is.',
         "When more than one fits, pick the one listed first.",
       ],
     },

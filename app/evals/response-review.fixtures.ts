@@ -660,6 +660,17 @@ export const responseReviewFixturesV1: readonly ResponseReviewFixtureV1[] = [
     "release",
   ),
   claim(
+    "claim-intent-in-progress",
+    "Saying it is starting on the work is not saying the work was done.",
+    {
+      request: "can you give me a link to the email to open in gmail",
+      actions: [],
+      message:
+        "On it — pulling up the message so I can hand you a direct link.",
+    },
+    "release",
+  ),
+  claim(
     "claim-plan",
     "Saying what it will do is not saying it was done.",
     {
