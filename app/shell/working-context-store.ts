@@ -680,10 +680,12 @@ export async function selectStoredWorkingContextV1(
       ...(end ? { end } : {}),
     });
     if (page.size === 0) break;
+    const onPage: TurnContextIndexV1[] = [];
     for (const [key, turn] of page) {
       end = key;
       if (turn.turn >= request.currentTurn) continue;
       metas.push(turn);
+      onPage.push(turn);
     }
     const choice = chooseWorkingTurnsV1({
       head,
@@ -701,15 +703,19 @@ export async function selectStoredWorkingContextV1(
       head.compaction !== undefined &&
       oldestLoaded !== undefined &&
       oldestLoaded.turn <= head.compaction.throughTurn;
+    // The walk skips a Turn that does not fit and goes on, so one skip is not
+    // a full budget. Reading stops at a page none of whose Turns fit: the
+    // budget is all but spent, and older pages would mostly be read to skip.
+    const eligible = onPage.filter(
+      (turn) =>
+        turn.messageBearing &&
+        chatTurn(turn.turnType) &&
+        (head!.compaction === undefined ||
+          turn.turn > head!.compaction.throughTurn),
+    );
     const filled =
-      choice.kept.length <
-      metas.filter(
-        (turn) =>
-          turn.messageBearing &&
-          turn.turn < request.currentTurn &&
-          (head!.compaction === undefined ||
-            turn.turn > head!.compaction.throughTurn),
-      ).length;
+      eligible.length > 0 &&
+      !eligible.some((turn) => choice.kept.includes(turn.turn));
     if (covered || filled || page.size < TURN_LIST_LIMIT_V1) {
       const kept = await Promise.all(
         choice.kept.map(async (turn) => {

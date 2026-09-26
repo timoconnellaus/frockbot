@@ -362,7 +362,7 @@ describe("history for one Turn", () => {
     const first = choose(1_000);
     // The Turn's own tool traffic grows; the history it carries does not move.
     expect(choose(20_000)).toEqual(first);
-    expect(choose(45_000)).toEqual(first);
+    expect(choose(30_000)).toEqual(first);
     expect(first.kept).toEqual([10, 9, 8, 7]);
   });
 
@@ -418,6 +418,33 @@ describe("a Turn whose tool traffic outgrows the whole budget", () => {
     expect(contents(messages)).toContain("answer 2");
     expect(historyCharsV1(messages)).toBeLessThanOrEqual(
       CHAT_HISTORY_BUDGET_CHARS_V1,
+    );
+  });
+
+  test("the stored projection reads past a page with a skipped Turn", async () => {
+    // Twenty Turns span two index pages. Turn 19 alone is too big to keep
+    // even pruned; every other Turn, including the four on the older page,
+    // still fits.
+    const events = stamp([
+      ...Array.from({ length: 20 }, (_, index) =>
+        chatTurn(
+          index + 1,
+          index + 1 === 19 ? "y".repeat(151_000) : `said ${index + 1}`,
+        ),
+      ).flat(),
+    ]);
+    const storage = new BoundedStorage();
+    await applyWorkingContextAppendV1(storage, SESSION, events);
+    const request = {
+      sessionId: SESSION,
+      currentTurn: 21,
+      currentTurnType: "chat" as const,
+      currentMessages: [{ role: "user" as const, content: next }],
+    };
+    const stored = await selectStoredWorkingContextV1(storage, request);
+    expect(contents(stored)).toContain("said 1");
+    expect(contents(stored)).toEqual(
+      contents(assembleJournalContextV1({ ...request, events })),
     );
   });
 
@@ -486,6 +513,29 @@ describe("the Turn being assembled", () => {
     );
   });
 
+  test("never clears results the model has not read, however many one step made", () => {
+    const messages: LlmMessage[] = [
+      { role: "user", content: "x".repeat(40_000) },
+      {
+        role: "assistant",
+        content: "",
+        toolCalls: [0, 1, 2].map((index) => ({
+          id: `c${index}`,
+          name: "fetch",
+          input: {},
+        })),
+      },
+      ...[0, 1, 2].map((index): LlmMessage => ({
+        role: "tool",
+        callId: `c${index}`,
+        name: "fetch",
+        content: String(index).repeat(40_000),
+        isError: false,
+      })),
+    ];
+    expect(clearTurnToolResultsV1(messages)).toEqual(messages);
+  });
+
   test("a cleared result stays cleared at every later step", () => {
     const messages = toolLoop(12, 30_000);
     let previous: LlmMessage[] = [];
@@ -506,6 +556,25 @@ describe("the Turn being assembled", () => {
     // Batches, not one clearing per step: most steps keep the prefix whole.
     expect(clearings).toBeGreaterThan(0);
     expect(clearings).toBeLessThan(6);
+  });
+
+  test("a long tool loop over a full history stays under the prepaid bound", () => {
+    // Bob's Turn 119: twelve steps of 85k email bodies after a full history.
+    // The bound counts the request's bytes; leave 70k for system and tools.
+    const history = Array.from({ length: 30 }, (_, index) =>
+      chatTurn(index + 1, `question ${index + 1}`, 6_000),
+    ).flat();
+    for (let step = 1; step <= 12; step += 1) {
+      const messages = assembleJournalContextV1({
+        events: stamp(history),
+        sessionId: SESSION,
+        currentTurn: 31,
+        currentTurnType: "chat",
+        currentMessages: toolLoop(step, 85_000),
+      });
+      const bytes = new TextEncoder().encode(JSON.stringify(messages)).length;
+      expect(bytes).toBeLessThan(400_000 - 70_000);
+    }
   });
 
   test("is cleared in the rendered request too", () => {

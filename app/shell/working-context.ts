@@ -466,8 +466,12 @@ function chooseWithinBudgetV1(input: {
  * every step of a Turn sends the same history and hits the provider's prompt
  * cache. A Turn whose own tool traffic outgrows this is re-chosen against its
  * real size, which costs one cache miss rather than an overlong request.
+ *
+ * Kept low enough that the history, the Turn, and the system prompt and tools
+ * beside them stay well inside Frock AI's prepaid bound, which counts the
+ * request's UTF-8 bytes rather than these characters.
  */
-export const TURN_GROWTH_CEILING_V1 = 2;
+export const TURN_GROWTH_CEILING_V1 = 1.5;
 
 /**
  * Which committed Turns fit, using metadata only.

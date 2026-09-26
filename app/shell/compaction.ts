@@ -78,9 +78,10 @@ export const TURN_TOOL_CLEAR_TARGET_CHARS_V1 = 50_000;
  *
  * Replayed over the Turn in order, so the answer for a prefix never depends on
  * what came after it: a result cleared at one step stays cleared at every
- * later step, and nothing moves between clearings. The newest result is never
- * cleared — the model has not read it yet. Calls and their inputs stay, so the
- * model can see what it asked for and ask again.
+ * later step, and nothing moves between clearings. Results the model has not
+ * read yet — everything after its newest message, several at once when one
+ * step made parallel calls — are never cleared. Calls and their inputs stay,
+ * so the model can see what it asked for and ask again.
  */
 export function clearTurnToolResultsV1(
   messages: readonly LlmMessage[],
@@ -88,13 +89,13 @@ export function clearTurnToolResultsV1(
   const out: LlmMessage[] = [];
   let total = 0;
   let next = 0;
-  let newestTool = -1;
+  let unread = 0;
   for (const message of messages) {
     out.push(message);
     total += historyCharsV1([message]);
-    if (message.role === "tool") newestTool = out.length - 1;
+    if (message.role === "assistant") unread = out.length;
     if (total <= TURN_TOOL_CLEAR_TRIGGER_CHARS_V1) continue;
-    while (total > TURN_TOOL_CLEAR_TARGET_CHARS_V1 && next < newestTool) {
+    while (total > TURN_TOOL_CLEAR_TARGET_CHARS_V1 && next < unread) {
       const candidate = out[next]!;
       next += 1;
       if (candidate.role !== "tool") continue;
