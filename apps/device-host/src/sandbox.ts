@@ -85,7 +85,7 @@ export function moduleEnvironmentV1(
 }
 
 /** A string inside an SBPL literal. */
-function literal(value: string): string {
+export function seatbeltLiteralV1(value: string): string {
   if (/[\u0000-\u001f"\\]/.test(value)) {
     throw new Error(
       `a sandbox path may not contain quotes, backslashes or control characters: ${value}`,
@@ -123,13 +123,13 @@ export function seatbeltProfileV1(
     "(version 1)",
     "(deny default)",
     '(import "bsd.sb")',
-    `(allow process-exec (literal ${literal(paths.deno)}))`,
+    `(allow process-exec (literal ${seatbeltLiteralV1(paths.deno)}))`,
     // `subpath` names a file itself, or a directory as a tree.
     ...reads.map(
       (path) =>
-        `(allow file-read* (subpath ${literal(path.replace(/\/$/, ""))}))`,
+        `(allow file-read* (subpath ${seatbeltLiteralV1(path.replace(/\/$/, ""))}))`,
     ),
-    `(allow file-read* file-write* (subpath ${literal(paths.data)}))`,
+    `(allow file-read* file-write* (subpath ${seatbeltLiteralV1(paths.data)}))`,
     ...ports.map(
       (port) => `(allow network-outbound (remote ip "localhost:${port}"))`,
     ),

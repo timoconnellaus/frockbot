@@ -2,18 +2,26 @@
 //
 // The script never runs inside the app. The app holds Full Disk Access, and an
 // in-process AppleScript could `do shell script` with it, or nest a `tell` to
-// any other application. So each run is its own `osascript` under a Seatbelt
+// any other application. So each run is its own process under a Seatbelt
 // profile generated for that run: it may start, and it may send Apple Events to
 // the one application the module named — no fork, no other program, no
-// network, no writes. macOS still asks the person, attributing the run to the
-// app that started the host, before the first event reaches that application.
+// network, no writes.
+//
+// That process is the app's Apple Events helper, not `osascript`. macOS refuses
+// Apple Events from a sandboxed sender whose signature carries no Apple Events
+// entitlement (-10004), and `osascript` carries none. The helper's entitlement
+// only lets it send at all; its list of applications does not limit where
+// events go. What limits the target is this profile's one `appleevent-send`
+// rule. macOS still asks the person, attributing the run to the app that
+// started the host, before the first event reaches that application.
 //
 // Its proof is `apple-events.macos.test.ts`.
 
 import { Buffer } from "node:buffer";
 import { spawn, type ChildProcess } from "node:child_process";
 
-const OSASCRIPT = "/usr/bin/osascript";
+import { seatbeltLiteralV1 } from "./sandbox.ts";
+
 export const APPLE_SCRIPT_BYTES_MAX_V1 = 64 * 1_024;
 export const APPLE_SCRIPT_OUTPUT_BYTES_MAX_V1 = 256 * 1_024;
 const APPLE_SCRIPT_TIMEOUT_MS_V1 = 30_000;
@@ -24,32 +32,38 @@ const STDERR_BYTES_MAX = 4 * 1_024;
 const BUNDLE_ID = /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/;
 
 /**
- * The Seatbelt profile around one run of `osascript`.
+ * The Seatbelt profile around one run of the helper, at `helper`: an absolute
+ * path with no symbolic link in it, since Seatbelt matches real paths.
  *
- * Reads are system code only: what `osascript` and the AppleScript component
+ * Reads are system code only: what the helper and the AppleScript component
  * load, and nothing of the person's. Metadata is open because resolving any
  * path, the application's included, stats every directory above it. The mach
  * services are the ones an Apple Event crosses: the Apple Event server, Launch
- * Services to find the application by bundle id, and preferences for the
- * language it prints in.
+ * Services to find the application by bundle id, preferences, and the privacy
+ * service that holds the person's Automation consent.
  */
-export function appleEventsProfileV1(bundleId: string): string {
+export function appleEventsProfileV1(helper: string, bundleId: string): string {
   if (!BUNDLE_ID.test(bundleId)) {
     throw new Error(`not an application bundle id: ${bundleId}`);
   }
+  if (!helper.startsWith("/")) {
+    throw new Error(
+      `the Apple Events helper must be an absolute path: ${helper}`,
+    );
+  }
+  const path = seatbeltLiteralV1(helper);
   return [
     "(version 1)",
     "(deny default)",
     '(import "bsd.sb")',
-    `(allow process-exec (literal "${OSASCRIPT}"))`,
-    "(allow signal (target self))",
+    `(allow process-exec (literal ${path}))`,
     "(allow file-read*",
     '  (subpath "/System")',
     '  (subpath "/usr/lib")',
     '  (subpath "/usr/share")',
     '  (subpath "/Library/ScriptingAdditions")',
     '  (subpath "/private/var/db/dyld")',
-    `  (literal "${OSASCRIPT}"))`,
+    `  (literal ${path}))`,
     "(allow file-read-metadata)",
     "(allow mach-lookup",
     '  (global-name "com.apple.coreservices.appleevents")',
@@ -60,16 +74,16 @@ export function appleEventsProfileV1(bundleId: string): string {
     '  (global-name "com.apple.cfprefsd.agent")',
     '  (global-name "com.apple.tccd")',
     '  (global-name "com.apple.tccd.system"))',
-    "(allow user-preference-read",
-    '  (preference-domain "kCFPreferencesAnyApplication")',
-    '  (preference-domain "com.apple.osascript"))',
     `(allow appleevent-send (appleevent-destination "${bundleId}"))`,
     "",
   ].join("\n");
 }
 
-/** The whole command: Seatbelt around `osascript`, the script on stdin. */
-export function appleEventsCommandV1(bundleId: string): {
+/** The whole command: Seatbelt around the helper, the script on stdin. */
+export function appleEventsCommandV1(
+  helper: string,
+  bundleId: string,
+): {
   command: string;
   args: string[];
   env: Record<string, string>;
@@ -77,15 +91,7 @@ export function appleEventsCommandV1(bundleId: string): {
 } {
   return {
     command: "/usr/bin/sandbox-exec",
-    // `-l AppleScript` so a module cannot switch to JavaScript for Automation.
-    args: [
-      "-p",
-      appleEventsProfileV1(bundleId),
-      OSASCRIPT,
-      "-l",
-      "AppleScript",
-      "-",
-    ],
+    args: ["-p", appleEventsProfileV1(helper, bundleId), helper],
     env: {},
     cwd: "/",
   };
@@ -100,8 +106,12 @@ export type AppleEventsSpawnV1 = (
 const defaultSpawn: AppleEventsSpawnV1 = (command, args, options) =>
   spawn(command, args, { ...options, stdio: ["pipe", "pipe", "pipe"] });
 
-/** Runs one script against `bundleId` and answers what it returned. */
+/**
+ * Runs one script against `bundleId` with the helper at `helper`, and answers
+ * what it returned.
+ */
 export function runAppleEventsV1(
+  helper: string,
   bundleId: string,
   script: string,
   options: { spawn?: AppleEventsSpawnV1; timeoutMs?: number } = {},
@@ -113,7 +123,7 @@ export function runAppleEventsV1(
   }
   let command: ReturnType<typeof appleEventsCommandV1>;
   try {
-    command = appleEventsCommandV1(bundleId);
+    command = appleEventsCommandV1(helper, bundleId);
   } catch (error) {
     return Promise.reject(error);
   }

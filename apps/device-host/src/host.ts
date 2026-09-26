@@ -6,7 +6,8 @@
 // JSON object per line over stdin and stdout, and holds what the host must not:
 // the machine token rests in the app's Keychain, read and written through
 // `native` requests. A module's Apple Events are sent from here, each script in
-// its own sandboxed `osascript` (`apple-events.ts`), never from inside the app.
+// its own sandboxed run of the app's Apple Events helper (`apple-events.ts`),
+// never from inside the app.
 //
 //   app → host   start, pair, unpair, reply
 //   host → app   native, status, error
@@ -142,6 +143,7 @@ async function start(input: Record<string, unknown>): Promise<void> {
   const origin = new URL(text(input.origin, "origin")).origin;
   const fetchOnce = (url: string, init?: RequestInit) =>
     fetch(url, { ...init, redirect: "error" });
+  const appleEventsHelper = text(input.appleEventsHelper, "appleEventsHelper");
   modules = new ModuleHostV1({
     origin,
     supportDir: text(input.supportDir, "supportDir"),
@@ -150,7 +152,8 @@ async function start(input: Record<string, unknown>): Promise<void> {
     home: text(input.home, "home"),
     fetch: fetchOnce,
     credential: () => credential,
-    appleEvents: (bundleId, script) => runAppleEventsV1(bundleId, script),
+    appleEvents: (bundleId, script) =>
+      runAppleEventsV1(appleEventsHelper, bundleId, script),
     onChange: (next) => {
       entries = next;
       announce();

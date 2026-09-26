@@ -33,12 +33,23 @@ final class DeviceHostBridge {
   private var error = ""
 
   private var deno: URL { Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/deno") }
+  /// Sends a module's Apple Events. Its Seatbelt profile names it, and
+  /// Seatbelt matches real paths; `realpath` because Foundation's resolving
+  /// drops `/private`.
+  private var appleEventsHelper: String {
+    let path = Bundle.main.bundleURL.appendingPathComponent("Contents/Helpers/apple-events").path
+    guard let real = realpath(path, nil) else { return path }
+    defer { free(real) }
+    return String(cString: real)
+  }
   private var script: URL? { Bundle.main.url(forResource: "device-host", withExtension: "js") }
   private var runtime: URL? { Bundle.main.url(forResource: "device-runtime", withExtension: "js") }
 
   /// A development build run from Xcode or `flutter run` carries no Deno.
   private var available: Bool {
-    FileManager.default.isExecutableFile(atPath: deno.path) && script != nil && runtime != nil
+    FileManager.default.isExecutableFile(atPath: deno.path)
+      && FileManager.default.isExecutableFile(atPath: appleEventsHelper)
+      && script != nil && runtime != nil
   }
 
   /// Set by Forget, so this Mac does not pair itself again until asked.
@@ -196,6 +207,7 @@ final class DeviceHostBridge {
       send([
         "type": "start", "origin": origin,
         "supportDir": support.path, "deno": deno.path, "runtime": runtime.path,
+        "appleEventsHelper": appleEventsHelper,
         "home": NSHomeDirectory(),
         "label": String((Host.current().localizedName ?? ProcessInfo.processInfo.hostName).prefix(64)),
         "version": Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "0.0.0",

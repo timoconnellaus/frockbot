@@ -12,8 +12,10 @@ import {
   type AppleEventsSpawnV1,
 } from "./apple-events.ts";
 
+const HELPER = "/Applications/FrockBot.app/Contents/Helpers/apple-events";
+
 describe("the profile around one Apple Events run", () => {
-  const profile = appleEventsProfileV1("com.apple.iChat");
+  const profile = appleEventsProfileV1(HELPER, "com.apple.iChat");
 
   test("denies by default and admits events to the one named application", () => {
     expect(profile.split("\n").slice(0, 3)).toEqual([
@@ -27,11 +29,10 @@ describe("the profile around one Apple Events run", () => {
     expect(profile.match(/appleevent-destination/g)).toHaveLength(1);
   });
 
-  test("starts osascript and nothing else, and writes and connects nowhere", () => {
+  test("starts the helper and nothing else, and writes and connects nowhere", () => {
     expect(profile.match(/process-exec/g)).toEqual(["process-exec"]);
-    expect(profile).toContain(
-      '(allow process-exec (literal "/usr/bin/osascript"))',
-    );
+    expect(profile).toContain(`(allow process-exec (literal "${HELPER}"))`);
+    expect(profile).toContain(`  (literal "${HELPER}"))`);
     for (const refused of [
       "process-fork",
       "file-write",
@@ -50,23 +51,25 @@ describe("the profile around one Apple Events run", () => {
       "iChat",
       "",
     ]) {
-      expect(() => appleEventsProfileV1(bundleId)).toThrow(
+      expect(() => appleEventsProfileV1(HELPER, bundleId)).toThrow(
         /not an application/,
       );
     }
   });
 
-  test("the command is Seatbelt around AppleScript read from stdin", () => {
-    const command = appleEventsCommandV1("com.apple.iChat");
+  test("refuses a helper path that is relative or could break out of its literal", () => {
+    expect(() =>
+      appleEventsProfileV1("apple-events", "com.apple.iChat"),
+    ).toThrow(/absolute path/);
+    expect(() =>
+      appleEventsProfileV1('/a") (allow default) ("', "com.apple.iChat"),
+    ).toThrow(/may not contain quotes/);
+  });
+
+  test("the command is Seatbelt around the helper, the script on stdin", () => {
+    const command = appleEventsCommandV1(HELPER, "com.apple.iChat");
     expect(command.command).toBe("/usr/bin/sandbox-exec");
-    expect(command.args).toEqual([
-      "-p",
-      profile,
-      "/usr/bin/osascript",
-      "-l",
-      "AppleScript",
-      "-",
-    ]);
+    expect(command.args).toEqual(["-p", profile, HELPER]);
     expect(command.env).toEqual({});
   });
 });
@@ -120,17 +123,23 @@ describe("running a script", () => {
   test("passes the script on stdin and answers its trimmed output", async () => {
     const process = fake({ stdout: "2\n" });
     expect(
-      await runAppleEventsV1("com.apple.iChat", "return 1 + 1", process),
+      await runAppleEventsV1(
+        HELPER,
+        "com.apple.iChat",
+        "return 1 + 1",
+        process,
+      ),
     ).toBe("2");
     expect(process.stdin()).toBe("return 1 + 1");
     expect(process.calls[0]!.args).toContain(
-      appleEventsProfileV1("com.apple.iChat"),
+      appleEventsProfileV1(HELPER, "com.apple.iChat"),
     );
   });
 
-  test("a failing script throws what osascript said", async () => {
+  test("a failing script throws what the helper said", async () => {
     await expect(
       runAppleEventsV1(
+        HELPER,
         "com.apple.iChat",
         "error",
         fake({ stderr: "execution error: nope (-2700)\n", code: 1 }),
@@ -141,7 +150,7 @@ describe("running a script", () => {
   test("a script that does not finish is killed", async () => {
     const process = fake({ hang: true });
     await expect(
-      runAppleEventsV1("com.apple.iChat", "delay 100", {
+      runAppleEventsV1(HELPER, "com.apple.iChat", "delay 100", {
         ...process,
         timeoutMs: 20,
       }),
@@ -155,7 +164,7 @@ describe("running a script", () => {
       hang: false,
     });
     await expect(
-      runAppleEventsV1("com.apple.iChat", "big", process),
+      runAppleEventsV1(HELPER, "com.apple.iChat", "big", process),
     ).rejects.toThrow("returned more than");
     expect(process.killed()).toBe("SIGKILL");
   });
@@ -164,13 +173,14 @@ describe("running a script", () => {
     const process = fake({});
     await expect(
       runAppleEventsV1(
+        HELPER,
         "com.apple.iChat",
         "x".repeat(APPLE_SCRIPT_BYTES_MAX_V1 + 1),
         process,
       ),
     ).rejects.toThrow("longer than");
     await expect(
-      runAppleEventsV1('a") (allow default', "return 1", process),
+      runAppleEventsV1(HELPER, 'a") (allow default', "return 1", process),
     ).rejects.toThrow(/not an application/);
     expect(process.calls).toHaveLength(0);
   });

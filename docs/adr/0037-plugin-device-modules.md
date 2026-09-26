@@ -160,12 +160,22 @@ appleEvents.run(bundleId, script);
 ```
 
 The host refuses a bundle id the module did not declare, then runs the script
-in its own `osascript` under a Seatbelt profile generated for that run. The
+in its own process under a Seatbelt profile generated for that run. The
 profile admits Apple Events to the one named application and nothing else: no
 fork, no other program, no network, no writes, and no file contents but system code.
 So `do shell script` fails, and so does a nested `tell` to any other
 application. The script never runs inside the app, where it would hold the
 app's Full Disk Access. Its length, wall time and output are capped.
+
+That process is not `osascript`. macOS refuses Apple Events from a sandboxed
+sender whose signature carries no Apple Events entitlement, and `osascript`
+carries none. So the app bundles a small helper beside Deno, which runs the
+AppleScript on its stdin through `NSAppleScript` and prints the result, signed
+at release with the hardened runtime, `automation.apple-events` and the Apple
+Events sandbox exception. The exception is only leave to send: its list of
+applications does not limit where events go. What limits the target is the
+profile's one `appleevent-send` rule, so one helper serves every module and no
+module is signed on the person's Mac.
 
 The operating system attributes the run to the app, which carries the Apple
 Events entitlement, so the person grants Automation consent to FrockBot once
@@ -360,8 +370,9 @@ absent Device and the Pending-input result.
 - The Mac app gains the module host: Deno, the Seatbelt profile generator, the
   hibernating socket, the ledger and module lifecycle, built on the device
   agent that stays.
-- The module host gains `appleEvents.run`: `osascript` under a per-run
-  Seatbelt profile that admits Apple Events to the declared target alone.
+- The module host gains `appleEvents.run`: the app's Apple Events helper under
+  a per-run Seatbelt profile that admits Apple Events to the declared target
+  alone.
 - The Device's sync gains the module list and the listening flags, and the
   Device reports each module's state and logs.
 - The machine protocol gains the `module` operation and its outcomes.
