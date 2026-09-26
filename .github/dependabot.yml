@@ -17,8 +17,18 @@ updates:
     # fixes comes back with no signal. Bumping wrangler means re-creating
     # `patches/wrangler@<version>.patch` by hand, so it is not a grouped
     # automatic update.
+    #
+    # vitest majors wait for the Cloudflare Workers pool: under vitest 5 the
+    # pool fails to start ("Unexpected identifier 'file'"), so every workerd
+    # suite goes red. The Rive wasm is the web half of the `rive` Flutter
+    # package pinned in apps/native/pubspec.yaml; its major moves with that
+    # package, never on its own.
     ignore:
       - dependency-name: wrangler
+      - dependency-name: vitest
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@rive-app/flutter-native-wasm"
+        update-types: ["version-update:semver-major"]
     open-pull-requests-limit: 10
 
   - package-ecosystem: github-actions
