@@ -8,7 +8,9 @@
 //     write and no model call. A `tool/result` message older than the newest
 //     few Turns keeps its `callId` and `name` and loses only its payload, so
 //     the call/result pairing every provider validates survives while the
-//     bytes that actually dominate a long conversation do not.
+//     bytes that actually dominate a long conversation do not. The same rule
+//     clears the Turn being assembled's own older results once that Turn
+//     alone grows past a bound, so a long tool loop cannot outgrow a request.
 //  2. **Summarise the oldest Turns.** One `conversation/compacted` event on
 //     the durable log, computed once and replayed thereafter. It is *not*
 //     recomputed per request: that was the mistake the design this copies was
@@ -54,6 +56,58 @@ export const PRUNED_TOOL_RESULT_V1 = "[pruned]";
 
 /** Longest a pruned tool result may be before it is worth pruning at all. */
 export const PRUNE_MIN_RESULT_CHARS_V1 = 200;
+
+/**
+ * Size of the Turn being assembled above which its older tool results are
+ * cleared. The current Turn is carried whole by the history budget, so this is
+ * the only bound on it; a tool loop past it would otherwise grow the request
+ * until the provider refuses it.
+ */
+export const TURN_TOOL_CLEAR_TRIGGER_CHARS_V1 = 100_000;
+
+/**
+ * What one clearing brings the Turn back down to. Well below the trigger, so
+ * clearings come in batches: each one breaks the prompt cache once, and the
+ * steps after it hit the cache again until the Turn next crosses the trigger.
+ */
+export const TURN_TOOL_CLEAR_TARGET_CHARS_V1 = 50_000;
+
+/**
+ * The Turn being assembled, with its oldest tool results cleared once it grows
+ * past {@link TURN_TOOL_CLEAR_TRIGGER_CHARS_V1}.
+ *
+ * Replayed over the Turn in order, so the answer for a prefix never depends on
+ * what came after it: a result cleared at one step stays cleared at every
+ * later step, and nothing moves between clearings. Results the model has not
+ * read yet — everything after its newest message, several at once when one
+ * step made parallel calls — are never cleared. Calls and their inputs stay,
+ * so the model can see what it asked for and ask again.
+ */
+export function clearTurnToolResultsV1(
+  messages: readonly LlmMessage[],
+): LlmMessage[] {
+  const out: LlmMessage[] = [];
+  let total = 0;
+  let next = 0;
+  let unread = 0;
+  for (const message of messages) {
+    out.push(message);
+    total += historyCharsV1([message]);
+    if (message.role === "assistant") unread = out.length;
+    if (total <= TURN_TOOL_CLEAR_TRIGGER_CHARS_V1) continue;
+    while (total > TURN_TOOL_CLEAR_TARGET_CHARS_V1 && next < unread) {
+      const candidate = out[next]!;
+      next += 1;
+      if (candidate.role !== "tool") continue;
+      if (candidate.content.length <= PRUNE_MIN_RESULT_CHARS_V1) continue;
+      const { attachments: _attachments, ...rest } = candidate;
+      const cleared = { ...rest, content: PRUNED_TOOL_RESULT_V1 };
+      total += historyCharsV1([cleared]) - historyCharsV1([candidate]);
+      out[next - 1] = cleared;
+    }
+  }
+  return out;
+}
 
 /**
  * Most transcript one summariser call reads, in UTF-8 bytes once

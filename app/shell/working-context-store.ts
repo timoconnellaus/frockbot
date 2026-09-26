@@ -36,6 +36,7 @@ import { historyCharsV1, type CompactionStateV1 } from "./compaction.js";
 import { CHAT_HISTORY_BUDGET_CHARS_V1, type ChatWindowV1 } from "./history.js";
 import {
   chooseWorkingTurnsV1,
+  currentTurnCharsV1,
   turnOpeningMessagesV1,
   emptyVoiceExcerptV1,
   reduceWorkingContextAppendV1,
@@ -679,17 +680,19 @@ export async function selectStoredWorkingContextV1(
       ...(end ? { end } : {}),
     });
     if (page.size === 0) break;
+    const onPage: TurnContextIndexV1[] = [];
     for (const [key, turn] of page) {
       end = key;
       if (turn.turn >= request.currentTurn) continue;
       metas.push(turn);
+      onPage.push(turn);
     }
     const choice = chooseWorkingTurnsV1({
       head,
       turns: metas,
       currentTurn: request.currentTurn,
       currentTurnType: request.currentTurnType,
-      currentChars: historyCharsV1(request.currentMessages),
+      currentChars: currentTurnCharsV1(request.currentMessages),
       openingChars: historyCharsV1(
         turnOpeningMessagesV1(request.currentMessages),
       ),
@@ -700,15 +703,19 @@ export async function selectStoredWorkingContextV1(
       head.compaction !== undefined &&
       oldestLoaded !== undefined &&
       oldestLoaded.turn <= head.compaction.throughTurn;
+    // The walk skips a Turn that does not fit and goes on, so one skip is not
+    // a full budget. Reading stops at a page none of whose Turns fit: the
+    // budget is all but spent, and older pages would mostly be read to skip.
+    const eligible = onPage.filter(
+      (turn) =>
+        turn.messageBearing &&
+        chatTurn(turn.turnType) &&
+        (head!.compaction === undefined ||
+          turn.turn > head!.compaction.throughTurn),
+    );
     const filled =
-      choice.kept.length <
-      metas.filter(
-        (turn) =>
-          turn.messageBearing &&
-          turn.turn < request.currentTurn &&
-          (head!.compaction === undefined ||
-            turn.turn > head!.compaction.throughTurn),
-      ).length;
+      eligible.length > 0 &&
+      !eligible.some((turn) => choice.kept.includes(turn.turn));
     if (covered || filled || page.size < TURN_LIST_LIMIT_V1) {
       const kept = await Promise.all(
         choice.kept.map(async (turn) => {
@@ -721,6 +728,7 @@ export async function selectStoredWorkingContextV1(
           return {
             turn,
             messages: await readMessages(storage, request.sessionId, index),
+            pruned: choice.pruned.includes(turn),
           };
         }),
       );
