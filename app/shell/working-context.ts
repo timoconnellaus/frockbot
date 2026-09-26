@@ -22,11 +22,11 @@ import {
 } from "@frockbot/core/contracts";
 import { VOICE_HISTORY_MAX_LIMIT_V1 } from "@frockbot/app/voice/history";
 import {
+  clearTurnToolResultsV1,
   compactionMessageV1,
   historyCharsV1,
   PRUNED_TOOL_RESULT_V1,
   PRUNE_MIN_RESULT_CHARS_V1,
-  pruneToolOutputsV1,
   TOOL_OUTPUT_KEEP_RECENT_TURNS_V1,
   type CompactionV1,
 } from "./compaction.js";
@@ -385,12 +385,24 @@ export interface WorkingTurnMetaV1 {
   messages?: readonly LlmMessage[];
 }
 
+/** Which Turns a request carries, and which of those lose their tool payloads. */
+export interface WorkingTurnChoiceV1 {
+  kept: number[];
+  /** Kept Turns rendered without their tool payloads. A subset of `kept`. */
+  pruned: number[];
+  omitted: number;
+}
+
 /**
  * Which committed Turns fit, using metadata only.
  *
- * Walks newest first and stops at the first Turn that does not fit, matching
- * whole-Turn eviction. `verbatim` is the newest tool-output window of the
- * post-compaction chat, including Turns the budget then drops.
+ * Walks newest first. A Turn in the newest tool-output window is kept whole if
+ * it fits; any Turn that does not fit whole is kept without its tool payloads
+ * if that fits, and skipped otherwise. A skipped Turn never ends the walk: one
+ * Turn whose own tool traffic outgrows the budget must not take every Turn
+ * before it with it. The window is positional, so a Turn kept pruned or
+ * skipped still spends a slot, and the choice says which Turns to prune —
+ * the renderer does not work it out again.
  */
 function chooseWithinBudgetV1(input: {
   head: ConversationHeadV1;
@@ -400,7 +412,7 @@ function chooseWithinBudgetV1(input: {
   currentTurnType: TurnTypeV1 | "unspecified";
   currentChars: number;
   budget: number;
-}): { kept: number[]; omitted: number; spent: number } {
+}): WorkingTurnChoiceV1 & { spent: number } {
   const compaction =
     input.head.compaction &&
     input.head.compaction.throughTurn < input.currentTurn
@@ -411,21 +423,27 @@ function chooseWithinBudgetV1(input: {
     : 0;
   const budgetForTurns = Math.max(0, input.budget - summaryChars);
   if (!chatLike(input.currentTurnType)) {
-    return { kept: [], omitted: 0, spent: input.currentChars };
+    return { kept: [], pruned: [], omitted: 0, spent: input.currentChars };
   }
   let verbatimLeft = TOOL_OUTPUT_KEEP_RECENT_TURNS_V1;
   if (input.currentChars > 0) verbatimLeft -= 1;
   let spent = input.currentChars;
   const kept: number[] = [];
+  const pruned: number[] = [];
   for (const turn of input.turns) {
     if (turn.turn >= input.currentTurn) continue;
     if (compaction && turn.turn <= compaction.throughTurn) break;
     if (!chatLike(turn.turnType) || !turn.messageBearing) continue;
-    const cost = verbatimLeft > 0 ? turn.fullChars : turn.prunedChars;
-    if (verbatimLeft > 0) verbatimLeft -= 1;
-    if (spent + cost > budgetForTurns) break;
-    kept.push(turn.turn);
-    spent += cost;
+    const verbatim = verbatimLeft > 0;
+    if (verbatim) verbatimLeft -= 1;
+    if (verbatim && spent + turn.fullChars <= budgetForTurns) {
+      kept.push(turn.turn);
+      spent += turn.fullChars;
+    } else if (spent + turn.prunedChars <= budgetForTurns) {
+      kept.push(turn.turn);
+      pruned.push(turn.turn);
+      spent += turn.prunedChars;
+    }
   }
   const covered = compaction?.coveredMessageBearingTurns ?? 0;
   const currentBearing = input.currentChars > 0 ? 1 : 0;
@@ -433,7 +451,12 @@ function chooseWithinBudgetV1(input: {
     0,
     input.head.messageBearingChatTurns - covered - currentBearing,
   );
-  return { kept, omitted: Math.max(0, uncovered - kept.length), spent };
+  return {
+    kept,
+    pruned,
+    omitted: Math.max(0, uncovered - kept.length),
+    spent,
+  };
 }
 
 /**
@@ -455,20 +478,26 @@ export const TURN_GROWTH_CEILING_V1 = 2;
  */
 export function chooseWorkingTurnsV1(
   input: Parameters<typeof chooseWithinBudgetV1>[0] & { openingChars?: number },
-): { kept: number[]; omitted: number } {
+): WorkingTurnChoiceV1 {
   const { openingChars, ...rest } = input;
   if (openingChars !== undefined && openingChars < rest.currentChars) {
-    const pinned = chooseWithinBudgetV1({
+    const { spent, ...pinned } = chooseWithinBudgetV1({
       ...rest,
       currentChars: openingChars,
     });
-    const actual = pinned.spent - openingChars + rest.currentChars;
-    if (actual <= rest.budget * TURN_GROWTH_CEILING_V1) {
-      return { kept: pinned.kept, omitted: pinned.omitted };
-    }
+    const actual = spent - openingChars + rest.currentChars;
+    if (actual <= rest.budget * TURN_GROWTH_CEILING_V1) return pinned;
   }
-  const choice = chooseWithinBudgetV1(rest);
-  return { kept: choice.kept, omitted: choice.omitted };
+  const { spent: _spent, ...choice } = chooseWithinBudgetV1(rest);
+  return choice;
+}
+
+/**
+ * The size the Turn being assembled is charged at: what the request will
+ * carry of it, after its own older tool results are cleared.
+ */
+export function currentTurnCharsV1(messages: readonly LlmMessage[]): number {
+  return historyCharsV1(clearTurnToolResultsV1(messages));
 }
 
 /** What opened a Turn: its messages before the model first answered. */
@@ -496,12 +525,17 @@ function compactionAsV1(
 /**
  * Renders the request from Turns already chosen and loaded.
  *
- * Summary bytes are the committed summary. Pruning and the omission line run
- * on the selected Turns, not on a fixed tail of the archive.
+ * Summary bytes are the committed summary. A kept Turn is pruned exactly when
+ * the choice charged it pruned, so the request is the size the choice paid
+ * for. The current Turn is whole apart from its own cleared tool results.
  */
 export function renderWorkingContextV1(input: {
   head: ConversationHeadV1;
-  kept: readonly { turn: number; messages: readonly LlmMessage[] }[];
+  kept: readonly {
+    turn: number;
+    messages: readonly LlmMessage[];
+    pruned?: boolean;
+  }[];
   omitted: number;
   currentTurn: number;
   currentTurnType: TurnTypeV1 | "unspecified";
@@ -509,6 +543,7 @@ export function renderWorkingContextV1(input: {
   sessionId: string;
   pointer?(input: { sessionId: string; chatTurns: number }): string;
 }): LlmMessage[] {
+  const current = clearTurnToolResultsV1(input.currentMessages);
   if (!chatLike(input.currentTurnType)) {
     const chatTurns = input.head.messageBearingChatTurns;
     const pointer =
@@ -520,23 +555,17 @@ export function renderWorkingContextV1(input: {
         role: "user",
         content: pointer({ sessionId: input.sessionId, chatTurns }),
       },
-      ...input.currentMessages,
+      ...current,
     ];
   }
   const ordered = [...input.kept].sort((left, right) => left.turn - right.turn);
   const messages: LlmMessage[] = [];
-  const turnNumbers: number[] = [];
   for (const turn of ordered) {
-    for (const message of turn.messages) {
-      messages.push(message);
-      turnNumbers.push(turn.turn);
-    }
+    messages.push(
+      ...(turn.pruned ? pruneTurnToolPayloadsV1(turn.messages) : turn.messages),
+    );
   }
-  for (const message of input.currentMessages) {
-    messages.push(message);
-    turnNumbers.push(input.currentTurn);
-  }
-  const pruned = pruneToolOutputsV1(messages, turnNumbers);
+  messages.push(...current);
   const summary = input.head.compaction;
   const preamble: LlmMessage[] = [];
   if (summary && summary.throughTurn < input.currentTurn) {
@@ -548,7 +577,7 @@ export function renderWorkingContextV1(input: {
       content: OMITTED_HISTORY_NOTICE_V1,
     });
   }
-  return [...preamble, ...pruned];
+  return [...preamble, ...messages];
 }
 
 /**
@@ -586,7 +615,7 @@ export function assembleJournalContextV1(input: {
     turns: prior,
     currentTurn: input.currentTurn,
     currentTurnType: input.currentTurnType,
-    currentChars: historyCharsV1(input.currentMessages),
+    currentChars: currentTurnCharsV1(input.currentMessages),
     openingChars: historyCharsV1(turnOpeningMessagesV1(input.currentMessages)),
     budget: input.budget ?? CHAT_HISTORY_BUDGET_CHARS_V1,
   });
@@ -595,6 +624,7 @@ export function assembleJournalContextV1(input: {
     kept: choice.kept.map((turn) => ({
       turn,
       messages: messages.get(turn) ?? [],
+      pruned: choice.pruned.includes(turn),
     })),
     omitted: choice.omitted,
     currentTurn: input.currentTurn,

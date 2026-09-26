@@ -2,8 +2,16 @@ import { describe, expect, test } from "bun:test";
 import {
   decodeSessionEvent,
   emptyConversationHeadV1,
+  type LlmMessage,
   type SessionEventInput,
 } from "@frockbot/core/contracts";
+import {
+  clearTurnToolResultsV1,
+  historyCharsV1,
+  PRUNED_TOOL_RESULT_V1,
+  TURN_TOOL_CLEAR_TRIGGER_CHARS_V1,
+} from "./compaction.js";
+import { CHAT_HISTORY_BUDGET_CHARS_V1 } from "./history.js";
 import { MemoryStorage } from "@frockbot/core/durable/testing";
 import { SessionEventLog } from "@frockbot/core/durable";
 import {
@@ -363,4 +371,158 @@ describe("history for one Turn", () => {
     const grown = choose(50_000 * TURN_GROWTH_CEILING_V1);
     expect(grown.kept.length).toBeLessThan(first.kept.length);
   });
+});
+
+describe("a Turn whose tool traffic outgrows the whole budget", () => {
+  const openTurn = (turn: number, text: string): SessionEventInput[] => [
+    { type: "turn/start", turn },
+    { type: "turn/admission", turn, turnType: "chat" },
+    { type: "step/start", turn, step: 1 },
+    { type: "user/message", turn, step: 1, messageId: `m-${turn}`, text },
+  ];
+  const next = "can you give me a link to the email";
+  const history = [
+    ...chatTurn(1, "how do I book the smash room"),
+    ...chatTurn(2, "find the voucher for Becky", 350_000),
+  ];
+  const contents = (messages: { content: string }[]) =>
+    messages.map((message) => message.content);
+
+  test("keeps the Turn before it, and the big Turn's own words, within budget", () => {
+    const messages = assembleJournalContextV1({
+      events: stamp([...history, ...openTurn(3, next)]),
+      sessionId: SESSION,
+      currentTurn: 3,
+      currentTurnType: "chat",
+      currentMessages: [{ role: "user", content: next }],
+    });
+    expect(contents(messages)).toContain("how do I book the smash room");
+    expect(contents(messages)).toContain("find the voucher for Becky");
+    expect(contents(messages)).toContain("answer 2");
+    expect(contents(messages)).toContain(PRUNED_TOOL_RESULT_V1);
+    expect(historyCharsV1(messages)).toBeLessThanOrEqual(
+      CHAT_HISTORY_BUDGET_CHARS_V1,
+    );
+  });
+
+  test("the stored projection chooses the same", async () => {
+    const storage = new BoundedStorage();
+    await applyWorkingContextAppendV1(storage, SESSION, stamp(history));
+    const messages = await selectStoredWorkingContextV1(storage, {
+      sessionId: SESSION,
+      currentTurn: 3,
+      currentTurnType: "chat",
+      currentMessages: [{ role: "user", content: next }],
+    });
+    expect(contents(messages)).toContain("how do I book the smash room");
+    expect(contents(messages)).toContain("answer 2");
+    expect(historyCharsV1(messages)).toBeLessThanOrEqual(
+      CHAT_HISTORY_BUDGET_CHARS_V1,
+    );
+  });
+
+  test("an older Turn charged pruned is rendered pruned", () => {
+    // Turn 4 is skipped whole but still spends a verbatim slot, so Turn 2 is
+    // outside the window: it must not come back with its 140k payload.
+    const messages = assembleJournalContextV1({
+      events: stamp([
+        ...chatTurn(1, "one", 60_000),
+        ...chatTurn(2, "two", 140_000),
+        ...chatTurn(3, "three", 10_000),
+        ...chatTurn(4, "four", 350_000),
+        ...openTurn(5, "now"),
+      ]),
+      sessionId: SESSION,
+      currentTurn: 5,
+      currentTurnType: "chat",
+      currentMessages: [{ role: "user", content: "now" }],
+    });
+    expect(contents(messages)).toContain("two");
+    expect(historyCharsV1(messages)).toBeLessThanOrEqual(
+      CHAT_HISTORY_BUDGET_CHARS_V1,
+    );
+  });
+});
+
+describe("the Turn being assembled", () => {
+  function toolLoop(results: number, chars: number): LlmMessage[] {
+    const messages: LlmMessage[] = [{ role: "user", content: "find it" }];
+    for (let index = 0; index < results; index += 1) {
+      messages.push(
+        {
+          role: "assistant",
+          content: "",
+          toolCalls: [
+            { id: `c${index}`, name: "fetch", input: { id: `m${index}` } },
+          ],
+        },
+        {
+          role: "tool",
+          callId: `c${index}`,
+          name: "fetch",
+          content: String(index).repeat(chars),
+          isError: false,
+        },
+      );
+    }
+    return messages;
+  }
+
+  test("is untouched below the trigger", () => {
+    const messages = toolLoop(3, 10_000);
+    expect(clearTurnToolResultsV1(messages)).toEqual(messages);
+  });
+
+  test("a long tool loop stays bounded and keeps its newest result", () => {
+    const messages = toolLoop(12, 85_000);
+    const cleared = clearTurnToolResultsV1(messages);
+    expect(historyCharsV1(cleared)).toBeLessThanOrEqual(
+      TURN_TOOL_CLEAR_TRIGGER_CHARS_V1 + 85_000,
+    );
+    expect(cleared.at(-1)).toEqual(messages.at(-1));
+    // Calls and their inputs survive, so the model can ask again.
+    expect(cleared.filter((message) => message.role === "assistant")).toEqual(
+      messages.filter((message) => message.role === "assistant"),
+    );
+  });
+
+  test("a cleared result stays cleared at every later step", () => {
+    const messages = toolLoop(12, 30_000);
+    let previous: LlmMessage[] = [];
+    let clearings = 0;
+    for (let step = 1; step <= messages.length; step += 1) {
+      const cleared = clearTurnToolResultsV1(messages.slice(0, step));
+      const unchanged = previous.every(
+        (message, index) => cleared[index]!.content === message.content,
+      );
+      if (!unchanged) clearings += 1;
+      for (const [index, message] of previous.entries()) {
+        if (message.content === PRUNED_TOOL_RESULT_V1) {
+          expect(cleared[index]!.content).toBe(PRUNED_TOOL_RESULT_V1);
+        }
+      }
+      previous = cleared;
+    }
+    // Batches, not one clearing per step: most steps keep the prefix whole.
+    expect(clearings).toBeGreaterThan(0);
+    expect(clearings).toBeLessThan(6);
+  });
+
+  test("is cleared in the rendered request too", () => {
+    const current = toolLoop(12, 85_000);
+    const messages = assembleJournalContextV1({
+      events: stamp(chatTurn(1, "earlier")),
+      sessionId: SESSION,
+      currentTurn: 2,
+      currentTurnType: "chat",
+      currentMessages: current,
+    });
+    expect(contents(messages)).toContain("earlier");
+    expect(historyCharsV1(messages)).toBeLessThan(
+      TURN_TOOL_CLEAR_TRIGGER_CHARS_V1 + 85_000 + 1_000,
+    );
+  });
+
+  const contents = (messages: { content: string }[]) =>
+    messages.map((message) => message.content);
 });

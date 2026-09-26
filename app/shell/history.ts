@@ -72,7 +72,8 @@ export interface TurnScopedMessagesInputV1 {
   sessionId: string;
   /**
    * How many characters of history one request may carry. The current Turn is
-   * always whole; older Turns fill what is left. Absent means the default.
+   * whole apart from its own cleared tool results; older Turns fill what is
+   * left. Absent means the default.
    */
   budget?: number;
 }

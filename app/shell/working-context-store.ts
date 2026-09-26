@@ -36,6 +36,7 @@ import { historyCharsV1, type CompactionStateV1 } from "./compaction.js";
 import { CHAT_HISTORY_BUDGET_CHARS_V1, type ChatWindowV1 } from "./history.js";
 import {
   chooseWorkingTurnsV1,
+  currentTurnCharsV1,
   turnOpeningMessagesV1,
   emptyVoiceExcerptV1,
   reduceWorkingContextAppendV1,
@@ -689,7 +690,7 @@ export async function selectStoredWorkingContextV1(
       turns: metas,
       currentTurn: request.currentTurn,
       currentTurnType: request.currentTurnType,
-      currentChars: historyCharsV1(request.currentMessages),
+      currentChars: currentTurnCharsV1(request.currentMessages),
       openingChars: historyCharsV1(
         turnOpeningMessagesV1(request.currentMessages),
       ),
@@ -721,6 +722,7 @@ export async function selectStoredWorkingContextV1(
           return {
             turn,
             messages: await readMessages(storage, request.sessionId, index),
+            pruned: choice.pruned.includes(turn),
           };
         }),
       );
