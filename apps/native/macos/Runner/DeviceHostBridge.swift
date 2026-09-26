@@ -265,8 +265,6 @@ final class DeviceHostBridge {
       } catch {
         reply["error"] = "Keychain refused the request. Unlock your keychain and try again."
       }
-    case "appleEvents":
-      reply["error"] = "Apple Events are not available yet"
     default:
       reply["error"] = "unknown request"
     }

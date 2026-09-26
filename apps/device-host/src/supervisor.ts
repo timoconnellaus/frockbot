@@ -40,7 +40,7 @@ export interface ModuleSupervisorSeamsV1 {
     set(key: string, value: unknown): Promise<void>;
     delete(key: string): Promise<void>;
   };
-  /** Runs an AppleScript in the app, which holds the Automation consent. */
+  /** Runs an AppleScript that may reach only `bundleId`. */
   appleEvents(bundleId: string, script: string): Promise<string>;
   report(report: ModuleReportV1): void;
   now?(): number;

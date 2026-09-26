@@ -151,16 +151,25 @@ Bun helper carries today.
 
 ### The one host binding: Apple Events
 
-Neither boundary can say "only Messages": allowing `osascript` would let a
-module script any application. So the host keeps one binding, reached over the
-module's local channel:
+Neither boundary can say "only Messages": allowing `osascript` in the module's
+profile would let it script any application. So the host keeps one binding,
+reached over the module's local channel:
 
 ```ts
 appleEvents.run(bundleId, script);
 ```
 
-The app runs the script only against a bundle id the module declared. The
-operating system attributes it to the app, whose Automation consent covers it.
+The host refuses a bundle id the module did not declare, then runs the script
+in its own `osascript` under a Seatbelt profile generated for that run. The
+profile admits Apple Events to the one named application and nothing else: no
+fork, no other program, no network, no writes, and no file contents but system code.
+So `do shell script` fails, and so does a nested `tell` to any other
+application. The script never runs inside the app, where it would hold the
+app's Full Disk Access. Its length, wall time and output are capped.
+
+The operating system attributes the run to the app, which carries the Apple
+Events entitlement, so the person grants Automation consent to FrockBot once
+per application.
 
 Every other reach is the module's own code under its two boundaries. A new host
 binding is justified only by the same test: something the operating system
@@ -351,7 +360,8 @@ absent Device and the Pending-input result.
 - The Mac app gains the module host: Deno, the Seatbelt profile generator, the
   hibernating socket, the ledger and module lifecycle, built on the device
   agent that stays.
-- `AppDelegate.swift` gains `appleEvents.run` for a declared target.
+- The module host gains `appleEvents.run`: `osascript` under a per-run
+  Seatbelt profile that admits Apple Events to the declared target alone.
 - The Device's sync gains the module list and the listening flags, and the
   Device reports each module's state and logs.
 - The machine protocol gains the `module` operation and its outcomes.
