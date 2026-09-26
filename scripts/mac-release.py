@@ -13,6 +13,7 @@ import tempfile
 ROOT = Path(__file__).resolve().parent.parent
 NATIVE = ROOT / "apps/native"
 DEVICE_HOST = ROOT / "apps/device-host"
+APPLE_EVENTS = NATIVE / "macos/AppleEventsHelper"
 
 
 def fetch_deno(target, destination):
@@ -20,6 +21,14 @@ def fetch_deno(target, destination):
     module = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(module)
     return module.fetch(target, destination)
+
+
+def deployment_target():
+    project = (NATIVE / "macos/Runner.xcodeproj/project.pbxproj").read_text()
+    targets = set(re.findall(r"MACOSX_DEPLOYMENT_TARGET = ([\d.]+);", project))
+    if len(targets) != 1:
+        raise ValueError(f"Expected one macOS deployment target, found {sorted(targets)}")
+    return targets.pop()
 
 
 def run(*args):
@@ -62,6 +71,15 @@ def build(version, destination, identity=None, profile=None, provisioning=None):
         deno = contents / "Helpers/deno"
         parts = [fetch_deno(target, staging / f"deno-{target}") for target in ["aarch64-apple-darwin", "x86_64-apple-darwin"]]
         run("lipo", "-create", *parts, "-output", deno)
+        # The Apple Events helper a module's scripts run in, beside Deno.
+        apple_events = contents / "Helpers/apple-events"
+        minimum = deployment_target()
+        slices = []
+        for arch in ["arm64", "x86_64"]:
+            slices.append(staging / f"apple-events-{arch}")
+            run("xcrun", "swiftc", "-O", "-target", f"{arch}-apple-macos{minimum}",
+                "-o", slices[-1], APPLE_EVENTS / "main.swift")
+        run("lipo", "-create", *slices, "-output", apple_events)
         run("bun", DEVICE_HOST / "build.ts", contents / "Resources")
         app_entitlements = plistlib.loads((NATIVE / "macos/Runner/Release.entitlements").read_bytes())
         if identity:
@@ -95,8 +113,11 @@ def build(version, destination, identity=None, profile=None, provisioning=None):
             if item.suffix == ".xpc": args.append("--preserve-metadata=entitlements")
             if identity: args.append("--timestamp")
             run(*args, item)
-        # Deno before the app that seals it, with only the JIT V8 needs.
-        for item, entitlements in [(deno, DEVICE_HOST / "Deno.entitlements"), (app, entitlement_file)]:
+        # The helpers before the app that seals them: Deno with only the JIT V8
+        # needs, the Apple Events helper with only leave to send them.
+        for item, entitlements in [(deno, DEVICE_HOST / "Deno.entitlements"),
+                                   (apple_events, APPLE_EVENTS / "AppleEventsHelper.entitlements"),
+                                   (app, entitlement_file)]:
             args = ["codesign", "--force", "--sign", identity or "-", "--options", "runtime",
                     "--entitlements", entitlements]
             if identity:

@@ -85,7 +85,7 @@ export function moduleEnvironmentV1(
 }
 
 /** A string inside an SBPL literal. */
-function literal(value: string): string {
+export function seatbeltLiteralV1(value: string): string {
   if (/[\u0000-\u001f"\\]/.test(value)) {
     throw new Error(
       `a sandbox path may not contain quotes, backslashes or control characters: ${value}`,
@@ -100,7 +100,8 @@ function literal(value: string): string {
  * Everything is denied, then the system basics a process needs to start are
  * imported, then exactly what the module declared is added: reads under its
  * paths, connections to its loopback ports, writes to its own data directory.
- * Its Apple Events go through the app, never from here, so none are allowed.
+ * Its Apple Events go through the host (`apple-events.ts`), so none are
+ * allowed from here.
  */
 export function seatbeltProfileV1(
   reach: ModuleReachV1,
@@ -122,13 +123,13 @@ export function seatbeltProfileV1(
     "(version 1)",
     "(deny default)",
     '(import "bsd.sb")',
-    `(allow process-exec (literal ${literal(paths.deno)}))`,
+    `(allow process-exec (literal ${seatbeltLiteralV1(paths.deno)}))`,
     // `subpath` names a file itself, or a directory as a tree.
     ...reads.map(
       (path) =>
-        `(allow file-read* (subpath ${literal(path.replace(/\/$/, ""))}))`,
+        `(allow file-read* (subpath ${seatbeltLiteralV1(path.replace(/\/$/, ""))}))`,
     ),
-    `(allow file-read* file-write* (subpath ${literal(paths.data)}))`,
+    `(allow file-read* file-write* (subpath ${seatbeltLiteralV1(paths.data)}))`,
     ...ports.map(
       (port) => `(allow network-outbound (remote ip "localhost:${port}"))`,
     ),
