@@ -46,6 +46,7 @@ import {
   reviewClaimV1,
 } from "./claim-check.js";
 import { composeProgressDecisionV1, reviewProgressV1 } from "./loop-health.js";
+import { composeOutcomeDecisionV1, reviewOutcomeV1 } from "./outcome.js";
 import {
   composeTurnDirectiveV1,
   reviewTurnStartV1,
@@ -224,6 +225,21 @@ export function createJevTurnSupervisorV1(
           budget,
         });
         return composeQuestionRouteV1({
+          answers: review.answers,
+          model: review.model,
+        });
+      } catch (error) {
+        throw classifyJevFailure(error);
+      }
+    },
+    async reviewOutcome(evidence, signal) {
+      signal?.throwIfAborted();
+      try {
+        const review = await reviewOutcomeV1(options.client, evidence, {
+          signal,
+          budget,
+        });
+        return composeOutcomeDecisionV1({
           answers: review.answers,
           model: review.model,
         });

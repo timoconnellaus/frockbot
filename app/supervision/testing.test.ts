@@ -10,6 +10,7 @@ import {
   SUPERVISION_QUESTION_SETS_V1,
 } from "./testing.js";
 import { turnStartQuestionsV1 } from "./turn-start.js";
+import { outcomeQuestionsV1 } from "./outcome.js";
 import { questionRouteQuestionsV1 } from "./question-route.js";
 import { callReviewQuestionsV1, composeCallDecisionV1 } from "./call-review.js";
 import {
@@ -31,6 +32,7 @@ test("the fake knows exactly Turn supervision's question sets", () => {
     Object.keys(claimQuestionsV1),
     Object.keys(claimAndFactsQuestionsV1),
     Object.keys(progressQuestionsV1),
+    Object.keys(outcomeQuestionsV1),
     Object.keys(questionRouteQuestionsV1),
     Object.keys(callReviewQuestionsV1),
   ]);

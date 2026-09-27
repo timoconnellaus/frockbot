@@ -1099,3 +1099,79 @@ test("a send withheld for an undone claim turns the facts check off for the rest
   ]);
   expect(claimEvidenceV1(reviewed[1]!).pagesThisTurn).toHaveLength(1);
 });
+
+test("a Turn that used tools is judged on whether it did what was asked, as it stops", async () => {
+  const judged: unknown[] = [];
+  const events = await run(
+    scripted([
+      fetchStep("a"),
+      [
+        {
+          id: "b",
+          name: "send_to_user",
+          input: text("I couldn't reach it.", "finish"),
+        },
+      ],
+    ]),
+    createFakeTurnSupervisorV1({
+      reviewOutcome: async (evidence) => {
+        judged.push(evidence);
+        return {
+          status: "not_done",
+          cause: "tool_failed",
+          judgments: [{ question: "status", answer: "not_done", value: 0.9 }],
+        };
+      },
+    }),
+  );
+  expect(judged).toMatchObject([
+    {
+      objective: "Email Dana the March invoice.",
+      actions: [{ tool: "web_fetch" }],
+      shown: ["I couldn't reach it."],
+    },
+  ]);
+  expect(
+    events.filter((event) => event.type === "supervision/outcome"),
+  ).toMatchObject([
+    {
+      turn: 1,
+      step: 2,
+      decision: { status: "not_done", cause: "tool_failed" },
+    },
+  ]);
+});
+
+test("a Turn that only spoke is not judged, and a judge that fails never fails the Turn", async () => {
+  let asked = 0;
+  const spoke = await run(
+    scripted([
+      [{ id: "a", name: "send_to_user", input: text("Hi.", "finish") }],
+    ]),
+    createFakeTurnSupervisorV1({
+      reviewOutcome: async () => {
+        asked++;
+        return { status: "done", judgments: [] };
+      },
+    }),
+  );
+  expect(asked).toBe(0);
+  expect(spoke.some((event) => event.type === "supervision/outcome")).toBe(
+    false,
+  );
+  const failing = await run(
+    scripted([
+      fetchStep("a"),
+      [{ id: "b", name: "send_to_user", input: text("Done.", "finish") }],
+    ]),
+    createFakeTurnSupervisorV1({
+      reviewOutcome: async () => {
+        throw new Error("Jev is down");
+      },
+    }),
+  );
+  expect(failing.at(-1)).toMatchObject({
+    type: "turn/end",
+    outcome: "completed",
+  });
+});

@@ -405,6 +405,13 @@ pages says. `unsupported` at 0.7 or above withholds it with reason
 that it could not find it. It shares the claim check's once-per-Turn limit and
 does not end the Turn.
 
+When a Turn that used tools stops, Jev also judges whether it did what was
+asked (done, partly, not done) and, when it did not, what stopped it: it needs
+the person, a tool failed, it has no way to do it, it went in circles, or
+something else (`app/supervision/outcome.ts`). The answer is a
+`supervision/outcome` session event, read on `/api/debug`; nothing acts on
+it, and a judgment that fails is left out rather than failing the Turn.
+
 A weighted failure score with decay was not built. Loop signals and the
 per-send claim check cover the cases it was for.
 
