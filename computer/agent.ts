@@ -1296,11 +1296,6 @@ export function createComputerAgentFeature(
         let closeEgress: (() => void) | undefined;
         try {
           const effectId = await operationIdOf(context);
-          const egress = await openEgress(context);
-          closeEgress = egress?.close;
-          const command = egress
-            ? `${egress.prelude}\n${decoded.command}`
-            : decoded.command;
           return await useComputer(await open(context), async (computer) => {
             const exec = computer.exec;
             if (!exec) {
@@ -1309,6 +1304,13 @@ export function createComputerAgentFeature(
                 "The selected Computer does not support command execution",
               );
             }
+            // Minted once the Computer is open: the first open after a release
+            // updates its runtime, which can outlast the token's lifetime.
+            const egress = await openEgress(context);
+            closeEgress = egress?.close;
+            const command = egress
+              ? `${egress.prelude}\n${decoded.command}`
+              : decoded.command;
             const result = await operation(context, () =>
               exec.execute(
                 {
