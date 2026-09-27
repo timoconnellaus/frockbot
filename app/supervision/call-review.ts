@@ -300,7 +300,10 @@ export function callReviewJudgmentsV1(
  *
  * - Text trying to direct the review authorizes nothing.
  * - A call the person asked for, or gave lasting permission for, runs when
- *   its particulars match what they asked.
+ *   its particulars match what they asked. Particulars are judged only where
+ *   the effect reaches outside FrockBot: a read the person asked for runs even
+ *   when it is one of several things they asked, which Jev scores as a
+ *   mismatch.
  * - A step their request plainly needs runs only when it reaches nobody
  *   outside FrockBot; one that does is asked about first.
  * - Anything else is refused, and the Bot asks the person in conversation.
@@ -326,11 +329,12 @@ export function composeCallDecisionV1(input: {
   if (authorization === "materially_different") {
     return reject("arguments_changed");
   }
+  const reachesOutside =
+    answers.consequence.score >= CALL_REVIEW_IMPLIED_CONSEQUENCE_MAX_V1;
   if (authorization === "implied_by_request") {
-    if (answers.consequence.score >= CALL_REVIEW_IMPLIED_CONSEQUENCE_MAX_V1) {
-      return reject("no_authorization");
-    }
+    if (reachesOutside) return reject("no_authorization");
   } else if (
+    reachesOutside &&
     answers.argumentsMatchRequest.noul < CALL_REVIEW_ARGUMENTS_YES_V1
   ) {
     return reject("arguments_changed");

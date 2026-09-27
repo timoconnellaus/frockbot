@@ -523,11 +523,14 @@ _Done, enforced._
 - Each `mutate` call is reviewed right before it runs
   (`TurnSupervisor.reviewCall`, `app/supervision/call-review.ts`), with the
   conversation, the Turn's own requests and its results so far. A labeled
-  suite of 16 cases (`bun run eval:call-review`, 16/16 on `jev-1.13.0`).
+  suite of 25 cases, shell commands and credentialed requests among them
+  (`bun run eval:call-review`, 25/25 on `jev-1.13.0`).
 - Code allows a call the person asked for, or gave lasting permission for,
-  whose particulars match; and a step their request plainly needs only while
-  it reaches nobody outside FrockBot. Text trying to direct the review
-  authorizes nothing.
+  whose particulars match where its effect reaches outside FrockBot; and a
+  step their request plainly needs only while it reaches nobody outside
+  FrockBot. A read the person asked for runs even when it is one of several
+  things they asked, which Jev scores as a mismatch of particulars. Text
+  trying to direct the review authorizes nothing.
 - A refused call is a tool result the model reads, telling it to ask the
   person in conversation; it never runs. Each decision is a `supervision/call`
   session event, and a refused call an audit row.
