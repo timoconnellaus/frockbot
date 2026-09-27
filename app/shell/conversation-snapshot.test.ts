@@ -86,6 +86,7 @@ describe("conversation snapshot", () => {
                 admittedAt: `2026-09-22T00:00:${String(i).padStart(2, "0")}.000Z`,
                 input: heavy,
                 status: "completed",
+                outcome: { type: "completed", text: "done" },
                 events: [],
               },
             },

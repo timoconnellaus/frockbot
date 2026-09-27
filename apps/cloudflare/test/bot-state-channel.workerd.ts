@@ -14,6 +14,7 @@ import {
 } from "../src/bot-state-channel.ts";
 import { commitPublicationsV1, runEntityIdV1 } from "@frockbot/core/durable";
 import { CLIENT_RUN_PAGE_LIMIT } from "@frockbot/app/shell/run-protocol";
+import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { provisionBot } from "./provision-bot.ts";
 import { toolCallTriggerPrompt } from "./harness/miniflare.ts";
 
@@ -267,6 +268,7 @@ describe("hibernatable Bot-state channel", () => {
                   admittedAt: `2026-09-22T00:00:${String(i).padStart(2, "0")}.000Z`,
                   input: heavy,
                   status: "completed",
+                  outcome: { type: "completed", text: "done" },
                   events: [],
                 },
               },
@@ -291,6 +293,7 @@ describe("hibernatable Bot-state channel", () => {
     const snapshot: unknown = JSON.parse(
       parts.map((frame) => (frame as { data: string }).data).join(""),
     );
+    expect(() => decodeProtocol("StateFrame", snapshot)).not.toThrow();
     expect(snapshot).toMatchObject({
       type: "state/snapshot",
       conversation: { page: { truncated: true } },
