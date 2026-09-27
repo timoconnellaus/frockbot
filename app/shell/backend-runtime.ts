@@ -162,6 +162,8 @@ export interface ShellHostedRuntimeHostV1 {
    * and the token signer.
    */
   computerEgress?: NonNullable<ComputerAgentPluginConfig["egress"]>;
+  /** How this Turn's foreground commands reach Jev at `jev.internal`, charged. */
+  computerJev?: NonNullable<ComputerAgentPluginConfig["jev"]>;
   /** The `computerUse` task owner whose User-wide lease this child holds. */
   computerAgentControlOwnerId?: string;
   /**

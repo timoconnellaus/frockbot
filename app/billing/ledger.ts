@@ -83,7 +83,7 @@ export interface BillingStorage {
 }
 export interface UsageReservation {
   id: string;
-  kind: "model" | "computer" | "search";
+  kind: "model" | "computer" | "search" | "jev";
   maximumMicros: number;
   botId?: string;
   sessionId?: string;
@@ -125,7 +125,8 @@ export interface SpendCauseV1 {
   trigger?: string;
 }
 /** What a charge bought, as a person reads it. */
-export type SpendCategoryV1 = "model" | "summary" | "search" | "computer";
+export type SpendCategoryV1 =
+  "model" | "summary" | "search" | "computer" | "jev";
 export interface UsageAttributionV1 {
   /** The Turn the charge was made in. */
   runId?: string;
@@ -386,7 +387,7 @@ export class BillingLedger {
     identifier(input.id);
     amount(input.maximumMicros, "reservation");
     if (
-      !["model", "computer", "search"].includes(input.kind) ||
+      !["model", "computer", "search", "jev"].includes(input.kind) ||
       !input.description ||
       input.description.length > 300 ||
       !input.pricingVersion

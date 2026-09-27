@@ -722,6 +722,7 @@ const CATEGORY_LABELS: Record<string, string> = {
   summary: "Conversation summaries",
   search: "Web search",
   computer: "Computer time",
+  jev: "Jev decisions",
 };
 
 /** How one key of one dimension reads on the page. */

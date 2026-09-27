@@ -164,9 +164,15 @@ rate above.
    `app/evals/jev-browser/` against live Jev: 15 fixture pages, 22 goals,
    seven of them reworded variants. Results below. Cutoffs stay as the
    spike set them until live sites say otherwise.
-3. **Proxy and billing.** `jev.internal` on the Computer's proxy, the `jev`
-   ledger kind and meter beside `app/billing/search.ts`, the billing page
-   category, and the `docs/billing.md` sentence.
+3. **Proxy and billing.** _Done._ `jev.internal` is one of the hosts the
+   Computer's proxy intercepts (`computer/egress.ts`). A foreground
+   `computer_exec` command's request to it is answered by
+   `createJevEgressV1` (`app/supervision/jev-egress.ts`) under the exec's
+   own authority and effect id, with no review, since a decision acts on
+   nothing outside the Computer. The request is capped at 64 KB and 32
+   questions, and pinned to the platform's Jev model. The `jev` ledger kind
+   and meter are `app/billing/jev.ts`; `docs/billing.md` has the tariff.
+   With billing off, the request is answered and nothing is charged.
 4. **The tool.** The loop in the Computer runtime, `computer_browser_task`
    registered for the roles `computer_browser` is, the committing-action
    review, and the Bot's prompt guidance: one goal per call, pass the values.
