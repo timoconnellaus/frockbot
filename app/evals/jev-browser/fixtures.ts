@@ -199,6 +199,57 @@ window.__read=()=>({street:document.getElementById('street')?.value,city:documen
     );
   },
 
+  "/captcha": () =>
+    shell(
+      "Just a moment...",
+      `<h1>Checking your browser before accessing the store</h1>
+<p>Verify you are human by completing the action below.</p>
+<label><input type="checkbox" id="human"> I'm not a robot</label>`,
+      `window.__read=()=>({ticked:document.getElementById('human').checked})`,
+    ),
+
+  "/missing": () =>
+    shell(
+      "404 Not Found",
+      `<h1>404</h1><p>The page you were looking for doesn't exist.</p><p><a href="/">Go to the home page</a></p>`,
+      `window.__read=()=>({})`,
+    ),
+
+  "/billing": () =>
+    shell(
+      "Account",
+      `<h1>Your account</h1>
+<div role="tablist"><button role="tab" id="t1" aria-selected="true">Profile</button> <button role="tab" id="t2" aria-selected="false">Billing</button> <button role="tab" id="t3" aria-selected="false">Security</button></div>
+<section id="p1"><p>Name: Sam Lee</p><button>Edit profile</button></section>
+<section id="p2" class="hidden"><h2>Invoices</h2><ul><li>September 2026 <button data-inv="2026-09">Download invoice</button></li><li>August 2026 <button data-inv="2026-08">Download invoice</button></li></ul></section>
+<section id="p3" class="hidden"><button>Change password</button></section>`,
+      `const tabs=[['t1','p1'],['t2','p2'],['t3','p3']];
+tabs.forEach(([t,p])=>document.getElementById(t).onclick=()=>{tabs.forEach(([t2,p2])=>{document.getElementById(p2).classList.toggle('hidden',t2!==t);document.getElementById(t2).setAttribute('aria-selected',String(t2===t))})});
+document.querySelectorAll('[data-inv]').forEach(b=>b.onclick=()=>{window.__state.downloaded=b.dataset.inv;const p=document.createElement('p');p.textContent='Downloading invoice '+b.dataset.inv;document.body.appendChild(p)});
+window.__read=()=>({downloaded:window.__state.downloaded||null});`,
+    ),
+
+  "/search": () =>
+    shell(
+      "Recipes",
+      `<h1>Recipes</h1><p><label>Search recipes <input id="q" type="search"></label> <button id="go">Search</button></p><ul id="r"></ul><div id="d"></div>`,
+      `const all=['Lemon tart','Lemon chicken','Pumpkin soup','Chicken laksa','Banana bread'];
+document.getElementById('go').onclick=()=>{const q=document.getElementById('q').value.toLowerCase();window.__state.query=q;document.getElementById('r').innerHTML=all.filter(x=>x.toLowerCase().includes(q)).map(x=>'<li>'+x+' <button data-open="'+x+'">Open recipe</button></li>').join('');
+document.querySelectorAll('[data-open]').forEach(b=>b.onclick=()=>{window.__state.opened=b.dataset.open;document.getElementById('d').innerHTML='<h2>'+b.dataset.open+'</h2><p>Serves 4.</p>'})};
+window.__read=()=>({query:window.__state.query||null,opened:window.__state.opened||null});`,
+    ),
+
+  "/contact": () =>
+    shell(
+      "Contact details",
+      `<h1>Contact details</h1>
+<p><label>Full name <input id="n"></label></p>
+<p><label>Mobile phone (required) <input id="ph" required></label></p>
+<button id="save">Save details</button>`,
+      `document.getElementById('save').onclick=()=>{if(!document.getElementById('ph').value){window.__state.error=true;return}window.__state.saved=true};
+window.__read=()=>({name:document.getElementById('n').value,phone:document.getElementById('ph').value,saved:!!window.__state.saved});`,
+    ),
+
   "/orders": () => {
     const page = 1;
     return shell(

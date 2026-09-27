@@ -160,11 +160,10 @@ rate above.
    fixture pages (`bun app/evals/jev-browser/run.ts`). Decided the question
    set, the action list and the first cutoffs. Results below. Live sites
    are still to try.
-2. **Evals.** Fixture pages checked in as a labelled suite
-   (`bun run eval:browser`), run against Jev like `eval:context`: forms,
-   dropdowns, checkboxes and radios, a modal, a paginated list, a large page,
-   a sign-in wall, a CAPTCHA page, a checkout whose last button commits, a
-   page with injected instructions. Cutoffs are set here.
+2. **Evals.** _Done._ `bun run eval:browser` runs the labelled suite in
+   `app/evals/jev-browser/` against live Jev: 15 fixture pages, 22 goals,
+   seven of them reworded variants. Results below. Cutoffs stay as the
+   spike set them until live sites say otherwise.
 3. **Proxy and billing.** `jev.internal` on the Computer's proxy, the `jev`
    ledger kind and meter beside `app/billing/search.ts`, the billing page
    category, and the `docs/billing.md` sentence.
@@ -234,3 +233,32 @@ same tasks driven by the Bot's own model through `computer_browser`, which
 is stage 5's comparison and the only test of whether this is better rather
 than just faster; and the round trip once the loop runs on the Computer
 instead of beside the browser here.
+
+## Eval suite results
+
+22 goals over 15 pages (`bun run eval:browser`, `jev-1.13.0`, September
+2026): **20 pass.** Added to the spike's ten pages:
+
+- a CAPTCHA page and a 404 page (both hand the task to the person in one
+  call, touching nothing);
+- invoices behind a Billing tab;
+- a recipe search that needs a typed query, a Search click and then the
+  right result opened;
+- a contact form whose required phone number is not in `values`.
+
+The contact form ends `blocked` without inventing a number. The loop now
+reports a page that does not respond to the same action twice as `blocked`
+rather than `failed`: nothing went wrong in the loop, the page refused.
+
+The two failures:
+
+- "Buy 2 large mugs", as before: the Bot must spell out "and place the
+  order".
+- "Ship to 12 Crown St in Wollongong, Australia and go on to payment"
+  reaches the payment page and then does not call it finished, where the
+  original wording ("then continue to payment") does.
+
+Jev is deterministic for one input, but not across page changes: "Stop the
+email notifications" passed in one full run and stopped early in another
+after unrelated fixtures were added. Borderline answers sit near the 0.6
+`finish` and 0.7 `stop` cutoffs, which the live-site runs should settle.

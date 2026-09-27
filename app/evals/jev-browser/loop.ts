@@ -487,7 +487,7 @@ export async function runTask(
 
     if (pick.key + obs.fingerprint === lastKey) {
       if (++stale >= 2)
-        return end("failed", `repeated ${pick.describe} with no change`);
+        return end("blocked", `repeated ${pick.describe} with no change`);
     } else stale = 0;
     lastKey = pick.key + obs.fingerprint;
 
