@@ -34,26 +34,26 @@ export const FROCK_AI_SPECIALTIES_V1 = [
   {
     name: "writing",
     model: "@frock/writing",
-    route: "frock-writing",
+    route: "writing",
     summary:
       "Writing the person will read at length: emails, documents, posts, stories.",
   },
   {
     name: "coding",
     model: "@frock/coding",
-    route: "frock-coding",
+    route: "coding",
     summary: "Code: Plugins, scripts, and fixes on the Computer.",
   },
   {
     name: "thinking",
     model: "@frock/thinking",
-    route: "frock-thinking",
+    route: "thinking",
     summary: "Plans, maths and hard decisions that need careful reasoning.",
   },
   {
     name: "vision",
     model: "@frock/vision",
-    route: "frock-vision",
+    route: "vision",
     summary: "Photos, screenshots and PDFs: anything that has to be seen.",
   },
 ] as const;

@@ -290,7 +290,7 @@ The main model stays fixed per Bot, so its prompt cache holds; other models'
 strengths come in through subagents. A specialist is a Frock AI model id —
 `@frock/writing`, `@frock/coding`, `@frock/thinking`, `@frock/vision`
 (`FROCK_AI_SPECIALTIES_V1`, `providers/frock-ai/catalog.ts`) — backed by an AI
-Gateway dynamic route (`frock-writing` and so on) whose target model is chosen
+Gateway dynamic route (`writing` and so on) whose target model is chosen
 in the dashboard, the way Auto's is. Nobody picks a specialist as a Bot's own
 model.
 
