@@ -344,10 +344,10 @@ were, and neither is enforced.
   above the snapshot, with what to do. A CAPTCHA is handed to the person,
   never solved. The result also names the page's title and address, which it
   used to drop. Labelled in `bun run eval:context`. When a page lists more
-  than 12 controls,
-  the same call is given what the person asked this Turn and up to 40 of
-  them, and names up to three it is sure (at 0.6) are the ones to use next,
-  as a "Likely next" line. The snapshot always keeps every control.
+  than 12 controls, the same call is given what the person asked this Turn
+  and up to 40 of them, and names up to three it is sure (at 0.6) are the
+  ones to use next, as a "Likely next" line. The snapshot always keeps every
+  control.
 - **Compaction.** Before the summariser reads the oldest Turns, Jev
   chooses for each longer message the person sent and each tool result:
   summarise, keep word for word, or drop
