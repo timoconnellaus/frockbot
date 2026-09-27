@@ -185,9 +185,42 @@ Before admitting Users: complete the security checks in §8, a host-loss and R2 
 
 Grow to a pool of five hosts. Admit one User first and raise the cap one at a time as measured density stays stable.
 
+### Phase 5 — terminal first
+
+Build the credential boundary in §10, move MCP servers' uses to CLIs, then delete `app/mcp/`.
+
 ---
 
-## 10. Non-goals for the first implementation
+## 10. Terminal first
+
+An always-running Computer means a shell is there the moment a Bot wants one, with no cold start and no provisioning wait. That changes what the default way to act should be. Once the pilot pool is live, most of a Bot's work moves into its terminal: it runs command-line tools through `computer_exec` rather than calling bespoke tools the cloud has to host, list and proxy.
+
+### What moves and what stays
+
+- **MCP servers are replaced by CLIs.** A Bot reaches an outside service by installing and running its command-line tool — `gh`, `stripe`, `gcloud`, `aws`, a vendor's own CLI, or `curl` against a documented API — rather than through a remote MCP server added on the Connectors surface. When the CLI path covers what MCP servers do today, `app/mcp/` is deleted whole: the `mcp` Package and its Connection Type, sign-in, directory, tool namespace, routes and stored shapes, with the scoped cleanup of its records that a breaking stored-data change requires.
+- **CLIs live on the Computer.** Common tools ship in the VM image; anything else a Bot installs goes under the designated persistent prefixes (§6), so it survives a rebuild. A Skill can teach a Bot a CLI the same way it teaches anything else.
+- **The platform keeps what needs cloud authority.** The Agent loop still runs in the Bot Durable Object and treats the terminal as a tool. Conversation, memory, Approvals, Routines, cards, `send_to_user` and the audit stay native tools, because they are the cloud's own state.
+- **Connected apps are decided app by app.** A Composio-connected app stays a tool until a CLI or plain HTTP path covers it through the credential boundary below. Connection triggers stay on the events door either way: an inbound event is not terminal work.
+
+### Credentials never enter the VM
+
+"Secrets stay server-side" still holds. A CLI is configured with a placeholder, never a real token. Its requests leave through the egress boundary (§8), which recognises a credentialed destination, leases that Connection's credential for the Turn and effect that issued the command, and attaches it on the way out. A token the VM never held cannot be exfiltrated by code running in it, and revoking a Connection takes effect on the next request without touching the Computer.
+
+This needs the boundary to terminate TLS for credentialed hosts only, with a CA the image trusts, and pass everything else through untouched. A credential is scoped to the hosts its Connection declares, never attached to a destination the Bot chose.
+
+### Effects and approvals
+
+A command is one effect under its effect id, as `computer_exec` is today: a command that was sent and whose outcome is unknown is reported as unknown, never re-run. A CLI's own writes do not carry FrockBot's idempotency key, so the terminal is not a way around "at-most-once by key". A Bot is told which writes are unsafe to repeat, and the boundary can hold a credentialed write for an Approval where the Connection asks for one.
+
+### Open questions
+
+- Which Connection Types the credential boundary serves first, and whether it replaces Composio's execution for those apps or sits beside it.
+- Whether Approvals attach to a credentialed write at the boundary, to the command, or both.
+- How a Bot discovers the CLIs available to it, beyond what the image lists and its Skills teach.
+
+---
+
+## 11. Non-goals for the first implementation
 
 - automatic recovery of a failed host without a restore (shared storage and fencing);
 - a distributed filesystem;
@@ -199,7 +232,7 @@ The implementing session may choose the Linux distribution, Incus version, insta
 
 ---
 
-## 11. Definition of done
+## 12. Definition of done
 
 1. A fresh host joins the pool from repository-held definitions without manual mutation.
 2. The measured number of Computers stays resident per host under the declared envelope.
