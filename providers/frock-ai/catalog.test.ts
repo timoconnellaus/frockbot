@@ -50,13 +50,9 @@ describe("Frock AI catalog", () => {
   });
 
   test("sends each specialist to its own route, and lists none of them", () => {
-    expect(gatewayModelForFrockIdV1("@frock/writing")).toBe(
-      "dynamic/frock-writing",
-    );
+    expect(gatewayModelForFrockIdV1("@frock/writing")).toBe("dynamic/writing");
     // The pre-rename spelling names the same specialist.
-    expect(gatewayModelForFrockIdV1("@flock/coding")).toBe(
-      "dynamic/frock-coding",
-    );
+    expect(gatewayModelForFrockIdV1("@flock/coding")).toBe("dynamic/coding");
     expect(gatewayModelForFrockIdV1("@frock/vision", null)).toBe(
       FROCK_AI_BINDING_AUTO_MODEL,
     );
