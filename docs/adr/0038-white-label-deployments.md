@@ -193,7 +193,10 @@ deployment unchanged in behaviour.
    `frockbot` tool namespace and `window.frockbot` Plugin page API, the A2UI
    catalog URIs, the stored "unset" profile-name sentinel, and What's New,
    which a brand turns off. The one hosted-visible change is that neutral
-   Computer wording, which each Computer applies with one update run.
+   Computer wording, which each Computer applies with one update run. An auth
+   Package is now given the product's name as the required
+   `AuthPackageDependenciesV1.productName`, a breaking change to that published
+   contract.
 
 3. **External auth Packages.** §3: `authPackage` accepts a chooser path, the
    generator aliases it, and the profile names the chooser's required
