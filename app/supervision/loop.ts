@@ -293,10 +293,11 @@ function settledCalls(events: readonly SessionEvent[], turn: number) {
   return turnEvents(events, turn).flatMap((event) => {
     if (event.type === "tool/call") inputs.set(event.occurrenceId, event.input);
     if (event.type !== "tool/result") return [];
+    const input = inputs.get(event.occurrenceId);
     return [
       {
-        tool: event.name,
-        input: JSON.stringify(inputs.get(event.occurrenceId) ?? null),
+        tool: resolveDynamicToolNameV1(event.name, input),
+        input: JSON.stringify(input ?? null),
         result: event.content,
         isError: event.isError,
       },
@@ -592,6 +593,60 @@ export function createSupervisionRuntimeFeatureV1(
       return decision.stuck;
     };
 
+    /**
+     * Whether a Turn that used tools did what was asked, as it stops. For
+     * `/api/debug` alone: a judgment that fails is left out, never the Turn.
+     */
+    const judgeOutcome = async (
+      session: Session,
+      turn: number,
+      step: number,
+      signal: AbortSignal,
+    ): Promise<void> => {
+      const events = session.activeRunJournal;
+      if (
+        events.some(
+          (event) =>
+            event.type === "supervision/outcome" && event.turn === turn,
+        )
+      ) {
+        return;
+      }
+      const calls = settledCalls(events, turn).filter(
+        (call) => !speaks(call.tool),
+      );
+      if (calls.length === 0) return;
+      const started = Date.now();
+      let decision;
+      try {
+        decision = await host.supervisor.reviewOutcome(
+          {
+            objective: inputText(events, turn),
+            origin: host.origin,
+            actions: calls.map((call) => ({
+              tool: call.tool,
+              arguments: call.input,
+              result: call.result,
+              isError: call.isError,
+            })),
+            shown: shownThisTurn(events, turn),
+          },
+          signal,
+        );
+      } catch (error) {
+        if (signal.aborted) throw error;
+        return;
+      }
+      session.append({
+        type: "supervision/outcome",
+        turn,
+        step,
+        decision,
+        latencyMs: elapsed(started),
+      });
+      await session.flush();
+    };
+
     const hooks: LoopHooksV1 = {
       async request(agent, _request, turn, step, signal, next) {
         const request = await next();
@@ -858,14 +913,21 @@ export function createSupervisionRuntimeFeatureV1(
         };
       },
 
-      async stepContinuation(agent, _decision, turn, step, _signal, next) {
+      async stepContinuation(agent, _decision, turn, step, signal, next) {
         // Outermost, so nothing after it can reopen a Turn whose last word
         // the person already has. A caller-addressed Turn is left to delivery,
         // which keeps it going until the caller is answered.
-        if (withheldFinishV1(agent.session.activeRunJournal, turn, step)) {
-          return { kind: "stop" };
+        const decision = withheldFinishV1(
+          agent.session.activeRunJournal,
+          turn,
+          step,
+        )
+          ? ({ kind: "stop" } as const)
+          : await next();
+        if (decision.kind === "stop") {
+          await judgeOutcome(agent.session, turn, step, signal);
         }
-        return next();
+        return decision;
       },
     };
     const dispose = runtime.hooks.add(hooks);

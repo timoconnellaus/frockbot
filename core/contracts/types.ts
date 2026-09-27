@@ -21,12 +21,14 @@ import {
 } from "./structured-output.js";
 import {
   decodeCallDecisionV1,
+  decodeOutcomeDecisionV1,
   decodeProgressDecisionV1,
   decodeQuestionRouteV1,
   decodeSendDecisionV1,
   decodeStepDecisionV1,
   decodeTurnDirectiveV1,
   type CallDecisionV1,
+  type OutcomeDecisionV1,
   type ProgressDecisionV1,
   type QuestionRouteV1,
   type SendDecisionV1,
@@ -487,6 +489,17 @@ export interface SessionEventMap {
     turn: number;
     step: number;
     decision: ProgressDecisionV1;
+    latencyMs: number;
+  };
+  /**
+   * Whether a Turn that used tools did what was asked, judged at the step it
+   * stopped on, and why not when it did not. For `/api/debug`; nothing acts
+   * on it.
+   */
+  "supervision/outcome": {
+    turn: number;
+    step: number;
+    decision: OutcomeDecisionV1;
     latencyMs: number;
   };
   /**
@@ -1850,6 +1863,17 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       );
       turn();
       decodeQuestionRouteV1(event.route, "session event.route");
+      eventInteger(event.latencyMs, "session event.latencyMs", 0);
+      break;
+    case "supervision/outcome":
+      requireEventKeys(
+        event,
+        keys("turn", "step", "decision", "latencyMs"),
+        "session event",
+      );
+      turn();
+      step();
+      decodeOutcomeDecisionV1(event.decision, "session event.decision");
       eventInteger(event.latencyMs, "session event.latencyMs", 0);
       break;
     case "supervision/progress":

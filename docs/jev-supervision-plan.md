@@ -405,6 +405,13 @@ pages says. `unsupported` at 0.7 or above withholds it with reason
 that it could not find it. It shares the claim check's once-per-Turn limit and
 does not end the Turn.
 
+When a Turn that used tools stops, Jev also judges whether it did what was
+asked (done, partly, not done) and, when it did not, what stopped it: it needs
+the person, a tool failed, it has no way to do it, it went in circles, or
+something else (`app/supervision/outcome.ts`). The answer is a
+`supervision/outcome` session event, read on `/api/debug`; nothing acts on
+it, and a judgment that fails is left out rather than failing the Turn.
+
 A weighted failure score with decay was not built. Loop signals and the
 per-send claim check cover the cases it was for.
 
@@ -425,7 +432,9 @@ set becomes a compact prompt section on the next conversational Turn.
 
 The supervisor has no permissive failure mode. Each Jev call is retried once;
 a second failure fails the Turn before anything it would have judged runs, and
-the person is told the reply failed. `JEV_API_KEY` is a required production
+the person is told the reply failed. The one exception is the debug-only
+outcome judgment: one attempt of two seconds (`JEV_OUTCOME_BUDGET_V1`), left
+out when it fails. `JEV_API_KEY` is a required production
 secret; without it no Turn runs. Test harnesses answer through a
 supervision-only Jev fake (`app/supervision/testing.ts`).
 
@@ -584,8 +593,9 @@ _Done, enforced._
 
 ### 6. Mentor and continuation
 
-- Built: loop health and the per-send claim check (see Loop health and
-  claims); the thinking specialist is the Mentor a stuck Turn is offered.
+- Built: loop health, the per-send claim check and the debug-only outcome
+  judgment (see Loop health and claims); the thinking specialist is the Mentor
+  a stuck Turn is offered.
 - Add bounded continuation candidates and final-step classification.
 - Inject open continuation state into the next Turn.
 

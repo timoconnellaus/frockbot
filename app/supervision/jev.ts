@@ -46,6 +46,7 @@ import {
   reviewClaimV1,
 } from "./claim-check.js";
 import { composeProgressDecisionV1, reviewProgressV1 } from "./loop-health.js";
+import { composeOutcomeDecisionV1, reviewOutcomeV1 } from "./outcome.js";
 import {
   composeTurnDirectiveV1,
   reviewTurnStartV1,
@@ -62,6 +63,16 @@ export const JEV_SUPERVISION_ADAPTER_ID_V1 = "jev";
 export const JEV_TURN_BUDGET_V1: JevCallBudgetV1 = {
   retry: { maxRetries: 1 },
   timeout: 10_000,
+};
+
+/**
+ * How the outcome judgment runs: one short attempt. The person already has
+ * the reply and nothing acts on the judgment, so a slow Jev leaves it out
+ * rather than holding the Turn open.
+ */
+export const JEV_OUTCOME_BUDGET_V1: JevCallBudgetV1 = {
+  retry: { maxRetries: 0 },
+  timeout: 2_000,
 };
 
 export interface JevTurnSupervisorOptionsV1 {
@@ -224,6 +235,21 @@ export function createJevTurnSupervisorV1(
           budget,
         });
         return composeQuestionRouteV1({
+          answers: review.answers,
+          model: review.model,
+        });
+      } catch (error) {
+        throw classifyJevFailure(error);
+      }
+    },
+    async reviewOutcome(evidence, signal) {
+      signal?.throwIfAborted();
+      try {
+        const review = await reviewOutcomeV1(options.client, evidence, {
+          signal,
+          budget: JEV_OUTCOME_BUDGET_V1,
+        });
+        return composeOutcomeDecisionV1({
           answers: review.answers,
           model: review.model,
         });
