@@ -56,9 +56,7 @@ test("reads the memories, once each, and leaves out what is malformed", () => {
         ],
       }),
     ),
-  ).toEqual([
-    { text: "Tim moved to Thirroul in August.", kind: "experience" },
-  ]);
+  ).toEqual([{ text: "Tim moved to Thirroul in August.", kind: "experience" }]);
   const many = {
     memories: Array.from({ length: 20 }, (_, index) => ({
       text: `Fact ${index}.`,
