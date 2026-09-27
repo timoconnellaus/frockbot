@@ -9,6 +9,9 @@ packages" that [ADR 0028](0028-open-deployment.md) left open.
   and adds its own profile, brand and client shell.
 - The first one is a crypto product. It signs people in with Privy, themes
   differently and uses its own Bot characters.
+- Privy stays out of this repository. The white-label writes its own auth
+  Package against the published contract, and requires an email at sign-in, so
+  every User it admits has one.
 - Everything a white-label needs to differ in is a build-time seam here, chosen
   the way the auth Package and the Computer host already are. Nothing is chosen
   at runtime, and no white-label code runs inside this repository's builds.
@@ -36,7 +39,8 @@ open for this: every deployment choice goes through a build-time seam, never an
 - **The client is one application.** `apps/native` is `publish_to: none`, its
   characters are ten Rive and PNG pairs enumerated in `lib/flock/avatar.dart`
   and `lib/voice/appearance.dart`, and its user-visible strings say FrockBot.
-- **There are two auth Packages.** Neither is Privy.
+- **An auth Package can only come from here.** The profile's `authPackage` is
+  an enum of the two choosers in `apps/cloudflare/src`.
 
 ## Decision
 
@@ -48,9 +52,9 @@ config sets `main` to `@frockbot/cloudflare/src/index.ts` and resolves the
 Worker's seams with `alias`, which is exactly how the Access build already
 works. Two seams exist, and adding a third is a change to this ADR:
 
-- `#auth-package` — one of the auth Package choosers in `apps/cloudflare/src`,
-  selected by the profile's `authPackage`. A white-label chooses among the
-  Packages this repository ships; it does not write one (§3).
+- `#auth-package` — the auth Package chooser. The profile's `authPackage`
+  names one of the two this repository ships, or a path (relative to the
+  profile) to a chooser module the white-label wrote (§3).
 - `#brand` — a module exporting `BRAND_V1: BrandV1` (§2). The tracked default
   is `apps/cloudflare/src/brand.ts`, FrockBot's brand, which is what
   `wrangler dev`, every suite and the hosted deploy resolve. A profile names a
@@ -83,34 +87,33 @@ Trust chrome stays out of a brand exactly as it stays out of a theme:
 `THEME_FORBIDDEN_KEYS_V1` applies, and a brand names no approval, billing or
 Stop surface.
 
-### 3. Privy is a third auth Package, in this repository
+### 3. A white-label brings its own auth Package
 
-`app/auth/privy`, with the chooser `apps/cloudflare/src/auth-package.privy.ts`
-and `authPackage: "privy"` in the profile schema. It lives here, not in the
-white-label, so the suites cover it, the import rule polices it, and any
-deployment can choose it. Shape:
+`AuthPackageV1`, `AuthPackageBuildV1` and the types they name in
+`core/contracts/auth-package.ts` are published API. A white-label implements
+them in its own repository and names its chooser module in its profile; this
+repository ships no Privy code and names no Privy variable.
 
-- **Sign-in page.** Privy signs people in inside the browser, not by redirect,
-  so the Package serves a page at `/sign-in`, bundled from Privy's browser SDK
-  at artifact build time. On success the page posts Privy's access token to
-  `POST /api/auth/privy/session`. `startSignIn` sends a browser there with its
-  `returnTo`, which is what the native authorize door already asks of a Package.
-- **Verification.** The access token is an ES256 JWT: issuer `privy.io`,
-  audience the Privy app id, verified against the app's public key. Two vars,
-  `PRIVY_APP_ID` and `PRIVY_VERIFICATION_KEY`; neither is secret.
-- **Session.** The Package mints its own session cookie, signed with
-  `PRIVY_SESSION_SECRET`, which the installer mints like the other internal
-  secrets. Privy's tokens expire within the hour and refreshing one needs its
-  SDK, so the Worker never depends on a live Privy token after sign-in.
-- **Identity.** The User id is derived from Privy's user id (`sub`) the way the
-  Access Package derives one from its token's `sub`, under its own prefix.
-  Email is optional: a wallet-only person has none, and `AuthIdentityV1`
-  already allows that. The Package stores nothing, like Access.
-- **Admission.** Like Access, the Package decides admission: anyone Privy
-  authenticates is admitted, and the Privy app's own settings are the
-  allowlist. The hosted admission modes, invitations and the admin portal read
-  stored emails and do not apply to this build. A later ADR can give wallet
-  addresses an admission story if one is needed.
+- **The chooser contract is what the in-repo choosers already export:**
+  `AUTH_PACKAGE_V1` and the `AuthPackageEnvironmentV1` type the Worker's `env`
+  is checked against. The generator aliases `#auth-package` to the named file
+  exactly as it aliases the Access chooser today.
+- **The Worker's `env` type is widened by the chooser, not by this
+  repository.** A white-label's Package declares the vars and secrets it reads
+  through `AuthPackageEnvironmentV1`; the profile lists which of them are
+  required so the production-secrets check covers them.
+- **Email is present.** The crypto white-label requires an email at sign-in, so
+  its Package always returns a verified email and the existing admission
+  paths, keyed on email, work unchanged for it. Whether its Package stores
+  identities, and so whether it uses the hosted admission modes or decides
+  admission itself as Access does, is its choice through the optional members
+  `AuthPackageV1` already has.
+- **Sign-in routes are the Package's.** `handler` serves `/api/auth/*` and
+  `startSignIn` sends a browser that is nobody to sign in, which is all the
+  gateway and the native authorize door ask of any Package. A Package that
+  needs its own sign-in page serves it from those routes.
+- `scripts/check-auth-package-imports.ts` keeps policing this repository's two
+  Packages. A white-label's is outside its reach and inside the fixture's (§5).
 
 ### 4. The client is a Flutter package and a thin application
 
@@ -151,7 +154,7 @@ white-label writes `deployments/<name>.json` and generates its wrangler files
 the way the hosted and simple profiles do.
 
 A white-label fixture in this repository — a minimal consumer that installs the
-packed tarballs, names `#brand` and `authPackage: "privy"`, and runs
+packed tarballs, names its own `#brand` and its own stub auth Package, and runs
 `wrangler deploy --dry-run` — is the gate that proves the packages are
 consumable. It runs with the build category.
 
@@ -161,9 +164,9 @@ consumable. It runs with the build category.
 data. A white-label does not change that until it admits a real user; the
 moment it does, the tested forward migrations the constitution promises are due,
 as ADR 0028 already said of the simple profile. What does change now: a
-breaking change to `BrandV1`, `ClientBrand`, the profile schema or the seam
-specifiers is called out in the release's notes, because a consumer reads them
-at upgrade time.
+breaking change to `BrandV1`, `ClientBrand`, `AuthPackageV1`, the profile
+schema or the seam specifiers is called out in the release's notes, because a
+consumer reads them at upgrade time.
 
 ## Plan
 
@@ -175,8 +178,9 @@ deployment unchanged in behaviour.
    server's user-visible brand strings and the document icon read from it; the
    profile's `nativeApps` replaces the identities in `native-auth.ts`, with the
    hosted equivalence gate unchanged.
-3. **Privy auth Package.** §3, with the import rule extended to a third
-   implementation and a `tsconfig.privy.json` beside `tsconfig.access.json`.
+3. **External auth Packages.** §3: `authPackage` accepts a chooser path, the
+   generator aliases it, and the profile names the chooser's required
+   secrets. Rides with step 5, whose fixture is what proves it.
 4. **Client package.** §4. Ships as a full APK.
 5. **Publishing and the consumer path.** §5: manifests, the release job, the
    generator's move, the build scripts' arguments and the fixture gate. After
@@ -188,11 +192,11 @@ deployment unchanged in behaviour.
 ## Consequences
 
 - The white-label product's code, secrets and releases live outside this
-  repository. This one gains a brand seam, a third auth Package, a client
-  package and a larger publish job, and nothing that only the white-label runs.
-- Three auth Packages are three things to keep working. Privy's has no storage
-  and its verification is about the size of Access's; the sign-in page is the
-  new part.
+  repository. This one gains a brand seam, an auth seam a consumer can fill, a
+  client package and a larger publish job, and nothing that only the
+  white-label runs.
+- `AuthPackageV1` becomes a contract another repository compiles against, so
+  changing it is a breaking change in the §6 sense, not a local refactor.
 - Brand strings and characters become data. A pull request that adds a
   user-visible "FrockBot" to the client or the server is a bug.
 - Crypto features — wallets, signing, chain reads — are not part of any of
