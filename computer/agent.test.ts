@@ -1167,6 +1167,13 @@ describe("what a browser page is showing", () => {
         state: "ready",
       }),
     ).toBe('Page: Example — https://example.com\n\nheading "Example"');
+    const long = browserResultTextV1({
+      snapshot: `${'- link "Story"\n'.repeat(5_000)}- button "Last"`,
+    });
+    expect(long.length).toBeLessThan(31_000);
+    expect(long).toEndWith(
+      "the rest of the page was cut; act on what is shown or narrow the page",
+    );
     expect(browserResultTextV1({ snapshot: 'button "Go"' })).toBe(
       'button "Go"',
     );

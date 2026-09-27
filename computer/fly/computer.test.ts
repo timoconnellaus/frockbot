@@ -694,6 +694,38 @@ describe("Fly Sprite computer", () => {
   });
 });
 
+describe("a browser action on the Fly Computer", () => {
+  test("a long page's snapshot comes back whole, not cut into unreadable JSON", async () => {
+    const snapshot = Array.from(
+      { length: 4_000 },
+      (_, i) => `- link "Story ${i}":\n  - /url: /wiki/Story_${i}`,
+    ).join("\n");
+    expect(snapshot.length).toBeGreaterThan(100_000);
+    const host = new FakeComputerHost((script) =>
+      script.includes("browser.mjs")
+        ? {
+            stdout: JSON.stringify({
+              url: "https://en.wikipedia.org/",
+              title: "Wikipedia",
+              snapshot,
+            }),
+          }
+        : computerRunner(script),
+    );
+    const computer = await new FlyComputerHostV1(attach(host)).open(
+      { userId: "owner" },
+      { botId: "reader" },
+      { providerId: "computer-host", generation: 1 },
+    );
+    const page = await computer.browser!.perform(
+      { type: "snapshot" },
+      { signal: signal() },
+    );
+    expect(page.url).toBe("https://en.wikipedia.org/");
+    expect(page.accessibilitySnapshot).toBe(snapshot);
+  });
+});
+
 describe("a saved secret typed by the Fly Computer", () => {
   const SECRET = "fly-secret-9f3a1c7e";
 

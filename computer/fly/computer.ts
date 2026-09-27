@@ -37,6 +37,7 @@ import {
   DATA_ROOT,
   DEMONSTRATION_SCRIPT,
   demonstrationDirectoryV1,
+  BROWSER_SNAPSHOT_MAX_CHARS,
   DESKTOP_GUI_LEASE_KEY,
   DOCTOR_MARKER,
   DOCTOR_SCRIPT,
@@ -89,6 +90,11 @@ const MAX_OUTPUT = 30_000;
  */
 export const MAX_STORAGE_OUTPUT = 500_000;
 const EXEC_EXIT_MARKER = "__FROCKBOT_EXIT__";
+/**
+ * A browser helper's answer: a whole page snapshot as JSON, escaping and all.
+ * The helper cuts the snapshot first, so this cap is never what cuts it.
+ */
+const BROWSER_MAX_OUTPUT = BROWSER_SNAPSHOT_MAX_CHARS * 2;
 /** Largest screenshot this provider will carry back off a Computer. */
 export const SCREENSHOT_MAX_BYTES = 8 * 1024 * 1024;
 /**
@@ -1488,12 +1494,13 @@ export class FlyComputer {
         signal,
         effectId,
         timeoutMs: TIMEOUTS.browser,
-        maxOutputBytes: MAX_OUTPUT * 2,
+        maxOutputBytes: BROWSER_MAX_OUTPUT,
       },
       "Sprite browser action failed",
     );
     return clipped(
       outputText(outcome.stdout).trim() || outputText(outcome.stderr).trim(),
+      BROWSER_MAX_OUTPUT,
     );
   }
 
