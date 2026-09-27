@@ -250,18 +250,32 @@ server.on("connect", (req, socket, head) => {
 });
 
 ensureCa();
-server.listen(PORT, "127.0.0.1");
+server.listen(PORT, "127.0.0.1", () => {
+  // Written once listening: the ensure script restarts a proxy whose script is
+  // newer than this file, so an update's new host list takes effect.
+  fs.writeFileSync(DIR + "/proxy.pid", String(process.pid));
+});
 `;
 
 export const egressEnsureScript = `#!/usr/bin/env bash
 # Installed by FrockBot. Starts the connected-account proxy if it is not up;
 # exits 0 only when it is listening and its CA bundle exists.
 DIR=${shellQuote(EGRESS_ROOT)}
+SCRIPT=${shellQuote(EGRESS_PROXY_SCRIPT)}
 listening() { (exec 3<>/dev/tcp/127.0.0.1/${EGRESS_PORT}) 2>/dev/null; }
-if listening && [ -s ${shellQuote(EGRESS_BUNDLE)} ]; then exit 0; fi
+current() { [ -f "$DIR/proxy.pid" ] && ! [ "$SCRIPT" -nt "$DIR/proxy.pid" ]; }
+if listening && current && [ -s ${shellQuote(EGRESS_BUNDLE)} ]; then exit 0; fi
 mkdir -p "$DIR" && chmod 700 "$DIR" || exit 1
-exec 9>"$DIR/start.lock"
+# The proxy is started with this lock's descriptor closed, so it never holds
+# it. (A proxy from before that change holds \`start.lock\`, hence the name.)
+exec 9>"$DIR/ensure.lock"
 flock -w 10 9 || exit 1
+# A proxy started from an older script keeps its old host list: replace it.
+if listening && ! current; then
+  if [ -f "$DIR/proxy.pid" ]; then kill "$(cat "$DIR/proxy.pid")" 2>/dev/null; else pkill -f "$SCRIPT" 2>/dev/null; fi
+  for _ in $(seq 1 30); do listening || break; sleep 0.1; done
+  rm -f "$DIR/proxy.pid"
+fi
 if ! listening; then
   if [ -r /etc/profile.d/languages_paths ]; then
     PATH="$(tr '\\n' ':' < /etc/profile.d/languages_paths)$PATH"
@@ -269,10 +283,10 @@ if ! listening; then
   fi
   if [ -f "$DIR/proxy.log" ] && [ "$(stat -c %s "$DIR/proxy.log")" -gt 1000000 ]; then : > "$DIR/proxy.log"; fi
   env -u HTTPS_PROXY -u https_proxy -u HTTP_PROXY -u http_proxy \\
-    setsid nohup node ${shellQuote(EGRESS_PROXY_SCRIPT)} >>"$DIR/proxy.log" 2>&1 </dev/null &
-  for _ in $(seq 1 60); do listening && break; sleep 0.1; done
+    setsid nohup node "$SCRIPT" >>"$DIR/proxy.log" 2>&1 </dev/null 9>&- &
+  for _ in $(seq 1 60); do listening && [ -f "$DIR/proxy.pid" ] && break; sleep 0.1; done
 fi
-listening && [ -s ${shellQuote(EGRESS_BUNDLE)} ]
+listening && current && [ -s ${shellQuote(EGRESS_BUNDLE)} ]
 `;
 
 /**

@@ -1,10 +1,17 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import {
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   EGRESS_ENSURE_SCRIPT,
   EGRESS_PORT,
+  egressEnsureScript,
   EGRESS_PROXY_SCRIPT,
   EGRESS_ROOT,
   EGRESS_RUNTIME_ROOT,
@@ -175,4 +182,48 @@ describe("the proxy, run", () => {
     expect(out).toContain("computer_exec");
     expect(seen).toHaveLength(before);
   }, 20_000);
+});
+
+describe("the ensure script", () => {
+  test("starts the proxy once, and replaces it when its script is newer", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "frockbot-ensure-"));
+    const state = join(dir, "state");
+    const script = join(dir, "proxy.mjs");
+    const ensure = join(dir, "ensure.sh");
+    const port = 20_000 + Math.floor(Math.random() * 20_000);
+    const retarget = (text: string) =>
+      // The script's path first: the state directory's path is its prefix.
+      text
+        .replaceAll(EGRESS_PROXY_SCRIPT, script)
+        .replaceAll(EGRESS_ROOT, state)
+        .replaceAll(String(EGRESS_PORT), String(port));
+    writeFileSync(script, retarget(egressProxySource));
+    writeFileSync(ensure, retarget(egressEnsureScript), { mode: 0o755 });
+    const run = async () => {
+      const child = Bun.spawn(["bash", ensure], {
+        stdout: "ignore",
+        stderr: "ignore",
+      });
+      return child.exited;
+    };
+    const pid = () => readFileSync(join(state, "proxy.pid"), "utf8").trim();
+    try {
+      expect(await run()).toBe(0);
+      const first = pid();
+      expect(await run()).toBe(0);
+      expect(pid()).toBe(first);
+      // An update installing the script again, after the proxy started.
+      await Bun.sleep(1_100);
+      utimesSync(script, new Date(), new Date());
+      expect(await run()).toBe(0);
+      expect(pid()).not.toBe(first);
+    } finally {
+      try {
+        process.kill(Number(pid()));
+      } catch {
+        // Already gone.
+      }
+      rmSync(dir, { recursive: true, force: true });
+    }
+  }, 30_000);
 });
