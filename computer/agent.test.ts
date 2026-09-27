@@ -271,6 +271,7 @@ describe("computer agent contribution", () => {
       createComputerAgentFeature({
         userId: "user-1",
         defaultProviderId: "fixture",
+        productName: "FrockBot",
         now: () => clock,
         egress: {
           object: "user-1:bot-1",
