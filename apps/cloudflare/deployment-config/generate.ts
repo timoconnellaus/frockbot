@@ -88,7 +88,7 @@ export const AUTH_PACKAGE_CHOOSERS_V1: Record<BuiltInAuthPackageIdV1, string> =
 
 /**
  * The specifier the Worker imports its brand through
- * ([ADR 0038](../../docs/adr/0038-white-label-deployments.md)).
+ * ([ADR 0038](../../../docs/adr/0038-white-label-deployments.md)).
  *
  * The same shape as `#auth-package`: `apps/cloudflare/package.json` maps it to
  * FrockBot's brand, and a profile that names its own brand module gets an
@@ -133,11 +133,6 @@ export interface GenerateOptionsV1 {
   profileDirectory: string;
   /** Where `<name>/<worker>/wrangler.jsonc` is written: a `.deployment/`. */
   outputRoot: string;
-  /**
-   * The directory the Worker templates sit in, as `DEPLOYABLE_WORKERS_V1`
-   * names them. The one this package is in, except in tests.
-   */
-  workersRoot?: string;
 }
 
 export interface GeneratedConfigV1 {
@@ -513,7 +508,9 @@ export function generateWorkerConfigV1(
   options: GenerateOptionsV1,
 ): GeneratedConfigV1 {
   const { profile, outputRoot } = options;
-  const workersRoot = options.workersRoot ?? join(PACKAGE_ROOT_V1, "..");
+  // The directory this package sits in, where `DEPLOYABLE_WORKERS_V1` names
+  // each template.
+  const workersRoot = join(PACKAGE_ROOT_V1, "..");
   const entry = profile.workers?.[worker];
   if (!entry) {
     throw new Error(`Profile "${profile.name}" does not deploy ${worker}`);
