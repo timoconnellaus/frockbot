@@ -5,6 +5,9 @@
 // into a mounted runtime, so both an admitted Turn (`app/shell/turn.ts`) and an
 // isolate's `ai` grant (`app/isolates/bot.ts`) resolve the same way.
 
+import { hostedJevClientV1 } from "@frockbot/app/supervision/jev";
+import { createJevEgressV1 } from "@frockbot/app/supervision/jev-egress";
+import { createJevMeterV1 } from "@frockbot/app/billing/jev";
 import type { StoredRunCauseV1 } from "@frockbot/core/durable";
 import {
   COMPUTER_EGRESS_PATH_V1,
@@ -685,6 +688,34 @@ export async function agentRuntime(
                   sign: (token: ComputerEgressTokenV1) =>
                     signComputerEgressTokenV1(secret, token),
                 },
+              };
+            })(),
+            // Jev for the terminal, answered with the platform's key and
+            // charged to the account the Turn bills, where it bills.
+            ...(() => {
+              const client = hostedJevClientV1({
+                JEV_API_KEY: state.env.JEV_API_KEY,
+                JEV_BASE_URL: state.env.JEV_BASE_URL,
+              });
+              if (!client) return {};
+              const billing = state.env.BILLING?.(
+                identity.userId,
+                identity.botId,
+                turn.sessionId,
+                {
+                  runId: turn.runId,
+                  ...(turn.cause ? { cause: turn.cause } : {}),
+                },
+              );
+              return {
+                computerJev: createJevEgressV1({
+                  client,
+                  ...(billing
+                    ? { meter: createJevMeterV1(billing.account) }
+                    : {}),
+                  botId: identity.botId,
+                  sessionId: turn.sessionId,
+                }),
               };
             })(),
             // The sign-ins are the User's, so the vault is the User's object;

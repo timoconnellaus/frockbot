@@ -44,10 +44,27 @@ export const COMPUTER_EGRESS_ROUTES_V1: readonly ComputerEgressRouteV1[] = [
   { toolkit: "gmail", label: "Gmail", host: "gmail.googleapis.com" },
 ];
 
+/**
+ * Jev on the terminal: a System One request posted here is answered with the
+ * platform's own key and charged to the account on the input tokens Jev
+ * counts. Like a connected app, it answers only while the exec call that made
+ * the request is running.
+ */
+export const COMPUTER_EGRESS_JEV_HOST_V1 = "jev.internal";
+export const COMPUTER_EGRESS_JEV_PATH_V1 = "/v1/system-one";
+
 /** Every host the Computer's proxy intercepts. */
 export const COMPUTER_EGRESS_HOSTS_V1: readonly string[] = [
   ...new Set(COMPUTER_EGRESS_ROUTES_V1.map((route) => route.host)),
+  COMPUTER_EGRESS_JEV_HOST_V1,
 ];
+
+/** Answers one Jev request an exec call's command made, under its own effect id. */
+export type ComputerEgressJevV1 = (input: {
+  body: Uint8Array;
+  effectId: string;
+  signal?: AbortSignal;
+}) => Promise<ComputerEgressResponseV1>;
 
 export function computerEgressRouteByToolkitV1(
   toolkit: string,
@@ -353,6 +370,8 @@ export interface ComputerEgressHandlerConfigV1 {
     call: ToolCall,
     context: ToolExecutionContext,
   ): Promise<ToolPreparation>;
+  /** Answers `jev.internal`. Absent, and Jev is not reachable from the terminal. */
+  jev?: ComputerEgressJevV1;
 }
 
 /**
@@ -365,6 +384,7 @@ export function createComputerEgressHandlerV1(
   config: ComputerEgressHandlerConfigV1,
 ): (request: ComputerEgressRequestV1) => Promise<ComputerEgressResponseV1> {
   let sequence = 0;
+  let jevSequence = 0;
   // A CLI that retries a write it timed out on sends the same bytes again.
   // Within one exec that is the same effect, answered with what the first
   // send answered rather than sent twice.
@@ -372,6 +392,8 @@ export function createComputerEgressHandlerV1(
   const readReviews = new Map<string, Promise<string | undefined>>();
   return async (request) => {
     const url = new URL(request.url);
+    if (url.hostname === COMPUTER_EGRESS_JEV_HOST_V1)
+      return askJev(request, url);
     const target = computerEgressTargetV1(url);
     if (!target) {
       return computerEgressMessageV1(
@@ -413,6 +435,43 @@ export function createComputerEgressHandlerV1(
     writes.set(key, answer);
     return answer;
   };
+
+  // Not reviewed: a Jev decision acts on nothing outside the Computer, and
+  // every request is charged to the account that asked.
+  async function askJev(
+    request: ComputerEgressRequestV1,
+    url: URL,
+  ): Promise<ComputerEgressResponseV1> {
+    if (!config.jev) {
+      return computerEgressMessageV1(
+        403,
+        `Jev is not available from this ${config.productName} Computer.`,
+      );
+    }
+    if (
+      request.method !== "POST" ||
+      url.pathname !== COMPUTER_EGRESS_JEV_PATH_V1
+    ) {
+      return computerEgressMessageV1(
+        404,
+        `Jev answers POST https://${COMPUTER_EGRESS_JEV_HOST_V1}${COMPUTER_EGRESS_JEV_PATH_V1} with a JSON body of state and questions.`,
+      );
+    }
+    try {
+      return await config.jev({
+        body: request.bodyBase64
+          ? base64ToBytesV1(request.bodyBase64)
+          : new Uint8Array(),
+        effectId: `${config.context.effectId}:jev:${jevSequence++}`,
+        ...(config.context.signal ? { signal: config.context.signal } : {}),
+      });
+    } catch {
+      return computerEgressMessageV1(
+        502,
+        "Jev's answer could not be confirmed. Try again.",
+      );
+    }
+  }
 
   function refused(reason: string): ComputerEgressResponseV1 {
     return computerEgressMessageV1(

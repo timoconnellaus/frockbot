@@ -7,6 +7,7 @@ import type {
 import {
   answerComputerEgressV1,
   base64ToBytesV1,
+  COMPUTER_EGRESS_HOSTS_V1,
   bytesToBase64V1,
   computerEgressReadsV1,
   computerEgressRouteV1,
@@ -326,6 +327,84 @@ describe("computer egress handler", () => {
     });
     expect(response.status).toBe(403);
     expect(sent).toHaveLength(0);
+  });
+});
+
+describe("Jev from the terminal", () => {
+  const request = (
+    overrides: Partial<ComputerEgressRequestV1> = {},
+  ): ComputerEgressRequestV1 => ({
+    method: "POST",
+    url: "https://jev.internal/v1/system-one",
+    headers: { "content-type": "application/json" },
+    bodyBase64: body({ state: {}, questions: {} }),
+    ...overrides,
+  });
+
+  test("is one of the hosts the Computer's proxy intercepts", () => {
+    expect(COMPUTER_EGRESS_HOSTS_V1).toContain("jev.internal");
+  });
+
+  test("is answered under its own effect id per request, with no review and no account", async () => {
+    const asked: { body: string; effectId: string }[] = [];
+    let reviewed = false;
+    const handler = createComputerEgressHandlerV1({
+      productName: "FrockBot",
+      accounts: () => [],
+      context,
+      review: async () => {
+        reviewed = true;
+        return { kind: "denied", result: { content: "no" } } as never;
+      },
+      jev: async (input) => {
+        asked.push({
+          body: new TextDecoder().decode(input.body),
+          effectId: input.effectId,
+        });
+        return ok();
+      },
+    });
+    expect((await handler(request())).status).toBe(200);
+    expect((await handler(request())).status).toBe(200);
+    expect(asked.map((a) => a.effectId)).toEqual([
+      "tool:2:1:0:jev:0",
+      "tool:2:1:0:jev:1",
+    ]);
+    expect(JSON.parse(asked[0]!.body)).toEqual({ state: {}, questions: {} });
+    expect(reviewed).toBe(false);
+  });
+
+  test("answers only POST to its one path, and nothing where Jev is not offered", async () => {
+    const jev = createComputerEgressHandlerV1({
+      productName: "FrockBot",
+      accounts: () => [],
+      context,
+      jev: async () => ok(),
+    });
+    expect((await jev(request({ method: "GET" }))).status).toBe(404);
+    expect(
+      (await jev(request({ url: "https://jev.internal/other" }))).status,
+    ).toBe(404);
+    const without = createComputerEgressHandlerV1({
+      productName: "FrockBot",
+      accounts: () => [],
+      context,
+    });
+    const refused = await without(request());
+    expect(refused.status).toBe(403);
+    expect(messageOf(refused)).toContain("Jev is not available");
+  });
+
+  test("a Jev seam that throws is answered as unconfirmed", async () => {
+    const handler = createComputerEgressHandlerV1({
+      productName: "FrockBot",
+      accounts: () => [],
+      context,
+      jev: async () => {
+        throw new Error("down");
+      },
+    });
+    expect((await handler(request())).status).toBe(502);
   });
 });
 

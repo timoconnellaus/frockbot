@@ -55,6 +55,7 @@ import {
   computerEgressGenericOriginV1,
   createComputerEgressHandlerV1,
   openComputerEgressV1,
+  type ComputerEgressJevV1,
   type ComputerEgressSeamV1,
 } from "./egress.js";
 import {
@@ -311,6 +312,11 @@ export interface ComputerAgentPluginConfig {
    * `egressShellPrelude`, a command runs with no proxy and no account.
    */
   egress?: ComputerEgressSeamV1;
+  /**
+   * Answers the terminal's requests to `jev.internal`, charged to the account.
+   * Absent, and a command reaches no Jev.
+   */
+  jev?: ComputerEgressJevV1;
 }
 
 /**
@@ -1222,7 +1228,7 @@ export function createComputerAgentFeature(
       const prelude = capabilities?.egressShellPrelude;
       if (!seam || !prelude) return undefined;
       const accounts = () => computerEgressAccountsV1(runtime.tools);
-      if (accounts().length === 0) return undefined;
+      if (accounts().length === 0 && !config.jev) return undefined;
       const nonce = computerEgressNonceV1();
       const expiresAt = now() + EXEC_TIMEOUT_MS + 5_000;
       const token = await seam.sign({
@@ -1247,9 +1253,13 @@ export function createComputerAgentFeature(
               call,
               idempotent: false,
             })),
+          ...(config.jev ? { jev: config.jev } : {}),
         }),
       });
-      return { prelude: prelude(token), close };
+      return {
+        prelude: prelude(token, { accounts: accounts().length > 0 }),
+        close,
+      };
     };
 
     const execTool: ToolDefinition = {
@@ -1276,6 +1286,11 @@ export function createComputerAgentFeature(
         "This is where most work gets done: use command-line tools such as git, gh, jq and curl, and write a Python script for anything longer than a line or two. Install a missing tool with apt, pip or uv.",
         "Every command is reviewed before it runs, so run what the person's request needs and nothing it does not.",
         "A foreground command reaches the person's connected apps with no token: each is at https://<app>.connected.internal/ followed by the path of that app's own API, and gh reaches GitHub as usual. Every request as the person is reviewed before it is sent. Background commands have no connected accounts.",
+        ...(config.jev
+          ? [
+              'A foreground command can also ask Jev, a fast decision model, by POSTing a TypeSafe System One body ({"state": {...}, "questions": {...}}) to https://jev.internal/v1/system-one; each request is charged to the person\'s account by the input tokens it uses.',
+            ]
+          : []),
         "Pass cwd as an absolute path to run the command in that directory instead of the home directory.",
         "With background:true the command keeps running after this call returns and after this Turn ends, and you get a processId to check later.",
         "A background process runs only while the Computer is awake. Nothing keeps it awake for you: if the Computer hibernates first, the outcome is reported as unknown, with whatever log was durable at the time.",

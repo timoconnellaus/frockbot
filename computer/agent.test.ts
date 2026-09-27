@@ -218,6 +218,80 @@ describe("computer agent contribution", () => {
     await harness.dispose();
   });
 
+  test("with Jev offered, a foreground command reaches jev.internal with no connected account", async () => {
+    const commands: string[] = [];
+    let during: number | undefined;
+    const asked: string[] = [];
+    const capabilities: ComputerHostCapabilitiesV1 = {
+      viewerFrameOrigins: [],
+      egressShellPrelude: (token) => `export PROXY_TOKEN=${token}`,
+    };
+    const provider: ComputerHostV1 = {
+      id: "fixture",
+      capabilities,
+      open: async (identity, tenant, assignment) => ({
+        assignment,
+        identity,
+        tenant,
+        capabilities,
+        exec: {
+          execute: async (request) => {
+            const command = request.args?.[1] ?? "";
+            commands.push(command);
+            const token = JSON.parse(
+              /PROXY_TOKEN=(.*)/.exec(command)![1]!,
+            ) as ComputerEgressTokenV1;
+            during = (
+              await answerComputerEgressV1({
+                object: token.o,
+                nonce: token.n,
+                request: {
+                  method: "POST",
+                  url: "https://jev.internal/v1/system-one",
+                  headers: {},
+                  bodyBase64: "e30=",
+                },
+              })
+            ).status;
+            return {
+              exitCode: 0,
+              stdout: new Uint8Array(),
+              stderr: new Uint8Array(),
+              outputTruncated: false,
+            };
+          },
+        },
+        close: () => Promise.resolve(),
+      }),
+    };
+    const harness = createAgentRuntimeHarness();
+    harness.computers.register(provider);
+    await harness.mount(
+      createComputerAgentFeature({
+        userId: "user-1",
+        productName: "FrockBot",
+        defaultProviderId: "fixture",
+        egress: {
+          object: "user-1:bot-1",
+          endpoint: "https://bot.example/api/computer/egress",
+          sign: async (token) => JSON.stringify(token),
+        },
+        jev: async (input) => {
+          asked.push(input.effectId);
+          return { status: 200, headers: {}, bodyBase64: "" };
+        },
+      }),
+    );
+    await execute(harness, "computer_exec", { command: "python decide.py" });
+    expect(commands.at(-1)).toMatch(
+      /^export PROXY_TOKEN=.*\npython decide.py$/,
+    );
+    expect(during).toBe(200);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]).toMatch(/:jev:0$/);
+    await harness.dispose();
+  });
+
   test("a connected account's access starts once the Computer is open, however long opening took", async () => {
     let clock = 1_000_000;
     let during: number | undefined;
