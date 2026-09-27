@@ -357,6 +357,14 @@ were, and neither is enforced.
   Keeping is readily chosen (at 0.6); dropping is not (at 0.9). This runs
   after the Turn, so it costs no Turn time. Labelled in
   `bun run eval:context`.
+- **Tool results, once quiet.** Five minutes after a chat run settles, when
+  the provider's prompt cache has gone cold and no Turn is active or queued,
+  Jev judges each older tool result over 200 characters against the
+  person's latest messages: keep it, or prune it (at 0.8)
+  (`app/supervision/tool-result-pruning.ts`). The pruned ones are recorded
+  as one `conversation/tool-results-pruned` event and carried as `[pruned]`
+  from then on. Pruning waits for a cold cache because any change to an
+  earlier message misses it. A judgment that fails prunes nothing.
 - **Skills.** At the Turn's first request, Jev judges each Skill in a catalog
   of up to 24 against the request, and up to three strong matches are named
   in the tail runtime note (`app/supervision/skill-nomination.ts`). The

@@ -12,6 +12,7 @@ import {
   type NormalizedModelRequest,
   type SessionCursorV1,
   type SessionEvent,
+  type SessionEventInput,
 } from "@frockbot/core/contracts";
 import type { CompositionGenerationV1 } from "./composition/generation.js";
 import { DurableCompositionStore } from "./composition-store.js";
@@ -2137,41 +2138,97 @@ export class BotDurableAuthority<Snapshot> {
       .filter((event) => event.type !== "session/disposed")
       .map(decodeSessionEvent);
     if (durableEvents.length === 0) return;
-    const key = `${RUN_PREFIX}${runId}`;
-    await this.ctx.storage.transaction(async (transaction) => {
-      const run = await this.readRunFrom(transaction, runId);
-      if (!run) throw new Error(`run "${runId}" was not accepted`);
-      const eventLog = new SessionEventLog(transaction);
-      // `append` owns the contiguity guard: it checks the same thing this
-      // method used to pre-check, against the same index, before it writes
-      // anything, and the whole body runs in one transaction. It goes first
-      // so that a batch which does not continue the log is still refused for
-      // that reason rather than by the run record's own range check.
-      await eventLog.append(run.sessionId, durableEvents, { runId });
-      const next = this.codec.require({
-        ...run,
-        ...storedRunEventFieldsV2(run.previousEventCount, [
-          ...run.events,
-          ...durableEvents,
-        ]),
-      } satisfies StoredRunV1<Snapshot>);
-      const records = await this.hooks.eventRecords?.({
-        run: next,
-        events: durableEvents,
-        read: <T>(key: string) => transaction.get<T>(key),
-      });
-      if (records && Object.keys(records).length)
-        await transaction.put(records);
-      await transaction.put(key, structuredClone(storedRunRecordV2(next)));
-      await this.commitVisible(transaction, {
-        cause: "events",
-        run: next,
-        events: durableEvents,
-      });
-      await this.refreshRecoveryAlarm(transaction);
-    });
+    await this.ctx.storage.transaction((transaction) =>
+      this.appendRunEventsIn(transaction, runId, durableEvents),
+    );
     this.hooks.eventsCommitted?.();
     await this.drainPublication();
+  }
+
+  /**
+   * Appends conversation events while the Bot is quiet: no Turn executing and
+   * none queued. They join the log after `runId`'s own, the newest settled
+   * run of the Session, stamped here so they continue it. Refused — `false`,
+   * nothing written — when a Turn is active or queued, or when the log has
+   * moved past `expectedEventCount` since the caller read what it decided on.
+   */
+  async appendQuietSessionEvents(input: {
+    runId: string;
+    sessionId: string;
+    expectedEventCount: number;
+    events: readonly SessionEventInput[];
+  }): Promise<boolean> {
+    if (input.events.length === 0) return true;
+    if (this.executingRunId) return false;
+    const appended = await this.ctx.storage.transaction(async (transaction) => {
+      if (await transaction.get<string>(ACTIVE_RUN_KEY)) return false;
+      if (await firstPendingRunV1(transaction, PENDING_USER_RUN_PREFIX)) {
+        return false;
+      }
+      if (await firstPendingRunV1(transaction, PENDING_AGENT_RUN_PREFIX)) {
+        return false;
+      }
+      const eventCount = await new SessionEventLog(transaction).eventCount(
+        input.sessionId,
+      );
+      if (eventCount !== input.expectedEventCount) return false;
+      // Only the Session's newest run continues its log.
+      const run = await this.readRunFrom(transaction, input.runId);
+      if (
+        !run ||
+        run.sessionId !== input.sessionId ||
+        run.previousEventCount + run.events.length !== eventCount
+      ) {
+        return false;
+      }
+      const timestamp = new Date().toISOString();
+      const events = input.events.map((event, offset) =>
+        decodeSessionEvent({ ...event, seq: eventCount + offset, timestamp }),
+      );
+      await this.appendRunEventsIn(transaction, input.runId, events);
+      return true;
+    });
+    if (!appended) return false;
+    this.hooks.eventsCommitted?.();
+    await this.drainPublication();
+    return true;
+  }
+
+  private async appendRunEventsIn(
+    transaction: DurableObjectTransaction,
+    runId: string,
+    durableEvents: readonly SessionEvent[],
+  ): Promise<void> {
+    const key = `${RUN_PREFIX}${runId}`;
+    const run = await this.readRunFrom(transaction, runId);
+    if (!run) throw new Error(`run "${runId}" was not accepted`);
+    const eventLog = new SessionEventLog(transaction);
+    // `append` owns the contiguity guard: it checks the same thing this
+    // method used to pre-check, against the same index, before it writes
+    // anything, and the whole body runs in one transaction. It goes first
+    // so that a batch which does not continue the log is still refused for
+    // that reason rather than by the run record's own range check.
+    await eventLog.append(run.sessionId, durableEvents, { runId });
+    const next = this.codec.require({
+      ...run,
+      ...storedRunEventFieldsV2(run.previousEventCount, [
+        ...run.events,
+        ...durableEvents,
+      ]),
+    } satisfies StoredRunV1<Snapshot>);
+    const records = await this.hooks.eventRecords?.({
+      run: next,
+      events: durableEvents,
+      read: <T>(key: string) => transaction.get<T>(key),
+    });
+    if (records && Object.keys(records).length) await transaction.put(records);
+    await transaction.put(key, structuredClone(storedRunRecordV2(next)));
+    await this.commitVisible(transaction, {
+      cause: "events",
+      run: next,
+      events: durableEvents,
+    });
+    await this.refreshRecoveryAlarm(transaction);
   }
 
   /**

@@ -280,6 +280,10 @@ export const COMPACTION_SUMMARY_MAX_LENGTH = 12_000;
 export const COMPACTION_IDENTIFIERS_MAX = 200;
 export const COMPACTION_IDENTIFIER_MAX_LENGTH = 400;
 export const COMPACTION_FAILURE_REASON_MAX_LENGTH = 500;
+/** Most tool results one pruning names. */
+export const TOOL_RESULTS_PRUNED_MAX = 500;
+/** Longest tool call id a pruning names. */
+export const TOOL_RESULT_CALL_ID_MAX_LENGTH = 256;
 
 /**
  * Spoken turns kept on one hang-up accordion. A longer call is clipped from
@@ -1142,6 +1146,16 @@ export interface SessionEventMap {
     effectId: string;
     throughTurn: number;
     reason: string;
+  };
+  /**
+   * Older tool results the conversation's later requests carry as the pruned
+   * marker instead of their content. Recorded while the Bot is quiet, once the
+   * provider's prompt cache has gone cold, so rewriting history costs no cache
+   * hit. It carries no `turn` of its own, like a compaction: it belongs to the
+   * conversation. Each entry names a result by its Turn and its call id.
+   */
+  "conversation/tool-results-pruned": {
+    results: { turn: number; callId: string }[];
   };
   "step/end": { turn: number; step: number; outcome: StepOutcome };
   /**
@@ -3034,6 +3048,29 @@ export function decodeSessionEvent(input: unknown): SessionEvent {
       if (reason.length > COMPACTION_FAILURE_REASON_MAX_LENGTH) {
         throw new Error("session event.reason is too long");
       }
+      break;
+    }
+    case "conversation/tool-results-pruned": {
+      requireEventKeys(event, keys("results"), "session event");
+      if (
+        !Array.isArray(event.results) ||
+        event.results.length === 0 ||
+        event.results.length > TOOL_RESULTS_PRUNED_MAX
+      ) {
+        throw new Error("session event.results must be a bounded array");
+      }
+      event.results.forEach((result, index) => {
+        const label = `session event.results[${index}]`;
+        const entry = eventRecord(result, label);
+        requireEventKeys(entry, ["turn", "callId"], label);
+        eventInteger(entry.turn, `${label}.turn`, 1);
+        if (
+          eventString(entry.callId, `${label}.callId`).length >
+          TOOL_RESULT_CALL_ID_MAX_LENGTH
+        ) {
+          throw new Error(`${label}.callId is too long`);
+        }
+      });
       break;
     }
     case "step/end":

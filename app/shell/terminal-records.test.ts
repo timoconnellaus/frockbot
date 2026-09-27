@@ -5,6 +5,7 @@
 // overwrite another. A settlement that ran a producer twice would write two
 // records where the Turn earned one — a firing with two inbox entries — and
 // nobody would notice until they counted.
+import { TOOL_RESULT_PRUNE_DUE_PREFIX_V1 } from "./tool-result-pruning.js";
 import { describe, expect, test } from "bun:test";
 import { Session, type SessionEvent } from "@frockbot/core/contracts";
 import { shellTerminalRecordsV1 } from "./terminal-records.js";
@@ -64,7 +65,10 @@ describe("the settling transaction's records", () => {
       read: durable.read,
     });
 
-    expect(Object.keys(records)).toEqual([approvalKeyV1("ap-1")]);
+    expect(Object.keys(records)).toEqual([
+      approvalKeyV1("ap-1"),
+      `${TOOL_RESULT_PRUNE_DUE_PREFIX_V1}user-1:bot-1`,
+    ]);
     expect(
       decodeApprovalRecordV1(records[approvalKeyV1("ap-1")]),
     ).toMatchObject({ decision: "pending", runId: "run-1", createdAt: NOW });

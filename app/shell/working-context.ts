@@ -2,10 +2,10 @@
 //
 // The event log stays the archive. This module turns a committed batch into
 // turn metadata and normalized messages, then selects a request from that
-// metadata before any page is fetched. Costs for a Turn that is outside the
-// newest verbatim-tool window are the pruned costs, so an older Turn can
-// become eligible when a newer tool payload is pruned — the selector does not
-// keep only the last N messages.
+// metadata before any page is fetched. A Turn that does not fit whole is
+// charged its pruned cost, so an older Turn can still fit once a newer Turn's
+// tool payloads are pruned — the selector does not keep only the last N
+// messages.
 import {
   expandToolCallOccurrencesV1,
   emptyConversationHeadV1,
@@ -27,7 +27,6 @@ import {
   historyCharsV1,
   PRUNED_TOOL_RESULT_V1,
   PRUNE_MIN_RESULT_CHARS_V1,
-  TOOL_OUTPUT_KEEP_RECENT_TURNS_V1,
   type CompactionV1,
 } from "./compaction.js";
 import {
@@ -78,7 +77,7 @@ function blankTurn(
   };
 }
 
-/** Tool payloads this Turn would lose once it is outside the verbatim window. */
+/** Tool payloads this Turn would lose when only its pruned form fits the budget. */
 export function pruneTurnToolPayloadsV1(
   messages: readonly LlmMessage[],
 ): LlmMessage[] {
@@ -303,6 +302,21 @@ export function reduceWorkingContextAppendV1(input: {
       });
       continue;
     }
+    if (event.type === "conversation/tool-results-pruned") {
+      for (const result of event.results) {
+        const turn = turns.get(result.turn);
+        if (!turn) continue;
+        turn.messages = turn.messages.map((message) => {
+          if (message.role !== "tool" || message.callId !== result.callId) {
+            return message;
+          }
+          const { attachments: _attachments, ...rest } = message;
+          return { ...rest, content: PRUNED_TOOL_RESULT_V1 };
+        });
+        dirty.add(result.turn);
+      }
+      continue;
+    }
     if (event.type === "conversation/compaction-intent") {
       head.unsettledCompaction = {
         effectId: event.effectId,
@@ -368,6 +382,9 @@ export function turnsTouchedV1(events: readonly SessionEvent[]): number[] {
       turns.add((event as { turn: number }).turn);
     }
     if (event.type === "conversation/compacted") turns.add(event.throughTurn);
+    if (event.type === "conversation/tool-results-pruned") {
+      for (const result of event.results) turns.add(result.turn);
+    }
   }
   return [...turns];
 }
@@ -396,13 +413,16 @@ export interface WorkingTurnChoiceV1 {
 /**
  * Which committed Turns fit, using metadata only.
  *
- * Walks newest first. A Turn in the newest tool-output window is kept whole if
- * it fits; any Turn that does not fit whole is kept without its tool payloads
- * if that fits, and skipped otherwise. A skipped Turn never ends the walk: one
- * Turn whose own tool traffic outgrows the budget must not take every Turn
- * before it with it. The window is positional, so a Turn kept pruned or
- * skipped still spends a slot, and the choice says which Turns to prune —
- * the renderer does not work it out again.
+ * Walks newest first. A Turn is kept whole if it fits, kept without its tool
+ * payloads if that fits, and skipped otherwise. A skipped Turn never ends the
+ * walk: one Turn whose own tool traffic outgrows the budget must not take
+ * every Turn before it with it. The choice says which Turns to prune — the
+ * renderer does not work it out again.
+ *
+ * There is no fixed window of Turns that keep their tool payloads: moving one
+ * would change an earlier message at the start of nearly every Turn and miss
+ * the provider's prompt cache from there on. Which results a quiet Bot can do
+ * without is decided once its cache has gone cold (tool-result-pruning.ts).
  */
 function chooseWithinBudgetV1(input: {
   head: ConversationHeadV1;
@@ -425,8 +445,6 @@ function chooseWithinBudgetV1(input: {
   if (!chatLike(input.currentTurnType)) {
     return { kept: [], pruned: [], omitted: 0, spent: input.currentChars };
   }
-  let verbatimLeft = TOOL_OUTPUT_KEEP_RECENT_TURNS_V1;
-  if (input.currentChars > 0) verbatimLeft -= 1;
   let spent = input.currentChars;
   const kept: number[] = [];
   const pruned: number[] = [];
@@ -434,9 +452,7 @@ function chooseWithinBudgetV1(input: {
     if (turn.turn >= input.currentTurn) continue;
     if (compaction && turn.turn <= compaction.throughTurn) break;
     if (!chatLike(turn.turnType) || !turn.messageBearing) continue;
-    const verbatim = verbatimLeft > 0;
-    if (verbatim) verbatimLeft -= 1;
-    if (verbatim && spent + turn.fullChars <= budgetForTurns) {
+    if (spent + turn.fullChars <= budgetForTurns) {
       kept.push(turn.turn);
       spent += turn.fullChars;
     } else if (spent + turn.prunedChars <= budgetForTurns) {
