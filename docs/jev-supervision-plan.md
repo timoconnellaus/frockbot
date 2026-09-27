@@ -343,10 +343,8 @@ were, and neither is enforced.
   error or page still loading it is sure of (at 0.7) gets a plain line
   above the snapshot, with what to do. A CAPTCHA is handed to the person,
   never solved. The result also names the page's title and address, which it
-  used to drop. Labelled in `bun run eval:context`. Jev does not pre-rank
-  the elements to act on: clicks resolve by role and name on the live page,
-  the snapshot is already the candidate list, and ranking would need the
-  Turn's goal, which the tool does not see. When a page lists more than 12 controls,
+  used to drop. Labelled in `bun run eval:context`. When a page lists more
+  than 12 controls,
   the same call is given what the person asked this Turn and up to 40 of
   them, and names up to three it is sure (at 0.6) are the ones to use next,
   as a "Likely next" line. The snapshot always keeps every control.
