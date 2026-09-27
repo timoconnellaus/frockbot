@@ -74,6 +74,14 @@ _Avoid_: Environment, tier, edition, tenant
 The sign-in Package, behind `AuthPackageV1`: resolve an identity from a request, serve the sign-in and sign-out routes, and hand the native authorize page its identity step. Two builds, better-auth with Google and Cloudflare Access, each named by one chooser file the profile selects; a build carries only its own.
 _Avoid_: Auth provider, identity provider, login backend
 
+**Brand**:
+What a person sees that makes the product FrockBot or another: its name, the built-in model's name, icons, the palettes behind the named looks and, in the client, its Bot characters. A build-time seam (`#brand` on the server, `ClientBrand` in the client), never a runtime switch; where a deployment runs and who signs in belong to its Deployment profile instead ([ADR 0038](docs/adr/0038-white-label-deployments.md)).
+_Avoid_: Theme, skin, tenant
+
+**White-label**:
+A separate product built from FrockBot's published packages in its own repository, with its own profile, Brand and client application. Never a fork.
+_Avoid_: Fork, edition, reseller
+
 **Connection Type**:
 A Package-declared kind of configured external capability. Its authorization is explicitly `none`, `api-key`, `ambient-native`, or `grant`.
 _Avoid_: Plugin, provider account
