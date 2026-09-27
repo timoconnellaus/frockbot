@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/settings/billing.dart';
-import 'package:frockbot_native/shell/semantics.dart';
+import 'package:frockbot_client/settings/billing.dart';
+import 'package:frockbot_client/shell/semantics.dart';
 
 import 'navigation_test.dart' show identifiedBy;
 import 'settings_test.dart' show SettingsApi;

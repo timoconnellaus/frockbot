@@ -9,7 +9,9 @@ native = root / "apps/native"
 manifest = json.loads((native / "qualification.json").read_text())
 for name, expected in manifest["implementationSha256"].items():
     assert hashlib.sha256((native / name).read_bytes()).hexdigest() == expected, f"Native implementation changed: {name}; requalify and record the new digest"
-pubspec = (native / "pubspec.yaml").read_text()
+# The client package declares the dependencies; the application's lock resolves
+# the workspace they both belong to.
+pubspec = (native / "packages/frockbot_client/pubspec.yaml").read_text()
 lock = (native / "pubspec.lock").read_text()
 def check_pin(package, version):
     pin = re.escape(version)

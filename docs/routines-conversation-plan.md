@@ -79,7 +79,7 @@ instead. Same actions, no fields that write a Routine.
 
 A webhook key is still minted once and shown once, on the receipt. Rotate
 stays on the detail; the host still holds the banner
-(`apps/native/lib/routines/page.dart` `mintedKey`). A secret the authority
+(`apps/native/packages/frockbot_client/lib/routines/page.dart` `mintedKey`). A secret the authority
 minted once is still never in a document.
 
 Empty list: "Ask this Bot to set up a Routine." No FAB.
@@ -180,7 +180,7 @@ Product-visible. Leaves every existing Routine runnable.
 
 **Flutter**
 
-- Delete `apps/native/lib/routines/editor.dart` and the create/edit routes
+- Delete `apps/native/packages/frockbot_client/lib/routines/editor.dart` and the create/edit routes
   (`RoutineEditorPage`, `creating`, `editing`, `onOpenEditor`, New Routine).
 - Detail is host chrome over the same document, or a second projection the
   list opens. Prefer one document: list when no Routine is named, detail when

@@ -14,7 +14,7 @@
 // which is the flicker that made the old behaviour wrong.
 //
 // The receipt these tests are watching for is sent by `_readLatest` in
-// `apps/native/lib/shell/app_shell.dart`. The open chat's transcript calls it
+// `apps/native/packages/frockbot_client/lib/shell/app_shell.dart`. The open chat's transcript calls it
 // after every frame it draws and on every scroll, so it runs when a chat is
 // opened and again as each reply lands in the chat already on screen: the
 // unread fan-out repaints the shell, and the transcript with it. Both halves

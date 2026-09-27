@@ -2,9 +2,9 @@
 //
 // The client is Flutter, which paints to a canvas: there is no DOM of its own
 // to select. What there is instead is the engine's accessibility tree, held
-// open from the first frame (`apps/native/lib/main.dart` calls
+// open from the first frame (`apps/native/packages/frockbot_client/lib/app.dart` calls
 // `ensureSemantics()` on web), and every widget a spec touches carries a
-// `Semantics(identifier:)` written once in `apps/native/lib/shell/
+// `Semantics(identifier:)` written once in `apps/native/packages/frockbot_client/lib/shell/
 // semantics.dart`. So a selector here is that identifier, and `sem()` is the
 // only way a spec reaches a widget.
 //

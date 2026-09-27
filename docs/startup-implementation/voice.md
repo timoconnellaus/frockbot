@@ -45,7 +45,7 @@ Engineering defaults: at most eight local due records and one external operation
 
 ## S6: Opening lifecycle
 
-**Entry points:** `onMessage`, `onCustomMessage`, `startCall`, `openSession`, `wakeSession`, `applySwitch`, `onSessionClosed` and `GeminiSessionV1` in [voice-assistant.ts](../../apps/cloudflare/src/voice-assistant.ts); [voice shared protocol](../../app/voice/shared.ts), [Gemini encoder/decoder](../../app/voice/gemini-live.ts), [upstream socket helper](../../apps/cloudflare/src/voice-dictation.ts); Flutter [assistant](../../apps/native/lib/voice/assistant.dart), [protocol](../../apps/native/lib/voice/protocol.dart), speech gate and player.
+**Entry points:** `onMessage`, `onCustomMessage`, `startCall`, `openSession`, `wakeSession`, `applySwitch`, `onSessionClosed` and `GeminiSessionV1` in [voice-assistant.ts](../../apps/cloudflare/src/voice-assistant.ts); [voice shared protocol](../../app/voice/shared.ts), [Gemini encoder/decoder](../../app/voice/gemini-live.ts), [upstream socket helper](../../apps/cloudflare/src/voice-dictation.ts); Flutter [assistant](../../apps/native/packages/frockbot_client/lib/voice/assistant.dart), [protocol](../../apps/native/packages/frockbot_client/lib/voice/protocol.dart), speech gate and player.
 
 ### Opening attempt and controls
 

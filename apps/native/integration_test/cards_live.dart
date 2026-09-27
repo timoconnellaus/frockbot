@@ -11,6 +11,8 @@
 library;
 
 import 'package:integration_test/integration_test.dart';
+import 'package:frockbot_client/brand.dart';
+import 'package:frockbot_native/brand.dart';
 
 import '../test/cards_data_test.dart' as data;
 import '../test/cards_example_test.dart' as example;
@@ -23,6 +25,7 @@ import '../test/cards_structure_test.dart' as structure;
 
 void main() {
   IntegrationTestWidgetsFlutterBinding.ensureInitialized();
+  installClientBrand(frockbotBrand);
   structure.main();
   row.main();
   data.main();

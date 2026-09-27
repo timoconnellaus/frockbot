@@ -268,14 +268,26 @@ async function stageFallbackFonts(payload: string): Promise<string[]> {
 }
 
 /**
- * The Dart sources, the assets, and the page template the build reads.
+ * The Dart sources, the assets, and the page template the build reads: the
+ * application's and those of the client package it depends on.
  *
  * `build/` and `.dart_tool/` are the build's own outputs, and the platform
  * directories belong to the phone builds; nothing under them reaches the web
  * bundle.
  */
-const SOURCE_ROOTS = ["lib", "web", "assets", "vendor"];
-const SOURCE_FILES = ["pubspec.yaml", "pubspec.lock"];
+const SOURCE_ROOTS = [
+  "lib",
+  "web",
+  "assets",
+  "vendor",
+  "packages/frockbot_client/lib",
+  "packages/frockbot_client/assets",
+];
+const SOURCE_FILES = [
+  "pubspec.yaml",
+  "pubspec.lock",
+  "packages/frockbot_client/pubspec.yaml",
+];
 
 async function sourceFingerprint(defines: string[]): Promise<string> {
   const digest = createHash("sha256");

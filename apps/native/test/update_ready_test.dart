@@ -9,11 +9,11 @@ import 'package:flutter/foundation.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/shell/semantics.dart';
-import 'package:frockbot_native/client/plain_store.dart';
-import 'package:frockbot_native/client/store.dart';
-import 'package:frockbot_native/update/app_version.dart';
-import 'package:frockbot_native/update/update_ready.dart';
+import 'package:frockbot_client/shell/semantics.dart';
+import 'package:frockbot_client/client/plain_store.dart';
+import 'package:frockbot_client/client/store.dart';
+import 'package:frockbot_client/update/app_version.dart';
+import 'package:frockbot_client/update/update_ready.dart';
 
 class FakeUpdateService implements MobileUpdateService {
   final List<MobileUpdateStatus> statuses;

@@ -10,7 +10,7 @@ import 'package:flutter/foundation.dart'
     show debugDefaultTargetPlatformOverride;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 void main() {
   test('the dark window is #15151e, and it is the theme that says so', () {

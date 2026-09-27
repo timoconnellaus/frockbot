@@ -2,18 +2,18 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/transport.dart' show RequestFailure;
-import 'package:frockbot_native/flock/avatar.dart';
-import 'package:frockbot_native/groups/api.dart';
-import 'package:frockbot_native/groups/faces.dart';
-import 'package:frockbot_native/groups/lines.dart';
-import 'package:frockbot_native/groups/model.dart';
-import 'package:frockbot_native/groups/pane.dart';
-import 'package:frockbot_native/groups/thread.dart';
-import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
-import 'package:frockbot_native/shell/semantics.dart';
-import 'package:frockbot_native/shell/sidebar.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/client/transport.dart' show RequestFailure;
+import 'package:frockbot_client/flock/avatar.dart';
+import 'package:frockbot_client/groups/api.dart';
+import 'package:frockbot_client/groups/faces.dart';
+import 'package:frockbot_client/groups/lines.dart';
+import 'package:frockbot_client/groups/model.dart';
+import 'package:frockbot_client/groups/pane.dart';
+import 'package:frockbot_client/groups/thread.dart';
+import 'package:frockbot_client/protocol/client_wire.generated.dart' as wire;
+import 'package:frockbot_client/shell/semantics.dart';
+import 'package:frockbot_client/shell/sidebar.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 import 'groups_test.dart'
     show GroupApi, at, event, groupId, page, record, text, view;

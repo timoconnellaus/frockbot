@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/shell/person_avatar.dart';
-import 'package:frockbot_native/shell/semantics.dart';
-import 'package:frockbot_native/shell/sidebar.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/shell/person_avatar.dart';
+import 'package:frockbot_client/shell/semantics.dart';
+import 'package:frockbot_client/shell/sidebar.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 Finder identifiedBy(String id) => find.byWidgetPredicate(
   (widget) => widget is Semantics && widget.properties.identifier == id,

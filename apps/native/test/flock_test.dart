@@ -2,12 +2,12 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/flock/create.dart';
-import 'package:frockbot_native/flock/lifecycle.dart';
-import 'package:frockbot_native/flock/avatar.dart';
-import 'package:frockbot_native/theme/dialogs.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/flock/create.dart';
+import 'package:frockbot_client/flock/lifecycle.dart';
+import 'package:frockbot_client/flock/avatar.dart';
+import 'package:frockbot_client/theme/dialogs.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 import 'settings_test.dart' show SettingsApi;
 import 'widget_test.dart' show MemoryStore;

@@ -3,7 +3,7 @@
 // The hosted WebUI is the product UI on every platform (`AGENTS.md`, "One
 // production path"), so the phone is not a separate client: it is this same
 // Flutter bundle at a 390pt viewport. Below 640 the shell is one column
-// (`apps/native/lib/shell/desktop_layout.dart`): the Bot list is the first
+// (`apps/native/packages/frockbot_client/lib/shell/desktop_layout.dart`): the Bot list is the first
 // screen, a conversation is a page over it, and everything the right panel
 // held is a page too — and this spec measures what that costs rather than
 // eyeballing it.

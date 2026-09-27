@@ -9,6 +9,7 @@ on:
     paths:
       - "apps/native/ios/**"
       - "apps/native/pubspec.yaml"
+      - "apps/native/packages/frockbot_client/pubspec.yaml"
       - "apps/native/pubspec.lock"
       - "apps/native/vendor/**"
       - "scripts/native-app-icon.swift"

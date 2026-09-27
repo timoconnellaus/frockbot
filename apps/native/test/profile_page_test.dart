@@ -6,8 +6,8 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/shell/profile_page.dart';
-import 'package:frockbot_native/shell/semantics.dart';
+import 'package:frockbot_client/shell/profile_page.dart';
+import 'package:frockbot_client/shell/semantics.dart';
 
 void main() {
   Widget page() => MaterialApp(

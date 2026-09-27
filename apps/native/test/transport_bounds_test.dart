@@ -1,7 +1,7 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
-import 'package:frockbot_native/update/app_version.dart';
+import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/protocol/client_wire.generated.dart' as wire;
+import 'package:frockbot_client/update/app_version.dart';
 
 void main() {
   test('this build speaks a protocol its own deployment serves', () {

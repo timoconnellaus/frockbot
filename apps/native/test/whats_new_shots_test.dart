@@ -5,11 +5,11 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/shell/semantics.dart';
-import 'package:frockbot_native/shell/sidebar.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
-import 'package:frockbot_native/whats_new/feed.dart';
-import 'package:frockbot_native/whats_new/page.dart';
+import 'package:frockbot_client/shell/semantics.dart';
+import 'package:frockbot_client/shell/sidebar.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
+import 'package:frockbot_client/whats_new/feed.dart';
+import 'package:frockbot_client/whats_new/page.dart';
 
 import 'navigation_test.dart' show DirectoryApi, identifiedBy;
 import 'widget_test.dart' show MemoryStore;

@@ -6,15 +6,15 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/cards/catalog.dart';
-import 'package:frockbot_native/cards/chat_card.dart';
-import 'package:frockbot_native/cards/client.dart';
-import 'package:frockbot_native/cards/frock_catalog/frock_catalog.dart';
-import 'package:frockbot_native/cards/surface.dart';
-import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/shell/transcript_model.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
-import 'package:frockbot_native/view/embed.dart';
+import 'package:frockbot_client/cards/catalog.dart';
+import 'package:frockbot_client/cards/chat_card.dart';
+import 'package:frockbot_client/cards/client.dart';
+import 'package:frockbot_client/cards/frock_catalog/frock_catalog.dart';
+import 'package:frockbot_client/cards/surface.dart';
+import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/shell/transcript_model.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
+import 'package:frockbot_client/view/embed.dart';
 
 import 'settings_test.dart' show SettingsApi;
 import 'widget_test.dart' show MemoryStore;
@@ -113,10 +113,10 @@ const cardVisualOutput = String.fromEnvironment('CARD_VISUAL_OUTPUT');
 /// The app's own typeface, so a captured card is read rather than measured.
 /// `flutter test` draws every glyph as a block otherwise.
 Future<void> loadInter() async {
-  final loader = FontLoader('Inter');
+  final loader = FontLoader(interFontFamily);
   for (final weight in [400, 500, 600, 700]) {
     loader.addFont(
-      File('assets/fonts/inter-latin-$weight.ttf')
+      File('packages/frockbot_client/assets/fonts/inter-latin-$weight.ttf')
           .readAsBytes()
           .then((bytes) => ByteData.view(Uint8List.fromList(bytes).buffer)),
     );

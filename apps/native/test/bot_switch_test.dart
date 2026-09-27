@@ -4,14 +4,14 @@ import 'dart:io';
 
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/bot_sessions.dart';
-import 'package:frockbot_native/client/chat_controller.dart';
-import 'package:frockbot_native/client/page_cache.dart';
-import 'package:frockbot_native/client/plain_store.dart';
-import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/main.dart';
-import 'package:frockbot_native/shell/chat_header.dart';
-import 'package:frockbot_native/shell/semantics.dart';
+import 'package:frockbot_client/client/bot_sessions.dart';
+import 'package:frockbot_client/client/chat_controller.dart';
+import 'package:frockbot_client/client/page_cache.dart';
+import 'package:frockbot_client/client/plain_store.dart';
+import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/app.dart';
+import 'package:frockbot_client/shell/chat_header.dart';
+import 'package:frockbot_client/shell/semantics.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'navigation_test.dart' show identifiedBy;

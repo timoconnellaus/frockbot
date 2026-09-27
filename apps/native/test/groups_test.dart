@@ -2,14 +2,14 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/chat_controller.dart'
+import 'package:frockbot_client/client/chat_controller.dart'
     show ConnectionState;
-import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/groups/api.dart';
-import 'package:frockbot_native/groups/channel.dart';
-import 'package:frockbot_native/groups/directory.dart';
-import 'package:frockbot_native/groups/model.dart';
-import 'package:frockbot_native/groups/thread.dart';
+import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/groups/api.dart';
+import 'package:frockbot_client/groups/channel.dart';
+import 'package:frockbot_client/groups/directory.dart';
+import 'package:frockbot_client/groups/model.dart';
+import 'package:frockbot_client/groups/thread.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'native_session.dart';

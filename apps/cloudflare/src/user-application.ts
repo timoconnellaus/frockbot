@@ -104,7 +104,7 @@ function hostedIsAdmin(request: Request): boolean {
  *
  * A browser's session is a cookie it cannot see, so the account is stamped
  * onto the document the Worker renders and the Flutter app adopts it on its
- * first frame (`apps/native/lib/client/identity_web.dart`) rather than
+ * first frame (`apps/native/packages/frockbot_client/lib/client/identity_web.dart`) rather than
  * flashing the sign-in door at someone who is already signed in. The identity
  * read still happens; this is what it confirms.
  */

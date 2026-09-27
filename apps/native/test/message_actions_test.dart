@@ -1,9 +1,9 @@
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/shell/message_actions.dart';
-import 'package:frockbot_native/shell/transcript.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/shell/message_actions.dart';
+import 'package:frockbot_client/shell/transcript.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 void main() {
   Widget conversation(void Function(String?) selected, {bool busy = false}) =>

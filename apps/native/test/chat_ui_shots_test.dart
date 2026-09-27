@@ -12,14 +12,14 @@ import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart' show FontLoader, rootBundle;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/attachments.dart';
-import 'package:frockbot_native/client/chat_controller.dart';
-import 'package:frockbot_native/client/image_prep.dart';
-import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/shell/chat_header.dart';
-import 'package:frockbot_native/shell/chat_pane.dart';
-import 'package:frockbot_native/shell/skill_menu.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/client/attachments.dart';
+import 'package:frockbot_client/client/chat_controller.dart';
+import 'package:frockbot_client/client/image_prep.dart';
+import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/shell/chat_header.dart';
+import 'package:frockbot_client/shell/chat_pane.dart';
+import 'package:frockbot_client/shell/skill_menu.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 import 'skill_popover_reopen_test.dart' show SilentApi, VoidStore;
 import 'widget_test.dart' show MemoryStore;
@@ -33,9 +33,9 @@ const _scale = int.fromEnvironment('CHAT_SHOTS_SCALE', defaultValue: 2);
 final _boundary = GlobalKey();
 
 Future<void> _loadFonts() async {
-  final inter = FontLoader('Inter');
+  final inter = FontLoader(interFontFamily);
   for (final weight in [400, 500, 600, 700]) {
-    inter.addFont(rootBundle.load('assets/fonts/inter-latin-$weight.ttf'));
+    inter.addFont(rootBundle.load('packages/frockbot_client/assets/fonts/inter-latin-$weight.ttf'));
   }
   await inter.load();
   await (FontLoader(
@@ -681,7 +681,7 @@ Future<Uint8List> _chart() async {
   );
   final title =
       (ui.ParagraphBuilder(
-              ui.ParagraphStyle(fontFamily: 'Inter', fontSize: 44),
+              ui.ParagraphStyle(fontFamily: interFontFamily, fontSize: 44),
             )
             ..pushStyle(
               ui.TextStyle(

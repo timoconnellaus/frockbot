@@ -1,9 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/computer/card.dart';
-import 'package:frockbot_native/computer/client.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/computer/card.dart';
+import 'package:frockbot_client/computer/client.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 import 'computer_test.dart' show projection;
 import 'settings_test.dart' show SettingsApi;

@@ -720,7 +720,7 @@ export const MESSAGE_TO_BOT_TOOL_NAME_V1 = `${FROCKBOT_NAMESPACE_V1}/${BOT_MESSA
  * The projection keeps the wrapper on the wire because that is what the
  * journal recorded, and the wrapper's input names the tool. This is the
  * spelling the Flutter transcript already puts in front of a person
- * (`_presentedToolCall` in `apps/native/lib/shell/transcript_model.dart`), so
+ * (`_presentedToolCall` in `apps/native/packages/frockbot_client/lib/shell/transcript_model.dart`), so
  * a name copied out of the Work view is the name the search index holds. The
  * audit classifier answers a different question — which tool ran, regardless
  * of how it is displayed — and strips the first-party namespace instead.

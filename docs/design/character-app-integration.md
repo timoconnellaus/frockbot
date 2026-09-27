@@ -19,13 +19,13 @@ still need to be established.
 
 ## What exists in the app
 
-- `apps/native/lib/flock/avatar.dart`: the shared Rive `CharacterAvatar`, full
+- `apps/native/packages/frockbot_client/lib/flock/avatar.dart`: the shared Rive `CharacterAvatar`, full
   cast catalogue, colour binding, activity/emotion inputs, reduced motion,
   still-image fallback and independent quiet-twitch timing. Gaze is fed by the
   surface that owns the pointer rather than read off the character's own
   square: `gaze` carries where to look, `hold` keeps the artboard from drawing
   while a nearby text field is being attached.
-- `apps/native/lib/flock/create.dart`: creation and editing for all eleven
+- `apps/native/packages/frockbot_client/lib/flock/create.dart`: creation and editing for all eleven
   characters plus curated colours.
 - The persisted `AvatarAppearanceV1` contains `characterId` and `primary`.
   Registration, templates, Bot-created Bots and identity updates share it.
@@ -69,10 +69,10 @@ working Bot still reads as working in the sidebar. Widget tests use the checked-
 Flutter's test renderer cannot host the Rive Native renderer; device and browser
 validation exercise the real `.riv` files.
 
-- `apps/native/lib/shell/transcript_model.dart`: turn status, pending state,
+- `apps/native/packages/frockbot_client/lib/shell/transcript_model.dart`: turn status, pending state,
   running tools, deliveries and errors. `run_view.dart` draws a Turn's
   receipts on the Work view. Sidebar summaries expose less detail than an open chat.
-- `apps/native/lib/shell/send_payload.dart`: pending approval records can supply
+- `apps/native/packages/frockbot_client/lib/shell/send_payload.dart`: pending approval records can supply
   an explicit needs-attention cue.
 - `apps/native/README.md`: one Flutter client serves web, Android and macOS;
   Flutter 3.47.0 / Dart 3.13.0 must remain pinned.

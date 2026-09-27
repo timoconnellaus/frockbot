@@ -9,7 +9,7 @@ import 'package:flutter_test/flutter_test.dart';
 void main() {
   test('connect.wav is the original confirm, without the silent tail', () async {
     TestWidgetsFlutterBinding.ensureInitialized();
-    final data = await rootBundle.load('assets/voice/connect.wav');
+    final data = await rootBundle.load('packages/frockbot_client/assets/voice/connect.wav');
     final bytes = data.buffer.asUint8List(
       data.offsetInBytes,
       data.lengthInBytes,

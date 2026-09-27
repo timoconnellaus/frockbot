@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/theme/document.dart';
+import 'package:frockbot_client/theme/document.dart';
 
 void main() {
   test('Ink, Paper, and Studio compile from the named look', () {

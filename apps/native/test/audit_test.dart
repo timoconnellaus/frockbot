@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/audit/activity.dart';
-import 'package:frockbot_native/audit/page.dart';
-import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/audit/activity.dart';
+import 'package:frockbot_client/audit/page.dart';
+import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/protocol/client_wire.generated.dart' as wire;
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 import 'native_session.dart';
 import 'widget_test.dart' show MemoryStore;

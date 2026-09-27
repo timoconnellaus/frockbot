@@ -1,7 +1,7 @@
 import 'dart:convert';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/cards/schema_client.dart';
+import 'package:frockbot_client/cards/schema_client.dart';
 import 'package:http/http.dart' as http;
 
 /// One document the client holds, read as a response — no network either way.

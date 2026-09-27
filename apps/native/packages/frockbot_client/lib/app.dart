@@ -1,0 +1,341 @@
+/// The app entry and the sign-in door.
+///
+/// An application calls [runFrockbot] with its brand; that is the whole of
+/// what makes it FrockBot or another product (ADR 0038).
+///
+/// Everything the person actually looks at is `lib/shell/`. This holds the
+/// three things that are true before any of it: the `MaterialApp`, the session
+/// — restoring one, completing one, ending one — and the deep link that names
+/// a Bot, which it hands to the shell rather than acting on itself.
+library;
+
+import 'dart:async';
+import 'dart:convert';
+
+import 'package:app_links/app_links.dart';
+import 'package:flutter/foundation.dart'
+    show TargetPlatform, defaultTargetPlatform, kIsWeb;
+import 'package:flutter/material.dart' hide ConnectionState;
+import 'package:rive/rive.dart' show RiveNative;
+
+import 'acceptance_metrics.dart';
+import 'activity/controller.dart';
+import 'auth/sign_in_page.dart';
+import 'brand.dart';
+import 'client/auth.dart';
+import 'client/bot_sessions.dart';
+import 'client/identity.dart';
+import 'client/plain_store.dart';
+import 'client/transport.dart';
+import 'connections/document.dart'
+    show
+        connectReturnNotice,
+        connectReturns,
+        isConnectReturnV1,
+        mcpSignInCompletionV1,
+        mcpSignInRefusalV1;
+import 'flock/avatar.dart' show riveRuntimeReady;
+import 'orientation.dart';
+import 'shell/app_shell.dart';
+import 'theme/frock_theme.dart';
+import 'update/desktop_update.dart';
+import 'update/update_ready.dart';
+import 'protocol/client_wire.generated.dart' as wire;
+
+Future<void> runFrockbot(ClientBrand brand) async {
+  installClientBrand(brand);
+  final binding = WidgetsFlutterBinding.ensureInitialized();
+  // Rive's animated characters need their runtime, but the app is not their
+  // waiting room: the first frame does not wait for it. Every avatar begins
+  // as its checked-in still and swaps to the artboard when the runtime lands.
+  // On the web the loader appends a `<script>` and awaits its `load` event,
+  // which a Content-Security-Policy refusal or a 404 never fires — so the
+  // deadline is what settles it then, and the stills simply stay. The outcome
+  // is recorded rather than dropped: a renderer asked for while the runtime
+  // is absent throws from inside `build`, and a thrown avatar is an empty
+  // slot with an error where the still should be.
+  unawaited(
+    RiveNative.init()
+        .timeout(const Duration(seconds: 10), onTimeout: () => false)
+        .catchError((Object _) => false)
+        .then((ready) => riveRuntimeReady.value = ready),
+  );
+  await setMobileOrientation();
+  // The browser draws to a canvas, so the accessibility tree is the only DOM
+  // there is: without it a screen reader sees an empty page and a browser test
+  // has nothing to select. The engine builds it lazily, behind a hidden
+  // "enable accessibility" button nobody should have to find, so the web build
+  // holds it open from the first frame. The phone's platform already asks for
+  // it when someone turns a screen reader on.
+  if (kIsWeb) binding.ensureSemantics();
+  AcceptanceMetrics.instance.start();
+  runApp(const FrockBotApp());
+}
+
+class FrockBotApp extends StatefulWidget {
+  final LocalStore? store;
+  final NativeApi? api;
+  final MobileUpdateService? updateService;
+
+  /// The desktop updater, where this build has one. Defaults to Sparkle on
+  /// macOS when the brand names a release channel, and to none otherwise.
+  final DesktopUpdater? desktopUpdater;
+  const FrockBotApp({
+    super.key,
+    this.store,
+    this.api,
+    this.updateService,
+    this.desktopUpdater,
+  });
+  @override
+  State<FrockBotApp> createState() => _FrockBotAppState();
+}
+
+class _FrockBotAppState extends State<FrockBotApp> {
+  final navigatorKey = GlobalKey<NavigatorState>();
+  final botLinks = ValueNotifier<String?>(null);
+  late final LocalStore store = widget.store ?? nativeStore();
+  late final NativeApi api = widget.api ?? NativeApi(store);
+  late final SignIn auth = signInV1(api, store);
+  late final BotSessions sessions = BotSessions(api: api, store: store);
+  late final MobileUpdateController updates = MobileUpdateController(
+    service:
+        widget.updateService ??
+        switch (clientBrand.releaseChannel) {
+          ClientReleaseChannel.shorebird => ShorebirdMobileUpdateService(),
+          null => const InertMobileUpdateService(),
+        },
+    beforeRestart: () => checkpointStore(store),
+  );
+  late final DesktopUpdateController? desktopUpdates =
+      switch (widget.desktopUpdater ??
+      (!kIsWeb &&
+              defaultTargetPlatform == TargetPlatform.macOS &&
+              clientBrand.releaseChannel != null
+          ? MacDesktopUpdater()
+          : null)) {
+        final DesktopUpdater updater => DesktopUpdateController(
+          updater: updater,
+          beforeRestart: () => checkpointStore(store),
+        ),
+        null => null,
+      };
+  StreamSubscription<Uri>? links;
+  String? userId = localDevelopment ? 'development' : null;
+  String? error;
+  bool busy = true;
+  bool awaitingBrowser = false;
+
+  @override
+  void initState() {
+    super.initState();
+    api.onSessionRejected = (message) => unawaited(forget(message));
+    links = AppLinks().uriLinkStream.listen(
+      (uri) => unawaited(accept(uri)),
+      onError: (Object _) {
+        if (mounted) {
+          setState(() {
+            error = 'Couldn’t open that sign-in link. Please try again.';
+          });
+        }
+      },
+    );
+    unawaited(restore());
+  }
+
+  Future<void> accept(Uri uri) async {
+    final target = botLink(uri);
+    if (target != null) {
+      botLinks.value = target;
+      return;
+    }
+    // A hosted door closing: the Marketplace is still where the person left
+    // it, and it reads its frame again to show what they did there. An MCP
+    // server's sign-in is finished here first, under this app's session.
+    if (isConnectReturnV1(uri)) {
+      String? refusal;
+      final completion = mcpSignInCompletionV1(uri);
+      if (completion != null) {
+        try {
+          await api.request(completion.path, body: completion.body);
+        } on RequestFailure catch (failure) {
+          refusal = mcpSignInRefusalV1(failure.status);
+        }
+      }
+      connectReturnNotice.value = refusal;
+      connectReturns.value += 1;
+      return;
+    }
+    try {
+      if (await auth.accept(uri)) {
+        navigatorKey.currentState?.popUntil((route) => route.isFirst);
+        sessions.clear();
+        if (mounted) setState(() => userId = null);
+        await restore();
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          error = 'Couldn’t finish signing in. Please try again.';
+          busy = false;
+        });
+      }
+    }
+  }
+
+  /// A stored session is adopted before the identity read, so the shell paints
+  /// its cached directory rather than the sign-in door on a cold start.
+  ///
+  /// The identity read happens either way. The phone carries its session as a
+  /// stored token; the browser carries it as an ambient cookie it cannot see,
+  /// and learns the account from the document the gateway rendered — the read
+  /// then confirms it.
+  Future<void> restore() async {
+    try {
+      // The browser's session is an ambient cookie it cannot read, but the
+      // document it was served names the account, so the shell paints before
+      // the identity read rather than after it.
+      final bootstrap = bootstrapUserIdV1();
+      if (bootstrap != null && mounted) setState(() => userId = bootstrap);
+      final savedSession = await store.read('session');
+      if (savedSession != null && !localDevelopment) {
+        api.adoptSession(savedSession);
+        final cached = wire.AuthSessionView.fromJson(jsonDecode(savedSession));
+        if (mounted) setState(() => userId = cached.userId.value);
+      }
+      final identity = wire.AuthIdentity.fromJson(
+        await api.request('/api/identity'),
+      );
+      if (mounted) {
+        setState(() {
+          userId = identity.userId.value;
+          error = null;
+        });
+      }
+    } on RequestFailure catch (failure) {
+      if (failure.status == 401) {
+        await forget(failure.message);
+      } else if (mounted) {
+        setState(() => error = failure.message);
+      }
+    } catch (_) {
+      if (mounted) {
+        setState(() => error = 'Couldn’t reach ${clientBrand.productName}. Please try again.');
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  /// Ends a session the gateway has stopped accepting.
+  ///
+  /// A bearer may expire or be revoked while the cached shell is still
+  /// perfectly readable. Keeping that shell open makes every transcript read
+  /// and state-channel reconnect look like a network outage, with no route
+  /// back to authentication. The rejected token is forgotten in memory first,
+  /// so a keystore that refuses the durable delete cannot hold the shell open,
+  /// and the refusal's own sentence says why sign-in is being asked for again
+  /// — where there was a session to lose, rather than to someone who has yet
+  /// to sign in at all.
+  Future<void> forget(String message) =>
+      forgetting ??= _forget(message).whenComplete(() => forgetting = null);
+  Future<void>? forgetting;
+
+  Future<void> _forget(String message) async {
+    final signedIn = userId != null;
+    api.adoptSession(null);
+    sessions.clear();
+    if (mounted) {
+      setState(() {
+        userId = null;
+        error = signedIn ? message : null;
+      });
+    }
+    try {
+      await store.delete('session');
+    } catch (_) {
+      // The token is already forgotten in memory; a keystore that cannot
+      // delete it will hand back nothing this client will adopt again.
+    }
+  }
+
+  Future<void> signIn() async {
+    setState(() {
+      busy = true;
+      error = null;
+    });
+    try {
+      await auth.start();
+      if (mounted) setState(() => awaitingBrowser = true);
+    } catch (failure) {
+      if (mounted) {
+        setState(() {
+          error = failure is RequestFailure
+              ? failure.message
+              : 'Couldn’t open sign-in. Please try again.';
+        });
+      }
+    } finally {
+      if (mounted) setState(() => busy = false);
+    }
+  }
+
+  Future<void> signOut() async {
+    try {
+      await auth.signOut();
+      sessions.clear();
+      if (mounted) setState(() => userId = null);
+    } catch (_) {
+      if (mounted) {
+        setState(() {
+          error = 'Couldn’t sign out. Please reconnect and try again.';
+        });
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) => MaterialApp(
+    title: clientBrand.productName,
+    navigatorKey: navigatorKey,
+    debugShowCheckedModeBanner: false,
+    theme: FrockTheme.theme(Brightness.light),
+    darkTheme: FrockTheme.theme(Brightness.dark),
+    themeMode: ThemeMode.dark,
+    builder: (context, child) {
+      final framed = UpdateReadyFrame(controller: updates, child: child!);
+      final desktop = desktopUpdates;
+      return desktop == null
+          ? framed
+          : DesktopUpdateFrame(controller: desktop, child: framed);
+    },
+    home: userId == null
+        ? SignInPage(
+            busy: busy,
+            awaitingBrowser: awaitingBrowser,
+            error: error,
+            onSignIn: signIn,
+          )
+        : AppShell(
+            key: ValueKey(userId),
+            api: api,
+            store: store,
+            sessions: sessions,
+            userId: userId!,
+            botLinks: botLinks,
+            onSignOut: signOut,
+            version: updates.version,
+          ),
+  );
+
+  @override
+  void dispose() {
+    unawaited(links?.cancel());
+    botLinks.dispose();
+    sessions.clear();
+    api.close();
+    updates.dispose();
+    desktopUpdates?.dispose();
+    super.dispose();
+  }
+}

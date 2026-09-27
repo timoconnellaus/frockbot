@@ -2,11 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/cards/chat_card.dart';
-import 'package:frockbot_native/cards/connections.dart';
-import 'package:frockbot_native/cards/frock_catalog/frock_catalog.dart';
-import 'package:frockbot_native/shell/connect_cards.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/cards/chat_card.dart';
+import 'package:frockbot_client/cards/connections.dart';
+import 'package:frockbot_client/cards/frock_catalog/frock_catalog.dart';
+import 'package:frockbot_client/shell/connect_cards.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 import 'cards_test.dart' show cardJson;
 import 'connections_test.dart' show connectionsFrame;

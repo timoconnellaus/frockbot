@@ -10,14 +10,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart' show FontLoader, rootBundle;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/groups/api.dart';
-import 'package:frockbot_native/groups/faces.dart';
-import 'package:frockbot_native/groups/model.dart';
-import 'package:frockbot_native/groups/pane.dart';
-import 'package:frockbot_native/groups/thread.dart';
-import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
-import 'package:frockbot_native/shell/sidebar.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/groups/api.dart';
+import 'package:frockbot_client/groups/faces.dart';
+import 'package:frockbot_client/groups/model.dart';
+import 'package:frockbot_client/groups/pane.dart';
+import 'package:frockbot_client/groups/thread.dart';
+import 'package:frockbot_client/protocol/client_wire.generated.dart' as wire;
+import 'package:frockbot_client/shell/sidebar.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 import 'groups_test.dart' show GroupApi, groupId, page, record, text;
 import 'widget_test.dart' show MemoryStore;
@@ -65,9 +65,9 @@ void main() {
   ) async {
     if (_out.isEmpty) return;
     await tester.runAsync(() async {
-      final inter = FontLoader('Inter');
+      final inter = FontLoader(interFontFamily);
       for (final weight in [400, 500, 600, 700]) {
-        inter.addFont(rootBundle.load('assets/fonts/inter-latin-$weight.ttf'));
+        inter.addFont(rootBundle.load('packages/frockbot_client/assets/fonts/inter-latin-$weight.ttf'));
       }
       await inter.load();
       await (FontLoader(

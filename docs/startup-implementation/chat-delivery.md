@@ -4,7 +4,7 @@ Read the [common rules](README.md). S5 depends on S2/S3's context, read-only sna
 
 ## S5: Committed updates
 
-**Entry points:** `sendToUser`/send commitment in [app/shell/agent.ts](../../app/shell/agent.ts), transaction hooks in [authority.ts](../../core/durable/authority.ts), [BotStateChannel](../../apps/cloudflare/src/bot-state-channel.ts), [run protocol](../../app/shell/run-protocol.ts), [wire schema](../../core/protocol-schemas/schema/client-wire.schema.json), and Flutter [state channel](../../apps/native/lib/client/state_channel.dart), [transport](../../apps/native/lib/client/transport.dart), [chat controller](../../apps/native/lib/client/chat_controller.dart), [transcript](../../apps/native/lib/shell/transcript.dart).
+**Entry points:** `sendToUser`/send commitment in [app/shell/agent.ts](../../app/shell/agent.ts), transaction hooks in [authority.ts](../../core/durable/authority.ts), [BotStateChannel](../../apps/cloudflare/src/bot-state-channel.ts), [run protocol](../../app/shell/run-protocol.ts), [wire schema](../../core/protocol-schemas/schema/client-wire.schema.json), and Flutter [state channel](../../apps/native/packages/frockbot_client/lib/client/state_channel.dart), [transport](../../apps/native/packages/frockbot_client/lib/client/transport.dart), [chat controller](../../apps/native/packages/frockbot_client/lib/client/chat_controller.dart), [transcript](../../apps/native/packages/frockbot_client/lib/shell/transcript.dart).
 
 ### Commit the visible projection and publication together
 

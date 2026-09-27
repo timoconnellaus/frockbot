@@ -1,8 +1,8 @@
 import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/flock/avatar.dart';
-import 'package:frockbot_native/groups/faces.dart';
+import 'package:frockbot_client/flock/avatar.dart';
+import 'package:frockbot_client/groups/faces.dart';
 
 /// A Bot drawn where the shell draws it at once: a square in the sidebar and
 /// the cropped companion in the header, beside another Bot's sidebar row.

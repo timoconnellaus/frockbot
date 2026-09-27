@@ -12,11 +12,11 @@ import 'dart:math' as math;
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/shell/composer.dart';
-import 'package:frockbot_native/voice/capture.dart';
-import 'package:frockbot_native/voice/dictation.dart';
-import 'package:frockbot_native/voice/protocol.dart';
-import 'package:frockbot_native/voice/socket.dart';
+import 'package:frockbot_client/shell/composer.dart';
+import 'package:frockbot_client/voice/capture.dart';
+import 'package:frockbot_client/voice/dictation.dart';
+import 'package:frockbot_client/voice/protocol.dart';
+import 'package:frockbot_client/voice/socket.dart';
 
 import 'voice_fakes.dart';
 
@@ -225,7 +225,7 @@ void main() {
 
   test('a refused microphone says what to do about it', () async {
     final harness = Harness();
-    harness.capture.failure = const MicrophoneDenied();
+    harness.capture.failure = MicrophoneDenied();
     await harness.controller.start('bot-a');
     await settle();
     expect(harness.controller.state, DictationState.error);

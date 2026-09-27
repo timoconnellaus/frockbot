@@ -53,7 +53,7 @@ describe("catalog provider registry", () => {
     const missing: string[] = [];
     for (const icon of icons) {
       const asset = new URL(
-        `../../apps/native/assets/connectors/${icon}.png`,
+        `../../apps/native/packages/frockbot_client/assets/connectors/${icon}.png`,
         import.meta.url,
       );
       if (!(await Bun.file(asset).exists())) missing.push(icon);

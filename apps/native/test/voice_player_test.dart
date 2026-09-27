@@ -1,6 +1,6 @@
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/voice/player.dart';
+import 'package:frockbot_client/voice/player.dart';
 
 const channel = MethodChannel('com.frockbot/pcm');
 

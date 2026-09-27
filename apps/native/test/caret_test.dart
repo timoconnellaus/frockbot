@@ -2,9 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart' show FontLoader, rootBundle;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/shell/composer.dart';
-import 'package:frockbot_native/theme/caret.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/shell/composer.dart';
+import 'package:frockbot_client/theme/caret.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 Widget _app(Widget child, TargetPlatform platform) => MaterialApp(
   theme: FrockTheme.theme(Brightness.dark).copyWith(platform: platform),
@@ -72,9 +72,9 @@ const _draft = 'a draft ending in f';
 
 void main() {
   setUpAll(() async {
-    final inter = FontLoader('Inter');
+    final inter = FontLoader(interFontFamily);
     for (final weight in [400, 500, 600, 700]) {
-      inter.addFont(rootBundle.load('assets/fonts/inter-latin-$weight.ttf'));
+      inter.addFont(rootBundle.load('packages/frockbot_client/assets/fonts/inter-latin-$weight.ttf'));
     }
     await inter.load();
   });

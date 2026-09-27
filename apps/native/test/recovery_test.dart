@@ -2,10 +2,10 @@ import 'dart:async';
 
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/chat_controller.dart';
-import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/shell/chat_pane.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/client/chat_controller.dart';
+import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/shell/chat_pane.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 import 'widget_test.dart' show MemoryStore, FakeTransport, running;
 

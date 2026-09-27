@@ -1,4 +1,4 @@
-import 'package:frockbot_native/client/transport.dart';
+import 'package:frockbot_client/client/transport.dart';
 
 /// A request-level client for native integration tests.
 ///
