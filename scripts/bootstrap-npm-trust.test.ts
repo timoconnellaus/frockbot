@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 
 import {
   bootstrap,
+  isAlreadyPublished,
   readWorkspacePackages,
   trustArguments,
   WORKFLOW_FILE,
@@ -16,6 +17,8 @@ function stubNpm(options: {
   calls: string[][];
   /** Records which calls were given the terminal, keyed by subcommand. */
   interactive?: Map<string, boolean>;
+  /** Published, but not yet readable: `view` says 404, `publish` says E403. */
+  unreadable?: Set<string>;
 }): CommandRunner {
   return async (command, args, runOptions) => {
     options.calls.push([command, ...args]);
@@ -32,6 +35,17 @@ function stubNpm(options: {
       return options.existing?.has(name)
         ? { ...ok, stdout: "0.0.0" }
         : { exitCode: 1, stdout: "", stderr: "E404" };
+    }
+    if (args[0] === "publish" && runOptions?.cwd) {
+      const manifest = await Bun.file(`${runOptions.cwd}/package.json`).json();
+      if (options.unreadable?.has(manifest.name)) {
+        return {
+          exitCode: 1,
+          stdout: "",
+          stderr:
+            "npm error code E403\nnpm error 403 403 Forbidden - PUT https://registry.npmjs.org/x - You cannot publish over the previously published versions: 0.0.0.\n",
+        };
+      }
     }
     return ok;
   };
@@ -212,5 +226,43 @@ describe("npm trusted publishing bootstrap", () => {
     expect(calls.filter((call) => call.includes("deprecate")).length).toBe(
       packages.length,
     );
+  });
+
+  test("a placeholder npm cannot show yet is taken as published, then trusted", async () => {
+    // A new package is not publicly readable for a few minutes, so a re-run
+    // in that window finds it missing and publishes again. npm refuses with
+    // E403 "cannot publish over", which means the work is already done.
+    const packages = readWorkspacePackages(root);
+    const fresh = packages[0]!.name;
+    const existing = new Set(
+      packages.map((entry) => entry.name).filter((name) => name !== fresh),
+    );
+    const calls: string[][] = [];
+    const result = await bootstrap({
+      root,
+      confirm: true,
+      run: stubNpm({ existing, unreadable: new Set([fresh]), calls }),
+      log: () => {},
+    });
+    expect(result).toMatchObject({ publishedCount: 0, trustedCount: 1 });
+    const trusted = calls.filter(
+      (call) => call[1] === "trust" && call[2] === "github",
+    );
+    expect(trusted).toHaveLength(1);
+    expect(trusted[0]).toContain(fresh);
+  });
+
+  test("only npm's cannot-publish-over refusal counts as published", () => {
+    expect(
+      isAlreadyPublished(
+        "npm error code E403\nnpm error 403 Forbidden - You cannot publish over the previously published versions: 0.0.0.",
+      ),
+    ).toBe(true);
+    expect(
+      isAlreadyPublished(
+        "npm error code E403\nnpm error 403 Forbidden - You do not have permission to publish",
+      ),
+    ).toBe(false);
+    expect(isAlreadyPublished("npm error code EOTP")).toBe(false);
   });
 });
