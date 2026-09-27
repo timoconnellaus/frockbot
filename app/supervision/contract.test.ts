@@ -378,6 +378,42 @@ describe("the Jev adapter's relay check", () => {
     ]);
   });
 
+  test("lets a word about work already given whole go by", async () => {
+    const seen: unknown[] = [];
+    const decision = await jevSupervisor(
+      jevFetch(
+        (answers) =>
+          "relay" in answers
+            ? {
+                wantsTheWork: { type: "noul", noul: 0.9 },
+                relay: choice(
+                  [
+                    "relays",
+                    "edits_as_asked",
+                    "unrelated",
+                    "describes",
+                    "condenses",
+                    "rewrites",
+                  ],
+                  "describes",
+                ),
+              }
+            : answers,
+        seen,
+      ),
+    ).reviewSend({
+      ...withWork,
+      shown: [`Here it is:\n\n${toast}`],
+      message: "It leans on the goat story. Want it shorter?",
+    });
+    expect(decision.send).toBe("release");
+    expect(
+      seen.map((body) =>
+        Object.keys((body as { questions: object }).questions),
+      ),
+    ).not.toContainEqual(["wantsTheWork", "relay"]);
+  });
+
   test("asks nothing about relay when no subagent worked this Turn", async () => {
     const seen: unknown[] = [];
     await jevSupervisor(jevFetch(undefined, seen)).reviewSend(sendEvidence);

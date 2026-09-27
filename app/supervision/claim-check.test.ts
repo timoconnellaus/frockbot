@@ -1,6 +1,11 @@
 import { expect, test } from "bun:test";
 import type { SendReviewEvidenceV1 } from "@frockbot/core/contracts";
-import { CLAIM_RECENT_ACTIONS_V1, claimEvidenceV1 } from "./claim-check.js";
+import {
+  CLAIM_RECENT_ACTIONS_V1,
+  FACTS_PAGE_CHARS_V1,
+  FACTS_PAGES_MAX_V1,
+  claimEvidenceV1,
+} from "./claim-check.js";
 
 const evidence = (
   priorResults: SendReviewEvidenceV1["priorResults"],
@@ -38,4 +43,28 @@ test("a long Turn's early calls still reach the claim check", () => {
       .slice(-CLAIM_RECENT_ACTIONS_V1)
       .every((action) => action.result.length === 241),
   ).toBe(true);
+});
+
+test("the facts check is told which pages it sees only part of", () => {
+  const page = (callId: string, content: string) => ({
+    callId,
+    tool: "web_fetch",
+    content,
+    isError: false,
+  });
+  const results = [
+    ...Array.from({ length: FACTS_PAGES_MAX_V1 }, (_, index) =>
+      page(`p${index}`, "Annual fee: A$715."),
+    ),
+    page("long", `${"x".repeat(FACTS_PAGE_CHARS_V1)} Joining fee: A$480.`),
+  ];
+
+  const judged = claimEvidenceV1(evidence(results));
+
+  expect(judged.pagesNotShown).toBe(1);
+  expect(judged.pagesThisTurn.map((shown) => shown.clipped)).toEqual([
+    false,
+    false,
+    true,
+  ]);
 });

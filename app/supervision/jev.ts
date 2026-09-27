@@ -23,6 +23,7 @@ import {
   reviewSendV1,
   sendReviewEvidenceV1,
   sendVetoV1,
+  workShownV1,
   RESPONSE_REVIEW_ATTEMPT_TIMEOUT_MS_V1,
   RESPONSE_REVIEW_MODEL_V1,
   RESPONSE_REVIEW_RETRY_V1,
@@ -151,7 +152,7 @@ export function createJevTurnSupervisorV1(
       try {
         // Work a subagent produced is judged first, and whatever the vetoes
         // say: a long message or a question can still be a rewrite of it.
-        if (evidence.work.length > 0) {
+        if (evidence.work.length > 0 && !workShownV1(evidence)) {
           const relay = await reviewRelayV1(
             options.client,
             relayEvidenceV1(evidence),

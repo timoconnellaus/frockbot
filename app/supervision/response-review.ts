@@ -545,6 +545,21 @@ export function relayEvidenceV1(
   };
 }
 
+/** Whether the latest work was already sent to the person whole this Turn. */
+export function workShownV1(evidence: SendReviewEvidenceV1): boolean {
+  const latest = evidence.work.at(-1);
+  if (latest === undefined) return false;
+  const work = squashSpace(latest);
+  return (
+    work.length > 0 &&
+    evidence.shown.some((shown) => squashSpace(shown).includes(work))
+  );
+}
+
+function squashSpace(text: string): string {
+  return text.replace(/\s+/g, " ").trim();
+}
+
 export function relayStateV1(
   evidence: RelayJudgmentEvidenceV1,
 ): Record<string, JsonValue> {

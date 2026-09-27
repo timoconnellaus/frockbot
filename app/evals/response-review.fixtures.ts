@@ -121,7 +121,9 @@ function claim(
       pagesThisTurn: (evidence.pages ?? []).map(([tool, text]) => ({
         tool,
         text,
+        clipped: false,
       })),
+      pagesNotShown: 0,
     },
     expected: { send },
   };
