@@ -21,6 +21,7 @@ import {
   type QuestionRouteReviewV1,
 } from "../supervision/question-route.js";
 import type {
+  OutcomeEvidenceV1,
   ProgressEvidenceV1,
   QuestionRouteEvidenceV1,
 } from "@frockbot/core/contracts";
@@ -31,6 +32,11 @@ import {
   type ClaimJudgmentEvidenceV1,
   type ClaimReviewV1,
 } from "../supervision/claim-check.js";
+import {
+  composeOutcomeDecisionV1,
+  outcomeStateV1,
+  type OutcomeReviewV1,
+} from "../supervision/outcome.js";
 import {
   composeProgressDecisionV1,
   progressStateV1,
@@ -102,7 +108,17 @@ export interface ProgressFixtureV1 {
   readonly expected: { readonly stuck: boolean };
 }
 
+/** A Turn as it stops: did it do what was asked, and why not? */
+export interface OutcomeFixtureV1 {
+  readonly kind: "outcome";
+  readonly name: string;
+  readonly intent: string;
+  readonly evidence: OutcomeEvidenceV1;
+  readonly expected: string;
+}
+
 export type ResponseReviewFixtureV1 =
+  | OutcomeFixtureV1
   | ResponseAlignmentFixtureV1
   | SendFixtureV1
   | RelayFixtureV1
@@ -194,6 +210,24 @@ export function gradeClaimV1(
   ];
 }
 
+export function gradeOutcomeV1(
+  fixture: OutcomeFixtureV1,
+  review: OutcomeReviewV1,
+): ResponseReviewCheckV1[] {
+  const decision = composeOutcomeDecisionV1({ answers: review.answers });
+  const actual = decision.cause
+    ? `${decision.status}:${decision.cause}`
+    : decision.status;
+  return [
+    {
+      question: "outcome",
+      expected: fixture.expected,
+      actual: `${actual} (status p ${round(review.answers.status.probabilities[review.answers.status.choice] ?? 0)})`,
+      passed: actual === fixture.expected,
+    },
+  ];
+}
+
 export function gradeProgressV1(
   fixture: ProgressFixtureV1,
   review: ProgressReviewV1,
@@ -251,7 +285,8 @@ export function responseReviewReportCaseV1(
           | RelayV1
           | QuestionRouteReviewV1
           | ClaimReviewV1
-          | ProgressReviewV1;
+          | ProgressReviewV1
+          | OutcomeReviewV1;
         readonly checks: readonly ResponseReviewCheckV1[];
       }
     | { readonly failure: unknown },
@@ -271,7 +306,9 @@ export function responseReviewReportCaseV1(
               ? claimStateV1(fixture.evidence)
               : fixture.kind === "progress"
                 ? progressStateV1(fixture.evidence)
-                : sendReviewStateV1(fixture.evidence),
+                : fixture.kind === "outcome"
+                  ? outcomeStateV1(fixture.evidence)
+                  : sendReviewStateV1(fixture.evidence),
     expected: fixture.expected,
   };
   if ("failure" in outcome)

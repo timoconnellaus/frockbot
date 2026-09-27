@@ -8,6 +8,7 @@ import type {
   Model,
   Provider,
 } from "@earendil-works/pi-ai";
+import { normalizeContext } from "@earendil-works/pi-ai";
 import { builtinProviders } from "@earendil-works/pi-ai/providers/all";
 import type { CredentialLeaseV1 } from "@frockbot/core/connection";
 import type { CredentialLeaseRuntime } from "@frockbot/app/credentials/user";
@@ -306,7 +307,9 @@ class CatalogProvider implements LlmProvider {
           decodeCatalogStreamV1(
             provider.streamSimple(
               model,
-              catalogContextV1(request, model, plan.instruction),
+              normalizeContext(
+                catalogContextV1(request, model, plan.instruction),
+              ),
               {
                 apiKey,
                 env,

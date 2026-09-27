@@ -406,6 +406,39 @@ export interface ProgressDecisionV1 {
   model?: string;
 }
 
+/** Why a Turn that ended short of what was asked ended there. */
+export const OUTCOME_CAUSES_V1 = [
+  "needs_person",
+  "tool_failed",
+  "missing_ability",
+  "going_in_circles",
+  "other",
+] as const;
+
+export type OutcomeCauseV1 = (typeof OUTCOME_CAUSES_V1)[number];
+
+/** A Turn that used tools, as it stops: what was asked, done and said. */
+export interface OutcomeEvidenceV1 {
+  objective: string;
+  origin: TurnInputOriginV1;
+  /** The Turn's calls, oldest first. */
+  actions: readonly LoopActionV1[];
+  /** What the person was shown this Turn, oldest first. */
+  shown: readonly string[];
+}
+
+/**
+ * Whether the Turn did what was asked, and why not when it did not. Read on
+ * `/api/debug`; nothing acts on it.
+ */
+export interface OutcomeDecisionV1 {
+  status: "done" | "partly" | "not_done";
+  /** Present exactly when the Turn did not finish what was asked. */
+  cause?: OutcomeCauseV1;
+  judgments: SupervisionJudgmentV1[];
+  model?: string;
+}
+
 /** A question a subagent asked, and what the person said before it came. */
 export interface QuestionRouteEvidenceV1 {
   question: string;
@@ -445,6 +478,11 @@ export interface TurnSupervisor {
     evidence: QuestionRouteEvidenceV1,
     signal?: AbortSignal,
   ): Promise<QuestionRouteV1>;
+  /** Whether a Turn that used tools did what was asked, as it stops. */
+  reviewOutcome(
+    evidence: OutcomeEvidenceV1,
+    signal?: AbortSignal,
+  ): Promise<OutcomeDecisionV1>;
   /** Whether a long Turn is still getting anywhere. */
   reviewProgress(
     evidence: ProgressEvidenceV1,
@@ -841,6 +879,34 @@ export function decodeQuestionRouteV1(
   };
 }
 
+export function decodeOutcomeDecisionV1(
+  value: unknown,
+  label = "outcome decision",
+): OutcomeDecisionV1 {
+  const decision = record(value, label);
+  exactKeys(decision, ["status", "judgments"], ["cause", "model"], label);
+  const status = oneOf(
+    decision.status,
+    ["done", "partly", "not_done"] as const,
+    `${label}.status`,
+  );
+  if ((status === "done") !== (decision.cause === undefined)) {
+    throw new Error(`${label}.cause must name why exactly when not done`);
+  }
+  return {
+    status,
+    ...(decision.cause === undefined
+      ? {}
+      : { cause: oneOf(decision.cause, OUTCOME_CAUSES_V1, `${label}.cause`) }),
+    judgments: decodeJudgmentsV1(decision.judgments, `${label}.judgments`),
+    ...(decision.model === undefined
+      ? {}
+      : {
+          model: text(decision.model, `${label}.model`, JUDGMENT_TEXT_MAX_V1),
+        }),
+  };
+}
+
 export function decodeProgressDecisionV1(
   value: unknown,
   label = "progress decision",
@@ -905,6 +971,7 @@ export function createFakeTurnSupervisorV1(options?: {
   reviewCall?: TurnSupervisor["reviewCall"];
   routeQuestion?: TurnSupervisor["routeQuestion"];
   reviewProgress?: TurnSupervisor["reviewProgress"];
+  reviewOutcome?: TurnSupervisor["reviewOutcome"];
 }): TurnSupervisor {
   return {
     async startTurn(evidence, signal) {
@@ -934,6 +1001,12 @@ export function createFakeTurnSupervisorV1(options?: {
       }
       return { answerer: "person", judgments: [] };
     },
+    async reviewOutcome(evidence, signal) {
+      throwIfAborted(signal);
+      if (options?.reviewOutcome)
+        return options.reviewOutcome(evidence, signal);
+      return { status: "done", judgments: [] };
+    },
     async reviewProgress(evidence, signal) {
       throwIfAborted(signal);
       if (options?.reviewProgress) {
@@ -959,5 +1032,6 @@ export function createUnavailableTurnSupervisorV1(
     reviewCall: fail,
     routeQuestion: fail,
     reviewProgress: fail,
+    reviewOutcome: fail,
   };
 }

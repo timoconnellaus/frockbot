@@ -746,6 +746,25 @@ describe("the Jev adapter", () => {
     expect(attempts).toBe(2);
   });
 
+  test("judges an outcome in one attempt, never retrying", async () => {
+    let attempts = 0;
+    const supervisor = jevSupervisor(async () => {
+      attempts++;
+      return new Response("no", { status: 503 });
+    });
+    await expect(
+      supervisor.reviewOutcome({
+        objective: "Email Dana the March invoice.",
+        origin: "user",
+        actions: [
+          { tool: "web_fetch", arguments: "{}", result: "403", isError: true },
+        ],
+        shown: ["I couldn't reach it."],
+      }),
+    ).rejects.toBeInstanceOf(SupervisionUnavailableError);
+    expect(attempts).toBe(1);
+  });
+
   test("a second attempt that lands is the answer", async () => {
     let attempts = 0;
     const answer = jevFetch();

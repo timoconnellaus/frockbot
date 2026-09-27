@@ -3,6 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { TypeSafeClient } from "@typesafe-ai/sdk";
 import { responseReviewFixturesV1 } from "./response-review.fixtures.js";
 import {
+  gradeOutcomeV1,
   gradeClaimV1,
   gradeProgressV1,
   gradeQuestionV1,
@@ -22,6 +23,7 @@ import {
   PROGRESS_STUCK_NO_V1,
   reviewProgressV1,
 } from "../supervision/loop-health.js";
+import { reviewOutcomeV1 } from "../supervision/outcome.js";
 import {
   RESPONSE_REVIEW_ALIGNMENT_MIN_V1,
   RESPONSE_REVIEW_ATTEMPT_TIMEOUT_MS_V1,
@@ -105,6 +107,14 @@ async function runResponseReviewEvalV1() {
         entry = responseReviewReportCaseV1(fixture, {
           review,
           checks: gradeClaimV1(fixture, review),
+        });
+      } else if (fixture.kind === "outcome") {
+        const review = await reviewOutcomeV1(client, fixture.evidence, {
+          signal,
+        });
+        entry = responseReviewReportCaseV1(fixture, {
+          review,
+          checks: gradeOutcomeV1(fixture, review),
         });
       } else if (fixture.kind === "progress") {
         const review = await reviewProgressV1(client, fixture.evidence, {

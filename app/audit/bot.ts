@@ -72,6 +72,7 @@ export interface AuditProjectableRunV1 {
       decision?: string;
       reasonCode?: string;
       stuck?: boolean;
+      status?: string;
     };
   }[];
   /** Used only when an event carries no timestamp of its own. */

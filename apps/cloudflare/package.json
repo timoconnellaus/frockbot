@@ -29,7 +29,7 @@
   },
   "devDependencies": {
     "@cloudflare/vitest-plugin": "^1.1.10",
-    "@cloudflare/workers-types": "5.20260919.1",
+    "@cloudflare/workers-types": "5.20260920.1",
     "@playwright/test": "1.63.0",
     "@rive-app/flutter-native-wasm": "44.0.0",
     "@types/bun": "1.4.2",

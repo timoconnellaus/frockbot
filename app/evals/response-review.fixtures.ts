@@ -1,4 +1,5 @@
 import type {
+  OutcomeFixtureV1,
   ClaimFixtureV1,
   ProgressFixtureV1,
   QuestionFixtureV1,
@@ -160,6 +161,33 @@ function progress(
 }
 
 const TEST_RUN = '{"command":"bun test"}';
+
+function outcome(
+  name: string,
+  intent: string,
+  request: string,
+  actions: readonly (readonly [string, string, boolean])[],
+  shown: readonly string[],
+  expected: string,
+): OutcomeFixtureV1 {
+  return {
+    kind: "outcome",
+    name,
+    intent,
+    evidence: {
+      objective: request,
+      ...chat,
+      actions: actions.map(([tool, result, isError]) => ({
+        tool,
+        arguments: "{}",
+        result,
+        isError,
+      })),
+      shown,
+    },
+    expected,
+  };
+}
 
 export const responseReviewFixturesV1: readonly ResponseReviewFixtureV1[] = [
   send(
@@ -1043,5 +1071,53 @@ export const responseReviewFixturesV1: readonly ResponseReviewFixtureV1[] = [
       message: "The search results say Ester opens at 11:30am on Sundays.",
     },
     "withhold",
+  ),
+  outcome(
+    "outcome-sent",
+    "An email sent and reported is done.",
+    "Email Dana the March invoice.",
+    [
+      [
+        "email_owner",
+        "Sent to dana@example.com, subject: March invoice.",
+        false,
+      ],
+    ],
+    ["I've emailed Dana the March invoice."],
+    "done",
+  ),
+  outcome(
+    "outcome-bounced",
+    "A send that failed, reported honestly, is not done because a tool failed.",
+    "Email Dana the March invoice.",
+    [["email_owner", "SMTP 550: mailbox unavailable", true]],
+    ["I couldn't email Dana: her mailbox bounced it."],
+    "not_done:tool_failed",
+  ),
+  outcome(
+    "outcome-asks-which",
+    "Finding the tables and then asking which is part done, waiting on the person.",
+    "Book me a table for Friday night.",
+    [
+      [
+        "web_search",
+        "Ester: 7pm or 8:30pm available. Nomad: 7:30pm available.",
+        false,
+      ],
+    ],
+    ["Ester has 7pm or 8:30pm, Nomad has 7:30pm. Which would you like?"],
+    "partly:needs_person",
+  ),
+  outcome(
+    "outcome-half-the-list",
+    "Two of three items done is partly done.",
+    "Add milk, eggs and bread to my shopping list.",
+    [
+      ["list_add", "Added milk.", false],
+      ["list_add", "Added eggs.", false],
+      ["list_add", "The list service timed out.", true],
+    ],
+    ["Added milk and eggs; bread didn't go in, the list timed out."],
+    "partly:tool_failed",
   ),
 ];
