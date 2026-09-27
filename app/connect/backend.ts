@@ -38,6 +38,8 @@ import type { ConnectTriggerOfferV1 } from "./triggers.js";
 import { mcpReturnHandOffV1 } from "@frockbot/app/mcp/oauth";
 
 export interface ConnectGatewayHost {
+  /** What the return pages call the product. */
+  productName: string;
   executeConnection(
     userId: string,
     command: ConnectionCommandV1,
@@ -160,38 +162,42 @@ const APPLE_SCHEMES = {
 export function connectCallbackPageV1(
   client: ConnectionReturnClientV1 | undefined,
   origin: string,
+  productName: string,
   mcpAnswer?: URLSearchParams,
 ): Response {
-  const heading = "Back to FrockBot";
-  const footnote =
-    "FrockBot shows whether the app connected. If it did not, connect it again from the Marketplace.";
+  const product = productName;
+  const heading = `Back to ${product}`;
+  const footnote = `${product} shows whether the app connected. If it did not, connect it again from the Marketplace.`;
   if (client !== undefined && client !== "android") {
     const answer = mcpAnswer?.toString();
     const query = answer ? `?${answer}` : "";
     const target = `${APPLE_SCHEMES[client]}://${new URL(origin).host}${connectCallbackPathV1(client)}${query}`;
     return returnPageV1({
-      title: "Back to FrockBot",
+      productName,
+      title: heading,
       heading,
-      lead: "Your browser is handing you back to the FrockBot app. Once it opens, you can close this tab.",
-      status: "Opening FrockBot",
-      action: { label: "Open FrockBot", href: target, id: "open" },
+      lead: `Your browser is handing you back to the ${product} app. Once it opens, you can close this tab.`,
+      status: `Opening ${product}`,
+      action: { label: `Open ${product}`, href: target, id: "open" },
       footnote,
       script: `location.replace(${JSON.stringify(target)});`,
     });
   }
   if (client === "android") {
     return returnPageV1({
-      title: "Back to FrockBot",
+      productName,
+      title: heading,
       heading,
-      lead: "Head back to the FrockBot app. You can close this page.",
+      lead: `Head back to the ${product} app. You can close this page.`,
       footnote,
     });
   }
   return returnPageV1({
-    title: "Back to FrockBot",
+    productName,
+    title: heading,
     heading,
-    lead: "You can close this tab and return to FrockBot.",
-    action: { label: "Open FrockBot", href: `${origin}/` },
+    lead: `You can close this tab and return to ${product}.`,
+    action: { label: `Open ${product}`, href: `${origin}/` },
     footnote,
   });
 }
@@ -213,6 +219,7 @@ export function createConnectBackendContribution(
       return connectCallbackPageV1(
         client,
         url.origin,
+        host.productName,
         mcpReturnHandOffV1(url, true),
       );
     },

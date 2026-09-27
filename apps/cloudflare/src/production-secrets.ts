@@ -247,6 +247,10 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] 
       why: "Native sign-in returns, exactly as listed; production enables Android, macOS, the FrockBot Dev Mac and iOS.",
     },
     {
+      name: "NATIVE_APPS",
+      why: "The signed apps `assetlinks.json` and `apple-app-site-association` name, from the profile's `nativeApps`; production names the FrockBot Android and Apple apps.",
+    },
+    {
       name: "DEFAULT_APPLICATION_HASH",
       why: "A `vars` entry the deploy writes.",
     },

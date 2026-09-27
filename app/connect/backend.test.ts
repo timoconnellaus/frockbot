@@ -14,6 +14,7 @@ function contribution(
 ) {
   const commands: ConnectionCommandV1[] = [];
   const backend = createConnectBackendContribution({
+    productName: "FrockBot",
     executeConnection: (_userId, command) => {
       commands.push(command);
       return Promise.resolve(answer(command));
@@ -311,6 +312,7 @@ describe("Connected-app trigger routes", () => {
       },
     ];
     const backend = createConnectBackendContribution({
+      productName: "FrockBot",
       executeConnection: () => {
         throw new Error("unused");
       },
@@ -329,6 +331,7 @@ describe("Connected-app trigger routes", () => {
   test("accepts a signed trigger.message and refuses a miss", async () => {
     const events: unknown[] = [];
     const backend = createConnectBackendContribution({
+      productName: "FrockBot",
       executeConnection: () => {
         throw new Error("unused");
       },
@@ -380,6 +383,7 @@ describe("Connected-app trigger routes", () => {
 
   test("closes the door when the webhook secret is absent", async () => {
     const backend = createConnectBackendContribution({
+      productName: "FrockBot",
       executeConnection: () => {
         throw new Error("unused");
       },

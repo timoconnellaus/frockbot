@@ -1,7 +1,9 @@
-import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { parseJsoncV1 } from "./jsonc.ts";
+import { decodeBrandV1 } from "../../core/contracts/brand.ts";
 import {
+  PROFILE_DIRECTORY_V1,
   REPO_ROOT_V1,
   type DeploymentProfileV1,
   type DeploymentWorkerV1,
@@ -74,6 +76,17 @@ export const AUTH_PACKAGE_CHOOSERS_V1: Record<
 };
 
 /**
+ * The specifier the Worker imports its brand through
+ * ([ADR 0038](../../docs/adr/0038-white-label-deployments.md)).
+ *
+ * The same shape as `#auth-package`: `apps/cloudflare/package.json` maps it to
+ * FrockBot's brand, and a profile that names its own brand module gets an
+ * alias to that file. No alias is written otherwise, so the hosted and staging
+ * configs are unchanged by the seam.
+ */
+export const BRAND_ALIAS_V1 = "#brand";
+
+/**
  * Config values that name a file or directory. `wrangler -c <path>` resolves
  * each one against the config's own directory, so a generated config that
  * copied them verbatim would look for `src/index.ts` inside `.deployment/`.
@@ -85,6 +98,7 @@ const PATH_FIELDS_V1 = [
   // Written below as the app template's own relative path, then rewritten with
   // every other path so wrangler resolves it from `.deployment/` too.
   ["alias", AUTH_PACKAGE_ALIAS_V1],
+  ["alias", BRAND_ALIAS_V1],
 ] as const;
 
 export interface GenerateOptionsV1 {
@@ -101,6 +115,11 @@ export interface GenerateOptionsV1 {
    * than a profile field, the way `d1DatabaseId` is.
    */
   applicationHash?: string;
+  /**
+   * Where the profile file lives, which a `brand` path is relative to.
+   * `deployments/`, except in tests.
+   */
+  profileDirectory?: string;
   /** Where `.deployment/<name>/` is rooted. The repository, except in tests. */
   outputRoot?: string;
   repoRoot?: string;
@@ -207,7 +226,10 @@ function rewritePathsV1(
     const entry = entryAt(config, path);
     if (!entry) continue;
     const next = rewrite(entry.holder[entry.key]);
-    if (next !== undefined) entry.holder[entry.key] = next;
+    if (next === undefined) continue;
+    // esbuild reads an alias target without a leading dot as a package name.
+    entry.holder[entry.key] =
+      path[0] === "alias" && !next.startsWith(".") ? `./${next}` : next;
   }
   for (const database of asArray(config.d1_databases)) {
     const next = rewrite(database.migrations_dir);
@@ -264,6 +286,46 @@ function bindingNamed(
   return entries.find((entry) => entry.binding === binding);
 }
 
+/**
+ * The brand module a profile names, as an absolute path, or undefined for
+ * FrockBot's own.
+ */
+export function profileBrandModuleV1(
+  profile: DeploymentProfileV1,
+  profileDirectory: string = PROFILE_DIRECTORY_V1,
+): string | undefined {
+  return profile.brand === undefined
+    ? undefined
+    : resolve(profileDirectory, profile.brand);
+}
+
+/**
+ * Load the brand module a profile names and hold it to `BrandV1`: every look
+ * through the ThemeDocument decoder and its contrast floor, and the icon a
+ * file the artifact build can read. This is the build-time refusal of a brand
+ * that would ship an unreadable look.
+ */
+export async function validateProfileBrandV1(
+  profile: DeploymentProfileV1,
+  profileDirectory: string = PROFILE_DIRECTORY_V1,
+): Promise<void> {
+  const module = profileBrandModuleV1(profile, profileDirectory);
+  if (module === undefined) return;
+  if (!existsSync(module)) {
+    throw new Error(
+      `Profile "${profile.name}" names the brand ${profile.brand}, and there is no ${module}`,
+    );
+  }
+  const loaded = (await import(module)) as { BRAND_V1?: unknown };
+  const brand = decodeBrandV1(loaded.BRAND_V1);
+  const icon = resolve(dirname(module), brand.iconPng);
+  if (!existsSync(icon)) {
+    throw new Error(
+      `The brand at ${module} names the icon ${icon}, which does not exist`,
+    );
+  }
+}
+
 function identityVarsV1(
   worker: DeployableWorkerV1,
   profile: DeploymentProfileV1,
@@ -283,6 +345,9 @@ function identityVarsV1(
     vars.ACCESS_AUD = profile.access.aud;
   }
   if (profile.email) vars.EMAIL_DOMAIN = profile.email.domain;
+  // A string rather than a JSON var, so it is read and decoded exactly like
+  // every other setting the Worker takes (`native-auth.ts`).
+  if (profile.nativeApps) vars.NATIVE_APPS = JSON.stringify(profile.nativeApps);
   return vars;
 }
 
@@ -395,6 +460,19 @@ export function generateWorkerConfigV1(
     config.alias = {
       ...((config.alias as Record<string, unknown>) ?? {}),
       [AUTH_PACKAGE_ALIAS_V1]: AUTH_PACKAGE_CHOOSERS_V1[profile.authPackage],
+    };
+  }
+
+  const brandModule =
+    worker === "app"
+      ? profileBrandModuleV1(profile, options.profileDirectory)
+      : undefined;
+  if (brandModule !== undefined) {
+    // Written relative to the template, like the auth alias above, and
+    // rewritten with every other path once the output directory is known.
+    config.alias = {
+      ...((config.alias as Record<string, unknown>) ?? {}),
+      [BRAND_ALIAS_V1]: relative(template.directory, brandModule),
     };
   }
 

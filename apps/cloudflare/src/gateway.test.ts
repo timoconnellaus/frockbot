@@ -1150,6 +1150,7 @@ function createTestGateway(
   },
   openBotStateChannel?: NonNullable<GatewayDependencies["openBotStateChannel"]>,
   voice?: GatewayDependencies["voice"],
+  whatsNew = true,
 ) {
   const loader = new DirectWorkerLoader();
   const states = new Map<string, MemoryBotState>();
@@ -1185,6 +1186,7 @@ function createTestGateway(
     },
     ...(openBotStateChannel ? { openBotStateChannel } : {}),
     ...(voice ? { voice } : {}),
+    whatsNew,
     backendContributions: [
       createFlockBackendContribution({
         listBots: (userId) => configurationFor(userId).listBots(),
@@ -2453,6 +2455,25 @@ describe("Cloudflare user application gateway", () => {
     expect(body.schemaVersion).toBe(1);
     expect(body.entries.length).toBeGreaterThan(0);
     expect(body.entries.map((entry) => entry.id)).toContain("whats-new");
+  });
+
+  test("a brand with What’s New off serves an empty feed", async () => {
+    const { gateway } = createTestGateway(
+      undefined,
+      unauthenticatedAuth,
+      true,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      false,
+    );
+    const feed = await gateway(request("/api/whats-new", "alice"));
+    expect(feed.status).toBe(200);
+    expect((await feed.json()) as object).toEqual({
+      schemaVersion: 1,
+      entries: [],
+    });
   });
 
   test("ignores development identity headers unless explicitly enabled", async () => {

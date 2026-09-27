@@ -110,12 +110,14 @@ import { createPanelFocusFeature } from "@frockbot/app/plugins/panel-focus";
 
 export { FOUNDATION_MODEL, FOUNDATION_PROVIDER };
 import {
-  FOUNDATION_PACKAGE_CATALOG_V1,
+  foundationPackageCatalogV1,
   FOUNDATION_PACKAGE_VERSION_V1,
+  type FoundationPackageBrandV1,
 } from "./packages.js";
 export {
-  FOUNDATION_PACKAGE_CATALOG_V1,
+  foundationPackageCatalogV1,
   FOUNDATION_PACKAGE_VERSION_V1,
+  type FoundationPackageBrandV1,
 } from "./packages.js";
 
 /** Everything a feature may register into, for one Turn. */
@@ -706,14 +708,18 @@ export function createFoundationSummariserRuntimePackage(
  * the factories that turn a Package id into a mounted feature. The Shell
  * reads no part of this application directly.
  */
-export const foundationShellApplicationV1: ShellApplicationV1 = {
-  packages: FOUNDATION_PACKAGE_CATALOG_V1.entries,
-  packageVersion: FOUNDATION_PACKAGE_VERSION_V1,
-  runtime: {
-    base: foundationBaseRuntimePackagesV1,
-    hosted: createFoundationHostedRuntimePackages,
-    enabled: createFoundationEnabledRuntimePackages,
-    model: createFoundationModelRuntimePackage,
-    summariser: createFoundationSummariserRuntimePackage,
-  },
-};
+export function foundationShellApplicationV1(
+  brand: FoundationPackageBrandV1,
+): ShellApplicationV1 {
+  return {
+    packages: foundationPackageCatalogV1(brand).entries,
+    packageVersion: FOUNDATION_PACKAGE_VERSION_V1,
+    runtime: {
+      base: foundationBaseRuntimePackagesV1,
+      hosted: createFoundationHostedRuntimePackages,
+      enabled: createFoundationEnabledRuntimePackages,
+      model: createFoundationModelRuntimePackage,
+      summariser: createFoundationSummariserRuntimePackage,
+    },
+  };
+}

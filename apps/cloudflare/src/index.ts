@@ -153,8 +153,10 @@ import {
   decodeUserFeaturesV1,
 } from "@frockbot/app/admin/shared";
 import { AUTH_PACKAGE_V1 } from "#auth-package";
+import { BRAND_V1 } from "#brand";
 import {
   createNativeAuth,
+  nativeAppsV1,
   NATIVE_RETURN_DEVELOPMENT,
   nativeReturnUris,
 } from "./native-auth.js";
@@ -262,6 +264,8 @@ interface Env {
   FCM_SERVICE_ACCOUNT?: string;
   /** Explicit qualification gate; not enabled by the production configuration. */
   NATIVE_SLICE_2_AUTH?: string;
+  /** The profile's `nativeApps`, as JSON: what the association files name. */
+  NATIVE_APPS?: string;
   USER_APPLICATIONS: WorkerLoader;
   // Bot-authored Package isolates, driven from the Bot Durable Object with
   // `globalOutbound` disabled (plan Step 4). A separate loader namespace from
@@ -1827,6 +1831,7 @@ function groupChatObject(env: Env, userId: string, groupId: string) {
 const createGatewayBackendContributions = (env: Env) =>
   createFoundationBackendContributions({
     backendHost: "gateway",
+    productName: BRAND_V1.productName,
     listGroupChats: async (userId: string) =>
       unwrapGroupRpcV1<GroupChatListV1>(
         await groupChatUser(env, userId).listGroupChats({
@@ -2694,6 +2699,8 @@ export default {
                       mayCreateIdentity(env, candidate),
                   }),
                   returnUris: nativeReturnUrisFor(env, env.BETTER_AUTH_URL),
+                  nativeApps: nativeAppsV1(env.NATIVE_APPS),
+                  productName: BRAND_V1.productName,
                   origin: env.BETTER_AUTH_URL,
                   // The development door signs the app in as the development
                   // identity in place of Google.
@@ -2759,6 +2766,7 @@ export default {
           debug: debugSurface(env),
           allowedClientOrigins: allowedClientOrigins(env),
           allowDevelopmentIdentity: env.ALLOW_DEVELOPMENT_AUTH === "true",
+          whatsNew: BRAND_V1.whatsNew,
         },
         timing,
       );

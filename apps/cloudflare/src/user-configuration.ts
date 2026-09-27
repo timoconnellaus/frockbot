@@ -320,6 +320,7 @@ import {
   createComputerHostV1,
 } from "./computer-host.js";
 import type { AuthPackageEnvironmentV1 } from "#auth-package";
+import { BRAND_V1 } from "#brand";
 import type { VoiceAssistant } from "./voice-assistant.js";
 import {
   InboundEmailUserStoreV1,
@@ -925,6 +926,7 @@ export class UserConfiguration
   private contributions(): Promise<MountedFoundationUserBackend> {
     if (!this.mounted) {
       this.mounted = createFoundationUserBackendContributions({
+        brand: BRAND_V1,
         storage: this.ctx.storage,
         machineSockets: durableObjectMachineSocketsV1(this.ctx),
         readSecret: (name) =>

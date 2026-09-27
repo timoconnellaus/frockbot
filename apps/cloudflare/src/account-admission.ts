@@ -1,3 +1,4 @@
+import { BRAND_V1 } from "#brand";
 import {
   ADMISSION_REFUSAL_COPY_V1,
   type AccountAccessV1,
@@ -106,8 +107,7 @@ export function identityMayBeCreatedV1(
   return mode === "invite-only" && request.emailVerified && invitation !== null;
 }
 
-export const ACCOUNT_ADMISSION_UNAVAILABLE_MESSAGE =
-  "FrockBot couldn't check this account's access. Try again in a moment.";
+export const ACCOUNT_ADMISSION_UNAVAILABLE_MESSAGE = `${BRAND_V1.productName} couldn't check this account's access. Try again in a moment.`;
 
 const NO_STORE = { "cache-control": "no-store" } as const;
 
@@ -140,11 +140,11 @@ export function admissionRefusedResponse(
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>FrockBot</title>
+  <title>${escapeHtml(BRAND_V1.productName)}</title>
 </head>
 <body>
   <main data-reason="${escapeHtml(reason)}">
-    <p>FrockBot</p>
+    <p>${escapeHtml(BRAND_V1.productName)}</p>
     <h1>${escapeHtml(copy.title)}</h1>
     <p>${escapeHtml(copy.detail)}</p>
     <a href="/sign-out">Sign out</a>

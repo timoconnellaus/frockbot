@@ -39,6 +39,7 @@ export {
   type BuiltInBotLookV1,
   type HexColorV1,
   type MeBubbleV1,
+  type NamedLookDocumentsV1,
   type NamedLookV1,
   type ThemeDocumentV1,
   type ThemePhaseV1,

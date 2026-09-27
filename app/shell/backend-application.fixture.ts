@@ -10,7 +10,10 @@ import { shellDefinitionV1 } from "./definition.js";
  */
 export function shellTestApplicationV1(): ShellApplicationV1 {
   return {
-    packages: [shellDefinitionV1, { id: "echo", displayName: "Echo" }],
+    packages: [
+      shellDefinitionV1("FrockBot"),
+      { id: "echo", displayName: "Echo" },
+    ],
     packageVersion: "0.0.1",
     runtime: {
       base: () => [],

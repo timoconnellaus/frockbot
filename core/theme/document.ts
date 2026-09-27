@@ -152,15 +152,16 @@ export const STUDIO_DOCUMENT_V1: ThemeDocumentV1 = {
   tokens: STUDIO_TOKENS_V1,
 };
 
-export function namedLookDocumentV1(look: NamedLookV1): ThemeDocumentV1 {
-  switch (look) {
-    case "ink":
-      return structuredClone(INK_DOCUMENT_V1);
-    case "paper":
-      return structuredClone(PAPER_DOCUMENT_V1);
-    case "studio":
-      return structuredClone(STUDIO_DOCUMENT_V1);
-  }
+/** The palette behind each named look, which the brand chooses. */
+export type NamedLookDocumentsV1 = Readonly<
+  Record<NamedLookV1, ThemeDocumentV1>
+>;
+
+export function namedLookDocumentV1(
+  look: NamedLookV1,
+  looks: NamedLookDocumentsV1,
+): ThemeDocumentV1 {
+  return structuredClone(looks[look]);
 }
 
 /** Resolve System against the OS, Ink/Paper as themselves. */
@@ -177,9 +178,10 @@ export function compileBotLookV1(
   look: BotLookV1,
   account: AccountLookV1,
   osDark: boolean,
+  looks: NamedLookDocumentsV1,
 ): ThemeDocumentV1 {
-  if (look === "studio") return namedLookDocumentV1("studio");
-  return namedLookDocumentV1(resolveAccountLookV1(account, osDark));
+  if (look === "studio") return namedLookDocumentV1("studio", looks);
+  return namedLookDocumentV1(resolveAccountLookV1(account, osDark), looks);
 }
 
 /** Tokens and phases, not the seed name — a Plugin patch keeps the seed look. */

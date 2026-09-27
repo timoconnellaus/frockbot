@@ -24,6 +24,7 @@ function gatewayFor(options: {
       }),
   };
   return createGateway({
+    whatsNew: true,
     loader: { get: unreached("loader") } as never,
     artifacts: { load: unreached("artifacts") },
     auth,

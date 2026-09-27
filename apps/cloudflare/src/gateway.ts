@@ -1,3 +1,4 @@
+import { BRAND_V1 } from "#brand";
 import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { settingsDocumentV1 } from "@frockbot/app/settings/document";
 import { connectionsCatalogQueryV1 } from "@frockbot/app/settings/frame";
@@ -575,9 +576,14 @@ export function createGateway(
     }
     if (url.pathname === "/api/whats-new") {
       if (request.method !== "GET") return jsonError(405, "method not allowed");
-      return Response.json(whatsNewFeedV1(whatsNewPublishedAtV1), {
-        headers: { "cache-control": "no-store" },
-      });
+      // FrockBot's release notes are FrockBot's: a brand that turns them off
+      // serves an empty feed, which every client already shows as nothing.
+      return Response.json(
+        dependencies.whatsNew
+          ? whatsNewFeedV1(whatsNewPublishedAtV1)
+          : { schemaVersion: 1, entries: [] },
+        { headers: { "cache-control": "no-store" } },
+      );
     }
 
     if (url.pathname === "/api/push/device") {
@@ -1132,7 +1138,10 @@ export function createGateway(
               url.searchParams.has("view") &&
               url.searchParams.get("view") !== "2"
             )
-              return jsonError(426, "Refresh FrockBot to update Settings.");
+              return jsonError(
+                426,
+                `Refresh ${BRAND_V1.productName} to update Settings.`,
+              );
             return Response.json(
               settingsProjection(
                 await dependencies
@@ -1191,7 +1200,10 @@ export function createGateway(
           (Object.hasOwn(command.values ?? {}, "account-model") ||
             command.unset?.includes("account-model"))
         ) {
-          return jsonError(426, "Refresh FrockBot to update Models.");
+          return jsonError(
+            426,
+            `Refresh ${BRAND_V1.productName} to update Models.`,
+          );
         }
         if (command.type === "user/set-platform-model") {
           return jsonError(

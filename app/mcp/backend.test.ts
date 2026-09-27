@@ -26,6 +26,7 @@ function harness(
 ) {
   const executed: { userId: string; command: ConnectionCommandV1 }[] = [];
   const routes = createMcpBackendContribution({
+    productName: "FrockBot",
     mcpSignInKeyring: keyring,
     now: () => now,
     executeConnection: async (userId, command) => {

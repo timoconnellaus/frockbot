@@ -65,6 +65,8 @@ export async function nativeHeaders(userId: string) {
     secret: env.BETTER_AUTH_SECRET,
     origin: NATIVE_ORIGIN,
     returnUris: [NATIVE_RETURN_ANDROID],
+    nativeApps: { android: [], apple: [] },
+    productName: "FrockBot",
     auth: {
       getSession: async () => ({ user: { id: userId } }),
       startSignIn: async () => new Response(null, { status: 404 }),

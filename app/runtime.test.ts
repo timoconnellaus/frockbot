@@ -6,9 +6,13 @@ import {
   createFoundationHostedRuntimePackages,
   createFoundationModelRuntimePackage,
   foundationBaseRuntimePackagesV1,
-  FOUNDATION_PACKAGE_CATALOG_V1,
+  foundationPackageCatalogV1,
 } from "./runtime.js";
 import { foundationDefaultPackageIds } from "./user.js";
+import { TEST_BRAND_NAMES_V1 } from "@frockbot/app/testkit";
+
+const FOUNDATION_PACKAGE_CATALOG_V1 =
+  foundationPackageCatalogV1(TEST_BRAND_NAMES_V1);
 
 describe("foundation application", () => {
   test("lists every Package this deployment ships, once", () => {
@@ -59,7 +63,9 @@ describe("foundation application", () => {
   });
 
   test("seeds a default-disabled Package and its dependencies", () => {
-    const packageIds = foundationDefaultPackageIds();
+    const packageIds = foundationDefaultPackageIds(
+      FOUNDATION_PACKAGE_CATALOG_V1,
+    );
 
     expect(packageIds.has("provider-ollama-cloud")).toBe(true);
     expect(packageIds.has("settings")).toBe(true);
@@ -205,6 +211,7 @@ describe("foundation application", () => {
   test("resolves declared backend and enabled runtime Contributions through host seams", async () => {
     const backend = await createFoundationBackendContributions({
       backendHost: "gateway",
+      productName: TEST_BRAND_NAMES_V1.productName,
       listBots: () =>
         Promise.resolve({ schemaVersion: 1, revision: 0, bots: [] }),
       createBot: () =>

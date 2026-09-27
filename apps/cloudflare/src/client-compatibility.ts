@@ -4,9 +4,10 @@ import {
   SUPPORTED_PROTOCOL_MIN,
   isProtocolValue,
 } from "@frockbot/core/protocol-schemas";
+import { BRAND_V1 } from "#brand";
 
 export const CLIENT_HELLO_HEADER = "x-frockbot-client";
-export const UPDATE_APP_MESSAGE = "Update the app to continue using FrockBot.";
+export const UPDATE_APP_MESSAGE = `Update the app to continue using ${BRAND_V1.productName}.`;
 
 /** Version selection is compatibility, never authentication or a capability grant. */
 export function clientCompatibilityResponse(

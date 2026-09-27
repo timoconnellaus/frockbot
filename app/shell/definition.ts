@@ -1,8 +1,8 @@
 import type { PackageDefinitionV1 } from "@frockbot/core/contracts";
 
-export const shellDefinitionV1: PackageDefinitionV1 = {
+/** The Shell's manifest, all but its name. */
+export const SHELL_PACKAGE_V1 = {
   id: "shell",
-  displayName: "FrockBot",
   capabilities: [
     {
       id: "user-voice",
@@ -23,4 +23,10 @@ export const shellDefinitionV1: PackageDefinitionV1 = {
   ],
   dependencies: ["ui-theme"],
   platformOwned: true,
-};
+} satisfies Omit<PackageDefinitionV1, "displayName">;
+
+/** The Shell is the product itself, so it carries the brand's name. */
+export function shellDefinitionV1(productName: string): PackageDefinitionV1 {
+  const { id, ...rest } = SHELL_PACKAGE_V1;
+  return { id, displayName: productName, ...rest };
+}

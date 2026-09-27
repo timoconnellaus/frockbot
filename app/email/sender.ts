@@ -121,10 +121,14 @@ const DISPLAY_NAME_MAX_V1 = 80;
  * of exact addresses), so the domain is held here: a `from` anywhere else is
  * refused before the binding is reached.
  */
-export function createBindingEmailSenderV1(env: {
-  SEND_EMAIL?: EmailBindingV1;
-  EMAIL_DOMAIN?: string;
-}): EmailSenderV1 | undefined {
+export function createBindingEmailSenderV1(
+  env: {
+    SEND_EMAIL?: EmailBindingV1;
+    EMAIL_DOMAIN?: string;
+  },
+  /** The brand's sender name, for a message whose own name is left empty. */
+  senderName: string,
+): EmailSenderV1 | undefined {
   const binding = env.SEND_EMAIL;
   const domain = env.EMAIL_DOMAIN?.trim().toLowerCase();
   if (!binding || !domain) return undefined;
@@ -141,10 +145,11 @@ export function createBindingEmailSenderV1(env: {
       // The binding writes the header from these parts; what is left to keep
       // out of it is a control character and a name long enough to be a
       // message.
-      const name = request.from.name
-        .replace(/[\p{Cc}\p{Cf}]+/gu, " ")
-        .trim()
-        .slice(0, DISPLAY_NAME_MAX_V1);
+      const name =
+        request.from.name
+          .replace(/[\p{Cc}\p{Cf}]+/gu, " ")
+          .trim()
+          .slice(0, DISPLAY_NAME_MAX_V1) || senderName;
       try {
         const { messageId } = await binding.send({
           from: { email: address, name },

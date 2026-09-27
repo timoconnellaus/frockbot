@@ -5,7 +5,10 @@ import {
 } from "@frockbot/core/configuration";
 import type { WorkerLoader } from "./contracts.js";
 import { randomAvatarAppearanceV1 } from "@frockbot/app/flock/shared";
-import { FOUNDATION_PACKAGE_CATALOG_V1 } from "@frockbot/app/packages";
+import { foundationPackageCatalogV1 } from "@frockbot/app/packages";
+import { BRAND_V1 } from "#brand";
+
+const FOUNDATION_PACKAGE_CATALOG_V1 = foundationPackageCatalogV1(BRAND_V1);
 
 // `mock.module` is process-global and the first registration in a suite run
 // fixes the module's shape, so this stub has to satisfy every consumer the run

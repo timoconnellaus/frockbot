@@ -1,6 +1,8 @@
 import { readFile, rm } from "node:fs/promises";
-import { resolve } from "node:path";
+import { dirname, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { decodeBrandV1 } from "@frockbot/core/contracts";
+import { BRAND_V1 } from "#brand";
 
 const root = fileURLToPath(new URL(".", import.meta.url));
 const outdir = resolve(root, "dist/artifacts");
@@ -22,10 +24,13 @@ try {
   throw new Error("Flutter web client was not built", { cause: error });
 }
 
-// The hosted shell serves the site icon the marketing site already serves,
-// read from the one canonical brand icon the app-icon script also renders.
+// The brand is validated here, where a build can still refuse it: every look
+// through the ThemeDocument decoder and its contrast floor. Its icon is a path
+// beside the brand module, which the shell serves as the site icon.
+const brand = decodeBrandV1(BRAND_V1);
+const brandModule = fileURLToPath(import.meta.resolve("#brand"));
 const clientIcon = await readFile(
-  resolve(root, "../../assets/marketing/app-icon/frockbot-icon-64.png"),
+  resolve(dirname(brandModule), brand.iconPng),
   "base64",
 );
 

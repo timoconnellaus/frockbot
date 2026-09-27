@@ -79,6 +79,8 @@ interface FrockAiUserSettingsHost {
 interface FrockAiUserBackendHost {
   storage: FrockAiUserSettingsStorage;
   settings: FrockAiUserSettingsHost;
+  /** What a person sees the ambient Connection called: the brand's model name. */
+  connectionName: string;
 }
 
 interface StoredBootstrapV1 {
@@ -127,12 +129,12 @@ function decodeStoredCommand(input: unknown): StoredCommandV1 {
   };
 }
 
-function ambientConnection(): ConnectionView {
+function ambientConnection(displayName: string): ConnectionView {
   return {
     connectionId: FROCK_AI_CONNECTION_ID,
     packageId: FROCK_AI_PACKAGE_ID,
     connectionTypeId: FROCK_AI_CONNECTION_TYPE_ID,
-    displayName: "Frock AI",
+    displayName,
     state: "ready",
     generation: FROCK_AI_CONNECTION_GENERATION,
     providerType: FROCK_AI_PROVIDER_TYPE,
@@ -229,7 +231,7 @@ export class FrockAiUserBackendContribution implements UserConfigurationReadBoot
 
       let connection = await this.host.settings.createConnection(
         userId,
-        ambientConnection(),
+        ambientConnection(this.host.connectionName),
         storage,
       );
       if (
@@ -243,7 +245,7 @@ export class FrockAiUserBackendContribution implements UserConfigurationReadBoot
           userId,
           FROCK_AI_CONNECTION_ID,
           connection.generation,
-          ambientConnection(),
+          ambientConnection(this.host.connectionName),
           storage,
         );
       }

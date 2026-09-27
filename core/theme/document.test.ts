@@ -15,6 +15,12 @@ import {
   themeDocumentsMatchV1,
 } from "./document.js";
 
+const LOOKS = {
+  ink: INK_DOCUMENT_V1,
+  paper: PAPER_DOCUMENT_V1,
+  studio: STUDIO_DOCUMENT_V1,
+};
+
 describe("named looks", () => {
   test("Ink, Paper and Studio each meet the contrast floor", () => {
     for (const document of [
@@ -28,11 +34,15 @@ describe("named looks", () => {
   });
 
   test("Inherit compiles the account look; Studio is its own document", () => {
-    expect(compileBotLookV1("inherit", "paper", true).look).toBe("paper");
-    expect(compileBotLookV1("inherit", "system", true).look).toBe("ink");
-    expect(compileBotLookV1("inherit", "system", false).look).toBe("paper");
-    expect(compileBotLookV1("studio", "ink", true)).toEqual(
-      namedLookDocumentV1("studio"),
+    expect(compileBotLookV1("inherit", "paper", true, LOOKS).look).toBe(
+      "paper",
+    );
+    expect(compileBotLookV1("inherit", "system", true, LOOKS).look).toBe("ink");
+    expect(compileBotLookV1("inherit", "system", false, LOOKS).look).toBe(
+      "paper",
+    );
+    expect(compileBotLookV1("studio", "ink", true, LOOKS)).toEqual(
+      namedLookDocumentV1("studio", LOOKS),
     );
   });
 

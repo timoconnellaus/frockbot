@@ -1,29 +1,34 @@
 import type { PackageDefinitionV1 } from "@frockbot/core/contracts";
 
-export const providerFlockAiDefinitionV1: PackageDefinitionV1 = {
-  id: "provider-flock-ai",
-  displayName: "Frock AI",
-  capabilities: [
-    {
-      id: "flock-ai-models",
-      kind: "model",
-      connectionTypes: ["flock-ai-account"],
-      admission: {
-        turnTypes: ["chat", "agent", "automation", "subagent"],
+/** The built-in model, named by the brand. */
+export function providerFlockAiDefinitionV1(
+  builtInModelName: string,
+): PackageDefinitionV1 {
+  return {
+    id: "provider-flock-ai",
+    displayName: builtInModelName,
+    capabilities: [
+      {
+        id: "flock-ai-models",
+        kind: "model",
+        connectionTypes: ["flock-ai-account"],
+        admission: {
+          turnTypes: ["chat", "agent", "automation", "subagent"],
+        },
       },
-    },
-  ],
-  connectionTypes: [
-    {
-      id: "flock-ai-account",
-      displayName: "Frock AI",
-      allowMultiple: false,
-      authorization: {
-        kind: "ambient-native",
+    ],
+    connectionTypes: [
+      {
+        id: "flock-ai-account",
+        displayName: builtInModelName,
+        allowMultiple: false,
+        authorization: {
+          kind: "ambient-native",
+        },
+        capabilities: ["flock-ai-models"],
       },
-      capabilities: ["flock-ai-models"],
-    },
-  ],
-  dependencies: ["settings"],
-  platformOwned: true,
-};
+    ],
+    dependencies: ["settings"],
+    platformOwned: true,
+  };
+}

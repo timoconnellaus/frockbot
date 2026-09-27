@@ -810,6 +810,8 @@ export interface GatewayDependencies {
   allowedClientOrigins?: string[];
   allowDevelopmentIdentity?: boolean;
   compatibilityDate?: string;
+  /** The brand's What's New switch: off, the feed is empty. */
+  whatsNew: boolean;
 }
 
 /** The two voice sockets and the probe the clients read before offering them. */

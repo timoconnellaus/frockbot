@@ -1,0 +1,30 @@
+/**
+ * FrockBot's brand: what the hosted deployment and every suite show a person.
+ *
+ * The Worker reaches it through `#brand`, which `apps/cloudflare/package.json`
+ * maps here. A profile that names its own brand module gets a generated
+ * wrangler config aliasing `#brand` to that file instead, the way `access`
+ * profiles alias `#auth-package` ([ADR 0038](../../../docs/adr/0038-white-label-deployments.md)).
+ * Only the Worker imports this; app code is handed the brand as data.
+ */
+import type { BrandV1 } from "@frockbot/core/contracts";
+import {
+  INK_DOCUMENT_V1,
+  PAPER_DOCUMENT_V1,
+  STUDIO_DOCUMENT_V1,
+} from "@frockbot/core/theme";
+
+export const BRAND_V1: BrandV1 = {
+  schemaVersion: 1,
+  productName: "FrockBot",
+  builtInModelName: "Frock AI",
+  emailSenderName: "FrockBot",
+  // The one canonical icon the marketing site and the app-icon script share.
+  iconPng: "../../../assets/marketing/app-icon/frockbot-icon-64.png",
+  looks: {
+    ink: INK_DOCUMENT_V1,
+    paper: PAPER_DOCUMENT_V1,
+    studio: STUDIO_DOCUMENT_V1,
+  },
+  whatsNew: true,
+};

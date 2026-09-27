@@ -237,7 +237,11 @@ class FakeSettings {
 function fixture() {
   const storage = new MemoryStorage();
   const settings = new FakeSettings();
-  const frockAi = createFrockAiUserBackendContribution({ storage, settings });
+  const frockAi = createFrockAiUserBackendContribution({
+    storage,
+    settings,
+    connectionName: "Frock AI",
+  });
   settings.registerConfigurationReadBootstrap(frockAi);
   return { storage, settings };
 }

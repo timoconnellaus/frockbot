@@ -1,5 +1,5 @@
 // The branded page a person lands on in their browser when a hosted flow
-// hands them back to FrockBot: the app's own sign-in, or an app's sign-in
+// hands them back to the product: the app's own sign-in, or an app's sign-in
 // through Connect. One template, so every return reads as one product.
 //
 // The page loads nothing from anywhere: the icon is inlined, the styles are
@@ -11,6 +11,8 @@ import { RETURN_PAGE_LOGO_V1 } from "./return-page-logo.js";
 export { RETURN_PAGE_LOGO_V1 };
 
 export interface ReturnPageV1 {
+  /** The product the page belongs to: the brand's name. */
+  productName: string;
   /** The document title. */
   title: string;
   heading: string;
@@ -157,7 +159,7 @@ ${page.script}
 <body>
 <main>
   <img class="icon" src="${RETURN_PAGE_LOGO_V1}" alt="" width="88" height="88">
-  <p class="brand">FrockBot</p>
+  <p class="brand">${escape(page.productName)}</p>
   <h1>${escape(page.heading)}</h1>
   <p>${escape(page.lead)}</p>${status}${action}${form}
   <small>${escape(page.footnote)}</small>

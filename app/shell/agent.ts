@@ -44,7 +44,7 @@ import {
 import { compactionScopeV1, compactionWorkV1 } from "./compaction-scheduler.js";
 import { SUMMARY_EFFECT_PREFIX_V1 } from "@frockbot/app/billing/model";
 import { conversationDeliveryHooksV1 } from "./delivery.js";
-import { shellDefinitionV1 } from "./definition.js";
+import { SHELL_PACKAGE_V1 } from "./definition.js";
 import {
   drawFirstPartyCardV1,
   type SecretRequestTermsV1,
@@ -76,7 +76,7 @@ export const PARENT_HANDOFF_CAPABILITY_V1 = "parent-handoff";
 export function shellAdmissionCeilingV1(
   capabilityId: string,
 ): readonly TurnTypeV1[] | undefined {
-  return packageAdmissionCeilingV1(shellDefinitionV1, capabilityId);
+  return packageAdmissionCeilingV1(SHELL_PACKAGE_V1, capabilityId);
 }
 
 function refusal(reason: string): ToolExecutionResult {
