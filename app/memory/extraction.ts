@@ -114,6 +114,7 @@ export function parseMemoryExtractionV1(
     if (typeof memory !== "object" || memory === null) continue;
     const { text: raw, kind } = memory as { text?: unknown; kind?: unknown };
     if (typeof raw !== "string") continue;
+    if (kind !== "fact" && kind !== "experience") continue;
     const fact = raw.trim();
     if (fact.length === 0 || fact.length > MEMORY_EXTRACTION_FACT_CHARS_V1) {
       continue;
@@ -123,7 +124,7 @@ export function parseMemoryExtractionV1(
     seen.add(key);
     proposals.push({
       text: fact,
-      kind: kind === "experience" ? "experience" : "fact",
+      kind,
     });
   }
   return proposals;

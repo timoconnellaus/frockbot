@@ -1,7 +1,10 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { Database, type SQLQueryBindings } from "bun:sqlite";
 import { MemoryEngineV1 } from "./engine.ts";
-import { drainMemoryProcessingV1 } from "./processing.ts";
+import {
+  drainMemoryProcessingV1,
+  MemoryExtractionNotSentError,
+} from "./processing.ts";
 import type { MemoryProcessingAdaptersV1 } from "./processing.ts";
 import {
   groupChatScopeV1,
@@ -757,6 +760,56 @@ describe("wakeup, eviction and isolation", () => {
       engine.inspectJobs().find((job) => job.kind === "extract")?.state,
     ).toBe("blocked");
     expect(engine.inspectRetention()[0]?.state).toBe("retained");
+  });
+
+  test("an extraction refused before it was sent waits and tries again; one that was sent is never repeated", async () => {
+    const { engine, time } = engineOf();
+    engine.captureExtraction({
+      authority: auth(),
+      scope: BOT,
+      principal: PRINCIPAL,
+      source: chatSource({ capturedText: "Tim lives in Wollongong." }),
+    });
+    let calls = 0;
+    const refused = await drainDue(engine, time, {
+      extract: async () => {
+        calls += 1;
+        throw new MemoryExtractionNotSentError("out of credit");
+      },
+    });
+    expect(refused.notes).toEqual(["not-sent"]);
+    expect(
+      engine.inspectJobs().find((job) => job.kind === "extract")?.state,
+    ).toBe("pending");
+    time.advance(60_000);
+    const sent = await drainDue(engine, time, {
+      extract: async () => {
+        calls += 1;
+        return [{ text: "Tim lives in Wollongong.", kind: "fact" as const }];
+      },
+    });
+    expect(sent.notes).toEqual(["model", "extracted"]);
+    expect(calls).toBe(2);
+    expect(
+      engine.inspectJobs().find((job) => job.kind === "extract")?.state,
+    ).toBe("done");
+
+    const other = engineOf();
+    other.engine.captureExtraction({
+      authority: auth(),
+      scope: BOT,
+      principal: PRINCIPAL,
+      source: chatSource({ capturedText: "Tim prefers aisle seats." }),
+    });
+    const lost = await drainDue(other.engine, other.time, {
+      extract: async () => {
+        throw new Error("the stream dropped");
+      },
+    });
+    expect(lost.notes).toEqual(["uncertain"]);
+    expect(
+      other.engine.inspectJobs().find((job) => job.kind === "extract")?.state,
+    ).toBe("blocked");
   });
 });
 

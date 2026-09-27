@@ -13,7 +13,10 @@ import {
 import { BilledLlmRegistry, type ModelBilling } from "../billing/model.js";
 import type { UsageAttributionV1 } from "../billing/ledger.js";
 import { createModelMemoryExtractorV1 } from "./extraction.js";
-import type { MemoryProcessingAdaptersV1 } from "./processing.js";
+import {
+  MemoryExtractionNotSentError,
+  type MemoryProcessingAdaptersV1,
+} from "./processing.js";
 
 /**
  * The deployment's extractor: the platform's summary model on the ambient
@@ -41,7 +44,7 @@ export function createHostedMemoryExtractorV1(host: {
       connectionId: FROCK_AI_CONNECTION_ID,
       connectionGeneration: FROCK_AI_CONNECTION_GENERATION,
     },
-    stream(request, dispatch, signal) {
+    async *stream(request, dispatch, signal) {
       const { principal } = dispatch;
       const hooks = new LoopHookListV1();
       const registry = host.billing
@@ -58,15 +61,27 @@ export function createHostedMemoryExtractorV1(host: {
             ),
           )
         : new LlmRegistry(hooks);
+      let sent = false;
       registry.register(
         createFrockAiProviderV1({
           connectionId: FROCK_AI_CONNECTION_ID,
           connectionGeneration: FROCK_AI_CONNECTION_GENERATION,
           autoRoute: gateway.autoRoute,
-          runChatCompletion: gateway.runChatCompletion,
+          runChatCompletion: (...args) => {
+            sent = true;
+            return gateway.runChatCompletion(...args);
+          },
         }),
       );
-      return registry.stream(request, signal);
+      try {
+        yield* registry.stream(request, signal);
+      } catch (error) {
+        if (sent) throw error;
+        throw new MemoryExtractionNotSentError(
+          "The memory extraction call was refused before it was sent.",
+          { cause: error },
+        );
+      }
     },
   });
 }

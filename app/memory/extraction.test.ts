@@ -8,6 +8,7 @@ import {
   parseMemoryExtractionV1,
 } from "./extraction.js";
 import { createHostedMemoryExtractorV1 } from "./extraction-host.js";
+import { MemoryExtractionNotSentError } from "./processing.js";
 import type { MemoryExtractionDispatchV1 } from "./processing.js";
 
 const dispatch: MemoryExtractionDispatchV1 = {
@@ -57,7 +58,6 @@ test("reads the memories, once each, and leaves out what is malformed", () => {
     ),
   ).toEqual([
     { text: "Tim moved to Thirroul in August.", kind: "experience" },
-    { text: "Tim prefers aisle seats.", kind: "fact" },
   ]);
   const many = {
     memories: Array.from({ length: 20 }, (_, index) => ({
@@ -145,4 +145,62 @@ test("the hosted extractor asks the summary model once, billed to the Turn as a 
     },
   ]);
   expect(settlements).toHaveLength(1);
+});
+
+test("a hosted extraction refused before it is sent says so, and nothing reaches the model", async () => {
+  const sent: unknown[] = [];
+  const extract = createHostedMemoryExtractorV1({
+    gateway: {
+      autoRoute: "flock-auto",
+      runChatCompletion: async (body) => {
+        sent.push(body);
+        throw new Error("must not be sent");
+      },
+    },
+    billing: (_userId, botId, sessionId) => ({
+      account: {
+        async reserve() {
+          throw new Error("This account is out of credit.");
+        },
+        async settle() {},
+      },
+      rates: async () =>
+        ({
+          schemaVersion: 1,
+          version: 3,
+          createdAt: "2026-09-27T00:00:00.000Z",
+          createdBy: "owner@example.com",
+          routes: {
+            "@frock/structured": {
+              inputMicrosPerToken: 1,
+              cachedInputMicrosPerToken: 0.5,
+              outputMicrosPerToken: 2,
+              maximumInputTokens: 4_000,
+              maximumOutputTokens: 800,
+            },
+          },
+          served: {},
+        }) as HostedModelRatesV1,
+      botId,
+      sessionId,
+    }),
+  })!;
+  await expect(extract(dispatch)).rejects.toBeInstanceOf(
+    MemoryExtractionNotSentError,
+  );
+  expect(sent).toHaveLength(0);
+});
+
+test("a hosted extraction that fails once sent is not reported as unsent", async () => {
+  const extract = createHostedMemoryExtractorV1({
+    gateway: {
+      autoRoute: "flock-auto",
+      runChatCompletion: async () => {
+        throw new Error("the connection dropped");
+      },
+    },
+  })!;
+  const error = await extract(dispatch).catch((caught: unknown) => caught);
+  expect(error).toBeInstanceOf(Error);
+  expect(error).not.toBeInstanceOf(MemoryExtractionNotSentError);
 });
