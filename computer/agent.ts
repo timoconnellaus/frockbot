@@ -148,12 +148,43 @@ export type ComputerPageStateV1 =
 
 /**
  * Reads what a page is showing from its address, title and accessibility
- * snapshot, already redacted. `undefined` when it cannot say.
+ * snapshot, already redacted, and, given what the Turn was asked and a long
+ * list of the page's controls, which of them to use next. `undefined` when it
+ * cannot say.
  */
 export type ComputerPageJudgeV1 = (
-  page: { url?: string; title?: string; snapshot: string },
+  page: {
+    url?: string;
+    title?: string;
+    snapshot: string;
+    /** What the person asked this Turn. */
+    goal?: string;
+    /** The page's controls as the snapshot names them, `role "name"`. */
+    elements?: readonly string[];
+  },
   signal?: AbortSignal,
-) => Promise<ComputerPageStateV1 | undefined>;
+) => Promise<
+  { state?: ComputerPageStateV1; next?: readonly string[] } | undefined
+>;
+
+/** Fewer controls than this, and the model reads them without help. */
+export const BROWSER_RANK_MIN_ELEMENTS_V1 = 12;
+
+/** The most controls one ranking reads, in page order. */
+export const BROWSER_RANK_MAX_ELEMENTS_V1 = 40;
+
+const INTERACTIVE_ROLES_V1 =
+  /^\s*-\s*(button|link|textbox|searchbox|checkbox|radio|combobox|menuitem|tab|option|switch|slider|spinbutton)\s+"([^"]+)"/;
+
+/** The page's controls, `role "name"`, once each, in page order. */
+export function browserElementsV1(snapshot: string): string[] {
+  const seen = new Set<string>();
+  for (const line of snapshot.split("\n")) {
+    const match = INTERACTIVE_ROLES_V1.exec(line);
+    if (match) seen.add(`${match[1]} "${match[2]}"`);
+  }
+  return [...seen];
+}
 
 const PAGE_STATE_NOTES_V1: Readonly<
   Record<Exclude<ComputerPageStateV1, "ready">, string>
@@ -178,16 +209,24 @@ export function browserResultTextV1(input: {
   title?: string;
   snapshot: string;
   state?: ComputerPageStateV1;
+  /** The controls a judge picked for what was asked; the snapshot keeps all. */
+  next?: readonly string[];
 }): string {
   const where = [input.title?.trim(), input.url?.trim()]
     .filter((part): part is string => !!part)
     .join(" — ");
-  return [
-    ...(where ? [`Page: ${where}`] : []),
+  const notes = [
     ...(input.state && input.state !== "ready"
       ? [PAGE_STATE_NOTES_V1[input.state]]
       : []),
-    ...(where || (input.state && input.state !== "ready") ? [""] : []),
+    ...(input.next && input.next.length > 0
+      ? [`Likely next for what was asked: ${input.next.join(", ")}`]
+      : []),
+  ];
+  return [
+    ...(where ? [`Page: ${where}`] : []),
+    ...notes,
+    ...(where || notes.length > 0 ? [""] : []),
     input.snapshot,
   ].join("\n");
 }
@@ -2194,6 +2233,21 @@ export function createComputerAgentFeature(
       }
     };
 
+    /** What the person asked in the Turn this call runs in. */
+    const turnGoal = (sessionId: string): string | undefined => {
+      const session = runtime.sessions.get(sessionId);
+      if (!session) return undefined;
+      const journal = session.activeRunJournal;
+      const turn = journal.findLast((event) => "turn" in event);
+      const current = turn && "turn" in turn ? turn.turn : undefined;
+      const said = journal.flatMap((event) =>
+        event.type === "user/message" && event.turn === current
+          ? [event.text]
+          : [],
+      );
+      return said.length > 0 ? said.join("\n\n").slice(0, 1_000) : undefined;
+    };
+
     const browserTool: ToolDefinition = {
       name: "computer_browser",
       namespace: "frockbot",
@@ -2280,11 +2334,26 @@ export function createComputerAgentFeature(
               ...(result.title ? { title: result.title } : {}),
               snapshot: result.accessibilitySnapshot,
             };
-            const state = await config.judgePage?.(page, context.signal);
+            // A long page's controls are ranked against what was asked; a
+            // short one's the model reads at a glance.
+            const elements = browserElementsV1(result.accessibilitySnapshot);
+            const goal = turnGoal(context.sessionId);
+            const ranked =
+              goal && elements.length > BROWSER_RANK_MIN_ELEMENTS_V1
+                ? {
+                    goal,
+                    elements: elements.slice(0, BROWSER_RANK_MAX_ELEMENTS_V1),
+                  }
+                : {};
+            const judged = await config.judgePage?.(
+              { ...page, ...ranked },
+              context.signal,
+            );
             return {
               content: browserResultTextV1({
                 ...page,
-                ...(state ? { state } : {}),
+                ...(judged?.state ? { state: judged.state } : {}),
+                ...(judged?.next ? { next: judged.next } : {}),
               }),
               isError: false,
             };
