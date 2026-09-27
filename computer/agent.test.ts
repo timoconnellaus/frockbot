@@ -11,6 +11,7 @@ import {
 } from "@frockbot/app/testkit";
 import { createFakeComputerHostV1 } from "@frockbot/computer/fake";
 import {
+  browserElementsV1,
   browserResultTextV1,
   COMPUTER_OVERLOADED_TOOL_MESSAGE_V1,
   createComputerAgentFeature,
@@ -856,7 +857,7 @@ describe("what a browser page is showing", () => {
         defaultProviderId: "fixture",
         judgePage: async (page) => {
           judged.push(page);
-          return "sign_in";
+          return { state: "sign_in" };
         },
       }),
     );
@@ -898,5 +899,50 @@ describe("what a browser page is showing", () => {
     expect(browserResultTextV1({ snapshot: "", state: "captcha" })).toContain(
       "Do not try to solve or get around it",
     );
+  });
+});
+
+describe("a long page's controls, against what was asked", () => {
+  const snapshot = [
+    "- banner:",
+    '  - link "Home"',
+    '  - searchbox "Search"',
+    ...Array.from({ length: 14 }, (_, index) => `  - link "Mug ${index}"`),
+    '  - button "Add to cart"',
+    '  - link "Cart"',
+  ].join("\n");
+
+  test("reads each control once, in page order", () => {
+    const elements = browserElementsV1(`${snapshot}\n  - link "Home"`);
+    expect(elements.slice(0, 3)).toEqual([
+      'link "Home"',
+      'searchbox "Search"',
+      'link "Mug 0"',
+    ]);
+    expect(elements).toHaveLength(18);
+  });
+
+  test("keeps a control's name whole when it quotes something", () => {
+    expect(
+      browserElementsV1('- button "Say \\"hi\\" back"\n- link "Home"'),
+    ).toEqual(['button "Say \\"hi\\" back"', 'link "Home"']);
+  });
+
+  test("names the likely next ones and keeps every control in the snapshot", () => {
+    expect(
+      browserResultTextV1({
+        url: "https://shop.example.com",
+        title: "Mugs",
+        snapshot,
+        state: "ready",
+        next: ['button "Add to cart"', 'link "Cart"'],
+      })
+        .split("\n")
+        .slice(0, 3),
+    ).toEqual([
+      "Page: Mugs — https://shop.example.com",
+      'Likely next for what was asked: button "Add to cart", link "Cart"',
+      "",
+    ]);
   });
 });

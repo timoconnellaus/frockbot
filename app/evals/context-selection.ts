@@ -5,6 +5,7 @@ import {
 } from "../supervision/memory-recall.js";
 import { routineAttributionV1 } from "../routines/inbox.js";
 import { createJevPageJudgeV1 } from "../supervision/page-state.js";
+import { browserElementsV1 } from "@frockbot/computer/agent";
 import { createJevCompactionChooserV1 } from "../supervision/compaction-choice.js";
 import type { CompactionItemV1 } from "../shell/compaction.js";
 import { judgeMemoryWriteV1 } from "../supervision/memory-write.js";
@@ -62,6 +63,10 @@ export type ContextFixtureV1 =
       readonly title: string;
       readonly snapshot: string;
       readonly expected: "ready" | "sign_in" | "captcha" | "error" | "loading";
+      /** What was asked, when the case ranks the page's controls. */
+      readonly goal?: string;
+      /** The controls named as likely next, best first. */
+      readonly next?: readonly string[];
     }
   | {
       readonly kind: "compaction";
@@ -135,16 +140,19 @@ export async function runContextCaseV1(
     };
   }
   if (fixture.kind === "page") {
-    const state = await createJevPageJudgeV1(client)({
+    const judged = await createJevPageJudgeV1(client)({
       url: fixture.url,
       title: fixture.title,
       snapshot: fixture.snapshot,
+      ...(fixture.goal
+        ? { goal: fixture.goal, elements: browserElementsV1(fixture.snapshot) }
+        : {}),
     });
-    return {
-      passed: state === fixture.expected,
-      expected: fixture.expected,
-      actual: state ?? "undecided",
-    };
+    const actual = judged
+      ? [judged.state ?? "ready", ...(judged.next ?? [])].join(" | ")
+      : "undecided";
+    const expected = [fixture.expected, ...(fixture.next ?? [])].join(" | ");
+    return { passed: actual === expected, expected, actual };
   }
   if (fixture.kind === "compaction") {
     const choices = await createJevCompactionChooserV1(client)(
@@ -210,6 +218,38 @@ const SKILLS: readonly SkillCandidateV1[] = [
 ];
 
 export const contextFixturesV1: readonly ContextFixtureV1[] = [
+  {
+    kind: "page",
+    name: "page-ranks-add-to-cart",
+    url: "https://shop.example.com/products/blue-ceramic-mug",
+    title: "Blue ceramic mug - Example Shop",
+    goal: "Add the blue ceramic mug to my cart.",
+    snapshot: [
+      "- banner:",
+      '  - link "Example Shop"',
+      '  - searchbox "Search products"',
+      '  - link "Sign in"',
+      '  - link "Cart (0)"',
+      "- navigation:",
+      '  - link "Mugs"',
+      '  - link "Plates"',
+      '  - link "Bowls"',
+      '  - link "Sale"',
+      "- main:",
+      '  - heading "Blue ceramic mug" [level=1]',
+      "  - text: A$24",
+      '  - combobox "Quantity"',
+      '  - button "Add to cart"',
+      '  - button "Add to wishlist"',
+      '  - link "Shipping and returns"',
+      '  - link "Write a review"',
+      "- contentinfo:",
+      '  - link "Contact"',
+      '  - link "Privacy"',
+    ].join("\n"),
+    expected: "ready",
+    next: ['button "Add to cart"'],
+  },
   {
     kind: "page",
     name: "page-a-news-article",
