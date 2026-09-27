@@ -101,15 +101,22 @@ const runCommand: CommandRunner = async (command, args, options) => {
   // call is given the terminal, and only the read-only probes whose output
   // this script has to parse are captured. npm answers the password once per
   // operation, not once per session, so this is not something a single
-  // sign-in up front can satisfy.
+  // sign-in up front can satisfy. Its stderr is still copied as it arrives,
+  // so a refusal can be read back without hiding the question.
   if (options?.interactive) {
     const child = Bun.spawn([command, ...args], {
       cwd: options.cwd,
       stdout: "inherit",
-      stderr: "inherit",
+      stderr: "pipe",
       stdin: "inherit",
     });
-    return { exitCode: await child.exited, stdout: "", stderr: "" };
+    const decoder = new TextDecoder();
+    let stderr = "";
+    for await (const chunk of child.stderr) {
+      process.stderr.write(chunk);
+      stderr += decoder.decode(chunk, { stream: true });
+    }
+    return { exitCode: await child.exited, stdout: "", stderr };
   }
 
   const child = Bun.spawn([command, ...args], {
@@ -137,7 +144,19 @@ async function packageExists(name: string, run: CommandRunner) {
   return result.exitCode === 0;
 }
 
-/** Publishes the placeholder that gives `npm trust` something to attach to. */
+/**
+ * npm's answer to publishing a version it already has. A package is not
+ * publicly readable for a few minutes after its first publish, so `npm view`
+ * calls it missing and a re-run in that window publishes it again.
+ */
+export function isAlreadyPublished(stderr: string) {
+  return /\bE403\b/.test(stderr) && /cannot publish over/i.test(stderr);
+}
+
+/**
+ * Publishes the placeholder that gives `npm trust` something to attach to.
+ * Answers false when npm already had it.
+ */
 async function publishPlaceholder(
   entry: WorkspacePackage,
   root: string,
@@ -170,6 +189,9 @@ async function publishPlaceholder(
       cwd: directory,
       interactive: true,
     });
+    if (published.exitCode !== 0 && isAlreadyPublished(published.stderr)) {
+      return false;
+    }
     if (published.exitCode !== 0) {
       throw new Error(
         `could not publish ${entry.name}; npm's output is above this message`,
@@ -185,6 +207,7 @@ async function publishPlaceholder(
       ],
       { interactive: true },
     );
+    return true;
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -259,8 +282,11 @@ export async function bootstrap(options: {
   for (const entry of work) {
     if (!onRegistry.has(entry.name)) {
       log(`  ${entry.name}: publishing placeholder`);
-      await publishPlaceholder(entry, options.root, run);
-      publishedCount += 1;
+      if (await publishPlaceholder(entry, options.root, run)) {
+        publishedCount += 1;
+      } else {
+        log(`  ${entry.name}: npm already has the placeholder`);
+      }
     }
 
     log(`  ${entry.name}: configuring trusted publisher`);
