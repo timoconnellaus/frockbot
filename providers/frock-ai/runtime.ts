@@ -270,6 +270,16 @@ class FrockAiProvider implements LlmProvider {
 }
 
 /**
+ * The provider alone, for model work outside a Turn's runtime: a background
+ * job that registers it on its own billed registry.
+ */
+export function createFrockAiProviderV1(
+  config: FrockAiRuntimeConfig,
+): LlmProvider {
+  return new FrockAiProvider(config);
+}
+
+/**
  * Frock AI as the summariser beside a Bot on another provider: the provider
  * alone, so its Auto fallback never touches the Bot's own requests. A Turn
  * already on Frock AI has the provider, and this mounts nothing.

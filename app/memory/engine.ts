@@ -1501,7 +1501,11 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
     return ok;
   }
 
-  retryClaimedJob(claim: MemoryClaimedJobV1, terminal: boolean): boolean {
+  retryClaimedJob(
+    claim: MemoryClaimedJobV1,
+    terminal: boolean,
+    options: { readonly undispatched?: boolean } = {},
+  ): boolean {
     this.open();
     const now = this.#now();
     const ok = this.#storage.transactionSync(() => {
@@ -1514,6 +1518,12 @@ export class MemoryEngineV1 implements MemoryOperationsV1 {
           claim.id,
         );
         return true;
+      }
+      if (options.undispatched) {
+        this.#sql.exec(
+          `UPDATE memory_job SET effect_ref = NULL WHERE id = ?`,
+          claim.id,
+        );
       }
       this.#sql.exec(
         `UPDATE memory_job

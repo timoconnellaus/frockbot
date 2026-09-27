@@ -131,6 +131,7 @@
     "./mcp/user": "./mcp/user.ts",
     "./memory": "./memory/index.ts",
     "./memory/agent": "./memory/agent.ts",
+    "./memory/extraction-host": "./memory/extraction-host.ts",
     "./memory/chunk-index": "./memory/chunk-index.ts",
     "./memory/cleanup": "./memory/cleanup.ts",
     "./memory/engine": "./memory/engine.ts",

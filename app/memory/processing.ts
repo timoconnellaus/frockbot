@@ -55,6 +55,9 @@ export interface MemoryProcessingAdaptersV1 {
   ) => Promise<{ status: "ok" } | { status: "refused"; reason: string }>;
 }
 
+/** An extractor's refusal before its call was sent: the job may try again. */
+export class MemoryExtractionNotSentError extends Error {}
+
 export interface MemoryDrainResultV1 {
   kind: "local" | "external" | "index" | "idle";
   processed: number;
@@ -183,7 +186,11 @@ async function drainExtract(
           scope: job.scope,
         })),
       ];
-    } catch {
+    } catch (error) {
+      if (error instanceof MemoryExtractionNotSentError) {
+        engine.retryClaimedJob(job, false, { undispatched: true });
+        return ["not-sent"];
+      }
       engine.completeClaimedJob(job, "blocked", {
         reason:
           "the model update was sent and its outcome is unknown; it is not repeated",
