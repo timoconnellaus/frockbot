@@ -18,10 +18,10 @@ import 'package:flutter/foundation.dart'
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:rive/rive.dart' show RiveNative;
 
-import 'brand.dart';
 import 'acceptance_metrics.dart';
 import 'activity/controller.dart';
 import 'auth/sign_in_page.dart';
+import 'brand.dart';
 import 'client/auth.dart';
 import 'client/bot_sessions.dart';
 import 'client/identity.dart';
