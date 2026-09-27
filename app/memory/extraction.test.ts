@@ -7,6 +7,7 @@ import {
   memoryExtractionRequestV1,
   parseMemoryExtractionV1,
 } from "./extraction.js";
+import { TEST_BRAND_V1 } from "../testkit/brand.js";
 import { createHostedMemoryExtractorV1 } from "./extraction-host.js";
 import { MemoryExtractionNotSentError } from "./processing.js";
 import type { MemoryExtractionDispatchV1 } from "./processing.js";
@@ -71,7 +72,11 @@ test("reads the memories, once each, and leaves out what is malformed", () => {
 });
 
 test("without Frock AI there is no extractor, and jobs wait as before", () => {
-  expect(createHostedMemoryExtractorV1({})).toBeUndefined();
+  expect(
+    createHostedMemoryExtractorV1({
+      displayName: TEST_BRAND_V1.builtInModelName,
+    }),
+  ).toBeUndefined();
 });
 
 test("the hosted extractor asks the summary model once, billed to the Turn as a summary", async () => {
@@ -106,6 +111,7 @@ test("the hosted extractor asks the summary model once, billed to the Turn as a 
     memories: [{ text: "Tim moved to Thirroul.", kind: "experience" }],
   });
   const extract = createHostedMemoryExtractorV1({
+    displayName: TEST_BRAND_V1.builtInModelName,
     gateway: {
       autoRoute: "flock-auto",
       runChatCompletion: async (body) => {
@@ -148,6 +154,7 @@ test("the hosted extractor asks the summary model once, billed to the Turn as a 
 test("a hosted extraction refused before it is sent says so, and nothing reaches the model", async () => {
   const sent: unknown[] = [];
   const extract = createHostedMemoryExtractorV1({
+    displayName: TEST_BRAND_V1.builtInModelName,
     gateway: {
       autoRoute: "flock-auto",
       runChatCompletion: async (body) => {
@@ -191,6 +198,7 @@ test("a hosted extraction refused before it is sent says so, and nothing reaches
 
 test("a hosted extraction that fails once sent is not reported as unsent", async () => {
   const extract = createHostedMemoryExtractorV1({
+    displayName: TEST_BRAND_V1.builtInModelName,
     gateway: {
       autoRoute: "flock-auto",
       runChatCompletion: async () => {

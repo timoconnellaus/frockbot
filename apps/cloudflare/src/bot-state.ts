@@ -1165,6 +1165,7 @@ export class BotState
   private async drainMemoryProcessing(): Promise<void> {
     if (!durableObjectHasSqlV1(this.ctx.storage)) return;
     const extract = createHostedMemoryExtractorV1({
+      displayName: BRAND_V1.builtInModelName,
       ...(this.backendEnv.FROCK_AI
         ? { gateway: this.backendEnv.FROCK_AI }
         : {}),

@@ -24,6 +24,8 @@ import {
  * Absent Frock AI, there is none and a job waits, as before.
  */
 export function createHostedMemoryExtractorV1(host: {
+  /** The brand's name for the built-in model. */
+  readonly displayName: string;
   readonly gateway?: {
     autoRoute: string | null;
     runChatCompletion: FrockAiChatCompletionV1;
@@ -64,6 +66,7 @@ export function createHostedMemoryExtractorV1(host: {
       let sent = false;
       registry.register(
         createFrockAiProviderV1({
+          displayName: host.displayName,
           connectionId: FROCK_AI_CONNECTION_ID,
           connectionGeneration: FROCK_AI_CONNECTION_GENERATION,
           autoRoute: gateway.autoRoute,
