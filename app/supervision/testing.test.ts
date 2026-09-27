@@ -12,7 +12,11 @@ import {
 import { turnStartQuestionsV1 } from "./turn-start.js";
 import { questionRouteQuestionsV1 } from "./question-route.js";
 import { callReviewQuestionsV1, composeCallDecisionV1 } from "./call-review.js";
-import { claimQuestionsV1, claimUnsupportedV1 } from "./claim-check.js";
+import {
+  claimAndFactsQuestionsV1,
+  claimQuestionsV1,
+  claimUnsupportedV1,
+} from "./claim-check.js";
 import {
   composeProgressDecisionV1,
   progressQuestionsV1,
@@ -25,6 +29,7 @@ test("the fake knows exactly Turn supervision's question sets", () => {
     Object.keys(sendReviewQuestionsV1),
     Object.keys(relayQuestionsV1),
     Object.keys(claimQuestionsV1),
+    Object.keys(claimAndFactsQuestionsV1),
     Object.keys(progressQuestionsV1),
     Object.keys(questionRouteQuestionsV1),
     Object.keys(callReviewQuestionsV1),

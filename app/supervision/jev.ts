@@ -41,6 +41,7 @@ import {
   claimEvidenceV1,
   claimJudgmentsV1,
   claimUnsupportedV1,
+  factsUnsupportedV1,
   reviewClaimV1,
 } from "./claim-check.js";
 import { composeProgressDecisionV1, reviewProgressV1 } from "./loop-health.js";
@@ -185,6 +186,14 @@ export function createJevTurnSupervisorV1(
           return {
             send: "withhold",
             reason: "unsupported_claim",
+            judgments: claimJudgmentsV1(claim.answers),
+            model: claim.model,
+          };
+        }
+        if (claim && factsUnsupportedV1(claim.answers)) {
+          return {
+            send: "withhold",
+            reason: "unsupported_fact",
             judgments: claimJudgmentsV1(claim.answers),
             model: claim.model,
           };

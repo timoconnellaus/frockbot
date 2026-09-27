@@ -405,6 +405,58 @@ describe("the Jev adapter's claim check", () => {
     ],
   };
 
+  test("checks what a message says pages said, only when the Turn read some", async () => {
+    const seen: unknown[] = [];
+    const read = {
+      ...sendEvidence,
+      checkClaim: true,
+      priorResults: [
+        {
+          callId: "tool:1:1:0",
+          tool: "web_fetch",
+          content: "Annual fee: A$715.",
+          isError: false,
+        },
+      ],
+    };
+    const decision = await jevSupervisor(
+      jevFetch(
+        (answers) =>
+          "facts" in answers
+            ? {
+                claim: claim("no_claim"),
+                facts: choice(
+                  ["no_page_facts", "supported", "unsupported"],
+                  "unsupported",
+                ),
+              }
+            : answers,
+        seen,
+      ),
+    ).reviewSend({ ...read, message: "The site says it is A$590." });
+    expect(decision).toMatchObject({
+      send: "withhold",
+      reason: "unsupported_fact",
+    });
+    const asked = seen.map((body) =>
+      Object.keys((body as { questions: object }).questions).join(","),
+    );
+    expect(asked).toContain("claim,facts");
+    // No page read: facts are not asked.
+    const plain: unknown[] = [];
+    await jevSupervisor(jevFetch(undefined, plain)).reviewSend(failed);
+    expect(
+      plain.map((body) =>
+        Object.keys((body as { questions: object }).questions).join(","),
+      ),
+    ).toContain("claim");
+    expect(
+      plain.map((body) =>
+        Object.keys((body as { questions: object }).questions).join(","),
+      ),
+    ).not.toContain("claim,facts");
+  });
+
   test("withholds a claim the results do not show, whatever the vetoes say", async () => {
     const decision = await jevSupervisor(
       jevFetch((answers) =>

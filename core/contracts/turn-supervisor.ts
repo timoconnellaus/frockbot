@@ -33,6 +33,7 @@ export const SUPERVISION_REASON_CODES_V1 = [
   "redundant_text",
   "paraphrased_work",
   "unsupported_claim",
+  "unsupported_fact",
   "text_depends_on_rejected_effect",
   "supervisor_unavailable",
   "supervisor_timeout",
@@ -304,9 +305,9 @@ export interface SendReviewEvidenceV1 {
   /** What a subagent produced for this Turn, oldest first. */
   work: readonly string[];
   /**
-   * Whether to check what the message says was done against the results.
-   * Off once a send this Turn was withheld for it, so a Turn is corrected
-   * once and never held in a loop.
+   * Whether to check what the message says was done, and what it says pages
+   * said, against the results. Off once a send this Turn was withheld for
+   * either, so a Turn is corrected once and never held in a loop.
    */
   checkClaim: boolean;
 }
@@ -363,7 +364,11 @@ export interface CallDecisionV1 {
 export function withheldSendEndsTurnV1(
   reason: SupervisionReasonCode | undefined,
 ): boolean {
-  return reason !== "paraphrased_work" && reason !== "unsupported_claim";
+  return (
+    reason !== "paraphrased_work" &&
+    reason !== "unsupported_claim" &&
+    reason !== "unsupported_fact"
+  );
 }
 
 /** What code saw a long Turn doing, before Jev is asked about it. */

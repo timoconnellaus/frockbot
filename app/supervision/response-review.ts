@@ -596,6 +596,8 @@ export const relayQuestionsV1 = {
       edits_as_asked:
         "Changes the work the way the person asked it to be changed - shorter, punchier, another tone - in their latest message",
       unrelated: "Says something else, not the work",
+      describes:
+        "Tells the person about the work - what it covers or says - instead of giving it",
       condenses: "Gives a shortened or summarised version of the work",
       rewrites:
         "Gives the work reworded, restructured or replaced with its own version",
@@ -652,7 +654,8 @@ export function relayJudgmentsV1(
 export function relayRewroteV1(answers: RelayAnswersV1): boolean {
   return (
     answers.wantsTheWork.noul >= RELAY_WANTS_WORK_YES_V1 &&
-    (answers.relay.choice === "condenses" ||
+    (answers.relay.choice === "describes" ||
+      answers.relay.choice === "condenses" ||
       answers.relay.choice === "rewrites") &&
     probability(answers.relay, answers.relay.choice) >= RELAY_REWRITES_MIN_V1
   );

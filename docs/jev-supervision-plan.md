@@ -397,6 +397,14 @@ thing or say plainly that it is not done. Such a send does not end the Turn,
 even as a finish, and the check runs at most once per Turn, so a Turn is
 corrected once and never held in a loop.
 
+When the Turn read pages (`web_fetch`, `web_search`, `computer_browser`, named
+by the tool that ran rather than `call_dynamic_tool`), the same call also asks
+whether the message says a page said something that none of the latest three
+pages says. `unsupported` at 0.7 or above withholds it with reason
+`unsupported_fact`, and the model is told to say only what the pages say or
+that it could not find it. It shares the claim check's once-per-Turn limit and
+does not end the Turn.
+
 A weighted failure score with decay was not built. Loop signals and the
 per-send claim check cover the cases it was for.
 

@@ -24,6 +24,7 @@ export const SUPERVISION_QUESTION_SETS_V1: readonly (readonly string[])[] = [
   ["messageNeeded", "messageKind"],
   ["wantsTheWork", "relay"],
   ["claim"],
+  ["claim", "facts"],
   ["progressing"],
   ["answeredBy"],
   [
