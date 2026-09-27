@@ -37,6 +37,14 @@ describe("the Sprite's connected-account proxy", () => {
     for (const name of TERMINAL_PACKAGES) expect(packages).toContain(name);
   });
 
+  test("a command with no connected account signs in for Jev alone and sets no GitHub placeholder", () => {
+    const prelude = flyEgressShellPreludeV1("payload.signature", {
+      accounts: false,
+    });
+    expect(prelude).toContain("http://frockbot-jev:payload.signature@");
+    expect(prelude).not.toContain("GH_TOKEN");
+  });
+
   test("a command's prelude points every client at the proxy only when it is up", () => {
     const prelude = flyEgressShellPreludeV1("payload.signature");
     expect(prelude.split("\n")[0]).toBe(
@@ -183,6 +191,32 @@ describe("the proxy, run", () => {
       url: "https://notion.connected.internal/v1/users/me?x=1",
     });
   }, 20_000);
+
+  test("a command with no connected account reaches Jev, and every other host untouched", async () => {
+    const jev = await curl(
+      [
+        "-X",
+        "POST",
+        "https://jev.internal/v1/system-one",
+        "-d",
+        '{"state":{},"questions":{}}',
+      ],
+      `http://frockbot-jev:${token}@127.0.0.1:${port}`,
+    );
+    expect(jev).toContain("HTTP/1.1 201 Created");
+    expect(seen.at(-1)).toMatchObject({
+      method: "POST",
+      url: "https://jev.internal/v1/system-one",
+    });
+    const before = seen.length;
+    // Tunnelled to the real host rather than answered here: whatever the
+    // network makes of it, the Worker never sees it.
+    await curl(
+      ["--max-time", "5", "https://api.github.com/user"],
+      `http://frockbot-jev:${token}@127.0.0.1:${port}`,
+    );
+    expect(seen).toHaveLength(before);
+  }, 30_000);
 
   test("answers a connected app's host without a token by saying where accounts are available", async () => {
     const before = seen.length;

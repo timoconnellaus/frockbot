@@ -921,9 +921,11 @@ export interface ComputerHostCapabilitiesV1 {
   /**
    * The shell lines that point one command's clients at the host's
    * connected-account proxy under `token`. Absent, the host has no such
-   * proxy and a command reaches no connected account.
+   * proxy and a command reaches no connected account. With `accounts`
+   * false the command reaches Jev alone, and every other host as if there
+   * were no proxy, so a client signed in on the Computer itself still is.
    */
-  egressShellPrelude?(token: string): string;
+  egressShellPrelude?(token: string, options?: { accounts?: boolean }): string;
   /** The desktop's shape, when this host has one. Descriptive; see above. */
   desktop?: { slots: number; width: number; height: number };
   /**

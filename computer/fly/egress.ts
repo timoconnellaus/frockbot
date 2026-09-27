@@ -15,6 +15,7 @@
 
 import {
   COMPUTER_EGRESS_GENERIC_DOMAIN,
+  COMPUTER_EGRESS_JEV_HOST_V1,
   COMPUTER_EGRESS_HOSTS_V1,
 } from "../egress.js";
 import { shellQuote } from "./shell.js";
@@ -39,6 +40,8 @@ export const EGRESS_CA = `${EGRESS_ROOT}/ca.pem`;
  * `authorization` header before a request leaves the Sprite.
  */
 export const EGRESS_PLACEHOLDER_TOKEN = "frockbot-connected-account";
+/** The proxy user of a command with no connected account, which reaches Jev alone. */
+const EGRESS_JEV_ONLY_USER = "frockbot-jev";
 const EGRESS_REQUEST_MAX_BYTES = 1_000_000;
 
 export const egressProxySource = `// Installed by the platform. Loopback HTTPS proxy for connected accounts.
@@ -53,6 +56,10 @@ const PORT = ${EGRESS_PORT};
 const DIR = ${JSON.stringify(EGRESS_ROOT)};
 const HOSTS = new Set(${JSON.stringify(COMPUTER_EGRESS_HOSTS_V1)});
 const GENERIC_SUFFIX = ${JSON.stringify(`.${COMPUTER_EGRESS_GENERIC_DOMAIN}`)};
+const JEV_HOST = ${JSON.stringify(COMPUTER_EGRESS_JEV_HOST_V1)};
+// The proxy user a command signs in as says what it may reach: every
+// intercepted host, or, with no account connected, Jev alone.
+const JEV_ONLY_USER = ${JSON.stringify(EGRESS_JEV_ONLY_USER)};
 const intercepted = (host) => HOSTS.has(host) || (host.endsWith(GENERIC_SUFFIX) && /^[a-z0-9][a-z0-9_-]{0,63}$/.test(host.slice(0, -GENERIC_SUFFIX.length)));
 const MAX_BODY = ${EGRESS_REQUEST_MAX_BYTES};
 const TIMEOUT_MS = 110000;
@@ -104,6 +111,13 @@ function contextFor(host) {
   const context = tls.createSecureContext({ key: fs.readFileSync(DIR + "/leaf.key"), cert: fs.readFileSync(cert) });
   contexts.set(host, context);
   return context;
+}
+
+function proxyUser(header) {
+  if (typeof header !== "string" || !header.startsWith("Basic ")) return undefined;
+  const decoded = Buffer.from(header.slice(6), "base64").toString("utf8");
+  const colon = decoded.indexOf(":");
+  return colon >= 0 ? decoded.slice(0, colon) : undefined;
 }
 
 function proxyToken(header) {
@@ -234,7 +248,8 @@ server.on("connect", (req, socket, head) => {
   }
   const host = match[1].toLowerCase();
   const port = Number(match[2]);
-  if (!intercepted(host) || port !== 443) {
+  const jevOnly = proxyUser(req.headers["proxy-authorization"]) === JEV_ONLY_USER;
+  if (!intercepted(host) || port !== 443 || (jevOnly && host !== JEV_HOST)) {
     tunnel(host, port, socket, head);
     return;
   }
@@ -300,15 +315,24 @@ listening && current && [ -s ${shellQuote(EGRESS_BUNDLE)} ]
  * accounts: start the proxy, then point every client at it and at the CA it
  * signs with. The token is the exec call's own and expires with it.
  */
-export function flyEgressShellPreludeV1(token: string): string {
-  const proxy = `http://frockbot:${token}@127.0.0.1:${EGRESS_PORT}`;
+export function flyEgressShellPreludeV1(
+  token: string,
+  options: { accounts?: boolean } = {},
+): string {
+  const accounts = options.accounts !== false;
+  const user = accounts ? "frockbot" : EGRESS_JEV_ONLY_USER;
+  const proxy = `http://${user}:${token}@127.0.0.1:${EGRESS_PORT}`;
   return [
     `if ${shellQuote(EGRESS_ENSURE_SCRIPT)} >/dev/null 2>&1; then`,
     `  export HTTPS_PROXY=${shellQuote(proxy)} https_proxy=${shellQuote(proxy)}`,
     `  export NO_PROXY=localhost,127.0.0.1,::1 no_proxy=localhost,127.0.0.1,::1`,
     `  export SSL_CERT_FILE=${shellQuote(EGRESS_BUNDLE)} REQUESTS_CA_BUNDLE=${shellQuote(EGRESS_BUNDLE)} CURL_CA_BUNDLE=${shellQuote(EGRESS_BUNDLE)} GIT_SSL_CAINFO=${shellQuote(EGRESS_BUNDLE)}`,
     `  export NODE_EXTRA_CA_CERTS=${shellQuote(EGRESS_CA)} NODE_USE_ENV_PROXY=1`,
-    `  export GH_TOKEN="\${GH_TOKEN:-${EGRESS_PLACEHOLDER_TOKEN}}"`,
+    // Only with an account to answer for it: a placeholder with none would
+    // shadow a gh the person signed in on the Computer itself.
+    ...(accounts
+      ? [`  export GH_TOKEN="\${GH_TOKEN:-${EGRESS_PLACEHOLDER_TOKEN}}"`]
+      : []),
     `fi`,
   ].join("\n");
 }

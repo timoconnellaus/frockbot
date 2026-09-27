@@ -1256,7 +1256,10 @@ export function createComputerAgentFeature(
           ...(config.jev ? { jev: config.jev } : {}),
         }),
       });
-      return { prelude: prelude(token), close };
+      return {
+        prelude: prelude(token, { accounts: accounts().length > 0 }),
+        close,
+      };
     };
 
     const execTool: ToolDefinition = {
