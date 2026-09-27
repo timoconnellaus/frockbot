@@ -540,19 +540,27 @@ export function relayEvidenceV1(
 ): RelayJudgmentEvidenceV1 {
   return {
     request: { text: clip(evidence.objective), origin: evidence.origin },
-    work: evidence.work.slice(-2).map(clipWork),
+    work: relayWork(evidence).map(clipWork),
     message: clipWork(evidence.message),
   };
 }
 
-/** Whether the latest work was already sent to the person whole this Turn. */
+function relayWork(evidence: SendReviewEvidenceV1): readonly string[] {
+  return evidence.work.slice(-2);
+}
+
+/** Whether every work the relay check would see was already sent to the person whole this Turn. */
 export function workShownV1(evidence: SendReviewEvidenceV1): boolean {
-  const latest = evidence.work.at(-1);
-  if (latest === undefined) return false;
-  const work = squashSpace(latest);
+  const works = relayWork(evidence);
   return (
-    work.length > 0 &&
-    evidence.shown.some((shown) => squashSpace(shown).includes(work))
+    works.length > 0 &&
+    works.every((text) => {
+      const work = squashSpace(text);
+      return (
+        work.length > 0 &&
+        evidence.shown.some((shown) => squashSpace(shown).includes(work))
+      );
+    })
   );
 }
 

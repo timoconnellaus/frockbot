@@ -414,6 +414,40 @@ describe("the Jev adapter's relay check", () => {
     ).not.toContainEqual(["wantsTheWork", "relay"]);
   });
 
+  test("still judges a word about earlier work when only the latest was given whole", async () => {
+    const email = "Hi Sam, thanks for today. Could we meet Tuesday at 10?";
+    const decision = await jevSupervisor(
+      jevFetch((answers) =>
+        "relay" in answers
+          ? {
+              wantsTheWork: { type: "noul", noul: 0.9 },
+              relay: choice(
+                [
+                  "relays",
+                  "edits_as_asked",
+                  "unrelated",
+                  "describes",
+                  "condenses",
+                  "rewrites",
+                ],
+                "describes",
+              ),
+            }
+          : answers,
+      ),
+    ).reviewSend({
+      ...withWork,
+      objective: "Write me an email to Sam and a toast for Mia's wedding.",
+      work: [email, toast],
+      shown: [`Here it is:\n\n${toast}`],
+      message: "The email thanks Sam and proposes Tuesday.",
+    });
+    expect(decision).toMatchObject({
+      send: "withhold",
+      reason: "paraphrased_work",
+    });
+  });
+
   test("asks nothing about relay when no subagent worked this Turn", async () => {
     const seen: unknown[] = [];
     await jevSupervisor(jevFetch(undefined, seen)).reviewSend(sendEvidence);
