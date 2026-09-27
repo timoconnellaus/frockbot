@@ -15,6 +15,7 @@ export const BRAND_V1: BrandV1 = {
   emailSenderName: "Wallet Pal",
   iconPng: "../../../../assets/marketing/app-icon/frockbot-icon-64.png",
   pageLogo: "data:image/png;base64,V2FsbGV0UGFs",
+  nativeScheme: "walletpal",
   looks: {
     ink: INK_DOCUMENT_V1,
     paper: PAPER_DOCUMENT_V1,

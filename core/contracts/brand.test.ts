@@ -8,6 +8,7 @@ import {
   BrandDecodeError,
   brandUserAgentV1,
   decodeBrandV1,
+  nativeReturnSchemeV1,
   type BrandV1,
 } from "./brand.js";
 
@@ -19,6 +20,7 @@ const brand: BrandV1 = {
   emailSenderName: "Wallet Pal",
   iconPng: "./icon.png",
   pageLogo: "data:image/png;base64,V2FsbGV0UGFs",
+  nativeScheme: "walletpal",
   looks: {
     ink: INK_DOCUMENT_V1,
     paper: PAPER_DOCUMENT_V1,
@@ -38,6 +40,24 @@ describe("a brand", () => {
         homepage: "https://frockbot.com",
       }),
     ).toBe("FrockBot/0.0.1 (+https://frockbot.com)");
+  });
+
+  test("hands a sign-in back on its own scheme", () => {
+    expect(nativeReturnSchemeV1(brand, "released")).toBe("walletpal");
+    expect(nativeReturnSchemeV1(brand, "development")).toBe("walletpal-dev");
+    for (const nativeScheme of [
+      "",
+      "WalletPal",
+      "1pal",
+      "wallet pal",
+      "wallet:pal",
+      "https",
+      "javascript",
+    ]) {
+      expect(() => decodeBrandV1({ ...brand, nativeScheme })).toThrow(
+        /nativeScheme/,
+      );
+    }
   });
 
   test("decodes to itself", () => {

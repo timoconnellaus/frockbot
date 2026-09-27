@@ -5,6 +5,7 @@ import 'package:crypto/crypto.dart';
 import 'package:flutter/foundation.dart' show debugPrint;
 import 'package:url_launcher/url_launcher.dart';
 
+import '../brand.dart';
 import '../protocol/client_wire.generated.dart' as wire;
 import 'auth.dart';
 import 'desktop_build.dart';
@@ -20,7 +21,7 @@ class NativeSignIn implements SignIn {
   /// A development sign-in comes back on a custom scheme: the local stack's
   /// origin is plain HTTP on a private address, which no App Link can name.
   String get returnUri => developmentAuth
-      ? 'frockbot-dev://native/return/android'
+      ? '${clientBrand.nativeScheme}-dev://native/return/android'
       : '$hostedOrigin/native/return/${Platform.isAndroid
             ? 'android'
             : Platform.isIOS
@@ -77,10 +78,10 @@ class NativeSignIn implements SignIn {
   /// only on the user's own click; the return page hands the same code and
   /// state to this scheme so every browser reaches the app. The local
   /// FrockBot Dev build has its own, so the released app never answers it.
-  static const macosScheme = macosSchemeV1;
+  static String get macosScheme => macosSchemeV1;
 
   /// The iPhone app's, for the same reason as the Mac's.
-  static const iosScheme = iosSchemeV1;
+  static String get iosScheme => iosSchemeV1;
 
   /// The return as the app would have received it on its verified link.
   ///

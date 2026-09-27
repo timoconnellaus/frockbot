@@ -101,7 +101,7 @@ class _ComputerRecordingPillState extends State<ComputerRecordingPill> {
               child: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
-                  const Icon(
+                  Icon(
                     Icons.fiber_manual_record,
                     color: FrockTheme.accent,
                     size: 12,

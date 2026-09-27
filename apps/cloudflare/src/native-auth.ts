@@ -22,9 +22,11 @@ import {
   admissionRefusedResponse,
   admissionUnavailableResponse,
 } from "./account-admission.js";
-import type {
-  AuthIdentityV1,
-  AuthPackageIdentityV1,
+import {
+  nativeReturnSchemeV1,
+  type AuthIdentityV1,
+  type AuthPackageIdentityV1,
+  type BrandV1,
 } from "@frockbot/core/contracts";
 import type {
   NativeSessionOperation,
@@ -62,38 +64,40 @@ export function nativeReturnUriV1(
 }
 /**
  * Where a development build of the app receives its sign-in. A custom scheme,
- * because a plain-HTTP loopback origin can never be an App Link; only a Worker
- * running with `ALLOW_DEVELOPMENT_AUTH` ever lists it.
+ * the brand's development one, because a plain-HTTP loopback origin can never
+ * be an App Link; only a Worker running with `ALLOW_DEVELOPMENT_AUTH` ever
+ * lists it.
  */
-export const NATIVE_RETURN_DEVELOPMENT = "frockbot-dev://native/return/android";
+export function nativeDevelopmentReturnUriV1(
+  brand: Pick<BrandV1, "nativeScheme">,
+): string {
+  return `${nativeReturnSchemeV1(brand, "development")}://native/return/android`;
+}
 /**
- * The Apple apps' custom scheme. A Universal Link only reaches the app from
+ * Which build each Apple return page hands over to, on the brand's scheme
+ * (`nativeReturnSchemeV1`). A Universal Link only reaches the app from
  * Safari, and only on a user's own click; Chrome and Firefox never dispatch
  * one, and Google's completion redirect is not a click — on an iPhone as on a
- * Mac. The return page hands the same code and state to this scheme, which
- * every browser can open. The code is useless without the PKCE verifier the
- * app never shares.
+ * Mac. The return page hands the same code and state to the app's scheme,
+ * which every browser can open. The code is useless without the PKCE verifier
+ * the app never shares.
+ *
+ * The development builds (`bun run update:desktop` on a Mac, a
+ * `FROCKBOT_IOS_DEV` build on an iPhone) are each a separate app beside the
+ * released one, with its own bundle identifier, so their sign-in comes back
+ * through their own `-dev` page and scheme: handed to the released scheme,
+ * the released app would take the code, or the system would open the wrong
+ * copy. Not in the Apple association, so Safari never offers it to the
+ * released app as a Universal Link either. Android needs no scheme.
  */
-export const NATIVE_APPLE_SCHEME = "frockbot";
-/**
- * The FrockBot Dev builds' scheme (`bun run update:desktop` on a Mac, a
- * `FROCKBOT_IOS_DEV` build on an iPhone). Each is a separate app beside the
- * released one, with its own bundle identifier, so its sign-in comes back
- * through its own `-dev` page: handed to `frockbot://`, the released app would
- * take the code, or the system would open the wrong copy. Not in the Apple
- * association, so Safari never offers it to the released app as a Universal
- * Link either.
- */
-export const NATIVE_APPLE_DEV_SCHEME = "frockbot-dev";
-/** The scheme each Apple return page hands over on; Android needs none. */
-const NATIVE_RETURN_SCHEMES: Record<
+const NATIVE_RETURN_BUILDS: Record<
   Exclude<NativeReturnPlatformV1, "android">,
-  string
+  "released" | "development"
 > = {
-  macos: NATIVE_APPLE_SCHEME,
-  "macos-dev": NATIVE_APPLE_DEV_SCHEME,
-  ios: NATIVE_APPLE_SCHEME,
-  "ios-dev": NATIVE_APPLE_DEV_SCHEME,
+  macos: "released",
+  "macos-dev": "development",
+  ios: "released",
+  "ios-dev": "development",
 };
 /** The returns the Apple association claims: the released apps' own. */
 const APPLE_ASSOCIATED_RETURNS = ["macos", "ios"] as const;
@@ -972,7 +976,7 @@ function nativeReturnPage(
   const target =
     platform === "android"
       ? undefined
-      : `${NATIVE_RETURN_SCHEMES[platform]}://${returnUri.host}${returnUri.pathname}`;
+      : `${nativeReturnSchemeV1(brand, NATIVE_RETURN_BUILDS[platform])}://${returnUri.host}${returnUri.pathname}`;
   return returnPageV1({
     brand,
     title: `Return to ${product}`,

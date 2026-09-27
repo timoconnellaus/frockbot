@@ -20,6 +20,7 @@ import {
   type ConnectionCommandV1,
 } from "@frockbot/core/connection";
 import { decodeStartConnectionCommandV1 } from "@frockbot/core/configuration";
+import { nativeReturnSchemeV1 } from "@frockbot/core/contracts";
 import { defineGatewayContribution } from "@frockbot/core/contracts/contributions";
 import {
   CONNECT_PACKAGE_ID,
@@ -139,15 +140,15 @@ async function deliverConnectEvent(
 }
 
 /**
- * The Apple apps' custom schemes; the same ones their sign-in returns use.
- * The FrockBot Dev builds are separate apps with their own, so a Connect one
- * started never opens the released app.
+ * Which build of the Apple apps each page hands over to; the same schemes
+ * their sign-in returns use. The development builds are separate apps with
+ * their own, so a Connect one started never opens the released app.
  */
-const APPLE_SCHEMES = {
-  macos: "frockbot",
-  "macos-dev": "frockbot-dev",
-  ios: "frockbot",
-  "ios-dev": "frockbot-dev",
+const APPLE_BUILDS = {
+  macos: "released",
+  "macos-dev": "development",
+  ios: "released",
+  "ios-dev": "development",
 } as const;
 
 /**
@@ -174,7 +175,7 @@ export function connectCallbackPageV1(
   if (client !== undefined && client !== "android") {
     const answer = mcpAnswer?.toString();
     const query = answer ? `?${answer}` : "";
-    const target = `${APPLE_SCHEMES[client]}://${new URL(origin).host}${connectCallbackPathV1(client)}${query}`;
+    const target = `${nativeReturnSchemeV1(brand, APPLE_BUILDS[client])}://${new URL(origin).host}${connectCallbackPathV1(client)}${query}`;
     return returnPageV1({
       brand,
       title: heading,

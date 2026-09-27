@@ -9,10 +9,8 @@ import { readFileSync } from "node:fs";
 import {
   createNativeAuth,
   readNativeJsonBody,
-  NATIVE_RETURN_DEVELOPMENT,
-  NATIVE_APPLE_DEV_SCHEME,
-  NATIVE_APPLE_SCHEME,
   nativeAppsV1,
+  nativeDevelopmentReturnUriV1,
   nativeReturnUris,
   nativeReturnUriV1,
   type NativeAuthOptions,
@@ -31,6 +29,11 @@ import {
   type NativeSessionStorage,
 } from "./native-sessions.js";
 
+// FrockBot's own schemes, spelled out: the released apps and the FrockBot Dev
+// builds must keep opening exactly as they did before the brand named them.
+const NATIVE_APPLE_SCHEME = "frockbot";
+const NATIVE_APPLE_DEV_SCHEME = "frockbot-dev";
+const NATIVE_RETURN_DEVELOPMENT = "frockbot-dev://native/return/android";
 const hello = {
   schemaVersion: 1,
   protocolVersion: CLIENT_PROTOCOL_VERSION,
@@ -1694,6 +1697,34 @@ test("the pages name the product the brand names", async () => {
   expect(html).toContain('src="data:image/png;base64,V2FsbGV0UGFs"');
   expect(html).not.toContain(BRAND_V1.pageLogo);
   expect(html).not.toContain("FrockBot");
+});
+
+test("the Apple returns hand over on the brand's scheme", async () => {
+  const brand = { ...BRAND_V1, nativeScheme: "walletpal" };
+  expect(nativeDevelopmentReturnUriV1(BRAND_V1)).toBe(
+    NATIVE_RETURN_DEVELOPMENT,
+  );
+  expect(nativeDevelopmentReturnUriV1(brand)).toBe(
+    "walletpal-dev://native/return/android",
+  );
+  const f = fixture({
+    brand,
+    returnUris: nativeReturnUris("ios,ios-dev", NATIVE_ORIGIN),
+  });
+  const released = await (await f.auth.route(
+    f.request("/native/return/ios"),
+  ))!.text();
+  expect(released).toContain(
+    `walletpal://${new URL(NATIVE_ORIGIN).host}/native/return/ios`,
+  );
+  expect(released).not.toContain("frockbot://");
+  const development = await (await f.auth.route(
+    f.request("/native/return/ios-dev"),
+  ))!.text();
+  expect(development).toContain(
+    `walletpal-dev://${new URL(NATIVE_ORIGIN).host}/native/return/ios-dev`,
+  );
+  expect(development).not.toContain("frockbot-dev://");
 });
 
 function tamper(value: string, at: number): string {

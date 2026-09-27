@@ -212,7 +212,9 @@
           "const": "update-required"
         },
         "message": {
-          "const": "Update the app to continue using FrockBot."
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200
         }
       },
       "required": ["schemaVersion", "status", "message"],

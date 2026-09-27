@@ -53,13 +53,16 @@ Future<void> runFrockbot(ClientBrand brand) async {
   // deadline is what settles it then, and the stills simply stay. The outcome
   // is recorded rather than dropped: a renderer asked for while the runtime
   // is absent throws from inside `build`, and a thrown avatar is an empty
-  // slot with an error where the still should be.
-  unawaited(
-    RiveNative.init()
-        .timeout(const Duration(seconds: 10), onTimeout: () => false)
-        .catchError((Object _) => false)
-        .then((ready) => riveRuntimeReady.value = ready),
-  );
+  // slot with an error where the still should be. A brand whose characters
+  // are all stills has nothing for the runtime to draw, and fetches none.
+  if (brand.characters.any((character) => character.rive != null)) {
+    unawaited(
+      RiveNative.init()
+          .timeout(const Duration(seconds: 10), onTimeout: () => false)
+          .catchError((Object _) => false)
+          .then((ready) => riveRuntimeReady.value = ready),
+    );
+  }
   await setMobileOrientation();
   // The browser draws to a canvas, so the accessibility tree is the only DOM
   // there is: without it a screen reader sees an empty page and a browser test

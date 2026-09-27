@@ -7,8 +7,9 @@
  * module ([ADR 0038](../../docs/adr/0038-white-label-deployments.md)). App code
  * never imports it; the Worker entry hands it over as data.
  *
- * Where a deployment runs and which native apps sign in to it are the
- * profile's, not the brand's. Trust chrome is neither: a brand names no
+ * Where a deployment runs and which signed native apps sign in to it are the
+ * profile's, not the brand's; the URL scheme those apps register is the
+ * product's, so every deployment of it hands a sign-in back on the same one. Trust chrome is neither: a brand names no
  * approval, billing or Stop surface, exactly as a ThemeDocument names none.
  */
 import {
@@ -43,6 +44,12 @@ export interface BrandV1 {
    * nothing from anywhere.
    */
   pageLogo: string;
+  /**
+   * The custom URL scheme the product's Mac and iPhone apps register, which a
+   * browser return hands the sign-in back on. Its development builds are
+   * separate apps on `<nativeScheme>-dev`, as the client's brand says too.
+   */
+  nativeScheme: string;
   /** The palette behind each named look. */
   looks: NamedLookDocumentsV1;
   /**
@@ -67,6 +74,7 @@ const BRAND_KEYS_V1 = [
   "emailSenderName",
   "iconPng",
   "pageLogo",
+  "nativeScheme",
   "looks",
   "whatsNew",
 ] as const;
@@ -125,6 +133,17 @@ export function decodeBrandV1(input: unknown): BrandV1 {
       "brand.pageLogo must be a base64 PNG, WebP or JPEG data URL",
     );
   }
+  if (
+    typeof value.nativeScheme !== "string" ||
+    !/^[a-z][a-z0-9+.-]*$/.test(value.nativeScheme) ||
+    ["http", "https", "file", "javascript", "data", "blob", "about"].includes(
+      value.nativeScheme,
+    )
+  ) {
+    throw new BrandDecodeError(
+      "brand.nativeScheme must be the product's own lowercase URL scheme",
+    );
+  }
   if (typeof value.whatsNew !== "boolean") {
     throw new BrandDecodeError("brand.whatsNew must be true or false");
   }
@@ -166,6 +185,7 @@ export function decodeBrandV1(input: unknown): BrandV1 {
     emailSenderName: name(value.emailSenderName, "emailSenderName"),
     iconPng: value.iconPng,
     pageLogo: value.pageLogo,
+    nativeScheme: value.nativeScheme,
     looks: decoded,
     whatsNew: value.whatsNew,
   };
@@ -180,4 +200,17 @@ export function brandUserAgentV1(
 ): string {
   const token = brand.productName.replace(/[^A-Za-z0-9!#$%&'*+.^_`|~-]/g, "");
   return `${token || "Bot"}/0.0.1 (+${brand.homepage})`;
+}
+
+/**
+ * The scheme a native return page hands a sign-in over on: the product's for a
+ * released app, `<scheme>-dev` for a development build beside it.
+ */
+export function nativeReturnSchemeV1(
+  brand: Pick<BrandV1, "nativeScheme">,
+  build: "released" | "development",
+): string {
+  return build === "development"
+    ? `${brand.nativeScheme}-dev`
+    : brand.nativeScheme;
 }

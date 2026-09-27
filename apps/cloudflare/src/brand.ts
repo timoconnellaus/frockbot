@@ -24,6 +24,7 @@ export const BRAND_V1: BrandV1 = {
   // The one canonical icon the marketing site and the app-icon script share.
   iconPng: "../../../assets/marketing/app-icon/frockbot-icon-64.png",
   pageLogo: FROCKBOT_PAGE_LOGO_V1,
+  nativeScheme: "frockbot",
   looks: {
     ink: INK_DOCUMENT_V1,
     paper: PAPER_DOCUMENT_V1,

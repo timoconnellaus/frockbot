@@ -75,7 +75,7 @@ The sign-in Package, behind `AuthPackageV1`: resolve an identity from a request,
 _Avoid_: Auth provider, identity provider, login backend
 
 **Brand**:
-What a person sees that makes the product FrockBot or another: its name, the built-in model's name, icons, the palettes behind the named looks and, in the client, its Bot characters. A build-time seam (`#brand` on the server, `ClientBrand` in the client), never a runtime switch; where a deployment runs and who signs in belong to its Deployment profile instead ([ADR 0038](docs/adr/0038-white-label-deployments.md)).
+What a person sees that makes the product FrockBot or another: its name, the built-in model's name, icons, the palettes behind the named looks, the URL scheme its apps are handed a sign-in back on and, in the client, its accent, the sign-in provider it names and its Bot characters. A build-time seam (`#brand` on the server, `ClientBrand` in the client), never a runtime switch; where a deployment runs and who signs in belong to its Deployment profile instead ([ADR 0038](docs/adr/0038-white-label-deployments.md)).
 _Avoid_: Theme, skin, tenant
 
 **White-label**:

@@ -352,6 +352,15 @@
     "value": null
   },
   {
+    "name": "UpdateRequired without a message",
+    "schema": "UpdateRequired",
+    "value": {
+      "schemaVersion": 1,
+      "status": "update-required",
+      "message": ""
+    }
+  },
+  {
     "name": "AuthIdentity wrong shape",
     "schema": "AuthIdentity",
     "value": null

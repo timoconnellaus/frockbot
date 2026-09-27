@@ -4,7 +4,10 @@ import type {
   ConnectionCommandReceiptV1,
   ConnectionCommandV1,
 } from "@frockbot/core/connection";
-import { createConnectBackendContribution } from "./backend.js";
+import {
+  connectCallbackPageV1,
+  createConnectBackendContribution,
+} from "./backend.js";
 import { connectEventSignatureV1 } from "./events.js";
 import type { ConnectTriggerOfferV1 } from "./triggers.js";
 
@@ -297,6 +300,31 @@ describe("the Connected apps gateway routes", () => {
     );
     expect(other).toBeUndefined();
   });
+});
+
+test("a Connect return hands over on the brand's own scheme", async () => {
+  const brand = {
+    ...TEST_BRAND_V1,
+    productName: "Wallet Pal",
+    nativeScheme: "walletpal",
+  };
+  for (const [client, scheme] of [
+    ["macos", "walletpal"],
+    ["macos-dev", "walletpal-dev"],
+    ["ios", "walletpal"],
+    ["ios-dev", "walletpal-dev"],
+  ] as const) {
+    const page = await connectCallbackPageV1(
+      client,
+      "https://wallet-pal.example",
+      brand,
+    ).text();
+    expect(page).toContain(
+      `${scheme}://wallet-pal.example/api/connect/callback/${client}"`,
+    );
+    expect(page).not.toContain("frockbot");
+    expect(page).not.toContain("FrockBot");
+  }
 });
 
 describe("Connected-app trigger routes", () => {

@@ -19,17 +19,16 @@ const displayFontFamily = 'packages/frockbot_client/Archivo Black';
 /// radii, the weight of a line — so that a stock widget dropped anywhere in
 /// the app already looks like it belongs here.
 abstract final class FrockTheme {
-  static const accent = Color(0xffd92d71);
+  static Color get accent => clientBrand.accent.ink;
 
-  /// The pale pink secondary actions are written in: Pixel's own body
-  /// colour. The voice footer's lobes use it as the tint between white and
-  /// the accent.
-  static const accentSoft = Color(0xfffc85ae);
+  /// The pale tint secondary actions are written in. The voice footer's
+  /// lobes use it as the tint between white and the accent.
+  static Color get accentSoft => clientBrand.accent.soft;
 
-  /// The deep rose the Bot speaks in on the voice footer's pink slab: the
+  /// The deep shade the Bot speaks in on the voice footer's accent slab: the
   /// same hue as [accent], darker, so the two voices are one family told
   /// apart by weight rather than by a second colour.
-  static const accentDeep = Color(0xff9a124c);
+  static Color get accentDeep => clientBrand.accent.deep;
 
   /// The two states the scheme has no slot for. A Card's pill says "Sent" in
   /// green and "Needs your attention" in amber; `primary` is the brand and

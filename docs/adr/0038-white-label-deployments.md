@@ -75,7 +75,12 @@ namespaces are its own because its account is.
   `ThemeDocument` the existing decoder and contrast floor validate at build
   time, so a brand cannot ship an unreadable look;
 - whether What's New is shown. Its entries are FrockBot's release notes, so a
-  white-label turns it off rather than inheriting them.
+  white-label turns it off rather than inheriting them;
+- `nativeScheme`, the custom URL scheme the product's Mac and iPhone apps
+  register, which a browser return hands a sign-in or a Connect back on
+  (`<nativeScheme>-dev` for their development builds). It is the product's,
+  not a deployment's: every deployment of one product hands back to the same
+  apps, and a development stack runs with no profile at all.
 
 What belongs to a deployment rather than a product goes in the profile: the
 native apps it signs in (`nativeApps`: Android package names and signing
@@ -202,6 +207,15 @@ deployment unchanged in behaviour.
    generator aliases it, and the profile names the chooser's required
    secrets. Rides with step 5, whose fixture is what proves it.
 4. **Client package.** §4. Ships as a full APK.
+
+   **Built**, with the gaps a first white-label found closed after it: a
+   `ClientBrand` also names its `nativeScheme` (the server brand's, which
+   the application's platform projects register), its accent, and the
+   sign-in provider its sign-in page names, or none for neutral wording. A
+   character's Rive file is optional; a still-only character never loads
+   one. The update-required message is the server brand's words, so the wire
+   schema types it as a string rather than FrockBot's sentence.
+
 5. **Publishing and the consumer path.** §5: manifests, the release job, the
    generator's move, the build scripts' arguments and the fixture gate. After
    step 2, which it wires.

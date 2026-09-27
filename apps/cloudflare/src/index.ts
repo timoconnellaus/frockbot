@@ -157,7 +157,7 @@ import { BRAND_V1 } from "#brand";
 import {
   createNativeAuth,
   nativeAppsV1,
-  NATIVE_RETURN_DEVELOPMENT,
+  nativeDevelopmentReturnUriV1,
   nativeReturnUris,
 } from "./native-auth.js";
 import {
@@ -942,7 +942,9 @@ function developmentAuthAllowed(env: Env): boolean {
 function nativeReturnUrisFor(env: Env, origin: string): readonly string[] {
   return [
     ...nativeReturnUris(env.NATIVE_SLICE_2_AUTH, origin),
-    ...(developmentAuthAllowed(env) ? [NATIVE_RETURN_DEVELOPMENT] : []),
+    ...(developmentAuthAllowed(env)
+      ? [nativeDevelopmentReturnUriV1(BRAND_V1)]
+      : []),
   ];
 }
 
