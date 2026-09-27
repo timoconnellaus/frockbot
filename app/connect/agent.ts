@@ -138,11 +138,12 @@ export function createConnectFeature(
         toolkit: metadata.toolkitSlug,
         label: labelOf(config, metadata),
         ...(config.permitConnection ? { permit: config.permitConnection } : {}),
-        send: (request) =>
+        send: (request, endpoint) =>
           sendAsConnectedAccountV1(
             client,
             metadata.connectedAccountId,
             request,
+            endpoint,
           ),
       }),
     ];

@@ -86,7 +86,11 @@ export interface ExecuteToolResultV1 {
 /** One HTTP request made as a connected account, through the provider. */
 export interface ProxyRequestInputV1 {
   connectedAccountId: string;
-  /** The full URL, without its query; the query travels in `parameters`. */
+  /**
+   * The full URL, or a path the provider resolves against the connected
+   * account's own API base URL; either way without its query, which travels
+   * in `parameters`.
+   */
   endpoint: string;
   method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD";
   body?: Record<string, unknown>;

@@ -172,6 +172,18 @@ describe("the proxy, run", () => {
     expect(seen.at(-1)!.headers.authorization).toBeUndefined();
   }, 20_000);
 
+  test("intercepts any app's generic address, which resolves nowhere else", async () => {
+    const out = await curl(
+      ["https://notion.connected.internal/v1/users/me?x=1"],
+      `http://frockbot:${token}@127.0.0.1:${port}`,
+    );
+    expect(out).toContain("HTTP/1.1 201 Created");
+    expect(seen.at(-1)).toMatchObject({
+      method: "GET",
+      url: "https://notion.connected.internal/v1/users/me?x=1",
+    });
+  }, 20_000);
+
   test("answers a connected app's host without a token by saying where accounts are available", async () => {
     const before = seen.length;
     const out = await curl(

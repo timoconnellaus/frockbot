@@ -52,7 +52,7 @@ import { shellQuote } from "./fly/shell.js";
 import {
   computerEgressAccountsV1,
   computerEgressNonceV1,
-  COMPUTER_EGRESS_ROUTES_V1,
+  computerEgressGenericOriginV1,
   createComputerEgressHandlerV1,
   openComputerEgressV1,
   type ComputerEgressSeamV1,
@@ -1154,6 +1154,26 @@ export function createComputerAgentFeature(
      * under it. Nothing opens when no connected account has a route, so a
      * command that cannot use one runs exactly as it would without.
      */
+    /**
+     * The person's connected apps, as the terminal reaches them: read when the
+     * prompt is assembled, after every app's feature has mounted.
+     */
+    const connectedAppsPromptLines = (): string[] => {
+      if (!config.egress || !capabilities?.egressShellPrelude) return [];
+      const accounts = computerEgressAccountsV1(runtime.tools);
+      if (accounts.length === 0) return [];
+      return [
+        `From the terminal, a foreground command reaches these connected apps with no token, at the app's API paths: ${accounts
+          .map(
+            (account) =>
+              `${account.label} at ${computerEgressGenericOriginV1(account.toolkit)}/`,
+          )
+          .join(
+            "; ",
+          )}. For example, curl -s ${computerEgressGenericOriginV1(accounts[0]!.toolkit)}/<path of its API>.`,
+      ];
+    };
+
     const openEgress = async (
       context: ToolExecutionContext,
     ): Promise<{ prelude: string; close: () => void } | undefined> => {
@@ -1161,15 +1181,7 @@ export function createComputerAgentFeature(
       const prelude = capabilities?.egressShellPrelude;
       if (!seam || !prelude) return undefined;
       const accounts = () => computerEgressAccountsV1(runtime.tools);
-      if (
-        !accounts().some((account) =>
-          COMPUTER_EGRESS_ROUTES_V1.some(
-            (route) => route.toolkit === account.toolkit,
-          ),
-        )
-      ) {
-        return undefined;
-      }
+      if (accounts().length === 0) return undefined;
       const nonce = computerEgressNonceV1();
       const expiresAt = now() + EXEC_TIMEOUT_MS + 5_000;
       const token = await seam.sign({
@@ -1221,7 +1233,7 @@ export function createComputerAgentFeature(
         "Run a shell command in the Bot's selected persistent Computer. New calls are blocked while the user has taken control.",
         "This is where most work gets done: use command-line tools such as git, gh, jq and curl, and write a Python script for anything longer than a line or two. Install a missing tool with apt, pip or uv.",
         "Every command is reviewed before it runs, so run what the person's request needs and nothing it does not.",
-        `A foreground command reaches the person's connected ${COMPUTER_EGRESS_ROUTES_V1.map((route) => route.label).join(" and ")} accounts with no token: CLIs such as gh, and requests to ${COMPUTER_EGRESS_ROUTES_V1.map((route) => route.host).join(" and ")}, act as that account, and each write is reviewed again before it is sent. Background commands have no connected accounts.`,
+        "A foreground command reaches the person's connected apps with no token: each is at https://<app>.connected.internal/ followed by the path of that app's own API, and gh reaches GitHub as usual. Every request as the person is reviewed before it is sent. Background commands have no connected accounts.",
         "Pass cwd as an absolute path to run the command in that directory instead of the home directory.",
         "With background:true the command keeps running after this call returns and after this Turn ends, and you get a processId to check later.",
         "A background process runs only while the Computer is awake. Nothing keeps it awake for you: if the Computer hibernates first, the outcome is reported as unknown, with whatever log was durable at the time.",
@@ -2714,6 +2726,7 @@ export function createComputerAgentFeature(
             "You share a persistent Linux Computer with your User's other Bots. You have your own directories and desktop on it; the browser profile is shared.",
             "Use computer_exec to inspect the filesystem before claiming that a path or file exists.",
             "Prefer doing work in the terminal with computer_exec — command-line tools, and Python scripts for longer jobs — over one tool call per step.",
+            ...connectedAppsPromptLines(),
             "Use computer_screenshot to see your own desktop; each capture is filed in your durable screenshots root.",
             "For a job that outlasts this Turn, use computer_exec with background:true and check it later with computer_process_check. Do not poll it in a loop.",
             "Use computer_doctor when the Computer misbehaves; it reports disk, desktop, renderer-watchdog actions, top memory consumers, sync, and network in one read-only call.",
