@@ -62,6 +62,7 @@ export async function runTask(
         await target.click({ timeout: 3_000 });
       } else if (action.operation.op === "type") {
         await target.fill(value ?? "", { timeout: 3_000 });
+        if (action.operation.submit) await target.press("Enter");
       } else {
         await target.selectOption(
           { label: action.operation.option },

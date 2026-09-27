@@ -56,16 +56,23 @@ async function execute(
 }
 
 describe("computer_browser_task", () => {
-  function taskHarness(options: { decide?: boolean; refuse?: string }) {
+  function taskHarness(options: {
+    decide?: boolean;
+    refuse?: string;
+    page?: string[];
+    answers?: Record<string, BrowserTaskAnswerV1>[];
+  }) {
     const performed: { type: string; effectId?: string; nth?: number }[] = [];
     const reviews: { name: string; effect?: string; input: unknown }[] = [];
     let checked = true;
     const snapshot = () =>
-      [
-        '- heading "Settings" [level=1]',
-        `- checkbox "Email notifications"${checked ? " [checked]" : ""}`,
-        '- button "Delete account"',
-      ].join("\n");
+      (
+        options.page ?? [
+          '- heading "Settings" [level=1]',
+          `- checkbox "Email notifications"${checked ? " [checked]" : ""}`,
+          '- button "Delete account"',
+        ]
+      ).join("\n");
     const provider: ComputerHostV1 = {
       id: "fixture",
       capabilities: TEST_HOST_CAPABILITIES,
@@ -96,7 +103,7 @@ describe("computer_browser_task", () => {
         close: () => Promise.resolve(),
       }),
     };
-    const answers: Record<string, BrowserTaskAnswerV1>[] = [
+    const answers: Record<string, BrowserTaskAnswerV1>[] = options.answers ?? [
       {
         page: { choice: "ready", probabilities: { ready: 1 } },
         action: { choice: "a1", probabilities: { a1: 0.9 } },
@@ -182,6 +189,33 @@ describe("computer_browser_task", () => {
           url: "https://example.com/settings",
         }),
       },
+    ]);
+    await task.harness.dispose();
+  });
+
+  test("a search typed with Enter fills the box, then presses Enter", async () => {
+    const ready = { choice: "ready", probabilities: { ready: 1 } };
+    const task = taskHarness({
+      page: ['- searchbox "Search"'],
+      answers: [
+        { page: ready, action: { choice: "a2", probabilities: { a2: 0.9 } } },
+        {
+          page: ready,
+          action: { choice: "finish", probabilities: { finish: 0.9 } },
+        },
+      ],
+    });
+    await task.mount();
+    const result = await execute(task.harness, "computer_browser_task", {
+      goal: "Search for Wollongong",
+      values: { query: "Wollongong" },
+    });
+    expect(result.content).toContain("Outcome: done.");
+    expect(task.performed.map((p) => p.type)).toEqual([
+      "snapshot",
+      "fill",
+      "press",
+      "snapshot",
     ]);
     await task.harness.dispose();
   });
