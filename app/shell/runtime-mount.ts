@@ -6,7 +6,10 @@
 // isolate's `ai` grant (`app/isolates/bot.ts`) resolve the same way.
 
 import { hostedJevClientV1 } from "@frockbot/app/supervision/jev";
-import { createJevEgressV1 } from "@frockbot/app/supervision/jev-egress";
+import {
+  createBrowserTaskDeciderV1,
+  createJevEgressV1,
+} from "@frockbot/app/supervision/jev-egress";
 import { createJevMeterV1 } from "@frockbot/app/billing/jev";
 import type { StoredRunCauseV1 } from "@frockbot/core/durable";
 import {
@@ -709,6 +712,14 @@ export async function agentRuntime(
               );
               return {
                 computerJev: createJevEgressV1({
+                  client,
+                  ...(billing
+                    ? { meter: createJevMeterV1(billing.account) }
+                    : {}),
+                  botId: identity.botId,
+                  sessionId: turn.sessionId,
+                }),
+                computerBrowserTaskDecider: createBrowserTaskDeciderV1({
                   client,
                   ...(billing
                     ? { meter: createJevMeterV1(billing.account) }

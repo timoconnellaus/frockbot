@@ -173,9 +173,24 @@ rate above.
    questions, and pinned to the platform's Jev model. The `jev` ledger kind
    and meter are `app/billing/jev.ts`; `docs/billing.md` has the tariff.
    With billing off, the request is answered and nothing is charged.
-4. **The tool.** The loop in the Computer runtime, `computer_browser_task`
-   registered for the roles `computer_browser` is, the committing-action
-   review, and the Bot's prompt guidance: one goal per call, pass the values.
+4. **The tool.** _Done, with the loop in the app._ `computer_browser_task`
+   (`computer/agent.ts`) runs `runBrowserTaskV1` (`computer/browser-task.ts`)
+   in the Bot's own object rather than on the Computer: each step is one
+   `snapshot` through the existing browser action, one Jev request through
+   `decideBrowserTask` (`createBrowserTaskDeciderV1`, charged like
+   `jev.internal`), and one `click`, `fill` or `select` by role and exact
+   name, with `nth` for one of several same-named controls. A Computer
+   command is cut off at 120 seconds, and nothing yet shows that the
+   Computer's Node sends `fetch` through the proxy, so the loop moved to
+   where the Jev client, the saved-secret path and supervision already are.
+   It still saves what mattered: no model step and no snapshot in the
+   Bot's context per click. A committing click is reviewed as a `mutate`
+   call named `computer_browser_task` with the click and the page as its
+   arguments; a refusal ends the task `needs_approval`. The controls come
+   from the accessibility snapshot: role, name, state, and the row, dialog,
+   group or list item they sit in — an unnamed one known by its own text.
+   Saved secrets are not typed by the task; the Bot fills those with
+   `computer_browser`. The labelled suite drives this same loop: 19 of 22.
 5. **Compare.** The same live tasks through `computer_browser` with the
    Bot's model and through the task, for completion, wall time, model
    tokens and charge. The task replaces per-click driving in the prompt

@@ -53,6 +53,159 @@ async function execute(
   return harness.tools.executePrepared(prepared, context);
 }
 
+describe("computer_browser_task", () => {
+  function taskHarness(options: { decide?: boolean; refuse?: string }) {
+    const performed: { type: string; effectId?: string; nth?: number }[] = [];
+    const reviews: { name: string; effect?: string; input: unknown }[] = [];
+    let checked = true;
+    const snapshot = () =>
+      [
+        '- heading "Settings" [level=1]',
+        `- checkbox "Email notifications"${checked ? " [checked]" : ""}`,
+        '- button "Delete account"',
+      ].join("\n");
+    const provider: ComputerHostV1 = {
+      id: "fixture",
+      capabilities: TEST_HOST_CAPABILITIES,
+      open: async (identity, tenant, assignment) => ({
+        assignment,
+        identity,
+        tenant,
+        capabilities: TEST_HOST_CAPABILITIES,
+        browser: {
+          perform: async (action, options) => {
+            performed.push({
+              type: action.type,
+              ...(options?.effectId ? { effectId: options.effectId } : {}),
+            });
+            if (
+              action.type === "click" &&
+              action.name === "Email notifications"
+            ) {
+              checked = !checked;
+            }
+            return {
+              url: "https://example.com/settings",
+              title: "Settings",
+              accessibilitySnapshot: snapshot(),
+            };
+          },
+        },
+        close: () => Promise.resolve(),
+      }),
+    };
+    const answers = [
+      {
+        page: { choice: "ready", probabilities: { ready: 1 } },
+        action: { choice: "a1", probabilities: { a1: 0.9 } },
+      },
+      {
+        page: { choice: "ready", probabilities: { ready: 1 } },
+        action: { choice: "a2", probabilities: { a2: 0.9 } },
+      },
+    ];
+    const decided: string[] = [];
+    const harness = createAgentRuntimeHarness();
+    harness.computers.register(provider);
+    harness.hooks.add({
+      prepareTool: async (call, context, next) => {
+        if (
+          context.effect === "mutate" &&
+          call.name === "computer_browser_task"
+        ) {
+          reviews.push({
+            name: call.name,
+            effect: context.effect,
+            input: call.input,
+          });
+          if (options.refuse) {
+            return {
+              kind: "denied",
+              result: { content: options.refuse, isError: true },
+            } as never;
+          }
+        }
+        return next();
+      },
+    });
+    return {
+      harness,
+      performed,
+      reviews,
+      decided,
+      mount: () =>
+        harness.mount(
+          createComputerAgentFeature({
+            userId: "user-1",
+            productName: "FrockBot",
+            defaultProviderId: "fixture",
+            ...(options.decide === false
+              ? {}
+              : {
+                  decideBrowserTask: async (_request, effectId) => {
+                    decided.push(effectId);
+                    return answers[decided.length - 1];
+                  },
+                }),
+          }),
+        ),
+    };
+  }
+
+  test("drives the page by Jev's choices, each host call its own effect, and a committing click is reviewed first", async () => {
+    const task = taskHarness({
+      refuse: "The person did not ask to delete it.",
+    });
+    await task.mount();
+    const result = await execute(task.harness, "computer_browser_task", {
+      goal: "Turn off email notifications and delete my account",
+    });
+    expect(result.isError).toBe(false);
+    expect(result.content).toContain(
+      "Outcome: needs_approval. The person did not ask to delete it.",
+    );
+    expect(result.content).toContain(
+      '- untick checkbox "Email notifications" (now ticked)',
+    );
+    expect(task.performed.map((p) => p.type)).toEqual([
+      "snapshot",
+      "click",
+      "snapshot",
+    ]);
+    expect(new Set(task.performed.map((p) => p.effectId)).size).toBe(3);
+    expect(task.decided).toEqual(["tool:1:1:0:jev:0", "tool:1:1:0:jev:1"]);
+    expect(task.reviews).toEqual([
+      {
+        name: "computer_browser_task",
+        effect: "mutate",
+        input: expect.objectContaining({
+          click: 'click button "Delete account" — in: Settings',
+          url: "https://example.com/settings",
+        }),
+      },
+    ]);
+    await task.harness.dispose();
+  });
+
+  test("is not offered without a Jev decider, and names a bad field", async () => {
+    const without = taskHarness({ decide: false });
+    await without.mount();
+    await expect(
+      execute(without.harness, "computer_browser_task", { goal: "x" }),
+    ).rejects.toThrow();
+    await without.harness.dispose();
+    const task = taskHarness({});
+    await task.mount();
+    const refused = await execute(task.harness, "computer_browser_task", {
+      goal: "x",
+      values: { "bad key": "y" },
+    });
+    expect(refused).toMatchObject({ isError: true });
+    expect(refused.content).toContain("values.bad key");
+    await task.harness.dispose();
+  });
+});
+
 describe("computer agent contribution", () => {
   test("routes generic tools through the Bot's selected Computer provider", async () => {
     const calls: string[] = [];

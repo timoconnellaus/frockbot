@@ -1355,8 +1355,11 @@ if (action.action === "fill-secret") {
   await done({ filled: true, url: page.url(), title: await page.title(), snapshot: "" });
 }
 if (action.action === "navigate") await page.goto(action.url, { waitUntil: "domcontentloaded" });
-if (action.action === "click") await page.getByRole(action.role, { name: action.name, exact: action.exact ?? false }).click();
-if (action.action === "fill") await page.getByLabel(action.label, { exact: action.exact ?? false }).fill(action.text);
+// One of several same-named controls, by its order in the page.
+const pick = (locator) => (Number.isInteger(action.nth) ? locator.nth(action.nth) : locator);
+if (action.action === "click") await pick(page.getByRole(action.role, { name: action.name, exact: action.exact ?? false })).click();
+if (action.action === "fill") await pick(action.role ? page.getByRole(action.role, { name: action.label, exact: action.exact ?? false }) : page.getByLabel(action.label, { exact: action.exact ?? false })).fill(action.text);
+if (action.action === "select") await pick(page.getByRole(action.role, { name: action.name, exact: action.exact ?? false })).selectOption({ label: action.option });
 if (action.action === "press") await page.keyboard.press(action.key);
 if (action.action === "wait") await page.waitForTimeout(action.milliseconds ?? 1000);
 // What a password field, a card field or a field a saved secret was typed

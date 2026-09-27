@@ -42,6 +42,7 @@ import {
   type Session,
   type SessionStore,
   type ToolAttachmentV1,
+  type ToolCall,
   type ToolDefinition,
   type ToolExecutionContext,
   type ToolExecutionResult,
@@ -49,6 +50,14 @@ import {
   type WorkspaceRootV1,
 } from "@frockbot/core/contracts";
 import { shellQuote } from "./fly/shell.js";
+import {
+  BROWSER_TASK_DEFAULT_STEPS_V1,
+  BROWSER_TASK_MAX_STEPS_V1,
+  runBrowserTaskV1,
+  type BrowserTaskActionV1,
+  type BrowserTaskAnswerV1,
+  type BrowserTaskReportV1,
+} from "./browser-task.js";
 import {
   computerEgressAccountsV1,
   computerEgressNonceV1,
@@ -317,7 +326,22 @@ export interface ComputerAgentPluginConfig {
    * Absent, and a command reaches no Jev.
    */
   jev?: ComputerEgressJevV1;
+  /**
+   * Answers one Jev request of a `computer_browser_task` step, charged to the
+   * account. Absent, and the tool is not offered.
+   */
+  decideBrowserTask?: ComputerBrowserTaskDeciderV1;
 }
+
+/** One Jev request of a browser task: `undefined` when Jev could not answer. */
+export type ComputerBrowserTaskDeciderV1 = (
+  request: {
+    state: Record<string, unknown>;
+    questions: Record<string, unknown>;
+  },
+  effectId: string,
+  signal?: AbortSignal,
+) => Promise<Readonly<Record<string, BrowserTaskAnswerV1>> | undefined>;
 
 /**
  * A Plugin's page as `plugin_publish` would store it, built from its source
@@ -878,6 +902,110 @@ class ComputerCallTiming {
   finish(): ComputerTimingV1 {
     return { ...this.#ms, total: elapsedMsV1(this.now, this.#started) };
   }
+}
+
+/** A browser task's input, or the refusal naming the field that is wrong. */
+export function decodeBrowserTaskV1(input: unknown):
+  | {
+      goal: string;
+      values: Record<string, string>;
+      url?: string;
+      maxSteps?: number;
+    }
+  | string {
+  const value = record(input);
+  if (!value || typeof value.goal !== "string" || !value.goal.trim()) {
+    return 'computer_browser_task input is invalid: "goal" must be the outcome wanted, as text.';
+  }
+  if (value.goal.length > 2_000) {
+    return 'computer_browser_task input is invalid: "goal" is at most 2000 characters; keep it to one outcome.';
+  }
+  const values: Record<string, string> = {};
+  if (value.values !== undefined) {
+    const given = record(value.values);
+    if (!given || Object.keys(given).length > 30) {
+      return 'computer_browser_task input is invalid: "values" must be an object of at most 30 named strings.';
+    }
+    for (const [key, text] of Object.entries(given)) {
+      if (
+        typeof text !== "string" ||
+        text.length > 5_000 ||
+        !/^[A-Za-z][A-Za-z0-9_]{0,40}$/.test(key)
+      ) {
+        return `computer_browser_task input is invalid: values.${key} must be text of at most 5000 characters, named with letters, digits and underscores.`;
+      }
+      values[key] = text;
+    }
+  }
+  if (value.url !== undefined && typeof value.url !== "string") {
+    return 'computer_browser_task input is invalid: "url" must be an address.';
+  }
+  if (
+    value.maxSteps !== undefined &&
+    (typeof value.maxSteps !== "number" ||
+      !Number.isInteger(value.maxSteps) ||
+      value.maxSteps < 1)
+  ) {
+    return 'computer_browser_task input is invalid: "maxSteps" must be a whole number of at least 1.';
+  }
+  return {
+    goal: value.goal.trim(),
+    values,
+    ...(typeof value.url === "string" ? { url: value.url } : {}),
+    ...(typeof value.maxSteps === "number" ? { maxSteps: value.maxSteps } : {}),
+  };
+}
+
+/** The host action one browser-task action is: by role and name, exactly. */
+export function browserTaskHostActionV1(
+  action: BrowserTaskActionV1,
+  value: string | undefined,
+): ComputerBrowserAction {
+  const { role, name, nth, count } = action.control;
+  const which = count > 1 ? { nth } : {};
+  switch (action.operation.op) {
+    case "click":
+      return { type: "click", role, name, exact: true, ...which };
+    case "type":
+      return {
+        type: "fill",
+        role,
+        label: name,
+        text: value ?? "",
+        exact: true,
+        ...which,
+      };
+    case "select":
+      return {
+        type: "select",
+        role,
+        name,
+        option: action.operation.option,
+        exact: true,
+        ...which,
+      };
+  }
+}
+
+const BROWSER_TASK_PAGE_CHARS_V1 = 4_000;
+
+/** A finished task, as the model reads it. */
+export function browserTaskResultTextV1(report: BrowserTaskReportV1): string {
+  const lines = [`Outcome: ${report.outcome}. ${report.reason}`];
+  if (report.steps.length) {
+    lines.push("", "What it did:", ...report.steps.map((step) => `- ${step}`));
+  }
+  if (report.page) {
+    const snapshot = report.page.snapshot;
+    lines.push(
+      "",
+      `Page: ${report.page.title ?? ""}${report.page.url ? ` — ${report.page.url}` : ""}`,
+      snapshot.length <= BROWSER_TASK_PAGE_CHARS_V1
+        ? snapshot
+        : `${snapshot.slice(0, BROWSER_TASK_PAGE_CHARS_V1)}…`,
+    );
+  }
+  return lines.join("\n");
 }
 
 /**
@@ -2382,6 +2510,143 @@ export function createComputerAgentFeature(
       },
     };
 
+    const browserTaskTool: ToolDefinition = {
+      name: "computer_browser_task",
+      namespace: "frockbot",
+      admission: {
+        turnTypes: ["chat", "agent", "automation", "subagent"],
+        subagentRoles: ["executor", "browserUse", "computerUse"],
+      },
+      // Its own clicks that commit anything are reviewed as `mutate` calls
+      // one by one, before each runs; the task as a whole acts on nothing.
+      description: [
+        "Do one thing on a web page in the Computer's browser, fast: give the outcome you want as `goal` and every piece of text to type in `values`, and a decision model reads the page and clicks, types, ticks and chooses a step at a time until the goal is done.",
+        "Use it for forms, settings, lists and anything that takes several clicks. Use computer_browser to read a page, to act once, or for a password or card number the person saved.",
+        'One outcome per call, spelled out: "add 2 large mugs to the cart and place the order", not "buy mugs". It never invents text: anything it must type goes in values, named for what it is.',
+        "A click that would buy, send, delete, publish or submit is reviewed before it runs; if it is refused, the result says so and you ask the person.",
+        "The result says how it ended — done, blocked, needs_person (a sign-in or a CAPTCHA), needs_approval, step_limit — what it did, and the page it ended on.",
+      ].join(" "),
+      inputSchema: {
+        type: "object",
+        properties: {
+          goal: {
+            type: "string",
+            description: "The one outcome wanted on the page, spelled out.",
+          },
+          values: {
+            type: "object",
+            additionalProperties: { type: "string" },
+            description:
+              'Text to type, each named for what it is: {"email": "sam@example.com"}.',
+          },
+          url: {
+            type: "string",
+            description:
+              "Open this address first. Absent, it starts on the current page.",
+          },
+          maxSteps: {
+            type: "number",
+            description: `At most this many actions (default ${BROWSER_TASK_DEFAULT_STEPS_V1}, at most ${BROWSER_TASK_MAX_STEPS_V1}).`,
+          },
+        },
+        required: ["goal"],
+        additionalProperties: false,
+      },
+      validate: (input) => !!record(input),
+      execute: async (input, context) => {
+        const task = decodeBrowserTaskV1(input);
+        if (typeof task === "string") return { content: task, isError: true };
+        const decide = config.decideBrowserTask;
+        if (!decide) {
+          return {
+            content:
+              "Browser tasks are not available here; use computer_browser.",
+            isError: true,
+          };
+        }
+        browserUsedThisTurn = true;
+        try {
+          return await useComputer(await open(context), async (computer) => {
+            const browser = computer.browser;
+            if (!browser) {
+              throw new ComputerError(
+                "capability-unavailable",
+                "The selected Computer does not support browser automation",
+              );
+            }
+            // Every host call and Jev request of the task is its own effect,
+            // under the task call's id, so a re-run after an eviction repeats
+            // none of them under a new identity.
+            let sequence = 0;
+            const perform = async (action: ComputerBrowserAction) =>
+              operation(context, async () =>
+                browser.perform(action, {
+                  signal: context.signal,
+                  effectId: await computerOperationIdV1({
+                    botId: context.botId,
+                    runId: config.writer?.runId ?? context.sessionId,
+                    effectId: `${context.effectId}:task:${sequence++}`,
+                  }),
+                }),
+              );
+            if (task.url) {
+              await perform({ type: "navigate", url: task.url });
+              const origin = localPreviewOriginV1(task.url);
+              if (origin) previewOrigins.add(origin);
+            }
+            let decisions = 0;
+            let reviews = 0;
+            const report = await runBrowserTaskV1(task, {
+              observe: async () => {
+                const state = await perform({ type: "snapshot" });
+                return {
+                  ...(state.url ? { url: state.url } : {}),
+                  ...(state.title ? { title: state.title } : {}),
+                  snapshot: state.accessibilitySnapshot,
+                };
+              },
+              act: async (action, value) => {
+                await perform(browserTaskHostActionV1(action, value));
+              },
+              decide: (request) =>
+                decide(
+                  request,
+                  `${context.effectId}:jev:${decisions++}`,
+                  context.signal,
+                ),
+              review: async (action, page) => {
+                const effectId = `${context.effectId}:review:${reviews++}`;
+                const call: ToolCall = {
+                  id: effectId,
+                  name: "computer_browser_task",
+                  input: {
+                    goal: task.goal,
+                    click: action.describe,
+                    ...(page.url ? { url: page.url } : {}),
+                    ...(page.title ? { title: page.title } : {}),
+                  },
+                };
+                const prepared = await runtime.hooks.prepareTool(
+                  call,
+                  { ...context, effectId, toolCall: call, effect: "mutate" },
+                  async () => ({ kind: "ready", call, idempotent: false }),
+                );
+                return prepared.kind === "denied"
+                  ? prepared.result.content || "The review refused it."
+                  : undefined;
+              },
+            });
+            return {
+              content: browserTaskResultTextV1(report),
+              isError: false,
+            };
+          });
+        } catch (error) {
+          return failure(error);
+        }
+      },
+    };
+
     /**
      * The work after a Turn that used the Computer: close the preview tabs it
      * opened, file the frame the card shows while the Bot is idle, and push.
@@ -2778,6 +3043,9 @@ export function createComputerAgentFeature(
           ]
         : []),
       runtime.tools.register(timed(browserTool)),
+      ...(config.decideBrowserTask
+        ? [runtime.tools.register(timed(browserTaskTool))]
+        : []),
       runtime.hooks.add({
         // A Turn's first step is where the Turn's sync state begins; a Turn that
         // never touches the Computer never syncs and never wakes one.
@@ -2816,6 +3084,11 @@ export function createComputerAgentFeature(
             "Use computer_exec to inspect the filesystem before claiming that a path or file exists.",
             "Prefer doing work in the terminal with computer_exec — command-line tools, and Python scripts for longer jobs — over one tool call per step.",
             ...connectedAppsPromptLines(),
+            ...(config.decideBrowserTask
+              ? [
+                  "For anything on a web page that takes several clicks — a form, a setting, a list — use computer_browser_task with the outcome spelled out and the text to type in values. Use computer_browser to read a page or act once.",
+                ]
+              : []),
             "Use computer_screenshot to see your own desktop; each capture is filed in your durable screenshots root.",
             "For a job that outlasts this Turn, use computer_exec with background:true and check it later with computer_process_check. Do not poll it in a loop.",
             "Use computer_doctor when the Computer misbehaves; it reports disk, desktop, renderer-watchdog actions, top memory consumers, sync, and network in one read-only call.",
