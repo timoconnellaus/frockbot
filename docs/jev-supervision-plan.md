@@ -569,9 +569,11 @@ _Done, enforced._
 - _Done._ Faithful relay: when a subagent's work is in the Turn — a blocking
   `Task` result, or the completion a Turn was opened for — each send is first
   asked whether the person wanted the words themselves and whether it gives
-  them as written. A condensed or reworded version is withheld with feedback,
-  and the Turn goes on to send the work; a change the person asked for
-  ("make it punchier") passes, and a Turn withholds a rewrite at most once.
+  them as written. A condensed or reworded version, or one that describes the
+  work instead of giving it, is withheld with feedback, and the Turn goes on to
+  send the work; a change the person asked for ("make it punchier") passes, a
+  send after the work was already given whole this Turn is not asked, and a
+  Turn withholds a rewrite at most once.
 - _Done._ `task_ask`: a subagent hands its parent one question and ends its
   Turn; the parent's notice says to answer with `task_resume`. When a Turn
   opens on such a question, Jev judges whether what the person already said
