@@ -17,8 +17,10 @@ import {
   createComputerAgentFeature,
   EXEC_TRUNCATED_NOTE_V1,
   HUMAN_CONTROL_PROMPT_LINE,
+  type ComputerBrowserTaskDeciderV1,
   type ComputerSecretFillSeamV1,
 } from "./agent.js";
+import type { BrowserTaskAnswerV1 } from "./browser-task.js";
 import { COMPUTER_CONTROL_RECORD_KEY } from "./control-record.js";
 import {
   answerComputerEgressV1,
@@ -94,7 +96,7 @@ describe("computer_browser_task", () => {
         close: () => Promise.resolve(),
       }),
     };
-    const answers = [
+    const answers: Record<string, BrowserTaskAnswerV1>[] = [
       {
         page: { choice: "ready", probabilities: { ready: 1 } },
         action: { choice: "a1", probabilities: { a1: 0.9 } },
@@ -105,6 +107,10 @@ describe("computer_browser_task", () => {
       },
     ];
     const decided: string[] = [];
+    const decide: ComputerBrowserTaskDeciderV1 = async (_request, effectId) => {
+      decided.push(effectId);
+      return answers[decided.length - 1];
+    };
     const harness = createAgentRuntimeHarness();
     harness.computers.register(provider);
     harness.hooks.add({
@@ -139,14 +145,7 @@ describe("computer_browser_task", () => {
             userId: "user-1",
             productName: "FrockBot",
             defaultProviderId: "fixture",
-            ...(options.decide === false
-              ? {}
-              : {
-                  decideBrowserTask: async (_request, effectId) => {
-                    decided.push(effectId);
-                    return answers[decided.length - 1];
-                  },
-                }),
+            ...(options.decide === false ? {} : { decideBrowserTask: decide }),
           }),
         ),
     };
