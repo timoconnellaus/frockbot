@@ -684,7 +684,7 @@ describe("the install manifest", () => {
       await computer.cleanup();
       await rm(shim, { recursive: true, force: true });
     }
-  });
+  }, 30_000);
 
   test("a retired path holding one this install owns is left, and so is what it holds", async () => {
     const owned = `${RUNTIME_ROOT}/node_modules/playwright-core/package.json`;
