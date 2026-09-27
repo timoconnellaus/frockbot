@@ -102,7 +102,7 @@ Bot's context and speaks in that Bot's voice; the Bot is its worker.**
 7. **The button lives on the Bot, at the far right of the composer, and
    voice is a focused mode of the Bot page.** Option A from the discussion:
    a fixed voice control to the right of the existing mic / send / stop
-   morph (`apps/native/lib/shell/composer.dart`, `_actionButton`). It never
+   morph (`apps/native/packages/frockbot_client/lib/shell/composer.dart`, `_actionButton`). It never
    morphs, so it is always the same target under the thumb. Dictation stays
    beside it. Pressing it puts the Bot page into **voice mode**: the current
    Bot's character large, the thread still readable, mute on the screen, and

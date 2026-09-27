@@ -29,7 +29,7 @@ Sources:
 - Historical payload reads: `core/durable/session-event-log.ts:290`, `:598`
 - Runtime and context: `app/shell/runtime-mount.ts:183`, `app/memory/agent.ts:1397`, `app/skills/agent.ts:875`
 - Model effect fence: `core/agent-loop/model-request.ts:116`
-- Invalidation and client refresh: `apps/cloudflare/src/bot-state-channel.ts:360`, `apps/native/lib/client/state_channel.dart:123`
+- Invalidation and client refresh: `apps/cloudflare/src/bot-state-channel.ts:360`, `apps/native/packages/frockbot_client/lib/client/state_channel.dart:123`
 
 ## Voice
 
@@ -43,7 +43,7 @@ After call admission and selected-Bot identity resolution, prompt preparation fa
 
 Sources:
 
-- Client entry/parallel setup: `apps/native/lib/voice/assistant.dart:341`, `:806`
+- Client entry/parallel setup: `apps/native/packages/frockbot_client/lib/voice/assistant.dart:341`, `:806`
 - Gateway: `apps/cloudflare/src/gateway.ts:676`
 - Agent and recovery: `apps/cloudflare/src/voice-assistant.ts:727`, `:887`
 - Call admission: `apps/cloudflare/src/voice-assistant.ts:1580`

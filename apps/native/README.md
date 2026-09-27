@@ -2,6 +2,14 @@
 
 The one FrockBot client, over the existing cloud commands. Its web build is what `bot.frockbot.com` serves, staged into the app Worker's static assets by `apps/cloudflare/build-flutter-web.ts`. The Android, macOS and iOS builds are unqualified: they do not claim Slice 2 acceptance, and [`qualification.json`](qualification.json) records the evidence and what is still missing.
 
+## An application and a package
+
+The client is a Flutter package, [`packages/frockbot_client`](packages/frockbot_client), and `apps/native` is the thin application that runs it: `lib/main.dart` calls `runFrockbot(frockbotBrand)`, and `lib/brand.dart` is FrockBot's `ClientBrand` ([ADR 0038](../../docs/adr/0038-white-label-deployments.md)). The two are one pub workspace under this directory's `pubspec.lock`, so `flutter pub get`, `flutter analyze` and `flutter test` here cover both. The suites live in this application's `test/` and `integration_test/`, which reach the package exactly as another application would: its assets under `packages/frockbot_client/…`, its fonts as `packages/frockbot_client/<family>`.
+
+What is FrockBot's rather than the client's belongs to the application: the Android, iOS, macOS and web projects, `com.frockbot.mobile`, signing, `shorebird.yaml`, the `--dart-define` origin, the icons in `assets/branding`, and the characters in `assets/characters`, which `frockbotBrand` names by asset key. The package bundles what every product shares: the connector icons, the voice clips and chime, and its typefaces.
+
+A `ClientBrand` holds the product name every user-visible string reads, the built-in model's name, an optional sign-in icon (the default character otherwise), the character catalog — each id with its Rive file, still, ink box, colours and default voice — and the default character, extra font families the application bundles itself, and the release channel. `ClientReleaseChannel.shorebird` turns on Shorebird's updater on the phone and Sparkle on the Mac; a brand with none gets `InertMobileUpdateService` and no desktop updater. A white-label is another application that depends on `frockbot_client` by git URL, path and release tag, passes its own brand, and carries the same `webview_flutter_wkwebview` override this pubspec does if it wants the vendored WebKit adapter.
+
 Use Flutter **3.47.0 / Dart 3.13.0**, framework `4cf24164269a5ebf0c16a028a00727d0e77bbb05`, from `/Users/tim/repos/flutter/bin/flutter`. Do not upgrade it. `pubspec.lock` pins WebView **4.14.1**, Android WebView adapter **4.14.1**, WebKit adapter **3.26.1**, and secure storage **11.0.0**.
 
 ```sh
@@ -189,7 +197,7 @@ staging build serves that runtime from the origin and passes the
 `RIVE_NATIVE_WASM_HOST` define that names it. How and why is
 [the web build](../../docs/architecture.md#served-on-the-web).
 
-`dart:io` is confined to `lib/**/*_io.dart`, which a test enforces. Four seams choose an implementation by conditional import: the HTTP client and the state-channel socket (`client/transport_io.dart`, `client/transport_web.dart`), the credential (`client/credential_*.dart`), the sign-in door (`client/auth_*.dart`) and the durable store (`client/plain_store_*.dart`).
+`dart:io` is confined to `*_io.dart` files under the application's and the package's `lib/`, which a test enforces. Four seams choose an implementation by conditional import: the HTTP client and the state-channel socket (`client/transport_io.dart`, `client/transport_web.dart`), the credential (`client/credential_*.dart`), the sign-in door (`client/auth_*.dart`) and the durable store (`client/plain_store_*.dart`).
 
 The phone holds a PKCE bearer token in the platform keystore and sends it as a header. The browser holds nothing: `withCredentials` carries the ambient better-auth cookie, sign-in navigates to better-auth's Google door, and everything that is not a secret lives in `localStorage`. A cookie is invisible to script, so the account is read off the `<body>` attributes the Worker stamped on the document (`lib/client/identity_web.dart`) and the shell paints before `/api/identity` confirms it.
 
@@ -201,7 +209,7 @@ The app persists PKCE state/verifier before opening the system browser. The gate
 
 ## Extension boundary
 
-A plugin renders by returning a `ViewDocument`, which `lib/view/` draws with the host's own widgets: six node types, no markup and no third-party renderer. The budgets — 512 nodes, depth 16, 262,144 bytes — are checked before the first widget is built, and a document past any of them becomes a host-owned unavailable region rather than a partial view. `embed` names a host region; the host decides what goes in it. A development build reaches `View sample` from You to look at the renderer before any plugin produces a document.
+A plugin renders by returning a `ViewDocument`, which `packages/frockbot_client/lib/view/` draws with the host's own widgets: six node types, no markup and no third-party renderer. The budgets — 512 nodes, depth 16, 262,144 bytes — are checked before the first widget is built, and a document past any of them becomes a host-owned unavailable region rather than a partial view. `embed` names a host region; the host decides what goes in it. A development build reaches `View sample` from You to look at the renderer before any plugin produces a document.
 
 The native host confirms external links before opening the system browser. WebKit's pinned source override selects a nonpersistent store because the public plugin API does not expose it; see its vendor README.
 

@@ -66,7 +66,7 @@ What exists:
 Before the module host is built, Messages is removed entirely:
 `app/machine-messages`, `apps/mac-messages`, the `messages` operation and its
 limits in `core/machine-protocol`, the Messages channel in `AppDelegate.swift`,
-`apps/native/lib/machines/mac_messages.dart` and its place on the machines
+`apps/native/packages/frockbot_client/lib/machines/mac_messages.dart` and its place on the machines
 page, its Package definition and catalog entry, its tests, and the Messages
 section of `apps/native/macos/README.md`. Its stored records go under the
 disposable-state rule, and a fresh conversation is verified.
@@ -344,7 +344,7 @@ reference and the responses its first calls return.
   approved, needs a new approval. Discovery on the real Mac takes several
   generations, and each approval is a round trip with the person.
 - Windows and Linux hosts.
-- Moving the phone's presence lease (`apps/native/lib/activity/push.dart`
+- Moving the phone's presence lease (`apps/native/packages/frockbot_client/lib/activity/push.dart`
   renews it every six seconds while the app is focused) onto its channel
   socket.
 

@@ -5,12 +5,12 @@ import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart' show FontLoader, rootBundle;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/chat_controller.dart';
-import 'package:frockbot_native/flock/avatar.dart';
-import 'package:frockbot_native/shell/chat_header.dart';
-import 'package:frockbot_native/shell/chat_pane.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
-import 'package:frockbot_native/voice/dictation.dart';
+import 'package:frockbot_client/client/chat_controller.dart';
+import 'package:frockbot_client/flock/avatar.dart';
+import 'package:frockbot_client/shell/chat_header.dart';
+import 'package:frockbot_client/shell/chat_pane.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
+import 'package:frockbot_client/voice/dictation.dart';
 
 import 'voice_shell_harness.dart';
 import 'widget_test.dart' show FakeTransport, MemoryStore;
@@ -39,9 +39,9 @@ void main() {
   const visual = String.fromEnvironment('COMPANION_VISUAL_OUTPUT');
   if (visual.isNotEmpty) {
     setUpAll(() async {
-      final inter = FontLoader('Inter');
+      final inter = FontLoader(interFontFamily);
       for (final weight in [400, 500, 600, 700]) {
-        inter.addFont(rootBundle.load('assets/fonts/inter-latin-$weight.ttf'));
+        inter.addFont(rootBundle.load('packages/frockbot_client/assets/fonts/inter-latin-$weight.ttf'));
       }
       await inter.load();
       await (FontLoader(

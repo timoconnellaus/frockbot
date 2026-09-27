@@ -5,10 +5,10 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/settings/voice_settings.dart';
-import 'package:frockbot_native/voice/appearance.dart';
-import 'package:frockbot_native/voice/player.dart';
-import 'package:frockbot_native/voice/preview.dart';
+import 'package:frockbot_client/settings/voice_settings.dart';
+import 'package:frockbot_client/voice/appearance.dart';
+import 'package:frockbot_client/voice/player.dart';
+import 'package:frockbot_client/voice/preview.dart';
 
 class _FakePlayer extends VoicePlayer {
   int? rate;
@@ -67,7 +67,7 @@ void main() {
   });
 
   test('names a clip after the voice, under the bundled folder', () {
-    expect(voicePreviewAssetV1('Iapetus'), 'assets/voices/Iapetus.wav');
+    expect(voicePreviewAssetV1('Iapetus'), 'packages/frockbot_client/assets/voices/Iapetus.wav');
   });
 
   test('hears one voice, and tapping it again stops', () async {

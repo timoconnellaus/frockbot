@@ -1,9 +1,9 @@
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/chat_controller.dart';
-import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/shell/transcript_model.dart';
+import 'package:frockbot_client/client/chat_controller.dart';
+import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/shell/transcript_model.dart';
 
 import 'widget_test.dart' show MemoryStore;
 

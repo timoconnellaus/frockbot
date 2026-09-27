@@ -8,7 +8,7 @@ import 'package:flutter/gestures.dart' show PointerDeviceKind;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/shell/desktop_layout.dart';
+import 'package:frockbot_client/shell/desktop_layout.dart';
 
 void main() {
   const window = MethodChannel('com.frockbot/window');

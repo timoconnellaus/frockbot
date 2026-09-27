@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/panels/plugin_page.dart';
+import 'package:frockbot_client/panels/plugin_page.dart';
 
 void main() {
   group('what a Plugin page may say', () {

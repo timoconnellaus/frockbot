@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/settings/account_deletion.dart';
+import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/settings/account_deletion.dart';
 
 import 'native_session.dart';
 import 'widget_test.dart' show MemoryStore;

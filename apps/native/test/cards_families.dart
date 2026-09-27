@@ -14,8 +14,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/cards/chat_card.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/cards/chat_card.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 import 'settings_test.dart' show SettingsApi;
 import 'widget_test.dart' show MemoryStore;
@@ -48,10 +48,10 @@ const familyVisualOutput = String.fromEnvironment('CARD_VISUAL_OUTPUT');
 Future<void> loadFamilyFont() async {
   final faces = [
     for (final weight in [400, 500, 600, 700])
-      File('assets/fonts/inter-latin-$weight.ttf'),
+      File('packages/frockbot_client/assets/fonts/inter-latin-$weight.ttf'),
   ];
   if (faces.any((face) => !face.existsSync())) return;
-  final loader = FontLoader('Inter');
+  final loader = FontLoader(interFontFamily);
   for (final face in faces) {
     loader.addFont(
       face.readAsBytes().then(

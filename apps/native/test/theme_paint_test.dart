@@ -3,12 +3,12 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/main.dart';
-import 'package:frockbot_native/theme/document.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/app.dart';
+import 'package:frockbot_client/theme/document.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 import 'package:http/http.dart' as http;
 import 'package:http/testing.dart';
-import 'package:frockbot_native/client/transport.dart';
+import 'package:frockbot_client/client/transport.dart';
 import 'package:web_socket_channel/web_socket_channel.dart';
 
 import 'bot_switch_test.dart' show LatchedStore, registration, session;

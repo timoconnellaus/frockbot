@@ -17,7 +17,7 @@ test:
     the PR's `Check` runs. Do not rerun the whole suite. Add targeted runs only
     for what the diff touches:
     - Worker or Durable Object runtime: `bun run --filter @frockbot/<package> test:workerd`
-    - Dart under apps/native: `flutter analyze --no-pub` and `flutter test --no-pub` there
+    - Dart under apps/native (the application and `packages/frockbot_client`): `flutter analyze --no-pub` and `flutter test --no-pub` in apps/native
     - Browser client or integration seams: the relevant `bun run validate:<category>`
     Skip anything slow that the diff cannot affect.
     A diff that touches `SKILL.md`, `app/skills/`, `app/plugins/skills/`,

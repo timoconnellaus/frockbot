@@ -6,8 +6,8 @@ library;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/shell/markdown.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/shell/markdown.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 Map<String, TextStyle> leafStyles(WidgetTester tester) {
   final styles = <String, TextStyle>{};
@@ -34,7 +34,7 @@ void main() {
     );
     final styles = leafStyles(tester);
 
-    expect(styles['Plain ']!.fontFamily, 'Inter');
+    expect(styles['Plain ']!.fontFamily, interFontFamily);
     expect(styles['Plain ']!.fontWeight, FontWeight.w400);
     expect(styles['Plain ']!.height, 1.55);
     expect(styles['Plain ']!.fontSize, 14);
@@ -48,7 +48,7 @@ void main() {
     final style = FrockTheme.message(theme);
     final body = theme.textTheme.bodyLarge!;
 
-    expect(style.fontFamily, 'Inter');
+    expect(style.fontFamily, interFontFamily);
     expect(style.fontWeight, FontWeight.w400);
     expect(style.height, 1.55);
     expect(style.fontSize, 14);

@@ -1,7 +1,7 @@
 // Mint the thirty Gemini timbre clips the native picker plays.
 //
 // Gemini TTS recites one line in each Live `voiceName` over HTTP. The clips
-// live in `apps/native/assets/voices/` and are shipped with the app; this
+// live in `apps/native/packages/frockbot_client/assets/voices/` and are shipped with the app; this
 // script is how they are remade, not a runtime path. It spends money and
 // needs `GEMINI_API_KEY`, so it is never part of CI.
 //
@@ -26,7 +26,10 @@ import {
 } from "../app/voice/preview.ts";
 
 const root = resolve(import.meta.dirname, "..");
-const outDir = resolve(root, "apps/native/assets/voices");
+const outDir = resolve(
+  root,
+  "apps/native/packages/frockbot_client/assets/voices",
+);
 
 function readApiKeyV1(): string {
   // The project's key lives in .dev.vars. An inherited GEMINI_API_KEY in the

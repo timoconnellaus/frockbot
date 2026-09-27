@@ -22,7 +22,7 @@ controls, a settled state.
 Today the conversation has exactly one rich vocabulary, the `send_to_user`
 payload union in `core/contracts/send-to-user.ts`: `text`, `attachment`,
 `widget`, `approval`, `secret-request`, `agent-card` and `applet`, each drawn
-by its own Flutter widget in `apps/native/lib/shell/send_payload.dart`. Adding
+by its own Flutter widget in `apps/native/packages/frockbot_client/lib/shell/send_payload.dart`. Adding
 the email card that way means a new union member, a new decoder, a new widget,
 and a release. A Plugin cannot add one at all.
 
@@ -81,7 +81,7 @@ else; a surface naming an unknown component is refused whole, the way a
 Drawing a Card reaches no network. The renderer validates a surface against
 the catalog's schemas, and the schema stack resolves the `$schema` that would
 otherwise be fetched: the draft 2020-12 meta-schema, which sits in
-`apps/native/lib/cards/schema_documents.g.dart` — lifted from ajv, the same
+`apps/native/packages/frockbot_client/lib/cards/schema_documents.g.dart` — lifted from ajv, the same
 document set the deployment's validator uses — and is answered by the client
 the renderer's intake is run with (`cards/schema_client.dart`). That client
 refuses every other schema URI without a request, because a schema this build
@@ -245,7 +245,7 @@ fold into A2UI is a later decision, taken when a slot needs something
 - The Session gains `card:<surfaceId>` records and a Card read route; the
   state channel's invalidation notices cover them.
 - `apps/native` regains `genui` and `a2ui_core`, this time with a caller. The
-  Frock catalog is a Dart package under `apps/native/lib/cards/` and a
+  Frock catalog is a Dart package under `apps/native/packages/frockbot_client/lib/cards/` and a
   generated schema under `core/protocol-schemas`, gated like the client wire.
   Whether `genui` 0.10.x speaks the 1.0 release candidate or 0.9.1 is checked
   at step 1; if it lags, the seam decodes 1.0 and the renderer is fed what it
@@ -460,7 +460,7 @@ serve`), the platform model over the remote Workers AI binding, asked
    > `<effectId>:card`, derived rather than minted so a replayed call
    > recomputes the same occurrence, the same surface and the same ids.
    >
-   > **What the client lost.** `apps/native/lib/shell/send_payload.dart` drew
+   > **What the client lost.** `apps/native/packages/frockbot_client/lib/shell/send_payload.dart` drew
    > each of the five with a widget of its own; all five are gone, along with
    > `_Card`, `_Widget`, `_Attachment`, `_Approval` and `_SecretRequest`, and
    > the `approvals` and `onOpenSettings` parameter chains behind them
@@ -471,7 +471,7 @@ serve`), the platform model over the remote Workers AI binding, asked
    > reported, removed: the screenshots show one card per send.
    >
    > Two things moved rather than died. `ApprovalsController` is now
-   > `apps/native/lib/shell/approvals.dart` and reaches the catalog through
+   > `apps/native/packages/frockbot_client/lib/shell/approvals.dart` and reaches the catalog through
    > `CardApprovalsScope`, because an Approval settles without its surface
    > moving — somebody answers on another device, or the alarm expires it — so
    > `ApprovalActions` draws "You approved this." from the Bot's own approvals

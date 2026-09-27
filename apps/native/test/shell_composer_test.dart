@@ -3,8 +3,8 @@
 library;
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/shell/composer.dart';
-import 'package:frockbot_native/shell/skill_menu.dart';
+import 'package:frockbot_client/shell/composer.dart';
+import 'package:frockbot_client/shell/skill_menu.dart';
 
 SkillCatalogEntry entry(String slug, {String? name, String description = ''}) =>
     SkillCatalogEntry(

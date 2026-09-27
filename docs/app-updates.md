@@ -31,7 +31,7 @@ restarting`, with `retry` from any failure and `restart to update` when an
 - **Failures are ordinary.** A network drop, a bad signature or a refused
   restart leaves the running app exactly as it was and offers the press again.
 
-In Dart the seam is `DesktopUpdater` (`apps/native/lib/update/desktop_update.dart`):
+In Dart the seam is `DesktopUpdater` (`apps/native/packages/frockbot_client/lib/update/desktop_update.dart`):
 `check`, `download`, `install`, and a stream of snapshots. The controller above
 it owns the states, the checkpoint and the retry rules, and is tested against a
 fake. A new platform adds an adapter, not a new controller.

@@ -16,7 +16,7 @@
 // dependency touches thousands of files that a build does not have to follow.
 // The client is built separately, by `flutter build web`, and reaches the
 // artifact only as a build hash, so no Dart file appears in that map:
-// `apps/native/lib` is walked as well.
+// the client package's `lib` is walked as well.
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { dirname, join, relative, resolve } from "node:path";
 

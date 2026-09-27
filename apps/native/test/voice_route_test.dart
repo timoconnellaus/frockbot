@@ -9,11 +9,11 @@ import 'dart:typed_data';
 import 'package:flutter/foundation.dart'
     show TargetPlatform, debugDefaultTargetPlatformOverride;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/voice/assistant.dart';
-import 'package:frockbot_native/voice/capture.dart';
-import 'package:frockbot_native/voice/protocol.dart';
-import 'package:frockbot_native/voice/route.dart';
-import 'package:frockbot_native/voice/waveform.dart';
+import 'package:frockbot_client/voice/assistant.dart';
+import 'package:frockbot_client/voice/capture.dart';
+import 'package:frockbot_client/voice/protocol.dart';
+import 'package:frockbot_client/voice/route.dart';
+import 'package:frockbot_client/voice/waveform.dart';
 
 import 'voice_fakes.dart';
 
@@ -244,7 +244,7 @@ void main() {
 
   test('a failed start still ends the session it began', () async {
     final h = _Harness();
-    h.capture.failure = const MicrophoneDenied();
+    h.capture.failure = MicrophoneDenied();
     unawaited(h.controller.start());
     await settle(6);
     expect(h.controller.phase, VoiceSessionPhase.error);

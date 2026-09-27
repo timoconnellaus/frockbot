@@ -119,11 +119,11 @@ catalog check. There is nothing here to hold against a provider account: a
 voice name is either one of the thirty or it is refused by the decoder.
 
 **Choosing one.** Settings › Voice under a Bot
-(`apps/native/lib/settings/voice_settings.dart`) is the same two halves: a
+(`apps/native/packages/frockbot_client/lib/settings/voice_settings.dart`) is the same two halves: a
 timbre picked from the thirty, and a delivery picked from presets, with the
 person's own words last. It saves as the About card does — the moment a
 choice is made, and a moment after the last keystroke. The timbre picker
-plays a minted clip of that mouth (`apps/native/assets/voices/<voice>.wav`,
+plays a minted clip of that mouth (`apps/native/packages/frockbot_client/assets/voices/<voice>.wav`,
 recited by Gemini TTS from `scripts/mint-voice-previews.ts` so a Live
 session is not opened just to hear it). Accent, attitude and the dials are
 still only heard on a call: they are prose in the instruction, not a
@@ -401,7 +401,7 @@ Gemini generates a reply "as quickly as possible, and not in real time", and
 leaves playing it out in real time to the client. Both native speakers play
 silence the moment their queue is empty, so a chunk fed on arrival that is
 late by more than the one before it lasted is a gap mid-word. The player
-(`apps/native/lib/voice/player.dart`) therefore holds 200 ms of audio before
+(`apps/native/packages/frockbot_client/lib/voice/player.dart`) therefore holds 200 ms of audio before
 an idle speaker starts, and again after it runs dry. The cushion is counted in
 audio, not time: a reply that arrives faster than real time starts at once, and
 a trickle waits at most 200 ms.
@@ -754,7 +754,7 @@ that one question and nothing else.
 
 They are off. A client build turns them on for itself with
 `--dart-define FROCKBOT_VOICE_DIAGNOSTICS=true`; every shipped build compiles
-them out (`apps/native/lib/voice/diagnostics.dart`). In this repository the one
+them out (`apps/native/packages/frockbot_client/lib/voice/diagnostics.dart`). In this repository the one
 build that sets it is the development desktop app, built with
 `bun run update:desktop --voice-diagnostics`
 ([`apps/native/README.md`](../apps/native/README.md), "macOS"). A build that
@@ -783,7 +783,7 @@ press, `edge` from the entry Worker receiving the upgrade, `server` from the
 voice object accepting the socket. Read the three sequences beside each other;
 never subtract one side's elapsed from another's.
 
-- **`client`** (`apps/native/lib/voice/assistant.dart`, where each is
+- **`client`** (`apps/native/packages/frockbot_client/lib/voice/assistant.dart`, where each is
   documented): `controller.start`, `route.begin`/`route.ready`,
   `capture.open`/`capture.ready` (the permission prompt is inside this one),
   `socket.open`/`socket.ready` per attempt, `socket.welcome`,
@@ -1194,7 +1194,7 @@ minute.
 
 ### Flutter on web, Android and macOS
 
-`apps/native/lib/voice/` implements both protocols over the same
+`apps/native/packages/frockbot_client/lib/voice/` implements both protocols over the same
 authenticated upgrade `NativeApi.socket()` uses (`connectSocketV1` with the
 bearer header). `record` 7.1.1 captures streaming PCM16, asking for echo
 cancellation, noise suppression and automatic gain wherever
@@ -1220,10 +1220,10 @@ when the app is away.
 that is open and delivering nothing but zeros — what the macOS voice
 processing unit does when asked for echo cancellation with nothing rendering
 through the same engine (`voiceCaptureProcessingV1` in
-`apps/native/lib/voice/capture.dart`) — leaves the call live with a flat
+`apps/native/packages/frockbot_client/lib/voice/capture.dart`) — leaves the call live with a flat
 meter. Ten seconds of a live call that has never carried a single frame at or
 above the room's own level — `voiceRoomToneLevelV1` in
-`apps/native/lib/voice/speech_gate.dart`, far below the gate's floor, which is
+`apps/native/packages/frockbot_client/lib/voice/speech_gate.dart`, far below the gate's floor, which is
 where words start — says so once, as a notice on whichever surface is drawing
 the call: `FrockBot isn’t hearing anything. Check the microphone in your
 device settings.` It is a notice and not an error — the call is fine and the
@@ -1247,7 +1247,7 @@ Gemini-owned interruption.
 operating system — communication mode is where Android attaches its echo
 canceller and how a Bluetooth microphone gets used — but not to the person,
 who is not holding the phone to their ear. `VoiceAudioRoute`
-(`apps/native/lib/voice/route.dart`, `com.frockbot/audio-route`, Kotlin
+(`apps/native/packages/frockbot_client/lib/voice/route.dart`, `com.frockbot/audio-route`, Kotlin
 `VoiceAudioRoute.kt`) therefore holds the session the way a VoIP app does,
 for exactly the length of the call: transient audio focus with
 voice-communication attributes, `MODE_IN_COMMUNICATION`, and the output route
@@ -1324,7 +1324,7 @@ so somebody who walked to another Bot while the call carried on is not dragged
 out of it.
 
 **The voice surface.** The thread and composer stay. A live call sits in the
-conversation header as a compact cluster (`apps/native/lib/voice/call_chrome.dart`);
+conversation header as a compact cluster (`apps/native/packages/frockbot_client/lib/voice/call_chrome.dart`);
 hang-up is there, and the composer's voice control turns the Bot's primary
 colour while this Bot's session is up. After hang-up the spoken turns land
 in the thread as a collapsible **Voice chat** section — the durable
@@ -1402,7 +1402,7 @@ a time: the next call's press waits on `AssistantSessionController.released`
 before it opens them. Nothing is queued: the control says so, and the person
 presses again.
 
-Both meters are the same five pills (`apps/native/lib/voice/waveform.dart`):
+Both meters are the same five pills (`apps/native/packages/frockbot_client/lib/voice/waveform.dart`):
 one object whose motion source changes with the call, the way the shipped
 assistants do it (Gemini's bars, ChatGPT's orb, Alexa's ring). Sound from the
 person raises the pills in white; sound from the Bot raises them in the deep

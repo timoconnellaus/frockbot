@@ -260,7 +260,7 @@ export function a2uiByteLengthV1(value: unknown): number {
  * Both spellings count. 1.0 writes the name directly on `action`; v0.9, which
  * is what the shipping renderer and the committed catalogs speak, nests it
  * under `action.event`. Counting only 1.0's would let a surface past this
- * budget that `admitCardV1` in `apps/native/lib/cards/surface.dart` then
+ * budget that `admitCardV1` in `apps/native/packages/frockbot_client/lib/cards/surface.dart` then
  * refuses, and the seam and the client have to refuse the same surfaces: a
  * budget enforced only in the client is enforced in the one place that cannot
  * tell the Bot what it did wrong.

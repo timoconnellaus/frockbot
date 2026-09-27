@@ -3,7 +3,7 @@
 
 Catalog providers are compiled Packages, not Plugins. Their Connection Type
 already names `icon: <provider.id>`. The Flutter host draws
-`apps/native/assets/connectors/<icon>.png` or a letter tile. This script
+`apps/native/packages/frockbot_client/assets/connectors/<icon>.png` or a letter tile. This script
 fills those files from a pinned Lobe Icons PNG pack so a card looks like
 the brand, the same way Gmail and Slack already do.
 
@@ -24,7 +24,7 @@ import urllib.request
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-DEST = ROOT / "apps/native/assets/connectors"
+DEST = ROOT / "apps/native/packages/frockbot_client/assets/connectors"
 PACKAGE = "@lobehub/icons-static-png"
 VERSION = "1.94.0"
 SIZE = 192

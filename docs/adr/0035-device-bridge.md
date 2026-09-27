@@ -76,7 +76,7 @@ allowed to reach.
 - **Deep links** through `app_links` for sign-in return, Bot links and connect
   return. No share sheet, NFC, geofence, Bluetooth, widget, watch, tray or
   browser extension code exists.
-- **One microphone owner** at a time (`apps/native/lib/voice/mic_ownership.dart`),
+- **One microphone owner** at a time (`apps/native/packages/frockbot_client/lib/voice/mic_ownership.dart`),
   shared by dictation and the voice assistant.
 
 ## Decision

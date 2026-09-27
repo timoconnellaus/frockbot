@@ -3,13 +3,13 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/attachments.dart';
-import 'package:frockbot_native/client/chat_controller.dart';
-import 'package:frockbot_native/client/image_prep.dart';
-import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
-import 'package:frockbot_native/shell/composer.dart';
-import 'package:frockbot_native/shell/transcript_model.dart';
+import 'package:frockbot_client/client/attachments.dart';
+import 'package:frockbot_client/client/chat_controller.dart';
+import 'package:frockbot_client/client/image_prep.dart';
+import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/protocol/client_wire.generated.dart' as wire;
+import 'package:frockbot_client/shell/composer.dart';
+import 'package:frockbot_client/shell/transcript_model.dart';
 
 import 'widget_test.dart' show MemoryStore;
 

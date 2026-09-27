@@ -39,11 +39,11 @@ Most of what this needs survived the Applet deletion:
 - **The artifact origin.** `servePackageUiArtifact` (`apps/cloudflare/src/gateway.ts`)
   serves `ui.<host>/packages/<sha256>.html`: content-addressed, hash-checked,
   immutable, with `default-src 'none'`.
-- **The frame.** `HostFrameView` (`apps/native/lib/view/host_frame*.dart`) is a
+- **The frame.** `HostFrameView` (`apps/native/packages/frockbot_client/lib/view/host_frame*.dart`) is a
   `sandbox="allow-scripts"` credentialless iframe on the web and a hardened
   WebView on a phone. The WebView refuses every permission request and
   navigates to exactly one URL.
-- **The bridge.** `PackagePageFrame` (`apps/native/lib/packages/frame.dart`) is
+- **The bridge.** `PackagePageFrame` (`apps/native/packages/frockbot_client/lib/packages/frame.dart`) is
   what first-party package pages and the Computer viewer speak. It has a
   versioned `hello`, `resize`, `focus`, `openExternal` and a `callTool` gated by
   what the contribution declared, plus theme and state feeds.

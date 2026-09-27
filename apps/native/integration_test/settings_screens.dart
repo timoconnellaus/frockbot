@@ -6,11 +6,13 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/client/plain_store.dart';
-import 'package:frockbot_native/settings/page.dart';
-import 'package:frockbot_native/connections/page.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/client/plain_store.dart';
+import 'package:frockbot_client/settings/page.dart';
+import 'package:frockbot_client/connections/page.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
+import 'package:frockbot_client/brand.dart';
+import 'package:frockbot_native/brand.dart';
 
 class LocalSettingsApi extends NativeApi {
   final Uri origin;
@@ -63,6 +65,7 @@ class LocalSettingsApi extends NativeApi {
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
+  installClientBrand(frockbotBrand);
   SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
   final store = PlainStore(name: 'native-settings-design-v1.json');
   final api = LocalSettingsApi(

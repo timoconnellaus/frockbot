@@ -69,7 +69,7 @@ export const prePushCategories = ["format", "typecheck", "unit"];
  * `providers` imports these directories, and `main.yml` says of the same suite
  * that it "never needs Flutter". The Flutter client reaches the other slow
  * categories through the built artifact — `test:integration` reads
- * `../native/lib` directly — so none of them may borrow this list.
+ * the client package's `lib` directly — so none of them may borrow this list.
  */
 const CATEGORY_EXCLUSIONS: Record<string, string[]> = {
   runtime: ["apps/native/", "apps/marketing/", "apps/admin-portal/"],

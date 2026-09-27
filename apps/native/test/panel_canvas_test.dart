@@ -8,9 +8,9 @@ library;
 import 'dart:async';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/panels/canvas.dart';
-import 'package:frockbot_native/view/action.dart';
+import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/panels/canvas.dart';
+import 'package:frockbot_client/view/action.dart';
 
 import 'document_cache_test.dart' show listDocument;
 import 'widget_test.dart' show MemoryStore;

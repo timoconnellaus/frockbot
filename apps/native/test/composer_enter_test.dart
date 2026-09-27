@@ -8,11 +8,11 @@ library;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/shell/chat_icons.dart';
-import 'package:frockbot_native/shell/composer.dart';
-import 'package:frockbot_native/shell/skill_menu.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/shell/chat_icons.dart';
+import 'package:frockbot_client/shell/composer.dart';
+import 'package:frockbot_client/shell/skill_menu.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 class VoidStore implements LocalStore {
   @override

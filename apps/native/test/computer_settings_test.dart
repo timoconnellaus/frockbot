@@ -1,10 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/computer/client.dart';
-import 'package:frockbot_native/computer/settings.dart';
-import 'package:frockbot_native/settings/bot_settings.dart';
-import 'package:frockbot_native/shell/semantics.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/computer/client.dart';
+import 'package:frockbot_client/computer/settings.dart';
+import 'package:frockbot_client/settings/bot_settings.dart';
+import 'package:frockbot_client/shell/semantics.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 import 'bot_settings_test.dart' show account, botSettings;
 import 'computer_test.dart' show projection;

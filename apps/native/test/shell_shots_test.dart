@@ -13,18 +13,18 @@ import 'package:flutter/material.dart' hide ConnectionState;
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart' show FontLoader, rootBundle;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/chat_controller.dart';
-import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/flock/lifecycle.dart';
-import 'package:frockbot_native/groups/faces.dart';
-import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
-import 'package:frockbot_native/shell/archived_conversation.dart';
-import 'package:frockbot_native/shell/chat_header.dart';
-import 'package:frockbot_native/shell/chat_pane.dart';
-import 'package:frockbot_native/shell/desktop_layout.dart';
-import 'package:frockbot_native/shell/sidebar.dart';
-import 'package:frockbot_native/shell/skill_menu.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/client/chat_controller.dart';
+import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/flock/lifecycle.dart';
+import 'package:frockbot_client/groups/faces.dart';
+import 'package:frockbot_client/protocol/client_wire.generated.dart' as wire;
+import 'package:frockbot_client/shell/archived_conversation.dart';
+import 'package:frockbot_client/shell/chat_header.dart';
+import 'package:frockbot_client/shell/chat_pane.dart';
+import 'package:frockbot_client/shell/desktop_layout.dart';
+import 'package:frockbot_client/shell/sidebar.dart';
+import 'package:frockbot_client/shell/skill_menu.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 import 'settings_test.dart' show SettingsApi;
 import 'skill_popover_reopen_test.dart' show SilentApi, VoidStore;
@@ -36,9 +36,9 @@ const _tag = String.fromEnvironment('CHAT_SHOTS_TAG', defaultValue: 'shot');
 final _boundary = GlobalKey();
 
 Future<void> _loadFonts() async {
-  final inter = FontLoader('Inter');
+  final inter = FontLoader(interFontFamily);
   for (final weight in [400, 500, 600, 700]) {
-    inter.addFont(rootBundle.load('assets/fonts/inter-latin-$weight.ttf'));
+    inter.addFont(rootBundle.load('packages/frockbot_client/assets/fonts/inter-latin-$weight.ttf'));
   }
   await inter.load();
   await (FontLoader(

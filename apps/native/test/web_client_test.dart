@@ -2,9 +2,9 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/credential_io.dart';
-import 'package:frockbot_native/client/credential_web.dart';
-import 'package:frockbot_native/client/transport.dart';
+import 'package:frockbot_client/client/credential_io.dart';
+import 'package:frockbot_client/client/credential_web.dart';
+import 'package:frockbot_client/client/transport.dart';
 
 import 'widget_test.dart' show MemoryStore;
 
@@ -58,7 +58,13 @@ void main() {
 
   test('nothing in lib/ reaches for dart:io outside an _io.dart file', () {
     final offenders = <String>[];
-    for (final entity in Directory('lib').listSync(recursive: true)) {
+    final sources = [
+      for (final root in ['lib', 'packages/frockbot_client/lib'])
+        ...Directory(root).listSync(recursive: true),
+    ];
+    // A walk that found nothing would pass for the wrong reason.
+    expect(sources.whereType<File>().length, greaterThan(100));
+    for (final entity in sources) {
       if (entity is! File || !entity.path.endsWith('.dart')) continue;
       if (entity.path.endsWith('_io.dart')) continue;
       if (entity.readAsStringSync().contains("import 'dart:io'")) {

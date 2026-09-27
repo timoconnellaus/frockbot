@@ -2,14 +2,14 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/settings/bot_settings.dart';
-import 'package:frockbot_native/settings/look_settings.dart';
-import 'package:frockbot_native/settings/voice_settings.dart';
-import 'package:frockbot_native/shell/semantics.dart';
-import 'package:frockbot_native/shell/sidebar.dart';
-import 'package:frockbot_native/theme/document.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/settings/bot_settings.dart';
+import 'package:frockbot_client/settings/look_settings.dart';
+import 'package:frockbot_client/settings/voice_settings.dart';
+import 'package:frockbot_client/shell/semantics.dart';
+import 'package:frockbot_client/shell/sidebar.dart';
+import 'package:frockbot_client/theme/document.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 import 'settings_test.dart' show SettingsApi;
 import 'shell_layout_test.dart' show bot, byIdentifier;

@@ -10,8 +10,8 @@ import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart' show FontLoader, rootBundle;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/email/page.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
+import 'package:frockbot_client/email/page.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
 
 import 'native_session.dart';
 import 'widget_test.dart' show MemoryStore;
@@ -23,9 +23,9 @@ void main() {
   testWidgets('a Bot’s email address and who may write to it', (tester) async {
     if (_out.isEmpty) return;
     await tester.runAsync(() async {
-      final inter = FontLoader('Inter');
+      final inter = FontLoader(interFontFamily);
       for (final weight in [400, 500, 600, 700]) {
-        inter.addFont(rootBundle.load('assets/fonts/inter-latin-$weight.ttf'));
+        inter.addFont(rootBundle.load('packages/frockbot_client/assets/fonts/inter-latin-$weight.ttf'));
       }
       await inter.load();
       await (FontLoader(

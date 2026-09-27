@@ -2,11 +2,11 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/document_cache.dart';
-import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
-import 'package:frockbot_native/theme/states.dart';
-import 'package:frockbot_native/view/document.dart';
-import 'package:frockbot_native/view/surface.dart';
+import 'package:frockbot_client/client/document_cache.dart';
+import 'package:frockbot_client/protocol/client_wire.generated.dart' as wire;
+import 'package:frockbot_client/theme/states.dart';
+import 'package:frockbot_client/view/document.dart';
+import 'package:frockbot_client/view/surface.dart';
 
 import 'document_cache_test.dart' show listDocument;
 import 'widget_test.dart' show MemoryStore;

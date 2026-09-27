@@ -8,12 +8,12 @@ import 'dart:typed_data';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/panels/client.dart';
-import 'package:frockbot_native/panels/page_microphone.dart';
-import 'package:frockbot_native/panels/plugin_page.dart';
-import 'package:frockbot_native/voice/capture.dart';
-import 'package:frockbot_native/voice/mic_ownership.dart';
+import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/panels/client.dart';
+import 'package:frockbot_client/panels/page_microphone.dart';
+import 'package:frockbot_client/panels/plugin_page.dart';
+import 'package:frockbot_client/voice/capture.dart';
+import 'package:frockbot_client/voice/mic_ownership.dart';
 
 import 'voice_fakes.dart';
 import 'widget_test.dart' show MemoryStore;
@@ -114,7 +114,7 @@ void main() {
       );
       final denied = MicOwnership();
       final capture = FakeVoiceCapture()
-        ..failure = const MicrophoneDenied('No.');
+        ..failure = MicrophoneDenied('No.');
       await expectLater(
         ShellPageMicrophone(
           ownership: denied,

@@ -29,7 +29,7 @@ export const E2E_API_BASE_URL_SETTING = "api-base-url";
 
 /**
  * A Bot id from a name, by the client's own rule — `botIdFromNameV1` in
- * `apps/native/lib/flock/create.dart`: a slug of the name, then a suffix, so
+ * `apps/native/packages/frockbot_client/lib/flock/create.dart`: a slug of the name, then a suffix, so
  * two Bots called the same thing are two Bots.
  *
  * Mirrored rather than shared because the rule lives in Dart. What matters is

@@ -9,13 +9,13 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart' show FontLoader, rootBundle;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/shell/composer.dart';
-import 'package:frockbot_native/shell/semantics.dart';
-import 'package:frockbot_native/theme/frock_theme.dart';
-import 'package:frockbot_native/voice/assistant.dart';
-import 'package:frockbot_native/voice/call_chrome.dart';
-import 'package:frockbot_native/voice/capture.dart';
-import 'package:frockbot_native/voice/footer.dart';
+import 'package:frockbot_client/shell/composer.dart';
+import 'package:frockbot_client/shell/semantics.dart';
+import 'package:frockbot_client/theme/frock_theme.dart';
+import 'package:frockbot_client/voice/assistant.dart';
+import 'package:frockbot_client/voice/call_chrome.dart';
+import 'package:frockbot_client/voice/capture.dart';
+import 'package:frockbot_client/voice/footer.dart';
 
 import 'shell_layout_test.dart' show byIdentifier;
 import 'voice_fakes.dart';
@@ -72,9 +72,9 @@ void main() {
   const visual = String.fromEnvironment('VOICE_VISUAL_OUTPUT');
   if (visual.isNotEmpty) {
     setUpAll(() async {
-      final inter = FontLoader('Inter');
+      final inter = FontLoader(interFontFamily);
       for (final weight in [400, 500, 600, 700]) {
-        inter.addFont(rootBundle.load('assets/fonts/inter-latin-$weight.ttf'));
+        inter.addFont(rootBundle.load('packages/frockbot_client/assets/fonts/inter-latin-$weight.ttf'));
       }
       await inter.load();
       await (FontLoader(

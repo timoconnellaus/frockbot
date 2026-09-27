@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/shell/hot_panel.dart';
+import 'package:frockbot_client/shell/hot_panel.dart';
 
 class _Leaf extends StatefulWidget {
   final String name;

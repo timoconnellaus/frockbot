@@ -12,7 +12,7 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/cards/chat_card.dart';
+import 'package:frockbot_client/cards/chat_card.dart';
 
 import 'cards_families.dart';
 

@@ -9,8 +9,8 @@ import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart' show TargetPlatform;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/voice/speech_classifier.dart';
-import 'package:frockbot_native/voice/speech_gate.dart';
+import 'package:frockbot_client/voice/speech_classifier.dart';
+import 'package:frockbot_client/voice/speech_gate.dart';
 
 import 'voice_fakes.dart';
 

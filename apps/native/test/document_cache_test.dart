@@ -1,6 +1,6 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/document_cache.dart';
-import 'package:frockbot_native/protocol/client_wire.generated.dart' as wire;
+import 'package:frockbot_client/client/document_cache.dart';
+import 'package:frockbot_client/protocol/client_wire.generated.dart' as wire;
 
 import 'native_session.dart' show NativeSessionApi;
 import 'widget_test.dart' show MemoryStore;

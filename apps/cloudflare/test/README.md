@@ -171,7 +171,8 @@ runner throws.
 
 `artifact:build` begins with `flutter build web --release`, which is a minute
 whether or not a line changed. `build-flutter-web.ts` fingerprints what the
-build reads — `apps/native/lib`, `web`, `assets`, `vendor`, both pubspecs, the
+build reads — `apps/native/lib`, `web`, `assets`, `vendor`, the client package's
+`lib`, `assets` and pubspec, the application's pubspec and lock, the
 build flags, the Flutter version and the URL the Rive runtime is staged at —
 and skips the build when the staged
 bundle already came from exactly those. `FROCKBOT_FORCE_CLIENT_BUILD=1` builds

@@ -9,7 +9,7 @@ library;
 
 import 'package:flutter/foundation.dart' show TargetPlatform;
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/voice/capture.dart';
+import 'package:frockbot_client/voice/capture.dart';
 import 'package:record/record.dart';
 
 void main() {

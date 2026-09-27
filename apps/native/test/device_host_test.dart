@@ -1,8 +1,8 @@
 import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
-import 'package:frockbot_native/client/transport.dart';
-import 'package:frockbot_native/machines/device_host.dart';
+import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/machines/device_host.dart';
 
 import 'settings_test.dart' show SettingsApi;
 import 'widget_test.dart' show MemoryStore;
