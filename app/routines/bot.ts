@@ -118,6 +118,11 @@ import {
 import { projectClientRunV1 } from "@frockbot/app/shell/run-protocol";
 import type { SessionEvent } from "@frockbot/core/contracts";
 import {
+  deferToolResultPruningV1,
+  settleToolResultPruningV1,
+  toolResultPruneDeadlinesV1,
+} from "@frockbot/app/shell/tool-result-pruning";
+import {
   classifyRoutineFireOnceV1,
   connectionFireSkipV1,
 } from "@frockbot/app/routines/event-judge";
@@ -555,6 +560,7 @@ export async function scheduledDeadlines(
     // on its next alarm rather than on a floating promise.
     ...(await subagentDeadlines(transaction)),
     ...(await profileMirrorDeadlineV1(transaction)),
+    ...(await toolResultPruneDeadlinesV1(transaction)),
     ...(state.hostScheduled.deadlines
       ? await state.hostScheduled.deadlines(transaction)
       : []),
@@ -605,6 +611,7 @@ export async function deferScheduledWork(
     transaction,
     await routineAccountTimezoneV1(transaction),
   );
+  await deferToolResultPruningV1(transaction, Date.now());
   await state.hostScheduled.defer?.(transaction);
 }
 
@@ -624,6 +631,12 @@ export async function settleScheduledWork(
     await reconcileOverdueTasks(state);
     await expireDueApprovals(state);
     await replayPendingWakeNotifications(state);
+    await settleToolResultPruningV1({
+      storage: state.ctx.storage,
+      pruner: state.toolResultPruner,
+      append: (input) => state.authority.appendQuietSessionEvents(input),
+      now: () => Date.now(),
+    });
     await state.hostScheduled.settle?.();
   } finally {
     await state.ctx.storage.transaction((transaction) =>

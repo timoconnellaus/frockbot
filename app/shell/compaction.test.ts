@@ -335,7 +335,7 @@ describe("pruning tool outputs", () => {
     expect(pruned[2]!.content).toBe("B".repeat(500));
   });
 
-  test("reaches a Turn's tool results through request assembly", () => {
+  test("carries every Turn's tool results through request assembly while they fit", () => {
     const events = log([
       MODEL_REQUEST,
       ...conversation(6, 1_000),
@@ -347,16 +347,11 @@ describe("pruning tool outputs", () => {
       pointer: () => "pointer",
       sessionId: SESSION_ID,
     });
-    // The newest three Turns of the window are 5, 6 and the open 7, so only
-    // Turns 5 and 6 still carry a payload.
+    // No fixed window prunes older Turns: while the history fits, every
+    // Turn's payload is carried, so a new Turn never rewrites an earlier one.
     const tools = messages.filter((message) => message.role === "tool");
     expect(tools).toHaveLength(6);
-    expect(
-      tools.slice(0, 4).every((t) => t.content === PRUNED_TOOL_RESULT_V1),
-    ).toBe(true);
-    expect(tools.slice(4).every((t) => t.content === "T".repeat(1_000))).toBe(
-      true,
-    );
+    expect(tools.every((t) => t.content === "T".repeat(1_000))).toBe(true);
   });
 });
 

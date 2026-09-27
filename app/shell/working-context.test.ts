@@ -649,3 +649,62 @@ describe("the conversation supervision reads", () => {
     expect(context.turns).toEqual([]);
   });
 });
+
+describe("pruning tool results", () => {
+  test("carries older Turns' results whole while they fit, so a new Turn rewrites nothing earlier", async () => {
+    const storage = new BoundedStorage();
+    await projectTurns(storage, 5, 400);
+    const selected = await selectStoredWorkingContextV1(storage, {
+      sessionId: SESSION,
+      currentTurn: 6,
+      currentTurnType: "chat",
+      currentMessages: [{ role: "user", content: "now" }],
+      budget: CHAT_HISTORY_BUDGET_CHARS_V1,
+    });
+    const tools = selected.filter((m) => m.role === "tool");
+    expect(tools).toHaveLength(5);
+    expect(tools.every((m) => m.content === "T".repeat(400))).toBe(true);
+  });
+
+  test("a recorded pruning replaces exactly the named results and their size", async () => {
+    const storage = new BoundedStorage();
+    const seq = await projectTurns(storage, 3, 400);
+    const request = {
+      sessionId: SESSION,
+      currentTurn: 4,
+      currentTurnType: "chat" as const,
+      currentMessages: [{ role: "user" as const, content: "now" }],
+      budget: CHAT_HISTORY_BUDGET_CHARS_V1,
+    };
+    const before = await selectStoredWorkingContextV1(storage, request);
+    await applyWorkingContextAppendV1(
+      storage,
+      SESSION,
+      stamp(
+        [
+          {
+            type: "conversation/tool-results-pruned",
+            results: [
+              { turn: 1, callId: "c-1" },
+              { turn: 3, callId: "c-3" },
+            ],
+          },
+        ],
+        seq,
+      ),
+    );
+    const after = await selectStoredWorkingContextV1(storage, request);
+    const tools = after.filter((m) => m.role === "tool");
+    expect(tools.map((m) => m.content)).toEqual([
+      PRUNED_TOOL_RESULT_V1,
+      "T".repeat(400),
+      PRUNED_TOOL_RESULT_V1,
+    ]);
+    expect(tools.map((m) => (m.role === "tool" ? m.callId : ""))).toEqual([
+      "c-1",
+      "c-2",
+      "c-3",
+    ]);
+    expect(historyCharsV1(after)).toBeLessThan(historyCharsV1(before));
+  });
+});

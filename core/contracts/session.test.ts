@@ -1136,3 +1136,34 @@ describe("a batch's sub-calls and the message count", () => {
     );
   });
 });
+
+test("a tool-result pruning is an exact, bounded durable session event", () => {
+  const pruned = {
+    type: "conversation/tool-results-pruned",
+    results: [
+      { turn: 3, callId: "call-1" },
+      { turn: 4, callId: "call-2" },
+    ],
+    seq: 9,
+    timestamp,
+  } satisfies SessionEvent;
+  expect(decodeSessionEvent(structuredClone(pruned))).toEqual(pruned);
+  expect(() => decodeSessionEvent({ ...pruned, turn: 3 })).toThrow(
+    /invalid fields/,
+  );
+  expect(() => decodeSessionEvent({ ...pruned, results: [] })).toThrow(
+    /bounded array/,
+  );
+  expect(() =>
+    decodeSessionEvent({
+      ...pruned,
+      results: [{ turn: 0, callId: "call-1" }],
+    }),
+  ).toThrow(/turn/);
+  expect(() =>
+    decodeSessionEvent({
+      ...pruned,
+      results: [{ turn: 3, callId: "call-1", content: "x" }],
+    }),
+  ).toThrow(/invalid fields/);
+});

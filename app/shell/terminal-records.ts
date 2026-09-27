@@ -35,6 +35,7 @@ import { approvalTerminalRecordsV1 } from "./approvals.js";
 import { cardTerminalRecordsV1 } from "./cards.js";
 import { routineTerminalRecordsForRunV1 } from "@frockbot/app/routines/bot";
 import { voiceReplyOutboxRecordsV1 } from "./voice-reply.js";
+import { toolResultPruneTerminalRecordsV1 } from "./tool-result-pruning.js";
 
 /** The settled run a terminal record set is computed from. */
 export interface ShellTerminalRunV1 {
@@ -141,6 +142,13 @@ function voiceRecordsV1(
   );
 }
 
+/** The pass a settled chat run owes its conversation once it goes quiet. */
+function toolResultPruneRecordsV1(
+  input: ShellTerminalInputV1,
+): Promise<Record<string, unknown>> {
+  return Promise.resolve(toolResultPruneTerminalRecordsV1(input));
+}
+
 /** The producers, in the order they are composed. Each is called once. */
 const SHELL_TERMINAL_PRODUCERS_V1 = [
   routineRecordsV1,
@@ -148,6 +156,7 @@ const SHELL_TERMINAL_PRODUCERS_V1 = [
   cardRecordsV1,
   voiceRecordsV1,
   yieldedTurnRecordsV1,
+  toolResultPruneRecordsV1,
 ] as const;
 
 /**
