@@ -16,6 +16,7 @@ export const BRAND_V1: BrandV1 = {
   emailSenderName: "Wallet Pal",
   iconPng: "./icon.png",
   pageLogo: "data:image/png;base64,V2FsbGV0UGFs",
+  nativeScheme: "walletpal",
   looks: {
     ink: INK_DOCUMENT_V1,
     paper: PAPER_DOCUMENT_V1,
