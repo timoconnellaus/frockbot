@@ -1,0 +1,202 @@
+# ADR 0038: White-label deployments build FrockBot from published packages
+
+Status: accepted, 2026-09-27. Decisions are Tim's from the 2026-09-27
+discussion. This is the "customised deployments come later, through published
+packages" that [ADR 0028](0028-open-deployment.md) left open.
+
+- A white-label product is its own repository. It is not a fork, a submodule
+  or a branch of this one: it installs FrockBot's packages at a release version
+  and adds its own profile, brand and client shell.
+- The first one is a crypto product. It signs people in with Privy, themes
+  differently and uses its own Bot characters.
+- Everything a white-label needs to differ in is a build-time seam here, chosen
+  the way the auth Package and the Computer host already are. Nothing is chosen
+  at runtime, and no white-label code runs inside this repository's builds.
+
+## Context
+
+ADR 0028 made the deployment a profile and sign-in a Package, and kept one rule
+open for this: every deployment choice goes through a build-time seam, never an
+`env` read scattered through the app. What stops a second product today:
+
+- **Nothing is importable.** `@frockbot/applet-sdk` is the only workspace a
+  release publishes. `core`, `app`, `providers`, `computer`, `frock-compose`,
+  `applets` and the Worker itself (`apps/cloudflare`) are `private`, and depend
+  on each other as `workspace:*`.
+- **The Worker's seams point into this repository.** `#auth-package` is a
+  subpath import whose other build is a generated wrangler `alias` to a second
+  file beside it. A consumer cannot name a file of its own, and the generator
+  that writes the alias is a script under `scripts/`.
+- **The brand is written in.** The server names FrockBot in about 85 files
+  (`displayName: "FrockBot"` in `app/shell/definition.ts`, Frock AI as the
+  built-in model's name, email senders, page titles); `build-artifact.ts` reads
+  the FrockBot icon from `assets/marketing`; `native-auth.ts` serves
+  `assetlinks.json` and `apple-app-site-association` naming
+  `com.frockbot.mobile`, its signing fingerprint and Apple team.
+- **The client is one application.** `apps/native` is `publish_to: none`, its
+  characters are ten Rive and PNG pairs enumerated in `lib/flock/avatar.dart`
+  and `lib/voice/appearance.dart`, and its user-visible strings say FrockBot.
+- **There are two auth Packages.** Neither is Privy.
+
+## Decision
+
+### 1. The Worker is a published package, and its seams are module specifiers
+
+`apps/cloudflare` is published as `@frockbot/cloudflare`, TypeScript source as
+the other workspaces are, because wrangler bundles it. A white-label's wrangler
+config sets `main` to `@frockbot/cloudflare/src/index.ts` and resolves the
+Worker's seams with `alias`, which is exactly how the Access build already
+works. Two seams exist, and adding a third is a change to this ADR:
+
+- `#auth-package` — one of the auth Package choosers in `apps/cloudflare/src`,
+  selected by the profile's `authPackage`. A white-label chooses among the
+  Packages this repository ships; it does not write one (§3).
+- `#brand` — a module exporting `BRAND_V1: BrandV1` (§2). The tracked default
+  is `apps/cloudflare/src/brand.ts`, FrockBot's brand, which is what
+  `wrangler dev`, every suite and the hosted deploy resolve. A profile names a
+  different module with `brand: "<path relative to the profile>"`.
+
+The Durable Object classes, their migrations and the `AdminEntrypoint` are the
+package's, so a white-label declares the same classes under the same names. Its
+namespaces are its own because its account is.
+
+### 2. A brand is words, pictures and looks; a profile is where and who
+
+`BrandV1` lives in `core/contracts` and holds what a person sees:
+
+- the product name, the built-in model's display name and the name email is
+  sent from;
+- the icon the web document and email use, as bytes the artifact build embeds;
+- the palettes behind the named looks (`ink`, `paper`, `studio`), each a
+  `ThemeDocument` the existing decoder and contrast floor validate at build
+  time, so a brand cannot ship an unreadable look;
+- whether What's New is shown. Its entries are FrockBot's release notes, so a
+  white-label turns it off rather than inheriting them.
+
+What belongs to a deployment rather than a product goes in the profile: the
+native apps it signs in (`nativeApps`: Android package names and signing
+fingerprints, Apple app ids), which replaces the hard-coded identities in
+`native-auth.ts`. The hosted profile states FrockBot's own, and the equivalence
+gate proves its generated config is unchanged.
+
+Trust chrome stays out of a brand exactly as it stays out of a theme:
+`THEME_FORBIDDEN_KEYS_V1` applies, and a brand names no approval, billing or
+Stop surface.
+
+### 3. Privy is a third auth Package, in this repository
+
+`app/auth/privy`, with the chooser `apps/cloudflare/src/auth-package.privy.ts`
+and `authPackage: "privy"` in the profile schema. It lives here, not in the
+white-label, so the suites cover it, the import rule polices it, and any
+deployment can choose it. Shape:
+
+- **Sign-in page.** Privy signs people in inside the browser, not by redirect,
+  so the Package serves a page at `/sign-in`, bundled from Privy's browser SDK
+  at artifact build time. On success the page posts Privy's access token to
+  `POST /api/auth/privy/session`. `startSignIn` sends a browser there with its
+  `returnTo`, which is what the native authorize door already asks of a Package.
+- **Verification.** The access token is an ES256 JWT: issuer `privy.io`,
+  audience the Privy app id, verified against the app's public key. Two vars,
+  `PRIVY_APP_ID` and `PRIVY_VERIFICATION_KEY`; neither is secret.
+- **Session.** The Package mints its own session cookie, signed with
+  `PRIVY_SESSION_SECRET`, which the installer mints like the other internal
+  secrets. Privy's tokens expire within the hour and refreshing one needs its
+  SDK, so the Worker never depends on a live Privy token after sign-in.
+- **Identity.** The User id is derived from Privy's user id (`sub`) the way the
+  Access Package derives one from its token's `sub`, under its own prefix.
+  Email is optional: a wallet-only person has none, and `AuthIdentityV1`
+  already allows that. The Package stores nothing, like Access.
+- **Admission.** Like Access, the Package decides admission: anyone Privy
+  authenticates is admitted, and the Privy app's own settings are the
+  allowlist. The hosted admission modes, invitations and the admin portal read
+  stored emails and do not apply to this build. A later ADR can give wallet
+  addresses an admission story if one is needed.
+
+### 4. The client is a Flutter package and a thin application
+
+`apps/native/lib` and its assets move into a Flutter package,
+`apps/native/packages/frockbot_client`, and `apps/native` becomes a thin
+application that calls `runFrockbot(frockbotBrand)`. A white-label is another
+thin application that depends on `frockbot_client` by git URL, path and release
+tag, and passes its own `ClientBrand`:
+
+- product name and icons for user-visible strings and the sign-in page;
+- the character catalog — each id with its Rive file, still and ink — and the
+  default character. The server stores a character id as an opaque string, so
+  a white-label's ids need no server change;
+- extra font families, registered by the application that bundles them;
+- the release channel, if any. A white-label without Shorebird gets the plain
+  build's inert updater, as the simple profile already does.
+
+The application owns its Android, iOS and macOS projects, its package name,
+signing, and its `--dart-define` origin (ADR 0028 step 3). The web client is
+built from the white-label's application too, so its bundle carries its brand;
+`build-flutter-web.ts` and `build-artifact.ts` take the application directory
+and brand as arguments instead of assuming `apps/native`.
+
+Moving every asset path is a native change: the first release after it is a
+full APK through `release.yml`, not a Shorebird patch.
+
+### 5. Publishing
+
+Every workspace the Worker's graph reaches is published at the release version
+by the existing `publish-npm` job, which already rewrites `workspace:*` to that
+version for any manifest marked `frockbot.npm: true`. Versions move in
+lockstep with the tag. A white-label pins an exact version of every
+`@frockbot/*` package and of `frockbot_client`.
+
+The deployment-config generator and its profile schema move from `scripts/` into
+`@frockbot/cloudflare`, with a `frockbot-deployment-config` bin, so a
+white-label writes `deployments/<name>.json` and generates its wrangler files
+the way the hosted and simple profiles do.
+
+A white-label fixture in this repository — a minimal consumer that installs the
+packed tarballs, names `#brand` and `authPackage: "privy"`, and runs
+`wrangler deploy --dry-run` — is the gate that proves the packages are
+consumable. It runs with the build category.
+
+### 6. Compatibility
+
+"Nothing is kept for compatibility" still governs this repository's own stored
+data. A white-label does not change that until it admits a real user; the
+moment it does, the tested forward migrations the constitution promises are due,
+as ADR 0028 already said of the simple profile. What does change now: a
+breaking change to `BrandV1`, `ClientBrand`, the profile schema or the seam
+specifiers is called out in the release's notes, because a consumer reads them
+at upgrade time.
+
+## Plan
+
+Each step is its own pull request and leaves `main` shippable, with the hosted
+deployment unchanged in behaviour.
+
+1. **This ADR.**
+2. **Server brand.** `BrandV1`, the `#brand` seam and FrockBot's brand; the
+   server's user-visible brand strings and the document icon read from it; the
+   profile's `nativeApps` replaces the identities in `native-auth.ts`, with the
+   hosted equivalence gate unchanged.
+3. **Privy auth Package.** §3, with the import rule extended to a third
+   implementation and a `tsconfig.privy.json` beside `tsconfig.access.json`.
+4. **Client package.** §4. Ships as a full APK.
+5. **Publishing and the consumer path.** §5: manifests, the release job, the
+   generator's move, the build scripts' arguments and the fixture gate. After
+   step 2, which it wires.
+6. **By hand, by Tim.** `bun run bootstrap:npm-trust` for the newly published
+   names, which needs an interactive npm session; then the white-label
+   repository itself, from the fixture.
+
+## Consequences
+
+- The white-label product's code, secrets and releases live outside this
+  repository. This one gains a brand seam, a third auth Package, a client
+  package and a larger publish job, and nothing that only the white-label runs.
+- Three auth Packages are three things to keep working. Privy's has no storage
+  and its verification is about the size of Access's; the sign-in page is the
+  new part.
+- Brand strings and characters become data. A pull request that adds a
+  user-visible "FrockBot" to the client or the server is a bug.
+- Crypto features — wallets, signing, chain reads — are not part of any of
+  this. They arrive as Plugins with the grants they need, and a signing key is a
+  secret like any other: server-side, crossing an interface only as a lease.
+- Out: runtime brand switching, a brand per Bot, white-label code in this
+  repository, a private fork.
