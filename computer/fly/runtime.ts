@@ -41,6 +41,12 @@ export const DATA_ROOT = `${HOME_ROOT}/agent-data`;
 export const RUNTIME_ROOT = `${HOME_ROOT}/.frockbot`;
 export const BOTS_ROOT = `${RUNTIME_ROOT}/bots`;
 /** FrockBot-owned noVNC shell; only noVNC's transport/core is linked into it. */
+/**
+ * Longest page snapshot the browser helper answers with. A long article or
+ * a front page runs to 100k; the helper cuts past this so its answer is
+ * always whole JSON under the provider's browser output cap.
+ */
+export const BROWSER_SNAPSHOT_MAX_CHARS = 200_000;
 export const VIEWER_ROOT = `${RUNTIME_ROOT}/viewer`;
 export const VIEWER_PAGE = `${VIEWER_ROOT}/index.html`;
 
@@ -1381,6 +1387,10 @@ async function sensitiveValues() {
 }
 let snapshot = await page.locator("body").ariaSnapshot({ timeout: 10000 });
 for (const hidden of await sensitiveValues()) snapshot = snapshot.split(hidden).join("••••");
+// Cut here, at a line, so the answer stays whole JSON under the host's cap.
+if (snapshot.length > ${BROWSER_SNAPSHOT_MAX_CHARS}) {
+  snapshot = snapshot.slice(0, snapshot.lastIndexOf("\\n", ${BROWSER_SNAPSHOT_MAX_CHARS})) + "\\n- text: … the rest of the page was cut";
+}
 await done({ url: page.url(), title: await page.title(), snapshot });
 `;
 

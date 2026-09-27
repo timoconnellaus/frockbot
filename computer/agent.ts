@@ -214,6 +214,12 @@ const PAGE_STATE_NOTES_V1: Readonly<
  * judge says it is showing when that is not the page itself, then the
  * snapshot.
  */
+/**
+ * Most of a snapshot the model reads from one `computer_browser` call. The
+ * page's controls are still ranked from the whole snapshot.
+ */
+export const BROWSER_RESULT_SNAPSHOT_CHARS_V1 = 30_000;
+
 export function browserResultTextV1(input: {
   url?: string;
   title?: string;
@@ -237,7 +243,9 @@ export function browserResultTextV1(input: {
     ...(where ? [`Page: ${where}`] : []),
     ...notes,
     ...(where || notes.length > 0 ? [""] : []),
-    input.snapshot,
+    input.snapshot.length > BROWSER_RESULT_SNAPSHOT_CHARS_V1
+      ? `${input.snapshot.slice(0, BROWSER_RESULT_SNAPSHOT_CHARS_V1)}\n… the rest of the page was cut; act on what is shown or narrow the page`
+      : input.snapshot,
   ].join("\n");
 }
 
