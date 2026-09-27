@@ -99,6 +99,9 @@ class ProtocolFrames {
   get type(): CursoredFrameV1["type"] {
     return this.frame.type;
   }
+  get bytes(): number {
+    return frameBytes(this.frame);
+  }
   for(attachment: ChannelAttachmentV1): string[] {
     // The cursor still advances past it: the update is an invalidation, and
     // a client that cannot read it reads the look when it next opens the Bot.
@@ -116,6 +119,10 @@ class ProtocolFrames {
 
 const utf8 = new TextEncoder();
 const utf8Decoder = new TextDecoder();
+
+function frameBytes(frame: CursoredFrameV1): number {
+  return utf8.encode(JSON.stringify(frame)).length;
+}
 
 function encodeFrame(frame: StateFrame): string {
   return JSON.stringify(frame);
@@ -390,9 +397,15 @@ export class BotStateChannel {
     if (this.silenced || updates.length === 0) return;
     for (const update of updates) {
       let frames: ProtocolFrames;
+      const frame = updateFrame(update);
       try {
-        frames = new ProtocolFrames(updateFrame(update));
-      } catch {
+        frames = new ProtocolFrames(frame);
+      } catch (error) {
+        console.error("bot-state delivery failed", {
+          frame: frame.type,
+          bytes: frameBytes(frame),
+          error: error instanceof Error ? error.message : String(error),
+        });
         continue;
       }
       this.sendFrames(frames, update.epoch, update.cursor);
@@ -510,6 +523,7 @@ export class BotStateChannel {
       } catch (error) {
         console.error("bot-state delivery failed", {
           frame: frames.type,
+          bytes: frames.bytes,
           error: error instanceof Error ? error.message : String(error),
         });
         try {
@@ -613,7 +627,7 @@ export class BotStateChannel {
           console.error("bot-state handshake failed", {
             botId: identity.botId,
             frame: frame.type,
-            bytes: utf8.encode(JSON.stringify(frame)).length,
+            bytes: frameBytes(frame),
             error: error instanceof Error ? error.message : String(error),
           });
           server.close(1011, "handshake failed");
