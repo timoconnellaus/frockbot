@@ -1221,7 +1221,7 @@ export function createComputerAgentFeature(
         "Run a shell command in the Bot's selected persistent Computer. New calls are blocked while the user has taken control.",
         "This is where most work gets done: use command-line tools such as git, gh, jq and curl, and write a Python script for anything longer than a line or two. Install a missing tool with apt, pip or uv.",
         "Every command is reviewed before it runs, so run what the person's request needs and nothing it does not.",
-        "A foreground command reaches the person's connected GitHub account with no token: gh and requests to api.github.com act as that account, and each write is reviewed again before it is sent. Background commands have no connected accounts.",
+        `A foreground command reaches the person's connected ${COMPUTER_EGRESS_ROUTES_V1.map((route) => route.label).join(" and ")} accounts with no token: CLIs such as gh, and requests to ${COMPUTER_EGRESS_ROUTES_V1.map((route) => route.host).join(" and ")}, act as that account, and each write is reviewed again before it is sent. Background commands have no connected accounts.`,
         "Pass cwd as an absolute path to run the command in that directory instead of the home directory.",
         "With background:true the command keeps running after this call returns and after this Turn ends, and you get a processId to check later.",
         "A background process runs only while the Computer is awake. Nothing keeps it awake for you: if the Computer hibernates first, the outcome is reported as unknown, with whatever log was durable at the time.",

@@ -37,12 +37,13 @@ export interface ComputerEgressRouteV1 {
 /**
  * The APIs a CLI on the Computer can reach with a connected account. Only
  * these hosts are intercepted on the Computer; everything else goes straight
- * out, with no credential. GitHub alone for now: an app joins only with a
- * read classifier that is right for its API, because a read is sent without
- * review.
+ * out, with no credential. An app joins only with a read classifier that is
+ * right for its API, because a read is sent without a second review: GitHub's
+ * reads are GET and HEAD plus GraphQL queries, and Gmail's are GET.
  */
 export const COMPUTER_EGRESS_ROUTES_V1: readonly ComputerEgressRouteV1[] = [
   { toolkit: "github", label: "GitHub", host: "api.github.com" },
+  { toolkit: "gmail", label: "Gmail", host: "gmail.googleapis.com" },
 ];
 
 /** Every host the Computer's proxy intercepts. */

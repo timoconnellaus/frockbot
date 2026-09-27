@@ -58,10 +58,22 @@ function account(
 }
 
 describe("computer egress routes", () => {
-  test("attaches an account to GitHub's API and nothing else", () => {
+  test("attaches an account to GitHub's and Gmail's APIs and nothing else", () => {
     expect(
       computerEgressRouteV1(new URL("https://api.github.com/user"))?.toolkit,
     ).toBe("github");
+    expect(
+      computerEgressRouteV1(
+        new URL("https://gmail.googleapis.com/gmail/v1/users/me/messages/send"),
+      )?.toolkit,
+    ).toBe("gmail");
+    expect(
+      computerEgressReadsV1({
+        method: "POST",
+        url: "https://gmail.googleapis.com/gmail/v1/users/me/messages/send",
+        headers: {},
+      }),
+    ).toBe(false);
     expect(
       computerEgressRouteV1(new URL("https://github.com/o/r.git")),
     ).toBeUndefined();

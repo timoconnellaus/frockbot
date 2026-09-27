@@ -187,7 +187,7 @@ Grow to a pool of five hosts. Admit one User first and raise the cap one at a ti
 
 ### Phase 5 — terminal first
 
-The credential boundary in §10 runs on the Sprite for GitHub. Carry it to the Incus host, add apps one read classifier at a time, move MCP servers' uses to CLIs, then delete `app/mcp/`.
+The credential boundary in §10 runs on the Sprite for GitHub and Gmail. Carry it to the Incus host, add apps one read classifier at a time, move MCP servers' uses to CLIs, then delete `app/mcp/`.
 
 ---
 
@@ -206,7 +206,7 @@ An always-running Computer means a shell is there the moment a Bot wants one, wi
 
 "Secrets stay server-side" still holds. A CLI runs with a placeholder token, never a real one. Its requests to a connected app's API go through a proxy on the Computer that terminates TLS for those hosts only, with a CA the Computer trusts, and forwards each request to the app Worker under a token that names the Turn's object and the exec call. The Bot Durable Object sends it as the connected account through the provider, which attaches the credential, so nothing on the Computer ever holds one. Every other destination is a plain tunnel. Revoking a Connection takes effect on the next request.
 
-This runs on the Fly Sprite today (`computer/egress.ts`, `computer/fly/egress.ts`, `app/connect/egress.ts`, [architecture §10](architecture.md#connected-accounts-from-the-terminal)), for GitHub only: an app joins once its API has a correct read classifier, because a read is sent without a second review.
+This runs on the Fly Sprite today (`computer/egress.ts`, `computer/fly/egress.ts`, `app/connect/egress.ts`, [architecture §10](architecture.md#connected-accounts-from-the-terminal)), for GitHub and Gmail: an app joins once its API has a correct read classifier, because a read is sent without a second review.
 
 ### Jev reviews every command
 
