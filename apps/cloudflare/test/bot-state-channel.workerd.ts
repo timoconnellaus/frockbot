@@ -12,6 +12,9 @@ import {
   BOT_STATE_CHANNEL_INTERNAL_PATH,
   BOT_STATE_CHANNEL_RETENTION,
 } from "../src/bot-state-channel.ts";
+import { commitPublicationsV1, runEntityIdV1 } from "@frockbot/core/durable";
+import { CLIENT_RUN_PAGE_LIMIT } from "@frockbot/app/shell/run-protocol";
+import { decodeProtocol } from "@frockbot/core/protocol-schemas";
 import { provisionBot } from "./provision-bot.ts";
 import { toolCallTriggerPrompt } from "./harness/miniflare.ts";
 
@@ -238,6 +241,67 @@ describe("hibernatable Bot-state channel", () => {
       reason: "gap",
     });
     expect(await nextFrame(socket)).toMatchObject({ type: "state/ready" });
+    socket.close(1000, "done");
+  });
+
+  test("a conversation too heavy for one frame still opens, with its oldest Turns paged", async () => {
+    const suffix = crypto.randomUUID();
+    const identity = {
+      userId: `state-heavy-user-${suffix}`,
+      botId: `state-heavy-bot-${suffix}`,
+    };
+    await initialize(identity);
+    const stub = bot(identity);
+    const heavy = "x".repeat(30_000);
+    await runInDurableObject(stub, async (_instance, state) => {
+      for (let i = 0; i < CLIENT_RUN_PAGE_LIMIT; i += 1) {
+        const runId = `run-${String(i).padStart(2, "0")}`;
+        await state.storage.transaction((transaction) =>
+          commitPublicationsV1(transaction, [
+            {
+              kind: "run-status",
+              entityId: runEntityIdV1(runId),
+              payload: {
+                run: {
+                  schemaVersion: 1,
+                  runId,
+                  admittedAt: `2026-09-22T00:00:${String(i).padStart(2, "0")}.000Z`,
+                  input: heavy,
+                  status: "completed",
+                  outcome: { type: "completed", text: "done" },
+                  events: [],
+                },
+              },
+            },
+          ]),
+        );
+      }
+    });
+
+    const socket = await openSocket(identity);
+    let closed: number | undefined;
+    socket.addEventListener("close", (event) => {
+      closed = event.code;
+    });
+    const read = await framesUntil(
+      socket,
+      (frame) => frame.type === "state/ready",
+    );
+    expect(closed).toBeUndefined();
+    const parts = read.filter((frame) => frame.type === "state/part");
+    expect(parts.length).toBeGreaterThan(1);
+    const snapshot: unknown = JSON.parse(
+      parts.map((frame) => (frame as { data: string }).data).join(""),
+    );
+    expect(() => decodeProtocol("StateFrame", snapshot)).not.toThrow();
+    expect(snapshot).toMatchObject({
+      type: "state/snapshot",
+      conversation: { page: { truncated: true } },
+    });
+    const runs = (snapshot as { conversation: { runs: { runId: string }[] } })
+      .conversation.runs;
+    expect(runs.length).toBeLessThan(CLIENT_RUN_PAGE_LIMIT);
+    expect(runs.at(-1)?.runId).toBe(`run-${CLIENT_RUN_PAGE_LIMIT - 1}`);
     socket.close(1000, "done");
   });
 
