@@ -32,7 +32,7 @@
     "@ai-sdk/openai-compatible": "3.0.53",
     "@ai-sdk/provider": "4.0.17",
     "@ai-sdk/provider-utils": "5.0.45",
-    "@earendil-works/pi-ai": "0.85.1",
+    "@earendil-works/pi-ai": "0.86.1",
     "@frockbot/app": "workspace:*",
     "@frockbot/core": "workspace:*"
   },
