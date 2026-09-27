@@ -922,6 +922,12 @@ describe("a long page's controls, against what was asked", () => {
     expect(elements).toHaveLength(18);
   });
 
+  test("keeps a control's name whole when it quotes something", () => {
+    expect(
+      browserElementsV1('- button "Say \\"hi\\" back"\n- link "Home"'),
+    ).toEqual(['button "Say \\"hi\\" back"', 'link "Home"']);
+  });
+
   test("names the likely next ones and keeps every control in the snapshot", () => {
     expect(
       browserResultTextV1({

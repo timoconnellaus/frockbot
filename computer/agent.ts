@@ -174,7 +174,7 @@ export const BROWSER_RANK_MIN_ELEMENTS_V1 = 12;
 export const BROWSER_RANK_MAX_ELEMENTS_V1 = 40;
 
 const INTERACTIVE_ROLES_V1 =
-  /^\s*-\s*(button|link|textbox|searchbox|checkbox|radio|combobox|menuitem|tab|option|switch|slider|spinbutton)\s+"([^"]+)"/;
+  /^\s*-\s*(button|link|textbox|searchbox|checkbox|radio|combobox|menuitem|tab|option|switch|slider|spinbutton)\s+"((?:[^"\\]|\\.)+)"/;
 
 /** The page's controls, `role "name"`, once each, in page order. */
 export function browserElementsV1(snapshot: string): string[] {
