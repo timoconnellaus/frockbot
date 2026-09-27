@@ -23,6 +23,7 @@ class SignInPage extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final provider = clientBrand.signInProvider;
     return Scaffold(
       body: identified(
         SignInIds.page,
@@ -102,7 +103,9 @@ class SignInPage extends StatelessWidget {
                                               ? 'Open sign-in again'
                                               : developmentAuth
                                               ? 'Continue as local developer'
-                                              : 'Continue with Google',
+                                              : provider == null
+                                              ? 'Continue to sign in'
+                                              : 'Continue with $provider',
                                         ),
                                       ),
                                     ),
@@ -141,7 +144,8 @@ class SignInPage extends StatelessWidget {
                                             ),
                                             const SizedBox(height: 6),
                                             Text(
-                                              error ?? 'Complete Google sign-in, then return here. If you closed the browser, you can open sign-in again.',
+                                              error ??
+                                                  'Complete ${provider == null ? 'sign-in' : '$provider sign-in'}, then return here. If you closed the browser, you can open sign-in again.',
                                               style: theme.textTheme.bodyMedium,
                                             ),
                                           ],
@@ -153,7 +157,7 @@ class SignInPage extends StatelessWidget {
                           ),
                           const SizedBox(height: 24),
                           Text(
-                            'Secure sign-in with Google.\nYour conversations stay with your account.',
+                            '${provider == null ? 'Secure sign-in.' : 'Secure sign-in with $provider.'}\nYour conversations stay with your account.',
                             textAlign: TextAlign.center,
                             style: theme.textTheme.bodySmall,
                           ),

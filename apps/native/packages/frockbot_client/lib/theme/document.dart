@@ -6,6 +6,8 @@ library;
 
 import 'package:flutter/material.dart';
 
+import '../brand.dart';
+
 enum AccountLook { ink, paper, system }
 
 enum BotLook { inherit, studio, custom }
@@ -146,7 +148,8 @@ class ThemeDocument {
       ThemeDocument(look: NamedLook.studio, tokens: studioTokens);
 }
 
-const inkTokens = ThemeTokens(
+/// The built-in looks, in the brand's accent.
+ThemeTokens get inkTokens => ThemeTokens(
   surfaces: ThemeSurfaces(
     window: Color(0xff15151e),
     surface: Color(0xff181824),
@@ -154,7 +157,7 @@ const inkTokens = ThemeTokens(
     text: Color(0xfff1f1f6),
     muted: Color(0xffa0a2b6),
     line: Color(0xff2c2d3d),
-    accent: Color(0xffd92d71),
+    accent: clientBrand.accent.ink,
     onAccent: Color(0xffffffff),
   ),
   type: ThemeTypeface.inter,
@@ -162,7 +165,7 @@ const inkTokens = ThemeTokens(
   meBubble: MeBubble.tint,
 );
 
-const paperTokens = ThemeTokens(
+ThemeTokens get paperTokens => ThemeTokens(
   surfaces: ThemeSurfaces(
     window: Color(0xfff5f6f9),
     surface: Color(0xffffffff),
@@ -170,7 +173,7 @@ const paperTokens = ThemeTokens(
     text: Color(0xff15151e),
     muted: Color(0xff5c5f70),
     line: Color(0xffdfe1e8),
-    accent: Color(0xffd3266d),
+    accent: clientBrand.accent.paper,
     onAccent: Color(0xffffffff),
   ),
   type: ThemeTypeface.inter,
@@ -178,7 +181,7 @@ const paperTokens = ThemeTokens(
   meBubble: MeBubble.tint,
 );
 
-const studioTokens = ThemeTokens(
+ThemeTokens get studioTokens => ThemeTokens(
   surfaces: ThemeSurfaces(
     window: Color(0xfff5f6f9),
     surface: Color(0xffffffff),
@@ -186,7 +189,7 @@ const studioTokens = ThemeTokens(
     text: Color(0xff15151e),
     muted: Color(0xff5c5f70),
     line: Color(0xffdfe1e8),
-    accent: Color(0xffd3266d),
+    accent: clientBrand.accent.paper,
     onAccent: Color(0xffffffff),
   ),
   type: ThemeTypeface.inter,

@@ -9,7 +9,10 @@
 import type { BrandV1 } from "@frockbot/core/contracts";
 
 /** What of the brand a return page shows. */
-export type ReturnPageBrandV1 = Pick<BrandV1, "productName" | "pageLogo">;
+export type ReturnPageBrandV1 = Pick<
+  BrandV1,
+  "productName" | "pageLogo" | "nativeScheme"
+>;
 
 export interface ReturnPageV1 {
   /** The product the page belongs to: its name and logo. */

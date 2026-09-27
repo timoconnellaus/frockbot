@@ -19,6 +19,7 @@ export const TEST_BRAND_V1: BrandV1 = {
   iconPng: "./icon.png",
   pageLogo:
     "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII=",
+  nativeScheme: "frockbot",
   looks: {
     ink: INK_DOCUMENT_V1,
     paper: PAPER_DOCUMENT_V1,

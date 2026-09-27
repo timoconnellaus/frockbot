@@ -9,6 +9,14 @@ const frockbotBrand = ClientBrand(
   productName: 'FrockBot',
   builtInModelName: 'Frock AI',
   defaultCharacterId: 'pixel',
+  signInProvider: 'Google',
+  nativeScheme: 'frockbot',
+  accent: ClientAccent(
+    ink: Color(0xffd92d71),
+    paper: Color(0xffd3266d),
+    soft: Color(0xfffc85ae),
+    deep: Color(0xff9a124c),
+  ),
   releaseChannel: ClientReleaseChannel.shorebird,
   characters: [
     CharacterDefinition(

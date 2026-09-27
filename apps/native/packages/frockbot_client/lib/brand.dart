@@ -59,8 +59,9 @@ class CharacterDefinition {
 
   /// The Rive file and the still that stands in for it, as asset keys in the
   /// application's bundle: `assets/…` for the application's own assets,
-  /// `packages/<name>/assets/…` for a package's.
-  final String rive;
+  /// `packages/<name>/assets/…` for a package's. A character with no Rive
+  /// file is its still wherever it is drawn, and nothing tries to load one.
+  final String? rive;
   final String still;
 
   /// The Gemini voice a Bot wearing this character speaks in until someone
@@ -75,8 +76,8 @@ class CharacterDefinition {
     this.shade,
     this.eyes, {
     required this.ink,
-    required this.rive,
     required this.still,
+    this.rive,
     this.voice,
   });
 }
@@ -86,6 +87,31 @@ enum ClientReleaseChannel {
   /// Shorebird patches on Android and iOS, and the Sparkle feed the macOS
   /// project names on the Mac.
   shorebird,
+}
+
+/// The brand's accent: the one warm note on either ground, and the two tints
+/// the voice footer and secondary actions are written in. White type sits on
+/// [ink] and [paper], so each clears 4.5:1 against white.
+@immutable
+class ClientAccent {
+  /// The accent on the dark look.
+  final Color ink;
+
+  /// The accent on the light looks, where it may need to be a touch deeper.
+  final Color paper;
+
+  /// A pale tint of the accent, for secondary actions on a dark ground.
+  final Color soft;
+
+  /// A deep shade of the accent, for type on an accent-filled slab.
+  final Color deep;
+
+  const ClientAccent({
+    required this.ink,
+    required this.paper,
+    required this.soft,
+    required this.deep,
+  });
 }
 
 @immutable
@@ -99,6 +125,19 @@ class ClientBrand {
   /// The picture above the product name on the sign-in page. Null draws the
   /// default character there.
   final ImageProvider? signInIcon;
+
+  /// Who the person signs in with, as the sign-in page names it ("Continue
+  /// with Google"). The deployment's auth Package decides that, so null says
+  /// only "sign in".
+  final String? signInProvider;
+
+  /// The custom URL scheme the application's Mac and iPhone projects
+  /// register, which the server brand's `nativeScheme` names too: a browser
+  /// return hands the sign-in back on it. Development builds are separate
+  /// apps on `<nativeScheme>-dev`.
+  final String nativeScheme;
+
+  final ClientAccent accent;
 
   /// Every character a Bot may wear, in the order the pickers show them.
   final List<CharacterDefinition> characters;
@@ -119,7 +158,10 @@ class ClientBrand {
     required this.builtInModelName,
     required this.characters,
     required this.defaultCharacterId,
+    required this.nativeScheme,
+    required this.accent,
     this.signInIcon,
+    this.signInProvider,
     this.fontFamilies = const [],
     this.releaseChannel,
   });
@@ -151,6 +193,14 @@ void installClientBrand(ClientBrand brand) {
       brand.defaultCharacterId,
       'defaultCharacterId',
       'is not one of the brand\'s characters',
+    );
+  }
+  if (!RegExp(r'^[a-z][a-z0-9+.-]*$').hasMatch(brand.nativeScheme) ||
+      const {'http', 'https', 'file'}.contains(brand.nativeScheme)) {
+    throw ArgumentError.value(
+      brand.nativeScheme,
+      'nativeScheme',
+      'must be the application\'s own lowercase URL scheme',
     );
   }
   _installed = brand;

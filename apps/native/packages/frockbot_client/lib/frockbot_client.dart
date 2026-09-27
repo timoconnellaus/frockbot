@@ -4,4 +4,9 @@ library;
 
 export 'app.dart' show runFrockbot;
 export 'brand.dart'
-    show CharacterDefinition, CharacterInk, ClientBrand, ClientReleaseChannel;
+    show
+        CharacterDefinition,
+        CharacterInk,
+        ClientAccent,
+        ClientBrand,
+        ClientReleaseChannel;

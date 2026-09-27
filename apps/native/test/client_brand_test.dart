@@ -1,11 +1,17 @@
+import 'dart:io';
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:frockbot_client/app.dart';
+import 'package:frockbot_client/auth/sign_in_page.dart';
 import 'package:frockbot_client/brand.dart';
+import 'package:frockbot_client/client/auth_io.dart';
 import 'package:frockbot_client/client/transport.dart';
+import 'package:frockbot_client/connections/document.dart';
 import 'package:frockbot_client/flock/avatar.dart';
 import 'package:frockbot_client/flock/create.dart';
+import 'package:frockbot_client/theme/document.dart';
 import 'package:frockbot_client/theme/frock_theme.dart';
 import 'package:frockbot_client/voice/appearance.dart';
 import 'package:frockbot_native/brand.dart';
@@ -14,13 +20,21 @@ import 'package:http/testing.dart';
 
 import 'widget_test.dart' show MemoryStore;
 
-/// A white-label's brand: another name, one character of its own, no
-/// release channel. Its character borrows a still this application bundles,
-/// under an id FrockBot does not have.
+/// A white-label's brand: another name, one still-only character of its own,
+/// its own scheme and accent, no sign-in provider and no release channel. Its
+/// character borrows a still this application bundles, under an id FrockBot
+/// does not have.
 const coinfolk = ClientBrand(
   productName: 'Coinfolk',
   builtInModelName: 'Coin AI',
   defaultCharacterId: 'coin',
+  nativeScheme: 'coinfolk',
+  accent: ClientAccent(
+    ink: Color(0xff2f6fdb),
+    paper: Color(0xff2a62c4),
+    soft: Color(0xff9dc0ff),
+    deep: Color(0xff123a80),
+  ),
   characters: [
     CharacterDefinition(
       'coin',
@@ -36,7 +50,6 @@ const coinfolk = ClientBrand(
         width: 421,
         height: 438,
       ),
-      rive: 'assets/characters/sunny.riv',
       still: 'assets/characters/sunny.png',
       voice: 'Kore',
     ),
@@ -64,6 +77,16 @@ void withoutDeepLinks(WidgetTester tester) {
     addTearDown(() => messenger.setMockMethodCallHandler(channel, null));
   }
 }
+
+Widget signInIn({bool awaitingBrowser = false}) => MaterialApp(
+  theme: FrockTheme.theme(Brightness.dark),
+  home: SignInPage(
+    busy: false,
+    awaitingBrowser: awaitingBrowser,
+    error: null,
+    onSignIn: () {},
+  ),
+);
 
 Future<void> answer(WidgetTester tester) async {
   for (var round = 0; round < 4; round++) {
@@ -114,6 +137,146 @@ void main() {
     expect(stills(tester), {'assets/characters/sunny.png'});
     expect(find.textContaining('FrockBot'), findsNothing);
     expect(find.bySemanticsLabel(RegExp('FrockBot')), findsNothing);
+    expect(find.textContaining('Google'), findsNothing);
+  });
+
+  testWidgets('sign-in names no provider the brand does not', (tester) async {
+    wearing(coinfolk);
+    await tester.pumpWidget(signInIn());
+    expect(find.text('Continue to sign in'), findsOneWidget);
+    expect(find.textContaining('Secure sign-in.'), findsOneWidget);
+
+    await tester.pumpWidget(signInIn(awaitingBrowser: true));
+    await tester.pumpAndSettle();
+    expect(find.textContaining('Complete sign-in, then'), findsOneWidget);
+    expect(find.textContaining('Google'), findsNothing);
+    expect(find.bySemanticsLabel(RegExp('Google')), findsNothing);
+    expect(find.textContaining('FrockBot'), findsNothing);
+  });
+
+  testWidgets('FrockBot’s sign-in still names Google', (tester) async {
+    await tester.pumpWidget(signInIn());
+    expect(find.text('Continue with Google'), findsOneWidget);
+    expect(find.textContaining('Secure sign-in with Google.'), findsOneWidget);
+
+    await tester.pumpWidget(signInIn(awaitingBrowser: true));
+    await tester.pumpAndSettle();
+    expect(
+      find.textContaining('Complete Google sign-in, then'),
+      findsOneWidget,
+    );
+  });
+
+  test('the looks and the accent are the brand’s', () {
+    wearing(coinfolk);
+
+    expect(inkTokens.surfaces.accent, coinfolk.accent.ink);
+    expect(paperTokens.surfaces.accent, coinfolk.accent.paper);
+    expect(studioTokens.surfaces.accent, coinfolk.accent.paper);
+    expect(
+      FrockTheme.theme(Brightness.dark).colorScheme.primary,
+      coinfolk.accent.ink,
+    );
+    expect(FrockTheme.accentSoft, coinfolk.accent.soft);
+    expect(FrockTheme.accentDeep, coinfolk.accent.deep);
+    for (final tokens in [inkTokens, paperTokens, studioTokens]) {
+      expect(tokensMeetContrastFloor(tokens), isTrue);
+    }
+  });
+
+  test('FrockBot’s accent is unchanged', () {
+    expect(inkTokens.surfaces.accent, const Color(0xffd92d71));
+    expect(paperTokens.surfaces.accent, const Color(0xffd3266d));
+    expect(FrockTheme.accentSoft, const Color(0xfffc85ae));
+    expect(FrockTheme.accentDeep, const Color(0xff9a124c));
+  });
+
+  test('the app comes back on the brand’s scheme', () {
+    expect(NativeSignIn.macosScheme, 'frockbot');
+    expect(NativeSignIn.iosScheme, 'frockbot');
+    expect(
+      isConnectReturnV1(
+        Uri.parse('frockbot://bot.frockbot.com/api/connect/callback/macos'),
+      ),
+      isTrue,
+    );
+
+    wearing(coinfolk);
+    expect(NativeSignIn.macosScheme, 'coinfolk');
+    expect(NativeSignIn.iosScheme, 'coinfolk');
+    expect(
+      isConnectReturnV1(
+        Uri.parse('coinfolk://coinfolk.example/api/connect/callback/macos'),
+      ),
+      isTrue,
+    );
+    expect(
+      isConnectReturnV1(
+        Uri.parse('frockbot://coinfolk.example/api/connect/callback/macos'),
+      ),
+      isFalse,
+    );
+  });
+
+  test(
+    'FrockBot’s projects and server register the scheme its brand names',
+    () {
+      final scheme = frockbotBrand.nativeScheme;
+      for (final path in const [
+        'ios/Runner/Configs/AppInfo.xcconfig',
+        'macos/Runner/Configs/AppInfo.xcconfig',
+      ]) {
+        expect(
+          File(path).readAsStringSync(),
+          contains('FROCKBOT_URL_SCHEME = $scheme\$('),
+          reason: path,
+        );
+      }
+      expect(
+        File('android/app/src/debug/AndroidManifest.xml').readAsStringSync(),
+        contains('android:scheme="$scheme-dev"'),
+      );
+      expect(
+        File('../cloudflare/src/brand.ts').readAsStringSync(),
+        contains('nativeScheme: "$scheme",'),
+      );
+    },
+  );
+
+  test('a brand names a scheme of its own', () {
+    for (final scheme in ['https', 'Coin', '1coin', 'coin folk', '']) {
+      expect(
+        () => installClientBrand(
+          ClientBrand(
+            productName: coinfolk.productName,
+            builtInModelName: coinfolk.builtInModelName,
+            characters: coinfolk.characters,
+            defaultCharacterId: coinfolk.defaultCharacterId,
+            nativeScheme: scheme,
+            accent: coinfolk.accent,
+          ),
+        ),
+        throwsArgumentError,
+        reason: scheme,
+      );
+    }
+    expect(clientBrand.nativeScheme, 'frockbot');
+  });
+
+  testWidgets('a still-only character is drawn as its still', (tester) async {
+    wearing(coinfolk);
+    expect(coinfolk.characters.single.rive, isNull);
+
+    await tester.pumpWidget(
+      MaterialApp(
+        theme: FrockTheme.theme(Brightness.dark),
+        home: const Scaffold(body: CharacterAvatar(characterId: 'coin')),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(tester.takeException(), isNull);
+    expect(stills(tester), {'assets/characters/sunny.png'});
   });
 
   testWidgets('the character picker offers only the brand’s cast', (

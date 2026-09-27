@@ -309,8 +309,10 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
       ? (widget.characterId ?? widget.background)!
       : defaultCharacterIdV1;
 
-  rive.FileLoader get _loader {
+  /// Null for a character that is only its still.
+  rive.FileLoader? get _loader {
     final asset = characterCatalogV1[_characterId]!.rive;
+    if (asset == null) return null;
     return _loaders.putIfAbsent(
       asset,
       () => rive.FileLoader.fromAsset(asset, riveFactory: rive.Factory.flutter),
@@ -527,37 +529,40 @@ class _CharacterAvatarState extends State<CharacterAvatar> {
   /// call swapped the Bot's own colour for it. A resting artboard is not
   /// advanced, and a composer beside one guards its field with
   /// [CharacterAvatar.hold].
-  Widget _figure(Size size, {required BoxFit fit}) => SizedBox(
-    width: size.width,
-    height: size.height,
-    child: _isFlutterTest || !riveRuntimeReady.value
-        ? Image.asset(
-            characterCatalogV1[_characterId]!.still,
-            fit: fit,
-            excludeFromSemantics: true,
-          )
-        : _LiveCharacter(
-            key: ValueKey(_characterId),
-            loader: _loader,
-            onLoaded: (loaded) {
-              _loaded = loaded;
-              _synced = null;
-              _lookedAt = null;
-              _sync();
-              _look();
-            },
-            // A runtime that never arrives — a script the CSP refuses, a
-            // request that hangs — leaves the file loading forever rather
-            // than failing, so the still stands in for waiting as well as for
-            // failure. An empty slot is never the better answer: the still is
-            // what the animation replaces.
-            still: Image.asset(
+  Widget _figure(Size size, {required BoxFit fit}) {
+    final loader = _isFlutterTest || !riveRuntimeReady.value ? null : _loader;
+    return SizedBox(
+      width: size.width,
+      height: size.height,
+      child: loader == null
+          ? Image.asset(
               characterCatalogV1[_characterId]!.still,
               fit: fit,
               excludeFromSemantics: true,
+            )
+          : _LiveCharacter(
+              key: ValueKey(_characterId),
+              loader: loader,
+              onLoaded: (loaded) {
+                _loaded = loaded;
+                _synced = null;
+                _lookedAt = null;
+                _sync();
+                _look();
+              },
+              // A runtime that never arrives — a script the CSP refuses, a
+              // request that hangs — leaves the file loading forever rather
+              // than failing, so the still stands in for waiting as well as for
+              // failure. An empty slot is never the better answer: the still is
+              // what the animation replaces.
+              still: Image.asset(
+                characterCatalogV1[_characterId]!.still,
+                fit: fit,
+                excludeFromSemantics: true,
+              ),
             ),
-          ),
-  );
+    );
+  }
 
   @override
   Widget build(BuildContext context) {

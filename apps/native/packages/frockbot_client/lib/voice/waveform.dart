@@ -29,7 +29,7 @@ const double voiceLevelEpsilon = 0.012;
 /// An envelope target loud enough to be a voice rather than the room.
 const double voiceSpeechTarget = 0.35;
 const voiceLobeTintsPerson = [Colors.white];
-const voiceLobeTintsBot = [FrockTheme.accentDeep];
+List<Color> get voiceLobeTintsBot => [FrockTheme.accentDeep];
 
 /// What the meter is showing when no sound decides it.
 enum VoiceMeterMode {

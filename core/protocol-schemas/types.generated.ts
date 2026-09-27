@@ -35,7 +35,7 @@ export type CompatibilityView = {
 export type UpdateRequired = {
   schemaVersion: 1;
   status: "update-required";
-  message: "Update the app to continue using FrockBot.";
+  message: string;
 };
 export type AuthIdentity = {
   schemaVersion: 1;
