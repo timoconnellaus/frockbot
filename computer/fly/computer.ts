@@ -263,6 +263,7 @@ export interface BrowserAction {
     | "click"
     | "fill"
     | "fill-secret"
+    | "select"
     | "press"
     | "wait";
   url?: string;
@@ -275,6 +276,8 @@ export interface BrowserAction {
   text?: string;
   key?: string;
   exact?: boolean;
+  nth?: number;
+  option?: string;
   milliseconds?: number;
 }
 

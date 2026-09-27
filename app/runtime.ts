@@ -603,6 +603,9 @@ export function createFoundationHostedRuntimePackages(
         ...(host.computerSecrets ? { secrets: host.computerSecrets } : {}),
         ...(host.computerEgress ? { egress: host.computerEgress } : {}),
         ...(host.computerJev ? { jev: host.computerJev } : {}),
+        ...(host.computerBrowserTaskDecider
+          ? { decideBrowserTask: host.computerBrowserTaskDecider }
+          : {}),
         ...(host.computerPageJudge
           ? { judgePage: host.computerPageJudge }
           : {}),

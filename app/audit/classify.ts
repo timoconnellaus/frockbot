@@ -196,7 +196,7 @@ export function auditKindForToolV1(
     // could not have run, and it is audited against the target it named.
     return { kind: "shell", target: onComputer };
   }
-  if (name === "computer_browser") {
+  if (name === "computer_browser" || name === "computer_browser_task") {
     return { kind: "browser", target: onComputer };
   }
   if (name.startsWith("computer_process_")) {

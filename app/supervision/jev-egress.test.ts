@@ -3,6 +3,7 @@ import { APIError, APITimeoutError } from "@typesafe-ai/sdk";
 import { base64ToBytesV1 } from "@frockbot/computer/egress";
 import type { JevMeterV1 } from "../billing/jev.js";
 import {
+  createBrowserTaskDeciderV1,
   createJevEgressV1,
   JEV_EGRESS_BODY_MAX_BYTES_V1,
   JEV_EGRESS_QUESTIONS_MAX_V1,
@@ -185,5 +186,52 @@ describe("Jev from the terminal", () => {
       effectId: "e",
     });
     expect(answer.status).toBe(200);
+  });
+});
+
+describe("Jev for a browser task", () => {
+  test("answers on the platform's model and charges the tokens Jev counted", async () => {
+    const billing = meter();
+    const decide = createBrowserTaskDeciderV1({
+      client: client(ANSWERED),
+      meter: billing.value,
+      botId: "bot-1",
+      sessionId: "s-1",
+    });
+    const answers = await decide(
+      { state: { goal: "x" }, questions: { pick: QUESTION } },
+      "tool:1:1:0:jev:0",
+    );
+    expect(answers).toMatchObject({ pick: { choice: "a" } });
+    expect(billing.log).toEqual(["reserve tool:1:1:0:jev:0", "charge 321"]);
+  });
+
+  test("an account that cannot pay, or a Jev that does not answer, ends the task", async () => {
+    const broke = createBrowserTaskDeciderV1({
+      client: client(ANSWERED),
+      meter: {
+        reserve: async () => {
+          throw new Error("out of credit");
+        },
+      },
+      botId: "bot-1",
+      sessionId: "s-1",
+    });
+    expect(
+      await broke({ state: {}, questions: { pick: QUESTION } }, "e"),
+    ).toBeUndefined();
+    const refused = meter();
+    const bad = createBrowserTaskDeciderV1({
+      client: client(async () => {
+        throw new APIError(422, {}, new Headers());
+      }),
+      meter: refused.value,
+      botId: "bot-1",
+      sessionId: "s-1",
+    });
+    expect(
+      await bad({ state: {}, questions: { pick: QUESTION } }, "e"),
+    ).toBeUndefined();
+    expect(refused.log).toEqual(["reserve e", "release"]);
   });
 });

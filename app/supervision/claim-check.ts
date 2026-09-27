@@ -40,6 +40,7 @@ export const PAGE_TOOLS_V1: readonly string[] = [
   "web_fetch",
   "web_search",
   "computer_browser",
+  "computer_browser_task",
 ];
 
 /** The latest pages a message's facts are checked against. */

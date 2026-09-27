@@ -90,8 +90,29 @@ export type ComputerBrowserAction =
   | { type: "navigate"; url: string }
   /** Internal lifecycle action; the model-facing browser tool cannot send it. */
   | { type: "close-origins"; origins: readonly string[] }
-  | { type: "click"; role: string; name: string; exact?: boolean }
-  | { type: "fill"; label: string; text: string; exact?: boolean }
+  /** `nth` picks one of several controls with this role and name, from 0. */
+  | { type: "click"; role: string; name: string; exact?: boolean; nth?: number }
+  /**
+   * `label` finds the field by its label; with `role`, by that role and
+   * `label` as its accessible name, as a snapshot lists it.
+   */
+  | {
+      type: "fill";
+      label: string;
+      text: string;
+      exact?: boolean;
+      role?: string;
+      nth?: number;
+    }
+  /** Chooses `option` by its label in a native select. */
+  | {
+      type: "select";
+      role: string;
+      name: string;
+      option: string;
+      exact?: boolean;
+      nth?: number;
+    }
   /**
    * Internal: the model-facing tool names a saved secret by reference, and
    * the Bot's own authority leases its value for this one action. A host

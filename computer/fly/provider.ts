@@ -132,6 +132,7 @@ function browserAction(action: ComputerBrowserAction): BrowserAction {
         role: action.role,
         name: action.name,
         exact: action.exact,
+        nth: action.nth,
       };
     case "fill":
       return {
@@ -139,6 +140,17 @@ function browserAction(action: ComputerBrowserAction): BrowserAction {
         label: action.label,
         text: action.text,
         exact: action.exact,
+        role: action.role,
+        nth: action.nth,
+      };
+    case "select":
+      return {
+        action: "select",
+        role: action.role,
+        name: action.name,
+        option: action.option,
+        exact: action.exact,
+        nth: action.nth,
       };
     // The value is not part of the action: it is handed to the command apart
     // from the action's own description, which is what lands in a script.

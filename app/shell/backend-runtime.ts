@@ -164,6 +164,10 @@ export interface ShellHostedRuntimeHostV1 {
   computerEgress?: NonNullable<ComputerAgentPluginConfig["egress"]>;
   /** How this Turn's foreground commands reach Jev at `jev.internal`, charged. */
   computerJev?: NonNullable<ComputerAgentPluginConfig["jev"]>;
+  /** How this Turn's browser tasks ask Jev, charged. */
+  computerBrowserTaskDecider?: NonNullable<
+    ComputerAgentPluginConfig["decideBrowserTask"]
+  >;
   /** The `computerUse` task owner whose User-wide lease this child holds. */
   computerAgentControlOwnerId?: string;
   /**

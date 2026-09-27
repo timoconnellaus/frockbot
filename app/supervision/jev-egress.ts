@@ -8,6 +8,7 @@ import {
   type ComputerEgressJevV1,
   type ComputerEgressResponseV1,
 } from "@frockbot/computer/egress";
+import type { ComputerBrowserTaskDeciderV1 } from "@frockbot/computer/agent";
 import type { JevMeterV1 } from "../billing/jev.js";
 import { RESPONSE_REVIEW_MODEL_V1 } from "./response-review.js";
 
@@ -131,6 +132,54 @@ export function createJevEgressV1(config: {
         502,
         "Jev's answer could not be confirmed. The request may still be charged; try again.",
       );
+    }
+  };
+}
+
+/**
+ * Jev for `computer_browser_task`: one request a step, asked from the app
+ * rather than the terminal, charged the same way. A request the account
+ * cannot pay for, or that Jev does not answer, ends the task.
+ */
+export function createBrowserTaskDeciderV1(config: {
+  client: TypeSafeClient;
+  meter?: JevMeterV1;
+  botId: string;
+  sessionId: string;
+}): ComputerBrowserTaskDeciderV1 {
+  return async (request, effectId, signal) => {
+    const bytes = new TextEncoder().encode(JSON.stringify(request)).byteLength;
+    let charge;
+    try {
+      charge = await config.meter?.reserve({
+        effectId,
+        botId: config.botId,
+        sessionId: config.sessionId,
+        maximumInputTokens: bytes + JEV_EGRESS_FRAMING_TOKENS_V1,
+      });
+    } catch {
+      return undefined;
+    }
+    try {
+      const result = await config.client.systemOne(
+        {
+          state: request.state as Record<string, JsonValue>,
+          questions: request.questions as never,
+          model: RESPONSE_REVIEW_MODEL_V1,
+        },
+        {
+          retry: { maxRetries: 0 },
+          timeout: JEV_EGRESS_TIMEOUT_MS_V1,
+          ...(signal ? { signal } : {}),
+        },
+      );
+      await charge?.charge(result.usage.input_tokens);
+      return result.answers as never;
+    } catch (error) {
+      if (error instanceof APIError && error.status < 500) {
+        await charge?.release();
+      }
+      return undefined;
     }
   };
 }
