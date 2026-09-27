@@ -13,6 +13,8 @@
 !computer/fly/runtime.ts
 !computer/fly/shell.ts
 !computer/fly/demonstration.ts
+!computer/fly/egress.ts
+!computer/egress.ts
 !applets/package.json
 !applets/build-contract.ts
 !applets/sdk
