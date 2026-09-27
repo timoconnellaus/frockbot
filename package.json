@@ -65,6 +65,7 @@
     "eval:call-review": "bun scripts/eval-call-review.ts",
     "eval:plugin-fit": "bun scripts/eval-plugin-fit.ts",
     "eval:context": "bun scripts/eval-context.ts",
+    "eval:browser": "bun scripts/eval-browser.ts",
     "eval:routine-event": "bun scripts/eval-routine-event.ts",
     "eval:dictation-cleanup": "bun scripts/eval-dictation-cleanup.ts"
   },
