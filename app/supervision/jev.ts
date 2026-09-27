@@ -65,6 +65,16 @@ export const JEV_TURN_BUDGET_V1: JevCallBudgetV1 = {
   timeout: 10_000,
 };
 
+/**
+ * How the outcome judgment runs: one short attempt. The person already has
+ * the reply and nothing acts on the judgment, so a slow Jev leaves it out
+ * rather than holding the Turn open.
+ */
+export const JEV_OUTCOME_BUDGET_V1: JevCallBudgetV1 = {
+  retry: { maxRetries: 0 },
+  timeout: 2_000,
+};
+
 export interface JevTurnSupervisorOptionsV1 {
   readonly client: TypeSafeClient;
   /** Defaults to {@link JEV_TURN_BUDGET_V1}. */
@@ -237,7 +247,7 @@ export function createJevTurnSupervisorV1(
       try {
         const review = await reviewOutcomeV1(options.client, evidence, {
           signal,
-          budget,
+          budget: JEV_OUTCOME_BUDGET_V1,
         });
         return composeOutcomeDecisionV1({
           answers: review.answers,
