@@ -2607,6 +2607,9 @@ export function createComputerAgentFeature(
               },
               act: async (action, value) => {
                 await perform(browserTaskHostActionV1(action, value));
+                if (action.operation.op === "type" && action.operation.submit) {
+                  await perform({ type: "press", key: "Enter" });
+                }
               },
               decide: (request) =>
                 decide(

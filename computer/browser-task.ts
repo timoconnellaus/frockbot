@@ -33,7 +33,8 @@ export interface BrowserTaskControlV1 {
 
 export type BrowserTaskOperationV1 =
   | { op: "click" }
-  | { op: "type"; valueKey: string }
+  /** `submit` presses Enter after typing: a search box's own way to search. */
+  | { op: "type"; valueKey: string; submit?: boolean }
   | { op: "select"; option: string };
 
 export interface BrowserTaskActionV1 {
@@ -262,6 +263,15 @@ export function browserTaskActionsV1(
           operation: { op: "type", valueKey: key },
           describe: `type values.${key} into ${control.role} ${name}${control.value ? ` (now holds ${JSON.stringify(control.value)})` : " (empty)"}${where}`,
         });
+        // A search box's suggestions cover whatever would submit it, and some
+        // have no button at all; Enter is the search.
+        if (control.role === "searchbox") {
+          add({
+            control,
+            operation: { op: "type", valueKey: key, submit: true },
+            describe: `type values.${key} into ${control.role} ${name} and press Enter${where}`,
+          });
+        }
       }
       continue;
     }
@@ -360,6 +370,7 @@ const BROWSER_TASK_PAGE_MIN_V1 = 0.7;
 export const BROWSER_TASK_COMMIT_MIN_V1 = 0.5;
 /** Over this many actions, a region is chosen first. */
 const BROWSER_TASK_REGION_OVER_V1 = 80;
+const BROWSER_TASK_REGION_CONTROLS_V1 = 5;
 const BROWSER_TASK_TEXT_CHARS_V1 = 1_500;
 
 /** Names that commit whatever Jev says: a review costs less than a wrong order. */
@@ -406,6 +417,36 @@ function actionQuestion(options: Record<string, string>) {
       ...options,
     },
   };
+}
+
+/**
+ * A region as Jev chooses it: its name alone rarely says what is in it — a
+ * search box above the first heading is in "page" — so the label carries the
+ * first of its controls.
+ */
+function regionLabelV1(
+  region: string,
+  actions: readonly BrowserTaskActionV1[],
+): string {
+  const controls = [
+    ...new Set(
+      actions
+        .filter((action) => (action.control.region || "page") === region)
+        .map(
+          (action) =>
+            `${action.control.role} ${JSON.stringify(action.control.name)}`,
+        ),
+    ),
+  ];
+  const shown = controls.slice(0, BROWSER_TASK_REGION_CONTROLS_V1).join(", ");
+  const more =
+    controls.length > BROWSER_TASK_REGION_CONTROLS_V1
+      ? ` and ${controls.length - BROWSER_TASK_REGION_CONTROLS_V1} more`
+      : "";
+  return `${region === "page" ? "top of the page" : region} — ${shown}${more}`.slice(
+    0,
+    300,
+  );
 }
 
 function regionQuestion(regions: Record<string, string>) {
@@ -514,9 +555,15 @@ export async function runBrowserTaskV1(
       const labels = Object.fromEntries(
         regions.map((region, index) => [`r${index + 1}`, region]),
       );
+      const criteria = Object.fromEntries(
+        Object.entries(labels).map(([key, region]) => [
+          key,
+          regionLabelV1(region, actions),
+        ]),
+      );
       const answers = await decide(base, {
         page: PAGE_QUESTION,
-        region: regionQuestion(labels),
+        region: regionQuestion(criteria),
       });
       if (!answers) return end("blocked", "Jev could not be reached");
       pageAnswer = answers.page;

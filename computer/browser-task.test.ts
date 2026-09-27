@@ -142,6 +142,24 @@ describe("the actions a page allows", () => {
     });
     expect(actions.some((a) => a.operation.op === "type")).toBe(false);
   });
+
+  test("a search box can also be typed into and searched with Enter", () => {
+    const actions = browserTaskActionsV1(
+      browserTaskControlsV1(`- search:
+  - searchbox "Search Wikipedia"`),
+      { query: "Wollongong" },
+    );
+    expect(actions.map((a) => [a.describe, a.operation])).toEqual([
+      [
+        'type values.query into searchbox "Search Wikipedia" (empty)',
+        { op: "type", valueKey: "query" },
+      ],
+      [
+        'type values.query into searchbox "Search Wikipedia" and press Enter',
+        { op: "type", valueKey: "query", submit: true },
+      ],
+    ]);
+  });
 });
 
 describe("running a task", () => {
@@ -213,6 +231,37 @@ describe("running a task", () => {
       'untick checkbox "Email notifications" (now ticked) — in: Account',
     ]);
     expect(run.reviewed).toEqual([]);
+  });
+
+  test("on a large page each region is offered by the controls it holds", async () => {
+    const links = Array.from(
+      { length: 90 },
+      (_, i) => `- link "Story ${i}"`,
+    ).join("\n");
+    const snapshot = `- search:
+  - searchbox "Search Wikipedia"
+  - button "Search"
+- heading "In the news" [level=2]
+${links}`;
+    const asked: Record<string, unknown>[] = [];
+    const report = await runBrowserTaskV1(
+      { goal: "Search for Wollongong", values: { query: "Wollongong" } },
+      {
+        observe: async () => ({ snapshot }),
+        act: async () => {},
+        decide: async ({ questions }) => {
+          asked.push(questions);
+          return undefined;
+        },
+        review: async () => undefined,
+      },
+    );
+    expect(report.outcome).toBe("blocked");
+    const region = asked[0]!.region as { criteria: Record<string, string> };
+    expect(Object.values(region.criteria)).toEqual([
+      'top of the page — searchbox "Search Wikipedia", button "Search"',
+      'In the news — link "Story 0", link "Story 1", link "Story 2", link "Story 3", link "Story 4" and 85 more',
+    ]);
   });
 
   test("a committing click is reviewed first, and a refusal ends the task", async () => {
