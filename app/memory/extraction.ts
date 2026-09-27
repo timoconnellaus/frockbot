@@ -154,10 +154,25 @@ export function createModelMemoryExtractorV1(deps: {
       model: deps.model,
       ...(deps.modelBinding ? { modelBinding: deps.modelBinding } : {}),
     });
-    const signal = AbortSignal.timeout(deps.timeoutMs ?? 60_000);
+    // A cleared timer rather than `AbortSignal.timeout`, whose pending timer
+    // would hold the Bot's object in memory after the call is done.
+    const controller = new AbortController();
+    const deadline = setTimeout(
+      () =>
+        controller.abort(new Error("Memory extraction ran past its deadline.")),
+      deps.timeoutMs ?? 60_000,
+    );
     let text = "";
-    for await (const event of deps.stream(request, dispatch, signal)) {
-      if (event.type === "text-delta") text += event.text;
+    try {
+      for await (const event of deps.stream(
+        request,
+        dispatch,
+        controller.signal,
+      )) {
+        if (event.type === "text-delta") text += event.text;
+      }
+    } finally {
+      clearTimeout(deadline);
     }
     return parseMemoryExtractionV1(text);
   };
