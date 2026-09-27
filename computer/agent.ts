@@ -506,6 +506,12 @@ function record(input: unknown): Record<string, unknown> | undefined {
 }
 
 const MAX_EXEC_COMMAND_LENGTH = 20_000;
+/**
+ * Said after output the host cut short, so the model knows it is reading part
+ * of the answer and how to get the rest.
+ */
+export const EXEC_TRUNCATED_NOTE_V1 =
+  "[Output truncated at 30 KB. Redirect long output to a file and read it with head, tail or grep.]";
 /** How long a foreground `computer_exec` may run. */
 const EXEC_TIMEOUT_MS = 120_000;
 /** An absolute path on the Computer, at the Computer host's own path bound. */
@@ -1304,7 +1310,11 @@ export function createComputerAgentFeature(
               ),
             );
             return {
-              content: [text(result.stdout), text(result.stderr)]
+              content: [
+                text(result.stdout),
+                text(result.stderr),
+                ...(result.outputTruncated ? [EXEC_TRUNCATED_NOTE_V1] : []),
+              ]
                 .filter(Boolean)
                 .join("\n"),
               isError: result.exitCode !== 0,

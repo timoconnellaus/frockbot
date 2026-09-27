@@ -14,6 +14,7 @@ import {
   browserResultTextV1,
   COMPUTER_OVERLOADED_TOOL_MESSAGE_V1,
   createComputerAgentFeature,
+  EXEC_TRUNCATED_NOTE_V1,
   HUMAN_CONTROL_PROMPT_LINE,
   type ComputerSecretFillSeamV1,
 } from "./agent.js";
@@ -211,6 +212,41 @@ describe("computer agent contribution", () => {
     expect(after.status).toBe(410);
     expect(effects).toEqual(["mutate", "mutate"]);
     unregister();
+    await harness.dispose();
+  });
+
+  test("computer_exec says when the host cut its output short", async () => {
+    const provider: ComputerHostV1 = {
+      id: "fixture",
+      capabilities: TEST_HOST_CAPABILITIES,
+      open: async (identity, tenant, assignment) => ({
+        assignment,
+        identity,
+        tenant,
+        capabilities: TEST_HOST_CAPABILITIES,
+        exec: {
+          execute: async () => ({
+            exitCode: 0,
+            stdout: new TextEncoder().encode("line 1"),
+            stderr: new Uint8Array(),
+            outputTruncated: true,
+          }),
+        },
+        close: () => Promise.resolve(),
+      }),
+    };
+    const harness = createAgentRuntimeHarness();
+    harness.computers.register(provider);
+    await harness.mount(
+      createComputerAgentFeature({
+        userId: "user-1",
+        defaultProviderId: "fixture",
+      }),
+    );
+    const result = await execute(harness, "computer_exec", {
+      command: "cat big.log",
+    });
+    expect(result.content).toBe(`line 1\n${EXEC_TRUNCATED_NOTE_V1}`);
     await harness.dispose();
   });
 

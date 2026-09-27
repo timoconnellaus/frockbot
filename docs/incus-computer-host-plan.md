@@ -216,6 +216,10 @@ This runs on the Fly Sprite today (`computer/egress.ts`, `computer/fly/egress.ts
 
 A command is one effect under its effect id: one whose outcome is unknown is reported as unknown, never re-run. Each credentialed request is its own effect under the command's id, sent at most once; a byte-identical write repeated inside the same command is answered with the first answer instead of sent again, so a CLI's retry does not repeat it.
 
+### Long output
+
+A foreground command returns at most 30 KB of stdout and stderr to the model, and runs for at most two minutes. Output the host cut short ends with a note saying so and telling the Bot to redirect long output to a file and read it with `head`, `tail` or `grep`; a job that outlasts the call runs with `background:true` and is read back through its bounded log. Credentialed responses are bounded at 8 MB on the way back to the CLI, which never counts against the model's context.
+
 ### Known gaps
 
 - Only a foreground command gets connected accounts; a background process's token would outlive its review.
