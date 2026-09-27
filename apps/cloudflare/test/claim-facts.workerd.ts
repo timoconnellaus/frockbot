@@ -10,7 +10,10 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { fakeJevAnswersV1 } from "@frockbot/app/supervision/testing";
 import { provisionBot } from "./provision-bot.ts";
 import { hydratedStoredRunsV1 } from "./session-log-probe.ts";
-import { frockbotToolCallPrompt, JEV_STUB_ORIGIN } from "./harness/miniflare.ts";
+import {
+  frockbotToolCallPrompt,
+  JEV_STUB_ORIGIN,
+} from "./harness/miniflare.ts";
 
 type Identity = { userId: string; botId: string };
 type StoredEvent = {
