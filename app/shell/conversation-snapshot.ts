@@ -11,11 +11,14 @@ import {
   RUN_PREFIX,
   readVisibleIndexV1,
   readConversationRowV1,
+  runIndexKey,
 } from "@frockbot/core/durable";
 import { decodeSessionEvent } from "@frockbot/core/contracts";
 import { requireStoredRunV1 } from "./backend-contracts.js";
 import {
+  CLIENT_RUN_LIST_MAX_BYTES,
   CLIENT_RUN_PAGE_LIMIT,
+  clientRunListWireBytes,
   isVisibleRunV1,
   projectClientAnnouncementsV1,
   projectClientRunV1,
@@ -147,8 +150,59 @@ async function snapshotFromArchive(
   };
 }
 
+const utf8 = new TextEncoder();
+
+/**
+ * The snapshot is sent as one assembled frame, so it holds the same byte
+ * budget as a page read. Tool-heavy Turns fill that budget well before the
+ * run count does; the oldest ones are left to the older-page read, which
+ * starts at the oldest Turn kept here.
+ */
+function withinWireBudget(list: ClientRunListV1): ClientRunListV1 {
+  if (clientRunListWireBytes(list) <= CLIENT_RUN_LIST_MAX_BYTES) return list;
+  const newestFirst = [...list.runs].sort(
+    (left, right) =>
+      right.admittedAt.localeCompare(left.admittedAt) ||
+      right.runId.localeCompare(left.runId),
+  );
+  const cursorOf = (run: ClientRunV1) => runIndexKey(run.admittedAt, run.runId);
+  const kept = new Set<ClientRunV1>();
+  let oldestKept: ClientRunV1 | undefined;
+  // Everything but the runs, with the longest cursor this page could name;
+  // each run then costs its own bytes and a separating comma.
+  let bytes = clientRunListWireBytes({
+    ...list,
+    runs: [],
+    page: {
+      truncated: true,
+      nextCursor: newestFirst
+        .map(cursorOf)
+        .reduce(
+          (longest, cursor) =>
+            cursor.length > longest.length ? cursor : longest,
+          "",
+        ),
+    },
+  });
+  for (const run of newestFirst) {
+    bytes += utf8.encode(JSON.stringify(run)).byteLength + 1;
+    if (kept.size > 0 && bytes > CLIENT_RUN_LIST_MAX_BYTES) break;
+    kept.add(run);
+    oldestKept = run;
+  }
+  return {
+    ...list,
+    runs: list.runs.filter((run) => kept.has(run)),
+    page: oldestKept
+      ? { truncated: true, nextCursor: cursorOf(oldestKept) }
+      : list.page,
+  };
+}
+
 export async function readConversationSnapshotV1(
   storage: ConversationSnapshotStorageV1,
 ): Promise<ClientRunListV1> {
-  return (await snapshotFromIndex(storage)) ?? snapshotFromArchive(storage);
+  return withinWireBudget(
+    (await snapshotFromIndex(storage)) ?? (await snapshotFromArchive(storage)),
+  );
 }

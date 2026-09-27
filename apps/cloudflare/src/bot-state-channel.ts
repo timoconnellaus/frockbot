@@ -96,6 +96,9 @@ class ProtocolFrames {
     this.frame = frame;
     this.current = framesFor(frame);
   }
+  get type(): CursoredFrameV1["type"] {
+    return this.frame.type;
+  }
   for(attachment: ChannelAttachmentV1): string[] {
     // The cursor still advances past it: the update is an invalidation, and
     // a client that cannot read it reads the look when it next opens the Bot.
@@ -504,7 +507,11 @@ export class BotStateChannel {
           ...attachment,
           lastSent: String(cursor),
         } satisfies ChannelAttachmentV1);
-      } catch {
+      } catch (error) {
+        console.error("bot-state delivery failed", {
+          frame: frames.type,
+          error: error instanceof Error ? error.message : String(error),
+        });
         try {
           socket.close(1011, "delivery failed");
         } catch {
@@ -600,7 +607,15 @@ export class BotStateChannel {
         try {
           for (const encoded of new ProtocolFrames(frame).for(attachment))
             server.send(encoded);
-        } catch {
+        } catch (error) {
+          // Every client is refused the same way until the cause is gone,
+          // and the client only ever sees the close code.
+          console.error("bot-state handshake failed", {
+            botId: identity.botId,
+            frame: frame.type,
+            bytes: utf8.encode(JSON.stringify(frame)).length,
+            error: error instanceof Error ? error.message : String(error),
+          });
           server.close(1011, "handshake failed");
           return new Response(null, { status: 101, webSocket: client });
         }
