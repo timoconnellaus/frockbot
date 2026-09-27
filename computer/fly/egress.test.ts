@@ -1,0 +1,178 @@
+import { afterAll, describe, expect, test } from "bun:test";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  EGRESS_ENSURE_SCRIPT,
+  EGRESS_PORT,
+  EGRESS_PROXY_SCRIPT,
+  EGRESS_ROOT,
+  EGRESS_RUNTIME_ROOT,
+  egressProxySource,
+  flyEgressShellPreludeV1,
+} from "./egress.js";
+import {
+  COMPUTER_RUNTIME_FILES,
+  PROVISION_PHASES,
+  RUNTIME_ROOT,
+  TERMINAL_PACKAGES,
+} from "./runtime.js";
+
+describe("the Sprite's connected-account proxy", () => {
+  test("lives under the runtime root and is installed by the runtime phase", () => {
+    expect(EGRESS_RUNTIME_ROOT).toBe(RUNTIME_ROOT);
+    const paths = COMPUTER_RUNTIME_FILES.map((file) => file.path);
+    expect(paths).toContain(EGRESS_PROXY_SCRIPT);
+    expect(paths).toContain(EGRESS_ENSURE_SCRIPT);
+    const packages = PROVISION_PHASES.find(
+      (phase) => phase.name === "packages",
+    )!.body;
+    for (const name of TERMINAL_PACKAGES) expect(packages).toContain(name);
+  });
+
+  test("a command's prelude points every client at the proxy only when it is up", () => {
+    const prelude = flyEgressShellPreludeV1("payload.signature");
+    expect(prelude.split("\n")[0]).toBe(
+      `if '${EGRESS_ENSURE_SCRIPT}' >/dev/null 2>&1; then`,
+    );
+    expect(prelude).toContain(
+      `HTTPS_PROXY='http://frockbot:payload.signature@127.0.0.1:${EGRESS_PORT}'`,
+    );
+    expect(prelude).toContain(`SSL_CERT_FILE='${EGRESS_ROOT}/bundle.pem'`);
+    expect(prelude).toContain("NODE_USE_ENV_PROXY=1");
+    expect(prelude).toContain('GH_TOKEN="${GH_TOKEN:-');
+  });
+});
+
+describe("the proxy, run", () => {
+  const dir = mkdtempSync(join(tmpdir(), "frockbot-egress-"));
+  const seen: {
+    method: string;
+    url: string;
+    headers: Record<string, string>;
+    body: string;
+    bearer: string;
+  }[] = [];
+  const endpoint = Bun.serve({
+    hostname: "127.0.0.1",
+    port: 0,
+    fetch: async (request) => {
+      const forwarded = (await request.json()) as {
+        method: string;
+        url: string;
+        headers: Record<string, string>;
+        bodyBase64?: string;
+      };
+      seen.push({
+        method: forwarded.method,
+        url: forwarded.url,
+        headers: forwarded.headers,
+        body: forwarded.bodyBase64 ? atob(forwarded.bodyBase64) : "",
+        bearer: request.headers.get("authorization") ?? "",
+      });
+      return Response.json({
+        status: 201,
+        headers: { "content-type": "application/json", link: "<next>" },
+        bodyBase64: btoa('{"number":7}'),
+      });
+    },
+  });
+  const port = 20_000 + Math.floor(Math.random() * 20_000);
+  writeFileSync(
+    join(dir, "proxy.mjs"),
+    egressProxySource
+      .replace(JSON.stringify(EGRESS_ROOT), JSON.stringify(join(dir, "state")))
+      .replace(`const PORT = ${EGRESS_PORT};`, `const PORT = ${port};`),
+  );
+  const proxy = Bun.spawn(["node", join(dir, "proxy.mjs")], {
+    stdout: "ignore",
+    stderr: "ignore",
+  });
+  const payload = btoa(
+    JSON.stringify({
+      v: 1,
+      o: "user-1:bot-1",
+      n: "nonce",
+      x: Date.now() + 60_000,
+      u: `http://127.0.0.1:${endpoint.port}/api/computer/egress`,
+    }),
+  )
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+  const token = `${payload}.signature`;
+
+  afterAll(() => {
+    proxy.kill();
+    void endpoint.stop(true);
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  async function curl(args: string[], proxyUrl: string) {
+    for (let attempt = 0; attempt < 100; attempt++) {
+      const listening = await Bun.connect({
+        hostname: "127.0.0.1",
+        port,
+        socket: { data() {} },
+      }).then(
+        (socket) => {
+          socket.end();
+          return true;
+        },
+        () => false,
+      );
+      if (listening) break;
+      await Bun.sleep(100);
+    }
+    const child = Bun.spawn(["curl", "-sS", "-i", ...args], {
+      env: {
+        PATH: process.env.PATH ?? "/usr/bin:/bin",
+        HTTPS_PROXY: proxyUrl,
+        https_proxy: proxyUrl,
+        CURL_CA_BUNDLE: join(dir, "state", "bundle.pem"),
+      },
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    await child.exited;
+    return new Response(child.stdout).text();
+  }
+
+  test("sends a connected app's request to the Worker under the token, without the CLI's credential", async () => {
+    const out = await curl(
+      [
+        "-X",
+        "POST",
+        "https://api.github.com/repos/o/r/issues?per_page=5",
+        "-H",
+        "authorization: token frockbot-connected-account",
+        "-H",
+        "content-type: application/json",
+        "-d",
+        '{"title":"hi"}',
+      ],
+      `http://frockbot:${token}@127.0.0.1:${port}`,
+    );
+    expect(out).toContain("HTTP/1.1 201 Created");
+    expect(out).toContain("link: <next>");
+    expect(out).toContain('{"number":7}');
+    expect(seen.at(-1)).toMatchObject({
+      method: "POST",
+      url: "https://api.github.com/repos/o/r/issues?per_page=5",
+      body: '{"title":"hi"}',
+      bearer: `Bearer ${token}`,
+    });
+    expect(seen.at(-1)!.headers.authorization).toBeUndefined();
+  }, 20_000);
+
+  test("answers a connected app's host without a token by saying where accounts are available", async () => {
+    const before = seen.length;
+    const out = await curl(
+      ["https://api.github.com/user"],
+      `http://127.0.0.1:${port}`,
+    );
+    expect(out).toContain("407");
+    expect(out).toContain("computer_exec");
+    expect(seen).toHaveLength(before);
+  }, 20_000);
+});

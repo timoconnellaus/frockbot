@@ -2,7 +2,7 @@
 
 FrockBot is a hosted product for creating and running persistent conversational Bots. A Bot holds a conversation, calls tools, remembers things, runs on a schedule, and can extend itself. The reference for what a Bot should be able to do is [`docs/grokbot-parity.md`](docs/grokbot-parity.md).
 
-Terms are defined in [`CONTEXT.md`](CONTEXT.md). How the system is built is in [`docs/architecture.md`](docs/architecture.md). What is changing right now is in [`docs/plan.md`](docs/plan.md). Jev turn supervision is in [`docs/jev-supervision-plan.md`](docs/jev-supervision-plan.md).
+Terms are defined in [`CONTEXT.md`](CONTEXT.md). How the system is built is in [`docs/architecture.md`](docs/architecture.md). What is changing right now is in [`docs/plan.md`](docs/plan.md). Jev turn supervision is in [`docs/jev-supervision-plan.md`](docs/jev-supervision-plan.md). Jev's latency and price are both negligible, which is why it reviews everywhere: around ten Jev calls in a Turn is no concern, so never skip or batch a check to save time or money — just don't multiply them for no reason.
 
 ## Rigor is proportional to consequence
 

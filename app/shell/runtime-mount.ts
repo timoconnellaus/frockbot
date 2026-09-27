@@ -6,6 +6,11 @@
 // isolate's `ai` grant (`app/isolates/bot.ts`) resolve the same way.
 
 import type { StoredRunCauseV1 } from "@frockbot/core/durable";
+import {
+  COMPUTER_EGRESS_PATH_V1,
+  signComputerEgressTokenV1,
+  type ComputerEgressTokenV1,
+} from "@frockbot/computer/egress";
 import { createBotGroupChatsHost } from "./backend-groups.js";
 import {
   PLUGIN_MODEL_PROVIDER_UNAVAILABLE_REASON_V1,
@@ -657,6 +662,31 @@ export async function agentRuntime(
               vault: userSecretsV1(state, identity),
               readSecret: (name) => readSecret(name),
             }),
+            // A foreground command reaches the User's connected accounts
+            // through this object: the token names it, and is signed with
+            // the Computer's own secret. Off without that secret or an
+            // origin for the Computer's proxy to post to.
+            ...(() => {
+              const secret = readSecret("COMPUTER_HOST_TOKEN");
+              const origin = readSecret("BETTER_AUTH_URL");
+              if (!secret || !origin) return {};
+              let endpoint: string;
+              try {
+                endpoint = new URL(COMPUTER_EGRESS_PATH_V1, origin).toString();
+              } catch {
+                return {};
+              }
+              return {
+                computerEgress: {
+                  object: turn.subagentTaskId
+                    ? `${identity.userId}:${identity.botId}#task:${turn.subagentTaskId}`
+                    : `${identity.userId}:${identity.botId}`,
+                  endpoint,
+                  sign: (token: ComputerEgressTokenV1) =>
+                    signComputerEgressTokenV1(secret, token),
+                },
+              };
+            })(),
             // The sign-ins are the User's, so the vault is the User's object;
             // when this object last kept them, and the checkpoint it knows
             // of, are this object's own.

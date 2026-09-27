@@ -83,6 +83,24 @@ export interface ExecuteToolResultV1 {
   error?: string;
 }
 
+/** One HTTP request made as a connected account, through the provider. */
+export interface ProxyRequestInputV1 {
+  connectedAccountId: string;
+  /** The full URL, without its query; the query travels in `parameters`. */
+  endpoint: string;
+  method: "GET" | "POST" | "PUT" | "DELETE" | "PATCH" | "HEAD";
+  body?: Record<string, unknown>;
+  parameters: { name: string; value: string; type: "header" | "query" }[];
+}
+
+/** The app's answer, as the provider relays it. */
+export interface ProxyRequestResultV1 {
+  status: number;
+  data: unknown;
+  headers: Record<string, string>;
+  binary?: { url: string; contentType: string };
+}
+
 /** A provider answer the caller can act on by status. */
 export class ComposioRequestError extends Error {
   constructor(readonly status: number) {
@@ -493,6 +511,79 @@ export class ComposioClient {
         ? { error: result.error.slice(0, 2000) }
         : {}),
     };
+  }
+
+  /**
+   * Make one HTTP request as a connected account: the provider attaches the
+   * account's credential, so it never reaches this deployment. The app's own
+   * status comes back in the answer; only the provider's refusals are HTTP
+   * errors here.
+   */
+  async proxyRequest(
+    input: ProxyRequestInputV1,
+  ): Promise<ProxyRequestResultV1> {
+    const result = asRecord(
+      await this.request("/tools/execute/proxy", {
+        method: "POST",
+        body: JSON.stringify({
+          endpoint: input.endpoint,
+          method: input.method,
+          connected_account_id: input.connectedAccountId,
+          ...(input.body ? { body: input.body } : {}),
+          ...(input.parameters.length ? { parameters: input.parameters } : {}),
+        }),
+      }),
+    );
+    if (
+      typeof result.status !== "number" ||
+      !Number.isInteger(result.status) ||
+      result.status < 100 ||
+      result.status > 599
+    ) {
+      throw new Error("The service returned an invalid proxy answer");
+    }
+    const headers: Record<string, string> = {};
+    if (result.headers && typeof result.headers === "object") {
+      for (const [name, value] of Object.entries(
+        result.headers as Record<string, unknown>,
+      )) {
+        if (typeof value === "string") headers[name.toLowerCase()] = value;
+      }
+    }
+    const binary =
+      result.binary_data && typeof result.binary_data === "object"
+        ? (result.binary_data as Record<string, unknown>)
+        : undefined;
+    return {
+      status: result.status,
+      data: result.data ?? null,
+      headers,
+      ...(binary && typeof binary.url === "string"
+        ? {
+            binary: {
+              url: binary.url,
+              contentType:
+                typeof binary.content_type === "string"
+                  ? binary.content_type
+                  : "application/octet-stream",
+            },
+          }
+        : {}),
+    };
+  }
+
+  /** Reads a binary answer the provider parked at `url`, bounded. */
+  async readBinary(url: string): Promise<Uint8Array> {
+    const response = await this.fetcher(url, { redirect: "follow" });
+    if (!response.ok) {
+      await response.body?.cancel().catch(() => undefined);
+      throw new ComposioRequestError(response.status);
+    }
+    const bytes = new Uint8Array(await response.arrayBuffer());
+    if (bytes.byteLength > MAX_RESPONSE_BYTES) {
+      throw new Error("The service response exceeded its size limit");
+    }
+    return bytes;
   }
 
   private async pages(path: string): Promise<unknown[]> {

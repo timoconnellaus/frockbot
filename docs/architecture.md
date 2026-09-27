@@ -1218,7 +1218,7 @@ In the Bot Durable Object (`computer/bot.ts`) three Computer commands drive it �
 
 All from `computer/`; neither implementation registers one.
 
-- `computer_exec` — `agent.ts`
+- `computer_exec` — `agent.ts`; a `mutate` call, so Jev reviews every command before it runs
 - `computer_screenshot`
 - `computer_doctor`
 - `computer_process_check` / `computer_process_logs` / `computer_process_stop`
@@ -1226,6 +1226,16 @@ All from `computer/`; neither implementation registers one.
 - `plugin_page_try` — offered only with the Plugin authoring host's `pluginPages` seam; see §9
 - `plugin_module_try` — `module-try.ts`; offered only with the Plugin authoring host's `pluginModules` seam; see §9
 - `demonstration_delete` — the Bot's own conversation only; deletes a demonstration the person sent it, and opens no Computer
+
+### Connected accounts from the terminal
+
+A foreground `computer_exec` command reaches the User's connected accounts without a credential ever reaching the Computer (`computer/egress.ts`). GitHub is the one route today (`COMPUTER_EGRESS_ROUTES_V1`).
+
+- **Opening.** When one of the Turn's connected accounts has a route and the host declares `egressShellPrelude`, the tool mints a token — `{object, nonce, expiry, endpoint}` HMAC-signed with `COMPUTER_HOST_TOKEN`, expiring with the call — registers the call's handler in the isolate under the nonce, and prefixes the command with the host's prelude. The handler is removed when the call returns. The seam (`ComputerAgentPluginConfig.egress`) is built in `app/shell/runtime-mount.ts` from `COMPUTER_HOST_TOKEN` and `BETTER_AUTH_URL`; without either, commands run as written.
+- **On the Sprite** (`computer/fly/egress.ts`). The prelude starts `egress-proxy.mjs` on `127.0.0.1:18089` if it is not up and exports `HTTPS_PROXY` carrying the token, the CA bundle variables and a placeholder `GH_TOKEN`; a Sprite that cannot start it runs the command with no proxy. The proxy terminates TLS for routed hosts only, with leaf certificates from a CA it makes with `openssl`, drops the CLI's `authorization`, and posts `{method, url, headers, bodyBase64}` to `POST /api/computer/egress`; every other host is a plain tunnel.
+- **The door** (`apps/cloudflare/src/computer-egress.ts`) verifies the token before addressing any object, then calls `answerComputerEgress` on the object it names, which answers through the live handler or with 410 once the call has ended.
+- **The handler** refuses a host with no route and an app with no connected account, sends a read as the account, and runs a write through the Turn's prepare hooks as a `mutate` `credentialed_request` call first, so supervision reviews it; a refusal is the 403 `message` the CLI prints. A byte-identical write repeated within one call is answered once.
+- **The account** (`app/connect/egress.ts`) is registered by the connected app's own runtime feature on the Turn's tool registry, and sends through the provider's proxy-execute endpoint as the account: JSON object bodies only, the query and safe headers carried, `link`, `etag` and rate-limit headers relayed.
 
 ### Saved secrets — `app/secrets/`
 

@@ -50,6 +50,14 @@ import {
 } from "@frockbot/core/contracts";
 import { shellQuote } from "./fly/shell.js";
 import {
+  computerEgressAccountsV1,
+  computerEgressNonceV1,
+  COMPUTER_EGRESS_ROUTES_V1,
+  createComputerEgressHandlerV1,
+  openComputerEgressV1,
+  type ComputerEgressSeamV1,
+} from "./egress.js";
+import {
   createPluginModuleTryToolV1,
   type ComputerPluginModulesSeamV1,
 } from "./module-try.js";
@@ -255,6 +263,13 @@ export interface ComputerAgentPluginConfig {
    * cannot say, the result carries the page's address and snapshot alone.
    */
   judgePage?: ComputerPageJudgeV1;
+  /**
+   * How a foreground `computer_exec` reaches the User's connected accounts
+   * from the terminal: the Turn's object name, the endpoint the Computer's
+   * proxy posts to, and the signer for its token. Absent, or on a host with no
+   * `egressShellPrelude`, a command runs with no proxy and no account.
+   */
+  egress?: ComputerEgressSeamV1;
 }
 
 /**
@@ -491,6 +506,14 @@ function record(input: unknown): Record<string, unknown> | undefined {
 }
 
 const MAX_EXEC_COMMAND_LENGTH = 20_000;
+/**
+ * Said after output the host cut short, so the model knows it is reading part
+ * of the answer and how to get the rest.
+ */
+export const EXEC_TRUNCATED_NOTE_V1 =
+  "[Output truncated at 30 KB. Redirect long output to a file and read it with head, tail or grep.]";
+/** How long a foreground `computer_exec` may run. */
+const EXEC_TIMEOUT_MS = 120_000;
 /** An absolute path on the Computer, at the Computer host's own path bound. */
 const MAX_EXEC_CWD_LENGTH = 4_096;
 
@@ -1124,6 +1147,57 @@ export function createComputerAgentFeature(
       }
     };
 
+    /**
+     * Opens one foreground exec's reach to the User's connected accounts, for
+     * as long as the call runs: a token naming this object and the call, and
+     * the handler that answers the requests the Computer's proxy forwards
+     * under it. Nothing opens when no connected account has a route, so a
+     * command that cannot use one runs exactly as it would without.
+     */
+    const openEgress = async (
+      context: ToolExecutionContext,
+    ): Promise<{ prelude: string; close: () => void } | undefined> => {
+      const seam = config.egress;
+      const prelude = capabilities?.egressShellPrelude;
+      if (!seam || !prelude) return undefined;
+      const accounts = () => computerEgressAccountsV1(runtime.tools);
+      if (
+        !accounts().some((account) =>
+          COMPUTER_EGRESS_ROUTES_V1.some(
+            (route) => route.toolkit === account.toolkit,
+          ),
+        )
+      ) {
+        return undefined;
+      }
+      const nonce = computerEgressNonceV1();
+      const expiresAt = now() + EXEC_TIMEOUT_MS + 5_000;
+      const token = await seam.sign({
+        v: 1,
+        o: seam.object,
+        n: nonce,
+        x: expiresAt,
+        u: seam.endpoint,
+      });
+      const close = openComputerEgressV1(nonce, {
+        object: seam.object,
+        expiresAt,
+        answer: createComputerEgressHandlerV1({
+          accounts,
+          context,
+          // A write is reviewed where every `mutate` call is: the Turn's own
+          // prepare hooks, which supervision leads.
+          review: (call, reviewContext) =>
+            runtime.hooks.prepareTool(call, reviewContext, async () => ({
+              kind: "ready",
+              call,
+              idempotent: false,
+            })),
+        }),
+      });
+      return { prelude: prelude(token), close };
+    };
+
     const execTool: ToolDefinition = {
       name: "computer_exec",
       namespace: "frockbot",
@@ -1138,8 +1212,16 @@ export function createComputerAgentFeature(
         subagentRoles: ["executor", "computerUse"],
       },
       idempotent: config.idempotentEffects === true,
+      // Every command is reviewed before it runs, like any call that can act
+      // on the world: a shell reaches the internet and the User's connected
+      // accounts, so what it reads and where it sends it are both the
+      // person's to have asked for.
+      effect: "mutate",
       description: [
         "Run a shell command in the Bot's selected persistent Computer. New calls are blocked while the user has taken control.",
+        "This is where most work gets done: use command-line tools such as git, gh, jq and curl, and write a Python script for anything longer than a line or two. Install a missing tool with apt, pip or uv.",
+        "Every command is reviewed before it runs, so run what the person's request needs and nothing it does not.",
+        "A foreground command reaches the person's connected GitHub account with no token: gh and requests to api.github.com act as that account, and each write is reviewed again before it is sent. Background commands have no connected accounts.",
         "Pass cwd as an absolute path to run the command in that directory instead of the home directory.",
         "With background:true the command keeps running after this call returns and after this Turn ends, and you get a processId to check later.",
         "A background process runs only while the Computer is awake. Nothing keeps it awake for you: if the Computer hibernates first, the outcome is reported as unknown, with whatever log was durable at the time.",
@@ -1199,8 +1281,14 @@ export function createComputerAgentFeature(
                 isError: true,
               };
         }
+        let closeEgress: (() => void) | undefined;
         try {
           const effectId = await operationIdOf(context);
+          const egress = await openEgress(context);
+          closeEgress = egress?.close;
+          const command = egress
+            ? `${egress.prelude}\n${decoded.command}`
+            : decoded.command;
           return await useComputer(await open(context), async (computer) => {
             const exec = computer.exec;
             if (!exec) {
@@ -1213,16 +1301,20 @@ export function createComputerAgentFeature(
               exec.execute(
                 {
                   executable: "/bin/bash",
-                  args: ["-lc", decoded.command],
+                  args: ["-lc", command],
                   ...(decoded.cwd ? { cwd: decoded.cwd } : {}),
-                  timeoutMs: 120_000,
+                  timeoutMs: EXEC_TIMEOUT_MS,
                   maxOutputBytes: 30_000,
                 },
                 { signal: context.signal, effectId },
               ),
             );
             return {
-              content: [text(result.stdout), text(result.stderr)]
+              content: [
+                text(result.stdout),
+                text(result.stderr),
+                ...(result.outputTruncated ? [EXEC_TRUNCATED_NOTE_V1] : []),
+              ]
                 .filter(Boolean)
                 .join("\n"),
               isError: result.exitCode !== 0,
@@ -1230,6 +1322,8 @@ export function createComputerAgentFeature(
           });
         } catch (error) {
           return failure(error);
+        } finally {
+          closeEgress?.();
         }
       },
     };
@@ -2619,6 +2713,7 @@ export function createComputerAgentFeature(
             "## Persistent Computer",
             "You share a persistent Linux Computer with your User's other Bots. You have your own directories and desktop on it; the browser profile is shared.",
             "Use computer_exec to inspect the filesystem before claiming that a path or file exists.",
+            "Prefer doing work in the terminal with computer_exec — command-line tools, and Python scripts for longer jobs — over one tool call per step.",
             "Use computer_screenshot to see your own desktop; each capture is filed in your durable screenshots root.",
             "For a job that outlasts this Turn, use computer_exec with background:true and check it later with computer_process_check. Do not poll it in a loop.",
             "Use computer_doctor when the Computer misbehaves; it reports disk, desktop, renderer-watchdog actions, top memory consumers, sync, and network in one read-only call.",

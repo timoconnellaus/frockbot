@@ -32,6 +32,7 @@ import {
   FlyComputer,
   type FlyAgentComputer,
 } from "./computer.js";
+import { flyEgressShellPreludeV1 } from "./egress.js";
 import {
   computerSpriteNameSourceV1,
   computerSpriteNameV1,
@@ -385,6 +386,7 @@ export const FLY_HOST_CAPABILITIES_V1: ComputerHostCapabilitiesV1 = {
     const gui = shellGuiCommandV1(command);
     return gui === undefined ? undefined : computerGuiRefusalV1(gui);
   },
+  egressShellPrelude: flyEgressShellPreludeV1,
   desktop: { slots: DESKTOP_SLOTS, width: SLOT_WIDTH, height: SLOT_HEIGHT },
   viewerFrameOrigins: ["https://*.sprites.app"],
 };

@@ -151,6 +151,8 @@ import {
 } from "@frockbot/app/isolates/bot";
 import { isolateDeviceCall } from "@frockbot/app/isolates/device";
 import { deliverMachineResult } from "@frockbot/app/machine/bot";
+import { answerComputerEgressV1 } from "@frockbot/computer/egress";
+import { decodeComputerEgressAnswerInputV1 } from "./computer-egress.js";
 import { listSkills } from "@frockbot/app/skills/bot";
 import {
   archiveEligible,
@@ -3523,6 +3525,20 @@ export class BotState
       shell.state,
       request.delivery as MachineResultDeliveryV1,
     );
+  }
+
+  /**
+   * One request a `computer_exec` call's CLI made to a connected app, which
+   * the Worker has already verified this object's token for. Answered by the
+   * call's own handler while it runs, and refused once it has finished.
+   */
+  async answerComputerEgress(input: unknown) {
+    const request = decodeComputerEgressAnswerInputV1(input);
+    return answerComputerEgressV1({
+      object: request.object,
+      nonce: request.nonce,
+      request: request.request,
+    });
   }
 
   /** One Routine's bounded run log, newest first. */

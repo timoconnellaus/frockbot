@@ -187,7 +187,7 @@ Grow to a pool of five hosts. Admit one User first and raise the cap one at a ti
 
 ### Phase 5 — terminal first
 
-Build the credential boundary in §10, move MCP servers' uses to CLIs, then delete `app/mcp/`.
+The credential boundary in §10 runs on the Sprite for GitHub. Carry it to the Incus host, add apps one read classifier at a time, move MCP servers' uses to CLIs, then delete `app/mcp/`.
 
 ---
 
@@ -204,18 +204,34 @@ An always-running Computer means a shell is there the moment a Bot wants one, wi
 
 ### Credentials never enter the VM
 
-"Secrets stay server-side" still holds. A CLI is configured with a placeholder, never a real token. Its requests leave through the egress boundary (§8), which recognises a credentialed destination, leases that Connection's credential for the Turn and effect that issued the command, and attaches it on the way out. A token the VM never held cannot be exfiltrated by code running in it, and revoking a Connection takes effect on the next request without touching the Computer.
+"Secrets stay server-side" still holds. A CLI runs with a placeholder token, never a real one. Its requests to a connected app's API go through a proxy on the Computer that terminates TLS for those hosts only, with a CA the Computer trusts, and forwards each request to the app Worker under a token that names the Turn's object and the exec call. The Bot Durable Object sends it as the connected account through the provider, which attaches the credential, so nothing on the Computer ever holds one. Every other destination is a plain tunnel. Revoking a Connection takes effect on the next request.
 
-This needs the boundary to terminate TLS for credentialed hosts only, with a CA the image trusts, and pass everything else through untouched. A credential is scoped to the hosts its Connection declares, never attached to a destination the Bot chose.
+This runs on the Fly Sprite today (`computer/egress.ts`, `computer/fly/egress.ts`, `app/connect/egress.ts`, [architecture §10](architecture.md#connected-accounts-from-the-terminal)), for GitHub only: an app joins once its API has a correct read classifier, because a read is sent without a second review.
 
-### Effects and approvals
+### Jev reviews every command
 
-A command is one effect under its effect id, as `computer_exec` is today: a command that was sent and whose outcome is unknown is reported as unknown, never re-run. A CLI's own writes do not carry FrockBot's idempotency key, so the terminal is not a way around "at-most-once by key". A Bot is told which writes are unsafe to repeat, and the boundary can hold a credentialed write for an Approval where the Connection asks for one.
+`computer_exec` is a `mutate` call, so Jev reviews every command before it runs, with the Turn's conversation: what a command reads and where it sends it are both the person's to have asked for, and that is also what stops a prompt-injected `curl` from carrying data out. A credentialed write the command then makes (anything but GET and HEAD, and GitHub GraphQL mutations) is reviewed again as a `credentialed_request` call before it is sent, because Jev saw `python sync.py`, not what the script posts. Jev's latency and price are negligible, so this is the default, not a cost to optimise.
+
+### Effects
+
+A command is one effect under its effect id: one whose outcome is unknown is reported as unknown, never re-run. Each credentialed request is its own effect under the command's id, sent at most once; a byte-identical write repeated inside the same command is answered with the first answer instead of sent again, so a CLI's retry does not repeat it.
+
+### Long output
+
+A foreground command returns at most 30 KB of stdout and stderr to the model, and runs for at most two minutes. Output the host cut short ends with a note saying so and telling the Bot to redirect long output to a file and read it with `head`, `tail` or `grep`; a job that outlasts the call runs with `background:true` and is read back through its bounded log. Credentialed responses are bounded at 8 MB on the way back to the CLI, which never counts against the model's context.
+
+### Known gaps
+
+- Only a foreground command gets connected accounts; a background process's token would outlive its review.
+- The exec token sits in the command's environment, readable by another process of the same Linux user while the command runs. Binding it to the command's cgroup instead is the fix once the Computer runs a guest agent.
+- `git` over HTTPS to `github.com` is not routed; only GitHub's API is.
+- Bodies must be JSON objects: multipart uploads and streaming are not carried.
+- Traffic to hosts without a connected account is not restricted; Jev's review of each command is the only guard on it.
 
 ### Open questions
 
-- Which Connection Types the credential boundary serves first, and whether it replaces Composio's execution for those apps or sits beside it.
-- Whether Approvals attach to a credentialed write at the boundary, to the command, or both.
+- Which apps join next, each with a read classifier for its API, and whether each then leaves Composio's tools.
+- Whether a deny-by-default egress allowlist is worth adding under Jev's review.
 - How a Bot discovers the CLIs available to it, beyond what the image lists and its Skills teach.
 
 ---

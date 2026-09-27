@@ -214,6 +214,10 @@ import { createHostedDictationCleanupJudgeV1 } from "@frockbot/app/supervision";
 import { VOICE_DICTATION_CLEANUP_MODEL_V1 } from "@frockbot/app/voice/dictation-cleanup";
 import { voiceDictationConfiguredV1 } from "@frockbot/app/voice/dictation-upstream";
 import { voiceAssistantEdgeTimingOfV1 } from "@frockbot/app/voice/diagnostics";
+import {
+  COMPUTER_EGRESS_PATH_V1,
+  routeComputerEgressV1,
+} from "./computer-egress.js";
 import type { VoiceGatewayDependencies } from "./contracts.js";
 import {
   decodeRpcEnvelopeV1,
@@ -2613,6 +2617,22 @@ export default {
     }
   },
   async fetch(request: Request, env: Env, ctx: ExecutionContext) {
+    // The Computer's connected-account proxy: authorized by its own signed
+    // token, before sessions, admission or any backend is mounted.
+    if (new URL(request.url).pathname === COMPUTER_EGRESS_PATH_V1) {
+      return routeComputerEgressV1(request, {
+        ...(env.COMPUTER_HOST_TOKEN ? { secret: env.COMPUTER_HOST_TOKEN } : {}),
+        answer: (input) => {
+          // SAFETY: Wrangler binds BOT_STATES to BotState; workers-types cannot infer its generated RPC surface.
+          const rpc = env.BOT_STATES.get(
+            env.BOT_STATES.idFromName(input.object),
+          ) as unknown as RpcBoundary<{
+            answerComputerEgress(input: unknown): Promise<unknown>;
+          }>;
+          return rpc.answerComputerEgress(input);
+        },
+      });
+    }
     let mountedBackend:
       Awaited<ReturnType<typeof createGatewayBackendContributions>> | undefined;
     // Opt-in voice diagnostics for the assistant upgrade and nothing else.

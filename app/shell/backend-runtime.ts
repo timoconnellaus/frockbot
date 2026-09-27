@@ -155,6 +155,12 @@ export interface ShellHostedRuntimeHostV1 {
   computerPageJudge?: NonNullable<ComputerAgentPluginConfig["judgePage"]>;
   /** The User's sealed sign-ins and this Bot's upkeep records, for one Turn. */
   computerUpkeep?: NonNullable<ComputerAgentPluginConfig["upkeep"]>;
+  /**
+   * How this Turn's foreground commands reach the User's connected accounts:
+   * the object the Turn runs in, the endpoint the Computer's proxy posts to,
+   * and the token signer.
+   */
+  computerEgress?: NonNullable<ComputerAgentPluginConfig["egress"]>;
   /** The `computerUse` task owner whose User-wide lease this child holds. */
   computerAgentControlOwnerId?: string;
   /**

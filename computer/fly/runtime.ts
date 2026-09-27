@@ -14,10 +14,16 @@
  * There is one copy. `computer/fly` imports this module rather than holding its
  * own, so a change to the Computer's layout cannot mean two Computers.
  */
-// The container ships this module, `./shell.ts` and `./demonstration.ts` and
-// nothing else of the Package (`apps/computer-host/Dockerfile`), so neither may
-// reach further.
+// The container ships this module, `./shell.ts`, `./demonstration.ts`,
+// `./egress.ts` and `../egress.ts` and nothing else of the Package
+// (`apps/computer-host/Dockerfile`), so none of them may reach further.
 import { demonstrationRecorderV1 } from "./demonstration.js";
+import {
+  EGRESS_ENSURE_SCRIPT,
+  EGRESS_PROXY_SCRIPT,
+  egressEnsureScript,
+  egressProxySource,
+} from "./egress.js";
 import { shellQuote } from "./shell.js";
 
 export const DESKTOP_SERVICE = "frockbot-viewer-gateway";
@@ -97,6 +103,23 @@ export const ENSURE_WINDOW_SCRIPT = `${RUNTIME_ROOT}/ensure-window.sh`;
 export const FOCUS_WINDOW_SCRIPT = `${RUNTIME_ROOT}/focus-window.sh`;
 /** Where Playwright keeps the browser builds it downloads for this Computer. */
 export const BROWSERS_ROOT = `${RUNTIME_ROOT}/browsers`;
+/**
+ * The command-line tools a Bot does its work with: `git` and `gh`, Python
+ * with `venv` and `pip` for scripts, `jq`, and `openssl`, which the
+ * connected-account proxy makes its certificates with. Installed with the
+ * desktop on a new Computer; an existing one gets them when a Bot installs
+ * them, because an in-place update never runs `apt`.
+ */
+export const TERMINAL_PACKAGES = [
+  "git",
+  "gh",
+  "jq",
+  "openssl",
+  "python3",
+  "python3-venv",
+  "python3-pip",
+] as const;
+
 /**
  * The one path that runs the Computer's browser.
  *
@@ -2250,6 +2273,8 @@ export const COMPUTER_RUNTIME_FILES: readonly {
   { path: BOUNDED_LOG_SCRIPT, content: boundedLogScript, mode: 0o700 },
   { path: `${RUNTIME_ROOT}/browser.mjs`, content: browserHelper, mode: 0o700 },
   { path: DEMONSTRATION_SCRIPT, content: demonstrationRecorder, mode: 0o700 },
+  { path: EGRESS_PROXY_SCRIPT, content: egressProxySource, mode: 0o700 },
+  { path: EGRESS_ENSURE_SCRIPT, content: egressEnsureScript, mode: 0o700 },
   {
     path: `${RUNTIME_ROOT}/start-gateway.sh`,
     content: gatewayScript,
@@ -2450,7 +2475,7 @@ chown box:box ${SCRATCH_ROOT} 2>/dev/null || true`,
   {
     name: "packages",
     label: "installing the desktop packages",
-    body: `if ! command -v Xvfb >/dev/null || ! command -v x11vnc >/dev/null || ! command -v websockify >/dev/null || ! command -v scrot >/dev/null; then
+    body: `if ! command -v Xvfb >/dev/null || ! command -v x11vnc >/dev/null || ! command -v websockify >/dev/null || ! command -v scrot >/dev/null || ! command -v gh >/dev/null || ! command -v openssl >/dev/null; then
   if [ "$(id -u)" = 0 ]; then SUDO=""; else SUDO="sudo"; fi
   # The base image ships a populated /var/lib/apt/lists, but a stale one: on
   # 2026-09-01 installing straight from it failed with 404s on superseded
@@ -2459,7 +2484,7 @@ chown box:box ${SCRATCH_ROOT} 2>/dev/null || true`,
   # awake, against the 262 s measured for the same command on a Sprite the
   # platform kept pausing underneath it.
   $SUDO apt-get update
-  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ${DESKTOP_PACKAGES.join(" ")}
+  $SUDO env DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends ${[...DESKTOP_PACKAGES, ...TERMINAL_PACKAGES].join(" ")}
 fi`,
   },
   {

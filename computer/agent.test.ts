@@ -14,10 +14,16 @@ import {
   browserResultTextV1,
   COMPUTER_OVERLOADED_TOOL_MESSAGE_V1,
   createComputerAgentFeature,
+  EXEC_TRUNCATED_NOTE_V1,
   HUMAN_CONTROL_PROMPT_LINE,
   type ComputerSecretFillSeamV1,
 } from "./agent.js";
 import { COMPUTER_CONTROL_RECORD_KEY } from "./control-record.js";
+import {
+  answerComputerEgressV1,
+  registerComputerEgressAccountV1,
+  type ComputerEgressTokenV1,
+} from "./egress.js";
 
 /** A host that offers nothing beyond the operations under test. */
 const TEST_HOST_CAPABILITIES: ComputerHostCapabilitiesV1 = {
@@ -107,6 +113,140 @@ describe("computer agent contribution", () => {
       "open:user-1:bot-1",
       "browser:snapshot",
     ]);
+    await harness.dispose();
+  });
+
+  test("computer_exec is reviewed as mutate, and a foreground command reaches a connected account only while it runs", async () => {
+    const commands: string[] = [];
+    const effects: (string | undefined)[] = [];
+    let during: number | undefined;
+    let tokenOf: ComputerEgressTokenV1 | undefined;
+    const capabilities: ComputerHostCapabilitiesV1 = {
+      viewerFrameOrigins: [],
+      egressShellPrelude: (token) => `export PROXY_TOKEN=${token}`,
+    };
+    const provider: ComputerHostV1 = {
+      id: "fixture",
+      capabilities,
+      open: async (identity, tenant, assignment) => ({
+        assignment,
+        identity,
+        tenant,
+        capabilities,
+        exec: {
+          execute: async (request) => {
+            const command = request.args?.[1] ?? "";
+            commands.push(command);
+            const token = /PROXY_TOKEN=(.*)/.exec(command)?.[1];
+            if (token) {
+              tokenOf = JSON.parse(token) as ComputerEgressTokenV1;
+              during = (
+                await answerComputerEgressV1({
+                  object: tokenOf.o,
+                  nonce: tokenOf.n,
+                  request: {
+                    method: "GET",
+                    url: "https://api.github.com/user",
+                    headers: {},
+                  },
+                })
+              ).status;
+            }
+            return {
+              exitCode: 0,
+              stdout: new Uint8Array(),
+              stderr: new Uint8Array(),
+              outputTruncated: false,
+            };
+          },
+        },
+        close: () => Promise.resolve(),
+      }),
+    };
+    const harness = createAgentRuntimeHarness();
+    harness.computers.register(provider);
+    harness.hooks.add({
+      prepareTool: async (call, context, next) => {
+        if (call.name === "computer_exec") effects.push(context.effect);
+        return next();
+      },
+    });
+    await harness.mount(
+      createComputerAgentFeature({
+        userId: "user-1",
+        defaultProviderId: "fixture",
+        egress: {
+          object: "user-1:bot-1",
+          endpoint: "https://bot.example/api/computer/egress",
+          sign: async (token) => JSON.stringify(token),
+        },
+      }),
+    );
+
+    // No connected account has a route: the command runs as written.
+    await execute(harness, "computer_exec", { command: "gh auth status" });
+    expect(commands.at(-1)).toBe("gh auth status");
+
+    const unregister = registerComputerEgressAccountV1(harness.tools, {
+      toolkit: "github",
+      label: "GitHub",
+      send: async () => ({ status: 200, headers: {}, bodyBase64: "" }),
+    });
+    await execute(harness, "computer_exec", { command: "gh api user" });
+    expect(commands.at(-1)).toMatch(/^export PROXY_TOKEN=.*\ngh api user$/);
+    expect(tokenOf).toMatchObject({
+      v: 1,
+      o: "user-1:bot-1",
+      u: "https://bot.example/api/computer/egress",
+    });
+    expect(during).toBe(200);
+    const after = await answerComputerEgressV1({
+      object: tokenOf!.o,
+      nonce: tokenOf!.n,
+      request: {
+        method: "GET",
+        url: "https://api.github.com/user",
+        headers: {},
+      },
+    });
+    expect(after.status).toBe(410);
+    expect(effects).toEqual(["mutate", "mutate"]);
+    unregister();
+    await harness.dispose();
+  });
+
+  test("computer_exec says when the host cut its output short", async () => {
+    const provider: ComputerHostV1 = {
+      id: "fixture",
+      capabilities: TEST_HOST_CAPABILITIES,
+      open: async (identity, tenant, assignment) => ({
+        assignment,
+        identity,
+        tenant,
+        capabilities: TEST_HOST_CAPABILITIES,
+        exec: {
+          execute: async () => ({
+            exitCode: 0,
+            stdout: new TextEncoder().encode("line 1"),
+            stderr: new Uint8Array(),
+            outputTruncated: true,
+          }),
+        },
+        close: () => Promise.resolve(),
+      }),
+    };
+    const harness = createAgentRuntimeHarness();
+    harness.computers.register(provider);
+    await harness.mount(
+      createComputerAgentFeature({
+        userId: "user-1",
+        defaultProviderId: "fixture",
+      }),
+    );
+    const result = await execute(harness, "computer_exec", {
+      command: "cat big.log",
+    });
+    expect(result.content).toBe(`line 1\n${EXEC_TRUNCATED_NOTE_V1}`);
     await harness.dispose();
   });
 
