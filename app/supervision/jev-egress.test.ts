@@ -164,7 +164,7 @@ describe("Jev from the terminal", () => {
     const unknown = meter();
     const slow = createJevEgressV1({
       client: client(async () => {
-        throw new APITimeoutError();
+        throw new APITimeoutError(10_000);
       }),
       meter: unknown.value,
       botId: "bot-1",
