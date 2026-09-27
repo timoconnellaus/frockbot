@@ -429,6 +429,7 @@ export class ShellBotStateV1 {
     this.ctx = host.state;
     this.env = host.env;
     this.application = {
+      brand: host.brand,
       packages: host.packages,
       packageVersion: host.packageVersion,
       runtime: host.runtime,
@@ -485,10 +486,13 @@ export class ShellBotStateV1 {
       });
     this.turnSupervisor =
       host.turnSupervisor ??
-      createHostedTurnSupervisorV1({
-        JEV_API_KEY: host.env.JEV_API_KEY,
-        JEV_BASE_URL: host.env.JEV_BASE_URL,
-      });
+      createHostedTurnSupervisorV1(
+        {
+          JEV_API_KEY: host.env.JEV_API_KEY,
+          JEV_BASE_URL: host.env.JEV_BASE_URL,
+        },
+        host.brand.productName,
+      );
     this.now = host.now ?? (() => new Date());
     this.sleep =
       host.sleep ??
@@ -498,6 +502,7 @@ export class ShellBotStateV1 {
     // has not built yet, so the read stays deferred.
     const routines = createBotRoutines(
       host.state.storage,
+      host.brand.productName,
       createBotRoutineHookMinter(
         () => this.authority.readDurableIdentity(),
         host.env.ROUTINE_HOOK_SECRET,

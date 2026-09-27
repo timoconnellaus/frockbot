@@ -39,8 +39,10 @@ const NAMESPACE_LISTED_TOOLS_MAX = 50;
 /** Most tools one search of such a namespace returns before it asks to be narrowed. */
 const PATTERN_MATCHES_MAX = 100;
 
-export const FROCKBOT_NAMESPACE_USE_INSTRUCTIONS =
-  "Native FrockBot tools for this session. You MUST read the tool schemas before calling them.";
+/** How the model is told to use the product's own tool namespace. */
+export function nativeNamespaceUseInstructionsV1(productName: string): string {
+  return `Native ${productName} tools for this session. You MUST read the tool schemas before calling them.`;
+}
 
 const GET_DYNAMIC_TOOLS_DESCRIPTION = [
   "Discover schemas for dynamic tools.",
@@ -468,13 +470,15 @@ export class ToolRegistry implements ToolExecution {
 
   constructor(
     private readonly hooks: LoopHookListV1,
+    /** The brand's product name, which the native namespace is described in. */
+    productName: string,
     systemPrompt?: PromptSectionRegistration,
   ) {
     this.namespaces.set(FROCKBOT_TOOL_NAMESPACE, {
       name: FROCKBOT_TOOL_NAMESPACE,
       external: false,
       effect: "read",
-      useInstructions: FROCKBOT_NAMESPACE_USE_INSTRUCTIONS,
+      useInstructions: nativeNamespaceUseInstructionsV1(productName),
     });
     this.installMetaTool({
       ...GET_DYNAMIC_TOOLS_SCHEMA,

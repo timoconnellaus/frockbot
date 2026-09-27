@@ -253,6 +253,7 @@ async function runTurn(
   await runtime.mount(
     createComputerAgentFeature({
       userId: "user-1",
+      productName: "FrockBot",
       defaultProviderId: "timed",
       writer: { sessionId: "session-1", turnId: "run-1", runId: "run-1" },
       frames: computerFrameSinkV1(new TimedFrames(clock)),

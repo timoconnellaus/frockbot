@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
-import { createIdentityFeature, DEFAULT_IDENTITY_TEXT } from "./agent.js";
+import { createIdentityFeature, defaultIdentityTextV1 } from "./agent.js";
 
 const assemblyContext = {
   sessionId: "session",
@@ -12,13 +12,13 @@ const assemblyContext = {
 describe("identity feature", () => {
   test("registers and disposes a prompt section", async () => {
     const runtime = createAgentRuntimeHarness();
-    await runtime.mount(createIdentityFeature());
+    await runtime.mount(createIdentityFeature({ productName: "FrockBot" }));
 
     const assembled = await runtime.systemPrompt.assemble(assemblyContext);
-    expect(assembled.text).toContain(DEFAULT_IDENTITY_TEXT);
+    expect(assembled.text).toContain(defaultIdentityTextV1("FrockBot"));
     expect(assembled.sections).toContainEqual({
       id: "identity",
-      text: DEFAULT_IDENTITY_TEXT,
+      text: defaultIdentityTextV1("FrockBot"),
     });
 
     await runtime.dispose();
@@ -26,13 +26,14 @@ describe("identity feature", () => {
     expect(
       afterDispose.sections.some((section) => section.id === "identity"),
     ).toBe(false);
-    expect(afterDispose.text).not.toContain(DEFAULT_IDENTITY_TEXT);
+    expect(afterDispose.text).not.toContain(defaultIdentityTextV1("FrockBot"));
   });
 
   test("supports package-owned identity configuration", async () => {
     const runtime = createAgentRuntimeHarness();
     await runtime.mount(
       createIdentityFeature({
+        productName: "FrockBot",
         sectionId: "persona",
         text: "You are a test bot.",
         order: 50,

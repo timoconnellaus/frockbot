@@ -99,6 +99,7 @@ function fixture() {
     }),
   );
   const contribution = createSettingsBackendContribution({
+    brand: { productName: "FrockBot" },
     executeConnection: (userId, command) =>
       manager.execute(
         userId,

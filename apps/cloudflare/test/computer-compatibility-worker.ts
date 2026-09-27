@@ -768,6 +768,7 @@ export class WorkerdBotState extends BotState {
     const reads = createBotSkillsReads(this.backendEnv);
     if (!reads) throw new Error("no Workspace bucket is bound");
     const catalog = await loadFullSkillCatalogV1(reads, identity, {
+      productName: "FrockBot",
       indexes: await this.skillIndexLoad(identity),
     });
     const generations = (await this.listCompositionGenerations({

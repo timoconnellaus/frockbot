@@ -51,6 +51,7 @@ test("provider connections isolate command receipts, credentials, and disabled a
   const storage = new Storage();
   const settings = createUserSettingsBackendContribution({
     storage,
+    productName: "FrockBot",
     availablePackages: ["deepseek", "google"].map((id) => ({
       packageId: `provider-${id}`,
       version: "0.0.1",
@@ -176,6 +177,7 @@ test("a catalog provider owns its endpoint language and client selection", async
   const storage = new Storage();
   const settings = createUserSettingsBackendContribution({
     storage,
+    productName: "FrockBot",
     availablePackages: [{ packageId: "provider-deepseek", version: "0.0.1" }],
   });
   await settings.executeConfiguration({

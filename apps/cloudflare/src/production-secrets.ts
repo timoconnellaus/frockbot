@@ -230,7 +230,7 @@ export const OPTIONAL_PRODUCTION_SECRETS_V1: readonly OptionalProductionSecretV1
       name: "FROCK_AI_GATEWAY_TOKEN",
       why: "The `cf-aig-authorization` bearer for the AI Gateway.",
       degraded:
-        "Frock AI falls back to the `AI` binding and the Auto model fails",
+        "The built-in model falls back to the `AI` binding and the Auto model fails",
     },
   ];
 
@@ -244,11 +244,11 @@ export const NON_SECRET_WORKER_SETTINGS_V1: readonly NonSecretWorkerSettingV1[] 
   [
     {
       name: "NATIVE_SLICE_2_AUTH",
-      why: "Native sign-in returns, exactly as listed; production enables Android, macOS, the FrockBot Dev Mac and iOS.",
+      why: "Native sign-in returns, exactly as the profile's `nativeAuth` lists them.",
     },
     {
       name: "NATIVE_APPS",
-      why: "The signed apps `assetlinks.json` and `apple-app-site-association` name, from the profile's `nativeApps`; production names the FrockBot Android and Apple apps.",
+      why: "The signed apps `assetlinks.json` and `apple-app-site-association` name, from the profile's `nativeApps`.",
     },
     {
       name: "DEFAULT_APPLICATION_HASH",

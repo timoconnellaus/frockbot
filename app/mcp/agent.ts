@@ -54,6 +54,8 @@ const MAX_PROMPT_INSTRUCTIONS = 800;
 type McpRuntimeV1 = AgentRuntimeV1 & { credentials?: CredentialLeaseRuntime };
 
 export interface McpRuntimeConfigV1 {
+  /** The product, which the server is described as outside of. */
+  productName: string;
   userId: string;
   connection: ConnectionView;
   fetch?: McpFetchV1;
@@ -160,7 +162,7 @@ export function createMcpFeatureV1(
         external: true,
         directory,
         useInstructions: [
-          `Tools from the User's MCP server ${label}, a service outside FrockBot.`,
+          `Tools from the User's MCP server ${label}, a service outside ${config.productName}.`,
           `Find a tool with get_dynamic_tools({ "namespace": "${metadata.namespace}", "pattern": "<words in its name>" }) and read its schema with get_dynamic_tools({ "namespace": "${metadata.namespace}", "toolName": "<tool>" }) before calling it.`,
           "Every call reaches that server: say why in mcpDetails.description, and confirm anything that sends, posts or deletes.",
           ...(notes
@@ -350,6 +352,7 @@ export async function executeMcpToolV1(
     }
     const result = await withMcpSessionV1(
       {
+        productName: config.productName,
         url: target.url,
         ...(target.metadata.transport
           ? { transport: target.metadata.transport }

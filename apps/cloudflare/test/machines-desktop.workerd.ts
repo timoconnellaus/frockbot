@@ -67,6 +67,7 @@ function snapshot<T>(value: T): T {
 function gateway(userId: string): MachineBackendRouteContribution {
   const rpc = machines(userId);
   return createMachineBackendContribution({
+    brand: { productName: "FrockBot" },
     machineTokenSecret: env.MACHINE_TOKEN_SECRET as string,
     createMachinePairing: async (owner) =>
       decodeMachinePairingOfferV1(

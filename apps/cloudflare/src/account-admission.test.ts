@@ -1,8 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import { BRAND_V1 } from "#brand";
 import {
   ACCOUNT_ACCESS_STATES_V1,
   ADMISSION_MODES_V1,
-  ADMISSION_REFUSAL_COPY_V1,
+  admissionRefusalCopyV1,
   type AccountAccessStateV1,
   type AccountAccessV1,
   type AdmissionModeV1,
@@ -159,15 +160,16 @@ describe("the beta-access rule", () => {
 });
 
 describe("refusal responses", () => {
+  const refusalCopy = admissionRefusalCopyV1(BRAND_V1.productName);
   test("JSON names the reason and carries its copy", async () => {
     for (const reason of Object.keys(
-      ADMISSION_REFUSAL_COPY_V1,
-    ) as (keyof typeof ADMISSION_REFUSAL_COPY_V1)[]) {
+      refusalCopy,
+    ) as (keyof typeof refusalCopy)[]) {
       const response = admissionRefusedResponse(reason, false);
       expect(response.status).toBe(403);
       expect(response.headers.get("cache-control")).toBe("no-store");
       expect(await response.json<unknown>()).toEqual({
-        error: ADMISSION_REFUSAL_COPY_V1[reason].title,
+        error: refusalCopy[reason].title,
         code: "account-access-refused",
         reason,
       });

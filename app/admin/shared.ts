@@ -187,30 +187,34 @@ export type AccountAdmissionDecisionV1 =
  * of nothing else: an unknown account is never told it was invited, and a
  * paused one is never told the deployment is closed.
  */
-export const ADMISSION_REFUSAL_COPY_V1: Readonly<
+export function admissionRefusalCopyV1(
+  productName: string,
+): Readonly<
   Record<AdmissionRefusalReasonV1, { title: string; detail: string }>
-> = {
-  "admission-closed": {
-    title: "FrockBot isn't admitting new accounts right now.",
-    detail: "You're signed in, but this account doesn't have beta access.",
-  },
-  "invitation-required": {
-    title: "FrockBot is invite-only right now.",
-    detail: "You're signed in, but this account doesn't have beta access.",
-  },
-  "account-paused": {
-    title: "Your FrockBot access is paused.",
-    detail: "Your account and Bots are kept while access is paused.",
-  },
-  "account-ended": {
-    title: "Your FrockBot beta access has ended.",
-    detail: "Thanks for trying FrockBot.",
-  },
-  "account-blocked": {
-    title: "This account can't use FrockBot.",
-    detail: "Sign in with a different account to continue.",
-  },
-};
+> {
+  return {
+    "admission-closed": {
+      title: `${productName} isn't admitting new accounts right now.`,
+      detail: "You're signed in, but this account doesn't have beta access.",
+    },
+    "invitation-required": {
+      title: `${productName} is invite-only right now.`,
+      detail: "You're signed in, but this account doesn't have beta access.",
+    },
+    "account-paused": {
+      title: `Your ${productName} access is paused.`,
+      detail: "Your account and Bots are kept while access is paused.",
+    },
+    "account-ended": {
+      title: `Your ${productName} beta access has ended.`,
+      detail: `Thanks for trying ${productName}.`,
+    },
+    "account-blocked": {
+      title: `This account can't use ${productName}.`,
+      detail: "Sign in with a different account to continue.",
+    },
+  };
+}
 
 function record(value: unknown, label: string): Record<string, unknown> {
   if (typeof value !== "object" || value === null || Array.isArray(value)) {
@@ -604,9 +608,13 @@ export function decodeIdentityCreationRequestV1(
   };
 }
 
-const REFUSAL_REASONS = Object.keys(
-  ADMISSION_REFUSAL_COPY_V1,
-) as AdmissionRefusalReasonV1[];
+const REFUSAL_REASONS: readonly AdmissionRefusalReasonV1[] = [
+  "admission-closed",
+  "invitation-required",
+  "account-paused",
+  "account-ended",
+  "account-blocked",
+];
 
 export function decodeAccountAdmissionDecisionV1(
   input: unknown,

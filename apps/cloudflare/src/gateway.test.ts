@@ -13,6 +13,7 @@ import type {
   SecretViewV1,
 } from "@frockbot/app/secrets/shared";
 import { describe, expect, test } from "bun:test";
+import { BRAND_V1 } from "#brand";
 import {
   type AuthPackageV1,
   emptyCommittedContextV1,
@@ -148,6 +149,7 @@ class MemoryBotState implements BotStateBinding {
     this.runs.set(botId, runs);
     try {
       const composition = await createShellCompositionHost({
+        productName: BRAND_V1.productName,
         botId,
         sessionId: command.sessionId,
         // The active journal is this run, not the archive. Prior events stay
@@ -167,7 +169,7 @@ class MemoryBotState implements BotStateBinding {
         admitEffect: () => Promise.resolve(true),
         // The Bot Durable Object hands these over on a real Turn; this double
         // stands in for it, so it hands over the same base Packages.
-        agentPackages: foundationBaseRuntimePackagesV1(),
+        agentPackages: foundationBaseRuntimePackagesV1(BRAND_V1),
       }).mount(generation, new AbortController().signal);
       const result = await executeBotTurn({
         command,
@@ -1255,6 +1257,7 @@ function createTestGateway(
           Promise.reject(new Error("unread is not wired in this test")),
       }),
       createSettingsBackendContribution({
+        brand: BRAND_V1,
         executeConnection: (userId, command) => {
           const configuration =
             configurations.get(userId) ?? new MemoryConfiguration();

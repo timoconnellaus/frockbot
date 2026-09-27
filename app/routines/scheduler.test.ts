@@ -46,6 +46,7 @@ function harness(options: {
   const storage = createMemoryRoutineStorageV1();
   const time = clock(options.start);
   const scheduler = new RoutineScheduler(storage, {
+    productName: "FrockBot",
     now: time.now,
     ...(options.fireTimeoutMs === undefined
       ? {}

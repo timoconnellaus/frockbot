@@ -140,9 +140,10 @@ export async function recordPluginModuleReportsV1(
 export function pluginModuleReportsTextV1(
   pluginId: string,
   reports: PluginModuleReportsV1,
+  productName: string,
 ): string {
   if (reports.states.length === 0 && reports.entries.length === 0) {
-    return `${pluginId}'s device modules have reported nothing. A desktop reports a module once the FrockBot app there is open and has started it, which happens after the generation carrying it is active.`;
+    return `${pluginId}'s device modules have reported nothing. A desktop reports a module once the ${productName} app there is open and has started it, which happens after the generation carrying it is active.`;
   }
   const where = (entry: ReportOriginV1) =>
     `${entry.moduleId} on ${entry.machineLabel}`;

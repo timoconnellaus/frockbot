@@ -146,7 +146,7 @@ import {
 } from "@frockbot/app/audit";
 import {
   accessEmailV1,
-  ADMISSION_REFUSAL_COPY_V1,
+  admissionRefusalCopyV1,
   decodeAccountAdmissionDecisionV1,
   type AccountAdmissionDecisionV1,
   type AdmissionIdentityV1,
@@ -391,7 +391,7 @@ interface Env {
  * needs sign-in itself to be configured.
  */
 function authIdentitiesV1(env: Env): AuthPackageIdentityStoreV1 {
-  return AUTH_PACKAGE_V1.create(env);
+  return AUTH_PACKAGE_V1.create(env, { productName: BRAND_V1.productName });
 }
 
 /** The User Durable Object's account features, addressed by User. */
@@ -895,7 +895,8 @@ async function externalAccountRefusal(
   if (!decision.admitted) {
     return {
       status: 403,
-      message: ADMISSION_REFUSAL_COPY_V1[decision.reason].title,
+      message: admissionRefusalCopyV1(BRAND_V1.productName)[decision.reason]
+        .title,
     };
   }
 }
@@ -1831,7 +1832,7 @@ function groupChatObject(env: Env, userId: string, groupId: string) {
 const createGatewayBackendContributions = (env: Env) =>
   createFoundationBackendContributions({
     backendHost: "gateway",
-    productName: BRAND_V1.productName,
+    brand: BRAND_V1,
     listGroupChats: async (userId: string) =>
       unwrapGroupRpcV1<GroupChatListV1>(
         await groupChatUser(env, userId).listGroupChats({
@@ -2682,6 +2683,7 @@ export default {
               ),
           },
           auth: AUTH_PACKAGE_V1.create(env, {
+            productName: BRAND_V1.productName,
             mayCreateIdentity: (candidate) => mayCreateIdentity(env, candidate),
           }),
           // The deployment's own origin, which is what `BETTER_AUTH_URL` is: a
@@ -2695,12 +2697,13 @@ export default {
                 nativeAuth: createNativeAuth({
                   secret: nativeTokenSecret,
                   auth: AUTH_PACKAGE_V1.create(env, {
+                    productName: BRAND_V1.productName,
                     mayCreateIdentity: (candidate) =>
                       mayCreateIdentity(env, candidate),
                   }),
                   returnUris: nativeReturnUrisFor(env, env.BETTER_AUTH_URL),
                   nativeApps: nativeAppsV1(env.NATIVE_APPS),
-                  productName: BRAND_V1.productName,
+                  brand: BRAND_V1,
                   origin: env.BETTER_AUTH_URL,
                   // The development door signs the app in as the development
                   // identity in place of Google.

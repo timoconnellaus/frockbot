@@ -25,7 +25,10 @@ import {
   CONNECT_PACKAGE_ID,
   connectToolkitForConnectionTypeV1,
 } from "./catalog.js";
-import { returnPageV1 } from "@frockbot/app/return-page";
+import {
+  returnPageV1,
+  type ReturnPageBrandV1,
+} from "@frockbot/app/return-page";
 import { connectCallbackPathV1, connectReturnClientV1 } from "./user.js";
 import type { ConnectionReturnClientV1 } from "@frockbot/core/configuration";
 import {
@@ -38,8 +41,8 @@ import type { ConnectTriggerOfferV1 } from "./triggers.js";
 import { mcpReturnHandOffV1 } from "@frockbot/app/mcp/oauth";
 
 export interface ConnectGatewayHost {
-  /** What the return pages call the product. */
-  productName: string;
+  /** What the return pages show of the product. */
+  brand: ReturnPageBrandV1;
   executeConnection(
     userId: string,
     command: ConnectionCommandV1,
@@ -162,10 +165,10 @@ const APPLE_SCHEMES = {
 export function connectCallbackPageV1(
   client: ConnectionReturnClientV1 | undefined,
   origin: string,
-  productName: string,
+  brand: ReturnPageBrandV1,
   mcpAnswer?: URLSearchParams,
 ): Response {
-  const product = productName;
+  const product = brand.productName;
   const heading = `Back to ${product}`;
   const footnote = `${product} shows whether the app connected. If it did not, connect it again from the Marketplace.`;
   if (client !== undefined && client !== "android") {
@@ -173,7 +176,7 @@ export function connectCallbackPageV1(
     const query = answer ? `?${answer}` : "";
     const target = `${APPLE_SCHEMES[client]}://${new URL(origin).host}${connectCallbackPathV1(client)}${query}`;
     return returnPageV1({
-      productName,
+      brand,
       title: heading,
       heading,
       lead: `Your browser is handing you back to the ${product} app. Once it opens, you can close this tab.`,
@@ -185,7 +188,7 @@ export function connectCallbackPageV1(
   }
   if (client === "android") {
     return returnPageV1({
-      productName,
+      brand,
       title: heading,
       heading,
       lead: `Head back to the ${product} app. You can close this page.`,
@@ -193,7 +196,7 @@ export function connectCallbackPageV1(
     });
   }
   return returnPageV1({
-    productName,
+    brand,
     title: heading,
     heading,
     lead: `You can close this tab and return to ${product}.`,
@@ -219,7 +222,7 @@ export function createConnectBackendContribution(
       return connectCallbackPageV1(
         client,
         url.origin,
-        host.productName,
+        host.brand,
         mcpReturnHandOffV1(url, true),
       );
     },
@@ -260,7 +263,10 @@ export function createConnectBackendContribution(
         }
         const command = decodeStartConnectionCommandV1(await request.json());
         if (!connectToolkitForConnectionTypeV1(command.connectionTypeId)) {
-          return jsonError(400, "This app is not one FrockBot can connect.");
+          return jsonError(
+            400,
+            `This app is not one ${host.brand.productName} can connect.`,
+          );
         }
         const receipt = decodeConnectionCommandReceiptV1(
           await host.executeConnection(context.userId, {

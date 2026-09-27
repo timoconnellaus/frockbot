@@ -25,7 +25,7 @@ import {
 
 test("the fake knows exactly Turn supervision's question sets", () => {
   expect(SUPERVISION_QUESTION_SETS_V1).toEqual([
-    Object.keys(turnStartQuestionsV1),
+    Object.keys(turnStartQuestionsV1("FrockBot")),
     Object.keys(responseReviewQuestionsV1),
     Object.keys(sendReviewQuestionsV1),
     Object.keys(relayQuestionsV1),
@@ -59,7 +59,7 @@ test("answers supervision with the safe reading and refuses every other judge", 
     (await post({ fit: { type: "noul", instructions: "x" } })).status,
   ).toBe(422);
   expect(
-    fakeJevAnswersV1({ questions: turnStartQuestionsV1 }).answers,
+    fakeJevAnswersV1({ questions: turnStartQuestionsV1("FrockBot") }).answers,
   ).toMatchObject({ capability: { choice: "none" } });
 });
 

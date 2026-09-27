@@ -29,7 +29,7 @@ function view(over: Partial<MachineListViewV1> = {}): MachineListViewV1 {
 }
 
 function facts(over: Partial<MachineListViewV1> = {}): string {
-  const node = walk(machinesDocumentV1(view(over)).root).find(
+  const node = walk(machinesDocumentV1(view(over), "FrockBot").root).find(
     (node) => node.type === "text" && node.text.startsWith("macos"),
   );
   return node?.type === "text" ? node.text : "";
@@ -60,6 +60,7 @@ test("a revoked machine says so rather than that it is connected, and offers no 
         { ...laptop, connected: true, revokedAt: "2026-09-06T02:00:00.000Z" },
       ],
     }),
+    "FrockBot",
   );
   const nodes = walk(document.root);
   expect(
@@ -82,7 +83,7 @@ test("a revoked machine says so rather than that it is connected, and offers no 
 test("revoking is the one command, and nothing on the page adds a machine", () => {
   // A computer enrols itself from the signed-in desktop app, so there is no
   // form, no field and no code here — only a way to cut one off.
-  const document = machinesDocumentV1(view());
+  const document = machinesDocumentV1(view(), "FrockBot");
   expect(
     walk(document.root)
       .filter((node) => node.type === "action")
@@ -112,9 +113,9 @@ test("a registry that has not changed keeps its revision", () => {
 });
 
 test("an empty registry says so once, and does not summarise nothing", () => {
-  const nodes = walk(machinesDocumentV1(view({ machines: [] })).root).filter(
-    (node) => node.type === "text",
-  );
+  const nodes = walk(
+    machinesDocumentV1(view({ machines: [] }), "FrockBot").root,
+  ).filter((node) => node.type === "text");
   expect(
     nodes.filter(
       (node) => node.type === "text" && /No computers/u.test(node.text),

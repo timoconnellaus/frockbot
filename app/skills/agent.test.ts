@@ -47,7 +47,7 @@ async function callThroughRegistry(
   tool: ToolDefinition,
   input: unknown,
 ): Promise<ToolExecutionResult> {
-  const tools = new ToolRegistry(new LoopHookListV1());
+  const tools = new ToolRegistry(new LoopHookListV1(), "FrockBot");
   tools.register(tool);
   const call = frockbotToolCallV1({
     id: "provider-call",
@@ -96,6 +96,7 @@ describe("the Skill catalog", () => {
     ]);
     const { session, dispose } = await openSession();
     const catalog = new SkillCatalog(
+      "FrockBot",
       OWNER,
       workspace,
       [],
@@ -160,6 +161,7 @@ describe("the Skill catalog", () => {
     ]);
     const { session, dispose } = await openSession();
     const catalog = new SkillCatalog(
+      "FrockBot",
       OWNER,
       workspace,
       [],
@@ -206,7 +208,9 @@ describe("the Skill catalog", () => {
 
   test("a managed Skill the host withholds is neither listed nor refused", async () => {
     const { session, dispose } = await openSession();
-    const catalog = new SkillCatalog(OWNER, new FakeWorkspace(), ["plugins"]);
+    const catalog = new SkillCatalog("FrockBot", OWNER, new FakeWorkspace(), [
+      "plugins",
+    ]);
 
     await catalog.refresh(4, session);
 
@@ -248,6 +252,7 @@ describe("the skill_load tool", () => {
     ]);
     const { session, dispose } = await openSession();
     const catalog = new SkillCatalog(
+      "FrockBot",
       OWNER,
       workspace,
       [],
@@ -287,6 +292,7 @@ describe("the skill_load tool", () => {
     ]);
     const { session, dispose } = await openSession();
     const catalog = new SkillCatalog(
+      "FrockBot",
       OWNER,
       workspace,
       [],
@@ -304,7 +310,7 @@ describe("the skill_load tool", () => {
 
   test("says what a wrong input should have been, instead of refusing blankly", async () => {
     const { session, dispose } = await openSession();
-    const catalog = new SkillCatalog(OWNER, new FakeWorkspace());
+    const catalog = new SkillCatalog("FrockBot", OWNER, new FakeWorkspace());
     await catalog.refresh(4, session);
     const tool = createSkillLoadTool(catalog);
 
@@ -339,6 +345,7 @@ describe("the skill_load tool", () => {
     ]);
     const { session, dispose } = await openSession();
     const catalog = new SkillCatalog(
+      "FrockBot",
       OWNER,
       workspace,
       [],
@@ -393,6 +400,7 @@ describe("the skill_load tool", () => {
     ]);
     const { session, dispose } = await openSession();
     const catalog = new SkillCatalog(
+      "FrockBot",
       OWNER,
       workspace,
       [],
@@ -442,6 +450,7 @@ describe("the skill_load tool", () => {
     ]);
     const { session, dispose } = await openSession();
     const catalog = new SkillCatalog(
+      "FrockBot",
       OWNER,
       workspace,
       [],
@@ -490,6 +499,7 @@ describe("the skill_load tool", () => {
     const workspace = new FakeWorkspace();
     const { session, dispose } = await openSession();
     const catalog = new SkillCatalog(
+      "FrockBot",
       OWNER,
       workspace,
       [],
@@ -532,7 +542,12 @@ describe("the skill_write tool", () => {
     const workspace = new FakeWorkspace();
     const { session, sessions, dispose } = await openSession();
     const tool = createSkillWriteTool(
-      { owner: OWNER, reads: workspace, files: workspace },
+      {
+        productName: "FrockBot",
+        owner: OWNER,
+        reads: workspace,
+        files: workspace,
+      },
       WRITER,
       sessions,
     );
@@ -572,6 +587,7 @@ describe("the skill_write tool", () => {
 
     // The Skill it wrote is loadable on the next Turn, by its own authority.
     const catalog = new SkillCatalog(
+      "FrockBot",
       OWNER,
       workspace,
       [],
@@ -593,6 +609,7 @@ describe("the skill_write tool", () => {
     const { sessions, dispose } = await openSession();
     const tool = createSkillWriteTool(
       {
+        productName: "FrockBot",
         owner: OWNER,
         reads: workspace,
         files: workspace,
@@ -648,7 +665,12 @@ describe("the skill_write tool", () => {
     }
     const { sessions, dispose } = await openSession();
     const tool = createSkillWriteTool(
-      { owner: OWNER, reads: workspace, files: workspace },
+      {
+        productName: "FrockBot",
+        owner: OWNER,
+        reads: workspace,
+        files: workspace,
+      },
       WRITER,
       sessions,
     );
@@ -680,7 +702,12 @@ describe("the skill_write tool", () => {
     };
     const { session, sessions, dispose } = await openSession();
     const tool = createSkillWriteTool(
-      { owner: OWNER, reads: workspace, files: workspace },
+      {
+        productName: "FrockBot",
+        owner: OWNER,
+        reads: workspace,
+        files: workspace,
+      },
       WRITER,
       sessions,
     );
@@ -709,7 +736,12 @@ describe("the skill_write tool", () => {
     const workspace = new FakeWorkspace();
     const { sessions, dispose } = await openSession();
     const tool = createSkillWriteTool(
-      { owner: OWNER, reads: workspace, files: workspace },
+      {
+        productName: "FrockBot",
+        owner: OWNER,
+        reads: workspace,
+        files: workspace,
+      },
       WRITER,
       sessions,
     );
@@ -733,7 +765,12 @@ describe("the skill_write tool", () => {
     const workspace = new FakeWorkspace();
     const { sessions, dispose } = await openSession();
     const tool = createSkillWriteTool(
-      { owner: OWNER, reads: workspace, files: workspace },
+      {
+        productName: "FrockBot",
+        owner: OWNER,
+        reads: workspace,
+        files: workspace,
+      },
       WRITER,
       sessions,
     );
@@ -772,7 +809,12 @@ describe("the skill_write tool", () => {
     ]);
     const { session, sessions, dispose } = await openSession();
     const tool = createSkillWriteTool(
-      { owner: OWNER, reads: workspace, files: workspace },
+      {
+        productName: "FrockBot",
+        owner: OWNER,
+        reads: workspace,
+        files: workspace,
+      },
       WRITER,
       sessions,
     );
@@ -791,6 +833,7 @@ describe("the skill_write tool", () => {
     ).toMatchObject({ path: "skills/standup/references/forms.md" });
     // It is loadable on the next Turn, as one of that Skill's references.
     const catalog = new SkillCatalog(
+      "FrockBot",
       OWNER,
       workspace,
       [],
@@ -812,7 +855,12 @@ describe("the skill_write tool", () => {
     const workspace = new FakeWorkspace();
     const { sessions, dispose } = await openSession();
     const tool = createSkillWriteTool(
-      { owner: OWNER, reads: workspace, files: workspace },
+      {
+        productName: "FrockBot",
+        owner: OWNER,
+        reads: workspace,
+        files: workspace,
+      },
       WRITER,
       sessions,
     );
@@ -845,7 +893,12 @@ describe("the skill_write tool", () => {
     const workspace = new FakeWorkspace();
     const { sessions, dispose } = await openSession();
     const tool = createSkillWriteTool(
-      { owner: OWNER, reads: workspace, files: workspace },
+      {
+        productName: "FrockBot",
+        owner: OWNER,
+        reads: workspace,
+        files: workspace,
+      },
       WRITER,
       sessions,
     );
@@ -886,6 +939,7 @@ describe("the Skills runtime feature", () => {
     const runtime = createAgentRuntimeHarness();
     await runtime.mount(
       createSkillsRuntimeFeature({
+        productName: "FrockBot",
         owner: OWNER,
         reads: new FakeWorkspace(),
         pluginSkills: [
@@ -932,6 +986,7 @@ describe("the Skills runtime feature", () => {
     const runtime = createAgentRuntimeHarness();
     await runtime.mount(
       createSkillsRuntimeFeature({
+        productName: "FrockBot",
         owner: OWNER,
         reads: new FakeWorkspace(),
         pluginSkills: [

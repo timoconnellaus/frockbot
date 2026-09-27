@@ -1,12 +1,12 @@
 import { expect, test } from "bun:test";
 import { createAgentLoop } from "@frockbot/core/agent-loop";
 import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
-import { shellAgentFeature } from "../shell/agent.js";
+import { createShellAgentFeatureV1 } from "../shell/agent.js";
 import { gradeGreeting } from "./greeting.js";
 
 test("greeting grader reads a batched send as the call the model made", async () => {
   const root = createAgentRuntimeHarness();
-  await root.mount(shellAgentFeature);
+  await root.mount(createShellAgentFeatureV1("FrockBot"));
   root.llm.register({
     id: "fixture",
     async *stream() {
@@ -62,7 +62,7 @@ test("greeting grader reads a batched send as the call the model made", async ()
 for (const repairFirst of [false, true]) {
   test(`greeting grader ${repairFirst ? "rejects repaired delivery" : "accepts a single final send"}`, async () => {
     const root = createAgentRuntimeHarness();
-    await root.mount(shellAgentFeature);
+    await root.mount(createShellAgentFeatureV1("FrockBot"));
     let calls = 0;
     root.llm.register({
       id: "fixture",

@@ -102,6 +102,7 @@ async function fixture(options: { reject?: (url: string) => boolean } = {}) {
   const storage = new MemoryStorage();
   const settings = createUserSettingsBackendContribution({
     storage,
+    productName: "FrockBot",
     availablePackages: [
       { packageId: "provider-ollama-cloud", version: "0.0.1" },
     ],

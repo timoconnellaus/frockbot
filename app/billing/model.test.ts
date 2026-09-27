@@ -523,6 +523,7 @@ function hosted(
     connectionId: FROCK_AI_CONNECTION_ID,
     connectionGeneration: FROCK_AI_CONNECTION_GENERATION,
     autoRoute: "flock-auto",
+    displayName: "Frock AI",
     runChatCompletion: async (_model, _body, _signal, served) => {
       served?.(frockAiServedModelFromHeadersV1(new Headers(headers)));
       const body = new Response(

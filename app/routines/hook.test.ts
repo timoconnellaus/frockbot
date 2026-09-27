@@ -164,7 +164,7 @@ describe("the delivery codec", () => {
 
 function harness() {
   const storage = createMemoryRoutineStorageV1();
-  const scheduler = new RoutineScheduler(storage);
+  const scheduler = new RoutineScheduler(storage, { productName: "FrockBot" });
   const store = new RoutineStore(storage, {
     firings: scheduler,
     hookKeys: {
@@ -414,7 +414,9 @@ describe("the durable half of the check", () => {
 
   test("a Bot with no signing secret records the Routine and refuses the key", async () => {
     const storage = createMemoryRoutineStorageV1();
-    const scheduler = new RoutineScheduler(storage);
+    const scheduler = new RoutineScheduler(storage, {
+      productName: "FrockBot",
+    });
     const store = new RoutineStore(storage, { firings: scheduler });
     const { create } = harness();
 

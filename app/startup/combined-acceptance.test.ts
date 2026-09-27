@@ -483,6 +483,7 @@ describe("startup combined acceptance", () => {
     const fetches: string[] = [];
     const delays = new Map<string, number>();
     const contribution = createConnectUserBackendContribution({
+      productName: "FrockBot",
       storage: catalog,
       settings: {
         getConnection: (_userId: string, connectionId: string) =>

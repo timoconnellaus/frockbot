@@ -169,6 +169,8 @@ type HostStorage = UserSettingsStorage &
 type HostTransaction = UserSettingsTransaction & CredentialTransaction;
 
 export interface McpUserBackendHost {
+  /** The product, which a server sees and every refusal names. */
+  productName: string;
   storage: HostStorage;
   settings: UserSettingsBackendContribution;
   credentials: Pick<
@@ -781,13 +783,17 @@ export class McpUserBackendContribution {
     try {
       listed = await withMcpSessionV1(
         {
+          productName: this.host.productName,
           url: classified.url,
           ...(token ? { token } : {}),
           ...(this.host.fetch ? { fetch: this.host.fetch } : {}),
         },
         async (session) => ({
           info: session.info,
-          tools: boundMcpCatalogToolsV1(await session.listTools()),
+          tools: boundMcpCatalogToolsV1(
+            await session.listTools(),
+            this.host.productName,
+          ),
         }),
       );
     } catch (error) {
@@ -839,6 +845,7 @@ export class McpUserBackendContribution {
       return this.receipt(command, connectionId, "failed");
     }
     await publishMcpCatalogV1(this.catalogStorage(), {
+      productName: this.host.productName,
       connectionId,
       generation,
       tools: listed.tools,
@@ -900,6 +907,7 @@ export class McpUserBackendContribution {
     }
     try {
       const server = await discoverMcpSignInV1({
+        productName: this.host.productName,
         url,
         challenge: await this.challenge(url),
         ...(this.host.fetch ? { fetch: this.host.fetch } : {}),
@@ -913,6 +921,7 @@ export class McpUserBackendContribution {
         kept?.server.authorizationServerUrl === server.authorizationServerUrl
           ? kept.client
           : await registerMcpClientV1({
+              productName: this.host.productName,
               server,
               origin: callback.origin,
               ...(this.host.fetch ? { fetch: this.host.fetch } : {}),
@@ -1000,7 +1009,7 @@ export class McpUserBackendContribution {
     ) {
       return answer(
         "failed",
-        "This sign-in is no longer the one FrockBot is waiting for.",
+        `This sign-in is no longer the one ${this.host.productName} is waiting for.`,
       );
     }
     if (signIn.status !== "waiting") {
@@ -1038,6 +1047,7 @@ export class McpUserBackendContribution {
         );
       }
       const tokens = await exchangeMcpSignInV1({
+        productName: this.host.productName,
         server: secret.server,
         client: secret.client,
         code,
@@ -1056,7 +1066,10 @@ export class McpUserBackendContribution {
       });
       return installed
         ? answer("ready")
-        : answer("failed", "Signed in, but the server still refused FrockBot.");
+        : answer(
+            "failed",
+            `Signed in, but the server still refused ${this.host.productName}.`,
+          );
     } catch (error) {
       const line =
         error instanceof McpSignInError
@@ -1139,13 +1152,17 @@ export class McpUserBackendContribution {
     try {
       listed = await withMcpSessionV1(
         {
+          productName: this.host.productName,
           url,
           token: bearer,
           ...(this.host.fetch ? { fetch: this.host.fetch } : {}),
         },
         async (session) => ({
           info: session.info,
-          tools: boundMcpCatalogToolsV1(await session.listTools()),
+          tools: boundMcpCatalogToolsV1(
+            await session.listTools(),
+            this.host.productName,
+          ),
         }),
       );
     } catch (error) {
@@ -1219,6 +1236,7 @@ export class McpUserBackendContribution {
       await this.revokeGrant(previous).catch(() => undefined);
     }
     await publishMcpCatalogV1(this.catalogStorage(), {
+      productName: this.host.productName,
       connectionId,
       generation,
       tools: listed.tools,
@@ -1253,7 +1271,11 @@ export class McpUserBackendContribution {
   ): Promise<McpAuthChallengeV1 | undefined> {
     try {
       await withMcpSessionV1(
-        { url, ...(this.host.fetch ? { fetch: this.host.fetch } : {}) },
+        {
+          productName: this.host.productName,
+          url,
+          ...(this.host.fetch ? { fetch: this.host.fetch } : {}),
+        },
         async (session) => {
           await session.listTools();
         },
@@ -1381,6 +1403,7 @@ export class McpUserBackendContribution {
     try {
       listed = await withMcpSessionV1(
         {
+          productName: this.host.productName,
           url,
           ...(token ? { token } : {}),
           ...(metadata.transport ? { transport: metadata.transport } : {}),
@@ -1388,7 +1411,10 @@ export class McpUserBackendContribution {
         },
         async (session) => ({
           info: session.info,
-          tools: boundMcpCatalogToolsV1(await session.listTools()),
+          tools: boundMcpCatalogToolsV1(
+            await session.listTools(),
+            this.host.productName,
+          ),
         }),
       );
     } catch (error) {
@@ -1424,6 +1450,7 @@ export class McpUserBackendContribution {
     );
     if (!settled) return false;
     await publishMcpCatalogV1(this.catalogStorage(), {
+      productName: this.host.productName,
       connectionId: connection.connectionId,
       generation: connection.generation ?? "",
       tools: listed.tools,
@@ -1471,6 +1498,7 @@ export class McpUserBackendContribution {
     },
   ): Promise<McpRevocationV1> {
     return revokeMcpSignInV1({
+      productName: this.host.productName,
       server: grant.server,
       client: grant.client,
       ...(grant.refreshToken
@@ -1546,6 +1574,7 @@ export class McpUserBackendContribution {
       this.host.keyring
     ) {
       const offered = await discoverMcpSignInV1({
+        productName: this.host.productName,
         url,
         challenge: error.challenge,
         ...(this.host.fetch ? { fetch: this.host.fetch } : {}),
@@ -1632,6 +1661,7 @@ export class McpUserBackendContribution {
       }
       listed = await withMcpSessionV1(
         {
+          productName: this.host.productName,
           url,
           ...(metadata.transport ? { transport: metadata.transport } : {}),
           ...(token ? { token } : {}),
@@ -1672,6 +1702,7 @@ export class McpUserBackendContribution {
     }
     try {
       await publishMcpCatalogV1(this.catalogStorage(), {
+        productName: this.host.productName,
         connectionId: connection.connectionId,
         generation: job.generation,
         tools: listed.tools,
@@ -1723,6 +1754,7 @@ export class McpUserBackendContribution {
             throw new McpSignInError(MCP_SIGN_IN_AGAIN_LINE_V1);
           }
           const tokens = await refreshMcpSignInV1({
+            productName: this.host.productName,
             server: grant.server,
             client: grant.client,
             refreshToken: grant.refreshToken,

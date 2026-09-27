@@ -51,10 +51,10 @@ const OAUTH_MAX_BYTES = 64 * 1024;
 /** The longest token FrockBot keeps. */
 const MAX_TOKEN = 16_384;
 
-const CLIENT_NAME = "FrockBot";
-
-export const MCP_SIGN_IN_UNAVAILABLE_LINE_V1 =
-  "This server doesn't offer a sign-in FrockBot can use. Give it an access token from the server instead.";
+/** The line a server with no sign-in the product can use is refused with. */
+export function mcpSignInUnavailableLineV1(productName: string): string {
+  return `This server doesn't offer a sign-in ${productName} can use. Give it an access token from the server instead.`;
+}
 
 /** A sign-in that cannot go on, with the sentence a person reads. */
 export class McpSignInError extends Error {
@@ -169,10 +169,10 @@ export function mcpOAuthRedirectUrisV1(origin: string): string[] {
  * FrockBot's client metadata document: what an authorization server that
  * takes a URL as a `client_id` fetches to learn who is asking.
  */
-export function mcpOAuthClientMetadataV1(origin: string) {
+export function mcpOAuthClientMetadataV1(origin: string, productName: string) {
   return {
     client_id: `${origin}${MCP_OAUTH_CLIENT_PATH}`,
-    client_name: CLIENT_NAME,
+    client_name: productName,
     client_uri: `${origin}/`,
     redirect_uris: mcpOAuthRedirectUrisV1(origin),
     grant_types: ["authorization_code", "refresh_token"],
@@ -186,9 +186,13 @@ export function mcpOAuthClientMetadataV1(origin: string) {
  * is, bounded in time and size, and read whole before it is handed back so
  * the deadline covers the body as well.
  */
-export function mcpOAuthFetchV1(base?: McpFetchV1): McpFetchV1 {
+export function mcpOAuthFetchV1(
+  productName: string,
+  base?: McpFetchV1,
+): McpFetchV1 {
   const guarded = guardedMcpFetchV1(
     base ?? ((input, init) => globalThis.fetch(input, init)),
+    productName,
   );
   return async (input, init = {}) => {
     const deadline = withDeadlineV1(OAUTH_TIMEOUT_MS, init.signal ?? undefined);
@@ -261,11 +265,13 @@ function publicHttps(value: unknown): value is string {
  * nothing of PKCE is taken not to do it.
  */
 export async function discoverMcpSignInV1(input: {
+  /** The product, which the server sees and a refusal names. */
+  productName: string;
   url: string;
   challenge?: McpAuthChallengeV1;
   fetch?: McpFetchV1;
 }): Promise<McpSignInServerV1> {
-  const fetchFn = mcpOAuthFetchV1(input.fetch);
+  const fetchFn = mcpOAuthFetchV1(input.productName, input.fetch);
   let info: Awaited<ReturnType<typeof discoverOAuthServerInfo>>;
   try {
     info = await discoverOAuthServerInfo(input.url, {
@@ -275,7 +281,7 @@ export async function discoverMcpSignInV1(input: {
       fetchFn,
     });
   } catch {
-    throw new McpSignInError(MCP_SIGN_IN_UNAVAILABLE_LINE_V1);
+    throw new McpSignInError(mcpSignInUnavailableLineV1(input.productName));
   }
   const found = info.authorizationServerMetadata as
     Record<string, unknown> | undefined;
@@ -289,7 +295,7 @@ export async function discoverMcpSignInV1(input: {
     !challengeMethods?.includes("S256") ||
     !responseTypes?.includes("code")
   ) {
-    throw new McpSignInError(MCP_SIGN_IN_UNAVAILABLE_LINE_V1);
+    throw new McpSignInError(mcpSignInUnavailableLineV1(input.productName));
   }
   const optionalUrl = (value: unknown) =>
     publicHttps(value) ? value : undefined;
@@ -362,11 +368,13 @@ function sdkMetadata(server: McpSignInServerV1): AuthorizationServerMetadata {
  * metadata document, where the server takes a URL as a `client_id`.
  */
 export async function registerMcpClientV1(input: {
+  /** The product, which the server sees and a refusal names. */
+  productName: string;
   server: McpSignInServerV1;
   origin: string;
   fetch?: McpFetchV1;
 }): Promise<McpSignInClientV1> {
-  const document = mcpOAuthClientMetadataV1(input.origin);
+  const document = mcpOAuthClientMetadataV1(input.origin, input.productName);
   if (!input.server.metadata.registration_endpoint) {
     if (
       input.server.metadata.client_id_metadata_document_supported === true &&
@@ -375,7 +383,7 @@ export async function registerMcpClientV1(input: {
       return { client_id: document.client_id };
     }
     throw new McpSignInError(
-      "This server's sign-in doesn't let FrockBot register with it. Give it an access token from the server instead.",
+      `This server's sign-in doesn't let ${input.productName} register with it. Give it an access token from the server instead.`,
     );
   }
   const { client_id: _clientId, ...clientMetadata } = document;
@@ -385,15 +393,15 @@ export async function registerMcpClientV1(input: {
       metadata: sdkMetadata(input.server),
       clientMetadata,
       ...(input.server.scope ? { scope: input.server.scope } : {}),
-      fetchFn: mcpOAuthFetchV1(input.fetch),
+      fetchFn: mcpOAuthFetchV1(input.productName, input.fetch),
     });
   } catch {
     throw new McpSignInError(
-      "The server wouldn't register FrockBot for its sign-in. Try again later, or give it an access token instead.",
+      `The server wouldn't register ${input.productName} for its sign-in. Try again later, or give it an access token instead.`,
     );
   }
   if (!registered.client_id || registered.client_id.length > 2_048) {
-    throw new McpSignInError(MCP_SIGN_IN_UNAVAILABLE_LINE_V1);
+    throw new McpSignInError(mcpSignInUnavailableLineV1(input.productName));
   }
   return {
     client_id: registered.client_id,
@@ -448,6 +456,7 @@ function signInFailure(error: unknown): McpSignInError {
 }
 
 function tokensOf(
+  productName: string,
   tokens: OAuthTokens,
   now: number,
   previousRefresh?: string,
@@ -458,7 +467,7 @@ function tokensOf(
     tokens.access_token.length > MAX_TOKEN
   ) {
     throw new McpSignInError(
-      "The server issued a kind of token FrockBot can't use.",
+      `The server issued a kind of token ${productName} can't use.`,
     );
   }
   const refresh = tokens.refresh_token ?? previousRefresh;
@@ -476,6 +485,8 @@ function tokensOf(
 
 /** The authorization code, traded once for tokens. */
 export async function exchangeMcpSignInV1(input: {
+  /** The product, which the server sees and a refusal names. */
+  productName: string;
   server: McpSignInServerV1;
   client: McpSignInClientV1;
   code: string;
@@ -487,6 +498,7 @@ export async function exchangeMcpSignInV1(input: {
 }): Promise<McpSignInTokensV1> {
   try {
     return tokensOf(
+      input.productName,
       await exchangeAuthorization(input.server.authorizationServerUrl, {
         metadata: sdkMetadata(input.server),
         clientInformation: input.client,
@@ -495,7 +507,7 @@ export async function exchangeMcpSignInV1(input: {
         codeVerifier: input.codeVerifier,
         redirectUri: input.redirectUri,
         resource: new URL(input.server.resource),
-        fetchFn: mcpOAuthFetchV1(input.fetch),
+        fetchFn: mcpOAuthFetchV1(input.productName, input.fetch),
       }),
       input.now,
     );
@@ -506,6 +518,8 @@ export async function exchangeMcpSignInV1(input: {
 
 /** A fresh access token for the refresh token. A new one replaces the old. */
 export async function refreshMcpSignInV1(input: {
+  /** The product, which the server sees and a refusal names. */
+  productName: string;
   server: McpSignInServerV1;
   client: McpSignInClientV1;
   refreshToken: string;
@@ -514,12 +528,13 @@ export async function refreshMcpSignInV1(input: {
 }): Promise<McpSignInTokensV1> {
   try {
     return tokensOf(
+      input.productName,
       await refreshAuthorization(input.server.authorizationServerUrl, {
         metadata: sdkMetadata(input.server),
         clientInformation: input.client,
         refreshToken: input.refreshToken,
         resource: new URL(input.server.resource),
-        fetchFn: mcpOAuthFetchV1(input.fetch),
+        fetchFn: mcpOAuthFetchV1(input.productName, input.fetch),
       }),
       input.now,
       input.refreshToken,
@@ -541,6 +556,8 @@ export type McpRevocationV1 =
 
 /** Tells the server a token is done with (RFC 7009). */
 export async function revokeMcpSignInV1(input: {
+  /** The product, which the server sees and a refusal names. */
+  productName: string;
   server: McpSignInServerV1;
   client: McpSignInClientV1;
   token: string;
@@ -573,11 +590,14 @@ export async function revokeMcpSignInV1(input: {
     if (secret) body.set("client_secret", secret);
   }
   try {
-    const response = await mcpOAuthFetchV1(input.fetch)(endpoint, {
-      method: "POST",
-      headers,
-      body,
-    });
+    const response = await mcpOAuthFetchV1(input.productName, input.fetch)(
+      endpoint,
+      {
+        method: "POST",
+        headers,
+        body,
+      },
+    );
     if (response.ok) return "revoked";
     // A server in trouble, or one asking us to slow down, may answer later.
     return response.status >= 500 || response.status === 429

@@ -1,16 +1,17 @@
 import {
   isChosenUserName,
-  USER_PROFILE_PLACEHOLDER_NAME_V1,
+  unnamedUserDisplayNameV1,
 } from "@frockbot/core/configuration";
 
 export function resolveUserDisplayName(input: {
   savedName?: string;
   sessionName?: string;
   sessionEmail?: string;
+  productName: string;
 }): string {
   if (isChosenUserName(input.savedName)) return input.savedName.trim();
   if (isChosenUserName(input.sessionName)) return input.sessionName.trim();
 
   const sessionEmail = input.sessionEmail?.trim();
-  return sessionEmail || USER_PROFILE_PLACEHOLDER_NAME_V1;
+  return sessionEmail || unnamedUserDisplayNameV1(input.productName);
 }

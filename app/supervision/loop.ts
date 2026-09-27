@@ -1,5 +1,6 @@
 import {
   appendRuntimeNoteV1,
+  runtimeNoteLabelV1,
   BATCH_TOOL_NAME,
   decodeBatchCallsV1,
   defaultTurnDirectiveV1,
@@ -60,6 +61,8 @@ import { loopSignalsV1, progressCheckDueV1 } from "./loop-health.js";
 // so no Plugin hook sees a call supervision refused.
 
 export interface SupervisionRuntimeHostV1 {
+  /** The product runtime notes are labelled with. */
+  readonly productName: string;
   readonly supervisor: TurnSupervisor;
   /** Where this Turn's input came from. */
   readonly origin: TurnInputOriginV1;
@@ -107,22 +110,30 @@ const REPLY_TO_REQUEST = "reply_to_request";
 export const SUPERVISION_CONVERSATION_MAX_V1 = 8;
 
 /** Runtime notes carry a label so the model reads them as the platform's. */
-export const ACKNOWLEDGE_NOTE_V1 =
-  '[FrockBot runtime: acknowledge first]\nThis will take some work. Before you start it, send the person one short line with send_to_user (disposition "continue") saying what you are about to do. Then do the work.';
+export function acknowledgeNoteV1(productName: string): string {
+  return `${runtimeNoteLabelV1(productName, "acknowledge first")}\nThis will take some work. Before you start it, send the person one short line with send_to_user (disposition "continue") saying what you are about to do. Then do the work.`;
+}
 
 /** How a stuck Turn is steered, offered the thinking specialist when it has it. */
-export function stuckNoteV1(thinking?: { slug: string }): string {
+export function stuckNoteV1(
+  productName: string,
+  thinking?: { slug: string },
+): string {
   const mentor = thinking
     ? `, hand the problem to the thinking specialist (call Task with model "${thinking.slug}" and a brief of what you tried and what happened)`
     : "";
-  return `[FrockBot runtime: not getting anywhere]\nYour last few steps have not moved the work forward. Stop repeating what has not worked. Try a different approach${mentor}, or tell the person what is blocking you and ask how to go on.`;
+  return `${runtimeNoteLabelV1(productName, "not getting anywhere")}\nYour last few steps have not moved the work forward. Stop repeating what has not worked. Try a different approach${mentor}, or tell the person what is blocking you and ask how to go on.`;
 }
 
 /** How a Turn is steered to answer a question its subagent asked. */
-export function questionNoteV1(answerer: "conversation" | "person"): string {
+export function questionNoteV1(
+  productName: string,
+  answerer: "conversation" | "person",
+): string {
+  const label = runtimeNoteLabelV1(productName, "subagent question");
   return answerer === "conversation"
-    ? "[FrockBot runtime: subagent question]\nWhat the person has already said answers your subagent's question. Answer it from that with task_resume; do not ask the person."
-    : "[FrockBot runtime: subagent question]\nOnly the person can answer your subagent's question. Ask them in your own words, then pass their answer on with task_resume.";
+    ? `${label}\nWhat the person has already said answers your subagent's question. Answer it from that with task_resume; do not ask the person.`
+    : `${label}\nOnly the person can answer your subagent's question. Ask them in your own words, then pass their answer on with task_resume.`;
 }
 
 /**
@@ -155,11 +166,14 @@ function questionRouteOf(
 }
 
 /** Where a Turn is steered when Jev names a specialist it is offered. */
-export function specialistNoteV1(specialist: {
-  name: string;
-  slug: string;
-}): string {
-  return `[FrockBot runtime: specialist]\nThis is ${specialist.name} work, which the ${specialist.name} specialist does better than you. Hand it over: call Task with model "${specialist.slug}" and a complete brief. When it comes back, give the person what it produced as it wrote it.`;
+export function specialistNoteV1(
+  productName: string,
+  specialist: {
+    name: string;
+    slug: string;
+  },
+): string {
+  return `${runtimeNoteLabelV1(productName, "specialist")}\nThis is ${specialist.name} work, which the ${specialist.name} specialist does better than you. Hand it over: call Task with model "${specialist.slug}" and a complete brief. When it comes back, give the person what it produced as it wrote it.`;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -656,7 +670,10 @@ export function createSupervisionRuntimeFeatureV1(
           const thinking = host
             .specialists?.()
             .find((offered) => offered.name === "thinking");
-          return appendRuntimeNoteV1(request, stuckNoteV1(thinking));
+          return appendRuntimeNoteV1(
+            request,
+            stuckNoteV1(host.productName, thinking),
+          );
         }
         const session = agent.session;
         let directive = directiveOf(session.activeRunJournal, turn);
@@ -711,9 +728,13 @@ export function createSupervisionRuntimeFeatureV1(
           await session.flush();
         }
         const notes = [
-          ...(directive.acknowledge ? [ACKNOWLEDGE_NOTE_V1] : []),
-          ...(specialist ? [specialistNoteV1(specialist)] : []),
-          ...(route ? [questionNoteV1(route.answerer)] : []),
+          ...(directive.acknowledge
+            ? [acknowledgeNoteV1(host.productName)]
+            : []),
+          ...(specialist
+            ? [specialistNoteV1(host.productName, specialist)]
+            : []),
+          ...(route ? [questionNoteV1(host.productName, route.answerer)] : []),
         ];
         return notes.reduce(appendRuntimeNoteV1, request);
       },

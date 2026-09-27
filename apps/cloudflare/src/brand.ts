@@ -13,14 +13,17 @@ import {
   PAPER_DOCUMENT_V1,
   STUDIO_DOCUMENT_V1,
 } from "@frockbot/core/theme";
+import { FROCKBOT_PAGE_LOGO_V1 } from "./brand-logo.js";
 
 export const BRAND_V1: BrandV1 = {
   schemaVersion: 1,
   productName: "FrockBot",
+  homepage: "https://frockbot.com",
   builtInModelName: "Frock AI",
   emailSenderName: "FrockBot",
   // The one canonical icon the marketing site and the app-icon script share.
   iconPng: "../../../assets/marketing/app-icon/frockbot-icon-64.png",
+  pageLogo: FROCKBOT_PAGE_LOGO_V1,
   looks: {
     ink: INK_DOCUMENT_V1,
     paper: PAPER_DOCUMENT_V1,

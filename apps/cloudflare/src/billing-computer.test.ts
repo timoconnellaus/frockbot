@@ -495,6 +495,7 @@ describe("a Computer tool call's reservation", () => {
     await harness.mount(
       createComputerAgentFeature({
         userId: "user-1",
+        productName: "FrockBot",
         defaultProviderId: "computer-host",
         writer: {
           sessionId: call.sessionId,

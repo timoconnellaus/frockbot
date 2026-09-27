@@ -18,8 +18,16 @@ export const BILLING_PLAN = {
  * The two refusals a person is told in the conversation, so they are written
  * for the person. `run-failure-copy` carries them through verbatim.
  */
-export const SUBSCRIPTION_REQUIRED_REASON_V1 =
-  "A paid FrockBot subscription is required. Open Billing to subscribe or update your payment method.";
+export function subscriptionRequiredReasonV1(productName: string): string {
+  return `A paid ${productName} subscription is required. Open Billing to subscribe or update your payment method.`;
+}
+
+/**
+ * That sentence, whichever product wrote it: the product name is the one part
+ * that varies, and it is a short plain name.
+ */
+export const SUBSCRIPTION_REQUIRED_REASON_PATTERN_V1 =
+  /A paid [^.\n<>]{1,80} subscription is required\. Open Billing to subscribe or update your payment method\./;
 export const CREDIT_EXHAUSTED_REASON_V1 =
   "You have no usage credit left. Open Billing to add more.";
 /**
@@ -213,6 +221,8 @@ export function stable(value: unknown): string {
 export class BillingLedger {
   constructor(
     private readonly storage: BillingStorage,
+    /** The product a subscription is to, as a refusal names it. */
+    private readonly productName: string,
     private readonly now: () => number = Date.now,
   ) {
     const sql = storage.sql;
@@ -351,7 +361,7 @@ export class BillingLedger {
   }
   requireSubscription() {
     if (!this.subscribed())
-      throw new BillingError(SUBSCRIPTION_REQUIRED_REASON_V1);
+      throw new BillingError(subscriptionRequiredReasonV1(this.productName));
   }
   /**
    * The grants a reservation may draw on, cheapest to spend first: monthly
@@ -404,11 +414,11 @@ export class BillingLedger {
         throw new BillingError(DAILY_LIMIT_REASON_V1);
       const subscribed = this.subscribed();
       if (this.get<boolean>("suspended"))
-        throw new BillingError(SUBSCRIPTION_REQUIRED_REASON_V1);
+        throw new BillingError(subscriptionRequiredReasonV1(this.productName));
       const grants = this.spendable(subscribed);
       const available = grants.reduce((total, g) => total + g.remaining, 0);
       if (!subscribed && available === 0)
-        throw new BillingError(SUBSCRIPTION_REQUIRED_REASON_V1);
+        throw new BillingError(subscriptionRequiredReasonV1(this.productName));
       let needed = input.maximumMicros;
       if (available < needed)
         throw new BillingError(CREDIT_EXHAUSTED_REASON_V1);

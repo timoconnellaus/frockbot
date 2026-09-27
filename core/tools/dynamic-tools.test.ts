@@ -10,7 +10,7 @@ import {
 import {
   CALL_DYNAMIC_TOOL_NAME,
   frockbotToolCallV1,
-  FROCKBOT_NAMESPACE_USE_INSTRUCTIONS,
+  nativeNamespaceUseInstructionsV1,
   BATCH_TOOL_NAME,
   GET_DYNAMIC_TOOLS_NAME,
   ToolRegistry,
@@ -50,7 +50,11 @@ interface ToolsFixture {
 function toolsFixture(): ToolsFixture {
   const hooks = new LoopHookListV1();
   const systemPrompt = new PromptFixture();
-  return { hooks, tools: new ToolRegistry(hooks, systemPrompt), systemPrompt };
+  return {
+    hooks,
+    tools: new ToolRegistry(hooks, "FrockBot", systemPrompt),
+    systemPrompt,
+  };
 }
 
 function contextFor(call: ToolCall): ToolExecutionContext {
@@ -592,7 +596,7 @@ describe("progressive tool disclosure", () => {
         "These dynamic tool namespaces were available when this conversation started. Availability may have changed, so use get_dynamic_tools to check current state before calling call_dynamic_tool.",
         "",
         "<dynamic_tool_namespaces>",
-        `<namespace name="frockbot" tools="package_author" namespaceUseInstructions="${FROCKBOT_NAMESPACE_USE_INSTRUCTIONS}" />`,
+        `<namespace name="frockbot" tools="package_author" namespaceUseInstructions="${nativeNamespaceUseInstructionsV1("FrockBot")}" />`,
         '<namespace name="mail&amp;&quot;&apos;work" tools="search&lt;&quot;mail" namespaceUseInstructions="Use &lt;schema&gt; &amp; &quot;call&quot;.&#10;Then invoke." namespaceStatus="ready" />',
         "</dynamic_tool_namespaces>",
         "</dynamic_tool_catalog>",

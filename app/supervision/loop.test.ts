@@ -19,13 +19,13 @@ import {
 } from "@frockbot/core/contracts";
 import { createAgentRuntimeHarness } from "@frockbot/app/testkit";
 import { createWebFetchToolDefinitionV1 } from "@frockbot/app/web/agent";
-import { shellAgentFeature } from "../shell/agent.js";
+import { createShellAgentFeatureV1 } from "../shell/agent.js";
 import { createReplyToRequestToolV1 } from "../shell/reply-to-caller.js";
 import type { FoundationFeature } from "../runtime.js";
 import { pendingBotInputPreambleV1 } from "../routines/inbox.js";
 import { claimEvidenceV1 } from "./claim-check.js";
 import {
-  ACKNOWLEDGE_NOTE_V1,
+  acknowledgeNoteV1,
   createSupervisionRuntimeFeatureV1,
   questionNoteV1,
   specialistNoteV1,
@@ -79,6 +79,7 @@ async function run(
   // Mounted first, as the host does.
   await root.mount(
     createSupervisionRuntimeFeatureV1({
+      productName: "FrockBot",
       supervisor,
       origin: options.voice ? "voice" : "user",
       clearReplyDraft: (ordinal) => options.cleared?.push(ordinal),
@@ -87,7 +88,7 @@ async function run(
         : {}),
     }) as unknown as Parameters<typeof root.mount>[0],
   );
-  await root.mount(shellAgentFeature);
+  await root.mount(createShellAgentFeatureV1("FrockBot"));
   const followUp = options.followUp;
   if (followUp !== undefined) {
     root.hooks.add({
@@ -111,6 +112,7 @@ async function run(
   for (const tool of options.tools ?? []) root.tools.register(tool);
   root.tools.register(
     createWebFetchToolDefinitionV1({
+      userAgent: "FrockBot/0.0.1 (+https://frockbot.com)",
       fetch: async () =>
         new Response("Example result", {
           headers: { "content-type": "text/plain" },
@@ -207,11 +209,11 @@ test("an acknowledgement is asked for at the tail of the first request only", as
   expect(seen).toHaveLength(2);
   expect(seen[0]?.messages.at(-1)).toEqual({
     role: "user",
-    content: ACKNOWLEDGE_NOTE_V1,
+    content: acknowledgeNoteV1("FrockBot"),
   });
-  expect(seen[1]?.messages.some((m) => m.content === ACKNOWLEDGE_NOTE_V1)).toBe(
-    false,
-  );
+  expect(
+    seen[1]?.messages.some((m) => m.content === acknowledgeNoteV1("FrockBot")),
+  ).toBe(false);
   // The note never touches the cached prefix.
   expect(seen[0]?.system).toBe(seen[1]?.system);
 });
@@ -645,7 +647,7 @@ test("work Jev names for a specialist the Turn is offered is handed to it from t
   );
   expect(seen[0]?.messages.at(-1)).toEqual({
     role: "user",
-    content: `${ACKNOWLEDGE_NOTE_V1}\n\n${specialistNoteV1(writing)}`,
+    content: `${acknowledgeNoteV1("FrockBot")}\n\n${specialistNoteV1("FrockBot", writing)}`,
   });
 
   // A specialist the Turn is not offered is never named.
@@ -851,7 +853,9 @@ test("a Turn opened on a subagent's question is steered to whoever can answer it
     { initialText: QUESTION_NOTICE },
   );
   expect(asked).toEqual(["Nomad at 7pm or Ester at 8:30pm?"]);
-  expect(seen[0]?.messages.at(-1)?.content).toBe(questionNoteV1("person"));
+  expect(seen[0]?.messages.at(-1)?.content).toBe(
+    questionNoteV1("FrockBot", "person"),
+  );
   expect(
     events.filter((event) => event.type === "supervision/question"),
   ).toMatchObject([{ route: { answerer: "person" } }]);
@@ -910,7 +914,7 @@ test("a long Turn going in circles is told, at that request's tail, to change co
     arguments: '{"url":"https://example.com"}',
     isError: true,
   });
-  const note = stuckNoteV1({ slug: "@frock/thinking" });
+  const note = stuckNoteV1("FrockBot", { slug: "@frock/thinking" });
   expect(note).toContain('model "@frock/thinking"');
   const carries = (index: number) =>
     seen[index]?.messages.some((m) => m.content.includes(note)) ?? false;
@@ -925,7 +929,7 @@ test("a long Turn going in circles is told, at that request's tail, to change co
 });
 
 test("a stuck Turn offered no thinking specialist is told to try another way or ask", () => {
-  const note = stuckNoteV1();
+  const note = stuckNoteV1("FrockBot");
   expect(note).not.toContain("Task");
   expect(note).toContain("ask how to go on");
 });

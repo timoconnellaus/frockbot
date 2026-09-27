@@ -111,6 +111,8 @@ export interface AuthIdentityCandidateV1 {
 
 /** What an auth Package is given beyond `env`. */
 export interface AuthPackageDependenciesV1 {
+  /** What the identity provider is told the application is called. */
+  readonly productName: string;
   /**
    * Decides whether a first-time sign-in may write an identity. The gateway's
    * admission check runs after the Package has already served its own routes,
@@ -178,6 +180,6 @@ export interface AuthPackageBuildV1<EnvironmentV1> {
    */
   create(
     environment: EnvironmentV1,
-    dependencies?: AuthPackageDependenciesV1,
+    dependencies: AuthPackageDependenciesV1,
   ): AuthPackageV1;
 }

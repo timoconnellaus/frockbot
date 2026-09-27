@@ -6,8 +6,9 @@ import {
   waitOnExecutionContext,
 } from "cloudflare:test";
 import { beforeAll, expect, test } from "vitest";
+import { BRAND_V1 } from "#brand";
 import {
-  ADMISSION_REFUSAL_COPY_V1,
+  admissionRefusalCopyV1,
   type AccountAccessStateV1,
 } from "@frockbot/app/admin/shared";
 import type { MachinePairingOfferV1 } from "@frockbot/core/machine-protocol";
@@ -175,7 +176,8 @@ for (const state of ["paused", "ended", "blocked"] as const) {
       const response = await app.fetch(request);
       expect(response.status).toBe(403);
       expect(await response.json()).toEqual({
-        error: ADMISSION_REFUSAL_COPY_V1[`account-${state}`].title,
+        error: admissionRefusalCopyV1(BRAND_V1.productName)[`account-${state}`]
+          .title,
       });
     }
     expect(app.accessed).toEqual([]);

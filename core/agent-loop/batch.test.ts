@@ -112,7 +112,7 @@ async function runTurn(
   );
   const systemPrompt = new SystemPromptRegistry(hooks);
   const llm = new LlmRegistry(hooks);
-  const tools = new ToolRegistry(hooks, systemPrompt);
+  const tools = new ToolRegistry(hooks, "FrockBot", systemPrompt);
   systemPrompt.register({ id: "identity", render: () => "Test agent." });
   llm.register(provider);
   for (const definition of definitions) tools.register(definition);
@@ -228,7 +228,7 @@ function attachmentFor(shot: number): ToolAttachmentV1 {
 describe("batch", () => {
   test("is offered to the model as a native tool", () => {
     const hooks = new LoopHookListV1();
-    const names = new ToolRegistry(hooks)
+    const names = new ToolRegistry(hooks, "FrockBot")
       .schemas({ turnType: "chat" })
       .map((schema) => schema.name);
 

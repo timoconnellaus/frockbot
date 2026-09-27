@@ -238,9 +238,15 @@ export const MAX_USER_CONNECTIONS_V1 = 100;
 
 /**
  * The stored name of a User who has not chosen one. The contract requires a
- * non-empty name, so "unset" is spelled with this sentinel.
+ * non-empty name, so "unset" is spelled with this sentinel. It is a stored
+ * marker, never shown: a display falls back to `unnamedUserDisplayNameV1`.
  */
 export const USER_PROFILE_PLACEHOLDER_NAME_V1 = "FrockBot user";
+
+/** What a User who has chosen no name and has no email is called. */
+export function unnamedUserDisplayNameV1(productName: string): string {
+  return `${productName} user`;
+}
 
 /** Whether a profile name is one the User actually chose (not blank, not the sentinel). */
 export function isChosenUserName(name: string | undefined): name is string {

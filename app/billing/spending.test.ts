@@ -57,7 +57,7 @@ function setup() {
 function setupOn(database: Database) {
   const db = storage(database);
   let now = NOW;
-  const ledger = new BillingLedger(db, () => now);
+  const ledger = new BillingLedger(db, "FrockBot", () => now);
   ledger.grant("comp:1", "complimentary", 100_000_000, null);
   const charge = (
     id: string,

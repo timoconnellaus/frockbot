@@ -59,6 +59,7 @@ function runtimeConfig(
 ) {
   return {
     connectionId: FROCK_AI_CONNECTION_ID,
+    displayName: "Frock AI",
     connectionGeneration: FROCK_AI_CONNECTION_GENERATION,
     autoRoute: "configured-auto",
     runChatCompletion,
@@ -83,22 +84,31 @@ function pushableSse(): {
 describe("Frock AI runtime Contribution", () => {
   test("maps AI Gateway and Workers AI error envelopes", () => {
     expect(
-      classifyFrockAiFailureV1(new FrockAiTransportErrorV1("busy", 503, 2_000)),
+      classifyFrockAiFailureV1(
+        new FrockAiTransportErrorV1("busy", 503, 2_000),
+        "Frock AI",
+      ),
     ).toMatchObject({
       classification: "transient",
       providerReason: "busy",
       retryAfterMs: 2_000,
     });
     expect(
-      classifyFrockAiFailureV1({
-        error: { message: "model not found", code: "invalid_model" },
-      }),
+      classifyFrockAiFailureV1(
+        {
+          error: { message: "model not found", code: "invalid_model" },
+        },
+        "Frock AI",
+      ),
     ).toMatchObject({
       classification: "permanent",
       providerReason: "model not found",
     });
     expect(
-      classifyFrockAiFailureV1({ error: { message: "opaque", code: 7999 } }),
+      classifyFrockAiFailureV1(
+        { error: { message: "opaque", code: 7999 } },
+        "Frock AI",
+      ),
     ).toMatchObject({ classification: "unknown", providerReason: "opaque" });
   });
 

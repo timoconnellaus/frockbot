@@ -4,14 +4,21 @@ import {
   PAPER_DOCUMENT_V1,
   STUDIO_DOCUMENT_V1,
 } from "../theme/index.js";
-import { BrandDecodeError, decodeBrandV1, type BrandV1 } from "./brand.js";
+import {
+  BrandDecodeError,
+  brandUserAgentV1,
+  decodeBrandV1,
+  type BrandV1,
+} from "./brand.js";
 
 const brand: BrandV1 = {
   schemaVersion: 1,
   productName: "Wallet Pal",
   builtInModelName: "Pal AI",
+  homepage: "https://wallet-pal.example",
   emailSenderName: "Wallet Pal",
   iconPng: "./icon.png",
+  pageLogo: "data:image/png;base64,V2FsbGV0UGFs",
   looks: {
     ink: INK_DOCUMENT_V1,
     paper: PAPER_DOCUMENT_V1,
@@ -21,6 +28,18 @@ const brand: BrandV1 = {
 };
 
 describe("a brand", () => {
+  test("names itself to the servers it calls", () => {
+    expect(brandUserAgentV1(brand)).toBe(
+      "WalletPal/0.0.1 (+https://wallet-pal.example)",
+    );
+    expect(
+      brandUserAgentV1({
+        productName: "FrockBot",
+        homepage: "https://frockbot.com",
+      }),
+    ).toBe("FrockBot/0.0.1 (+https://frockbot.com)");
+  });
+
   test("decodes to itself", () => {
     expect(decodeBrandV1(brand)).toEqual(brand);
   });
@@ -72,5 +91,12 @@ describe("a brand", () => {
     expect(() => decodeBrandV1({ ...brand, iconPng: "./icon.svg" })).toThrow(
       /iconPng/,
     );
+    for (const pageLogo of [
+      "https://example.com/logo.png",
+      'data:image/png;base64,AA" onerror="x',
+      "data:image/svg+xml;base64,AAAA",
+    ]) {
+      expect(() => decodeBrandV1({ ...brand, pageLogo })).toThrow(/pageLogo/);
+    }
   });
 });

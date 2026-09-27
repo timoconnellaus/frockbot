@@ -1,6 +1,6 @@
 import { BRAND_V1 } from "#brand";
 import {
-  ADMISSION_REFUSAL_COPY_V1,
+  admissionRefusalCopyV1,
   type AccountAccessV1,
   type AccountAdmissionDecisionV1,
   type AdmissionIdentityV1,
@@ -127,7 +127,7 @@ export function admissionRefusedResponse(
   reason: AdmissionRefusalReasonV1,
   page: boolean,
 ): Response {
-  const copy = ADMISSION_REFUSAL_COPY_V1[reason];
+  const copy = admissionRefusalCopyV1(BRAND_V1.productName)[reason];
   if (!page) {
     return Response.json(
       { error: copy.title, code: "account-access-refused", reason },

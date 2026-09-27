@@ -24,11 +24,11 @@ import {
   conversationPromptTextV1,
   HANDOFF_PROMPT_TEXT_V1,
   shellAdmissionCeilingV1,
-  shellAgentFeature,
+  createShellAgentFeatureV1,
   PARENT_HANDOFF_CAPABILITY_V1,
   SEND_TO_USER_TOOL_V1,
   TIME_BUDGET_WARNING_MS_V1,
-  TURN_BUDGET_NOTE_LABEL_V1,
+  turnBudgetNoteLabelV1,
   turnBudgetHooksV1,
   USER_VOICE_CAPABILITY_V1,
   SUBAGENT_ASK_PROMPT_TEXT_V1,
@@ -56,7 +56,7 @@ async function mount(): Promise<Mounted> {
     { type: "turn/start", turn: 4 },
     { type: "step/start", turn: 4, step: 2 },
   ]);
-  await root.mount(shellAgentFeature);
+  await root.mount(createShellAgentFeatureV1("FrockBot"));
   return { root, session, dispose: () => root.dispose() };
 }
 
@@ -116,7 +116,7 @@ async function budgetNote(input: {
           }),
         }),
   } as never;
-  const request = await turnBudgetHooksV1.request!(
+  const request = await turnBudgetHooksV1("FrockBot").request!(
     agent,
     base,
     1,
@@ -128,7 +128,9 @@ async function budgetNote(input: {
   if (request.messages.length === base.messages.length) return undefined;
   const note = request.messages.at(-1);
   expect(note?.role).toBe("user");
-  expect(note?.content.startsWith(TURN_BUDGET_NOTE_LABEL_V1)).toBe(true);
+  expect(note?.content.startsWith(turnBudgetNoteLabelV1("FrockBot"))).toBe(
+    true,
+  );
   return note?.content;
 }
 

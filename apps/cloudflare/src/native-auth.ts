@@ -8,7 +8,10 @@ import {
   CLIENT_HELLO_HEADER,
   UPDATE_APP_MESSAGE,
 } from "./client-compatibility.js";
-import { returnPageV1 } from "@frockbot/app/return-page";
+import {
+  returnPageV1,
+  type ReturnPageBrandV1,
+} from "@frockbot/app/return-page";
 import {
   AUTH_NO_STORE_HEADERS_V1,
   signInFailedV1 as error,
@@ -273,8 +276,8 @@ export interface NativeAuthOptions {
   returnUris: readonly string[];
   /** The signed apps the association files name. */
   nativeApps: NativeAppsV1;
-  /** What the pages call the product. */
-  productName: string;
+  /** What the pages show of the product. */
+  brand: ReturnPageBrandV1;
   /**
    * The beta-access authority, asked after a bearer passes its read-only
    * session check, or before a session is issued. Reads never provision a User.
@@ -383,7 +386,7 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
   // Normalised, so a configured origin with a trailing slash or a default port
   // still matches the request origin the `/native/*` check compares it against.
   const origin = new URL(options.origin).origin;
-  const product = options.productName;
+  const product = options.brand.productName;
   const now = options.now ?? Date.now;
   const key = () =>
     crypto.subtle.importKey(
@@ -572,7 +575,7 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
     );
     const destination = new URL(claims.start.returnUri);
     return returnPageV1({
-      productName: product,
+      brand: options.brand,
       title: `Sign in to ${product}`,
       heading: `Sign in to ${platform ? nativeAppName(platform, product) : `the ${product} development build on this device`}?`,
       lead: session.user.email
@@ -940,7 +943,8 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
           const platform = NATIVE_RETURN_PLATFORMS.find(
             (candidate) => nativeReturnUriV1(origin, candidate) === page,
           );
-          if (platform) return nativeReturnPage(platform, origin, product);
+          if (platform)
+            return nativeReturnPage(platform, origin, options.brand);
         }
         return error(404);
       } catch {
@@ -961,15 +965,16 @@ export function createNativeAuth(options: NativeAuthOptions): NativeAuth {
 function nativeReturnPage(
   platform: NativeReturnPlatformV1,
   origin: string,
-  product: string,
+  brand: ReturnPageBrandV1,
 ): Response {
+  const product = brand.productName;
   const returnUri = new URL(nativeReturnUriV1(origin, platform));
   const target =
     platform === "android"
       ? undefined
       : `${NATIVE_RETURN_SCHEMES[platform]}://${returnUri.host}${returnUri.pathname}`;
   return returnPageV1({
-    productName: product,
+    brand,
     title: `Return to ${product}`,
     heading: `Return to ${product} to finish signing in`,
     lead: target

@@ -113,13 +113,14 @@ carries it as a repository secret, which is why `hosted.json` omits it.
 
 ## Brand
 
-What a person sees — the product's name, the built-in model's name, the icon,
-the palettes behind the named looks and whether What's New is served — is a
-`BrandV1` (`core/contracts/brand.ts`), chosen at build time the way the auth
-Package is ([ADR 0038](../../docs/adr/0038-white-label-deployments.md)). The
-Worker imports it through `#brand`, which `apps/cloudflare/package.json` maps to
-FrockBot's own, `apps/cloudflare/src/brand.ts`. A profile that names another
-module, relative to the profile file:
+What a person sees — the product's name, the built-in model's name, the
+homepage outbound requests point back to, the icon and page logo, the palettes
+behind the named looks and whether What's New is served — is a `BrandV1`
+(`core/contracts/brand.ts`), chosen at build time the way the auth Package is
+([ADR 0038](../../docs/adr/0038-white-label-deployments.md)). The Worker imports
+it through `#brand`, which `apps/cloudflare/package.json` maps to FrockBot's own,
+`apps/cloudflare/src/brand.ts`, and hands it to app code as data. A profile that
+names another module, relative to the profile file:
 
 ```json
 "brand": "./wallet-pal/brand.ts"
@@ -128,11 +129,20 @@ module, relative to the profile file:
 gets a generated `alias` for `#brand` to it, and the generator imports it and
 refuses a brand whose looks fail the ThemeDocument decoder or contrast floor, or
 whose icon is not there. The hosted and staging profiles name none, so their
-configs carry no alias. Where a deployment runs and which native apps sign in to
-it are the profile's (`nativeApps`), not the brand's. The application artifact
-is built by `apps/cloudflare/build-artifact.ts`, which resolves `#brand` through
-the package import and so builds FrockBot's; taking the brand as an argument is
-step 5 of the ADR.
+configs carry no alias.
+
+The application artifact is bundled by `apps/cloudflare/build-artifact.ts`, not
+by wrangler, so the alias never reaches it. Build it with the same module:
+
+```
+bun run apps/cloudflare/build-artifact.ts --brand deployments/wallet-pal/brand.ts
+```
+
+Without `--brand` it resolves `#brand` through the package import, which is
+FrockBot's.
+
+Where a deployment runs and which native apps sign in to it are the profile's
+(`nativeApps`), not the brand's.
 
 ## Email
 

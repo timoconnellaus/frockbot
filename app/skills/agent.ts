@@ -23,6 +23,7 @@
 // hibernation seam documented in `./catalog.ts`.
 import {
   appendRuntimeNoteV1,
+  runtimeNoteLabelV1,
   latestOpenStepPositionV1,
 } from "@frockbot/core/contracts";
 import { sha256HexBytesV1, sha256HexTextV1 } from "@frockbot/core/crypto";
@@ -87,6 +88,8 @@ export interface SkillWriterIdentityV1 {
  * and Turn its provenance can name.
  */
 export interface SkillsRuntimeHostV1 {
+  /** The product, which managed Skills and runtime notes are named for. */
+  productName: string;
   owner: SkillOwnerV1;
   reads: WorkspaceReadsV1;
   files?: WorkspaceFilesV1;
@@ -162,6 +165,7 @@ export type SkillInvocationOutcomeV1 =
  * both read, so those two can never disagree about what this Turn loaded.
  */
 export class SkillCatalog {
+  #productName: string;
   #owner: SkillOwnerV1;
   #reads: WorkspaceReadsV1;
   #withheldManagedSlugs: readonly string[];
@@ -174,12 +178,14 @@ export class SkillCatalog {
   #step: { turn: number; step: number } | undefined;
 
   constructor(
+    productName: string,
     owner: SkillOwnerV1,
     reads: WorkspaceReadsV1,
     withheldManagedSlugs: readonly string[] = [],
     pluginSkills: readonly PluginSkillContributionV1[] = [],
     indexes?: SkillIndexSourceV1,
   ) {
+    this.#productName = productName;
     this.#owner = owner;
     this.#reads = reads;
     this.#withheldManagedSlugs = withheldManagedSlugs;
@@ -200,6 +206,7 @@ export class SkillCatalog {
   async refresh(turn: number, session: Session): Promise<SkillCatalogV1> {
     const indexes = this.#indexes ? await this.#indexes.load() : undefined;
     this.#catalog = await loadFullSkillCatalogV1(this.#reads, this.#owner, {
+      productName: this.#productName,
       withheldManagedSlugs: this.#withheldManagedSlugs,
       pluginSkills: this.#pluginSkills,
       ...(indexes ? { indexes } : {}),
@@ -936,6 +943,7 @@ export function createSkillsRuntimeFeature(
 ): RuntimeFeatureV1<AgentRuntimeV1> {
   return (runtime) => {
     const catalog = new SkillCatalog(
+      host.productName,
       host.owner,
       host.reads,
       host.withheldManagedSlugs ?? [],
@@ -949,7 +957,7 @@ export function createSkillsRuntimeFeature(
         order: 90,
         render: () =>
           [
-            renderSkillCatalogPromptV1(catalog.current()),
+            renderSkillCatalogPromptV1(catalog.current(), host.productName),
             renderInvokedSkillsPromptV1(catalog.currentInvoked()),
           ]
             .filter((block) => block.length > 0)
@@ -983,7 +991,7 @@ export function createSkillsRuntimeFeature(
             if (named.length === 0) return request;
             return appendRuntimeNoteV1(
               request,
-              `[FrockBot runtime: skills]\nLikely useful for this request: ${named
+              `${runtimeNoteLabelV1(host.productName, "skills")}\nLikely useful for this request: ${named
                 .map((skill) => `${skill.name} (skill_load "${skill.load}")`)
                 .join(
                   ", ",

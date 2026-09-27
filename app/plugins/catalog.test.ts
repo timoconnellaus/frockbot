@@ -16,10 +16,9 @@ import {
 } from "./catalog.js";
 import { emptyPluginEnablementV1 } from "./enablement.js";
 import { foundationPackageCatalogV1 } from "@frockbot/app/packages";
-import { TEST_BRAND_NAMES_V1 } from "@frockbot/app/testkit";
+import { TEST_BRAND_V1 } from "@frockbot/app/testkit";
 
-const FOUNDATION_PACKAGE_CATALOG_V1 =
-  foundationPackageCatalogV1(TEST_BRAND_NAMES_V1);
+const FOUNDATION_PACKAGE_CATALOG_V1 = foundationPackageCatalogV1(TEST_BRAND_V1);
 import { servedPluginContractVersionsV1 } from "@frockbot/core/contracts";
 
 test("every deployment Plugin can resolve under a served contract", () => {

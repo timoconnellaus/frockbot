@@ -15,7 +15,7 @@ import {
 } from "@frockbot/app/memory";
 import clockFeature from "@frockbot/app/clock/agent";
 import echoFeature from "@frockbot/app/echo/agent";
-import identityFeature from "@frockbot/app/identity/agent";
+import { createIdentityFeature } from "@frockbot/app/identity/agent";
 import foundationProviderFeature from "@frockbot/providers/foundation/runtime";
 import type {
   FoundationAgentPackage,
@@ -32,7 +32,10 @@ const allowEffect = () => Promise.resolve(true);
  */
 function basePackages(): FoundationAgentPackage[] {
   return [
-    { id: "identity", feature: identityFeature },
+    {
+      id: "identity",
+      feature: createIdentityFeature({ productName: "FrockBot" }),
+    },
     { id: "provider-foundation", feature: foundationProviderFeature },
     { id: "echo", feature: echoFeature },
     { id: "clock", feature: clockFeature },
@@ -41,6 +44,7 @@ function basePackages(): FoundationAgentPackage[] {
 
 async function createRuntime(): Promise<FoundationRuntime> {
   const runtime = await createFoundationRuntime(undefined, {
+    productName: "FrockBot",
     admitEffect: allowEffect,
     agentPackages: basePackages(),
   });
@@ -93,6 +97,7 @@ describe("foundation runtime", () => {
 
   test("includes the durable Bot description in the normalized model request", async () => {
     const runtime = await createFoundationRuntime(undefined, {
+      productName: "FrockBot",
       systemPromptSection:
         "You are Housework.\n\nResearch, marketing, admin.\n\nKeep the household organized.",
       admitEffect: allowEffect,
@@ -158,6 +163,7 @@ describe("foundation runtime", () => {
 
   test("keeps a manifest-bounded tool out of a chat Turn's model request", async () => {
     const runtime = await createFoundationRuntime(undefined, {
+      productName: "FrockBot",
       admitEffect: allowEffect,
       agentPackages: basePackages(),
     });
@@ -198,6 +204,7 @@ describe("foundation runtime", () => {
 
   test("mounts the Agent on the turn type the root was created with", async () => {
     const runtime = await createFoundationRuntime(undefined, {
+      productName: "FrockBot",
       admitEffect: allowEffect,
       turnType: "automation",
       agentPackages: basePackages(),
@@ -221,6 +228,7 @@ describe("foundation runtime", () => {
       owner,
     });
     const runtime = await createFoundationRuntime(undefined, {
+      productName: "FrockBot",
       botId: owner.botId,
       sessionId: "alice:primary",
       admitEffect: allowEffect,
@@ -293,6 +301,7 @@ describe("foundation runtime", () => {
       ),
     });
     const runtime = await createFoundationRuntime(undefined, {
+      productName: "FrockBot",
       botId: owner.botId,
       sessionId,
       admitEffect: allowEffect,
@@ -351,9 +360,7 @@ describe("foundation runtime", () => {
             ),
           ),
       },
-      {
-        admitEffect: allowEffect,
-      },
+      { productName: "FrockBot", admitEffect: allowEffect },
     );
     runtimes.push(runtime);
 

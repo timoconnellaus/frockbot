@@ -125,14 +125,21 @@ test("disabled, revoked and wrong-version providers disappear while saved choice
         (c) => c.value,
       ),
     ).toEqual([null]);
-    const field = modelsSettingsFrame("tim", unavailable, [provider])
-      .sections[0]!.fields[0]!;
+    const field = modelsSettingsFrame(
+      "tim",
+      unavailable,
+      [provider],
+      "FrockBot",
+    ).sections[0]!.fields[0]!;
     expect(field.value).toEqual({ ...user.accountModel! });
     expect(field.choices?.at(-1)?.label).toContain("unavailable");
   }
-  const platform = modelsSettingsFrame("tim", user, [
-    { ...provider, platformOwned: true },
-  ]);
+  const platform = modelsSettingsFrame(
+    "tim",
+    user,
+    [{ ...provider, platformOwned: true }],
+    "FrockBot",
+  );
   expect(platform.sections).toHaveLength(1);
   expect(platform.sections[0]!.fields[0]!.choices![0]!.label).toBe(
     "Automatic — recommended",
@@ -165,7 +172,12 @@ test("one manifest home, disabled controls absent, reset distinct from explicit 
     state: "installed",
     values: { nullable: null },
   });
-  const frame = applicationSettingsFrame("tim", user, [provider, control]);
+  const frame = applicationSettingsFrame(
+    "tim",
+    user,
+    [provider, control],
+    "FrockBot",
+  );
   expect(frame.sections.map((s) => s.id)).toEqual([
     "profile",
     "appearance",
@@ -177,7 +189,8 @@ test("one manifest home, disabled controls absent, reset distinct from explicit 
   ]);
   user.packages[1]!.state = "disabled";
   expect(
-    applicationSettingsFrame("tim", user, [provider, control]).sections,
+    applicationSettingsFrame("tim", user, [provider, control], "FrockBot")
+      .sections,
   ).toHaveLength(2);
   expect(user.packages[1]!.values).toEqual({ nullable: null });
 });
@@ -185,7 +198,7 @@ test("one manifest home, disabled controls absent, reset distinct from explicit 
 test("identity prefills an unsaved profile while saved fields remain authoritative", () => {
   const user = settings();
   user.profile = { name: "FrockBot user" };
-  const hinted = applicationSettingsFrame("tim", user, [provider], {
+  const hinted = applicationSettingsFrame("tim", user, [provider], "FrockBot", {
     name: "Timothy",
     email: "tim@example.test",
   });
@@ -195,7 +208,7 @@ test("identity prefills an unsaved profile while saved fields remain authoritati
     "UTC",
   ]);
   expect(
-    applicationSettingsFrame("tim", user, [provider], {
+    applicationSettingsFrame("tim", user, [provider], "FrockBot", {
       name: "Timothy",
       email: "tim@example.test",
       image: "https://lh3.googleusercontent.com/a/photo",
@@ -207,7 +220,7 @@ test("identity prefills an unsaved profile while saved fields remain authoritati
   expect(user.profile).toEqual({ name: "FrockBot user" });
   user.profile = { name: "Tim", email: "chosen@example.test" };
   expect(
-    applicationSettingsFrame("tim", user, [provider], {
+    applicationSettingsFrame("tim", user, [provider], "FrockBot", {
       name: "Timothy",
       email: "tim@example.test",
     }).sections[0]!.fields.map((f) => f.value),
@@ -232,6 +245,7 @@ test("the released model reader retains the account fallback without the removed
     ): Promise<T> => fn(storage),
   };
   const owner = createUserSettingsBackendContribution({
+    productName: "FrockBot",
     storage,
     availablePackages: [provider],
   });
@@ -293,16 +307,17 @@ test("provider knobs have one Models home, and a provider that is not added has 
   };
   user.packages[0]!.values = { limit: 4 };
   expect(
-    modelsSettingsFrame("tim", user, [declared]).sections[1]!.fields,
+    modelsSettingsFrame("tim", user, [declared], "FrockBot").sections[1]!
+      .fields,
   ).toMatchObject([{ id: "limit", value: 4, canReset: true }]);
   expect(
-    applicationSettingsFrame("tim", user, [declared]).sections,
+    applicationSettingsFrame("tim", user, [declared], "FrockBot").sections,
   ).toHaveLength(2);
   // Removed with a key left behind is not added: the Marketplace is the way
   // back, and the values wait for it.
   user.packages[0]!.state = "disabled";
   expect(
-    modelsSettingsFrame("tim", user, [declared]).sections.map(
+    modelsSettingsFrame("tim", user, [declared], "FrockBot").sections.map(
       (section) => section.id,
     ),
   ).toEqual(["model"]);
@@ -328,9 +343,12 @@ test("Models lists only providers already added, not the rest of the catalog", (
     displayName: "Together",
   };
   expect(
-    modelsSettingsFrame("tim", user, [provider, together]).sections.map(
-      (section) => section.id,
-    ),
+    modelsSettingsFrame(
+      "tim",
+      user,
+      [provider, together],
+      "FrockBot",
+    ).sections.map((section) => section.id),
   ).toEqual(["model", "provider.provider"]);
   expect(() =>
     modelsSettingsCommand({
@@ -348,15 +366,21 @@ test("Models lists only providers already added, not the rest of the catalog", (
     state: "disabled",
   });
   expect(
-    modelsSettingsFrame("tim", user, [provider, together]).sections.map(
-      (section) => section.id,
-    ),
+    modelsSettingsFrame(
+      "tim",
+      user,
+      [provider, together],
+      "FrockBot",
+    ).sections.map((section) => section.id),
   ).toEqual(["model", "provider.provider"]);
   user.packages[1]!.state = "installed";
   expect(
-    modelsSettingsFrame("tim", user, [provider, together]).sections.map(
-      (section) => section.id,
-    ),
+    modelsSettingsFrame(
+      "tim",
+      user,
+      [provider, together],
+      "FrockBot",
+    ).sections.map((section) => section.id),
   ).toEqual(["model", "provider.provider", "provider.provider-together"]);
 });
 
@@ -675,7 +699,8 @@ test("a Marketplace read is decoded from its query string, and refused when malf
 test("a provider section's one action names the next step", () => {
   const user = settings();
   const actions = () =>
-    modelsSettingsFrame("tim", user, [provider]).sections[1]!.actions;
+    modelsSettingsFrame("tim", user, [provider], "FrockBot").sections[1]!
+      .actions;
   expect(actions()).toEqual([
     { kind: "manage-provider", label: "Manage provider" },
   ]);
@@ -719,7 +744,7 @@ test("resetting an Application setting omits the empty patch at the owner seam",
 test("Profile owns the timezone used by Routines", () => {
   const user = settings();
   user.profile.timezone = "Australia/Sydney";
-  const profile = applicationSettingsFrame("tim", user, [provider])
+  const profile = applicationSettingsFrame("tim", user, [provider], "FrockBot")
     .sections[0]!;
   expect(profile).toMatchObject({
     id: "profile",
@@ -780,8 +805,12 @@ test("Profile owns the timezone used by Routines", () => {
 
 test("Appearance owns Ink, Paper, and System", () => {
   const user = settings();
-  const appearance = applicationSettingsFrame("tim", user, [provider])
-    .sections[1]!;
+  const appearance = applicationSettingsFrame(
+    "tim",
+    user,
+    [provider],
+    "FrockBot",
+  ).sections[1]!;
   expect(appearance).toMatchObject({
     id: "appearance",
     fields: [
@@ -815,14 +844,14 @@ test("Appearance owns Ink, Paper, and System", () => {
 
 test("Profile defaults to UTC and keeps a valid stored alias selectable", () => {
   const user = settings();
-  let timezone = applicationSettingsFrame("tim", user, [provider]).sections[0]!
-    .fields[2]!;
+  let timezone = applicationSettingsFrame("tim", user, [provider], "FrockBot")
+    .sections[0]!.fields[2]!;
   expect(timezone.value).toBe("UTC");
   expect(timezone.choices![0]).toEqual({ label: "UTC", value: "UTC" });
 
   user.profile.timezone = "US/Eastern";
-  timezone = applicationSettingsFrame("tim", user, [provider]).sections[0]!
-    .fields[2]!;
+  timezone = applicationSettingsFrame("tim", user, [provider], "FrockBot")
+    .sections[0]!.fields[2]!;
   expect(timezone.value).toBe("US/Eastern");
   expect(timezone.choices).toContainEqual({
     label: "US / Eastern",

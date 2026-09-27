@@ -25,6 +25,11 @@ export interface BrandV1 {
   productName: string;
   /** The built-in model's display name. */
   builtInModelName: string;
+  /**
+   * The product's public https home, which outbound requests that identify
+   * themselves point back to (a fetched page sees it in the user agent).
+   */
+  homepage: string;
   /** The display name mail is sent under when nothing more specific names it. */
   emailSenderName: string;
   /**
@@ -32,6 +37,12 @@ export interface BrandV1 {
    * brand module. The artifact build reads it and embeds the bytes.
    */
   iconPng: string;
+  /**
+   * The logo the pages a browser lands on show — sign-in, returns, connected
+   * apps — inlined as a `data:image/…;base64,` URL, because those pages load
+   * nothing from anywhere.
+   */
+  pageLogo: string;
   /** The palette behind each named look. */
   looks: NamedLookDocumentsV1;
   /**
@@ -52,8 +63,10 @@ const BRAND_KEYS_V1 = [
   "schemaVersion",
   "productName",
   "builtInModelName",
+  "homepage",
   "emailSenderName",
   "iconPng",
+  "pageLogo",
   "looks",
   "whatsNew",
 ] as const;
@@ -93,8 +106,24 @@ export function decodeBrandV1(input: unknown): BrandV1 {
   if (value.schemaVersion !== 1) {
     throw new BrandDecodeError("unsupported brand");
   }
+  if (
+    typeof value.homepage !== "string" ||
+    !/^https:\/\/[a-z0-9.-]+(\/[^\s"<>]*)?$/.test(value.homepage)
+  ) {
+    throw new BrandDecodeError("brand.homepage must be an https URL");
+  }
   if (typeof value.iconPng !== "string" || !value.iconPng.endsWith(".png")) {
     throw new BrandDecodeError("brand.iconPng must name a .png file");
+  }
+  if (
+    typeof value.pageLogo !== "string" ||
+    !/^data:image\/(png|webp|jpeg);base64,[A-Za-z0-9+/]+=*$/.test(
+      value.pageLogo,
+    )
+  ) {
+    throw new BrandDecodeError(
+      "brand.pageLogo must be a base64 PNG, WebP or JPEG data URL",
+    );
   }
   if (typeof value.whatsNew !== "boolean") {
     throw new BrandDecodeError("brand.whatsNew must be true or false");
@@ -133,9 +162,22 @@ export function decodeBrandV1(input: unknown): BrandV1 {
     schemaVersion: 1,
     productName: name(value.productName, "productName"),
     builtInModelName: name(value.builtInModelName, "builtInModelName"),
+    homepage: value.homepage,
     emailSenderName: name(value.emailSenderName, "emailSenderName"),
     iconPng: value.iconPng,
+    pageLogo: value.pageLogo,
     looks: decoded,
     whatsNew: value.whatsNew,
   };
+}
+
+/**
+ * How the product identifies itself to a server it calls: an RFC 9110 product
+ * token — the name with anything a token cannot carry left out — and its home.
+ */
+export function brandUserAgentV1(
+  brand: Pick<BrandV1, "productName" | "homepage">,
+): string {
+  const token = brand.productName.replace(/[^A-Za-z0-9!#$%&'*+.^_`|~-]/g, "");
+  return `${token || "Bot"}/0.0.1 (+${brand.homepage})`;
 }

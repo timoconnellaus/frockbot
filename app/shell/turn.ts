@@ -442,6 +442,7 @@ export async function executeTurn(
         enabled,
       });
       const mounted = await createShellCompositionHost({
+        productName: state.application.brand.productName,
         botId: input.identity.botId,
         sessionId: input.command.sessionId,
         sessionSeed: {

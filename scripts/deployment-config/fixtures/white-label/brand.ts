@@ -10,9 +10,11 @@ import {
 export const BRAND_V1: BrandV1 = {
   schemaVersion: 1,
   productName: "Wallet Pal",
+  homepage: "https://wallet-pal.example",
   builtInModelName: "Pal AI",
   emailSenderName: "Wallet Pal",
   iconPng: "../../../../assets/marketing/app-icon/frockbot-icon-64.png",
+  pageLogo: "data:image/png;base64,V2FsbGV0UGFs",
   looks: {
     ink: INK_DOCUMENT_V1,
     paper: PAPER_DOCUMENT_V1,

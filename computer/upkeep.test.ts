@@ -138,6 +138,7 @@ async function runTurn(input: {
   await runtime.mount(
     createComputerAgentFeature({
       userId: "user-1",
+      productName: "FrockBot",
       defaultProviderId: input.host.id,
       upkeep: { records: input.records, vault: input.vault },
       now: input.now,

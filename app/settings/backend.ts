@@ -23,6 +23,8 @@ import {
 import { defineGatewayContribution } from "@frockbot/core/contracts/contributions";
 
 export interface SettingsConnectionGatewayHost {
+  /** What the sign-in pages call the product. */
+  brand: { productName: string };
   executeConnection(
     userId: string,
     command: ConnectionCommandV1,
@@ -201,7 +203,7 @@ export function createSettingsBackendContribution(
       } catch {
         return jsonError(
           400,
-          "Sign-in link is invalid, expired, or could not finish. Start a new sign-in in FrockBot.",
+          `Sign-in link is invalid, expired, or could not finish. Start a new sign-in in ${host.brand.productName}.`,
         );
       }
     },

@@ -98,6 +98,7 @@ async function mount(
     serverTime: NOW,
   };
   const host: MachineRuntimeHostV1 = {
+    productName: "FrockBot",
     botId: "bot-1",
     ...(options.writer === false
       ? {}

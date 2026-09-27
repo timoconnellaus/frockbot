@@ -18,6 +18,7 @@ import {
   type NativeAuthOptions,
 } from "./native-auth.js";
 import { createGateway } from "./gateway.js";
+import { BRAND_V1 } from "#brand";
 import type {
   AccountAccessV1,
   AccountAdmissionDecisionV1,
@@ -79,7 +80,7 @@ function fixture(overrides: Partial<NativeAuthOptions> = {}) {
     origin: NATIVE_ORIGIN,
     returnUris: [NATIVE_RETURN_ANDROID],
     nativeApps: HOSTED_NATIVE_APPS,
-    productName: "FrockBot",
+    brand: BRAND_V1,
     admit: async () => ({ schemaVersion: 1, admitted: true, basis: "active" }),
     now: () => time,
     auth: {
@@ -1164,7 +1165,7 @@ describe("beta access on the native door", () => {
       origin: NATIVE_ORIGIN,
       returnUris: [NATIVE_RETURN_ANDROID],
       nativeApps: HOSTED_NATIVE_APPS,
-      productName: "FrockBot",
+      brand: BRAND_V1,
       now: f.now,
       admit: async (userId) => {
         admitted.push(userId);
@@ -1680,12 +1681,18 @@ test("a deployment names only the signed apps its profile names", async () => {
 
 test("the pages name the product the brand names", async () => {
   const f = fixture({
-    productName: "Wallet Pal",
+    brand: {
+      ...BRAND_V1,
+      productName: "Wallet Pal",
+      pageLogo: "data:image/png;base64,V2FsbGV0UGFs",
+    },
     returnUris: nativeReturnUris("android,ios", NATIVE_ORIGIN),
   });
   const page = await f.auth.route(f.request("/native/return/ios"));
   const html = await page!.text();
   expect(html).toContain("Return to Wallet Pal");
+  expect(html).toContain('src="data:image/png;base64,V2FsbGV0UGFs"');
+  expect(html).not.toContain(BRAND_V1.pageLogo);
   expect(html).not.toContain("FrockBot");
 });
 

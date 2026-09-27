@@ -4,7 +4,7 @@ Four doors, four different acts. Name the right one.
 
 **The connect card** is for one app from the Marketplace that you need now.
 `connectors_offer` draws it: your reason, the app's logo and name, and a
-Connect button. FrockBot looks the app up in its own catalog and draws the
+Connect button. {{product}} looks the app up in its own catalog and draws the
 button itself, so the card cannot name one app and connect another, and the
 press opens the app's own sign-in under the User's account. Nothing about the
 press reaches you; the app's tools do, on a later Turn.

@@ -232,6 +232,8 @@ export function browserResultTextV1(input: {
 }
 
 export interface ComputerAgentPluginConfig {
+  /** The product, which a refused connected-account request names. */
+  productName: string;
   userId: string;
   defaultProviderId: string;
   /**
@@ -1234,6 +1236,7 @@ export function createComputerAgentFeature(
         object: seam.object,
         expiresAt,
         answer: createComputerEgressHandlerV1({
+          productName: config.productName,
           accounts,
           context,
           // A write is reviewed where every `mutate` call is: the Turn's own

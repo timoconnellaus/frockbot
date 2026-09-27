@@ -88,7 +88,11 @@ function machineFacts(machine: MachineListEntryV1, now: string): string {
   return `${machine.platform} · ${can || "runs device modules"} · ${state}`;
 }
 
-function machineNode(machine: MachineListEntryV1, now: string): ViewNode {
+function machineNode(
+  machine: MachineListEntryV1,
+  now: string,
+  productName: string,
+): ViewNode {
   return {
     type: "group",
     orientation: "column",
@@ -98,7 +102,7 @@ function machineNode(machine: MachineListEntryV1, now: string): ViewNode {
       ...(machine.revokedAt
         ? [
             status(
-              "This computer’s key is retired. To connect it again, choose Run modules on this Mac in the FrockBot desktop app on it.",
+              `This computer’s key is retired. To connect it again, choose Run modules on this Mac in the ${productName} desktop app on it.`,
             ),
           ]
         : [
@@ -118,7 +122,10 @@ function machineNode(machine: MachineListEntryV1, now: string): ViewNode {
 }
 
 /** A `MachineListView` as a `ViewDocument`. */
-export function machinesDocumentV1(view: MachineListViewV1): ViewDocument {
+export function machinesDocumentV1(
+  view: MachineListViewV1,
+  productName: string,
+): ViewDocument {
   const live = view.machines.filter((machine) => !machine.revokedAt);
   const connected = live.filter((machine) => machine.connected).length;
   return decodeProtocol("ViewDocument", {
@@ -131,7 +138,7 @@ export function machinesDocumentV1(view: MachineListViewV1): ViewDocument {
       children: [
         {
           type: "text",
-          text: "Your computers are Macs signed in to the FrockBot desktop app. Each is separate from your Bot’s hosted Computer. A Mac connects itself when you sign in to the app on it, and runs your Plugins’ device modules while the app is open. Revoke one here to cut it off.",
+          text: `Your computers are Macs signed in to the ${productName} desktop app. Each is separate from your Bot’s hosted Computer. A Mac connects itself when you sign in to the app on it, and runs your Plugins’ device modules while the app is open. Revoke one here to cut it off.`,
         },
         // The count is the summary that sits under the title.
         // With nothing registered there is nothing to summarise, and the list
@@ -142,7 +149,7 @@ export function machinesDocumentV1(view: MachineListViewV1): ViewDocument {
         ...(view.machines.length === 0
           ? [status("No computers are connected yet.")]
           : view.machines.map((machine) =>
-              machineNode(machine, view.serverTime),
+              machineNode(machine, view.serverTime, productName),
             )),
       ],
     },

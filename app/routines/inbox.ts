@@ -88,11 +88,14 @@ const INTERNAL_FAILURE_MARKERS = [
 ];
 
 /** The sentence a person reads instead of a kernel string. Never empty. */
-export function routineFailureSentenceV1(summary: string | undefined): string {
+export function routineFailureSentenceV1(
+  summary: string | undefined,
+  productName: string,
+): string {
   const text = (summary ?? "").trim();
   if (text.length === 0) return "It stopped without saying why.";
   if (INTERNAL_FAILURE_MARKERS.some((marker) => marker.test(text))) {
-    return "Something inside FrockBot went wrong; the run log has the details.";
+    return `Something inside ${productName} went wrong; the run log has the details.`;
   }
   return text;
 }

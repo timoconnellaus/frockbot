@@ -18,13 +18,16 @@ const BASE_URL = "https://bot.frockbot.com";
 const SECRET = "workerd-auth-schema-secret-0123456789abcdef";
 
 function configuredAuth() {
-  return BETTER_AUTH_PACKAGE_V1.create({
-    AUTH_DB: env.AUTH_DB,
-    BETTER_AUTH_SECRET: SECRET,
-    BETTER_AUTH_URL: BASE_URL,
-    GOOGLE_CLIENT_ID: "auth-schema.apps.googleusercontent.com",
-    GOOGLE_CLIENT_SECRET: "auth-schema-client-secret",
-  });
+  return BETTER_AUTH_PACKAGE_V1.create(
+    {
+      AUTH_DB: env.AUTH_DB,
+      BETTER_AUTH_SECRET: SECRET,
+      BETTER_AUTH_URL: BASE_URL,
+      GOOGLE_CLIENT_ID: "auth-schema.apps.googleusercontent.com",
+      GOOGLE_CLIENT_SECRET: "auth-schema-client-secret",
+    },
+    { productName: "FrockBot" },
+  );
 }
 
 beforeAll(async () => {
@@ -62,6 +65,7 @@ test("a closed deployment refuses to create an account on first sign-in", async 
       GOOGLE_CLIENT_SECRET: "auth-schema-client-secret",
     },
     {
+      productName: "FrockBot",
       mayCreateIdentity: async ({ email }) => {
         refused.push(email);
         return false;
@@ -94,13 +98,16 @@ test("signing out clears the session cookie and sends the browser home", async (
   // The whole of what `/sign-out` means on this build: better-auth's own route,
   // reached over its own handler, and a 303 back to the document. The gateway
   // knows only that it hands the route to the Package.
-  const auth = createAuth({
-    AUTH_DB: env.AUTH_DB,
-    BETTER_AUTH_SECRET: SECRET,
-    BETTER_AUTH_URL: BASE_URL,
-    GOOGLE_CLIENT_ID: "auth-schema.apps.googleusercontent.com",
-    GOOGLE_CLIENT_SECRET: "auth-schema-client-secret",
-  });
+  const auth = createAuth(
+    {
+      AUTH_DB: env.AUTH_DB,
+      BETTER_AUTH_SECRET: SECRET,
+      BETTER_AUTH_URL: BASE_URL,
+      GOOGLE_CLIENT_ID: "auth-schema.apps.googleusercontent.com",
+      GOOGLE_CLIENT_SECRET: "auth-schema-client-secret",
+    },
+    { productName: "FrockBot" },
+  );
   const adapter = (await auth.$context).internalAdapter;
   const user = await adapter.createUser(
     {

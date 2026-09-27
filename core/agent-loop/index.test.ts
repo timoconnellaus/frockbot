@@ -64,7 +64,7 @@ function mountRuntime(
   const sessions = new SessionStore({ persistEvents, initialSessions });
   const systemPrompt = new SystemPromptRegistry(hooks);
   const llm = new LlmRegistry(hooks);
-  const tools = new ToolRegistry(hooks, systemPrompt);
+  const tools = new ToolRegistry(hooks, "FrockBot", systemPrompt);
 
   systemPrompt.register({
     id: "identity",

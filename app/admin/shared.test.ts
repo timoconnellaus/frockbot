@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
-  ADMISSION_REFUSAL_COPY_V1,
+  admissionRefusalCopyV1,
   accessEmailV1,
   decodeAccountAccessV1,
   decodeAccountAccessViewV1,
@@ -245,7 +245,7 @@ describe("account access codecs", () => {
         basis: "invitation",
       }),
     ).toEqual({ schemaVersion: 1, admitted: true, basis: "invitation" });
-    for (const reason of Object.keys(ADMISSION_REFUSAL_COPY_V1)) {
+    for (const reason of Object.keys(admissionRefusalCopyV1("FrockBot"))) {
       expect(
         decodeAccountAdmissionDecisionV1({
           schemaVersion: 1,
@@ -272,7 +272,7 @@ describe("account access codecs", () => {
   });
 
   test("no refusal copy claims an invitation exists", () => {
-    for (const copy of Object.values(ADMISSION_REFUSAL_COPY_V1)) {
+    for (const copy of Object.values(admissionRefusalCopyV1("FrockBot"))) {
       expect(`${copy.title} ${copy.detail}`).not.toMatch(/invited|invitation/i);
     }
   });

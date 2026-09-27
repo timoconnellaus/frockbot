@@ -318,6 +318,8 @@ export function pluginApprovalActionV1(
   member: Pick<CompositionMemberV1, "descriptor"> &
     Partial<Pick<CompositionMemberV1, "artifact" | "packageId">>,
   verb: "Run" | "Turn on",
+  /** The product, whose desktop app a device module runs in. */
+  productName: string,
 ): string {
   const descriptor = member.descriptor;
   const packageId = member.packageId ?? descriptor.id;
@@ -367,7 +369,7 @@ export function pluginApprovalActionV1(
       ...module.appleEvents.map((bundleId) => `controls ${bundleId}`),
     ];
     parts.push(
-      `It runs code on your computer while the FrockBot app is open${reach.length === 0 ? ", reaching nothing on it" : ` that ${reach.join(", ")}`}.`,
+      `It runs code on your computer while the ${productName} app is open${reach.length === 0 ? ", reaching nothing on it" : ` that ${reach.join(", ")}`}.`,
     );
   }
   // A model provider contribution runs when a Bot's model names it, which is

@@ -16,6 +16,7 @@ const ENABLED_CAPABILITY = {
   packageId: "web",
   capabilityId: "web-fetch",
 } as const;
+const USER_AGENT = "FrockBot/0.0.1 (+https://frockbot.com)";
 
 function toolContext(): ToolExecutionContext {
   return {
@@ -67,7 +68,7 @@ describe("web_fetch", () => {
     ]);
     const result = await executeWebFetchV1(
       { url: "https://example.test/page", maxBytes: 65536, format: "text" },
-      { fetch },
+      { fetch, userAgent: USER_AGENT },
     );
 
     expect(result.isError).toBe(false);
@@ -95,7 +96,7 @@ describe("web_fetch", () => {
     };
     await executeWebFetchV1(
       { url: "https://example.test/", maxBytes: 65536, format: "text" },
-      { fetch },
+      { fetch, userAgent: USER_AGENT },
     );
     expect(sent?.get("user-agent")).toContain("FrockBot");
     expect(sent?.get("authorization")).toBeNull();
@@ -111,7 +112,7 @@ describe("web_fetch", () => {
     ]);
     const result = await executeWebFetchV1(
       { url: "https://example.test/big", maxBytes: 4096, format: "text" },
-      { fetch },
+      { fetch, userAgent: USER_AGENT },
     );
     const body = parsed(result.content) as unknown as WebFetchResultV1;
     expect(result.isError).toBe(false);
@@ -136,7 +137,7 @@ describe("web_fetch", () => {
         maxBytes: WEB_FETCH_MAX_BYTES_V1,
         format: "text",
       },
-      { fetch },
+      { fetch, userAgent: USER_AGENT },
     );
     expect(result.isError).toBe(true);
     expect(parsed(result.content).error).toBe("web-fetch-response-too-large");
@@ -148,7 +149,7 @@ describe("web_fetch", () => {
     ]);
     const result = await executeWebFetchV1(
       { url: "https://example.test/doc.pdf", maxBytes: 65536, format: "text" },
-      { fetch },
+      { fetch, userAgent: USER_AGENT },
     );
     expect(result.isError).toBe(true);
     expect(parsed(result.content).error).toBe("web-fetch-blocked-content-type");
@@ -163,7 +164,7 @@ describe("web_fetch", () => {
     ]);
     const result = await executeWebFetchV1(
       { url: "https://example.test/go", maxBytes: 65536, format: "text" },
-      { fetch },
+      { fetch, userAgent: USER_AGENT },
     );
     expect(result.isError).toBe(true);
     expect(parsed(result.content).error).toBe("ssrf-blocked-private-address");
@@ -177,7 +178,7 @@ describe("web_fetch", () => {
     ]);
     const result = await executeWebFetchV1(
       { url: "https://example.test/a", maxBytes: 65536, format: "text" },
-      { fetch },
+      { fetch, userAgent: USER_AGENT },
     );
     expect(parsed(result.content).error).toBe("web-fetch-too-many-redirects");
     expect(calls.length).toBe(4);
@@ -191,7 +192,7 @@ describe("web_fetch", () => {
         maxBytes: 65536,
         format: "text",
       },
-      { fetch },
+      { fetch, userAgent: USER_AGENT },
     );
     expect(result.isError).toBe(true);
     expect(parsed(result.content).error).toBe("ssrf-blocked-scheme");
@@ -210,11 +211,15 @@ describe("web_fetch", () => {
   });
 
   test("declares itself idempotent, so recovery re-runs rather than guesses", () => {
-    expect(createWebFetchToolDefinitionV1().idempotent).toBe(true);
+    expect(
+      createWebFetchToolDefinitionV1({ userAgent: USER_AGENT }).idempotent,
+    ).toBe(true);
   });
 
   test("rejects arguments the schema does not admit", async () => {
-    const definition = createWebFetchToolDefinitionV1();
+    const definition = createWebFetchToolDefinitionV1({
+      userAgent: USER_AGENT,
+    });
     expect(definition.validate?.({ url: 42 })).toBe(false);
     expect(
       definition.validate?.({ url: "https://a.test/", format: "pdf" }),
@@ -229,11 +234,13 @@ describe("the web-fetch Capability enablement", () => {
   test("mounts only for the enabled Capability", () => {
     expect(
       createConfiguredWebFetchRuntimeContribution({
+        userAgent: USER_AGENT,
         capability: { ...ENABLED_CAPABILITY, capabilityId: "something-else" },
       }),
     ).toBeUndefined();
     expect(
       createConfiguredWebFetchRuntimeContribution({
+        userAgent: USER_AGENT,
         capability: ENABLED_CAPABILITY,
       }),
     ).toBeDefined();
@@ -242,6 +249,7 @@ describe("the web-fetch Capability enablement", () => {
   test("offers web_fetch on every turn type its manifest admits", async () => {
     const runtime = createAgentRuntimeHarness();
     const feature = createConfiguredWebFetchRuntimeContribution({
+      userAgent: USER_AGENT,
       capability: ENABLED_CAPABILITY,
     });
     expect(feature).toBeDefined();

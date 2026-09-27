@@ -231,7 +231,7 @@ const SEEDED_PLUGIN_WORDS_V1: Record<string, SeededPluginWordsV1> = {
   approvals: {
     displayName: "Approval cards",
     description:
-      "Draws the card that asks you to allow or refuse one action, and shows what you decided. The decision itself is FrockBot's own record, never this plugin's. Always on.",
+      "Draws the card that asks you to allow or refuse one action, and shows what you decided. The decision itself is the platform's own record, never this plugin's. Always on.",
     seed: "locked",
   },
   attachments: {

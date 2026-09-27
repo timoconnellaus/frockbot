@@ -615,6 +615,7 @@ export class BotIsolateProbe extends DurableObject<BotIsolateProbeEnv> {
       generation.members.map((member) => member.descriptor),
     );
     const composition = await createShellCompositionHost({
+      productName: "FrockBot",
       admitEffect: () => Promise.resolve(true),
       botId: input.botId,
       sessionId: `${input.userId}:${input.botId}`,

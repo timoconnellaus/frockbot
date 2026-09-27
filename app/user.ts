@@ -259,6 +259,7 @@ export async function createFoundationUserBackendContributions(host: {
     get settings() {
       return {
         storage: host.storage,
+        productName: host.brand.productName,
         availablePackages: catalog.entries.map((pkg) => ({
           packageId: pkg.id,
           version: FOUNDATION_PACKAGE_VERSION_V1,
@@ -290,6 +291,7 @@ export async function createFoundationUserBackendContributions(host: {
       // refuse a forged one before it reaches this object.
       const keyring = host.readSecret("CREDENTIAL_KEYRING");
       return {
+        productName: host.brand.productName,
         storage: host.storage,
         settings,
         credentials,
@@ -304,6 +306,7 @@ export async function createFoundationUserBackendContributions(host: {
       const apiKey = host.readSecret("COMPOSIO_API_KEY");
       const callbackBaseUrl = host.readSecret("BETTER_AUTH_URL");
       return {
+        productName: host.brand.productName,
         storage: host.storage,
         settings,
         ...(apiKey ? { apiKey } : {}),
@@ -321,7 +324,9 @@ export async function createFoundationUserBackendContributions(host: {
     get frockAi() {
       const settings = mountedContributions.get(settingsUserContribution);
       if (!settings) {
-        throw new Error("Frock AI requires the Settings Contribution");
+        throw new Error(
+          "The built-in model requires the Settings Contribution",
+        );
       }
       return {
         storage: host.storage,
@@ -418,7 +423,7 @@ export async function createFoundationUserBackendContributions(host: {
   ) {
     await mounted.dispose();
     throw new Error(
-      "Foundation requires Settings, Credentials, Ollama, Frock AI, Flock, Search, Audit, Machines, Connected apps and MCP servers User Contributions",
+      "Foundation requires Settings, Credentials, Ollama, the built-in model, Flock, Search, Audit, Machines, Connected apps and MCP servers User Contributions",
     );
   }
 

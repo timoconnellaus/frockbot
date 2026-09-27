@@ -339,6 +339,8 @@ function reviewBody(request: ComputerEgressRequestV1): unknown {
 }
 
 export interface ComputerEgressHandlerConfigV1 {
+  /** The product, which a refusal a CLI prints names. */
+  productName: string;
   /** The Turn's connected accounts, read when a request arrives. */
   accounts(): readonly ComputerEgressAccountV1[];
   /** The exec call's own context: its Turn, its effect id, its signal. */
@@ -374,7 +376,7 @@ export function createComputerEgressHandlerV1(
     if (!target) {
       return computerEgressMessageV1(
         403,
-        `FrockBot does not attach a connected account to ${url.host}${url.pathname}.`,
+        `${config.productName} does not attach a connected account to ${url.host}${url.pathname}.`,
       );
     }
     const account = config
@@ -415,7 +417,7 @@ export function createComputerEgressHandlerV1(
   function refused(reason: string): ComputerEgressResponseV1 {
     return computerEgressMessageV1(
       403,
-      `FrockBot did not send this request. ${reason}`,
+      `${config.productName} did not send this request. ${reason}`,
     );
   }
 

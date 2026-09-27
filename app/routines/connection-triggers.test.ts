@@ -17,7 +17,7 @@ const IDENTITY = { userId: "owner", botId: "scout" };
 
 function harness() {
   const storage = createMemoryRoutineStorageV1();
-  const scheduler = new RoutineScheduler(storage);
+  const scheduler = new RoutineScheduler(storage, { productName: "FrockBot" });
   const store = new RoutineStore(storage, { firings: scheduler });
   const create: RoutineCommandV1 = {
     schemaVersion: 1,
@@ -102,7 +102,9 @@ describe("a connected-app Routine firing", () => {
     ).toEqual({ status: "dropped", reason: "Routine is paused" });
 
     const scheduled = new RoutineStore(createMemoryRoutineStorageV1(), {
-      firings: new RoutineScheduler(createMemoryRoutineStorageV1()),
+      firings: new RoutineScheduler(createMemoryRoutineStorageV1(), {
+        productName: "FrockBot",
+      }),
     });
     await scheduled.execute(
       {

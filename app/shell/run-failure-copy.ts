@@ -18,7 +18,7 @@ import { UNSENT_REPLY_REASON_V1 } from "./delivery.js";
 import {
   CREDIT_EXHAUSTED_REASON_V1,
   DAILY_LIMIT_REASON_V1,
-  SUBSCRIPTION_REQUIRED_REASON_V1,
+  SUBSCRIPTION_REQUIRED_REASON_PATTERN_V1,
 } from "../billing/ledger.js";
 
 /**
@@ -60,8 +60,8 @@ export const USER_FACING_FAILURE_REASONS_V1: readonly string[] = [
   STEP_LIMIT_REASON_V1,
   UNSENT_REPLY_REASON_V1,
   // Billing's refusals name what the person can do about them — subscribe,
-  // or add credit — which the outcome alone ("model-error") never could.
-  SUBSCRIPTION_REQUIRED_REASON_V1,
+  // or add credit — which the outcome alone ("model-error") never could. The
+  // subscription one names the product, so it is matched by its shape below.
   CREDIT_EXHAUSTED_REASON_V1,
   DAILY_LIMIT_REASON_V1,
 ];
@@ -70,10 +70,16 @@ export const USER_FACING_FAILURE_REASONS_V1: readonly string[] = [
  * The failures whose way out is Billing rather than sending again. A client
  * that can open Billing offers that instead of a retry.
  */
-export const BILLING_FAILURE_REASONS_V1: readonly string[] = [
-  SUBSCRIPTION_REQUIRED_REASON_V1,
-  CREDIT_EXHAUSTED_REASON_V1,
-];
+export function isBillingFailureCopyV1(copy: string): boolean {
+  return (
+    copy === CREDIT_EXHAUSTED_REASON_V1 ||
+    wholeMatch(SUBSCRIPTION_REQUIRED_REASON_PATTERN_V1, copy)
+  );
+}
+
+function wholeMatch(pattern: RegExp, text: string): boolean {
+  return pattern.exec(text)?.[0] === text;
+}
 
 /**
  * What each terminal outcome says. Total over `TurnOutcome` so adding one to
@@ -119,9 +125,9 @@ export function runFailureCopyV1(input: {
   events?: readonly SessionEvent[];
 }): string {
   const failure = input.failure ?? "";
-  const written = USER_FACING_FAILURE_REASONS_V1.find((reason) =>
-    failure.includes(reason),
-  );
+  const written =
+    USER_FACING_FAILURE_REASONS_V1.find((reason) => failure.includes(reason)) ??
+    SUBSCRIPTION_REQUIRED_REASON_PATTERN_V1.exec(failure)?.[0];
   if (written) return written;
   const outcome = terminalTurnOutcomeV1(input.events ?? []);
   return outcome ? RUN_FAILURE_COPY_V1[outcome] : RUN_FAILURE_FALLBACK_COPY_V1;
@@ -148,7 +154,9 @@ const KNOWN_FAILURE_COPY_V1 = new Set<string>([
 
 /** The failure if the product wrote it, else the line every failure can use. */
 export function knownFailureCopyV1(failure: string | undefined): string {
-  return failure && KNOWN_FAILURE_COPY_V1.has(failure)
+  return failure &&
+    (KNOWN_FAILURE_COPY_V1.has(failure) ||
+      wholeMatch(SUBSCRIPTION_REQUIRED_REASON_PATTERN_V1, failure))
     ? failure
     : RUN_FAILURE_FALLBACK_COPY_V1;
 }

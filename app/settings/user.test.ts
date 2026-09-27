@@ -49,6 +49,7 @@ class MemoryStorage implements UserSettingsStorage {
 
 function contribution(storage = new MemoryStorage()) {
   return createUserSettingsBackendContribution({
+    productName: "FrockBot",
     storage,
     availablePackages: [
       { packageId: "flock", version: "0.0.1" },
@@ -98,6 +99,7 @@ describe("User settings backend Contribution", () => {
   test("rejects an ambiguous Package catalog before reading durable state", () => {
     expect(() =>
       createUserSettingsBackendContribution({
+        productName: "FrockBot",
         storage: new MemoryStorage(),
         availablePackages: [
           { packageId: "web", version: "1.0.0" },
@@ -179,6 +181,7 @@ describe("User settings backend Contribution", () => {
   test("bootstraps first-party Packages once and preserves a later uninstall", async () => {
     const storage = new MemoryStorage();
     const settings = createUserSettingsBackendContribution({
+      productName: "FrockBot",
       storage,
       availablePackages: [
         {
@@ -243,6 +246,7 @@ describe("User settings backend Contribution", () => {
 
   test("bootstraps a declared default-disabled Package without re-enabling it", async () => {
     const settings = createUserSettingsBackendContribution({
+      productName: "FrockBot",
       storage: new MemoryStorage(),
       availablePackages: [
         {
@@ -278,6 +282,7 @@ describe("User settings backend Contribution", () => {
       { packageId: "web", version: "0.0.1", installByDefault: true },
     ];
     const seeded = createUserSettingsBackendContribution({
+      productName: "FrockBot",
       storage,
       availablePackages: before,
     });
@@ -308,6 +313,7 @@ describe("User settings backend Contribution", () => {
       },
     ];
     const shipped = createUserSettingsBackendContribution({
+      productName: "FrockBot",
       storage,
       availablePackages: after,
     });
@@ -342,6 +348,7 @@ describe("User settings backend Contribution", () => {
       seededPackageIds: [1],
     });
     const settings = createUserSettingsBackendContribution({
+      productName: "FrockBot",
       storage,
       availablePackages: [
         { packageId: "web", version: "0.0.1", installByDefault: true },
@@ -459,6 +466,7 @@ describe("User settings backend Contribution", () => {
 
   test("refuses enabling until every declared dependency is enabled", async () => {
     const settings = createUserSettingsBackendContribution({
+      productName: "FrockBot",
       storage: new MemoryStorage(),
       availablePackages: [
         { packageId: "custom-models", version: "0.0.1" },
@@ -1498,6 +1506,7 @@ describe("provider choice is one durable User decision", () => {
     });
     const owner = () =>
       createUserSettingsBackendContribution({
+        productName: "FrockBot",
         storage,
         availablePackages: [provider, support],
       });
@@ -1530,6 +1539,7 @@ describe("provider choice is one durable User decision", () => {
     const storage = new MemoryStorage();
     const owner = () =>
       createUserSettingsBackendContribution({
+        productName: "FrockBot",
         storage,
         availablePackages: [provider],
       });

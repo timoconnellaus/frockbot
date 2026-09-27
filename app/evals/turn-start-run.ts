@@ -57,6 +57,7 @@ async function runTurnStartEvalV1() {
     let entry;
     try {
       const review = await reviewTurnStartV1(client, fixture.evidence, {
+        productName: "FrockBot",
         signal,
       });
       entry = turnStartReportCaseV1(fixture, {

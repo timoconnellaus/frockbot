@@ -4,10 +4,14 @@ import {
 } from "@frockbot/core/connection";
 import { decodeStartConnectionCommandV1 } from "@frockbot/core/configuration";
 import type { SettingsConnectionGatewayHost } from "./backend.js";
-function html(body: string, script = "") {
+/** The product's name as page text: `<` and `&` escaped, everything else as is. */
+function pageText(value: string): string {
+  return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;");
+}
+function html(productName: string, body: string, script = "") {
   const nonce = crypto.randomUUID();
   return new Response(
-    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Connect to FrockBot</title><style nonce="${nonce}">body{font:17px system-ui;background:#faf8f4;color:#242323;max-width:38rem;margin:10vh auto;padding:24px}button,a,input,textarea{font:inherit;padding:12px;margin:8px 0}input,textarea{box-sizing:border-box;width:100%}button{cursor:pointer}#code{font-size:2rem}a{display:block}small{display:block}</style><main>${body}</main>${script ? `<script nonce="${nonce}">${script}</script>` : ""}</html>`,
+    `<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width"><title>Connect to ${pageText(productName)}</title><style nonce="${nonce}">body{font:17px system-ui;background:#faf8f4;color:#242323;max-width:38rem;margin:10vh auto;padding:24px}button,a,input,textarea{font:inherit;padding:12px;margin:8px 0}input,textarea{box-sizing:border-box;width:100%}button{cursor:pointer}#code{font-size:2rem}a{display:block}small{display:block}</style><main>${body}</main>${script ? `<script nonce="${nonce}">${script}</script>` : ""}</html>`,
     {
       headers: {
         "Content-Type": "text/html; charset=utf-8",
@@ -69,14 +73,16 @@ export async function routeModelOAuthV1(
     });
   }
   if (url.pathname === "/api/model-oauth" && request.method === "GET") {
+    const product = pageText(host.brand.productName);
     return html(
-      `<h1>Connect your account</h1><p id="status">Loading sign-in…</p><strong id="code"></strong><a id="signin" hidden target="_blank" rel="noopener noreferrer">Open provider sign-in</a><div id="manual" hidden><label>Return URL<textarea id="returnUrl" rows="4" placeholder="Paste the return URL after signing in"></textarea></label><button id="finish">Finish connecting</button></div><button id="cancel">Cancel sign-in</button><small>When connected, return to FrockBot. Your models are shared across your Bots.</small>`,
+      host.brand.productName,
+      `<h1>Connect your account</h1><p id="status">Loading sign-in…</p><strong id="code"></strong><a id="signin" hidden target="_blank" rel="noopener noreferrer">Open provider sign-in</a><div id="manual" hidden><label>Return URL<textarea id="returnUrl" rows="4" placeholder="Paste the return URL after signing in"></textarea></label><button id="finish">Finish connecting</button></div><button id="cancel">Cancel sign-in</button><small>When connected, return to ${product}. Your models are shared across your Bots.</small>`,
       `
 const q=new URLSearchParams(location.hash.slice(1));let base={userId:q.get('userId'),packageId:q.get('packageId'),attemptId:q.get('attemptId'),browserKey:q.get('browserKey')};
 try{if(base.browserKey)sessionStorage.setItem('frockbot-oauth-page',JSON.stringify(base));else base=JSON.parse(sessionStorage.getItem('frockbot-oauth-page')||'null')||base;}catch{}
 history.replaceState(null,'',location.pathname);
 let finished=false,busy=false;
-async function step(action,code){if(busy||finished)return;busy=true;try{const r=await fetch('/api/model-oauth/progress',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...base,action,...(code?{code}:{})})});const data=await r.json();if(!r.ok)throw Error(data.error||'Sign-in could not finish');const p=data.oauth;if(!p)throw Error('Sign-in progress unavailable');document.getElementById('status').textContent=p.status==='ready'?'Account connected. Return to FrockBot.':p.status==='waiting'?'Sign in with your provider to continue.':p.message||'Sign-in cancelled.';finished=p.status!=='waiting';if(finished){try{sessionStorage.removeItem('frockbot-oauth-page');}catch{}}const a=document.getElementById('signin');a.hidden=!p.authorizationUrl||finished;if(p.authorizationUrl){const u=new URL(p.authorizationUrl);if(u.protocol!=='https:')throw Error('Invalid sign-in URL');a.href=u.href;}document.getElementById('code').textContent=finished?'':p.userCode||'';document.getElementById('manual').hidden=!p.manualCode||finished;document.getElementById('cancel').hidden=finished;}catch(e){document.getElementById('status').textContent=e.message;finished=true;}finally{busy=false;}}
+async function step(action,code){if(busy||finished)return;busy=true;try{const r=await fetch('/api/model-oauth/progress',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({...base,action,...(code?{code}:{})})});const data=await r.json();if(!r.ok)throw Error(data.error||'Sign-in could not finish');const p=data.oauth;if(!p)throw Error('Sign-in progress unavailable');document.getElementById('status').textContent=p.status==='ready'?${JSON.stringify(`Account connected. Return to ${host.brand.productName}.`).replaceAll("<", "\\u003c")}:p.status==='waiting'?'Sign in with your provider to continue.':p.message||'Sign-in cancelled.';finished=p.status!=='waiting';if(finished){try{sessionStorage.removeItem('frockbot-oauth-page');}catch{}}const a=document.getElementById('signin');a.hidden=!p.authorizationUrl||finished;if(p.authorizationUrl){const u=new URL(p.authorizationUrl);if(u.protocol!=='https:')throw Error('Invalid sign-in URL');a.href=u.href;}document.getElementById('code').textContent=finished?'':p.userCode||'';document.getElementById('manual').hidden=!p.manualCode||finished;document.getElementById('cancel').hidden=finished;}catch(e){document.getElementById('status').textContent=e.message;finished=true;}finally{busy=false;}}
 document.getElementById('finish').onclick=()=>step('complete',document.getElementById('returnUrl').value);document.getElementById('cancel').onclick=()=>step('cancel');step('check');setInterval(()=>step('check'),5000);`,
     );
   }
@@ -131,7 +137,8 @@ document.getElementById('finish').onclick=()=>step('complete',document.getElemen
       .replaceAll("<", "&lt;")
       .replaceAll('"', "&quot;");
     return html(
-      `<h1>Return to FrockBot</h1><p>Copy this return URL into the sign-in box to finish connecting your account.</p><textarea readonly rows="6">${escaped}</textarea>`,
+      host.brand.productName,
+      `<h1>Return to ${pageText(host.brand.productName)}</h1><p>Copy this return URL into the sign-in box to finish connecting your account.</p><textarea readonly rows="6">${escaped}</textarea>`,
     );
   }
   return undefined;

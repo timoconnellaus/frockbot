@@ -178,7 +178,7 @@ export async function createBotSkillsHost(
    */
   pluginSkills?: PluginSkillContributionV1[],
   admitted?: { botRevision: string; userRevision: string },
-): Promise<SkillsRuntimeHostV1 | undefined> {
+): Promise<Omit<SkillsRuntimeHostV1, "productName"> | undefined> {
   // Absence is a supported state, not an error: a host that binds no
   // Workspace mounts no Skills.
   const files = state.env.WORKSPACE_FILES;
@@ -317,6 +317,7 @@ export async function listSkills(
     reads,
     { userId: identity.userId, botId: identity.botId },
     {
+      productName: state.application.brand.productName,
       ...gates,
       indexes: await skillIndexSourceForTurnV1(state, identity).load(),
     },

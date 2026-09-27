@@ -133,6 +133,7 @@ describe("computer egress routes", () => {
 describe("computer egress handler", () => {
   test("refuses a host with no route and an app with no connected account", async () => {
     const handler = createComputerEgressHandlerV1({
+      productName: "FrockBot",
       accounts: () => [],
       context,
     });
@@ -163,6 +164,7 @@ describe("computer egress handler", () => {
       },
     };
     const handler = createComputerEgressHandlerV1({
+      productName: "FrockBot",
       accounts: () => [notion],
       context,
       review: async (call) => {
@@ -194,6 +196,7 @@ describe("computer egress handler", () => {
   test("a read the review refuses is not sent", async () => {
     const sent: ComputerEgressRequestV1[] = [];
     const handler = createComputerEgressHandlerV1({
+      productName: "FrockBot",
       accounts: () => [account(sent)],
       context,
       review: async (call): Promise<ToolPreparation> => ({
@@ -216,6 +219,7 @@ describe("computer egress handler", () => {
     const sent: ComputerEgressRequestV1[] = [];
     const reviews: { call: ToolCall; context: ToolExecutionContext }[] = [];
     const handler = createComputerEgressHandlerV1({
+      productName: "FrockBot",
       accounts: () => [account(sent)],
       context,
       review: async (call, reviewContext) => {
@@ -253,6 +257,7 @@ describe("computer egress handler", () => {
   test("a refused write never leaves, and the CLI is told why", async () => {
     const sent: ComputerEgressRequestV1[] = [];
     const handler = createComputerEgressHandlerV1({
+      productName: "FrockBot",
       accounts: () => [account(sent)],
       context,
       review: async (call): Promise<ToolPreparation> => ({
@@ -274,6 +279,7 @@ describe("computer egress handler", () => {
   test("a write with no reviewer is not sent", async () => {
     const sent: ComputerEgressRequestV1[] = [];
     const handler = createComputerEgressHandlerV1({
+      productName: "FrockBot",
       accounts: () => [account(sent)],
       context,
     });
@@ -288,6 +294,7 @@ describe("computer egress handler", () => {
 
   test("a write whose send failed is answered as unknown", async () => {
     const handler = createComputerEgressHandlerV1({
+      productName: "FrockBot",
       accounts: () => [
         account([], async () => {
           throw new Error("socket closed");
@@ -308,6 +315,7 @@ describe("computer egress handler", () => {
   test("an account whose Connection is no longer permitted is not used", async () => {
     const sent: ComputerEgressRequestV1[] = [];
     const handler = createComputerEgressHandlerV1({
+      productName: "FrockBot",
       accounts: () => [{ ...account(sent), permit: async () => false }],
       context,
     });

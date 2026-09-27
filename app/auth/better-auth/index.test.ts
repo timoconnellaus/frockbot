@@ -51,12 +51,15 @@ test("the native door signs with the live hosted key, under any other name", () 
 });
 
 test("stores no identity, and signs nobody in, without a database", async () => {
-  const stub = BETTER_AUTH_PACKAGE_V1.create({
-    BETTER_AUTH_SECRET: "x".repeat(32),
-    BETTER_AUTH_URL: "https://bot.example",
-    GOOGLE_CLIENT_ID: "id",
-    GOOGLE_CLIENT_SECRET: "secret",
-  });
+  const stub = BETTER_AUTH_PACKAGE_V1.create(
+    {
+      BETTER_AUTH_SECRET: "x".repeat(32),
+      BETTER_AUTH_URL: "https://bot.example",
+      GOOGLE_CLIENT_ID: "id",
+      GOOGLE_CLIENT_SECRET: "secret",
+    },
+    { productName: "FrockBot" },
+  );
   expect(stub.storedIdentity).toBeUndefined();
   expect(stub.listStoredIdentities).toBeUndefined();
   expect(stub.deleteStoredIdentity).toBeUndefined();
@@ -76,7 +79,10 @@ test("forgets an identity with its sessions and linked accounts, in one batch", 
       return [];
     },
   } as unknown as D1Database;
-  const store = BETTER_AUTH_PACKAGE_V1.create({ AUTH_DB: database });
+  const store = BETTER_AUTH_PACKAGE_V1.create(
+    { AUTH_DB: database },
+    { productName: "FrockBot" },
+  );
   await store.deleteStoredIdentity!("user-1");
   // A session left behind would still sign the deleted User in.
   expect(batches).toEqual([

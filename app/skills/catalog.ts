@@ -990,6 +990,8 @@ export async function loadFullSkillCatalogV1(
   reads: WorkspaceReadsV1,
   owner: SkillOwnerV1,
   options: {
+    /** The product, which managed Skills are attributed to. */
+    productName: string;
     managed?: boolean;
     withheldManagedSlugs?: readonly string[];
     /**
@@ -1006,7 +1008,7 @@ export async function loadFullSkillCatalogV1(
      * not a scan.
      */
     indexes?: SkillIndexLoadV1;
-  } = {},
+  },
 ): Promise<SkillCatalogV1> {
   // `reads` remains on the signature for the administrative rebuild and the
   // quota walk. The Turn catalog does not use it.
@@ -1023,6 +1025,7 @@ export async function loadFullSkillCatalogV1(
   if (options.managed !== false) {
     const withheld = options.withheldManagedSlugs ?? [];
     sources.managed = await loadManagedSkillsV1(
+      options.productName,
       MANAGED_SKILL_DOCUMENTS_V1.filter(
         (document) => !withheld.includes(document.slug),
       ),
@@ -1045,7 +1048,10 @@ export async function loadFullSkillCatalogV1(
  * wrote. A duplicated name is qualified by its ref, since names are not unique
  * and refs are.
  */
-export function renderSkillCatalogPromptV1(catalog: SkillCatalogV1): string {
+export function renderSkillCatalogPromptV1(
+  catalog: SkillCatalogV1,
+  productName: string,
+): string {
   if (catalog.skills.length === 0) return "";
   const counts = new Map<string, number>();
   for (const skill of catalog.skills) {
@@ -1071,7 +1077,7 @@ export function renderSkillCatalogPromptV1(catalog: SkillCatalogV1): string {
     "<agent_skills>",
     ...entries,
     "</agent_skills>",
-    "These are your Skills: recipes you wrote, or your User wrote, for you; the managed ones ship with FrockBot, and the plugin ones come from a Plugin your User's Bot runs.",
+    `These are your Skills: recipes you wrote, or your User wrote, for you; the managed ones ship with ${productName}, and the plugin ones come from a Plugin your User's Bot runs.`,
     'Only names, refs, paths and descriptions are listed above. Call skill_load with the ref in its "path" field to read a Skill\'s full instructions before you follow it.',
     "Mentioning a Skill is not running it.",
   ].join("\n");

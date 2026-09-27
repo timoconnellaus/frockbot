@@ -172,6 +172,7 @@ function setup(
       instructions: "Echo repeats.",
     });
   const contribution = new McpUserBackendContribution({
+    productName: "FrockBot",
     storage,
     settings: settings as unknown as UserSettingsBackendContribution,
     credentials,

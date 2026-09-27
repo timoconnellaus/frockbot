@@ -80,7 +80,7 @@ function buildFoundationPackageCatalogV1(brand: FoundationPackageBrandV1) {
       { id: "skills", displayName: "Skills" },
       { id: "echo", displayName: "Echo" },
       shellDefinitionV1(brand.productName),
-      settingsDefinitionV1,
+      settingsDefinitionV1(brand.productName),
       customModelsDefinitionV1,
       routinesDefinitionV1,
       credentialsDefinitionV1,

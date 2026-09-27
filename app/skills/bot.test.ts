@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { FakeWorkspace } from "@frockbot/app/skills/testing";
+import { TEST_BRAND_V1 } from "@frockbot/app/testkit";
 import type { ShellBotStateV1 } from "@frockbot/app/shell/backend-state";
 import { userAccountFeaturesReaderV1 } from "@frockbot/app/settings/bot";
 import { createBotSkillsHost, listSkills } from "./bot.ts";
@@ -52,6 +53,7 @@ function botState(options: {
       ...(options.workspace ? { WORKSPACE_FILES: options.workspace } : {}),
     },
     authority: { validateIdentity: () => Promise.resolve() },
+    application: { brand: TEST_BRAND_V1 },
     ctx: {
       storage: {
         get: () => Promise.resolve(undefined),

@@ -5,7 +5,7 @@ import {
   type BillingAccountRpc,
   type BillingEnv,
 } from "./billing";
-import { billingPage, billingScript } from "@frockbot/app/billing/page";
+import { billingPageV1, billingScript } from "@frockbot/app/billing/page";
 import { seedHostedModelRatesV1 } from "@frockbot/app/billing/rates";
 
 const rates = async () => seedHostedModelRatesV1("2026-09-24T00:00:00.000Z");
@@ -99,7 +99,7 @@ describe("billing HTTP routes", () => {
       "Credit history",
       "Recent usage",
     ])
-      expect(billingPage).toContain(text);
+      expect(billingPageV1("FrockBot")).toContain(text);
   });
   test("requires authentication for both the billing page and account API", async () => {
     const routes = billingRoutes(env, () => account(), rates);

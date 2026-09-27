@@ -6,20 +6,24 @@ import {
 
 // This contribution is runtime-neutral and can mount in Node or Workers.
 export const DEFAULT_IDENTITY_SECTION = "identity";
-export const DEFAULT_IDENTITY_TEXT =
-  "You are FrockBot running on the custom agent loop.";
+/** Who the model is told it is, in the brand's words. */
+export function defaultIdentityTextV1(productName: string): string {
+  return `You are ${productName} running on the custom agent loop.`;
+}
 
 export interface IdentityFeatureConfig {
+  /** The product's name, which the default identity names. */
+  productName: string;
   sectionId?: string;
   text?: string;
   order?: number;
 }
 
 export function createIdentityFeature(
-  config: IdentityFeatureConfig = {},
+  config: IdentityFeatureConfig,
 ): RuntimeFeatureV1<AgentRuntimeV1> {
   const sectionId = config.sectionId?.trim() || DEFAULT_IDENTITY_SECTION;
-  const text = config.text?.trim() || DEFAULT_IDENTITY_TEXT;
+  const text = config.text?.trim() || defaultIdentityTextV1(config.productName);
   const order = config.order ?? 0;
   if (!Number.isFinite(order)) {
     throw new Error("identity section order must be finite");
@@ -32,7 +36,3 @@ export function createIdentityFeature(
   };
   return (runtime) => runtime.systemPrompt.register(section);
 }
-
-const identityFeature = createIdentityFeature();
-
-export default identityFeature;

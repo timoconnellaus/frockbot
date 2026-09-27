@@ -160,16 +160,18 @@ export function decodeMcpCatalogJobV1(
  */
 export function boundMcpCatalogToolsV1(
   tools: readonly McpToolV1[],
+  /** The product, which a refused listing names. */
+  productName: string,
 ): McpToolV1[] {
   if (tools.length > MCP_CATALOG_MAX_TOOLS_V1) {
     throw new McpCatalogTooLargeError(
-      `The server lists ${tools.length} tools; FrockBot holds at most ${MCP_CATALOG_MAX_TOOLS_V1}.`,
+      `The server lists ${tools.length} tools; ${productName} holds at most ${MCP_CATALOG_MAX_TOOLS_V1}.`,
     );
   }
   const bytes = new TextEncoder().encode(JSON.stringify(tools)).byteLength;
   if (bytes > MCP_CATALOG_MAX_BYTES_V1) {
     throw new McpCatalogTooLargeError(
-      "The server's tool list is larger than FrockBot can hold.",
+      `The server's tool list is larger than ${productName} can hold.`,
     );
   }
   const names = new Set<string>();
@@ -215,6 +217,7 @@ type ReadConnection = (
 export async function publishMcpCatalogV1(
   storage: McpCatalogStorageV1,
   input: {
+    productName: string;
     connectionId: string;
     generation: string;
     tools: readonly McpToolV1[];
@@ -222,7 +225,7 @@ export async function publishMcpCatalogV1(
     readConnection: ReadConnection;
   },
 ): Promise<boolean> {
-  const tools = boundMcpCatalogToolsV1(input.tools);
+  const tools = boundMcpCatalogToolsV1(input.tools, input.productName);
   const dueAt = input.now + MCP_CATALOG_REFRESH_AFTER_MS_V1;
   const stored = await storage.transaction(async (tx) => {
     const current = await input.readConnection(tx);

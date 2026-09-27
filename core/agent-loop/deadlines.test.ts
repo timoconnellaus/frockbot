@@ -47,7 +47,7 @@ function mount(
   const sessions = new SessionStore();
   const systemPrompt = new SystemPromptRegistry(hooks);
   const llm = new LlmRegistry(hooks);
-  const tools = new ToolRegistry(hooks, systemPrompt);
+  const tools = new ToolRegistry(hooks, "FrockBot", systemPrompt);
   systemPrompt.register({ id: "identity", render: () => "Be useful." });
   llm.register(provider);
   const loop = createAgentLoop(

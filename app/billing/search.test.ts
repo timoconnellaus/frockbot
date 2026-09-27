@@ -38,7 +38,7 @@ const SEARCH = {
 
 /** An account with complimentary credit, spendable without a subscription. */
 function account(micros = 1_000_000) {
-  const ledger = new BillingLedger(storage(), () => NOW);
+  const ledger = new BillingLedger(storage(), "FrockBot", () => NOW);
   if (micros > 0) {
     ledger.grantComplimentary({
       id: "gift",

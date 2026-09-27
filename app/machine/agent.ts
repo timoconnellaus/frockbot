@@ -128,6 +128,8 @@ export interface MachineIntentStorageV1 {
  * effect nobody can trace back to a conversation.
  */
 export interface MachineRuntimeHostV1 {
+  /** The product whose desktop app a machine runs. */
+  productName: string;
   botId: string;
   writer?: MachineWriterIdentityV1;
   /** The Bot's own durable storage, where the intent record lives. */
@@ -194,6 +196,7 @@ export function machineTargetRefusalV1(
   tool: string,
   target: MachineTargetViewV1,
   op: MachineOpV1,
+  productName: string,
 ): string | undefined {
   const entry = target.entry;
   if (!entry) {
@@ -203,7 +206,7 @@ export function machineTargetRefusalV1(
     return `machine "${entry.label}" was revoked and can no longer be reached.`;
   }
   if (!entry.connected) {
-    return `machine "${entry.label}" is not connected. It was last seen at ${entry.lastSeenAt}; it has to be running FrockBot to accept a command.`;
+    return `machine "${entry.label}" is not connected. It was last seen at ${entry.lastSeenAt}; it has to be running ${productName} to accept a command.`;
   }
   const needed = machineOpCapabilityV1(op);
   if (!entry.capabilities.includes(needed)) {
@@ -287,7 +290,7 @@ function createMachineApprovalToolV1(config: {
           `${name} failed: ${error instanceof Error ? error.message : String(error)}`,
         );
       }
-      const reason = machineTargetRefusalV1(name, target, op);
+      const reason = machineTargetRefusalV1(name, target, op, host.productName);
       if (reason !== undefined) return refuse(name, reason);
       const entry = target.entry!;
 
@@ -368,8 +371,7 @@ function createMachineListTool(host: MachineRuntimeHostV1): ToolDefinition {
   return {
     name: MACHINE_LIST_TOOL_V1,
     namespace: "frockbot",
-    description:
-      "List the user's registered machines — their own computers, which are a separate filesystem from the Computer sandbox. `connected` is false when the machine is not currently running FrockBot, and a command can only be sent to a connected machine.",
+    description: `List the user's registered machines — their own computers, which are a separate filesystem from the Computer sandbox. \`connected\` is false when the machine is not currently running ${host.productName}, and a command can only be sent to a connected machine.`,
     inputSchema: {
       type: "object",
       properties: {},
@@ -383,8 +385,7 @@ function createMachineListTool(host: MachineRuntimeHostV1): ToolDefinition {
       const view = await host.list();
       if (view.machines.length === 0) {
         return {
-          content:
-            "No machines are registered to this account. A computer connects when the user signs in to the FrockBot desktop app on it; you cannot connect one for them.",
+          content: `No machines are registered to this account. A computer connects when the user signs in to the ${host.productName} desktop app on it; you cannot connect one for them.`,
           isError: false,
         };
       }
